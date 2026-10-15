@@ -90,7 +90,6 @@ describe('F1 request verification (FT1 review)', () => {
   });
 
   it.each([
-    'Do not add a crossfade between A and B.',
     "Don't use transitions.",
     'Don\u2019t use transitions.',
     'Dont add any crossfades.',
@@ -111,6 +110,40 @@ describe('F1 request verification (FT1 review)', () => {
     expect(check(before, request, before).unmet).toHaveLength(1);
     expect(check(withT(before, 'clip-a', 'clip-b'), request, before).unmet).toEqual([]);
   });
+
+  it('a negated named pair must not get a new transition (do not add between A and B)', () => {
+    const before = base();
+    const request = 'Do not add a crossfade between A and B.';
+    expect(check(before, request, before)).toEqual({ verified: [], unmet: [] });
+    expect(check(withT(before, 'clip-a', 'clip-b'), request, before).unmet).toEqual([
+      'request asked for no transition between a and b, but this run added one',
+    ]);
+  });
+
+  it('N9: "Do not crossfade A and B, but add a crossfade between B and C" is decided per clause', () => {
+    const before = base();
+    const request = 'Do not crossfade A and B, but add a crossfade between B and C.';
+    expect(check(before, request, before).unmet).toEqual([
+      'request asked for a crossfade between b and c, but this run added none there',
+    ]);
+    const right = check(withT(before, 'clip-b', 'clip-c'), request, before);
+    expect(right.unmet).toEqual([]);
+    expect(right.verified).toContain('Request: crossfade between b and c');
+    const wrong = check(withT(before, 'clip-a', 'clip-b'), request, before);
+    expect(wrong.unmet).toContain(
+      'request asked for no transition between a and b, but this run added one',
+    );
+    expect(wrong.unmet).toContain(
+      'request asked for a crossfade between b and c, but this run added none there',
+    );
+  });
+
+  it.each(['هیچ ترنزیشنی نگذار', 'بدون ترنزیشن کلیپ‌ها را پشت هم بگذار', 'ترنزیشن نذار'])(
+    'N12: Persian negation adds no transition check (%s)',
+    (request) => {
+      expect(check(base(), request, base())).toEqual({ verified: [], unmet: [] });
+    },
+  );
 
   it('P4: Persian "انتقال" meaning "move" is not a transition request', () => {
     const result = check(base(), 'کلیپ دوم را به ابتدا انتقال بده');

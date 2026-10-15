@@ -406,8 +406,12 @@ interface TransitionIntent {
   readonly mode: 'add' | 'remove';
   /** A named type other than crossfade/dissolve (slide, wipe, ...): unsupported. */
   readonly unsupportedType?: string;
-  /** Clip references named as "between X and Y", in request order. */
+  /** Clip pairs the request asks a transition for, in request order. */
   readonly pairs: readonly (readonly [string, string])[];
+  /** Clip pairs a negated clause names ("do not crossfade A and B"): must not get a new one. */
+  readonly negatedPairs: readonly (readonly [string, string])[];
+  /** False when only negated clauses mention transitions (then only negatedPairs are checked). */
+  readonly positive?: boolean;
 }
 
 const FA_TRANSITION = '\u062a\u0631\u0646\u0632\u06cc\u0634\u0646'; // transition (loanword)
@@ -432,7 +436,15 @@ const TRANSITION_WORDS = new RegExp(
 );
 const TRANSITION_NEGATED = new RegExp(
   "(?:\\b(?:no|without|zero|never|avoid|dont)\\b|\\bdo not\\b|\\bdon[\u2019']t\\b)[^.]{0,30}\\b(?:transitions?|cross-?fades?|dissolves?)\\b|\\bhard cuts?\\b|" +
-    FA_WITHOUT,
+    FA_WITHOUT +
+    // "هیچ ترنزیشنی نگذار": "no transition", and a negated verb after the word.
+    '|\u0647\u06cc\u0686[^.]{0,25}(?:' +
+    FA_TRANSITION +
+    '|' +
+    FA_MOVE_OR_TRANSITION +
+    ')|(?:' +
+    FA_TRANSITION +
+    ')[^.]{0,25}\u0646(?:\u06af\u0630\u0627\u0631|\u0630\u0627\u0631|\u0632\u0646|\u06a9\u0646|\u0645\u06cc)',
   'u',
 );
 const TRANSITION_REMOVE = new RegExp(
@@ -442,28 +454,49 @@ const TRANSITION_REMOVE = new RegExp(
 );
 const UNSUPPORTED_TRANSITION_TYPE =
   /\b(slide|wipe|zoom|push|spin|whip|glitch|iris|swipe|cube|flip)\b/;
-const CLIP_REF = '(?:the\\s+)?(?:clips?\\s+)?([a-z0-9][\\w-]*)';
-const BETWEEN_PAIR = new RegExp('\\bbetween\\s+' + CLIP_REF + '\\s+(?:and|&)\\s+' + CLIP_REF, 'gi');
+const PAIR_REF = '(?:the\\s+)?(?:clips?\\s+)?(?!(?:between|from)\\b)([a-z0-9][\\w-]*)';
+/** "between A and B", or "crossfade A and/into B" (the clip pair a clause talks about). */
+const NAMED_PAIR = new RegExp(
+  '(?:\\bbetween|\\b(?:cross-?fades?|dissolves?))\\s+' +
+    PAIR_REF +
+    '\\s+(?:and|&|into|to|with)\\s+' +
+    PAIR_REF,
+  'gi',
+);
+/** Clause boundaries: punctuation (Latin and Persian), "but", "then", "ولی", "اما". */
+const CLAUSE_SPLIT = /[.;,!?\u060c\u061b]|\bbut\b|\bthen\b|\u0648\u0644\u06cc|\u0627\u0645\u0627/u;
 
 function parseTransitionIntent(normalized: string): TransitionIntent | undefined {
   if (!TRANSITION_WORDS.test(normalized)) return undefined;
-  const remove = TRANSITION_REMOVE.test(normalized);
-  // "no transitions, hard cuts only" asks for nothing to check, but "a crossfade between A and B,
-  // but no other transitions" still asks for one: skip only when nothing positive is left once
-  // the negated phrases are taken out.
-  if (
-    !remove &&
-    TRANSITION_NEGATED.test(normalized) &&
-    !TRANSITION_WORDS.test(normalized.replace(new RegExp(TRANSITION_NEGATED.source, 'gu'), ' '))
-  )
-    return undefined;
-  const pairs = [...normalized.matchAll(BETWEEN_PAIR)].map(
-    (match) => [match[1]!, match[2]!] as const,
-  );
+  const pairsIn = (text: string) =>
+    [...text.matchAll(NAMED_PAIR)].map((match) => [match[1]!, match[2]!] as const);
   const unsupported = UNSUPPORTED_TRANSITION_TYPE.exec(normalized)?.[1];
+  if (TRANSITION_REMOVE.test(normalized))
+    return {
+      mode: 'remove',
+      pairs: pairsIn(normalized),
+      negatedPairs: [],
+      ...(unsupported === undefined ? {} : { unsupportedType: unsupported }),
+    };
+  // Decide per clause: "Do not crossfade A and B, but add a crossfade between B and C" asks for
+  // B-C and forbids A-B. A request with only negated clauses and no named pair checks nothing.
+  const pairs: (readonly [string, string])[] = [];
+  const negatedPairs: (readonly [string, string])[] = [];
+  let positive = false;
+  for (const clause of normalized.split(CLAUSE_SPLIT)) {
+    if (!TRANSITION_WORDS.test(clause) && !/\bhard cuts?\b/.test(clause)) continue;
+    if (TRANSITION_NEGATED.test(clause)) negatedPairs.push(...pairsIn(clause));
+    else if (TRANSITION_WORDS.test(clause)) {
+      positive = true;
+      pairs.push(...pairsIn(clause));
+    }
+  }
+  if (!positive && negatedPairs.length === 0) return undefined;
   return {
-    mode: remove ? 'remove' : 'add',
+    mode: 'add',
+    positive,
     pairs,
+    negatedPairs,
     ...(unsupported === undefined ? {} : { unsupportedType: unsupported }),
   };
 }
@@ -530,6 +563,16 @@ function verifyTransitionIntent(
     );
     return;
   }
+  const keyOf = (t: TransitionLike) => `${t.id ?? ''}|${t.leftClipId}|${t.rightClipId}|${t.type}`;
+  const before_ = new Set(before === undefined ? [] : previous.map(keyOf));
+  const newTransitions = after.filter((t) => !before_.has(keyOf(t)));
+  for (const [a, b] of intent.negatedPairs) {
+    const ids = [resolveClipRef(a, clipsByStart), resolveClipRef(b, clipsByStart)] as const;
+    if (ids[0] === undefined || ids[1] === undefined) continue;
+    if (newTransitions.some((t) => samePair(t, ids[0]!, ids[1]!)))
+      unmet.push(`request asked for no transition between ${a} and ${b}, but this run added one`);
+  }
+  if (intent.positive === false) return;
   if (intent.unsupportedType !== undefined) {
     unmet.push(
       `request asked for a ${intent.unsupportedType} transition; only crossfade is supported`,
