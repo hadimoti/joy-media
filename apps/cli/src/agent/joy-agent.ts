@@ -434,19 +434,30 @@ const TRANSITION_WORDS = new RegExp(
     FA_MOVE_OR_TRANSITION,
   'u',
 );
-const TRANSITION_NEGATED = new RegExp(
-  "(?:\\b(?:no|without|zero|never|avoid|dont)\\b|\\bdo not\\b|\\bdon[\u2019']t\\b)[^.]{0,30}\\b(?:transitions?|cross-?fades?|dissolves?)\\b|\\bhard cuts?\\b|" +
-    FA_WITHOUT +
-    // "هیچ ترنزیشنی نگذار": "no transition", and a negated verb after the word.
-    '|\u0647\u06cc\u0686[^.]{0,25}(?:' +
-    FA_TRANSITION +
-    '|' +
-    FA_MOVE_OR_TRANSITION +
-    ')|(?:' +
-    FA_TRANSITION +
-    ')[^.]{0,25}\u0646(?:\u06af\u0630\u0627\u0631|\u0630\u0627\u0631|\u0632\u0646|\u06a9\u0646|\u0645\u06cc)',
-  'u',
-);
+// Negation spans. Each match covers the negation AND the transition word it negates, so stripping
+// the matches leaves any positive transition request in the same clause intact.
+const TRANSITION_NEGATED_SOURCE =
+  "(?:\\b(?:no|without|zero|never|avoid|dont)\\b|\\bdo not\\b|\\bdon[\u2019']t\\b)[^.]{0,30}?\\b(?:transitions?|cross-?fades?|dissolves?)\\b|\\bhard cuts?\\b|" +
+  // "بدون ترنزیشن/انتقال": without (a) transition.
+  FA_WITHOUT +
+  '\\s*(?:' +
+  FA_TRANSITION +
+  '|' +
+  FA_MOVE_OR_TRANSITION +
+  ')\\u06cc?' +
+  // "هیچ ترنزیشنی": no transition at all.
+  '|\\u0647\\u06cc\\u0686\\s*(?:' +
+  FA_TRANSITION +
+  '|' +
+  FA_MOVE_OR_TRANSITION +
+  ')\\u06cc?' +
+  // "ترنزیشن(ی) نذار/نگذار/نزار/نزن": the negated verb right after the transition word only.
+  '|(?:' +
+  FA_TRANSITION +
+  '|' +
+  FA_MOVE_OR_TRANSITION +
+  ')\\u06cc?\\s*(?:(?:\\u0631\\u0648|\\u0631\\u0627)\\s*)?\\u0646(?:\\u06af\\u0630\\u0627\\u0631|\\u0630\\u0627\\u0631|\\u0632\\u0627\\u0631|\\u0632\\u0646)';
+const TRANSITION_NEGATED_ALL = new RegExp(TRANSITION_NEGATED_SOURCE, 'gu');
 const TRANSITION_REMOVE = new RegExp(
   '\\b(?:remove|delete|drop|get rid of|take out)\\b[^.]{0,40}\\b(?:transitions?|cross-?fades?|dissolves?)\\b|' +
     FA_REMOVE,
@@ -463,8 +474,12 @@ const NAMED_PAIR = new RegExp(
     PAIR_REF,
   'gi',
 );
-/** Clause boundaries: punctuation (Latin and Persian), "but", "then", "ولی", "اما". */
-const CLAUSE_SPLIT = /[.;,!?\u060c\u061b]|\bbut\b|\bthen\b|\u0648\u0644\u06cc|\u0627\u0645\u0627/u;
+/**
+ * Clause boundaries: punctuation (Latin and Persian) and ":", "but", "then", "ولی", "اما", " و ",
+ * and "and" when a new verb follows ("crossfade A and B and don't add ...").
+ */
+const CLAUSE_SPLIT =
+  /[.;,!?:\u060c\u061b]|\bbut\b|\bthen\b|\band\s+(?=(?:add|put|use|insert|apply|make|keep|do|don|never|avoid|crossfade|cross-fade|dissolve|remove|delete|drop)\b)|\u0648\u0644\u06cc|\u0627\u0645\u0627|\s\u0648\s/u;
 
 function parseTransitionIntent(normalized: string): TransitionIntent | undefined {
   if (!TRANSITION_WORDS.test(normalized)) return undefined;
@@ -485,11 +500,13 @@ function parseTransitionIntent(normalized: string): TransitionIntent | undefined
   let positive = false;
   for (const clause of normalized.split(CLAUSE_SPLIT)) {
     if (!TRANSITION_WORDS.test(clause) && !/\bhard cuts?\b/.test(clause)) continue;
-    if (TRANSITION_NEGATED.test(clause)) negatedPairs.push(...pairsIn(clause));
-    else if (TRANSITION_WORDS.test(clause)) {
+    // Strip only the negated spans; whatever transition request is left is still positive. When in
+    // doubt this keeps the check (unmet) rather than skipping it.
+    const rest = clause.replace(TRANSITION_NEGATED_ALL, ' ');
+    if (TRANSITION_WORDS.test(rest)) {
       positive = true;
       pairs.push(...pairsIn(clause));
-    }
+    } else if (rest !== clause) negatedPairs.push(...pairsIn(clause));
   }
   if (!positive && negatedPairs.length === 0) return undefined;
   return {

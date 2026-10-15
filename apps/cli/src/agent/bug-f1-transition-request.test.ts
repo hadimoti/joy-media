@@ -145,6 +145,49 @@ describe('F1 request verification (FT1 review)', () => {
     },
   );
 
+  it.each([
+    ['X6', 'ترنزیشن بذار و صدا رو قطع نکن'],
+    ['X6d', 'ترنزیشن بذار و به متن دست نزن'],
+    ['X6c', 'ترنزیشن کراس فید بذار چون نمیخوام کات باشه'],
+  ])('%s: an unrelated Persian negated verb keeps the transition check (%s)', (_id, request) => {
+    const before = base();
+    expect(check(before, request, before).unmet).toEqual([
+      'request asked for a crossfade transition between clips, but this run added none',
+    ]);
+    expect(check(withT(before, 'clip-a', 'clip-b'), request, before).unmet).toEqual([]);
+  });
+
+  it.each([
+    ['X2', "crossfade A and B and don't add a crossfade between B and C"],
+    ['X2b', 'add a crossfade between B and C and do not crossfade A and B'],
+  ])('%s: "and <verb>" splits a positive and a negated pair (%s)', (id, request) => {
+    const before = base();
+    const [want, forbid] = id === 'X2' ? (['a', 'b'] as const) : (['b', 'c'] as const);
+    const [no1, no2] = id === 'X2' ? (['b', 'c'] as const) : (['a', 'b'] as const);
+    expect(check(before, request, before).unmet).toEqual([
+      `request asked for a crossfade between ${want} and ${forbid}, but this run added none there`,
+    ]);
+    expect(check(withT(before, `clip-${want}`, `clip-${forbid}`), request, before).unmet).toEqual(
+      [],
+    );
+    const wrong = check(withT(before, `clip-${no1}`, `clip-${no2}`), request, before);
+    expect(wrong.unmet).toContain(
+      `request asked for no transition between ${no1} and ${no2}, but this run added one`,
+    );
+    expect(wrong.unmet).toContain(
+      `request asked for a crossfade between ${want} and ${forbid}, but this run added none there`,
+    );
+  });
+
+  it('X8: "Avoid jump cuts: add transitions between A and B" is checked', () => {
+    const before = base();
+    const request = 'Avoid jump cuts: add transitions between A and B';
+    expect(check(before, request, before).unmet).toEqual([
+      'request asked for a crossfade between a and b, but this run added none there',
+    ]);
+    expect(check(withT(before, 'clip-a', 'clip-b'), request, before).unmet).toEqual([]);
+  });
+
   it('P4: Persian "انتقال" meaning "move" is not a transition request', () => {
     const result = check(base(), 'کلیپ دوم را به ابتدا انتقال بده');
     expect(result.unmet.join(' ')).not.toMatch(/transition|crossfade/i);
