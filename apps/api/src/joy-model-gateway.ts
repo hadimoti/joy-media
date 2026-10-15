@@ -455,6 +455,8 @@ export class JoyModelGateway {
     let upstreamRes: Response | undefined;
     let verdict: 'ok' | UpstreamFailureKind = 'fallback';
     const failures: UpstreamFailure[] = [];
+    /** Model ids that failed, in order; named in the busy error (#24). */
+    const triedModels: string[] = [];
     let upstreamJson: Record<string, unknown> | undefined;
     let streamStart: StreamStart | undefined;
     let successfulAttempt: { ownerId: string; attempt: number; of: number } | undefined;
@@ -594,6 +596,7 @@ export class JoyModelGateway {
         outcome: kind,
       });
       failures.push(failure);
+      triedModels.push(candidate);
       verdict = kind;
       if (kind !== 'fallback') break;
     }
@@ -636,8 +639,9 @@ export class JoyModelGateway {
             error: {
               code: 'JOY_AGENT_MODELS_BUSY',
               message: vision
-                ? `Every free image model is busy or unavailable right now (${failures.length} tried); retry in about ${retryAfterSeconds} seconds, or send the request without images.`
-                : `Every free model is busy or unavailable right now (${failures.length} tried); retry in about ${retryAfterSeconds} seconds.`,
+                ? `Every free image model is busy or unavailable right now (${failures.length} tried: ${triedModels.join(', ')}); retry in about ${retryAfterSeconds} seconds, or send the request without images.`
+                : `Every free model is busy or unavailable right now (${failures.length} tried: ${triedModels.join(', ')}); retry in about ${retryAfterSeconds} seconds.`,
+              triedModels,
               retryable: true,
               retryAfterSeconds,
               vision,
@@ -680,6 +684,8 @@ export class JoyModelGateway {
       let streamComplete = false;
       let streamErrored = false;
       const thinkStates = new Map<number, ThinkTagStripState>();
+      /** Choice indexes whose finish_reason was already forwarded (NEW-2: OpenRouter repeats it). */
+      const finishedChoices = new Set<number>();
       // Text held back as a possible '<think>' prefix is real output if the stream ends there.
       const flushHeldThinkText = (): string => {
         let out = '';
@@ -716,8 +722,20 @@ export class JoyModelGateway {
               ? undefined
               : parseJsonObject(payload);
           if (data === undefined) {
-            if (payload !== undefined && payload.trim() === '[DONE]')
+            if (payload !== undefined && payload.trim() === '[DONE]') {
               forward += flushHeldThinkText();
+              // NEW-2: a stream that ends with no text and no tool call gets a terminal error
+              // event before [DONE], so the caller does not take it for a real empty answer.
+              if (!streamErrored && streamedOutputText.trim().length === 0) {
+                logUpstreamAttempt({
+                  ...successfulAttempt!,
+                  modelId,
+                  status: upstreamRes!.status,
+                  outcome: 'empty_stream',
+                });
+                forward += `data: ${JSON.stringify({ error: { code: 'EMPTY_COMPLETION', message: 'The model finished without any text or tool call; retry the request.' } })}\n\n`;
+              }
+            }
             forward += `${line}\n`;
             continue;
           }
@@ -736,8 +754,11 @@ export class JoyModelGateway {
           }
           const reasoningRemoved = stripReasoning(data);
           const thinkRemoved = stripThinkTagsFromDeltas(data, thinkStates);
+          const finishRemoved = dropRepeatedFinishReason(data, finishedChoices);
           forward +=
-            reasoningRemoved || thinkRemoved ? `data: ${JSON.stringify(data)}\n` : `${line}\n`;
+            reasoningRemoved || thinkRemoved || finishRemoved
+              ? `data: ${JSON.stringify(data)}\n`
+              : `${line}\n`;
           // The shape is not trusted: anything unexpected throws and the frame is skipped.
           const chunk = data as StreamChunkShape;
           try {
@@ -1220,6 +1241,27 @@ function stripThinkTagsFromDeltas(
 }
 
 /**
+ * NEW-2: OpenRouter sends finish_reason again on the trailing usage chunk. Forward it once per
+ * choice; later repeats become null. Returns true if a chunk was changed.
+ */
+function dropRepeatedFinishReason(
+  payload: Record<string, unknown>,
+  finished: Set<number>,
+): boolean {
+  if (!Array.isArray(payload.choices)) return false;
+  let changed = false;
+  for (const [position, choice] of payload.choices.entries()) {
+    if (!isPlainObject(choice) || choice.finish_reason == null) continue;
+    const index = typeof choice.index === 'number' ? choice.index : position;
+    if (finished.has(index)) {
+      choice.finish_reason = null;
+      changed = true;
+    } else finished.add(index);
+  }
+  return changed;
+}
+
+/**
  * Removes reasoning from a completion or a stream chunk, in place: the reasoning fields of each
  * choice's message or delta, and <think>...</think> blocks in completion content.
  * Returns true if anything was removed.
@@ -1465,7 +1507,8 @@ function logUpstreamAttempt(entry: {
   readonly attempt: number;
   readonly of: number;
   readonly modelId: string;
-  readonly outcome: 'ok' | UpstreamFailureKind | 'timeout' | 'unreachable' | 'mid_stream_error';
+  readonly outcome:
+    'ok' | UpstreamFailureKind | 'timeout' | 'unreachable' | 'mid_stream_error' | 'empty_stream';
   readonly status?: number;
   readonly code?: string;
   readonly failedRoutingStep?: string;

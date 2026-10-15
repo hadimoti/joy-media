@@ -2086,6 +2086,103 @@ describe('JoyModelGateway', () => {
         .map((choice) => choice.delta?.content ?? '')
         .join('');
 
+    it('NEW-2: forwards finish_reason once per choice when upstream repeats it', async () => {
+      const result = createMockRes();
+      await streamGateway(async () =>
+        sse([
+          'data: {"id":"g","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}',
+          'data: {"id":"g","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+          'data: [DONE]',
+        ]),
+      ).handleChatCompletions(
+        createMockReq({ body: { model: SUPER, messages: [], stream: true } }),
+        result.res,
+      );
+      const body = result.getBody();
+      expect(body.match(/"finish_reason":"stop"/g)).toHaveLength(1);
+      expect(contentOf(body)).toBe('hi');
+      expect(body).toContain('"usage"');
+    });
+
+    it('NEW-2: an empty stream ends with an EMPTY_COMPLETION error event before [DONE]', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+      try {
+        const result = createMockRes();
+        await streamGateway(async () =>
+          sse([
+            'data: {"id":"g","choices":[{"index":0,"delta":{"content":""}}]}',
+            'data: {"id":"g","choices":[{"index":0,"delta":{"content":""},"finish_reason":"stop"}]}',
+            'data: [DONE]',
+          ]),
+        ).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [], stream: true } }),
+          result.res,
+        );
+        const body = result.getBody();
+        expect(body).toContain('"code":"EMPTY_COMPLETION"');
+        expect(body.indexOf('EMPTY_COMPLETION')).toBeLessThan(body.indexOf('[DONE]'));
+      } finally {
+        warn.mockRestore();
+        info.mockRestore();
+      }
+    });
+
+    it('NEW-2: a normal stream gets no EMPTY_COMPLETION event', async () => {
+      const result = createMockRes();
+      await streamGateway(async () =>
+        sse(['data: {"id":"g","choices":[{"index":0,"delta":{"content":"ok"}}]}', 'data: [DONE]']),
+      ).handleChatCompletions(
+        createMockReq({ body: { model: SUPER, messages: [], stream: true } }),
+        result.res,
+      );
+      expect(result.getBody()).not.toContain('EMPTY_COMPLETION');
+    });
+
+    it('NEW-1: a text request for gemma served by another model says so in the headers', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        let calls = 0;
+        const result = createMockRes();
+        await streamGateway(async () =>
+          ++calls === 1
+            ? new Response('{"error":{"code":429,"message":"busy"}}', { status: 429 })
+            : sse([
+                'data: {"id":"g","choices":[{"index":0,"delta":{"content":"ok"}}]}',
+                'data: [DONE]',
+              ]),
+        ).handleChatCompletions(
+          createMockReq({ body: { model: GEMMA, messages: [], stream: true } }),
+          result.res,
+        );
+        expect(result.getHeaders()['x-joy-model-requested']).toBe(GEMMA);
+        expect(result.getHeaders()['x-joy-model-used']).toBe(joyModelFallbackOrder(GEMMA)[1]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('#24: the busy error names the models it tried', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const result = createMockRes();
+        await streamGateway(
+          async () => new Response('{"error":{"code":429,"message":"busy"}}', { status: 429 }),
+        ).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          result.res,
+        );
+        expect(result.getStatus()).toBe(503);
+        const error = (
+          JSON.parse(result.getBody()) as { error: { message: string; triedModels: string[] } }
+        ).error;
+        expect(error.triedModels).toEqual(joyModelFallbackOrder(SUPER));
+        expect(error.message).toContain(`tried: ${joyModelFallbackOrder(SUPER).join(', ')}`);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it('flushes a held-back trailing "<" when the stream ends with [DONE] (b)', async () => {
       const result = createMockRes();
       await streamGateway(async () =>
