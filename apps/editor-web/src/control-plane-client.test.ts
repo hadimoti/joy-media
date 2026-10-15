@@ -42,6 +42,29 @@ describe('BrowserControlPlaneClient', () => {
     ]);
   });
 
+  it('#9: inside the desktop host the retired hosted routes are never requested', async () => {
+    const requests: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return json(200, { data: [] });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://joyst.ir/api',
+        () => 'joy-session-token',
+        true,
+      );
+      expect(await client.workers()).toEqual([]);
+      expect(await client.myAssets()).toEqual([]);
+      expect(await client.myAssets('project-1')).toEqual([]);
+      await expect(client.ensureProject('project-1', 'Title')).resolves.toBeUndefined();
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(requests).toEqual([]);
+  });
+
   it('coalesces concurrent worker and same-project job reads', async () => {
     const requests: string[] = [];
     let release!: () => void;
