@@ -28,13 +28,14 @@ function noKeyringDesktop(values: Map<string, string>) {
     if (channel === 'desktop.media-session.clear') memory = undefined;
     return undefined;
   });
+  const dispatchEvent = vi.fn();
   vi.stubGlobal('window', {
     localStorage: storage,
     joyDesktop: { invoke },
-    dispatchEvent: vi.fn(),
+    dispatchEvent,
   });
   setMediaSessionTokenBackendForTests();
-  return { restartMainProcess: () => (memory = undefined) };
+  return { invoke, dispatchEvent, restartMainProcess: () => (memory = undefined) };
 }
 
 afterEach(() => {
@@ -81,5 +82,27 @@ describe('MUST1: no keyring, no plaintext token', () => {
     await setStoredMediaToken('account-b');
     expect(values.has(KEY)).toBe(false);
     expect(await getStoredMediaToken()).toBe('account-b');
+  });
+
+  it('migration fires a session-changed event so the keyring notice shows', async () => {
+    const host = noKeyringDesktop(new Map([[KEY, 'legacy-token']]));
+    await initializeMediaSessionToken();
+    expect(host.dispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'joy-media-session-changed' }),
+    );
+  });
+
+  it('sign-out removes the plaintext copy even when the desktop clear throws', async () => {
+    const values = new Map<string, string>();
+    const host = noKeyringDesktop(values);
+    await setStoredMediaToken('session-a');
+    values.set(KEY, 'session-a');
+    host.invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.media-session.clear') throw new Error('ipc down');
+      return undefined;
+    });
+    await expect(clearStoredMediaToken()).rejects.toThrow('ipc down');
+    expect(values.has(KEY)).toBe(false);
+    expect(await getStoredMediaToken()).toBeUndefined();
   });
 });

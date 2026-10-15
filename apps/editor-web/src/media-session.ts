@@ -186,6 +186,9 @@ export function initializeMediaSessionToken(): Promise<void> {
         cachedToken = secureToken;
         cacheLoaded = true;
         removeLegacyTokenAfterMigration();
+        // Let the app show the keyring notice for a session restored by migration (FT2b).
+        if (typeof window !== 'undefined')
+          window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));
         return;
       }
       if (secureToken === legacyToken) {
@@ -230,10 +233,14 @@ export async function setStoredMediaToken(token: string): Promise<void> {
 
 export async function clearStoredMediaToken(): Promise<void> {
   await initializeMediaSessionToken();
-  await backend.clear();
+  // FT2b: drop any plaintext copy first, so it goes even when the desktop clear throws.
   if (isDesktopHost()) removeLegacyTokenAfterMigration();
-  sessionPersisted = true;
-  cachedToken = undefined;
+  try {
+    await backend.clear();
+  } finally {
+    sessionPersisted = true;
+    cachedToken = undefined;
+  }
   cacheLoaded = true;
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));
 }
