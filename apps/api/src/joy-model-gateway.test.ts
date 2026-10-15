@@ -369,12 +369,15 @@ describe('JoyModelGateway', () => {
         'This API key is disabled',
         'Key limit exceeded (total limit)',
         'Invalid credentials',
-      ])('treats a 403 about the key (%s) as an auth failure and stops', async (message) => {
+      ])('falls through each candidate on a 403 about the key (%s)', async (message) => {
         const tried: string[] = [];
         const result = await run(
-          sequence([() => openRouterError(403, { code: 403, message })], tried),
+          sequence(
+            Array.from({ length: 5 }, () => () => openRouterError(403, { code: 403, message })),
+            tried,
+          ),
         );
-        expect(tried).toEqual([SUPER]);
+        expect(tried).toEqual([SUPER, ULTRA, NORTH, GEMMA, OMNI]);
         expect(result.getStatus()).toBe(503);
         expect(result.getBody()).toContain('JOY_AGENT_UPSTREAM_AUTH_FAILED');
         expect(result.getBody()).not.toContain(message);
@@ -553,17 +556,287 @@ describe('JoyModelGateway', () => {
             ...activeUser(),
             ledger: new MemoryAgentUsageLedger(),
             openRouterApiKey: 'test-key',
-            fetchImpl: sequence([silent], tried),
+            fetchImpl: async (_url, init) => {
+              tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+              return silent();
+            },
           }).handleChatCompletions(
             createMockReq({ body: { model: SUPER, messages: [], stream: true } }),
             result.res,
           );
           await vi.advanceTimersByTimeAsync(86_000);
           await pending;
-          expect(tried).toEqual([SUPER]);
-          expect(result.getStatus()).toBe(504);
-          expect(result.getBody()).toContain('UPSTREAM_TIMEOUT');
+          expect(tried).toHaveLength(5);
+          expect(result.getStatus()).toBe(503);
+          expect(result.getBody()).toContain('JOY_AGENT_MODELS_BUSY');
           expect(result.getBody()).not.toContain('OPENROUTER PROCESSING');
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it.each([
+        [401, { provider_name: 'Google AI Studio' }],
+        [403, { provider_name: 'Google AI Studio' }],
+      ] as const)(
+        'falls back on provider-level status %i with provider metadata',
+        async (status, metadata) => {
+          const tried: string[] = [];
+          const result = await run(
+            sequence(
+              [
+                () =>
+                  openRouterError(status, {
+                    code: status,
+                    message: 'Provider returned error',
+                    metadata,
+                  }),
+                () =>
+                  new Response(
+                    JSON.stringify({ choices: [{ message: { content: 'nano-omni answered' } }] }),
+                    { status: 200 },
+                  ),
+              ],
+              tried,
+            ),
+          );
+          expect(tried).toEqual([SUPER, ULTRA]);
+          expect(result.getStatus()).toBe(200);
+          expect(result.getBody()).toContain('nano-omni answered');
+        },
+      );
+
+      it('accepts a later success after a key-sounding 403', async () => {
+        const tried: string[] = [];
+        const result = await run(
+          sequence(
+            [
+              () =>
+                openRouterError(403, {
+                  code: 403,
+                  message: 'API key does not have access to this model',
+                }),
+              okJson('answered after key-sounding 403'),
+            ],
+            tried,
+          ),
+        );
+        expect(tried).toEqual([SUPER, ULTRA]);
+        expect(result.getStatus()).toBe(200);
+        expect(result.getBody()).toContain('answered after key-sounding 403');
+      });
+
+      it('returns AUTH_FAILED only when all 403 attempts are key-level', async () => {
+        const tried: string[] = [];
+        const result = await run(
+          sequence(
+            Array.from(
+              { length: 5 },
+              () => () => openRouterError(403, { code: 403, message: 'API key is disabled' }),
+            ),
+            tried,
+          ),
+        );
+        expect(tried).toEqual([SUPER, ULTRA, NORTH, GEMMA, OMNI]);
+        expect(result.getBody()).toContain('JOY_AGENT_UPSTREAM_AUTH_FAILED');
+      });
+
+      it('returns models busy when key-level 403s are mixed with model failures', async () => {
+        const tried: string[] = [];
+        const result = await run(
+          sequence(
+            [
+              () => openRouterError(403, { code: 403, message: 'API key is disabled' }),
+              ...Array.from({ length: 4 }, () => () => openRouterError(429, { code: 429 })),
+            ],
+            tried,
+          ),
+        );
+        expect(tried).toEqual([SUPER, ULTRA, NORTH, GEMMA, OMNI]);
+        expect(result.getStatus()).toBe(503);
+        expect(result.getBody()).toContain('JOY_AGENT_MODELS_BUSY');
+      });
+
+      it.each([400, 413, 422])(
+        'stops on a 200 error body with request status %i',
+        async (status) => {
+          const tried: string[] = [];
+          const result = await run(
+            sequence(
+              [
+                () =>
+                  new Response(
+                    JSON.stringify({ error: { code: status, message: 'request rejected' } }),
+                    { status: 200 },
+                  ),
+              ],
+              tried,
+            ),
+          );
+          expect(tried).toEqual([SUPER]);
+          expect(result.getStatus()).toBe(502);
+          expect(result.getBody()).not.toContain('JOY_AGENT_MODELS_BUSY');
+        },
+      );
+
+      it.each(['not json', '<html>upstream failure</html>', ''])(
+        'falls back after invalid non-stream 200 body %j',
+        async (body) => {
+          const tried: string[] = [];
+          const result = await run(
+            sequence([() => new Response(body, { status: 200 }), okJson('fallback answer')], tried),
+          );
+          expect(tried).toEqual([SUPER, ULTRA]);
+          expect(result.getStatus()).toBe(200);
+          expect(result.getBody()).toContain('fallback answer');
+        },
+      );
+
+      it('falls back after a network error on one candidate', async () => {
+        const tried: string[] = [];
+        const result = await run(async (_url, init) => {
+          tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+          if (tried.length === 1) throw new TypeError('offline test network error');
+          return new Response(
+            JSON.stringify({ choices: [{ message: { content: 'recovered' } }] }),
+            { status: 200 },
+          );
+        });
+        expect(tried.slice(0, 2)).toEqual([SUPER, ULTRA]);
+        expect(result.getStatus()).toBe(200);
+        expect(result.getBody()).toContain('recovered');
+      });
+
+      it('falls back to the next candidate after one attempt times out', async () => {
+        vi.useFakeTimers();
+        try {
+          const tried: string[] = [];
+          const result = createMockRes();
+          const pending = new JoyModelGateway({
+            ...activeUser(),
+            ledger: new MemoryAgentUsageLedger(),
+            openRouterApiKey: 'test-key',
+            fetchImpl: async (_url, init) => {
+              tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+              if (tried.length === 1)
+                return new Promise((_resolve, reject) => {
+                  (init?.signal as AbortSignal).addEventListener(
+                    'abort',
+                    () => reject(Object.assign(new Error('timeout'), { name: 'AbortError' })),
+                    { once: true },
+                  );
+                });
+              return new Response(
+                JSON.stringify({ choices: [{ message: { content: 'timeout fallback' } }] }),
+                { status: 200 },
+              );
+            },
+          }).handleChatCompletions(
+            createMockReq({ body: { model: SUPER, messages: [] } }),
+            result.res,
+          );
+          await vi.advanceTimersByTimeAsync(20_001);
+          await pending;
+          expect(tried.slice(0, 2)).toEqual([SUPER, ULTRA]);
+          expect(result.getStatus()).toBe(200);
+          expect(result.getBody()).toContain('timeout fallback');
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('shares one 85 second deadline across five slow candidates', async () => {
+        vi.useFakeTimers();
+        try {
+          const tried: string[] = [];
+          const started = Date.now();
+          const result = createMockRes();
+          const pending = new JoyModelGateway({
+            ...activeUser(),
+            ledger: new MemoryAgentUsageLedger(),
+            openRouterApiKey: 'test-key',
+            fetchImpl: async (_url, init) => {
+              tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+              return new Promise((_resolve, reject) => {
+                (init?.signal as AbortSignal).addEventListener(
+                  'abort',
+                  () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+                  { once: true },
+                );
+              });
+            },
+          }).handleChatCompletions(
+            createMockReq({ body: { model: SUPER, messages: [] } }),
+            result.res,
+          );
+          await vi.advanceTimersByTimeAsync(85_001);
+          await pending;
+          expect(Date.now() - started).toBeLessThanOrEqual(85_001);
+          expect(tried).toHaveLength(5);
+          expect(result.getStatus()).toBe(503);
+          expect(result.getBody()).toContain('JOY_AGENT_MODELS_BUSY');
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('aborts an in-flight upstream request when the client disconnects', async () => {
+        let signal: AbortSignal | undefined;
+        let entered!: () => void;
+        const fetchEntered = new Promise<void>((resolve) => {
+          entered = resolve;
+        });
+        const result = createMockRes();
+        const pending = new JoyModelGateway({
+          ...activeUser(),
+          ledger: new MemoryAgentUsageLedger(),
+          openRouterApiKey: 'test-key',
+          fetchImpl: async (_url, init) => {
+            signal = init?.signal as AbortSignal;
+            entered();
+            return new Promise((_resolve, reject) =>
+              signal!.addEventListener(
+                'abort',
+                () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+                { once: true },
+              ),
+            );
+          },
+        }).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          result.res,
+        );
+        await fetchEntered;
+        result.close();
+        await pending;
+        expect(signal?.aborted).toBe(true);
+      });
+
+      it('falls back after a comment-only stream times out while request budget remains', async () => {
+        vi.useFakeTimers();
+        try {
+          const tried: string[] = [];
+          const silent = () =>
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(new TextEncoder().encode(': OPENROUTER PROCESSING\n\n'));
+                },
+              }),
+              { status: 200 },
+            );
+          const pending = run(
+            sequence(
+              [silent, sse('data: {"choices":[{"delta":{"content":"fallback stream"}}]}\n\n')],
+              tried,
+            ),
+            { stream: true },
+          );
+          await vi.advanceTimersByTimeAsync(20_001);
+          const result = await pending;
+          expect(tried.slice(0, 2)).toEqual([SUPER, ULTRA]);
+          expect(result.getStatus()).toBe(200);
+          expect(result.getBody()).toContain('fallback stream');
         } finally {
           vi.useRealTimers();
         }
@@ -1199,7 +1472,11 @@ describe('JoyModelGateway', () => {
             [
               'data: {"id":"g","choices":[{"delta":{"role":"assistant","reasoning":"STREAMED-REASONING","reasoning_details":[{"text":"STREAMED-REASONING"}]}}]}',
               '',
-              'data: {"id":"g","choices":[{"delta":{"content":"Hi","reasoning_content":"STREAMED-REASONING"}}]}',
+              'data: {"id":"g","choices":[{"delta":{"content":"<thi","reasoning_content":"STREAMED-REASONING"}}]}',
+              '',
+              'data: {"id":"g","choices":[{"delta":{"content":"nk>private plan</th"}}]}',
+              '',
+              'data: {"id":"g","choices":[{"delta":{"content":"ink>Hi"}}]}',
               '',
               'data: {"id":"g","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"edit","arguments":"{}"}}]}}]}',
               '',
@@ -1217,6 +1494,8 @@ describe('JoyModelGateway', () => {
       );
       const body = result.getBody();
       expect(body).not.toContain('STREAMED-REASONING');
+      expect(body).not.toContain('private plan');
+      expect(body).toContain('"content":"Hi"');
       expect(body).not.toContain('reasoning');
       expect(body).toContain('data: {"id":"g","choices":[{"delta":{"content":"Hi"}}]}\n');
       expect(body).toContain('"name":"edit"');
@@ -1645,10 +1924,101 @@ describe('JoyModelGateway', () => {
       createMockReq({ body: { model: 'google/gemma-4-31b-it:free', messages: [] } }),
       response.res,
     );
-    expect(response.getStatus()).toBe(502);
-    expect(response.getBody()).toContain('UPSTREAM_ERROR');
+    expect(response.getStatus()).toBe(503);
+    expect(response.getBody()).toContain('JOY_AGENT_MODELS_BUSY');
     expect(response.getBody()).not.toContain('private-upstream-body');
-    expect((await ledger.getSummary('u')).totalRequests).toBe(1);
+    expect((await ledger.getSummary('u')).totalRequests).toBe(0);
+  });
+
+  it('bounds non-stream body reads by the shared deadline and falls back', async () => {
+    vi.useFakeTimers();
+    try {
+      const tried: string[] = [];
+      const result = createMockRes();
+      const pending = new JoyModelGateway({
+        mediaAuth: {
+          authenticate: async () => ({ id: 'body-timeout' }),
+        } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'body-timeout',
+            plan: 'pro',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: async (_url, init) => {
+          tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+          if (tried.length === 1)
+            return new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(new TextEncoder().encode('{'));
+                },
+              }),
+              { status: 200 },
+            );
+          return new Response(
+            JSON.stringify({ choices: [{ message: { content: 'body fallback' } }] }),
+            { status: 200 },
+          );
+        },
+      }).handleChatCompletions(createMockReq({ body: { model: SUPER, messages: [] } }), result.res);
+      await vi.advanceTimersByTimeAsync(20_001);
+      await pending;
+      expect(tried.slice(0, 2)).toEqual([SUPER, ULTRA]);
+      expect(result.getStatus()).toBe(200);
+      expect(result.getBody()).toContain('body fallback');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends a sanitized terminal error and logs an upstream error after stream start', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const result = createMockRes();
+      await new JoyModelGateway({
+        mediaAuth: {
+          authenticate: async () => ({ id: 'mid-stream' }),
+        } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'mid-stream',
+            plan: 'pro',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl: async () =>
+          new Response(
+            [
+              'data: {"id":"g","choices":[{"delta":{"content":"partial"}}]}',
+              '',
+              'data: {"id":"g","error":{"code":502},"choices":[{"finish_reason":"error"}]}',
+              '',
+              '',
+            ].join('\n'),
+            { status: 200 },
+          ),
+      }).handleChatCompletions(
+        createMockReq({ body: { model: SUPER, messages: [], stream: true } }),
+        result.res,
+      );
+      expect(result.getBody()).toContain('"content":"partial"');
+      expect(result.getBody()).toContain('UPSTREAM_STREAM_ERROR');
+      expect(result.getBody()).not.toContain('"code":502');
+      expect(warn).toHaveBeenCalledWith(
+        'joy-model-gateway: upstream attempt',
+        expect.objectContaining({ modelId: SUPER, outcome: 'mid_stream_error' }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('records OpenRouter usage.cost for non-streaming responses', async () => {
@@ -1723,6 +2093,41 @@ describe('JoyModelGateway', () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it('does not count 30 invalid model requests against the user request limit', async () => {
+    const gateway = new JoyModelGateway({
+      mediaAuth: {
+        authenticate: async () => ({ id: 'validation-rate-user' }),
+      } as unknown as MediaAuthService,
+      account: {
+        getSubscription: async () => ({
+          ownerId: 'validation-rate-user',
+          plan: 'pro',
+          status: 'active',
+          updatedAt: 0,
+        }),
+      } as unknown as AccountService,
+      ledger: new MemoryAgentUsageLedger(),
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ choices: [], usage: {} }), { status: 200 }),
+    });
+    for (let index = 0; index < 30; index += 1) {
+      const invalid = createMockRes();
+      await gateway.handleChatCompletions(
+        createMockReq({ body: { model: 'paid/not-allowed', messages: [] } }),
+        invalid.res,
+      );
+      expect(invalid.getStatus()).toBe(400);
+      expect(invalid.getBody()).toContain('MODEL_NOT_ALLOWED');
+    }
+    const valid = createMockRes();
+    await gateway.handleChatCompletions(
+      createMockReq({ body: { model: SUPER, messages: [] } }),
+      valid.res,
+    );
+    expect(valid.getStatus()).toBe(200);
   });
 
   it('enforces the per-user daily billed spend cap', async () => {
@@ -2106,10 +2511,10 @@ describe('JoyModelGateway', () => {
     for (const [error, expectedStatus, expectedCode] of [
       [
         Object.assign(new Error('timeout-body-sentinel'), { name: 'TimeoutError' }),
-        504,
-        'UPSTREAM_TIMEOUT',
+        503,
+        'JOY_AGENT_MODELS_BUSY',
       ],
-      [new TypeError('network-body-sentinel'), 502, 'UPSTREAM_UNREACHABLE'],
+      [new TypeError('network-body-sentinel'), 503, 'JOY_AGENT_MODELS_BUSY'],
     ] as const) {
       const gateway = new JoyModelGateway({
         mediaAuth: auth,
@@ -2698,6 +3103,7 @@ describe('JoyModelGateway', () => {
 
   it('cancels the upstream reader when the response client closes early', async () => {
     let canceled = false;
+    let upstreamSignal: AbortSignal | undefined;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(
@@ -2723,7 +3129,10 @@ describe('JoyModelGateway', () => {
       } as unknown as AccountService,
       ledger,
       openRouterApiKey: 'test-key',
-      fetchImpl: async () => new Response(stream, { status: 200 }),
+      fetchImpl: async (_url, init) => {
+        upstreamSignal ??= init?.signal as AbortSignal;
+        return new Response(stream, { status: 200 });
+      },
     });
     const response = createMockRes();
     const operation = gateway.handleChatCompletions(
@@ -2736,6 +3145,7 @@ describe('JoyModelGateway', () => {
     response.close();
     await operation;
     expect(canceled).toBe(true);
+    expect(upstreamSignal?.aborted).toBe(true);
     expect((await ledger.getSummary('u')).totalCompletionTokens).toBe(4);
   });
 });

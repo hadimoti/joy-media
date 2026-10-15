@@ -81,25 +81,31 @@ const KEY_LEVEL_FORBIDDEN =
   /api[\s_-]?key|\bkey\b[^.]{0,40}\b(?:invalid|disabled|revoked|expired|limit|not found)|credential|unauthori[sz]ed/i;
 
 /**
- * - auth: the key itself was rejected (401, or a 403 clearly about the key). Every model
- *   would fail the same way, so stop.
- * - fallback: this model is busy, gated or failing right now; try the next candidate. That is
- *   404 (withdrawn or no provider), 429 (including a shared free pool), 5xx, any other 403
- *   (e.g. a free endpoint gated to agentic harnesses, reported as a failed routing step), and
- *   a 200 whose body (or first stream event) is an error, e.g. a provider's ResourceExhausted.
- * - stop: anything else (such as 400 or 402) is about the request or the account; stop.
+ * - auth: a bare key-level 401 is rejected and stops immediately.
+ * - fallback: 401/403 provider failures, every 403, 404, 429, 5xx, timeouts, network errors,
+ *   invalid 200 completion bodies and retryable errors carried in a 200 body or first stream event.
+ * - stop: non-retryable request or account failures, including 400, 402 and 200 error codes 400,
+ *   413 or 422.
  */
+function isKeyLevelAuthFailure(failure: UpstreamFailure): boolean {
+  if (failure.failedRoutingStep !== undefined || failure.providerName !== undefined) return false;
+  return (
+    failure.status === 401 ||
+    (failure.status === 403 && KEY_LEVEL_FORBIDDEN.test(failure.message ?? ''))
+  );
+}
+
+/** Provider-specific auth and every 403 are model failures; only bare key-level 401 stops. */
 function classifyUpstreamFailure(failure: UpstreamFailure): UpstreamFailureKind {
   const { status } = failure;
-  // An error carried in a 200 body or as a stream's first event: the model failed this time.
-  if (status >= 200 && status <= 299) return 'fallback';
-  if (status === 401) return 'auth';
-  if (status === 403)
-    return failure.failedRoutingStep === undefined &&
-      KEY_LEVEL_FORBIDDEN.test(failure.message ?? '')
-      ? 'auth'
-      : 'fallback';
-  if (status === 404 || status === 429 || (status >= 500 && status <= 599)) return 'fallback';
+  if (status >= 200 && status <= 299) {
+    const bodyStatus = Number(failure.code);
+    if (bodyStatus === 400 || bodyStatus === 413 || bodyStatus === 422) return 'stop';
+    return 'fallback';
+  }
+  if (status === 401) return isKeyLevelAuthFailure(failure) ? 'auth' : 'fallback';
+  if (status === 403 || status === 404 || status === 429 || (status >= 500 && status <= 599))
+    return 'fallback';
   return 'stop';
 }
 
@@ -117,7 +123,8 @@ export function warnIfPaidModelAllowlistSet(env: NodeJS.ProcessEnv = process.env
 
 export const DEFAULT_COMMISSION_RATE_BPS = 2500; // 25% gross margin
 export const JOY_MODEL_MAX_OUTPUT_TOKENS = 8192;
-const UPSTREAM_HEADER_TIMEOUT_MS = 85_000;
+const UPSTREAM_REQUEST_DEADLINE_MS = 85_000;
+const UPSTREAM_ATTEMPT_TIMEOUT_MS = 20_000;
 const UPSTREAM_STREAM_IDLE_TIMEOUT_MS = 60_000;
 
 const FORWARDED_COMPLETION_FIELDS = [
@@ -231,24 +238,6 @@ export class JoyModelGateway {
       return;
     }
 
-    const now = Date.now();
-    const rateWindowStart = now - 60_000;
-    const recentRequests = (this.requestTimesByUser.get(actor.id) ?? []).filter(
-      (at) => at > rateWindowStart,
-    );
-    const rateLimit = positiveEnvInteger('JOY_GATEWAY_RATE_LIMIT_PER_MIN', 30);
-    if (recentRequests.length >= rateLimit) {
-      const retryAfter = Math.max(1, Math.ceil((recentRequests[0]! + 60_000 - now) / 1000));
-      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': String(retryAfter) });
-      res.end(
-        JSON.stringify({
-          error: { code: 'RATE_LIMITED', message: 'Per-user request limit reached; retry later.' },
-        }),
-      );
-      return;
-    }
-    recentRequests.push(now);
-    this.requestTimesByUser.set(actor.id, recentRequests);
     let bodyBuffer: Buffer;
     try {
       bodyBuffer = await readRequestBody(req);
@@ -340,6 +329,24 @@ export class JoyModelGateway {
       return;
     }
 
+    const now = Date.now();
+    const rateWindowStart = now - 60_000;
+    const recentRequests = (this.requestTimesByUser.get(actor.id) ?? []).filter(
+      (at) => at > rateWindowStart,
+    );
+    const rateLimit = positiveEnvInteger('JOY_GATEWAY_RATE_LIMIT_PER_MIN', 30);
+    if (recentRequests.length >= rateLimit) {
+      const retryAfter = Math.max(1, Math.ceil((recentRequests[0]! + 60_000 - now) / 1000));
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': String(retryAfter) });
+      res.end(
+        JSON.stringify({
+          error: { code: 'RATE_LIMITED', message: 'Per-user request limit reached; retry later.' },
+        }),
+      );
+      return;
+    }
+    recentRequests.push(now);
+    this.requestTimesByUser.set(actor.id, recentRequests);
     const dailyCapMicros = BigInt(
       Math.round(positiveEnvNumber('JOY_GATEWAY_DAILY_SPEND_CAP_USD', 5) * 1_000_000),
     );
@@ -406,97 +413,133 @@ export class JoyModelGateway {
       return;
     }
 
-    // Forward to OpenRouter. A free model that is busy, gated or failing (see
-    // classifyUpstreamFailure) is retried with the next candidate; only a key-level rejection
-    // stops as an auth failure. Timeouts and network failures are not model-specific and stop.
+    // All candidate attempts share one deadline. Each attempt gets a bounded slice so a
+    // silent provider can fail over while there is still budget for another candidate.
     const isStream = parsedBody.stream === true;
     let upstreamRes: Response | undefined;
     let verdict: 'ok' | UpstreamFailureKind = 'fallback';
     const failures: UpstreamFailure[] = [];
-    // What the answering attempt already read: the parsed JSON body, or the start of the stream.
     let upstreamJson: Record<string, unknown> | undefined;
     let streamStart: StreamStart | undefined;
+    let successfulAttempt: { ownerId: string; attempt: number; of: number } | undefined;
+    let winningUpstreamController: AbortController | undefined;
     const candidates = joyModelFallbackOrder(modelId, {
       requireVision: messagesHaveImages(parsedBody.messages),
     });
+    const requestDeadline = Date.now() + UPSTREAM_REQUEST_DEADLINE_MS;
+    const clientAbortController = new AbortController();
+    let clientDisconnected = false;
+    const onClientClose = () => {
+      clientDisconnected = true;
+      clientAbortController.abort();
+      winningUpstreamController?.abort();
+    };
+    res.on('close', onClientClose);
     for (const [index, candidate] of candidates.entries()) {
+      if (clientDisconnected || Date.now() >= requestDeadline) break;
       const attempt = { ownerId: actor.id, attempt: index + 1, of: candidates.length };
       const upstreamController = new AbortController();
+      const abortForClient = () => upstreamController.abort();
+      clientAbortController.signal.addEventListener('abort', abortForClient, { once: true });
       let upstreamTimedOut = false;
-      const attemptDeadline = Date.now() + UPSTREAM_HEADER_TIMEOUT_MS;
-      const headerTimeout = setTimeout(() => {
+      const remainingMs = requestDeadline - Date.now();
+      const attemptBudget = Math.min(remainingMs, UPSTREAM_ATTEMPT_TIMEOUT_MS);
+      const attemptDeadline = Date.now() + attemptBudget;
+      const attemptTimeout = setTimeout(() => {
         upstreamTimedOut = true;
         upstreamController.abort();
-      }, UPSTREAM_HEADER_TIMEOUT_MS);
+      }, attemptBudget);
       let streamPeek: StreamPeek | undefined;
+      let failure: UpstreamFailure | undefined;
       try {
         upstreamRes = await this.fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            authorization: `Bearer ${this.openRouterApiKey}`,
+            authorization: 'Bearer ' + this.openRouterApiKey,
             'http-referer': 'https://joyst.ir',
             'x-title': 'JOY Media Built-in Agent',
           },
           body: JSON.stringify(buildUpstreamBody(parsedBody, candidate, isStream)),
           signal: upstreamController.signal,
         });
-        // A stream can start with HTTP 200 and an error as its first event. Look before
-        // committing the response, within the same time budget as the headers.
         if (upstreamRes.ok && isStream && upstreamRes.body !== null)
           streamPeek = await peekStreamStart(upstreamRes.body, attemptDeadline);
+        modelId = candidate;
+        if (!upstreamRes.ok) {
+          failure = await readUpstreamFailure(upstreamRes, attemptDeadline);
+        } else if (streamPeek?.kind === 'error') {
+          failure = { status: upstreamRes.status, ...openRouterErrorFields(streamPeek.payload) };
+        } else if (!isStream) {
+          const bodyText = await readBoundedText(
+            upstreamRes,
+            Number.POSITIVE_INFINITY,
+            attemptDeadline,
+          );
+          const parsed = parseJsonObject(bodyText);
+          const bodyError = parsed === undefined ? undefined : bodyErrorOf(parsed);
+          if (bodyError !== undefined) {
+            failure = { status: upstreamRes.status, ...openRouterErrorFields(bodyError) };
+          } else if (parsed === undefined || !Array.isArray(parsed.choices)) {
+            failure = { status: upstreamRes.status, code: 'INVALID_RESPONSE' };
+          } else {
+            upstreamJson = parsed;
+          }
+        }
       } catch (error) {
-        await this.safeRelease(reservationId);
-        const timedOut =
+        if (clientDisconnected) {
+          await this.safeRelease(reservationId);
+          res.off('close', onClientClose);
+          return;
+        }
+        const timeout =
           upstreamTimedOut ||
           (error instanceof Error &&
             (error.name === 'TimeoutError' || error.name === 'AbortError'));
+        failure = {
+          status: timeout ? 504 : 503,
+          code: timeout ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNREACHABLE',
+        };
+      } finally {
+        clearTimeout(attemptTimeout);
+        clientAbortController.signal.removeEventListener('abort', abortForClient);
+      }
+
+      if (failure === undefined) {
         logUpstreamAttempt({
           ...attempt,
           modelId: candidate,
-          outcome: timedOut ? 'timeout' : 'unreachable',
+          status: upstreamRes!.status,
+          outcome: 'ok',
         });
-        res.writeHead(timedOut ? 504 : 502, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            error: {
-              code: timedOut ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNREACHABLE',
-              message: timedOut ? 'AI upstream timed out' : 'Failed to connect to AI upstream',
-            },
-          }),
-        );
-        return;
-      } finally {
-        clearTimeout(headerTimeout);
-      }
-      modelId = candidate;
-      let failure: UpstreamFailure | undefined;
-      if (!upstreamRes.ok) {
-        failure = await readUpstreamFailure(upstreamRes);
-      } else if (streamPeek?.kind === 'error') {
-        failure = { status: upstreamRes.status, ...openRouterErrorFields(streamPeek.payload) };
-      } else if (!isStream) {
-        const parsed = parseJsonObject(await upstreamRes.text().catch(() => ''));
-        const bodyError = parsed === undefined ? undefined : bodyErrorOf(parsed);
-        if (bodyError !== undefined)
-          failure = { status: upstreamRes.status, ...openRouterErrorFields(bodyError) };
-        else upstreamJson = parsed;
-      }
-      if (failure === undefined) {
-        logUpstreamAttempt({ ...attempt, modelId, status: upstreamRes.status, outcome: 'ok' });
         if (streamPeek?.kind === 'ok') streamStart = streamPeek.start;
+        successfulAttempt = attempt;
+        winningUpstreamController = upstreamController;
         verdict = 'ok';
         break;
       }
       const kind = classifyUpstreamFailure(failure);
-      logUpstreamAttempt({ ...attempt, modelId, ...failureLogFields(failure), outcome: kind });
+      logUpstreamAttempt({
+        ...attempt,
+        modelId: candidate,
+        ...failureLogFields(failure),
+        outcome: kind,
+      });
       failures.push(failure);
       verdict = kind;
       if (kind !== 'fallback') break;
     }
-    if (upstreamRes === undefined) throw new Error('joy-model-gateway: no upstream attempt');
-
+    if (verdict !== 'ok' && failures.length > 0 && failures.every(isKeyLevelAuthFailure))
+      verdict = 'auth';
+    if (upstreamRes === undefined && failures.length === 0)
+      throw new Error('joy-model-gateway: no upstream attempt');
+    if (clientDisconnected) {
+      await this.safeRelease(reservationId);
+      res.off('close', onClientClose);
+      return;
+    }
     if (verdict !== 'ok') {
+      res.off('close', onClientClose);
       await this.safeRelease(reservationId);
       const last = failures.at(-1)!;
       const status = last.status;
@@ -546,6 +589,7 @@ export class JoyModelGateway {
       return;
     }
 
+    if (streamStart === undefined) res.off('close', onClientClose);
     if (streamStart !== undefined) {
       res.writeHead(200, {
         'content-type': 'text/event-stream',
@@ -563,8 +607,13 @@ export class JoyModelGateway {
       let generationId: string | undefined;
       let pending = '';
       let streamComplete = false;
+      let streamErrored = false;
+      const thinkStates = new Map<number, ThinkTagStripState>();
       const onClose = () => {
-        if (!streamComplete) void reader.cancel().catch(() => {});
+        if (!streamComplete) {
+          winningUpstreamController?.abort();
+          void reader.cancel().catch(() => {});
+        }
       };
       res.on('close', onClose);
       // Forwards complete SSE lines (minus any reasoning the model streamed) and accounts for
@@ -584,7 +633,23 @@ export class JoyModelGateway {
             forward += `${line}\n`;
             continue;
           }
-          forward += stripReasoning(data) ? `data: ${JSON.stringify(data)}\n` : `${line}\n`;
+          if (streamErrored) continue;
+          if (bodyErrorOf(data) !== undefined) {
+            streamErrored = true;
+            logUpstreamAttempt({
+              ...successfulAttempt!,
+              modelId,
+              status: upstreamRes!.status,
+              outcome: 'mid_stream_error',
+            });
+            forward +=
+              'data: {"error":{"code":"UPSTREAM_STREAM_ERROR","message":"AI upstream stream failed"}}\n';
+            continue;
+          }
+          const reasoningRemoved = stripReasoning(data);
+          const thinkRemoved = stripThinkTagsFromDeltas(data, thinkStates);
+          forward +=
+            reasoningRemoved || thinkRemoved ? `data: ${JSON.stringify(data)}\n` : `${line}\n`;
           // The shape is not trusted: anything unexpected throws and the frame is skipped.
           const chunk = data as StreamChunkShape;
           try {
@@ -632,6 +697,10 @@ export class JoyModelGateway {
             break;
           }
           const { done, value } = readResult;
+          if (streamErrored) {
+            void reader.cancel().catch(() => {});
+            break;
+          }
           if (done) {
             processLines(decoder.decode());
             if (pending.length > 0) processLines('\n');
@@ -643,6 +712,7 @@ export class JoyModelGateway {
       } finally {
         clearInterval(keepAlive);
         res.off('close', onClose);
+        res.off('close', onClientClose);
         res.end();
       }
 
@@ -985,9 +1055,70 @@ interface StreamChunkShape {
 
 const REASONING_FIELDS = ['reasoning', 'reasoning_content', 'reasoning_details'] as const;
 
+interface ThinkTagStripState {
+  insideThink: boolean;
+  pending: string;
+}
+
+function longestTagPrefixSuffix(value: string, tag: string): number {
+  for (let length = Math.min(value.length, tag.length - 1); length > 0; length -= 1)
+    if (tag.startsWith(value.slice(-length))) return length;
+  return 0;
+}
+
+/** Removes inline reasoning from delta content, retaining partial tag prefixes across deltas. */
+function stripThinkDelta(text: string, state: ThinkTagStripState): string {
+  state.pending += text;
+  let output = '';
+  while (state.pending.length > 0) {
+    const tag = state.insideThink ? '</think>' : '<think>';
+    const tagAt = state.pending.indexOf(tag);
+    if (tagAt >= 0) {
+      if (!state.insideThink) output += state.pending.slice(0, tagAt);
+      state.pending = state.pending.slice(tagAt + tag.length);
+      state.insideThink = !state.insideThink;
+      continue;
+    }
+    const partial = longestTagPrefixSuffix(state.pending, tag);
+    if (!state.insideThink) output += state.pending.slice(0, state.pending.length - partial);
+    state.pending = partial > 0 ? state.pending.slice(-partial) : '';
+    break;
+  }
+  return output;
+}
+
+function stripThinkTagsFromDeltas(
+  payload: Record<string, unknown>,
+  states: Map<number, ThinkTagStripState>,
+): boolean {
+  if (!Array.isArray(payload.choices)) return false;
+  let changed = false;
+  for (const [position, choice] of payload.choices.entries()) {
+    if (
+      !isPlainObject(choice) ||
+      !isPlainObject(choice.delta) ||
+      typeof choice.delta.content !== 'string'
+    )
+      continue;
+    const index = typeof choice.index === 'number' ? choice.index : position;
+    let state = states.get(index);
+    if (state === undefined) {
+      state = { insideThink: false, pending: '' };
+      states.set(index, state);
+    }
+    const original = choice.delta.content;
+    const filtered = stripThinkDelta(original, state);
+    if (filtered !== original) {
+      choice.delta.content = filtered;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 /**
  * Removes reasoning from a completion or a stream chunk, in place: the reasoning fields of each
- * choice's message or delta, and a leading <think>...</think> block in a message's content.
+ * choice's message or delta, and <think>...</think> blocks in completion content.
  * Returns true if anything was removed.
  */
 function stripReasoning(payload: Record<string, unknown>): boolean {
@@ -1110,11 +1241,16 @@ function retryHintSeconds(failures: readonly UpstreamFailure[]): number {
 const UPSTREAM_ERROR_BODY_MAX_BYTES = 32 * 1024;
 
 /** Reads a bounded error body and keeps only OpenRouter's error code and routing metadata. */
-async function readUpstreamFailure(response: Response): Promise<UpstreamFailure> {
+async function readUpstreamFailure(
+  response: Response,
+  deadline = Date.now() + 10_000,
+): Promise<UpstreamFailure> {
   const retryAfter = response.headers.get('retry-after');
   return {
     status: response.status,
-    ...openRouterErrorFields(parseJsonObject(await readBoundedText(response))),
+    ...openRouterErrorFields(
+      parseJsonObject(await readBoundedText(response, UPSTREAM_ERROR_BODY_MAX_BYTES, deadline)),
+    ),
     ...(retryAfter === null ? {} : { retryAfter }),
   };
 }
@@ -1122,6 +1258,7 @@ async function readUpstreamFailure(response: Response): Promise<UpstreamFailure>
 async function readBoundedText(
   response: Response,
   maxBytes = UPSTREAM_ERROR_BODY_MAX_BYTES,
+  deadline = Date.now() + 10_000,
 ): Promise<string> {
   if (response.body === null) return '';
   const reader = response.body.getReader();
@@ -1129,7 +1266,10 @@ async function readBoundedText(
   let total = 0;
   try {
     while (total < maxBytes) {
-      const { done, value } = await readStreamChunk(reader, 10_000);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0)
+        throw Object.assign(new Error('Upstream body deadline exceeded'), { name: 'TimeoutError' });
+      const { done, value } = await readStreamChunk(reader, Math.min(10_000, remaining));
       if (done) break;
       chunks.push(value);
       total += value.byteLength;
@@ -1207,7 +1347,7 @@ function logUpstreamAttempt(entry: {
   readonly attempt: number;
   readonly of: number;
   readonly modelId: string;
-  readonly outcome: 'ok' | UpstreamFailureKind | 'timeout' | 'unreachable';
+  readonly outcome: 'ok' | UpstreamFailureKind | 'timeout' | 'unreachable' | 'mid_stream_error';
   readonly status?: number;
   readonly code?: string;
   readonly failedRoutingStep?: string;
