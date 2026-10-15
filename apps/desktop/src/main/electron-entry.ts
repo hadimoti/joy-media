@@ -25,6 +25,7 @@ import path, { dirname, join } from 'node:path';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseProjectDeepLink } from '../deep-link.js';
+import { isTrustedIpcSenderFrame } from '../ipc.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
@@ -40,6 +41,7 @@ import { resolveDesktopPaths } from '../store/paths.js';
 import { LocalDatabase } from '../store/local-database.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
+import { createSessionTokenStore } from './session-token-store.js';
 import { probeOpenAiCompatibleProvider } from '@joy-media/provider-sdk';
 import { evaluateAutoUpdate } from './auto-update-policy.js';
 
@@ -90,6 +92,10 @@ if (!app.requestSingleInstanceLock()) {
     args: workerEntry.args,
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
+  const sessionTokenStore = createSessionTokenStore(
+    join(app.getPath('userData'), 'session-token.enc'),
+    safeStorage,
+  );
   const ipcHandlers = createIpcHandlers({
     fileRegistry,
     workerSupervisor,
@@ -115,6 +121,7 @@ if (!app.requestSingleInstanceLock()) {
       return { canceled: result.canceled, path: result.filePaths[0] };
     },
     secretStore,
+    sessionTokenStore,
     probeProvider: (request) => probeOpenAiCompatibleProvider(request, fetch),
     // Pure, network-free decision (see auto-update-policy.ts). The renderer fetches the
     // manifest from the public `GET /v1/releases/:channel` route and its own subscription
@@ -151,9 +158,16 @@ if (!app.requestSingleInstanceLock()) {
     },
   });
 
-  ipcMain.handle('joy-desktop-ipc', (_event, request: IpcRequest) =>
-    dispatchIpcRequest(ipcHandlers, request),
-  );
+  ipcMain.handle('joy-desktop-ipc', (event, request: IpcRequest) => {
+    if (
+      !isTrustedIpcSenderFrame(
+        { senderFrame: event.senderFrame, mainFrame: event.sender.mainFrame },
+        request?.origin,
+      )
+    )
+      return { ok: false, error: 'Blocked IPC sender' };
+    return dispatchIpcRequest(ipcHandlers, request);
+  });
 
   app.on('second-instance', (_event, argv) => {
     const link = argv.find((arg) => arg.startsWith('joy://'));

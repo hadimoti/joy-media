@@ -8,6 +8,7 @@ import { createWorkerSupervisor } from './worker-supervisor.js';
 import type { SupervisedChild } from './worker-supervisor.js';
 import { LocalDatabase } from '../store/local-database.js';
 import { createMemorySecretStore } from '@joy-media/provider-sdk';
+import { createSessionTokenStore } from './session-token-store.js';
 
 function deps() {
   const fileRegistry = createFileRegistry(() => 'ref-1');
@@ -28,6 +29,15 @@ function deps() {
     kind: 'video' as const,
   }));
   const secretStore = createMemorySecretStore();
+  const sessionTokenStore = createSessionTokenStore(
+    path.join(os.tmpdir(), `unused-${Math.random()}`),
+    {
+      isEncryptionAvailable: () => false,
+      encryptString: (value) => Buffer.from(value),
+      decryptString: (value) => value.toString(),
+    },
+    () => {},
+  );
   const probeProvider = vi.fn(async () => ({ ok: true, modelId: 'gpt-4o-mini' }));
   const checkForUpdate = vi.fn((): { status: 'current'; reason: 'not-newer' } => ({
     status: 'current',
@@ -41,6 +51,7 @@ function deps() {
     localDatabase,
     probeMedia,
     secretStore,
+    sessionTokenStore,
     probeProvider,
     checkForUpdate,
     now: () => 'T0',
@@ -49,6 +60,33 @@ function deps() {
 }
 
 describe('IPC dispatch', () => {
+  it('stores, reads and clears validated session tokens through the session IPC channels', async () => {
+    const handlers = createIpcHandlers(deps());
+    const request = (channel: string, payload?: unknown) =>
+      dispatchIpcRequest(handlers, { origin: 'http://localhost:5173', channel, payload });
+    expect(await request('desktop.media-session.set', 'token-test-redacted')).toMatchObject({
+      ok: true,
+    });
+    expect(await request('desktop.media-session.get')).toEqual({
+      ok: true,
+      data: 'token-test-redacted',
+    });
+    expect(await request('desktop.media-session.clear')).toMatchObject({ ok: true });
+    expect(await request('desktop.media-session.get')).toEqual({ ok: true, data: undefined });
+  });
+
+  it('rejects invalid session token payloads', async () => {
+    const handlers = createIpcHandlers(deps());
+    for (const payload of ['', 2, {}, 'x'.repeat(8193)]) {
+      const result = await dispatchIpcRequest(handlers, {
+        origin: 'http://localhost:5173',
+        channel: 'desktop.media-session.set',
+        payload,
+      });
+      expect(result.ok).toBe(false);
+    }
+  });
+
   it('rejects requests from an origin outside the allow-list before any handler runs', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);

@@ -29,7 +29,6 @@ import { seedsForCatalogEntry } from './project-factory.js';
 import { removeJoyCodeThreads } from './joy-code-history.js';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
 import { getStoredMediaToken } from './media-session.js';
-import type { MediaSessionStorage } from './media-session.js';
 import { probeJoySession } from './identity.js';
 import {
   getControlPlaneProjectBinding,
@@ -361,9 +360,8 @@ async function openRemoteProject(
   storage: BrowserKeyValueStore,
   entry: ProjectCatalogEntry,
 ): Promise<RemoteProjectContext | undefined> {
-  const sessionStorage = storage as BrowserKeyValueStore & MediaSessionStorage;
-  if (getStoredMediaToken(sessionStorage) === undefined) return undefined;
-  const session = await probeJoySession(sessionStorage);
+  if ((await getStoredMediaToken()) === undefined) return undefined;
+  const session = await probeJoySession();
   const ownerKey = session.kind === 'ready' ? (session.subject ?? 'signed-in') : 'signed-in';
   const client = new BrowserControlPlaneClient();
   const binding = getControlPlaneProjectBinding(storage, entry.id, ownerKey);

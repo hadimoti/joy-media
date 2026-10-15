@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BrowserControlPlaneClient,
   RESUMABLE_ORIGINAL_UPLOAD_THRESHOLD_BYTES,
@@ -63,12 +63,13 @@ describe('BrowserControlPlaneClient', () => {
       const jobReads = [client.jobs('project-1'), client.jobs('project-1')];
       // Different project scopes remain independent reads.
       const otherProjectJobs = client.jobs('project-2');
-      await Promise.resolve();
-      expect(requests).toEqual([
-        'https://media.joyteam.ir/api/v1/workers',
-        'https://media.joyteam.ir/api/v1/projects/project-1/jobs',
-        'https://media.joyteam.ir/api/v1/projects/project-2/jobs',
-      ]);
+      await vi.waitFor(() =>
+        expect(requests).toEqual([
+          'https://media.joyteam.ir/api/v1/workers',
+          'https://media.joyteam.ir/api/v1/projects/project-1/jobs',
+          'https://media.joyteam.ir/api/v1/projects/project-2/jobs',
+        ]),
+      );
       release();
       await Promise.all([...workerReads, ...jobReads, otherProjectJobs]);
     } finally {
@@ -98,8 +99,7 @@ describe('BrowserControlPlaneClient', () => {
         () => 'joy-session-token',
       );
       const reads = [firstPanel.workers(), secondPanel.workers()];
-      await Promise.resolve();
-      expect(requests).toEqual(['https://media.joyteam.ir/api/v1/workers']);
+      await vi.waitFor(() => expect(requests).toEqual(['https://media.joyteam.ir/api/v1/workers']));
       release();
       await Promise.all(reads);
     } finally {

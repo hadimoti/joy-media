@@ -9,11 +9,7 @@ import {
   type BrowserStockVideoCategory,
 } from './control-plane-client.js';
 import { describeMedia, importMediaFile } from './media-import.js';
-import {
-  getStoredMediaToken,
-  MEDIA_SESSION_CHANGED_EVENT,
-  type MediaSessionStorage,
-} from './media-session.js';
+import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
 import {
   assetCollectionId,
   assetCollectionLabel,
@@ -78,7 +74,7 @@ import {
 import { StockVideoDiscovery, waitForStockVideoImport } from './StockVideoDiscovery.js';
 
 type AssetSource = 'cloud' | 'user';
-type AssetLibraryStorage = UiPreferenceStorage & MediaSessionStorage;
+type AssetLibraryStorage = UiPreferenceStorage;
 
 const categories: readonly {
   readonly id: AssetCategory;
@@ -289,7 +285,7 @@ export function AssetLibraryPanel({
   }, [pendingPreviewOwner]);
   const refresh = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
-    const token = getStoredMediaToken(storage);
+    const token = await getStoredMediaToken();
     if (!isDesktopHost() && token === undefined) {
       // LoginGate keeps the editor mounted under the blur; don't wipe a prior
       // catalog or treat "not signed in yet" as a hard failure.
@@ -379,7 +375,7 @@ export function AssetLibraryPanel({
       setOwnedAssetIds(new Set());
       setStatus(`Failed to load media catalog: ${detail}`);
     }
-  }, [client, projectId, storage]);
+  }, [client, projectId]);
   useEffect(() => {
     void refresh();
   }, [refresh]);

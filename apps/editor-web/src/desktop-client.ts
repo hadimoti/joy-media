@@ -135,6 +135,23 @@ export async function getDesktopWorkerStatus(): Promise<DesktopWorkerStatus> {
   return data as DesktopWorkerStatus;
 }
 
+/** Session-token operations are restricted to the main process's safeStorage-backed store. */
+export async function getDesktopSessionToken(): Promise<string | undefined> {
+  const token = await requireBridge().invoke('desktop.media-session.get');
+  if (token !== undefined && typeof token !== 'string') {
+    throw new Error('Invalid session token response from desktop host');
+  }
+  return token as string | undefined;
+}
+
+export async function setDesktopSessionToken(token: string): Promise<void> {
+  await requireBridge().invoke('desktop.media-session.set', token);
+}
+
+export async function clearDesktopSessionToken(): Promise<void> {
+  await requireBridge().invoke('desktop.media-session.clear');
+}
+
 /**
  * Opens the native "select a file" dialog via `desktop.select-file`. Resolves to `undefined`
  * if the user cancels the dialog.

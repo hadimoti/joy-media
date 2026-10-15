@@ -107,8 +107,8 @@ export function DesktopAccountModal({
     setBusy(true);
     setError(undefined);
     try {
-      await verifyOtp(contact.trim(), method, code, window.localStorage);
-      void registerDevice(undefined, window.localStorage);
+      await verifyOtp(contact.trim(), method, code);
+      void registerDevice();
       setSuccessGlow(true);
       setHint('Connected successfully! Workstation registered.');
       setTimeout(() => {

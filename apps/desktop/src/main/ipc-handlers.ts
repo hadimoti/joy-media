@@ -16,6 +16,7 @@ import type {
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
 import type { DirectProviderProbeReport, SecretStore } from '@joy-media/provider-sdk';
 import type { AutoUpdateDecision, SignedReleaseManifest } from './auto-update-policy.js';
+import type { SessionTokenStore } from './session-token-store.js';
 
 /** Native "select a file" prompt, injected so main-process wiring stays unit-testable. */
 export type ShowOpenDialog = () => Promise<{
@@ -60,6 +61,7 @@ export interface IpcHandlerDeps {
   readonly localDatabase: LocalDatabase;
   readonly probeMedia: ProbeMedia;
   readonly secretStore: SecretStore;
+  readonly sessionTokenStore: SessionTokenStore;
   readonly probeProvider: ProbeProvider;
   readonly checkForUpdate: CheckForUpdate;
   readonly handleWindowControl?: (
@@ -379,6 +381,21 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
           error: err instanceof Error ? err.message : 'Failed to read asset catalog',
         };
       }
+    },
+    'desktop.media-session.get': async (): Promise<IpcResult> => ({
+      ok: true,
+      data: await deps.sessionTokenStore.get(),
+    }),
+    'desktop.media-session.set': async (payload): Promise<IpcResult> => {
+      if (typeof payload !== 'string' || payload.length === 0 || payload.length > 8192) {
+        return { ok: false, error: 'Invalid session token' };
+      }
+      await deps.sessionTokenStore.set(payload);
+      return { ok: true };
+    },
+    'desktop.media-session.clear': async (): Promise<IpcResult> => {
+      await deps.sessionTokenStore.clear();
+      return { ok: true };
     },
   };
 }

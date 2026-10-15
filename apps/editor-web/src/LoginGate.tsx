@@ -88,7 +88,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
       const requestId = ++sessionProbeSeqRef.current;
       let state;
       try {
-        state = await probeJoySession(window.localStorage);
+        state = await probeJoySession();
       } catch {
         state = { kind: 'signed-out' as const };
       }
@@ -164,8 +164,8 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
     setSuggestOpen(false);
     if (method === 'token') {
       try {
-        setStoredMediaToken(value, window.localStorage);
-        const state = await probeJoySession(window.localStorage);
+        await setStoredMediaToken(value);
+        const state = await probeJoySession();
         if (state.kind === 'ready') {
           unlockAfterSuccess();
         } else {
@@ -195,7 +195,7 @@ export function LoginGate({ children }: { readonly children: ReactNode }): React
     otpSubmittingRef.current = true;
     setError(undefined);
     try {
-      await verifyOtp(contact.trim(), method, code, window.localStorage);
+      await verifyOtp(contact.trim(), method, code);
       persistContact(contact.trim(), method);
       unlockAfterSuccess();
     } catch {

@@ -23,6 +23,9 @@ export const IPC_CHANNELS = [
   'desktop.asset-library.select-directory',
   'desktop.asset-library.get-catalog',
   'desktop.asset-library.reset-directory',
+  'desktop.media-session.get',
+  'desktop.media-session.set',
+  'desktop.media-session.clear',
 ] as const;
 export type IpcChannel = (typeof IPC_CHANNELS)[number];
 export interface IpcRequest {
@@ -30,6 +33,34 @@ export interface IpcRequest {
   readonly channel: string;
   readonly payload?: unknown;
 }
+
+export interface IpcSenderFrame {
+  readonly url: string;
+}
+
+/** Checks the invoking renderer is the main frame and its URL matches its claimed origin. */
+export function isTrustedIpcSenderFrame(
+  event: {
+    readonly senderFrame: IpcSenderFrame | null;
+    readonly mainFrame: IpcSenderFrame;
+  },
+  requestOrigin: unknown,
+): boolean {
+  const frame = event.senderFrame;
+  if (frame === null || frame !== event.mainFrame || typeof requestOrigin !== 'string')
+    return false;
+  try {
+    const url = new URL(frame.url);
+    const frameOrigin =
+      url.origin === 'null' && url.protocol === 'joy-media-app:' && url.host === 'renderer'
+        ? 'joy-media-app://renderer'
+        : url.origin;
+    return frameOrigin !== 'null' && frameOrigin === requestOrigin;
+  } catch {
+    return false;
+  }
+}
+
 export function isAllowedIpcRequest(
   request: IpcRequest,
 ): request is IpcRequest & { channel: IpcChannel } {

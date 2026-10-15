@@ -1,31 +1,29 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { logoutJoySession, probeJoySession } from './identity.js';
-import { setStoredMediaToken } from './media-session.js';
-
-function memoryStorage() {
-  const values = new Map<string, string>();
-  return {
-    getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => values.set(key, value),
-    removeItem: (key: string) => values.delete(key),
-  };
-}
+import {
+  createMemoryMediaSessionTokenBackend,
+  getStoredMediaToken,
+  setMediaSessionTokenBackendForTests,
+  setStoredMediaToken,
+} from './media-session.js';
 
 const jsonResponse = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status });
 
+beforeEach(() => setMediaSessionTokenBackendForTests(createMemoryMediaSessionTokenBackend()));
+afterEach(() => setMediaSessionTokenBackendForTests());
+
 describe('probeJoySession', () => {
   it('reports signed-out when no session token is stored (never calls the network)', async () => {
-    const state = await probeJoySession(memoryStorage(), async () => {
+    const state = await probeJoySession(async () => {
       throw new Error('should not be called');
     });
     expect(state).toEqual({ kind: 'signed-out' });
   });
 
   it('reports ready with the contact for a valid stored session', async () => {
-    const storage = memoryStorage();
-    setStoredMediaToken('token-abc', storage);
-    const state = await probeJoySession(storage, async (url) => {
+    await setStoredMediaToken('token-abc');
+    const state = await probeJoySession(async (url) => {
       if (String(url).includes('/avatar')) return new Response(null, { status: 404 });
       return jsonResponse(200, {
         data: {
@@ -47,9 +45,8 @@ describe('probeJoySession', () => {
   });
 
   it('prefers displayName over numeric telegram contact for the account label', async () => {
-    const storage = memoryStorage();
-    setStoredMediaToken('token-abc', storage);
-    const state = await probeJoySession(storage, async (url) => {
+    await setStoredMediaToken('token-abc');
+    const state = await probeJoySession(async (url) => {
       if (String(url).includes('/avatar')) return new Response(null, { status: 404 });
       return jsonResponse(200, {
         data: {
@@ -69,29 +66,21 @@ describe('probeJoySession', () => {
   });
 
   it('reports signed-out and clears the token on 401 (expired/revoked session)', async () => {
-    const storage = memoryStorage();
-    setStoredMediaToken('token-abc', storage);
-    const state = await probeJoySession(
-      storage,
-      async () => new Response('unauthorized', { status: 401 }),
-    );
+    await setStoredMediaToken('token-abc');
+    const state = await probeJoySession(async () => new Response('unauthorized', { status: 401 }));
     expect(state).toEqual({ kind: 'signed-out' });
-    expect(storage.getItem('joy-media-session-token')).toBeNull();
+    expect(await getStoredMediaToken()).toBeUndefined();
   });
 
   it('reports unavailable on a server error instead of guessing the login state', async () => {
-    const storage = memoryStorage();
-    setStoredMediaToken('token-abc', storage);
-    const state = await probeJoySession(storage, async () =>
-      jsonResponse(503, { error: 'unavailable' }),
-    );
+    await setStoredMediaToken('token-abc');
+    const state = await probeJoySession(async () => jsonResponse(503, { error: 'unavailable' }));
     expect(state).toEqual({ kind: 'unavailable' });
   });
 
   it('reports unavailable on network failure instead of guessing the login state', async () => {
-    const storage = memoryStorage();
-    setStoredMediaToken('token-abc', storage);
-    const state = await probeJoySession(storage, async () => {
+    await setStoredMediaToken('token-abc');
+    const state = await probeJoySession(async () => {
       throw new TypeError('network down');
     });
     expect(state).toEqual({ kind: 'unavailable' });
@@ -99,11 +88,10 @@ describe('probeJoySession', () => {
 });
 
 describe('logoutJoySession', () => {
-  it('clears the local token and posts a best-effort remote revoke', async () => {
-    const storage = memoryStorage();
-    setStoredMediaToken('token-abc', storage);
+  it('clears the token and posts a best-effort remote revoke', async () => {
+    await setStoredMediaToken('token-abc');
     const calls: { url: string; init: RequestInit | undefined }[] = [];
-    await logoutJoySession(storage, async (url, init) => {
+    await logoutJoySession(async (url, init) => {
       calls.push({ url: String(url), init });
       return new Response(JSON.stringify({ data: { ok: true } }));
     });
@@ -113,21 +101,20 @@ describe('logoutJoySession', () => {
       method: 'POST',
       headers: { authorization: 'Bearer token-abc' },
     });
-    expect(storage.getItem('joy-media-session-token')).toBeNull();
+    expect(await getStoredMediaToken()).toBeUndefined();
   });
 
-  it('still clears the local token when the remote revoke fails (opaque/network failure)', async () => {
-    const storage = memoryStorage();
-    setStoredMediaToken('token-abc', storage);
-    await logoutJoySession(storage, async () => {
+  it('still clears the token when the remote revoke fails', async () => {
+    await setStoredMediaToken('token-abc');
+    await logoutJoySession(async () => {
       throw new TypeError('network down');
     });
-    expect(storage.getItem('joy-media-session-token')).toBeNull();
+    expect(await getStoredMediaToken()).toBeUndefined();
   });
 
   it('is a no-op when no session token is stored', async () => {
     let called = false;
-    await logoutJoySession(memoryStorage(), async () => {
+    await logoutJoySession(async () => {
       called = true;
       return new Response();
     });
