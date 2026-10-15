@@ -806,9 +806,15 @@ export function verifyRequestIntent(
           }),
       ) ?? false;
     const centered = centeredVisualObject || centeredCaption;
-    (centered ? verified : unmet).push(
-      centered ? 'Request: centered text' : 'request asked for centered text',
-    );
+    // NEW-4: "centred horizontally near the bottom" checks only the horizontal centre; say so
+    // instead of reporting plain "centered text" for bottom captions.
+    const horizontalOnly =
+      !intent.verticalCenterText &&
+      /\b(?:bottom|top|lower|upper|horizontally)\b|\u067e\u0627\u06cc\u06cc\u0646|\u0628\u0627\u0644\u0627/iu.test(
+        request,
+      );
+    const what = horizontalOnly ? 'text centered horizontally' : 'centered text';
+    (centered ? verified : unmet).push(centered ? `Request: ${what}` : `request asked for ${what}`);
   }
   if (intent.startAtZero) {
     // Audit item 2: when this run moved clips, one of the moved clips must be the one at 0; a
@@ -1199,7 +1205,10 @@ function partialLimitMessage(reason: string | undefined, value?: number): string
  * "don't leave any gaps", "the title can stay blank" and "black and white look" are not.
  */
 function requestsExplicitGap(request: string): boolean {
-  const text = request.toLowerCase().replace(/black[\s-]*(?:and|&)[\s-]*white/g, ' ');
+  const text = request
+    .toLowerCase()
+    .replace(/black[\s-]*(?:and|&)[\s-]*white/g, ' ')
+    .replace(/\u0633\u06cc\u0627\u0647\s*\u0648\s*\u0633\u0641\u06cc\u062f/gu, ' '); // سیاه و سفید (b&w)
   // FT2b: a clause with any negation ("I don't want to leave a gap", "make sure not to leave a
   // gap", "no need to…", Persian نه / بدون / a ن-prefixed verb) is never an explicit gap request.
   return text
@@ -1210,7 +1219,12 @@ function requestsExplicitGap(request: string): boolean {
 const GAP_NEGATION =
   /\b(?:not|no|never|without|avoid|cannot|nothing|none)\b|n['\u2019]t\b|(?:^|\s)(?:\u0646\u0647|\u0628\u062f\u0648\u0646)(?=\s|$)|(?:^|\s)\u0646[\u0600-\u06ff]+/u;
 
+/** Persian "فاصله/گپ/صفحه سیاه … بذار/بگذار/بزار/اضافه کن" (leave/add a gap or black). */
+const FA_GAP_REQUEST =
+  /(?:\u0641\u0627\u0635\u0644\u0647|\u06af\u067e|\u0633\u06cc\u0627\u0647)[^.]{0,30}?(?:\u0628\u0630\u0627\u0631|\u0628\u06af\u0630\u0627\u0631|\u0628\u0632\u0627\u0631|\u0627\u0636\u0627\u0641\u0647)/u;
+
 function clauseAsksForGap(text: string): boolean {
+  if (FA_GAP_REQUEST.test(text)) return true;
   const verb = '\\b(?:leave|keep|add|insert|put|create|want)';
   const amount = '(?:\\d+(?:\\.\\d+)?\\s*(?:s|secs?|seconds?)\\s+)?';
   return (

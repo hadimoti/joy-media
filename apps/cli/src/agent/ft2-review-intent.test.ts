@@ -21,6 +21,8 @@ const gapUnmet = (request: string) =>
 describe('MUST2: the #7 gap check is skipped only for an explicit gap request', () => {
   it.each([
     "Trim A to 3s and don't leave any gaps",
+    '\u06a9\u0644\u06cc\u067e A \u0631\u0648 \u06a9\u0648\u062a\u0627\u0647 \u06a9\u0646 \u0648 \u0641\u0627\u0635\u0644\u0647 \u0646\u0630\u0627\u0631',
+    'Trim A to 3s and make it \u0633\u06cc\u0627\u0647 \u0648 \u0633\u0641\u06cc\u062f',
     "Trim A to 3s; I don't want to leave a gap",
     'Trim A to 3s and do not ever leave a gap',
     'Trim A to 3s, no need to leave a gap',
@@ -32,12 +34,13 @@ describe('MUST2: the #7 gap check is skipped only for an explicit gap request', 
     expect(gapUnmet(request)).toHaveLength(1);
   });
 
-  it.each(['Trim A to 3s and leave a 2s black gap', 'trim A and add 2 seconds of black after it'])(
-    '%s is an explicit gap',
-    (request) => {
-      expect(gapUnmet(request)).toEqual([]);
-    },
-  );
+  it.each([
+    'Trim A to 3s and leave a 2s black gap',
+    'trim A and add 2 seconds of black after it',
+    '\u06a9\u0644\u06cc\u067e A \u0631\u0648 \u06a9\u0648\u062a\u0627\u0647 \u06a9\u0646 \u0648 \u0641\u0627\u0635\u0644\u0647 \u0633\u06cc\u0627\u0647 \u0628\u0630\u0627\u0631',
+  ])('%s is an explicit gap', (request) => {
+    expect(gapUnmet(request)).toEqual([]);
+  });
 });
 
 describe('HIGH: start-at-0 needs a clip this run moved', () => {
@@ -116,5 +119,31 @@ describe("SHOULD: 'all clips' look rule", () => {
   it("'all clips' still does", () => {
     const result = verifyRequestIntent(withLook(), 'make all clips black and white');
     expect(result.unmet).toContain('request asked for bw look');
+  });
+});
+
+describe('NEW-4: bottom captions are not reported as plain "centered text"', () => {
+  const captions = () =>
+    fixtureProject({
+      clips: [{ id: 'clip-a', assetId: 'asset-a', startUs: 0, durationUs: 8_000_000 }],
+      texts: [{ id: 't1', text: 'Welcome to JOY', startUs: 0, durationUs: 4_000_000, y: 0.32 }],
+    }) as unknown as JoyProjectV1;
+
+  it('"centred horizontally near the bottom" reports the horizontal check only', () => {
+    const result = verifyRequestIntent(
+      captions(),
+      'Add "Welcome to JOY" from 0s to 4s, centred horizontally near the bottom of the frame.',
+    );
+    expect(result.verified).not.toContain('Request: centered text');
+    expect(result.verified).toContain('Request: text centered horizontally');
+  });
+
+  it('"in the middle of the screen" still needs vertical centring', () => {
+    const result = verifyRequestIntent(
+      captions(),
+      'Put "Welcome to JOY" in the middle of the screen.',
+    );
+    expect(result.verified).not.toContain('Request: centered text');
+    expect(result.unmet).toContain('request asked for centered text');
   });
 });
