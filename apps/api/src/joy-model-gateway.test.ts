@@ -383,6 +383,34 @@ describe('JoyModelGateway', () => {
         expect(result.getBody()).not.toContain(message);
       });
 
+      it('does not report AUTH_FAILED when a bare 401 follows a non-auth failure (FT1 a)', async () => {
+        const tried: string[] = [];
+        const result = await run(
+          sequence(
+            [
+              () => openRouterError(503, { code: 503, message: 'overloaded' }),
+              () => openRouterError(401, { code: 401, message: 'No auth credentials found' }),
+            ],
+            tried,
+          ),
+        );
+        expect(tried).toEqual([SUPER, ULTRA]);
+        expect(result.getStatus()).toBe(503);
+        expect(result.getBody()).not.toContain('AUTH_FAILED');
+      });
+
+      it('still reports AUTH_FAILED when every attempt was a bare 401 (FT1 a control)', async () => {
+        const tried: string[] = [];
+        const result = await run(
+          sequence(
+            [() => openRouterError(401, { code: 401, message: 'No auth credentials found' })],
+            tried,
+          ),
+        );
+        expect(tried).toEqual([SUPER]);
+        expect(result.getBody()).toContain('JOY_AGENT_UPSTREAM_AUTH_FAILED');
+      });
+
       it('still treats a key-sounding 403 that names a failed routing step as model-specific', async () => {
         const tried: string[] = [];
         await run(
@@ -1930,7 +1958,9 @@ describe('JoyModelGateway', () => {
     expect((await ledger.getSummary('u')).totalRequests).toBe(0);
   });
 
-  it('bounds non-stream body reads by the shared deadline and falls back', async () => {
+  // FC5: after 200 headers the body read runs against the whole 85 s request deadline (not the
+  // 20 s attempt budget), so a body that stalls forever ends as busy at the deadline, never hangs.
+  it('bounds a stalled non-stream body read by the 85 s request deadline', async () => {
     vi.useFakeTimers();
     try {
       const tried: string[] = [];
@@ -1966,11 +1996,12 @@ describe('JoyModelGateway', () => {
           );
         },
       }).handleChatCompletions(createMockReq({ body: { model: SUPER, messages: [] } }), result.res);
-      await vi.advanceTimersByTimeAsync(20_001);
+      await vi.advanceTimersByTimeAsync(85_001);
       await pending;
-      expect(tried.slice(0, 2)).toEqual([SUPER, ULTRA]);
-      expect(result.getStatus()).toBe(200);
-      expect(result.getBody()).toContain('body fallback');
+      expect(tried[0]).toBe(SUPER);
+      expect(result.getStatus()).toBe(503);
+      expect(result.getBody()).toContain('JOY_AGENT_MODELS_BUSY');
+      expect(result.getBody()).not.toContain('INVALID_RESPONSE');
     } finally {
       vi.useRealTimers();
     }
@@ -2019,6 +2050,323 @@ describe('JoyModelGateway', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  describe('stream follow-ups (FT1 b-d)', () => {
+    const streamGateway = (fetchImpl: typeof fetch) =>
+      new JoyModelGateway({
+        mediaAuth: { authenticate: async () => ({ id: 'ft1' }) } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'ft1',
+            plan: 'pro',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl,
+      });
+    const sse = (lines: string[]) =>
+      new Response(lines.map((line) => line + '\n\n').join(''), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    const contentOf = (body: string) =>
+      body
+        .split('\n')
+        .filter((line) => line.startsWith('data:') && !line.includes('[DONE]'))
+        .map(
+          (line) =>
+            JSON.parse(line.slice(5).trim()) as {
+              choices?: Array<{ delta?: { content?: string } }>;
+            },
+        )
+        .flatMap((chunk) => chunk.choices ?? [])
+        .map((choice) => choice.delta?.content ?? '')
+        .join('');
+
+    it('flushes a held-back trailing "<" when the stream ends with [DONE] (b)', async () => {
+      const result = createMockRes();
+      await streamGateway(async () =>
+        sse(['data: {"id":"g","choices":[{"index":0,"delta":{"content":"1 <"}}]}', 'data: [DONE]']),
+      ).handleChatCompletions(
+        createMockReq({ body: { model: SUPER, messages: [], stream: true } }),
+        result.res,
+      );
+      expect(contentOf(result.getBody())).toBe('1 <');
+    });
+
+    it('flushes a held-back partial tag prefix on finish_reason (b)', async () => {
+      const result = createMockRes();
+      await streamGateway(async () =>
+        sse([
+          'data: {"id":"g","choices":[{"index":0,"delta":{"content":"a <th"},"finish_reason":"stop"}]}',
+          'data: [DONE]',
+        ]),
+      ).handleChatCompletions(
+        createMockReq({ body: { model: SUPER, messages: [], stream: true } }),
+        result.res,
+      );
+      expect(contentOf(result.getBody())).toBe('a <th');
+    });
+
+    it('flushes a held-back "<" when the stream closes without [DONE] (b)', async () => {
+      const result = createMockRes();
+      await streamGateway(async () =>
+        sse(['data: {"id":"g","choices":[{"index":0,"delta":{"content":"x<"}}]}']),
+      ).handleChatCompletions(
+        createMockReq({ body: { model: SUPER, messages: [], stream: true } }),
+        result.res,
+      );
+      expect(contentOf(result.getBody())).toBe('x<');
+    });
+
+    it('strips <think> from "data:" lines with no space after the colon (c)', async () => {
+      const result = createMockRes();
+      await streamGateway(async () =>
+        sse([
+          'data:{"id":"g","choices":[{"index":0,"delta":{"content":"<think>SECRET-PLAN</think>Hi"}}]}',
+          'data:[DONE]',
+        ]),
+      ).handleChatCompletions(
+        createMockReq({ body: { model: SUPER, messages: [], stream: true } }),
+        result.res,
+      );
+      const body = result.getBody();
+      expect(body).not.toContain('SECRET-PLAN');
+      expect(contentOf(body)).toBe('Hi');
+    });
+
+    it('ends the response right after a mid-stream error, not at the 60 s idle timeout (d)', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const encoder = new TextEncoder();
+        // The upstream sends a chunk and an error, then stays open forever.
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode('data: {"id":"g","choices":[{"delta":{"content":"partial"}}]}\n\n'),
+            );
+            setTimeout(
+              () =>
+                controller.enqueue(
+                  encoder.encode(
+                    'data: {"id":"g","error":{"code":502},"choices":[{"finish_reason":"error"}]}\n\n',
+                  ),
+                ),
+              5,
+            );
+          },
+        });
+        const result = createMockRes();
+        const started = Date.now();
+        await streamGateway(async () => new Response(body, { status: 200 })).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [], stream: true } }),
+          result.res,
+        );
+        expect(Date.now() - started).toBeLessThan(3_000);
+        expect(result.getBody()).toContain('UPSTREAM_STREAM_ERROR');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
+  describe('slow non-stream bodies (FC5, D2 rollback probe)', () => {
+    const KEEPALIVE = '\n' + ' '.repeat(20) + '\n'; // 22 bytes, as OpenRouter sent it
+    const VALID = JSON.stringify({
+      id: 'gen-1',
+      object: 'chat.completion',
+      choices: [{ message: { role: 'assistant', content: 'Red' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 5, completion_tokens: 1, cost: 0 },
+    });
+    const gatewayWith = (fetchImpl: typeof fetch) =>
+      new JoyModelGateway({
+        mediaAuth: { authenticate: async () => ({ id: 'fc5' }) } as unknown as MediaAuthService,
+        account: {
+          getSubscription: async () => ({
+            ownerId: 'fc5',
+            plan: 'pro',
+            status: 'active',
+            updatedAt: 0,
+          }),
+        } as unknown as AccountService,
+        ledger: new MemoryAgentUsageLedger(),
+        openRouterApiKey: 'test-key',
+        fetchImpl,
+      });
+    /** A body that sends the keep-alive now and the rest after delayMs (or errors / closes). */
+    const slowBody = (
+      delayMs: number,
+      then: 'json' | 'error' | 'close',
+      signal?: AbortSignal | null,
+    ) => {
+      const encoder = new TextEncoder();
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(KEEPALIVE));
+          const timer = setTimeout(() => {
+            if (then === 'json') {
+              controller.enqueue(encoder.encode(VALID));
+              controller.close();
+            } else if (then === 'error') controller.error(new Error('socket hang up'));
+            else controller.close();
+          }, delayMs);
+          signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            try {
+              controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+            } catch {
+              // already closed
+            }
+          });
+        },
+      });
+    };
+
+    it('returns 200 when 22 bytes of whitespace arrive, then valid JSON after the 20 s attempt budget', async () => {
+      vi.useFakeTimers();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const tried: string[] = [];
+        const result = createMockRes();
+        const pending = gatewayWith(async (_url, init) => {
+          tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+          return new Response(slowBody(25_000, 'json', init?.signal), { status: 200 });
+        }).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          result.res,
+        );
+        await vi.advanceTimersByTimeAsync(25_001);
+        await pending;
+        expect(tried).toEqual([SUPER]);
+        expect(result.getStatus()).toBe(200);
+        expect(result.getBody()).toContain('Red');
+        expect(result.getBody()).not.toContain('INVALID_RESPONSE');
+      } finally {
+        warn.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it.each(['error', 'close'] as const)(
+      'never parses a truncated body (%s after keep-alive): falls back to the next model',
+      async (then) => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          const tried: string[] = [];
+          const result = createMockRes();
+          await gatewayWith(async (_url, init) => {
+            tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+            if (tried.length === 1)
+              return new Response(slowBody(5, then, init?.signal), { status: 200 });
+            return new Response(KEEPALIVE + VALID, { status: 200 });
+          }).handleChatCompletions(
+            createMockReq({ body: { model: SUPER, messages: [] } }),
+            result.res,
+          );
+          expect(tried.length).toBe(2);
+          expect(result.getStatus()).toBe(200);
+          expect(result.getBody()).toContain('Red');
+        } finally {
+          warn.mockRestore();
+        }
+      },
+    );
+
+    it('treats a body cut off by the request deadline as a timeout, not INVALID_RESPONSE', async () => {
+      vi.useFakeTimers();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const result = createMockRes();
+        const pending = gatewayWith(
+          async (_url, init) =>
+            new Response(slowBody(10 * 60_000, 'json', init?.signal), { status: 200 }),
+        ).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          result.res,
+        );
+        await vi.advanceTimersByTimeAsync(86_000);
+        await pending;
+        expect(result.getStatus()).toBe(503);
+        expect(result.getBody()).not.toContain('INVALID_RESPONSE');
+        expect(warn).toHaveBeenCalledWith(
+          'joy-model-gateway: upstream attempt',
+          expect.objectContaining({ outcome: 'fallback' }),
+        );
+        expect(warn).not.toHaveBeenCalledWith(
+          'joy-model-gateway: invalid upstream body',
+          expect.anything(),
+        );
+      } finally {
+        warn.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it('logs the length and first bytes of an invalid 200 body', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const result = createMockRes();
+        await gatewayWith(
+          async () => new Response('<html>busy</html>', { status: 200 }),
+        ).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          result.res,
+        );
+        expect(warn).toHaveBeenCalledWith(
+          'joy-model-gateway: invalid upstream body',
+          expect.objectContaining({ bodyLength: 17, bodyStart: '<html>busy</html>' }),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('gives a vision request up to 40 s for headers before falling back', async () => {
+      vi.useFakeTimers();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const tried: string[] = [];
+        const result = createMockRes();
+        const pending = gatewayWith(async (_url, init) => {
+          tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(resolve, 30_000);
+            init?.signal?.addEventListener('abort', () => {
+              clearTimeout(timer);
+              reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+            });
+          });
+          return new Response(VALID, { status: 200 });
+        }).handleChatCompletions(
+          createMockReq({
+            body: {
+              model: OMNI,
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: 'colour?' },
+                    { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+                  ],
+                },
+              ],
+            },
+          }),
+          result.res,
+        );
+        await vi.advanceTimersByTimeAsync(30_001);
+        await pending;
+        expect(tried.length).toBe(1);
+        expect(result.getStatus()).toBe(200);
+      } finally {
+        warn.mockRestore();
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('records OpenRouter usage.cost for non-streaming responses', async () => {

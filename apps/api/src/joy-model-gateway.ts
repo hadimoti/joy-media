@@ -125,6 +125,8 @@ export const DEFAULT_COMMISSION_RATE_BPS = 2500; // 25% gross margin
 export const JOY_MODEL_MAX_OUTPUT_TOKENS = 8192;
 const UPSTREAM_REQUEST_DEADLINE_MS = 85_000;
 const UPSTREAM_ATTEMPT_TIMEOUT_MS = 20_000;
+/** Vision models take longer to start answering; still well inside the request deadline. */
+const UPSTREAM_VISION_ATTEMPT_TIMEOUT_MS = 40_000;
 const UPSTREAM_STREAM_IDLE_TIMEOUT_MS = 60_000;
 
 const FORWARDED_COMPLETION_FIELDS = [
@@ -427,6 +429,7 @@ export class JoyModelGateway {
       requireVision: messagesHaveImages(parsedBody.messages),
     });
     const requestDeadline = Date.now() + UPSTREAM_REQUEST_DEADLINE_MS;
+    const requestHasImages = messagesHaveImages(parsedBody.messages);
     const clientAbortController = new AbortController();
     let clientDisconnected = false;
     const onClientClose = () => {
@@ -443,9 +446,12 @@ export class JoyModelGateway {
       clientAbortController.signal.addEventListener('abort', abortForClient, { once: true });
       let upstreamTimedOut = false;
       const remainingMs = requestDeadline - Date.now();
-      const attemptBudget = Math.min(remainingMs, UPSTREAM_ATTEMPT_TIMEOUT_MS);
+      const attemptBudget = Math.min(
+        remainingMs,
+        requestHasImages ? UPSTREAM_VISION_ATTEMPT_TIMEOUT_MS : UPSTREAM_ATTEMPT_TIMEOUT_MS,
+      );
       const attemptDeadline = Date.now() + attemptBudget;
-      const attemptTimeout = setTimeout(() => {
+      let attemptTimeout = setTimeout(() => {
         upstreamTimedOut = true;
         upstreamController.abort();
       }, attemptBudget);
@@ -471,16 +477,33 @@ export class JoyModelGateway {
         } else if (streamPeek?.kind === 'error') {
           failure = { status: upstreamRes.status, ...openRouterErrorFields(streamPeek.payload) };
         } else if (!isStream) {
+          // Headers are in: OpenRouter may hold the body open with whitespace keep-alives while
+          // the model works. Read it against the whole-request deadline, not the attempt budget.
+          clearTimeout(attemptTimeout);
+          attemptTimeout = setTimeout(
+            () => {
+              upstreamTimedOut = true;
+              upstreamController.abort();
+            },
+            Math.max(0, requestDeadline - Date.now()),
+          );
+          // A truncated or aborted read throws (classified as a timeout below); never a partial body.
           const bodyText = await readBoundedText(
             upstreamRes,
             Number.POSITIVE_INFINITY,
-            attemptDeadline,
+            requestDeadline,
+            { allowPartial: false },
           );
           const parsed = parseJsonObject(bodyText);
           const bodyError = parsed === undefined ? undefined : bodyErrorOf(parsed);
           if (bodyError !== undefined) {
             failure = { status: upstreamRes.status, ...openRouterErrorFields(bodyError) };
           } else if (parsed === undefined || !Array.isArray(parsed.choices)) {
+            console.warn('joy-model-gateway: invalid upstream body', {
+              modelId: candidate,
+              bodyLength: bodyText.length,
+              bodyStart: redactSecrets(bodyText.slice(0, 64)),
+            });
             failure = { status: upstreamRes.status, code: 'INVALID_RESPONSE' };
           } else {
             upstreamJson = parsed;
@@ -531,6 +554,8 @@ export class JoyModelGateway {
     }
     if (verdict !== 'ok' && failures.length > 0 && failures.every(isKeyLevelAuthFailure))
       verdict = 'auth';
+    // A key-level 401 after another kind of failure does not prove the key is bad: report busy.
+    else if (verdict === 'auth') verdict = 'fallback';
     if (upstreamRes === undefined && failures.length === 0)
       throw new Error('joy-model-gateway: no upstream attempt');
     if (clientDisconnected) {
@@ -609,6 +634,18 @@ export class JoyModelGateway {
       let streamComplete = false;
       let streamErrored = false;
       const thinkStates = new Map<number, ThinkTagStripState>();
+      // Text held back as a possible '<think>' prefix is real output if the stream ends there.
+      const flushHeldThinkText = (): string => {
+        let out = '';
+        for (const [index, state] of thinkStates) {
+          if (state.insideThink || state.pending.length === 0) continue;
+          const content = state.pending;
+          state.pending = '';
+          streamedOutputText += content;
+          out += `data: ${JSON.stringify({ choices: [{ index, delta: { content } }] })}\n\n`;
+        }
+        return out;
+      };
       const onClose = () => {
         if (!streamComplete) {
           winningUpstreamController?.abort();
@@ -624,12 +661,17 @@ export class JoyModelGateway {
         pending = lines.pop() ?? '';
         let forward = '';
         for (const line of lines) {
-          const payload = line.startsWith('data: ') ? line.slice(6) : undefined;
+          // SSE allows "data:" with or without one space after the colon.
+          const payload = line.startsWith('data:')
+            ? line.slice(line.startsWith('data: ') ? 6 : 5)
+            : undefined;
           const data =
             payload === undefined || payload.trim() === '[DONE]'
               ? undefined
               : parseJsonObject(payload);
           if (data === undefined) {
+            if (payload !== undefined && payload.trim() === '[DONE]')
+              forward += flushHeldThinkText();
             forward += `${line}\n`;
             continue;
           }
@@ -686,6 +728,11 @@ export class JoyModelGateway {
 
       try {
         while (true) {
+          // After a mid-stream error the terminal event is already written: end now, not at idle.
+          if (streamErrored) {
+            void reader.cancel().catch(() => {});
+            break;
+          }
           let readResult: ReadableStreamReadResult<Uint8Array>;
           try {
             readResult = await readStreamChunk(reader, UPSTREAM_STREAM_IDLE_TIMEOUT_MS);
@@ -704,6 +751,8 @@ export class JoyModelGateway {
           if (done) {
             processLines(decoder.decode());
             if (pending.length > 0) processLines('\n');
+            const held = flushHeldThinkText();
+            if (held.length > 0 && !res.destroyed && !res.writableEnded) res.write(held);
             streamComplete = true;
             break;
           }
@@ -1107,7 +1156,12 @@ function stripThinkTagsFromDeltas(
       states.set(index, state);
     }
     const original = choice.delta.content;
-    const filtered = stripThinkDelta(original, state);
+    let filtered = stripThinkDelta(original, state);
+    // A held-back partial tag prefix (e.g. a trailing '<') is real text once the choice finishes.
+    if (choice.finish_reason != null && !state.insideThink && state.pending.length > 0) {
+      filtered += state.pending;
+      state.pending = '';
+    }
     if (filtered !== original) {
       choice.delta.content = filtered;
       changed = true;
@@ -1255,10 +1309,22 @@ async function readUpstreamFailure(
   };
 }
 
+function redactSecrets(text: string): string {
+  return text
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-<redacted>')
+    .replace(/Bearer\s+\S+/gi, 'Bearer <redacted>');
+}
+
+/**
+ * Reads a body up to maxBytes before the deadline. Error bodies (allowPartial, the default) keep
+ * whatever arrived, which is enough to classify the failure. A success body must be complete:
+ * a timeout, abort or stream error throws instead of returning a truncated body.
+ */
 async function readBoundedText(
   response: Response,
   maxBytes = UPSTREAM_ERROR_BODY_MAX_BYTES,
   deadline = Date.now() + 10_000,
+  { allowPartial = true }: { allowPartial?: boolean } = {},
 ): Promise<string> {
   if (response.body === null) return '';
   const reader = response.body.getReader();
@@ -1269,13 +1335,21 @@ async function readBoundedText(
       const remaining = deadline - Date.now();
       if (remaining <= 0)
         throw Object.assign(new Error('Upstream body deadline exceeded'), { name: 'TimeoutError' });
-      const { done, value } = await readStreamChunk(reader, Math.min(10_000, remaining));
+      const { done, value } = await readStreamChunk(
+        reader,
+        allowPartial ? Math.min(10_000, remaining) : remaining,
+      );
       if (done) break;
       chunks.push(value);
       total += value.byteLength;
     }
-  } catch {
-    // A partial body is enough to classify the failure.
+  } catch (error) {
+    // A partial error body is enough to classify the failure; a partial success body is not.
+    if (!allowPartial) {
+      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError'))
+        throw error;
+      throw Object.assign(new Error('Upstream body read failed'), { name: 'TimeoutError' });
+    }
   } finally {
     void reader.cancel().catch(() => {});
   }
@@ -1284,7 +1358,8 @@ async function readBoundedText(
 
 function parseJsonObject(text: string): Record<string, unknown> | undefined {
   try {
-    const parsed: unknown = JSON.parse(text);
+    // OpenRouter pads a slow non-stream body with leading whitespace keep-alives.
+    const parsed: unknown = JSON.parse(text.trimStart());
     return isPlainObject(parsed) ? parsed : undefined;
   } catch {
     return undefined;
