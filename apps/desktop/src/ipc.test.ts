@@ -9,6 +9,20 @@ describe('IPC sender frame policy', () => {
     ).toBe(true);
   });
 
+  it('rejects a frame whose origin is not the origin the request claims', () => {
+    const frame = { url: 'https://joyst.ir/editor' };
+    expect(
+      isTrustedIpcSenderFrame({ senderFrame: frame, mainFrame: frame }, 'https://www.joyst.ir'),
+    ).toBe(false);
+    expect(
+      isTrustedIpcSenderFrame({ senderFrame: frame, mainFrame: frame }, 'joy-media-app://renderer'),
+    ).toBe(false);
+    const appFrame = { url: 'joy-media-app://renderer/index.html' };
+    expect(
+      isTrustedIpcSenderFrame({ senderFrame: appFrame, mainFrame: appFrame }, 'https://joyst.ir'),
+    ).toBe(false);
+  });
+
   it('rejects subframes, mismatched origins and malformed frame URLs', () => {
     const mainFrame = { url: 'https://joyst.ir/editor' };
     expect(

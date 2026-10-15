@@ -7,6 +7,7 @@ import {
   getStoredMediaToken,
   desktopPlatformName,
   initializeMediaSessionToken,
+  isMediaSessionPersisted,
   registerDevice,
   resetDeviceRegistrationsForTests,
   setMediaSessionTokenBackendForTests,
@@ -76,6 +77,32 @@ describe('media session token storage', () => {
       'desktop.media-session.set',
       'desktop.media-session.clear',
     ]);
+  });
+
+  it('keeps the legacy copy when the desktop has no keyring and says the session is not persisted', async () => {
+    const values = new Map([['joy-media-session-token', 'legacy-test-token']]);
+    const storage = {
+      getItem: vi.fn((key: string) => values.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => values.set(key, value)),
+      removeItem: vi.fn((key: string) => values.delete(key)),
+    } as unknown as Storage;
+    let memoryToken: string | undefined;
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'desktop.media-session.get') return memoryToken;
+      if (channel === 'desktop.media-session.set') {
+        memoryToken = payload as string;
+        return { persisted: false, reason: 'secure-storage-unavailable' };
+      }
+      return undefined;
+    });
+    installWindow(storage, { invoke });
+    setMediaSessionTokenBackendForTests();
+
+    await initializeMediaSessionToken();
+
+    expect(await getStoredMediaToken()).toBe('legacy-test-token');
+    expect(values.get('joy-media-session-token')).toBe('legacy-test-token');
+    expect(isMediaSessionPersisted()).toBe(false);
   });
 
   it('deletes a legacy copy when a secure token already exists', async () => {

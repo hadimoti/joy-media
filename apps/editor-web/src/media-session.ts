@@ -20,8 +20,19 @@ export const MEDIA_SESSION_CHANGED_EVENT = 'joy-media-session-changed';
 
 export interface MediaSessionTokenBackend {
   get(): Promise<string | undefined>;
-  set(token: string): Promise<void>;
+  /** Resolves false when the token was kept in memory only and will not survive a restart. */
+  set(token: string): Promise<boolean | void>;
   clear(): Promise<void>;
+}
+
+let sessionPersisted = true;
+
+/**
+ * False after the desktop host reported it could not store the session token securely (no OS
+ * keyring): the user stays signed in for this run only. UI can tell the user (r17 follow-up).
+ */
+export function isMediaSessionPersisted(): boolean {
+  return sessionPersisted;
 }
 
 const memoryBackend = (() => {
@@ -112,8 +123,8 @@ function removeLegacyTokenAfterMigration(): void {
 export function initializeMediaSessionToken(): Promise<void> {
   if (initialization !== undefined) return initialization;
   initialization = (async () => {
-    // Only Electron has a protected destination for the legacy value. Browser and test
-    // contexts stay memory-only and must never consume or delete localStorage data.
+    // No secure store outside Electron. Browser and test contexts keep the legacy localStorage
+    // value (memory alone would sign the user out on every reload) and never delete it.
     if (!isDesktopHost()) {
       try {
         cachedToken = await backend.get();
@@ -160,8 +171,15 @@ export function initializeMediaSessionToken(): Promise<void> {
     }
 
     try {
-      await backend.set(legacyToken);
+      const persisted = await backend.set(legacyToken);
+      sessionPersisted = persisted !== false;
       secureToken = await backend.get();
+      if (secureToken === legacyToken && persisted === false) {
+        // No keyring: keep the legacy copy so the next launch is still signed in.
+        cachedToken = secureToken;
+        cacheLoaded = true;
+        return;
+      }
       if (secureToken === legacyToken) {
         cachedToken = secureToken;
         cacheLoaded = true;
@@ -194,7 +212,7 @@ export async function setStoredMediaToken(token: string): Promise<void> {
     throw new Error('Invalid session token');
   }
   await initializeMediaSessionToken();
-  await backend.set(token);
+  sessionPersisted = (await backend.set(token)) !== false;
   cachedToken = token;
   cacheLoaded = true;
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));

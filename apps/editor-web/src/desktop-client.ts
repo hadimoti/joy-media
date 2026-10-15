@@ -144,8 +144,14 @@ export async function getDesktopSessionToken(): Promise<string | undefined> {
   return token as string | undefined;
 }
 
-export async function setDesktopSessionToken(token: string): Promise<void> {
-  await requireBridge().invoke('desktop.media-session.set', token);
+/** Returns false when the desktop host kept the token in memory only (no OS keyring). */
+export async function setDesktopSessionToken(token: string): Promise<boolean> {
+  const result = await requireBridge().invoke('desktop.media-session.set', token);
+  return !(
+    typeof result === 'object' &&
+    result !== null &&
+    (result as { persisted?: unknown }).persisted === false
+  );
 }
 
 export async function clearDesktopSessionToken(): Promise<void> {

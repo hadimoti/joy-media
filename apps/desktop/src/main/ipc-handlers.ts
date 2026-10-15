@@ -391,7 +391,11 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         return { ok: false, error: 'Invalid session token' };
       }
       await deps.sessionTokenStore.set(payload);
-      return { ok: true };
+      // No keyring: set() keeps the token in memory only. Report that so the user is told,
+      // instead of a silent sign-out on the next launch (r17 follow-up).
+      return deps.sessionTokenStore.isPersistent?.() !== false
+        ? { ok: true }
+        : { ok: true, data: { persisted: false, reason: 'secure-storage-unavailable' } };
     },
     'desktop.media-session.clear': async (): Promise<IpcResult> => {
       await deps.sessionTokenStore.clear();

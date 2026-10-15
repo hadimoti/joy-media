@@ -75,6 +75,19 @@ describe('IPC dispatch', () => {
     expect(await request('desktop.media-session.get')).toEqual({ ok: true, data: undefined });
   });
 
+  it('reports that the token was not persisted when secure storage is unavailable (r17 follow-up)', async () => {
+    const handlers = createIpcHandlers(deps());
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'http://localhost:5173',
+      channel: 'desktop.media-session.set',
+      payload: 'token-test-redacted',
+    });
+    expect(result).toEqual({
+      ok: true,
+      data: { persisted: false, reason: 'secure-storage-unavailable' },
+    });
+  });
+
   it('rejects invalid session token payloads', async () => {
     const handlers = createIpcHandlers(deps());
     for (const payload of ['', 2, {}, 'x'.repeat(8193)]) {
