@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AgentUsageLedger } from './agent-usage-ledger.js';
 import type { AccountApi } from './account-service.js';
@@ -127,6 +128,8 @@ const UPSTREAM_REQUEST_DEADLINE_MS = 85_000;
 const UPSTREAM_ATTEMPT_TIMEOUT_MS = 20_000;
 /** Vision models take longer to start answering; still well inside the request deadline. */
 const UPSTREAM_VISION_ATTEMPT_TIMEOUT_MS = 40_000;
+/** After 200 headers, a non-stream body that sends no bytes at all for this long falls back. */
+const UPSTREAM_BODY_IDLE_TIMEOUT_MS = 25_000;
 const UPSTREAM_STREAM_IDLE_TIMEOUT_MS = 60_000;
 
 const FORWARDED_COMPLETION_FIELDS = [
@@ -502,7 +505,7 @@ export class JoyModelGateway {
             console.warn('joy-model-gateway: invalid upstream body', {
               modelId: candidate,
               bodyLength: bodyText.length,
-              bodyStart: redactSecrets(bodyText.slice(0, 64)),
+              bodySha256: createHash('sha256').update(bodyText).digest('hex').slice(0, 12),
             });
             failure = { status: upstreamRes.status, code: 'INVALID_RESPONSE' };
           } else {
@@ -1309,12 +1312,6 @@ async function readUpstreamFailure(
   };
 }
 
-function redactSecrets(text: string): string {
-  return text
-    .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-<redacted>')
-    .replace(/Bearer\s+\S+/gi, 'Bearer <redacted>');
-}
-
 /**
  * Reads a body up to maxBytes before the deadline. Error bodies (allowPartial, the default) keep
  * whatever arrived, which is enough to classify the failure. A success body must be complete:
@@ -1337,7 +1334,7 @@ async function readBoundedText(
         throw Object.assign(new Error('Upstream body deadline exceeded'), { name: 'TimeoutError' });
       const { done, value } = await readStreamChunk(
         reader,
-        allowPartial ? Math.min(10_000, remaining) : remaining,
+        Math.min(allowPartial ? 10_000 : UPSTREAM_BODY_IDLE_TIMEOUT_MS, remaining),
       );
       if (done) break;
       chunks.push(value);
@@ -1358,8 +1355,8 @@ async function readBoundedText(
 
 function parseJsonObject(text: string): Record<string, unknown> | undefined {
   try {
-    // OpenRouter pads a slow non-stream body with leading whitespace keep-alives.
-    const parsed: unknown = JSON.parse(text.trimStart());
+    // JSON.parse already skips the leading whitespace OpenRouter pads slow bodies with.
+    const parsed: unknown = JSON.parse(text);
     return isPlainObject(parsed) ? parsed : undefined;
   } catch {
     return undefined;

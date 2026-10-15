@@ -1958,9 +1958,9 @@ describe('JoyModelGateway', () => {
     expect((await ledger.getSummary('u')).totalRequests).toBe(0);
   });
 
-  // FC5: after 200 headers the body read runs against the whole 85 s request deadline (not the
-  // 20 s attempt budget), so a body that stalls forever ends as busy at the deadline, never hangs.
-  it('bounds a stalled non-stream body read by the 85 s request deadline', async () => {
+  // FC5/FT1: after 200 headers the body is read against the 85 s request deadline, but a body that
+  // sends no bytes for the 25 s idle gap falls back to the next model.
+  it('falls back when a non-stream body stalls with no bytes for the 25 s idle gap', async () => {
     vi.useFakeTimers();
     try {
       const tried: string[] = [];
@@ -1996,12 +1996,11 @@ describe('JoyModelGateway', () => {
           );
         },
       }).handleChatCompletions(createMockReq({ body: { model: SUPER, messages: [] } }), result.res);
-      await vi.advanceTimersByTimeAsync(85_001);
+      await vi.advanceTimersByTimeAsync(25_001);
       await pending;
-      expect(tried[0]).toBe(SUPER);
-      expect(result.getStatus()).toBe(503);
-      expect(result.getBody()).toContain('JOY_AGENT_MODELS_BUSY');
-      expect(result.getBody()).not.toContain('INVALID_RESPONSE');
+      expect(tried.slice(0, 2)).toEqual([SUPER, ULTRA]);
+      expect(result.getStatus()).toBe(200);
+      expect(result.getBody()).toContain('body fallback');
     } finally {
       vi.useRealTimers();
     }
@@ -2234,12 +2233,12 @@ describe('JoyModelGateway', () => {
         const result = createMockRes();
         const pending = gatewayWith(async (_url, init) => {
           tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
-          return new Response(slowBody(25_000, 'json', init?.signal), { status: 200 });
+          return new Response(slowBody(22_000, 'json', init?.signal), { status: 200 });
         }).handleChatCompletions(
           createMockReq({ body: { model: SUPER, messages: [] } }),
           result.res,
         );
-        await vi.advanceTimersByTimeAsync(25_001);
+        await vi.advanceTimersByTimeAsync(22_001);
         await pending;
         expect(tried).toEqual([SUPER]);
         expect(result.getStatus()).toBe(200);
@@ -2306,7 +2305,83 @@ describe('JoyModelGateway', () => {
       }
     });
 
-    it('logs the length and first bytes of an invalid 200 body', async () => {
+    it('never logs body content for an invalid 200 body, only its length and a hash', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        await gatewayWith(
+          async () => new Response('<html>user secret text</html>', { status: 200 }),
+        ).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          createMockRes().res,
+        );
+        expect(JSON.stringify(warn.mock.calls)).not.toContain('user secret text');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('falls back when no body bytes arrive for 25 s after the headers', async () => {
+      vi.useFakeTimers();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const tried: string[] = [];
+        const result = createMockRes();
+        const pending = gatewayWith(async (_url, init) => {
+          tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+          if (tried.length === 1)
+            return new Response(slowBody(10 * 60_000, 'json', init?.signal), { status: 200 });
+          return new Response(VALID, { status: 200 });
+        }).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          result.res,
+        );
+        await vi.advanceTimersByTimeAsync(25_001);
+        await pending;
+        expect(tried).toEqual([SUPER, ULTRA]);
+        expect(result.getStatus()).toBe(200);
+        expect(result.getBody()).toContain('Red');
+      } finally {
+        warn.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps waiting while whitespace keep-alives keep arriving, past the idle gap', async () => {
+      vi.useFakeTimers();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const tried: string[] = [];
+        const result = createMockRes();
+        const encoder = new TextEncoder();
+        const pending = gatewayWith(async (_url, init) => {
+          tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              for (let at = 0; at < 60_000; at += 15_000)
+                setTimeout(() => controller.enqueue(encoder.encode(KEEPALIVE)), at);
+              setTimeout(() => {
+                controller.enqueue(encoder.encode(VALID));
+                controller.close();
+              }, 60_000);
+            },
+          });
+          return new Response(body, { status: 200 });
+        }).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          result.res,
+        );
+        await vi.advanceTimersByTimeAsync(60_001);
+        await pending;
+        expect(tried).toEqual([SUPER]);
+        expect(result.getStatus()).toBe(200);
+        expect(result.getBody()).toContain('Red');
+      } finally {
+        warn.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it('logs the length and a hash of an invalid 200 body', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       try {
         const result = createMockRes();
@@ -2318,7 +2393,10 @@ describe('JoyModelGateway', () => {
         );
         expect(warn).toHaveBeenCalledWith(
           'joy-model-gateway: invalid upstream body',
-          expect.objectContaining({ bodyLength: 17, bodyStart: '<html>busy</html>' }),
+          expect.objectContaining({
+            bodyLength: 17,
+            bodySha256: expect.stringMatching(/^[0-9a-f]{12}$/),
+          }),
         );
       } finally {
         warn.mockRestore();
