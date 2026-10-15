@@ -1,3 +1,4 @@
+import { applyCors, corsAllowedOriginsFromEnv } from './cors.js';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import {
@@ -130,6 +131,8 @@ export interface ControlPlaneHttpServerOptions {
   /** Flag-gated fail-closed retirement for hosted project/media/Worker-pairing routes; every
    * flag defaults false (see hosted-route-retirement.ts). */
   readonly hostedRouteRetirement?: HostedRouteRetirementFlags;
+  /** Browser origins allowed cross-origin (desktop renderer, joyst.ir); default from env. */
+  readonly corsAllowedOrigins?: ReadonlySet<string>;
   /** USDC checkout (wave 5). `DisabledUsdcCheckoutService` when unset — every route stays
    * reachable, `createInvoice`/`handleWebhook` just report CHECKOUT_DISABLED. */
   readonly usdcCheckout?: UsdcCheckoutApi;
@@ -193,7 +196,10 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
     throw new RangeError('maxJsonBodyBytes must be a positive safe integer');
   const rateLimitBuckets = new Map<string, { windowStart: number; count: number }>();
   const clientAddressResolver = options.clientAddressResolver ?? createClientAddressResolver();
+  const corsAllowedOrigins = options.corsAllowedOrigins ?? corsAllowedOriginsFromEnv();
   const server = createServer(async (request, response) => {
+    // CORS first: a preflight never reaches rate limiting, routing or authentication.
+    if (applyCors(request, response, corsAllowedOrigins)) return;
     if (options.queryObservability === true) attachDbQueryCountHeader(response);
     await withDbQueryContext(async () => {
       const path = request.url?.split('?', 1)[0] ?? '/';
