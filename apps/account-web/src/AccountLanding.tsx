@@ -11,6 +11,7 @@ import {
   type DeviceInfo,
   type AgentUsageSummary,
 } from './api.js';
+import { periodEndLabel, planLabel } from './subscription-labels.js';
 
 interface AccountLandingProps {
   readonly user: UserSession;
@@ -199,21 +200,11 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
           <div className="subscription-details-grid">
             <div className="sub-detail-item">
               <span className="sub-detail-label">Current Plan</span>
-              <span className="sub-detail-value">
-                {subscription?.plan === 'monthly'
-                  ? 'JOY Pro Monthly'
-                  : subscription?.plan === 'yearly'
-                    ? 'JOY Pro Yearly'
-                    : 'Standard Creator'}
-              </span>
+              <span className="sub-detail-value">{planLabel(subscription)}</span>
             </div>
             <div className="sub-detail-item">
               <span className="sub-detail-label">Renewal / Period End</span>
-              <span className="sub-detail-value">
-                {subscription?.currentPeriodEnd
-                  ? new Date(subscription.currentPeriodEnd).toLocaleDateString()
-                  : 'Lifetime Local / No Expiry'}
-              </span>
+              <span className="sub-detail-value">{periodEndLabel(subscription)}</span>
             </div>
             <div className="sub-detail-item">
               <span className="sub-detail-label">Joy Model Gateway</span>
