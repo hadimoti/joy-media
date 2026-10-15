@@ -72,14 +72,15 @@ describe('media session token storage', () => {
     await clearStoredMediaToken();
     expect(vi.mocked(storage.getItem)).toHaveBeenCalledTimes(migrationReads);
     expect(storage.setItem).not.toHaveBeenCalled();
-    expect(vi.mocked(storage.removeItem)).toHaveBeenCalledTimes(migrationDeletes);
+    // FT2 review MUST1: every new token and every sign-out also removes any plaintext copy.
+    expect(vi.mocked(storage.removeItem)).toHaveBeenCalledTimes(migrationDeletes + 2);
     expect(invoke.mock.calls.slice(3).map(([channel]) => channel)).toEqual([
       'desktop.media-session.set',
       'desktop.media-session.clear',
     ]);
   });
 
-  it('keeps the legacy copy when the desktop has no keyring and says the session is not persisted', async () => {
+  it('removes the legacy copy when the desktop has no keyring and says the session is not persisted', async () => {
     const values = new Map([['joy-media-session-token', 'legacy-test-token']]);
     const storage = {
       getItem: vi.fn((key: string) => values.get(key) ?? null),
@@ -101,7 +102,7 @@ describe('media session token storage', () => {
     await initializeMediaSessionToken();
 
     expect(await getStoredMediaToken()).toBe('legacy-test-token');
-    expect(values.get('joy-media-session-token')).toBe('legacy-test-token');
+    expect(values.has('joy-media-session-token')).toBe(false);
     expect(isMediaSessionPersisted()).toBe(false);
   });
 

@@ -35,6 +35,10 @@ export function isMediaSessionPersisted(): boolean {
   return sessionPersisted;
 }
 
+/** Shown when the desktop has no OS keyring: the token is held in memory for this run only. */
+export const SESSION_NOT_PERSISTED_NOTICE =
+  'This computer has no secure keyring, so your JOY sign-in is kept for this session only. You will be signed out when the app closes.';
+
 const memoryBackend = (() => {
   let token: string | undefined;
   return {
@@ -177,9 +181,11 @@ export function initializeMediaSessionToken(): Promise<void> {
       sessionPersisted = persisted !== false;
       secureToken = await backend.get();
       if (secureToken === legacyToken && persisted === false) {
-        // No keyring: keep the legacy copy so the next launch is still signed in.
+        // No keyring: hold the token in memory for this run only. A plaintext copy must never
+        // outlive sign-out, a restart or an account switch (FT2 review MUST1).
         cachedToken = secureToken;
         cacheLoaded = true;
+        removeLegacyTokenAfterMigration();
         return;
       }
       if (secureToken === legacyToken) {
@@ -215,6 +221,8 @@ export async function setStoredMediaToken(token: string): Promise<void> {
   }
   await initializeMediaSessionToken();
   sessionPersisted = (await backend.set(token)) !== false;
+  // Desktop: a new token replaces any leftover plaintext copy, persisted or not.
+  if (isDesktopHost()) removeLegacyTokenAfterMigration();
   cachedToken = token;
   cacheLoaded = true;
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));
@@ -223,6 +231,8 @@ export async function setStoredMediaToken(token: string): Promise<void> {
 export async function clearStoredMediaToken(): Promise<void> {
   await initializeMediaSessionToken();
   await backend.clear();
+  if (isDesktopHost()) removeLegacyTokenAfterMigration();
+  sessionPersisted = true;
   cachedToken = undefined;
   cacheLoaded = true;
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));
