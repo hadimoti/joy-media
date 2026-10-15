@@ -266,7 +266,11 @@ export class JoyAgentEngine {
       return result;
     } catch (error) {
       const safe = toSafeJoyAgentError(error);
-      emit({ type: 'failed', code: safe.code, retryable: safe.retryable });
+      try {
+        emit({ type: 'failed', code: safe.code, retryable: safe.retryable });
+      } catch {
+        // A failing event sink must not replace the run's real error (NEW-3).
+      }
       throw new JoyAgentRunError(safe.code, {
         cause: error,
         detail: safeErrorDetail(error, this.options.apiKeyForRedaction),
@@ -486,12 +490,21 @@ async function withTimeout<T>(
   if (parent?.aborted === true) controller.abort();
   parent?.addEventListener('abort', forwardAbort, { once: true });
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort(new JoyAgentWallTimeError(timeoutMs));
-  }, timeoutMs);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // NEW-3: settle at the deadline even if the SDK ignores the abort (a run reported at 186 s
+  // as JOY_AGENT_UNKNOWN). A late rejection of the abandoned operation is swallowed.
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      const timeout = new JoyAgentWallTimeError(timeoutMs);
+      controller.abort(timeout);
+      reject(timeout);
+    }, timeoutMs);
+  });
+  const running = operation(controller.signal);
+  running.catch(() => undefined);
   try {
-    return await operation(controller.signal);
+    return await Promise.race([running, deadline]);
   } catch (error) {
     // Whatever the SDK wraps the abort in (an AbortError, or an APICallError with status 200
     // when the body was still streaming), a run stopped by the wall-time limit is a timeout.

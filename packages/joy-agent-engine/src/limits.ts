@@ -18,7 +18,10 @@ export const DEFAULT_JOY_AGENT_LIMITS: JoyAgentLimits = Object.freeze({
   maxToolCalls: 24,
   maxConcurrentReads: 2,
   maxOperations: 32,
-  wallTimeMs: 180_000,
+  // #6: 4 of 10 hosted runs hit the old 180 s limit. Each model call is its own HTTP request
+  // (the gateway caps one at 85 s, under the 100 s edge limit), so the run deadline is only this
+  // client-side budget.
+  wallTimeMs: 300_000,
   probeTimeMs: 15_000,
   probeMaxOutputTokens: 512,
   contextBytes: 524_288,

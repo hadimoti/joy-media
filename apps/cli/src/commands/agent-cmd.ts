@@ -7,7 +7,7 @@ import {
   canonicalKiloBaseUrl,
   defaultModelFor,
 } from '@joy-media/joy-agent-engine';
-import { JoyAgentRunError } from '@joy-media/joy-agent-engine';
+import { JoyAgentRunError, classifyJoyAgentError } from '@joy-media/joy-agent-engine';
 import { AgentSetupError, describeEffectiveConfig } from '../agent/provider.js';
 import type { CliFlags } from '../cli.js';
 import {
@@ -81,13 +81,26 @@ export function gatewayErrorFromBody(
   return message === undefined ? { code } : { code, message };
 }
 
+/** #6: what happened and what to do after a timeout. Apply runs only after a finished plan. */
+const TIMEOUT_ADVICE =
+  'nothing was applied; free models can be slow or busy, so retry with a smaller request (one change at a time) or choose another model';
+
 export function formatAgentRunFailure(error: unknown, debug: boolean): string {
   if (error instanceof AgentSetupError) return `Joy Agent execution failed: ${error.message}`;
   if (!(error instanceof JoyAgentRunError)) {
     const message = error instanceof Error ? error.message : '';
     if (/^No API key for [^:]+:/.test(message))
       return `Joy Agent execution failed: JOY_AGENT_NO_API_KEY (${message})`;
-    return 'Joy Agent execution failed: JOY_AGENT_UNKNOWN';
+    // NEW-3: an error that did not come through the engine still gets a real code and reason.
+    const code = classifyJoyAgentError(error);
+    const reason = message
+      .replace(/Bearer\s+\S+/gi, 'Bearer [Redacted]')
+      .replace(/sk-[A-Za-z0-9_-]{8,}/g, '[Redacted]')
+      .trim()
+      .slice(0, 200);
+    if (code === 'JOY_AGENT_TIMEOUT')
+      return `Joy Agent execution failed: JOY_AGENT_TIMEOUT (${reason || 'the run hit its time limit'}; ${TIMEOUT_ADVICE})`;
+    return `Joy Agent execution failed: ${code}${reason ? ` (${error instanceof Error ? error.name : 'Error'}: ${reason})` : ''}`;
   }
   const debugSuffix = debug ? `\nDebug detail: ${JSON.stringify(error.detail)}` : '';
   const gateway = gatewayErrorFromBody(error.detail.responseBodySnippet);
@@ -101,7 +114,7 @@ export function formatAgentRunFailure(error: unknown, debug: boolean): string {
   }
   if (error.code === 'JOY_AGENT_TIMEOUT' && gateway === undefined) {
     const reason = /within \d+ s/.exec(error.detail.message ?? '')?.[0];
-    return `Joy Agent execution failed: JOY_AGENT_TIMEOUT (${reason ? `no complete answer from the model ${reason}` : 'the model did not answer in time'}${httpNote}; free models can be slow or busy, so retry or choose another model)${debugSuffix}`;
+    return `Joy Agent execution failed: JOY_AGENT_TIMEOUT (${reason ? `the run hit its time limit: no complete answer from the model ${reason}` : 'the model did not answer in time'}${httpNote}; ${TIMEOUT_ADVICE})${debugSuffix}`;
   }
   if (gateway?.code === 'JOY_AGENT_MODELS_BUSY') {
     const reason = gateway.message ?? 'every free model is busy right now; retry shortly';

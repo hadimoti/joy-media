@@ -58,4 +58,29 @@ describe('F7: wall-time limit is reported as a timeout', () => {
     const error = await runAgainst('no-headers');
     expect((error as JoyAgentRunError).code).toBe('JOY_AGENT_TIMEOUT');
   });
+
+  it('NEW-3: settles at the deadline even when the operation ignores the abort', async () => {
+    const { MockLanguageModelV3 } = await import('ai/test');
+    const model = new MockLanguageModelV3({
+      doGenerate: () => new Promise(() => undefined), // never settles, ignores abortSignal
+    });
+    const engine = new JoyAgentEngine({ model, bridge, limits: { wallTimeMs: 300 } });
+    const started = Date.now();
+    const error = await engine
+      .run({
+        runId: 'r',
+        taskKind: 'joy-code-edit',
+        baseRevision: 'r1',
+        request: 'hi',
+        context: {},
+      })
+      .catch((caught: unknown) => caught);
+    expect((error as JoyAgentRunError).code).toBe('JOY_AGENT_TIMEOUT');
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it('#6: the default wall-time limit is 300 s', async () => {
+    const { DEFAULT_JOY_AGENT_LIMITS } = await import('./limits.js');
+    expect(DEFAULT_JOY_AGENT_LIMITS.wallTimeMs).toBe(300_000);
+  });
 });
