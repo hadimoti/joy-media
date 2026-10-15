@@ -141,6 +141,9 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
   const v = rawValues as Record<string, string | boolean | undefined>;
   if (typeof v.direction === 'string' && !['rtl', 'ltr', 'auto'].includes(v.direction))
     throw new FlagValidationError('direction', 'expected rtl, ltr, or auto', v.direction);
+  // #13: "--project --json" (an empty id from a failed create) must not swallow the next flag.
+  if (typeof v.project === 'string' && (v.project.trim() === '' || v.project.startsWith('-')))
+    throw new FlagValidationError('project', 'expected a project id or file', v.project);
   return {
     project: typeof v.project === 'string' ? v.project : undefined,
     apply: Boolean(v.apply),

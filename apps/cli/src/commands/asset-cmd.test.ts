@@ -37,4 +37,32 @@ describe('asset import and list', () => {
       if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(!hasFfprobe)('#13: asset import --json prints one JSON object', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-asset-json-'));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const projectPath = join(dir, 'project.json');
+      await import('node:fs').then(({ writeFileSync }) =>
+        writeFileSync(projectPath, JSON.stringify(createDefaultProject('json import'))),
+      );
+      const media = resolve('packages/test-fixtures/media/video.mp4');
+      expect(
+        await runCli(['asset', 'import', media, '--project', projectPath, '--id', 'v', '--json']),
+      ).toBe(0);
+      expect(JSON.parse(String(log.mock.calls.at(-1)?.[0]))).toEqual({
+        ok: true,
+        assetId: 'v',
+        kind: 'video',
+      });
+    } finally {
+      log.mockRestore();
+      if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('#13: an empty or flag-like --project value fails loudly (exit 2)', async () => {
+    expect(await runCli(['asset', 'list', '--project', ''])).toBe(2);
+    expect(await runCli(['asset', 'list', '--project=--json'])).toBe(2);
+  });
 });

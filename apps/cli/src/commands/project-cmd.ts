@@ -78,6 +78,10 @@ export async function handleProjectCommand(args: string[], flags: CliFlags): Pro
     };
 
     const rev = saveProject(project, target);
+    if (flags.json) {
+      console.log(JSON.stringify({ ok: true, projectId: project.id, revision: rev }));
+      return 0;
+    }
     logSuccess(
       `Created project: ${c(project.title, 'bold')} (${c(project.id, 'cyan')}) at revision ${rev}.`,
     );
