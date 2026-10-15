@@ -36,6 +36,11 @@ export interface MediaImportOptions {
     mimeType: string,
   ) => Promise<BrowserMediaDescriptor>;
   readonly createAssetId?: () => string;
+  /**
+   * Keep the original on this device only: verify, hash and cache it, but do not register it
+   * with or upload it to the cloud. Used when there is no JOY session (offline import, #20).
+   */
+  readonly localOnly?: boolean;
 }
 
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
@@ -125,6 +130,25 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
     },
     file,
   );
+
+  if (options.localOnly === true) {
+    report(options, 1, `${file.name} saved on this device. Sign in to back it up to the cloud.`);
+    if (explicitAssetId === undefined) {
+      idsByProject?.delete(options.projectId);
+      if (idsByProject?.size === 0) generatedAssetIdsByFile.delete(file);
+    }
+    return {
+      id: registration.id,
+      projectId: options.projectId,
+      kind: registration.kind,
+      displayName: registration.displayName,
+      sha256: registration.sha256,
+      bytes: registration.bytes,
+      descriptor: registration.descriptor,
+      createdAt: Date.now(),
+      cloudBacked: false,
+    };
+  }
 
   report(options, 0.82, `Registering ${file.name}...`);
   await client.ensureProject(options.projectId, options.projectTitle);
