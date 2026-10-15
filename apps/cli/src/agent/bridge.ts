@@ -5,7 +5,7 @@ import type {
   JoyPlanChecklistItem,
   JoyTimelineOperation,
 } from '@joy-media/joy-agent-engine';
-import type { CaptionDocumentV1, JoyProjectV1 } from '@joy-media/project-schema';
+import type { CaptionDocumentV1, JoyProjectV1, TransitionV1 } from '@joy-media/project-schema';
 import { sourceTimeAtVideoClipTime, validateJoyProjectV1 } from '@joy-media/project-schema';
 import { recomputeRootDuration } from '../utils/timeline-math.js';
 import { durationAtSpeedUs, speedProblem } from '../utils/clip-speed.js';
@@ -312,7 +312,8 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
     return {
       textStyles: ['headline', 'subheadline', 'caption-glow', 'callout'],
       looks: ['crt', 'bw', 'warm', 'cool'],
-      transitions: ['crossfade', 'slide-left', 'wipe-up', 'zoom-in'],
+      // Only what add-transition can create and the CLI renderer draws (F1).
+      transitions: ['crossfade'],
       aspectRatios: ['9:16 (Reels/TikTok)', '16:9 (YouTube)', '1:1 (Square)'],
     };
   }
@@ -399,6 +400,19 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           errors.push(`Asset ${operation.assetId} not found.`);
         if (operation.durationUs < minimumFrame)
           errors.push(`Operation ${operation.id} duration is shorter than one project frame.`);
+        continue;
+      }
+      if (operation.kind === 'add-transition') {
+        const staged = new Set(
+          [...this.stagedTimeline, ...operations].flatMap((candidate) =>
+            candidate.kind === 'insert' ? [candidate.id] : [],
+          ),
+        );
+        for (const clipId of [operation.leftClipId, operation.rightClipId])
+          if (!clips.some(({ clip }) => clip.id === clipId) && !staged.has(clipId))
+            errors.push(`Clip ${clipId} not found.`);
+        if (operation.leftClipId === operation.rightClipId)
+          errors.push(`Transition ${operation.id} needs two different clips.`);
         continue;
       }
       const found = clips.find(({ clip }) => clip.id === operation.clipId);
@@ -632,10 +646,13 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       }>;
     }>;
 
-    // Apply timeline operations
+    // Apply timeline operations; transitions are placed after every clip edit (F1).
+    const transitionOps: Extract<JoyTimelineOperation, { kind: 'add-transition' }>[] = [];
     for (const op of this.stagedTimeline) {
       try {
-        if (op.kind === 'insert') {
+        if (op.kind === 'add-transition') {
+          transitionOps.push(op);
+        } else if (op.kind === 'insert') {
           const track = tracks.find((t) => t.id === op.trackId);
           if (!track) {
             errors.push(`Track ${op.trackId} not found for insert`);
@@ -847,6 +864,69 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
         errors.push(`Error applying ${op.kind}: ${String(err)}`);
       }
     }
+
+    const minimumTransitionUs = oneFrameUs(root.frameRate.num, root.frameRate.den);
+    const transitionProblem = (input: {
+      readonly leftClipId: string;
+      readonly rightClipId: string;
+      readonly durationUs: number;
+    }): { trackId?: string; problem?: string } => {
+      const track = tracks.find((candidate) =>
+        candidate.clips.some((clip) => clip.id === input.leftClipId),
+      );
+      const left = track?.clips.find((clip) => clip.id === input.leftClipId);
+      const right = track?.clips.find((clip) => clip.id === input.rightClipId);
+      if (!track || !left) return { problem: `clip ${input.leftClipId} not found` };
+      if (!right)
+        return {
+          problem: `clips ${input.leftClipId} and ${input.rightClipId} are not on the same track`,
+        };
+      if (track.kind !== 'video' || left.kind !== 'video' || right.kind !== 'video')
+        return { problem: 'both clips must be video clips on a video track' };
+      if (left.startUs + left.durationUs !== right.startUs)
+        return {
+          problem: `clips must be adjacent: ${input.leftClipId} ends at ${left.startUs + left.durationUs} µs but ${input.rightClipId} starts at ${right.startUs} µs (they must touch)`,
+        };
+      if (input.durationUs < minimumTransitionUs)
+        return { problem: 'duration is shorter than one frame' };
+      if (input.durationUs > Math.min(left.durationUs, right.durationUs) / 2)
+        return { problem: 'duration must be at most half of each clip' };
+      return { trackId: track.id };
+    };
+    const transitions = [
+      ...((current as { transitions?: readonly TransitionV1[] }).transitions ?? []),
+    ];
+    for (const op of transitionOps) {
+      const placed = transitionProblem(op);
+      if (placed.problem !== undefined) {
+        errors.push(`Transition ${op.id}: ${placed.problem}.`);
+        continue;
+      }
+      const sameJunction = transitions.findIndex(
+        (existing) =>
+          existing.leftClipId === op.leftClipId && existing.rightClipId === op.rightClipId,
+      );
+      if (sameJunction >= 0) transitions.splice(sameJunction, 1);
+      // Stored under the editor's registry id: transition-shaders `dissolve` is the crossfade.
+      transitions.push({
+        id: op.id,
+        trackId: placed.trackId!,
+        leftClipId: op.leftClipId,
+        rightClipId: op.rightClipId,
+        type: 'dissolve',
+        durationUs: op.durationUs,
+      });
+      recordApplied(op.id);
+    }
+    // Edits such as trim, move or remove can break an existing junction.
+    for (const existing of transitions) {
+      if (transitionOps.some((op) => op.id === existing.id)) continue;
+      const placed = transitionProblem(existing);
+      if (placed.problem !== undefined)
+        errors.push(`Existing transition ${existing.id} is no longer valid: ${placed.problem}.`);
+    }
+    if (transitions.length > 0 || transitionOps.length > 0)
+      (current as { transitions?: readonly TransitionV1[] }).transitions = transitions;
 
     // Apply document operations
     for (const op of this.stagedDocument) {

@@ -365,6 +365,7 @@ export function missingOperationCoverage(
       (kind === 'trim' && (checks.has('trim') || intent.trimRange !== undefined)) ||
       (kind === 'add-effect' && (checks.has('look') || intent.look !== undefined)) ||
       (kind === 'set-speed' && (checks.has('speed') || intent.speed !== undefined)) ||
+      (kind === 'add-transition' && (checks.has('transition') || intent.transition)) ||
       ((kind === 'create-text' || kind === 'set-text' || kind === 'update-text') &&
         (checks.has('text') || intent.centerText || intent.textSize !== undefined)) ||
       (kind === 'set-property' && intent.centerText) ||
@@ -385,6 +386,8 @@ interface RequestIntent {
   trimRange?: readonly [number, number];
   look?: 'crt' | 'bw' | 'warm' | 'cool';
   durationUs?: number;
+  /** The request asks for a crossfade/dissolve/transition between clips (F1). */
+  transition?: boolean;
   /** Requested playback rate ("2x speed", "twice as fast", "half speed"). */
   speed?: number;
   /** "make the title smaller/bigger": compared with the text before the run (F3). */
@@ -395,6 +398,10 @@ interface RequestIntent {
 
 const QUOTED_TIMED_TEXT =
   /["“«]([^"“”«»]{1,400})["”»]\s*,?\s*\(?\s*(?:from|between|at|از)?\s*(\d+(?:\.\d+)?)\s*(?:s|secs?|seconds?|ثانیه)?\s*(?:to|until|and|[-–]|تا)\s*(\d+(?:\.\d+)?)\s*(?:s\b|secs?\b|seconds?\b|ثانیه)?/giu;
+
+function isCrossfade(type: string): boolean {
+  return type === 'dissolve' || type === 'crossfade';
+}
 
 function parseRequestedSpeed(normalized: string): number | undefined {
   if (/\btwice as fast\b|\bdouble (?:the )?speed\b/.test(normalized)) return 2;
@@ -463,6 +470,12 @@ function parseRequestIntent(request: string): RequestIntent {
     )
   )
     intent.textSize = 'larger';
+  if (
+    /\b(cross-?fades?|cross-?dissolves?|dissolves?|transitions?)\b|\bfade (?:between|from one|into the next)\b|ترنزیشن|انتقال/.test(
+      normalized,
+    )
+  )
+    intent.transition = true;
   const speed = parseRequestedSpeed(normalized);
   if (speed !== undefined) intent.speed = speed;
   const captionTimes = parseCaptionTimes(request);
@@ -550,6 +563,16 @@ export function verifyRequestIntent(
     );
     (hasLook ? verified : unmet).push(
       hasLook ? `Request: ${intent.look} look` : `request asked for ${intent.look} look`,
+    );
+  }
+  if (intent.transition) {
+    const transitions =
+      (project as { transitions?: readonly { type: string }[] }).transitions ?? [];
+    const has = transitions.some((transition) => isCrossfade(transition.type));
+    (has ? verified : unmet).push(
+      has
+        ? 'Request: crossfade transition'
+        : 'request asked for a crossfade transition between clips, but the timeline has none',
     );
   }
   if (intent.speed !== undefined) {
@@ -655,7 +678,9 @@ function checklistItemStart(
       matches.find((clip) => clip.startUs === item.timelineStartUs)?.startUs ?? matches[0]?.startUs
     );
   }
-  return clips.find((clip) => clip.id === item.clipId)?.startUs;
+  // A transition starts at its cut, where the right clip starts.
+  const clipId = item.kind === 'transition' ? item.rightClipId : item.clipId;
+  return clips.find((clip) => clip.id === clipId)?.startUs;
 }
 
 export function verifyPlanChecklist(
@@ -669,7 +694,12 @@ export function verifyPlanChecklist(
   for (const item of checklist) {
     if (item.timelineStartUs !== undefined) {
       const start = checklistItemStart(project, clips, item);
-      const label = item.kind === 'text' ? `text “${item.text}”` : `${item.kind} ${item.clipId}`;
+      const label =
+        item.kind === 'text'
+          ? `text “${item.text}”`
+          : item.kind === 'transition'
+            ? `transition ${item.leftClipId} → ${item.rightClipId}`
+            : `${item.kind} ${item.clipId}`;
       if (start === item.timelineStartUs)
         verified.push(`Start of ${label}: ${seconds(item.timelineStartUs)}`);
       else
@@ -690,6 +720,21 @@ export function verifyPlanChecklist(
         verified.push(`Trim ${item.clipId}: source ${item.sourceInUs}–${item.sourceOutUs} µs`);
       else
         unmet.push(`trim ${item.clipId} expected source ${item.sourceInUs}–${item.sourceOutUs} µs`);
+    } else if (item.kind === 'transition') {
+      const transitions =
+        (
+          project as {
+            transitions?: readonly { leftClipId: string; rightClipId: string; type: string }[];
+          }
+        ).transitions ?? [];
+      const has = transitions.some(
+        (transition) =>
+          transition.leftClipId === item.leftClipId &&
+          transition.rightClipId === item.rightClipId &&
+          isCrossfade(transition.type),
+      );
+      if (has) verified.push(`Crossfade ${item.leftClipId} → ${item.rightClipId}`);
+      else unmet.push(`crossfade between ${item.leftClipId} and ${item.rightClipId}`);
     } else if (item.kind === 'speed') {
       const clip = clips.find((candidate) => candidate.id === item.clipId);
       if (clip?.kind === 'video' && Math.abs((clip.playbackRate ?? 1) - item.rate) < 1e-6)

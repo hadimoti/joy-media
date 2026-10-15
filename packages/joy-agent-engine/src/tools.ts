@@ -63,6 +63,18 @@ const timelineOperation = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
+      kind: z.literal('add-transition'),
+      id,
+      /** The earlier clip; it must end exactly where rightClipId starts, on the same track. */
+      leftClipId: id,
+      rightClipId: id,
+      type: z.enum(['crossfade']).default('crossfade'),
+      durationUs: z.number().int().positive().max(10_000_000).default(1_000_000),
+      dependsOn: z.array(id).max(32).default([]),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal('set-speed'),
       id,
       clipId: id,
@@ -176,6 +188,12 @@ export type JoyPlanChecklistItem = (
       readonly look: 'crt' | 'bw' | 'warm' | 'cool';
     }
   | { readonly kind: 'speed'; readonly clipId: string; readonly rate: number }
+  | {
+      readonly kind: 'transition';
+      readonly leftClipId: string;
+      readonly rightClipId: string;
+      readonly type?: 'crossfade' | undefined;
+    }
 ) & {
   /** Where the clip or caption should start on the timeline; verified by the CLI. */
   readonly timelineStartUs?: number | undefined;
@@ -581,7 +599,7 @@ export function createJoyAgentTools(
     }),
     propose_timeline_operations: tool({
       description:
-        'Propose timeline operations. set-speed changes a video clip playback rate (rate 2 = twice as fast, so the clip source span lasts half as long on the timeline; 0.5 = half speed); apply it after any trim. Each operation needs a unique id and schema-valid fields; the tool returns validation errors for repair and retry (up to three invalid proposals). Time values use integer microseconds. For trim, sourceInUs/sourceOutUs are positions into the SOURCE media, and timelineStartUs is optional. Example: keep source 7 s to 17 s => sourceInUs: 7000000, sourceOutUs: 17000000. Trimming changes the visible duration; use move to change timeline position.',
+        'Propose timeline operations. set-speed changes a video clip playback rate (rate 2 = twice as fast, so the clip source span lasts half as long on the timeline; 0.5 = half speed); apply it after any trim. add-transition puts a crossfade (the only transition type) between two clips that touch on the same video track (leftClipId ends exactly where rightClipId starts; place them first); durationUs defaults to 1 s and must be at most half of either clip. Each operation needs a unique id and schema-valid fields; the tool returns validation errors for repair and retry (up to three invalid proposals). Time values use integer microseconds. For trim, sourceInUs/sourceOutUs are positions into the SOURCE media, and timelineStartUs is optional. Example: keep source 7 s to 17 s => sourceInUs: 7000000, sourceOutUs: 17000000. Trimming changes the visible duration; use move to change timeline position.',
       inputSchema: proposalInput(operationLimit),
       execute: async (input) => {
         let operations: readonly JoyTimelineOperation[];
@@ -678,7 +696,7 @@ export function createJoyAgentTools(
     }),
     submit_plan: tool({
       description:
-        'Finalize the staged plan for JOY approval. Include a non-empty checklist that covers every staged operation type and each requested outcome (trim source range, text with its position and timelineStartUs, look, speed, start position, or duration) so the CLI can verify the final timeline. The CLI independently checks explicit outcomes from the user request.',
+        'Finalize the staged plan for JOY approval. Include a non-empty checklist that covers every staged operation type and each requested outcome (trim source range, text with its position and timelineStartUs, look, speed, transition, start position, or duration) so the CLI can verify the final timeline. The CLI independently checks explicit outcomes from the user request.',
       inputSchema: z
         .object({
           checklist: z
@@ -706,6 +724,15 @@ export function createJoyAgentTools(
                     kind: z.literal('look'),
                     clipId: id,
                     look: z.enum(JOY_LOOK_PRESETS),
+                    ...checklistStartHint,
+                  })
+                  .strict(),
+                z
+                  .object({
+                    kind: z.literal('transition'),
+                    leftClipId: id,
+                    rightClipId: id,
+                    type: z.literal('crossfade').optional(),
                     ...checklistStartHint,
                   })
                   .strict(),

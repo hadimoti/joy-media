@@ -76,6 +76,11 @@ const KIND_SYNONYMS: Readonly<Record<string, string>> = {
   'create-caption': 'create-text',
   title: 'create-text',
   'add-title': 'create-text',
+  transition: 'add-transition',
+  crossfade: 'add-transition',
+  'cross-fade': 'add-transition',
+  'add-crossfade': 'add-transition',
+  dissolve: 'add-transition',
   speed: 'set-speed',
   'change-speed': 'set-speed',
   'set-playback-rate': 'set-speed',
@@ -101,10 +106,12 @@ function canonicalKind(value: unknown): unknown {
 /** `type`, `operation`, `op` and `action` are accepted for an operation's `kind`. */
 function withKind(record: Record<string, unknown>, index: number): Record<string, unknown> {
   const { type, operation, op, action, ...rest } = record;
-  // On add-effect, `type` names the look (like the CLI's --type flag), so it is kept.
+  // On add-effect, `type` names the look (like the CLI's --type flag), and on add-transition
+  // the transition, so it is kept.
+  const named = canonicalKind(rest.kind ?? operation ?? op ?? action);
   const typeIsLook =
-    canonicalKind(rest.kind ?? operation ?? op ?? action) === 'add-effect' &&
-    normalizeLookName(type) !== undefined;
+    (named === 'add-effect' && normalizeLookName(type) !== undefined) ||
+    (named === 'add-transition' && type !== undefined);
   const entries: AliasEntry[] = [
     ['kind', rest.kind],
     ...(typeIsLook ? [] : ([['type', type]] as AliasEntry[])),
@@ -145,9 +152,98 @@ export function normalizeTimelineOperationAliases(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
   return withIds(
     value.map((candidate, index) => (isRecord(candidate) ? withKind(candidate, index) : candidate)),
-  ).map((candidate) =>
-    isRecord(candidate) && candidate.kind === 'set-speed' ? setSpeedAliases(candidate) : candidate,
+  ).map((candidate, index) =>
+    !isRecord(candidate)
+      ? candidate
+      : candidate.kind === 'set-speed'
+        ? setSpeedAliases(candidate)
+        : candidate.kind === 'add-transition'
+          ? transitionAliases(candidate, value[index])
+          : candidate,
   );
+}
+
+const TRANSITION_TYPES: Readonly<Record<string, 'crossfade'>> = {
+  crossfade: 'crossfade',
+  'cross-fade': 'crossfade',
+  dissolve: 'crossfade',
+  fade: 'crossfade',
+};
+
+/** clipIdA/from → leftClipId, clipIdB/to → rightClipId, transition/style → type. */
+function transitionAliases(
+  candidate: Record<string, unknown>,
+  original: unknown,
+): Record<string, unknown> {
+  const prefix = `add-transition ${String(candidate.id)}`;
+  const {
+    clipIdA,
+    clipA,
+    fromClipId,
+    from,
+    clipIdB,
+    clipB,
+    toClipId,
+    to,
+    transition,
+    style,
+    ...rest
+  } = candidate;
+  const leftClipId = pickAlias(
+    'left clip id',
+    [
+      ['leftClipId', rest.leftClipId],
+      ['clipIdA', clipIdA],
+      ['clipA', clipA],
+      ['fromClipId', fromClipId],
+      ['from', from],
+    ],
+    { prefix },
+  );
+  const rightClipId = pickAlias(
+    'right clip id',
+    [
+      ['rightClipId', rest.rightClipId],
+      ['clipIdB', clipIdB],
+      ['clipB', clipB],
+      ['toClipId', toClipId],
+      ['to', to],
+    ],
+    { prefix },
+  );
+  // A kind of "crossfade" names the type too.
+  const kindName = isRecord(original)
+    ? [original.kind, original.type, original.operation, original.op].find(
+        (value) => typeof value === 'string' && TRANSITION_TYPES[value.trim().toLowerCase()],
+      )
+    : undefined;
+  const rawType = pickAlias(
+    'transition type',
+    [
+      ['type', rest.type],
+      ['transition', transition],
+      ['style', style],
+    ],
+    {
+      prefix,
+      normalize: (value) =>
+        typeof value === 'string' ? (TRANSITION_TYPES[value.trim().toLowerCase()] ?? value) : value,
+    },
+  );
+  const type =
+    rawType === undefined
+      ? kindName === undefined
+        ? undefined
+        : 'crossfade'
+      : typeof rawType === 'string'
+        ? (TRANSITION_TYPES[rawType.trim().toLowerCase()] ?? rawType)
+        : rawType;
+  return {
+    ...rest,
+    ...(leftClipId === undefined ? {} : { leftClipId }),
+    ...(rightClipId === undefined ? {} : { rightClipId }),
+    ...(type === undefined ? {} : { type }),
+  };
 }
 
 /** `"2x"`/`2` under `rate`, `speed` or `playbackRate`. */
