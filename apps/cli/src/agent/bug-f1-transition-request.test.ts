@@ -220,6 +220,38 @@ describe('F1 request verification (FT1 review)', () => {
     expect(done.unmet.filter((line) => /crossfade|transition/.test(line))).toEqual([]);
   });
 
+  it('FT1f: "not between A and B" after a positive pair forbids A-B', () => {
+    const before = base();
+    const request = 'Add a crossfade between B and C, not between A and B.';
+    expect(check(withT(before, 'clip-b', 'clip-c'), request, before).unmet).toEqual([]);
+    const both = withT(withT(before, 'clip-b', 'clip-c'), 'clip-a', 'clip-b');
+    expect(check(both, request, before).unmet).toEqual([
+      'request asked for no transition between a and b, but this run added one',
+    ]);
+  });
+
+  it('FT1f: Persian clip references become named pairs (بین کلیپ ۱ و ۲)', () => {
+    const before = base();
+    const request = 'بین کلیپ ۱ و ۲ کراس فید بذار';
+    expect(check(before, request, before).unmet).toEqual([
+      'request asked for a crossfade between 1 and 2, but this run added none there',
+    ]);
+    expect(check(withT(before, 'clip-a', 'clip-b'), request, before).unmet).toEqual([]);
+    expect(check(withT(before, 'clip-b', 'clip-c'), request, before).unmet).toEqual([
+      'request asked for a crossfade between 1 and 2, but this run added none there',
+    ]);
+  });
+
+  it('FT1f Y13: "0:05" is not "start at 0"', () => {
+    const before = base();
+    const done = check(
+      withT(before, 'clip-a', 'clip-b'),
+      'add a crossfade at 0:05 between A and B',
+      before,
+    );
+    expect(done.verified).not.toContain('Request: clip starts at 0');
+  });
+
   it('P4: Persian "انتقال" meaning "move" is not a transition request', () => {
     const result = check(base(), 'کلیپ دوم را به ابتدا انتقال بده');
     expect(result.unmet.join(' ')).not.toMatch(/transition|crossfade/i);

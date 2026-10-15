@@ -43,6 +43,7 @@ const memoryBackend = (() => {
     },
     async set(value: string) {
       token = value;
+      return true;
     },
     async clear() {
       token = undefined;
@@ -104,6 +105,7 @@ export function createMemoryMediaSessionTokenBackend(): MediaSessionTokenBackend
     },
     async set(value) {
       token = value;
+      return true;
     },
     async clear() {
       token = undefined;

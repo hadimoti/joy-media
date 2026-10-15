@@ -489,12 +489,31 @@ const NAMED_PAIR = new RegExp(
  * and "and" when a new verb follows ("crossfade A and B and don't add ...").
  */
 const CLAUSE_SPLIT =
-  /[.;,!?\u060c\u061b]|(?<!\d):(?!\d)|\bbut\b|\bthen\b|\band\s+(?=(?:add|put|use|insert|apply|make|keep|do|don|never|avoid|crossfade|cross-fade|dissolve|remove|delete|drop)\b)|\u0648\u0644\u06cc|\u0627\u0645\u0627|\s\u0648\s/u;
+  /[.;,!?\u060c\u061b]|(?<!\d):(?!\d)|\bbut\b|\bthen\b|\band\s+(?=(?:add|put|use|insert|apply|make|keep|do|don|never|avoid|crossfade|cross-fade|dissolve|remove|delete|drop)\b)|\u0648\u0644\u06cc|\u0627\u0645\u0627|\s\u0648\s(?![0-9\u06f0-\u06f9]|\u06a9\u0644\u06cc\u067e|[a-z]\b)/u;
+
+const FA_CLIP = '(?:\u06a9\u0644\u06cc\u067e\\s*)?'; // optional "کلیپ"
+const FA_NAMED_PAIR = new RegExp(
+  '\u0628\u06cc\u0646\\s+' + // "بین" (between)
+    FA_CLIP +
+    '([0-9\u06f0-\u06f9]+|[a-z])\\s+\u0648\\s*' + // "و" (and)
+    FA_CLIP +
+    '([0-9\u06f0-\u06f9]+|[a-z])',
+  'gu',
+);
+
+function persianDigits(value: string): string {
+  return value.replace(/[\u06f0-\u06f9]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0));
+}
 
 function parseTransitionIntent(normalized: string): TransitionIntent | undefined {
   if (!TRANSITION_WORDS.test(normalized)) return undefined;
-  const pairsIn = (text: string) =>
-    [...text.matchAll(NAMED_PAIR)].map((match) => [match[1]!, match[2]!] as const);
+  const pairsIn = (text: string) => [
+    ...[...text.matchAll(NAMED_PAIR)].map((match) => [match[1]!, match[2]!] as const),
+    // Persian: "بین کلیپ ۱ و ۲" (between clip 1 and 2), Persian or ASCII digits or a letter.
+    ...[...text.matchAll(FA_NAMED_PAIR)].map(
+      (match) => [persianDigits(match[1]!), persianDigits(match[2]!)] as const,
+    ),
+  ];
   const unsupported = UNSUPPORTED_TRANSITION_TYPE.exec(normalized)?.[1];
   if (TRANSITION_REMOVE.test(normalized))
     return {
@@ -509,6 +528,12 @@ function parseTransitionIntent(normalized: string): TransitionIntent | undefined
   const negatedPairs: (readonly [string, string])[] = [];
   let positive = false;
   for (const clause of normalized.split(CLAUSE_SPLIT)) {
+    // "…between B and C, not between A and B": a bare "not between X and Y" clause in a
+    // transition request forbids that pair.
+    if (/^\s*not\s+between\b/.test(clause)) {
+      negatedPairs.push(...pairsIn(clause));
+      continue;
+    }
     if (!TRANSITION_WORDS.test(clause) && !/\bhard cuts?\b/.test(clause)) continue;
     // Strip only the negated spans; whatever transition request is left is still positive. When in
     // doubt this keeps the check (unmet) rather than skipping it.
@@ -667,7 +692,7 @@ function parseRequestIntent(request: string): RequestIntent {
   const intent: RequestIntent = {
     centerText: /\b(center|centre|centered|centred|middle)\b|وسط.?چین|وسط/i.test(normalized),
     startAtZero:
-      /\b(at the start|at 0|from the beginning|start at zero)\b|از ابتدا|از ابتدای|از شروع/i.test(
+      /\b(at the start|at 0(?!\d|[:.,]\d)|from the beginning|start at zero)\b|از ابتدا|از ابتدای|از شروع/i.test(
         normalized,
       ),
   };
