@@ -76,6 +76,19 @@ describe('F1 request verification (FT1 review)', () => {
     expect(result.verified.join(' ')).not.toMatch(/transition|crossfade/i);
   });
 
+  it.each([
+    'Add a crossfade between A and B, but no other transitions.',
+    'Crossfade clip A into clip B; hard cuts everywhere else.',
+  ])('N1/N2: a negation elsewhere does not cancel a positive request (%s)', (request) => {
+    const before = base();
+    const nothing = check(before, request, before);
+    expect(nothing.verified.join(' ')).not.toMatch(/crossfade/i);
+    expect(nothing.unmet).toHaveLength(1);
+    const done = check(withT(before, 'clip-a', 'clip-b'), request, before);
+    expect(done.unmet).toEqual([]);
+    expect(done.verified.join(' ')).toMatch(/crossfade/i);
+  });
+
   it('P4: Persian "انتقال" meaning "move" is not a transition request', () => {
     const result = check(base(), 'کلیپ دوم را به ابتدا انتقال بده');
     expect(result.unmet.join(' ')).not.toMatch(/transition|crossfade/i);

@@ -128,8 +128,11 @@ const UPSTREAM_REQUEST_DEADLINE_MS = 85_000;
 const UPSTREAM_ATTEMPT_TIMEOUT_MS = 20_000;
 /** Vision models take longer to start answering; still well inside the request deadline. */
 const UPSTREAM_VISION_ATTEMPT_TIMEOUT_MS = 40_000;
-/** After 200 headers, a non-stream body that sends no bytes at all for this long falls back. */
-const UPSTREAM_BODY_IDLE_TIMEOUT_MS = 25_000;
+/**
+ * After 200 headers, a non-stream body that sends no bytes at all for this long falls back.
+ * D2 saw a real nano-omni answer about 25 s after a single whitespace burst, so keep a margin.
+ */
+const UPSTREAM_BODY_IDLE_TIMEOUT_MS = 40_000;
 const UPSTREAM_STREAM_IDLE_TIMEOUT_MS = 60_000;
 
 const FORWARDED_COMPLETION_FIELDS = [

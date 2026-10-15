@@ -1959,8 +1959,8 @@ describe('JoyModelGateway', () => {
   });
 
   // FC5/FT1: after 200 headers the body is read against the 85 s request deadline, but a body that
-  // sends no bytes for the 25 s idle gap falls back to the next model.
-  it('falls back when a non-stream body stalls with no bytes for the 25 s idle gap', async () => {
+  // sends no bytes for the 40 s idle gap falls back to the next model.
+  it('falls back when a non-stream body stalls with no bytes for the 40 s idle gap', async () => {
     vi.useFakeTimers();
     try {
       const tried: string[] = [];
@@ -1996,7 +1996,7 @@ describe('JoyModelGateway', () => {
           );
         },
       }).handleChatCompletions(createMockReq({ body: { model: SUPER, messages: [] } }), result.res);
-      await vi.advanceTimersByTimeAsync(25_001);
+      await vi.advanceTimersByTimeAsync(40_001);
       await pending;
       expect(tried.slice(0, 2)).toEqual([SUPER, ULTRA]);
       expect(result.getStatus()).toBe(200);
@@ -2233,12 +2233,12 @@ describe('JoyModelGateway', () => {
         const result = createMockRes();
         const pending = gatewayWith(async (_url, init) => {
           tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
-          return new Response(slowBody(22_000, 'json', init?.signal), { status: 200 });
+          return new Response(slowBody(25_000, 'json', init?.signal), { status: 200 });
         }).handleChatCompletions(
           createMockReq({ body: { model: SUPER, messages: [] } }),
           result.res,
         );
-        await vi.advanceTimersByTimeAsync(22_001);
+        await vi.advanceTimersByTimeAsync(25_001);
         await pending;
         expect(tried).toEqual([SUPER]);
         expect(result.getStatus()).toBe(200);
@@ -2320,7 +2320,7 @@ describe('JoyModelGateway', () => {
       }
     });
 
-    it('falls back when no body bytes arrive for 25 s after the headers', async () => {
+    it('falls back when no body bytes arrive for 40 s after the headers', async () => {
       vi.useFakeTimers();
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       try {
@@ -2335,9 +2335,33 @@ describe('JoyModelGateway', () => {
           createMockReq({ body: { model: SUPER, messages: [] } }),
           result.res,
         );
-        await vi.advanceTimersByTimeAsync(25_001);
+        await vi.advanceTimersByTimeAsync(40_001);
         await pending;
         expect(tried).toEqual([SUPER, ULTRA]);
+        expect(result.getStatus()).toBe(200);
+        expect(result.getBody()).toContain('Red');
+      } finally {
+        warn.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it('returns 200 when the JSON follows the keep-alive after a 35 s silent gap', async () => {
+      vi.useFakeTimers();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const tried: string[] = [];
+        const result = createMockRes();
+        const pending = gatewayWith(async (_url, init) => {
+          tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+          return new Response(slowBody(35_000, 'json', init?.signal), { status: 200 });
+        }).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          result.res,
+        );
+        await vi.advanceTimersByTimeAsync(35_001);
+        await pending;
+        expect(tried).toEqual([SUPER]);
         expect(result.getStatus()).toBe(200);
         expect(result.getBody()).toContain('Red');
       } finally {

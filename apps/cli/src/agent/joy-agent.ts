@@ -448,8 +448,15 @@ const BETWEEN_PAIR = new RegExp('\\bbetween\\s+' + CLIP_REF + '\\s+(?:and|&)\\s+
 function parseTransitionIntent(normalized: string): TransitionIntent | undefined {
   if (!TRANSITION_WORDS.test(normalized)) return undefined;
   const remove = TRANSITION_REMOVE.test(normalized);
-  // "no transitions, hard cuts only" asks for nothing to check.
-  if (!remove && TRANSITION_NEGATED.test(normalized)) return undefined;
+  // "no transitions, hard cuts only" asks for nothing to check, but "a crossfade between A and B,
+  // but no other transitions" still asks for one: skip only when nothing positive is left once
+  // the negated phrases are taken out.
+  if (
+    !remove &&
+    TRANSITION_NEGATED.test(normalized) &&
+    !TRANSITION_WORDS.test(normalized.replace(new RegExp(TRANSITION_NEGATED.source, 'gu'), ' '))
+  )
+    return undefined;
   const pairs = [...normalized.matchAll(BETWEEN_PAIR)].map(
     (match) => [match[1]!, match[2]!] as const,
   );
