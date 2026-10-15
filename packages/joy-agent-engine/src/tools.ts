@@ -13,8 +13,7 @@ import {
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
 /**
  * Models often add the clip's timeline start to a submit_plan checklist item (BUGS.md 9).
- * It is accepted so the plan isn't rejected, then dropped: start positions are verified by
- * the CLI from the user's request, not from the checklist.
+ * It is kept and verified like the rest of the item (F4: dropping it hid wrong start times).
  */
 const checklistStartHint = {
   timelineStartUs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
@@ -129,7 +128,7 @@ export const JOY_CHECKLIST_TEXT_POSITIONS = ['center', 'bottom', 'middle', 'top'
 export type JoyChecklistTextPosition = (typeof JOY_CHECKLIST_TEXT_POSITIONS)[number];
 export type JoyTimelineOperation = z.infer<typeof timelineOperation>;
 export type JoyDocumentOperation = z.infer<typeof documentOperation>;
-export type JoyPlanChecklistItem =
+export type JoyPlanChecklistItem = (
   | {
       readonly kind: 'trim';
       readonly clipId: string;
@@ -146,7 +145,11 @@ export type JoyPlanChecklistItem =
       readonly kind: 'look';
       readonly clipId: string;
       readonly look: 'crt' | 'bw' | 'warm' | 'cool';
-    };
+    }
+) & {
+  /** Where the clip or caption should start on the timeline; verified by the CLI. */
+  readonly timelineStartUs?: number | undefined;
+};
 
 export interface JoyAgentToolBridge {
   readonly hasSubmittedPlan?: () => boolean;
@@ -645,7 +648,7 @@ export function createJoyAgentTools(
     }),
     submit_plan: tool({
       description:
-        'Finalize the staged plan for JOY approval. Include a non-empty checklist that covers every staged operation type and each requested outcome (trim source range, centered text, look, start position, or duration) so the CLI can verify the final timeline. The CLI independently checks explicit outcomes from the user request.',
+        'Finalize the staged plan for JOY approval. Include a non-empty checklist that covers every staged operation type and each requested outcome (trim source range, text with its position and timelineStartUs, look, start position, or duration) so the CLI can verify the final timeline. The CLI independently checks explicit outcomes from the user request.',
       inputSchema: z
         .object({
           checklist: z
@@ -686,9 +689,8 @@ export function createJoyAgentTools(
       execute: async (input) =>
         boundedResult(
           await bridge.submitPlan({
-            // The start hint is informational: the CLI checks start positions from the request.
-            checklist: input.checklist.map(
-              ({ timelineStartUs: _timelineStartUs, ...item }) => item,
+            checklist: input.checklist.map(({ timelineStartUs, ...item }) =>
+              timelineStartUs === undefined ? item : { ...item, timelineStartUs },
             ),
           }),
           maxPayloadBytes,

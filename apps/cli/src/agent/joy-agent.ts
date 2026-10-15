@@ -379,6 +379,19 @@ interface RequestIntent {
   trimRange?: readonly [number, number];
   look?: 'crt' | 'bw' | 'warm' | 'cool';
   durationUs?: number;
+  /** Quoted caption text with the time range the request gave it (`"Hi" from 0s to 4s`). */
+  captionTimes?: readonly { text: string; startUs: number; endUs: number }[];
+}
+
+const QUOTED_TIMED_TEXT =
+  /["“«]([^"“”«»]{1,400})["”»]\s*,?\s*\(?\s*(?:from|between|at|از)?\s*(\d+(?:\.\d+)?)\s*(?:s|secs?|seconds?|ثانیه)?\s*(?:to|until|and|[-–]|تا)\s*(\d+(?:\.\d+)?)\s*(?:s\b|secs?\b|seconds?\b|ثانیه)?/giu;
+
+function parseCaptionTimes(request: string): { text: string; startUs: number; endUs: number }[] {
+  return [...request.matchAll(QUOTED_TIMED_TEXT)].flatMap((match) => {
+    const startUs = Math.round(Number(match[2]) * 1_000_000);
+    const endUs = Math.round(Number(match[3]) * 1_000_000);
+    return endUs > startUs ? [{ text: match[1]!.trim(), startUs, endUs }] : [];
+  });
 }
 
 function parseRequestIntent(request: string): RequestIntent {
@@ -413,6 +426,8 @@ function parseRequestIntent(request: string): RequestIntent {
   const duration = /(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\s+long/i.exec(normalized);
   if (duration?.[1]) intent.durationUs = Math.round(Number(duration[1]) * 1_000_000);
   intent.verticalCenterText = /\b(middle|vertically)\b/i.test(normalized);
+  const captionTimes = parseCaptionTimes(request);
+  if (captionTimes.length > 0) intent.captionTimes = captionTimes;
   return intent;
 }
 
@@ -496,6 +511,22 @@ export function verifyRequestIntent(
       hasLook ? `Request: ${intent.look} look` : `request asked for ${intent.look} look`,
     );
   }
+  for (const wanted of intent.captionTimes ?? []) {
+    const matches = captionClipsWithText(project, clips, wanted.text);
+    const placed = matches.some(
+      (clip) => clip.startUs === wanted.startUs && clip.startUs + clip.durationUs === wanted.endUs,
+    );
+    const range = `${seconds(wanted.startUs)} to ${seconds(wanted.endUs)}`;
+    if (placed) verified.push(`Request: caption “${wanted.text}” from ${range}`);
+    else
+      unmet.push(
+        `request asked for caption “${wanted.text}” from ${range}; ${
+          matches.length === 0
+            ? 'no caption has that text'
+            : `it is at ${matches.map((clip) => `${seconds(clip.startUs)} to ${seconds(clip.startUs + clip.durationUs)}`).join(', ')}`
+        }`,
+      );
+  }
   if (intent.durationUs !== undefined) {
     const durationMatches = root?.durationUs === intent.durationUs;
     (durationMatches ? verified : unmet).push(
@@ -507,6 +538,50 @@ export function verifyRequestIntent(
   return { verified, unmet };
 }
 
+function seconds(us: number): string {
+  return `${Number((us / 1_000_000).toFixed(3))}s`;
+}
+
+type TimelineClip = NonNullable<
+  JoyProjectV1['compositions'][string]
+>['tracks'][number]['clips'][number];
+
+function captionText(project: JoyProjectV1, documentId: string): string | undefined {
+  const document = project.captionDocuments?.[documentId];
+  return document?.segments
+    .map(
+      (segment) =>
+        segment.textOverride ??
+        segment.wordIds.map((id) => document.words[id]?.text ?? '').join(''),
+    )
+    .join(' ');
+}
+
+/** Caption clips whose text is exactly `text`. */
+function captionClipsWithText(
+  project: JoyProjectV1,
+  clips: readonly TimelineClip[],
+  text: string,
+): TimelineClip[] {
+  return clips.filter(
+    (clip) => clip.kind === 'caption' && captionText(project, clip.captionDocumentId) === text,
+  );
+}
+
+function checklistItemStart(
+  project: JoyProjectV1,
+  clips: readonly TimelineClip[],
+  item: JoyPlanChecklistItem,
+): number | undefined {
+  if (item.kind === 'text') {
+    const matches = captionClipsWithText(project, clips, item.text);
+    return (
+      matches.find((clip) => clip.startUs === item.timelineStartUs)?.startUs ?? matches[0]?.startUs
+    );
+  }
+  return clips.find((clip) => clip.id === item.clipId)?.startUs;
+}
+
 export function verifyPlanChecklist(
   project: JoyProjectV1,
   checklist: readonly JoyPlanChecklistItem[],
@@ -516,6 +591,16 @@ export function verifyPlanChecklist(
   const verified: string[] = [];
   const unmet: string[] = [];
   for (const item of checklist) {
+    if (item.timelineStartUs !== undefined) {
+      const start = checklistItemStart(project, clips, item);
+      const label = item.kind === 'text' ? `text “${item.text}”` : `${item.kind} ${item.clipId}`;
+      if (start === item.timelineStartUs)
+        verified.push(`Start of ${label}: ${seconds(item.timelineStartUs)}`);
+      else
+        unmet.push(
+          `${label} expected to start at ${seconds(item.timelineStartUs)} but starts at ${start === undefined ? 'nothing' : seconds(start)}`,
+        );
+    }
     if (item.kind === 'trim') {
       const clip = clips.find((candidate) => candidate.id === item.clipId);
       const actualIn = clip?.kind === 'video' ? clip.sourceInUs : undefined;
