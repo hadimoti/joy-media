@@ -431,7 +431,7 @@ const TRANSITION_WORDS = new RegExp(
   'u',
 );
 const TRANSITION_NEGATED = new RegExp(
-  '\\b(?:no|without|zero)\\b[^.]{0,30}\\b(?:transitions?|cross-?fades?|dissolves?)\\b|\\bhard cuts?\\b|' +
+  "(?:\\b(?:no|without|zero|never|avoid|dont)\\b|\\bdo not\\b|\\bdon[\u2019']t\\b)[^.]{0,30}\\b(?:transitions?|cross-?fades?|dissolves?)\\b|\\bhard cuts?\\b|" +
     FA_WITHOUT,
   'u',
 );
