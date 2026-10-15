@@ -442,7 +442,12 @@ import {
   ZoomInIcon,
 } from './icons.js';
 import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
-import { getStoredMediaToken, MEDIA_SESSION_CHANGED_EVENT } from './media-session.js';
+import {
+  getStoredMediaToken,
+  isMediaSessionPersisted,
+  MEDIA_SESSION_CHANGED_EVENT,
+  SESSION_NOT_PERSISTED_NOTICE,
+} from './media-session.js';
 import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   markCompletedExportCacheUnavailable,
@@ -1369,6 +1374,14 @@ function EditorWorkspace({
       projectPackageNotice.startsWith('Project import failed:') ? 'error' : 'success',
     );
   }, [projectPackageNotice, showToast]);
+  // FT2 review MUST1: without an OS keyring the sign-in lasts for this run only; say so.
+  useEffect(() => {
+    const warnIfNotPersisted = (): void => {
+      if (!isMediaSessionPersisted()) showToast(SESSION_NOT_PERSISTED_NOTICE, 'error');
+    };
+    window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, warnIfNotPersisted);
+    return () => window.removeEventListener(MEDIA_SESSION_CHANGED_EVENT, warnIfNotPersisted);
+  }, [showToast]);
   useEffect(() => {
     if (lastExportRef.current !== null) return;
     const entry = exportHistory.find((candidate) => candidate.status === 'completed');

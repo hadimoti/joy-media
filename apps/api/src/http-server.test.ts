@@ -428,6 +428,11 @@ describe('control-plane HTTP transport', () => {
       status: 200,
       body: { ok: true, liveness: true },
     });
+    // #15: /health names the live build.
+    expect(await request(origin, 'GET', '/health')).toMatchObject({
+      status: 200,
+      body: { ok: true, commit: 'aaaaaaaaaaaa' },
+    });
     expect(await request(origin, 'GET', '/ready')).toMatchObject({
       status: 503,
       body: {
@@ -444,7 +449,7 @@ describe('control-plane HTTP transport', () => {
 
     expect(await request(origin, 'GET', '/health')).toMatchObject({
       status: 200,
-      body: { ok: true, controlPlane: true },
+      body: { ok: true, controlPlane: true, commit: null },
     });
     expect(
       await request(origin, 'POST', '/v1/projects', { id: 'p', title: 'Project' }),

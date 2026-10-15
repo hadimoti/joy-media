@@ -131,7 +131,8 @@ export async function handleAssetCommand(args: string[], flags: CliFlags): Promi
     logError(`Could not save imported asset: ${String(error)}`);
     return 1;
   }
-  logSuccess(`Imported ${asset.displayName} as ${asset.id}.`);
+  if (flags.json) console.log(JSON.stringify({ ok: true, assetId: asset.id, kind: asset.kind }));
+  else logSuccess(`Imported ${asset.displayName} as ${asset.id}.`);
   return 0;
 }
 

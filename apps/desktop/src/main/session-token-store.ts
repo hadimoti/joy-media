@@ -7,6 +7,8 @@ export interface SessionTokenStore {
   get(): Promise<string | undefined>;
   set(token: string): Promise<void>;
   clear(): Promise<void>;
+  /** False when the token is kept in memory only (no OS keyring) and will not survive a restart. */
+  isPersistent?(): boolean;
 }
 
 /** Stores the session token encrypted by Electron safeStorage in the app's userData folder. */
@@ -34,19 +36,27 @@ export function createSessionTokenStore(
   };
 
   return {
+    isPersistent: () => encryptionAvailable(),
     async get() {
       if (!encryptionAvailable()) return memoryToken;
       try {
         const ciphertext = fs.readFileSync(filePath);
         const token = safeStorage.decryptString(ciphertext);
+        if (token.length === 0 || token.length > 8192)
+          throw new Error('session token file is not a token');
         memoryToken = token;
         return token;
-      } catch {
-        memoryToken = undefined;
-        try {
-          fs.rmSync(filePath, { force: true });
-        } catch {
-          // A corrupt value is treated as absent even if the file cannot be removed.
+      } catch (error) {
+        // A single decrypt failure keeps the file: a transient keyring glitch must not sign the
+        // user out permanently (r17 follow-up). Only a value that decodes but is not a token is
+        // removed.
+        if (error instanceof Error && error.message === 'session token file is not a token') {
+          memoryToken = undefined;
+          try {
+            fs.rmSync(filePath, { force: true });
+          } catch {
+            // Treated as absent even if the file cannot be removed.
+          }
         }
         return undefined;
       }

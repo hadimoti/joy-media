@@ -17,6 +17,7 @@ import {
 import { c, logInfo, logStep, logSuccess, logWarn } from '../utils/logger.js';
 import {
   CliJoyAgentToolBridge,
+  summarizePlacements,
   type AppliedTimelineSummary,
   type StagedOperationsSummary,
 } from './bridge.js';
@@ -249,7 +250,13 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     },
   });
 
-  if (!options.json) logSuccess(`Joy Agent finished in ${runResult.steps} step(s).`);
+  if (!options.json) {
+    if (runResult.status === 'partial')
+      logWarn(`Joy Agent stopped after ${runResult.steps} step(s) without a final plan.`);
+    else logSuccess(`Joy Agent finished in ${runResult.steps} step(s).`);
+  }
+  const limitHit =
+    runResult.partialReason === 'step-limit' || runResult.partialReason === 'tool-call-limit';
   if (runResult.resolvedModelId && runResult.resolvedModelId !== config.modelId) {
     if (!options.json) logInfo(`Model: ${config.modelId} → ${runResult.resolvedModelId}`);
   }
@@ -307,11 +314,16 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     }
   }
 
-  if (runResult.partialReason === 'no-plan' || (options.apply && !bridge.hasSubmittedPlan())) {
+  if (limitHit) {
+    errors = [...errors, partialLimitMessage(runResult.partialReason, runResult.limit)];
+  } else if (
+    runResult.partialReason === 'no-plan' ||
+    (options.apply && !bridge.hasSubmittedPlan())
+  ) {
     // The engine retries only after a frame-only turn; do not claim a retry that did not happen.
     errors = [...errors, 'No plan was submitted, so nothing was applied.'];
   } else if (runResult.status === 'partial') {
-    errors = [...errors, partialLimitMessage(runResult.partialReason)];
+    errors = [...errors, partialLimitMessage(runResult.partialReason, runResult.limit)];
   }
 
   return {
@@ -319,7 +331,7 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
       runResult.status === 'partial'
         ? runResult.partialReason === 'no-plan'
           ? 'Partial run: no plan was submitted. Nothing was applied.'
-          : partialLimitMessage(runResult.partialReason)
+          : partialLimitMessage(runResult.partialReason, runResult.limit)
         : truthfulAgentSummary({
             applyRequested: options.apply === true,
             applied,
@@ -488,12 +500,31 @@ const NAMED_PAIR = new RegExp(
  * and "and" when a new verb follows ("crossfade A and B and don't add ...").
  */
 const CLAUSE_SPLIT =
-  /[.;,!?\u060c\u061b]|(?<!\d):(?!\d)|\bbut\b|\bthen\b|\band\s+(?=(?:add|put|use|insert|apply|make|keep|do|don|never|avoid|crossfade|cross-fade|dissolve|remove|delete|drop)\b)|\u0648\u0644\u06cc|\u0627\u0645\u0627|\s\u0648\s/u;
+  /[.;,!?\u060c\u061b]|(?<!\d):(?!\d)|\bbut\b|\bthen\b|\band\s+(?=(?:add|put|use|insert|apply|make|keep|do|don|never|avoid|crossfade|cross-fade|dissolve|remove|delete|drop)\b)|\u0648\u0644\u06cc|\u0627\u0645\u0627|\s\u0648\s(?![0-9\u06f0-\u06f9]|\u06a9\u0644\u06cc\u067e|[a-z]\b)/u;
+
+const FA_CLIP = '(?:\u06a9\u0644\u06cc\u067e\\s*)?'; // optional "کلیپ"
+const FA_NAMED_PAIR = new RegExp(
+  '\u0628\u06cc\u0646\\s+' + // "بین" (between)
+    FA_CLIP +
+    '([0-9\u06f0-\u06f9]+|[a-z])\\s+\u0648\\s*' + // "و" (and)
+    FA_CLIP +
+    '([0-9\u06f0-\u06f9]+|[a-z])',
+  'gu',
+);
+
+function persianDigits(value: string): string {
+  return value.replace(/[\u06f0-\u06f9]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0));
+}
 
 function parseTransitionIntent(normalized: string): TransitionIntent | undefined {
   if (!TRANSITION_WORDS.test(normalized)) return undefined;
-  const pairsIn = (text: string) =>
-    [...text.matchAll(NAMED_PAIR)].map((match) => [match[1]!, match[2]!] as const);
+  const pairsIn = (text: string) => [
+    ...[...text.matchAll(NAMED_PAIR)].map((match) => [match[1]!, match[2]!] as const),
+    // Persian: "بین کلیپ ۱ و ۲" (between clip 1 and 2), Persian or ASCII digits or a letter.
+    ...[...text.matchAll(FA_NAMED_PAIR)].map(
+      (match) => [persianDigits(match[1]!), persianDigits(match[2]!)] as const,
+    ),
+  ];
   const unsupported = UNSUPPORTED_TRANSITION_TYPE.exec(normalized)?.[1];
   if (TRANSITION_REMOVE.test(normalized))
     return {
@@ -508,6 +539,12 @@ function parseTransitionIntent(normalized: string): TransitionIntent | undefined
   const negatedPairs: (readonly [string, string])[] = [];
   let positive = false;
   for (const clause of normalized.split(CLAUSE_SPLIT)) {
+    // "…between B and C, not between A and B": a bare "not between X and Y" clause in a
+    // transition request forbids that pair.
+    if (/^\s*not\s+between\b/.test(clause)) {
+      negatedPairs.push(...pairsIn(clause));
+      continue;
+    }
     if (!TRANSITION_WORDS.test(clause) && !/\bhard cuts?\b/.test(clause)) continue;
     // Strip only the negated spans; whatever transition request is left is still positive. When in
     // doubt this keeps the check (unmet) rather than skipping it.
@@ -666,7 +703,7 @@ function parseRequestIntent(request: string): RequestIntent {
   const intent: RequestIntent = {
     centerText: /\b(center|centre|centered|centred|middle)\b|وسط.?چین|وسط/i.test(normalized),
     startAtZero:
-      /\b(at the start|at 0|from the beginning|start at zero)\b|از ابتدا|از ابتدای|از شروع/i.test(
+      /\b(at the start|at 0(?!\d|[:.,]\d)|from the beginning|start at zero)\b|از ابتدا|از ابتدای|از شروع/i.test(
         normalized,
       ),
   };
@@ -774,9 +811,53 @@ export function verifyRequestIntent(
     );
   }
   if (intent.startAtZero) {
-    const startsAtZero = clips.some((clip) => clip.startUs === 0);
+    // Audit item 2: when this run moved clips, one of the moved clips must be the one at 0; a
+    // clip that already sat at 0 does not prove "move clip B to the start".
+    const startBefore = new Map(
+      (before?.compositions[before.rootCompositionId]?.tracks ?? [])
+        .flatMap((track) => track.clips)
+        .map((clip) => [clip.id, clip.startUs] as const),
+    );
+    const moved = clips.filter(
+      (clip) => startBefore.has(clip.id) && startBefore.get(clip.id) !== clip.startUs,
+    );
+    // FT2 review HIGH: with a `before` project, only clips this run moved, added or changed
+    // count; an untouched clip that already sat at 0 does not prove "move clip C to start at 0".
+    const clipBefore = new Map(
+      (before?.compositions[before.rootCompositionId]?.tracks ?? [])
+        .flatMap((track) => track.clips)
+        .map((clip) => [clip.id, JSON.stringify(clip)] as const),
+    );
+    const touched = clips.filter((clip) => clipBefore.get(clip.id) !== JSON.stringify(clip));
+    // A named clip ("move clip C to start at 0") must itself be changed by this run and sit at 0.
+    // Letters and numbers name clips by their order before this run.
+    const namedRef = /\bclip\s+([a-z0-9][\w-]*)\b/i.exec(request)?.[1];
+    const orderBefore = [
+      ...(before?.compositions[before.rootCompositionId]?.tracks ?? []).flatMap(
+        (track) => track.clips,
+      ),
+    ].sort((left, right) => left.startUs - right.startUs);
+    const namedId =
+      namedRef === undefined
+        ? undefined
+        : resolveClipRef(namedRef, before === undefined ? clips : orderBefore);
+    const candidates =
+      namedId !== undefined
+        ? (before === undefined ? clips : touched).filter((clip) => clip.id === namedId)
+        : before === undefined
+          ? clips
+          : moved.length > 0
+            ? moved
+            : touched;
+    const startsAtZero = candidates.some((clip) => clip.startUs === 0);
     (startsAtZero ? verified : unmet).push(
-      startsAtZero ? 'Request: clip starts at 0' : 'request asked for a clip starting at 0',
+      startsAtZero
+        ? 'Request: clip starts at 0'
+        : before === undefined || candidates.length > 0
+          ? 'request asked for a clip starting at 0'
+          : namedId !== undefined && touched.length > 0
+            ? `request asked for ${namedId} to start at 0, but this run did not change ${namedId}`
+            : 'request asked for a clip starting at 0, but this run moved no clip',
     );
   }
   if (intent.trimRange) {
@@ -794,15 +875,40 @@ export function verifyRequestIntent(
     );
   }
   if (intent.look) {
-    const hasLook = clips.some(
-      (clip) => clip.kind === 'video' && clip.look?.preset === intent.look,
-    );
+    // Audit item 4: "both/all/every/each clip(s)" needs the look on every video clip.
+    const videoClips = clips.filter((clip) => clip.kind === 'video');
+    // "all clips", "both videos", "each of the shots", "both of them"; not "keep all audio".
+    const everyClip =
+      /\b(?:both|all|every|each)\s+(?:of\s+)?(?:(?:the|my|these|those)\s+)?(?:\w+\s+)?(?:clips?|videos?|shots?|them)\b/.test(
+        request.toLowerCase(),
+      );
+    const hasLook = everyClip
+      ? videoClips.length > 0 &&
+        videoClips.every((clip) => clip.kind === 'video' && clip.look?.preset === intent.look)
+      : videoClips.some((clip) => clip.kind === 'video' && clip.look?.preset === intent.look);
     (hasLook ? verified : unmet).push(
       hasLook ? `Request: ${intent.look} look` : `request asked for ${intent.look} look`,
     );
   }
   if (intent.transition)
     verifyTransitionIntent(intent.transition, project, before, clips, verified, unmet);
+  if (before !== undefined && !requestsExplicitGap(request)) {
+    // #7: a trim that leaves a hole between clips renders black there. Only holes this run
+    // created and that have content after them count; a shorter ending is not a black gap.
+    const durationUs = root?.durationUs ?? 0;
+    const interior = (source: JoyProjectV1) =>
+      summarizePlacements(source).blackRegions.filter((region) => region.endUs < durationUs);
+    const earlier = interior(before);
+    for (const region of interior(project)) {
+      const existed = earlier.some(
+        (old) => old.startUs <= region.startUs && old.endUs >= region.endUs,
+      );
+      if (!existed)
+        unmet.push(
+          `this run left a black gap at ${formatSeconds(region.startUs)}–${formatSeconds(region.endUs)} (no clip covers it); close the gap or ask for it explicitly`,
+        );
+    }
+  }
   if (intent.fadeInOut)
     unmet.push('request asked for a fade in/out; fades from or to black are not supported');
   if (intent.speed !== undefined) {
@@ -913,6 +1019,25 @@ function checklistItemStart(
   return clips.find((clip) => clip.id === clipId)?.startUs;
 }
 
+/**
+ * R1: a transition is anchored at its cut (where the right clip starts), but some models report
+ * where the blend begins (cut - duration). Both describe the same crossfade, so any start in
+ * [cut - duration, cut] is accepted.
+ */
+function transitionStartAccepted(
+  project: JoyProjectV1,
+  item: JoyPlanChecklistItem & { kind: 'transition' },
+  cutUs: number,
+  claimedUs: number,
+): boolean {
+  const transition = (
+    project as { transitions?: readonly (TransitionLike & { durationUs?: number })[] }
+  ).transitions?.find((candidate) => samePair(candidate, item.leftClipId, item.rightClipId));
+  if (!transition) return false;
+  const durationUs = transition.durationUs ?? 1_000_000;
+  return claimedUs >= cutUs - durationUs && claimedUs <= cutUs;
+}
+
 export function verifyPlanChecklist(
   project: JoyProjectV1,
   checklist: readonly JoyPlanChecklistItem[],
@@ -930,7 +1055,12 @@ export function verifyPlanChecklist(
           : item.kind === 'transition'
             ? `transition ${item.leftClipId} → ${item.rightClipId}`
             : `${item.kind} ${item.clipId}`;
-      if (start === item.timelineStartUs)
+      if (
+        start === item.timelineStartUs ||
+        (item.kind === 'transition' &&
+          start !== undefined &&
+          transitionStartAccepted(project, item, start, item.timelineStartUs))
+      )
         verified.push(`Start of ${label}: ${seconds(item.timelineStartUs)}`);
       else
         unmet.push(
@@ -1054,8 +1184,43 @@ export function truthfulAgentSummary(input: {
   return 'No project changes were made.';
 }
 
-function partialLimitMessage(reason: string | undefined): string {
+function partialLimitMessage(reason: string | undefined, value?: number): string {
   const limit =
     reason === 'step-limit' ? 'step' : reason === 'tool-call-limit' ? 'tool-call' : 'safety';
-  return `Run stopped at the ${limit} limit before the plan was final; nothing was applied.`;
+  const count =
+    value === undefined || limit === 'safety'
+      ? ''
+      : ` (${value} ${limit === 'step' ? 'steps' : 'tool calls'})`;
+  return `Run stopped at the ${limit} limit${count} before the plan was final; nothing was applied.`;
+}
+
+/**
+ * True only for an explicit ask to leave a gap ("leave a 2s black gap", "add 2 seconds of black").
+ * "don't leave any gaps", "the title can stay blank" and "black and white look" are not.
+ */
+function requestsExplicitGap(request: string): boolean {
+  const text = request.toLowerCase().replace(/black[\s-]*(?:and|&)[\s-]*white/g, ' ');
+  // FT2b: a clause with any negation ("I don't want to leave a gap", "make sure not to leave a
+  // gap", "no need to…", Persian نه / بدون / a ن-prefixed verb) is never an explicit gap request.
+  return text
+    .split(/[.;,!?\u060c\u061b]|\bbut\b|\bthen\b|\band\b|\s\u0648\s/u)
+    .some((clause) => !GAP_NEGATION.test(clause) && clauseAsksForGap(clause));
+}
+
+const GAP_NEGATION =
+  /\b(?:not|no|never|without|avoid|cannot|nothing|none)\b|n['\u2019]t\b|(?:^|\s)(?:\u0646\u0647|\u0628\u062f\u0648\u0646)(?=\s|$)|(?:^|\s)\u0646[\u0600-\u06ff]+/u;
+
+function clauseAsksForGap(text: string): boolean {
+  const verb = '\\b(?:leave|keep|add|insert|put|create|want)';
+  const amount = '(?:\\d+(?:\\.\\d+)?\\s*(?:s|secs?|seconds?)\\s+)?';
+  return (
+    new RegExp(
+      `${verb}\\s+(?:a\\s+|an\\s+|the\\s+)?${amount}(?:black\\s+|blank\\s+|empty\\s+)?gaps?\\b`,
+    ).test(text) ||
+    new RegExp(`${verb}\\s+${amount.slice(0, -1)}\\s*of\\s+(?:black|blank)\\b`).test(text)
+  );
+}
+
+function formatSeconds(microseconds: number): string {
+  return `${(microseconds / 1_000_000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}s`;
 }

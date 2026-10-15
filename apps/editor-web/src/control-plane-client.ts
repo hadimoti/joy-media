@@ -1,6 +1,6 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
-import { getRemoteApiBaseUrl } from './desktop-client.js';
+import { getRemoteApiBaseUrl, isDesktopHost } from './desktop-client.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
 import type {
   JoyProjectV1,
@@ -301,9 +301,17 @@ export class BrowserControlPlaneClient {
     private readonly apiUrl = getRemoteApiBaseUrl(),
     private readonly tokenProvider: () => string | undefined | Promise<string | undefined> = () =>
       getStoredMediaToken(),
+    /**
+     * The desktop app runs projects, its media library and Workers locally. The hosted
+     * `/v1/workers`, `/v1/library/my-assets` and `/v1/projects/ensure` routes are retired in
+     * production (nginx 404, no CORS headers), so calling them only produced console CORS
+     * errors on every launch (bug #9). Inside the desktop host they are not called.
+     */
+    private readonly skipRetiredHostedRoutes: boolean = isDesktopHost(),
   ) {}
 
   async workers(): Promise<readonly BrowserWorker[]> {
+    if (this.skipRetiredHostedRoutes) return [];
     return this.coalescedGet('/v1/workers', WORKER_READ_CACHE_TTL_MS);
   }
   async openGpuPreviewSession(projectId: string): Promise<BrowserGpuPreviewSession> {
@@ -426,6 +434,7 @@ export class BrowserControlPlaneClient {
    * available to cross-project library consumers.
    */
   async myAssets(projectId?: string): Promise<readonly BrowserAsset[]> {
+    if (this.skipRetiredHostedRoutes) return [];
     const query = projectId === undefined ? '' : `?projectId=${encodeURIComponent(projectId)}`;
     const { browserAssetList } = await browserProjections;
     return browserAssetList(await this.get<unknown>(`/v1/library/my-assets${query}`));
@@ -493,6 +502,7 @@ export class BrowserControlPlaneClient {
   }
 
   async ensureProject(id: string, title: string): Promise<void> {
+    if (this.skipRetiredHostedRoutes) return;
     await this.post('/v1/projects/ensure', { id, title });
   }
   async derivatives(projectId: string, assetId: string): Promise<readonly BrowserDerivative[]> {

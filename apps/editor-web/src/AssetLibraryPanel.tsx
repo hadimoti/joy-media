@@ -336,7 +336,11 @@ export function AssetLibraryPanel({
       // Render catalog metadata immediately. Derivatives only improve add-to-
       // timeline behavior and must not make the libraries appear empty while
       // their requests settle.
-      setItems(assets.map((asset) => ({ asset, derivatives: [] })));
+      setItems((current) => [
+        ...assets.map((asset) => ({ asset, derivatives: [] as readonly BrowserDerivative[] })),
+        // Offline imports (#20) are not in any catalog yet; keep them listed.
+        ...current.filter((item) => item.asset.cloudBacked === false && !byId.has(item.asset.id)),
+      ]);
       if (sharedResult.status === 'rejected') {
         setStatus(
           `Cloud library unavailable (${message(sharedResult.reason)}). Showing ${assets.length} owned item(s).`,
@@ -468,12 +472,16 @@ export function AssetLibraryPanel({
       return;
     }
     try {
+      // Without a JOY session the original stays on this device instead of failing with
+      // "JOY Media session required" (#20). It is backed up after the user signs in.
+      const localOnly = (await getStoredMediaToken()) === undefined;
       const imported = await importMediaFile({
         projectId,
         projectTitle,
         file: selectedFile,
         client,
         originalAssetCache,
+        localOnly,
         onProgress: ({ ratio, message: progressMessage }) => {
           setImportProgress(ratio);
           setStatus(progressMessage);
@@ -490,13 +498,15 @@ export function AssetLibraryPanel({
       setSort(reveal.sort);
       setRenderLimit(reveal.renderLimit);
       setStatus(
-        `${selectedFile.name} backed up to the cloud. Agent tags applied; catalog refreshing.`,
+        localOnly
+          ? `${selectedFile.name} saved on this device only (offline import; it is not uploaded to the cloud).`
+          : `${selectedFile.name} backed up to the cloud. Agent tags applied; catalog refreshing.`,
       );
       setImportProgress(1);
       setSelectedFile(undefined);
       if (fileInputRef.current !== null) fileInputRef.current.value = '';
       setImportOpen(false);
-      await refresh();
+      if (!localOnly) await refresh();
       window.setTimeout(() => setImportProgress(undefined), 350);
     } catch (error) {
       setImportProgress(undefined);

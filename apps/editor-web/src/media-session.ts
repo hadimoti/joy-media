@@ -20,9 +20,24 @@ export const MEDIA_SESSION_CHANGED_EVENT = 'joy-media-session-changed';
 
 export interface MediaSessionTokenBackend {
   get(): Promise<string | undefined>;
-  set(token: string): Promise<void>;
+  /** Resolves false when the token was kept in memory only and will not survive a restart. */
+  set(token: string): Promise<boolean | void>;
   clear(): Promise<void>;
 }
+
+let sessionPersisted = true;
+
+/**
+ * False after the desktop host reported it could not store the session token securely (no OS
+ * keyring): the user stays signed in for this run only. UI can tell the user (r17 follow-up).
+ */
+export function isMediaSessionPersisted(): boolean {
+  return sessionPersisted;
+}
+
+/** Shown when the desktop has no OS keyring: the token is held in memory for this run only. */
+export const SESSION_NOT_PERSISTED_NOTICE =
+  'This computer has no secure keyring, so your JOY sign-in is kept for this session only. You will be signed out when the app closes.';
 
 const memoryBackend = (() => {
   let token: string | undefined;
@@ -32,6 +47,7 @@ const memoryBackend = (() => {
     },
     async set(value: string) {
       token = value;
+      return true;
     },
     async clear() {
       token = undefined;
@@ -93,6 +109,7 @@ export function createMemoryMediaSessionTokenBackend(): MediaSessionTokenBackend
     },
     async set(value) {
       token = value;
+      return true;
     },
     async clear() {
       token = undefined;
@@ -112,8 +129,8 @@ function removeLegacyTokenAfterMigration(): void {
 export function initializeMediaSessionToken(): Promise<void> {
   if (initialization !== undefined) return initialization;
   initialization = (async () => {
-    // Only Electron has a protected destination for the legacy value. Browser and test
-    // contexts stay memory-only and must never consume or delete localStorage data.
+    // No secure store outside Electron. Browser and test contexts keep the legacy localStorage
+    // value (memory alone would sign the user out on every reload) and never delete it.
     if (!isDesktopHost()) {
       try {
         cachedToken = await backend.get();
@@ -160,8 +177,20 @@ export function initializeMediaSessionToken(): Promise<void> {
     }
 
     try {
-      await backend.set(legacyToken);
+      const persisted = await backend.set(legacyToken);
+      sessionPersisted = persisted !== false;
       secureToken = await backend.get();
+      if (secureToken === legacyToken && persisted === false) {
+        // No keyring: hold the token in memory for this run only. A plaintext copy must never
+        // outlive sign-out, a restart or an account switch (FT2 review MUST1).
+        cachedToken = secureToken;
+        cacheLoaded = true;
+        removeLegacyTokenAfterMigration();
+        // Let the app show the keyring notice for a session restored by migration (FT2b).
+        if (typeof window !== 'undefined')
+          window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));
+        return;
+      }
       if (secureToken === legacyToken) {
         cachedToken = secureToken;
         cacheLoaded = true;
@@ -194,7 +223,9 @@ export async function setStoredMediaToken(token: string): Promise<void> {
     throw new Error('Invalid session token');
   }
   await initializeMediaSessionToken();
-  await backend.set(token);
+  sessionPersisted = (await backend.set(token)) !== false;
+  // Desktop: a new token replaces any leftover plaintext copy, persisted or not.
+  if (isDesktopHost()) removeLegacyTokenAfterMigration();
   cachedToken = token;
   cacheLoaded = true;
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));
@@ -202,8 +233,14 @@ export async function setStoredMediaToken(token: string): Promise<void> {
 
 export async function clearStoredMediaToken(): Promise<void> {
   await initializeMediaSessionToken();
-  await backend.clear();
-  cachedToken = undefined;
+  // FT2b: drop any plaintext copy first, so it goes even when the desktop clear throws.
+  if (isDesktopHost()) removeLegacyTokenAfterMigration();
+  try {
+    await backend.clear();
+  } finally {
+    sessionPersisted = true;
+    cachedToken = undefined;
+  }
   cacheLoaded = true;
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(MEDIA_SESSION_CHANGED_EVENT));
 }
@@ -261,20 +298,47 @@ export async function verifyOtp(
   return data.token;
 }
 
+/** The OS this app runs on, for the device name; was always "Windows" (#10). */
+export function desktopPlatformName(
+  platform: string | undefined = typeof navigator === 'undefined'
+    ? undefined
+    : ((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
+        ?.platform ?? navigator.platform),
+): string {
+  const value = (platform ?? '').toLowerCase();
+  if (value.startsWith('win')) return 'Windows';
+  if (value.startsWith('mac')) return 'macOS';
+  if (value.includes('linux')) return 'Linux';
+  return 'Desktop';
+}
+
+/** One registration per session token, even when several sign-in paths fire at once (#10). */
+const deviceRegistrations = new Map<string, Promise<unknown>>();
+
+export function resetDeviceRegistrationsForTests(): void {
+  deviceRegistrations.clear();
+}
+
 export async function registerDevice(
   displayName?: string,
   fetchFn: typeof fetch = fetch,
 ): Promise<unknown> {
   const token = await getStoredMediaToken();
   if (!token) return undefined;
+  const existing = deviceRegistrations.get(token);
+  if (existing !== undefined) return existing;
   const name =
-    displayName || (isDesktop() ? 'JOY Desktop Studio (Windows)' : 'JOY Web Studio (Browser)');
-  try {
-    return await requestJson(fetchFn, '/v1/devices', { displayName: name }, token);
-  } catch {
-    // Background registration; do not interrupt interactive auth flow.
-    return undefined;
-  }
+    displayName ||
+    (isDesktop() ? `JOY Desktop Studio (${desktopPlatformName()})` : 'JOY Web Studio (Browser)');
+  const registration = requestJson(fetchFn, '/v1/devices', { displayName: name }, token).catch(
+    () => {
+      // Background registration; do not interrupt interactive auth flow. Allow a later retry.
+      deviceRegistrations.delete(token);
+      return undefined;
+    },
+  );
+  deviceRegistrations.set(token, registration);
+  return registration;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

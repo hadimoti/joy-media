@@ -1367,12 +1367,21 @@ export function JoyAgentSettingsDialog({
                             <span>Provider Platform</span>
                             <select
                               value={provider}
-                              onChange={(e) =>
-                                handleProviderChange(
-                                  e.target.value as
-                                    'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible',
-                                )
-                              }
+                              onChange={(e) => {
+                                const next = e.target.value as
+                                  'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible';
+                                // Picking one provider means a single-provider (BYOK) link. Leaving
+                                // the Dual-Brain preset active showed an OpenRouter key field on the
+                                // Kilo form and connected OpenRouter instead of Kilo (bug #22).
+                                if (
+                                  studioPreset === 'dual-brain' &&
+                                  (next === 'kilo' || next === 'openrouter')
+                                ) {
+                                  setStudioPreset('custom');
+                                  persistLastStudioPreset('custom');
+                                }
+                                handleProviderChange(next);
+                              }}
                             >
                               <option value="openrouter">OpenRouter (BYOK)</option>
                               <option value="kilo">Kilo Gateway (api.kilo.ai)</option>

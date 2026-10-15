@@ -118,7 +118,13 @@ export function formatAgentRunFailure(error: unknown, debug: boolean): string {
     const serverDetail = gateway.message ? `${gateway.code}: ${gateway.message}` : gateway.code;
     return `Joy Agent execution failed: ${error.code} (server: ${serverDetail}${httpNote})${debugSuffix}`;
   }
-  return `Joy Agent execution failed: ${error.code}${debugSuffix}`;
+  // #24: an UNKNOWN (or any other code) with no detail gave the user nothing to act on. The
+  // detail message is already redacted by the engine (safeErrorDetail).
+  const reason = error.detail.message.trim();
+  const context = [reason ? `${error.detail.name}: ${reason}` : '', httpNote.slice(2)]
+    .filter((part) => part.length > 0)
+    .join(', ');
+  return `Joy Agent execution failed: ${error.code}${context ? ` (${context})` : ''}${debugSuffix}`;
 }
 
 export function printAgentHelp(): void {

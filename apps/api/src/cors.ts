@@ -13,7 +13,10 @@ export const DEFAULT_CORS_ALLOWED_ORIGINS: readonly string[] = [
 
 const CORS_ALLOWED_METHODS = 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS';
 const CORS_ALLOWED_HEADERS =
-  'authorization, content-type, x-joy-bytes, x-joy-frame-count, x-joy-frame-rate, x-joy-mime-type';
+  'authorization, content-type, x-joy-bytes, x-joy-frame-count, x-joy-frame-rate, x-joy-mime-type, x-joy-sha256, x-joy-part-sha256';
+/** Response headers the desktop renderer reads (upload/preview routes, gateway model fallback). */
+export const CORS_EXPOSED_HEADERS =
+  'retry-after, x-joy-model-used, x-joy-model-requested, x-joy-preview-renderer, x-joy-preview-quality, x-joy-preview-width, x-joy-preview-height, x-joy-preview-request-id';
 const CORS_MAX_AGE_SECONDS = '600';
 
 /** The default list plus JOY_MEDIA_CORS_EXTRA_ORIGINS (comma separated); "*" and "null" are ignored. */
@@ -64,6 +67,9 @@ export function applyCors(
     response.end();
     return true;
   }
-  if (allowed) response.setHeader('access-control-allow-origin', origin);
+  if (allowed) {
+    response.setHeader('access-control-allow-origin', origin);
+    response.setHeader('access-control-expose-headers', CORS_EXPOSED_HEADERS);
+  }
   return false;
 }

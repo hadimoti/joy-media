@@ -211,6 +211,30 @@ describe('ProjectMediaResolver', () => {
     expect(assets).not.toHaveBeenCalled();
   });
 
+  it.each(['asset-product', 'asset-outro', 'asset-b-roll-a', 'asset-b-roll-b'])(
+    '#21: the sample project asset %s resolves to the bundled fixture when signed out',
+    async (assetId) => {
+      const resolver = new ProjectMediaResolver({
+        projectId: 'signed-out-project',
+        controlPlaneReady: false,
+        client: {
+          assets: vi.fn(async () => []),
+          originalBytes: vi.fn(async () => {
+            throw new Error('media API should not be queried');
+          }),
+          sharedCloudOriginalBytes: vi.fn(async () => {
+            throw new Error('shared cloud should not be queried');
+          }),
+        },
+        originalCache: { get: vi.fn(async () => undefined) },
+      });
+      await expect(resolver.resolve(assetId)).resolves.toMatchObject({
+        source: 'reference',
+        url: '/media/reference/asset-intro.mp4',
+      });
+    },
+  );
+
   it('prefers OPFS bytes and reuses the object URL', async () => {
     const blob = new Blob(['local'], { type: 'video/mp4' });
     const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:local');

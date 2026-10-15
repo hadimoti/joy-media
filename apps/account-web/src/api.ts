@@ -65,6 +65,17 @@ export function clearSessionToken(): void {
   }
 }
 
+/** A failed API call; `status` is the HTTP status. */
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ApiRequestError';
+  }
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -85,12 +96,17 @@ async function request<T>(
   });
 
   const text = await res.text();
-  const json = text ? JSON.parse(text) : {};
+  let json: { error?: { message?: string }; data?: unknown } = {};
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    if (res.ok) throw new ApiRequestError('Invalid server response', res.status);
+  }
   if (!res.ok) {
     const msg = json?.error?.message || `Request failed (${res.status})`;
-    throw new Error(msg);
+    throw new ApiRequestError(msg, res.status);
   }
-  return json.data !== undefined ? json.data : json;
+  return (json.data !== undefined ? json.data : json) as T;
 }
 
 export async function requestOtp(contact: string, method: 'gmail' | 'telegram'): Promise<string> {
@@ -128,8 +144,10 @@ export async function fetchUserSession(): Promise<UserSession | null> {
   try {
     const data = await request<UserSession>('/v1/auth/session');
     return data;
-  } catch {
-    clearSessionToken();
+  } catch (error) {
+    // Only a rejected session logs the user out; a network error or a 5xx keeps the token (#25).
+    if (error instanceof ApiRequestError && (error.status === 401 || error.status === 403))
+      clearSessionToken();
     return null;
   }
 }
@@ -151,12 +169,9 @@ export async function fetchLatestRelease(
     const data = await request<ReleaseInfo>(`/v1/releases/${channel}`, {}, null);
     return data;
   } catch {
-    return {
-      channel: 'stable',
-      version: '1.0.0',
-      downloadUrl: '/releases/joy-media-windows-x64-v1.0.0.zip',
-      sha256: '9f2a4f40f317ce53cebfba9a9f2ce5f396414ce53be2df79486c478a1bc1b474',
-    };
+    // No published release (404 RELEASE_NOT_FOUND) or the API is down. Do not invent a version,
+    // download URL and checksum: the old fallback pointed at a file that 404s (#8).
+    return null;
   }
 }
 

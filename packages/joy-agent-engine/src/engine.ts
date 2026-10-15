@@ -105,6 +105,8 @@ export interface JoyAgentRunResult {
   readonly steps: number;
   readonly status: 'completed' | 'partial';
   readonly partialReason?: 'step-limit' | 'tool-call-limit' | 'no-plan';
+  /** The limit that stopped the run (steps or tool calls), when partialReason names one. */
+  readonly limit?: number;
   readonly resolvedModelId?: string;
 }
 
@@ -442,9 +444,14 @@ export class JoyAgentEngine {
       text: result.text,
       steps: result.steps.length,
       status: stepLimitHit || toolCallLimitHit ? 'partial' : 'completed',
-      ...(stepLimitHit ? { partialReason: 'step-limit' as const } : {}),
-      ...(!stepLimitHit && toolCallLimitHit ? { partialReason: 'tool-call-limit' as const } : {}),
-      ...(noPlan ? { status: 'partial' as const, partialReason: 'no-plan' as const } : {}),
+      // R2: a limit is the real reason a run ended without a plan; keep it and name the limit.
+      ...(stepLimitHit ? { partialReason: 'step-limit' as const, limit: maxSteps } : {}),
+      ...(!stepLimitHit && toolCallLimitHit
+        ? { partialReason: 'tool-call-limit' as const, limit: this.limits.maxToolCalls }
+        : {}),
+      ...(noPlan && !stepLimitHit && !toolCallLimitHit
+        ? { status: 'partial' as const, partialReason: 'no-plan' as const }
+        : {}),
       resolvedModelId: result.response?.modelId,
     };
   }

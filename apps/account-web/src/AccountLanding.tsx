@@ -11,6 +11,7 @@ import {
   type DeviceInfo,
   type AgentUsageSummary,
 } from './api.js';
+import { periodEndLabel, planLabel } from './subscription-labels.js';
 
 interface AccountLandingProps {
   readonly user: UserSession;
@@ -117,7 +118,9 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
               <span className="card-kicker">Desktop Client</span>
               <h2>Download JOY Media for Windows</h2>
             </div>
-            <span className="version-tag">Version {release?.version || '1.0.0'} (Stable)</span>
+            <span className="version-tag">
+              Version {release?.version ?? 'unavailable'} (Stable)
+            </span>
           </div>
 
           <p className="card-desc">
@@ -128,7 +131,8 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
 
           <div className="download-actions-row">
             <a
-              href={release?.downloadUrl || '/releases/joy-media-windows-x64-v1.0.0.zip'}
+              href={release?.downloadUrl}
+              aria-disabled={release === null ? true : undefined}
               className="dash-btn-download"
               download
             >
@@ -151,7 +155,9 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
 
             <div className="checksum-container">
               <span className="checksum-label">SHA-256 Checksum:</span>
-              <code className="checksum-code">{release?.sha256 || 'Calculating…'}</code>
+              <code className="checksum-code">
+                {release === null ? 'No release published yet' : release.sha256}
+              </code>
               <button type="button" className="copy-checksum-btn" onClick={copyChecksum}>
                 {copiedSha ? '✓ Copied' : 'Copy'}
               </button>
@@ -194,21 +200,11 @@ export function AccountLanding({ user, release, onLogout }: AccountLandingProps)
           <div className="subscription-details-grid">
             <div className="sub-detail-item">
               <span className="sub-detail-label">Current Plan</span>
-              <span className="sub-detail-value">
-                {subscription?.plan === 'monthly'
-                  ? 'JOY Pro Monthly'
-                  : subscription?.plan === 'yearly'
-                    ? 'JOY Pro Yearly'
-                    : 'Standard Creator'}
-              </span>
+              <span className="sub-detail-value">{planLabel(subscription)}</span>
             </div>
             <div className="sub-detail-item">
               <span className="sub-detail-label">Renewal / Period End</span>
-              <span className="sub-detail-value">
-                {subscription?.currentPeriodEnd
-                  ? new Date(subscription.currentPeriodEnd).toLocaleDateString()
-                  : 'Lifetime Local / No Expiry'}
-              </span>
+              <span className="sub-detail-value">{periodEndLabel(subscription)}</span>
             </div>
             <div className="sub-detail-item">
               <span className="sub-detail-label">Joy Model Gateway</span>

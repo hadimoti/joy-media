@@ -5,7 +5,11 @@ import {
   clearStoredMediaToken,
   createMemoryMediaSessionTokenBackend,
   getStoredMediaToken,
+  desktopPlatformName,
   initializeMediaSessionToken,
+  isMediaSessionPersisted,
+  registerDevice,
+  resetDeviceRegistrationsForTests,
   setMediaSessionTokenBackendForTests,
   setStoredMediaToken,
 } from './media-session.js';
@@ -68,11 +72,38 @@ describe('media session token storage', () => {
     await clearStoredMediaToken();
     expect(vi.mocked(storage.getItem)).toHaveBeenCalledTimes(migrationReads);
     expect(storage.setItem).not.toHaveBeenCalled();
-    expect(vi.mocked(storage.removeItem)).toHaveBeenCalledTimes(migrationDeletes);
+    // FT2 review MUST1: every new token and every sign-out also removes any plaintext copy.
+    expect(vi.mocked(storage.removeItem)).toHaveBeenCalledTimes(migrationDeletes + 2);
     expect(invoke.mock.calls.slice(3).map(([channel]) => channel)).toEqual([
       'desktop.media-session.set',
       'desktop.media-session.clear',
     ]);
+  });
+
+  it('removes the legacy copy when the desktop has no keyring and says the session is not persisted', async () => {
+    const values = new Map([['joy-media-session-token', 'legacy-test-token']]);
+    const storage = {
+      getItem: vi.fn((key: string) => values.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => values.set(key, value)),
+      removeItem: vi.fn((key: string) => values.delete(key)),
+    } as unknown as Storage;
+    let memoryToken: string | undefined;
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'desktop.media-session.get') return memoryToken;
+      if (channel === 'desktop.media-session.set') {
+        memoryToken = payload as string;
+        return { persisted: false, reason: 'secure-storage-unavailable' };
+      }
+      return undefined;
+    });
+    installWindow(storage, { invoke });
+    setMediaSessionTokenBackendForTests();
+
+    await initializeMediaSessionToken();
+
+    expect(await getStoredMediaToken()).toBe('legacy-test-token');
+    expect(values.has('joy-media-session-token')).toBe(false);
+    expect(isMediaSessionPersisted()).toBe(false);
   });
 
   it('deletes a legacy copy when a secure token already exists', async () => {
@@ -176,5 +207,47 @@ describe('session token localStorage guard', () => {
       fs.readFileSync(file, 'utf8').includes('joy-media-session-token'),
     );
     expect(references.map((file) => path.basename(file))).toEqual(['media-session.ts']);
+  });
+});
+
+describe('#10 device registration', () => {
+  it('registers once per session token even when sign-in paths fire together', async () => {
+    resetDeviceRegistrationsForTests();
+    setMediaSessionTokenBackendForTests(createMemoryMediaSessionTokenBackend());
+    await setStoredMediaToken('device-test-token');
+    const fetchFn = vi.fn(
+      async () => new Response(JSON.stringify({ data: { id: 'd1' } }), { status: 201 }),
+    );
+    await Promise.all([
+      registerDevice(undefined, fetchFn as unknown as typeof fetch),
+      registerDevice(undefined, fetchFn as unknown as typeof fetch),
+      registerDevice(undefined, fetchFn as unknown as typeof fetch),
+      registerDevice(undefined, fetchFn as unknown as typeof fetch),
+    ]);
+    await registerDevice(undefined, fetchFn as unknown as typeof fetch);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries after a failed registration', async () => {
+    resetDeviceRegistrationsForTests();
+    setMediaSessionTokenBackendForTests(createMemoryMediaSessionTokenBackend());
+    await setStoredMediaToken('device-retry-token');
+    const fetchFn = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValue(new Response(JSON.stringify({ data: { id: 'd2' } }), { status: 201 }));
+    await registerDevice(undefined, fetchFn as unknown as typeof fetch);
+    await registerDevice(undefined, fetchFn as unknown as typeof fetch);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['Win32', 'Windows'],
+    ['Windows', 'Windows'],
+    ['Linux x86_64', 'Linux'],
+    ['MacIntel', 'macOS'],
+    ['', 'Desktop'],
+  ])('names platform %s as %s', (platform, name) => {
+    expect(desktopPlatformName(platform)).toBe(name);
   });
 });

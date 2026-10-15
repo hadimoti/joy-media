@@ -61,6 +61,46 @@ describe('importMediaFile', () => {
     expect(progress.at(-1)).toBe(1);
   });
 
+  it('#20: imports offline (no session) into the device cache without touching the cloud', async () => {
+    const client = {
+      ensureProject: vi.fn(async () => {
+        throw new Error('JOY Media session required');
+      }),
+      registerAsset: vi.fn(async () => {
+        throw new Error('JOY Media session required');
+      }),
+      assets: vi.fn(async () => []),
+      uploadAssetOriginal: vi.fn(async () => {
+        throw new Error('JOY Media session required');
+      }),
+    } satisfies NonNullable<MediaImportOptions['client']>;
+    const cache = { put: vi.fn(async () => undefined) };
+    const input = new File(['offline bytes'], 'clip.mp4', { type: 'video/mp4' });
+
+    const result = await importMediaFile({
+      projectId: 'project-1',
+      projectTitle: 'Project',
+      file: input,
+      assetId: 'clip-offline',
+      client,
+      originalAssetCache: cache,
+      localOnly: true,
+      describeMedia: async () => ({ mimeType: 'video/mp4', durationUs: 1_000_000 }),
+    });
+
+    expect(cache.put).toHaveBeenCalledTimes(1);
+    expect(client.ensureProject).not.toHaveBeenCalled();
+    expect(client.registerAsset).not.toHaveBeenCalled();
+    expect(client.uploadAssetOriginal).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      id: 'clip-offline',
+      projectId: 'project-1',
+      kind: 'video',
+      cloudBacked: false,
+      bytes: input.size,
+    });
+  });
+
   it('resumes a failed cloud upload when the prior registration matches', async () => {
     const input = new File(['retry bytes'], 'retry.wav', { type: 'audio/wav' });
     const sha256 = await digest(input);

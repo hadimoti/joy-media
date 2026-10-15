@@ -59,10 +59,21 @@ describe('session token store', () => {
     expect(onWarning).toHaveBeenCalledOnce();
   });
 
-  it('treats a corrupt encrypted file as empty and clears it', async () => {
+  it('keeps the token file after a single decrypt failure (r17 follow-up)', async () => {
+    const { filePath, safeStorage, store } = setup();
+    await store.set('token-test-redacted');
+    vi.spyOn(safeStorage, 'decryptString').mockImplementationOnce(() => {
+      throw new Error('keyring temporarily unavailable');
+    });
+    expect(await store.get()).toBeUndefined();
+    expect(fs.existsSync(filePath)).toBe(true);
+    expect(await store.get()).toBe('token-test-redacted');
+  });
+
+  it('treats a corrupt encrypted file as empty but keeps it for a later retry', async () => {
     const { filePath, store } = setup();
     fs.writeFileSync(filePath, 'not-valid-ciphertext', { mode: 0o600 });
     expect(await store.get()).toBeUndefined();
-    expect(fs.existsSync(filePath)).toBe(false);
+    expect(fs.existsSync(filePath)).toBe(true);
   });
 });

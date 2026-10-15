@@ -282,7 +282,15 @@ async function route(
     return;
   }
   if (request.method === 'GET' && url.pathname === '/health') {
-    respondJson(response, 200, { ok: true, service: 'joy-media-api', controlPlane: true });
+    // #15: say which build is live. The commit is non-secret release metadata (same source as
+    // /ready); null when the deployment did not provide a release identity.
+    const commitSha = options.readiness?.releaseIdentity?.commitSha;
+    respondJson(response, 200, {
+      ok: true,
+      service: 'joy-media-api',
+      controlPlane: true,
+      commit: commitSha === undefined ? null : commitSha.slice(0, 12),
+    });
     return;
   }
   if (!url.pathname.startsWith('/v1/')) {

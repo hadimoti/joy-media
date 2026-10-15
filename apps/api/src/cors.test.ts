@@ -77,6 +77,28 @@ describe('CORS for the desktop renderer', () => {
     expect(other.headers['access-control-allow-origin']).toBeUndefined();
   });
 
+  it('allows the upload hash headers and exposes the preview and model headers', async () => {
+    const base = await serve();
+    const pre = await send(base, 'OPTIONS', preflight('joy-media-app://renderer'));
+    const allow = String(pre.headers['access-control-allow-headers']);
+    expect(allow).toContain('x-joy-sha256');
+    expect(allow).toContain('x-joy-part-sha256');
+    const actual = await send(base, 'POST', { origin: 'joy-media-app://renderer' });
+    const expose = String(actual.headers['access-control-expose-headers']);
+    for (const name of [
+      'x-joy-preview-renderer',
+      'x-joy-preview-quality',
+      'x-joy-preview-width',
+      'x-joy-preview-height',
+      'x-joy-preview-request-id',
+      'x-joy-model-used',
+      'retry-after',
+    ])
+      expect(expose).toContain(name);
+    const other = await send(base, 'POST', { origin: 'https://evil.example' });
+    expect(other.headers['access-control-expose-headers']).toBeUndefined();
+  });
+
   it('leaves same-origin requests (no Origin) and plain OPTIONS alone', async () => {
     const base = await serve();
     expect((await send(base, 'POST', {})).headers['access-control-allow-origin']).toBeUndefined();

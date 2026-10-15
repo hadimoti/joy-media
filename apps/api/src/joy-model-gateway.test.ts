@@ -2405,6 +2405,119 @@ describe('JoyModelGateway', () => {
       }
     });
 
+    it('#24: a slow first model leaves budget for the next one instead of "1 tried"', async () => {
+      vi.useFakeTimers();
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const tried: string[] = [];
+        const result = createMockRes();
+        const encoder = new TextEncoder();
+        const pending = gatewayWith(async (_url, init) => {
+          tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+          if (tried.length > 1) return new Response(VALID, { status: 200 });
+          // Keep-alives forever: the first model never answers inside the request deadline.
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              const timer = setInterval(
+                () => controller.enqueue(encoder.encode(KEEPALIVE)),
+                15_000,
+              );
+              init?.signal?.addEventListener('abort', () => {
+                clearInterval(timer);
+                controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+              });
+            },
+          });
+          return new Response(body, { status: 200 });
+        }).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          result.res,
+        );
+        await vi.advanceTimersByTimeAsync(86_000);
+        await pending;
+        expect(tried).toEqual(joyModelFallbackOrder(SUPER).slice(0, 2));
+        expect(result.getStatus()).toBe(200);
+        expect(result.getBody()).toContain('Red');
+      } finally {
+        warn.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it('#11: content null at finish_reason length falls back to the next model', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const tried: string[] = [];
+        const result = createMockRes();
+        const empty = JSON.stringify({
+          id: 'gen-0',
+          object: 'chat.completion',
+          choices: [{ message: { role: 'assistant', content: null }, finish_reason: 'length' }],
+          usage: { prompt_tokens: 5, completion_tokens: 50, cost: 0 },
+        });
+        await gatewayWith(async (_url, init) => {
+          tried.push((JSON.parse(String(init?.body)) as { model: string }).model);
+          return new Response(tried.length === 1 ? empty : VALID, { status: 200 });
+        }).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [], max_tokens: 50 } }),
+          result.res,
+        );
+        expect(tried).toHaveLength(2);
+        expect(result.getStatus()).toBe(200);
+        expect(result.getBody()).toContain('Red');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('#11: every model returning content null at the limit is an error, not a 200', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const result = createMockRes();
+        const empty = JSON.stringify({
+          choices: [{ message: { role: 'assistant', content: null }, finish_reason: 'length' }],
+          usage: { prompt_tokens: 5, completion_tokens: 50, cost: 0 },
+        });
+        await gatewayWith(async () => new Response(empty, { status: 200 })).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [], max_tokens: 50 } }),
+          result.res,
+        );
+        expect(result.getStatus()).toBe(503);
+        expect(result.getBody()).toContain('JOY_AGENT_MODELS_BUSY');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('#12: says which model answered when it is not the requested one', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        let calls = 0;
+        const result = createMockRes();
+        await gatewayWith(async () =>
+          ++calls === 1
+            ? new Response('{"error":{"code":429,"message":"busy"}}', { status: 429 })
+            : new Response(VALID, { status: 200 }),
+        ).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          result.res,
+        );
+        expect(result.getStatus()).toBe(200);
+        expect(result.getHeaders()['x-joy-model-used']).toBe(joyModelFallbackOrder(SUPER)[1]);
+        expect(result.getHeaders()['x-joy-model-requested']).toBe(SUPER);
+
+        const direct = createMockRes();
+        await gatewayWith(async () => new Response(VALID, { status: 200 })).handleChatCompletions(
+          createMockReq({ body: { model: SUPER, messages: [] } }),
+          direct.res,
+        );
+        expect(direct.getHeaders()['x-joy-model-used']).toBe(SUPER);
+        expect(direct.getHeaders()['x-joy-model-requested']).toBeUndefined();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it('logs the length and a hash of an invalid 200 body', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       try {

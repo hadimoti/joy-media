@@ -174,6 +174,22 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
     },
   );
 
+  it('#24: JOY_AGENT_UNKNOWN carries the redacted reason and HTTP status without --debug', () => {
+    const error = new JoyAgentRunError('JOY_AGENT_UNKNOWN', {
+      detail: {
+        name: 'TypeError',
+        statusCode: 500,
+        message: 'Cannot read properties of undefined',
+        responseBodySnippet: '',
+      },
+    });
+    const formatted = formatAgentRunFailure(error, false);
+    expect(formatted).toBe(
+      'Joy Agent execution failed: JOY_AGENT_UNKNOWN (TypeError: Cannot read properties of undefined, HTTP 500)',
+    );
+    expect(formatted).not.toContain('Debug detail');
+  });
+
   it('says a busy hosted catalog is temporary and passes on the retry hint', () => {
     const error = new JoyAgentRunError('JOY_AGENT_UPSTREAM_UNAVAILABLE', {
       detail: {

@@ -1132,7 +1132,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   }
 }
 
-function summarizePlacements(project: JoyProjectV1): AppliedTimelineSummary {
+export function summarizePlacements(project: JoyProjectV1): AppliedTimelineSummary {
   const root = project.compositions[project.rootCompositionId];
   if (!root) return { clips: [], gaps: [], blackRegions: [] };
   const visualTracks = root.tracks.filter(

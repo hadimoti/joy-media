@@ -43,6 +43,34 @@ export function joyModelFallbackOrder(
   ];
 }
 
+/**
+ * Which model answered. The gateway may fall back to another free model (for example a different
+ * vision model); say so instead of swapping silently (#12).
+ */
+function modelUsedHeaders(requested: string, used: string): Record<string, string> {
+  return {
+    'x-joy-model-used': used,
+    ...(requested === used ? {} : { 'x-joy-model-requested': requested }),
+  };
+}
+
+/** A completion cut at the output limit with no content and no tool call (all reasoning). */
+function isEmptyLengthCut(body: Record<string, unknown>): boolean {
+  const choices = body.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return false;
+  return choices.every((choice) => {
+    if (choice === null || typeof choice !== 'object') return false;
+    const { finish_reason: finish, message } = choice as {
+      finish_reason?: unknown;
+      message?: { content?: unknown; tool_calls?: unknown };
+    };
+    const content = message?.content;
+    const empty = content === null || content === undefined || content === '';
+    const toolCalls = Array.isArray(message?.tool_calls) && message.tool_calls.length > 0;
+    return finish === 'length' && empty && !toolCalls;
+  });
+}
+
 /** True when any message carries an image_url part. */
 function messagesHaveImages(messages: unknown): boolean {
   return (
@@ -435,6 +463,7 @@ export class JoyModelGateway {
       requireVision: messagesHaveImages(parsedBody.messages),
     });
     const requestDeadline = Date.now() + UPSTREAM_REQUEST_DEADLINE_MS;
+    const requestedModelId = modelId;
     const requestHasImages = messagesHaveImages(parsedBody.messages);
     const clientAbortController = new AbortController();
     let clientDisconnected = false;
@@ -485,19 +514,25 @@ export class JoyModelGateway {
         } else if (!isStream) {
           // Headers are in: OpenRouter may hold the body open with whitespace keep-alives while
           // the model works. Read it against the whole-request deadline, not the attempt budget.
+          // Leave one attempt budget for the next candidate, so one slow model cannot use up the
+          // whole request and end it with "1 tried" while other free models remain (#24).
+          const bodyDeadline =
+            index < candidates.length - 1
+              ? Math.max(attemptDeadline, requestDeadline - UPSTREAM_ATTEMPT_TIMEOUT_MS)
+              : requestDeadline;
           clearTimeout(attemptTimeout);
           attemptTimeout = setTimeout(
             () => {
               upstreamTimedOut = true;
               upstreamController.abort();
             },
-            Math.max(0, requestDeadline - Date.now()),
+            Math.max(0, bodyDeadline - Date.now()),
           );
           // A truncated or aborted read throws (classified as a timeout below); never a partial body.
           const bodyText = await readBoundedText(
             upstreamRes,
             Number.POSITIVE_INFINITY,
-            requestDeadline,
+            bodyDeadline,
             { allowPartial: false },
           );
           const parsed = parseJsonObject(bodyText);
@@ -511,6 +546,10 @@ export class JoyModelGateway {
               bodySha256: createHash('sha256').update(bodyText).digest('hex').slice(0, 12),
             });
             failure = { status: upstreamRes.status, code: 'INVALID_RESPONSE' };
+          } else if (isEmptyLengthCut(parsed)) {
+            // A reasoning model spent the whole output limit thinking: 200 with content null and
+            // finish_reason "length". Try the next model rather than return an empty answer (#11).
+            failure = { status: upstreamRes.status, code: 'EMPTY_COMPLETION' };
           } else {
             upstreamJson = parsed;
           }
@@ -623,6 +662,7 @@ export class JoyModelGateway {
     if (streamStart === undefined) res.off('close', onClientClose);
     if (streamStart !== undefined) {
       res.writeHead(200, {
+        ...modelUsedHeaders(requestedModelId, modelId),
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
         connection: 'keep-alive',
@@ -874,7 +914,10 @@ export class JoyModelGateway {
     if (!costReported && generationId && recordId)
       void this.reconcileGenerationUsage(recordId, generationId);
 
-    res.writeHead(200, { 'content-type': 'application/json' });
+    res.writeHead(200, {
+      ...modelUsedHeaders(requestedModelId, modelId),
+      'content-type': 'application/json',
+    });
     res.end(JSON.stringify(jsonResponse));
   }
 

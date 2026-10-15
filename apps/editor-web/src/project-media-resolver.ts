@@ -36,7 +36,19 @@ export interface ProjectMediaResolverOptions {
   readonly originalCache: Pick<OpfsOriginalAssetCache, 'get'>;
 }
 
-const REFERENCE_ASSET_IDS = new Set(['asset-intro', 'asset-product', 'asset-outro']);
+/**
+ * The bundled sample project uses these assets. Only one 30 s fixture is committed
+ * (public/media/reference/asset-intro.mp4), so every sample asset plays it; before, the
+ * product/outro and B-roll clips had no media and exporting the sample failed (#21).
+ */
+const REFERENCE_ASSET_IDS = new Set([
+  'asset-intro',
+  'asset-product',
+  'asset-outro',
+  'asset-b-roll-a',
+  'asset-b-roll-b',
+]);
+const REFERENCE_MEDIA_URL = '/media/reference/asset-intro.mp4';
 
 function mediaMimeType(asset: BrowserAsset | undefined, blob: Blob): string {
   const blobType = blob.type.trim().toLowerCase();
@@ -164,7 +176,7 @@ export class ProjectMediaResolver {
         return this.#remember(
           assetId,
           {
-            url: `/media/reference/${encodeURIComponent(assetId)}.mp4`,
+            url: REFERENCE_MEDIA_URL,
             mimeType: 'video/mp4',
             source: 'reference',
           },
@@ -207,7 +219,7 @@ export class ProjectMediaResolver {
         return this.#remember(
           assetId,
           {
-            url: `/media/reference/${encodeURIComponent(assetId)}.mp4`,
+            url: REFERENCE_MEDIA_URL,
             mimeType: 'video/mp4',
             source: 'reference',
           },

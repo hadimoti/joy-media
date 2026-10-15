@@ -9,6 +9,20 @@ describe('IPC sender frame policy', () => {
     ).toBe(true);
   });
 
+  it('rejects a frame whose origin is not the origin the request claims', () => {
+    const frame = { url: 'https://joyst.ir/editor' };
+    expect(
+      isTrustedIpcSenderFrame({ senderFrame: frame, mainFrame: frame }, 'https://www.joyst.ir'),
+    ).toBe(false);
+    expect(
+      isTrustedIpcSenderFrame({ senderFrame: frame, mainFrame: frame }, 'joy-media-app://renderer'),
+    ).toBe(false);
+    const appFrame = { url: 'joy-media-app://renderer/index.html' };
+    expect(
+      isTrustedIpcSenderFrame({ senderFrame: appFrame, mainFrame: appFrame }, 'https://joyst.ir'),
+    ).toBe(false);
+  });
+
   it('rejects subframes, mismatched origins and malformed frame URLs', () => {
     const mainFrame = { url: 'https://joyst.ir/editor' };
     expect(
@@ -23,5 +37,19 @@ describe('IPC sender frame policy', () => {
     expect(
       isTrustedIpcSenderFrame({ senderFrame: { url: 'not a URL' }, mainFrame }, 'https://joyst.ir'),
     ).toBe(false);
+  });
+
+  it('rejects a detached frame (null senderFrame) and a request with no claimed origin', () => {
+    const mainFrame = { url: 'joy-media-app://renderer/index.html' };
+    expect(
+      isTrustedIpcSenderFrame({ senderFrame: null, mainFrame }, 'joy-media-app://renderer'),
+    ).toBe(false);
+    expect(isTrustedIpcSenderFrame({ senderFrame: mainFrame, mainFrame }, undefined)).toBe(false);
+    expect(isTrustedIpcSenderFrame({ senderFrame: mainFrame, mainFrame }, 42)).toBe(false);
+  });
+
+  it('rejects a frame with an opaque (null) origin even if the request claims "null"', () => {
+    const frame = { url: 'data:text/html,hi' };
+    expect(isTrustedIpcSenderFrame({ senderFrame: frame, mainFrame: frame }, 'null')).toBe(false);
   });
 });

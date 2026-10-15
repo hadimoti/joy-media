@@ -73,7 +73,8 @@ describe('AssetLibraryPanel successful import contract', () => {
     expect(refreshPath).toContain('client.myAssets();');
     expect(refreshPath).not.toContain('if (!projectScopeReady) return;');
     expect(refreshPath).toContain('client.sharedCloudAssets()');
-    expect(refreshPath).toContain('setItems(assets.map((asset) => ({ asset, derivatives: [] })));');
+    expect(refreshPath).toContain('assets.map((asset) => ({ asset, derivatives: []');
+    expect(refreshPath).toContain('cloudBacked === false');
     expect(refreshPath).toContain('void Promise.all(');
   });
 
