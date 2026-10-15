@@ -125,6 +125,8 @@ const documentOperation = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
+export const JOY_CHECKLIST_TEXT_POSITIONS = ['center', 'bottom', 'middle', 'top'] as const;
+export type JoyChecklistTextPosition = (typeof JOY_CHECKLIST_TEXT_POSITIONS)[number];
 export type JoyTimelineOperation = z.infer<typeof timelineOperation>;
 export type JoyDocumentOperation = z.infer<typeof documentOperation>;
 export type JoyPlanChecklistItem =
@@ -134,7 +136,12 @@ export type JoyPlanChecklistItem =
       readonly sourceInUs: number;
       readonly sourceOutUs: number;
     }
-  | { readonly kind: 'text'; readonly text: string; readonly position?: 'center' | undefined }
+  | {
+      readonly kind: 'text';
+      readonly text: string;
+      /** center = horizontally centred; bottom/middle/top = vertical band of the frame. */
+      readonly position?: JoyChecklistTextPosition | undefined;
+    }
   | {
       readonly kind: 'look';
       readonly clipId: string;
@@ -657,7 +664,7 @@ export function createJoyAgentTools(
                   .object({
                     kind: z.literal('text'),
                     text: boundedText,
-                    position: z.literal('center').optional(),
+                    position: z.enum(JOY_CHECKLIST_TEXT_POSITIONS).optional(),
                     ...checklistStartHint,
                   })
                   .strict(),

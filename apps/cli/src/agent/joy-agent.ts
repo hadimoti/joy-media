@@ -546,17 +546,37 @@ export function verifyPlanChecklist(
           );
           return (
             caption?.kind === 'caption' &&
-            (item.position !== 'center' ||
-              (caption.style?.positionX === 0 && caption.style?.positionY === 0))
+            (item.position === undefined || textAtPosition(caption.style, item.position))
           );
         }),
       );
-      if (found)
-        verified.push(`Text “${item.text}”${item.position === 'center' ? ' centered' : ''}`);
-      else unmet.push(`text “${item.text}”${item.position === 'center' ? ' centered' : ''}`);
+      const where = item.position === undefined ? '' : ` ${positionLabel(item.position)}`;
+      if (found) verified.push(`Text “${item.text}”${where}`);
+      else unmet.push(`text “${item.text}”${where}`);
     }
   }
   return { verified, unmet };
+}
+
+/**
+ * Checklist positions in CLI units (x from the centre; y = -positionY, measured from the
+ * template's bottom title line, negative = up). "center" is horizontal centring, which is what
+ * "centred near the bottom" means; bottom/middle/top are vertical bands of the frame.
+ */
+export function textAtPosition(
+  style: { readonly positionX?: number; readonly positionY?: number } | undefined,
+  position: NonNullable<Extract<JoyPlanChecklistItem, { kind: 'text' }>['position']>,
+): boolean {
+  const x = style?.positionX ?? 0;
+  const y = -(style?.positionY ?? 0);
+  if (position === 'center') return Math.abs(x) <= 0.05;
+  if (position === 'bottom') return y >= -0.2;
+  if (position === 'middle') return y < -0.2 && y > -0.5;
+  return y <= -0.5;
+}
+
+function positionLabel(position: string): string {
+  return position === 'center' ? 'centered' : `at the ${position}`;
 }
 
 export function truthfulAgentSummary(input: {
