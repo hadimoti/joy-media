@@ -5,7 +5,10 @@ import {
   clearStoredMediaToken,
   createMemoryMediaSessionTokenBackend,
   getStoredMediaToken,
+  desktopPlatformName,
   initializeMediaSessionToken,
+  registerDevice,
+  resetDeviceRegistrationsForTests,
   setMediaSessionTokenBackendForTests,
   setStoredMediaToken,
 } from './media-session.js';
@@ -176,5 +179,47 @@ describe('session token localStorage guard', () => {
       fs.readFileSync(file, 'utf8').includes('joy-media-session-token'),
     );
     expect(references.map((file) => path.basename(file))).toEqual(['media-session.ts']);
+  });
+});
+
+describe('#10 device registration', () => {
+  it('registers once per session token even when sign-in paths fire together', async () => {
+    resetDeviceRegistrationsForTests();
+    setMediaSessionTokenBackendForTests(createMemoryMediaSessionTokenBackend());
+    await setStoredMediaToken('device-test-token');
+    const fetchFn = vi.fn(
+      async () => new Response(JSON.stringify({ data: { id: 'd1' } }), { status: 201 }),
+    );
+    await Promise.all([
+      registerDevice(undefined, fetchFn as unknown as typeof fetch),
+      registerDevice(undefined, fetchFn as unknown as typeof fetch),
+      registerDevice(undefined, fetchFn as unknown as typeof fetch),
+      registerDevice(undefined, fetchFn as unknown as typeof fetch),
+    ]);
+    await registerDevice(undefined, fetchFn as unknown as typeof fetch);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries after a failed registration', async () => {
+    resetDeviceRegistrationsForTests();
+    setMediaSessionTokenBackendForTests(createMemoryMediaSessionTokenBackend());
+    await setStoredMediaToken('device-retry-token');
+    const fetchFn = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValue(new Response(JSON.stringify({ data: { id: 'd2' } }), { status: 201 }));
+    await registerDevice(undefined, fetchFn as unknown as typeof fetch);
+    await registerDevice(undefined, fetchFn as unknown as typeof fetch);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['Win32', 'Windows'],
+    ['Windows', 'Windows'],
+    ['Linux x86_64', 'Linux'],
+    ['MacIntel', 'macOS'],
+    ['', 'Desktop'],
+  ])('names platform %s as %s', (platform, name) => {
+    expect(desktopPlatformName(platform)).toBe(name);
   });
 });

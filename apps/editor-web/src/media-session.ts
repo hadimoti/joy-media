@@ -261,20 +261,47 @@ export async function verifyOtp(
   return data.token;
 }
 
+/** The OS this app runs on, for the device name; was always "Windows" (#10). */
+export function desktopPlatformName(
+  platform: string | undefined = typeof navigator === 'undefined'
+    ? undefined
+    : ((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
+        ?.platform ?? navigator.platform),
+): string {
+  const value = (platform ?? '').toLowerCase();
+  if (value.startsWith('win')) return 'Windows';
+  if (value.startsWith('mac')) return 'macOS';
+  if (value.includes('linux')) return 'Linux';
+  return 'Desktop';
+}
+
+/** One registration per session token, even when several sign-in paths fire at once (#10). */
+const deviceRegistrations = new Map<string, Promise<unknown>>();
+
+export function resetDeviceRegistrationsForTests(): void {
+  deviceRegistrations.clear();
+}
+
 export async function registerDevice(
   displayName?: string,
   fetchFn: typeof fetch = fetch,
 ): Promise<unknown> {
   const token = await getStoredMediaToken();
   if (!token) return undefined;
+  const existing = deviceRegistrations.get(token);
+  if (existing !== undefined) return existing;
   const name =
-    displayName || (isDesktop() ? 'JOY Desktop Studio (Windows)' : 'JOY Web Studio (Browser)');
-  try {
-    return await requestJson(fetchFn, '/v1/devices', { displayName: name }, token);
-  } catch {
-    // Background registration; do not interrupt interactive auth flow.
-    return undefined;
-  }
+    displayName ||
+    (isDesktop() ? `JOY Desktop Studio (${desktopPlatformName()})` : 'JOY Web Studio (Browser)');
+  const registration = requestJson(fetchFn, '/v1/devices', { displayName: name }, token).catch(
+    () => {
+      // Background registration; do not interrupt interactive auth flow. Allow a later retry.
+      deviceRegistrations.delete(token);
+      return undefined;
+    },
+  );
+  deviceRegistrations.set(token, registration);
+  return registration;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
