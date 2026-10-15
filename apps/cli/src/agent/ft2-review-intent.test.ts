@@ -176,3 +176,36 @@ describe('FT3 MUST1: "center" means the middle unless limited to the horizontal 
     ).toContain('Request: text centered horizontally at the bottom');
   });
 });
+
+describe('FT3b: top/bottom words only count in the centred-text clause', () => {
+  const at = (y: number) =>
+    fixtureProject({
+      clips: [{ id: 'clip-a', assetId: 'asset-a', startUs: 0, durationUs: 8_000_000 }],
+      texts: [{ id: 't1', text: 'Welcome', startUs: 0, durationUs: 4_000_000, y }],
+    }) as unknown as JoyProjectV1;
+  it.each([
+    ['Center the text, not at the bottom', 0.32],
+    ['center the text; avoid the bottom', 0.32],
+    [
+      '\u0645\u062a\u0646 \u0631\u0627 \u0648\u0633\u0637 \u0628\u0630\u0627\u0631 \u0646\u0647 \u067e\u0627\u06cc\u06cc\u0646',
+      0.32,
+    ],
+    ['Center the text and move the logo to the top', -0.7],
+    [
+      '\u0628\u0627\u0644\u0627\u062e\u0631\u0647 \u0645\u062a\u0646 \u0631\u0627 \u0648\u0633\u0637 \u0635\u0641\u062d\u0647 \u0628\u0630\u0627\u0631',
+      -0.7,
+    ],
+  ])('%s does not verify a caption at the edge (y=%s)', (request, y) => {
+    const result = verifyRequestIntent(at(y), request);
+    expect(result.verified.filter((item) => /centered/.test(item))).toEqual([]);
+    expect(result.unmet.some((item) => /centered/.test(item))).toBe(true);
+  });
+  it('still verifies the same requests against a vertically centred caption', () => {
+    expect(
+      verifyRequestIntent(at(-0.364), 'Center the text, not at the bottom').verified,
+    ).toContain('Request: centered text');
+    expect(
+      verifyRequestIntent(at(-0.364), 'Center the text and move the logo to the top').unmet,
+    ).toEqual([]);
+  });
+});

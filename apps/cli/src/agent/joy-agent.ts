@@ -773,8 +773,8 @@ export function verifyRequestIntent(
     // horizontal axis ("horizontally", "at the bottom/top", پایین / بالا). A named top/bottom
     // placement must also hold: "center the text at the top" is not met by a bottom caption.
     const lower = request.toLowerCase();
-    const wantsTop = /\b(?:top|upper)\b|\u0628\u0627\u0644\u0627/u.test(lower);
-    const wantsBottom = /\b(?:bottom|lower)\b|\u067e\u0627\u06cc\u06cc\u0646/u.test(lower);
+    // FT3b: only a position word in the centre/text clause counts (see textPlacementWords).
+    const { wantsTop, wantsBottom } = textPlacementWords(lower);
     const horizontalOnly =
       !/\b(?:middle|vertically)\b/.test(lower) &&
       (/\bhorizontally\b/.test(lower) || wantsTop !== wantsBottom);
@@ -1252,4 +1252,34 @@ function clauseAsksForGap(text: string): boolean {
 
 function formatSeconds(microseconds: number): string {
   return `${(microseconds / 1_000_000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}s`;
+}
+
+/**
+ * FT3b: the top/bottom words that place the centred text. Fails safe (no word, so vertical
+ * centring is required): only clauses that ask for the centring count, a clause that names another
+ * subject (logo, image, clip) is ignored, words after a negation ("not at the bottom", "avoid the
+ * bottom", "نه پایین") are ignored, and بالا/پایین only match as whole words ("بالاخره" is not "top").
+ */
+function textPlacementWords(lower: string): { wantsTop: boolean; wantsBottom: boolean } {
+  const centre = /\b(?:center|centre|centered|centred|middle|horizontally)\b|\u0648\u0633\u0637/u;
+  const otherSubject =
+    /\b(?:logos?|images?|pictures?|photos?|videos?|clips?|stickers?|watermarks?)\b|\u0644\u0648\u06af\u0648|\u0639\u06a9\u0633|\u062a\u0635\u0648\u06cc\u0631|\u06a9\u0644\u06cc\u067e|\u0648\u06cc\u062f\u06cc\u0648/u;
+  const negation =
+    /\b(?:not|no|never|avoid|without|don'?t)\b|(?<![\p{L}\p{M}])(?:\u0646\u0647|\u0645\u0628\u0627\u062f\u0627|\u0628\u062f\u0648\u0646|\u0646\u0628\u0627\u06cc\u062f)(?![\p{L}\p{M}])/u;
+  const top = /\b(?:top|upper)\b|(?<![\p{L}\p{M}])\u0628\u0627\u0644\u0627(?![\p{L}\p{M}])/u;
+  const bottom =
+    /\b(?:bottom|lower)\b|(?<![\p{L}\p{M}])\u067e\u0627\u06cc(?:\u06cc|\u064a)\u0646(?![\p{L}\p{M}])/u;
+  let wantsTop = false;
+  let wantsBottom = false;
+  const parts = lower
+    .split(CLAUSE_SPLIT)
+    .flatMap((clause) => clause.split(/\band\b|\s\u0648\s/u))
+    .filter((part) => centre.test(part) && !otherSubject.test(part));
+  for (const part of parts) {
+    const negated = negation.exec(part);
+    const live = negated ? part.slice(0, negated.index) : part;
+    wantsTop ||= top.test(live);
+    wantsBottom ||= bottom.test(live);
+  }
+  return { wantsTop, wantsBottom };
 }
