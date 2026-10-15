@@ -780,6 +780,33 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     });
   }
 
+  it('#22: choosing Kilo in the provider list connects Kilo with the typed model, not OpenRouter', async () => {
+    const engineClient = client();
+    const rendered = await render(engineClient);
+    await changeProvider(rendered, 'kilo');
+    expect(rendered.textContent).not.toContain('OpenRouter API key');
+    const keys = [...rendered.querySelectorAll<HTMLInputElement>('input[type="password"]')];
+    expect(keys).toHaveLength(1);
+    const model = rendered.querySelector<HTMLInputElement>('input[aria-label="Model ID"]');
+    if (model === null) throw new Error('Expected Model ID field');
+    await act(async () => {
+      setInputValue(keys[0]!, 'kilo-key');
+      setInputValue(model, 'byteplus-coding/dola-seed-2.0-pro');
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    const config = vi.mocked(engineClient.configure).mock.calls[0]?.[0];
+    expect(config).toMatchObject({
+      provider: 'kilo',
+      baseUrl: 'https://api.kilo.ai/api/gateway',
+      modelId: 'byteplus-coding/dola-seed-2.0-pro',
+      apiKey: 'kilo-key',
+    });
+    expect(config).not.toHaveProperty('mode', 'dual-brain');
+  });
+
   it('selects the canonical Kilo URL and free default model', async () => {
     const rendered = await render(client(), readyStatus);
     await selectCustomPreset(rendered);
