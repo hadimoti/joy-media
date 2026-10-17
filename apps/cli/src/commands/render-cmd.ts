@@ -987,7 +987,15 @@ export async function runHeadlessRender(
       writeFileAtomic(manifestPath, manifestData);
     }
   } catch (err) {
-    if (stagedMediaPath) rmSync(stagedMediaPath, { force: true });
+    const cleanupFailures: string[] = [];
+    if (stagedMediaPath) {
+      try {
+        rmSync(stagedMediaPath, { force: true });
+      } catch (cleanupErr) {
+        // Keep the lock's staged-path journal intact so the next render can recover it.
+        cleanupFailures.push(errorMessage(cleanupErr));
+      }
+    }
     if (activeRenderPartialPath && !existsSync(activeRenderPartialPath)) {
       try {
         recordOutputPartialPath?.(null);
@@ -996,12 +1004,22 @@ export async function runHeadlessRender(
         // Keep the stale path in the lock so the next process can clean it safely.
       }
     }
-    releaseOutputLock?.();
+    try {
+      releaseOutputLock?.();
+    } catch (cleanupErr) {
+      // A read-only output directory can prevent lock removal. The stale journal
+      // remains recoverable once the user restores write permission.
+      cleanupFailures.push(errorMessage(cleanupErr));
+    }
     releaseOutputLock = null;
     if (showProgress) process.stdout.write('\n');
+    const cleanupNote =
+      cleanupFailures.length > 0
+        ? ` Output cleanup is deferred until the directory is writable again: ${cleanupFailures.join('; ')}`
+        : '';
     return failure(
       'output',
-      `Failed to write render manifest ${manifestPath}: ${errorMessage(err)}`,
+      `Failed to write render manifest ${manifestPath}: ${errorMessage(err)}${cleanupNote}`,
       totalFrames,
       totalClips,
     );

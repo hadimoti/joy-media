@@ -208,8 +208,13 @@ it needs an explicit opt-in, enumerated omissions, and a visibly partial outcome
       manifest output, cancellation, and recovery between media and sidecar
       promotion. They verify the previous pair, cleanup, error outcome, and no false
       success event.
-- [ ] Inject ENOSPC and permission-denied failures at write/rename boundaries and
-      prove that the last good deliverable remains intact.
+- [x] Inject a POSIX permission-denied failure while writing the staged manifest;
+      prove the prior media/manifest pair remains byte-identical, the CLI reports
+      an output error, and a later render recovers the stale partial and lock.
+- [x] Inject ENOSPC at the staged-media `write(2)` boundary and prove the last good
+      deliverable remains intact; the Linux-only interposer returns the real
+      `ENOSPC` errno and marks the injection so a size-limit simulation cannot
+      satisfy this check.
 - [x] Add `concurrentSameOutputDoesNotCrossPublish`: two renders either serialize,
       reject contention, or publish separate outputs with matching metadata; they
       must never pair one render's media with another's manifest.
@@ -221,8 +226,9 @@ it needs an explicit opt-in, enumerated omissions, and a visibly partial outcome
 - [ ] Repeat representative real rendering through the current frozen artifacts
       (`bin`, bundle, installed `joy.cmd`, and `joy-media.cmd`) and bind their hashes
       to the exact-candidate receipt.
-- [ ] Obtain the required independent reviews, update the ledger, and commit accepted
-      fixes with tests. Candidate-specific release approval remains Task 9.
+- [x] Update the local readiness ledger and commit accepted CLI fixes with tests.
+- [ ] Obtain the required independent reviews. Candidate-specific release approval
+      remains Task 9.
 
 **Exit:** The CLI delivers correct media for its declared supported scope and
 cannot misreport unsupported, failed, interrupted, or partial delivery as complete.

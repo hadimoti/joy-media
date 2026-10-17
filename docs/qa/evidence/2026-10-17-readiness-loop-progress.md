@@ -12,7 +12,8 @@ workspace on the originating machine.
 
 `pnpm verify:ci` passed in an isolated Windows profile with provider credentials
 removed from the test process and `JOY_MEDIA_EDGE_URL=off`: 625 test files passed,
-1 skipped; 5,551 tests passed, 24 skipped; typecheck, lint, formatting, workspace
+1 skipped; 5,551 tests passed, 26 skipped after the two POSIX-only recovery cases
+were added; typecheck, lint, formatting, workspace
 builds, and production dependency audit passed with no known vulnerabilities. One
 earlier attempt used a nested `TEMP` directory and failed a worker fixture because
 its generated path exceeded the Windows legacy path limit. Keeping `TEMP` at the
@@ -126,9 +127,29 @@ lint, formatting, the full Vitest suite, workspace builds, and the production
 dependency audit. The code-level read-only review is not a candidate deployment
 approval and does not close the separate Claude Code or owner release gates.
 
-The local readiness worktree contains a follow-up commit on top of `80a3c61`;
-it remains isolated and has not been pushed, merged, packaged for
+The local readiness branch contains the cancellation and output-recovery follow-ups
+on top of `80a3c61`; it remains isolated and has not been pushed, merged, packaged for
 distribution, or deployed. Installer lifecycle, packaged editor/store wiring and full edit parity,
-ENOSPC/permission-denied injection, real service/GPU qualification, the soak,
+real service/GPU qualification, the soak,
 frozen-candidate two-pass evidence, exact-candidate GPT-6.1-sol approval, and final
 Gbrain closeout remain open.
+
+## Permission-denied output recovery follow-up on October 17
+
+A new unprivileged POSIX end-to-end scenario removed output-directory write
+permission after FFmpeg had opened its staged file. It proved that the previous
+media and manifest stay byte-identical, the CLI reports a terminal `output`
+error rather than an `internal` error, and the next render removes the stale
+partial/lock and publishes successfully. The first red run exposed cleanup
+exceptions masking the actual filesystem failure. Render cleanup now treats
+partial removal and lock release as best-effort while leaving the journal for
+the next process to recover.
+
+A Linux-only `LD_PRELOAD` interposer also makes a staged-media `write(2)` return
+`ENOSPC` and writes a marker proving that the injection fired. FFmpeg reports
+the write failure, the previous media/manifest pair stays byte-identical, and a
+clean retry succeeds. This is a real errno injection, not a file-size cap. On
+Ubuntu 24.04 with Node 24.19.0 and FFmpeg 6.1.1, the entire
+`render-recovery.e2e.test.ts` file passed as unprivileged `nobody` (7 passed, one
+Windows-only skip). The ENOSPC case skips where Linux `cc` is unavailable; the
+permission-denied case runs for non-root POSIX users.
