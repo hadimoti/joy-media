@@ -458,6 +458,18 @@ describe('exporting and importing', () => {
     expect(r.err).not.toMatch(/ENOENT/);
   });
 
+  it.skipIf(process.platform !== 'win32')(
+    'rejects a Windows reserved device name as an export path',
+    async () => {
+      const id = await createProject(sb, 'Reserved output');
+      const r = await sb.run(['project', 'export', id, '--output', 'NUL', '--json']);
+      const failure = jsonError(r, 2);
+      expect(failure.code).toBe('USAGE');
+      expect(failure.message).toMatch(/reserved Windows device name/i);
+      expect(readdirSync(sb.cwd)).toEqual([]);
+    },
+  );
+
   it('re-exporting replaces the file as a whole: no temp files are left behind', async () => {
     const id = await createProject(sb, 'Twice exported');
     expectOk(await sb.run(['project', 'export', id, '--output', 'out.json']));

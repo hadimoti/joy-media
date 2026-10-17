@@ -243,6 +243,9 @@ function runExport(args: string[], flags: CliFlags, json: boolean): number {
   const res = loadProject(id, flags.sqlitePath);
   // `--out` is the render flag; agents mix the two up, so accept it here too.
   const outPath = flags.output ?? flags.out ?? `${res.project.id}.json`;
+  if (process.platform === 'win32' && isWindowsReservedDevicePath(outPath)) {
+    throw usageFailure(`The export path contains a reserved Windows device name: ${outPath}`);
+  }
   const exported = {
     format: 'joy-media-project',
     schemaVersion: 1,
@@ -271,6 +274,15 @@ function runExport(args: string[], flags: CliFlags, json: boolean): number {
   }
   logSuccess(`Exported project to ${c(outPath, 'bold')}.`);
   return 0;
+}
+
+function isWindowsReservedDevicePath(path: string): boolean {
+  const deviceName = /^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])$/i;
+  return path.split(/[\\/]/).some((component) => {
+    const normalized = component.replace(/[ .]+$/g, '');
+    const stem = (normalized.split(/[.:]/, 1)[0] ?? '').replace(/[ .]+$/g, '');
+    return deviceName.test(stem);
+  });
 }
 
 function runImport(args: string[], flags: CliFlags, json: boolean): number {
