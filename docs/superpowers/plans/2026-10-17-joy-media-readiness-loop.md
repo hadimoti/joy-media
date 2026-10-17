@@ -140,27 +140,27 @@ generator/tool version, byte hash/size, provenance/license, expected decoded
 duration/frame/stream/sample properties, and consumers. Keep existing fields and
 update its explicit file-list test intentionally.
 
-- [ ] Add fixtures: red/blue hard-cut plus known tones; flash/click sync marker;
+- [x] Add fixtures: red/blue hard-cut plus known tones; flash/click sync marker;
       silent and audio-only sources; stereo channels with distinct frequencies;
       44.1/48 kHz audio; VFR and 30000/1001 video; rotation metadata; alpha image;
       odd dimensions encoded losslessly with a format that supports them; truncated,
       empty, and mislabeled files; Persian/emoji/path-with-spaces variants.
-- [ ] Add project builders: basic A/V delivery, gaps/parallel tracks,
+- [x] Add project builders: basic A/V delivery, gaps/parallel tracks,
       kitchen-sink of supported editor domains, Persian/RTL, each supported historical
       schema, missing/relinked assets, and generated 10,000-clip scale case.
-- [ ] Test the generator output with independent FFprobe/decode expectations.
+- [x] Test the generator output with independent FFprobe/decode expectations.
       A hash-only test against a manifest rewritten by the same generator is
       insufficient. Force an incorrect duration/tone in disposable test output and
       demonstrate failure of the semantic check.
-- [ ] Initial proposed bounds: duration within one output frame; flash/click
+- [x] Initial proposed bounds: duration within one output frame; flash/click
       onset within one output frame after decoder timestamp/encoder-delay handling;
       normalized PCM RMS absolute error <=0.02; no NaN/Inf; solid-color center samples
       use the existing red/blue/green predicates. Keep existing visual goldens'
       tolerances; calibrate new complex-scene comparisons before accepting them.
-- [ ] Pin/record FFmpeg builds for strict byte goldens. Across platforms compare
+- [x] Pin/record FFmpeg builds for strict byte goldens. Across platforms compare
       decoded semantics using declared tolerances; do not claim byte identity across
       encoders. Never auto-bless changed expected output.
-- [ ] Generate in disposable storage first; after review update intended fixture
+- [x] Generate in disposable storage first; after review update intended fixture
       files. Run `pnpm exec vitest run packages/test-fixtures/src`, review provenance
       and exact diff, then commit. No copyrighted/customer source media.
 
