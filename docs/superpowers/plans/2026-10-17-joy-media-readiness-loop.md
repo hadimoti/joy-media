@@ -354,19 +354,28 @@ event, including real-media and plan-only completion. Preserve documented exit
 semantics: success 0, runtime failure 1, usage failure 2; treat termination policy
 explicitly per platform rather than copying POSIX signal numbers onto Windows.
 
-- [ ] Run local mock-agent journey: discover help -> create -> add real media ->
+- [x] Run local mock-agent journey: discover help -> create -> add real media ->
       split/trim -> make one invalid request -> consume structured error -> correct ->
-      render -> inspect artifact -> reopen project in a fresh process. Validate every
-      JSON document/event against its schema; stdout has no banners, ANSI, or SQLite
-      warning leakage. Test Node versions that reproduced the startup warning.
-- [ ] Add Windows equivalents for relevant POSIX skips: ACL inspection for
-      synthetic credentials, real Windows termination/child cleanup, path/reserved
-      name behavior, and file-lock failures. Test `bin`, `bundle`, installed `joy.cmd`.
-- [ ] Cover provider 401/429/500, malformed tool/SSE, hung stream, cancellation,
+      render -> inspect artifact -> reopen project in a fresh process. The fake provider
+      receives the typed validation error; the corrected edit survives a fresh CLI
+      process; FFprobe confirms a playable H.264 artifact. The JSON envelope and NDJSON
+      are parsed, stdout has no ANSI/banner noise, and stderr contains neither the
+      synthetic key nor a SQLite startup warning. The agent may write progress to stderr.
+      The journey passes through both shipped `bin` and `bundle` entries.
+- [ ] Add versioned schemas for help/error/doctor/project/timeline and each render
+      NDJSON event; validate every JSON document/event. Run the CLI contract on Node
+      versions that reproduced the startup warning.
+- [x] Verify Windows ACL inspection for synthetic credentials, `taskkill` process-tree
+      termination, real SQLite writer-lock behavior, and paths containing spaces;
+      the affected Windows selections passed. Both `bin` and `bundle` pass the new
+      real-media agent journey.
+- [ ] Add reserved-device-name coverage and run installed `joy.cmd`/`joy-media.cmd`
+      acceptance against a disposable staged package. Do not touch the active install.
+- [x] Cover provider 401/429/500, malformed tool/SSE, hung stream, cancellation,
       bounded retry, and no project mutation after failed/denied proposals. Scan logs,
-      reports, and persisted state for synthetic keys. Desktop main-process credential
-      transfer may be necessary; assert raw keys never return to renderer-visible
-      results/events/logs, rather than banning every internal IPC payload.
+      reports, and persisted state for synthetic keys. Existing offline CLI tests cover
+      these routes, including Windows credential ACL and process-tree checks; desktop
+      main-process credential transfer remains a separate packaged-app gate.
 - [x] Run the CLI, project-persistence, and fixture Vitest suites with
       `--no-file-parallelism` on Linux; the latest run passed 30 files, 508 passed,
       9 skipped. The full Windows `pnpm verify:ci` passed after the signal fixes;

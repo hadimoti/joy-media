@@ -196,6 +196,24 @@ revision and timeline unchanged, and succeeded at revision 2 after the holder
 exited. The full Windows `project-robustness.e2e.test.ts` passed 31/31 with the lock,
 crash, `SQLITE_FULL`, concurrency, corruption, and read-only scenarios.
 
+The fake-provider CLI delivery journey now runs against the real CLI binary and a
+checked-in MP4 fixture. It starts from help, creates a project, adds the fixture,
+feeds a malformed typed proposal through the tool-error response, applies a
+corrected split/trim, renders a playable H.264 MP4, probes its codec and duration,
+and reopens revision 3 in a fresh CLI process. Stdout remains machine-readable and
+ANSI-free; stderr retains human progress but contains neither the synthetic key nor
+a SQLite startup warning. Both shipped `bin` and single-file `bundle` entries pass.
+Versioned JSON schemas and the broader Node-version warning matrix remain open.
+
+The combined agent-delivery, agent-run, CLI-contract, and real-render selection
+passed 80 tests with 9 platform skips. A separate Windows run of agent secret,
+agent resilience, project robustness, and timeline editing passed 109 tests with 4
+platform skips; this included private Windows ACLs, `taskkill` process-tree
+termination, the real separate-process SQLite lock test, and explicit database-path
+selection. An earlier 46/46 persistence/robustness/asset-recovery selection covered
+media paths containing Persian text and spaces. The installed `joy.cmd` acceptance
+has not been run against a staged package.
+
 The expanded Windows project persistence/lifecycle/portability/editor-package
 selection passed 117/117. Both process-kill cases passed again after converting the
 test preload to ESM; root workspace typecheck and lint passed, and all changed files
