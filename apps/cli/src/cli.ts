@@ -6,6 +6,7 @@ import { handleProjectCommand } from './commands/project-cmd.js';
 import { handleRenderCommand } from './commands/render-cmd.js';
 import { handleTimelineCommand } from './commands/timeline-cmd.js';
 import { handleWorkerCommand } from './commands/worker-cmd.js';
+import { trackLongRunning } from './long-running.js';
 import {
   type CliOptionSpec,
   NUMERIC_RANGES,
@@ -429,7 +430,7 @@ async function dispatch(argv: string[]): Promise<number> {
       case 'worker':
         return await handleWorkerCommand(subArgs, flags);
       case 'render':
-        return await handleRenderCommand(subArgs, flags);
+        return await trackLongRunning(() => handleRenderCommand(subArgs, flags));
       case 'benchmark':
         return await handleBenchmarkCommand(subArgs, flags);
       case 'doctor':

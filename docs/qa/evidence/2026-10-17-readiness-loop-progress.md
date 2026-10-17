@@ -46,3 +46,56 @@ the 200-edit and 30-minute soak, external Claude Code review, candidate-specific
 GPT-6.1-sol approval (GPT-6 Astra is prohibited by owner instruction), the owner's
 release decision, and the required Gbrain closeout
 remain open.
+
+## Continuation on October 17
+
+The local worktree was `codex/joy-media-readiness`, based on local HEAD
+`b873cfcd5a6399d27b30b9578a55a9dfdd07d4ba`. This continuation is still local
+implementation evidence, not a candidate-bound release receipt.
+
+The CLI render signal path now marks tracked renders for cancellation and lets the
+render handler clean up before returning exit code 130. It removes partial output
+and releases the output lock instead of exiting immediately from the process-level
+signal handler. The real POSIX Ctrl-C render case passed in the final Linux suite.
+
+The odd-size fixture was genuinely encoded as 160x90 because FFmpeg's default
+4:2:0 `color` source rounded 161x91 before FFV1. The generator now forces
+`yuv444p` at the source and encoder. The corrected Windows FFmpeg 8.1.1 fixture
+probes as visible and coded 161x91, `yuv444p`; its SHA-256 is
+`fa433c6081d3bb81008373a98b7701a132f30e9da715bdd210dd64357e6b2a72` (7,921
+bytes). Only this fixture and its manifest entry were replaced; a disposable full
+regeneration changed unrelated media bytes and was not imported.
+
+The project-recency test now seeds ordered timestamps before editing and asserts
+that the timeline edit advances the selected project's timestamp. This removes
+real-clock ordering from the fixture while preserving a check that edits refresh
+`updatedAt`.
+
+Fresh verification on this worktree:
+
+- Windows `pnpm verify:ci` passed, including typecheck, lint, formatting, the full
+  repository Vitest run, workspace builds, and production dependency audit.
+- Windows no-file-parallelism matrix: 30 files, 494 passed, 21 skipped. The
+  corrected media semantic suite separately passed 17/17 on Windows.
+- Ubuntu 24.04, Node 24.19.0, pnpm 11.15.0, FFmpeg 6.1.1, unprivileged `nobody`,
+  sanitized environment: 30 files, 507 passed, 8 skipped.
+- Windows runner harness: 22 passed, 11 POSIX-only skips. Ubuntu harness: 31
+  passed, 2 Windows-only skips.
+- `package:unpacked`, packaged renderer smoke, and the no-retry packaged Electron
+  acceptance passed; the acceptance imported, played, saved, restarted, and
+  exported a playable project.
+
+The generator change came from Kilo session `ses_eb4c544dcffeqZzHa1io6mu9BM`
+on `kilo/byteplus-coding/deepseek-v4-flash` with `--agent lean --pure`; its
+reported costs were zero and its actual one-file diff was independently verified.
+A second scoped Kilo test-helper run (`ses_eb4b89875ffeXPviTmS91p3odf`) also
+reported zero cost, but stalled before producing a diff and was stopped; none of
+its output was used.
+
+Still open: clean Windows install/update/rollback/uninstall in the disposable
+host; complete supported-editor workflow and preview/export parity; real-service,
+GPU, restore, and calibrated 200-edit/30-minute soak qualification; exact-candidate
+two-pass release evidence; candidate-specific GPT-6.1-sol approval; the separate
+Claude Code review gate; owner release decision; and final VPS Gbrain write/read/
+export/receipt. No push, merge, active-profile install, distribution, or deployment
+was performed.

@@ -20,6 +20,7 @@ import {
   httpError,
   proposeTimeline,
   readProjects,
+  setProjectUpdatedAt,
   startMockLlm,
   text,
   toolCalls,
@@ -377,8 +378,14 @@ describe('agent run: which project, and where it is saved', () => {
 
   it('without --project it deterministically picks the most recently updated project', async () => {
     const older = await createProject(env.sb, 'Older');
-    await createProject(env.sb, 'Newer');
+    const newer = await createProject(env.sb, 'Newer');
+    setProjectUpdatedAt(env.sb, older, '2000-01-01T00:00:00.000Z');
+    setProjectUpdatedAt(env.sb, newer, '2000-01-02T00:00:00.000Z');
     await addClip(env.sb, older); // now "Older" is the most recently updated
+    const updated = readProjects(env.sb);
+    const olderUpdatedAt = updated.find((project) => project.id === older)!.payload.updatedAt;
+    const newerUpdatedAt = updated.find((project) => project.id === newer)!.payload.updatedAt;
+    expect(Date.parse(olderUpdatedAt)).toBeGreaterThan(Date.parse(newerUpdatedAt));
     mock.script(toolCalls(proposeTimeline(insertOp('agent-x'))), text('ok'));
 
     const r = await env.run(['agent', 'run', 'add a clip', '--apply', ...provider()]);

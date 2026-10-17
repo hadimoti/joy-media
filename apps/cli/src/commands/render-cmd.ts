@@ -34,6 +34,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { CliFlags } from '../cli.js';
+import { currentLongRunning } from '../long-running.js';
 import { FlagValidationError, parseIntFlag } from '../utils/flags.js';
 import {
   c,
@@ -542,9 +543,10 @@ export async function runHeadlessRender(
     totalFrames = 0,
     totalClips = 0,
   ): RenderCommandResult => {
-    failCommand(json, knownProjectId, code, message, 1);
+    const exitCode = code === 'cancelled' ? 130 : 1;
+    failCommand(json, knownProjectId, code, message, exitCode);
     return {
-      exitCode: 1,
+      exitCode,
       projectId: knownProjectId,
       preset,
       outDir,
@@ -733,7 +735,6 @@ export async function runHeadlessRender(
   let nextClip = 0;
   const workerCount = realMedia ? 0 : Math.min(concurrency, totalClips);
   const workers: Array<Promise<void>> = [];
-  const stopWatchingSignals = announceCancellation(json, plan.projectId);
   for (let w = 0; w < workerCount; w += 1) {
     workers.push(
       (async () => {
@@ -780,6 +781,14 @@ export async function runHeadlessRender(
   let stagedMediaPath: string | null = null;
   try {
     await Promise.all(workers);
+    if (currentLongRunning < 0) {
+      return failure(
+        'cancelled',
+        'Render cancelled; no media or manifest was written.',
+        totalFrames,
+        totalClips,
+      );
+    }
     if (realMedia) {
       const partialPath = join(
         outDir,
@@ -829,6 +838,15 @@ export async function runHeadlessRender(
         process.off('SIGINT', discardPartial);
         process.off('SIGTERM', discardPartial);
       }
+      if (currentLongRunning < 0) {
+        discardPartial();
+        return failure(
+          'cancelled',
+          'Render cancelled; no media or manifest was written.',
+          totalFrames,
+          totalClips,
+        );
+      }
       if (!outcome.ok) {
         discardPartial();
         if (showProgress) process.stdout.write('\n');
@@ -865,7 +883,6 @@ export async function runHeadlessRender(
       stagedMediaPath = partialPath;
     }
   } finally {
-    stopWatchingSignals();
     if (realMedia && stagedMediaPath === null) {
       if (activeRenderPartialPath && !existsSync(activeRenderPartialPath)) {
         try {
@@ -1074,36 +1091,6 @@ function failCommand(
 function emitJson(event: RenderEvent, json: boolean): void {
   if (!json) return;
   process.stdout.write(`${JSON.stringify(event)}\n`);
-}
-
-/**
- * While a render is running, make Ctrl-C / SIGTERM end the `--json` stream with
- * a terminal `error` event. The listener is *prepended* so it writes before the
- * process-wide handler in bin.ts flushes stdout and exits (130).
- */
-function announceCancellation(json: boolean, projectId: string): () => void {
-  if (!json) return () => undefined;
-  let announced = false;
-  const onSignal = (signal: NodeJS.Signals): void => {
-    if (announced) return;
-    announced = true;
-    emitJson(
-      {
-        type: 'error',
-        projectId,
-        message: `Render cancelled by ${signal}; no manifest was written.`,
-        ts: new Date().toISOString(),
-        code: 'cancelled',
-      },
-      true,
-    );
-  };
-  process.prependListener('SIGINT', onSignal);
-  process.prependListener('SIGTERM', onSignal);
-  return () => {
-    process.off('SIGINT', onSignal);
-    process.off('SIGTERM', onSignal);
-  };
 }
 
 function yieldToEventLoop(): Promise<void> {

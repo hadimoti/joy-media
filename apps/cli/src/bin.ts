@@ -3,6 +3,9 @@
 import './process-warnings.js';
 import { runCli, formatError, handleUnhandledError } from './cli.js';
 import { logError } from './utils/logger.js';
+import { currentLongRunning, requestLongRunningCancellation } from './long-running.js';
+
+export { currentLongRunning, trackLongRunning } from './long-running.js';
 
 let exiting = false;
 
@@ -83,10 +86,10 @@ function installSignalHandlers(): void {
       process.exit(code);
       return;
     }
-    // For long-running operations (REPL, agent run), let the inner handler decide.
+    // For tracked long-running work, let the command handler finish cancellation cleanup.
     if (currentLongRunning > 0) {
       logError(`Received ${sig}. Cancelling long-running operation...`);
-      currentLongRunning = -1; // mark cancel requested
+      requestLongRunningCancellation();
       return;
     }
     logError(`Received ${sig}. Shutting down.`);
@@ -106,15 +109,6 @@ function installSignalHandlers(): void {
 
 // Tracks whether a long-running operation is in flight so signal handlers
 // can decide whether to immediately exit or propagate cancellation.
-export let currentLongRunning = 0;
-
-export function trackLongRunning<T>(fn: () => Promise<T>): Promise<T> {
-  currentLongRunning++;
-  return fn().finally(() => {
-    currentLongRunning = Math.max(0, currentLongRunning - 1);
-  });
-}
-
 export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
   installStreamErrorHandlers();
   installSignalHandlers();

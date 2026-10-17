@@ -595,6 +595,7 @@ export interface ProjectRow {
   readonly revision: number;
   readonly payload: {
     readonly title: string;
+    readonly updatedAt: string;
     readonly compositions: Record<
       string,
       {
@@ -625,6 +626,31 @@ export function readProjects(sb: Sandbox): ProjectRow[] {
       revision: row.revision,
       payload: JSON.parse(row.payload) as ProjectRow['payload'],
     }));
+  } finally {
+    db.close();
+  }
+}
+
+/** Set a project's stored timestamp to a deterministic value for ordering tests. */
+export function setProjectUpdatedAt(sb: Sandbox, projectId: string, updatedAt: string): void {
+  const db = new DatabaseSync(projectDbPath(sb));
+  try {
+    const row = db
+      .prepare(
+        'SELECT revision, payload FROM snapshots WHERE project_id = ? ORDER BY revision DESC LIMIT 1',
+      )
+      .get(projectId) as { revision: number; payload: string } | undefined;
+    if (!row) throw new Error(`cannot set updatedAt for missing project ${projectId}`);
+
+    const project = JSON.parse(row.payload) as ProjectRow['payload'];
+    db.prepare(
+      'UPDATE snapshots SET payload = ?, checksum = ? WHERE project_id = ? AND revision = ?',
+    ).run(
+      JSON.stringify({ ...project, updatedAt }),
+      `sha256-${Date.now().toString(16)}`,
+      projectId,
+      row.revision,
+    );
   } finally {
     db.close();
   }

@@ -303,10 +303,12 @@ explicit `joy.cmd` path and sanitized disposable state directory.
       the desktop executable must not accidentally satisfy a CLI version assertion.
 - [ ] Verify installer/archive/sidecar hashes and tamper rejection. Record actual
       signing status; unsigned acceptance remains an explicit owner release decision.
-- [ ] Build with `pnpm --filter @joy-media/desktop package:unpacked`, run
-      `pnpm --filter @joy-media/desktop test:smoke-packaged`, then package the installer with the current release
-      prerequisites. Run the lifecycle harness only in the designated disposable host.
-      Associate all evidence with exact source, lockfile, and artifact hashes.
+- [x] Build with `pnpm --filter @joy-media/desktop package:unpacked` and run
+      `pnpm --filter @joy-media/desktop test:smoke-packaged`. The packaged Playwright
+      acceptance also passed with `--retries=0` (1 journey, including playable export).
+- [ ] Package the installer with the current release prerequisites and run the
+      lifecycle harness only in the designated disposable host. Associate all
+      lifecycle evidence with exact source, lockfile, and artifact hashes.
 - [ ] Fix/review/commit; never uninstall or overwrite the owner's working install.
 
 **Exit:** The actual Windows artifacts work without the source checkout or a
@@ -337,9 +339,10 @@ explicitly per platform rather than copying POSIX signal numbers onto Windows.
       reports, and persisted state for synthetic keys. Desktop main-process credential
       transfer may be necessary; assert raw keys never return to renderer-visible
       results/events/logs, rather than banning every internal IPC payload.
-- [ ] Run `pnpm exec vitest run apps/cli/src --no-file-parallelism` on both Linux
-      and Windows. A Windows worker build alone cannot satisfy this requirement.
-      Verify `pnpm typecheck`, `pnpm lint`, and the runner policy tests when CI changes.
+- [x] Run the CLI, project-persistence, and fixture Vitest suites with
+      `--no-file-parallelism` on both Linux and Windows.
+      Windows: 30 files, 494 passed, 21 skipped. Ubuntu: 30 files, 507 passed,
+      8 skipped. Windows `pnpm verify:ci` and runner policy harness also passed.
 - [ ] Review/commit and publish the supported CLI contract in help/docs; the
       schema version changes intentionally when a breaking event shape changes.
 

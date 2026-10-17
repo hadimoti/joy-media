@@ -357,13 +357,16 @@ run([
 ]);
 
 // 12) readiness-odd-161x91.mkv — lossless 161x91
+// Force yuv444p to prevent 4:2:0 chroma subsampling from rounding odd dimensions.
 run([
   '-f',
   'lavfi',
   '-i',
-  'color=c=gray:s=161x91:r=25:d=1',
+  'color=c=gray:s=161x91:r=25:d=1,format=yuv444p',
   '-c:v',
   'ffv1',
+  '-pix_fmt',
+  'yuv444p',
   join(outDir, 'readiness-odd-161x91.mkv'),
 ]);
 
