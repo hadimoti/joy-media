@@ -1,12 +1,21 @@
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { extname, join, posix, relative, resolve } from 'node:path';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // This gate is executed directly by Node's TypeScript strip-types loader.
 // Keep the explicit .ts extension so the release command works from a clean
 // checkout where no compiled font-assets.js sibling exists yet.
 import { scanFontAssets } from './font-assets.ts';
+import { validateReadinessEvidence, type ReadinessEvidence } from './readiness-evidence.ts';
 
 export const REQUIRED_BUILD_IDS = ['editor', 'api', 'worker'] as const;
 export const REQUIRED_JOURNEY_ID = 'authenticated-editor-1.0' as const;
@@ -85,6 +94,10 @@ export interface ReleaseGateInput {
   readonly performanceEvidence?: ReleasePerformanceEvidence;
   /** Real-service delivery, Worker lifecycle, and restore evidence. */
   readonly operationalEvidence?: ReleaseOperationalEvidence | null;
+  /** Complete, exact-candidate app/CLI evidence; source-bound releases cannot omit it. */
+  readonly readinessEvidence?: ReadinessEvidence | null;
+  /** Workspace-level readiness errors (missing file, stale hashes, or unsafe artifacts). */
+  readonly readinessEvidenceErrors?: readonly string[];
   /** Present for real workspace evidence; omitted by the pure evaluator. */
   readonly sourceProvenance?: ReleaseSourceProvenance;
   /**
@@ -307,6 +320,12 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
       sourceProvenanceMessage(input, now),
     ),
     check(
+      'readiness-evidence',
+      readinessEvidenceBlockers(input).length === 0,
+      readinessEvidenceMessage(input),
+      true,
+    ),
+    check(
       'tests',
       input.testSummary.collected > 0 && input.testSummary.failed === 0,
       input.testSummary.collected > 0
@@ -416,6 +435,39 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
     generatedAt: now.toISOString(),
     checks: resolved,
   };
+}
+
+function readinessEvidenceBlockers(input: ReleaseGateInput): string[] {
+  const blockers = [...(input.readinessEvidenceErrors ?? [])];
+  if (input.readinessEvidence === undefined) {
+    if (input.sourceProvenance !== undefined)
+      blockers.push('source-bound release is missing readiness evidence');
+    return blockers;
+  }
+  if (input.readinessEvidence === null) {
+    if (blockers.length === 0) blockers.push('readiness evidence is missing');
+    return blockers;
+  }
+
+  const expectedCandidateSha = input.sourceProvenance?.commitSha;
+  if (expectedCandidateSha === undefined || expectedCandidateSha.length === 0) {
+    blockers.push('source provenance candidate SHA is required to validate readiness evidence');
+    return blockers;
+  }
+  return [...blockers, ...validateReadinessEvidence(input.readinessEvidence, expectedCandidateSha)];
+}
+
+function readinessEvidenceMessage(input: ReleaseGateInput): string {
+  if (
+    input.readinessEvidence === undefined &&
+    input.sourceProvenance === undefined &&
+    (input.readinessEvidenceErrors?.length ?? 0) === 0
+  )
+    return 'readiness evidence not supplied to pure evaluator';
+  const blockers = readinessEvidenceBlockers(input);
+  return blockers.length === 0
+    ? `complete readiness evidence matches candidate ${input.readinessEvidence?.candidateSha}`
+    : `readiness evidence is not release-ready: ${blockers.join('; ')}`;
 }
 
 function check(id: string, passed: boolean, message: string, critical = true): ReleaseCheck {
@@ -1101,11 +1153,33 @@ export function writeReleaseEvidence(
   mkdirSync(outputDirectory, { recursive: true });
   verifyArtifactHashes(root, evidence.artifactHashes, evidence.manifest);
   verifyReleaseDocuments(evidence.manifest, evidence.sbom, evidence.sourceProvenance);
-  const result = evaluateReleaseGate(evidence, now);
+
+  // Fail-closed for source-bound releases: bind readiness evidence to the
+  // workspace file on disk rather than accepting the in-memory record alone.
+  // When the evidence file is missing, stale, or invalid, the workspace
+  // result carries null evidence and blockers that the gate rejects.
+  const checkedEvidence: ReleaseEvidence =
+    evidence.sourceProvenance !== undefined
+      ? {
+          ...evidence,
+          ...(() => {
+            const workspace = readReadinessEvidenceFromWorkspace(
+              root,
+              evidence.sourceProvenance.commitSha,
+            );
+            return {
+              readinessEvidence: workspace.evidence,
+              readinessEvidenceErrors: workspace.blockers,
+            };
+          })(),
+        }
+      : evidence;
+
+  const result = evaluateReleaseGate(checkedEvidence, now);
   const manifestText = JSON.stringify(evidence.manifest, null, 2);
   writeFileSync(
     join(outputDirectory, 'report.json'),
-    JSON.stringify({ result, evidence }, null, 2),
+    JSON.stringify({ result, evidence: checkedEvidence }, null, 2),
   );
   writeFileSync(join(outputDirectory, 'manifest.json'), manifestText);
   writeFileSync(join(outputDirectory, 'sbom.json'), JSON.stringify(evidence.sbom, null, 2));
@@ -1437,9 +1511,127 @@ function staticAssetMessage(input: ReleaseGateInput): string {
   return `static asset inventory recorded ${summary.copiedSourceAssetCount} copied public assets, ${summary.builtAssetCount} built assets, ${summary.effectPreviewCount} effect preview PNGs, and ${summary.effectMotionPreviewCount} motion previews`;
 }
 
+export interface WorkspaceReadinessEvidence {
+  readonly evidence: ReadinessEvidence | null;
+  readonly blockers: readonly string[];
+}
+
+const READINESS_EVIDENCE_PATH = 'test-output/readiness/evidence.json';
+const READINESS_LOCKFILE_PATH = 'pnpm-lock.yaml';
+const READINESS_FIXTURE_MANIFEST_PATH = 'packages/test-fixtures/media/manifest.json';
+
+/** Read and bind the readiness record to current workspace files and artifacts. */
+export function readReadinessEvidenceFromWorkspace(
+  root: string,
+  expectedCandidateSha: string,
+): WorkspaceReadinessEvidence {
+  const evidencePath = repositoryFile(root, READINESS_EVIDENCE_PATH);
+  if (evidencePath === null) {
+    return { evidence: null, blockers: [`${READINESS_EVIDENCE_PATH} is missing`] };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(evidencePath, 'utf8')) as unknown;
+  } catch {
+    return { evidence: null, blockers: [`${READINESS_EVIDENCE_PATH} is not valid JSON`] };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { evidence: null, blockers: [`${READINESS_EVIDENCE_PATH} must contain a JSON object`] };
+  }
+
+  const evidence = parsed as ReadinessEvidence;
+  const blockers = validateReadinessEvidence(evidence, expectedCandidateSha);
+  const currentLockfile = repositoryFile(root, READINESS_LOCKFILE_PATH);
+  if (currentLockfile === null) {
+    blockers.push(`${READINESS_LOCKFILE_PATH} is missing or resolves outside the repository`);
+  } else if (sha256File(currentLockfile) !== evidence.lockfileSha256) {
+    blockers.push('readiness evidence lockfile SHA-256 does not match the current workspace');
+  }
+
+  const currentFixtureManifest = repositoryFile(root, READINESS_FIXTURE_MANIFEST_PATH);
+  if (currentFixtureManifest === null) {
+    blockers.push(
+      `${READINESS_FIXTURE_MANIFEST_PATH} is missing or resolves outside the repository`,
+    );
+  } else if (sha256File(currentFixtureManifest) !== evidence.fixtureManifestSha256) {
+    blockers.push(
+      'readiness evidence fixture manifest SHA-256 does not match the current workspace',
+    );
+  }
+
+  if (Array.isArray(evidence.installerArtifacts)) {
+    for (const artifact of evidence.installerArtifacts) {
+      if (artifact === null || typeof artifact !== 'object' || typeof artifact.path !== 'string')
+        continue;
+      const path = repositoryFile(root, artifact.path);
+      if (path === null) {
+        blockers.push('installer artifact is missing, unsafe, or resolves outside the repository');
+        continue;
+      }
+      const actualSha256 = sha256File(path);
+      if (actualSha256 !== artifact.observedSha256) {
+        blockers.push(`installer artifact workspace hash mismatch for "${artifact.path}"`);
+      }
+    }
+  }
+
+  if (
+    evidence.redactedHashes !== null &&
+    typeof evidence.redactedHashes === 'object' &&
+    !Array.isArray(evidence.redactedHashes)
+  ) {
+    for (const [path, expectedSha256] of Object.entries(evidence.redactedHashes)) {
+      const artifactPath = repositoryFile(root, path);
+      if (artifactPath === null) {
+        blockers.push('redacted artifact is missing, unsafe, or resolves outside the repository');
+        continue;
+      }
+      if (sha256File(artifactPath) !== expectedSha256) {
+        blockers.push(`redacted artifact workspace hash mismatch for "${path}"`);
+      }
+    }
+  }
+
+  return blockers.length === 0 ? { evidence, blockers } : { evidence: null, blockers };
+}
+
+function repositoryFile(root: string, path: string): string | null {
+  if (path.length === 0 || path.includes('\\') || path.startsWith('/') || /^[A-Za-z]:/u.test(path))
+    return null;
+  const repositoryRoot = resolve(root);
+  const absolutePath = resolve(repositoryRoot, path);
+  const relativePath = relative(repositoryRoot, absolutePath);
+  if (
+    relativePath.length === 0 ||
+    relativePath === '..' ||
+    relativePath.startsWith(`..${sep}`) ||
+    isAbsolute(relativePath) ||
+    !existsSync(absolutePath)
+  )
+    return null;
+  try {
+    const realRoot = realpathSync(repositoryRoot);
+    const realPath = realpathSync(absolutePath);
+    const realRelativePath = relative(realRoot, realPath);
+    if (
+      realRelativePath.length === 0 ||
+      realRelativePath === '..' ||
+      realRelativePath.startsWith(`..${sep}`) ||
+      isAbsolute(realRelativePath) ||
+      !statSync(realPath).isFile()
+    )
+      return null;
+    return realPath;
+  } catch {
+    return null;
+  }
+}
+
 export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
   const commandResults = runReleaseCommands(root);
   const sourceProvenance = workspaceSourceProvenance(root);
+  const readiness = readReadinessEvidenceFromWorkspace(root, sourceProvenance.commitSha);
   const performanceEvidence = readPerformanceEvidence(root);
   const staticAssets = buildStaticAssetInventory(root);
   const fontAssets = scanFontAssets(root);
@@ -1469,6 +1661,16 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
   for (const directory of artifacts) {
     for (const path of collectFiles(root, directory))
       artifactHashes[normalizeRelativePath(root, path)] = sha256File(path);
+  }
+  const readinessEvidenceFile = repositoryFile(root, READINESS_EVIDENCE_PATH);
+  if (readinessEvidenceFile !== null)
+    artifactHashes[READINESS_EVIDENCE_PATH] = sha256File(readinessEvidenceFile);
+  for (const path of [
+    ...(readiness.evidence?.installerArtifacts.map((artifact) => artifact.path) ?? []),
+    ...Object.keys(readiness.evidence?.redactedHashes ?? {}),
+  ]) {
+    const file = repositoryFile(root, path);
+    if (file !== null) artifactHashes[path] = sha256File(file);
   }
   const tests = commandResults.find((result) => result.id === 'tests');
   const featureStatusPath = join(root, FEATURE_STATUS_PATH);
@@ -1504,6 +1706,8 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     sbomGenerated: true,
     browserJourneys,
     operationalEvidence: readOperationalEvidence(root),
+    readinessEvidence: readiness.evidence,
+    readinessEvidenceErrors: readiness.blockers,
     windowsAcceptance: readWindowsAcceptance(root),
     featureStatus: {
       auditedOn,

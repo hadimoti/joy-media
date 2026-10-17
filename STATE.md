@@ -1,15 +1,38 @@
 # JOY Media — Current State & Architecture Ledger
 
-**Last Updated:** 2026-09-19 (UTC)  
-**Primary Surface:** 100% Offline-First Windows Desktop NLE (Electron + React 19 + Local SQLite)  
+**Last Updated:** 2026-10-17 (readiness review)
+**Primary Surface:** Windows Electron editor candidate; installed-app, project-persistence, and media-delivery acceptance remain open
 **Web Surface:** Hardened Control Plane & Account Web (`joyst.ir` via `apps/account-web`)  
 **Historical Log:** Preserved at [`docs/archive/STATE-historical-2026-09-18.md`](docs/archive/STATE-historical-2026-09-18.md)
+
+The goals, verification table, and operational handoffs below are the 2026-09-19 checkpoint.
+They are historical records, not current release instructions. Current source findings and
+scenario status are maintained in [Feature Status](docs/product/FEATURE-STATUS.md) and the
+[readiness matrix](docs/qa/READINESS-MATRIX.md).
+
+## Current readiness — 2026-10-17
+
+- The audited upstream candidate is `c1fffd59d5078902e031e7684e69c27df40ce607`. A fresh Windows
+  baseline passed the repository-pinned pnpm verification before the current release-gate edits;
+  the latest full verification result is recorded separately in
+  [the readiness evidence](docs/qa/evidence/2026-10-17-windows-baseline.md).
+- The CLI has a real FFmpeg renderer and playable-output tests through its source entry. Windows
+  launcher parity, accurate unsupported-feature handling, failure recovery, and packaged-app
+  behavior remain open.
+- The Electron host opens a local database for media/job/provider metadata, but its project
+  open/save path is not wired to `SqliteProjectStore`. Worker derivative jobs can be queued but
+  are not dispatched to completion.
+- An unsigned staging package can be assembled for smoke tests. The release-packaging gate marks
+  public signing/tooling owner-gated; no new install or release acceptance is claimed here.
+- No merge, publish, deployment, or production-data operation is authorized by this status note.
 
 ---
 
 ## 1. Executive Summary & Architecture
 
-JOY Media has transitioned from a dual web/desktop architecture into a dedicated, **100% offline-first Windows desktop creative suite**.
+The following architecture picture is the 2026-09-19 target-state snapshot. The 2026-10-17
+source review found that Windows project persistence, derivative-job execution, and installed
+application lifecycle are not yet closed; see the current readiness section above.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -76,7 +99,7 @@ JOY Media has transitioned from a dual web/desktop architecture into a dedicated
 
 ---
 
-## 3. Verification Matrix
+## 3. Historical verification matrix — 2026-09-19
 
 | Check                        | Scope                    | Tool / Command                               | Result                            |
 | :--------------------------- | :----------------------- | :------------------------------------------- | :-------------------------------- |
@@ -88,7 +111,7 @@ JOY Media has transitioned from a dual web/desktop architecture into a dedicated
 
 ---
 
-## 4. Pending Operational Handoffs
+## 4. Historical operational handoffs — 2026-09-19 (not current instructions)
 
 1. **VPS Deployment**:
    - Push 4 pending commits (`e07e398c..6d809229`) plus current cleanup commits to `vps/main`.
