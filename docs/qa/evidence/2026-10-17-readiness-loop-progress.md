@@ -43,5 +43,6 @@ The editor is not yet ready for an unqualified release claim. Full edit semantic
 desktop preview/export parity, wiring the SQLite project store into packaged editor
 open/save, actual Windows installer lifecycle, optional service/GPU qualification,
 the 200-edit and 30-minute soak, external Claude Code review, candidate-specific
-GPT-6 Astra approval, the owner's release decision, and the required Gbrain closeout
+GPT-6.1-sol approval (GPT-6 Astra is prohibited by owner instruction), the owner's
+release decision, and the required Gbrain closeout
 remain open.

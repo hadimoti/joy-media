@@ -34,6 +34,11 @@ playable video for the CLI to count as ready. A render-plan manifest alone does
 not satisfy closeout. Required acceptance checks the actual output file through
 FFprobe and decoding, including picture, audio where expected, and timing.
 
+**Owner model instruction (2026-10-17):** Never use GPT-6 Astra. The
+candidate-specific model review gate, if required for release, must use
+GPT-6.1-sol. This supersedes the Astra references in the originating audit and
+does not waive the independent Claude Code review or the owner's release decision.
+
 ## Global constraints
 
 - Preserve the current branch, existing untracked `nul`, other worktrees, and user profiles.
@@ -55,7 +60,7 @@ FFprobe and decoding, including picture, audio where expected, and timing.
   in for decoded media or installed-app acceptance.
 - Reuse `release-candidate-v2.yml` and its exact-candidate two-pass gate. Recheck
   its contract before dispatch; do not relax missing-evidence/freshness checks.
-- External GPT-6 Astra's candidate-specific `APPROVE_FOR_DEPLOY` and the owner's
+- GPT-6.1-sol's candidate-specific `APPROVE_FOR_DEPLOY` and the owner's
   release authorization remain required. This plan authorizes no publication.
 
 ## Review focus
@@ -396,7 +401,7 @@ release notes, and artifact-bound evidence index.
 - [ ] Close all supported-surface rows. Zero open data-loss/security/false-success
       or other P0/P1 defects. Every remaining P2 has an owner, user-visible limitation,
       workaround, and release-note entry. Coverage count alone closes nothing.
-- [ ] Obtain external Claude Code review and external GPT-6 Astra's exact-candidate
+- [ ] Obtain external Claude Code review and GPT-6.1-sol's exact-candidate
       `APPROVE_FOR_DEPLOY`; resolve findings through the same loop. Obtain the owner's
       release decision, including unsigned distribution if applicable. Only then can
       merge/release/distribution/deployment proceed within that explicit authorization.

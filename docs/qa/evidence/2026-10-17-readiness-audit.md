@@ -105,8 +105,10 @@ need an explicit status and must not count as accepted functionality.
 The execution plan is
 [`2026-10-17-joy-media-readiness-loop.md`](../../superpowers/plans/2026-10-17-joy-media-readiness-loop.md).
 Implementation, merge, distribution, and deployment are not performed by this
-planning task. Owner standing instructions still require candidate-specific
-external GPT-6 Astra `APPROVE_FOR_DEPLOY` for JOY Media releases.
+planning task. Current owner instructions prohibit GPT-6 Astra and specify GPT-6.1-sol
+for any candidate-specific model `APPROVE_FOR_DEPLOY` review. This supersedes the
+reviewer model named in the original audit; the independent Claude Code review and
+owner's release decision remain separate gates.
 
 Sources: local Git status/log and fetched remote objects; PR/check/run readback
 through `gh`; source files named above; authenticated VPS Gbrain
