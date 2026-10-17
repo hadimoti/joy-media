@@ -6,7 +6,7 @@ import {
   type JoyDocumentOperation,
   type JoyTimelineOperation,
 } from '@joy-media/joy-agent-engine';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import type { CliProjectDocument } from '../utils/project-loader.js';
 import { c } from '../utils/logger.js';
 import { CliJoyAgentToolBridge, type StagedOperationsSummary } from './bridge.js';
 import { createAgentOutput, type AgentOutput } from './output.js';
@@ -18,7 +18,7 @@ import {
 } from './provider.js';
 
 export interface RunAgentOptions {
-  readonly project: JoyProjectV1;
+  readonly project: CliProjectDocument;
   readonly revision: number;
   readonly prompt: string;
   readonly taskKind?: JoyAgentTaskKind | undefined;
@@ -33,7 +33,7 @@ export interface ApplyOutcome {
   /** True only when EVERY staged operation applied cleanly. */
   readonly applied: boolean;
   /** The edited project when `applied`, otherwise the untouched input project. */
-  readonly updatedProject: JoyProjectV1;
+  readonly updatedProject: CliProjectDocument;
   readonly appliedCount: number;
   readonly errors: string[];
 }
@@ -209,7 +209,10 @@ export function describeOperation(op: JoyTimelineOperation | JoyDocumentOperatio
   }
 }
 
-function applyAllOrNothing(bridge: CliJoyAgentToolBridge, original: JoyProjectV1): ApplyOutcome {
+function applyAllOrNothing(
+  bridge: CliJoyAgentToolBridge,
+  original: CliProjectDocument,
+): ApplyOutcome {
   const result = bridge.applyStaged();
   if (result.errors.length > 0) {
     return { applied: false, updatedProject: original, appliedCount: 0, errors: result.errors };

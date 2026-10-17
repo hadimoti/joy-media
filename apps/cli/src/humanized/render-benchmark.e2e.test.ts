@@ -6,8 +6,8 @@
  * and files on disk. No wall-clock thresholds, no network, no API keys.
  *
  * Product facts these tests pin down (see the report that came with them):
- *  - `render` does NOT encode video. It writes a plan manifest and says so
- *    (`mediaProduced: false`). Tests named "manifest only" guard that honesty.
+ *  - Real media is encoded by `render-real.e2e.test.ts`; this suite builds label-only projects and
+ *    guards the honest manifest-only behavior (`mediaProduced: false`).
  *  - Tests wrapped in `it.fails(...)` document real bugs that live in files this
  *    suite's owner may not edit (cli.ts, utils/*). They flip to red the moment the
  *    bug is fixed, which is the cue to turn them into plain `it(...)`.

@@ -4,6 +4,7 @@
  * neither may leave a half-written project behind.
  */
 import process from 'node:process';
+import { execFileSync } from 'node:child_process';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createAgentSandbox,
@@ -77,6 +78,31 @@ describe('agent run against a provider that stalls (real binary)', () => {
     expect(r.code, describeRun(r)).toBe(143);
     expect(readProjects(env.sb)[0]!.revision).toBe(1);
   });
+
+  it.skipIf(process.platform !== 'win32')(
+    'taskkill terminates a stalled Windows CLI process tree without changing the project',
+    async () => {
+      mock.fallback({ kind: 'hang' });
+      const live = env.spawn(args());
+      const pid = live.child.pid;
+      expect(pid).toBeDefined();
+      await mock.waitForRequests(1, '/chat/completions');
+
+      execFileSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 15_000,
+      });
+      const terminated = await live.done;
+      expect(terminated.timedOut).toBe(false);
+      expect(terminated.code).not.toBe(0);
+      expect(readProjects(env.sb)[0]!.revision).toBe(1);
+      const recovered = await env.run(['project', 'show', projectId, '--json']);
+      expect(recovered.code, describeRun(recovered)).toBe(0);
+      expect(recovered.json()).toMatchObject({ id: projectId, revision: 1 });
+      expect(env.externalCalls()).toEqual([]);
+    },
+  );
 
   for (const [label, reply] of [
     ['a hung connection', { kind: 'hang' }],

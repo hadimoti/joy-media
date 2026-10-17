@@ -6,7 +6,7 @@
  * Skipped when ffmpeg/ffprobe are not installed.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createSandbox, describeRun, type RunResult, type Sandbox } from './harness.js';
 
@@ -221,6 +221,99 @@ describe.skipIf(!HAS_FFMPEG)('render makes real video (real binary + real ffmpeg
     expect(isBlue(colourAt(file, 4.7))).toBe(true);
     // nothing but the finished video and its manifest is left behind
     expect(readdirSync(sb.path('out1')).sort()).toEqual([`${id}.mp4`, `${id}.mp4.manifest.json`]);
+  }, 120_000);
+
+  it('the single-file bundle entry point also returns a playable video', async () => {
+    const id = await newProject('Bundle render');
+    await addClip(id, ['--asset', media('blue.mp4')]);
+
+    const result = await sb.run(
+      ['render', '--project', id, '--out', sb.path('bundle-out'), '--json'],
+      { entry: 'bundle', timeoutMs: 120_000 },
+    );
+
+    expect(result.code, describeRun(result)).toBe(0);
+    const complete = result.ndjson<{ type: string; mediaProduced?: boolean }>().at(-1)!;
+    expect(complete).toMatchObject({ type: 'complete', mediaProduced: true });
+    const file = sb.path('bundle-out', `${id}.mp4`);
+    expect(existsSync(file)).toBe(true);
+    expect(probe(file)).toMatchObject({ video: 'h264', audio: 'aac' });
+    expect(isBlue(colourAt(file, 1))).toBe(true);
+  }, 120_000);
+
+  it('replaces an earlier playable render and manifest at the same output path', async () => {
+    const id = await newProject('Replace output');
+    await addClip(id, ['--asset', media('red.mp4')]);
+    const outDir = sb.path('replace-output');
+    const first = await run(['render', '--project', id, '--out', outDir, '--json']);
+    expect(first.code, describeRun(first)).toBe(0);
+    const file = sb.path('replace-output', `${id}.mp4`);
+    const firstBytes = readFileSync(file);
+    await addClip(id, ['--asset', media('blue.mp4'), '--start', '3']);
+
+    const second = await run(['render', '--project', id, '--out', outDir, '--json']);
+
+    expect(second.code, describeRun(second)).toBe(0);
+    expect(second.ndjson<{ type: string; mediaProduced?: boolean }>().at(-1)).toMatchObject({
+      type: 'complete',
+      mediaProduced: true,
+    });
+    expect(readFileSync(file)).not.toEqual(firstBytes);
+    expect(probe(file).video).toBe('h264');
+    expect(probe(file).durationS).toBeGreaterThan(4.9);
+    expect(isBlue(colourAt(file, 3.5))).toBe(true);
+    expect(JSON.parse(readFileSync(`${file}.manifest.json`, 'utf8'))).toMatchObject({
+      mediaProduced: true,
+      projectId: id,
+      totalFrames: 150,
+    });
+    expect(readdirSync(outDir).sort()).toEqual([`${id}.mp4`, `${id}.mp4.manifest.json`]);
+  }, 120_000);
+
+  it('preserves an earlier playable render and manifest when the next encode fails', async () => {
+    const id = await newProject('Keep prior output');
+    await addClip(id, ['--asset', media('red.mp4')]);
+    const outDir = sb.path('keep-prior-output');
+    const first = await run(['render', '--project', id, '--out', outDir, '--json']);
+    expect(first.code, describeRun(first)).toBe(0);
+    const file = sb.path('keep-prior-output', `${id}.mp4`);
+    const originalVideo = readFileSync(file);
+    const originalManifest = readFileSync(`${file}.manifest.json`);
+
+    const failed = await run(['render', '--project', id, '--out', outDir, '--json'], {
+      JOY_MEDIA_FFMPEG: '/nonexistent/ffmpeg',
+    });
+
+    expect(failed.code, describeRun(failed)).toBe(1);
+    expect(failed.ndjson<{ type: string; code?: string }>().at(-1)).toMatchObject({
+      type: 'error',
+      code: 'ffmpeg-missing',
+    });
+    expect(readFileSync(file)).toEqual(originalVideo);
+    expect(readFileSync(`${file}.manifest.json`)).toEqual(originalManifest);
+    expect(readdirSync(outDir).sort()).toEqual([`${id}.mp4`, `${id}.mp4.manifest.json`]);
+  }, 120_000);
+
+  it('does not leave newly rendered media when the manifest destination cannot be written', async () => {
+    const id = await newProject('Blocked manifest');
+    await addClip(id, ['--asset', media('red.mp4')]);
+    const outDir = sb.path('blocked-real-manifest');
+    const manifestPath = sb.path('blocked-real-manifest', `${id}.mp4.manifest.json`);
+    mkdirSync(manifestPath, { recursive: true });
+    writeFileSync(sb.path('blocked-real-manifest', `${id}.mp4.manifest.json`, 'keep.txt'), 'keep');
+
+    const result = await run(['render', '--project', id, '--out', outDir, '--json']);
+
+    expect(result.code, describeRun(result)).toBe(1);
+    expect(result.ndjson<{ type: string; code?: string }>().at(-1)).toMatchObject({
+      type: 'error',
+      code: 'output',
+    });
+    expect(existsSync(sb.path('blocked-real-manifest', `${id}.mp4`))).toBe(false);
+    expect(readdirSync(outDir).sort()).toEqual([`${id}.mp4.manifest.json`]);
+    expect(
+      readFileSync(sb.path('blocked-real-manifest', `${id}.mp4.manifest.json`, 'keep.txt'), 'utf8'),
+    ).toBe('keep');
   }, 120_000);
 
   it('a still image on the second video track covers the first track only while it is on screen, and an audio file extends the video', async () => {

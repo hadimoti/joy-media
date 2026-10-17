@@ -1,7 +1,6 @@
 /* global console */
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { CliFlags } from '../cli.js';
 import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
 import {
@@ -286,7 +285,7 @@ function runImport(args: string[], flags: CliFlags, json: boolean): number {
   }
 
   const parsed = readProjectJson(filePath);
-  const project: JoyProjectV1 = extractProject(parsed, filePath);
+  const project = extractProject(parsed, filePath);
   const fileRevision =
     typeof parsed === 'object' &&
     parsed !== null &&

@@ -4,6 +4,7 @@
  * All keys are fake; the only endpoint is the in-process mock.
  */
 import { chmodSync, mkdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -25,6 +26,46 @@ import {
 import { describeRun, type RunResult } from './harness.js';
 
 const KEY = fakeKey('secret');
+const BROAD_WINDOWS_SIDS = ['S-1-1-0', 'S-1-5-11', 'S-1-5-32-545'];
+
+function windowsAclSids(path: string): string[] {
+  const pathBase64 = Buffer.from(path, 'utf8').toString('base64');
+  const script = [
+    `$path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${pathBase64}'))`,
+    '$acl = if ([IO.Directory]::Exists($path)) { [IO.Directory]::GetAccessControl($path) } else { [IO.File]::GetAccessControl($path) }',
+    '$entries = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value })',
+    'ConvertTo-Json -InputObject $entries -Compress',
+  ].join('\n');
+  const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
+  const output = execFileSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodedScript],
+    { encoding: 'utf8', windowsHide: true, timeout: 10_000 },
+  ).trim();
+  const parsed = JSON.parse(output) as string | string[];
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+function grantBroadRead(path: string, directory: boolean): void {
+  execFileSync(
+    'icacls.exe',
+    [path, '/grant', directory ? '*S-1-5-32-545:(OI)(CI)R' : '*S-1-5-32-545:R'],
+    { encoding: 'utf8', windowsHide: true, timeout: 10_000 },
+  );
+}
+
+function expectPrivateWindowsAcl(path: string): void {
+  const sids = windowsAclSids(path);
+  for (const sid of BROAD_WINDOWS_SIDS) expect(sids, `${path} ACL`).not.toContain(sid);
+  expect(sids, `${path} ACL`).toContain('S-1-5-18');
+  expect(sids, `${path} ACL`).toContain('S-1-5-32-544');
+  expect(sids, `${path} ACL`).toContain(
+    execFileSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    }).match(/S-1-[0-9-]+/)?.[0],
+  );
+}
 
 describe('API keys at rest', () => {
   let mock: MockLlmServer;
@@ -64,6 +105,48 @@ describe('API keys at rest', () => {
       const use = await env.run(['agent', 'provider', 'use', 'p']);
       expect(use.code).toBe(0);
       expect(modeOf(join(env.sb.joyDir, 'cli-config.json')).toString(8)).toBe('600');
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'Windows provider files inherit a private ACL for the current user, SYSTEM and Administrators',
+    async () => {
+      const r = await env.run([
+        'agent',
+        'provider',
+        'add',
+        'p',
+        '--url',
+        mock.url,
+        '--api-key',
+        KEY,
+      ]);
+      expect(r.code, describeRun(r)).toBe(0);
+      expectPrivateWindowsAcl(env.sb.joyDir);
+      expectPrivateWindowsAcl(join(env.sb.joyDir, 'ai-providers.json'));
+      const use = await env.run(['agent', 'provider', 'use', 'p']);
+      expect(use.code, describeRun(use)).toBe(0);
+      expectPrivateWindowsAcl(join(env.sb.joyDir, 'cli-config.json'));
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'tightens broad Windows ACLs on an older key file and its directory',
+    async () => {
+      mkdirSync(env.sb.joyDir, { recursive: true });
+      const path = writeJoyConfig(env.sb, 'ai-providers.json', {
+        old: { name: 'old', provider: 'custom', baseUrl: mock.url, apiKey: KEY },
+      });
+      grantBroadRead(env.sb.joyDir, true);
+      grantBroadRead(path, false);
+      expect(windowsAclSids(env.sb.joyDir)).toContain('S-1-5-32-545');
+      expect(windowsAclSids(path)).toContain('S-1-5-32-545');
+
+      const r = await env.run(['agent', 'provider', 'list']);
+      expect(r.code, describeRun(r)).toBe(0);
+      expectPrivateWindowsAcl(env.sb.joyDir);
+      expectPrivateWindowsAcl(path);
+      expect(readJoyConfig(env.sb, 'ai-providers.json')).toMatchObject({ old: { apiKey: KEY } });
     },
   );
 

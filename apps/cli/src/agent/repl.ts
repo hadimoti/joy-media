@@ -1,14 +1,13 @@
 /* global console, process */
 import * as readline from 'node:readline/promises';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { compileLook, editorialClean } from '@joy-media/motion-core';
 import { c, logInfo, logSuccess, logWarn, printBanner, printTable } from '../utils/logger.js';
-import { saveProject } from '../utils/project-loader.js';
+import { saveProject, type CliProjectDocument } from '../utils/project-loader.js';
 import { describeOperation, runJoyAgent } from './joy-agent.js';
 import type { ResolveProviderOptions } from './provider.js';
 
 export interface ReplOptions {
-  project: JoyProjectV1;
+  project: CliProjectDocument;
   revision: number;
   source: 'sqlite' | 'file';
   path: string;
@@ -261,7 +260,7 @@ function printReplHelp(): void {
   );
 }
 
-function printProjectSummary(project: JoyProjectV1, revision: number): void {
+function printProjectSummary(project: CliProjectDocument, revision: number): void {
   const root = project.compositions[project.rootCompositionId];
   console.log(`\n  ${c('Title:', 'bold')} ${project.title} | ${c('Rev:', 'bold')} ${revision}`);
   console.log(`  ${c('Tracks:', 'bold')} ${root?.tracks.length ?? 0}`);
@@ -273,7 +272,7 @@ function printProjectSummary(project: JoyProjectV1, revision: number): void {
   console.log();
 }
 
-function printTimeline(project: JoyProjectV1): void {
+function printTimeline(project: CliProjectDocument): void {
   const root = project.compositions[project.rootCompositionId];
   if (!root) {
     console.log(`\n  ${c('Timeline:', 'bold')} (empty — no root composition)\n`);
@@ -306,12 +305,12 @@ function printTimeline(project: JoyProjectV1): void {
 
 interface ApplyLookResult {
   readonly ok: boolean;
-  readonly project?: JoyProjectV1;
+  readonly project?: CliProjectDocument;
   readonly operationCount?: number;
   readonly message?: string;
 }
 
-function applyLivingLook(project: JoyProjectV1, pack: string): ApplyLookResult {
+function applyLivingLook(project: CliProjectDocument, pack: string): ApplyLookResult {
   // The REPL compiles any named pack through the L2 compiler; built-ins ship
   // real definitions (e.g. editorialClean), and arbitrary named packs are
   // pinned to editorialClean so the pipeline still validates end-to-end.
@@ -339,11 +338,11 @@ function applyLivingLook(project: JoyProjectV1, pack: string): ApplyLookResult {
 }
 
 function splitClipInProject(
-  project: JoyProjectV1,
+  project: CliProjectDocument,
   clipId: string,
   atSec: number,
-): JoyProjectV1 | null {
-  const cloned: JoyProjectV1 = structuredClone(project);
+): CliProjectDocument | null {
+  const cloned: CliProjectDocument = structuredClone(project);
   const root = cloned.compositions[cloned.rootCompositionId];
   if (!root) return null;
 

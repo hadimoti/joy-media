@@ -6,6 +6,7 @@ import { extname } from 'node:path';
 export interface MediaInfo {
   readonly hasVideo: boolean;
   readonly hasAudio: boolean;
+  readonly hasAlpha: boolean;
   /** A still picture (png/jpg/webp/...): no timeline length of its own. */
   readonly isImage: boolean;
   readonly durationUs: number;
@@ -52,6 +53,7 @@ interface ProbeStream {
   readonly codec_type?: string;
   readonly width?: number;
   readonly height?: number;
+  readonly pix_fmt?: string;
   readonly duration?: string;
   readonly disposition?: { readonly attached_pic?: number };
 }
@@ -85,6 +87,7 @@ export function probeMedia(path: string): MediaInfo | null {
   return {
     hasVideo: Boolean(video),
     hasAudio: Boolean(audio),
+    hasAlpha: /(?:rgba|bgra|argb|abgr|yuva|gbrap|ya8|gray\d*a)/u.test(video?.pix_fmt ?? ''),
     isImage,
     durationUs: Number.isFinite(seconds) && !isImage ? Math.round(seconds * 1_000_000) : 0,
     width: video?.width,

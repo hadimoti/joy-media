@@ -1,4 +1,4 @@
-/* global console, process, setImmediate */
+/* global Atomics, SharedArrayBuffer, console, process, setImmediate */
 /**
  * Headless batch render command.
  *
@@ -21,14 +21,18 @@
 import { randomBytes } from 'node:crypto';
 import {
   accessSync,
+  closeSync,
   constants,
+  existsSync,
   mkdirSync,
+  openSync,
+  readFileSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { CliFlags } from '../cli.js';
 import { FlagValidationError, parseIntFlag } from '../utils/flags.js';
 import {
@@ -40,8 +44,9 @@ import {
   logWarn,
   printBanner,
 } from '../utils/logger.js';
+import { probeMedia } from '../utils/media-probe.js';
 import { buildFfmpegArgs, fileSize, planMedia, startEncode } from './render-media.js';
-import { listProjects, loadProject, type createDefaultProject } from '../utils/project-loader.js';
+import { listProjects, loadProject, type CliProjectDocument } from '../utils/project-loader.js';
 
 export interface RenderCommandFlags {
   project?: string | undefined;
@@ -171,6 +176,7 @@ export type RenderErrorCode =
   | 'internal'
   | 'media-missing'
   | 'media-unreadable'
+  | 'unsupported-feature'
   | 'ffmpeg-missing'
   | 'encode-failed';
 
@@ -299,7 +305,7 @@ export async function handleRenderCommand(args: string[], flags: CliFlags): Prom
 }
 
 export interface RunHeadlessRenderInput {
-  readonly project: ReturnType<typeof createDefaultProject>;
+  readonly project: CliProjectDocument;
   readonly preset: RenderPresetSpec['id'];
   readonly outDir: string;
   readonly concurrency: number;
@@ -357,6 +363,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function finiteOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** First output frame at or after a timeline timestamp for the selected FPS. */
+function frameBoundaryAtUs(timeUs: number, fps: string): number {
+  const [numeratorText, denominatorText] = fps.split('/');
+  const numerator = Number(numeratorText);
+  const denominator = Number(denominatorText ?? '1');
+  if (!(numerator > 0) || !(denominator > 0)) return 0;
+  return Math.max(0, Math.ceil((timeUs * numerator) / (1_000_000 * denominator) - 1e-9));
 }
 
 /**
@@ -554,7 +569,26 @@ export async function runHeadlessRender(
   if (mediaPlan.mode === 'error') return failure(mediaPlan.code, mediaPlan.message);
   const realMedia = mediaPlan.mode === 'media' ? mediaPlan : null;
 
-  const { clips: allClips, totalFrames } = plan;
+  const allClips = realMedia
+    ? plan.clips.map((clip) => {
+        const mediaClip = realMedia.clips.find(
+          (candidate) => candidate.clipId === clip.clipId && candidate.trackId === clip.trackId,
+        );
+        if (!mediaClip) return clip;
+        const firstFrame = frameBoundaryAtUs(mediaClip.startUs, realMedia.fps);
+        const endFrame = frameBoundaryAtUs(mediaClip.startUs + mediaClip.durationUs, realMedia.fps);
+        return {
+          ...clip,
+          startUs: mediaClip.startUs,
+          durationUs: mediaClip.durationUs,
+          firstFrame,
+          frames: Math.max(1, endFrame - firstFrame),
+        };
+      })
+    : plan.clips;
+  const totalFrames = realMedia
+    ? Math.max(1, ...allClips.map((clip) => clip.firstFrame + clip.frames))
+    : plan.totalFrames;
   // A real render uses the project's own size and frame rate, so the "preset is fixed at ..."
   // note from planning does not apply to it.
   const warnings = [
@@ -572,8 +606,25 @@ export async function runHeadlessRender(
   if (totalClips > 0) {
     // Fail before doing any work (and before announcing `start`) if the
     // destination can never be written.
-    const outputProblem = prepareOutputDir(outDir);
+    const outputTargets = realMedia
+      ? [join(outDir, mediaName), join(outDir, manifestName)]
+      : [join(outDir, manifestName)];
+    const outputProblem = prepareOutputDir(outDir, outputTargets);
     if (outputProblem) return failure('output', outputProblem, totalFrames, totalClips);
+  }
+
+  let releaseOutputLock: (() => void) | null = null;
+  let recordOutputPartialPath: ((partialPath: string | null) => void) | null = null;
+  let recordOutputTransaction: ((transaction: OutputTransactionRecord | null) => void) | null =
+    null;
+  let activeRenderPartialPath: string | null = null;
+  if (realMedia) {
+    const lockPath = join(outDir, `.${mediaName}.render.lock`);
+    const lock = acquireOutputLock(lockPath);
+    if (!lock.ok) return failure('output', lock.message, totalFrames, totalClips);
+    releaseOutputLock = lock.release;
+    recordOutputPartialPath = lock.recordPartialPath;
+    recordOutputTransaction = lock.recordTransaction;
   }
 
   if (!json) {
@@ -725,12 +776,27 @@ export async function runHeadlessRender(
     );
   }
 
-  let mediaPath = '';
+  const mediaPath = realMedia ? join(outDir, mediaName) : '';
+  let stagedMediaPath: string | null = null;
   try {
     await Promise.all(workers);
     if (realMedia) {
-      const finalPath = join(outDir, mediaName);
-      const partialPath = join(outDir, `.${mediaName}.${process.pid}.partial`);
+      const partialPath = join(
+        outDir,
+        `.${mediaName}.${process.pid}.${randomBytes(4).toString('hex')}.partial`,
+      );
+      try {
+        if (!recordOutputPartialPath) throw new Error('Render output lock is unavailable.');
+        recordOutputPartialPath(partialPath);
+        activeRenderPartialPath = partialPath;
+      } catch (err) {
+        return failure(
+          'output',
+          `Cannot record staged media path ${partialPath}: ${errorMessage(err)}`,
+          totalFrames,
+          totalClips,
+        );
+      }
       let lastPercent = -1;
       const handle = startEncode(
         buildFfmpegArgs(realMedia, preset, partialPath),
@@ -773,37 +839,44 @@ export async function runHeadlessRender(
           totalClips,
         );
       }
-      try {
-        renameSync(partialPath, finalPath);
-      } catch (err) {
+      const encodedInfo = probeMedia(partialPath);
+      const [fpsNumerator, fpsDenominator] = realMedia.fps.split('/').map(Number);
+      const frameDurationUs =
+        fpsNumerator && fpsDenominator
+          ? (1_000_000 * fpsDenominator) / fpsNumerator
+          : Number.POSITIVE_INFINITY;
+      if (
+        !encodedInfo?.hasVideo ||
+        !encodedInfo.hasAudio ||
+        encodedInfo.width !== realMedia.width ||
+        encodedInfo.height !== realMedia.height ||
+        encodedInfo.durationUs <= 0 ||
+        Math.abs(encodedInfo.durationUs - realMedia.durationUs) > frameDurationUs
+      ) {
         discardPartial();
         return failure(
-          'output',
-          `Failed to write ${finalPath}: ${errorMessage(err)}`,
+          'encode-failed',
+          `FFmpeg exited successfully but did not produce playable ${presetSpec.container} media ` +
+            `matching the planned ${realMedia.width}x${realMedia.height} ${realMedia.fps} ${realMedia.durationUs}µs timeline.`,
           totalFrames,
           totalClips,
         );
       }
-      mediaPath = finalPath;
-      let cumulative = 0;
-      for (const clip of allClips) {
-        cumulative += clip.frames;
-        emitJson(
-          {
-            type: 'clip',
-            projectId: plan.projectId,
-            trackId: clip.trackId,
-            clipId: clip.clipId,
-            progress: 1,
-            framesRendered: cumulative,
-            totalFrames,
-          },
-          json,
-        );
-      }
+      stagedMediaPath = partialPath;
     }
   } finally {
     stopWatchingSignals();
+    if (realMedia && stagedMediaPath === null) {
+      if (activeRenderPartialPath && !existsSync(activeRenderPartialPath)) {
+        try {
+          recordOutputPartialPath?.(null);
+          activeRenderPartialPath = null;
+        } catch {
+          // Keep the stale path in the lock so the next process can clean it safely.
+        }
+      }
+      releaseOutputLock?.();
+    }
   }
 
   const durationMs = Date.now() - startedAt;
@@ -828,7 +901,7 @@ export async function runHeadlessRender(
             height: realMedia.height,
             fps: realMedia.fps,
             durationUs: realMedia.durationUs,
-            bytes: fileSize(mediaPath),
+            bytes: fileSize(stagedMediaPath ?? mediaPath),
           },
         }
       : {}),
@@ -842,9 +915,8 @@ export async function runHeadlessRender(
     durationMs,
     renderedAt: new Date().toISOString(),
     warnings,
-    // `frameRange` indexes the render's sequential frame stream (clips in
-    // track order, back to back): contiguous and never overlapping. It is
-    // not a timeline position; use `startUs`/`durationUs` for that.
+    // Real-media frame ranges use output timeline positions. Manifest-only
+    // planning retains its legacy sequential ranges because it has no encoder.
     clips: allClips.map((clip) => ({
       clipId: clip.clipId,
       trackId: clip.trackId,
@@ -856,8 +928,55 @@ export async function runHeadlessRender(
   };
 
   try {
-    writeFileAtomic(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const manifestData = `${JSON.stringify(manifest, null, 2)}\n`;
+    if (realMedia && stagedMediaPath) {
+      const stagedManifestPath = writeFileTemp(manifestPath, manifestData);
+      try {
+        if (!recordOutputTransaction) throw new Error('Render output lock is unavailable.');
+        installOutputPair(
+          stagedMediaPath,
+          mediaPath,
+          stagedManifestPath,
+          manifestPath,
+          recordOutputTransaction,
+        );
+      } catch (err) {
+        rmSync(stagedManifestPath, { force: true });
+        throw err;
+      }
+      stagedMediaPath = null;
+      activeRenderPartialPath = null;
+      releaseOutputLock?.();
+      releaseOutputLock = null;
+      for (const clip of allClips) {
+        emitJson(
+          {
+            type: 'clip',
+            projectId: plan.projectId,
+            trackId: clip.trackId,
+            clipId: clip.clipId,
+            progress: 1,
+            framesRendered: totalFrames,
+            totalFrames,
+          },
+          json,
+        );
+      }
+    } else {
+      writeFileAtomic(manifestPath, manifestData);
+    }
   } catch (err) {
+    if (stagedMediaPath) rmSync(stagedMediaPath, { force: true });
+    if (activeRenderPartialPath && !existsSync(activeRenderPartialPath)) {
+      try {
+        recordOutputPartialPath?.(null);
+        activeRenderPartialPath = null;
+      } catch {
+        // Keep the stale path in the lock so the next process can clean it safely.
+      }
+    }
+    releaseOutputLock?.();
+    releaseOutputLock = null;
     if (showProgress) process.stdout.write('\n');
     return failure(
       'output',
@@ -992,7 +1111,7 @@ function yieldToEventLoop(): Promise<void> {
 }
 
 /** Create `dir` if needed and check it is a writable directory. Returns a problem or null. */
-function prepareOutputDir(dir: string): string | null {
+function prepareOutputDir(dir: string, targets: readonly string[] = []): string | null {
   let existing: ReturnType<typeof statSync> | undefined;
   try {
     existing = statSync(dir);
@@ -1008,21 +1127,384 @@ function prepareOutputDir(dir: string): string | null {
   } catch (err) {
     return `Cannot use output directory "${dir}": ${errorMessage(err)}`;
   }
+  for (const target of targets) {
+    try {
+      if (statSync(target).isDirectory()) {
+        return `Output file path "${target}" exists as a directory.`;
+      }
+    } catch {
+      // A missing output file is expected before the render starts.
+    }
+  }
   return null;
+}
+
+interface OutputTransactionRecord {
+  readonly phase: 'committing' | 'committed';
+  readonly mediaPath: string;
+  readonly stagedMediaPath: string;
+  readonly mediaBackup: string;
+  readonly hadMedia: boolean;
+  readonly manifestPath: string;
+  readonly stagedManifestPath: string;
+  readonly manifestBackup: string;
+  readonly hadManifest: boolean;
+}
+
+interface OutputLockRecord {
+  pid: number;
+  startedAt: string;
+  activePartialPath: string | null;
+  transaction: OutputTransactionRecord | null;
+}
+
+/** Claim one real output pair so concurrent renders cannot cross-publish it. */
+function acquireOutputLock(path: string):
+  | {
+      readonly ok: true;
+      readonly release: () => void;
+      readonly recordPartialPath: (partialPath: string | null) => void;
+      readonly recordTransaction: (transaction: OutputTransactionRecord | null) => void;
+    }
+  | { readonly ok: false; readonly message: string } {
+  const create = (): number | null => {
+    try {
+      return openSync(path, 'wx');
+    } catch {
+      return null;
+    }
+  };
+  let descriptor = create();
+  let recoveryFailure = '';
+  if (descriptor === null && existsSync(path)) {
+    let ownerPid = 0;
+    let ownerStartedAt = '';
+    let transaction: OutputTransactionRecord | null = null;
+    let activePartialPath: string | null = null;
+    try {
+      const owner = JSON.parse(readFileSync(path, 'utf8')) as {
+        pid?: unknown;
+        startedAt?: unknown;
+        activePartialPath?: unknown;
+        transaction?: unknown;
+      };
+      if (typeof owner.pid === 'number') ownerPid = owner.pid;
+      if (typeof owner.startedAt === 'string') ownerStartedAt = owner.startedAt;
+      if (typeof owner.activePartialPath === 'string') activePartialPath = owner.activePartialPath;
+      else if (owner.activePartialPath !== null && owner.activePartialPath !== undefined) {
+        recoveryFailure = 'the active partial path is malformed';
+      }
+      if (isOutputTransactionRecord(owner.transaction)) transaction = owner.transaction;
+      else if (owner.transaction !== null && owner.transaction !== undefined) {
+        recoveryFailure = 'the output transaction journal is malformed';
+      }
+    } catch {
+      // A malformed or partially written lock remains busy; never guess that it is stale.
+    }
+    if (ownerPid > 0 && !isProcessAlive(ownerPid)) {
+      try {
+        if (recoveryFailure) throw new Error(recoveryFailure);
+        recoverOutputLockState(path, transaction, activePartialPath);
+        rmSync(path, { force: true });
+        descriptor = create();
+      } catch (err) {
+        recoveryFailure = errorMessage(err);
+        descriptor = null;
+      }
+    }
+    if (descriptor === null) {
+      return {
+        ok: false,
+        message:
+          ownerPid > 0 && !isProcessAlive(ownerPid)
+            ? `A stale render lock could not be recovered at ${path}${recoveryFailure ? `: ${recoveryFailure}` : ''}.`
+            : `Another render is writing this output (lock: ${path}${ownerStartedAt ? `, started ${ownerStartedAt}` : ''}).`,
+      };
+    }
+  }
+  if (descriptor === null) {
+    return { ok: false, message: `Cannot claim render output lock ${path}.` };
+  }
+  const record: OutputLockRecord = {
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    activePartialPath: null,
+    transaction: null,
+  };
+  try {
+    writeFileSync(descriptor, JSON.stringify(record));
+  } catch (err) {
+    closeSync(descriptor);
+    rmSync(path, { force: true });
+    return { ok: false, message: `Cannot write render output lock ${path}: ${errorMessage(err)}` };
+  }
+  closeSync(descriptor);
+  const recordPartialPath = (activePartialPath: string | null): void => {
+    const next = { ...record, activePartialPath };
+    writeFileAtomic(path, JSON.stringify(next));
+    record.activePartialPath = activePartialPath;
+  };
+  const recordTransaction = (transaction: OutputTransactionRecord | null): void => {
+    const next = { ...record, activePartialPath: null, transaction };
+    writeFileAtomic(path, JSON.stringify(next));
+    record.activePartialPath = null;
+    record.transaction = transaction;
+  };
+  let released = false;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    process.off('exit', release);
+    try {
+      const current = JSON.parse(readFileSync(path, 'utf8')) as {
+        pid?: unknown;
+        activePartialPath?: unknown;
+        transaction?: unknown;
+      };
+      if (
+        current.pid === process.pid &&
+        ((current.transaction !== null && current.transaction !== undefined) ||
+          (typeof current.activePartialPath === 'string' && current.activePartialPath.length > 0))
+      ) {
+        return;
+      }
+    } catch {
+      // Leave a malformed lock in place; a later command will refuse unsafe recovery.
+      return;
+    }
+    rmSync(path, { force: true });
+  };
+  process.once('exit', release);
+  return { ok: true, release, recordPartialPath, recordTransaction };
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+function isOutputTransactionRecord(value: unknown): value is OutputTransactionRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    (record['phase'] === 'committing' || record['phase'] === 'committed') &&
+    typeof record['mediaPath'] === 'string' &&
+    typeof record['stagedMediaPath'] === 'string' &&
+    typeof record['mediaBackup'] === 'string' &&
+    typeof record['hadMedia'] === 'boolean' &&
+    typeof record['manifestPath'] === 'string' &&
+    typeof record['stagedManifestPath'] === 'string' &&
+    typeof record['manifestBackup'] === 'string' &&
+    typeof record['hadManifest'] === 'boolean'
+  );
+}
+
+/** Recover a pair transaction left between file renames after its owner exited. */
+function recoverOutputTransaction(
+  lockPath: string,
+  transaction: OutputTransactionRecord | null,
+): void {
+  if (!transaction) return;
+  const parent = resolve(dirname(lockPath));
+  const paths = [
+    transaction.mediaPath,
+    transaction.stagedMediaPath,
+    transaction.mediaBackup,
+    transaction.manifestPath,
+    transaction.stagedManifestPath,
+    transaction.manifestBackup,
+  ];
+  if (paths.some((path) => resolve(dirname(path)) !== parent)) {
+    throw new Error('the output transaction journal contains a path outside its output directory');
+  }
+  const mediaName = basename(transaction.mediaPath);
+  const manifestName = `${mediaName}.manifest.json`;
+  const generatedPath = (path: string, prefix: string, suffix: string): boolean => {
+    const name = basename(path);
+    return name.startsWith(prefix) && name.endsWith(suffix);
+  };
+  if (
+    basename(lockPath) !== `.${mediaName}.render.lock` ||
+    basename(transaction.manifestPath) !== manifestName ||
+    !generatedPath(transaction.stagedMediaPath, `.${mediaName}.`, '.partial') ||
+    !generatedPath(transaction.mediaBackup, `.${mediaName}.`, '.backup') ||
+    !generatedPath(transaction.stagedManifestPath, `.${manifestName}.`, '.tmp') ||
+    !generatedPath(transaction.manifestBackup, `.${manifestName}.`, '.backup')
+  ) {
+    throw new Error('the output transaction journal contains unexpected output paths');
+  }
+  if (transaction.phase === 'committed') {
+    rmSync(transaction.mediaBackup, { force: true });
+    rmSync(transaction.manifestBackup, { force: true });
+  } else {
+    restoreOutputFile(
+      transaction.mediaPath,
+      transaction.mediaBackup,
+      transaction.stagedMediaPath,
+      transaction.hadMedia,
+    );
+    restoreOutputFile(
+      transaction.manifestPath,
+      transaction.manifestBackup,
+      transaction.stagedManifestPath,
+      transaction.hadManifest,
+    );
+  }
+  rmSync(transaction.stagedMediaPath, { force: true });
+  rmSync(transaction.stagedManifestPath, { force: true });
+}
+
+function recoverOutputLockState(
+  lockPath: string,
+  transaction: OutputTransactionRecord | null,
+  activePartialPath: string | null,
+): void {
+  if (activePartialPath) {
+    const mediaName = basename(lockPath)
+      .replace(/^\./u, '')
+      .replace(/\.render\.lock$/u, '');
+    const parent = resolve(dirname(lockPath));
+    if (
+      resolve(dirname(activePartialPath)) !== parent ||
+      !basename(activePartialPath).startsWith(`.${mediaName}.`) ||
+      !basename(activePartialPath).endsWith('.partial')
+    ) {
+      throw new Error('the output lock contains an unexpected partial-media path');
+    }
+    rmSync(activePartialPath, { force: true });
+  }
+  recoverOutputTransaction(lockPath, transaction);
+}
+
+function restoreOutputFile(
+  target: string,
+  backup: string,
+  staged: string,
+  existedBefore: boolean,
+): void {
+  if (existsSync(backup)) {
+    rmSync(target, { force: true });
+    renameSync(backup, target);
+  } else if (!existedBefore && !existsSync(staged)) {
+    // The staged file was already renamed to the public path before interruption.
+    rmSync(target, { force: true });
+  }
 }
 
 /** Write via a sibling temp file + rename so readers never see a half-written manifest. */
 function writeFileAtomic(path: string, data: string): void {
+  const tmp = writeFileTemp(path, data);
+  try {
+    replaceFileWithRetry(tmp, path);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+
+/** Retry transient Windows sharing violations while another process reads the lock journal. */
+function replaceFileWithRetry(source: string, target: string): void {
+  const retryableWindowsErrors = new Set(['EACCES', 'EBUSY', 'EPERM']);
+  const waitCell = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  const attempts = process.platform === 'win32' ? 25 : 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      renameSync(source, target);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (
+        process.platform !== 'win32' ||
+        !retryableWindowsErrors.has(code ?? '') ||
+        attempt === attempts - 1
+      ) {
+        throw error;
+      }
+      Atomics.wait(waitCell, 0, 0, 10);
+    }
+  }
+}
+
+/** Create a sibling temp file and leave it ready for a later atomic rename. */
+function writeFileTemp(path: string, data: string): string {
   const tmp = join(
     dirname(path),
     `.${basename(path)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`,
   );
   try {
     writeFileSync(tmp, data, 'utf8');
-    renameSync(tmp, path);
   } catch (err) {
     rmSync(tmp, { force: true });
     throw err;
+  }
+  return tmp;
+}
+
+/** Replace the media and its manifest as a recoverable pair. */
+function installOutputPair(
+  stagedMediaPath: string,
+  mediaPath: string,
+  stagedManifestPath: string,
+  manifestPath: string,
+  recordTransaction: (transaction: OutputTransactionRecord | null) => void,
+): void {
+  const suffix = `${process.pid}.${randomBytes(6).toString('hex')}.backup`;
+  const mediaBackup = join(dirname(mediaPath), `.${basename(mediaPath)}.${suffix}`);
+  const manifestBackup = join(dirname(manifestPath), `.${basename(manifestPath)}.${suffix}`);
+  let transaction: OutputTransactionRecord | null = null;
+  try {
+    for (const target of [mediaPath, manifestPath]) {
+      if (existsSync(target) && statSync(target).isDirectory()) {
+        throw new Error(`Output file path "${target}" exists as a directory.`);
+      }
+    }
+    transaction = {
+      phase: 'committing',
+      mediaPath,
+      stagedMediaPath,
+      mediaBackup,
+      hadMedia: existsSync(mediaPath),
+      manifestPath,
+      stagedManifestPath,
+      manifestBackup,
+      hadManifest: existsSync(manifestPath),
+    };
+    recordTransaction(transaction);
+    if (transaction.hadMedia) {
+      renameSync(mediaPath, mediaBackup);
+    }
+    if (transaction.hadManifest) {
+      renameSync(manifestPath, manifestBackup);
+    }
+    renameSync(stagedMediaPath, mediaPath);
+    renameSync(stagedManifestPath, manifestPath);
+    transaction = { ...transaction, phase: 'committed' };
+    recordTransaction(transaction);
+  } catch (err) {
+    let detail = '';
+    if (transaction) {
+      try {
+        recoverOutputTransaction(
+          join(dirname(mediaPath), `.${basename(mediaPath)}.render.lock`),
+          transaction,
+        );
+        recordTransaction(null);
+      } catch (rollbackError) {
+        detail = ` Output recovery failed: ${errorMessage(rollbackError)}.`;
+      }
+    }
+    throw new Error(`${errorMessage(err)}.${detail}`);
+  }
+  try {
+    rmSync(mediaBackup, { force: true });
+    rmSync(manifestBackup, { force: true });
+    recordTransaction(null);
+  } catch {
+    // The committed journal stays in the lock; a later render cleans up these backups.
   }
 }
 
@@ -1039,7 +1521,7 @@ export function resolveRenderProjectTarget(
   identifier: string | undefined,
   sqlitePath?: string,
 ): {
-  project: ReturnType<typeof createDefaultProject>;
+  project: CliProjectDocument;
   revision: number;
   source: 'sqlite' | 'file';
   path: string;

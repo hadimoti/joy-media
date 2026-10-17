@@ -16,15 +16,16 @@
     "test": "vitest run --root ../.. apps/cli/src"
   },
   "dependencies": {
-    "@joy-media/joy-agent-engine": "workspace:*",
-    "@joy-media/project-schema": "workspace:*",
-    "@joy-media/project-persistence": "workspace:*",
-    "@joy-media/commands": "workspace:*",
     "@joy-media/agent-tools": "workspace:*",
+    "@joy-media/commands": "workspace:*",
+    "@joy-media/joy-agent-engine": "workspace:*",
     "@joy-media/motion-core": "workspace:*",
+    "@joy-media/project-persistence": "workspace:*",
+    "@joy-media/project-schema": "workspace:*",
     "ai": "7.0.92"
   },
   "devDependencies": {
+    "@joy-media/test-fixtures": "workspace:*",
     "@types/node": "^22.16.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"

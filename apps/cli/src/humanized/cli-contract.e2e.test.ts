@@ -22,6 +22,7 @@ import {
 } from './cli-helpers.js';
 import { createSandbox, describeRun, hasAnsi, type Sandbox } from './harness.js';
 import { defaultProjectDbPath } from './project-helpers.js';
+import { buildHistoricalSchemaProjects } from '@joy-media/test-fixtures';
 
 const COMMANDS = [
   'agent',
@@ -38,25 +39,23 @@ const OFFLINE = { JOY_MEDIA_EDGE_URL: 'off' };
 /** A minimal project file the timeline/render commands accept via `--project file.json`. */
 function writeProjectFile(sb: Sandbox, name = 'demo.json'): string {
   const path = sb.path(name);
+  const historical = buildHistoricalSchemaProjects().v1;
+  const root = historical.compositions[historical.rootCompositionId]!;
   writeFileSync(
     path,
     JSON.stringify({
-      schemaVersion: 1,
+      ...historical,
       id: 'proj-demo',
       title: 'Demo',
-      rootCompositionId: 'root',
-      assets: {},
       compositions: {
-        root: {
-          id: 'root',
+        ...historical.compositions,
+        [historical.rootCompositionId]: {
+          ...root,
           name: 'Main',
           width: 1080,
           height: 1920,
-          frameRate: { num: 30, den: 1 },
           durationUs: 10_000_000,
-          tracks: [
-            { id: 'track-v1', kind: 'video', name: 'V1', order: 0, enabled: true, clips: [] },
-          ],
+          tracks: root.tracks.map((track) => ({ ...track, clips: [] })),
         },
       },
     }),

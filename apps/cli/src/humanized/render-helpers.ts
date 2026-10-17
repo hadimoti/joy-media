@@ -135,9 +135,14 @@ export async function buildProjectViaCli(
 
 export interface DocClip {
   readonly id: string;
+  readonly assetId?: string | undefined;
   readonly startUs?: number | undefined;
+  readonly sourceInUs?: number | undefined;
   /** Anything goes: tests feed the renderer corrupt values on purpose. */
   readonly durationUs?: unknown;
+  readonly playbackRate?: number | undefined;
+  readonly reversed?: boolean | undefined;
+  readonly timeRemap?: unknown;
 }
 
 export interface DocTrack {
@@ -155,6 +160,7 @@ export interface ProjectDocOptions {
   readonly title?: string;
   readonly width?: number;
   readonly height?: number;
+  readonly durationUs?: number;
   /** Frames per second as a rational, e.g. `{ num: 60000, den: 1001 }`. */
   readonly frameRate?: { num: number; den: number };
   readonly tracks?: readonly DocTrack[];
@@ -178,7 +184,7 @@ export function projectDoc(options: ProjectDocOptions = {}): Record<string, unkn
         height: options.height ?? 1920,
         pixelAspectRatio: { num: 1, den: 1 },
         frameRate: options.frameRate ?? { num: 30, den: 1 },
-        durationUs: 10_000_000,
+        durationUs: options.durationUs ?? 10_000_000,
         background: '#000000',
         tracks: (options.tracks ?? []).map((track, order) => ({
           id: track.id,
@@ -191,10 +197,13 @@ export function projectDoc(options: ProjectDocOptions = {}): Record<string, unkn
           clips: track.clips.map((clip) => ({
             id: clip.id,
             kind: 'video',
-            assetId: 'asset-default',
+            assetId: clip.assetId ?? 'asset-default',
             startUs: clip.startUs ?? 0,
             durationUs: clip.durationUs,
-            sourceInUs: 0,
+            sourceInUs: clip.sourceInUs ?? 0,
+            ...(clip.playbackRate === undefined ? {} : { playbackRate: clip.playbackRate }),
+            ...(clip.reversed === undefined ? {} : { reversed: clip.reversed }),
+            ...(clip.timeRemap === undefined ? {} : { timeRemap: clip.timeRemap }),
           })),
         })),
       },

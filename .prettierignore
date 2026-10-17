@@ -13,6 +13,8 @@ test-results/
 apps/editor-web/public/assets/
 # Generated workflow artifacts: canonical format is workflowToJson (pinned by test).
 packages/workflow-engine/workflows/
+# Generated fixture inventory; its exact toolchain strings are owned by the generator.
+packages/test-fixtures/media/manifest.json
 # TypeScript compiler outputs emitted alongside authored source files.
 **/src/**/*.js
 **/src/**/*.d.ts

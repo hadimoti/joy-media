@@ -33,30 +33,83 @@ for (const relPath of requiredFiles) {
 console.log('✔ All required distribution files present.');
 
 // 2. Test Packaged CLI Execution via joy.cmd
-console.log('2. Testing packaged CLI execution (joy.cmd doctor)...');
+console.log('2. Testing packaged CLI execution (joy.cmd doctor) in a disposable profile...');
 const joyCmdPath = resolve(standaloneDir, 'joy.cmd');
-const doctorResult = spawnSync(joyCmdPath, ['doctor'], {
-  shell: true,
-  encoding: 'utf8',
-  timeout: 15000,
-});
-assert.strictEqual(doctorResult.status, 0, `joy.cmd doctor failed: ${doctorResult.stderr}`);
-assert.ok(doctorResult.stdout.includes('JOY MEDIA CLI'), 'Doctor output missing banner');
-assert.ok(
-  doctorResult.stdout.includes('All core system diagnostics passed'),
-  'Doctor diagnostics failed',
-);
-console.log('✔ Packaged CLI doctor passed cleanly.');
+const cliSandboxRoot = mkdtempSync(join(tmpdir(), 'joy-cli-package-check-'));
+const cliHome = join(cliSandboxRoot, 'profile');
+const cliTemp = join(cliSandboxRoot, 'temp');
+const cliDatabase = join(cliSandboxRoot, 'data', 'joy-media.sqlite3');
+mkdirSync(cliHome, { recursive: true });
+mkdirSync(cliTemp, { recursive: true });
+mkdirSync(join(cliSandboxRoot, 'data'), { recursive: true });
+const cliEnv = {
+  ...Object.fromEntries(
+    ['PATH', 'SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT'].flatMap((name) =>
+      process.env[name] ? [[name, process.env[name]]] : [],
+    ),
+  ),
+  HOME: cliHome,
+  USERPROFILE: cliHome,
+  APPDATA: join(cliHome, 'AppData', 'Roaming'),
+  LOCALAPPDATA: join(cliHome, 'AppData', 'Local'),
+  TEMP: cliTemp,
+  TMP: cliTemp,
+  JOY_MEDIA_SQLITE_PATH: cliDatabase,
+  JOY_MEDIA_EDGE_URL: 'off',
+  NODE_ENV: 'production',
+};
+mkdirSync(cliEnv.APPDATA, { recursive: true });
+mkdirSync(cliEnv.LOCALAPPDATA, { recursive: true });
+try {
+  const doctorResult = spawnSync(joyCmdPath, ['doctor'], {
+    shell: true,
+    env: cliEnv,
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  assert.strictEqual(doctorResult.status, 0, `joy.cmd doctor failed: ${doctorResult.stderr}`);
+  assert.ok(doctorResult.stdout.includes('JOY MEDIA CLI'), 'Doctor output missing banner');
+  assert.ok(
+    doctorResult.stdout.includes('Core checks passed with'),
+    'Doctor output did not report a successful core-check summary',
+  );
+  assert.ok(
+    doctorResult.stdout.includes('Disabled by JOY_MEDIA_EDGE_URL'),
+    'Package check must keep the doctor edge probe disabled and offline',
+  );
+  console.log('✔ Packaged CLI doctor passed cleanly without a production network probe.');
 
-console.log('3. Testing packaged CLI project list...');
-const projectResult = spawnSync(joyCmdPath, ['project', 'list'], {
-  shell: true,
-  encoding: 'utf8',
-  timeout: 15000,
-});
-assert.strictEqual(projectResult.status, 0, `joy.cmd project list failed: ${projectResult.stderr}`);
-assert.ok(projectResult.stdout.includes('Local Projects'), 'Project list output unexpected');
-console.log('✔ Packaged CLI project list passed cleanly.');
+  console.log('3. Testing packaged CLI project create/list...');
+  const createResult = spawnSync(
+    joyCmdPath,
+    ['project', 'create', 'Installer package check', '--sqlite-path', cliDatabase, '--json'],
+    { shell: true, env: cliEnv, encoding: 'utf8', timeout: 15000 },
+  );
+  assert.strictEqual(
+    createResult.status,
+    0,
+    `joy.cmd project create failed: ${createResult.stderr}`,
+  );
+  const created = JSON.parse(createResult.stdout);
+  const projectResult = spawnSync(
+    joyCmdPath,
+    ['project', 'list', '--sqlite-path', cliDatabase, '--json'],
+    { shell: true, env: cliEnv, encoding: 'utf8', timeout: 15000 },
+  );
+  assert.strictEqual(
+    projectResult.status,
+    0,
+    `joy.cmd project list failed: ${projectResult.stderr}`,
+  );
+  const projects = JSON.parse(projectResult.stdout);
+  assert.ok(
+    projects.some((project) => project.id === created.id),
+    'Project list omitted created project',
+  );
+  console.log('✔ Packaged CLI project create/list passed in the disposable profile.');
+} finally {
+  rmSync(cliSandboxRoot, { recursive: true, force: true });
+}
 
 // 4. Test Standalone Uninstall Sandbox Isolation
 console.log('4. Testing standalone uninstall.cmd cleanup in an isolated sandbox...');

@@ -18,12 +18,15 @@ Electron, SQLite, FFmpeg/FFprobe, existing self-hosted Windows/Linux runners.
 
 **Spec:** [Repository audit and readiness definition](../../qa/evidence/2026-10-17-readiness-audit.md).
 
-**Status:** Execution underway. Task 1's validator, source-bound writer gate, audit
-matrix, and Windows verification are implemented and independently green in the
-isolated worktree; this commit closes Task 1. Tasks 2–9 remain open. This plan is
-not an app-ready or release certificate.
-Baseline is remote SHA `c1fffd59d5078902e031e7684e69c27df40ce607`; local HEAD
-`34bb887f` lacks its three latest commits. The earlier October 14 plan was removed
+**Status (2026-10-17):** Tasks 1 and 2 are complete and committed as `930d73cb`
+and `6eacd9b5`. Tasks 3–7 now have extensive local Windows evidence for playable CLI
+output, recovery, fresh-profile project operations, packaged editor workflow, and
+staging package/launcher checks, but remain open where their full scope is not yet
+accepted. Task 8 has not started. Task 9 remains open for a frozen-candidate two-pass
+run, independent reviews, owner release decision, and required closeout receipt. This
+plan is not an app-ready or release certificate.
+The implementation began from remote baseline SHA
+`c1fffd59d5078902e031e7684e69c27df40ce607`. The earlier October 14 plan was removed
 upstream and its statement that CLI rendering produces no media is superseded.
 
 **Owner-confirmed requirement (2026-10-17):** `joy-media render` must produce

@@ -1,8 +1,8 @@
-/* global process */
-import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getJoyMediaDir } from './config.js';
+import { withExclusiveLock, writeFileAtomic } from './project-loader.js';
 
 /**
  * Where the media behind an asset lives on THIS machine.
@@ -36,12 +36,12 @@ export function loadAssetSources(): AssetSourceMap {
 
 export function registerAssetSource(assetId: string, absolutePath: string): void {
   const path = sourcesPath();
-  const map = loadAssetSources();
-  if (map[assetId] === absolutePath) return;
-  map[assetId] = absolutePath;
-  const tmp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(map, null, 2)}\n`, 'utf8');
-  renameSync(tmp, path);
+  withExclusiveLock(path, () => {
+    const map = loadAssetSources();
+    if (map[assetId] === absolutePath) return;
+    map[assetId] = absolutePath;
+    writeFileAtomic(path, `${JSON.stringify(map, null, 2)}\n`);
+  });
 }
 
 /** Stable id for a media file on this machine: same file path -> same asset id. */

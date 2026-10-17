@@ -9,8 +9,9 @@ import { ffmpegBinary, probeMedia, type MediaInfo } from '../utils/media-probe.j
  * Real media rendering for `joy-media render`: turn the project's timeline into one video file
  * with ffmpeg. Scope (v1): video/image/audio clips on enabled tracks, placed at their start time,
  * trimmed by `sourceInUs`, later tracks drawn on top of earlier ones, all audio mixed. Anything
- * else (speed changes, reverse, nested compositions, captions, effects) is skipped with a warning
- * instead of being silently ignored.
+ * else (speed changes, reverse, nested compositions, captions, transforms, effects, color grading,
+ * and non-default audio graph processing) is rejected before output instead of being silently
+ * ignored. See docs/product/CLI-RENDER-SUPPORT.md for the current render boundary.
  */
 
 export type MediaPresetId = 'mp4' | 'webm' | 'prores';
@@ -46,7 +47,7 @@ export type MediaPlan =
   | MediaPlanReady
   | {
       readonly mode: 'error';
-      readonly code: 'media-missing' | 'media-unreadable';
+      readonly code: 'media-missing' | 'media-unreadable' | 'unsupported-feature';
       readonly message: string;
     };
 
@@ -68,6 +69,54 @@ function fileExists(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+function unsupportedProjectFeature(project: Record<string, unknown>): string | null {
+  const visualObjects = project['visualObjects'];
+  if (isRecord(visualObjects) && Object.keys(visualObjects).length > 0)
+    return 'visual objects, transforms, and effects';
+  const captionDocuments = project['captionDocuments'];
+  if (isRecord(captionDocuments) && Object.keys(captionDocuments).length > 0)
+    return 'caption documents';
+  if (Array.isArray(project['transitions']) && project['transitions'].length > 0)
+    return 'transitions';
+  if (
+    isRecord(project['propertyAnimations']) &&
+    Object.keys(project['propertyAnimations']).length > 0
+  )
+    return 'property animations';
+  if (isRecord(project['clipColorGrades']) && Object.keys(project['clipColorGrades']).length > 0)
+    return 'clip color grades';
+  if (project['colorGrade'] !== undefined) return 'color grading';
+
+  const audio = project['audio'];
+  if (!isRecord(audio)) return null;
+  const audioClips = isRecord(audio['clips']) ? audio['clips'] : {};
+  for (const [clipId, rawConfig] of Object.entries(audioClips)) {
+    if (!isRecord(rawConfig)) continue;
+    if (rawConfig['sourceAssetId'] !== undefined)
+      return `processed audio source on clip "${clipId}"`;
+    if (rawConfig['gain'] !== undefined && rawConfig['gain'] !== 1)
+      return `audio gain on clip "${clipId}"`;
+    if (rawConfig['pan'] !== undefined && rawConfig['pan'] !== 0)
+      return `audio pan on clip "${clipId}"`;
+    if (rawConfig['mute'] === true) return `audio mute on clip "${clipId}"`;
+    if (rawConfig['solo'] === true) return `audio solo on clip "${clipId}"`;
+    if (Number(rawConfig['fadeInUs'] ?? 0) > 0 || Number(rawConfig['fadeOutUs'] ?? 0) > 0)
+      return `audio fades on clip "${clipId}"`;
+  }
+  if (Array.isArray(audio['effects']) && audio['effects'].length > 0) return 'audio effects';
+  const buses = Array.isArray(audio['buses']) ? audio['buses'] : [];
+  if (buses.length > 1) return 'audio bus routing';
+  for (const rawBus of buses) {
+    if (!isRecord(rawBus)) continue;
+    if (rawBus['gain'] !== undefined && rawBus['gain'] !== 1) return 'audio bus gain';
+    if (rawBus['pan'] !== undefined && rawBus['pan'] !== 0) return 'audio bus pan';
+    if (rawBus['mute'] === true) return 'audio bus mute';
+    if (rawBus['solo'] === true) return 'audio bus solo';
+    if (Array.isArray(rawBus['inputs']) && rawBus['inputs'].length > 0) return 'audio bus routing';
+  }
+  return null;
 }
 
 function resolveSource(
@@ -113,6 +162,14 @@ export function planMedia(
   if (!isRecord(root) || !Array.isArray(root['tracks'])) {
     return { mode: 'manifest-only', reason: 'The project has no timeline.' };
   }
+  const unsupported = unsupportedProjectFeature(project);
+  if (unsupported) {
+    return {
+      mode: 'error',
+      code: 'unsupported-feature',
+      message: `The CLI renderer does not support ${unsupported}; no media was produced.`,
+    };
+  }
   const assets = isRecord(project['assets']) ? project['assets'] : {};
   const sources = loadAssetSources();
 
@@ -130,15 +187,23 @@ export function planMedia(
   for (const rawTrack of root['tracks'] as unknown[]) {
     if (!isRecord(rawTrack) || rawTrack['enabled'] === false) continue;
     const trackId = typeof rawTrack['id'] === 'string' ? rawTrack['id'] : '?';
+    if (rawTrack['muted'] === true || rawTrack['solo'] === true) {
+      return {
+        mode: 'error',
+        code: 'unsupported-feature',
+        message: `Track "${trackId}" uses mute or solo, which the CLI renderer does not support.`,
+      };
+    }
     const clips = Array.isArray(rawTrack['clips']) ? rawTrack['clips'] : [];
     for (const rawClip of clips as unknown[]) {
       if (!isRecord(rawClip)) continue;
       const clipId = typeof rawClip['id'] === 'string' ? rawClip['id'] : '?';
       if (rawClip['kind'] !== 'video' || typeof rawClip['assetId'] !== 'string') {
-        warnings.push(
-          `Clip "${clipId}" is a ${String(rawClip['kind'])} clip; the CLI renderer only draws video, image and audio clips, so it is left out.`,
-        );
-        continue;
+        return {
+          mode: 'error',
+          code: 'unsupported-feature',
+          message: `Clip "${clipId}" is a ${String(rawClip['kind'])} clip; the CLI renderer only supports video clips.`,
+        };
       }
       const assetId = rawClip['assetId'];
       pending.push({
@@ -191,20 +256,31 @@ export function planMedia(
           'is not installed (set JOY_MEDIA_FFPROBE to its path).',
       };
     }
+    if (info.hasAlpha) {
+      return {
+        mode: 'error',
+        code: 'unsupported-feature',
+        message: `Clip "${entry.clipId}" uses alpha-bearing media; the CLI renderer cannot preserve transparency.`,
+      };
+    }
     const c = entry.clip;
     const startUs = typeof c['startUs'] === 'number' ? c['startUs'] : 0;
     const durationUs = typeof c['durationUs'] === 'number' ? c['durationUs'] : 0;
     const sourceInUs = typeof c['sourceInUs'] === 'number' ? c['sourceInUs'] : 0;
     if (durationUs <= 0) continue;
     if (typeof c['playbackRate'] === 'number' && c['playbackRate'] !== 1) {
-      warnings.push(
-        `Clip "${entry.clipId}": playback rate ${c['playbackRate']}x is not supported by the CLI renderer; drawn at 1x.`,
-      );
+      return {
+        mode: 'error',
+        code: 'unsupported-feature',
+        message: `Clip "${entry.clipId}": playback rate ${c['playbackRate']}x is not supported by the CLI renderer.`,
+      };
     }
     if (c['reversed'] === true || isRecord(c['timeRemap'])) {
-      warnings.push(
-        `Clip "${entry.clipId}": reverse / time remap is not supported by the CLI renderer; drawn forward at 1x.`,
-      );
+      return {
+        mode: 'error',
+        code: 'unsupported-feature',
+        message: `Clip "${entry.clipId}": reverse / time remap is not supported by the CLI renderer.`,
+      };
     }
     if (
       !info.isImage &&

@@ -4,6 +4,7 @@
  * model weights, and an edge server we control (never the real internet).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -65,6 +66,43 @@ function installFakeVenv(venv: string, exitCode = 0): string {
       `exit ${exitCode}`,
     ].join('\n'),
   );
+}
+
+function installWindowsFakeVenv(venv: string): string {
+  const pythonDirectory = join(sb.joyDir, venv, 'Scripts');
+  const pythonPath = join(pythonDirectory, 'python.exe');
+  const sourcePath = sb.path('fake-python.cs');
+  const source = [
+    'using System;',
+    'using System.IO;',
+    'class FakePython {',
+    '  static int Main(string[] args) {',
+    '    string output = null;',
+    '    for (int i = 0; i + 1 < args.Length; i++) { if (args[i] == "-o") output = args[i + 1]; }',
+    '    string exitText = Environment.GetEnvironmentVariable("JOY_TEST_FAKE_WORKER_EXIT_CODE");',
+    '    if (output != null && exitText != "3") File.WriteAllText(output, "processed");',
+    '    Console.WriteLine("fake worker: processing on stdout");',
+    '    Console.In.ReadToEnd();',
+    '    int exitCode = 0;',
+    '    Int32.TryParse(exitText, out exitCode);',
+    '    return exitCode;',
+    '  }',
+    '}',
+  ].join('\n');
+  mkdirSync(pythonDirectory, { recursive: true });
+  writeFileSync(sourcePath, source, 'utf8');
+  const compiler = 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe';
+  const compiled = spawnSync(compiler, ['/nologo', `/out:${pythonPath}`, sourcePath], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 30_000,
+  });
+  if (compiled.error || compiled.status !== 0) {
+    throw new Error(
+      `Could not compile the Windows worker fixture: ${compiled.stderr || compiled.stdout}`,
+    );
+  }
+  return pythonPath;
 }
 
 describe('doctor on a machine without network, GPU or models', () => {
@@ -287,6 +325,37 @@ describe('worker upscale / denoise', () => {
     );
   });
 
+  it.skipIf(!isWindows)(
+    'Windows Scripts/python.exe runs an isolated fake worker and writes output',
+    async () => {
+      installWindowsFakeVenv('venv-realesrgan');
+      writeFileSync(sb.path('photo.png'), 'original');
+      const r = await sb.run(['worker', 'upscale', 'photo.png', '--scale', '2'], {
+        env: { JOY_TEST_FAKE_WORKER_EXIT_CODE: '0' },
+      });
+      expect(r.code, describeRun(r)).toBe(0);
+      expect(r.out).toMatch(/Upscale completed: photo-upscaled-2x\.png/);
+      expect(readFileSync(sb.path('photo-upscaled-2x.png'), 'utf8')).toBe('processed');
+      expect(readFileSync(sb.path('photo.png'), 'utf8')).toBe('original');
+    },
+  );
+
+  it.skipIf(!isWindows)('Windows --json keeps fake worker chatter on stderr', async () => {
+    installWindowsFakeVenv('venv-deepfilternet');
+    writeFileSync(sb.path('voice.wav'), 'audio');
+    const r = await sb.run(['worker', 'denoise', 'voice.wav', '--json'], {
+      env: { JOY_TEST_FAKE_WORKER_EXIT_CODE: '0' },
+    });
+    expect(r.code, describeRun(r)).toBe(0);
+    expect(r.json()).toEqual({
+      ok: true,
+      operation: 'denoise',
+      input: 'voice.wav',
+      output: 'voice-denoised.wav',
+    });
+    expect(r.err).toContain('fake worker: processing on stdout');
+  });
+
   it.skipIf(isWindows)(
     '--json: stdout is one JSON document; worker chatter goes to stderr',
     async () => {
@@ -312,6 +381,18 @@ describe('worker upscale / denoise', () => {
     expect(r.code, describeRun(r)).toBe(1);
     expect(r.json()).toMatchObject({ ok: false, operation: 'upscale', workerExitCode: 3 });
     expect(r.err).toMatch(/Upscale failed: worker exited with code 3/);
+  });
+
+  it.skipIf(!isWindows)('Windows worker failure returns a structured nonzero result', async () => {
+    installWindowsFakeVenv('venv-realesrgan');
+    writeFileSync(sb.path('photo.png'), 'original');
+    const r = await sb.run(['worker', 'upscale', 'photo.png', '--scale', '2', '--json'], {
+      env: { JOY_TEST_FAKE_WORKER_EXIT_CODE: '3' },
+    });
+    expect(r.code, describeRun(r)).toBe(1);
+    expect(r.json()).toMatchObject({ ok: false, operation: 'upscale', workerExitCode: 3 });
+    expect(r.err).toMatch(/Upscale failed: worker exited with code 3/);
+    expect(readFileSync(sb.path('photo.png'), 'utf8')).toBe('original');
   });
 
   it.skipIf(isWindows)(
@@ -348,6 +429,18 @@ describe('worker upscale / denoise', () => {
       expect(r.code, describeRaw(args, r)).toBe(0);
     },
   );
+
+  it.skipIf(!isWindows)('Windows worker does not inherit a tool loop stdin', async () => {
+    installWindowsFakeVenv('venv-realesrgan');
+    writeFileSync(sb.path('photo.png'), 'original');
+    const args = ['worker', 'upscale', 'photo.png', '--scale', '2'];
+    const r = await spawnCli(sb, args, {
+      keepStdinOpen: true,
+      env: { JOY_TEST_FAKE_WORKER_EXIT_CODE: '0' },
+      timeoutMs: 20_000,
+    });
+    expect(r.code, describeRaw(args, r)).toBe(0);
+  });
 
   it('an unknown worker subcommand is reported on stderr with a suggestion', async () => {
     const r = await sb.run(['worker', 'upscal', 'x.png']);

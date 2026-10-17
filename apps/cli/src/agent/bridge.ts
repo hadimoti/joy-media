@@ -3,7 +3,7 @@ import type {
   JoyDocumentOperation,
   JoyTimelineOperation,
 } from '@joy-media/joy-agent-engine';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import type { CliProjectDocument } from '../utils/project-loader.js';
 
 export interface StagedOperationsSummary {
   readonly timelineOps: readonly JoyTimelineOperation[];
@@ -17,7 +17,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   private playheadUs: number = 0;
 
   constructor(
-    private project: JoyProjectV1,
+    private project: CliProjectDocument,
     private revision: number,
     private onStagedChange?: (summary: StagedOperationsSummary) => void,
   ) {}
@@ -173,7 +173,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   /**
    * Applies all staged operations onto the project and returns a clean, modified project document.
    */
-  applyStaged(): { updatedProject: JoyProjectV1; appliedCount: number; errors: string[] } {
+  applyStaged(): { updatedProject: CliProjectDocument; appliedCount: number; errors: string[] } {
     const current = structuredClone(this.project);
     const errors: string[] = [];
     let appliedCount = 0;

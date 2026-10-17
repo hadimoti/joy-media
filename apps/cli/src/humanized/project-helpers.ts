@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect } from 'vitest';
-import { validateJoyProjectV1 } from '@joy-media/project-schema';
+import { validateJoyProjectV3 } from '@joy-media/project-schema';
 import { describeRun, hasAnsi, type RunOptions, type RunResult, type Sandbox } from './harness.js';
 
 export interface ClipDoc {
@@ -193,7 +193,7 @@ export async function exportAndValidate(
     revision: number;
     source: unknown;
   };
-  expect(validateJoyProjectV1(exported.source)).toEqual([]);
+  expect(validateJoyProjectV3(exported.source)).toEqual([]);
   return exported;
 }
 

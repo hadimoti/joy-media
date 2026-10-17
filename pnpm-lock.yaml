@@ -147,6 +147,9 @@ importers:
         specifier: 7.0.92
         version: 7.0.92(zod@4.4.3)
     devDependencies:
+      '@joy-media/test-fixtures':
+        specifier: workspace:*
+        version: link:../../packages/test-fixtures
       '@types/node':
         specifier: ^22.16.0
         version: 22.20.1

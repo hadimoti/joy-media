@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildHistoricalSchemaProjects } from '@joy-media/test-fixtures';
 import { createSandbox, describeRun, hasAnsi, type Sandbox } from './harness.js';
 import {
   addClip,
@@ -516,6 +517,110 @@ describe('exporting and importing', () => {
     expect(r.out).toMatch(/replaced the existing project/);
   });
 
+  it('migrates every historical schema to v3 and preserves its timeline after save and fresh-process reopen', async () => {
+    const historical = buildHistoricalSchemaProjects();
+    let previousRevision = 0;
+
+    for (const [label, project] of Object.entries(historical)) {
+      const inputPath = `historical-${label}.json`;
+      const outputPath = `roundtrip-${label}.json`;
+      writeFileSync(sb.path(inputPath), JSON.stringify(project));
+
+      const imported = singleJson<{ id: string; revision: number }>(
+        expectOk(await sb.run(['project', 'import', inputPath, '--json'])),
+      );
+      expect(imported.id).toBe('historical-schemas');
+      expect(imported.revision).toBe(previousRevision + 1);
+      previousRevision = imported.revision;
+
+      const reopened = await showProject(sb, imported.id);
+      expect(reopened).toMatchObject({
+        id: 'historical-schemas',
+        title: 'Historical Schema Versions',
+        revision: imported.revision,
+      });
+      expect(reopened.tracks[0]?.clips).toMatchObject([
+        {
+          id: 'clip-video',
+          startUs: 0,
+          durationUs: 5_000_000,
+          assetId: 'asset-video',
+        },
+      ]);
+
+      expectOk(await sb.run(['project', 'export', imported.id, '--output', outputPath]));
+      const exported = JSON.parse(readFileSync(sb.path(outputPath), 'utf8')) as {
+        source: { schemaVersion: number; id: string; title: string };
+      };
+      expect(exported.source).toMatchObject({
+        schemaVersion: 3,
+        id: 'historical-schemas',
+        title: 'Historical Schema Versions',
+      });
+    }
+  });
+
+  it('rejects malformed, dangling, and cyclic projects without writing files or profile data', async () => {
+    const historical = buildHistoricalSchemaProjects();
+    const malformed = structuredClone(historical.v1);
+    Object.assign(malformed, { title: '' });
+
+    const dangling = structuredClone(historical.v1);
+    const tracks = dangling.compositions[dangling.rootCompositionId]!
+      .tracks as unknown as unknown[];
+    tracks.push({
+      id: 'caption-track',
+      kind: 'caption',
+      name: 'Captions',
+      order: 1,
+      enabled: true,
+      locked: false,
+      clips: [
+        {
+          id: 'dangling-caption',
+          kind: 'caption',
+          startUs: 0,
+          durationUs: 1_000_000,
+          captionDocumentId: 'missing-document',
+        },
+      ],
+    });
+
+    const cyclic = structuredClone(historical.v1);
+    const transform = {
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    };
+    Object.assign(cyclic, {
+      visualObjects: {
+        a: { id: 'a', kind: 'null', transform, parentId: 'b' },
+        b: { id: 'b', kind: 'null', transform, parentId: 'a' },
+      },
+    });
+
+    for (const [label, project] of [
+      ['malformed', malformed],
+      ['dangling', dangling],
+      ['cyclic', cyclic],
+    ] as const) {
+      const path = `${label}.json`;
+      writeFileSync(sb.path(path), JSON.stringify(project));
+      const before = readFileSync(sb.path(path), 'utf8');
+
+      const result = await sb.run(['project', 'import', path, '--json']);
+
+      const error = jsonError(result, 1);
+      expect(error.code, label).toBe('PROJECT_FILE_INVALID');
+      expect(readFileSync(sb.path(path), 'utf8'), label).toBe(before);
+      expect(existsSync(dbFile()), label).toBe(false);
+    }
+  });
+
   it('importing a file that does not exist says so (not "Usage"), and with no file is a usage error', async () => {
     const missing = expectExit(await sb.run(['project', 'import', 'nope.json']), 1);
     expect(missing.err).toMatch(/File not found: nope\.json/);
@@ -561,6 +666,33 @@ describe('a project addressed by id versus by file.json', () => {
     await addClip(sb, 'copy.json', { duration: 3 });
     expect((await showProject(sb, 'copy.json')).tracks[0]!.clips).toHaveLength(1);
     expect((await showProject(sb, id)).tracks[0]!.clips).toHaveLength(0);
+  });
+
+  it('rejects a future project schema before editing and leaves the file byte-for-byte intact', async () => {
+    const id = await createProject(sb, 'Future schema');
+    expectOk(await sb.run(['project', 'export', id, '--output', 'future.json']));
+    const projectFile = sb.path('future.json');
+    const parsed = JSON.parse(readFileSync(projectFile, 'utf8')) as {
+      source: { schemaVersion: number };
+    };
+    parsed.source.schemaVersion = 99;
+    writeFileSync(projectFile, JSON.stringify(parsed, null, 2));
+    const before = readFileSync(projectFile, 'utf8');
+
+    const result = await sb.run([
+      'timeline',
+      'add-clip',
+      '--project',
+      'future.json',
+      '--duration',
+      '2',
+      '--json',
+    ]);
+
+    const error = jsonError(result, 1);
+    expect(error.code).toBe('PROJECT_SCHEMA_UNSUPPORTED');
+    expect(error.message).toMatch(/schema version 99/i);
+    expect(readFileSync(projectFile, 'utf8')).toBe(before);
   });
 
   it('a folder that happens to be named like the project id does not break lookup by id', async () => {

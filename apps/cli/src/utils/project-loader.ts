@@ -13,7 +13,15 @@ import {
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { SqliteProjectStore } from '@joy-media/project-persistence/desktop';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import {
+  migrateToLatest,
+  migrateV0ToV1,
+  validateJoyProjectV3,
+  type JoyProjectV1,
+  type JoyProjectV2,
+  type JoyProjectV3,
+  type SpikeProject,
+} from '@joy-media/project-schema';
 import { FlagValidationError } from './flags.js';
 import { getDefaultSqlitePath } from './config.js';
 import { logError } from './logger.js';
@@ -21,11 +29,16 @@ import { logError } from './logger.js';
 export { getDefaultSqlitePath };
 
 export interface ProjectLoadResult {
-  readonly project: JoyProjectV1;
+  readonly project: CliProjectDocument;
   readonly revision: number;
   readonly source: 'sqlite' | 'file';
   readonly path: string;
 }
+
+/** Runtime project shape shared by the CLI's v1 editing operations and v1-v3 documents. */
+export type CliProjectDocument = Omit<JoyProjectV1, 'schemaVersion'> & {
+  readonly schemaVersion: 1 | 2 | 3;
+};
 
 export interface ProjectSummary {
   readonly id: string;
@@ -359,7 +372,7 @@ export function locateProject(identifier: string, sqlitePath?: string): ProjectL
  * `export` (`source`) or a saved file (`project`). Throws a clear failure for
  * anything that is not a project, instead of crashing later on `undefined`.
  */
-export function extractProject(parsed: unknown, label: string): JoyProjectV1 {
+export function extractProject(parsed: unknown, label: string): CliProjectDocument {
   const notAProject = (): CommandFailure =>
     new CommandFailure(
       'PROJECT_FILE_INVALID',
@@ -385,7 +398,44 @@ export function extractProject(parsed: unknown, label: string): JoyProjectV1 {
   ) {
     throw notAProject();
   }
-  return candidate as unknown as JoyProjectV1;
+
+  const schemaVersion = candidate.schemaVersion;
+  if (typeof schemaVersion !== 'number' || !Number.isInteger(schemaVersion)) {
+    throw new CommandFailure(
+      'PROJECT_FILE_INVALID',
+      `${label} is not a valid JOY Media project file (schemaVersion must be an integer).`,
+    );
+  }
+  if (schemaVersion < 0 || schemaVersion > 3) {
+    throw new CommandFailure(
+      'PROJECT_SCHEMA_UNSUPPORTED',
+      `${label} uses unsupported JOY Media project schema version ${schemaVersion}; this CLI supports versions 0 through 3.`,
+    );
+  }
+
+  let project: JoyProjectV3;
+  try {
+    project =
+      schemaVersion === 0
+        ? migrateToLatest(migrateV0ToV1(candidate as unknown as SpikeProject).project)
+        : migrateToLatest(candidate as unknown as JoyProjectV1 | JoyProjectV2 | JoyProjectV3);
+  } catch (err) {
+    if (err instanceof CommandFailure) throw err;
+    throw new CommandFailure(
+      'PROJECT_FILE_INVALID',
+      `${label} could not be migrated safely (${errorMessage(err)}).`,
+    );
+  }
+  const diagnostics = validateJoyProjectV3(project);
+  if (diagnostics.length > 0) {
+    const first = diagnostics[0]!;
+    const location = first.path ? ` at ${first.path}` : '';
+    throw new CommandFailure(
+      'PROJECT_FILE_INVALID',
+      `${label} is not a valid JOY Media project file${location} (${first.message}).`,
+    );
+  }
+  return project as CliProjectDocument;
 }
 
 /** Read and parse a JSON file, with failures that name the file. */
@@ -436,7 +486,7 @@ export function loadProject(identifier: string, sqlitePath?: string): ProjectLoa
   }
 
   return withDatabase(dbPath, () => {
-    const store = new SqliteProjectStore<JoyProjectV1, unknown>(dbPath);
+    const store = new SqliteProjectStore<CliProjectDocument, unknown>(dbPath);
     try {
       let snapshots;
       try {
@@ -476,7 +526,7 @@ export function latestRevision(projectId: string, sqlitePath?: string): number {
   const dbPath = sqlitePath ?? getDefaultSqlitePath();
   if (!existsSync(dbPath)) return 0;
   return withDatabase(dbPath, () => {
-    const store = new SqliteProjectStore<JoyProjectV1, unknown>(dbPath);
+    const store = new SqliteProjectStore<CliProjectDocument, unknown>(dbPath);
     try {
       return store.snapshots(projectId).at(-1)?.revision ?? 0;
     } finally {
@@ -486,7 +536,7 @@ export function latestRevision(projectId: string, sqlitePath?: string): number {
 }
 
 export function saveProject(
-  project: JoyProjectV1,
+  project: CliProjectDocument,
   target: { source: 'sqlite' | 'file'; path: string; revision: number },
 ): number {
   const nextRevision = target.revision + 1;
@@ -515,7 +565,7 @@ export function saveProject(
 
   return withExclusiveLock(target.path, () =>
     withDatabase(target.path, () => {
-      const store = new SqliteProjectStore<JoyProjectV1, unknown>(target.path);
+      const store = new SqliteProjectStore<CliProjectDocument, unknown>(target.path);
       try {
         // Compare-and-swap: the caller read `target.revision`; if somebody else has
         // saved since, writing now would silently throw their work away.
@@ -532,7 +582,7 @@ export function saveProject(
           project.id,
           {
             revision: nextRevision,
-            schemaVersion: 1,
+            schemaVersion: updatedProject.schemaVersion,
             payload: updatedProject,
             checksum: `sha256-${Date.now().toString(16)}`,
           },
@@ -590,7 +640,7 @@ export function listProjects(
 
       for (const row of rows) {
         try {
-          const project = JSON.parse(row.payload) as JoyProjectV1;
+          const project = JSON.parse(row.payload) as CliProjectDocument;
           const root = project.compositions?.[project.rootCompositionId];
           let clipCount = 0;
           let trackCount = 0;

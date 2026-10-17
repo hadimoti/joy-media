@@ -14,10 +14,10 @@ import {
   writeFileSync,
   chmodSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSandbox, describeRun, type Sandbox } from './harness.js';
+import { CLI_ROOT, createSandbox, describeRun, type Sandbox } from './harness.js';
 import {
   addClip,
   createProject,
@@ -45,6 +45,72 @@ afterEach(() => sb.cleanup());
 const defaultDb = (): string => defaultProjectDbPath(sb);
 
 describe('several processes at once (an agent fanning out tool calls)', () => {
+  it('parallel file-project imports retain every source registration and render after restart', async () => {
+    const sources = [
+      'readiness-hard-cut.mkv',
+      'readiness-silent.mp4',
+      'readiness-odd-161x91.mkv',
+      'readiness-vfr.mkv',
+      'readiness-rotation.mp4',
+      'readiness-ntsc-30000-1001.mp4',
+    ].map((name) => resolve(CLI_ROOT, '..', '..', 'packages', 'test-fixtures', 'media', name));
+    const projects: string[] = [];
+    for (let index = 0; index < sources.length; index++) {
+      const id = await createProject(sb, `File registration ${index + 1}`);
+      const path = sb.path(`file-project-${index + 1}.json`);
+      const exported = await sb.run(['project', 'export', id, '--output', path, '--json']);
+      expect(exported.code, describeRun(exported)).toBe(0);
+      projects.push(path);
+    }
+
+    const added = await Promise.all(
+      projects.map((project, index) =>
+        sb.run([
+          'timeline',
+          'add-clip',
+          '--project',
+          project,
+          '--asset',
+          sources[index]!,
+          '--json',
+        ]),
+      ),
+    );
+    for (const result of added) expect(result.code, describeRun(result)).toBe(0);
+
+    const sourceMapPath = join(sb.joyDir, 'cli-asset-sources.json');
+    const sourceMap = JSON.parse(readFileSync(sourceMapPath, 'utf8')) as Record<string, string>;
+    const assetIds = await Promise.all(
+      projects.map(async (project) => {
+        const shown = await showProject(sb, project);
+        return shown.tracks.flatMap((item) => item.clips).map((clip) => clip.assetId!)[0]!;
+      }),
+    );
+    for (const [index, assetId] of assetIds.entries()) {
+      expect(sourceMap[assetId], `missing source registration ${assetId}`).toBe(sources[index]);
+    }
+
+    const renders = await Promise.all(
+      projects.map((project, index) =>
+        sb.run([
+          'render',
+          '--project',
+          project,
+          '--out',
+          sb.path(`fresh-render-${index}`),
+          '--json',
+        ]),
+      ),
+    );
+    for (const result of renders) {
+      expect(result.code, describeRun(result)).toBe(0);
+      expect(result.ndjson<{ type: string; mediaProduced?: boolean }>().at(-1)).toMatchObject({
+        type: 'complete',
+        mediaProduced: true,
+      });
+    }
+  }, 120_000);
+
   it('eight parallel `project create` calls all succeed and make eight distinct projects', async () => {
     const names = Array.from({ length: 8 }, (_, i) => `Parallel ${i + 1}`);
     const results = await Promise.all(

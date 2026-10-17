@@ -1,4 +1,5 @@
 /* global process */
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -11,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 
 export interface CliConfig {
   activeProvider?: string | undefined;
@@ -53,6 +54,52 @@ export class ConfigFileError extends Error {
 const IS_POSIX = process.platform !== 'win32';
 const PRIVATE_DIR_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
+const securedWindowsPaths = new Set<string>();
+let windowsUserSid: string | undefined;
+
+export function resolveWindowsSystemExecutablePath(
+  executableName: 'whoami.exe' | 'icacls.exe',
+  systemRoot = process.env.SystemRoot ?? process.env.WINDIR,
+): string {
+  if (!systemRoot || !win32.isAbsolute(systemRoot)) {
+    throw new Error(
+      'Could not determine an absolute Windows system root to protect JOY Media secrets.',
+    );
+  }
+  return win32.join(systemRoot, 'System32', executableName);
+}
+
+function currentWindowsUserSid(): string {
+  if (windowsUserSid) return windowsUserSid;
+  const result = spawnSync(
+    resolveWindowsSystemExecutablePath('whoami.exe'),
+    ['/user', '/fo', 'csv', '/nh'],
+    {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 10_000,
+    },
+  );
+  const sid = result.stdout?.match(/S-1-[0-9-]+/)?.[0];
+  if (result.error || result.status !== 0 || !sid) {
+    throw new Error(
+      'Could not determine the current Windows user SID to protect JOY Media secrets.',
+    );
+  }
+  windowsUserSid = sid;
+  return sid;
+}
+
+function runWindowsAcl(path: string, args: string[]): void {
+  const result = spawnSync(resolveWindowsSystemExecutablePath('icacls.exe'), [path, ...args], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 10_000,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`Could not secure JOY Media configuration permissions for ${path}.`);
+  }
+}
 
 export function getJoyMediaDir(): string {
   const dir = join(homedir(), '.joy-media');
@@ -63,6 +110,7 @@ export function getJoyMediaDir(): string {
       // Ignore if cannot create
     }
   }
+  if (existsSync(dir)) makePrivate(dir, PRIVATE_DIR_MODE, true);
   return dir;
 }
 
@@ -74,14 +122,33 @@ export function getAiProvidersPath(): string {
   return join(getJoyMediaDir(), 'ai-providers.json');
 }
 
-/** Tighten group/other permission bits on POSIX (best effort, never throws). */
-function makePrivate(path: string, mode: number): void {
-  if (!IS_POSIX) return;
-  try {
-    if ((statSync(path).mode & 0o077) !== 0) chmodSync(path, mode);
-  } catch {
-    // Best effort: a read-only or foreign-owned file is reported elsewhere.
+/** Keep the secret-bearing config directory and files private on POSIX and Windows. */
+function makePrivate(path: string, mode: number, directory = false): void {
+  if (IS_POSIX) {
+    try {
+      if ((statSync(path).mode & 0o077) !== 0) chmodSync(path, mode);
+    } catch {
+      // Best effort, as chmod may fail for a read-only or foreign-owned file.
+    }
+    return;
   }
+
+  const normalizedPath = path.toLowerCase();
+  if (securedWindowsPaths.has(normalizedPath)) return;
+
+  const userSid = currentWindowsUserSid();
+  const permission = directory ? '(OI)(CI)F' : 'F';
+  // Add a private allow-list before removing inherited or explicit broad grants, so
+  // tightening an old profile cannot lock out the current process halfway through.
+  runWindowsAcl(path, [
+    '/grant:r',
+    `*${userSid}:${permission}`,
+    `*S-1-5-18:${permission}`,
+    `*S-1-5-32-544:${permission}`,
+  ]);
+  runWindowsAcl(path, ['/inheritance:r']);
+  runWindowsAcl(path, ['/remove:g', '*S-1-1-0', '*S-1-5-11', '*S-1-5-32-545']);
+  securedWindowsPaths.add(normalizedPath);
 }
 
 function readJsonObject(path: string): Record<string, unknown> | undefined {
@@ -161,7 +228,9 @@ function withConfigLock<T>(fn: () => T): T {
 
 /** @throws ConfigFileError when the file exists but is corrupt. */
 export function loadCliConfig(): CliConfig {
-  return (readJsonObject(getCliConfigPath()) ?? {}) as CliConfig;
+  const path = getCliConfigPath();
+  if (existsSync(path)) makePrivate(path, PRIVATE_FILE_MODE);
+  return (readJsonObject(path) ?? {}) as CliConfig;
 }
 
 export function saveCliConfig(config: CliConfig): void {
@@ -183,16 +252,14 @@ export function updateCliConfig(mutate: (current: CliConfig) => CliConfig): CliC
  */
 export function loadAiProviders(): Record<string, AiProviderConfig> {
   const path = getAiProvidersPath();
+  if (existsSync(path)) makePrivate(path, PRIVATE_FILE_MODE);
   const providers = readJsonObject(path);
   if (providers === undefined) return Object.create(null) as Record<string, AiProviderConfig>;
-  // Self-heal installs that stored keys world-readable before this fix.
-  makePrivate(getJoyMediaDir(), PRIVATE_DIR_MODE);
-  makePrivate(path, PRIVATE_FILE_MODE);
   return providers as Record<string, AiProviderConfig>;
 }
 
 export function saveAiProviders(providers: Record<string, AiProviderConfig>): void {
-  makePrivate(getJoyMediaDir(), PRIVATE_DIR_MODE);
+  makePrivate(getJoyMediaDir(), PRIVATE_DIR_MODE, true);
   writeFileAtomic(
     getAiProvidersPath(),
     `${JSON.stringify({ ...providers }, null, 2)}\n`,
