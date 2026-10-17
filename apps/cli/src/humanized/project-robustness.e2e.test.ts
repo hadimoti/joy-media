@@ -14,6 +14,7 @@ import {
   writeFileSync,
   chmodSync,
 } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -46,6 +47,47 @@ afterEach(() => sb.cleanup());
 const defaultDb = (): string => defaultProjectDbPath(sb);
 
 describe('several processes at once (an agent fanning out tool calls)', () => {
+  it('a separate SQLite writer lock returns a bounded busy error and retry keeps revisions monotonic', async () => {
+    const id = await createProject(sb, 'Held database lock');
+    const marker = sb.path('sqlite-lock-held.json');
+    const lockHolder = spawn(
+      process.execPath,
+      [
+        join(CLI_ROOT, 'src', 'humanized', 'fixtures', 'sqlite-lock-holder.mjs'),
+        defaultDb(),
+        marker,
+      ],
+      { cwd: sb.cwd, env: sb.env(), stdio: 'ignore' },
+    );
+    const lockHolderClosed = new Promise<void>((resolvePromise) => {
+      lockHolder.once('close', () => resolvePromise());
+    });
+
+    try {
+      await expect.poll(() => existsSync(marker), { timeout: 10_000 }).toBe(true);
+      const blocked = await sb.run(
+        ['timeline', 'add-clip', '--project', id, '--duration', '4', '--json'],
+        { timeoutMs: 20_000 },
+      );
+      const error = jsonError(blocked, 1);
+      expect(error.code).toBe('DATABASE_BUSY');
+      expect(error.message).toMatch(/busy.*Try again/i);
+      expect(spans(await showProject(sb, id))).toEqual([]);
+      expect((await showProject(sb, id)).revision).toBe(1);
+
+      lockHolder.kill('SIGKILL');
+      await lockHolderClosed;
+      await addClip(sb, id, { duration: 4 });
+      expect(spans(await showProject(sb, id))).toEqual([[0, 4]]);
+      expect((await showProject(sb, id)).revision).toBe(2);
+    } finally {
+      if (lockHolder.exitCode === null && lockHolder.signalCode === null) {
+        lockHolder.kill('SIGKILL');
+      }
+      await lockHolderClosed;
+    }
+  }, 40_000);
+
   it('a process killed before SQLite COMMIT leaves the previous complete revision recoverable', async () => {
     const id = await createProject(sb, 'Crash before commit');
     const marker = sb.path('sqlite-commit-paused.json');

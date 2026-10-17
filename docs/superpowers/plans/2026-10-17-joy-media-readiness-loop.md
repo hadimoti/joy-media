@@ -294,15 +294,16 @@ Fresh-process reads are the oracle; a worker's in-memory object is insufficient.
 - [x] Inject SQLite `SQLITE_FULL` at commit and prove rollback, a stable
       `DATABASE_FULL` response, and successful retry; existing tests also cover
       read-only SQLite and stale-lock recovery.
-- [ ] Hold a project database lock from another process and verify bounded busy
-      behavior or a successful monotonic retry. Physical full-volume and held-file
-      publication failures remain untested; check restart recovery and temp cleanup.
+- [x] Hold a project database lock from another process and verify bounded
+      `DATABASE_BUSY` behavior, unchanged revision, and successful monotonic retry.
+      Physical full-volume and held-file publication failures remain untested.
 - [x] Run `pnpm exec vitest run packages/project-persistence/src apps/cli/src/humanized/project-robustness.e2e.test.ts apps/cli/src/humanized/asset-recovery.e2e.test.ts --no-file-parallelism`
       plus affected editor package tests. The expanded Windows selection passed
       117/117, including `project-lifecycle.e2e.test.ts` at 62/62 and the editor
-      project-package suite at 7/7. The two crash-boundary cases passed again after
-      the preload was converted to ESM. Workspace typecheck, lint, and formatting
-      checks passed.
+      project-package suite at 7/7. After the separate-process lock case was added,
+      the complete `project-robustness.e2e.test.ts` passed 31/31. The crash-boundary
+      cases passed again after the preload was converted to ESM. Workspace typecheck,
+      lint, and formatting checks passed.
 
 **Exit:** The app and CLI preserve projects and can recover/relink media after
 concurrent edits, interrupted writes, and transfer to another profile.

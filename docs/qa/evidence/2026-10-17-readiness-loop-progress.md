@@ -169,8 +169,8 @@ unchanged. The editor project-package suite passed 7/7.
 
 These results close the planned CLI parallel-registration, fresh-profile
 export/import/relink, and schema-migration acceptance items for this local source.
-Process-kill injection at SQLite commit and file-rename boundaries, plus a real
-locked/full-destination publication failure, remain open. The renderer still uses
+SQLite commit and export-rename process-kill boundaries are now tested, along with
+fresh-profile media relink. The renderer still uses
 its guarded browser-storage contract; the desktop SQLite project store is not wired
 into editor open/save. This is local scenario evidence only, not a frozen-candidate
 receipt or release approval.
@@ -190,10 +190,16 @@ previous revision remains intact and a later write succeeds. This injects the
 SQLite-reported full condition at the transaction boundary; it is not evidence of
 a physically exhausted Windows volume.
 
+A separate Node process held the actual SQLite `BEGIN IMMEDIATE` write lock while
+the CLI attempted an edit. It returned bounded `DATABASE_BUSY` guidance, kept the
+revision and timeline unchanged, and succeeded at revision 2 after the holder
+exited. The full Windows `project-robustness.e2e.test.ts` passed 31/31 with the lock,
+crash, `SQLITE_FULL`, concurrency, corruption, and read-only scenarios.
+
 The expanded Windows project persistence/lifecycle/portability/editor-package
 selection passed 117/117. Both process-kill cases passed again after converting the
 test preload to ESM; root workspace typecheck and lint passed, and all changed files
 are Prettier-clean. Read-only SQLite and stale-lock recovery are covered. A real
-full/locked project-database publication failure, editor SQLite-store wiring, and
-the installed Windows app lifecycle remain open; these local checks do not form a
+physical full-volume/held-file failure, editor SQLite-store wiring, and the
+installed Windows app lifecycle remain open; these local checks do not form a
 candidate release receipt.
