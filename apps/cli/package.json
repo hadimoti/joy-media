@@ -27,6 +27,7 @@
   "devDependencies": {
     "@joy-media/test-fixtures": "workspace:*",
     "@types/node": "^22.16.0",
+    "ajv": "6.15.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   }

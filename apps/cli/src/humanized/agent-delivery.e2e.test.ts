@@ -16,6 +16,7 @@ import {
   type MockLlmServer,
 } from './agent-helpers.js';
 import { describeRun, hasAnsi } from './harness.js';
+import { cliSchemaErrors } from './schema-validation.js';
 
 const HAS_FFMPEG = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
 const HAS_FFPROBE = spawnSync('ffprobe', ['-version'], { stdio: 'ignore' }).status === 0;
@@ -126,6 +127,7 @@ describe.skipIf(!HAS_FFMPEG || !HAS_FFPROBE)(
           applied: true,
           revision: 3,
         });
+        expect(cliSchemaErrors('agent-run-result.v1.schema.json', agent.json())).toEqual([]);
         expect(mock.chatRequests).toHaveLength(3);
         const correctionContext = JSON.stringify(mock.chatRequests[1]?.json?.messages);
         expect(correctionContext).toMatch(/expected number/i);
@@ -160,6 +162,12 @@ describe.skipIf(!HAS_FFMPEG || !HAS_FFPROBE)(
           mediaProduced?: boolean;
           artifactPath?: string;
         }>();
+        for (const event of events) {
+          expect(
+            cliSchemaErrors('render-event.v1.schema.json', event),
+            JSON.stringify(event),
+          ).toEqual([]);
+        }
         const complete = events.at(-1)!;
         const videoPath = env.sb.path('delivery', `${projectId}.mp4`);
         expect(complete).toMatchObject({

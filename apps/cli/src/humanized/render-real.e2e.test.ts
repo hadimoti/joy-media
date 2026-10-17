@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createSandbox, describeRun, type RunResult, type Sandbox } from './harness.js';
+import { cliSchemaErrors } from './schema-validation.js';
 
 const hasTool = (name: string): boolean => spawnSync(name, ['-version']).status === 0;
 const HAS_FFMPEG = hasTool('ffmpeg') && hasTool('ffprobe');
@@ -201,6 +202,11 @@ describe.skipIf(!HAS_FFMPEG)('render makes real video (real binary + real ffmpeg
     expect(done.type).toBe('complete');
     expect(done.mediaProduced).toBe(true);
     expect(events.some((e) => e.type === 'progress')).toBe(true);
+    for (const event of events) {
+      expect(cliSchemaErrors('render-event.v1.schema.json', event), JSON.stringify(event)).toEqual(
+        [],
+      );
+    }
 
     const file = sb.path('out1', `${id}.mp4`);
     expect(done.artifactPath).toBe(file);

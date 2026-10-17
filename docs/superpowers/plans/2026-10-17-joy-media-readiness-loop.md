@@ -362,9 +362,13 @@ explicitly per platform rather than copying POSIX signal numbers onto Windows.
       are parsed, stdout has no ANSI/banner noise, and stderr contains neither the
       synthetic key nor a SQLite startup warning. The agent may write progress to stderr.
       The journey passes through both shipped `bin` and `bundle` entries.
-- [ ] Add versioned schemas for help/error/doctor/project/timeline and each render
-      NDJSON event; validate every JSON document/event. Run the CLI contract on Node
-      versions that reproduced the startup warning.
+- [x] Add versioned schemas for help/error/doctor/project/timeline, agent-run results,
+      and each render NDJSON event. Real `bin` and `bundle` output validates for
+      help, error, doctor, project create/list/show/export/import, timeline add/split/
+      trim/remove, render errors, and plan-only events; real-media and agent-delivery
+      suites validate encoded-render events.
+- [ ] Run the contract suite on additional supported Node versions that reproduced
+      the startup warning; current evidence is Node 24.19.0 only.
 - [x] Verify Windows ACL inspection for synthetic credentials, `taskkill` process-tree
       termination, real SQLite writer-lock behavior, and paths containing spaces;
       the affected Windows selections passed. Both `bin` and `bundle` pass the new
@@ -381,8 +385,8 @@ explicitly per platform rather than copying POSIX signal numbers onto Windows.
       9 skipped. The full Windows `pnpm verify:ci` passed after the signal fixes;
       an earlier Windows no-file-parallelism run passed 30 files, 494 passed,
       21 skipped. Windows runner policy harness also passed.
-- [ ] Review/commit and publish the supported CLI contract in help/docs; the
-      schema version changes intentionally when a breaking event shape changes.
+- [x] Review/commit and publish the supported CLI contract in help/docs; the schema
+      directory documents the v1 compatibility policy and contract test command.
 
 **Exit:** An automated caller can diagnose errors, recover, and obtain verified
 media through every shipped CLI entry on Windows without parsing human prose.

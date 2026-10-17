@@ -221,3 +221,19 @@ are Prettier-clean. Read-only SQLite and stale-lock recovery are covered. A real
 physical full-volume/held-file failure, editor SQLite-store wiring, and the
 installed Windows app lifecycle remain open; these local checks do not form a
 candidate release receipt.
+
+## Versioned CLI contracts on October 18
+
+Added Draft 7 schemas for help text, command errors, doctor reports, project
+list/create/show/export/import, timeline mutations, agent-run results, and all six
+render NDJSON event types. The `bin` and `bundle` black-box test validates success
+and error output, including Persian/space-containing project export paths and
+manifest-only completion. The real-media render and fake-agent delivery journeys
+also validate emitted events and results against the schemas. The focused schema,
+delivery, and real-render selection passed 16 tests with 2 platform skips. Current
+Node 24.19.0 passed; additional Node versions and installed-launcher schema delivery
+remain open. The schemas are source-tree contracts and are not copied into the CLI
+bundle.
+
+The pinned-Pnpm follow-up including CLI contract, agent-run, schema, agent-delivery,
+and real-render files passed 82 tests with 9 platform skips.

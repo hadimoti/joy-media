@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.joy.media/cli/v1/project-transfer.schema.json",
+  "title": "JOY Media CLI project export/import result v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["id", "title", "revision", "path"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "path": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["id", "title", "revision", "replaced"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "replaced": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  ]
+}
