@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLI_ROOT, createSandbox, describeRun, type Sandbox } from './harness.js';
 import {
   addClip,
-  crashBoundaryEnv,
+  persistenceFaultEnv,
   createProject,
   defaultProjectDbPath,
   expectExit,
@@ -52,7 +52,7 @@ describe('several processes at once (an agent fanning out tool calls)', () => {
     const killed = await sb.run(
       ['timeline', 'add-clip', '--project', id, '--duration', '4', '--json'],
       {
-        env: crashBoundaryEnv('before-sqlite-commit', marker),
+        env: persistenceFaultEnv('before-sqlite-commit', marker),
         signal: 'SIGKILL',
         signalAfterMs: 3_000,
         timeoutMs: 15_000,
@@ -71,6 +71,25 @@ describe('several processes at once (an agent fanning out tool calls)', () => {
     expect(await showProject(sb, id)).toMatchObject({ revision: 2 });
     expect(spans(await showProject(sb, id))).toEqual([[0, 4]]);
   }, 30_000);
+
+  it('SQLite SQLITE_FULL at commit keeps the old revision and returns a stable error', async () => {
+    const id = await createProject(sb, 'Full database');
+    const marker = sb.path('sqlite-full-injected.json');
+    const failed = await sb.run(
+      ['timeline', 'add-clip', '--project', id, '--duration', '4', '--json'],
+      { env: persistenceFaultEnv('sqlite-full-commit', marker) },
+    );
+
+    const error = jsonError(failed, 1);
+    expect(error.code).toBe('DATABASE_FULL');
+    expect(error.message).toMatch(/is full.*Free disk space/i);
+    expect(JSON.parse(readFileSync(marker, 'utf8'))).toMatchObject({ mode: 'sqlite-full-commit' });
+    expect(spans(await showProject(sb, id))).toEqual([]);
+    expect((await showProject(sb, id)).revision).toBe(1);
+
+    await addClip(sb, id, { duration: 4 });
+    expect(spans(await showProject(sb, id))).toEqual([[0, 4]]);
+  });
 
   it('parallel file-project imports retain every source registration and render after restart', async () => {
     const sources = [

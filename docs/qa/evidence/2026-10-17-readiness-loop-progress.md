@@ -184,8 +184,14 @@ written but before rename leaves the previous export byte-identical; the next
 atomic write recognizes the dead writer PID, removes only the matching orphan temp,
 and completes successfully. The initial red test reproduced the orphan-temp leak.
 
+A separate engine-error injection makes SQLite return `SQLITE_FULL` at commit. The
+CLI now returns stable `DATABASE_FULL` guidance; a fresh process confirms the
+previous revision remains intact and a later write succeeds. This injects the
+SQLite-reported full condition at the transaction boundary; it is not evidence of
+a physically exhausted Windows volume.
+
 The expanded Windows project persistence/lifecycle/portability/editor-package
-selection passed 116/116. Both process-kill cases passed again after converting the
+selection passed 117/117. Both process-kill cases passed again after converting the
 test preload to ESM; root workspace typecheck and lint passed, and all changed files
 are Prettier-clean. Read-only SQLite and stale-lock recovery are covered. A real
 full/locked project-database publication failure, editor SQLite-store wiring, and

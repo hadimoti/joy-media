@@ -68,9 +68,9 @@ export interface ErrorDoc {
 
 export const SEC = 1_000_000;
 
-/** Test-only preload that pauses a real CLI process at a durable-write boundary. */
-export function crashBoundaryEnv(
-  boundary: 'before-sqlite-commit' | 'before-file-rename',
+/** Test-only preload for real CLI durable-write boundary faults. */
+export function persistenceFaultEnv(
+  boundary: 'before-sqlite-commit' | 'before-file-rename' | 'sqlite-full-commit',
   markerPath: string,
   targetPath?: string,
 ): NonNullable<RunOptions['env']> {

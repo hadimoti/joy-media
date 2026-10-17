@@ -10,7 +10,7 @@ import { buildHistoricalSchemaProjects } from '@joy-media/test-fixtures';
 import { createSandbox, describeRun, hasAnsi, type Sandbox } from './harness.js';
 import {
   addClip,
-  crashBoundaryEnv,
+  persistenceFaultEnv,
   createProject,
   defaultProjectDbPath,
   exportAndValidate,
@@ -727,7 +727,7 @@ describe('a project addressed by id versus by file.json', () => {
     const marker = sb.path('file-rename-paused.json');
 
     const killed = await sb.run(['project', 'export', id, '--output', 'atomic.json', '--json'], {
-      env: crashBoundaryEnv('before-file-rename', marker, target),
+      env: persistenceFaultEnv('before-file-rename', marker, target),
       signal: 'SIGKILL',
       signalAfterMs: 3_000,
       timeoutMs: 15_000,

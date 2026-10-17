@@ -291,13 +291,15 @@ Fresh-process reads are the oracle; a worker's in-memory object is insufficient.
 - [x] Kill disposable writers at database commit and file-rename boundaries;
       readback stays at the old complete revision/file, SQLite rolls back, and a
       retry removes the orphaned atomic-write temp before succeeding.
-- [ ] Inject locked/read-only/full destinations. Existing tests cover contention,
-      read-only SQLite, and stale-lock recovery; project database full-disk and
-      locked publication failures remain open. Check recovery and leftover temp
-      files after restart.
+- [x] Inject SQLite `SQLITE_FULL` at commit and prove rollback, a stable
+      `DATABASE_FULL` response, and successful retry; existing tests also cover
+      read-only SQLite and stale-lock recovery.
+- [ ] Hold a project database lock from another process and verify bounded busy
+      behavior or a successful monotonic retry. Physical full-volume and held-file
+      publication failures remain untested; check restart recovery and temp cleanup.
 - [x] Run `pnpm exec vitest run packages/project-persistence/src apps/cli/src/humanized/project-robustness.e2e.test.ts apps/cli/src/humanized/asset-recovery.e2e.test.ts --no-file-parallelism`
       plus affected editor package tests. The expanded Windows selection passed
-      116/116, including `project-lifecycle.e2e.test.ts` at 62/62 and the editor
+      117/117, including `project-lifecycle.e2e.test.ts` at 62/62 and the editor
       project-package suite at 7/7. The two crash-boundary cases passed again after
       the preload was converted to ESM. Workspace typecheck, lint, and formatting
       checks passed.

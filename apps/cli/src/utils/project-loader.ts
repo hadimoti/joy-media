@@ -252,6 +252,15 @@ function isBusyError(err: unknown): boolean {
 function databaseFailure(err: unknown, dbPath: string): CommandFailure {
   if (err instanceof CommandFailure) return err;
   const message = errorMessage(err);
+  if (
+    (err as NodeJS.ErrnoException).code === 'SQLITE_FULL' ||
+    /database or disk is full/i.test(message)
+  ) {
+    return new CommandFailure(
+      'DATABASE_FULL',
+      `The project database at ${dbPath} is full. Free disk space or choose another --sqlite-path, then retry.`,
+    );
+  }
   if (isBusyError(err)) {
     return new CommandFailure(
       'DATABASE_BUSY',

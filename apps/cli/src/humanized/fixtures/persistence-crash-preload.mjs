@@ -13,11 +13,21 @@ function pauseAtBoundary() {
   for (;;) Atomics.wait(sleep, 0, 0, 1_000);
 }
 
-if (mode === 'before-sqlite-commit') {
+if (mode === 'before-sqlite-commit' || mode === 'sqlite-full-commit') {
   const { DatabaseSync } = await import('node:sqlite');
   const originalExec = DatabaseSync.prototype.exec;
+  let fullInjected = false;
   DatabaseSync.prototype.exec = function exec(sql) {
-    if (typeof sql === 'string' && sql.trim().toUpperCase() === 'COMMIT') pauseAtBoundary();
+    if (typeof sql === 'string' && sql.trim().toUpperCase() === 'COMMIT') {
+      if (mode === 'before-sqlite-commit') pauseAtBoundary();
+      if (mode === 'sqlite-full-commit' && !fullInjected) {
+        fullInjected = true;
+        const error = new Error('database or disk is full');
+        error.code = 'SQLITE_FULL';
+        fs.writeFileSync(markerPath, JSON.stringify({ mode, pid: process.pid }));
+        throw error;
+      }
+    }
     return originalExec.call(this, sql);
   };
 }
