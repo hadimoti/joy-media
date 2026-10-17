@@ -48,7 +48,10 @@ export type ProjectHydrationResult =
  */
 export async function hydrateProjectDocument(
   session: ProjectHydrationSession,
-  binding: Pick<ControlPlaneProjectBinding, 'editorProjectId' | 'controlPlaneProjectId'>,
+  binding: Pick<
+    ControlPlaneProjectBinding,
+    'editorProjectId' | 'controlPlaneProjectId' | 'documentRevisionId'
+  >,
   load: LoadProjectDocument,
 ): Promise<ProjectHydrationResult> {
   const localRevision = session.projectRevisionId;
@@ -81,6 +84,16 @@ export async function hydrateProjectDocument(
   if (session.projectRevisionId !== localRevision) {
     return { kind: 'local-changed', revisionId: remote.revisionId };
   }
+  // A durable local document can advance after the last remote write and the
+  // app can close before debounced autosync completes. Preserve only a newer
+  // visual/Look revision; timeline and other device-local counters may advance
+  // without changing the document stored by the control plane.
+  if (
+    binding.documentRevisionId !== undefined &&
+    hasNewerLocalDocument(localRevision, binding.documentRevisionId, binding.editorProjectId)
+  ) {
+    return { kind: 'local-changed', revisionId: remote.revisionId };
+  }
   const visualSame = JSON.stringify(session.visualProject) === JSON.stringify(remote.document);
   // Apply the remote Look document only when the server carried one AND it
   // differs — an absent remote value never clears a populated local document.
@@ -97,4 +110,45 @@ export async function hydrateProjectDocument(
     looksNeedApply ? remote.lookInstances : undefined,
   );
   return { kind: 'hydrated', revisionId: remote.revisionId };
+}
+
+interface LocalRevisionComponents {
+  readonly projectId: string;
+  readonly document: number;
+  readonly looks: number;
+}
+
+function hasNewerLocalDocument(
+  localRevision: ProjectRevisionId,
+  lastSyncedRevision: ProjectRevisionId,
+  editorProjectId: string,
+): boolean {
+  const local = parseLocalRevision(localRevision);
+  const synced = parseLocalRevision(lastSyncedRevision);
+  if (
+    local === undefined ||
+    synced === undefined ||
+    local.projectId !== editorProjectId ||
+    synced.projectId !== editorProjectId
+  ) {
+    return false;
+  }
+  return local.document > synced.document || local.looks > synced.looks;
+}
+
+function parseLocalRevision(revision: ProjectRevisionId): LocalRevisionComponents | undefined {
+  const match =
+    /^local-revision:v1:([^:]+):timeline=(\d+):document=(\d+):graph=(\d+):artifacts=(\d+)(?::looks=(\d+))?$/.exec(
+      revision,
+    );
+  if (match === null) return undefined;
+  try {
+    const projectId = decodeURIComponent(match[1]!);
+    const document = Number(match[3]);
+    const looks = Number(match[6] ?? 0);
+    if (!Number.isSafeInteger(document) || !Number.isSafeInteger(looks)) return undefined;
+    return { projectId, document, looks };
+  } catch {
+    return undefined;
+  }
 }

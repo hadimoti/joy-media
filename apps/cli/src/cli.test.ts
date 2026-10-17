@@ -46,14 +46,23 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
   });
 
   it('normalizes BYOK provider configuration', () => {
-    const config = resolveByokConfig({
-      provider: 'openrouter',
-      model: 'anthropic/claude-3.7-sonnet',
-      apiKey: 'test-key',
-    });
-    expect(config.provider).toBe('openrouter');
-    expect(config.modelId).toBe('anthropic/claude-3.7-sonnet');
-    expect(config.apiKey).toBe('test-key');
+    const home = mkdtempSync(join(tmpdir(), 'joy-cli-byok-test-'));
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    vi.stubEnv('APPDATA', join(home, 'AppData', 'Roaming'));
+    try {
+      const config = resolveByokConfig({
+        provider: 'openrouter',
+        model: 'anthropic/claude-3.7-sonnet',
+        apiKey: 'test-key',
+      });
+      expect(config.provider).toBe('openrouter');
+      expect(config.modelId).toBe('anthropic/claude-3.7-sonnet');
+      expect(config.apiKey).toBe('test-key');
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   describe('Project Management & Persistence', () => {

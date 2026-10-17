@@ -71,6 +71,7 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const projectTitle = `Desktop acceptance ${suffix}`;
   const mediaName = `desktop-readiness-${suffix}.mp4`;
+  const audioName = `desktop-readiness-${suffix}.wav`;
   const errors: string[] = [];
   let app: ElectronApplication | undefined;
   let result: Record<string, unknown> = {};
@@ -122,6 +123,73 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     await expect(clip).toHaveCount(1);
     await expect(clip).toBeVisible();
 
+    // --- Keyboard trim, Undo/Redo, duplicate ---
+    await clip.click();
+    await expect(clip).toHaveAttribute('aria-pressed', 'true');
+    const originalLabel = await clip.getAttribute('aria-label');
+    expect(originalLabel).toBeTruthy();
+    const clipId = await clip.getAttribute('data-clip-id');
+    expect(clipId).toBeTruthy();
+    const trimEnd = page.getByRole('button', { name: `Trim end of ${clipId}` });
+    // One keyboard nudge is one history entry; multiple nudges are individually undoable.
+    await trimEnd.press('ArrowLeft');
+    const trimmedLabel = await clip.getAttribute('aria-label');
+    expect(trimmedLabel).not.toBe(originalLabel);
+    expect(trimmedLabel).toMatch(/, 2\.9s, /);
+
+    const undo = page.getByRole('button', { name: 'Undo', exact: true });
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect(clip).toHaveAttribute('aria-label', originalLabel!);
+
+    const redo = page.getByRole('button', { name: 'Redo', exact: true });
+    await expect(redo).toBeEnabled();
+    await redo.click();
+    await expect(clip).toHaveAttribute('aria-label', trimmedLabel!);
+
+    await page.getByRole('button', { name: 'Duplicate clip' }).click();
+    await expect(page.locator(`.timeline-clip[aria-label^="${mediaName},"]`)).toHaveCount(2);
+
+    // --- Import audio, set gain to 1.25 ---
+    await openPanel(page, 'Assets');
+    await page
+      .getByRole('tablist', { name: 'Assets sections' })
+      .getByRole('tab', { name: /^Audio/ })
+      .click();
+    const audioImportDialog = page.getByRole('dialog', { name: 'Import media' });
+    await page.getByRole('button', { name: 'Import media' }).first().click();
+    await audioImportDialog.locator('input[type="file"][aria-label="Media file"]').setInputFiles({
+      name: audioName,
+      mimeType: 'audio/wav',
+      buffer: readFileSync(join(fixtureDirectory, 'audio.wav')),
+    });
+    await expect(audioImportDialog.getByText(audioName, { exact: true })).toBeVisible();
+    await audioImportDialog.getByRole('button', { name: 'Confirm import' }).click();
+    const audioCard = page.locator('.asset-card', { hasText: audioName }).first();
+    await expect(audioCard).toBeVisible();
+    await audioCard.getByRole('button', { name: `Add ${audioName} to timeline` }).click();
+    const audioClip = page.locator(`.timeline-clip[aria-label^="${audioName},"]`);
+    await expect(audioClip).toHaveCount(1);
+
+    await audioClip.click();
+    await openPanel(page, 'Audio');
+    await page.getByRole('tab', { name: 'Mix' }).click();
+    const gain = page.getByRole('slider', { name: /^Gain voice-/ });
+    await expect(gain).toBeEnabled();
+    await gain.fill('1.25');
+    await expect(gain).toHaveValue('1.25');
+
+    // --- Captions: add track, import Persian VTT ---
+    await openPanel(page, 'Captions');
+    await page.getByRole('button', { name: 'Add caption track' }).click();
+    await expect(page.getByRole('button', { name: 'Add caption' })).toBeVisible();
+    await page
+      .locator('.captions-panel input[type="file"]')
+      .setInputFiles(join(fixtureDirectory, 'captions-fa.vtt'));
+    await expect(page.locator('.caption-row')).toHaveCount(1);
+    const persianCaption = page.getByRole('textbox', { name: /^Caption text / });
+    await expect(persianCaption).toHaveValue('این یک آزمون است');
+
     await app.close();
     app = await launchPackagedEditor(profile);
     page = await openEditorPage(app);
@@ -132,7 +200,26 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
       await savedProject.click();
     }
     await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible();
-    await expect(page.locator(`.timeline-clip[aria-label^="${mediaName},"]`)).toHaveCount(1);
+    // Assert duplicated video clips survived restart
+    const restoredVideoClips = page.locator(`.timeline-clip[aria-label^="${mediaName},"]`);
+    await expect(restoredVideoClips).toHaveCount(2);
+    const restoredVideoLabels = await restoredVideoClips.evaluateAll((clips) =>
+      clips.map((element) => element.getAttribute('aria-label') ?? ''),
+    );
+    for (const label of restoredVideoLabels) expect(label).toContain(', 2.9s, ');
+    // Assert audio clip survived
+    const restoredAudioClip = page.locator(`.timeline-clip[aria-label^="${audioName},"]`);
+    await expect(restoredAudioClip).toHaveCount(1);
+    // Assert audio gain survived
+    await restoredAudioClip.click();
+    await openPanel(page, 'Audio');
+    await page.getByRole('tab', { name: 'Mix' }).click();
+    await expect(page.getByRole('slider', { name: /^Gain voice-/ })).toHaveValue('1.25');
+    // Assert Persian caption survived
+    await openPanel(page, 'Captions');
+    await expect(page.getByRole('textbox', { name: /^Caption text / })).toHaveValue(
+      'این یک آزمون است',
+    );
 
     await page.getByRole('button', { name: 'Export MP4' }).click();
     const recentProcesses = page.getByRole('button', { name: 'Recent processes' });

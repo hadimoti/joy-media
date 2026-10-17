@@ -16,6 +16,18 @@ function document(title = 'Recovered document') {
   return { ...INITIAL_EDITOR_PROJECT, id: binding.editorProjectId, title };
 }
 
+function localRevision({
+  timeline = 0,
+  document: visualDocument = 0,
+  looks: lookInstances = 0,
+}: {
+  readonly timeline?: number;
+  readonly document?: number;
+  readonly looks?: number;
+} = {}): ProjectRevisionId {
+  return `local-revision:v1:${encodeURIComponent(binding.editorProjectId)}:timeline=${timeline}:document=${visualDocument}:graph=0:artifacts=0:looks=${lookInstances}` as ProjectRevisionId;
+}
+
 function looks(instanceIds: readonly string[] = []): LookInstancesDocument {
   return {
     ...emptyLookInstancesDocument(binding.editorProjectId),
@@ -84,6 +96,66 @@ describe('project document hydration', () => {
 
     expect(result).toEqual({ kind: 'local-changed', revisionId: 'server-2' });
     expect(session.synchronizeDocuments).not.toHaveBeenCalled();
+  });
+
+  it('keeps a durable local edit newer than this device’s last synced revision', async () => {
+    const session = sessionFor(document('Unsynced local edit'));
+    session.revision = localRevision({ document: 2 });
+    const lastSyncedRevision = localRevision({ document: 1 });
+    const result = await hydrateProjectDocument(
+      session,
+      { ...binding, documentRevisionId: lastSyncedRevision },
+      async () => ({
+        projectId: binding.controlPlaneProjectId,
+        revisionId: lastSyncedRevision,
+        document: document('Last synced version'),
+      }),
+    );
+
+    expect(result).toEqual({ kind: 'local-changed', revisionId: lastSyncedRevision });
+    expect(session.synchronizeDocuments).not.toHaveBeenCalled();
+  });
+
+  it('does not send an older valid local revision over its last synced cloud head', async () => {
+    const session = sessionFor(document('Recovered old local snapshot'));
+    session.revision = localRevision({ document: 1 });
+    const lastSyncedRevision = localRevision({ document: 2 });
+    const result = await hydrateProjectDocument(
+      session,
+      { ...binding, documentRevisionId: lastSyncedRevision },
+      async () => ({
+        projectId: binding.controlPlaneProjectId,
+        revisionId: lastSyncedRevision,
+        document: document('Last synced version'),
+      }),
+    );
+
+    expect(result).toEqual({ kind: 'hydrated', revisionId: lastSyncedRevision });
+    expect(session.synchronizeDocuments).toHaveBeenCalledWith(
+      document('Last synced version'),
+      undefined,
+    );
+  });
+
+  it('still hydrates remote visual changes when only the local timeline advanced', async () => {
+    const session = sessionFor(document('Local visual baseline'));
+    session.revision = localRevision({ document: 3, timeline: 2 });
+    const lastSyncedRevision = localRevision({ document: 3, timeline: 1 });
+    const result = await hydrateProjectDocument(
+      session,
+      { ...binding, documentRevisionId: lastSyncedRevision },
+      async () => ({
+        projectId: binding.controlPlaneProjectId,
+        revisionId: 'remote-visual-update',
+        document: document('Remote visual update'),
+      }),
+    );
+
+    expect(result).toEqual({ kind: 'hydrated', revisionId: 'remote-visual-update' });
+    expect(session.synchronizeDocuments).toHaveBeenCalledWith(
+      document('Remote visual update'),
+      undefined,
+    );
   });
 
   it('does not write an identical document', async () => {

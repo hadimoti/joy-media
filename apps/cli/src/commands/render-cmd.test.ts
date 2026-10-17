@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,11 +43,30 @@ function redirectStdout(target: StringWritable): () => void {
   };
 }
 
-describe('joy render (headless batch render command)', () => {
-  const tempDir = mkdtempSync(join(tmpdir(), 'joy-render-cmd-test-'));
-  const testDbPath = join(tempDir, 'render-test.sqlite3');
-  const outDir = join(tempDir, 'renders');
+const tempDir = mkdtempSync(join(tmpdir(), 'joy-render-cmd-test-'));
+const testDbPath = join(tempDir, 'render-test.sqlite3');
+const outDir = join(tempDir, 'renders');
 
+beforeAll(() => {
+  // These direct runCli calls must never secure or read the developer's real
+  // ~/.joy-media directory. The subprocess harness already provides a fake
+  // HOME for its CLI integration tests; mirror that isolation here.
+  vi.stubEnv('HOME', tempDir);
+  vi.stubEnv('USERPROFILE', tempDir);
+  vi.stubEnv('APPDATA', join(tempDir, 'AppData', 'Roaming'));
+  vi.stubEnv('JOY_MEDIA_SQLITE_PATH', join(tempDir, 'joy-media.sqlite3'));
+});
+
+afterAll(() => {
+  vi.unstubAllEnvs();
+  try {
+    rmSync(tempDir, { recursive: true, force: true });
+  } catch {
+    // Ignore transient Windows SQLite locks after the test suite finishes.
+  }
+});
+
+describe('joy render (headless batch render command)', () => {
   it('exposes mp4/webm/prores render presets with deterministic specs', () => {
     expect(isRenderPresetId('mp4')).toBe(true);
     expect(isRenderPresetId('webm')).toBe(true);
@@ -219,14 +238,6 @@ describe('joy render (headless batch render command)', () => {
         (e: { type: string; preset: string }) => e.type === 'start' && e.preset === 'prores',
       ),
     ).toBe(true);
-  });
-
-  it('cleans up render test artifacts', () => {
-    try {
-      rmSync(tempDir, { recursive: true, force: true });
-    } catch {
-      // ignore on Windows transient locks
-    }
   });
 });
 

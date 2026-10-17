@@ -1355,7 +1355,7 @@ function EditorWorkspace({
       onResult: (result) => {
         if (result.kind === 'conflict') {
           showToast(
-            'Cloud document changed elsewhere. Your local edits were kept; reload the project before saving again.',
+            'Cloud document changed since this browser last synced. Local edits are preserved here; export them before reloading to recover the conflict.',
             'error',
           );
         } else if (result.kind === 'request-failure') {
@@ -1674,9 +1674,8 @@ function EditorWorkspace({
           setRemoteDocumentBootstrapProjectId(controlPlaneProjectId);
           return;
         }
-        // Both an existing remote head and an explicit missing-document read
-        // are a write barrier: only after either result may ordinary editor
-        // mutations be auto-saved.
+        // A completed remote read resolves the bootstrap barrier. Autosync
+        // keeps its own write block active when this read found a conflict.
         setRemoteDocumentBootstrapProjectId(controlPlaneProjectId);
         if (result.kind === 'hydrated') setRevision((revision) => revision + 1);
       })
