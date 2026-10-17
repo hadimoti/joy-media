@@ -276,21 +276,31 @@ Potential fix owners: `apps/cli/src/utils/{asset-sources,project-loader}.ts`,
 **Interfaces:** Use existing JSON/project-package and SQLite store contracts.
 Fresh-process reads are the oracle; a worker's in-memory object is insufficient.
 
-- [ ] Add `parallelRegistrationsRetainBothAssets`: two processes add distinct
-      files concurrently; restart and render each project; neither source map entry
-      may disappear. A failed add/edit must not leave a half-applied project state.
-- [ ] Add `exportImportRelinkRendersOnFreshProfile`: export, move originals,
+- [x] Add `parallelRegistrationsRetainBothAssets`: concurrent CLI processes add
+      distinct files; restart and render each project; neither source-map entry
+      may disappear. The existing six-process test verifies all registrations and
+      renders each exported project after the operations finish.
+- [x] Add `exportImportRelinkRendersOnFreshProfile`: export, move originals,
       import in a clean profile, relink explicitly, and inspect the resulting media.
       No dependence on the original profile's path registry is allowed.
-- [ ] For every supported historical schema, load/migrate/save/reopen with
-      semantic equality and idempotent migration. Newer schemas must be rejected
-      without rewriting; malformed/dangling/cyclic inputs fail without data loss.
-- [ ] Kill disposable writers at database commit and file-rename boundaries;
-      inject locked/read-only/full destinations. Readback is always the old or new
-      complete revision, never torn. Contention returns a bounded error or succeeds
-      with monotonic revisions. Check recovery and leftover temp files after restart.
-- [ ] Run `pnpm exec vitest run packages/project-persistence/src apps/cli/src/humanized/project-robustness.e2e.test.ts apps/cli/src/humanized/asset-recovery.e2e.test.ts --no-file-parallelism`
-      plus affected editor package tests. Prove each fix independently, review, commit.
+- [x] For every supported historical schema, load/migrate/save/reopen with
+      semantic timeline preservation and idempotent migration. Newer schemas are
+      rejected without rewriting; malformed/dangling/cyclic inputs fail without
+      data loss. Import-side future-schema rejection is covered by the October 17
+      follow-up test.
+- [x] Kill disposable writers at database commit and file-rename boundaries;
+      readback stays at the old complete revision/file, SQLite rolls back, and a
+      retry removes the orphaned atomic-write temp before succeeding.
+- [ ] Inject locked/read-only/full destinations. Existing tests cover contention,
+      read-only SQLite, and stale-lock recovery; project database full-disk and
+      locked publication failures remain open. Check recovery and leftover temp
+      files after restart.
+- [x] Run `pnpm exec vitest run packages/project-persistence/src apps/cli/src/humanized/project-robustness.e2e.test.ts apps/cli/src/humanized/asset-recovery.e2e.test.ts --no-file-parallelism`
+      plus affected editor package tests. The expanded Windows selection passed
+      116/116, including `project-lifecycle.e2e.test.ts` at 62/62 and the editor
+      project-package suite at 7/7. The two crash-boundary cases passed again after
+      the preload was converted to ESM. Workspace typecheck, lint, and formatting
+      checks passed.
 
 **Exit:** The app and CLI preserve projects and can recover/relink media after
 concurrent edits, interrupted writes, and transfer to another profile.

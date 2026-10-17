@@ -153,3 +153,41 @@ Ubuntu 24.04 with Node 24.19.0 and FFmpeg 6.1.1, the entire
 `render-recovery.e2e.test.ts` file passed as unprivileged `nobody` (7 passed, one
 Windows-only skip). The ENOSPC case skips where Linux `cc` is unavailable; the
 permission-denied case runs for non-root POSIX users.
+
+## Fresh-profile project portability follow-up on October 17
+
+The CLI has a verified cross-profile portability path: export from one disposable
+HOME, import into another with no original asset registry, confirm a missing source
+fails as `media-missing`, explicitly relink by media directory, and produce an MP4
+with video and audio streams that FFprobe inspects. On Windows the asset-recovery
+scenario passed 1/1; the combined project-persistence, project robustness, and
+portability matrix passed 46/46. The full Windows `project-lifecycle.e2e.test.ts`
+passed 61/61, including every historical schema, malformed/dangling/cyclic input,
+and a new future-schema import case. The new case confirms the unsupported file
+stays byte-for-byte unchanged and the preexisting project database contents remain
+unchanged. The editor project-package suite passed 7/7.
+
+These results close the planned CLI parallel-registration, fresh-profile
+export/import/relink, and schema-migration acceptance items for this local source.
+Process-kill injection at SQLite commit and file-rename boundaries, plus a real
+locked/full-destination publication failure, remain open. The renderer still uses
+its guarded browser-storage contract; the desktop SQLite project store is not wired
+into editor open/save. This is local scenario evidence only, not a frozen-candidate
+receipt or release approval.
+
+## Persistence crash-boundary follow-up on October 17
+
+Two process-kill tests now stop the real CLI at durable-write boundaries. Killing
+immediately before SQLite `COMMIT` leaves the previous project revision readable
+and the retry commits the next revision. Killing after an export's sibling temp is
+written but before rename leaves the previous export byte-identical; the next
+atomic write recognizes the dead writer PID, removes only the matching orphan temp,
+and completes successfully. The initial red test reproduced the orphan-temp leak.
+
+The expanded Windows project persistence/lifecycle/portability/editor-package
+selection passed 116/116. Both process-kill cases passed again after converting the
+test preload to ESM; root workspace typecheck and lint passed, and all changed files
+are Prettier-clean. Read-only SQLite and stale-lock recovery are covered. A real
+full/locked project-database publication failure, editor SQLite-store wiring, and
+the installed Windows app lifecycle remain open; these local checks do not form a
+candidate release receipt.

@@ -7,9 +7,17 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { expect } from 'vitest';
 import { validateJoyProjectV3 } from '@joy-media/project-schema';
-import { describeRun, hasAnsi, type RunOptions, type RunResult, type Sandbox } from './harness.js';
+import {
+  CLI_ROOT,
+  describeRun,
+  hasAnsi,
+  type RunOptions,
+  type RunResult,
+  type Sandbox,
+} from './harness.js';
 
 export interface ClipDoc {
   id: string;
@@ -59,6 +67,20 @@ export interface ErrorDoc {
 }
 
 export const SEC = 1_000_000;
+
+/** Test-only preload that pauses a real CLI process at a durable-write boundary. */
+export function crashBoundaryEnv(
+  boundary: 'before-sqlite-commit' | 'before-file-rename',
+  markerPath: string,
+  targetPath?: string,
+): NonNullable<RunOptions['env']> {
+  return {
+    NODE_OPTIONS: `--import=${pathToFileURL(join(CLI_ROOT, 'src', 'humanized', 'fixtures', 'persistence-crash-preload.mjs')).href}`,
+    JOY_MEDIA_TEST_CRASH_BOUNDARY: boundary,
+    JOY_MEDIA_TEST_CRASH_MARKER: markerPath,
+    ...(targetPath === undefined ? {} : { JOY_MEDIA_TEST_RENAME_TARGET: targetPath }),
+  };
+}
 
 /** Resolve the CLI's platform-specific default project database in a sandbox. */
 export function defaultProjectDbPath(sb: Sandbox): string {

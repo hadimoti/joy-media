@@ -3,14 +3,16 @@ import { randomBytes } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
   rmdirSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { SqliteProjectStore } from '@joy-media/project-persistence/desktop';
 import {
@@ -132,6 +134,7 @@ function sleepSync(ms: number): void {
  * write a sibling temp file, then rename over the target.
  */
 export function writeFileAtomic(path: string, data: string): void {
+  removeOrphanedAtomicWriteTemps(path);
   const tmp = `${path}.${process.pid}.${randomBytes(3).toString('hex')}.tmp`;
   try {
     writeFileSync(tmp, data, 'utf8');
@@ -143,6 +146,45 @@ export function writeFileAtomic(path: string, data: string): void {
       /* best effort */
     }
     throw err;
+  }
+}
+
+/** Remove only this target's atomic-write temps when their recorded writer is gone. */
+function removeOrphanedAtomicWriteTemps(path: string): void {
+  const directory = dirname(path);
+  const prefix = `${basename(path)}.`;
+  let entries: string[];
+  try {
+    entries = readdirSync(directory);
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.startsWith(prefix) || !entry.endsWith('.tmp')) continue;
+    const identity = entry.slice(prefix.length, -'.tmp'.length).split('.');
+    if (
+      identity.length !== 2 ||
+      !/^[1-9][0-9]*$/.test(identity[0]!) ||
+      !/^[0-9a-f]{6}$/.test(identity[1]!)
+    )
+      continue;
+    const pid = Number(identity[0]);
+    if (!Number.isSafeInteger(pid) || isProcessAlive(pid)) continue;
+    try {
+      unlinkSync(join(directory, entry));
+    } catch {
+      // A read-only or concurrently replaced temp is not the new write's failure.
+    }
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
   }
 }
 

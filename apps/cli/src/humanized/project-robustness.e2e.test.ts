@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLI_ROOT, createSandbox, describeRun, type Sandbox } from './harness.js';
 import {
   addClip,
+  crashBoundaryEnv,
   createProject,
   defaultProjectDbPath,
   expectExit,
@@ -45,6 +46,32 @@ afterEach(() => sb.cleanup());
 const defaultDb = (): string => defaultProjectDbPath(sb);
 
 describe('several processes at once (an agent fanning out tool calls)', () => {
+  it('a process killed before SQLite COMMIT leaves the previous complete revision recoverable', async () => {
+    const id = await createProject(sb, 'Crash before commit');
+    const marker = sb.path('sqlite-commit-paused.json');
+    const killed = await sb.run(
+      ['timeline', 'add-clip', '--project', id, '--duration', '4', '--json'],
+      {
+        env: crashBoundaryEnv('before-sqlite-commit', marker),
+        signal: 'SIGKILL',
+        signalAfterMs: 3_000,
+        timeoutMs: 15_000,
+      },
+    );
+
+    expect(killed.timedOut, describeRun(killed)).toBe(false);
+    expect(killed.code, describeRun(killed)).not.toBe(0);
+    expect(JSON.parse(readFileSync(marker, 'utf8'))).toMatchObject({
+      mode: 'before-sqlite-commit',
+    });
+    expect(await showProject(sb, id)).toMatchObject({ revision: 1, tracks: expect.any(Array) });
+    expect(spans(await showProject(sb, id))).toEqual([]);
+
+    await addClip(sb, id, { duration: 4 });
+    expect(await showProject(sb, id)).toMatchObject({ revision: 2 });
+    expect(spans(await showProject(sb, id))).toEqual([[0, 4]]);
+  }, 30_000);
+
   it('parallel file-project imports retain every source registration and render after restart', async () => {
     const sources = [
       'readiness-hard-cut.mkv',

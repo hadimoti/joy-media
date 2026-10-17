@@ -10,6 +10,7 @@ import { buildHistoricalSchemaProjects } from '@joy-media/test-fixtures';
 import { createSandbox, describeRun, hasAnsi, type Sandbox } from './harness.js';
 import {
   addClip,
+  crashBoundaryEnv,
   createProject,
   defaultProjectDbPath,
   exportAndValidate,
@@ -621,6 +622,29 @@ describe('exporting and importing', () => {
     }
   });
 
+  it('rejects a future schema on import without changing the file or stored projects', async () => {
+    const safeId = await createProject(sb, 'Safe existing project');
+    expectOk(await sb.run(['project', 'export', safeId, '--output', 'future-schema.json']));
+
+    const projectFile = sb.path('future-schema.json');
+    const parsed = JSON.parse(readFileSync(projectFile, 'utf8')) as {
+      source: { schemaVersion: number };
+    };
+    parsed.source.schemaVersion = 99;
+    writeFileSync(projectFile, JSON.stringify(parsed, null, 2));
+    const beforeFile = readFileSync(projectFile, 'utf8');
+    const beforeProjects = JSON.stringify(await listProjects(sb));
+
+    const result = await sb.run(['project', 'import', 'future-schema.json', '--json']);
+
+    const error = jsonError(result, 1);
+    expect(error.code).toBe('PROJECT_SCHEMA_UNSUPPORTED');
+    expect(error.message).toMatch(/schema version 99/i);
+    expect(readFileSync(projectFile, 'utf8')).toBe(beforeFile);
+    expect(JSON.stringify(await listProjects(sb))).toBe(beforeProjects);
+    expect((await showProject(sb, safeId)).revision).toBe(1);
+  });
+
   it('importing a file that does not exist says so (not "Usage"), and with no file is a usage error', async () => {
     const missing = expectExit(await sb.run(['project', 'import', 'nope.json']), 1);
     expect(missing.err).toMatch(/File not found: nope\.json/);
@@ -694,6 +718,38 @@ describe('a project addressed by id versus by file.json', () => {
     expect(error.message).toMatch(/schema version 99/i);
     expect(readFileSync(projectFile, 'utf8')).toBe(before);
   });
+
+  it('a process killed before export rename preserves the old file and a retry removes its temp', async () => {
+    const id = await createProject(sb, 'Atomic export');
+    expectOk(await sb.run(['project', 'export', id, '--output', 'atomic.json']));
+    const target = sb.path('atomic.json');
+    const priorBytes = readFileSync(target);
+    const marker = sb.path('file-rename-paused.json');
+
+    const killed = await sb.run(['project', 'export', id, '--output', 'atomic.json', '--json'], {
+      env: crashBoundaryEnv('before-file-rename', marker, target),
+      signal: 'SIGKILL',
+      signalAfterMs: 3_000,
+      timeoutMs: 15_000,
+    });
+
+    expect(killed.timedOut, describeRun(killed)).toBe(false);
+    expect(killed.code, describeRun(killed)).not.toBe(0);
+    expect(JSON.parse(readFileSync(marker, 'utf8'))).toMatchObject({ mode: 'before-file-rename' });
+    expect(readFileSync(target)).toEqual(priorBytes);
+    const abandonedTemps = readdirSync(sb.cwd).filter(
+      (name) => name.startsWith('atomic.json.') && name.endsWith('.tmp'),
+    );
+    expect(abandonedTemps).toHaveLength(1);
+
+    expectOk(await sb.run(['project', 'export', id, '--output', 'atomic.json']));
+    expect(JSON.parse(readFileSync(target, 'utf8'))).toMatchObject({ id, title: 'Atomic export' });
+    expect(
+      readdirSync(sb.cwd).filter(
+        (name) => name.startsWith('atomic.json.') && name.endsWith('.tmp'),
+      ),
+    ).toHaveLength(0);
+  }, 30_000);
 
   it('a folder that happens to be named like the project id does not break lookup by id', async () => {
     const id = await createProject(sb, 'Name clash');
