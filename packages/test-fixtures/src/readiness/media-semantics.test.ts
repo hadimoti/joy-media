@@ -358,8 +358,12 @@ function verifyReadinessFixtures(root: string): void {
   expect(transparent[3]).toBe(0);
 
   expect(videoStream(join(root, 'readiness-odd-161x91.mkv'))).toMatchObject({
+    codec_name: 'ffv1',
     width: 161,
     height: 91,
+    coded_width: 161,
+    coded_height: 91,
+    pix_fmt: 'yuv444p',
   });
   expect(
     spawnSync('ffprobe', ['-v', 'error', join(root, 'readiness-truncated.mp4')]).status,

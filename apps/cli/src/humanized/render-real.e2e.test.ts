@@ -482,9 +482,12 @@ describe.skipIf(!HAS_FFMPEG)('render makes real video (real binary + real ffmpeg
     expect(JSON.stringify(shown.json())).not.toContain('notes.txt');
   }, 120_000);
 
-  it.skipIf(process.platform === 'win32')(
-    'Ctrl-C in the middle of an encode exits 130 and leaves no half-written video behind',
-    async () => {
+  it.skipIf(process.platform === 'win32').each([
+    { signal: 'SIGINT' as const, exitCode: 130 },
+    { signal: 'SIGTERM' as const, exitCode: 143 },
+  ])(
+    '%s in the middle of an encode exits with its signal status and leaves no half-written video behind',
+    async ({ signal, exitCode }) => {
       ff(
         '-f',
         'lavfi',
@@ -505,11 +508,11 @@ describe.skipIf(!HAS_FFMPEG)('render makes real video (real binary + real ffmpeg
       const id = await newProject('Long');
       await addClip(id, ['--asset', media('long.mp4')]);
       const r = await sb.run(['render', '--project', id, '--out', sb.path('out8'), '--json'], {
-        signal: 'SIGINT',
+        signal,
         signalAfterMs: 2500,
         timeoutMs: 120_000,
       });
-      expect(r.code, describeRun(r)).toBe(130);
+      expect(r.code, describeRun(r)).toBe(exitCode);
       expect(r.ndjson<{ type: string; code?: string }>().at(-1)).toMatchObject({
         type: 'error',
         code: 'cancelled',

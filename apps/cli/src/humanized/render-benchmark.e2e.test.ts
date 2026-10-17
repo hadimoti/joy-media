@@ -834,6 +834,35 @@ describe('Ctrl-C during a long render', () => {
       expect(listTree(sb.path('marathon-out'))).toEqual([]);
     },
   );
+
+  it.skipIf(process.platform === 'win32')(
+    'stops manifest-only frame work after SIGINT instead of finishing the remaining clips',
+    async () => {
+      const clips: DocClip[] = Array.from({ length: 1000 }, (_, i) => ({
+        id: `day-${i}`,
+        durationUs: 86_400_000_000,
+      }));
+      const file = writeSandboxFile(
+        sb,
+        'manifest-marathon-sigint.json',
+        projectDoc({ id: 'manifest-marathon', tracks: [{ id: 't1', clips }] }),
+      );
+      const r = await runAndSignalAfterOutput(
+        sb,
+        ['render', '--project', file, '--out', 'manifest-marathon-out', '--json'],
+        'SIGINT',
+        10_000,
+      );
+      expect(r.timedOut, `a signal must stop manifest work${describeRun(r).slice(0, 600)}`).toBe(
+        false,
+      );
+      expect(r.code, describeRun(r).slice(0, 600)).toBe(130);
+      const events = expectNdjsonContract(r, ['error']);
+      expect(events[events.length - 1]).toMatchObject({ code: 'cancelled' });
+      expect(eventsOfType(events, 'clip').length).toBeLessThan(clips.length);
+      expect(listTree(sb.path('manifest-marathon-out'))).toEqual([]);
+    },
+  );
 });
 
 // ===========================================================================

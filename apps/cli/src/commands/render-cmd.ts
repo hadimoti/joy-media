@@ -34,7 +34,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { CliFlags } from '../cli.js';
-import { currentLongRunning } from '../long-running.js';
+import { currentLongRunning, longRunningCancellationExitCode } from '../long-running.js';
 import { FlagValidationError, parseIntFlag } from '../utils/flags.js';
 import {
   c,
@@ -543,7 +543,7 @@ export async function runHeadlessRender(
     totalFrames = 0,
     totalClips = 0,
   ): RenderCommandResult => {
-    const exitCode = code === 'cancelled' ? 130 : 1;
+    const exitCode = code === 'cancelled' ? longRunningCancellationExitCode : 1;
     failCommand(json, knownProjectId, code, message, exitCode);
     return {
       exitCode,
@@ -739,10 +739,12 @@ export async function runHeadlessRender(
     workers.push(
       (async () => {
         for (;;) {
+          if (currentLongRunning < 0) return;
           const next = allClips[nextClip];
           nextClip += 1;
           if (!next) break;
           for (let f = 0; f < next.frames; f += 1) {
+            if (currentLongRunning < 0) return;
             // Deterministic per-frame work. A real engine would push pixels
             // through an encoder here; this is a placeholder busy-step.
             Math.sin(f * 0.001 + next.frames * 0.0001);
@@ -758,8 +760,10 @@ export async function runHeadlessRender(
             if (framesSinceYield >= FRAMES_PER_SLICE) {
               framesSinceYield = 0;
               await yieldToEventLoop();
+              if (currentLongRunning < 0) return;
             }
           }
+          if (currentLongRunning < 0) return;
           emitJson(
             {
               type: 'clip',

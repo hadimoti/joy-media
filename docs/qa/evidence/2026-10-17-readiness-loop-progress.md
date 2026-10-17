@@ -99,3 +99,36 @@ two-pass release evidence; candidate-specific GPT-6.1-sol approval; the separate
 Claude Code review gate; owner release decision; and final VPS Gbrain write/read/
 export/receipt. No push, merge, active-profile install, distribution, or deployment
 was performed.
+
+## Cancellation review follow-up on October 17
+
+A read-only GPT-6.1-sol review of `80a3c61ab3e8c3d93c439a1ed6e3ad66eaee97f6`
+found two render cancellation regressions and asked for a stronger odd-fixture
+contract. No GPT-6 Astra was used. Before the fixes, Linux reproduced SIGTERM
+returning 130 instead of 143, and a SIGINT manifest-only run completed and emitted
+all 1,000 queued clip events before exiting.
+
+The CLI now carries the initiating conventional exit status through render cleanup,
+checks cancellation before claiming more clip work and after each event-loop yield,
+and stops before emitting clip-complete events. The odd 161x91 fixture assertion
+now pins visible and coded dimensions, FFV1, and `yuv444p`.
+
+The focused signal and fixture selection passed 5/5. On Ubuntu 24.04 with Node
+24.19.0, pnpm 11.15.0, and FFmpeg 6.1.1, the no-file-parallelism CLI,
+project-persistence, and fixture matrix passed 30 files (508 passed, 9 skipped).
+The cancellation review also identified an ordering-sensitive assertion in the
+manifest-only signal test; it now allows clips completed before signal delivery
+while still requiring cancellation before the full queued render. That exact
+Linux signal and fixture selection passed again (5 passed, 75 unrelated tests
+skipped).
+Windows `pnpm verify:ci` passed on the same source changes, including typecheck,
+lint, formatting, the full Vitest suite, workspace builds, and the production
+dependency audit. The code-level read-only review is not a candidate deployment
+approval and does not close the separate Claude Code or owner release gates.
+
+The local readiness worktree contains a follow-up commit on top of `80a3c61`;
+it remains isolated and has not been pushed, merged, packaged for
+distribution, or deployed. Installer lifecycle, packaged editor/store wiring and full edit parity,
+ENOSPC/permission-denied injection, real service/GPU qualification, the soak,
+frozen-candidate two-pass evidence, exact-candidate GPT-6.1-sol approval, and final
+Gbrain closeout remain open.

@@ -191,29 +191,38 @@ features with a machine-readable `unsupported-feature` error and no replacement
 output. Keep explicit `--manifest-only` for planning. If partial export is wanted,
 it needs an explicit opt-in, enumerated omissions, and a visibly partial outcome.
 
-- [ ] Add `metadataMatchesDecodedTimeline`: gap/overlap/parallel-track projects
+- [x] Add `metadataMatchesDecodedTimeline`: gap/overlap/parallel-track projects
       assert duration equals timeline end, fps and frame count agree with decoded
-      media, and completion/manifest totals describe the actual result.
-- [ ] Add `mixRespectsMuteGainPanAndPlacement`: distinct channel tones expose
-      wrong gains/mute/pan, audio source offsets, and timing. Check samples, not only
-      codec presence. Test no-audio and audio-only timelines explicitly.
-- [ ] Add feature cases for transforms/crop/alpha, captions/Persian text, effects,
+      media, and completion/manifest totals describe the actual result. Existing
+      `render-parity.e2e.test.ts` covers decoded frame count, fps, duration, and
+      matching manifest/completion totals for gaps and parallel tracks.
+- [x] Prove the declared audio subset with distinct stereo tones, audio-only
+      placement, and no-audio silence. Gain, pan, mute, solo, fades, bus gain, and
+      audio effects fail closed until their CLI semantics are implemented.
+- [x] Add feature cases for transforms/crop/alpha, captions/Persian text, effects,
       transitions, speed/reverse, and nested scenes. For every supported operation,
       compare CLI output with the desktop reference. Otherwise assert explicit
       unsupported behavior and document the limitation; no silent success/omission.
-- [ ] Add `failedRenderPreservesLastGoodOutput` and
-      `manifestFailureCannotReportComplete`: missing input, permission/disk-full
-      injection, FFmpeg failure, cancellation, and failure between media promotion
-      and sidecar write. Verify previous deliverable hashes, cleanup, error outcome,
-      and no false success event; define recovery for any published partial pair.
-- [ ] Add `concurrentSameOutputDoesNotCrossPublish`: two renders either serialize,
+- [x] Add `failedRenderPreservesLastGoodOutput` and
+      `manifestFailureCannotReportComplete` cases for FFmpeg failure, blocked
+      manifest output, cancellation, and recovery between media and sidecar
+      promotion. They verify the previous pair, cleanup, error outcome, and no false
+      success event.
+- [ ] Inject ENOSPC and permission-denied failures at write/rename boundaries and
+      prove that the last good deliverable remains intact.
+- [x] Add `concurrentSameOutputDoesNotCrossPublish`: two renders either serialize,
       reject contention, or publish separate outputs with matching metadata; they
       must never pair one render's media with another's manifest.
-- [ ] Run each regression red, fix minimally, and prove red/green. Verify using
-      `pnpm exec vitest run apps/cli/src/humanized/render-real.e2e.test.ts apps/cli/src/humanized/render-parity.e2e.test.ts apps/cli/src/humanized/render-recovery.e2e.test.ts --no-file-parallelism`.
-      Repeat representative real rendering through `bin`, `bundle`, and Task 6's
-      installed `joy.cmd`; missing FFmpeg in the required lane fails setup.
-- [ ] Review independently, update ledger, and commit accepted fixes with tests.
+- [x] Reproduce the SIGTERM exit-code and manifest-cancellation regressions red,
+      fix them, and prove the focused signal/fixture tests green (5 passed). Run the
+      CLI parity/recovery and neighboring persistence/fixture matrix on Linux and
+      Windows. Latest Ubuntu: 30 files, 508 passed, 9 skipped; full Windows
+      `verify:ci` passed.
+- [ ] Repeat representative real rendering through the current frozen artifacts
+      (`bin`, bundle, installed `joy.cmd`, and `joy-media.cmd`) and bind their hashes
+      to the exact-candidate receipt.
+- [ ] Obtain the required independent reviews, update the ledger, and commit accepted
+      fixes with tests. Candidate-specific release approval remains Task 9.
 
 **Exit:** The CLI delivers correct media for its declared supported scope and
 cannot misreport unsupported, failed, interrupted, or partial delivery as complete.
@@ -340,9 +349,10 @@ explicitly per platform rather than copying POSIX signal numbers onto Windows.
       transfer may be necessary; assert raw keys never return to renderer-visible
       results/events/logs, rather than banning every internal IPC payload.
 - [x] Run the CLI, project-persistence, and fixture Vitest suites with
-      `--no-file-parallelism` on both Linux and Windows.
-      Windows: 30 files, 494 passed, 21 skipped. Ubuntu: 30 files, 507 passed,
-      8 skipped. Windows `pnpm verify:ci` and runner policy harness also passed.
+      `--no-file-parallelism` on Linux; the latest run passed 30 files, 508 passed,
+      9 skipped. The full Windows `pnpm verify:ci` passed after the signal fixes;
+      an earlier Windows no-file-parallelism run passed 30 files, 494 passed,
+      21 skipped. Windows runner policy harness also passed.
 - [ ] Review/commit and publish the supported CLI contract in help/docs; the
       schema version changes intentionally when a breaking event shape changes.
 

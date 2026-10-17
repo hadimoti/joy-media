@@ -89,7 +89,7 @@ function installSignalHandlers(): void {
     // For tracked long-running work, let the command handler finish cancellation cleanup.
     if (currentLongRunning > 0) {
       logError(`Received ${sig}. Cancelling long-running operation...`);
-      requestLongRunningCancellation();
+      requestLongRunningCancellation(code);
       return;
     }
     logError(`Received ${sig}. Shutting down.`);
