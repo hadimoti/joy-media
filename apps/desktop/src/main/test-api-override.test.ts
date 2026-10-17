@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { resolveTestApiBaseUrl, resolveTestDownloadDirectory } from './test-api-override.js';
 
 describe('resolveTestApiBaseUrl', () => {
@@ -48,26 +50,28 @@ describe('resolveTestApiBaseUrl', () => {
 });
 
 describe('resolveTestDownloadDirectory', () => {
-  const userDataDirectory = 'C:\\temp\\joy-media-profile';
+  const userDataDirectory = join(tmpdir(), 'joy-media-profile');
+  const downloadDirectory = join(userDataDirectory, 'downloads');
+  const outsideDownloadDirectory = join(tmpdir(), 'joy-media-profile-outside', 'Downloads');
 
   it('requires desktop test mode and confines test downloads to the disposable profile', () => {
     expect(
       resolveTestDownloadDirectory({
         argv: ['--joy-media-test-mode'],
-        env: { JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY: 'C:\\temp\\joy-media-profile\\downloads' },
+        env: { JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY: downloadDirectory },
         userDataDirectory,
       }),
-    ).toBe('C:\\temp\\joy-media-profile\\downloads');
+    ).toBe(downloadDirectory);
     expect(
       resolveTestDownloadDirectory({
         argv: [],
-        env: { JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY: 'C:\\Users\\test\\Downloads' },
+        env: { JOY_MEDIA_TEST_DOWNLOAD_DIRECTORY: outsideDownloadDirectory },
         userDataDirectory,
       }),
     ).toBeUndefined();
   });
 
-  it.each([undefined, 'C:\\Users\\test\\Downloads', 'C:\\temp\\joy-media-profile'])(
+  it.each([undefined, outsideDownloadDirectory, userDataDirectory])(
     'rejects missing or non-isolated test download paths: %s',
     (directory) => {
       expect(() =>
