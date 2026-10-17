@@ -115,9 +115,11 @@ describe('property animation ownership lifecycle', () => {
   });
 
   it('keeps 500 scalar channels below the WP34 p95 sampling budget', () => {
-    const result = benchmarkScalarChannelSampling();
+    // A 100-sample p95 is less sensitive to one runner scheduling spike than
+    // the benchmark helper's short interactive default of 25 samples.
+    const result = benchmarkScalarChannelSampling(500, 100);
     expect(result.channelCount).toBe(500);
-    expect(result.iterations).toBe(25);
+    expect(result.iterations).toBe(100);
     expect(Number.isFinite(result.checksum)).toBe(true);
     expect(result.p95Ms).toBeLessThan(5);
   });
