@@ -18,13 +18,13 @@ Electron, SQLite, FFmpeg/FFprobe, existing self-hosted Windows/Linux runners.
 
 **Spec:** [Repository audit and readiness definition](../../qa/evidence/2026-10-17-readiness-audit.md).
 
-**Status (2026-10-17):** Tasks 1 and 2 are complete and committed as `930d73cb`
+**Status (continued 2026-10-18):** Tasks 1 and 2 are complete and committed as `930d73cb`
 and `6eacd9b5`. Tasks 3–7 now have extensive local Windows evidence for playable CLI
 output, recovery, fresh-profile project operations, packaged editor workflow, and
 staging package/launcher checks, but remain open where their full scope is not yet
 accepted. Task 8 has not started. Task 9 remains open for a frozen-candidate two-pass
 run, independent reviews, owner release decision, and required closeout receipt. This
-plan is not an app-ready or release certificate.
+plan is not an app-ready or release certificate. The October 18 continuation added a test-first Windows reserved-device output-path guard and verified both current staged CLI launchers with decoded media; exact-candidate release evidence and Windows installed-app lifecycle remain open.
 The implementation began from remote baseline SHA
 `c1fffd59d5078902e031e7684e69c27df40ce607`. The earlier October 14 plan was removed
 upstream and its statement that CLI rendering produces no media is superseded.
@@ -223,9 +223,9 @@ it needs an explicit opt-in, enumerated omissions, and a visibly partial outcome
       CLI parity/recovery and neighboring persistence/fixture matrix on Linux and
       Windows. Latest Ubuntu: 30 files, 508 passed, 9 skipped; full Windows
       `verify:ci` passed.
-- [ ] Repeat representative real rendering through the current frozen artifacts
-      (`bin`, bundle, installed `joy.cmd`, and `joy-media.cmd`) and bind their hashes
-      to the exact-candidate receipt.
+- [x] Repeat representative real rendering through the source `bin`, bundle, and current staged installed `joy.cmd` and `joy-media.cmd`; FFprobe and full decode pass. Hash-bound local staging evidence is recorded in `docs/qa/evidence/2026-10-18-windows-staged-cli-acceptance.md`.
+- [ ] Repeat against frozen exact-candidate artifacts and bind their hashes
+      to the two-pass release receipt.
 - [x] Update the local readiness ledger and commit accepted CLI fixes with tests.
 - [ ] Obtain the required independent reviews. Candidate-specific release approval
       remains Task 9.
@@ -254,11 +254,12 @@ proof of Electron acceptance. Browser helpers remain reusable where applicable.
 - [ ] Compare decoded desktop export against fixture expectations and sampled
       preview frames. Cover all supported presets, audio mixing, scenes and overlays.
       Crash or cancel during export must leave project data intact and allow retry.
-- [ ] Run focused browser specs first, then `pnpm run test:e2e:audit --retries=0`.
-      Run packaged scenarios via
-      `pnpm exec playwright test --config playwright.desktop.config.ts --retries=0`.
-      Exercise axe scans and keyboard reachability on supported panels; do not infer
-      full-viewports coverage from the existing two one-test responsive lanes.
+- [x] Run `pnpm run test:e2e:audit --retries=0` and the packaged Electron journey
+      with retries disabled. The October 18 full audit passed 826 tests, skipped 7
+      optional cases, and failed none across seven viewport projects; packaged Electron
+      acceptance passed one import/play/save/restart/reopen/render journey.
+- [ ] Add/verify axe scans and keyboard reachability across supported packaged panels;
+      do not infer this from browser-only checks or viewport coverage.
 - [ ] Record/fix failures through the loop, review, and commit. Any browser-only
       proof stays labeled browser-only until the packaged-app equivalent passes.
 
@@ -334,8 +335,8 @@ explicit `joy.cmd` path and sanitized disposable state directory.
 - [x] Build with `pnpm --filter @joy-media/desktop package:unpacked` and run
       `pnpm --filter @joy-media/desktop test:smoke-packaged`. The packaged Playwright
       acceptance also passed with `--retries=0` (1 journey, including playable export).
-- [ ] Package the installer with the current release prerequisites and run the
-      lifecycle harness only in the designated disposable host. Associate all
+- [x] Rebuild the unsigned Windows staging package and run both launcher render journeys, packaged/standalone smoke, and package-integrity checks. This proves staging entrypoints only; see `docs/qa/evidence/2026-10-18-windows-staged-cli-acceptance.md`.
+- [ ] Run clean install/update/rollback/uninstall in the designated disposable Windows host. Associate all
       lifecycle evidence with exact source, lockfile, and artifact hashes.
 - [ ] Fix/review/commit; never uninstall or overwrite the owner's working install.
 
@@ -373,8 +374,8 @@ explicitly per platform rather than copying POSIX signal numbers onto Windows.
       termination, real SQLite writer-lock behavior, and paths containing spaces;
       the affected Windows selections passed. Both `bin` and `bundle` pass the new
       real-media agent journey.
-- [ ] Add reserved-device-name coverage and run installed `joy.cmd`/`joy-media.cmd`
-      acceptance against a disposable staged package. Do not touch the active install.
+- [x] Reject Windows reserved-device export paths; a black-box test proves `NUL` returns a JSON usage error without creating an output.
+- [x] Run installed `joy.cmd` and `joy-media.cmd` acceptance against the disposable staged package; validate all ten v1 CLI schemas through both launchers with a loopback-only fake provider and reject reserved `NUL` export paths. Do not touch the active install; evidence is hash-bound in `docs/qa/evidence/2026-10-18-windows-staged-cli-acceptance.md`.
 - [x] Cover provider 401/429/500, malformed tool/SSE, hung stream, cancellation,
       bounded retry, and no project mutation after failed/denied proposals. Scan logs,
       reports, and persisted state for synthetic keys. Existing offline CLI tests cover

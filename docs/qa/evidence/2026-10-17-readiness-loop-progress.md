@@ -231,9 +231,55 @@ and error output, including Persian/space-containing project export paths and
 manifest-only completion. The real-media render and fake-agent delivery journeys
 also validate emitted events and results against the schemas. The focused schema,
 delivery, and real-render selection passed 16 tests with 2 platform skips. Current
-Node 24.19.0 passed; additional Node versions and installed-launcher schema delivery
-remain open. The schemas are source-tree contracts and are not copied into the CLI
-bundle.
+Node 24.19.0 passed; additional Node versions remain open. The schemas are source-tree
+contracts and are not copied into the CLI bundle. The installed-launcher schema gap
+was subsequently closed by the October 18 acceptance extension recorded below.
 
 The pinned-Pnpm follow-up including CLI contract, agent-run, schema, agent-delivery,
 and real-render files passed 82 tests with 9 platform skips.
+
+## Staged Windows CLI and packaged editor follow-up on October 18
+
+The test-first Windows reserved-device output-path guard and full CLI suite are
+recorded in [the staged CLI acceptance note](2026-10-18-windows-staged-cli-acceptance.md).
+That suite passed 25 files (470 passed, 25 platform skips); the targeted regression
+was first observed returning exit 0 for `NUL`, then passed with an exit-2 JSON usage
+error. Typecheck, lint, formatting, and whitespace checks passed.
+
+On the package built from source commit `4bc719b0f9e15147079f4a62ffdff11b0a24ae92`,
+`joy.cmd` and `joy-media.cmd` each rendered a fully decoded 3-second H.264/AAC output
+from a fresh temporary profile. Packaged Electron Playwright acceptance passed one
+journey with retries disabled (12.9s): import, playback, save, restart, reopen, export.
+This does not close full editor semantics, preview/export parity, or SQLite project-store
+integration. Only Node 24.19.0 is installed on this host; cross-version CLI evidence
+remains open.
+
+After this integration, `pnpm dlx pnpm@11.15.0 run verify:ci` exited 0, including
+workspace typecheck, lint, formatting, the full Vitest run, workspace builds, and
+production audit (`No known vulnerabilities found`). The tool returned a truncated
+final test summary, so no aggregate count is claimed here. `pnpm dlx pnpm@11.15.0 run
+test:harness` passed 22 tests, skipped 11 platform-specific Bash/Perl and POSIX process
+cases, and failed none.
+
+## Self-hosted runner closeout — October 18
+
+The full Windows browser audit completed with retries disabled: 826 passed, 7 optional
+environment skips, 0 failures across all seven desktop viewport projects (15.3 minutes).
+The staged `joy.cmd` and `joy-media.cmd` harness now validates all ten versioned CLI
+schemas, uses only a loopback fake provider for agent output, rejects the Windows `NUL`
+export path with a structured usage error, and verifies the real H.264/AAC render. Both
+launchers passed; schema hashes and artifact identities are in the staged CLI acceptance
+note.
+
+Docker was confirmed running with the isolated PostgreSQL 17 and MinIO CI services in
+the Ubuntu 24.04 WSL Docker engine. The repository's three self-hosted runners were
+online and idle at the last inventory check. No service credentials were read or copied.
+The exact-SHA two-pass workflow has not yet run for this candidate.
+
+Open closeout limits remain: a disposable Windows user/VM is required for actual app
+install/update/rollback/uninstall because the generated setup and uninstaller modify
+user shortcuts, PATH, and uninstall registry state. The desktop edit/preview/export
+parity matrix and SQLite-store integration are partial, and only Node 24.19.0 is
+installed locally. No active-profile install, deployment, publication, or candidate
+approval was performed. GPT-6 Astra remains prohibited by the owner; no replacement
+review approval is claimed here.
