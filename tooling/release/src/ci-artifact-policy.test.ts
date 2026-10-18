@@ -142,7 +142,11 @@ describe('v2 release-candidate artifact upload policy', () => {
 
     expect(windowsJob).toContain('runs-on: [self-hosted, windows, x64, joy-media-worker-docker]');
     expect(windowsJob).toContain('node apps/desktop/scripts/install-electron-windows.mjs');
+    expect(windowsJob).toContain('pnpm --filter @joy-media/editor-web... build');
     expect(windowsJob.indexOf('install-electron-windows.mjs')).toBeLessThan(
+      windowsJob.indexOf('package:installer'),
+    );
+    expect(windowsJob.indexOf('@joy-media/editor-web... build')).toBeLessThan(
       windowsJob.indexOf('package:installer'),
     );
     expect(windowsJob).toContain('package:installer');

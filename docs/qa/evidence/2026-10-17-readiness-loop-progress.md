@@ -274,11 +274,13 @@ note.
 Docker was confirmed running with the isolated PostgreSQL 17 and MinIO CI services in
 the Ubuntu 24.04 WSL Docker engine. The repository's three self-hosted runners were
 online and idle at the last inventory check. No service credentials were read or copied.
-Two exact-SHA workflow dispatches reached the Windows Docker runner and failed before
+Three exact-SHA workflow dispatches reached the Windows Docker runner and failed before
 acceptance. The first exposed that a clean install omits Electron's prebuilt runtime;
 the second downloaded it but Electron's bundled native ZIP extractor could not load its
-Windows binding. Both runs produced no Windows lifecycle passes or candidate-readiness
-receipt; remaining lanes were canceled to release the self-hosted runners.
+Windows binding; the third passed runtime installation and version verification, then
+found that the clean checkout had not built `apps/editor-web/dist`. None produced
+Windows lifecycle passes or a candidate-readiness receipt; remaining lanes were canceled
+to release the self-hosted runners.
 
 Open closeout limits remain: a disposable Windows user/VM is required for actual app
 install/update/rollback/uninstall because the generated setup and uninstaller modify
@@ -300,8 +302,10 @@ The Windows job now uses `install-electron-windows.mjs`: `@electron/get` downloa
 locked Electron artifact with its published SHA-256, and PowerShell's built-in
 `Expand-Archive` extracts it without Electron's failing native ZIP binding. The helper
 checks the extracted version and executable; unit tests cover checksum selection,
-idempotence, missing-checksum rejection, and safe PowerShell quoting. The bin and bundle
-schema journeys passed focused validation; their full-suite per-test limit is now 60
+idempotence, missing-checksum rejection, and safe PowerShell quoting. The Windows build
+now builds the editor web package and its workspace dependencies before packaging; a
+workflow test enforces that ordering. The bin and bundle schema journeys passed focused
+validation; their full-suite per-test limit is now 60
 seconds because a full run timed out at 30 seconds under host-wide suite load, while the
 same test passed in 6.9 seconds in isolation. The subsequent complete local
 `pnpm verify:ci` run exited 0; `pnpm test:harness` passed 29 tests, skipped 11
