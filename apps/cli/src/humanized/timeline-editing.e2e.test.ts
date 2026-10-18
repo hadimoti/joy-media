@@ -841,6 +841,24 @@ describe('flag spelling and order do not matter', () => {
 });
 
 describe('a long editing session', () => {
+  it('persists all 200 successful edits with a fresh-process readback', async () => {
+    const id = await createProject(sb, 'Two hundred edits');
+    const startedAt = performance.now();
+    for (let i = 0; i < 200; i += 1) {
+      await addClip(sb, id, { start: i * 2, duration: 1 });
+    }
+    const elapsedMs = performance.now() - startedAt;
+
+    // `showProject` and `listProjects` each start a new CLI process, so the
+    // counts below prove the durable store, not only the last command result.
+    const show = await showProject(sb, id);
+    expect(show.revision).toBe(201);
+    expect(track(show, 'track-v1').clips).toHaveLength(200);
+    expect(spans(show)).toEqual(Array.from({ length: 200 }, (_, i) => [i * 2, i * 2 + 1]));
+    expect((await listProjects(sb))[0]).toMatchObject({ revision: 201, clipCount: 200 });
+    expect(elapsedMs).toBeGreaterThan(0);
+  }, 240_000);
+
   it('counts one revision per successful edit, stays readable, and keeps bounded history', async () => {
     const id = await createProject(sb, 'Session');
     for (let i = 0; i < 12; i += 1) {
