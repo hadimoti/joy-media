@@ -1,11 +1,13 @@
 # JOY Media CI runner policy
 
-The release-candidate workflow uses the standard GitHub-hosted
-`ubuntu-24.04` runner for `editor-web-bundle`. The repository is public, so
-standard hosted runner minutes are free; artifact storage remains quota-limited.
-The repository's one-file artifact probe passed on 2026-10-18 (run
-`39084850937`), enabling this one-day renderer handoff. All other release jobs
-remain on owner-controlled Docker runners. The policy is enforced offline by
+The v2 release-candidate workflow uses standard GitHub-hosted
+`ubuntu-24.04` runners for candidate validation, `editor-web-bundle`, and
+responsive-only browser checks. The repository is public, so standard hosted
+runner minutes are free; artifact storage remains quota-limited. The repository's
+one-file artifact probe passed on 2026-10-18 (run `39084850937`), enabling this
+one-day renderer handoff. Media-export browser acceptance and shipped-bundle
+smoke use the dedicated Linux acceptance runner after hosted-runner export
+timeouts. The policy is enforced offline by
 `tooling/release/src/ci-runner-policy.test.ts`; runner image, entrypoint, and
 registration-token contracts remain locked down by
 `tooling/release/src/ci-runner-contract.test.ts`.
@@ -157,6 +159,15 @@ observation, not a durable state guarantee. WSL2 may stop an idle distribution,
 so the operator must verify `wsl -l -v`, the Docker daemon, and the GitHub
 runner inventory immediately before dispatching a gate.
 
+In `release-candidate-v2.yml`, `acceptance-primary` and `prod-build-smoke` also
+use this runner because their media-export browser paths exceeded GitHub-hosted
+download timeouts. They set `JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only` and
+clear the runner-local database, S3, Worker, evidence, real-acceptance command,
+and OpenCLI settings. They use the container's preinstalled Chromium system
+libraries and install only the Playwright browser binary. These jobs remain
+deterministic fixture runs; only the real-service jobs may use disposable
+runner-local service credentials.
+
 ## Release-candidate lanes
 
 The closure plan requires a separate, manually dispatched release workflow before promotion. It
@@ -253,7 +264,10 @@ Linux-container or host-direct evidence ever presented as Windows acceptance.
 dispatched manually with a full 40-character candidate SHA. It runs the same lane inventory
 described above, but encodes the clean-state repeat explicitly as two in-workflow passes per
 matrix lane and restructures the browser viewport matrix so each pass stays inside its lane's
-timeout budget. It depends on the same `self-hosted` runners (`joy-media-ci`,
+timeout budget. Candidate validation, editor bundling, and responsive-only
+browser checks use GitHub-hosted Ubuntu. Media-export primary browser acceptance
+and shipped-bundle smoke use `joy-media-acceptance` because the hosted runner
+timed out on production exports. It depends on the same `self-hosted` runners (`joy-media-ci`,
 `joy-media-worker-docker`, `joy-media-acceptance`) and on the same runner-local env vars
 (`JOY_MEDIA_CI_RELEASE_COMMAND`, `JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND`,
 `JOY_MEDIA_CI_EVIDENCE_ROOT`).

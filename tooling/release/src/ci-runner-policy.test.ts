@@ -11,10 +11,11 @@ const WORKFLOWS_DIR = join(REPO_ROOT, '.github', 'workflows');
  * Explicit CI runner placement contract.
  *
  * The public repository may use standard GitHub-hosted runners without minute
- * charges. Portable candidate validation, browser acceptance, production
- * smoke, and editor bundle jobs use `ubuntu-24.04`; lanes requiring private
- * services, durable evidence, or Windows Docker stay on owner-controlled
- * runners. This test enforces the exact split offline:
+ * charges. Candidate validation, responsive-only browser checks, and editor
+ * bundle jobs use `ubuntu-24.04`. Media-export browser acceptance runs on the
+ * isolated Linux acceptance runner because the hosted runner timed out waiting
+ * for production exports. Private service and Windows Docker lanes stay on
+ * their owner-controlled runners. This test enforces the exact split offline:
  *
  *   1. Only the explicitly listed jobs in release-candidate-v2.yml may use
  *      `ubuntu-24.04`; all other hosted labels are forbidden.
@@ -63,9 +64,7 @@ const APPROVED_HOSTED_RUNNERS: ReadonlyMap<
     new Map([
       ['validate-candidate', ['ubuntu-24.04']],
       ['editor-web-bundle', ['ubuntu-24.04']],
-      ['acceptance-primary', ['ubuntu-24.04']],
       ['acceptance-responsive', ['ubuntu-24.04']],
-      ['prod-build-smoke', ['ubuntu-24.04']],
     ]),
   ],
 ]);
@@ -288,6 +287,38 @@ describe('CI runner placement contract', () => {
 
   it('declares at least one self-hosted runner contract under ops/self-hosted/', () => {
     expect(declaredLabels.length).toBeGreaterThan(0);
+  });
+
+  it('runs media-export browser jobs on the isolated fixture-only acceptance runner', () => {
+    const workflowPath = join(WORKFLOWS_DIR, 'release-candidate-v2.yml');
+    const workflow = readFileSync(workflowPath, 'utf8');
+
+    const runnerLocalSettings = [
+      'JOY_MEDIA_CI_ACCEPTANCE_WORKER',
+      'JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND',
+      'JOY_MEDIA_CI_EVIDENCE_ROOT',
+      'JOY_MEDIA_CI_DATABASE_URL',
+      'JOY_MEDIA_CI_S3_ENDPOINT',
+      'JOY_MEDIA_CI_S3_ACCESS_KEY',
+      'JOY_MEDIA_CI_S3_SECRET_KEY',
+      'JOY_MEDIA_CI_S3_SECRET_ACCESS_KEY',
+      'JOY_MEDIA_CI_S3_HEALTHCHECK_URL',
+      'JOY_MEDIA_OPENCLI_PROFILE',
+    ];
+
+    for (const jobName of ['acceptance-primary', 'prod-build-smoke']) {
+      const job = findJobBlock(workflow, jobName);
+      expect(job, `${jobName} must exist in the release workflow`).not.toBe('');
+      expect(job).toContain('runs-on: [self-hosted, linux, x64, joy-media-acceptance]');
+      expect(job).toContain('JOY_MEDIA_CI_ACCEPTANCE_PROFILE: fixture-only');
+      expect(job).toContain('pnpm exec playwright install chromium');
+      expect(job).not.toContain('pnpm exec playwright install --with-deps chromium');
+      for (const setting of runnerLocalSettings) {
+        expect(job, `${jobName} must clear runner-local ${setting}`).toMatch(
+          new RegExp(`^\\s+${setting}: ''$`, 'm'),
+        );
+      }
+    }
   });
 
   it.each(workflows)('forbids hosted runner labels in %s', (workflowPath) => {

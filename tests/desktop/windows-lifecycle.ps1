@@ -543,7 +543,7 @@ finally {
         } catch { }
         $cleanupDeadline = [DateTime]::UtcNow.AddSeconds(30)
         while ((Test-Path -LiteralPath $installRoot) -and [DateTime]::UtcNow -lt $cleanupDeadline) { Start-Sleep -Milliseconds 500 }
-        if (Test-Path -LiteralPath $installRoot -and (Test-Path -LiteralPath (Join-Path $installRoot 'joy-media.exe'))) {
+        if ((Test-Path -LiteralPath $installRoot) -and (Test-Path -LiteralPath (Join-Path $installRoot 'joy-media.exe'))) {
             Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }

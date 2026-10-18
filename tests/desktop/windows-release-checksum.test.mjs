@@ -28,6 +28,15 @@ test('legacy lifecycle hashes files from the actual v1.0.1 archive layout', () =
   );
 });
 
+test('Windows lifecycle cleanup groups Test-Path calls before applying logical operators', () => {
+  const lifecycle = readFileSync(windowsLifecycle, 'utf8');
+
+  assert.match(
+    lifecycle,
+    /if \(\(Test-Path -LiteralPath \$installRoot\) -and \(Test-Path -LiteralPath \(Join-Path \$installRoot 'joy-media\.exe'\)\)\) \{/,
+  );
+});
+
 test(
   'derives legacy installed-file hashes from the verified archive when the sidecar lists only the archive',
   { skip: process.platform !== 'win32' },

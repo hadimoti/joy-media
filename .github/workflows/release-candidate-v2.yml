@@ -9,15 +9,20 @@ name: release-candidate-v2
 # docs/reviews/joy-media-ci-repetition-contract-2026-09-08.md.
 #
 # Runner placement: this is a public repository, so standard GitHub-hosted
-# runners are free. Portable source, browser, and production-bundle lanes use
-# `ubuntu-24.04`; the renderer bundle also builds there because the Windows
-# Hyper-V worker exposes only 1 GiB to Node. Jobs that need owner-controlled
-# databases, durable evidence storage, or Windows Docker remain self-hosted.
-# `ci-runner-policy.test.ts` records this exact hosted-job allowlist.
+# runners are free. Candidate validation, editor bundle, and responsive-only
+# checks use `ubuntu-24.04`; the renderer bundle also builds there because the
+# Windows Hyper-V worker exposes only 1 GiB to Node. GitHub-hosted export smoke
+# timed out waiting for downloads (the same production bundle passed locally),
+# so media-export browser acceptance and shipped-bundle smoke use the isolated
+# Linux acceptance runner. Fixture-only jobs clear its runner-local service
+# settings; only real-service jobs can use those disposable credentials.
+# `ci-runner-policy.test.ts` records this exact split.
 #
 # Lane → runner mapping (matches ops/self-hosted/*/ contract docs):
-#   - validate-candidate / editor-web-bundle / acceptance-primary /
-#     acceptance-responsive / prod-build-smoke: GitHub-hosted ubuntu-24.04.
+#   - validate-candidate / editor-web-bundle / acceptance-responsive:
+#     GitHub-hosted ubuntu-24.04.
+#   - acceptance-primary / prod-build-smoke: self-hosted,linux,x64,
+#     joy-media-acceptance (fixture-only; media-export capable).
 #   - linux-real-services: self-hosted,linux,x64,joy-media-ci (PC Docker Linux).
 #   - real-service-acceptance / p3-real-services / gate-summary:
 #     self-hosted,linux,x64,joy-media-acceptance (isolated PC Docker Linux).
@@ -445,7 +450,7 @@ jobs:
 
   acceptance-primary:
     name: acceptance-primary desktop-primary (pass ${{ matrix.pass }})
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, joy-media-acceptance]
     needs: [validate-candidate, linux-real-services, windows-worker-clean]
     strategy:
       fail-fast: false
@@ -454,6 +459,16 @@ jobs:
     timeout-minutes: 45
     env:
       JOY_MEDIA_CI_ACCEPTANCE_PROFILE: fixture-only
+      JOY_MEDIA_CI_ACCEPTANCE_WORKER: ''
+      JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND: ''
+      JOY_MEDIA_CI_EVIDENCE_ROOT: ''
+      JOY_MEDIA_CI_DATABASE_URL: ''
+      JOY_MEDIA_CI_S3_ENDPOINT: ''
+      JOY_MEDIA_CI_S3_ACCESS_KEY: ''
+      JOY_MEDIA_CI_S3_SECRET_KEY: ''
+      JOY_MEDIA_CI_S3_SECRET_ACCESS_KEY: ''
+      JOY_MEDIA_CI_S3_HEALTHCHECK_URL: ''
+      JOY_MEDIA_OPENCLI_PROFILE: ''
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -473,9 +488,11 @@ jobs:
           corepack enable pnpm
           pnpm --version
           test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
+          test -z "${JOY_MEDIA_CI_DATABASE_URL:-}" || { echo 'fixture-only browser acceptance must not receive the runner database URL' >&2; exit 1; }
+          test -z "${JOY_MEDIA_CI_S3_ACCESS_KEY:-}${JOY_MEDIA_CI_S3_SECRET_KEY:-}${JOY_MEDIA_CI_S3_SECRET_ACCESS_KEY:-}" || { echo 'fixture-only browser acceptance must not receive runner object-storage credentials' >&2; exit 1; }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install chromium
       - name: Full disposable desktop acceptance suite (reference viewport)
         shell: bash
         env:
@@ -620,9 +637,21 @@ jobs:
 
   prod-build-smoke:
     name: prod-build-smoke (shipped bundle, public UI)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, joy-media-acceptance]
     needs: [validate-candidate]
     timeout-minutes: 30
+    env:
+      JOY_MEDIA_CI_ACCEPTANCE_PROFILE: fixture-only
+      JOY_MEDIA_CI_ACCEPTANCE_WORKER: ''
+      JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND: ''
+      JOY_MEDIA_CI_EVIDENCE_ROOT: ''
+      JOY_MEDIA_CI_DATABASE_URL: ''
+      JOY_MEDIA_CI_S3_ENDPOINT: ''
+      JOY_MEDIA_CI_S3_ACCESS_KEY: ''
+      JOY_MEDIA_CI_S3_SECRET_KEY: ''
+      JOY_MEDIA_CI_S3_SECRET_ACCESS_KEY: ''
+      JOY_MEDIA_CI_S3_HEALTHCHECK_URL: ''
+      JOY_MEDIA_OPENCLI_PROFILE: ''
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -636,11 +665,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = 'fixture-only' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only is required' >&2; exit 1; }
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on fixture-only acceptance jobs' >&2; exit 1; }
+          test -z "${JOY_MEDIA_CI_DATABASE_URL:-}" || { echo 'fixture-only smoke must not receive the runner database URL' >&2; exit 1; }
+          test -z "${JOY_MEDIA_CI_S3_ACCESS_KEY:-}${JOY_MEDIA_CI_S3_SECRET_KEY:-}${JOY_MEDIA_CI_S3_SECRET_ACCESS_KEY:-}" || { echo 'fixture-only smoke must not receive runner object-storage credentials' >&2; exit 1; }
           corepack enable pnpm
           test "$(pnpm --version)" = '11.15.0'
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install chromium
       - name: Measure the shipped editor entry-bundle graph
         shell: bash
         run: |

@@ -40,9 +40,13 @@ fall back to the existing self-hosted runners when a hosted runner is unavailabl
 or insufficient. The public repository's standard runner is free, the artifact
 inventory was empty, and the one-file quota probe passed as run `39084850937`.
 The current workflow uses `ubuntu-24.04` for candidate validation, editor bundle,
-desktop browser primary/responsive acceptance, and shipped-bundle UI smoke. It
-retains self-hosted runners for isolated real-service/P3 evidence, the Windows
-Docker installer lifecycle, and the evidence gate summary. Transfer the renderer
+and responsive-only browser acceptance. Media-export desktop-primary acceptance
+and shipped-bundle UI smoke use the isolated self-hosted Linux acceptance runner
+after exact hosted-runner export timeouts. The workflow retains self-hosted
+runners for isolated real-service/P3 evidence, the Windows Docker installer
+lifecycle, and the evidence gate summary. Fixture-only browser jobs explicitly
+clear runner-local database, object-storage, Worker, evidence, and OpenCLI
+settings. Transfer the renderer
 bundle with a one-day artifact bound to run/attempt/candidate and verify its full
 file manifest on the Windows Docker runner. This keeps the memory-heavy Vite
 build off the 1 GiB-visible Hyper-V container while preserving the container-local
@@ -108,6 +112,29 @@ regression test; commit `19f47d96` adds a 200-command timeline edit/readback
 scenario. The new policy test passes 25/25, the full timeline CLI suite passes
 66/66 (160.52 s), and the sustained case passes with 200 edits in 59.89 s. Run
 `39093151282` cannot certify `a5a2b5e6` or later commits.
+
+Exact-candidate run `39094711674` at `56126fbf2794ad7455f2aa0d80066b9af6e09b24`
+passed candidate validation, editor-bundle transfer, both Linux/P3 service
+passes, and Windows package creation. Hosted production-bundle UI checks passed
+three cases but timed out twice waiting for media-export downloads (120 s and
+240 s); the same production bundle passed those journeys in a local reproduction.
+The Windows lifecycle cleanup then failed because Windows PowerShell 5.1 parsed
+`-and` as a `Test-Path` parameter, masking the underlying lifecycle exception.
+The cleanup expression now groups each `Test-Path` call and has a regression test.
+The runner-policy test now requires primary and shipped-bundle media-export jobs
+on `joy-media-acceptance`, with fixture-only runner settings, and keeps the
+responsive-only six-viewport layout job on hosted Ubuntu. A new exact-SHA run is
+still required to see the original Windows lifecycle error and verify the routed
+production-export smoke on the capable runner.
+
+Local verification after these fixes passed: the runner-policy suite (24/24),
+Windows lifecycle harness (32 passed, 11 expected host-specific skips), and
+real CLI video suite (12 passed, 2 expected skips). The integrated retry passed
+the full test matrix (630 files, 5,591 passed, 28 skipped), built the workspace,
+and completed the production audit with no known vulnerabilities. The first
+integrated attempt's only failure was the Windows provider-ACL test hitting its
+30-second timeout under suite load; it passed alone in 1.9 seconds and passed
+the integrated retry in 16.4 seconds.
 
 The ZIP-layout failure now has a test-first fix: a regression test failed while
 the lifecycle requested root-level files, the fixture was changed to reproduce
