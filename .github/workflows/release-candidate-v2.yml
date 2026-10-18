@@ -162,7 +162,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          pnpm --filter @joy-media/desktop exec install-electron
+          node apps/desktop/scripts/install-electron-windows.mjs
           if ($LASTEXITCODE -ne 0) { throw "Electron runtime install failed with exit code $LASTEXITCODE." }
           $electronExe = Join-Path $PWD 'apps\desktop\node_modules\electron\dist\electron.exe'
           if (-not (Test-Path -LiteralPath $electronExe -PathType Leaf)) { throw "Electron runtime executable is missing: $electronExe" }

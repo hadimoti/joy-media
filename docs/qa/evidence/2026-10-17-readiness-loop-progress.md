@@ -274,11 +274,11 @@ note.
 Docker was confirmed running with the isolated PostgreSQL 17 and MinIO CI services in
 the Ubuntu 24.04 WSL Docker engine. The repository's three self-hosted runners were
 online and idle at the last inventory check. No service credentials were read or copied.
-The first exact-SHA workflow dispatch reached immutable-candidate validation and the
-Windows Docker runner, then failed before acceptance because Electron's prebuilt runtime
-was missing from the clean install. The other lanes were canceled after that failure so
-the self-hosted runners could be released; this produced no Windows lifecycle passes or
-candidate-readiness receipt.
+Two exact-SHA workflow dispatches reached the Windows Docker runner and failed before
+acceptance. The first exposed that a clean install omits Electron's prebuilt runtime;
+the second downloaded it but Electron's bundled native ZIP extractor could not load its
+Windows binding. Both runs produced no Windows lifecycle passes or candidate-readiness
+receipt; remaining lanes were canceled to release the self-hosted runners.
 
 Open closeout limits remain: a disposable Windows user/VM is required for actual app
 install/update/rollback/uninstall because the generated setup and uninstaller modify
@@ -296,15 +296,16 @@ contracts passed, and the Windows lifecycle PowerShell script parsed successfull
 These are source/worktree checks; they do not replace fresh artifact-bound Windows
 acceptance.
 
-The Windows job now explicitly runs Electron's `install-electron` bootstrap and verifies
-the installed executable and version before packaging. A workflow policy test fails if
-this bootstrap disappears or moves after packaging. The bin and bundle schema journeys
-passed focused validation; their full-suite per-test limit is now 60 seconds because the
-first full run timed out at 30 seconds under host-wide suite load, while the same test
-passed in 6.9 seconds in isolation. The subsequent complete local `pnpm verify:ci` run
-exited 0; `pnpm test:harness` passed 29 tests, skipped 11 platform-specific cases, and
-failed none. `install-electron` and the Electron v44.3.0 runtime check also passed
-locally.
+The Windows job now uses `install-electron-windows.mjs`: `@electron/get` downloads the
+locked Electron artifact with its published SHA-256, and PowerShell's built-in
+`Expand-Archive` extracts it without Electron's failing native ZIP binding. The helper
+checks the extracted version and executable; unit tests cover checksum selection,
+idempotence, missing-checksum rejection, and safe PowerShell quoting. The bin and bundle
+schema journeys passed focused validation; their full-suite per-test limit is now 60
+seconds because a full run timed out at 30 seconds under host-wide suite load, while the
+same test passed in 6.9 seconds in isolation. The subsequent complete local
+`pnpm verify:ci` run exited 0; `pnpm test:harness` passed 29 tests, skipped 11
+platform-specific cases, and failed none.
 
 The corrected exact-SHA `release-candidate-v2` dispatch remains the next closeout gate.
 GitHub inventory showed all required self-hosted runners online: Linux CI, Linux

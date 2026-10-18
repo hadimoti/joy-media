@@ -141,9 +141,8 @@ describe('v2 release-candidate artifact upload policy', () => {
     const windowsJob = workflow.slice(start, end);
 
     expect(windowsJob).toContain('runs-on: [self-hosted, windows, x64, joy-media-worker-docker]');
-    expect(windowsJob).toContain('pnpm --filter @joy-media/desktop exec install-electron');
-    expect(windowsJob).toContain('apps\\desktop\\node_modules\\electron\\dist\\electron.exe');
-    expect(windowsJob.indexOf('exec install-electron')).toBeLessThan(
+    expect(windowsJob).toContain('node apps/desktop/scripts/install-electron-windows.mjs');
+    expect(windowsJob.indexOf('install-electron-windows.mjs')).toBeLessThan(
       windowsJob.indexOf('package:installer'),
     );
     expect(windowsJob).toContain('package:installer');
