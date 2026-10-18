@@ -415,6 +415,36 @@ const lifecycleHarnessPath = resolve('tests/desktop/windows-lifecycle.ps1');
 const lifecycleHarness = readFileSync(lifecycleHarnessPath, 'utf8');
 assert.match(
   lifecycleHarness,
+  /trap\s*\{[\s\S]*lifecycle diagnostic line/u,
+  'Lifecycle failures must report the PowerShell source line before cleanup.',
+);
+assert.match(
+  lifecycleHarness,
+  /function Test-UserPathEntry\([\s\S]*?\[string\]::IsNullOrWhiteSpace\(\$UserPath\)/u,
+  'Lifecycle User PATH inspection must safely handle an unset value.',
+);
+assert.doesNotMatch(
+  lifecycleHarness,
+  /\.Contains\([^\r\n]*,\s*\[StringComparison\]/u,
+  'Windows PowerShell 5.1 does not support the two-argument String.Contains overload.',
+);
+assert.match(
+  lifecycleHarness,
+  /function Assert-CleanCheckoutStatus\b/u,
+  'Lifecycle checkout validation must handle an empty git status result without calling methods on null.',
+);
+assert.match(
+  lifecycleHarness,
+  /\$statusLines\s*=\s*@\(& git -C \$repoRoot status --porcelain\)[\s\S]{0,220}Assert-CleanCheckoutStatus -StatusLines \$statusLines/u,
+  'Lifecycle checkout validation must capture porcelain output as a collection and validate it safely.',
+);
+assert.doesNotMatch(
+  lifecycleHarness,
+  /\(& git -C \$repoRoot status --porcelain\)\.Trim\(\)/u,
+  'A clean git status returns no output in Windows PowerShell 5.1, so Trim() would dereference null.',
+);
+assert.match(
+  lifecycleHarness,
   /Invoke-VerifiedSetup \$testTamperedArtifact \$candidateSetup \$candidateVersion/u,
   'Lifecycle hash negative control must exercise the same verified setup entrypoint.',
 );
@@ -440,6 +470,55 @@ assert.strictEqual(
   lifecycleParseResult.status,
   0,
   `Windows lifecycle harness syntax parsing failed:\n${lifecycleParseResult.stderr || lifecycleParseResult.stdout}`,
+);
+const lifecyclePathProbeCommand = String.raw`
+  $errors = $null
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile('${lifecycleHarnessPath.replace(/'/g, "''")}', [ref]$null, [ref]$errors)
+  if ($errors.Count -gt 0) { Write-Error ($errors | Out-String); exit 1 }
+  $function = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-UserPathEntry' }, $true)
+  if ($null -eq $function) { Write-Error 'Test-UserPathEntry function is missing'; exit 1 }
+  . ([ScriptBlock]::Create($function.Extent.Text))
+  $installPath = 'C:\Users\Disposable\Programs\JOY Media'
+  if (Test-UserPathEntry -UserPath $null -InstallPath $installPath) { Write-Error 'Null User PATH was accepted'; exit 1 }
+  if (Test-UserPathEntry -UserPath '' -InstallPath $installPath) { Write-Error 'Empty User PATH was accepted'; exit 1 }
+  if (-not (Test-UserPathEntry -UserPath 'C:\Other;C:\Users\Disposable\Programs\JOY Media\' -InstallPath $installPath)) { Write-Error 'A normalized installed User PATH entry was not detected'; exit 1 }
+  if (Test-UserPathEntry -UserPath 'C:\Users\Other\Programs\JOY Media' -InstallPath $installPath) { Write-Error 'A different User PATH entry was accepted'; exit 1 }
+`;
+const lifecyclePathProbeResult = spawnSync(
+  'powershell.exe',
+  ['-NoProfile', '-NonInteractive', '-Command', lifecyclePathProbeCommand],
+  { encoding: 'utf8', timeout: 15000 },
+);
+assert.strictEqual(
+  lifecyclePathProbeResult.status,
+  0,
+  `Windows lifecycle User PATH null/normalization probe failed:\n${lifecyclePathProbeResult.stderr || lifecyclePathProbeResult.stdout}`,
+);
+const lifecycleCheckoutProbeCommand = String.raw`
+  $errors = $null
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile('${lifecycleHarnessPath.replace(/'/g, "''")}', [ref]$null, [ref]$errors)
+  if ($errors.Count -gt 0) { Write-Error ($errors | Out-String); exit 1 }
+  $function = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-CleanCheckoutStatus' }, $true)
+  if ($null -eq $function) { Write-Error 'Assert-CleanCheckoutStatus function is missing'; exit 1 }
+  . ([ScriptBlock]::Create($function.Extent.Text))
+  Assert-CleanCheckoutStatus -StatusLines @()
+  $dirtyRejected = $false
+  try { Assert-CleanCheckoutStatus -StatusLines @(' M tracked-file.txt') }
+  catch {
+    if ($_.Exception.Message -ne 'Windows lifecycle checkout is not clean before generated artifacts.') { throw }
+    $dirtyRejected = $true
+  }
+  if (-not $dirtyRejected) { Write-Error 'A dirty lifecycle checkout was accepted'; exit 1 }
+`;
+const lifecycleCheckoutProbeResult = spawnSync(
+  'powershell.exe',
+  ['-NoProfile', '-NonInteractive', '-Command', lifecycleCheckoutProbeCommand],
+  { encoding: 'utf8', timeout: 15000 },
+);
+assert.strictEqual(
+  lifecycleCheckoutProbeResult.status,
+  0,
+  `Windows lifecycle empty/dirty checkout probe failed:\n${lifecycleCheckoutProbeResult.stderr || lifecycleCheckoutProbeResult.stdout}`,
 );
 console.log('✔ Windows installed-lifecycle harness syntax parse check passed.');
 

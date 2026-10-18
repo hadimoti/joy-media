@@ -48,6 +48,27 @@ builds the CLI dependency closure sequentially before packaging to fit the Windo
 container. Local `package:installer` produced the v1.0.2 archive (188.96 MB), but
 the new exact-candidate two-pass run is still required; no installed-Windows
 lifecycle evidence was produced by run `39085505980`.
+Exact-candidate run `39086664395` then passed the sequential CLI dependency build,
+Windows package integrity, hosted renderer transfer, public-bundle UI smoke, and
+both Linux/P3 service passes. Its Windows lifecycle step failed before installation:
+in the clean Windows PowerShell 5.1 checkout, `git status --porcelain` emits no
+objects, so calling `.Trim()` on its captured `$null` raised the null-valued-method
+error. I reproduced that behavior inside the same Docker runner (Windows
+10.0.20348.5622). The harness now captures porcelain output as an array, checks
+Git's exit code, and rejects a non-empty array; the package checker tests both
+empty and dirty states. That regression test failed against the old harness before
+the guard was added, then passed. The same pass also adds line diagnostics and
+guards for unset User PATH/profile values and the PowerShell 5.1-incompatible
+`String.Contains` overload. The updated package checker passes.
+
+On the modified worktree at HEAD `325cc4d7277d3008bd79c18749ddcff9c9a53051`,
+`pnpm verify:ci` passed (typecheck, lint, formatting, full Vitest suite, build, and
+production audit); `pnpm test:harness` passed 29 with 11 expected host-specific
+skips. `pnpm exec vitest run apps/cli/src/humanized/render-real.e2e.test.ts
+--no-file-parallelism` passed 12 with 2 skips, including decoded playable H.264/AAC
+from the source and single-file bundle entry points. These are working-tree results,
+not exact-candidate or installed-artifact evidence. A new exact-SHA two-pass run is
+still required to prove the revised Windows lifecycle harness and frozen artifacts.
 The implementation began from remote baseline SHA
 `c1fffd59d5078902e031e7684e69c27df40ce607`. The earlier October 14 plan was removed
 upstream and its statement that CLI rendering produces no media is superseded.
@@ -362,6 +383,7 @@ explicit `joy.cmd` path and sanitized disposable state directory.
       `pnpm --filter @joy-media/desktop test:smoke-packaged`. The packaged Playwright
       acceptance also passed with `--retries=0` (1 journey, including playable export).
 - [x] Rebuild the unsigned Windows staging package and run both launcher render journeys, packaged/standalone smoke, and package-integrity checks. This proves staging entrypoints only; see `docs/qa/evidence/2026-10-18-windows-staged-cli-acceptance.md`.
+- [x] Reproduce and remove the clean-checkout PowerShell 5.1 null dereference; package-level regression checks cover empty and dirty git status results, and lifecycle errors now print their source line. Exact installed-artifact lifecycle acceptance remains open below.
 - [ ] Run clean install/update/rollback/uninstall in the designated disposable Windows host. Associate all
       lifecycle evidence with exact source, lockfile, and artifact hashes.
 - [ ] Fix/review/commit; never uninstall or overwrite the owner's working install.

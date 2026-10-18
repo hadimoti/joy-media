@@ -14,6 +14,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+trap {
+    $errorRecord = $_
+    $lineNumber = $errorRecord.InvocationInfo.ScriptLineNumber
+    $sourceLine = $errorRecord.InvocationInfo.Line
+    [Console]::Error.WriteLine("windows-lifecycle diagnostic line ${lineNumber}: $sourceLine")
+    if ($errorRecord.ScriptStackTrace) { [Console]::Error.WriteLine($errorRecord.ScriptStackTrace) }
+    throw $errorRecord
+}
 $PreviousVersion = '1.0.1'
 $PreviousSetupSha256 = '3f5fbe853de04a24aac22a46e28dd661cc1a80a2a6c5a1fa383fcd9ab3efde04'
 $PreviousChecksumsSha256 = 'a7b933f44ec82edd2f166dcde0bb013e1febd0ebbd19aa42dd49ac8e05adfe32'
@@ -155,11 +163,26 @@ function Get-ChecksummedFile([string]$ChecksumsText, [string]$FileName) {
     return $matches[0].Groups[1].Value
 }
 
+function Test-UserPathEntry([AllowNull()][string]$UserPath, [Parameter(Mandatory = $true)][string]$InstallPath) {
+    if ([string]::IsNullOrWhiteSpace($UserPath)) { return $false }
+    $normalizedInstallPath = $InstallPath.TrimEnd('\')
+    foreach ($entry in ($UserPath -split ';')) {
+        if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+        if ($entry.TrimEnd('\') -ieq $normalizedInstallPath) { return $true }
+    }
+    return $false
+}
+
+function Assert-CleanCheckoutStatus([AllowEmptyCollection()][object[]]$StatusLines) {
+    if ($StatusLines.Count -gt 0) { throw 'Windows lifecycle checkout is not clean before generated artifacts.' }
+}
+
 function Assert-RegisteredVersion([string]$ExpectedVersion) {
     $key = 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\JoyMedia'
     $entry = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
     if ($entry.DisplayVersion -ne $ExpectedVersion) { throw "Installed version registration mismatch for $ExpectedVersion" }
     if ($entry.DisplayName -ne 'JOY Media') { throw 'Installer registration display name is incorrect.' }
+    if ([string]::IsNullOrWhiteSpace([string]$entry.InstallLocation)) { throw 'Installer registration is missing its install location.' }
     if ([IO.Path]::GetFullPath($entry.InstallLocation).TrimEnd('\') -ine [IO.Path]::GetFullPath($installRoot).TrimEnd('\')) {
         throw 'Installer registration points outside the expected isolated install directory.'
     }
@@ -181,7 +204,7 @@ function Get-InstalledFileHash([string]$RelativePath) {
 function Assert-UserIntegrations([string]$Version) {
     Assert-RegisteredVersion $Version
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if (-not ($userPath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $installRoot.TrimEnd('\') })) {
+    if (-not (Test-UserPathEntry -UserPath $userPath -InstallPath $installRoot)) {
         throw 'Installer did not register the isolated install path for the current test user.'
     }
     if (-not (Test-Path -LiteralPath $desktopShortcut -PathType Leaf)) { throw 'Desktop shortcut was not created.' }
@@ -240,7 +263,7 @@ function Assert-NoOwnedProcesses {
     $owned = @()
     foreach ($process in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
         if (-not $process.CommandLine) { continue }
-        if ($process.CommandLine.Contains($workRoot, [StringComparison]::OrdinalIgnoreCase) -or $process.CommandLine.Contains($installRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        if ($process.CommandLine.IndexOf($workRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or $process.CommandLine.IndexOf($installRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
             if ($process.Name -match '^(joy-media|joy-worker|ffmpeg|electron)\.exe$') { $owned += $process }
         }
     }
@@ -264,7 +287,9 @@ $cliManifest = Get-Content -LiteralPath $cliManifestPath -Raw | ConvertFrom-Json
 $candidateVersion = [string]$desktopManifest.version
 $sourceHead = (& git -C $repoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $sourceHead -ne $CandidateSha) { throw 'Windows lifecycle checkout does not match the requested candidate SHA.' }
-if ((& git -C $repoRoot status --porcelain).Trim()) { throw 'Windows lifecycle checkout is not clean before generated artifacts.' }
+$statusLines = @(& git -C $repoRoot status --porcelain)
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the Windows lifecycle checkout state.' }
+Assert-CleanCheckoutStatus -StatusLines $statusLines
 if ($desktopManifest.version -ne $cliManifest.version -or $candidateManifest.version -ne $candidateVersion -or $candidateManifest.targetCommit -ne $CandidateSha) {
     throw 'Desktop, CLI, release manifest, and frozen candidate identities do not match.'
 }
@@ -282,14 +307,21 @@ if (-not $outputAbsolute.StartsWith($runnerTemp.TrimEnd('\') + '\', [StringCompa
 if (Test-Path -LiteralPath $outputAbsolute) { throw 'Lifecycle evidence output already exists.' }
 
 $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+if ([string]::IsNullOrWhiteSpace($localAppData)) { $localAppData = $env:LOCALAPPDATA }
+if ([string]::IsNullOrWhiteSpace($localAppData)) { throw 'The disposable Windows profile has no LocalApplicationData path.' }
 $installRoot = Join-Path $localAppData 'Programs\JOY Media'
 if ([IO.Path]::GetFullPath($localAppData).StartsWith([IO.Path]::GetFullPath($env:SystemRoot), [StringComparison]::OrdinalIgnoreCase)) { throw 'The runner profile resolves inside the Windows system directory.' }
 if (Test-Path -LiteralPath $installRoot) { throw 'Refusing to overwrite a pre-existing JOY Media installation in the runner profile.' }
 $workRoot = Join-Path $runnerTemp "joy-media-installed-lifecycle-$RunId-$Attempt-p$Pass"
 if (Test-Path -LiteralPath $workRoot) { throw 'Lifecycle temp root already exists.' }
 $userDataDirectory = Join-Path $workRoot 'profile\Roaming\JOY Media Lifecycle Fixture'
-$desktopShortcut = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'JOY Media.lnk'
-$startMenuShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\JOY Media.lnk'
+$desktopDirectory = [Environment]::GetFolderPath('DesktopDirectory')
+if ([string]::IsNullOrWhiteSpace($desktopDirectory)) { $desktopDirectory = Join-Path $env:USERPROFILE 'Desktop' }
+$applicationData = [Environment]::GetFolderPath('ApplicationData')
+if ([string]::IsNullOrWhiteSpace($applicationData)) { $applicationData = $env:APPDATA }
+if ([string]::IsNullOrWhiteSpace($desktopDirectory) -or [string]::IsNullOrWhiteSpace($applicationData)) { throw 'The disposable Windows profile has no Desktop or ApplicationData path.' }
+$desktopShortcut = Join-Path $desktopDirectory 'JOY Media.lnk'
+$startMenuShortcut = Join-Path $applicationData 'Microsoft\Windows\Start Menu\Programs\JOY Media.lnk'
 $startedAt = [DateTime]::UtcNow.ToString('o')
 $candidateArchive = Get-Sha256 $CandidateArchivePath
 $candidateSetup = Get-Sha256 $CandidateSetupPath
@@ -362,7 +394,7 @@ $oldShortcutState = @{
     startMenu = Test-Path -LiteralPath $startMenuShortcut
 }
 if ($oldShortcutState.desktop -or $oldShortcutState.startMenu) { throw 'Test profile already contains a JOY Media shortcut.' }
-if ($oldUserPathValue -and ($oldUserPathValue -split ';' | Where-Object { $_.TrimEnd('\') -ieq $installRoot.TrimEnd('\') })) {
+if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     throw 'Test profile already has the JOY Media install path registered.'
 }
 
@@ -432,7 +464,7 @@ if ($oldUserPathValue -and ($oldUserPathValue -split ';' | Where-Object { $_.Tri
     if (Test-Path -LiteralPath $desktopShortcut) { throw 'Uninstaller left the Desktop shortcut behind.' }
     if (Test-Path -LiteralPath $startMenuShortcut) { throw 'Uninstaller left the Start Menu shortcut behind.' }
     $remainingUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if ($remainingUserPath -and ($remainingUserPath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $installRoot.TrimEnd('\') })) { throw 'Uninstaller left its path registration behind.' }
+    if (Test-UserPathEntry -UserPath $remainingUserPath -InstallPath $installRoot) { throw 'Uninstaller left its path registration behind.' }
     $script:ownedInstall = $false
     if (-not (Test-Path -LiteralPath $userDataDirectory -PathType Container) -or -not (Test-Path -LiteralPath (Join-Path $userDataDirectory 'safe-storage-lifecycle-fixture.bin') -PathType Leaf)) {
         throw 'Uninstall removed user data that must remain available for recovery.'
