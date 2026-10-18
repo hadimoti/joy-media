@@ -262,7 +262,7 @@ test.describe('WP-32 real-project workflow acceptance', () => {
       await runCheckpoint(checkpoints, 'author a timeline edit', async () => {
         const videoClip = page.locator(`.timeline-clip[aria-label^="${names.video},"]`);
         await videoClip.click();
-        await expect(videoClip).toHaveAttribute('aria-pressed', 'true');
+        await expect(videoClip).toHaveAttribute('aria-current', 'true');
         const clipId = await videoClip.getAttribute('data-clip-id');
         expect(clipId).toBeTruthy();
         const trimEnd = page.getByRole('button', { name: `Trim end of ${clipId}` });

@@ -3564,7 +3564,11 @@ export function AgentPanel({
           </div>
           <div
             className={`joy-code-messages${activeThread?.messages.length === 0 ? ' is-empty' : ''}`}
+            role="log"
+            aria-label="Joy Code conversation"
             aria-live="polite"
+            aria-relevant="additions"
+            tabIndex={0}
             hidden={composerCapability === 'creative-brief' || composerCapability === 'recipes'}
           >
             {activeThread?.messages.length === 0 && (

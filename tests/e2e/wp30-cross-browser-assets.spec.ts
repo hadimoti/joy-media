@@ -92,7 +92,7 @@ test.describe('WP-30 cross-browser animated assets', () => {
       // against the old five-second still-image fallback.
       const gifCard = page.locator('.asset-card', { hasText: gifName });
       await gifCard.getByRole('button', { name: `Add ${gifName} to timeline` }).click();
-      await page.locator('.panel-tab[aria-label="Timeline"]').first().click();
+      await page.locator('.dv-tab[role="tab"][aria-label="Timeline"]').first().click();
       await expect(page.locator('.timeline-panel')).toBeVisible();
       const gifClip = page.locator('.timeline-clip[data-clip-id]').last();
       await expect(gifClip).toBeVisible();

@@ -38,6 +38,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
   const { onAction, signedIn } = props;
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
+  const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const menuRefs = useRef(new Map<string, HTMLUListElement>());
   const baseId = useId();
 
@@ -51,6 +52,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        if (openMenu !== null) triggerRefs.current.get(openMenu)?.focus();
         setOpenMenu(null);
         return;
       }
@@ -98,6 +100,10 @@ export function AppMenuBar(props: AppMenuBarProps) {
             <button
               type="button"
               className="app-menu-trigger"
+              ref={(element) => {
+                if (element === null) triggerRefs.current.delete(group.id);
+                else triggerRefs.current.set(group.id, element);
+              }}
               aria-haspopup="menu"
               aria-expanded={isOpen}
               aria-controls={menuId}
@@ -145,6 +151,8 @@ export function AppMenuBar(props: AppMenuBarProps) {
                           if (event.key === 'Enter' || event.key === ' ') return;
                           if (event.key === 'Escape') {
                             event.preventDefault();
+                            event.stopPropagation();
+                            triggerRefs.current.get(group.id)?.focus();
                             setOpenMenu(null);
                           }
                         }}

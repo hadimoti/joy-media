@@ -10,7 +10,7 @@ async function selectProductClip(page: Page): Promise<void> {
   const product = page.locator('.timeline-clip[data-clip-id="product"]');
   await expect(product).toBeVisible();
   await product.click();
-  await expect(product).toHaveAttribute('aria-pressed', 'true');
+  await expect(product).toHaveAttribute('aria-current', 'true');
 }
 
 async function selectIntroJunction(page: Page): Promise<void> {
@@ -22,8 +22,8 @@ async function selectIntroJunction(page: Page): Promise<void> {
   const right = clips.nth(1);
   await left.click();
   await right.click({ modifiers: ['Control'] });
-  await expect(left).toHaveAttribute('aria-pressed', 'true');
-  await expect(right).toHaveAttribute('aria-pressed', 'true');
+  await expect(left).toHaveAttribute('aria-current', 'true');
+  await expect(right).toHaveAttribute('aria-current', 'true');
 }
 
 test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector', () => {

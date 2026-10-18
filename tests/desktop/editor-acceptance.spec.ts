@@ -5,6 +5,7 @@ import {
   type ElectronApplication,
   type Page,
 } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -69,6 +70,11 @@ async function openEditorPage(app: ElectronApplication): Promise<Page> {
   return page;
 }
 
+async function expectAccessiblePackagedEditor(page: Page, state: string): Promise<void> {
+  const result = await new AxeBuilder({ page }).setLegacyMode().analyze();
+  expect(result.violations, `${state}: ${JSON.stringify(result.violations, null, 2)}`).toEqual([]);
+}
+
 test('packaged editor imports, plays, saves, restarts, and exports a playable project', async () => {
   const testInfo = test.info();
   test.setTimeout(360_000);
@@ -95,6 +101,32 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     await page.getByPlaceholder('Project name').fill(projectTitle);
     await page.getByRole('button', { name: 'Create project' }).click();
     await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible();
+    await expectAccessiblePackagedEditor(page, 'new packaged editor project');
+
+    // Open a menu and close it using only keyboard input; focus returns to the
+    // trigger so the journey proves the packaged shell's keyboard route.
+    const viewMenuButton = page.getByRole('button', { name: 'View', exact: true });
+    await viewMenuButton.focus();
+    await page.keyboard.press('Enter');
+    const viewMenu = page.getByRole('menu');
+    await expect(viewMenu).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(viewMenu).toBeHidden();
+    await expect(viewMenuButton).toBeFocused();
+
+    for (const panel of [
+      'Timeline',
+      'Captions',
+      'Audio',
+      'Effects',
+      'Motion',
+      'Color',
+      'Inspector',
+      'Joy Code',
+    ]) {
+      await openPanel(page, panel);
+      await expectAccessiblePackagedEditor(page, `packaged ${panel} panel`);
+    }
 
     await openPanel(page, 'Assets');
     const importDialog = page.getByRole('dialog', { name: 'Import media' });
@@ -108,6 +140,7 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     await importDialog.getByRole('button', { name: 'Confirm import' }).click();
     const assetCard = page.locator('.asset-card', { hasText: mediaName }).first();
     await expect(assetCard).toBeVisible();
+    await expectAccessiblePackagedEditor(page, 'packaged asset library with imported video');
 
     await assetCard.getByRole('button', { name: `Preview ${mediaName}` }).click();
     const preview = page.getByRole('region', { name: `Preview: ${mediaName}` });
@@ -131,7 +164,7 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
 
     // --- Keyboard trim, Undo/Redo, duplicate ---
     await clip.click();
-    await expect(clip).toHaveAttribute('aria-pressed', 'true');
+    await expect(clip).toHaveAttribute('aria-current', 'true');
     const originalLabel = await clip.getAttribute('aria-label');
     expect(originalLabel).toBeTruthy();
     const clipId = await clip.getAttribute('data-clip-id');
@@ -184,6 +217,7 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     await expect(gain).toBeEnabled();
     await gain.fill('1.25');
     await expect(gain).toHaveValue('1.25');
+    await expectAccessiblePackagedEditor(page, 'packaged audio mix panel');
 
     // --- Captions: add track, import Persian VTT ---
     await openPanel(page, 'Captions');
@@ -195,6 +229,7 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     await expect(page.locator('.caption-row')).toHaveCount(1);
     const persianCaption = page.getByRole('textbox', { name: /^Caption text / });
     await expect(persianCaption).toHaveValue('این یک آزمون است');
+    await expectAccessiblePackagedEditor(page, 'packaged Persian caption panel');
 
     await app.close();
     app = await launchPackagedEditor(profile);
@@ -226,6 +261,7 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     await expect(page.getByRole('textbox', { name: /^Caption text / })).toHaveValue(
       'این یک آزمون است',
     );
+    await expectAccessiblePackagedEditor(page, 'reopened packaged project with Persian captions');
 
     await page.getByRole('button', { name: 'Export MP4' }).click();
     const recentProcesses = page.getByRole('button', { name: 'Recent processes' });

@@ -105,7 +105,7 @@ test.describe('WP-35 universal timeline closeout', () => {
     await page.mouse.move(endX, y, { steps: 12 });
     await page.mouse.up();
 
-    await expect(page.locator('.timeline-clip[aria-pressed="true"]')).toHaveCount(targetCount);
+    await expect(page.locator('.timeline-clip[aria-current="true"]')).toHaveCount(targetCount);
     await page.keyboard.press('Delete');
     await expect(page.locator('.timeline-clip[data-clip-id]')).toHaveCount(
       beforeCount - targetCount,
@@ -138,19 +138,19 @@ test.describe('WP-35 universal timeline closeout', () => {
     const second = clips.nth(1);
 
     await first.click();
-    await expect(page.locator('.timeline-clip[aria-pressed="true"]')).toHaveCount(1);
-    await expect(first).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.timeline-clip[aria-current="true"]')).toHaveCount(1);
+    await expect(first).toHaveAttribute('aria-current', 'true');
 
     await second.click();
-    await expect(page.locator('.timeline-clip[aria-pressed="true"]')).toHaveCount(1);
-    await expect(second).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.timeline-clip[aria-current="true"]')).toHaveCount(1);
+    await expect(second).toHaveAttribute('aria-current', 'true');
 
     await page.keyboard.down('Control');
     await first.click();
     await page.keyboard.up('Control');
-    await expect(page.locator('.timeline-clip[aria-pressed="true"]')).toHaveCount(2);
-    await expect(first).toHaveAttribute('aria-pressed', 'true');
-    await expect(second).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.timeline-clip[aria-current="true"]')).toHaveCount(2);
+    await expect(first).toHaveAttribute('aria-current', 'true');
+    await expect(second).toHaveAttribute('aria-current', 'true');
   });
 
   test('reorders visual layers from top to bottom', async ({ page }) => {

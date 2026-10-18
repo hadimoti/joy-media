@@ -97,7 +97,7 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
     const placedClip = page.locator('.timeline-clip[data-clip-id]').first();
     await expect(placedClip).toBeVisible();
     await placedClip.click();
-    await expect(placedClip).toHaveAttribute('aria-pressed', 'true');
+    await expect(placedClip).toHaveAttribute('aria-current', 'true');
 
     await recordEvidence(testInfo, {
       caseId: 16,

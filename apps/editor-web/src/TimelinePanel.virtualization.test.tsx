@@ -119,8 +119,12 @@ describe('TimelinePanel virtualization focus behavior', () => {
     await act(async () => {
       emptyState!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
-    const lane = container.querySelector<HTMLElement>('[aria-label^="Insert media"]');
+    const lane = container.querySelector<HTMLElement>(
+      '[aria-label^="Track track-0 timeline lane"]',
+    );
     expect(lane).not.toBeNull();
+    expect(lane?.getAttribute('role')).toBe('group');
+    expect(lane?.getAttribute('tabindex')).toBe('0');
     await act(async () => {
       lane!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });

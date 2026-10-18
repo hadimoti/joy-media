@@ -5,6 +5,19 @@ const panelSource = readFileSync(new URL('./AgentPanel.tsx', import.meta.url), '
 const appCss = readFileSync(new URL('./app.css', import.meta.url), 'utf8');
 
 describe('Joy Code capability panel contract', () => {
+  it('makes the scrollable message stream keyboard focusable and named', () => {
+    const messagesStart = panelSource.indexOf('className={`joy-code-messages');
+    const messagesOpeningTag = panelSource.slice(
+      messagesStart,
+      panelSource.indexOf('>', messagesStart),
+    );
+
+    expect(messagesStart).toBeGreaterThanOrEqual(0);
+    expect(messagesOpeningTag).toContain('role="log"');
+    expect(messagesOpeningTag).toContain('aria-label="Joy Code conversation"');
+    expect(messagesOpeningTag).toContain('tabIndex={0}');
+  });
+
   it('removes the Edit message stream from the Creative Brief and Recipes views', () => {
     const messagesStart = panelSource.indexOf('className={`joy-code-messages');
     const messagesOpeningTag = panelSource.slice(

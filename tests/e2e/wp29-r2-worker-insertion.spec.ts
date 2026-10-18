@@ -210,7 +210,7 @@ test.describe('WP-29 R2 — Worker result insertion browser closeout', () => {
     );
     const clip = page.locator('.timeline-clip[data-clip-id]').first();
     await clip.click();
-    await expect(clip).toHaveAttribute('aria-pressed', 'true');
+    await expect(clip).toHaveAttribute('aria-current', 'true');
 
     const worker = await pairProtocolWorker(page, sourceAssetId!);
     const run = page.getByRole('button', { name: 'Run audio denoise' });

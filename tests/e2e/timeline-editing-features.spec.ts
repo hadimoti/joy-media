@@ -69,7 +69,7 @@ test.describe('Timeline editing features — aspect ratio, merge, and speed', ()
     await expect(rate).toHaveValue('1.25');
 
     await page.getByRole('button', { name: 'Set speed to reverse' }).click();
-    const selected = page.locator('.timeline-clip[aria-pressed="true"]');
+    const selected = page.locator('.timeline-clip[aria-current="true"]');
     await selected.click({ button: 'right' });
     const restoreForward = page.getByRole('menuitem', { name: 'Restore forward playback' });
     await expect(restoreForward).toBeVisible();
