@@ -354,6 +354,7 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     await page.keyboard.press('Enter');
     const viewMenu = page.getByRole('menu');
     await expect(viewMenu).toBeVisible();
+    await expectAccessiblePackagedEditor(page, 'packaged View menu open');
     await page.keyboard.press('Escape');
     await expect(viewMenu).toBeHidden();
     await expect(viewMenuButton).toBeFocused();
@@ -368,9 +369,15 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
       'Color',
       'Inspector',
       'Joy Code',
+      'Workflows',
+      'Plugins',
     ]) {
       await openPanel(page, panel);
       await expectAccessiblePackagedEditor(page, `packaged ${panel} panel`);
+      if (panel === 'Workflows') {
+        await page.getByRole('tab', { name: 'System', exact: true }).click();
+        await expectAccessiblePackagedEditor(page, 'packaged system workflows panel');
+      }
     }
 
     await openPanel(page, 'Assets');
@@ -482,6 +489,7 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     await textDirection.press('End');
     await expect(titleEditor).toHaveValue(authoredTitle);
     await expect(textDirection).toHaveValue('rtl');
+    await expect(page.getByRole('heading', { level: 3, name: 'Content' })).toBeVisible();
     for (const label of ['Size', 'Weight', 'Stroke width', 'Shadow blur', 'Opacity'])
       await expect(page.getByRole('slider', { name: label, exact: true })).toBeVisible();
     await expectAccessiblePackagedEditor(page, 'packaged Persian mixed-bidi title editor');
@@ -559,6 +567,10 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
       .evaluate((element) => element.closest('.timeline-lane')?.getAttribute('data-track-id'));
     expect(trackId).toBeTruthy();
     await openPanel(page, 'Transitions');
+    await expectAccessiblePackagedEditor(page, 'packaged Transitions panel');
+    const transitionFavorite = page.getByRole('button', { name: 'Add to favorites' }).first();
+    await transitionFavorite.focus();
+    await expect(transitionFavorite).toHaveCSS('opacity', '1');
     const transitionCard = page
       .getByRole('group', { name: 'Transition type' })
       .locator('.transition-card[data-transition-type]')
@@ -577,6 +589,7 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
       },
     });
     await expect(page.locator('.timeline-transition-junction')).toHaveCount(1);
+    await expectAccessiblePackagedEditor(page, 'packaged selected transition inspector');
 
     // --- Import audio, set gain to 1.25 ---
     await openPanel(page, 'Assets');
@@ -622,6 +635,9 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     const persianCaption = page.getByRole('textbox', { name: /^Caption text / });
     await expect(persianCaption).toHaveValue('این یک آزمون است');
     await expectAccessiblePackagedEditor(page, 'packaged Persian caption panel');
+    await page.getByRole('tab', { name: 'Style', exact: true }).click();
+    await expectAccessiblePackagedEditor(page, 'packaged Persian caption style panel');
+    await page.getByRole('tab', { name: 'Transcript', exact: true }).click();
 
     expect(
       await page.evaluate((key) => window.localStorage.getItem(key), timelineLogKey),
@@ -927,6 +943,7 @@ test('packaged editor remains accessible at 150% display scaling', async () => {
     await page.getByPlaceholder('Project name').fill('Packaged DPI acceptance');
     await page.getByRole('button', { name: 'Create project' }).click();
     await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Packaged DPI acceptance');
     await expectAccessiblePackagedEditor(page, 'packaged editor at 150% display scaling');
     await testInfo.attach('packaged-editor-150-percent-display-scale.png', {
       body: await page.screenshot(),

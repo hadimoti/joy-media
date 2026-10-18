@@ -400,9 +400,15 @@ proof of Electron acceptance. Browser helpers remain reusable where applicable.
       Persian caption, SQLite persistence across restart, and playable export.
 - [x] Add/verify axe scans and keyboard reachability across supported packaged panels;
       packaged Electron scans cover Timeline, Captions, Audio, Effects, Motion,
-      Color, Inspector, Joy Code, and imported Assets, with keyboard menu/trim paths.
-- [ ] Record/fix failures through the loop, review, and commit. Any browser-only
-      proof stays labeled browser-only until the packaged-app equivalent passes.
+      Color, Inspector, Joy Code, imported Assets, the View menu, Workflows and its
+      System tab, Plugins, Transitions, the selected-transition inspector, and
+      Persian caption Style. Keyboard checks cover menu/trim paths and visible
+      transition favorites when focused.
+- [x] Record/fix failures through the loop, review, and commit. The packaged
+      acceptance run exposed heading hierarchy and transition-card interaction/focus
+      defects; the retry-free packaged Electron suite passed all 5 tests after fixes.
+      Any browser-only proof stays labeled browser-only until the packaged-app
+      equivalent passes.
 
 **Exit:** An installed creator can edit, restart, scrub/play locally, and deliver
 an inspected file with the intended picture, timing, and sound.

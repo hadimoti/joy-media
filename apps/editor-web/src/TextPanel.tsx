@@ -315,7 +315,7 @@ function TextEditor({
   return (
     <section className="text-editor-view" aria-label="Edit text">
       <section className="text-editor-section">
-        <h4>Content</h4>
+        <h3>Content</h3>
         <textarea
           value={draftText}
           dir={style.direction === 'rtl' ? 'rtl' : 'auto'}
@@ -362,7 +362,7 @@ function TextEditor({
         </div>
       </section>
       <section className="text-editor-section">
-        <h4>Typography</h4>
+        <h3>Typography</h3>
         <label className="text-editor-row">
           <span>Font</span>
           <select
@@ -491,7 +491,7 @@ function TextEditor({
         </details>
       </section>
       <section className="text-editor-section">
-        <h4>Fill</h4>
+        <h3>Fill</h3>
         <div className="text-fill-mode" role="group" aria-label="Text fill type">
           <button
             type="button"
@@ -565,7 +565,7 @@ function TextEditor({
         )}
       </section>
       <section className="text-editor-section">
-        <h4>Effects</h4>
+        <h3>Effects</h3>
         <label className="text-color-row">
           <span>Stroke</span>
           <input

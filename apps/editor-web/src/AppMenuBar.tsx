@@ -1,6 +1,31 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { APP_MENU_GROUPS, type AppMenuActionId, type AppMenuItem } from './app-menu.js';
 import { PANEL_INTENT_LABELS } from './panel-metadata.js';
+
+type MenuEntry =
+  | { readonly kind: 'item'; readonly item: AppMenuItem; readonly index: number }
+  | {
+      readonly kind: 'section';
+      readonly section: NonNullable<AppMenuItem['section']>;
+      readonly items: { readonly item: AppMenuItem; readonly index: number }[];
+    };
+
+function groupMenuItems(items: readonly AppMenuItem[]): MenuEntry[] {
+  const entries: MenuEntry[] = [];
+  items.forEach((item, index) => {
+    if (item.section === undefined) {
+      entries.push({ kind: 'item', item, index });
+      return;
+    }
+    const last = entries[entries.length - 1];
+    if (last?.kind === 'section' && last.section === item.section) {
+      last.items.push({ item, index });
+    } else {
+      entries.push({ kind: 'section', section: item.section, items: [{ item, index }] });
+    }
+  });
+  return entries;
+}
 
 export interface AppMenuBarProps {
   readonly canUndo: boolean;
@@ -95,6 +120,41 @@ export function AppMenuBar(props: AppMenuBarProps) {
         const menuId = `${baseId}-${group.id}`;
         const isOpen = openMenu === group.id;
         const items = group.items.filter((item) => !(item.requiresSignedIn === true && !signedIn));
+        const entries = groupMenuItems(items);
+        const renderMenuItem = (item: AppMenuItem, index: number) => {
+          const disabled = itemDisabled(item, props);
+          const showSeparator = item.separatorAfter === true && index < items.length - 1;
+          return (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                className="app-menu-item"
+                disabled={disabled}
+                onClick={() => {
+                  if (disabled) return;
+                  onAction(item.id);
+                  setOpenMenu(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') return;
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    triggerRefs.current.get(group.id)?.focus();
+                    setOpenMenu(null);
+                  }
+                }}
+              >
+                <span className="app-menu-item-label">{item.label}</span>
+                {item.shortcut !== undefined && (
+                  <kbd className="app-menu-item-shortcut">{item.shortcut}</kbd>
+                )}
+              </button>
+              {showSeparator && <hr className="app-menu-separator" aria-hidden="true" />}
+            </>
+          );
+        };
         return (
           <div key={group.id} className="app-menu">
             <button
@@ -124,48 +184,28 @@ export function AppMenuBar(props: AppMenuBarProps) {
                   else menuRefs.current.set(group.id, element);
                 }}
               >
-                {items.map((item, index) => {
-                  const disabled = itemDisabled(item, props);
-                  const showSeparator = item.separatorAfter === true && index < items.length - 1;
-                  const previous = items[index - 1];
-                  const sectionHeading =
-                    item.section !== undefined && item.section !== previous?.section
-                      ? PANEL_INTENT_LABELS[item.section]
-                      : undefined;
-                  return (
-                    <li key={item.id} role="none">
-                      {sectionHeading !== undefined && (
-                        <h4 className="app-menu-section-heading">{sectionHeading}</h4>
-                      )}
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="app-menu-item"
-                        disabled={disabled}
-                        onClick={() => {
-                          if (disabled) return;
-                          onAction(item.id);
-                          setOpenMenu(null);
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') return;
-                          if (event.key === 'Escape') {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            triggerRefs.current.get(group.id)?.focus();
-                            setOpenMenu(null);
-                          }
-                        }}
+                {entries.map((entry) =>
+                  entry.kind === 'section' ? (
+                    <li key={`section-${entry.section}`} role="none">
+                      <div
+                        className="app-menu-section-group"
+                        role="group"
+                        aria-label={PANEL_INTENT_LABELS[entry.section]}
                       >
-                        <span className="app-menu-item-label">{item.label}</span>
-                        {item.shortcut !== undefined && (
-                          <kbd className="app-menu-item-shortcut">{item.shortcut}</kbd>
-                        )}
-                      </button>
-                      {showSeparator && <hr className="app-menu-separator" aria-hidden="true" />}
+                        <span className="app-menu-section-heading" aria-hidden="true">
+                          {PANEL_INTENT_LABELS[entry.section]}
+                        </span>
+                        {entry.items.map(({ item, index }) => (
+                          <Fragment key={item.id}>{renderMenuItem(item, index)}</Fragment>
+                        ))}
+                      </div>
                     </li>
-                  );
-                })}
+                  ) : (
+                    <li key={entry.item.id} role="none">
+                      {renderMenuItem(entry.item, entry.index)}
+                    </li>
+                  ),
+                )}
               </ul>
             )}
           </div>

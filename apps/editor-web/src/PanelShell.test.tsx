@@ -12,6 +12,7 @@ describe('PanelShell header actions', () => {
 
     expect(markup).not.toContain('joy-panel-header');
     expect(markup).toContain('aria-label="Effects"');
+    expect(markup).toContain('<h2 class="sr-only">Effects</h2>');
   });
 
   it('places leading actions before the centered title and trailing actions after it', () => {

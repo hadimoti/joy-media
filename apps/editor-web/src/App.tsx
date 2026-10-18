@@ -6968,6 +6968,7 @@ function EditorWorkspace({
     <AgentPreviewProvider store={appAgentPreviewStore}>
       <AgentPresenceProvider store={appAgentPresenceStore}>
         <main>
+          <h1 className="sr-only">{controlPlaneProject.title || `${JOY_STUDIO_NAME} editor`}</h1>
           <header className="app-header">
             <AgentActivityIndicator
               onShowTarget={(target) => {
