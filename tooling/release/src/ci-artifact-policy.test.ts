@@ -201,7 +201,11 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(windowsJob).toContain('node tooling/release/src/editor-web-artifact.mjs verify');
     expect(windowsJob).toContain('editor-web artifact verification failed');
     expect(windowsJob).not.toContain('pnpm --filter @joy-media/editor-web... build');
+    expect(windowsJob).toContain('pnpm --workspace-concurrency=1 --filter @joy-media/cli... build');
     expect(windowsJob.indexOf('install-electron-windows.mjs')).toBeLessThan(
+      windowsJob.indexOf('package:installer'),
+    );
+    expect(windowsJob.indexOf('@joy-media/cli... build')).toBeLessThan(
       windowsJob.indexOf('package:installer'),
     );
     expect(windowsJob.indexOf('editor-web-artifact.mjs verify')).toBeLessThan(

@@ -39,6 +39,15 @@ its local CLI exposes no hard filesystem sandbox, so the owner-required worker
 isolation gate remains unverified. The cost if this ruling is wrong is one fresh
 runner/artifact dependency and no independent worker diff; external review and
 candidate approval remain required.
+Exact-candidate run `39085505980` confirmed the hosted renderer upload and Windows
+manifest verification, production-bundle public UI smoke, and both Linux/P3 real-
+service passes. The Windows package lane then failed because `package:installer`
+could not resolve `@joy-media/joy-agent-engine` and `@joy-media/motion-core` from
+the clean checkout: their workspace outputs had not been built. The workflow now
+builds the CLI dependency closure sequentially before packaging to fit the Windows
+container. Local `package:installer` produced the v1.0.2 archive (188.96 MB), but
+the new exact-candidate two-pass run is still required; no installed-Windows
+lifecycle evidence was produced by run `39085505980`.
 The implementation began from remote baseline SHA
 `c1fffd59d5078902e031e7684e69c27df40ce607`. The earlier October 14 plan was removed
 upstream and its statement that CLI rendering produces no media is superseded.

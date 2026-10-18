@@ -259,6 +259,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Worker package build failed with exit code $LASTEXITCODE." }
           pnpm --filter @joy-media/desktop build
           if ($LASTEXITCODE -ne 0) { throw "Desktop package build failed with exit code $LASTEXITCODE." }
+          pnpm --workspace-concurrency=1 --filter @joy-media/cli... build
+          if ($LASTEXITCODE -ne 0) { throw "CLI workspace dependency build failed with exit code $LASTEXITCODE." }
           $buildMarker = "release-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)"
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $workerExe -BuildMarker $buildMarker
           if ($LASTEXITCODE -ne 0) { throw "Worker executable build failed with exit code $LASTEXITCODE." }
