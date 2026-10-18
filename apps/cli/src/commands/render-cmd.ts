@@ -19,6 +19,7 @@
  * (exit non-zero).
  */
 import { randomBytes } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import {
   accessSync,
   closeSync,
@@ -533,7 +534,7 @@ export async function runHeadlessRender(
   const { project, preset, outDir, concurrency, json } = input;
   const showProgress = !json && (input.progress ?? Boolean(process.stdout.isTTY));
   const presetSpec = RENDER_PRESETS[preset];
-  const startedAt = Date.now();
+  const startedAt = performance.now();
   const rawId = (project as { id?: unknown } | null | undefined)?.id;
   const knownProjectId = typeof rawId === 'string' ? rawId : '';
 
@@ -553,7 +554,7 @@ export async function runHeadlessRender(
       artifactPath: '',
       totalFrames,
       totalClips,
-      durationMs: Date.now() - startedAt,
+      durationMs: performance.now() - startedAt,
       mediaProduced: false,
       manifestWritten: false,
       warnings: [],
@@ -900,7 +901,7 @@ export async function runHeadlessRender(
     }
   }
 
-  const durationMs = Date.now() - startedAt;
+  const durationMs = performance.now() - startedAt;
   const manifestPath = join(outDir, manifestName);
   const artifactPath = realMedia ? mediaPath : manifestPath;
   const doneMessage = realMedia

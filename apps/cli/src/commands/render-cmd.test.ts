@@ -439,6 +439,26 @@ describe('runHeadlessRender writes an honest, atomic, deterministic manifest', (
     }
   });
 
+  it('reports a non-negative render duration when the wall clock moves backwards', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-clock-'));
+    const wallClock = vi.spyOn(Date, 'now');
+    wallClock.mockReturnValueOnce(1_000).mockReturnValueOnce(900);
+    try {
+      const result = await runHeadlessRender({
+        project: timelineProject('clock-backwards-1'),
+        preset: 'mp4',
+        outDir: dir,
+        concurrency: 1,
+        json: true,
+      });
+
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    } finally {
+      wallClock.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('plans identically at every concurrency (frame ranges never depend on worker order)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'joy-render-conc-'));
     try {
