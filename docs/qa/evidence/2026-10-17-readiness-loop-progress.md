@@ -437,3 +437,25 @@ The exact-candidate source-bound workflow for these current changes is pending. 
 local tests do not replace its retry-free two-pass evidence, independent review, or
 release decision. Real GPU qualification remains unavailable because the local model
 runtimes and weights are absent; no model download or external paid provider was used.
+
+## Exact-candidate Windows runtime follow-up — October 18
+
+Run `39108309551`, pinned to `684d1472043d613ccac5c7727b258f59f0c5d3a2`, passed
+candidate validation, renderer artifact transfer/manifest verification, hosted
+editor bundle build, shipped-bundle public UI smoke, and both Linux real-service
+and P3 passes. The Windows frozen build and package integrity checks passed, but
+the installed Worker lifecycle failed on pass 1 before the Worker could handshake.
+The container-local runtime staging omitted the transitive `@joy-media/project-schema`
+dependency required by `@joy-media/export-core`; Node reported `ERR_MODULE_NOT_FOUND`.
+The Windows container teardown passed, and no Windows acceptance evidence was
+published for the failed pass. Downstream desktop, responsive, and real-service
+acceptance lanes were skipped after this required failure.
+
+A new regression test computes the Worker production workspace dependency closure
+from package manifests and checks that the isolated Windows runtime stages every
+dependency. It failed against the previous package list with only `project-schema`
+missing. The runtime list now includes that package. The focused test passed, and
+`pnpm test:harness` passed 35 tests with 11 expected host-specific skips and no
+failures; Prettier and `git diff --check` also passed. These fixes still require a
+new frozen commit and exact-candidate workflow. No app-ready or release-ready claim
+is made from run `39108309551`.
