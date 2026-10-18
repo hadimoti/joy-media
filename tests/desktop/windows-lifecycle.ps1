@@ -22,6 +22,7 @@ trap {
     if ($errorRecord.ScriptStackTrace) { [Console]::Error.WriteLine($errorRecord.ScriptStackTrace) }
     throw $errorRecord
 }
+. (Join-Path $PSScriptRoot 'windows-release-checksum.ps1')
 $PreviousVersion = '1.0.1'
 $PreviousSetupSha256 = '3f5fbe853de04a24aac22a46e28dd661cc1a80a2a6c5a1fa383fcd9ab3efde04'
 $PreviousChecksumsSha256 = 'a7b933f44ec82edd2f166dcde0bb013e1febd0ebbd19aa42dd49ac8e05adfe32'
@@ -154,13 +155,6 @@ function Invoke-Pnpm(
     $script:commands.Add([pscustomobject]@{ name = $Name; exitCode = $result.ExitCode })
     if ($result.ExitCode -ne 0) { throw "$Name failed with exit code $($result.ExitCode): $(Get-CommandFailureSummary $result)" }
     return $result
-}
-
-function Get-ChecksummedFile([string]$ChecksumsText, [string]$FileName) {
-    $escaped = [regex]::Escape($FileName)
-    $matches = @([regex]::Matches($ChecksumsText, "(?m)^([0-9a-f]{64})  $escaped\s*$"))
-    if ($matches.Count -ne 1) { throw "Release checksum file does not contain exactly one entry for $FileName" }
-    return $matches[0].Groups[1].Value
 }
 
 function Test-UserPathEntry([AllowNull()][string]$UserPath, [Parameter(Mandatory = $true)][string]$InstallPath) {
@@ -349,8 +343,8 @@ if ((Get-ChecksummedFile $candidateChecksumsText 'joy-media.exe') -ne $candidate
 if ($candidateSetup.Length -ne 64) { throw 'Candidate setup hash is malformed.' }
 $previousChecksumsText = Get-Content -LiteralPath $PreviousChecksumsPath -Raw
 if ((Get-ChecksummedFile $previousChecksumsText 'joy-media-windows-x64-v1.0.1.zip') -ne $previousArchive) { throw 'Pinned v1.0.1 portable archive hash does not match the downloaded archive.' }
-$previousDesktopExeSha = Get-ChecksummedFile $previousChecksumsText 'joy-media.exe'
-$previousCliBundleSha = Get-ChecksummedFile $previousChecksumsText 'joy-media-bundle.mjs'
+$previousDesktopExeSha = Get-ChecksummedArchiveEntryHash -ChecksumsText $previousChecksumsText -FileName 'joy-media.exe' -ArchivePath $PreviousArchivePath -ArchiveEntryName 'joy-media.exe'
+$previousCliBundleSha = Get-ChecksummedArchiveEntryHash -ChecksumsText $previousChecksumsText -FileName 'joy-media-bundle.mjs' -ArchivePath $PreviousArchivePath -ArchiveEntryName 'resources/app/cli/joy-media-bundle.mjs'
 $nodeVersionResult = Invoke-CapturedProcess -FilePath $nodePath -Arguments @('--version') -TimeoutSeconds 30 -WorkingDirectory $repoRoot -Environment (Get-SafeEnvironment)
 if ($nodeVersionResult.ExitCode -ne 0) { throw 'Could not establish the Windows Node.js toolchain version.' }
 $pnpmVersionResult = Invoke-Pnpm 'pnpm toolchain version' @('--version') 60
