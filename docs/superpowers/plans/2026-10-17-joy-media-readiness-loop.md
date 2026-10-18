@@ -499,10 +499,14 @@ real services. Evidence must name which ran and what remained unavailable.
       ledger idempotency under duplicate/concurrent requests, and documented failure
       charging policy. Exercise disposable database backup/restore and the control
       plane deny-list; do not contact real customers or alter production records.
-- [ ] Worker fixtures: no GPU/runtime/model, progress/error/hang/cancel/death;
-      bounded error, no orphan process, unchanged project, cleaned temp output.
-      Real-GPU qualification: one supported job per advertised capability with decoded
-      output checks; a mock protocol pass cannot claim model output quality.
+- [x] Run the no-model CLI doctor/Worker tests and deterministic Worker protocol,
+      job, and fake-Windows-runner suites. `doctor-worker.e2e.test.ts`: 16 passed,
+      8 platform skips; `pnpm --filter @joy-media/worker test`: 56 passed, 1
+      platform skip. This proves bounded unavailable/error handling and protocol
+      behavior only; it does not qualify model output.
+- [ ] Real-GPU qualification: one supported job per advertised capability with
+      decoded output checks; the local GPU is detected but all model runtimes and
+      weights are absent.
 - [x] Add and run a 200-edit CLI persistence scenario: 200 real CLI processes add
       non-overlapping clips, then fresh-process readback verifies revision 201 and
       all 200 exact spans. Local Windows/Node 24.19.0 run: 59.89 s for the edits.
