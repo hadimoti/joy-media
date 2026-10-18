@@ -114,10 +114,12 @@ test.describe('WP-29 R5 batch E — effects, transitions, color, and Inspector',
     const second = cards.nth(1);
     const favoriteType = await first.getAttribute('data-transition-type');
     await first.getByRole('button', { name: 'Add to favorites' }).click();
-    await first.click();
-    await expect(first).toHaveAttribute('aria-pressed', 'true');
-    await second.click();
-    await expect(second).toHaveAttribute('aria-pressed', 'true');
+    const firstControl = first.locator('button.transition-card-select');
+    const secondControl = second.locator('button.transition-card-select');
+    await firstControl.click();
+    await expect(firstControl).toHaveAttribute('aria-pressed', 'true');
+    await secondControl.click();
+    await expect(secondControl).toHaveAttribute('aria-pressed', 'true');
     await page.getByRole('button', { name: 'Remove selected transition' }).click();
     await expect(page.getByRole('button', { name: 'Remove selected transition' })).toHaveCount(0);
 
