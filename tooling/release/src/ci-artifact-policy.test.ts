@@ -18,6 +18,18 @@ const DISABLED_RECEIPT = [
   'reason=github-artifact-upload-disabled-by-policy',
 ];
 
+const EDITOR_WEB_ARTIFACT_NAME =
+  'joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}';
+
+function jobBlock(workflow: string, jobName: string): string {
+  const marker = `\n  ${jobName}:\n`;
+  const start = workflow.indexOf(marker);
+  if (start < 0) return '';
+  const remaining = workflow.slice(start + marker.length);
+  const nextJob = remaining.match(/\n {2}[a-z0-9-]+:\n/);
+  return workflow.slice(start, nextJob ? start + marker.length + nextJob.index! : workflow.length);
+}
+
 describe('v2 release-candidate artifact upload policy', () => {
   const workflow = readWorkflow();
 
@@ -26,11 +38,32 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(workflow).toContain('name: release-candidate-v2');
   });
 
-  it('asserts zero upload-artifact and zero download-artifact actions', () => {
-    expect(workflow).not.toMatch(/uses:\s*actions\/upload-artifact\b/);
-    expect(workflow).not.toMatch(/uses:\s*actions\/download-artifact\b/);
-    expect(workflow).not.toContain('actions/upload-artifact');
-    expect(workflow).not.toContain('actions/download-artifact');
+  it('uses one short-lived artifact pair only for the exact-candidate renderer handoff', () => {
+    const bundleJob = jobBlock(workflow, 'editor-web-bundle');
+    const windowsJob = jobBlock(workflow, 'windows-worker-clean');
+    expect(workflow.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(1);
+    expect(workflow.match(/uses:\s*actions\/download-artifact@/g) ?? []).toHaveLength(1);
+    expect(bundleJob).toContain(
+      'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2',
+    );
+    expect(windowsJob).toContain(
+      'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0',
+    );
+    expect(bundleJob).toContain(EDITOR_WEB_ARTIFACT_NAME);
+    expect(windowsJob).toContain(EDITOR_WEB_ARTIFACT_NAME);
+    expect(bundleJob).toContain('retention-days: 1');
+    expect(bundleJob).toContain('if-no-files-found: error');
+
+    for (const evidenceJob of [
+      'linux-real-services',
+      'real-service-acceptance',
+      'p3-real-services',
+      'gate-summary',
+    ]) {
+      const block = jobBlock(workflow, evidenceJob);
+      expect(block).not.toContain('actions/upload-artifact');
+      expect(block).not.toContain('actions/download-artifact');
+    }
   });
 
   it('records disabled receipts for both passes and the final gate', () => {
@@ -51,6 +84,24 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(workflow).not.toMatch(/steps\.upload-[a-z0-9-]+\.outcome/);
     expect(workflow).not.toContain('upload-real-service-artifact');
     expect(workflow).not.toContain('upload-p3-artifact');
+  });
+
+  it('builds the renderer on the standard hosted Linux runner from the exact candidate', () => {
+    const bundleJob = jobBlock(workflow, 'editor-web-bundle');
+    expect(bundleJob.length).toBeGreaterThan(0);
+    expect(bundleJob).toContain('runs-on: ubuntu-24.04');
+    expect(bundleJob).toContain('needs: [validate-candidate]');
+    expect(bundleJob).toContain('ref: ${{ env.CANDIDATE_SHA }}');
+    expect(bundleJob).toContain(
+      'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0',
+    );
+    expect(bundleJob).toContain('node-version: 22');
+    expect(bundleJob).toContain('pnpm --filter @joy-media/editor-web... build');
+    expect(bundleJob).toContain('node tooling/release/src/editor-web-artifact.mjs create');
+    expect(bundleJob).toContain(
+      'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2',
+    );
+    expect(bundleJob).toContain(EDITOR_WEB_ARTIFACT_NAME);
   });
 
   it('keeps durable evidence verification for both passes', () => {
@@ -141,12 +192,19 @@ describe('v2 release-candidate artifact upload policy', () => {
     const windowsJob = workflow.slice(start, end);
 
     expect(windowsJob).toContain('runs-on: [self-hosted, windows, x64, joy-media-worker-docker]');
+    expect(windowsJob).toContain('needs: [validate-candidate, editor-web-bundle]');
     expect(windowsJob).toContain('node apps/desktop/scripts/install-electron-windows.mjs');
-    expect(windowsJob).toContain('pnpm --filter @joy-media/editor-web... build');
+    expect(windowsJob).toContain('node tooling/release/src/editor-web-artifact.mjs verify');
+    expect(windowsJob).toContain(
+      'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0',
+    );
+    expect(windowsJob).toContain('node tooling/release/src/editor-web-artifact.mjs verify');
+    expect(windowsJob).toContain('editor-web artifact verification failed');
+    expect(windowsJob).not.toContain('pnpm --filter @joy-media/editor-web... build');
     expect(windowsJob.indexOf('install-electron-windows.mjs')).toBeLessThan(
       windowsJob.indexOf('package:installer'),
     );
-    expect(windowsJob.indexOf('@joy-media/editor-web... build')).toBeLessThan(
+    expect(windowsJob.indexOf('editor-web-artifact.mjs verify')).toBeLessThan(
       windowsJob.indexOf('package:installer'),
     );
     expect(windowsJob).toContain('package:installer');
@@ -159,11 +217,12 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(windowsJob).toContain('Installed JOY Media files remained after lifecycle cleanup');
   });
 
-  it('declares 14 job instances across both passes', () => {
+  it('declares 15 job instances across both passes', () => {
     const jobKeys = Array.from(workflow.matchAll(/^\s{2}([a-z0-9-]+):$/gm), (m) => m[1]);
     const uniqueKeys = [...new Set(jobKeys)];
     expect(uniqueKeys).toEqual([
       'validate-candidate',
+      'editor-web-bundle',
       'linux-real-services',
       'windows-worker-clean',
       'acceptance-primary',
@@ -179,9 +238,9 @@ describe('v2 release-candidate artifact upload policy', () => {
     const matrixPasses = workflow.match(/pass:\s*\[1,\s*2\]/g) ?? [];
     expect(matrixPasses.length).toBe(5);
     expect(matrixPasses.length * 2).toBe(10);
-    // 4 single-instance jobs (validate-candidate, windows-worker-clean,
-    // prod-build-smoke, gate-summary). 10 + 4 = 14 job instances total.
-    expect(matrixPasses.length * 2 + 4).toBe(14);
+    // 5 single-instance jobs (validate-candidate, editor-web-bundle,
+    // windows-worker-clean, prod-build-smoke, gate-summary). 10 + 5 = 15.
+    expect(matrixPasses.length * 2 + 5).toBe(15);
   });
 
   it('runs both passes for every matrix lane', () => {

@@ -8,21 +8,22 @@ const REPO_ROOT = resolve(HERE, '../../..');
 const WORKFLOWS_DIR = join(REPO_ROOT, '.github', 'workflows');
 
 /**
- * Self-hosted-only CI architecture contract.
+ * Explicit CI runner placement contract.
  *
- * JOY Media's GitHub-hosted Actions minutes/billing are unavailable from Iran,
- * so every workflow job in `.github/workflows/` MUST run on an owner-controlled
- * self-hosted runner. This test enforces that contract offline:
+ * The public repository may use standard GitHub-hosted runners without minute
+ * charges. The renderer bundle is the only approved hosted job because the
+ * Windows Hyper-V acceptance container exposes only 1 GiB to Node. All other
+ * lanes remain on the owner-controlled Docker runners. This test enforces that
+ * narrow exception offline:
  *
- *   1. No job in any workflow may use `ubuntu-latest`, `windows-latest`,
- *      `macos-latest`, or any other GitHub-hosted label.
- *   2. Every job must list an `allowed` self-hosted label tuple, where the
+ *   1. Only release-candidate-v2.yml / editor-web-bundle may use
+ *      `ubuntu-24.04`; all other hosted labels are forbidden.
+ *   2. Every other job must list an `allowed` self-hosted label tuple, where the
  *      allowed set is exactly the PC Docker self-hosted runner labels the
  *      repository actually provisions (see ops/self-hosted/linux-runner,
  *      ops/self-hosted/windows-runner, docs/SELF-HOSTED-CI.md).
- *   3. The runner contract lives entirely under `ops/self-hosted/`. Re-adding
- *      a hosted label, or pointing a job at a label without an entry in
- *      `ops/self-hosted/`, fails this test before a CI minute is consumed.
+ *   3. Re-adding a hosted label elsewhere, or pointing a job at a label without
+ *      an entry in `ops/self-hosted/`, fails this test.
  *
  * The label allowlist is read directly from the README files in each
  * `ops/self-hosted/<runner>/` directory, so a runner added later is honored
@@ -51,6 +52,16 @@ const HOSTED_LABEL_TOKENS = new Set([
   'macos-13',
   'macos-14',
   'macos-15',
+]);
+
+const APPROVED_HOSTED_RUNNERS: ReadonlyMap<
+  string,
+  ReadonlyMap<string, readonly string[]>
+> = new Map([
+  [
+    join(WORKFLOWS_DIR, 'release-candidate-v2.yml'),
+    new Map([['editor-web-bundle', ['ubuntu-24.04']]]),
+  ],
 ]);
 
 // Allowed self-hosted label tuples. Order matters: this is the canonical
@@ -95,8 +106,14 @@ interface RunsOnEntry {
 function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
   const lines = workflowText.split(/\r?\n/);
   const entries: RunsOnEntry[] = [];
+  let currentJobContext = '(workflow-level)';
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
+    const jobHeader = line.match(/^ {2}([a-z0-9-]+):\s*$/);
+    if (jobHeader) {
+      currentJobContext = jobHeader[1];
+      continue;
+    }
     // Detect `runs-on:` on its own line. The value can be a string, a list
     // continuation on the next lines, or an inline list `[a, b, c]`.
     const inline = line.match(/^\s*([A-Za-z0-9 _-]+:)?\s*runs-on:\s*(.+?)\s*$/);
@@ -108,7 +125,7 @@ function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
     if (remainder && !remainder.startsWith('[')) {
       entries.push({
         lineNo: i + 1,
-        jobContext: jobKey || '(workflow-level)',
+        jobContext: jobKey || currentJobContext,
         raw: remainder,
         tuple: [remainder.replace(/^['"]|['"]$/g, '')],
         isList: false,
@@ -123,7 +140,7 @@ function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
       const inner = remainder.slice(1, closingIdx);
       entries.push({
         lineNo: i + 1,
-        jobContext: jobKey || '(workflow-level)',
+        jobContext: jobKey || currentJobContext,
         raw: remainder,
         tuple: inner
           .split(',')
@@ -147,7 +164,7 @@ function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
     if (collected.length > 0) {
       entries.push({
         lineNo: i + 1,
-        jobContext: jobKey || '(workflow-level)',
+        jobContext: jobKey || currentJobContext,
         raw: collected.join(','),
         tuple: collected,
         isList: true,
@@ -243,7 +260,7 @@ function listWorkflowFiles(): string[] {
     .sort();
 }
 
-describe('self-hosted-only CI architecture contract', () => {
+describe('CI runner placement contract', () => {
   const workflows = listWorkflowFiles();
   expect(workflows.length).toBeGreaterThan(0);
 
@@ -261,6 +278,7 @@ describe('self-hosted-only CI architecture contract', () => {
 
   it.each(workflows)('forbids hosted runner labels in %s', (workflowPath) => {
     const text = readFileSync(workflowPath, 'utf8');
+    const entriesByLine = new Map(findRunsOnEntries(text).map((entry) => [entry.lineNo, entry]));
     // Pre-filter obvious comments — GitHub Actions does not honor commented
     // `runs-on:` lines, so we ignore them in the forbidden-label scan but
     // still enforce the allowlist on them (so a stale comment does not hide
@@ -271,6 +289,14 @@ describe('self-hosted-only CI architecture contract', () => {
       if (/^\s*#/.test(line)) continue;
       const m = line.match(/^\s*(?:-\s*)?runs-on:\s*(.+?)\s*$/);
       if (!m) continue;
+      const entry = entriesByLine.get(i + 1);
+      const approvedTuple = entry
+        ? APPROVED_HOSTED_RUNNERS.get(workflowPath)?.get(entry.jobContext)
+        : undefined;
+      if (approvedTuple) {
+        expect(entry?.tuple).toEqual(approvedTuple);
+        continue;
+      }
       const value = m[1].trim();
       // Strip inline list brackets.
       const tokens = value
@@ -300,6 +326,13 @@ describe('self-hosted-only CI architecture contract', () => {
       expect(entries.length).toBeGreaterThan(0);
 
       for (const entry of entries) {
+        const approvedHostedTuple = APPROVED_HOSTED_RUNNERS.get(workflowPath)?.get(
+          entry.jobContext,
+        );
+        if (approvedHostedTuple) {
+          expect(entry.tuple).toEqual(approvedHostedTuple);
+          continue;
+        }
         const sorted = normalizeTuple(entry.tuple);
         const key = sorted.join('|');
         expect(
@@ -307,7 +340,7 @@ describe('self-hosted-only CI architecture contract', () => {
           [
             `runs-on tuple ${JSON.stringify(entry.tuple)} on line ${entry.lineNo}`,
             `(${entry.jobContext}) in ${workflowPath}`,
-            `is not in the allowed self-hosted Docker label set.`,
+            `is not in the allowed self-hosted Docker label set or the exact hosted-job allowlist.`,
             `Allowed: ${[...allowed].join(' ; ')}.`,
             `Declare the runner contract under ops/self-hosted/<runner>/ and add the`,
             `label tuple to tooling/release/src/ci-runner-policy.test.ts if this is intentional.`,
@@ -319,9 +352,14 @@ describe('self-hosted-only CI architecture contract', () => {
         // membership check.
         expect(
           entry.tuple[0],
-          `runs-on tuple on line ${entry.lineNo} (${entry.jobContext}) in ${workflowPath} must begin with "self-hosted"; got ${JSON.stringify(entry.tuple)}`,
+          `runs-on tuple on line ${entry.lineNo} (${entry.jobContext}) in ${workflowPath} must begin with "self-hosted" unless it matches the exact hosted-job allowlist; got ${JSON.stringify(entry.tuple)}`,
         ).toBe('self-hosted');
       }
+      const observedHostedJobs = entries
+        .filter((entry) => !entry.tuple.includes('self-hosted'))
+        .map((entry) => [entry.jobContext, entry.tuple]);
+      const expectedHostedJobs = [...(APPROVED_HOSTED_RUNNERS.get(workflowPath)?.entries() ?? [])];
+      expect(observedHostedJobs).toEqual(expectedHostedJobs);
     },
   );
 

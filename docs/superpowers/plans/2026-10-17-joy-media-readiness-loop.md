@@ -1,9 +1,10 @@
 # JOY Media readiness test and fixture loop implementation plan
 
-> **For agentic workers:** Use `superpowers:executing-plans` for orchestration,
-> with bounded implementation delegated through the owner-approved local Kilo
-> CLI. Track the checkboxes below. The orchestrator verifies actual diffs and
-> results independently before accepting each work package.
+> **For agentic workers:** Use `superpowers:executing-plans` for orchestration.
+> Use the owner-approved local Kilo CLI for bounded implementation only when
+> its isolation and billing gates are verified; otherwise implement in the
+> isolated worktree. Track the checkboxes below. The orchestrator verifies
+> actual diffs and results independently before accepting each work package.
 
 **Goal:** Close the evidence and behavior gaps that prevent the Windows app and
 agent-facing CLI from being dependable for their documented supported workflows.
@@ -25,6 +26,19 @@ staging package/launcher checks, but remain open where their full scope is not y
 accepted. Task 8 has not started. Task 9 remains open for a frozen-candidate two-pass
 run, independent reviews, owner release decision, and required closeout receipt. This
 plan is not an app-ready or release certificate. The October 18 continuation added a test-first Windows reserved-device output-path guard and verified both current staged CLI launchers with decoded media; exact-candidate release evidence and Windows installed-app lifecycle remain open.
+
+**Rulings (2026-10-18):** The repository is public, the standard GitHub-hosted
+runner is free, the artifact inventory was empty, and the one-file quota probe
+passed as run `39084850937`. Use `ubuntu-24.04` only for building the editor
+bundle; transfer it with a one-day artifact bound to run/attempt/candidate and
+verify its full file manifest on the Windows Docker runner. This keeps the
+memory-heavy Vite build off the 1 GiB-visible Hyper-V container while preserving
+the container-local acceptance boundary. If runner or transfer availability is
+misjudged, the workflow fails closed before packaging. Kilo was not invoked:
+its local CLI exposes no hard filesystem sandbox, so the owner-required worker
+isolation gate remains unverified. The cost if this ruling is wrong is one fresh
+runner/artifact dependency and no independent worker diff; external review and
+candidate approval remain required.
 The implementation began from remote baseline SHA
 `c1fffd59d5078902e031e7684e69c27df40ce607`. The earlier October 14 plan was removed
 upstream and its statement that CLI rendering produces no media is superseded.
@@ -53,7 +67,10 @@ does not waive the independent Claude Code review or the owner's release decisio
   routes, new purchases, paid fallback, production credentials, or Gbrain writes.
 - Preserve external Claude Code independent review; if unavailable, record that
   gate as pending. Do not silently replace it or launch Claude-model workers.
-- Only existing permitted self-hosted runner labels; no GitHub-hosted billing.
+- Use standard GitHub-hosted `ubuntu-24.04` only for the editor bundle after the
+  short-lived artifact transfer probe passes; retain existing self-hosted Docker
+  runners for every other lane, especially Windows lifecycle acceptance. Do not
+  use paid larger runners.
 - No real provider calls in deterministic tests. Separate fake-provider contract
   tests from explicitly scoped real-provider or real-GPU acceptance.
 - A plan, mock response, worker self-test, or successful CI summary cannot stand

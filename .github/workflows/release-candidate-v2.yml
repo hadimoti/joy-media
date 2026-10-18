@@ -8,13 +8,15 @@ name: release-candidate-v2
 # docs/reviews/joy-media-ci-coverage-matrix-2026-09-08.md and
 # docs/reviews/joy-media-ci-repetition-contract-2026-09-08.md.
 #
-# JOY Media self-hosted-only CI: every job runs on an owner-controlled PC
-# self-hosted runner. GitHub-hosted Actions minutes/billing are unavailable
-# from Iran, so no job may use `ubuntu-latest`, `windows-latest`,
-# `macos-latest`, or any other GitHub-hosted label. The contract is enforced
-# offline by tooling/release/src/ci-runner-policy.test.ts.
+# Runner placement: this is a public repository, so standard GitHub-hosted
+# runners are free. The renderer bundle builds on `ubuntu-24.04` because the
+# Windows Hyper-V worker exposes only 1 GiB to Node. The Windows lifecycle lane
+# remains on its owner-controlled Docker runner for container-bound evidence;
+# all other release lanes remain on their provisioned self-hosted runners.
+# `ci-runner-policy.test.ts` allows only this single hosted-job exception.
 #
 # Lane → runner mapping (matches ops/self-hosted/*/ contract docs):
+#   - editor-web-bundle: GitHub-hosted ubuntu-24.04 (public standard runner).
 #   - validate-candidate / linux-real-services / prod-build-smoke:
 #     self-hosted,linux,x64,joy-media-ci (PC Docker Linux).
 #   - acceptance-primary / acceptance-responsive / real-service-acceptance /
@@ -68,6 +70,61 @@ jobs:
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
           resolved_sha="$(git rev-parse HEAD)"
           [[ "$resolved_sha" == "$CANDIDATE_SHA" ]] || { echo 'candidate_sha is not reachable from this repository' >&2; exit 1; }
+
+  editor-web-bundle:
+    name: editor-web-bundle (standard hosted Linux)
+    runs-on: ubuntu-24.04
+    needs: [validate-candidate]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Verify exact candidate and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          resolved_sha="$(git rev-parse HEAD)"
+          [[ "$resolved_sha" == "$CANDIDATE_SHA" ]] || { echo 'editor bundle checkout does not match candidate_sha' >&2; exit 1; }
+          node --version
+          corepack enable pnpm
+          test "$(pnpm --version)" = '11.15.0'
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build editor web bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf apps/editor-web/dist
+          pnpm --filter @joy-media/editor-web... build
+      - name: Stage source-bound renderer artifact
+        id: stage-renderer
+        shell: bash
+        env:
+          EDITOR_WEB_ARTIFACT_DIR: ${{ runner.temp }}/joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          rm -rf "$EDITOR_WEB_ARTIFACT_DIR"
+          mkdir -p "$EDITOR_WEB_ARTIFACT_DIR"
+          cp -a apps/editor-web/dist "$EDITOR_WEB_ARTIFACT_DIR/dist"
+          node tooling/release/src/editor-web-artifact.mjs create \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --lockfile pnpm-lock.yaml \
+            --dist "$EDITOR_WEB_ARTIFACT_DIR/dist" \
+            --manifest "$EDITOR_WEB_ARTIFACT_DIR/manifest.json"
+      - name: Upload renderer artifact for the Windows package job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: ${{ runner.temp }}/joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 1
+          if-no-files-found: error
 
   linux-real-services:
     name: linux-real-services (pass ${{ matrix.pass }})
@@ -127,7 +184,7 @@ jobs:
   windows-worker-clean:
     name: windows-worker-clean (two exact passes)
     runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
-    needs: [validate-candidate]
+    needs: [validate-candidate, editor-web-bundle]
     timeout-minutes: 240
     outputs:
       evidence1: ${{ steps.publish-evidence.outputs.evidence1 }}
@@ -138,6 +195,27 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
           fetch-depth: 1
           persist-credentials: false
+      - name: Download renderer artifact from this candidate run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: ${{ runner.temp }}/joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify and stage exact editor web bundle
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactRoot = Join-Path $env:RUNNER_TEMP ("joy-media-editor-web-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT)
+          $artifactDist = Join-Path $artifactRoot 'dist'
+          $artifactManifest = Join-Path $artifactRoot 'manifest.json'
+          if (-not (Test-Path -LiteralPath $artifactDist -PathType Container)) { throw 'Downloaded editor web dist directory is missing.' }
+          if (-not (Test-Path -LiteralPath $artifactManifest -PathType Leaf)) { throw 'Downloaded editor web manifest is missing.' }
+          node tooling/release/src/editor-web-artifact.mjs verify --candidate-sha $env:CANDIDATE_SHA --lockfile pnpm-lock.yaml --dist $artifactDist --manifest $artifactManifest
+          if ($LASTEXITCODE -ne 0) { throw "editor-web artifact verification failed before packaging (exit $LASTEXITCODE)." }
+          $editorDist = Join-Path $PWD 'apps\editor-web\dist'
+          if (Test-Path -LiteralPath $editorDist) { Remove-Item -LiteralPath $editorDist -Recurse -Force }
+          Copy-Item -LiteralPath $artifactDist -Destination $editorDist -Recurse
+          node tooling/release/src/editor-web-artifact.mjs verify --candidate-sha $env:CANDIDATE_SHA --lockfile pnpm-lock.yaml --dist $editorDist --manifest $artifactManifest
+          if ($LASTEXITCODE -ne 0) { throw "editor-web artifact verification failed after staging (exit $LASTEXITCODE)." }
       - name: Verify clean Worker host
         shell: powershell
         run: |
@@ -181,8 +259,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Worker package build failed with exit code $LASTEXITCODE." }
           pnpm --filter @joy-media/desktop build
           if ($LASTEXITCODE -ne 0) { throw "Desktop package build failed with exit code $LASTEXITCODE." }
-          pnpm --filter @joy-media/editor-web... build
-          if ($LASTEXITCODE -ne 0) { throw "Editor web and workspace dependency build failed with exit code $LASTEXITCODE." }
           $buildMarker = "release-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)"
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $workerExe -BuildMarker $buildMarker
           if ($LASTEXITCODE -ne 0) { throw "Worker executable build failed with exit code $LASTEXITCODE." }
