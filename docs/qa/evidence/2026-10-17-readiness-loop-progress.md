@@ -274,7 +274,11 @@ note.
 Docker was confirmed running with the isolated PostgreSQL 17 and MinIO CI services in
 the Ubuntu 24.04 WSL Docker engine. The repository's three self-hosted runners were
 online and idle at the last inventory check. No service credentials were read or copied.
-The exact-SHA two-pass workflow has not yet run for this candidate.
+The first exact-SHA workflow dispatch reached immutable-candidate validation and the
+Windows Docker runner, then failed before acceptance because Electron's prebuilt runtime
+was missing from the clean install. The other lanes were canceled after that failure so
+the self-hosted runners could be released; this produced no Windows lifecycle passes or
+candidate-readiness receipt.
 
 Open closeout limits remain: a disposable Windows user/VM is required for actual app
 install/update/rollback/uninstall because the generated setup and uninstaller modify
@@ -292,9 +296,18 @@ contracts passed, and the Windows lifecycle PowerShell script parsed successfull
 These are source/worktree checks; they do not replace fresh artifact-bound Windows
 acceptance.
 
-The exact-SHA `release-candidate-v2` dispatch is the next closeout gate. GitHub
-inventory showed all required self-hosted runners online: Linux CI, Linux acceptance,
-and the isolated Windows Docker worker runner. This workflow uses those runners under
-the repository's current runner/billing policy; exact-candidate evidence, the 30-minute
-soak, real-GPU qualification, remaining service checks, independent review, and
-candidate approval remain open until separately evidenced.
+The Windows job now explicitly runs Electron's `install-electron` bootstrap and verifies
+the installed executable and version before packaging. A workflow policy test fails if
+this bootstrap disappears or moves after packaging. The bin and bundle schema journeys
+passed focused validation; their full-suite per-test limit is now 60 seconds because the
+first full run timed out at 30 seconds under host-wide suite load, while the same test
+passed in 6.9 seconds in isolation. The subsequent complete local `pnpm verify:ci` run
+exited 0; `pnpm test:harness` passed 29 tests, skipped 11 platform-specific cases, and
+failed none. `install-electron` and the Electron v44.3.0 runtime check also passed
+locally.
+
+The corrected exact-SHA `release-candidate-v2` dispatch remains the next closeout gate.
+GitHub inventory showed all required self-hosted runners online: Linux CI, Linux
+acceptance, and the isolated Windows Docker worker runner. Exact-candidate evidence,
+the 30-minute soak, real-GPU qualification, remaining service checks, independent
+review, and candidate approval remain open until separately evidenced.

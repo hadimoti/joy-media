@@ -158,6 +158,16 @@ jobs:
           if ($env:JOY_MEDIA_WINDOWS_IMAGE_DIGEST -notmatch '^sha256:[0-9a-f]{64}$') { throw 'the Windows Docker runner must expose its immutable image digest' }
       - run: pnpm install --frozen-lockfile
         shell: powershell
+      - name: Install and verify Electron runtime
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm --filter @joy-media/desktop exec install-electron
+          if ($LASTEXITCODE -ne 0) { throw "Electron runtime install failed with exit code $LASTEXITCODE." }
+          $electronExe = Join-Path $PWD 'apps\desktop\node_modules\electron\dist\electron.exe'
+          if (-not (Test-Path -LiteralPath $electronExe -PathType Leaf)) { throw "Electron runtime executable is missing: $electronExe" }
+          pnpm --filter @joy-media/desktop exec electron --version
+          if ($LASTEXITCODE -ne 0) { throw "Electron runtime verification failed with exit code $LASTEXITCODE." }
       - name: Build frozen Windows desktop, CLI, and Worker candidate
         shell: powershell
         run: |

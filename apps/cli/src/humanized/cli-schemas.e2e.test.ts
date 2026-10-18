@@ -119,5 +119,5 @@ describe.each(['bin', 'bundle'] as const)('versioned CLI output schemas via %s',
     expect(renderFailure.code, describeRun(renderFailure)).toBe(1);
     for (const event of renderFailure.ndjson()) expectSchema('render-event.v1.schema.json', event);
     expect(renderFailure.ndjson().at(-1)).toMatchObject({ type: 'error' });
-  });
+  }, 60_000);
 });
