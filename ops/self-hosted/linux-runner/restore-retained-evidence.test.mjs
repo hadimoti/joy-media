@@ -241,6 +241,10 @@ test('restores both real-service and P3 passes into hash-bound evidence inputs',
     { pass: 2, status: 'passed' },
   );
   assert.deepEqual(
+    JSON.parse(await readFile(join(workspaceRoot, 'test-output/operations/teardown.json'), 'utf8')),
+    { clean: true, pass: 2 },
+  );
+  assert.deepEqual(
     JSON.parse(
       await readFile(
         join(workspaceRoot, 'test-output/release-performance/effects-soak.json'),

@@ -38,6 +38,7 @@ const FINAL_GATE_VIEW = [
   'test-output/release-performance/editor.json',
   'test-output/delivery/result.json',
   'test-output/operations/restore.json',
+  'test-output/operations/teardown.json',
   'test-output/ci-janitor/inventory.json',
 ];
 
