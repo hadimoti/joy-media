@@ -1,3 +1,5 @@
+import { performance } from 'node:perf_hooks';
+
 /* global process, setTimeout */
 
 /**
@@ -46,7 +48,7 @@ export async function terminateProcessTree(child, options = {}) {
   const graceMs = options.graceMs ?? 15_000;
   const killMs = options.killMs ?? 5_000;
   const pollMs = options.pollMs ?? 200;
-  const now = options.now ?? Date.now;
+  const now = options.now ?? (() => performance.now());
 
   const pid = typeof child?.pid === 'number' ? child.pid : null;
   const record = {
