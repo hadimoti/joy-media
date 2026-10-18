@@ -1322,7 +1322,7 @@ async function recordJourney(
     // name would resolve its media controller (which intentionally has no
     // animation channels) and make a valid persisted preset look missing.
     const motionClipId = await page
-      .locator('.timeline-clip[data-element-kind="html-scene"][aria-pressed="true"]')
+      .locator('.timeline-clip[data-element-kind="html-scene"][aria-current="true"]')
       .first()
       .getAttribute('data-clip-id');
     if (!motionClipId)
@@ -1747,7 +1747,7 @@ async function recordJourney(
     const reloadedClip = page.locator(`.timeline-clip[data-clip-id="${motionClipId}"]`).first();
     await reloadedClip.waitFor({ timeout: 15_000 });
     await reloadedClip.click();
-    if ((await reloadedClip.getAttribute('aria-pressed')) !== 'true')
+    if ((await reloadedClip.getAttribute('aria-current')) !== 'true')
       throw new Error(
         'real-service journey did not reselect the persisted Motion clip after reload',
       );
