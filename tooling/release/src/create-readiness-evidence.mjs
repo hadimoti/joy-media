@@ -8,6 +8,7 @@ import { validateReadinessEvidence } from './readiness-evidence.ts';
 
 const RELEASE_LANES = [
   'linux-real-services',
+  'node-contracts',
   'windows-worker-clean',
   'acceptance-primary',
   'acceptance-responsive',

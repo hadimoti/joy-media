@@ -10,6 +10,7 @@ const RUN_ID = '444';
 const ATTEMPT = '1';
 const LANES = [
   'linux-real-services',
+  'node-contracts',
   'windows-worker-clean',
   'acceptance-primary',
   'acceptance-responsive',
