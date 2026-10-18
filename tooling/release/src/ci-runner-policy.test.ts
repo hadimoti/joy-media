@@ -185,7 +185,7 @@ function findJobBlock(workflowText: string, jobName: string): string {
   const lines = workflowText.split(/\r?\n/);
   const start = lines.findIndex((line) => line === `  ${jobName}:`);
   if (start < 0) return '';
-  const end = lines.findIndex((line, index) => index > start && /^  [a-z0-9-]+:\s*$/.test(line));
+  const end = lines.findIndex((line, index) => index > start && /^ {2}[a-z0-9-]+:\s*$/.test(line));
   return lines.slice(start, end < 0 ? undefined : end).join('\n');
 }
 

@@ -343,8 +343,8 @@ if ((Get-ChecksummedFile $candidateChecksumsText 'joy-media.exe') -ne $candidate
 if ($candidateSetup.Length -ne 64) { throw 'Candidate setup hash is malformed.' }
 $previousChecksumsText = Get-Content -LiteralPath $PreviousChecksumsPath -Raw
 if ((Get-ChecksummedFile $previousChecksumsText 'joy-media-windows-x64-v1.0.1.zip') -ne $previousArchive) { throw 'Pinned v1.0.1 portable archive hash does not match the downloaded archive.' }
-$previousDesktopExeSha = Get-ChecksummedArchiveEntryHash -ChecksumsText $previousChecksumsText -FileName 'joy-media.exe' -ArchivePath $PreviousArchivePath -ArchiveEntryName 'joy-media.exe'
-$previousCliBundleSha = Get-ChecksummedArchiveEntryHash -ChecksumsText $previousChecksumsText -FileName 'joy-media-bundle.mjs' -ArchivePath $PreviousArchivePath -ArchiveEntryName 'resources/app/cli/joy-media-bundle.mjs'
+$previousDesktopExeSha = Get-ChecksummedArchiveEntryHash -ChecksumsText $previousChecksumsText -FileName 'joy-media.exe' -ArchivePath $PreviousArchivePath -ArchiveEntryName 'joy-media-win32-x64/joy-media.exe'
+$previousCliBundleSha = Get-ChecksummedArchiveEntryHash -ChecksumsText $previousChecksumsText -FileName 'joy-media-bundle.mjs' -ArchivePath $PreviousArchivePath -ArchiveEntryName 'joy-media-win32-x64/resources/app/cli/joy-media-bundle.mjs'
 $nodeVersionResult = Invoke-CapturedProcess -FilePath $nodePath -Arguments @('--version') -TimeoutSeconds 30 -WorkingDirectory $repoRoot -Environment (Get-SafeEnvironment)
 if ($nodeVersionResult.ExitCode -ne 0) { throw 'Could not establish the Windows Node.js toolchain version.' }
 $pnpmVersionResult = Invoke-Pnpm 'pnpm toolchain version' @('--version') 60

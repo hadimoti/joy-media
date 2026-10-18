@@ -23,7 +23,7 @@ Electron, SQLite, FFmpeg/FFprobe, existing self-hosted Windows/Linux runners.
 and `6eacd9b5`. Tasks 3–7 have extensive local Windows evidence for playable CLI
 output, recovery, fresh-profile project operations, packaged editor workflow, and
 staging package/launcher checks, but remain open where their full scope is not yet
-accepted. This worktree passed `pnpm verify:ci`, `pnpm test:harness` (30 passed, 11
+accepted. This worktree passed `pnpm verify:ci`, `pnpm test:harness` (31 passed, 11
 expected platform skips), and the full source Playwright audit (826 passed, 7 known
 skips, 0 retries) across seven viewports. The two viewport-sensitive Director tests
 also passed three repeats each at 1920px. The local Worker status detects an RTX 5070
@@ -95,16 +95,28 @@ real-GPU model output, 30-minute soak, and exact-candidate CI evidence remain op
 all four local model environments are absent and `JOY\\models` does not exist.
 
 The first new exact-candidate run `39093151282` is pinned to
-`4994ba108417f86c654a7df25325b4843196abab`. Hosted candidate validation and the
-editor-web artifact build passed; the hosted shipped-bundle smoke lane failed at
-`pnpm install` because it did not enable Corepack on the fresh GitHub runner. The
-same workflow run's Windows Docker and Linux/P3 lanes were still in progress when
-this note was written. Commit `a5a2b5e6` adds the missing pinned pnpm bootstrap and
-a runner-policy regression test; commit `19f47d96` adds a 200-command timeline
-edit/readback scenario. The new policy test passes 25/25, the full timeline CLI
-suite passes 66/66 (160.52 s), and the sustained case passes with 200 edits in
-59.89 s. The full `pnpm verify:ci` must be repeated at the new candidate before the
-next exact-SHA run; run `39093151282` cannot certify `a5a2b5e6` or later commits.
+`4994ba108417f86c654a7df25325b4843196abab` and completed with failure. Hosted
+candidate validation and the editor-web artifact build passed; the hosted
+shipped-bundle smoke lane failed at `pnpm install` because it did not enable
+Corepack on the fresh GitHub runner. Both passes of the Linux and P3 real-service
+lanes passed. The Windows Docker job built the frozen candidate but its lifecycle
+step failed before installation: the pinned v1.0.1 ZIP stores files under
+`joy-media-win32-x64/`, while the lifecycle looked for root-level entries. Later
+browser acceptance and the real-service soak were skipped by the failed Windows
+gate. Commit `a5a2b5e6` adds the missing pinned pnpm bootstrap and a runner-policy
+regression test; commit `19f47d96` adds a 200-command timeline edit/readback
+scenario. The new policy test passes 25/25, the full timeline CLI suite passes
+66/66 (160.52 s), and the sustained case passes with 200 edits in 59.89 s. Run
+`39093151282` cannot certify `a5a2b5e6` or later commits.
+
+The ZIP-layout failure now has a test-first fix: a regression test failed while
+the lifecycle requested root-level files, the fixture was changed to reproduce
+the actual `joy-media-win32-x64/` layout, and the script now hashes the correct
+desktop and CLI entries. The same local harness passes 31 tests with 11 expected
+host-specific skips. A fresh `pnpm verify:ci` passes typecheck, lint, formatting,
+the full Vitest suite, production build, and production audit after also correcting
+a lint rule in the hosted-runner policy test. These are worktree results; a new
+exact-SHA two-pass release workflow is still required.
 
 On the modified worktree at HEAD `325cc4d7277d3008bd79c18749ddcff9c9a53051`,
 `pnpm verify:ci` passed (typecheck, lint, formatting, full Vitest suite, build, and
