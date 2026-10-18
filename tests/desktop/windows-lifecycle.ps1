@@ -135,10 +135,11 @@ function Invoke-CapturedProcess {
 }
 
 function Get-CommandFailureSummary($Result) {
-    $combined = @($Result.Stdout, $Result.Stderr) -join "`n"
-    $lines = @($combined -split "`r?`n" | Where-Object { $_.Trim() -ne '' })
-    if ($lines.Count -gt 16) { $lines = $lines[($lines.Count - 16)..($lines.Count - 1)] }
-    return ($lines -join "`n")
+    $stdoutLines = @(([string]$Result.Stdout -split "`r?`n") | Where-Object { $_.Trim() -ne '' })
+    $stderrLines = @(([string]$Result.Stderr -split "`r?`n") | Where-Object { $_.Trim() -ne '' })
+    if ($stdoutLines.Count -gt 50) { $stdoutLines = $stdoutLines[($stdoutLines.Count - 50)..($stdoutLines.Count - 1)] }
+    if ($stderrLines.Count -gt 16) { $stderrLines = $stderrLines[($stderrLines.Count - 16)..($stderrLines.Count - 1)] }
+    return (@($stdoutLines + $stderrLines) -join "`n")
 }
 
 function Invoke-Pnpm(

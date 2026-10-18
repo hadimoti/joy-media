@@ -34,6 +34,22 @@ and required closeout receipt. This plan is not an app-ready or release certific
 The October 18 continuation also added a test-first Windows reserved-device
 output-path guard and verified both staged CLI launchers with decoded media.
 
+**Status (runner continuation 2026-10-18):** Candidate `55ba6516725b6a43c4899bde0758ad3d4dcce295`
+passed hosted validation, the hosted editor bundle, shipped-bundle smoke, both
+Linux real-service passes, and both P3 passes on run
+[`39113930140`](https://github.com/hadimoti/joy-media/actions/runs/39113930140).
+The Windows Docker runner built the frozen installer, CLI, and Worker, and pass 1
+completed, but pass 2 failed in installed candidate editor restart/save/export
+acceptance. The lifecycle wrapper had discarded the Playwright stdout while keeping
+only its final 16 combined stdout/stderr lines, so the underlying assertion was not
+retained. A test-first fix now preserves bounded stdout and stderr separately; a
+fresh exact-candidate run is required to learn and close the remaining Windows
+failure. Local `pnpm verify:ci` passes 631 files / 5,609 tests with 28 skips,
+workspace build and production audit; `pnpm test:harness` passes 36 with 11
+expected host-specific skips. Real-GPU qualification, the full two-pass release
+gate, external review, release authorization, and the final Gbrain receipt remain
+open. This plan is not an app-ready or release certificate.
+
 **Rulings (updated 2026-10-18):** The owner directs us to use standard
 GitHub-hosted runners for lanes their resources and prerequisites support, and
 fall back to the existing self-hosted runners when a hosted runner is unavailable
@@ -489,6 +505,10 @@ explicit `joy.cmd` path and sanitized disposable state directory.
 - [x] Rebuild the unsigned Windows staging package and run both launcher render journeys, packaged/standalone smoke, and package-integrity checks. This proves staging entrypoints only; see `docs/qa/evidence/2026-10-18-windows-staged-cli-acceptance.md`.
 - [x] Reproduce and remove the clean-checkout PowerShell 5.1 null dereference; package-level regression checks cover empty and dirty git status results, and lifecycle errors now print their source line. Exact installed-artifact lifecycle acceptance remains open below.
 - [x] Use the lockfile-pinned Electron executable to run the safe-storage lifecycle fixture; the installed app's `--run-as-node` invocation hung on the previous candidate. The harness parses and its fixture passes locally; actual installed-artifact acceptance remains open.
+- [x] Preserve Playwright stdout in the Windows lifecycle failure summary when
+      stderr contains teardown logs. The regression test failed with the old
+      combined 16-line tail, then passed after the summary retained bounded stdout
+      and stderr independently (6/6 Windows lifecycle harness tests).
 - [ ] Run clean install/update/rollback/uninstall in the designated disposable Windows host. Associate all
       lifecycle evidence with exact source, lockfile, and artifact hashes.
 - [ ] Fix/review/commit; never uninstall or overwrite the owner's working install.

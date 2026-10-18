@@ -37,6 +37,63 @@ test('Windows lifecycle cleanup groups Test-Path calls before applying logical o
   );
 });
 
+test(
+  'Windows lifecycle failure summary preserves Playwright stdout when stderr has teardown logs',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const root = resolve(mkdtempSync(join(tmpdir(), 'joy-media-lifecycle-summary-')));
+    const tempRoot = resolve(tmpdir()).replace(/[\\/]+$/, '') + sep;
+    assert.ok(root.startsWith(tempRoot), 'probe directory must stay under the OS temp root');
+    const testScript = join(root, 'test-failure-summary.ps1');
+    writeFileSync(
+      testScript,
+      [
+        'param([string]$LifecyclePath)',
+        "$ErrorActionPreference = 'Stop'",
+        '$source = [IO.File]::ReadAllText($LifecyclePath)',
+        "$start = $source.IndexOf('function Get-CommandFailureSummary($Result) {')",
+        "$end = $source.IndexOf('function Invoke-Pnpm(', $start)",
+        "if ($start -lt 0 -or $end -lt 0) { throw 'Could not find the lifecycle failure summary function.' }",
+        '. ([scriptblock]::Create($source.Substring($start, $end - $start)))',
+        "$stdout = @('1) tests/desktop/editor-acceptance.spec.ts:654:3 › packaged editor journey', '  Error: EXPECTED_PLAYWRIGHT_ASSERTION')",
+        'for ($index = 0; $index -lt 30; $index++) { $stdout += "stdout detail $index" }',
+        "$stderr = @('ExperimentalWarning: SQLite is an experimental feature')",
+        'for ($index = 0; $index -lt 30; $index++) { $stderr += "[WebServer] teardown detail $index" }',
+        '$result = [pscustomobject]@{ Stdout = $stdout -join [Environment]::NewLine; Stderr = $stderr -join [Environment]::NewLine }',
+        '$summary = Get-CommandFailureSummary $result',
+        "if ($summary -notmatch 'EXPECTED_PLAYWRIGHT_ASSERTION') { throw 'Failure summary omitted the Playwright assertion from stdout.' }",
+        'Write-Output $summary',
+      ].join('\n'),
+      'utf8',
+    );
+
+    try {
+      const result = spawnSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+          testScript,
+          windowsLifecycle,
+        ],
+        { cwd: repoRoot, encoding: 'utf8', timeout: 30_000, windowsHide: true },
+      );
+      assert.equal(result.error, undefined, result.error?.message ?? 'PowerShell did not start.');
+      assert.equal(
+        result.status,
+        0,
+        `PowerShell failure-summary probe failed:\n${result.stdout}\n${result.stderr}`,
+      );
+      assert.match(result.stdout, /EXPECTED_PLAYWRIGHT_ASSERTION/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
 test('Windows lifecycle invokes uninstaller batch files through cmd-compatible raw quoting', () => {
   const lifecycle = readFileSync(windowsLifecycle, 'utf8');
   const rawCmdArguments = /-RawArguments \('\/d \/s \/c ""' \+ \$uninstaller \+ '""'\)/g;
