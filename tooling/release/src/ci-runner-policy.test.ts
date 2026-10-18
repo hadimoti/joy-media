@@ -11,12 +11,12 @@ const WORKFLOWS_DIR = join(REPO_ROOT, '.github', 'workflows');
  * Explicit CI runner placement contract.
  *
  * The public repository may use standard GitHub-hosted runners without minute
- * charges. The renderer bundle is the only approved hosted job because the
- * Windows Hyper-V acceptance container exposes only 1 GiB to Node. All other
- * lanes remain on the owner-controlled Docker runners. This test enforces that
- * narrow exception offline:
+ * charges. Portable candidate validation, browser acceptance, production
+ * smoke, and editor bundle jobs use `ubuntu-24.04`; lanes requiring private
+ * services, durable evidence, or Windows Docker stay on owner-controlled
+ * runners. This test enforces the exact split offline:
  *
- *   1. Only release-candidate-v2.yml / editor-web-bundle may use
+ *   1. Only the explicitly listed jobs in release-candidate-v2.yml may use
  *      `ubuntu-24.04`; all other hosted labels are forbidden.
  *   2. Every other job must list an `allowed` self-hosted label tuple, where the
  *      allowed set is exactly the PC Docker self-hosted runner labels the
@@ -60,7 +60,13 @@ const APPROVED_HOSTED_RUNNERS: ReadonlyMap<
 > = new Map([
   [
     join(WORKFLOWS_DIR, 'release-candidate-v2.yml'),
-    new Map([['editor-web-bundle', ['ubuntu-24.04']]]),
+    new Map([
+      ['validate-candidate', ['ubuntu-24.04']],
+      ['editor-web-bundle', ['ubuntu-24.04']],
+      ['acceptance-primary', ['ubuntu-24.04']],
+      ['acceptance-responsive', ['ubuntu-24.04']],
+      ['prod-build-smoke', ['ubuntu-24.04']],
+    ]),
   ],
 ]);
 

@@ -9,19 +9,18 @@ name: release-candidate-v2
 # docs/reviews/joy-media-ci-repetition-contract-2026-09-08.md.
 #
 # Runner placement: this is a public repository, so standard GitHub-hosted
-# runners are free. The renderer bundle builds on `ubuntu-24.04` because the
-# Windows Hyper-V worker exposes only 1 GiB to Node. The Windows lifecycle lane
-# remains on its owner-controlled Docker runner for container-bound evidence;
-# all other release lanes remain on their provisioned self-hosted runners.
-# `ci-runner-policy.test.ts` allows only this single hosted-job exception.
+# runners are free. Portable source, browser, and production-bundle lanes use
+# `ubuntu-24.04`; the renderer bundle also builds there because the Windows
+# Hyper-V worker exposes only 1 GiB to Node. Jobs that need owner-controlled
+# databases, durable evidence storage, or Windows Docker remain self-hosted.
+# `ci-runner-policy.test.ts` records this exact hosted-job allowlist.
 #
 # Lane → runner mapping (matches ops/self-hosted/*/ contract docs):
-#   - editor-web-bundle: GitHub-hosted ubuntu-24.04 (public standard runner).
-#   - validate-candidate / linux-real-services / prod-build-smoke:
-#     self-hosted,linux,x64,joy-media-ci (PC Docker Linux).
-#   - acceptance-primary / acceptance-responsive / real-service-acceptance /
-#     p3-real-services: self-hosted,linux,x64,joy-media-acceptance (isolated
-#     PC Docker Linux acceptance runner).
+#   - validate-candidate / editor-web-bundle / acceptance-primary /
+#     acceptance-responsive / prod-build-smoke: GitHub-hosted ubuntu-24.04.
+#   - linux-real-services: self-hosted,linux,x64,joy-media-ci (PC Docker Linux).
+#   - real-service-acceptance / p3-real-services / gate-summary:
+#     self-hosted,linux,x64,joy-media-acceptance (isolated PC Docker Linux).
 #   - gate-summary: self-hosted,linux,x64,joy-media-acceptance so it can
 #     evaluate the source-bound gate after both isolated passes and retain the
 #     final report in the acceptance runner's durable evidence store.
@@ -55,7 +54,7 @@ env:
 jobs:
   validate-candidate:
     name: validate-candidate
-    runs-on: [self-hosted, linux, x64, joy-media-ci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -63,6 +62,9 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
           fetch-depth: 1
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
       - name: Validate immutable candidate input
         shell: bash
         run: |
@@ -443,7 +445,7 @@ jobs:
 
   acceptance-primary:
     name: acceptance-primary desktop-primary (pass ${{ matrix.pass }})
-    runs-on: [self-hosted, linux, x64, joy-media-acceptance]
+    runs-on: ubuntu-24.04
     needs: [validate-candidate, linux-real-services, windows-worker-clean]
     strategy:
       fail-fast: false
@@ -458,6 +460,9 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
           fetch-depth: 1
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
       - name: Verify fixture-only acceptance boundary
         shell: bash
         run: |
@@ -470,7 +475,7 @@ jobs:
           test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm exec playwright install chromium
+      - run: pnpm exec playwright install --with-deps chromium
       - name: Full disposable desktop acceptance suite (reference viewport)
         shell: bash
         env:
@@ -524,7 +529,7 @@ jobs:
 
   acceptance-responsive:
     name: acceptance-responsive 6 viewports (pass ${{ matrix.pass }})
-    runs-on: [self-hosted, linux, x64, joy-media-acceptance]
+    runs-on: ubuntu-24.04
     needs: [validate-candidate, linux-real-services, windows-worker-clean]
     strategy:
       fail-fast: false
@@ -539,6 +544,9 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
           fetch-depth: 1
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
       - name: Verify fixture-only acceptance boundary
         shell: bash
         run: |
@@ -551,7 +559,7 @@ jobs:
           test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm exec playwright install chromium
+      - run: pnpm exec playwright install --with-deps chromium
       - name: Layout / overflow / a11y / panel-reachability at every non-primary viewport
         shell: bash
         env:
@@ -612,7 +620,7 @@ jobs:
 
   prod-build-smoke:
     name: prod-build-smoke (shipped bundle, public UI)
-    runs-on: [self-hosted, linux, x64, joy-media-ci]
+    runs-on: ubuntu-24.04
     needs: [validate-candidate]
     timeout-minutes: 30
     steps:
@@ -621,9 +629,12 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
           fetch-depth: 1
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm exec playwright install chromium
+      - run: pnpm exec playwright install --with-deps chromium
       - name: Measure the shipped editor entry-bundle graph
         shell: bash
         run: |
