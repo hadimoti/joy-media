@@ -121,6 +121,12 @@ function retainedFiles(lane, pass) {
       'test-output/browser/p3-export-matrix.json': JSON.stringify({ pass }),
       'test-output/browser/p3-lane-evidence.json': JSON.stringify({ pass }),
       'test-output/browser/p3-case-evidence.json': JSON.stringify({ pass }),
+      'test-output/browser/p3-export-gallery/manifest.json': JSON.stringify({
+        schemaVersion: 1,
+        entries: [{ caseId: 'fixture', mp4: 'fixture/export.mp4', frames: ['fixture/frame.png'] }],
+      }),
+      'test-output/browser/p3-export-gallery/fixture/export.mp4': 'fixture video bytes',
+      'test-output/browser/p3-export-gallery/fixture/frame.png': 'fixture frame bytes',
       'test-output/browser/p3-progress.jsonl': `${JSON.stringify({ pass })}\n`,
       'test-output/browser/p3-child-stdout-tail.txt': `pass ${pass}\n`,
       'test-output/browser/p3-child-stderr-tail.txt': '',
@@ -214,6 +220,10 @@ test('restores both real-service and P3 passes into hash-bound evidence inputs',
 
   assert.equal(result.sources.length, 4);
   assert.ok(result.sources.every((source) => /^[0-9a-f]{64}$/.test(source.manifestSha256)));
+  assert.equal(
+    result.sources.find((source) => source.lane === 'p3' && source.pass === 1)?.fileCount,
+    13,
+  );
   assert.deepEqual(
     JSON.parse(
       await readFile(
@@ -244,6 +254,37 @@ test('restores both real-service and P3 passes into hash-bound evidence inputs',
       join(workspaceRoot, 'test-output/readiness/two-pass-evidence/manifest.json'),
       'utf8',
     ),
+  );
+  await assert.rejects(
+    readFile(
+      join(
+        workspaceRoot,
+        'test-output/readiness/two-pass-evidence/p3/pass-1/browser/p3-export-gallery/manifest.json',
+      ),
+    ),
+    { code: 'ENOENT' },
+  );
+});
+
+test('rejects unapproved P3 gallery files and names the rejected path', async () => {
+  const evidenceRoot = await mkdtemp(join(tmpdir(), 'jm-unapproved-gallery-'));
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'jm-unapproved-gallery-workspace-'));
+  await writeRetainedPass(evidenceRoot, 'real-service', 1);
+  await writeRetainedPass(evidenceRoot, 'real-service', 2);
+  await writeRetainedPass(evidenceRoot, 'p3', 1, {
+    'test-output/browser/p3-export-gallery/unexpected.txt': 'unapproved',
+  });
+  await writeRetainedPass(evidenceRoot, 'p3', 2);
+
+  await assert.rejects(
+    restoreRetainedEvidence({
+      evidenceRoot,
+      workspaceRoot,
+      candidateSha: CANDIDATE_SHA,
+      runId: RUN_ID,
+      attempt: ATTEMPT,
+    }),
+    /unapproved file: test-output\/browser\/p3-export-gallery\/unexpected\.txt/i,
   );
 });
 

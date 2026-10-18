@@ -95,6 +95,7 @@ function assertSafeRelativePath(path) {
 function isAllowedRetainedFile(path) {
   if (path === 'context.txt' || path === 'git-status.txt') return true;
   if (RETAINED_EVIDENCE_PATHS.has(path)) return true;
+  if (path === 'test-output/browser/p3-export-gallery/manifest.json') return true;
   return path.startsWith('test-output/browser/p3-export-gallery/') && /\.(?:mp4|png)$/iu.test(path);
 }
 
@@ -170,7 +171,7 @@ async function readVerifiedPass(root, expected) {
     assertSafeRelativePath(entry.path);
     if (!isAllowedRetainedFile(entry.path)) {
       throw new Error(
-        `retained ${expected.lane} pass ${expected.pass} contains an unapproved file`,
+        `retained ${expected.lane} pass ${expected.pass} contains an unapproved file: ${entry.path}`,
       );
     }
     if (seen.has(entry.path)) {
