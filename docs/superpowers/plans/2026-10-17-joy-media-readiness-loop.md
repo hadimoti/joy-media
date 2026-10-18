@@ -90,9 +90,21 @@ The October 18 local verification on the revised worktree passed `pnpm verify:ci
 `pnpm run test:e2e:audit --retries=0` (826 passed, 7 known skips across all seven
 viewports). The seven skips include the documented Local Worker audio scenario;
 they are not reported as accepted live-audio evidence. The Windows lifecycle,
-real-GPU model output, 200-edit and 30-minute soak, and exact-candidate CI evidence
-remain open. `joy-media worker status --json` detects the RTX 5070 Ti but confirms
+real-GPU model output, 30-minute soak, and exact-candidate CI evidence remain open.
+`joy-media worker status --json` detects the RTX 5070 Ti but confirms
 all four local model environments are absent and `JOY\\models` does not exist.
+
+The first new exact-candidate run `39093151282` is pinned to
+`4994ba108417f86c654a7df25325b4843196abab`. Hosted candidate validation and the
+editor-web artifact build passed; the hosted shipped-bundle smoke lane failed at
+`pnpm install` because it did not enable Corepack on the fresh GitHub runner. The
+same workflow run's Windows Docker and Linux/P3 lanes were still in progress when
+this note was written. Commit `a5a2b5e6` adds the missing pinned pnpm bootstrap and
+a runner-policy regression test; commit `19f47d96` adds a 200-command timeline
+edit/readback scenario. The new policy test passes 25/25, the full timeline CLI
+suite passes 66/66 (160.52 s), and the sustained case passes with 200 edits in
+59.89 s. The full `pnpm verify:ci` must be repeated at the new candidate before the
+next exact-SHA run; run `39093151282` cannot certify `a5a2b5e6` or later commits.
 
 On the modified worktree at HEAD `325cc4d7277d3008bd79c18749ddcff9c9a53051`,
 `pnpm verify:ci` passed (typecheck, lint, formatting, full Vitest suite, build, and
@@ -491,8 +503,11 @@ real services. Evidence must name which ran and what remained unavailable.
       bounded error, no orphan process, unchanged project, cleaned temp output.
       Real-GPU qualification: one supported job per advertised capability with decoded
       output checks; a mock protocol pass cannot claim model output quality.
-- [ ] Run 200 edits and the existing 30-minute effects/media soak, with warmup
-      and machine/toolchain recorded. First measure baseline; proposed release bound
+- [x] Add and run a 200-edit CLI persistence scenario: 200 real CLI processes add
+      non-overlapping clips, then fresh-process readback verifies revision 201 and
+      all 200 exact spans. Local Windows/Node 24.19.0 run: 59.89 s for the edits.
+- [ ] Run the existing 30-minute effects/media soak, with warmup and machine/toolchain
+      recorded. First measure baseline; proposed release bound
       is <=20% slowdown against the same machine class and <=10% post-warmup retained
       heap growth. Calibrate sampling/GC method before freezing these new bounds;
       retain existing stronger gates. Resource exhaustion must fail without data loss.
