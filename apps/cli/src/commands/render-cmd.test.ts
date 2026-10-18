@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { runCli } from '../cli.js';
+import { cliSchemaErrors } from '../humanized/schema-validation.js';
 import {
   handleRenderCommand,
   isRenderPresetId,
@@ -441,6 +442,8 @@ describe('runHeadlessRender writes an honest, atomic, deterministic manifest', (
 
   it('reports a non-negative render duration when the wall clock moves backwards', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'joy-render-clock-'));
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
     const wallClock = vi.spyOn(Date, 'now');
     wallClock.mockReturnValueOnce(1_000).mockReturnValueOnce(900);
     try {
@@ -451,9 +454,23 @@ describe('runHeadlessRender writes an honest, atomic, deterministic manifest', (
         concurrency: 1,
         json: true,
       });
+      const complete = capture
+        .text()
+        .split('\n')
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .at(-1)!;
+      const manifest = JSON.parse(readFileSync(result.artifactPath, 'utf8')) as {
+        durationMs: number;
+      };
 
-      expect(result.durationMs).toBeGreaterThanOrEqual(0);
+      expect(result.exitCode).toBe(0);
+      expect(complete).toMatchObject({ type: 'complete', durationMs: result.durationMs });
+      expect(cliSchemaErrors('render-event.v1.schema.json', complete)).toEqual([]);
+      expect(complete.durationMs).toBeGreaterThanOrEqual(0);
+      expect(manifest.durationMs).toBe(result.durationMs);
     } finally {
+      restore();
       wallClock.mockRestore();
       rmSync(dir, { recursive: true, force: true });
     }
