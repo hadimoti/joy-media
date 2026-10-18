@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { newDb } from 'pg-mem';
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { POSTGRES_BASELINE_SCHEMA } from './postgres-baseline-schema.js';
@@ -267,25 +268,65 @@ describe('ordered PostgreSQL migrations', () => {
     expect(combined).toContain('usdc_invoices_txhash_logindex_idx');
   });
 
-  it.each(['007-account-devices-subscriptions-entitlements', '008-usdc-invoices'])(
-    'keeps migration %s DDL idempotent and additive',
-    async (id) => {
-      const migration = POSTGRES_MIGRATIONS.find((candidate) => candidate.id === id);
-      expect(migration).toBeDefined();
-      const queries: string[] = [];
-      await migration!.up({
-        query: async (sql: string) => {
-          queries.push(sql);
-          return { rows: [] };
-        },
-      });
+  it('prevents duplicate pending invoices for one owner and plan (010)', async () => {
+    const database = newDb();
+    const pool = new (database.adapters.createPg().Pool)();
+    await pool.query(`
+      CREATE TABLE usdc_invoices (
+        id text PRIMARY KEY,
+        owner_id text NOT NULL,
+        plan text NOT NULL,
+        status text NOT NULL
+      )
+    `);
 
-      const combined = queries.join('\n');
-      expect(combined).not.toMatch(/CREATE TABLE(?!\s+IF NOT EXISTS)/iu);
-      expect(combined).not.toMatch(/CREATE(?: UNIQUE)? INDEX(?!\s+IF NOT EXISTS)/iu);
-      expect(combined).not.toMatch(/\b(?:DROP|TRUNCATE|DELETE)\b/iu);
-    },
-  );
+    const migration = POSTGRES_MIGRATIONS.find(
+      (candidate) => candidate.id === '010-usdc-pending-owner-plan',
+    );
+    expect(migration).toBeDefined();
+    await migration!.up(pool as unknown as Pool);
+
+    await pool.query(
+      "INSERT INTO usdc_invoices (id, owner_id, plan, status) VALUES ('one', 'owner', 'monthly', 'pending')",
+    );
+    await expect(
+      pool.query(
+        "INSERT INTO usdc_invoices (id, owner_id, plan, status) VALUES ('two', 'owner', 'monthly', 'pending')",
+      ),
+    ).rejects.toMatchObject({ code: '23505' });
+    await expect(
+      pool.query(
+        "INSERT INTO usdc_invoices (id, owner_id, plan, status) VALUES ('three', 'owner', 'yearly', 'pending')",
+      ),
+    ).resolves.toMatchObject({ rowCount: 1 });
+    await expect(
+      pool.query(
+        "INSERT INTO usdc_invoices (id, owner_id, plan, status) VALUES ('four', 'owner', 'monthly', 'expired')",
+      ),
+    ).resolves.toMatchObject({ rowCount: 1 });
+    await pool.end();
+  });
+
+  it.each([
+    '007-account-devices-subscriptions-entitlements',
+    '008-usdc-invoices',
+    '010-usdc-pending-owner-plan',
+  ])('keeps migration %s DDL idempotent and additive', async (id) => {
+    const migration = POSTGRES_MIGRATIONS.find((candidate) => candidate.id === id);
+    expect(migration).toBeDefined();
+    const queries: string[] = [];
+    await migration!.up({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [] };
+      },
+    });
+
+    const combined = queries.join('\n');
+    expect(combined).not.toMatch(/CREATE TABLE(?!\s+IF NOT EXISTS)/iu);
+    expect(combined).not.toMatch(/CREATE(?: UNIQUE)? INDEX(?!\s+IF NOT EXISTS)/iu);
+    expect(combined).not.toMatch(/\b(?:DROP|TRUNCATE|DELETE)\b/iu);
+  });
 
   it('fails closed when an applied migration checksum has drifted', async () => {
     const { pool } = createRecordingPool([

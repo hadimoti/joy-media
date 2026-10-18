@@ -1,13 +1,21 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { evaluateGateSummary } from './ci-gate-summary.js';
 
+const RELEASE_WORKFLOW = readFileSync(
+  new URL('../../../.github/workflows/release-candidate-v2.yml', import.meta.url),
+  'utf8',
+);
+
 const LANES = [
   'linux-real-services',
+  'node-contracts',
   'windows-worker-clean',
   'acceptance-primary',
   'acceptance-responsive',
   'prod-build-smoke',
   'real-service-acceptance',
+  'p3-real-services',
 ];
 const NAMES = LANES.join(',');
 const needs = (overrides: Record<string, string> = {}) =>
@@ -16,6 +24,26 @@ const needs = (overrides: Record<string, string> = {}) =>
 describe('release-gate summary evaluator — name-keyed', () => {
   it('passes when every expected lane is present and success', () => {
     expect(evaluateGateSummary(needs(), NAMES)).toEqual({ ok: true, reasons: [] });
+  });
+
+  it('keeps hosted PostgreSQL ledger verification required by the exact-candidate gate', () => {
+    const jobStart = RELEASE_WORKFLOW.indexOf('\n  node-contracts:\n');
+    const jobEnd = RELEASE_WORKFLOW.indexOf('\n  editor-web-bundle:\n', jobStart);
+    const job = RELEASE_WORKFLOW.slice(jobStart, jobEnd);
+
+    expect(jobStart).toBeGreaterThanOrEqual(0);
+    expect(job).toContain('runs-on: ubuntu-24.04');
+    expect(job).toContain('image: postgres:16');
+    expect(job).toContain("node: ['22.17.0', 24]");
+    expect(job).toContain('JOY_TEST_DATABASE_URL');
+    expect(job).toContain('JOY_MEDIA_EDGE_URL: off');
+    expect(job).toContain('test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"');
+    expect(job).toContain('vitest run apps/cli/src --no-file-parallelism');
+    expect(RELEASE_WORKFLOW).toContain(
+      "'linux-real-services,node-contracts,windows-worker-clean,acceptance-primary,acceptance-responsive,prod-build-smoke,real-service-acceptance,p3-real-services'",
+    );
+    const gateStart = RELEASE_WORKFLOW.indexOf('\n  gate-summary:\n');
+    expect(RELEASE_WORKFLOW.slice(gateStart)).toContain('        node-contracts,');
   });
 
   it('fails on a failure / cancelled / skipped / timed_out result, naming the lane', () => {

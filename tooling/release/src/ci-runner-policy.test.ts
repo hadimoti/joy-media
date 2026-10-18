@@ -11,8 +11,9 @@ const WORKFLOWS_DIR = join(REPO_ROOT, '.github', 'workflows');
  * Explicit CI runner placement contract.
  *
  * The public repository may use standard GitHub-hosted runners without minute
- * charges. Candidate validation, responsive-only browser checks, and editor
- * bundle jobs use `ubuntu-24.04`. Media-export browser acceptance runs on the
+ * charges. Candidate validation, Node 22/24 CLI and PostgreSQL contracts,
+ * responsive-only browser checks, and editor bundle jobs use `ubuntu-24.04`.
+ * Media-export browser acceptance runs on the
  * isolated Linux acceptance runner because the hosted runner timed out waiting
  * for production exports. Private service and Windows Docker lanes stay on
  * their owner-controlled runners. This test enforces the exact split offline:
@@ -63,6 +64,7 @@ const APPROVED_HOSTED_RUNNERS: ReadonlyMap<
     join(WORKFLOWS_DIR, 'release-candidate-v2.yml'),
     new Map([
       ['validate-candidate', ['ubuntu-24.04']],
+      ['node-contracts', ['ubuntu-24.04']],
       ['editor-web-bundle', ['ubuntu-24.04']],
       ['acceptance-responsive', ['ubuntu-24.04']],
     ]),

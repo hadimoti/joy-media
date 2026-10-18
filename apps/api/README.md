@@ -21,3 +21,11 @@ session cookie, or identity signing key.
 **Must not:** Heavy inference, frame rendering, large-media relay; one microservice per module.
 
 Dependency rule (§9.1): the graph points inward — apps depend on packages, packages depend on schema/primitives, never the reverse, and core packages never import from `apps/*`.
+
+## Model gateway accounting
+
+When the Joy Model gateway is explicitly configured, it records user usage only
+after a successful upstream response. Upstream errors and transport failures are
+returned as errors and do not create user usage charges. If a provider incurs a
+cost before returning an error, JOY absorbs that cost; it is not passed through
+to the user. The gateway does not silently retry through another provider.

@@ -474,3 +474,57 @@ test('rejects Windows Worker output from a different candidate or workflow run',
     /candidate|workflow run|run attempt/i,
   );
 });
+
+test('allows only named P3 gallery PPM sample frames', async () => {
+  const evidenceRoot = await mkdtemp(join(tmpdir(), 'jm-p3-ppm-gallery-'));
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'jm-p3-ppm-workspace-'));
+  await writeRetainedPass(evidenceRoot, 'real-service', 1);
+  await writeRetainedPass(evidenceRoot, 'real-service', 2);
+  const manifest = JSON.stringify({
+    schemaVersion: 1,
+    entries: [
+      {
+        caseId: 'fixture',
+        mp4: 'fixture/export.mp4',
+        frames: ['fixture/frame.png', 'fixture/frame-0.10.ppm'],
+      },
+    ],
+  });
+  await writeRetainedPass(evidenceRoot, 'p3', 1, {
+    'test-output/browser/p3-export-gallery/manifest.json': manifest,
+    'test-output/browser/p3-export-gallery/fixture/frame-0.10.ppm': 'P6 sample frame',
+  });
+  await writeRetainedPass(evidenceRoot, 'p3', 2);
+
+  await assert.doesNotReject(
+    restoreRetainedEvidence({
+      evidenceRoot,
+      workspaceRoot,
+      candidateSha: CANDIDATE_SHA,
+      runId: RUN_ID,
+      attempt: ATTEMPT,
+    }),
+  );
+});
+
+test('rejects P3 PPM gallery files outside the generated sample-frame names', async () => {
+  const evidenceRoot = await mkdtemp(join(tmpdir(), 'jm-unexpected-ppm-gallery-'));
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'jm-unexpected-ppm-workspace-'));
+  await writeRetainedPass(evidenceRoot, 'real-service', 1);
+  await writeRetainedPass(evidenceRoot, 'real-service', 2);
+  await writeRetainedPass(evidenceRoot, 'p3', 1, {
+    'test-output/browser/p3-export-gallery/fixture/unexpected.ppm': 'unapproved frame',
+  });
+  await writeRetainedPass(evidenceRoot, 'p3', 2);
+
+  await assert.rejects(
+    restoreRetainedEvidence({
+      evidenceRoot,
+      workspaceRoot,
+      candidateSha: CANDIDATE_SHA,
+      runId: RUN_ID,
+      attempt: ATTEMPT,
+    }),
+    /unapproved file: test-output\/browser\/p3-export-gallery\/fixture\/unexpected\.ppm/i,
+  );
+});

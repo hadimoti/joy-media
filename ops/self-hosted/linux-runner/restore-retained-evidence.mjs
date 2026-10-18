@@ -96,7 +96,11 @@ function isAllowedRetainedFile(path) {
   if (path === 'context.txt' || path === 'git-status.txt') return true;
   if (RETAINED_EVIDENCE_PATHS.has(path)) return true;
   if (path === 'test-output/browser/p3-export-gallery/manifest.json') return true;
-  return path.startsWith('test-output/browser/p3-export-gallery/') && /\.(?:mp4|png)$/iu.test(path);
+  if (!path.startsWith('test-output/browser/p3-export-gallery/')) return false;
+  return (
+    /\.(?:mp4|png)$/iu.test(path) ||
+    /^test-output\/browser\/p3-export-gallery\/[^/]+\/frame-(?:0\.10|0\.50|0\.90)\.ppm$/u.test(path)
+  );
 }
 
 function parseSha256Manifest(value) {
