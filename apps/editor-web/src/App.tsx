@@ -320,6 +320,7 @@ import {
 import type { AudioState } from '@joy-media/commands';
 import { renderOfflineAudio } from '@joy-media/audio-core/offline';
 import type { ExportPresetId } from '@joy-media/project-schema';
+import { dimensionsForExportPreset } from '@joy-media/project-schema';
 import {
   AgentPanel,
   type AgentPanelCommand,
@@ -3933,6 +3934,7 @@ function EditorWorkspace({
       const retryPreset = retryEntry?.presetId;
       if (
         retryPreset !== undefined &&
+        retryPreset !== 'social-h264-aac' &&
         retryPreset !== 'reels-1080' &&
         retryPreset !== 'shorts-1080' &&
         retryPreset !== 'youtube-1080' &&
@@ -4033,19 +4035,10 @@ function EditorWorkspace({
           exportVisualProject.compositions[exportVisualProject.rootCompositionId];
         const baseWidth = compositionV1?.width ?? 1080;
         const baseHeight = compositionV1?.height ?? 1920;
-        const { width, height } = (() => {
-          switch (activeExportPreset) {
-            case 'reels-1080':
-            case 'shorts-1080':
-              return { width: 1080, height: 1920 };
-            case 'youtube-1080':
-              return { width: 1920, height: 1080 };
-            case 'high-bitrate':
-              return { width: Math.max(baseWidth, 1920), height: Math.max(baseHeight, 1080) };
-            default:
-              return { width: baseWidth, height: baseHeight };
-          }
-        })();
+        const { width, height } = dimensionsForExportPreset(activeExportPreset, {
+          width: baseWidth,
+          height: baseHeight,
+        });
         const compositionTimeline =
           exportTimelineProject.compositions[exportTimelineProject.rootCompositionId];
         const allTimelineClips = flattenRootTimelineVideoClips(exportTimelineProject);

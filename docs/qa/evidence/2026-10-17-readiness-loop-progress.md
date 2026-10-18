@@ -341,12 +341,10 @@ typecheck, lint, format, the full Vitest suite, workspace builds and production 
 platform-specific cases, and failed none. The full retry-free Playwright audit and
 the candidate-bound two-pass workflow are separate acceptance gates.
 
-The exact-SHA `release-candidate-v2` workflow is pending dispatch for the frozen
-candidate. GitHub-hosted Ubuntu remains assigned to portable validation, renderer
-build and responsive checks; the available self-hosted runners handle media export,
-real services and Windows Docker lifecycle acceptance where hosted runners lack the
-needed capabilities. No candidate-ready receipt, release approval, install, or
-deployment is claimed yet.
+GitHub-hosted Ubuntu remains assigned to portable validation and renderer build;
+the available self-hosted runners handle real services and Windows Docker lifecycle
+acceptance where hosted runners lack the needed capabilities. Candidate-bound
+acceptance is still pending; no release approval, install, or deployment is claimed.
 
 ## Windows lifecycle command quoting follow-up — October 18
 
@@ -354,4 +352,88 @@ Exact-candidate workflow run `39101545683` for commit `68b9b6bcadc4cf011deae1fab
 
 Root cause was harness argument encoding: Windows CRT escaping passed `\"path\"` through `cmd.exe /c`, which CMD parsed as invalid syntax. The lifecycle acceptance and cleanup invocations now pass CMD-native `/d /s /c ""path""` raw arguments. A regression test checks both call sites and executes a generated batch file under `JOY Media` in the OS temp directory. The focused Windows harness passed 5 tests, the full `pnpm verify:ci` passed, and `pnpm test:harness` passed 34 tests with 11 platform skips and no failures.
 
-The correction is not yet on a frozen candidate. Commit and push it, then rerun the exact-SHA `release-candidate-v2` workflow on GitHub-hosted Ubuntu for portable lanes and the available self-hosted Linux/Windows Docker runners for service, media-export, and installer-lifecycle lanes. Keep release readiness open until both complete passes and all remaining plan gates are evidenced.
+The correction was committed as `f14c1ae355a692c07e6ee25f523ebce445ab3bd5` and dispatched as exact-SHA `release-candidate-v2` run `39103645259`. Hosted validation, renderer build, public production smoke, and both Linux real-service passes are green; Windows two-pass lifecycle and P3 qualification are still running. This run predates the additional packaged Monitor acceptance below and does not yet produce a candidate-ready receipt.
+
+## Packaged editor Monitor, text, and scale acceptance — October 18
+
+The unpacked Electron journey now verifies Local preview status, visible Monitor
+frame changes after seeking to 0.5 and 1.5 seconds, transport progression, and a
+successful keyboard seek reset. It captures screenshots and runs axe at 1024x768,
+1366x768, and 1920x1080. A second packaged launch with Chromium's
+`--force-device-scale-factor=1.5` verifies the reported display scale and scans the
+created project for accessibility violations.
+
+The restart journey decodes a 250ms AAC sample beginning 100ms after the actual
+audio clip start and requires normalized PCM16 RMS above 0.02, in addition to
+FFprobe's H.264/AAC and duration checks. A separate simple-project journey captures
+Monitor frames at 0.5 and 1.5 seconds, decodes the same samples from the exported
+MP4, and requires normalized 64x64 RGB mean absolute difference below 0.20 for each
+sample.
+
+The packaged main journey now moves a video clip, authors a Persian/Latin mixed-bidi
+title, selects RTL, and confirms the moved clip, title text/direction, keyframe,
+effects, transition, audio, and Persian caption after restart. The Text editor axe
+scan exposed low-contrast template previews and five unnamed range controls. Template
+previews now choose a contrasting solid surface, the Direction select has a stable
+accessible name, and each range control is linked to its visible PropertyRow label.
+The regression run passes the editor's axe scan and asserts all five slider names.
+
+The packaged Electron suite passed all 3 journeys with retries disabled in 42.3s:
+playable editor journey, 150% display-scale accessibility, and Monitor/export frame
+parity. Typecheck, targeted ESLint, and Prettier checks passed. This source/test
+update is not included in run `39103645259`; a new commit and exact-SHA two-pass
+workflow are required to bind these results to a candidate. The edit-panel keyboard
+route now creates a title, replaces its content, and selects RTL without pointer
+input. All export presets/scenes/overlays and export cancellation/crash recovery
+remain open in Task 4.
+
+## Full-source verification under shared-runner load — October 18
+
+Two local `pnpm verify:ci` attempts completed typecheck, lint, and formatting, then
+reached the full Vitest suite (630 files, 5,603 tests passed, 28 skipped). The first
+attempt had one `render-parity` test exceed Vitest's 30-second test timeout even
+though its real CLI child has a 60-second hang guard; the isolated case passed in
+about 1 second, so the file now allows 90 seconds for the child guard to report a
+structured failure. The rerun passed that suite but hit a Vitest worker watchdog in
+the `agent-run` setup hook. That isolated file passed 24/24 in 13.2 seconds.
+
+Both attempts overlapped the exact-candidate run `39103645259` on this same host's
+self-hosted acceptance runner, so neither is recorded as a passing full verification.
+After that workflow completed, a fresh local `pnpm verify:ci` passed the full source
+check, builds, and production audit; `pnpm test:harness` also passed. The isolated
+render-parity and agent-run suites were green. The exact candidate's separate
+real-service locator failure and its fix are recorded below.
+
+## Packaged output and exact-candidate harness follow-up — October 18
+
+Run `39103645259`, pinned to `f14c1ae355a692c07e6ee25f523ebce445ab3bd5`, finished
+failed. Hosted candidate/build/smoke lanes, responsive and desktop browser acceptance,
+Windows lifecycle, Linux real-service infrastructure/P3, and both P3 passes passed.
+Only the two authenticated real-service desktop journeys failed. Each timed out at
+`.panel-tab[aria-label="Enhance"]`; teardown verified that the disposable schema,
+bucket, temp root, and web process were removed. The shared browser helper and mounted
+UI use Dockview tabs, so the harness now selects `.dv-tab[role="tab"]` for Create,
+Enhance, Inspector, Joy Code, and 3D Scene. This fix requires a fresh candidate run.
+
+The packaged export regression reproduced a separate bug: cancelling Social H.264
+left the history row interrupted when Retry was clicked, because the retry guard
+omitted `social-h264-aac`. After adding that supported preset, the test passes and
+FFprobe plus a full FFmpeg decode confirm playable H.264/AAC output. The updated
+five-journey packaged suite passes with retries disabled in 1.2 minutes. It verifies
+project edits including split/undo, trim/undo/redo, move, Persian title/caption,
+effects, keyframes, transitions, audio, SQLite reopen, decoded audio channels, all
+five output presets, HTML scene Monitor/export frame parity, 150% scaling, and
+cancel/retry recovery. High-bitrate dimensions now scale proportionally through a
+shared project-schema preset resolver; its export-core tests pass 12/12.
+
+The current CLI real-render suite passes 12 tests with two expected POSIX signal
+skips on Windows. Its source and single-file-bundle cases probe playable H.264/AAC,
+decode the output, and check picture, timeline timing, audio, and recovery. The final
+local `pnpm verify:ci` run passed TypeScript, lint, formatting, the complete Vitest
+suite, workspace builds, and production audit (`No known vulnerabilities found`).
+`pnpm test:harness` passed 34, skipped 11 expected Linux-only cases, and failed none.
+
+The exact-candidate source-bound workflow for these current changes is pending. The
+local tests do not replace its retry-free two-pass evidence, independent review, or
+release decision. Real GPU qualification remains unavailable because the local model
+runtimes and weights are absent; no model download or external paid provider was used.

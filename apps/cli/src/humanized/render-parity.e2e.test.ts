@@ -1,9 +1,14 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CLI_ROOT, createSandbox, describeRun, type Sandbox } from './harness.js';
 import { expectNdjsonContract, projectDoc, writeSandboxFile } from './render-helpers.js';
+
+// Real CLI child processes get their own 60s hang guard. Let that guard return a
+// structured failure before Vitest's outer timeout, even during the full suite's
+// CPU-heavy fixture render tests.
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 });
 
 const hasFfmpeg = (): boolean => {
   return (

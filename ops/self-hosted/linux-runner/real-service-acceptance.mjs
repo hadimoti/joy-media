@@ -1241,7 +1241,7 @@ async function recordJourney(
     await page.getByRole('button', { name: 'File', exact: true }).waitFor();
 
     telemetry.phase = 'enhance-effects';
-    const enhance = page.locator('.panel-tab[aria-label="Enhance"]').first();
+    const enhance = page.locator('.dv-tab[role="tab"][aria-label="Enhance"]').first();
     await enhance.click();
     const effectsTab = page
       .getByRole('region', { name: 'Enhance tools', exact: true })
@@ -1249,10 +1249,10 @@ async function recordJourney(
     await effectsTab.click();
     await page.locator('.effects-panel').waitFor();
     telemetry.phase = 'inspector';
-    await page.locator('.panel-tab[aria-label="Inspector"]').first().click();
+    await page.locator('.dv-tab[role="tab"][aria-label="Inspector"]').first().click();
     await page.getByRole('article', { name: 'Inspector', exact: true }).waitFor();
     telemetry.phase = 'joy-code';
-    const joyCode = page.locator('.panel-tab[aria-label="Joy Code"]').first();
+    const joyCode = page.locator('.dv-tab[role="tab"][aria-label="Joy Code"]').first();
     await joyCode.click();
     await page.getByRole('article', { name: 'Joy Code', exact: true }).waitFor();
     // Creative Brief is a composer capability inside the Joy Code panel, not a
@@ -1264,11 +1264,11 @@ async function recordJourney(
     // The 3D scene workspace is its own on-demand Dockview panel. Reveal it from
     // the View menu when its dock tab is not already mounted.
     telemetry.phase = '3d-scene';
-    let scene3dTab = page.locator('.panel-tab[aria-label="3D Scene"]').first();
+    let scene3dTab = page.locator('.dv-tab[role="tab"][aria-label="3D Scene"]').first();
     if (!(await scene3dTab.isVisible())) {
       await page.getByRole('button', { name: 'View', exact: true }).click();
       await page.getByRole('menuitem', { name: '3D Scene', exact: true }).click();
-      scene3dTab = page.locator('.panel-tab[aria-label="3D Scene"]').first();
+      scene3dTab = page.locator('.dv-tab[role="tab"][aria-label="3D Scene"]').first();
     }
     await scene3dTab.click();
     await page.getByRole('article', { name: '3D Scene', exact: true }).waitFor();
@@ -1330,7 +1330,7 @@ async function recordJourney(
     // The Enhance panel replaces the Create/Assets surface. Return to the
     // catalog before resolving the second imported asset, and clear any kind
     // filter that the import flow or prior interactions may have selected.
-    await page.locator('.panel-tab[aria-label="Create"]').first().click();
+    await page.locator('.dv-tab[role="tab"][aria-label="Create"]').first().click();
     await page.getByRole('article', { name: 'Assets', exact: true }).waitFor();
     await resetAssetCatalogFilters(page);
     await addAssetToTimeline(page, audioName);
@@ -1984,7 +1984,7 @@ async function downloadSha256(download) {
 }
 
 async function importFixture(page, fileNameOrPath, displayName) {
-  await page.locator('.panel-tab[aria-label="Create"]').first().click();
+  await page.locator('.dv-tab[role="tab"][aria-label="Create"]').first().click();
   await page.getByRole('article', { name: 'Assets', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Import media' }).first().click();
   const drawer = page.getByRole('dialog', { name: 'Import media' });

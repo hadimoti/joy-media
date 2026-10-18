@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import type {
   JoyProjectV1,
   TextDocumentV1,
@@ -149,6 +149,10 @@ export function TextPanel({
 
 function TemplatePreview({ template }: { readonly template: TextTemplateV1 }) {
   const fill = template.style.fill;
+  const solidPreviewSurface =
+    fill.kind === 'solid'
+      ? contrastingTemplatePreviewSurface(fill.color, template.style.stroke?.color)
+      : undefined;
   const background =
     fill.kind === 'linear-gradient'
       ? `linear-gradient(${fill.angleDeg}deg, ${fill.stops.map((stop) => `${stop.color} ${Math.round(stop.offset * 100)}%`).join(', ')})`
@@ -160,6 +164,7 @@ function TemplatePreview({ template }: { readonly template: TextTemplateV1 }) {
       style={{
         color: fill.kind === 'solid' ? fill.color : fill.stops[0]?.color,
         backgroundImage: background,
+        backgroundColor: solidPreviewSurface,
         fontFamily: resolveContentFontFamily(template.style.fontFamily),
         fontSize: `${Math.max(0.68, Math.min(1.2, template.style.fontSizePx / 96))}rem`,
         fontStyle: template.style.italic ? 'italic' : 'normal',
@@ -169,11 +174,58 @@ function TemplatePreview({ template }: { readonly template: TextTemplateV1 }) {
           template.style.glow === undefined
             ? undefined
             : `0 0 ${template.style.glow.radiusPx / 3}px ${template.style.glow.color}`,
+        WebkitTextStroke:
+          template.style.stroke === undefined
+            ? undefined
+            : `${template.style.stroke.widthPx / 3}px ${template.style.stroke.color}`,
       }}
     >
       {template.sample}
     </span>
   );
+}
+
+function contrastingTemplatePreviewSurface(
+  color: string,
+  strokeColor?: string,
+): string | undefined {
+  const luminances = [color, ...(strokeColor === undefined ? [] : [strokeColor])].map(
+    relativeLuminance,
+  );
+  if (luminances.some((luminance) => luminance === undefined)) return undefined;
+
+  const candidates = [
+    { color: '#ffffff', luminance: 1 },
+    { color: '#17181c', luminance: 0.008 },
+    { color: '#6e6e6e', luminance: 0.156 },
+  ];
+  return candidates
+    .map((candidate) => ({
+      ...candidate,
+      minimumContrast: Math.min(
+        ...luminances.map((luminance) => {
+          const foreground = luminance!;
+          const high = Math.max(foreground, candidate.luminance);
+          const low = Math.min(foreground, candidate.luminance);
+          return (high + 0.05) / (low + 0.05);
+        }),
+      ),
+    }))
+    .sort((left, right) => right.minimumContrast - left.minimumContrast)[0]?.color;
+}
+
+function relativeLuminance(color: string): number | undefined {
+  const match = /^#([\da-f]{6})$/i.exec(color);
+  if (match?.[1] === undefined) return undefined;
+  const channels = [0, 2, 4].map((offset) =>
+    Number.parseInt(match[1]!.slice(offset, offset + 2), 16),
+  );
+  return channels
+    .map((channel) => {
+      const srgb = channel / 255;
+      return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+    })
+    .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index]!, 0);
 }
 
 function TextEditor({
@@ -183,6 +235,7 @@ function TextEditor({
   readonly object: VisualObjectV1;
   readonly onChange: (next: VisualObjectV1) => void;
 }) {
+  const controlPrefix = useId();
   const document = useMemo(
     () =>
       object.textDocument ?? {
@@ -323,8 +376,13 @@ function TextEditor({
             ))}
           </select>
         </label>
-        <PropertyRow label="Size" value={`${Math.round(style.fontSizePx)}px`}>
+        <PropertyRow
+          label="Size"
+          controlId={`${controlPrefix}-size`}
+          value={`${Math.round(style.fontSizePx)}px`}
+        >
           <input
+            id={`${controlPrefix}-size`}
             type="range"
             min={24}
             max={220}
@@ -332,8 +390,13 @@ function TextEditor({
             onChange={(event) => update({ fontSizePx: event.currentTarget.valueAsNumber })}
           />
         </PropertyRow>
-        <PropertyRow label="Weight" value={String(style.fontWeight)}>
+        <PropertyRow
+          label="Weight"
+          controlId={`${controlPrefix}-weight`}
+          value={String(style.fontWeight)}
+        >
           <input
+            id={`${controlPrefix}-weight`}
             type="range"
             min={300}
             max={900}
@@ -358,6 +421,7 @@ function TextEditor({
         <label className="text-editor-row">
           <span>Direction</span>
           <select
+            aria-label="Direction"
             value={style.direction}
             onChange={(event) =>
               update({ direction: event.currentTarget.value as TextStyleV1['direction'] })
@@ -518,8 +582,13 @@ function TextEditor({
             }
           />
         </label>
-        <PropertyRow label="Stroke width" value={`${style.stroke?.widthPx ?? 0}px`}>
+        <PropertyRow
+          label="Stroke width"
+          controlId={`${controlPrefix}-stroke-width`}
+          value={`${style.stroke?.widthPx ?? 0}px`}
+        >
           <input
+            id={`${controlPrefix}-stroke-width`}
             type="range"
             min={0}
             max={12}
@@ -554,8 +623,13 @@ function TextEditor({
             }
           />
         </label>
-        <PropertyRow label="Shadow blur" value={`${style.shadow?.blurPx ?? 0}px`}>
+        <PropertyRow
+          label="Shadow blur"
+          controlId={`${controlPrefix}-shadow-blur`}
+          value={`${style.shadow?.blurPx ?? 0}px`}
+        >
           <input
+            id={`${controlPrefix}-shadow-blur`}
             type="range"
             min={0}
             max={32}
@@ -589,8 +663,13 @@ function TextEditor({
             }
           />
         </label>
-        <PropertyRow label="Opacity" value={style.opacity.toFixed(2)}>
+        <PropertyRow
+          label="Opacity"
+          controlId={`${controlPrefix}-opacity`}
+          value={style.opacity.toFixed(2)}
+        >
           <input
+            id={`${controlPrefix}-opacity`}
             type="range"
             min={0}
             max={1}

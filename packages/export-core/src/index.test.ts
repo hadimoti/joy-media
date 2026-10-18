@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { REFERENCE_PROJECT } from '@joy-media/test-fixtures';
 import {
+  dimensionsForPreset,
   ffmpegArgs,
   freezeManifest,
   remuxBrowserMp4,
@@ -23,6 +24,30 @@ describe('deterministic export contract', () => {
     durationUs: 100_000,
     preset: 'social-h264-aac',
   } as const;
+  it.each([
+    [
+      { width: 1080, height: 1920 },
+      { width: 1080, height: 1920 },
+    ],
+    [
+      { width: 1920, height: 1080 },
+      { width: 1920, height: 1080 },
+    ],
+    [
+      { width: 320, height: 180 },
+      { width: 1920, height: 1080 },
+    ],
+    [
+      { width: 180, height: 320 },
+      { width: 1080, height: 1920 },
+    ],
+    [
+      { width: 1000, height: 1000 },
+      { width: 1920, height: 1920 },
+    ],
+  ])('keeps high-bitrate output proportional for %o', (composition, expected) => {
+    expect(dimensionsForPreset('high-bitrate', composition)).toEqual(expected);
+  });
   it('freezes a manifest and uses argument arrays', () => {
     expect(freezeManifest(manifest)).toEqual(manifest);
     expect(ffmpegArgs(manifest, 'out.mp4')).toContain('libx264');

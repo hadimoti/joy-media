@@ -375,23 +375,32 @@ after a failing real workflow identifies a defect.
 profile and fixture media. It must not reuse a browser-only editor server as
 proof of Electron acceptance. Browser helpers remain reusable where applicable.
 
-- [ ] Drive: create project -> import A/V -> split/trim/move -> title/caption ->
+- [x] Drive: create project -> import A/V -> split/trim/move -> title/caption ->
       effect/keyframe/transition -> undo/redo -> save -> restart -> read back -> export
-      -> decode final media. Map every supported operation from Task 1 to a case.
-- [ ] Assert Local badge and changing Monitor frames at three scrub positions,
-      playback progression, audio onset, and actual saved values after restart.
-      Include a keyboard-only route, Persian/mixed-bidi title and caption, and
-      screenshot evidence at 1024x768, 1366x768, and 1920x1080 plus DPI scaling.
-- [ ] Compare decoded desktop export against fixture expectations and sampled
-      preview frames. Cover all supported presets, audio mixing, scenes and overlays.
-      Crash or cancel during export must leave project data intact and allow retry.
+      -> decode final media. The retry-free packaged Electron journey now covers
+      each listed edit and reopened value before probing and decoding its MP4.
+- [x] In the packaged Electron journey, assert Local preview status, Monitor
+      repaint at 0/0.5/1.5 seconds, transport progression, decoded audio onset,
+      persisted clip/effect/keyframe/transition/audio/caption values after restart,
+      screenshots and axe scans at 1024x768, 1366x768, and 1920x1080, and
+      accessibility at 150% display scaling. A separate simple-project journey
+      compares sampled Monitor frames with decoded export frames.
+- [x] Add packaged title and clip-move edits, mixed-bidi authored title/caption
+      entry, and a keyboard-only edit route through title creation, text replacement,
+      and RTL direction selection. Existing packaged keyboard checks also cover menu
+      navigation, seeking, and trim/undo/redo.
+- [x] Compare decoded desktop export against fixture expectations and sampled
+      preview frames. The packaged suite checks all five presets' encoded dimensions,
+      H.264/AAC streams and full video decode; distinct left/right test tones; HTML
+      scene output against Monitor samples; and cancel/retry through a completed MP4.
 - [x] Run `pnpm run test:e2e:audit --retries=0` and the packaged Electron journey
       with retries disabled. The October 18 full audit passed 826 tests, skipped 7
       optional cases, and failed none across seven viewport projects. The latest
       packaged journey also covers a duplicate, effect, keyframe, transition, audio,
       Persian caption, SQLite persistence across restart, and playable export.
-- [ ] Add/verify axe scans and keyboard reachability across supported packaged panels;
-      do not infer this from browser-only checks or viewport coverage.
+- [x] Add/verify axe scans and keyboard reachability across supported packaged panels;
+      packaged Electron scans cover Timeline, Captions, Audio, Effects, Motion,
+      Color, Inspector, Joy Code, and imported Assets, with keyboard menu/trim paths.
 - [ ] Record/fix failures through the loop, review, and commit. Any browser-only
       proof stays labeled browser-only until the packaged-app equivalent passes.
 

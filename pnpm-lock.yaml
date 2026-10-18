@@ -446,6 +446,10 @@ importers:
         version: link:../project-schema
 
   packages/export-core:
+    dependencies:
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
     devDependencies:
       '@joy-media/test-fixtures':
         specifier: workspace:*
