@@ -32,6 +32,7 @@ const RETAINED_EVIDENCE_PATHS = new Set([
 
 const FINAL_GATE_VIEW = [
   'test-output/browser/journeys.json',
+  'test-output/browser/authenticated-editor-1.0/journey-evidence.json',
   'test-output/release-performance/polling.json',
   'test-output/release-performance/effects-soak.json',
   'test-output/release-performance/timeline-integrity.json',

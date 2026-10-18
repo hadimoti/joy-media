@@ -105,7 +105,33 @@ function retainedFiles(lane, pass) {
   };
   if (lane === 'real-service') {
     Object.assign(files, {
-      'test-output/browser/journeys.json': JSON.stringify({ pass, status: 'passed' }),
+      'test-output/browser/journeys.json': JSON.stringify([
+        {
+          id: 'authenticated-editor-1.0',
+          status: 'verified',
+          evidencePath: 'test-output/browser/authenticated-editor-1.0/journey-evidence.json',
+        },
+      ]),
+      'test-output/browser/authenticated-editor-1.0/journey-evidence.json': JSON.stringify({
+        journeyId: 'authenticated-editor-1.0',
+        status: 'verified',
+        verifiedAt: '2026-10-18T22:00:00.000Z',
+        execution: 'real-services',
+        sourceProvenance: {
+          commitSha: CANDIDATE_SHA,
+          treeHash: 'b'.repeat(40),
+          lockfileSha256: 'c'.repeat(64),
+          worktreeClean: true,
+        },
+        assertions: {
+          verifiedExport: {
+            channel: 'verified-delivery',
+            inspection: { state: 'passed' },
+          },
+          motionPlacement: [{}, {}],
+        },
+        pass,
+      }),
       'test-output/release-performance/polling.json': JSON.stringify({ metrics: { pass } }),
       'test-output/release-performance/effects-soak.json': JSON.stringify({ metrics: { pass } }),
       'test-output/release-performance/timeline-integrity.json': JSON.stringify({
@@ -234,11 +260,58 @@ test('restores both real-service and P3 passes into hash-bound evidence inputs',
         'utf8',
       ),
     ),
-    { pass: 1, status: 'passed' },
+    [
+      {
+        id: 'authenticated-editor-1.0',
+        status: 'verified',
+        evidencePath: 'test-output/browser/authenticated-editor-1.0/journey-evidence.json',
+      },
+    ],
   );
   assert.deepEqual(
     JSON.parse(await readFile(join(workspaceRoot, 'test-output/browser/journeys.json'), 'utf8')),
-    { pass: 2, status: 'passed' },
+    [
+      {
+        id: 'authenticated-editor-1.0',
+        status: 'verified',
+        evidencePath: 'test-output/browser/authenticated-editor-1.0/journey-evidence.json',
+      },
+    ],
+  );
+  assert.deepEqual(
+    JSON.parse(
+      await readFile(
+        join(workspaceRoot, 'test-output/browser/authenticated-editor-1.0/journey-evidence.json'),
+        'utf8',
+      ),
+    ),
+    {
+      journeyId: 'authenticated-editor-1.0',
+      status: 'verified',
+      verifiedAt: '2026-10-18T22:00:00.000Z',
+      execution: 'real-services',
+      sourceProvenance: {
+        commitSha: CANDIDATE_SHA,
+        treeHash: 'b'.repeat(40),
+        lockfileSha256: 'c'.repeat(64),
+        worktreeClean: true,
+      },
+      assertions: {
+        verifiedExport: {
+          channel: 'verified-delivery',
+          inspection: { state: 'passed' },
+        },
+        motionPlacement: [{}, {}],
+      },
+      pass: 2,
+    },
+  );
+  assert.ok(
+    result.gateView.some(
+      (entry) =>
+        entry.path === 'test-output/browser/authenticated-editor-1.0/journey-evidence.json',
+    ),
+    'the final gate view must restore the evidence referenced by journeys.json',
   );
   assert.deepEqual(
     JSON.parse(await readFile(join(workspaceRoot, 'test-output/operations/teardown.json'), 'utf8')),
