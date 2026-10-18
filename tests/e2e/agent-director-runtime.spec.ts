@@ -5,6 +5,7 @@ import {
   allowExpectedAssetFixtureMisses,
   assertBrowserAudit,
   setupBrowserAudit,
+  type CountRange,
 } from './helpers/browser-console-audit.js';
 
 const INVALID_CANONICAL_PROPOSAL = {
@@ -50,18 +51,32 @@ async function requestPreview(page: Page, prompt: string): Promise<void> {
 }
 
 test.describe('JOY Live Director runtime boundary', () => {
-  const DIRECTOR_ASSET_MISS_MAP: Record<string, number> = {
-    'cancellation rejects a delayed provider reply before it can stage a preview': 2,
-    'proves the provider handshake, repairs only through the canonical host, and requires approval': 9,
-    'invalidates a real Worker preview when its revision becomes stale': 5,
-    'clearing a model connection terminalizes an in-flight run without reviving a preview': 2,
-    'reports a provider adapter failure without suggesting an edit was applied': 2,
+  type AssetMissBounds = {
+    original: number | CountRange;
+    cloud?: number | CountRange;
+  };
+  const DIRECTOR_ASSET_MISS_MAP: Record<string, AssetMissBounds> = {
+    'cancellation rejects a delayed provider reply before it can stage a preview': { original: 2 },
+    'proves the provider handshake, repairs only through the canonical host, and requires approval':
+      {
+        original: 9,
+      },
+    'invalidates a real Worker preview when its revision becomes stale': {
+      original: 5,
+      // Optional missing cloud reference media can be probed fewer times at some viewport sizes.
+      cloud: { min: 0, max: 5 },
+    },
+    'clearing a model connection terminalizes an in-flight run without reviving a preview': {
+      // Optional absent reference media can be read zero, one, or two times across layouts.
+      original: { min: 0, max: 2 },
+    },
+    'reports a provider adapter failure without suggesting an edit was applied': { original: 2 },
   };
 
   test.beforeEach(({ page }, testInfo) => {
     setupBrowserAudit(page);
-    const count = DIRECTOR_ASSET_MISS_MAP[testInfo.title];
-    if (count != null) allowExpectedAssetFixtureMisses(page, count);
+    const bounds = DIRECTOR_ASSET_MISS_MAP[testInfo.title];
+    if (bounds != null) allowExpectedAssetFixtureMisses(page, bounds.original, bounds.cloud);
   });
 
   test.afterEach(async ({ page }, testInfo) => {
