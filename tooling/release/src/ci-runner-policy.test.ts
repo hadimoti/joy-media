@@ -181,6 +181,14 @@ function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
   return entries;
 }
 
+function findJobBlock(workflowText: string, jobName: string): string {
+  const lines = workflowText.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === `  ${jobName}:`);
+  if (start < 0) return '';
+  const end = lines.findIndex((line, index) => index > start && /^  [a-z0-9-]+:\s*$/.test(line));
+  return lines.slice(start, end < 0 ? undefined : end).join('\n');
+}
+
 function findWindowsDockerJobBlocks(workflowText: string): string[] {
   const lines = workflowText.split(/\r?\n/);
   const blocks: string[] = [];
@@ -323,6 +331,21 @@ describe('CI runner placement contract', () => {
       ).toBe(false);
     }
   });
+
+  for (const [workflowPath, hostedJobs] of APPROVED_HOSTED_RUNNERS) {
+    it.each([...hostedJobs.keys()])(
+      `${workflowPath}: hosted job %s enables Corepack before pnpm use`,
+      (jobName) => {
+        const text = readFileSync(workflowPath, 'utf8');
+        const job = findJobBlock(text, jobName);
+        expect(job, `hosted job ${jobName} must exist in ${workflowPath}`).not.toBe('');
+        if (!/\bpnpm\s/.test(job)) return;
+        expect(job, `hosted job ${jobName} must enable the pinned pnpm executable`).toContain(
+          'corepack enable pnpm',
+        );
+      },
+    );
+  }
 
   it.each(workflows)(
     'every job in %s targets an allowed self-hosted Docker label',
