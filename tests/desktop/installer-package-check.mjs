@@ -10,6 +10,27 @@ console.log('=== JOY Media Installer & Package Verification Suite ===');
 const desktopDistDir = resolve('apps/desktop/dist');
 const standaloneDir = resolve(desktopDistDir, 'joy-media-win32-x64');
 const releasesDir = resolve(desktopDistDir, 'releases');
+const desktopManifest = JSON.parse(readFileSync(resolve('apps/desktop/package.json'), 'utf8'));
+const cliManifest = JSON.parse(readFileSync(resolve('apps/cli/package.json'), 'utf8'));
+const releaseManifest = JSON.parse(
+  readFileSync(resolve(releasesDir, 'joy-media-release-manifest.json'), 'utf8'),
+);
+const setupSource = readFileSync(resolve('apps/desktop/installer/Setup.cs'), 'utf8');
+
+assert.strictEqual(
+  desktopManifest.version,
+  cliManifest.version,
+  'Desktop and CLI versions differ.',
+);
+assert.strictEqual(
+  releaseManifest.version,
+  desktopManifest.version,
+  'Packaged release manifest version differs from the desktop package.',
+);
+assert.ok(
+  setupSource.includes(`public const string ProductVersion = "${desktopManifest.version}";`),
+  'Installer registry version differs from the desktop package.',
+);
 
 // 1. Verify Distribution Layout
 console.log('1. Verifying distribution files in joy-media-win32-x64...');
@@ -76,6 +97,10 @@ try {
   assert.ok(
     doctorResult.stdout.includes('Disabled by JOY_MEDIA_EDGE_URL'),
     'Package check must keep the doctor edge probe disabled and offline',
+  );
+  assert.ok(
+    doctorResult.stdout.includes(`v${desktopManifest.version}`),
+    'Packaged CLI banner version differs from the desktop package.',
   );
   console.log('✔ Packaged CLI doctor passed cleanly without a production network probe.');
 
@@ -384,5 +409,38 @@ assert.strictEqual(
   `build-installer.ps1 syntax parsing failed:\n${parseResult.stderr || parseResult.stdout}`,
 );
 console.log('✔ build-installer.ps1 syntax parse check passed.');
+
+console.log('8. Verifying Windows installed-lifecycle hash control and harness syntax...');
+const lifecycleHarnessPath = resolve('tests/desktop/windows-lifecycle.ps1');
+const lifecycleHarness = readFileSync(lifecycleHarnessPath, 'utf8');
+assert.match(
+  lifecycleHarness,
+  /Invoke-VerifiedSetup \$testTamperedArtifact \$candidateSetup \$candidateVersion/u,
+  'Lifecycle hash negative control must exercise the same verified setup entrypoint.',
+);
+assert.match(
+  lifecycleHarness,
+  /if \(-not \$negativeControlRejected\).*Installer hash negative control was not rejected/su,
+  'Lifecycle harness must require a rejected tampered setup before any install.',
+);
+const lifecycleParseCommand = `
+  $errors = $null
+  [System.Management.Automation.Language.Parser]::ParseFile('${lifecycleHarnessPath.replace(/'/g, "''")}', [ref]$null, [ref]$errors)
+  if ($errors.Count -gt 0) {
+    Write-Error ($errors | Out-String)
+    exit 1
+  }
+`;
+const lifecycleParseResult = spawnSync(
+  'powershell.exe',
+  ['-NoProfile', '-NonInteractive', '-Command', lifecycleParseCommand],
+  { encoding: 'utf8', timeout: 15000 },
+);
+assert.strictEqual(
+  lifecycleParseResult.status,
+  0,
+  `Windows lifecycle harness syntax parsing failed:\n${lifecycleParseResult.stderr || lifecycleParseResult.stdout}`,
+);
+console.log('✔ Windows installed-lifecycle harness syntax parse check passed.');
 
 console.log('\n=== All Installer & Packaging Checks PASSED! ===');

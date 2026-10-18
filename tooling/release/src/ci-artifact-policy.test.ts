@@ -33,16 +33,17 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(workflow).not.toContain('actions/download-artifact');
   });
 
-  it('records a disabled receipt in both the real-service and P3 passes', () => {
-    // Exactly two ARTIFACT-UPLOAD-STATUS.txt writes, one per pass lane.
+  it('records disabled receipts for both passes and the final gate', () => {
+    // Two isolated acceptance passes plus one final source-bound gate receipt.
     const writes = workflow.match(/ARTIFACT-UPLOAD-STATUS\.txt/g) ?? [];
-    expect(writes.length).toBe(2);
+    expect(writes.length).toBe(3);
 
-    // Every disabled-receipt line appears exactly twice (once per pass lane).
+    // Every disabled-receipt line appears in both passes and the final gate.
     for (const line of DISABLED_RECEIPT) {
       const occurrences = workflow.split(line).length - 1;
-      expect(occurrences).toBe(2);
+      expect(occurrences).toBe(3);
     }
+    expect(workflow.split('pass=gate').length - 1).toBe(1);
   });
 
   it('removes the conditional GitHub-artifact source branching', () => {
@@ -61,9 +62,93 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(workflow).toContain('REDACTION-FAILURES.txt');
   });
 
-  it('invokes the source-bound release gate inside the real-service lane', () => {
+  it('evaluates the source-bound release gate once after both isolated passes', () => {
     expect(workflow).toContain('Evaluate source-bound release gate');
-    expect(workflow).toContain('pnpm run release:gate');
+    const realAcceptanceStart = workflow.indexOf('\n  real-service-acceptance:');
+    const realAcceptanceEnd = workflow.indexOf('\n  p3-real-services:', realAcceptanceStart);
+    const realAcceptance = workflow.slice(realAcceptanceStart, realAcceptanceEnd);
+    const gateSummary = workflow.slice(workflow.indexOf('\n  gate-summary:'));
+    const releaseGateStart = gateSummary.indexOf(
+      '      - name: Evaluate source-bound release gate',
+    );
+    const releaseGateEnd = gateSummary.indexOf('      - name:', releaseGateStart + 1);
+    const releaseGateStep = gateSummary.slice(releaseGateStart, releaseGateEnd);
+
+    expect(realAcceptance).not.toContain('pnpm run release:gate');
+    expect(gateSummary).toContain('runs-on: [self-hosted, linux, x64, joy-media-acceptance]');
+    expect(gateSummary).toContain('linux-real-services');
+    expect(gateSummary).toContain('windows-worker-clean');
+    expect(gateSummary).toContain('acceptance-primary');
+    expect(gateSummary).toContain('acceptance-responsive');
+    expect(gateSummary).toContain('prod-build-smoke');
+    expect(gateSummary).toContain('real-service-acceptance');
+    expect(gateSummary).toContain('p3-real-services');
+    expect(gateSummary).toContain('Restore and bind both isolated evidence passes');
+    expect(gateSummary).toContain('restore-retained-evidence.mjs');
+    expect(gateSummary).toContain('needs.windows-worker-clean.outputs.evidence1');
+    expect(gateSummary).toContain('needs.windows-worker-clean.outputs.evidence2');
+    expect(gateSummary).toContain(
+      'Build source-bound readiness evidence from all two-pass results',
+    );
+    expect(gateSummary).toContain('create-readiness-evidence.mjs');
+    expect(gateSummary).toContain('pnpm run release:gate');
+    for (const secretOrHarnessEnv of [
+      'JOY_MEDIA_CI_DATABASE_URL',
+      'JOY_MEDIA_CI_S3_ACCESS_KEY',
+      'JOY_MEDIA_CI_S3_SECRET_KEY',
+      'JOY_MEDIA_CI_S3_SECRET_ACCESS_KEY',
+      'JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND',
+      'JOY_MEDIA_CI_EVIDENCE_ROOT',
+      'JOY_MEDIA_OPENCLI_PROFILE',
+    ]) {
+      expect(releaseGateStep).toContain(`${secretOrHarnessEnv}: ''`);
+    }
+    const needsStart = gateSummary.indexOf('    needs:');
+    const stepsStart = gateSummary.indexOf('    steps:', needsStart);
+    const needsBlock = gateSummary.slice(needsStart, stepsStart);
+    for (const lane of [
+      'linux-real-services',
+      'windows-worker-clean',
+      'acceptance-primary',
+      'acceptance-responsive',
+      'prod-build-smoke',
+      'real-service-acceptance',
+      'p3-real-services',
+    ]) {
+      expect(needsBlock).toContain(lane);
+    }
+    const laneCheckIndex = gateSummary.indexOf('Require every lane green on both isolated passes');
+    const evidenceBuildIndex = gateSummary.indexOf(
+      'Build source-bound readiness evidence from all two-pass results',
+    );
+    const gateIndex = gateSummary.indexOf('Evaluate source-bound release gate');
+    expect(laneCheckIndex).toBeGreaterThanOrEqual(0);
+    expect(evidenceBuildIndex).toBeGreaterThanOrEqual(0);
+    expect(gateIndex).toBeGreaterThanOrEqual(0);
+    expect(laneCheckIndex).toBeLessThan(gateIndex);
+    expect(evidenceBuildIndex).toBeLessThan(gateIndex);
+    expect(gateSummary.indexOf('Restore and bind both isolated evidence passes')).toBeLessThan(
+      evidenceBuildIndex,
+    );
+    expect(readFileSync(join(import.meta.dirname, 'gate.ts'), 'utf8')).toContain(
+      "'test-output/readiness/two-pass-evidence'",
+    );
+  });
+
+  it('builds, installs, verifies, and tears down the exact Windows desktop candidate on its Docker runner', () => {
+    const start = workflow.indexOf('\n  windows-worker-clean:');
+    const end = workflow.indexOf('\n  acceptance-primary:', start);
+    const windowsJob = workflow.slice(start, end);
+
+    expect(windowsJob).toContain('runs-on: [self-hosted, windows, x64, joy-media-worker-docker]');
+    expect(windowsJob).toContain('package:installer');
+    expect(windowsJob).toContain('build-installer.ps1');
+    expect(windowsJob).toContain('tests/desktop/windows-lifecycle.ps1');
+    expect(windowsJob).toContain('-PreviousArchivePath $previousArchive');
+    expect(windowsJob).toContain('joy-media-windows-lifecycle');
+    expect(windowsJob).toContain('joy-media-setup.exe');
+    expect(windowsJob).toContain('JOY_MEDIA_WINDOWS_IMAGE_DIGEST');
+    expect(windowsJob).toContain('Installed JOY Media files remained after lifecycle cleanup');
   });
 
   it('declares 14 job instances across both passes', () => {

@@ -1,11 +1,19 @@
 # Build script for joy-media-setup.exe using Microsoft .NET Framework C# compiler (csc.exe)
-# Usage: build-installer.ps1 [-Version 1.0.1]
+# Usage: build-installer.ps1 [-Version <desktop package version>]
 param(
-    [string]$Version = "1.0.1"
+    [string]$Version = ""
 )
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path "$PSScriptRoot\..\..\..").Path
+$desktopManifestPath = Join-Path (Split-Path -Parent $PSScriptRoot) "package.json"
+$desktopManifest = Get-Content -LiteralPath $desktopManifestPath -Raw | ConvertFrom-Json
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = [string]$desktopManifest.version
+}
+if ($desktopManifest.version -ne $Version) {
+    throw "Desktop package version is '$($desktopManifest.version)' but -Version is '$Version'."
+}
 $distReleases = Join-Path $repoRoot "apps\desktop\dist\releases"
 $zipPath = Join-Path $distReleases "joy-media-windows-x64-v$Version.zip"
 $outExe = Join-Path $distReleases "joy-media-setup.exe"

@@ -283,3 +283,18 @@ parity matrix and SQLite-store integration are partial, and only Node 24.19.0 is
 installed locally. No active-profile install, deployment, publication, or candidate
 approval was performed. GPT-6 Astra remains prohibited by the owner; no replacement
 review approval is claimed here.
+
+The final local `pnpm verify:ci` run for the current candidate worktree exited 0 on
+October 18, including workspace typecheck, lint, formatting, full Vitest, workspace
+builds, and production audit (`No known vulnerabilities found`). The installer
+package integrity harness passed all eight checks, focused release/evidence
+contracts passed, and the Windows lifecycle PowerShell script parsed successfully.
+These are source/worktree checks; they do not replace fresh artifact-bound Windows
+acceptance.
+
+The exact-SHA `release-candidate-v2` dispatch is the next closeout gate. GitHub
+inventory showed all required self-hosted runners online: Linux CI, Linux acceptance,
+and the isolated Windows Docker worker runner. This workflow uses those runners under
+the repository's current runner/billing policy; exact-candidate evidence, the 30-minute
+soak, real-GPU qualification, remaining service checks, independent review, and
+candidate approval remain open until separately evidenced.

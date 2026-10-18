@@ -342,6 +342,7 @@ try {
         candidateSha = $CandidateSha
         workflowRunId = $RunId
         attempt = [int]$Attempt
+        pass = [int]$Pass
         runner = 'self-hosted,windows,x64,joy-media-worker-docker'
         execution = 'windows-docker-container'
         containerIdentity = [ordered]@{ containerId = $containerId; imageDigest = $imageDigest }

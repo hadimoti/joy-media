@@ -52,6 +52,10 @@ export interface InstallerArtifact {
   readonly expectedSha256: string;
   /** Observed SHA-256 hex digest (lowercase, 64 chars). */
   readonly observedSha256: string;
+  /** Local JSON receipt used to verify a binary produced on a separate runner. */
+  readonly sourceEvidencePath?: string;
+  /** Dot-separated key in sourceEvidencePath whose value is the binary SHA-256. */
+  readonly sourceEvidenceKey?: string;
 }
 
 export interface ReadinessEvidence {
@@ -455,6 +459,37 @@ export function validateReadinessEvidence(
         );
       }
 
+      const hasEvidencePath = artifact.sourceEvidencePath !== undefined;
+      const hasEvidenceKey = artifact.sourceEvidenceKey !== undefined;
+      if (hasEvidencePath !== hasEvidenceKey) {
+        blockers.push(
+          `installer artifact "${pathLabel(artifact.path)}" must provide both source evidence fields`,
+        );
+      } else if (hasEvidencePath) {
+        if (!artifact.path.startsWith('remote/')) {
+          blockers.push(
+            `installer artifact "${pathLabel(artifact.path)}" with source evidence must use a remote/ path`,
+          );
+        }
+        if (!isRepoRelativePath(artifact.sourceEvidencePath)) {
+          blockers.push(
+            `installer artifact source evidence path is invalid: ${pathLabel(artifact.sourceEvidencePath)}`,
+          );
+        }
+        if (
+          typeof artifact.sourceEvidenceKey !== 'string' ||
+          !/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/u.test(artifact.sourceEvidenceKey)
+        ) {
+          blockers.push(
+            `installer artifact source evidence key is invalid: ${String(artifact.sourceEvidenceKey)}`,
+          );
+        }
+      } else if (artifact.path.startsWith('remote/')) {
+        blockers.push(
+          `remote installer artifact "${pathLabel(artifact.path)}" requires source evidence`,
+        );
+      }
+
       if (!SHA256_HEX.test(artifact.expectedSha256)) {
         blockers.push(
           `installer artifact "${pathLabel(artifact.path)}" has malformed expected SHA-256: ${String(artifact.expectedSha256)}`,
@@ -520,6 +555,26 @@ export function validateReadinessEvidence(
     for (const path of validRedactedPaths) {
       if (!redactedHashPaths.has(path)) {
         blockers.push(`redacted path has no matching hash: ${pathLabel(path)}`);
+      }
+    }
+    if (Array.isArray(evidence.installerArtifacts)) {
+      for (const artifact of evidence.installerArtifacts) {
+        if (
+          artifact === null ||
+          typeof artifact !== 'object' ||
+          artifact.sourceEvidencePath === undefined
+        )
+          continue;
+        if (!validRedactedPaths.has(artifact.sourceEvidencePath)) {
+          blockers.push(
+            `installer source evidence path is not listed for redaction: ${pathLabel(artifact.sourceEvidencePath)}`,
+          );
+        }
+        if (!redactedHashPaths.has(artifact.sourceEvidencePath)) {
+          blockers.push(
+            `installer source evidence path has no redacted hash: ${pathLabel(artifact.sourceEvidencePath)}`,
+          );
+        }
       }
     }
   }

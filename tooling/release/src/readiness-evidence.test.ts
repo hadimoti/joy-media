@@ -167,6 +167,58 @@ describe('ReadinessEvidence validation', () => {
     expect(match!).not.toHaveLength(0);
   });
 
+  it('requires source-bound evidence for installer artifacts produced on another runner', () => {
+    const evidence = validEvidence({
+      installerArtifacts: [
+        {
+          path: 'remote/windows/joy-media-setup.exe',
+          expectedSha256: VALID_SHA256,
+          observedSha256: VALID_SHA256,
+        },
+      ],
+    });
+    const blockers = validateReadinessEvidence(evidence, VALID_SHA);
+    expect(blockers.join(' ')).toMatch(/source evidence/i);
+  });
+
+  it('accepts a remote installer hash only when it names a local provenance record', () => {
+    const sourcePath = 'test-output/readiness/windows-pass-1.json';
+    const evidence = validEvidence({
+      installerArtifacts: [
+        {
+          path: 'remote/windows/joy-media-setup.exe',
+          expectedSha256: VALID_SHA256,
+          observedSha256: VALID_SHA256,
+          sourceEvidencePath: sourcePath,
+          sourceEvidenceKey: 'desktopLifecycle.artifacts.candidateSetupSha256',
+        },
+      ],
+      redactedPaths: ['dist/joy-media-setup.exe', sourcePath],
+      redactedHashes: {
+        'dist/joy-media-setup.exe': VALID_SHA256,
+        [sourcePath]: VALID_SHA256,
+      },
+    });
+    expect(validateReadinessEvidence(evidence, VALID_SHA)).toEqual([]);
+  });
+
+  it('rejects unsafe or unredacted remote installer provenance paths', () => {
+    const sourcePath = 'test-output/readiness/windows-pass-1.json';
+    const evidence = validEvidence({
+      installerArtifacts: [
+        {
+          path: 'remote/windows/joy-media-setup.exe',
+          expectedSha256: VALID_SHA256,
+          observedSha256: VALID_SHA256,
+          sourceEvidencePath: sourcePath,
+          sourceEvidenceKey: '../candidateSetupSha256',
+        },
+      ],
+    });
+    const blockers = validateReadinessEvidence(evidence, VALID_SHA);
+    expect(blockers.join(' ')).toMatch(/source evidence|redacted/i);
+  });
+
   it('passing complete version-1 record returns empty blockers', () => {
     const evidence = validEvidence();
     const blockers = validateReadinessEvidence(evidence, VALID_SHA);

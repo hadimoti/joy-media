@@ -1564,6 +1564,42 @@ export function readReadinessEvidenceFromWorkspace(
     for (const artifact of evidence.installerArtifacts) {
       if (artifact === null || typeof artifact !== 'object' || typeof artifact.path !== 'string')
         continue;
+      if (typeof artifact.sourceEvidencePath === 'string') {
+        const sourcePath = repositoryFile(root, artifact.sourceEvidencePath);
+        if (sourcePath === null) {
+          blockers.push(
+            'remote installer artifact provenance is missing, unsafe, or outside the repository',
+          );
+          continue;
+        }
+        let sourceEvidence: unknown;
+        try {
+          sourceEvidence = JSON.parse(readFileSync(sourcePath, 'utf8')) as unknown;
+        } catch {
+          blockers.push('remote installer artifact provenance is not valid JSON');
+          continue;
+        }
+        const key =
+          typeof artifact.sourceEvidenceKey === 'string' ? artifact.sourceEvidenceKey : '';
+        let sourceValue: unknown = sourceEvidence;
+        for (const segment of key.split('.')) {
+          if (
+            sourceValue === null ||
+            typeof sourceValue !== 'object' ||
+            !Object.hasOwn(sourceValue, segment)
+          ) {
+            sourceValue = undefined;
+            break;
+          }
+          sourceValue = (sourceValue as Record<string, unknown>)[segment];
+        }
+        if (sourceValue !== artifact.observedSha256) {
+          blockers.push(
+            `remote installer artifact hash does not match its source evidence: "${artifact.path}"`,
+          );
+        }
+        continue;
+      }
       const path = repositoryFile(root, artifact.path);
       if (path === null) {
         blockers.push('installer artifact is missing, unsafe, or resolves outside the repository');
@@ -1646,6 +1682,7 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     'test-output/delivery',
     'test-output/windows',
     'test-output/operations',
+    'test-output/readiness/two-pass-evidence',
   ];
   const buildSuccess = Object.fromEntries(
     REQUIRED_BUILD_IDS.map((id) => {

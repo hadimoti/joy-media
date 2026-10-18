@@ -18,15 +18,21 @@ const fixtureDirectory = resolve('packages/test-fixtures/media');
 const apiBaseUrl = `http://127.0.0.1:${process.env.JOY_MEDIA_E2E_API_PORT ?? '4174'}`;
 const desktopRequire = createRequire(resolve(desktopRoot, 'package.json'));
 const electronExecutable = desktopRequire('electron') as string;
+const installedExecutable = process.env.JOY_MEDIA_TEST_EXECUTABLE;
 
 async function launchPackagedEditor(userDataDirectory: string): Promise<ElectronApplication> {
-  if (!existsSync(resolve(unpackedPackage, 'package.json'))) {
+  const appWorkingDirectory = process.env.JOY_MEDIA_TEST_WORKING_DIRECTORY ?? unpackedPackage;
+  if (!installedExecutable && !existsSync(resolve(unpackedPackage, 'package.json'))) {
     throw new Error('Missing unpacked desktop package. Run package:unpacked before this test.');
   }
   return electron.launch({
-    executablePath: electronExecutable,
-    cwd: unpackedPackage,
-    args: ['.', '--joy-media-test-mode', `--user-data-dir=${userDataDirectory}`],
+    executablePath: installedExecutable ?? electronExecutable,
+    cwd: appWorkingDirectory,
+    args: [
+      ...(installedExecutable ? [] : ['.']),
+      '--joy-media-test-mode',
+      `--user-data-dir=${userDataDirectory}`,
+    ],
     env: {
       ...process.env,
       NODE_ENV: 'production',

@@ -1987,6 +1987,54 @@ describe('JOY Studio 1.0 release gate', () => {
       );
     });
 
+    it('verifies a Windows installer hash from the captured runner receipt', () => {
+      const root = mkdtempSync(join(tmpdir(), 'joy-readiness-remote-installer-'));
+      const evidence = writeWorkspaceEvidence(root, 'a'.repeat(40));
+      const sourcePath = 'test-output/readiness/windows-pass-1.json';
+      const sourceHash = 'f'.repeat(64);
+      const source = {
+        desktopLifecycle: {
+          artifacts: { candidateSetupSha256: sourceHash },
+        },
+      };
+      mkdirSync(join(root, 'test-output/readiness'), { recursive: true });
+      writeFileSync(join(root, sourcePath), JSON.stringify(source));
+      const sourceEvidenceSha256 = sha256File(join(root, sourcePath));
+      const remoteEvidence: ReadinessEvidence = {
+        ...evidence,
+        installerArtifacts: [
+          {
+            path: 'remote/windows/joy-media-setup.exe',
+            expectedSha256: sourceHash,
+            observedSha256: sourceHash,
+            sourceEvidencePath: sourcePath,
+            sourceEvidenceKey: 'desktopLifecycle.artifacts.candidateSetupSha256',
+          },
+        ],
+        redactedPaths: [...evidence.redactedPaths, sourcePath],
+        redactedHashes: {
+          ...evidence.redactedHashes,
+          [sourcePath]: sourceEvidenceSha256,
+        },
+      };
+      writeFileSync(
+        join(root, 'test-output/readiness/evidence.json'),
+        JSON.stringify(remoteEvidence),
+      );
+      expect(readReadinessEvidenceFromWorkspace(root, 'a'.repeat(40))).toMatchObject({
+        evidence: remoteEvidence,
+        blockers: [],
+      });
+
+      source.desktopLifecycle.artifacts.candidateSetupSha256 = '9'.repeat(64);
+      writeFileSync(join(root, sourcePath), JSON.stringify(source));
+      const tampered = readReadinessEvidenceFromWorkspace(root, 'a'.repeat(40));
+      expect(tampered.evidence).toBeNull();
+      expect(tampered.blockers.join(' ')).toMatch(
+        /remote installer artifact hash|redacted artifact hash/i,
+      );
+    });
+
     it('rejects workspace evidence when lockfile or fixture hashes are stale', () => {
       const root = mkdtempSync(join(tmpdir(), 'joy-readiness-workspace-'));
       writeWorkspaceEvidence(root, 'a'.repeat(40));
