@@ -347,3 +347,11 @@ build and responsive checks; the available self-hosted runners handle media expo
 real services and Windows Docker lifecycle acceptance where hosted runners lack the
 needed capabilities. No candidate-ready receipt, release approval, install, or
 deployment is claimed yet.
+
+## Windows lifecycle command quoting follow-up — October 18
+
+Exact-candidate workflow run `39101545683` for commit `68b9b6bcadc4cf011deae1fabd0f43ac899b37be` passed hosted validation, editor bundle, production smoke, and both Linux real-service/P3 passes. The isolated Windows Docker runner built the frozen artifacts and completed update, repair, rollback, app/CLI, and DPAPI checks, then failed when `cmd.exe` tried to invoke the installed `uninstall.cmd` from a path containing spaces. Cleanup and evidence retention succeeded. The dependent acceptance lanes were skipped, so this run is not candidate acceptance.
+
+Root cause was harness argument encoding: Windows CRT escaping passed `\"path\"` through `cmd.exe /c`, which CMD parsed as invalid syntax. The lifecycle acceptance and cleanup invocations now pass CMD-native `/d /s /c ""path""` raw arguments. A regression test checks both call sites and executes a generated batch file under `JOY Media` in the OS temp directory. The focused Windows harness passed 5 tests, the full `pnpm verify:ci` passed, and `pnpm test:harness` passed 34 tests with 11 platform skips and no failures.
+
+The correction is not yet on a frozen candidate. Commit and push it, then rerun the exact-SHA `release-candidate-v2` workflow on GitHub-hosted Ubuntu for portable lanes and the available self-hosted Linux/Windows Docker runners for service, media-export, and installer-lifecycle lanes. Keep release readiness open until both complete passes and all remaining plan gates are evidenced.

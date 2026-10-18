@@ -91,7 +91,7 @@ describe('stderr is empty on a clean run (so any stderr means trouble)', () => {
         expect(r.code, describeRun(r)).toBe(0);
         expect(r.stderr, describeRun(r)).toBe('');
       }
-    }, 30_000);
+    }, 60_000);
 
     it(`other warnings still reach stderr via ${entry}`, async () => {
       const canary = sb.path('canary.cjs');

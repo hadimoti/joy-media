@@ -449,8 +449,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
 
     $uninstaller = Join-Path $installRoot 'uninstall.cmd'
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'Installed uninstaller is missing.' }
-    $uninstallCommand = '"' + $uninstaller + '"'
-    $uninstallResult = Invoke-CapturedProcess -FilePath (Join-Path $env:SystemRoot 'System32\cmd.exe') -Arguments @('/d', '/s', '/c', $uninstallCommand) -TimeoutSeconds 90 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment)
+    $uninstallResult = Invoke-CapturedProcess -FilePath (Join-Path $env:SystemRoot 'System32\cmd.exe') -RawArguments ('/d /s /c ""' + $uninstaller + '""') -TimeoutSeconds 90 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment)
     if ($uninstallResult.ExitCode -ne 0) { throw 'The installed uninstaller returned a non-zero exit code.' }
     $removeDeadline = [DateTime]::UtcNow.AddSeconds(60)
     while ((Test-Path -LiteralPath $installRoot) -and [DateTime]::UtcNow -lt $removeDeadline) { Start-Sleep -Milliseconds 500 }
@@ -538,8 +537,7 @@ finally {
         try {
             $uninstaller = Join-Path $installRoot 'uninstall.cmd'
             if (Test-Path -LiteralPath $uninstaller) {
-                $command = '"' + $uninstaller + '"'
-                Invoke-CapturedProcess -FilePath (Join-Path $env:SystemRoot 'System32\cmd.exe') -Arguments @('/d', '/s', '/c', $command) -TimeoutSeconds 60 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment) | Out-Null
+                Invoke-CapturedProcess -FilePath (Join-Path $env:SystemRoot 'System32\cmd.exe') -RawArguments ('/d /s /c ""' + $uninstaller + '""') -TimeoutSeconds 60 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment) | Out-Null
             }
         } catch { }
         $cleanupDeadline = [DateTime]::UtcNow.AddSeconds(30)
