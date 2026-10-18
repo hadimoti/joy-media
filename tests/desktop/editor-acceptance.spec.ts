@@ -263,18 +263,48 @@ async function openPackagedProcesses(page: Page): Promise<Locator> {
   return history;
 }
 
-async function downloadLatestPackagedExport(
+async function downloadPackagedExport(
+  app: ElectronApplication,
   page: Page,
   downloadDirectory: string,
+  download: Locator = page.getByRole('link', { name: /^Download .* again$/ }).first(),
 ): Promise<{ readonly filename: string; readonly path: string }> {
-  const download = page.getByRole('link', { name: /^Download .* again$/ }).first();
   await expect(download).toBeVisible();
   const filename = await download.getAttribute('download');
   expect(filename).toMatch(/\.mp4$/i);
   const path = join(downloadDirectory, filename!);
+  const downloadFinished = waitForPackagedDownload(app, filename!);
   await download.click();
+  await downloadFinished;
   await expect.poll(() => existsSync(path), { timeout: 30_000 }).toBe(true);
   return { filename: filename!, path };
+}
+
+function waitForPackagedDownload(app: ElectronApplication, filename: string): Promise<void> {
+  return app.evaluate(
+    ({ session }, expectedFilename) =>
+      new Promise<void>((resolve, reject) => {
+        const downloads = session.defaultSession;
+        const timeout = setTimeout(() => {
+          downloads.removeListener('will-download', onWillDownload);
+          reject(new Error(`Timed out waiting for packaged download ${expectedFilename}.`));
+        }, 30_000);
+        const onWillDownload = (_event: Electron.Event, item: Electron.DownloadItem): void => {
+          if (item.getFilename() !== expectedFilename) return;
+          item.once('done', (_doneEvent, state) => {
+            clearTimeout(timeout);
+            downloads.removeListener('will-download', onWillDownload);
+            if (state !== 'completed') {
+              reject(new Error(`Packaged download ${expectedFilename} ended in state ${state}.`));
+              return;
+            }
+            resolve();
+          });
+        };
+        downloads.on('will-download', onWillDownload);
+      }),
+    filename,
+  );
 }
 
 function probePackagedExport(path: string): {
@@ -714,14 +744,9 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     await expect(redownload).toBeVisible();
     const exportFilename = await redownload.getAttribute('download');
     expect(exportFilename).toMatch(/\.mp4$/i);
-    const exportedPath = join(downloadDirectory, exportFilename!);
-    await redownload.click();
-    await expect
-      .poll(() => existsSync(exportedPath), {
-        message: 'The native Electron download must write into the isolated test profile.',
-        timeout: 30_000,
-      })
-      .toBe(true);
+    const exported = await downloadPackagedExport(app, page, downloadDirectory, redownload);
+    expect(exported.filename).toBe(exportFilename);
+    const exportedPath = exported.path;
     const probe = JSON.parse(
       execFileSync(
         'ffprobe',
@@ -855,7 +880,7 @@ test('packaged Social H.264 export remains retryable after cancellation', async 
     await expect(completed).toHaveCount(completedBefore + 1, { timeout: 120_000 });
     await expect(completed).toContainText('Completed — final MP4 verified');
     await expect(clip).toBeVisible();
-    const exported = await downloadLatestPackagedExport(page, downloadDirectory);
+    const exported = await downloadPackagedExport(app, page, downloadDirectory);
     const probe = probePackagedExport(exported.path);
     expect(probe.video).toMatchObject({ codec_name: 'h264', width: 1080, height: 1920 });
     expect(probe.audio.codec_name).toBe('aac');
@@ -901,7 +926,7 @@ test('packaged exports encode every supported preset at its declared dimensions'
         .toBe(completedBefore + 1);
       await expect(history).toContainText('Completed — final MP4 verified');
 
-      const exported = await downloadLatestPackagedExport(page, downloadDirectory);
+      const exported = await downloadPackagedExport(app, page, downloadDirectory);
       const probe = probePackagedExport(exported.path);
       expect(probe.video, `${preset.label} video output`).toMatchObject({
         codec_name: 'h264',
@@ -1038,9 +1063,9 @@ test('packaged Monitor samples agree with decoded export frames', async () => {
     await expect(redownload).toBeVisible();
     const exportFilename = await redownload.getAttribute('download');
     expect(exportFilename).toMatch(/\.mp4$/i);
-    const exportedPath = join(downloadDirectory, exportFilename!);
-    await redownload.click();
-    await expect.poll(() => existsSync(exportedPath), { timeout: 30_000 }).toBe(true);
+    const exported = await downloadPackagedExport(app, page, downloadDirectory, redownload);
+    expect(exported.filename).toBe(exportFilename);
+    const exportedPath = exported.path;
 
     const differences = sampleTimes.map((sampleTime, index) =>
       normalizedRgbMeanAbsoluteDifference(
