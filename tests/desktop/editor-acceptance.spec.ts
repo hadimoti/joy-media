@@ -9,6 +9,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { authenticate, openPanel } from '../e2e/wp29-r5-harness.js';
@@ -16,6 +17,7 @@ import { authenticate, openPanel } from '../e2e/wp29-r5-harness.js';
 const desktopRoot = resolve('apps/desktop');
 const unpackedPackage = resolve(desktopRoot, 'dist/joy-media-unpacked');
 const fixtureDirectory = resolve('packages/test-fixtures/media');
+const timelineLogKey = 'joy-media.timeline-project-log.v1';
 const apiBaseUrl = `http://127.0.0.1:${process.env.JOY_MEDIA_E2E_API_PORT ?? '4174'}`;
 const desktopRequire = createRequire(resolve(desktopRoot, 'package.json'));
 const electronExecutable = desktopRequire('electron') as string;
@@ -47,6 +49,20 @@ async function openEditorPage(app: ElectronApplication): Promise<Page> {
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
   expect(page.url()).toMatch(/^joy-media-app:\/\/renderer\//);
+  if (!installedExecutable) {
+    expect(
+      existsSync(
+        resolve(
+          unpackedPackage,
+          'node_modules',
+          '@joy-media',
+          'project-persistence',
+          'dist',
+          'editor-storage.js',
+        ),
+      ),
+    ).toBe(true);
+  }
   expect(
     await page.evaluate(
       () => (window as unknown as Record<string, unknown>).__JOY_MEDIA_API_BASE__,
@@ -187,7 +203,53 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     await expect(clip).toHaveAttribute('aria-label', trimmedLabel!);
 
     await page.getByRole('button', { name: 'Duplicate clip' }).click();
-    await expect(page.locator(`.timeline-clip[aria-label^="${mediaName},"]`)).toHaveCount(2);
+    const videoClips = page.locator(`.timeline-clip[aria-label^="${mediaName},"]`);
+    await expect(videoClips).toHaveCount(2);
+
+    // --- Effect and keyframe edit ---
+    await videoClips.first().click();
+    await openPanel(page, 'Effects');
+    const addEffect = page.locator('.effect-add-btn:not([disabled])').first();
+    await expect(addEffect).toBeEnabled();
+    await addEffect.click();
+    await openPanel(page, 'Inspector');
+    const positionX = page.getByLabel('Position X', { exact: true });
+    await positionX.fill('420');
+    await expect(positionX).toHaveValue('420');
+    await page.getByRole('button', { name: 'Add Position X keyframe' }).click();
+    await expect(
+      page.getByRole('button', { name: 'Remove Position X keyframe', exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole('tablist', { name: 'Inspector sections' })
+      .getByRole('tab', { name: 'Effects', exact: true })
+      .click();
+    await expect(page.locator('.inspector-effect-item[data-effect-instance-id]')).toHaveCount(1);
+
+    // --- Transition across the adjacent duplicated clips ---
+    const trackId = await videoClips
+      .first()
+      .evaluate((element) => element.closest('.timeline-lane')?.getAttribute('data-track-id'));
+    expect(trackId).toBeTruthy();
+    await openPanel(page, 'Transitions');
+    const transitionCard = page
+      .getByRole('group', { name: 'Transition type' })
+      .locator('.transition-card[data-transition-type]')
+      .first();
+    const transitionType = await transitionCard.getAttribute('data-transition-type');
+    expect(transitionType).toBeTruthy();
+    const lane = page.locator(`.timeline-lane[data-track-id="${trackId}"]`);
+    const laneBounds = await lane.boundingBox();
+    const firstClipBounds = await videoClips.first().boundingBox();
+    expect(laneBounds).toBeTruthy();
+    expect(firstClipBounds).toBeTruthy();
+    await transitionCard.dragTo(lane, {
+      targetPosition: {
+        x: firstClipBounds!.x + firstClipBounds!.width - laneBounds!.x,
+        y: laneBounds!.height / 2,
+      },
+    });
+    await expect(page.locator('.timeline-transition-junction')).toHaveCount(1);
 
     // --- Import audio, set gain to 1.25 ---
     await openPanel(page, 'Assets');
@@ -231,7 +293,19 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     await expect(persianCaption).toHaveValue('این یک آزمون است');
     await expectAccessiblePackagedEditor(page, 'packaged Persian caption panel');
 
+    expect(
+      await page.evaluate((key) => window.localStorage.getItem(key), timelineLogKey),
+    ).toBeNull();
     await app.close();
+    const desktopDatabase = new DatabaseSync(join(profile, 'joy-media.sqlite3'));
+    try {
+      const persistedTimeline = desktopDatabase
+        .prepare('SELECT value FROM editor_storage WHERE key = ?')
+        .get(timelineLogKey) as { readonly value: string } | undefined;
+      expect(persistedTimeline?.value).toContain(mediaName);
+    } finally {
+      desktopDatabase.close();
+    }
     app = await launchPackagedEditor(profile);
     page = await openEditorPage(app);
     const projectLibrary = page.getByRole('heading', { name: 'Projects' });
@@ -251,6 +325,19 @@ test('packaged editor imports, plays, saves, restarts, and exports a playable pr
     // Assert audio clip survived
     const restoredAudioClip = page.locator(`.timeline-clip[aria-label^="${audioName},"]`);
     await expect(restoredAudioClip).toHaveCount(1);
+    await expect(page.locator('.timeline-transition-junction')).toHaveCount(1);
+    const restoredFirstVideo = restoredVideoClips.first();
+    await restoredFirstVideo.press('Enter');
+    await expect(restoredFirstVideo).toHaveAttribute('aria-current', 'true');
+    await openPanel(page, 'Inspector');
+    await expect(
+      page.getByRole('button', { name: 'Remove Position X keyframe', exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole('tablist', { name: 'Inspector sections' })
+      .getByRole('tab', { name: 'Effects', exact: true })
+      .click();
+    await expect(page.locator('.inspector-effect-item[data-effect-instance-id]')).toHaveCount(1);
     // Assert audio gain survived
     await restoredAudioClip.click();
     await openPanel(page, 'Audio');

@@ -46,3 +46,24 @@ if (mode === 'before-file-rename') {
   };
   syncBuiltinESMExports();
 }
+
+if (mode === 'file-rename-eperm-once') {
+  const targetPath = process.env['JOY_MEDIA_TEST_RENAME_TARGET'];
+  const originalRenameSync = fs.renameSync;
+  let injected = false;
+  fs.renameSync = function renameSync(source, destination) {
+    if (
+      !injected &&
+      typeof targetPath === 'string' &&
+      path.resolve(String(destination)) === path.resolve(targetPath)
+    ) {
+      injected = true;
+      fs.writeFileSync(markerPath, JSON.stringify({ mode, pid: process.pid }));
+      const error = new Error('injected transient Windows sharing violation');
+      error.code = 'EPERM';
+      throw error;
+    }
+    return originalRenameSync.call(this, source, destination);
+  };
+  syncBuiltinESMExports();
+}

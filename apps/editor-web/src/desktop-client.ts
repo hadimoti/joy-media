@@ -18,6 +18,12 @@
 export interface DesktopJoyBridge {
   readonly channels: readonly string[];
   invoke(channel: string, payload?: unknown): Promise<unknown>;
+  readonly projectStorage?: {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+    keys(): readonly string[];
+  };
 }
 
 declare global {

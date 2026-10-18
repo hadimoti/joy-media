@@ -165,6 +165,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@joy-media/project-persistence':
+        specifier: workspace:*
+        version: link:../../packages/project-persistence
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../../packages/provider-sdk

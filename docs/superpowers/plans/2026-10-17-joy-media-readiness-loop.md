@@ -387,8 +387,9 @@ proof of Electron acceptance. Browser helpers remain reusable where applicable.
       Crash or cancel during export must leave project data intact and allow retry.
 - [x] Run `pnpm run test:e2e:audit --retries=0` and the packaged Electron journey
       with retries disabled. The October 18 full audit passed 826 tests, skipped 7
-      optional cases, and failed none across seven viewport projects; packaged Electron
-      acceptance passed one import/play/save/restart/reopen/render journey.
+      optional cases, and failed none across seven viewport projects. The latest
+      packaged journey also covers a duplicate, effect, keyframe, transition, audio,
+      Persian caption, SQLite persistence across restart, and playable export.
 - [ ] Add/verify axe scans and keyboard reachability across supported packaged panels;
       do not infer this from browser-only checks or viewport coverage.
 - [ ] Record/fix failures through the loop, review, and commit. Any browser-only
@@ -429,6 +430,10 @@ Fresh-process reads are the oracle; a worker's in-memory object is insufficient.
 - [x] Hold a project database lock from another process and verify bounded
       `DATABASE_BUSY` behavior, unchanged revision, and successful monotonic retry.
       Physical full-volume and held-file publication failures remain untested.
+- [x] Persist packaged editor project documents through the desktop's allow-listed
+      SQLite bridge; retain legacy localStorage reads and migrate on write. A fresh
+      Electron process restores edits, effects, keyframes, transitions, audio and
+      captions from the app profile. Authentication and UI preferences remain browser-only.
 - [x] Run `pnpm exec vitest run packages/project-persistence/src apps/cli/src/humanized/project-robustness.e2e.test.ts apps/cli/src/humanized/asset-recovery.e2e.test.ts --no-file-parallelism`
       plus affected editor package tests. The expanded Windows selection passed
       117/117, including `project-lifecycle.e2e.test.ts` at 62/62 and the editor
@@ -468,6 +473,7 @@ explicit `joy.cmd` path and sanitized disposable state directory.
       acceptance also passed with `--retries=0` (1 journey, including playable export).
 - [x] Rebuild the unsigned Windows staging package and run both launcher render journeys, packaged/standalone smoke, and package-integrity checks. This proves staging entrypoints only; see `docs/qa/evidence/2026-10-18-windows-staged-cli-acceptance.md`.
 - [x] Reproduce and remove the clean-checkout PowerShell 5.1 null dereference; package-level regression checks cover empty and dirty git status results, and lifecycle errors now print their source line. Exact installed-artifact lifecycle acceptance remains open below.
+- [x] Use the lockfile-pinned Electron executable to run the safe-storage lifecycle fixture; the installed app's `--run-as-node` invocation hung on the previous candidate. The harness parses and its fixture passes locally; actual installed-artifact acceptance remains open.
 - [ ] Run clean install/update/rollback/uninstall in the designated disposable Windows host. Associate all
       lifecycle evidence with exact source, lockfile, and artifact hashes.
 - [ ] Fix/review/commit; never uninstall or overwrite the owner's working install.

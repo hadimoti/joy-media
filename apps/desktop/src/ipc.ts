@@ -23,6 +23,16 @@ export const IPC_CHANNELS = [
   'desktop.asset-library.select-directory',
   'desktop.asset-library.get-catalog',
   'desktop.asset-library.reset-directory',
+  'desktop.project-storage.get',
+  'desktop.project-storage.set',
+  'desktop.project-storage.remove',
+  'desktop.project-storage.keys',
+] as const;
+export const SYNCHRONOUS_IPC_CHANNELS = [
+  'desktop.project-storage.get',
+  'desktop.project-storage.set',
+  'desktop.project-storage.remove',
+  'desktop.project-storage.keys',
 ] as const;
 export type IpcChannel = (typeof IPC_CHANNELS)[number];
 export interface IpcRequest {

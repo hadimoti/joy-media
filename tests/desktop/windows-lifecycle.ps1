@@ -214,7 +214,7 @@ function Invoke-AppSmoke([string]$Label) {
 }
 
 function Invoke-LifecycleFixture([string]$ElectronPath, [string]$Mode) {
-    $result = Invoke-CapturedProcess -FilePath $ElectronPath -Arguments @('--run-as-node', $lifecycleFixture, "--user-data-dir=$userDataDirectory", $Mode) -TimeoutSeconds 60 -WorkingDirectory $repoRoot -Environment (Get-SafeEnvironment @{ NODE_ENV = 'production' })
+    $result = Invoke-CapturedProcess -FilePath $ElectronPath -Arguments @($lifecycleFixture, "--user-data-dir=$userDataDirectory", $Mode) -TimeoutSeconds 60 -WorkingDirectory $repoRoot -Environment (Get-SafeEnvironment @{ NODE_ENV = 'production' })
     if ($result.ExitCode -ne 0) { throw "DPAPI user-data fixture $Mode failed: $(Get-CommandFailureSummary $result)" }
     try { return ($result.Stdout.Trim() | ConvertFrom-Json -ErrorAction Stop) }
     catch { throw "DPAPI user-data fixture $Mode did not return valid evidence JSON." }
@@ -270,6 +270,8 @@ $nodePath = $nodeCommand.Source
 $pnpmCommand = Get-Command pnpm.cmd -ErrorAction SilentlyContinue
 if ($null -eq $pnpmCommand) { $pnpmCommand = Get-Command pnpm -ErrorAction Stop }
 $lifecycleFixture = Join-Path $repoRoot 'tests\desktop\lifecycle-user-data.mjs'
+$devElectron = Join-Path $repoRoot 'apps\desktop\node_modules\electron\dist\electron.exe'
+if (-not (Test-Path -LiteralPath $devElectron -PathType Leaf)) { throw 'The lockfile-pinned Electron executable for the DPAPI fixture is missing.' }
 $installedCliAcceptance = Join-Path $repoRoot 'tests\desktop\installed-cli-acceptance.mjs'
 $desktopManifestPath = Join-Path $repoRoot 'apps\desktop\package.json'
 $cliManifestPath = Join-Path $repoRoot 'apps\cli\package.json'
@@ -398,7 +400,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     $previousExeSha = Assert-Sha256 (Join-Path $installRoot 'joy-media.exe') $previousDesktopExeSha 'Installed v1.0.1 app executable'
     $previousInstalledCliSha = Assert-Sha256 (Join-Path $installRoot 'resources\app\cli\joy-media-bundle.mjs') $previousCliBundleSha 'Installed v1.0.1 CLI bundle'
     Invoke-AppSmoke 'v1.0.1 initial install'
-    $seedProof = Invoke-LifecycleFixture (Join-Path $installRoot 'joy-media.exe') 'seed'
+    $seedProof = Invoke-LifecycleFixture $devElectron 'seed'
     if ($seedProof.result -ne 'seeded' -or $seedProof.encryptionAvailable -ne $true) { throw 'v1.0.1 could not seed isolated settings, library, and DPAPI fixture data.' }
     Invoke-Pnpm 'CLI render-real source and bundle acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-real.e2e.test.ts', '--no-file-parallelism') | Out-Null
     Invoke-Pnpm 'CLI unsupported-feature acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-parity.e2e.test.ts', '--no-file-parallelism') | Out-Null
@@ -414,7 +416,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
         JOY_MEDIA_TEST_WORKING_DIRECTORY = $installRoot
         JOY_MEDIA_TEST_API_BASE_URL = 'http://127.0.0.1:4174'
     } | Out-Null
-    $candidateSeedVerification = Invoke-LifecycleFixture (Join-Path $installRoot 'joy-media.exe') 'verify'
+    $candidateSeedVerification = Invoke-LifecycleFixture $devElectron 'verify'
     if ($candidateSeedVerification.result -ne 'verified' -or $candidateSeedVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256 -or $candidateSeedVerification.directCiphertextSha256 -ne $seedProof.directCiphertextSha256) {
         throw 'Settings, asset-library catalog, or DPAPI ciphertext did not survive the candidate update.'
     }
@@ -429,7 +431,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     Invoke-VerifiedSetup $CandidateSetupPath $candidateSetup $candidateVersion | Out-Null
     if ((Get-Sha256 $rendererIndex) -ne $expectedRendererSha) { throw 'Candidate repair did not restore the exact missing renderer file.' }
     Assert-RegisteredVersion $candidateVersion
-    $repairVerification = Invoke-LifecycleFixture (Join-Path $installRoot 'joy-media.exe') 'verify'
+    $repairVerification = Invoke-LifecycleFixture $devElectron 'verify'
     if ($repairVerification.result -ne 'verified' -or $repairVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256) { throw 'Repair changed or lost user data.' }
     $script:commands.Add([pscustomobject]@{ name = 'installer repair restores removed renderer and preserves user data'; exitCode = 0 })
     Invoke-AppSmoke 'v1.0.2 repair'
@@ -440,7 +442,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
         throw 'Rollback did not restore the exact v1.0.1 app and CLI files.'
     }
     Invoke-AppSmoke 'v1.0.1 rollback'
-    $rollbackVerification = Invoke-LifecycleFixture (Join-Path $installRoot 'joy-media.exe') 'verify'
+    $rollbackVerification = Invoke-LifecycleFixture $devElectron 'verify'
     if ($rollbackVerification.result -ne 'verified' -or $rollbackVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256 -or $rollbackVerification.directCiphertextSha256 -ne $seedProof.directCiphertextSha256) {
         throw 'Settings, Persian asset-library catalog, or DPAPI ciphertext did not survive rollback.'
     }
@@ -463,7 +465,6 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     if (-not (Test-Path -LiteralPath $userDataDirectory -PathType Container) -or -not (Test-Path -LiteralPath (Join-Path $userDataDirectory 'safe-storage-lifecycle-fixture.bin') -PathType Leaf)) {
         throw 'Uninstall removed user data that must remain available for recovery.'
     }
-    $devElectron = Join-Path $repoRoot 'apps\desktop\node_modules\electron\dist\electron.exe'
     $uninstalledDataVerification = Invoke-LifecycleFixture $devElectron 'verify'
     if ($uninstalledDataVerification.result -ne 'verified' -or $uninstalledDataVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256) {
         throw 'User data could not be reopened after application uninstall.'

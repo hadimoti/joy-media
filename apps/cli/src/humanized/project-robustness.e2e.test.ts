@@ -47,6 +47,43 @@ afterEach(() => sb.cleanup());
 const defaultDb = (): string => defaultProjectDbPath(sb);
 
 describe('several processes at once (an agent fanning out tool calls)', () => {
+  it.skipIf(process.platform !== 'win32')(
+    'retries a transient Windows sharing violation while registering a media source',
+    async () => {
+      const id = await createProject(sb, 'Transient source-map rename');
+      const source = resolve(
+        CLI_ROOT,
+        '..',
+        '..',
+        'packages',
+        'test-fixtures',
+        'media',
+        'readiness-silent.mp4',
+      );
+      const sourceMapPath = join(sb.joyDir, 'cli-asset-sources.json');
+      const marker = sb.path('transient-rename-injected.json');
+      writeFileSync(sourceMapPath, `${JSON.stringify({ existing: 'path' })}\n`);
+
+      const added = await sb.run(
+        ['timeline', 'add-clip', '--project', id, '--asset', source, '--json'],
+        {
+          env: persistenceFaultEnv('file-rename-eperm-once', marker, sourceMapPath),
+        },
+      );
+
+      expect(added.code, describeRun(added)).toBe(0);
+      expect(JSON.parse(readFileSync(marker, 'utf8'))).toMatchObject({
+        mode: 'file-rename-eperm-once',
+      });
+      const assetId = (await showProject(sb, id)).tracks.flatMap((item) => item.clips)[0]?.assetId;
+      expect(assetId).toBeTruthy();
+      expect(JSON.parse(readFileSync(sourceMapPath, 'utf8'))).toMatchObject({
+        existing: 'path',
+        [assetId!]: source,
+      });
+    },
+  );
+
   it('a separate SQLite writer lock returns a bounded busy error and retry keeps revisions monotonic', async () => {
     const id = await createProject(sb, 'Held database lock');
     const marker = sb.path('sqlite-lock-held.json');

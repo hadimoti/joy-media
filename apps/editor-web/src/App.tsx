@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { DockviewReact } from 'dockview';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
+import { createEditorProjectStorageAdapter } from '@joy-media/project-persistence/editor-storage';
 import { PanelTab } from './PanelTab.js';
 import {
   EditorPanelContext,
@@ -823,7 +824,11 @@ interface ProjectJoyAgentRunLifecycle {
 }
 
 function guardBrowserStorage(writer: ProjectWriterHandle): GuardedBrowserStorage {
-  const storage = writer.guardStorage(window.localStorage);
+  const editorStorage = createEditorProjectStorageAdapter(
+    window.localStorage,
+    window.joyDesktop?.projectStorage,
+  );
+  const storage = writer.guardStorage(editorStorage);
   if (storage.removeItem === undefined)
     throw new Error('The browser writer storage boundary does not support removal.');
   return storage as GuardedBrowserStorage;

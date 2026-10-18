@@ -30,6 +30,9 @@ export default defineConfig({
       '@joy-media/project-persistence/desktop': pkg(
         './packages/project-persistence/src/desktop.ts',
       ),
+      '@joy-media/project-persistence/editor-storage': pkg(
+        './packages/project-persistence/src/editor-storage.ts',
+      ),
       '@joy-media/project-persistence/browser': pkg(
         './packages/project-persistence/src/browser.ts',
       ),

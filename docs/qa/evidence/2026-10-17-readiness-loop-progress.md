@@ -316,3 +316,34 @@ GitHub inventory showed all required self-hosted runners online: Linux CI, Linux
 acceptance, and the isolated Windows Docker worker runner. Exact-candidate evidence,
 the 30-minute soak, real-GPU qualification, remaining service checks, independent
 review, and candidate approval remain open until separately evidenced.
+
+## Packaged persistence and CLI atomic-write follow-up — October 18
+
+The editor now routes its allow-listed project documents through a synchronous
+desktop bridge into the app's SQLite profile. Authentication and UI preferences
+remain in browser storage; legacy browser project values remain readable and move
+to SQLite on the next write. The packaged Electron acceptance was rerun after a
+fresh `package:unpacked` build: 1 test passed in 22.5 seconds with retries disabled.
+It verified that timeline edits, effects, keyframes, transitions, audio and a Persian
+caption survive an Electron restart, and that the project exports playable media.
+
+The CLI's Windows atomic replacement now retries only bounded transient
+`EPERM`/`EACCES` rename failures before failing closed. The injected transient-error
+regression and multi-process import/render coverage passed in the full suite. The
+Windows installer lifecycle fixture now launches the lockfile-pinned Electron
+runtime directly instead of invoking the installed app with unsupported
+`--run-as-node`; PowerShell parsing and the safe-storage fixture pass locally. This
+fixes the harness path but does not claim installed lifecycle acceptance.
+
+Fresh source verification on October 18: `pnpm verify:ci` exited 0, including
+typecheck, lint, format, the full Vitest suite, workspace builds and production audit
+(`No known vulnerabilities found`). `pnpm test:harness` passed 32, skipped 11
+platform-specific cases, and failed none. The full retry-free Playwright audit and
+the candidate-bound two-pass workflow are separate acceptance gates.
+
+The exact-SHA `release-candidate-v2` workflow is pending dispatch for the frozen
+candidate. GitHub-hosted Ubuntu remains assigned to portable validation, renderer
+build and responsive checks; the available self-hosted runners handle media export,
+real services and Windows Docker lifecycle acceptance where hosted runners lack the
+needed capabilities. No candidate-ready receipt, release approval, install, or
+deployment is claimed yet.

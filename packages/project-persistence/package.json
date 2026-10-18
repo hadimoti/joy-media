@@ -18,6 +18,10 @@
     "./desktop": {
       "types": "./dist/desktop.d.ts",
       "default": "./dist/desktop.js"
+    },
+    "./editor-storage": {
+      "types": "./dist/editor-storage.d.ts",
+      "default": "./dist/editor-storage.js"
     }
   },
   "scripts": {

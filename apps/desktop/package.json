@@ -19,6 +19,7 @@
     "test:smoke-standalone": "node scripts/smoke-standalone.mjs"
   },
   "dependencies": {
+    "@joy-media/project-persistence": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*"
   },
   "devDependencies": {

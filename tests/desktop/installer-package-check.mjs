@@ -43,6 +43,7 @@ const requiredFiles = [
   'uninstall.cmd',
   'resources/app/worker/joy-worker.exe',
   'resources/app/cli/joy-media-bundle.mjs',
+  'resources/app/node_modules/@joy-media/project-persistence/dist/editor-storage.js',
   'resources/app/renderer/index.html',
   'resources/app/dist/main/electron-entry.js',
 ];

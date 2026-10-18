@@ -25,10 +25,15 @@ import path, { dirname, join } from 'node:path';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseProjectDeepLink } from '../deep-link.js';
+import { editorOriginFromFrameUrl } from '../origin-policy.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
-import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
+import {
+  createIpcHandlers,
+  dispatchIpcRequest,
+  dispatchSynchronousIpcRequest,
+} from './ipc-handlers.js';
 import type { IpcRequest } from '../ipc.js';
 import {
   PACKAGED_RENDERER_SCHEME,
@@ -167,6 +172,20 @@ if (!app.requestSingleInstanceLock()) {
   ipcMain.handle('joy-desktop-ipc', (_event, request: IpcRequest) =>
     dispatchIpcRequest(ipcHandlers, request),
   );
+  ipcMain.on('joy-desktop-project-storage', (event, request: IpcRequest) => {
+    let senderOrigin = '';
+    senderOrigin = editorOriginFromFrameUrl(event.senderFrame?.url ?? '') ?? '';
+    if (typeof request !== 'object' || request === null) {
+      event.returnValue = { ok: false, error: 'Blocked IPC request: malformed request' };
+      return;
+    }
+    // Trust the actual frame URL, never an origin supplied by renderer JavaScript.
+    event.returnValue = dispatchSynchronousIpcRequest(ipcHandlers, {
+      origin: senderOrigin,
+      channel: request.channel,
+      payload: request.payload,
+    });
+  });
 
   app.on('second-instance', (_event, argv) => {
     const link = argv.find((arg) => arg.startsWith('joy://'));

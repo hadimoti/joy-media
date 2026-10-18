@@ -138,7 +138,7 @@ export function writeFileAtomic(path: string, data: string): void {
   const tmp = `${path}.${process.pid}.${randomBytes(3).toString('hex')}.tmp`;
   try {
     writeFileSync(tmp, data, 'utf8');
-    renameSync(tmp, path);
+    renameAtomicWithRetry(tmp, path);
   } catch (err) {
     try {
       rmSync(tmp, { force: true });
@@ -146,6 +146,29 @@ export function writeFileAtomic(path: string, data: string): void {
       /* best effort */
     }
     throw err;
+  }
+}
+
+const WINDOWS_RENAME_RETRIES = 25;
+const WINDOWS_RENAME_RETRY_DELAY_MS = 10;
+
+/** Antivirus and indexer readers can briefly prevent replacing an existing file on Windows. */
+function renameAtomicWithRetry(source: string, destination: string): void {
+  for (let retry = 0; ; retry++) {
+    try {
+      renameSync(source, destination);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (
+        process.platform !== 'win32' ||
+        (code !== 'EPERM' && code !== 'EACCES') ||
+        retry >= WINDOWS_RENAME_RETRIES
+      ) {
+        throw error;
+      }
+      sleepSync(WINDOWS_RENAME_RETRY_DELAY_MS);
+    }
   }
 }
 

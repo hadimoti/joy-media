@@ -70,7 +70,8 @@ export const SEC = 1_000_000;
 
 /** Test-only preload for real CLI durable-write boundary faults. */
 export function persistenceFaultEnv(
-  boundary: 'before-sqlite-commit' | 'before-file-rename' | 'sqlite-full-commit',
+  boundary:
+    'before-sqlite-commit' | 'before-file-rename' | 'file-rename-eperm-once' | 'sqlite-full-commit',
   markerPath: string,
   targetPath?: string,
 ): NonNullable<RunOptions['env']> {

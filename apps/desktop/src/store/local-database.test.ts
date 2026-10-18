@@ -84,6 +84,30 @@ describe('LocalDatabase media manifest', () => {
   });
 });
 
+describe('LocalDatabase editor project storage', () => {
+  it('reads, replaces, and removes serialized editor values', () => {
+    const db = testDb();
+    expect(db.getEditorStorageItem('joy-media.timeline-project-log.v1')).toBeNull();
+
+    db.setEditorStorageItem('joy-media.timeline-project-log.v1', '{"projects":{}}');
+    expect(db.getEditorStorageItem('joy-media.timeline-project-log.v1')).toBe('{"projects":{}}');
+
+    db.setEditorStorageItem('joy-media.timeline-project-log.v1', '{"projects":{"p":{}}}');
+    expect(db.getEditorStorageItem('joy-media.timeline-project-log.v1')).toBe(
+      '{"projects":{"p":{}}}',
+    );
+    db.setEditorStorageItem('joy-media.project-catalog.v1', '{"projects":{}}');
+    expect(db.listEditorStorageKeys()).toEqual([
+      'joy-media.project-catalog.v1',
+      'joy-media.timeline-project-log.v1',
+    ]);
+
+    db.deleteEditorStorageItem('joy-media.timeline-project-log.v1');
+    expect(db.getEditorStorageItem('joy-media.timeline-project-log.v1')).toBeNull();
+    db.close();
+  });
+});
+
 describe('LocalDatabase jobs', () => {
   it('enqueues a job as queued and reports it back by id', () => {
     let idCount = 0;
