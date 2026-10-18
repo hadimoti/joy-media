@@ -20,21 +20,34 @@ Electron, SQLite, FFmpeg/FFprobe, existing self-hosted Windows/Linux runners.
 **Spec:** [Repository audit and readiness definition](../../qa/evidence/2026-10-17-readiness-audit.md).
 
 **Status (continued 2026-10-18):** Tasks 1 and 2 are complete and committed as `930d73cb`
-and `6eacd9b5`. Tasks 3–7 now have extensive local Windows evidence for playable CLI
+and `6eacd9b5`. Tasks 3–7 have extensive local Windows evidence for playable CLI
 output, recovery, fresh-profile project operations, packaged editor workflow, and
 staging package/launcher checks, but remain open where their full scope is not yet
-accepted. Task 8 has not started. Task 9 remains open for a frozen-candidate two-pass
-run, independent reviews, owner release decision, and required closeout receipt. This
-plan is not an app-ready or release certificate. The October 18 continuation added a test-first Windows reserved-device output-path guard and verified both current staged CLI launchers with decoded media; exact-candidate release evidence and Windows installed-app lifecycle remain open.
+accepted. This worktree passed `pnpm verify:ci`, `pnpm test:harness` (30 passed, 11
+expected platform skips), and the full source Playwright audit (826 passed, 7 known
+skips, 0 retries) across seven viewports. The two viewport-sensitive Director tests
+also passed three repeats each at 1920px. The local Worker status detects an RTX 5070
+Ti but reports 0/4 model environments ready and no model directory, so real-GPU
+qualification remains open. Task 8 is partially exercised but open; Task 9 remains
+open for a frozen-candidate two-pass run, independent reviews, owner release decision,
+and required closeout receipt. This plan is not an app-ready or release certificate.
+The October 18 continuation also added a test-first Windows reserved-device
+output-path guard and verified both staged CLI launchers with decoded media.
 
-**Rulings (2026-10-18):** The repository is public, the standard GitHub-hosted
-runner is free, the artifact inventory was empty, and the one-file quota probe
-passed as run `39084850937`. Use `ubuntu-24.04` only for building the editor
-bundle; transfer it with a one-day artifact bound to run/attempt/candidate and
-verify its full file manifest on the Windows Docker runner. This keeps the
-memory-heavy Vite build off the 1 GiB-visible Hyper-V container while preserving
-the container-local acceptance boundary. If runner or transfer availability is
-misjudged, the workflow fails closed before packaging. Kilo was not invoked:
+**Rulings (updated 2026-10-18):** The owner directs us to use standard
+GitHub-hosted runners for lanes their resources and prerequisites support, and
+fall back to the existing self-hosted runners when a hosted runner is unavailable
+or insufficient. The public repository's standard runner is free, the artifact
+inventory was empty, and the one-file quota probe passed as run `39084850937`.
+The current workflow uses `ubuntu-24.04` for candidate validation, editor bundle,
+desktop browser primary/responsive acceptance, and shipped-bundle UI smoke. It
+retains self-hosted runners for isolated real-service/P3 evidence, the Windows
+Docker installer lifecycle, and the evidence gate summary. Transfer the renderer
+bundle with a one-day artifact bound to run/attempt/candidate and verify its full
+file manifest on the Windows Docker runner. This keeps the memory-heavy Vite
+build off the 1 GiB-visible Hyper-V container while preserving the container-local
+Windows acceptance boundary. The workflow fails closed if runner or transfer
+availability is misjudged. Kilo was not invoked:
 its local CLI exposes no hard filesystem sandbox, so the owner-required worker
 isolation gate remains unverified. The cost if this ruling is wrong is one fresh
 runner/artifact dependency and no independent worker diff; external review and
@@ -60,6 +73,26 @@ empty and dirty states. That regression test failed against the old harness befo
 the guard was added, then passed. The same pass also adds line diagnostics and
 guards for unset User PATH/profile values and the PowerShell 5.1-incompatible
 `String.Contains` overload. The updated package checker passes.
+
+Exact-candidate run `39088536140` passed the hosted editor bundle, primary and
+responsive browser lanes, shipped-bundle public smoke, and both Linux/P3 service
+passes. Windows packaging and the Worker self-test passed, but lifecycle stopped
+before installation because pinned v1.0.1 `SHA256SUMS` lists only the setup EXE and
+portable ZIP, not the desktop EXE or CLI bundle inside that ZIP. The archive hash
+was verified against the pinned sidecar; the lifecycle helper now derives the two
+installed-file hashes from the verified archive entry when a direct sidecar entry
+is absent, while retaining strict duplicate/malformed/direct-entry checks. Its
+PowerShell regression test failed before implementation and passes afterward. This
+worktree's exact candidate still needs a fresh two-pass run.
+
+The October 18 local verification on the revised worktree passed `pnpm verify:ci`,
+`pnpm test:harness` (30 passed, 11 expected host-specific skips), and
+`pnpm run test:e2e:audit --retries=0` (826 passed, 7 known skips across all seven
+viewports). The seven skips include the documented Local Worker audio scenario;
+they are not reported as accepted live-audio evidence. The Windows lifecycle,
+real-GPU model output, 200-edit and 30-minute soak, and exact-candidate CI evidence
+remain open. `joy-media worker status --json` detects the RTX 5070 Ti but confirms
+all four local model environments are absent and `JOY\\models` does not exist.
 
 On the modified worktree at HEAD `325cc4d7277d3008bd79c18749ddcff9c9a53051`,
 `pnpm verify:ci` passed (typecheck, lint, formatting, full Vitest suite, build, and
@@ -97,10 +130,10 @@ does not waive the independent Claude Code review or the owner's release decisio
   routes, new purchases, paid fallback, production credentials, or Gbrain writes.
 - Preserve external Claude Code independent review; if unavailable, record that
   gate as pending. Do not silently replace it or launch Claude-model workers.
-- Use standard GitHub-hosted `ubuntu-24.04` only for the editor bundle after the
-  short-lived artifact transfer probe passes; retain existing self-hosted Docker
-  runners for every other lane, especially Windows lifecycle acceptance. Do not
-  use paid larger runners.
+- Prefer standard GitHub-hosted `ubuntu-24.04` for portable source, browser, and
+  shipped-bundle lanes after the transfer probe passes. Retain self-hosted runners
+  where isolated services, persistent evidence, or Windows Docker lifecycle
+  prerequisites need them. Do not use paid larger runners.
 - No real provider calls in deterministic tests. Separate fake-provider contract
   tests from explicitly scoped real-provider or real-GPU acceptance.
 - A plan, mock response, worker self-test, or successful CI summary cannot stand
