@@ -517,6 +517,10 @@ jobs:
           if (Test-Path -LiteralPath $installPath) {
             Remove-Item -LiteralPath $installPath -Recurse -Force -ErrorAction Stop
           }
+          $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JoyMedia'
+          if (Test-Path -LiteralPath $uninstallKey) {
+            Remove-Item -LiteralPath $uninstallKey -Recurse -Force -ErrorAction Stop
+          }
           if ($env:JOY_MEDIA_WINDOWS_BUILD_STARTED -eq 'true') {
             $repoRoot = (Resolve-Path $PWD).Path
             $desktopDist = Join-Path $repoRoot 'apps\desktop\dist'
