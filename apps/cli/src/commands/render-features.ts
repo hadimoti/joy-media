@@ -5,6 +5,37 @@ import { spawnSync } from 'node:child_process';
 import { ffmpegBinary, ffprobeBinary } from '../utils/media-probe.js';
 
 // ---------------------------------------------------------------------------
+// Renderer refusal fragments (shared verbatim with render-media.ts)
+// ---------------------------------------------------------------------------
+
+export const RF_VISUAL_OBJECTS = 'visual objects, transforms, and effects';
+export const RF_PROPERTY_ANIMATIONS = 'property animations';
+export const RF_CLIP_COLOR_GRADES = 'clip color grades';
+export const RF_COLOR_GRADING = 'color grading';
+export const RF_AUDIO_EFFECTS = 'audio effects';
+export const RF_AUDIO_BUS_ROUTING = 'audio bus routing';
+export const RF_AUDIO_BUS_GAIN = 'audio bus gain';
+export const RF_AUDIO_BUS_PAN = 'audio bus pan';
+export const RF_AUDIO_BUS_MUTE = 'audio bus mute';
+export const RF_AUDIO_BUS_SOLO = 'audio bus solo';
+export const RF_AUDIO_PAN = 'audio pan on clip';
+export const RF_AUDIO_SOLO = 'audio solo on clip';
+export const RF_PROCESSED_AUDIO = 'processed audio source on clip';
+export const RF_TRACK_MUTE_SOLO = 'uses mute or solo, which the CLI renderer does not support';
+export const RF_ALPHA = 'uses alpha-bearing media';
+export const RF_PLAYBACK_RATE = 'playback rate';
+export const RF_REVERSE_TIME_REMAP = 'reverse / time remap';
+export const RF_NOT_VIDEO_CLIP = 'the CLI renderer only supports video clips';
+export const RF_TRANSITION_TYPE = 'only dissolve is rendered';
+export const RF_CAPTION_STYLE = 'has its own style, which the CLI renderer does not draw yet';
+export const RF_CAPTION_STYLE_OR_ANIMATION =
+  'uses a caption style or animation, which the CLI renderer does not draw';
+export const RF_CAPTION_RTL = 'is right-to-left, which the CLI renderer does not draw yet';
+export const RF_DISSOLVE_HANDLE = 'for its dissolve, and its source';
+export const RF_AUDIO_GAIN_RANGE = 'must be a number from 0 to';
+export const RF_AUDIO_FADE_RANGE = 'must be zero or more microseconds';
+
+// ---------------------------------------------------------------------------
 // Stable feature IDs
 // ---------------------------------------------------------------------------
 
@@ -22,11 +53,14 @@ export const FEATURE_IDS = [
   'render.color-grade',
   'render.audio-effects',
   'render.audio-bus-routing',
+  'render.audio-bus-settings',
   'render.audio-pan',
   'render.audio-solo',
   'render.track-mute-solo',
   'render.audio-processed-source',
   'captions.drawtext',
+  'captions.styling',
+  'captions.rtl',
   'transitions.dissolve',
   'transitions.other',
   'audio.gain',
@@ -36,22 +70,8 @@ export const FEATURE_IDS = [
 
 export type FeatureId = (typeof FEATURE_IDS)[number];
 
-// ---------------------------------------------------------------------------
-// Reason strings (shared with render-media.ts so they cannot drift)
-// ---------------------------------------------------------------------------
-
-export const REASON_VISUAL_OBJECTS = 'visual objects, transforms, and effects';
-export const REASON_PROPERTY_ANIMATIONS = 'property animations';
-export const REASON_AUDIO_EFFECTS = 'audio effects';
-export const REASON_AUDIO_BUS_ROUTING = 'audio bus routing';
-export const REASON_ALPHA_MEDIA =
-  'alpha-bearing media; the CLI renderer cannot preserve transparency';
 export const REASON_CAPTION_FONT_MISSING =
   'Captions need a font file, and none was found. Set JOY_MEDIA_CAPTION_FONT to a .ttf or .otf file.';
-export const REASON_FFMPEG_MISSING =
-  'ffmpeg was not found (looked for "%s"). Install ffmpeg or set JOY_MEDIA_FFMPEG to its path.';
-export const REASON_FFPROBE_MISSING =
-  'ffprobe was not found (looked for "%s"). Install ffmpeg or set JOY_MEDIA_FFPROBE to its path.';
 
 // ---------------------------------------------------------------------------
 // Feature descriptor
@@ -64,6 +84,13 @@ export interface FeatureEntry {
   readonly area: string;
   readonly status: FeatureStatus;
   readonly reason: string;
+  readonly refusal: readonly string[];
+}
+
+export interface FeatureProbes {
+  readonly ffmpeg: boolean;
+  readonly ffprobe: boolean;
+  readonly captionFont: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,16 +105,8 @@ function binaryAvailable(name: string): boolean {
   return result.status === 0 && !result.error;
 }
 
-function ffmpegAvailable(): boolean {
-  return binaryAvailable(ffmpegBinary());
-}
-
-function ffprobeAvailable(): boolean {
-  return binaryAvailable(ffprobeBinary());
-}
-
-/** Duplicated from render-media.ts to avoid a circular import. */
-function captionFontFile(): string | null {
+/** Caption font search shared with render-media.ts. */
+export function captionFontFile(): string | null {
   const override = process.env['JOY_MEDIA_CAPTION_FONT']?.trim();
   if (override) return existsSync(override) ? override : null;
   const candidates =
@@ -102,229 +121,233 @@ function captionFontFile(): string | null {
   return candidates.find((path) => existsSync(path)) ?? null;
 }
 
-function captionFontAvailable(): boolean {
-  return captionFontFile() !== null;
-}
-
-// ---------------------------------------------------------------------------
-// Build the feature list
-// ---------------------------------------------------------------------------
-
-export function buildFeatureList(): FeatureEntry[] {
-  const features: FeatureEntry[] = [];
-
-  // render.real-media
-  const ffmpegOk = ffmpegAvailable();
-  const ffprobeOk = ffprobeAvailable();
-  if (ffmpegOk && ffprobeOk) {
-    features.push({
+/** The static catalog: what the product supports, before this machine is probed. */
+export function baseFeatureList(): FeatureEntry[] {
+  return [
+    {
       id: 'render.real-media',
       area: 'render',
       status: 'available',
       reason: 'Ordinary video, still images, and audio clips on enabled tracks.',
-    });
-  } else if (!ffmpegOk) {
-    features.push({
-      id: 'render.real-media',
+      refusal: [],
+    },
+    {
+      id: 'render.frame-rate.ntsc-and-fraction',
+      area: 'frame-rate',
+      status: 'available',
+      reason:
+        'NTSC rates (23.976, 29.97, 59.94) and exact fractions (e.g. 30000/1001) are supported.',
+      refusal: [],
+    },
+    {
+      id: 'render.alpha-media',
       area: 'render',
-      status: 'setup-required',
-      reason: REASON_FFMPEG_MISSING.replace('%s', ffmpegBinary()),
-    });
-  } else {
-    features.push({
-      id: 'render.real-media',
+      status: 'unsupported',
+      reason: 'Clips with alpha-bearing media are refused.',
+      refusal: [RF_ALPHA],
+    },
+    {
+      id: 'render.playback-rate',
       area: 'render',
-      status: 'setup-required',
-      reason: REASON_FFPROBE_MISSING.replace('%s', ffprobeBinary()),
-    });
-  }
-
-  // render.frame-rate.ntsc-and-fraction
-  features.push({
-    id: 'render.frame-rate.ntsc-and-fraction',
-    area: 'frame-rate',
-    status: 'available',
-    reason:
-      'NTSC rates (23.976, 29.97, 59.94) and exact fractions (e.g. 30000/1001) are supported.',
-  });
-
-  // render.alpha-media
-  features.push({
-    id: 'render.alpha-media',
-    area: 'render',
-    status: 'unsupported',
-    reason: REASON_ALPHA_MEDIA,
-  });
-
-  // render.playback-rate
-  features.push({
-    id: 'render.playback-rate',
-    area: 'render',
-    status: 'unsupported',
-    reason: 'Playback rate changes are not supported by the CLI renderer.',
-  });
-
-  // render.freeze-frame
-  features.push({
-    id: 'render.freeze-frame',
-    area: 'render',
-    status: 'unsupported',
-    reason:
-      'The CLI renderer has no freeze-frame model and refuses any playback rate other than 1x.',
-  });
-
-  // render.reverse
-  features.push({
-    id: 'render.reverse',
-    area: 'render',
-    status: 'unsupported',
-    reason: 'Reverse playback is not supported by the CLI renderer.',
-  });
-
-  // render.time-remap
-  features.push({
-    id: 'render.time-remap',
-    area: 'render',
-    status: 'unsupported',
-    reason: 'Time remapping is not supported by the CLI renderer.',
-  });
-
-  // render.nested-composition
-  features.push({
-    id: 'render.nested-composition',
-    area: 'render',
-    status: 'unsupported',
-    reason: 'Nested compositions are rejected as non-video clips.',
-  });
-
-  // render.visual-objects
-  features.push({
-    id: 'render.visual-objects',
-    area: 'render',
-    status: 'unsupported',
-    reason: REASON_VISUAL_OBJECTS,
-  });
-
-  // render.property-animations
-  features.push({
-    id: 'render.property-animations',
-    area: 'render',
-    status: 'unsupported',
-    reason: REASON_PROPERTY_ANIMATIONS,
-  });
-
-  // render.color-grade
-  features.push({
-    id: 'render.color-grade',
-    area: 'render',
-    status: 'unsupported',
-    reason: 'color grading',
-  });
-
-  // render.audio-effects
-  features.push({
-    id: 'render.audio-effects',
-    area: 'audio',
-    status: 'unsupported',
-    reason: REASON_AUDIO_EFFECTS,
-  });
-
-  // render.audio-bus-routing
-  features.push({
-    id: 'render.audio-bus-routing',
-    area: 'audio',
-    status: 'unsupported',
-    reason: REASON_AUDIO_BUS_ROUTING,
-  });
-
-  // render.audio-pan
-  features.push({
-    id: 'render.audio-pan',
-    area: 'audio',
-    status: 'unsupported',
-    reason: 'Audio pan is not supported by the CLI renderer.',
-  });
-
-  // render.audio-solo
-  features.push({
-    id: 'render.audio-solo',
-    area: 'audio',
-    status: 'unsupported',
-    reason: 'Audio solo is not supported by the CLI renderer.',
-  });
-
-  // render.track-mute-solo
-  features.push({
-    id: 'render.track-mute-solo',
-    area: 'render',
-    status: 'unsupported',
-    reason: 'Track mute and solo are not supported by the CLI renderer.',
-  });
-
-  // render.audio-processed-source
-  features.push({
-    id: 'render.audio-processed-source',
-    area: 'audio',
-    status: 'unsupported',
-    reason: 'Processed audio sources are not supported by the CLI renderer.',
-  });
-
-  // captions.drawtext
-  if (captionFontAvailable()) {
-    features.push({
+      status: 'unsupported',
+      reason: 'Clips with playback-rate changes are refused.',
+      refusal: [RF_PLAYBACK_RATE],
+    },
+    {
+      id: 'render.freeze-frame',
+      area: 'render',
+      status: 'unsupported',
+      reason:
+        'The CLI project format has no freeze-frame model; any playback-rate change, including zero, is refused.',
+      refusal: [RF_PLAYBACK_RATE],
+    },
+    {
+      id: 'render.reverse',
+      area: 'render',
+      status: 'unsupported',
+      reason: 'Clips with reverse playback are refused.',
+      refusal: [RF_REVERSE_TIME_REMAP],
+    },
+    {
+      id: 'render.time-remap',
+      area: 'render',
+      status: 'unsupported',
+      reason: 'Clips with time remapping are refused.',
+      refusal: [RF_REVERSE_TIME_REMAP],
+    },
+    {
+      id: 'render.nested-composition',
+      area: 'render',
+      status: 'unsupported',
+      reason: 'Nested compositions are refused as non-video clips.',
+      refusal: [RF_NOT_VIDEO_CLIP],
+    },
+    {
+      id: 'render.visual-objects',
+      area: 'render',
+      status: 'unsupported',
+      reason: RF_VISUAL_OBJECTS,
+      refusal: [RF_VISUAL_OBJECTS],
+    },
+    {
+      id: 'render.property-animations',
+      area: 'render',
+      status: 'unsupported',
+      reason: RF_PROPERTY_ANIMATIONS,
+      refusal: [RF_PROPERTY_ANIMATIONS],
+    },
+    {
+      id: 'render.color-grade',
+      area: 'render',
+      status: 'unsupported',
+      reason: 'Color grading and clip color grades are refused.',
+      refusal: [RF_COLOR_GRADING, RF_CLIP_COLOR_GRADES],
+    },
+    {
+      id: 'render.audio-effects',
+      area: 'audio',
+      status: 'unsupported',
+      reason: RF_AUDIO_EFFECTS,
+      refusal: [RF_AUDIO_EFFECTS],
+    },
+    {
+      id: 'render.audio-bus-routing',
+      area: 'audio',
+      status: 'unsupported',
+      reason: RF_AUDIO_BUS_ROUTING,
+      refusal: [RF_AUDIO_BUS_ROUTING],
+    },
+    {
+      id: 'render.audio-bus-settings',
+      area: 'audio',
+      status: 'unsupported',
+      reason:
+        'Audio bus gain, pan, mute and solo are not supported by the CLI renderer; only the default bus is rendered.',
+      refusal: [RF_AUDIO_BUS_GAIN, RF_AUDIO_BUS_PAN, RF_AUDIO_BUS_MUTE, RF_AUDIO_BUS_SOLO],
+    },
+    {
+      id: 'render.audio-pan',
+      area: 'audio',
+      status: 'unsupported',
+      reason: RF_AUDIO_PAN,
+      refusal: [RF_AUDIO_PAN],
+    },
+    {
+      id: 'render.audio-solo',
+      area: 'audio',
+      status: 'unsupported',
+      reason: RF_AUDIO_SOLO,
+      refusal: [RF_AUDIO_SOLO],
+    },
+    {
+      id: 'render.track-mute-solo',
+      area: 'render',
+      status: 'unsupported',
+      reason: RF_TRACK_MUTE_SOLO,
+      refusal: [RF_TRACK_MUTE_SOLO],
+    },
+    {
+      id: 'render.audio-processed-source',
+      area: 'audio',
+      status: 'unsupported',
+      reason: RF_PROCESSED_AUDIO,
+      refusal: [RF_PROCESSED_AUDIO],
+    },
+    {
       id: 'captions.drawtext',
       area: 'captions',
       status: 'available',
-      reason: 'Captions are rendered with ffmpeg drawtext when a font file is available.',
-    });
-  } else {
-    features.push({
-      id: 'captions.drawtext',
+      reason: 'Captions render with ffmpeg drawtext when a caption font is available.',
+      refusal: [],
+    },
+    {
+      id: 'captions.styling',
       area: 'captions',
-      status: 'setup-required',
-      reason: REASON_CAPTION_FONT_MISSING,
-    });
-  }
+      status: 'unsupported',
+      reason: 'Caption clips with their own style or a referenced style or animation are refused.',
+      refusal: [RF_CAPTION_STYLE, RF_CAPTION_STYLE_OR_ANIMATION],
+    },
+    {
+      id: 'captions.rtl',
+      area: 'captions',
+      status: 'unsupported',
+      reason: 'Right-to-left caption documents are refused.',
+      refusal: [RF_CAPTION_RTL],
+    },
+    {
+      id: 'transitions.dissolve',
+      area: 'transitions',
+      status: 'available',
+      reason:
+        "Dissolves render between touching clips when each clip has handle media beyond its edge; otherwise the render refuses with a message containing 'for its dissolve, and its source'.",
+      refusal: [],
+    },
+    {
+      id: 'transitions.other',
+      area: 'transitions',
+      status: 'unsupported',
+      reason: RF_TRANSITION_TYPE,
+      refusal: [RF_TRANSITION_TYPE],
+    },
+    {
+      id: 'audio.gain',
+      area: 'audio',
+      status: 'available',
+      reason: 'Clip gain must be a number from 0 to 4 (0 to +12 dB); other values are refused.',
+      refusal: [],
+    },
+    {
+      id: 'audio.fades',
+      area: 'audio',
+      status: 'available',
+      reason: 'Fade-in and fade-out must be zero or more microseconds; other values are refused.',
+      refusal: [],
+    },
+    {
+      id: 'audio.mute',
+      area: 'audio',
+      status: 'available',
+      reason: 'Clip mute is rendered.',
+      refusal: [],
+    },
+  ];
+}
 
-  // transitions.dissolve
-  features.push({
-    id: 'transitions.dissolve',
-    area: 'transitions',
-    status: 'available',
-    reason: 'Dissolve transitions between touching clips are rendered.',
+/** Apply environment probes without mutating the feature descriptors. */
+export function applyProbes(
+  features: readonly FeatureEntry[],
+  probes: FeatureProbes,
+): FeatureEntry[] {
+  const missing: string[] = [];
+  if (!probes.ffmpeg) missing.push('ffmpeg');
+  if (!probes.ffprobe) missing.push('ffprobe');
+  const missingReason = missing
+    .map(
+      (binary) =>
+        `${binary} is not found; install it or set JOY_MEDIA_${binary.toUpperCase()} (see the render requirements)`,
+    )
+    .join('; ');
+  return features.map((feature) => {
+    if (feature.status !== 'available') return { ...feature };
+    if (feature.id === 'captions.drawtext' && !probes.captionFont) {
+      const reason =
+        missing.length > 0
+          ? `${missingReason}; ${REASON_CAPTION_FONT_MISSING}`
+          : REASON_CAPTION_FONT_MISSING;
+      return { ...feature, status: 'setup-required', reason };
+    }
+    if (missing.length > 0) {
+      return { ...feature, status: 'setup-required', reason: missingReason };
+    }
+    return { ...feature };
   });
+}
 
-  // transitions.other
-  features.push({
-    id: 'transitions.other',
-    area: 'transitions',
-    status: 'unsupported',
-    reason: 'Only dissolve transitions are rendered.',
+/** Build the catalog using the real ffmpeg, ffprobe and caption-font probes. */
+export function buildFeatureList(): FeatureEntry[] {
+  return applyProbes(baseFeatureList(), {
+    ffmpeg: binaryAvailable(ffmpegBinary()),
+    ffprobe: binaryAvailable(ffprobeBinary()),
+    captionFont: captionFontFile() !== null,
   });
-
-  // audio.gain
-  features.push({
-    id: 'audio.gain',
-    area: 'audio',
-    status: 'available',
-    reason: 'Clip gain from 0 to 4 (0 to +12 dB) is rendered.',
-  });
-
-  // audio.fades
-  features.push({
-    id: 'audio.fades',
-    area: 'audio',
-    status: 'available',
-    reason: 'Audio fade-in and fade-out are rendered.',
-  });
-
-  // audio.mute
-  features.push({
-    id: 'audio.mute',
-    area: 'audio',
-    status: 'available',
-    reason: 'Clip mute is rendered.',
-  });
-
-  return features;
 }

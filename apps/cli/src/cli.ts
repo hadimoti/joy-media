@@ -65,6 +65,7 @@ export interface CliFlags {
   'media-engine': boolean;
   manifestOnly?: boolean;
   allowExtend?: boolean;
+  markdown?: boolean;
   mediaDir?: string | undefined;
 }
 
@@ -77,6 +78,7 @@ export const CLI_OPTIONS = {
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' },
   json: { type: 'boolean' },
+  markdown: { type: 'boolean' },
   project: { type: 'string', short: 'p' },
   apply: { type: 'boolean' },
   'allow-extend': { type: 'boolean' },
@@ -246,8 +248,14 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   },
   capabilities: {
     summary: 'Machine capability catalog',
-    usage: 'joy-media capabilities [--json]',
-    options: [['--json', 'One JSON document: { schemaVersion, cli, commands[], features[] }']],
+    usage: 'joy-media capabilities [--json|--markdown]',
+    options: [
+      ['--json', 'One JSON document: { schemaVersion, cli, commands[], features[] }'],
+      [
+        '--markdown',
+        'The same catalog as markdown (regenerates docs/product/CLI-RENDER-SUPPORT.md)',
+      ],
+    ],
   },
   doctor: {
     summary: 'System health check & diagnostics',
@@ -397,6 +405,7 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
       allowZero: false,
     }),
     json: v.json === true,
+    markdown: v.markdown === true,
     system: v.system === true,
     'media-engine': v['media-engine'] === true,
     manifestOnly: v['manifest-only'] === true,

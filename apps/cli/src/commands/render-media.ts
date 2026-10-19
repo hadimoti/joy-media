@@ -1,14 +1,37 @@
 /* global Buffer */
 import { spawn } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { loadAssetSources } from '../utils/asset-sources.js';
 import { ffmpegBinary, probeMedia, type MediaInfo } from '../utils/media-probe.js';
 import {
-  REASON_VISUAL_OBJECTS,
-  REASON_PROPERTY_ANIMATIONS,
-  REASON_AUDIO_EFFECTS,
-  REASON_AUDIO_BUS_ROUTING,
+  RF_ALPHA,
+  RF_AUDIO_BUS_GAIN,
+  RF_AUDIO_BUS_MUTE,
+  RF_AUDIO_BUS_PAN,
+  RF_AUDIO_BUS_ROUTING,
+  RF_AUDIO_BUS_SOLO,
+  RF_AUDIO_EFFECTS,
+  RF_AUDIO_FADE_RANGE,
+  RF_AUDIO_GAIN_RANGE,
+  RF_AUDIO_PAN,
+  RF_AUDIO_SOLO,
+  RF_CAPTION_RTL,
+  RF_CAPTION_STYLE,
+  RF_CAPTION_STYLE_OR_ANIMATION,
+  RF_CLIP_COLOR_GRADES,
+  RF_COLOR_GRADING,
+  RF_DISSOLVE_HANDLE,
+  RF_NOT_VIDEO_CLIP,
+  RF_PLAYBACK_RATE,
+  RF_PROCESSED_AUDIO,
+  RF_PROPERTY_ANIMATIONS,
+  RF_REVERSE_TIME_REMAP,
+  RF_TRACK_MUTE_SOLO,
+  RF_TRANSITION_TYPE,
+  RF_VISUAL_OBJECTS,
+  captionFontFile,
+  REASON_CAPTION_FONT_MISSING,
 } from './render-features.js';
 
 /**
@@ -144,16 +167,16 @@ function captionCuesOf(
 ): CaptionCue[] | string {
   const clipId = String(clip['id']);
   if (clip['style'] !== undefined) {
-    return `Caption clip "${clipId}" has its own style, which the CLI renderer does not draw yet.`;
+    return `Caption clip "${clipId}" ${RF_CAPTION_STYLE}.`;
   }
   const docs = isRecord(project['captionDocuments']) ? project['captionDocuments'] : {};
   const doc = docs[String(clip['captionDocumentId'])];
   if (!isRecord(doc)) return `Caption clip "${clipId}" refers to a missing caption document.`;
   if (doc['styleRef'] !== undefined || doc['animationRef'] !== undefined) {
-    return `Caption clip "${clipId}" uses a caption style or animation, which the CLI renderer does not draw.`;
+    return `Caption clip "${clipId}" ${RF_CAPTION_STYLE_OR_ANIMATION}.`;
   }
   if (doc['direction'] === 'rtl') {
-    return `Caption clip "${clipId}" is right-to-left, which the CLI renderer does not draw yet.`;
+    return `Caption clip "${clipId}" ${RF_CAPTION_RTL}.`;
   }
   const words: Record<string, unknown> = isRecord(doc['words']) ? doc['words'] : {};
   const segments = Array.isArray(doc['segments']) ? doc['segments'] : [];
@@ -181,25 +204,6 @@ function captionCuesOf(
   return cues;
 }
 
-/**
- * The font captions are drawn with: JOY_MEDIA_CAPTION_FONT when set, else a common system font
- * for this platform. Null when none exists, so the render refuses instead of drawing nothing.
- */
-export function captionFontFile(): string | null {
-  const override = process.env['JOY_MEDIA_CAPTION_FONT']?.trim();
-  if (override) return existsSync(override) ? override : null;
-  const candidates =
-    process.platform === 'win32'
-      ? [join(process.env['WINDIR'] ?? 'C:\\Windows', 'Fonts', 'arial.ttf')]
-      : process.platform === 'darwin'
-        ? ['/System/Library/Fonts/Supplemental/Arial.ttf', '/Library/Fonts/Arial.ttf']
-        : [
-            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-            '/usr/share/fonts/TTF/DejaVuSans.ttf',
-          ];
-  return candidates.find((path) => existsSync(path)) ?? null;
-}
-
 /** Escape a value for an ffmpeg filter option: separators and quotes need a backslash. */
 function filterValue(value: string): string {
   return value.replace(/[\\:,;'[\]%]/g, '\\$&');
@@ -207,46 +211,44 @@ function filterValue(value: string): string {
 
 function unsupportedProjectFeature(project: Record<string, unknown>): string | null {
   const visualObjects = project['visualObjects'];
-  if (isRecord(visualObjects) && Object.keys(visualObjects).length > 0)
-    return REASON_VISUAL_OBJECTS;
+  if (isRecord(visualObjects) && Object.keys(visualObjects).length > 0) return RF_VISUAL_OBJECTS;
   const unsupportedTransition = transitionList(project).find((t) => t['type'] !== 'dissolve');
   if (unsupportedTransition)
-    return `transition type "${String(unsupportedTransition['type'])}" (only dissolve is rendered)`;
+    return `transition type "${String(unsupportedTransition['type'])}" (${RF_TRANSITION_TYPE})`;
   if (
     isRecord(project['propertyAnimations']) &&
     Object.keys(project['propertyAnimations']).length > 0
   )
-    return REASON_PROPERTY_ANIMATIONS;
+    return RF_PROPERTY_ANIMATIONS;
   if (isRecord(project['clipColorGrades']) && Object.keys(project['clipColorGrades']).length > 0)
-    return 'clip color grades';
-  if (project['colorGrade'] !== undefined) return 'color grading';
+    return RF_CLIP_COLOR_GRADES;
+  if (project['colorGrade'] !== undefined) return RF_COLOR_GRADING;
 
   const audio = project['audio'];
   if (!isRecord(audio)) return null;
   const audioClips = isRecord(audio['clips']) ? audio['clips'] : {};
   for (const [clipId, rawConfig] of Object.entries(audioClips)) {
     if (!isRecord(rawConfig)) continue;
-    if (rawConfig['sourceAssetId'] !== undefined)
-      return `processed audio source on clip "${clipId}"`;
+    if (rawConfig['sourceAssetId'] !== undefined) return `${RF_PROCESSED_AUDIO} "${clipId}"`;
     // Gain, mute and fades are rendered (see clipAudioSettings); only the rest is refused here.
     if (rawConfig['gain'] !== undefined && !validGain(rawConfig['gain']))
-      return `audio gain on clip "${clipId}" must be a number from 0 to ${MAX_CLIP_GAIN}`;
+      return `audio gain on clip "${clipId}" ${RF_AUDIO_GAIN_RANGE} ${MAX_CLIP_GAIN}`;
     if (!validFade(rawConfig['fadeInUs']) || !validFade(rawConfig['fadeOutUs']))
-      return `audio fades on clip "${clipId}" must be zero or more microseconds`;
+      return `audio fades on clip "${clipId}" ${RF_AUDIO_FADE_RANGE}`;
     if (rawConfig['pan'] !== undefined && rawConfig['pan'] !== 0)
-      return `audio pan on clip "${clipId}"`;
-    if (rawConfig['solo'] === true) return `audio solo on clip "${clipId}"`;
+      return `${RF_AUDIO_PAN} "${clipId}"`;
+    if (rawConfig['solo'] === true) return `${RF_AUDIO_SOLO} "${clipId}"`;
   }
-  if (Array.isArray(audio['effects']) && audio['effects'].length > 0) return REASON_AUDIO_EFFECTS;
+  if (Array.isArray(audio['effects']) && audio['effects'].length > 0) return RF_AUDIO_EFFECTS;
   const buses = Array.isArray(audio['buses']) ? audio['buses'] : [];
-  if (buses.length > 1) return REASON_AUDIO_BUS_ROUTING;
+  if (buses.length > 1) return RF_AUDIO_BUS_ROUTING;
   for (const rawBus of buses) {
     if (!isRecord(rawBus)) continue;
-    if (rawBus['gain'] !== undefined && rawBus['gain'] !== 1) return 'audio bus gain';
-    if (rawBus['pan'] !== undefined && rawBus['pan'] !== 0) return 'audio bus pan';
-    if (rawBus['mute'] === true) return 'audio bus mute';
-    if (rawBus['solo'] === true) return 'audio bus solo';
-    if (Array.isArray(rawBus['inputs']) && rawBus['inputs'].length > 0) return 'audio bus routing';
+    if (rawBus['gain'] !== undefined && rawBus['gain'] !== 1) return RF_AUDIO_BUS_GAIN;
+    if (rawBus['pan'] !== undefined && rawBus['pan'] !== 0) return RF_AUDIO_BUS_PAN;
+    if (rawBus['mute'] === true) return RF_AUDIO_BUS_MUTE;
+    if (rawBus['solo'] === true) return RF_AUDIO_BUS_SOLO;
+    if (Array.isArray(rawBus['inputs']) && rawBus['inputs'].length > 0) return RF_AUDIO_BUS_ROUTING;
   }
   return null;
 }
@@ -338,7 +340,7 @@ export function planMedia(
       return {
         mode: 'error',
         code: 'unsupported-feature',
-        message: `Track "${trackId}" uses mute or solo, which the CLI renderer does not support.`,
+        message: `Track "${trackId}" ${RF_TRACK_MUTE_SOLO}.`,
       };
     }
     const clips = Array.isArray(rawTrack['clips']) ? rawTrack['clips'] : [];
@@ -356,7 +358,7 @@ export function planMedia(
         return {
           mode: 'error',
           code: 'unsupported-feature',
-          message: `Clip "${clipId}" is a ${String(rawClip['kind'])} clip; the CLI renderer only supports video clips.`,
+          message: `Clip "${clipId}" is a ${String(rawClip['kind'])} clip; ${RF_NOT_VIDEO_CLIP}.`,
         };
       }
       const assetId = rawClip['assetId'];
@@ -376,8 +378,7 @@ export function planMedia(
     return {
       mode: 'error',
       code: 'unsupported-feature',
-      message:
-        'Captions need a font file, and none was found. Set JOY_MEDIA_CAPTION_FONT to a .ttf or .otf file.',
+      message: REASON_CAPTION_FONT_MISSING,
     };
   }
   if (pending.length === 0) {
@@ -423,7 +424,7 @@ export function planMedia(
       return {
         mode: 'error',
         code: 'unsupported-feature',
-        message: `Clip "${entry.clipId}" uses alpha-bearing media; the CLI renderer cannot preserve transparency.`,
+        message: `Clip "${entry.clipId}" ${RF_ALPHA}; the CLI renderer cannot preserve transparency.`,
       };
     }
     const c = entry.clip;
@@ -435,14 +436,14 @@ export function planMedia(
       return {
         mode: 'error',
         code: 'unsupported-feature',
-        message: `Clip "${entry.clipId}": playback rate ${c['playbackRate']}x is not supported by the CLI renderer.`,
+        message: `Clip "${entry.clipId}": ${RF_PLAYBACK_RATE} ${c['playbackRate']}x is not supported by the CLI renderer.`,
       };
     }
     if (c['reversed'] === true || isRecord(c['timeRemap'])) {
       return {
         mode: 'error',
         code: 'unsupported-feature',
-        message: `Clip "${entry.clipId}": reverse / time remap is not supported by the CLI renderer.`,
+        message: `Clip "${entry.clipId}": ${RF_REVERSE_TIME_REMAP} is not supported by the CLI renderer.`,
       };
     }
     if (
@@ -466,7 +467,7 @@ export function planMedia(
         return {
           mode: 'error',
           code: 'unsupported-feature',
-          message: `Clip "${entry.clipId}" needs ${(transitionOutUs / 2_000_000).toFixed(2)} s more media after its end for its dissolve, and its source ends first.`,
+          message: `Clip "${entry.clipId}" needs ${(transitionOutUs / 2_000_000).toFixed(2)} s more media after its end ${RF_DISSOLVE_HANDLE} ends first.`,
         };
       }
     }
@@ -474,7 +475,7 @@ export function planMedia(
       return {
         mode: 'error',
         code: 'unsupported-feature',
-        message: `Clip "${entry.clipId}" needs ${(transitionInUs / 2_000_000).toFixed(2)} s more media before its start for its dissolve, and its source begins there.`,
+        message: `Clip "${entry.clipId}" needs ${(transitionInUs / 2_000_000).toFixed(2)} s more media before its start ${RF_DISSOLVE_HANDLE} begins there.`,
       };
     }
     clips.push({
