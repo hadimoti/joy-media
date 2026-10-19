@@ -364,9 +364,31 @@ jobs:
           $runnerTempDrive = [IO.Path]::GetPathRoot($env:RUNNER_TEMP).TrimEnd('\').TrimEnd(':')
           $availableBytes = (Get-PSDrive -Name $runnerTempDrive).Free
           if ($availableBytes -lt 12GB) { throw "Windows Docker runner needs at least 12 GiB free on its temp drive; found $([math]::Round($availableBytes / 1GB, 2)) GiB." }
-          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/hadimoti/joy-media/releases/download/v1.0.1/joy-media-setup.exe' -OutFile (Join-Path $previousRoot 'joy-media-setup.exe')
-          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/hadimoti/joy-media/releases/download/v1.0.1/joy-media-windows-x64-v1.0.1.zip' -OutFile (Join-Path $previousRoot 'joy-media-windows-x64-v1.0.1.zip')
-          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/hadimoti/joy-media/releases/download/v1.0.1/SHA256SUMS.txt' -OutFile (Join-Path $previousRoot 'SHA256SUMS.txt')
+          . .\tests\desktop\windows-release-checksum.ps1
+          $zip = 'joy-media-windows-x64-v1.0.1.zip'
+          $pins = [ordered]@{
+            'SHA256SUMS.txt' = 'a7b933f44ec82edd2f166dcde0bb013e1febd0ebbd19aa42dd49ac8e05adfe32'
+            'joy-media-setup.exe' = '3f5fbe853de04a24aac22a46e28dd661cc1a80a2a6c5a1fa383fcd9ab3efde04'
+            'joy-media-windows-x64-v1.0.1.zip' = '21be785e26c0d06cadba40929ada839cfd24345f17b828cdb735d4eff056a88c'
+          }
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            try {
+              foreach ($name in $pins.Keys) {
+                $path = Join-Path $previousRoot $name
+                if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+                Invoke-WebRequest -UseBasicParsing -ErrorAction Stop -TimeoutSec 300 -Uri "https://github.com/hadimoti/joy-media/releases/download/v1.0.1/$name" -OutFile $path
+                if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pins[$name]) { throw "SHA256 mismatch: $name" }
+              }
+              $sums = Get-Content -LiteralPath (Join-Path $previousRoot 'SHA256SUMS.txt') -Raw
+              $actual = (Get-FileHash -LiteralPath (Join-Path $previousRoot $zip) -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ((Get-ChecksummedFile $sums $zip) -ne $actual) { throw "SHA256SUMS.txt mismatch: $zip" }
+              break
+            } catch {
+              if ($attempt -eq 4) { throw "v1.0.1 download/verification failed after 4 attempts: $($_.Exception.Message)" }
+              Write-Warning "Attempt $attempt failed: $($_.Exception.Message)"
+              Start-Sleep -Seconds (5 * [math]::Pow(2, $attempt - 1))
+            }
+          }
       - name: Exercise Worker and installed desktop lifecycle in two exact passes
         shell: powershell
         run: |
