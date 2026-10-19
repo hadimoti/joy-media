@@ -298,6 +298,14 @@ function checkFlags(sub: Subcommand, flags: CliFlags): void {
       );
     }
   }
+  if (
+    sub === 'add-transition' &&
+    (flags.left === undefined || flags.right === undefined || flags.duration === undefined)
+  ) {
+    throw usageFailure(
+      'Usage: joy-media timeline add-transition --project <id> --left <clipId> --right <clipId> --duration <seconds>',
+    );
+  }
   if (sub === 'add-track' && flags.family === undefined) {
     throw usageFailure(
       'Usage: joy-media timeline add-track --project <id> --family <visual|audio> [--name <text>]',
@@ -611,6 +619,11 @@ function splitClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelinePr
   };
   clip.durationUs = localUs;
   track.clips.splice(index + 1, 0, second);
+  // The second part keeps the clip's gain, mute and fades; they are keyed by clip id.
+  const audioClips = (project.audio as { clips?: Record<string, unknown> } | undefined)?.clips;
+  if (audioClips && audioClips[clip.id] !== undefined) {
+    audioClips[second.id] = { ...(audioClips[clip.id] as Record<string, unknown>) };
+  }
 
   return {
     changed: true,
@@ -731,7 +744,7 @@ function moveClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelinePro
   if (target !== found.track) {
     // A clip stays with its kind of track (family, and kind for caption/object tracks), whatever
     // media it references, so a cross-kind move can never leave a project that will not load.
-    if (familyOf(target) !== familyOf(found.track) || target.kind !== found.track.kind) {
+    if (familyOf(target) !== familyOf(found.track) || !sameKindOfTrack(target, found.track)) {
       throw new CommandFailure(
         'TRACK_KIND_MISMATCH',
         `Clip "${clipId}" is on a ${familyOf(found.track)} track and cannot move to ${familyOf(target)} track "${trackLabel(target)}". Move it to a track of the same kind.`,
@@ -875,6 +888,12 @@ function assertDissolveHandle(
       `Clip "${clip.id}" has no media file, so a dissolve cannot take frames past its edge. Add it with a real file.`,
     );
   }
+  if (media.kind === 'audio') {
+    throw new CommandFailure(
+      'TRANSITION_INVALID',
+      `Clip "${clip.id}" is audio only, so it has no picture to dissolve.`,
+    );
+  }
   if (media.kind === 'image') return;
   const sourceInUs = Number(clip['sourceInUs'] ?? 0);
   if (side === 'before' && sourceInUs < halfUs) {
@@ -894,6 +913,13 @@ function assertDissolveHandle(
   }
 }
 
+/** Audio and video tracks may exchange clips within a family; caption and object tracks keep their own kind. */
+function sameKindOfTrack(a: TimelineTrack, b: TimelineTrack): boolean {
+  const pictureOrSound = (t: TimelineTrack): boolean =>
+    t.kind === undefined || t.kind === 'video' || t.kind === 'audio';
+  return a.kind === b.kind || (pictureOrSound(a) && pictureOrSound(b));
+}
+
 /** Blend two touching clips on one track: `--left` ends where `--right` starts. */
 function addTransition(
   tracks: TimelineTrack[],
@@ -906,6 +932,12 @@ function addTransition(
     throw new CommandFailure(
       'TRANSITION_INVALID',
       'Both clips of a transition must be on the same track.',
+    );
+  }
+  if (familyOf(left.track) !== 'visual') {
+    throw new CommandFailure(
+      'TRANSITION_INVALID',
+      `Dissolves join picture clips, and track "${trackLabel(left.track)}" is an audio track.`,
     );
   }
   const type = flags.type ?? 'dissolve';

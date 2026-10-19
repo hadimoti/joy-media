@@ -945,7 +945,12 @@ export async function runHeadlessRender(
     projectTitle: plan.title,
     preset,
     spec: realMedia
-      ? { ...presetSpec, width: realMedia.width, height: realMedia.height }
+      ? {
+          ...presetSpec,
+          width: realMedia.width,
+          height: realMedia.height,
+          fps: Number(realMedia.fps.split('/')[0]) / Number(realMedia.fps.split('/')[1] ?? 1),
+        }
       : presetSpec,
     composition: plan.composition,
     totalFrames,

@@ -474,10 +474,21 @@ export function buildFfmpegArgs(
   const audioLabels: string[] = [];
   let base = 0;
 
-  plan.clips.forEach((clip, i) => {
+  const trackRank = new Map<string, number>();
+  for (const clip of plan.clips) {
+    if (!trackRank.has(clip.trackId)) trackRank.set(clip.trackId, trackRank.size);
+  }
+  const ordered = [...plan.clips].sort(
+    (a, b) =>
+      (trackRank.get(a.trackId) ?? 0) - (trackRank.get(b.trackId) ?? 0) || a.startUs - b.startUs,
+  );
+  ordered.forEach((clip, i) => {
     const dur = secs(clip.durationUs);
     const from = secs(clip.sourceInUs);
-    if (clip.info.isImage) args.push('-loop', '1', '-framerate', FPS, '-t', dur);
+    if (clip.info.isImage) {
+      const heldUs = clip.durationUs + clip.transitionInUs / 2 + clip.transitionOutUs / 2;
+      args.push('-loop', '1', '-framerate', FPS, '-t', secs(heldUs));
+    }
     args.push('-i', clip.sourcePath);
 
     if (clip.visual) {
