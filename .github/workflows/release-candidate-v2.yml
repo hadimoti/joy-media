@@ -521,6 +521,16 @@ jobs:
           if (Test-Path -LiteralPath $uninstallKey) {
             Remove-Item -LiteralPath $uninstallKey -Recurse -Force -ErrorAction Stop
           }
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'JOY Media.lnk'
+          $startMenuShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\JOY Media.lnk'
+          foreach ($shortcut in @($desktopShortcut, $startMenuShortcut)) {
+            if (Test-Path -LiteralPath $shortcut) { Remove-Item -LiteralPath $shortcut -Force -ErrorAction Stop }
+          }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($userPath -and (($userPath -split ';') | Where-Object { $_ -and $_.TrimEnd('\') -ieq $installPath.TrimEnd('\') })) {
+            $keptEntries = ($userPath -split ';') | Where-Object { $_ -and $_.TrimEnd('\') -ine $installPath.TrimEnd('\') }
+            [Environment]::SetEnvironmentVariable('Path', ($keptEntries -join ';'), 'User')
+          }
           if ($env:JOY_MEDIA_WINDOWS_BUILD_STARTED -eq 'true') {
             $repoRoot = (Resolve-Path $PWD).Path
             $desktopDist = Join-Path $repoRoot 'apps\desktop\dist'
