@@ -313,11 +313,12 @@ describe('render parity and unsupported-feature contract', () => {
     ]);
   });
 
+  // Gain, mute and fades are rendered now (timeline-audio.e2e.test.ts checks the decoded sound).
+  // Pan, solo and out-of-range gain still fail closed.
   it.each([
-    ['gain and pan', { gain: 0.5, pan: -0.5, mute: false, solo: false }],
-    ['mute', { gain: 1, pan: 0, mute: true, solo: false }],
+    ['pan', { gain: 1, pan: -0.5, mute: false, solo: false }],
     ['solo', { gain: 1, pan: 0, mute: false, solo: true }],
-    ['fade', { gain: 1, pan: 0, mute: false, solo: false, fadeInUs: 500_000 }],
+    ['gain above 4', { gain: 9, pan: 0, mute: false, solo: false }],
   ] as const)(
     'fails closed when an audio clip uses unsupported %s settings',
     async (_label, config) => {

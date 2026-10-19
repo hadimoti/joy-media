@@ -27,6 +27,11 @@ export interface CliFlags {
   apply: boolean;
   name: string | undefined;
   family: string | undefined;
+  gain: number | undefined;
+  mute: boolean;
+  unmute: boolean;
+  fadeIn: number | undefined;
+  fadeOut: number | undefined;
   provider: string | undefined;
   model: string | undefined;
   apiKey: string | undefined;
@@ -70,6 +75,11 @@ export const CLI_OPTIONS = {
   'allow-extend': { type: 'boolean' },
   name: { type: 'string', short: 'n' },
   family: { type: 'string' },
+  gain: { type: 'string' },
+  mute: { type: 'boolean' },
+  unmute: { type: 'boolean' },
+  'fade-in': { type: 'string' },
+  'fade-out': { type: 'string' },
   provider: { type: 'string' },
   model: { type: 'string', short: 'm' },
   'api-key': { type: 'string' },
@@ -156,6 +166,10 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['remove-clip', 'Remove a clip (--clip)'],
       ['add-track', 'Add an empty track (--family visual|audio [--name])'],
       ['move', 'Move a clip in time, or to another track (--clip [--start] [--track])'],
+      [
+        'set-audio',
+        'Set a clip gain, mute and fades (--clip [--gain] [--mute|--unmute] [--fade-in] [--fade-out])',
+      ],
     ],
     options: [
       ['--project, -p <id|file.json>', 'Target project (required)'],
@@ -164,6 +178,9 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['--duration <s>', 'Clip length in seconds (>= 0.001)'],
       ['--allow-extend', 'add-clip: allow a clip longer than its source media'],
       ['--family <visual|audio>', 'add-track: the kind of track to add'],
+      ['--gain <n>', 'set-audio: clip gain, 0 to 4 (1 is unchanged)'],
+      ['--mute | --unmute', 'set-audio: silence the clip, or let it sound again'],
+      ['--fade-in <s> --fade-out <s>', 'set-audio: fade the clip in or out, in seconds'],
       ['--sqlite-path <path>', 'Project database'],
     ],
   },
@@ -313,6 +330,11 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
     apply: v.apply === true,
     name: str('name'),
     family: str('family'),
+    gain: parseFloatFlag('gain', v.gain, { min: 0, max: 4 }),
+    mute: v.mute === true,
+    unmute: v.unmute === true,
+    fadeIn: parseFloatFlag('fade-in', v['fade-in'], { min: 0, max: 86400 }),
+    fadeOut: parseFloatFlag('fade-out', v['fade-out'], { min: 0, max: 86400 }),
     provider: str('provider'),
     model: str('model'),
     apiKey: str('api-key'),

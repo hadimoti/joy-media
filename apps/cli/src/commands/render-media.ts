@@ -29,6 +29,7 @@ export interface MediaClip {
   readonly visual: boolean;
   /** Contributes sound. */
   readonly audio: boolean;
+  readonly audioSettings: ClipAudioSettings;
 }
 
 export interface MediaPlanReady {
@@ -71,6 +72,40 @@ function fileExists(path: string): boolean {
   }
 }
 
+/** Most gain a clip may take: +12 dB. */
+const MAX_CLIP_GAIN = 4;
+
+function validGain(value: unknown): value is number {
+  return (
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_CLIP_GAIN
+  );
+}
+
+function validFade(value: unknown): boolean {
+  return value === undefined || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+}
+
+/** A clip's rendered audio settings. Missing or invalid values mean unity gain, sound on, no fades. */
+export interface ClipAudioSettings {
+  readonly gain: number;
+  readonly mute: boolean;
+  readonly fadeInUs: number;
+  readonly fadeOutUs: number;
+}
+
+function clipAudioSettings(config: unknown): ClipAudioSettings {
+  const record = isRecord(config) ? config : {};
+  const gain = record['gain'];
+  const fadeIn = record['fadeInUs'];
+  const fadeOut = record['fadeOutUs'];
+  return {
+    gain: validGain(gain) ? gain : 1,
+    mute: record['mute'] === true,
+    fadeInUs: validFade(fadeIn) && typeof fadeIn === 'number' ? fadeIn : 0,
+    fadeOutUs: validFade(fadeOut) && typeof fadeOut === 'number' ? fadeOut : 0,
+  };
+}
+
 function unsupportedProjectFeature(project: Record<string, unknown>): string | null {
   const visualObjects = project['visualObjects'];
   if (isRecord(visualObjects) && Object.keys(visualObjects).length > 0)
@@ -96,14 +131,14 @@ function unsupportedProjectFeature(project: Record<string, unknown>): string | n
     if (!isRecord(rawConfig)) continue;
     if (rawConfig['sourceAssetId'] !== undefined)
       return `processed audio source on clip "${clipId}"`;
-    if (rawConfig['gain'] !== undefined && rawConfig['gain'] !== 1)
-      return `audio gain on clip "${clipId}"`;
+    // Gain, mute and fades are rendered (see clipAudioSettings); only the rest is refused here.
+    if (rawConfig['gain'] !== undefined && !validGain(rawConfig['gain']))
+      return `audio gain on clip "${clipId}" must be a number from 0 to ${MAX_CLIP_GAIN}`;
+    if (!validFade(rawConfig['fadeInUs']) || !validFade(rawConfig['fadeOutUs']))
+      return `audio fades on clip "${clipId}" must be zero or more microseconds`;
     if (rawConfig['pan'] !== undefined && rawConfig['pan'] !== 0)
       return `audio pan on clip "${clipId}"`;
-    if (rawConfig['mute'] === true) return `audio mute on clip "${clipId}"`;
     if (rawConfig['solo'] === true) return `audio solo on clip "${clipId}"`;
-    if (Number(rawConfig['fadeInUs'] ?? 0) > 0 || Number(rawConfig['fadeOutUs'] ?? 0) > 0)
-      return `audio fades on clip "${clipId}"`;
   }
   if (Array.isArray(audio['effects']) && audio['effects'].length > 0) return 'audio effects';
   const buses = Array.isArray(audio['buses']) ? audio['buses'] : [];
@@ -163,6 +198,10 @@ export function planMedia(
     return { mode: 'manifest-only', reason: 'The project has no timeline.' };
   }
   const unsupported = unsupportedProjectFeature(project);
+  const audioConfigs =
+    isRecord(project['audio']) && isRecord(project['audio']['clips'])
+      ? project['audio']['clips']
+      : {};
   if (unsupported) {
     return {
       mode: 'error',
@@ -302,6 +341,7 @@ export function planMedia(
       info,
       visual: info.hasVideo,
       audio: info.hasAudio && !info.isImage,
+      audioSettings: clipAudioSettings(audioConfigs[entry.clipId]),
     });
   }
   if (clips.length === 0) return { mode: 'manifest-only', reason: 'All clips have zero length.' };
@@ -406,9 +446,21 @@ export function buildFfmpegArgs(
     }
     if (clip.audio) {
       const ms = Math.round(clip.startUs / 1000);
+      // Gain, mute and fades act on the clip's own timeline, before it is delayed onto the timeline.
+      const { gain, mute, fadeInUs, fadeOutUs } = clip.audioSettings;
+      const fadeIn = Math.min(fadeInUs, clip.durationUs);
+      const fadeOut = Math.min(fadeOutUs, clip.durationUs - fadeIn);
+      const shaping = [
+        mute ? 'volume=0' : gain !== 1 ? `volume=${gain}:precision=float` : '',
+        fadeIn > 0 ? `afade=t=in:st=0:d=${secs(fadeIn)}` : '',
+        fadeOut > 0 ? `afade=t=out:st=${secs(clip.durationUs - fadeOut)}:d=${secs(fadeOut)}` : '',
+      ]
+        .filter((f) => f !== '')
+        .map((f) => `,${f}`)
+        .join('');
       filters.push(
         `[${i}:a]atrim=start=${from}:duration=${dur},asetpts=PTS-STARTPTS,aresample=48000,` +
-          `aformat=sample_fmts=fltp:channel_layouts=stereo${ms > 0 ? `,adelay=${ms}|${ms}` : ''}[a${i}]`,
+          `aformat=sample_fmts=fltp:channel_layouts=stereo${shaping}${ms > 0 ? `,adelay=${ms}|${ms}` : ''}[a${i}]`,
       );
       audioLabels.push(`[a${i}]`);
     }

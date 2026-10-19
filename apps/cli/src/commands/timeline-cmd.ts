@@ -36,6 +36,12 @@ interface TimelineClip {
   [key: string]: unknown;
 }
 
+/** The parts of a project that timeline edits read and write. */
+interface TimelineProject {
+  assets?: Record<string, unknown>;
+  audio?: unknown;
+}
+
 interface TimelineTrack {
   id: string;
   name?: string;
@@ -47,9 +53,23 @@ interface TimelineTrack {
   clips: TimelineClip[];
 }
 
-type Subcommand = 'add-clip' | 'split' | 'trim' | 'remove-clip' | 'add-track' | 'move';
+type Subcommand =
+  'add-clip' | 'split' | 'trim' | 'remove-clip' | 'add-track' | 'move' | 'set-audio';
 type ClipFlag =
-  'track' | 'clip' | 'asset' | 'start' | 'duration' | 'end' | 'at' | 'family' | 'name';
+  | 'track'
+  | 'clip'
+  | 'asset'
+  | 'start'
+  | 'duration'
+  | 'end'
+  | 'at'
+  | 'family'
+  | 'name'
+  | 'gain'
+  | 'mute'
+  | 'unmute'
+  | 'fadeIn'
+  | 'fadeOut';
 
 /** The only flags each subcommand understands. Anything else is a mistake, not a hint. */
 const ACCEPTED_FLAGS: Record<Subcommand, readonly ClipFlag[]> = {
@@ -59,6 +79,7 @@ const ACCEPTED_FLAGS: Record<Subcommand, readonly ClipFlag[]> = {
   'remove-clip': ['clip', 'track'],
   'add-track': ['family', 'name'],
   move: ['clip', 'start', 'track'],
+  'set-audio': ['clip', 'gain', 'mute', 'unmute', 'fadeIn', 'fadeOut'],
 };
 
 const SUBCOMMANDS = Object.keys(ACCEPTED_FLAGS) as Subcommand[];
@@ -120,7 +141,7 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       const tracks = root.tracks as unknown as TimelineTrack[];
 
       const media = subcommand === 'add-clip' ? registerRealMedia(edited, flags) : undefined;
-      const result = apply(subcommand, tracks, media?.flags ?? flags, edited.assets);
+      const result = apply(subcommand, tracks, media?.flags ?? flags, edited);
       // Registered before the save: a failed registry write then leaves no clip behind, and
       // an unreferenced registry entry is harmless. A rejected edit never reaches this line.
       if (result.changed) media?.register();
@@ -225,6 +246,11 @@ function checkFlags(sub: Subcommand, flags: CliFlags): void {
     at: flags.at,
     family: flags.family,
     name: flags.name,
+    gain: flags.gain,
+    mute: flags.mute ? true : undefined,
+    unmute: flags.unmute ? true : undefined,
+    fadeIn: flags.fadeIn,
+    fadeOut: flags.fadeOut,
   };
   const accepted = ACCEPTED_FLAGS[sub];
   for (const [name, value] of Object.entries(given)) {
@@ -239,6 +265,22 @@ function checkFlags(sub: Subcommand, flags: CliFlags): void {
     throw usageFailure(
       'Usage: joy-media timeline move --project <id> --clip <clipId> [--start <seconds>] [--track <id>]',
     );
+  }
+  if (sub === 'set-audio') {
+    if (flags.clip === undefined) {
+      throw usageFailure(
+        'Usage: joy-media timeline set-audio --project <id> --clip <clipId> [--gain <n>] [--mute|--unmute] [--fade-in <s>] [--fade-out <s>]',
+      );
+    }
+    if (flags.mute && flags.unmute) {
+      throw usageFailure('Use either --mute or --unmute, not both.');
+    }
+    const settings = [flags.gain, flags.fadeIn, flags.fadeOut, flags.mute, flags.unmute];
+    if (settings.every((value) => value === undefined || value === false)) {
+      throw usageFailure(
+        'Nothing to set: give at least one of --gain, --mute, --unmute, --fade-in, --fade-out.',
+      );
+    }
   }
   if (sub === 'add-track' && flags.family === undefined) {
     throw usageFailure(
@@ -280,11 +322,13 @@ function apply(
   sub: Subcommand,
   tracks: TimelineTrack[],
   flags: CliFlags,
-  assets: Record<string, unknown> | undefined,
+  project: TimelineProject,
 ): Outcome {
   switch (sub) {
     case 'add-clip':
-      return addClip(tracks, flags, assets);
+      return addClip(tracks, flags, project.assets);
+    case 'set-audio':
+      return setClipAudio(tracks, flags, project);
     case 'split':
       return splitClip(tracks, flags);
     case 'trim':
@@ -294,7 +338,7 @@ function apply(
     case 'add-track':
       return addTrack(tracks, flags);
     case 'move':
-      return moveClip(tracks, flags, assets);
+      return moveClip(tracks, flags, project.assets);
   }
 }
 
@@ -699,6 +743,49 @@ function moveClip(
     human: (rev) =>
       `Moved clip ${c(clipId, 'bold')} to ${fmt(startUs)} on track ${c(trackLabel(target), 'cyan')} (saved rev ${rev}).`,
     doc: () => ({ trackId: target.id, clip: describeClip(clip) }),
+  };
+}
+
+/** Gain, mute and fades for one clip, kept in the project's audio record. Unset fields keep their value. */
+function setClipAudio(tracks: TimelineTrack[], flags: CliFlags, project: TimelineProject): Outcome {
+  const clipId = flags.clip!;
+  const { clip } = locateClip(tracks, clipId, undefined);
+  const audio = (project.audio ??= { clips: {}, buses: [], effects: [] }) as {
+    clips?: Record<string, Record<string, unknown>>;
+  };
+  const clips = (audio.clips ??= {});
+  const defaults = { gain: 1, pan: 0, mute: false, solo: false };
+  const current: Record<string, unknown> = { ...defaults, ...clips[clipId] };
+  const next: Record<string, unknown> = { ...current };
+  if (flags.gain !== undefined) next['gain'] = flags.gain;
+  if (flags.mute) next['mute'] = true;
+  if (flags.unmute) next['mute'] = false;
+  if (flags.fadeIn !== undefined) next['fadeInUs'] = toUs(flags.fadeIn);
+  if (flags.fadeOut !== undefined) next['fadeOutUs'] = toUs(flags.fadeOut);
+  const fadeInUs = Number(next['fadeInUs'] ?? 0);
+  const fadeOutUs = Number(next['fadeOutUs'] ?? 0);
+  if (fadeInUs + fadeOutUs > clip.durationUs) {
+    throw usageFailure(
+      `The fades (${fmt(fadeInUs)} in, ${fmt(fadeOutUs)} out) are longer than clip "${clipId}" (${fmt(clip.durationUs)}).`,
+    );
+  }
+  const changed = JSON.stringify(current) !== JSON.stringify(next);
+  if (changed) clips[clipId] = next;
+  return {
+    changed,
+    human: (rev) =>
+      changed
+        ? `Set audio for clip ${c(clipId, 'bold')} (saved rev ${rev}).`
+        : `Clip ${c(clipId, 'bold')} already has these audio settings; nothing to change.`,
+    doc: () => ({
+      clipId,
+      audio: {
+        gain: next['gain'],
+        mute: next['mute'],
+        fadeInUs,
+        fadeOutUs,
+      },
+    }),
   };
 }
 
