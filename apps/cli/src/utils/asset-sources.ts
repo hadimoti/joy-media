@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getJoyMediaDir } from './config.js';
+import { getJoyMediaDir, joyMediaDirPath } from './config.js';
 import { withExclusiveLock, writeFileAtomic } from './project-loader.js';
 
 /**
@@ -18,8 +18,7 @@ function sourcesPath(): string {
   return join(getJoyMediaDir(), 'cli-asset-sources.json');
 }
 
-export function loadAssetSources(): AssetSourceMap {
-  const path = sourcesPath();
+function readAssetSources(path: string): AssetSourceMap {
   if (!existsSync(path)) return {};
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
@@ -32,6 +31,18 @@ export function loadAssetSources(): AssetSourceMap {
   } catch {
     return {};
   }
+}
+
+export function loadAssetSources(): AssetSourceMap {
+  return readAssetSources(sourcesPath());
+}
+
+/**
+ * Read-only variant for queries: it never creates the CLI state directory, so a query leaves
+ * the filesystem exactly as it found it.
+ */
+export function loadAssetSourcesIfPresent(): AssetSourceMap {
+  return readAssetSources(join(joyMediaDirPath(), 'cli-asset-sources.json'));
 }
 
 export function registerAssetSource(assetId: string, absolutePath: string): void {

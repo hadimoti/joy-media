@@ -200,8 +200,13 @@ function windowsDirectoryIsPrivate(path: string, userSid: string): boolean {
   return !acl.rules.some((rule) => rule.type === 'Deny' && requiredSids.includes(rule.sid));
 }
 
+/** Where the CLI keeps its state. Pure: does not create the directory. */
+export function joyMediaDirPath(): string {
+  return join(homedir(), '.joy-media');
+}
+
 export function getJoyMediaDir(): string {
-  const dir = join(homedir(), '.joy-media');
+  const dir = joyMediaDirPath();
   if (!existsSync(dir)) {
     try {
       mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE });

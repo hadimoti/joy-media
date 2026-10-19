@@ -35,7 +35,15 @@ export interface ProjectLoadResult {
   readonly revision: number;
   readonly source: 'sqlite' | 'file';
   readonly path: string;
+  readonly appliedPlans?: AppliedPlanLedger;
+  /** Schema version the file or row was stored in, before `project` was migrated to 3. */
+  readonly storedSchemaVersion: number;
 }
+
+export type AppliedPlanLedger = Record<
+  string,
+  { planId: string; receipt: Record<string, unknown> }
+>;
 
 /** Runtime project shape shared by the CLI's v1 editing operations and v1-v3 documents. */
 export type CliProjectDocument = Omit<JoyProjectV1, 'schemaVersion'> & {
@@ -449,6 +457,14 @@ export function locateProject(identifier: string, sqlitePath?: string): ProjectL
  * anything that is not a project, instead of crashing later on `undefined`.
  */
 export function extractProject(parsed: unknown, label: string): CliProjectDocument {
+  return extractStoredProject(parsed, label).project;
+}
+
+/** `extractProject`, also reporting the schema version the document was stored in. */
+function extractStoredProject(
+  parsed: unknown,
+  label: string,
+): { project: CliProjectDocument; storedSchemaVersion: number } {
   const notAProject = (): CommandFailure =>
     new CommandFailure(
       'PROJECT_FILE_INVALID',
@@ -511,7 +527,7 @@ export function extractProject(parsed: unknown, label: string): CliProjectDocume
       `${label} is not a valid JOY Media project file${location} (${first.message}).`,
     );
   }
-  return project as CliProjectDocument;
+  return { project: project as CliProjectDocument, storedSchemaVersion: schemaVersion };
 }
 
 /** Read and parse a JSON file, with failures that name the file. */
@@ -544,11 +560,16 @@ export function loadProject(identifier: string, sqlitePath?: string): ProjectLoa
       isRecord(parsed) && Number.isInteger(parsed.revision) && (parsed.revision as number) >= 0
         ? (parsed.revision as number)
         : 1;
+    const stored = extractStoredProject(parsed, location.path);
     return {
-      project: extractProject(parsed, location.path),
+      project: stored.project,
+      storedSchemaVersion: stored.storedSchemaVersion,
       revision,
       source: 'file',
       path: location.path,
+      ...(isRecord(parsed) && isRecord(parsed.appliedPlans)
+        ? { appliedPlans: parsed.appliedPlans as AppliedPlanLedger }
+        : {}),
     };
   }
 
@@ -585,8 +606,13 @@ export function loadProject(identifier: string, sqlitePath?: string): ProjectLoa
       }
 
       const latest = snapshots[snapshots.length - 1]!;
+      const stored = extractStoredProject(
+        latest.payload,
+        `The stored copy of project "${identifier}"`,
+      );
       return {
-        project: extractProject(latest.payload, `The stored copy of project "${identifier}"`),
+        project: stored.project,
+        storedSchemaVersion: stored.storedSchemaVersion,
         revision: latest.revision,
         source: 'sqlite' as const,
         path: dbPath,
@@ -622,17 +648,8 @@ export function saveProject(
   };
 
   if (target.source === 'file') {
-    const output = {
-      format: 'joy-media-project',
-      schemaVersion: 1,
-      revision: nextRevision,
-      exportedAt: new Date().toISOString(),
-      id: updatedProject.id,
-      title: updatedProject.title,
-      project: updatedProject,
-    };
     try {
-      writeFileAtomic(target.path, JSON.stringify(output, null, 2));
+      writeProjectFileWithAppliedPlans(updatedProject, target);
     } catch (err) {
       throw new CommandFailure('IO_ERROR', `Cannot write ${target.path}: ${errorMessage(err)}`);
     }
@@ -670,6 +687,39 @@ export function saveProject(
       }
     }),
   );
+}
+
+/** Write the document, revision and idempotency ledger in one atomic envelope replacement. */
+export function writeProjectFileWithAppliedPlans(
+  project: CliProjectDocument,
+  target: { path: string; revision: number },
+  appliedPlans?: AppliedPlanLedger,
+): number {
+  const revision = target.revision + 1;
+  const updatedProject = { ...project };
+  let ledger = appliedPlans;
+  if (ledger === undefined) {
+    try {
+      const previous = readProjectJson(target.path);
+      if (isRecord(previous) && isRecord(previous.appliedPlans)) {
+        ledger = previous.appliedPlans as AppliedPlanLedger;
+      }
+    } catch (err) {
+      if (!(err instanceof CommandFailure) || err.code !== 'PROJECT_NOT_FOUND') throw err;
+    }
+  }
+  const output = {
+    format: 'joy-media-project',
+    schemaVersion: 1,
+    revision,
+    exportedAt: new Date().toISOString(),
+    id: updatedProject.id,
+    title: updatedProject.title,
+    project: updatedProject,
+    ...(ledger === undefined ? {} : { appliedPlans: ledger }),
+  };
+  writeFileAtomic(target.path, JSON.stringify(output, null, 2));
+  return revision;
 }
 
 /**

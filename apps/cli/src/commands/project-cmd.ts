@@ -1,5 +1,5 @@
 /* global console */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { CliFlags } from '../cli.js';
 import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
@@ -245,6 +245,33 @@ function runShow(args: string[], flags: CliFlags, json: boolean): number {
   return 0;
 }
 
+/**
+ * The applied-plan ledger of the file an export would replace, when that file is an export of
+ * the same project. Without it, re-exporting over a file would erase the receipts that make a
+ * plan retry safe.
+ */
+function carriedLedger(path: string, projectId: string): unknown {
+  if (!existsSync(path)) return undefined;
+  try {
+    const previous = JSON.parse(readFileSync(path, 'utf8')) as {
+      id?: unknown;
+      appliedPlans?: unknown;
+    } | null;
+    if (
+      previous !== null &&
+      previous.id === projectId &&
+      typeof previous.appliedPlans === 'object' &&
+      previous.appliedPlans !== null &&
+      !Array.isArray(previous.appliedPlans)
+    ) {
+      return previous.appliedPlans;
+    }
+  } catch {
+    // Not a JOY Media envelope, so there is nothing to carry forward.
+  }
+  return undefined;
+}
+
 function runExport(args: string[], flags: CliFlags, json: boolean): number {
   const id = projectArgument(
     args,
@@ -257,6 +284,7 @@ function runExport(args: string[], flags: CliFlags, json: boolean): number {
   if (process.platform === 'win32' && isWindowsReservedDevicePath(outPath)) {
     throw usageFailure(`The export path contains a reserved Windows device name: ${outPath}`);
   }
+  const appliedPlans = carriedLedger(outPath, res.project.id);
   const exported = {
     format: 'joy-media-project',
     schemaVersion: 1,
@@ -266,6 +294,7 @@ function runExport(args: string[], flags: CliFlags, json: boolean): number {
     title: res.project.title,
     revision: res.revision,
     source: res.project,
+    ...(appliedPlans === undefined ? {} : { appliedPlans }),
   };
 
   try {

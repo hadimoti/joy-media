@@ -661,11 +661,14 @@ function resolveTargetProject(flags: CliFlags, out: AgentOutput): ProjectLoadRes
   out.warn(
     'No existing projects found in database. Using a new "Default Project" (saved only if changes are applied).',
   );
+  // Never stored, so its stored version is the version it is created in.
+  const project = createDefaultProject('Default Project');
   return {
-    project: createDefaultProject('Default Project'),
+    project,
     revision: 0,
     source: 'sqlite',
     path: flags.sqlitePath ?? getDefaultSqlitePath(),
+    storedSchemaVersion: project.schemaVersion,
   };
 }
 
