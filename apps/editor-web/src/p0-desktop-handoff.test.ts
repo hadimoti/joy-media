@@ -25,11 +25,13 @@ import { P0_TITLE_FONTS } from './p0-title-fonts.js';
 import {
   captureTitleMarkup,
   closeP0DesktopHandoff,
+  p0DesktopHandoffChromiumExecutable,
   prepareP0DesktopHandoff,
   runP0DesktopHandoff,
   type P0DesktopHandoffOperation,
 } from './p0-desktop-handoff-harness.js';
 import { buildTitleSceneFrame } from '@joy-media/motion-core';
+import { createChromiumSceneDriver, findChromiumExecutable } from '@joy-media/html-scene-runtime';
 
 const hash = (bytes: ArrayLike<number>): string =>
   createHash('sha256').update(Buffer.from(bytes)).digest('hex');
@@ -831,4 +833,98 @@ describe('P0 desktop title handoff', () => {
     },
     180_000,
   );
+
+  it('produces byte-identical title RGBA in desktop capture and the CLI Chromium driver', async () => {
+    const executablePath = findChromiumExecutable();
+    expect(executablePath).toBeDefined();
+    if (executablePath === undefined) throw new Error('Chromium executable is missing');
+    expect(p0DesktopHandoffChromiumExecutable()).toBe(executablePath);
+    const instance = makeInstance('joy.p0.title', 400, 'Shared desktop title', 'ltr', 'hold');
+    const instanceId = titleInstanceId(instance);
+    const durationUs = 2_000_000;
+    const timeUs = 360_000;
+    const frame = buildTitleSceneFrame(instance, instanceId, durationUs, timeUs, {
+      widthPx: 1080,
+      heightPx: 1920,
+      frameRate: { num: 30, den: 1 },
+      locale: 'en',
+      seed: instanceId,
+    });
+    const rows = [
+      ...frame.paintLines.primary.map((text) => ({
+        text,
+        size: instance.layout.fontSizePx,
+        height: instance.layout.lineHeightPx,
+      })),
+      ...frame.paintLines.secondary.map((text) => ({
+        text,
+        size: instance.layout.secondarySizePx,
+        height: Math.round(instance.layout.secondarySizePx * 1.25),
+      })),
+    ];
+    let y = instance.placement.yPx + frame.motion.translateYPx;
+    const lines = rows.map((row) => {
+      y += row.height;
+      return {
+        text: row.text,
+        x: instance.placement.xPx,
+        y,
+        height: row.height,
+        font: `${instance.font.weight} ${row.size}px "Noto Sans Arabic"`,
+        color: '#ffffff',
+        direction: 'ltr' as const,
+        align: 'center' as const,
+        opacity: frame.motion.opacity,
+      };
+    });
+    const sourceContext = projectContext(instance, { startUs: 0, durationUs });
+    const context = {
+      ...sourceContext,
+      visual: {
+        ...sourceContext.visual,
+        compositions: {
+          ...sourceContext.visual.compositions,
+          [sourceContext.visual.rootCompositionId]: {
+            ...sourceContext.visual.compositions[sourceContext.visual.rootCompositionId]!,
+            width: frame.viewport.width,
+            height: frame.viewport.height,
+          },
+        },
+      },
+    };
+    const browser = await runP0DesktopHandoff([
+      {
+        id: 'shared-title-frame',
+        kind: 'capture',
+        context,
+        timeUs,
+        width: frame.viewport.width,
+        height: frame.viewport.height,
+      },
+    ]);
+    const browserOperation = operationResult(browser, 'shared-title-frame');
+    expect(browserOperation.error).toBeUndefined();
+    const browserSurface = browserOperation.surfaces[instance.objectId];
+    if (browserSurface === undefined) throw new Error('Desktop title RGBA surface is missing');
+
+    const driver = createChromiumSceneDriver({ executablePath });
+    try {
+      const nodeSurface = driver.capture({
+        markup: frame.markup,
+        width: frame.viewport.width,
+        height: frame.viewport.height,
+        transparent: true,
+        timeUs: frame.timeUs,
+        frameRate: frame.frameRate,
+        locale: frame.locale,
+        seed: frame.seed,
+        lines,
+      });
+      if (nodeSurface.rgba.byteLength === 0) throw new Error('Node title RGBA surface is missing');
+      expect(browserSurface.data.byteLength).toBe(nodeSurface.rgba.byteLength);
+      expect(hash(browserSurface.data)).toBe(hash(nodeSurface.rgba));
+    } finally {
+      driver.close?.();
+    }
+  }, 180_000);
 });

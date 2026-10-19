@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { chromium, type Browser, type Page } from '@playwright/test';
 import { createServer, type Plugin } from 'vite';
 import { P0_TITLE_FONTS } from './p0-title-fonts.js';
+import { findChromiumExecutable } from '@joy-media/html-scene-runtime';
 import type {
   P0DesktopHandoffFont,
   P0DesktopHandoffOperation,
@@ -186,7 +187,8 @@ async function closeServer(server: BrowserServer): Promise<void> {
 }
 
 async function createResources(): Promise<BrowserResources> {
-  const executable = chromium.executablePath();
+  const executable = findChromiumExecutable();
+  if (executable === undefined) throw new Error('Runtime Chromium executable was not found');
   try {
     await access(executable);
   } catch {
@@ -195,12 +197,17 @@ async function createResources(): Promise<BrowserResources> {
   const fonts = await readVerifiedFonts();
   const server = await servePage();
   try {
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, executablePath: executable });
     return { browser, server, fonts };
   } catch (error) {
     await closeServer(server);
     throw error;
   }
+}
+
+/** Exact executable used by both the desktop harness and the CLI scene driver. */
+export function p0DesktopHandoffChromiumExecutable(): string | undefined {
+  return findChromiumExecutable();
 }
 
 async function getResources(): Promise<BrowserResources> {
