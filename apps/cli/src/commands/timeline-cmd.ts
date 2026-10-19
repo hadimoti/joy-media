@@ -6,6 +6,7 @@ import { deriveAssetId, registerAssetSource } from '../utils/asset-sources.js';
 import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
 import { c, logSuccess } from '../utils/logger.js';
 import { isMediaFileName, probeMedia } from '../utils/media-probe.js';
+import { isTitleManagedClip } from '../services/prepared-title.js';
 import {
   CommandFailure,
   emitJson,
@@ -43,6 +44,7 @@ interface TimelineProject {
   captionDocuments?: Record<string, unknown>;
   rootCompositionId?: string;
   compositions?: Record<string, unknown>;
+  pluginData?: unknown;
 }
 
 interface TimelineTrack {
@@ -480,6 +482,15 @@ function locateClip(
   );
 }
 
+function refuseTitleManagedClip(project: TimelineProject, clipId: string): void {
+  if (isTitleManagedClip(project, clipId)) {
+    throw new CommandFailure(
+      'TITLE_MANAGED_CLIP',
+      `Clip "${clipId}" is managed by a title instance; edit it with plan prepare and apply.`,
+    );
+  }
+}
+
 function uniqueClipId(tracks: TimelineTrack[]): string {
   const used = new Set(tracks.flatMap((t) => t.clips.map((k) => k.id)));
   for (;;) {
@@ -663,6 +674,7 @@ function splitClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelinePr
 
 function trimClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelineProject): Outcome {
   const clipId = flags.clip!;
+  refuseTitleManagedClip(project, clipId);
   assertNotInTransition(project, clipId);
   const { track, clip } = locateClip(tracks, clipId, flags.track);
 
@@ -760,6 +772,7 @@ function assertTrackEnabled(track: TimelineTrack): void {
  */
 function moveClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelineProject): Outcome {
   const clipId = flags.clip!;
+  refuseTitleManagedClip(project, clipId);
   assertNotInTransition(project, clipId);
   // --track is the destination here, so the clip is looked up on every track.
   const found = locateClip(tracks, clipId, undefined);
@@ -919,6 +932,7 @@ function addCaption(tracks: TimelineTrack[], flags: CliFlags, project: TimelineP
 
 function removeClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelineProject): Outcome {
   const clipId = flags.clip!;
+  refuseTitleManagedClip(project, clipId);
   const { track, index, clip } = locateClip(tracks, clipId, flags.track);
   track.clips.splice(index, 1);
   // A transition needs both of its clips, so removing one removes the transitions it is part of.

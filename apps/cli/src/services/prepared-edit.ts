@@ -27,6 +27,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function pluginData(project: CliProjectDocument): Record<string, unknown> {
+  return isRecord(project.pluginData) ? project.pluginData : {};
+}
+
 /**
  * Deterministic JSON: object keys are sorted as strings at every depth. The members are written
  * by hand because JSON.stringify would reorder integer-like keys numerically, and query and plan
@@ -165,6 +169,16 @@ function noOverlap(
     );
 }
 
+function assertNotTitleManaged(project: CliProjectDocument, clipId: string): void {
+  const raw = pluginData(project)['joy.contentTemplates'];
+  if (!isRecord(raw) || !isRecord(raw.instances)) return;
+  if (Object.keys(raw.instances).some((instanceId) => clipId === `clip-${instanceId}`))
+    throw new CommandFailure(
+      'TITLE_MANAGED_CLIP',
+      `Clip "${clipId}" is managed by a title instance.`,
+    );
+}
+
 function advanceSource(clip: TimelineClip, deltaUs: number): void {
   if (clip.kind === 'composition' && typeof clip.childOffsetUs === 'number') {
     const offset = clip.childOffsetUs + deltaUs;
@@ -239,6 +253,7 @@ export function applyPreparedOperations<T extends CliProjectDocument>(
       const trackId =
         operation.trackId === undefined ? undefined : requireField(operation, 'trackId', isString);
       const { track, clip } = findClip(tracks, clipId, trackId);
+      assertNotTitleManaged(project, clipId);
       const startUs =
         operation.startUs === undefined
           ? clip.startUs
@@ -267,6 +282,7 @@ export function applyPreparedOperations<T extends CliProjectDocument>(
     } else if (operation.op === 'moveClip') {
       assertNotInTransition(project, clipId);
       const found = findClip(tracks, clipId);
+      assertNotTitleManaged(project, clipId);
       const startUs =
         operation.startUs === undefined
           ? found.clip.startUs
@@ -313,6 +329,7 @@ export function applyPreparedOperations<T extends CliProjectDocument>(
       }
     } else {
       const { track, index } = findClip(tracks, clipId);
+      assertNotTitleManaged(project, clipId);
       track.clips.splice(index, 1);
       const root = project.compositions[project.rootCompositionId] as unknown as {
         transitions?: unknown;
@@ -330,12 +347,12 @@ export function applyPreparedOperations<T extends CliProjectDocument>(
 }
 
 export interface ChangedEntity {
-  readonly kind: 'clip' | 'track';
+  readonly kind: 'clip' | 'track' | 'instance' | 'object' | 'binding';
   readonly id: string;
   readonly change: 'added' | 'modified' | 'removed';
 }
 
-function entityMap(project: CliProjectDocument, kind: 'clip' | 'track'): Map<string, unknown> {
+function entityMap(project: CliProjectDocument, kind: ChangedEntity['kind']): Map<string, unknown> {
   const map = new Map<string, unknown>();
   const tracks = rootTracks(project);
   for (const track of tracks) {
@@ -344,9 +361,28 @@ function entityMap(project: CliProjectDocument, kind: 'clip' | 'track'): Map<str
         Object.entries(track).filter(([key]) => key !== 'clips'),
       );
       map.set(track.id, trackEntity);
-    } else {
+    } else if (kind === 'clip') {
       for (const clip of track.clips) map.set(clip.id, { trackId: track.id, clip });
     }
+  }
+  if (kind === 'instance' || kind === 'object') {
+    const raw =
+      kind === 'instance' ? pluginData(project)['joy.contentTemplates'] : project.visualObjects;
+    const records =
+      kind === 'instance' && isRecord(raw) && isRecord(raw.instances)
+        ? raw.instances
+        : isRecord(raw)
+          ? raw
+          : {};
+    for (const [id, value] of Object.entries(records)) map.set(id, value);
+  } else if (kind === 'binding') {
+    const raw = pluginData(project)['joy.clipObjects'];
+    if (isRecord(raw))
+      for (const [clipId, objectId] of Object.entries(raw))
+        map.set(`clip-object:${clipId}`, objectId);
+    const timeline = project.universalTimeline;
+    if (timeline && Array.isArray(timeline.items))
+      for (const item of timeline.items) map.set(`universal-timeline:${item.id}`, item);
   }
   return map;
 }
@@ -356,7 +392,7 @@ export function changedEntities(
   after: CliProjectDocument,
 ): ChangedEntity[] {
   const changes: ChangedEntity[] = [];
-  for (const kind of ['clip', 'track'] as const) {
+  for (const kind of ['clip', 'track', 'instance', 'object', 'binding'] as const) {
     const oldItems = entityMap(before, kind);
     const newItems = entityMap(after, kind);
     for (const id of new Set([...oldItems.keys(), ...newItems.keys()])) {

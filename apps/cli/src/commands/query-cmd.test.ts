@@ -257,6 +257,129 @@ describe('query command', () => {
     expect(items[0]).toMatchObject({ clipId: 'caption-0', timeDomain: 'document' });
   });
 
+  it('lists title instances with the bounded pagination envelope', async () => {
+    const f = await fixture();
+    const p = f.envelope.source;
+    p.compositions.root.tracks[0].clips.push(
+      { id: 'clip-speaker', kind: 'video', startUs: 500, durationUs: 2_000 },
+      { id: 'clip-speaker-2', kind: 'video', startUs: 3_000, durationUs: 2_000 },
+    );
+    p.visualObjects = {
+      'object-speaker': {
+        id: 'object-speaker',
+        kind: 'html-scene',
+        scenePackageId: 'joy.p0.title',
+        transform: {
+          x: 0,
+          y: 0,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        },
+      },
+      'object-speaker-2': {
+        id: 'object-speaker-2',
+        kind: 'html-scene',
+        scenePackageId: 'joy.p0.title',
+        transform: {
+          x: 0,
+          y: 0,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        },
+      },
+    };
+    p.pluginData = {
+      'joy.contentTemplates': {
+        version: 1,
+        instances: {
+          speaker: {
+            templateId: 'joy.p0.title',
+            templateVersion: 1,
+            templateSha256: `sha256:${'a'.repeat(64)}`,
+            compilerVersion: 1,
+            objectId: 'object-speaker',
+            clipId: 'clip-speaker',
+            lines: { primary: 'Sara', secondary: 'Host' },
+            font: {
+              family: 'Noto Sans Arabic',
+              weight: 400,
+              sha256: `sha256:${'a'.repeat(64)}`,
+            },
+            direction: 'ltr',
+            placement: { xPx: 64, yPx: 650, maxWidthPx: 900, safeInsetPx: 36 },
+            motion: { presetId: 'hold', inUs: 0, outUs: 0 },
+            layout: {
+              primaryLines: ['Sara'],
+              secondaryLines: ['Host'],
+              fontSizePx: 48,
+              secondarySizePx: 28,
+              lineHeightPx: 56,
+              boxHeightPx: 112,
+            },
+          },
+          'speaker-2': {
+            templateId: 'joy.p0.title',
+            templateVersion: 1,
+            templateSha256: `sha256:${'a'.repeat(64)}`,
+            compilerVersion: 1,
+            objectId: 'object-speaker-2',
+            clipId: 'clip-speaker-2',
+            lines: { primary: 'Reza', secondary: 'Guest' },
+            font: {
+              family: 'Noto Sans Arabic',
+              weight: 400,
+              sha256: `sha256:${'a'.repeat(64)}`,
+            },
+            direction: 'rtl',
+            placement: { xPx: 64, yPx: 650, maxWidthPx: 900, safeInsetPx: 36 },
+            motion: { presetId: 'hold', inUs: 0, outUs: 0 },
+            layout: {
+              primaryLines: ['Reza'],
+              secondaryLines: ['Guest'],
+              fontSizePx: 48,
+              secondarySizePx: 28,
+              lineHeightPx: 56,
+              boxHeightPx: 112,
+            },
+          },
+        },
+      },
+      'joy.clipObjects': {
+        'clip-speaker': 'object-speaker',
+        'clip-speaker-2': 'object-speaker-2',
+      },
+    };
+    save(f);
+    const result = JSON.parse(
+      (await query(f, 'titles', '--limit', '1', '--track', 'track-v1')).stdout,
+    );
+    expect(result).toMatchObject({
+      revision: f.envelope.revision,
+      contentHash: expect.stringMatching(/^sha256:/),
+      units: { time: 'us' },
+      coverage: { total: 2, returned: 1, truncated: true, nextCursor: expect.any(String) },
+    });
+    expect(result.items).toEqual([
+      {
+        instanceId: 'speaker',
+        templateId: 'joy.p0.title',
+        objectId: 'object-speaker',
+        clipId: 'clip-speaker',
+        trackId: 'track-v1',
+        lines: { primary: 'Sara', secondary: 'Host' },
+        direction: 'ltr',
+        startUs: 500,
+        durationUs: 2_000,
+      },
+    ]);
+  });
+
   it('maps clip-relative caption times onto the timeline for range queries', async () => {
     const f = await fixture();
     const p = f.envelope.source;

@@ -12,7 +12,7 @@ import {
   usageFailure,
 } from '../utils/project-loader.js';
 
-type QueryKind = 'assets' | 'clips' | 'captions' | 'tracks';
+type QueryKind = 'assets' | 'clips' | 'captions' | 'tracks' | 'titles';
 type QueryItem = Record<string, unknown>;
 
 interface CursorPayload {
@@ -63,7 +63,7 @@ function parseCursor(value: string | undefined): CursorPayload | undefined {
     if (
       !isRecord(parsed) ||
       parsed.v !== 1 ||
-      !['assets', 'clips', 'captions', 'tracks'].includes(String(parsed.kind)) ||
+      !['assets', 'clips', 'captions', 'tracks', 'titles'].includes(String(parsed.kind)) ||
       !Number.isSafeInteger(parsed.offset) ||
       (parsed.offset as number) < 0 ||
       !Number.isSafeInteger(parsed.revision) ||
@@ -108,7 +108,9 @@ function activeFilters(flags: CliFlags): string {
 
 function validateOptions(kind: QueryKind | undefined, flags: CliFlags): asserts kind is QueryKind {
   if (kind === undefined)
-    throw usageFailure('Usage: joy-media query <assets|clips|captions|tracks> --project <file>.');
+    throw usageFailure(
+      'Usage: joy-media query <assets|clips|captions|tracks|titles> --project <file>.',
+    );
   if (flags.project === undefined) throw usageFailure('query requires --project <file>.');
   if (flags.limit !== undefined && (!/^[1-9]\d*$/.test(flags.limit) || Number(flags.limit) > 200)) {
     throw usageFailure('--limit must be an integer from 1 through 200.');
@@ -118,6 +120,7 @@ function validateOptions(kind: QueryKind | undefined, flags: CliFlags): asserts 
     clips: ['kind', 'track', 'clip', 'text', 'range-us'],
     captions: ['track', 'clip', 'text', 'range-us'],
     tracks: ['kind', 'track'],
+    titles: ['track', 'clip', 'text'],
   };
   const supplied: [string, unknown][] = [
     ['kind', flags.kind],
@@ -239,6 +242,45 @@ function buildItems(
     );
   }
 
+  if (kind === 'titles') {
+    const raw = isRecord(project.pluginData)
+      ? project.pluginData['joy.contentTemplates']
+      : undefined;
+    const titleInstances = isRecord(raw) && isRecord(raw.instances) ? raw.instances : {};
+    const clipMap = new Map<string, { trackId: string; clip: Record<string, unknown> }>();
+    for (const { track } of tracks) {
+      if (!Array.isArray(track.clips)) continue;
+      for (const clip of track.clips)
+        if (isRecord(clip) && typeof clip.id === 'string')
+          clipMap.set(clip.id, { trackId: String(track.id), clip });
+    }
+    return Object.entries(titleInstances)
+      .flatMap(([instanceId, value]) => {
+        if (!isRecord(value) || !isRecord(value.lines)) return [];
+        const clipId = String(value.clipId ?? `clip-${instanceId}`);
+        const placed = clipMap.get(clipId);
+        if (!placed) return [];
+        if (flags.track !== undefined && placed.trackId !== flags.track) return [];
+        if (flags.clip !== undefined && clipId !== flags.clip) return [];
+        const text = `${instanceId} ${String(value.templateId ?? '')} ${String(value.lines.primary ?? '')} ${String(value.lines.secondary ?? '')}`;
+        if (!textMatches(text, flags.text)) return [];
+        return [
+          {
+            instanceId,
+            templateId: value.templateId,
+            objectId: value.objectId,
+            clipId,
+            trackId: placed.trackId,
+            lines: value.lines,
+            direction: value.direction,
+            startUs: placed.clip.startUs,
+            durationUs: placed.clip.durationUs,
+          },
+        ];
+      })
+      .sort((a, b) => compareText(String(a.instanceId), String(b.instanceId)));
+  }
+
   // Caption document times are clip-relative in the v1 schema. The range is compared against the
   // mapped timeline times; the stored times are reported next to them.
   const [rangeStart, rangeEnd] = parseRange(flags.rangeUs) ?? [undefined, undefined];
@@ -344,8 +386,10 @@ export async function handleQueryCommand(args: string[], flags: CliFlags): Promi
   const json = Boolean(flags.json);
   try {
     if (args.length > 1)
-      throw usageFailure('query accepts exactly one kind: assets, clips, captions, or tracks.');
-    const kind = ['assets', 'clips', 'captions', 'tracks'].includes(args[0] ?? '')
+      throw usageFailure(
+        'query accepts exactly one kind: assets, clips, captions, tracks, or titles.',
+      );
+    const kind = ['assets', 'clips', 'captions', 'tracks', 'titles'].includes(args[0] ?? '')
       ? (args[0] as QueryKind)
       : undefined;
     validateOptions(kind, flags);

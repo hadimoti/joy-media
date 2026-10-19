@@ -10,6 +10,11 @@ import {
   type PreparedOperation,
 } from '../services/prepared-edit.js';
 import {
+  applyPreparedTitleOperation,
+  isTitleOperation,
+  validateFrozenTitleOutput,
+} from '../services/prepared-title.js';
+import {
   CommandFailure,
   emitJson,
   loadProject,
@@ -21,13 +26,14 @@ import {
   writeProjectFileWithAppliedPlans,
   type AppliedPlanLedger,
 } from '../utils/project-loader.js';
+import type { CliProjectDocument } from '../utils/project-loader.js';
 
 // A type alias (not an interface) keeps the named fields through Omit and stays assignable to
 // the Record parameter of preparedPlanId.
 type EditPlan = {
   kind: 'joy-media.prepared-edit';
   schemaVersion: 1;
-  semanticsVersion: 1;
+  semanticsVersion: 1 | 2;
   planId: string;
   projectId: string;
   baseRevision: number;
@@ -79,6 +85,11 @@ function parsePlan(path: string): EditPlan {
       'File is not a supported joy-media.prepared-edit plan (schemaVersion 1).',
     );
   }
+  if (plan.semanticsVersion !== 1 && plan.semanticsVersion !== 2)
+    throw new CommandFailure(
+      'PLAN_UNSUPPORTED_SEMANTICS',
+      `Unsupported prepared plan semanticsVersion ${String(plan.semanticsVersion)}.`,
+    );
   if (typeof plan.planId !== 'string' || preparedPlanId(plan) !== plan.planId) {
     throw new CommandFailure('PLAN_TAMPERED', `Plan identity does not match its contents: ${path}`);
   }
@@ -90,7 +101,47 @@ function parsePlan(path: string): EditPlan {
   ) {
     throw new CommandFailure('PLAN_INVALID', 'Plan is missing required immutable fields.');
   }
+  if (
+    Array.isArray(plan.operations) &&
+    plan.operations.some((op) => isRecord(op) && isTitleOperation(op as PreparedOperation)) &&
+    plan.semanticsVersion !== 2
+  )
+    throw new CommandFailure(
+      'PLAN_UNSUPPORTED_SEMANTICS',
+      'Title operations require semanticsVersion 2.',
+    );
   return plan as unknown as EditPlan;
+}
+
+function applyOperations(
+  project: CliProjectDocument,
+  operations: readonly PreparedOperation[],
+  prepare: boolean,
+): { project: CliProjectDocument; operations: PreparedOperation[] } {
+  if (operations.length > 24)
+    throw new CommandFailure('PLAN_INVALID', 'A plan can contain at most 24 operations.');
+  const ids = new Set<string>();
+  let current = project;
+  const normalized: PreparedOperation[] = [];
+  for (const operation of operations) {
+    if (
+      !isRecord(operation) ||
+      typeof operation.id !== 'string' ||
+      !operation.id ||
+      ids.has(operation.id)
+    )
+      throw new CommandFailure('PLAN_INVALID', 'Every operation requires a unique string id.');
+    ids.add(operation.id);
+    if (isTitleOperation(operation)) {
+      const result = applyPreparedTitleOperation(current, operation, prepare);
+      current = result.project;
+      normalized.push(result.operation);
+    } else {
+      current = applyPreparedOperations(current, [operation]);
+      normalized.push(operation);
+    }
+  }
+  return { project: current, operations: normalized };
 }
 
 function parseRevision(value: string | undefined): number {
@@ -134,22 +185,23 @@ async function prepare(args: string[], flags: CliFlags): Promise<number> {
     );
   }
   const operations = parseOperationsFile(args[1]!);
-  const next = applyPreparedOperations(project, operations);
+  const prepared = applyOperations(project, operations, true);
+  const next = prepared.project;
   const preparedAt = new Date().toISOString();
   const resultDocument = { ...next, updatedAt: preparedAt };
   const withoutId: Omit<EditPlan, 'planId'> = {
     kind: 'joy-media.prepared-edit',
     schemaVersion: 1,
-    semanticsVersion: 1,
+    semanticsVersion: prepared.operations.some(isTitleOperation) ? 2 : 1,
     projectId: project.id,
     baseRevision: revision,
     baseHash: sha256Identity(project),
     preparedAt,
-    operations,
+    operations: prepared.operations,
     resultHash: sha256Identity(resultDocument),
     changedEntities: changedEntities(project, resultDocument),
     warnings: [],
-    estimatedWork: { operationCount: operations.length },
+    estimatedWork: { operationCount: prepared.operations.length },
   };
   const plan: EditPlan = { ...withoutId, planId: preparedPlanId(withoutId) };
   withExclusiveLock(outputPath, () => {
@@ -248,8 +300,14 @@ async function apply(args: string[], flags: CliFlags): Promise<number> {
         'The project no longer matches the base revision and content recorded in this plan.',
       );
     }
-    const next = applyPreparedOperations(info.project, plan.operations);
+    const { project: next, operations: ignored } = applyOperations(
+      info.project,
+      plan.operations,
+      false,
+    );
+    void ignored;
     const resultDocument = { ...next, updatedAt: plan.preparedAt };
+    if (plan.semanticsVersion === 2) validateFrozenTitleOutput(resultDocument);
     const resultHash = sha256Identity(resultDocument);
     if (resultHash !== plan.resultHash)
       throw new CommandFailure(
