@@ -14,6 +14,7 @@ import {
   isTitleOperation,
   validateFrozenTitleOutput,
 } from '../services/prepared-title.js';
+import { ensureTitleTextMeasurer } from '../services/title-measure.js';
 import {
   CommandFailure,
   emitJson,
@@ -169,6 +170,7 @@ function planSummary(plan: EditPlan, path?: string): Record<string, unknown> {
 }
 
 async function prepare(args: string[], flags: CliFlags): Promise<number> {
+  await ensureTitleTextMeasurer();
   if (args.length !== 2 || !flags.project || !flags.output) {
     throw usageFailure(
       'Usage: joy-media plan prepare <operations.json> --project <file> --output <plan.json> [--json]',

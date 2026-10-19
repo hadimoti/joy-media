@@ -6,6 +6,7 @@ import { validateJoyProjectV1 } from '@joy-media/project-schema';
 import { runCli } from '../cli.js';
 import { setTitleTextMeasurer } from '../services/prepared-title.js';
 import { preparedPlanId } from '../services/prepared-edit.js';
+import { findChromiumExecutable } from '@joy-media/html-scene-runtime';
 
 let dir = '';
 async function call(args: string[]): Promise<{ code: number; output: string }> {
@@ -83,6 +84,18 @@ afterEach(() => {
 });
 
 describe('prepared title plan flow', () => {
+  it.runIf(process.env.JOY_REQUIRE_CHROMIUM === '1' || findChromiumExecutable() !== undefined)(
+    'prepares a title with the real Chromium measurer and writes frozen layout',
+    async () => {
+      const f = await fixture();
+      const { result, output } = await prepare(f.path, [op()], 'real-plan.json');
+      expect(result.code).toBe(0);
+      const plan = JSON.parse(readFileSync(output, 'utf8'));
+      expect(plan.semanticsVersion).toBe(2);
+      expect(plan.operations[0].resolved.layout.fontSizePx).toBeGreaterThan(0);
+      expect(plan.operations[0].resolved.layout.primaryLines).toEqual(['Sara']);
+    },
+  );
   it('prepares and applies frozen title data and replays without a second write', async () => {
     setTitleTextMeasurer((text, size) => Array.from(text).length * size * 0.45);
     const f = await fixture();

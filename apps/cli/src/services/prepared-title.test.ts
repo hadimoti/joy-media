@@ -89,7 +89,8 @@ describe('prepared title resolution', () => {
     } catch (error) {
       expect(error).toMatchObject({
         code: 'SETUP_REQUIRED',
-        message: 'Title text measurement needs a Chromium browser; set JOY_CHROMIUM_PATH',
+        message:
+          'Title text measurement needs a Chromium browser; set JOY_CHROMIUM_PATH or install the Playwright Chromium browser',
       });
     }
   });

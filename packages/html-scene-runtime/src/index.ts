@@ -101,6 +101,7 @@ export {
   findChromiumExecutable,
   readChromiumVersion,
 } from './chromium-driver.js';
+export { createChromiumTextMeasure } from './text-measure.js';
 
 export type { SceneDiagnosticPlaceholder } from './placeholder.js';
 export { createSceneDiagnosticPlaceholder } from './placeholder.js';

@@ -1,7 +1,7 @@
 /** Persistent CDP implementation for deterministic, bounded scene captures. */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -32,8 +32,41 @@ const CHROMIUM_CANDIDATES = [
   '/usr/bin/chromium',
 ].filter((value): value is string => typeof value === 'string' && value.length > 0);
 
+function playwrightCandidates(): string[] {
+  const roots = process.env.PLAYWRIGHT_BROWSERS_PATH
+    ? [process.env.PLAYWRIGHT_BROWSERS_PATH]
+    : process.platform === 'win32'
+      ? [process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'ms-playwright') : '']
+      : [join(process.env.HOME ?? '', '.cache', 'ms-playwright')];
+  const candidates: { revision: number; paths: string[] }[] = [];
+  for (const root of roots.filter(Boolean)) {
+    let entries: string[];
+    try {
+      entries = readdirSync(root);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const match = /^chromium-(\d+)$/.exec(entry);
+      if (!match) continue;
+      const revision = Number(match[1]);
+      const base = join(root, entry);
+      candidates.push({
+        revision,
+        paths:
+          process.platform === 'win32'
+            ? [join(base, 'chrome-win64', 'chrome.exe'), join(base, 'chrome-win', 'chrome.exe')]
+            : [join(base, 'chrome-linux', 'chrome')],
+      });
+    }
+  }
+  return candidates.sort((a, b) => b.revision - a.revision).flatMap(({ paths }) => paths);
+}
+
 export function findChromiumExecutable(): string | undefined {
-  return CHROMIUM_CANDIDATES.find((candidate) => existsSync(candidate));
+  return [...CHROMIUM_CANDIDATES, ...playwrightCandidates()].find((candidate) =>
+    existsSync(candidate),
+  );
 }
 
 function killVerifiedChromium(pid: number | undefined): void {
@@ -78,6 +111,8 @@ let socket;
 let endpoint;
 let targetId;
 let sessionId;
+let measureSessionId;
+let measurementPageReady = false;
 let activeControl;
 let sequence = 0;
 const pending = new Map();
@@ -196,6 +231,8 @@ async function closeBrowser(skipProtocolClose) {
   endpoint = undefined;
   targetId = undefined;
   sessionId = undefined;
+  measureSessionId = undefined;
+  measurementPageReady = false;
   if (activeControl) activeControl[3] = 0;
 }
 
@@ -266,6 +303,33 @@ async function capture(request) {
   return { rgba, loadedFonts };
 }
 
+async function measure(requests) {
+  await ensureBrowser({ width: 1, height: 1 });
+  if (!measureSessionId) {
+    const created = await send('Target.createTarget', { url: 'about:blank' });
+    const attached = await send('Target.attachToTarget', { targetId: created.targetId, flatten: true });
+    measureSessionId = attached.sessionId;
+    await send('Page.enable', {}, measureSessionId);
+    await send('Runtime.enable', {}, measureSessionId);
+  }
+  if (!measurementPageReady) {
+    const markup = '<!doctype html><html><head><meta charset="utf-8"><style>' + workerData.fontCss + '</style></head><body></body></html>';
+    const loaded = waitForEvent('Page.loadEventFired');
+    await send('Page.navigate', { url: 'data:text/html;base64,' + Buffer.from(markup).toString('base64') }, measureSessionId);
+    if ((await loaded).timeout) throw new Error('Chromium measurement document load timed out');
+    measurementPageReady = true;
+  }
+  const fonts = '(async()=>{const faces=' + JSON.stringify(workerData.faces) + ';for(const face of faces){const sample=face.subset===\'arabic\'?String.fromCodePoint(0x627,0x644,0x639,0x631,0x628,0x64a,0x629,0x20,0x641,0x627,0x631,0x633,0x6cc):\'Noto Sans Arabic\';const list=await document.fonts.load(face.weight+\' 16px "Noto Sans Arabic"\',sample);if(!list.length||!document.fonts.check(face.weight+\' 16px "Noto Sans Arabic"\',sample))throw new Error("Noto Sans Arabic face failed to load: "+face.subset+" "+face.weight)}return true})()';
+  await evaluateIn(measureSessionId, fonts);
+  return await evaluateIn(measureSessionId, '(()=>{const requests=' + JSON.stringify(requests) + ';const context=document.createElement("canvas").getContext("2d");return requests.map(r=>{context.font=r.weight+" "+r.fontSizePx+"px \\"Noto Sans Arabic\\"";return context.measureText(r.text).width})})()');
+}
+
+async function evaluateIn(session, expression) {
+  const result = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, session);
+  if (result.exceptionDetails) throw new Error(result.exceptionDetails.text || 'Chromium measurement failed');
+  return result.result && result.result.value;
+}
+
 async function handle(message) {
   const control = new Int32Array(message.shared, 0, 4);
   const bytes = new Uint8Array(message.shared);
@@ -276,6 +340,18 @@ async function handle(message) {
       await closeBrowser();
       Atomics.store(control, 0, 1);
     } else {
+      if (message.type === 'measure') {
+        if (!Array.isArray(message.request)) throw new Error('Chromium measurement requests are missing');
+        let measureTimer;
+        const result = await Promise.race([
+          measure(message.request),
+          new Promise((resolve, reject) => { measureTimer = setTimeout(() => reject(new Error('Chromium text measurement exceeded its ' + workerData.timeoutMs * 4 + 'ms budget')), workerData.timeoutMs * 4); }),
+        ]).finally(() => clearTimeout(measureTimer));
+        const payload = Buffer.from(JSON.stringify(result), 'utf8');
+        if (payload.byteLength > bytes.byteLength - HEADER_BYTES - ERROR_BYTES) throw new Error('Chromium measurement result exceeds shared-memory capacity');
+        bytes.set(payload, HEADER_BYTES + ERROR_BYTES); control[1] = payload.byteLength; control[3] = browser ? browser.pid || 0 : 0;
+        Atomics.store(control, 0, 1);
+      } else {
       if (!message.request) throw new Error('Chromium capture request is missing');
       const budgetMs = workerData.timeoutMs * 4;
       let budgetTimer;
@@ -298,6 +374,7 @@ async function handle(message) {
       if (Atomics.compareExchange(control, 0, 0, 1) !== 0) {
         await closeBrowser(true);
         return;
+      }
       }
     }
   } catch (error) {
@@ -356,28 +433,45 @@ export function createChromiumSceneDriver(
   };
   process.once('exit', cleanupBrowserOnExit);
 
-  function exchange(type: 'capture' | 'close', request?: HeadlessCaptureRequest): HeadlessSurface {
-    const pixels = request ? request.width * request.height : 0;
-    const shared = new SharedArrayBuffer(HEADER_BYTES + ERROR_BYTES + pixels * 4);
+  function exchange(
+    type: 'capture' | 'close' | 'measure',
+    request?:
+      HeadlessCaptureRequest | readonly { text: string; fontSizePx: number; weight: 400 | 700 }[],
+  ): HeadlessSurface {
+    const pixels = request && 'width' in request ? request.width * request.height : 0;
+    const extra =
+      type === 'measure' ? Math.max(1024, JSON.stringify(request).length * 4) : pixels * 4;
+    const shared = new SharedArrayBuffer(HEADER_BYTES + ERROR_BYTES + extra);
     const control = new Int32Array(shared, 0, 4);
     const at = (index: number): number => control[index] ?? 0;
     worker.postMessage({ type, request, shared });
     const budgetMs = timeoutMs * 4;
-    const waitMs = (type === 'capture' ? budgetMs : timeoutMs) + 2_000;
+    const waitMs = (type === 'close' ? timeoutMs : budgetMs) + 2_000;
     const state = Atomics.wait(control, 0, 0, waitMs);
     lastBrowserPid = at(3) > 0 ? at(3) : undefined;
     if (state === 'timed-out') {
       Atomics.store(control, 0, 3);
       throw new Error(
-        `Chromium scene capture exceeded ${type === 'capture' ? budgetMs : timeoutMs}ms; browser cleanup is pending`,
+        `Chromium ${type === 'measure' ? 'text measurement' : 'scene capture'} exceeded ${type === 'close' ? timeoutMs : budgetMs}ms; browser cleanup is pending`,
       );
     }
     if (at(0) !== 1) {
       const size = Math.min(at(2), ERROR_BYTES);
       const message = new TextDecoder().decode(new Uint8Array(shared, HEADER_BYTES, size));
-      throw new Error(`Chromium scene capture failed: ${message || 'worker failed'}`);
+      throw new Error(
+        `Chromium ${type === 'measure' ? 'text measurement' : 'scene capture'} failed: ${message || 'worker failed'}`,
+      );
     }
     if (type === 'close') return { rgba: new Uint8Array() };
+    if (type === 'measure') {
+      const length = at(1);
+      const widths = JSON.parse(
+        new TextDecoder().decode(new Uint8Array(shared, HEADER_BYTES + ERROR_BYTES, length)),
+      ) as number[];
+      if (!Array.isArray(widths) || widths.some((width) => !Number.isFinite(width) || width < 0))
+        throw new Error('Chromium text measurement returned invalid widths');
+      return { rgba: new Uint8Array(), loadedFonts: widths.map(String) };
+    }
     const length = at(1);
     const rgba = new Uint8Array(shared, HEADER_BYTES + ERROR_BYTES, length).slice();
     const fontLength = Math.min(at(2), ERROR_BYTES);
@@ -395,6 +489,19 @@ export function createChromiumSceneDriver(
       if (closed) throw new Error('Chromium scene driver is closed');
       assertCaptureRequest(request);
       return exchange('capture', request);
+    },
+    measureTextWidths(requests) {
+      if (closed) throw new Error('Chromium scene driver is closed');
+      for (const request of requests) {
+        if (!Number.isFinite(request.fontSizePx) || request.fontSizePx <= 0)
+          throw new RangeError('text measurement fontSizePx must be finite and positive');
+        if (request.weight !== 400 && request.weight !== 700)
+          throw new RangeError('text measurement weight must be 400 or 700');
+        if (typeof request.text !== 'string')
+          throw new TypeError('text measurement text must be a string');
+      }
+      const result = exchange('measure', requests);
+      return (result.loadedFonts ?? []).map(Number);
     },
     close(): void {
       if (closed) return;

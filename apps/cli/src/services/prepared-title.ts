@@ -44,7 +44,7 @@ function requireTitleTextMeasurer(): TextMeasure {
   if (!measurer)
     fail(
       'SETUP_REQUIRED',
-      'Title text measurement needs a Chromium browser; set JOY_CHROMIUM_PATH',
+      'Title text measurement needs a Chromium browser; set JOY_CHROMIUM_PATH or install the Playwright Chromium browser',
     );
   return measurer;
 }
@@ -366,7 +366,7 @@ export function applyPreparedTitleOperation(
   if (prepare && !getTitleTextMeasurer())
     fail(
       'SETUP_REQUIRED',
-      'Title text measurement needs a Chromium browser; set JOY_CHROMIUM_PATH',
+      'Title text measurement needs a Chromium browser; set JOY_CHROMIUM_PATH or install the Playwright Chromium browser',
     );
   ensureProjectLimits(project);
   let normalized: PreparedOperation;

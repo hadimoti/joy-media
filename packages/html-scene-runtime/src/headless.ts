@@ -32,6 +32,9 @@ export interface HeadlessSurface {
 /** Implemented by the pinned Chromium/runtime process in WP-04.4 consumers. */
 export interface HeadlessSceneDriver {
   capture(request: HeadlessCaptureRequest): HeadlessSurface;
+  measureTextWidths?(
+    requests: readonly { text: string; fontSizePx: number; weight: 400 | 700 }[],
+  ): number[];
   close?(): void;
   readonly browserProcessId?: number | undefined;
 }
