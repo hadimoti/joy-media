@@ -58,13 +58,16 @@ const securedWindowsPaths = new Set<string>();
 let windowsUserSid: string | undefined;
 
 export function resolveWindowsSystemExecutablePath(
-  executableName: 'whoami.exe' | 'icacls.exe',
+  executableName: 'whoami.exe' | 'icacls.exe' | 'powershell.exe',
   systemRoot = process.env.SystemRoot ?? process.env.WINDIR,
 ): string {
   if (!systemRoot || !win32.isAbsolute(systemRoot)) {
     throw new Error(
       'Could not determine an absolute Windows system root to protect JOY Media secrets.',
     );
+  }
+  if (executableName === 'powershell.exe') {
+    return win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', executableName);
   }
   return win32.join(systemRoot, 'System32', executableName);
 }
@@ -99,6 +102,102 @@ function runWindowsAcl(path: string, args: string[]): void {
   if (result.error || result.status !== 0) {
     throw new Error(`Could not secure JOY Media configuration permissions for ${path}.`);
   }
+}
+
+const BROAD_WINDOWS_SIDS = ['S-1-1-0', 'S-1-5-11', 'S-1-5-32-545'];
+
+interface WindowsDirectoryAclRule {
+  sid: string;
+  type: 'Allow' | 'Deny';
+  fullControl: boolean;
+  inheritOnly: boolean;
+}
+
+interface WindowsDirectoryAcl {
+  protected: boolean;
+  rules: WindowsDirectoryAclRule[];
+}
+
+/** Read-only query of inheritance protection and every explicit or inherited SID access rule. */
+function windowsDirectoryAcl(path: string): WindowsDirectoryAcl | undefined {
+  const pathBase64 = Buffer.from(path, 'utf8').toString('base64');
+  const script = [
+    `$path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${pathBase64}'))`,
+    '$acl = [IO.Directory]::GetAccessControl($path)',
+    '$rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { [pscustomobject]@{ sid = $_.IdentityReference.Value; type = $_.AccessControlType.ToString(); fullControl = (($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq [Security.AccessControl.FileSystemRights]::FullControl); inheritOnly = (($_.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq [Security.AccessControl.PropagationFlags]::InheritOnly) } })',
+    '[pscustomobject]@{ protected = [bool]$acl.AreAccessRulesProtected; rules = @($rules) } | ConvertTo-Json -Depth 4 -Compress',
+  ].join('\n');
+  const result = spawnSync(
+    resolveWindowsSystemExecutablePath('powershell.exe'),
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-EncodedCommand',
+      Buffer.from(script, 'utf16le').toString('base64'),
+    ],
+    { encoding: 'utf8', windowsHide: true, timeout: 10_000 },
+  );
+  if (result.error || result.status !== 0) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(result.stdout.trim());
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return undefined;
+    }
+    const candidate = parsed as Record<string, unknown>;
+    if (typeof candidate.protected !== 'boolean' || !Array.isArray(candidate.rules)) {
+      return undefined;
+    }
+    const rules: WindowsDirectoryAclRule[] = [];
+    for (const rule of candidate.rules) {
+      if (rule === null || typeof rule !== 'object' || Array.isArray(rule)) {
+        return undefined;
+      }
+      const entry = rule as Record<string, unknown>;
+      if (
+        typeof entry.sid !== 'string' ||
+        (entry.type !== 'Allow' && entry.type !== 'Deny') ||
+        typeof entry.fullControl !== 'boolean' ||
+        typeof entry.inheritOnly !== 'boolean'
+      ) {
+        return undefined;
+      }
+      rules.push({
+        sid: entry.sid,
+        type: entry.type,
+        fullControl: entry.fullControl,
+        inheritOnly: entry.inheritOnly,
+      });
+    }
+    return { protected: candidate.protected, rules };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * True only when inheritance is protected, no broad SID has an Allow rule,
+ * SYSTEM, Administrators and the current user each have Allow full control,
+ * and none of those required SIDs has a Deny rule. Unknown ACLs are not private.
+ */
+function windowsDirectoryIsPrivate(path: string, userSid: string): boolean {
+  const acl = windowsDirectoryAcl(path);
+  if (!acl || acl.protected !== true) return false;
+  if (acl.rules.some((rule) => rule.type === 'Allow' && BROAD_WINDOWS_SIDS.includes(rule.sid))) {
+    return false;
+  }
+  const requiredSids = ['S-1-5-18', 'S-1-5-32-544', userSid];
+  if (
+    requiredSids.some(
+      (sid) =>
+        !acl.rules.some(
+          (rule) =>
+            rule.sid === sid && rule.type === 'Allow' && rule.fullControl && !rule.inheritOnly,
+        ),
+    )
+  ) {
+    return false;
+  }
+  return !acl.rules.some((rule) => rule.type === 'Deny' && requiredSids.includes(rule.sid));
 }
 
 export function getJoyMediaDir(): string {
@@ -137,6 +236,13 @@ function makePrivate(path: string, mode: number, directory = false): void {
   if (securedWindowsPaths.has(normalizedPath)) return;
 
   const userSid = currentWindowsUserSid();
+  // A directory's ACL change propagates into every existing descendant, so rewriting
+  // an already-private directory disturbs unrelated files and, on a large profile,
+  // can outrun the icacls timeout. Skip only when the existing ACL is private.
+  if (directory && windowsDirectoryIsPrivate(path, userSid)) {
+    securedWindowsPaths.add(normalizedPath);
+    return;
+  }
   const permission = directory ? '(OI)(CI)F' : 'F';
   // Add a private allow-list before removing inherited or explicit broad grants, so
   // tightening an old profile cannot lock out the current process halfway through.
