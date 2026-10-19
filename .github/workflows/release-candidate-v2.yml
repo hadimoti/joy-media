@@ -509,6 +509,14 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          $profileRoot = [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\')
+          $installPath = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\JOY Media'))
+          if ($profileRoot -match '(?i)HadiMoti' -or -not $installPath.StartsWith($profileRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Refusing install cleanup outside the disposable runner profile.'
+          }
+          if (Test-Path -LiteralPath $installPath) {
+            Remove-Item -LiteralPath $installPath -Recurse -Force -ErrorAction Stop
+          }
           if ($env:JOY_MEDIA_WINDOWS_BUILD_STARTED -eq 'true') {
             $repoRoot = (Resolve-Path $PWD).Path
             $desktopDist = Join-Path $repoRoot 'apps\desktop\dist'
