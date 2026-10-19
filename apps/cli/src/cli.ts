@@ -48,6 +48,7 @@ export interface CliFlags {
   system: boolean;
   'media-engine': boolean;
   manifestOnly?: boolean;
+  allowExtend?: boolean;
   mediaDir?: string | undefined;
 }
 
@@ -62,6 +63,7 @@ export const CLI_OPTIONS = {
   json: { type: 'boolean' },
   project: { type: 'string', short: 'p' },
   apply: { type: 'boolean' },
+  'allow-extend': { type: 'boolean' },
   name: { type: 'string', short: 'n' },
   provider: { type: 'string' },
   model: { type: 'string', short: 'm' },
@@ -153,6 +155,7 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['--track <id> --clip <id> --asset <id>', 'Targets'],
       ['--start <s> --end <s> --at <s>', 'Timeline positions in seconds (>= 0)'],
       ['--duration <s>', 'Clip length in seconds (>= 0.001)'],
+      ['--allow-extend', 'add-clip: allow a clip longer than its source media'],
       ['--sqlite-path <path>', 'Project database'],
     ],
   },
@@ -328,6 +331,7 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
     system: v.system === true,
     'media-engine': v['media-engine'] === true,
     manifestOnly: v['manifest-only'] === true,
+    allowExtend: v['allow-extend'] === true,
     mediaDir: str('media-dir'),
   };
 }

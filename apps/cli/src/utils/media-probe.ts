@@ -43,10 +43,38 @@ const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.bmp': 'image/bmp',
+  '.gif': 'image/gif',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
+  '.heic': 'image/heic',
+  '.mpg': 'video/mpeg',
+  '.mpeg': 'video/mpeg',
+  '.ts': 'video/mp2t',
+  '.flv': 'video/x-flv',
+  '.wmv': 'video/x-ms-wmv',
+  '.3gp': 'video/3gpp',
+  '.ogv': 'video/ogg',
+  '.mxf': 'application/mxf',
+  '.aif': 'audio/aiff',
+  '.aiff': 'audio/aiff',
+  '.wma': 'audio/x-ms-wma',
+  '.mka': 'audio/x-matroska',
+  '.oga': 'audio/ogg',
+  '.avif': 'image/avif',
+  '.apng': 'image/apng',
+  '.m2ts': 'video/mp2t',
+  '.mts': 'video/mp2t',
+  '.vob': 'video/mpeg',
+  '.m4b': 'audio/mp4',
 };
 
 export function mimeTypeFor(path: string): string {
   return MIME_BY_EXTENSION[extname(path).toLowerCase()] ?? 'application/octet-stream';
+}
+
+/** True when a name ends in a media extension this CLI knows (a file-like name, not a label). */
+export function isMediaFileName(name: string): boolean {
+  return Object.hasOwn(MIME_BY_EXTENSION, extname(name).toLowerCase());
 }
 
 interface ProbeStream {

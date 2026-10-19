@@ -429,13 +429,14 @@ describe('placing and removing clips', () => {
   });
 
   it('records the asset it was given, and the default clip length is 3 s', async () => {
+    // A plain label: a name with a media extension is a file reference and must exist.
     const id = await createProject(sb, 'Defaults');
     const c = singleJson<{ clip: { assetId: string; durationUs: number } }>(
       expectOk(
-        await sb.run(['timeline', 'add-clip', '--project', id, '--asset', 'beach.mp4', '--json']),
+        await sb.run(['timeline', 'add-clip', '--project', id, '--asset', 'beach', '--json']),
       ),
     );
-    expect(c.clip).toMatchObject({ assetId: 'beach.mp4', durationUs: 3 * SEC });
+    expect(c.clip).toMatchObject({ assetId: 'beach', durationUs: 3 * SEC });
   });
 
   it('removing a clip twice: the first works, the second is "not found", and neighbours survive', async () => {

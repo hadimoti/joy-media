@@ -5,7 +5,7 @@ import type { CliFlags } from '../cli.js';
 import { deriveAssetId, registerAssetSource } from '../utils/asset-sources.js';
 import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
 import { c, logSuccess } from '../utils/logger.js';
-import { probeMedia } from '../utils/media-probe.js';
+import { isMediaFileName, probeMedia } from '../utils/media-probe.js';
 import {
   CommandFailure,
   emitJson,
@@ -39,6 +39,8 @@ interface TimelineClip {
 interface TimelineTrack {
   id: string;
   name?: string;
+  family?: string;
+  kind?: string;
   clips: TimelineClip[];
 }
 
@@ -111,8 +113,11 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
       }
       const tracks = root.tracks as unknown as TimelineTrack[];
 
-      const effectiveFlags = subcommand === 'add-clip' ? registerRealMedia(edited, flags) : flags;
-      const result = apply(subcommand, tracks, effectiveFlags);
+      const media = subcommand === 'add-clip' ? registerRealMedia(edited, flags) : undefined;
+      const result = apply(subcommand, tracks, media?.flags ?? flags, edited.assets);
+      // Registered before the save: a failed registry write then leaves no clip behind, and
+      // an unreferenced registry entry is harmless. A rejected edit never reaches this line.
+      if (result.changed) media?.register();
       const saved = result.changed
         ? saveProject(edited, {
             source: info.source,
@@ -139,19 +144,36 @@ export async function handleTimelineCommand(args: string[], flags: CliFlags): Pr
  * knows its kind and length), remember where it lives on this machine (so `render` can find it),
  * and default the clip length to the whole file. A plain label such as `intro` is left alone.
  */
+interface RegisteredMedia {
+  readonly flags: CliFlags;
+  /** Records where the file lives on this machine; call only after the project is saved. */
+  readonly register: () => void;
+}
+
 function registerRealMedia(
   project: { assets?: Record<string, unknown> },
   flags: CliFlags,
-): CliFlags {
-  if (!flags.asset) return flags;
+): RegisteredMedia {
+  const noRegistration = { flags, register: (): void => undefined };
+  if (!flags.asset) return noRegistration;
+  // An asset id the project already knows is a reference, not a path on this machine.
+  if (project.assets?.[flags.asset] !== undefined) return noRegistration;
   const absolute = resolve(flags.asset);
-  let size: number;
+  let size: number | undefined;
   try {
     const stats = statSync(absolute);
-    if (!stats.isFile()) return flags;
-    size = stats.size;
+    if (stats.isFile()) size = stats.size;
   } catch {
-    return flags;
+    size = undefined;
+  }
+  if (size === undefined) {
+    if (looksLikeMediaPath(flags.asset)) {
+      throw new CommandFailure(
+        'MEDIA_NOT_FOUND',
+        `No media file at "${absolute}". Check the path, or pass a plain label (for example "intro") if you meant a name rather than a file.`,
+      );
+    }
+    return noRegistration;
   }
   const info = probeMedia(absolute);
   if (!info) {
@@ -174,12 +196,19 @@ function registerRealMedia(
       ...(info.height !== undefined ? { height: info.height } : {}),
     },
   };
-  registerAssetSource(assetId, absolute);
   const wholeFile = info.isImage || info.durationUs <= 0 ? undefined : info.durationUs / 1_000_000;
-  return { ...flags, asset: assetId, duration: flags.duration ?? wholeFile };
+  return {
+    flags: { ...flags, asset: assetId, duration: flags.duration ?? wholeFile },
+    register: () => registerAssetSource(assetId, absolute),
+  };
 }
 
 function checkFlags(sub: Subcommand, flags: CliFlags): void {
+  if (flags.allowExtend && sub !== 'add-clip') {
+    throw usageFailure(
+      `timeline ${sub} does not accept --allow-extend. It only applies to add-clip.`,
+    );
+  }
   const given: Record<ClipFlag, unknown> = {
     track: flags.track,
     clip: flags.clip,
@@ -229,10 +258,15 @@ function checkFlags(sub: Subcommand, flags: CliFlags): void {
   }
 }
 
-function apply(sub: Subcommand, tracks: TimelineTrack[], flags: CliFlags): Outcome {
+function apply(
+  sub: Subcommand,
+  tracks: TimelineTrack[],
+  flags: CliFlags,
+  assets: Record<string, unknown> | undefined,
+): Outcome {
   switch (sub) {
     case 'add-clip':
-      return addClip(tracks, flags);
+      return addClip(tracks, flags, assets);
     case 'split':
       return splitClip(tracks, flags);
     case 'trim':
@@ -343,19 +377,85 @@ function uniqueClipId(tracks: TimelineTrack[]): string {
   }
 }
 
-function addClip(tracks: TimelineTrack[], flags: CliFlags): Outcome {
+/** A value is a file path when it has a separator or a known media extension; otherwise a label. */
+function looksLikeMediaPath(value: string): boolean {
+  return /[\\/]/.test(value) || isMediaFileName(value);
+}
+
+interface AssetMedia {
+  readonly kind: 'image' | 'video' | 'audio';
+  readonly durationUs: number | undefined;
+}
+
+/** Kind and length of a registered real media asset; undefined for a plain label. */
+function assetMedia(asset: unknown): AssetMedia | undefined {
+  if (asset === null || typeof asset !== 'object') return undefined;
+  const record = asset as { kind?: unknown; descriptor?: { durationUs?: unknown } };
+  if (record.kind !== 'image' && record.kind !== 'video' && record.kind !== 'audio') {
+    return undefined;
+  }
+  const durationUs = record.descriptor?.durationUs;
+  return {
+    kind: record.kind,
+    durationUs: typeof durationUs === 'number' && durationUs > 0 ? durationUs : undefined,
+  };
+}
+
+/** Slack between a clip and its source; the same tolerance render allows. */
+const SOURCE_TOLERANCE_US = 50_000;
+
+function assertMediaFits(
+  track: TimelineTrack,
+  media: AssetMedia,
+  label: string,
+  durationUs: number,
+  allowExtend: boolean,
+): void {
+  // Same rule as the semantic snapshot: an explicit family wins, else the legacy kind decides.
+  const family = track.family ?? (track.kind === 'audio' ? 'audio' : 'visual');
+  const visual = family !== 'audio';
+  if (visual && media.kind === 'audio') {
+    throw new CommandFailure(
+      'TRACK_KIND_MISMATCH',
+      `"${label}" is audio only, but track "${trackLabel(track)}" is a visual track. Use an audio track (for example track-a1), or a video or image file.`,
+    );
+  }
+  if (!visual && media.kind !== 'audio') {
+    throw new CommandFailure(
+      'TRACK_KIND_MISMATCH',
+      `"${label}" has picture, but track "${trackLabel(track)}" is an audio track. Use a visual track, or an audio-only file.`,
+    );
+  }
+  if (media.kind === 'image' || media.durationUs === undefined || allowExtend) return;
+  if (durationUs > media.durationUs + SOURCE_TOLERANCE_US) {
+    const sourceSeconds = (media.durationUs / 1_000_000).toFixed(2);
+    throw new CommandFailure(
+      'CLIP_EXCEEDS_SOURCE',
+      `The clip would be ${fmt(durationUs)} long, but "${label}" is only ${sourceSeconds}s. Use --duration ${sourceSeconds} or less, or pass --allow-extend to let the rest render empty.`,
+    );
+  }
+}
+
+function addClip(
+  tracks: TimelineTrack[],
+  flags: CliFlags,
+  assets: Record<string, unknown> | undefined,
+): Outcome {
   const trackId = flags.track ?? tracks[0]?.id;
   if (!trackId) throw new CommandFailure('TRACK_NOT_FOUND', 'No tracks available in project.');
   const track = requireTrack(tracks, trackId);
 
   const startUs = toUs(flags.start ?? 0);
   const durationUs = toUs(flags.duration ?? 3);
+  const assetId = flags.asset ?? 'asset-default';
+  const media = assetMedia(assets?.[assetId]);
+  if (media) assertMediaFits(track, media, assetId, durationUs, flags.allowExtend === true);
   assertNoOverlap(track, startUs, durationUs);
 
   const clip: TimelineClip = {
     id: uniqueClipId(tracks),
     kind: 'video',
-    assetId: flags.asset ?? 'asset-default',
+    assetId,
     startUs,
     durationUs,
     sourceInUs: 0,
