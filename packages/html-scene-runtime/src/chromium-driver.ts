@@ -1,7 +1,8 @@
 /** Persistent CDP implementation for deterministic, bounded scene captures. */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import type { HeadlessCaptureRequest, HeadlessSceneDriver, HeadlessSurface } from './headless.js';
@@ -35,6 +36,28 @@ export function findChromiumExecutable(): string | undefined {
   return CHROMIUM_CANDIDATES.find((candidate) => existsSync(candidate));
 }
 
+function killVerifiedChromium(pid: number | undefined): void {
+  if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) return;
+  const probe =
+    process.platform === 'win32'
+      ? spawnSync('tasklist', ['/FI', 'PID eq ' + pid, '/FO', 'CSV', '/NH'], {
+          encoding: 'utf8',
+          windowsHide: true,
+          shell: false,
+        })
+      : spawnSync('ps', ['-p', String(pid), '-o', 'comm='], {
+          encoding: 'utf8',
+          shell: false,
+        });
+  if (probe.error !== undefined || probe.status !== 0) return;
+  if (!/(chrom|msedge|headless_shell)/i.test(probe.stdout)) return;
+  try {
+    process.kill(pid);
+  } catch {
+    /* already exited */
+  }
+}
+
 const HEADER_BYTES = 16;
 const ERROR_BYTES = 8_192;
 const MAX_CAPTURE_PIXELS = 4_194_304;
@@ -48,14 +71,10 @@ const MAX_CAPTURE_PIXELS = 4_194_304;
 const CHROMIUM_WORKER_SOURCE = String.raw`
 const { parentPort, workerData } = require('node:worker_threads');
 const { spawn } = require('node:child_process');
-const { mkdtempSync, rmSync } = require('node:fs');
-const { tmpdir } = require('node:os');
-const { join } = require('node:path');
 const HEADER_BYTES = 16;
 const ERROR_BYTES = 8192;
 let browser;
 let socket;
-let tempDirectory;
 let endpoint;
 let targetId;
 let sessionId;
@@ -149,10 +168,12 @@ function waitForEndpoint() {
   });
 }
 
-async function closeBrowser() {
+async function closeBrowser(skipProtocolClose) {
   const activeSocket = socket;
-  if (activeSocket && activeSocket.readyState === WebSocket.OPEN) {
-    try { await send('Browser.close', {}); } catch (ignored) { /* bounded best effort */ }
+  if (activeSocket) {
+    if (!skipProtocolClose && activeSocket.readyState === WebSocket.OPEN) {
+      try { await send('Browser.close', {}); } catch (ignored) { /* bounded best effort */ }
+    }
     try { activeSocket.close(); } catch (ignored) { /* already closed */ }
   }
   const child = browser;
@@ -162,27 +183,30 @@ async function closeBrowser() {
       new Promise((resolve) => child.once('exit', resolve)),
       new Promise((resolve) => setTimeout(resolve, 1000)),
     ]);
-    if (child.exitCode === null) child.kill('SIGKILL');
-  }
-  if (tempDirectory) {
-    try { rmSync(tempDirectory, { recursive: true, force: true }); } catch (ignored) { /* best effort after exit */ }
+    if (child.exitCode === null) {
+      child.kill('SIGKILL');
+      await Promise.race([
+        new Promise((resolve) => child.once('exit', resolve)),
+        new Promise((resolve) => setTimeout(resolve, 1000)),
+      ]);
+    }
   }
   browser = undefined;
   socket = undefined;
   endpoint = undefined;
   targetId = undefined;
   sessionId = undefined;
+  if (activeControl) activeControl[3] = 0;
 }
 
 async function ensureBrowser(request) {
   if (socket && targetId) return;
-  tempDirectory = mkdtempSync(join(tmpdir(), 'joy-scene-cdp-'));
   browser = spawn(workerData.executablePath, [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-background-networking',
     '--disable-component-update', '--disable-default-apps', '--disable-extensions', '--disable-sync',
     '--no-first-run', '--hide-scrollbars', '--force-device-scale-factor=1', '--lang=en-US',
     '--host-resolver-rules=MAP * 0.0.0.0, EXCLUDE localhost', '--remote-debugging-port=0',
-    '--user-data-dir=' + tempDirectory, '--window-size=' + request.width + ',' + request.height,
+    '--user-data-dir=' + workerData.profileDirectory, '--window-size=' + request.width + ',' + request.height,
   ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, shell: false });
   if (activeControl && browser.pid) activeControl[3] = browser.pid;
   endpoint = await waitForEndpoint();
@@ -246,32 +270,39 @@ async function handle(message) {
   const control = new Int32Array(message.shared, 0, 4);
   const bytes = new Uint8Array(message.shared);
   activeControl = control;
+  let budgetExpired = false;
   try {
     if (message.type === 'close') {
       await closeBrowser();
       Atomics.store(control, 0, 1);
     } else {
       if (!message.request) throw new Error('Chromium capture request is missing');
-      const result = await capture(message.request);
+      const budgetMs = workerData.timeoutMs * 4;
+      let budgetTimer;
+      const result = await Promise.race([
+        capture(message.request),
+        new Promise((resolve, reject) => {
+          budgetTimer = setTimeout(() => {
+            budgetExpired = true;
+            reject(new Error('Chromium scene capture exceeded its ' + budgetMs + 'ms budget'));
+          }, budgetMs);
+        }),
+      ]).finally(() => clearTimeout(budgetTimer));
       const outputAt = HEADER_BYTES + ERROR_BYTES;
-      if (Atomics.load(control, 0) === 3) {
-        await closeBrowser();
-        bytes.set(Buffer.from('scene capture was cancelled', 'utf8'), HEADER_BYTES);
-        control[2] = Buffer.byteLength('scene capture was cancelled');
-        Atomics.store(control, 0, 2);
-        Atomics.notify(control, 0);
-        return;
-      }
       bytes.set(result.rgba, outputAt);
       const fonts = Buffer.from(JSON.stringify(result.loadedFonts || []), 'utf8');
       control[1] = result.rgba.byteLength;
-      control[3] = browser ? browser.pid || 0 : control[3];
       control[2] = Math.min(fonts.byteLength, ERROR_BYTES);
+      control[3] = browser ? browser.pid || 0 : 0;
       bytes.set(fonts.subarray(0, ERROR_BYTES), HEADER_BYTES);
-      Atomics.store(control, 0, 1);
+      if (Atomics.compareExchange(control, 0, 0, 1) !== 0) {
+        await closeBrowser(true);
+        return;
+      }
     }
   } catch (error) {
-    await closeBrowser();
+    await closeBrowser(budgetExpired);
+    control[3] = 0;
     const messageBytes = Buffer.from(error && error.message ? error.message : String(error), 'utf8').subarray(0, ERROR_BYTES);
     bytes.set(messageBytes, HEADER_BYTES);
     control[2] = messageBytes.byteLength;
@@ -300,11 +331,13 @@ export function createChromiumSceneDriver(
     throw new RangeError('Chromium scene capture timeoutMs must be between 1 and 120000');
   }
   const faces = loadNotoSansArabicFaces();
+  const profileDirectory = mkdtempSync(join(tmpdir(), 'joy-scene-cdp-'));
   const worker = new Worker(CHROMIUM_WORKER_SOURCE, {
     eval: true,
     workerData: {
       executablePath,
       timeoutMs,
+      profileDirectory,
       painterScript: SCENE_PAINT_SCRIPT,
       fontCss: notoSansArabicFontCss(faces),
       faces: faces.map(({ weight, subset }) => ({ weight, subset })),
@@ -314,11 +347,11 @@ export function createChromiumSceneDriver(
   let closed = false;
   let lastBrowserPid: number | undefined;
   const cleanupBrowserOnExit = (): void => {
-    if (lastBrowserPid === undefined) return;
+    killVerifiedChromium(lastBrowserPid);
     try {
-      process.kill(lastBrowserPid);
+      rmSync(profileDirectory, { recursive: true, force: true });
     } catch {
-      /* already exited */
+      /* best effort during exit */
     }
   };
   process.once('exit', cleanupBrowserOnExit);
@@ -329,18 +362,21 @@ export function createChromiumSceneDriver(
     const control = new Int32Array(shared, 0, 4);
     const at = (index: number): number => control[index] ?? 0;
     worker.postMessage({ type, request, shared });
-    const state = Atomics.wait(control, 0, 0, timeoutMs + 2_000);
+    const budgetMs = timeoutMs * 4;
+    const waitMs = (type === 'capture' ? budgetMs : timeoutMs) + 2_000;
+    const state = Atomics.wait(control, 0, 0, waitMs);
+    lastBrowserPid = at(3) > 0 ? at(3) : undefined;
     if (state === 'timed-out') {
-      if (at(3) > 0) lastBrowserPid = at(3);
       Atomics.store(control, 0, 3);
-      throw new Error(`Chromium scene capture exceeded ${timeoutMs}ms; browser cleanup is pending`);
+      throw new Error(
+        `Chromium scene capture exceeded ${type === 'capture' ? budgetMs : timeoutMs}ms; browser cleanup is pending`,
+      );
     }
     if (at(0) !== 1) {
       const size = Math.min(at(2), ERROR_BYTES);
       const message = new TextDecoder().decode(new Uint8Array(shared, HEADER_BYTES, size));
       throw new Error(`Chromium scene capture failed: ${message || 'worker failed'}`);
     }
-    if (at(3) > 0) lastBrowserPid = at(3);
     if (type === 'close') return { rgba: new Uint8Array() };
     const length = at(1);
     const rgba = new Uint8Array(shared, HEADER_BYTES + ERROR_BYTES, length).slice();
@@ -364,10 +400,22 @@ export function createChromiumSceneDriver(
       if (closed) return;
       closed = true;
       try {
-        exchange('close');
-        process.removeListener('exit', cleanupBrowserOnExit);
+        try {
+          exchange('close');
+        } catch (error) {
+          killVerifiedChromium(lastBrowserPid);
+          throw error;
+        }
       } finally {
-        void worker.terminate();
+        const removeProfile = (): void => {
+          try {
+            rmSync(profileDirectory, { recursive: true, force: true });
+          } catch {
+            /* best effort after worker termination */
+          }
+          process.removeListener('exit', cleanupBrowserOnExit);
+        };
+        void worker.terminate().then(removeProfile, removeProfile);
       }
     },
   };

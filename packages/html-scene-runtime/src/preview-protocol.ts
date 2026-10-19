@@ -104,6 +104,12 @@ export const SCENE_PAINT_SCRIPT = `(function () {
   function isTransparent(color) {
     return !color || color === 'transparent' || color === 'rgba(0, 0, 0, 0)';
   }
+  function resolveAlign(textAlign, rtl) {
+    if (textAlign === 'center') return 'center';
+    if (textAlign === 'end') return rtl ? 'left' : 'right';
+    if (textAlign === 'right' || textAlign === 'left') return textAlign;
+    return rtl ? 'right' : 'left';
+  }
   function paintTree(ctx, root, width, height, explicitLines, background) {
     var rootRect = root.getBoundingClientRect();
     var rw = Math.max(1, rootRect.width || width);
@@ -124,29 +130,38 @@ export const SCENE_PAINT_SCRIPT = `(function () {
         if (!parent) return;
         var ps = window.getComputedStyle(parent);
         if (ps.display === 'none' || ps.visibility === 'hidden') return;
-        var opacity = parseFloat(ps.opacity) || 1;
+        var opacity = parseFloat(ps.opacity);
+        if (Number.isNaN(opacity)) opacity = 1;
         if (!(opacity > 0)) return;
         var pr = parent.getBoundingClientRect();
         ctx.save();
         ctx.fillStyle = ps.color || '#fff';
         ctx.font = ps.font || '16px sans-serif';
         ctx.direction = ps.direction === 'rtl' ? 'rtl' : 'ltr';
-        ctx.textAlign = ps.textAlign || 'start';
+        var textAlign = resolveAlign(ps.textAlign, ps.direction === 'rtl');
+        ctx.textAlign = textAlign;
         ctx.textBaseline = 'alphabetic';
         var metrics = ctx.measureText(text);
         var ascent = metrics.fontBoundingBoxAscent || metrics.actualBoundingBoxAscent || (parseFloat(ps.fontSize) || 16) * 0.8;
         var textY = (pr.top - rootRect.top) * sy + inheritedY + ascent * sy;
+        var textX = textAlign === 'right'
+          ? (pr.right - rootRect.left) * sx + inheritedX
+          : textAlign === 'center'
+            ? (pr.left - rootRect.left + pr.width / 2) * sx + inheritedX
+            : (pr.left - rootRect.left) * sx + inheritedX;
         if (!explicitLines || !explicitLines.length) {
-          ctx.fillText(text, (pr.left - rootRect.left) * sx + inheritedX, textY, Math.max(1, pr.width * sx));
+          ctx.fillText(text, textX, textY, Math.max(1, pr.width * sx));
         }
         ctx.restore();
         return;
       }
       if (node.nodeType !== 1) return;
       var el = node;
+      if (el.tagName === 'IMG') throw new Error('scene painter does not draw images');
       var style = window.getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden') return;
-      var alpha = parseFloat(style.opacity) || 1;
+      var alpha = parseFloat(style.opacity);
+      if (Number.isNaN(alpha)) alpha = 1;
       if (!(alpha > 0)) return;
       var rect = el.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) {

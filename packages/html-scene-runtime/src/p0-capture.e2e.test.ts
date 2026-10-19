@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { existsSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { rational } from '@joy-media/project-schema';
 import { createChromiumSceneDriver, findChromiumExecutable } from './chromium-driver.js';
@@ -86,5 +89,83 @@ describe.runIf(requireChromium || findChromiumExecutable() !== undefined)(
         driver.close?.();
       }
     }, 60_000);
+
+    it('does not paint an element whose opacity is zero', () => {
+      const driver = createChromiumSceneDriver();
+      try {
+        const surface = driver.capture({
+          markup: '<div style="width:120px;height:80px;background:red;opacity:0"></div>',
+          width: 120,
+          height: 80,
+          transparent: true,
+          timeUs: 0,
+          frameRate: rational(30, 1),
+          locale: 'en-US',
+          seed: 'p0-opacity-zero',
+          lines: [],
+        });
+        let paintedPixel = false;
+        for (let index = 3; index < surface.rgba.length; index += 4) {
+          if (surface.rgba[index]! > 0) paintedPixel = true;
+        }
+        expect(paintedPixel).toBe(false);
+      } finally {
+        driver.close?.();
+      }
+    });
+
+    it('refuses images', () => {
+      const driver = createChromiumSceneDriver();
+      try {
+        expect(() =>
+          driver.capture({
+            markup: '<img src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=">',
+            width: 120,
+            height: 80,
+            transparent: true,
+            timeUs: 0,
+            frameRate: rational(30, 1),
+            locale: 'en-US',
+            seed: 'p0-refuse-image',
+            lines: [],
+          }),
+        ).toThrow('does not draw images');
+      } finally {
+        driver.close?.();
+      }
+    });
+
+    it('closes the browser and profile after a successful capture and close', async () => {
+      const existingProfiles = new Set(
+        readdirSync(tmpdir()).filter((name) => name.startsWith('joy-scene-cdp-')),
+      );
+      const driver = createChromiumSceneDriver();
+      try {
+        driver.capture({
+          markup: '',
+          width: 120,
+          height: 80,
+          transparent: true,
+          timeUs: 0,
+          frameRate: rational(30, 1),
+          locale: 'en-US',
+          seed: 'p0-close-profile',
+          lines: [],
+        });
+        const profileName = readdirSync(tmpdir()).find(
+          (name) => name.startsWith('joy-scene-cdp-') && !existingProfiles.has(name),
+        );
+        if (profileName === undefined)
+          throw new Error('Chromium profile directory was not created');
+        const profileDirectory = join(tmpdir(), profileName);
+        driver.close?.();
+        for (let attempt = 0; attempt < 100 && existsSync(profileDirectory); attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(existsSync(profileDirectory)).toBe(false);
+      } finally {
+        driver.close?.();
+      }
+    });
   },
 );
