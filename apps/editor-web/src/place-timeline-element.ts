@@ -7,6 +7,7 @@ import type {
   UniversalTimelineSource,
   VisualObjectV1,
 } from '@joy-media/project-schema';
+import { createTimelineElementBindingPlacement } from '@joy-media/motion-core';
 import { bindClipToObject } from './sticker-bindings.js';
 import { upsertUniversalTimelineBinding } from './universal-placement.js';
 
@@ -149,14 +150,17 @@ export function buildTimelineElementDocument(
           clipId,
           visualObject.id,
         );
-  return upsertUniversalTimelineBinding(withObject, {
-    id: clipId,
-    compositionId: planned.compositionId,
-    trackId: planned.trackId,
-    elementKind: request.elementKind,
-    startUs: planned.clip.startUs,
-    durationUs: planned.clip.durationUs,
-    source: request.source,
-    ...(request.sourceInUs === undefined ? {} : { sourceInUs: request.sourceInUs }),
-  });
+  return upsertUniversalTimelineBinding(
+    withObject,
+    createTimelineElementBindingPlacement({
+      clipId,
+      compositionId: planned.compositionId,
+      trackId: planned.trackId,
+      elementKind: request.elementKind,
+      startUs: planned.clip.startUs,
+      durationUs: planned.clip.durationUs,
+      source: request.source,
+      ...(request.sourceInUs === undefined ? {} : { sourceInUs: request.sourceInUs }),
+    }),
+  );
 }

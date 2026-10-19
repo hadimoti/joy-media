@@ -44,6 +44,24 @@ export {
 
 export { sampleSpatialPath } from './spatial.js';
 
+export {
+  P0_TEMPLATES,
+  serializeTemplate,
+  templateSha256,
+  compileTitleInstance,
+  sampleTitleMotion,
+  createTimelineElementBindingPlacement,
+} from './content-templates/index.js';
+export type {
+  P0TemplateDefinition,
+  TextMeasure,
+  TitleCompileErrorCode,
+  TitleCompileRequest,
+  TitleCompileResult,
+  SampledTitleMotion,
+  TimelineElementBindingPlacement,
+} from './content-templates/index.js';
+
 export type { SampledAnimationValueV2 } from './property-sampling.js';
 export {
   sampleAnimationValue,
