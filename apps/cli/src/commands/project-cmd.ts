@@ -178,6 +178,15 @@ function runShow(args: string[], flags: CliFlags, json: boolean): number {
   const res = loadProject(id, flags.sqlitePath);
   const root = res.project.compositions[res.project.rootCompositionId];
   const tracks = root?.tracks ?? [];
+  // With clips, show the length the content really has; the declared length only stands for an empty project.
+  const enabledTracks = tracks.filter(
+    (track) => (track as { enabled?: boolean }).enabled !== false,
+  );
+  const contentEndUs = enabledTracks
+    .flatMap((track) => track.clips)
+    .reduce((end, clip) => Math.max(end, clip.startUs + clip.durationUs), 0);
+  const hasClips = enabledTracks.some((track) => track.clips.length > 0);
+  const durationUs = hasClips ? contentEndUs : (root?.durationUs ?? 0);
 
   if (json) {
     emitJson({
@@ -189,7 +198,7 @@ function runShow(args: string[], flags: CliFlags, json: boolean): number {
       width: root?.width ?? null,
       height: root?.height ?? null,
       frameRate: root ? root.frameRate.num / root.frameRate.den : null,
-      durationUs: root?.durationUs ?? 0,
+      durationUs,
       assetCount: Object.keys(res.project.assets ?? {}).length,
       tracks: tracks.map((track) => ({
         id: track.id,
@@ -215,7 +224,7 @@ function runShow(args: string[], flags: CliFlags, json: boolean): number {
   logStep('Title', res.project.title);
   logStep('Revision', String(res.revision));
   logStep('Resolution', `${root?.width ?? 1080}×${root?.height ?? 1920}`);
-  logStep('Duration', `${Math.round((root?.durationUs ?? 0) / 1_000_000)}s`);
+  logStep('Duration', `${Math.round(durationUs / 1_000_000)}s`);
   logStep('Assets', String(Object.keys(res.project.assets ?? {}).length));
 
   console.log(`\n  ${c('Tracks & Clips:', 'bold')}`);

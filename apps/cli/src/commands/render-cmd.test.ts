@@ -222,6 +222,8 @@ describe('joy render (headless batch render command)', () => {
         out: join(outDir, 'wired'),
         concurrency: 1,
         json: true,
+        // An empty project only succeeds as a plan; a real render of it is a failure.
+        manifestOnly: true,
         sqlitePath: testDbPath,
       } as unknown as Parameters<typeof handleRenderCommand>[1]);
       expect(code).toBe(0);

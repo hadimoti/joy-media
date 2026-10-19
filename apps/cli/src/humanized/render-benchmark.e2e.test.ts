@@ -413,29 +413,23 @@ describe('a creator chooses where the output goes', () => {
 // ===========================================================================
 
 describe('a creator or agent points render at a project', () => {
-  it('is told the render of an empty project did nothing, instead of being congratulated', async () => {
+  it('is told the render of an empty project failed, instead of being congratulated', async () => {
+    // A real render with nothing to encode is a failure (exit 1). Only --manifest-only may succeed.
     const r = await sb.run(['render', '--project', blank.id, '--out', 'empty-human']);
-    expect(r.code, describeRun(r)).toBe(0); // existing, deliberate behaviour: an empty timeline is not a failure
-    expect(r.out).toMatch(/nothing rendered/i);
-    expect(r.out).toMatch(/no manifest/i);
+    expect(r.code, describeRun(r)).toBe(1);
+    expect(r.err).toMatch(/nothing rendered/i);
     expect(r.out).not.toMatch(/\bRendered\b/);
     expect(r.out).not.toMatch(/Wrote render manifest/);
     expect(existsSync(sb.path('empty-human'))).toBe(false);
   });
 
-  it('gets an unmistakable `complete` for an empty project over --json: nothing written, nothing produced', async () => {
+  it('gets a machine-readable failure for an empty project over --json: nothing written', async () => {
     const r = await sb.run(['render', '--project', blank.id, '--out', 'empty-json', '--json']);
-    const events = expectNdjsonContract(r, ['complete']);
-    expect(events.map((e) => e.type)).toEqual(['start', 'complete']);
-    const complete = events[1]!;
-    expect(complete).toMatchObject({
-      artifactPath: '',
-      totalFrames: 0,
-      mediaProduced: false,
-      manifestWritten: false,
-    });
-    expect(String(complete['message'])).toMatch(/nothing rendered/i);
-    expect((complete['warnings'] as string[]).join(' ')).toMatch(/no clips/i);
+    expect(r.code, describeRun(r)).toBe(1);
+    const events = expectNdjsonContract(r, ['error']);
+    expect(events.map((e) => e.type)).toEqual(['start', 'error']);
+    expect(events[1]).toMatchObject({ code: 'nothing-to-render' });
+    expect(String(events[1]!['message'])).toMatch(/nothing rendered/i);
     expect(existsSync(sb.path('empty-json'))).toBe(false);
   });
 

@@ -12,6 +12,8 @@
  *   clip of every enabled track and writes a *plan manifest* to
  *   `<out>/<projectId>.<ext>.manifest.json`. No media file is produced, and every human
  *   message and the final JSON event say so (`mediaProduced: false`).
+ * - Nothing to encode: a real render of a project with no clips fails with
+ *   `nothing-to-render` (exit 1). Only `--manifest-only` may succeed without media.
  *
  * Streams progress either as a progress bar (human mode, TTY only) or as
  * newline-delimited JSON events (`--json`). In `--json` mode stdout carries
@@ -180,7 +182,8 @@ export type RenderErrorCode =
   | 'media-unreadable'
   | 'unsupported-feature'
   | 'ffmpeg-missing'
-  | 'encode-failed';
+  | 'encode-failed'
+  | 'nothing-to-render';
 
 /** Real render only: encoder progress, at most one event per whole percent. */
 export interface RenderProgressEvent {
@@ -429,6 +432,8 @@ export function planRender(project: unknown, presetSpec: RenderPresetSpec): Rend
   const warnings: string[] = [];
   const clips: PlannedClip[] = [];
   let firstFrame = 0;
+  // Where the last clip ends; the timeline is as long as its content when it has clips.
+  let contentEndUs = 0;
 
   for (const [trackIndex, rawTrack] of rawTracks.entries()) {
     if (!isRecord(rawTrack) || typeof rawTrack['id'] !== 'string') {
@@ -476,6 +481,7 @@ export function planRender(project: unknown, presetSpec: RenderPresetSpec): Rend
         };
       }
       const frames = Math.max(1, Math.round((durationUs / 1_000_000) * presetSpec.fps));
+      contentEndUs = Math.max(contentEndUs, (finiteOrNull(rawClip['startUs']) ?? 0) + durationUs);
       clips.push({
         trackId,
         trackName,
@@ -507,7 +513,10 @@ export function planRender(project: unknown, presetSpec: RenderPresetSpec): Rend
     ok: true,
     projectId,
     title: typeof project['title'] === 'string' ? project['title'] : projectId,
-    composition,
+    composition: {
+      ...composition,
+      durationUs: clips.length > 0 ? contentEndUs : composition.durationUs,
+    },
     trackCount: rawTracks.length,
     clips,
     totalFrames: firstFrame,
@@ -663,6 +672,11 @@ export async function runHeadlessRender(
     },
     json,
   );
+
+  // Nothing to encode is a failure for a real render; only an explicit plan-only run may stop here.
+  if (totalClips === 0 && !input.manifestOnly) {
+    return failure('nothing-to-render', NOTHING_RENDERED_MESSAGE);
+  }
 
   if (totalClips === 0) {
     const emptyWarnings = [...warnings, NOTHING_RENDERED_MESSAGE];
@@ -930,7 +944,9 @@ export async function runHeadlessRender(
     projectId: plan.projectId,
     projectTitle: plan.title,
     preset,
-    spec: presetSpec,
+    spec: realMedia
+      ? { ...presetSpec, width: realMedia.width, height: realMedia.height }
+      : presetSpec,
     composition: plan.composition,
     totalFrames,
     totalClips,
@@ -970,7 +986,11 @@ export async function runHeadlessRender(
       activeRenderPartialPath = null;
       releaseOutputLock?.();
       releaseOutputLock = null;
-      for (const clip of allClips) {
+      // Timeline order, so the reported progress never moves backward.
+      const inTimelineOrder = [...allClips].sort(
+        (a, b) => a.firstFrame + a.frames - (b.firstFrame + b.frames),
+      );
+      for (const clip of inTimelineOrder) {
         emitJson(
           {
             type: 'clip',
@@ -978,7 +998,8 @@ export async function runHeadlessRender(
             trackId: clip.trackId,
             clipId: clip.clipId,
             progress: 1,
-            framesRendered: totalFrames,
+            // Progress through the whole timeline: the frame this clip's output reaches.
+            framesRendered: clip.firstFrame + clip.frames,
             totalFrames,
           },
           json,
