@@ -59,14 +59,24 @@ export type {
   ScenePreviewSurface,
   ScenePreviewEndpoint,
   SandboxedIframeDescriptor,
+  ScenePaintLine,
+  ScenePreviewFontFace,
 } from './preview-protocol.js';
 export {
+  SCENE_PAINT_SCRIPT,
   createSandboxedIframeDescriptor,
   invalidPreviewMessageDiagnostic,
   ScenePreviewSession,
   validateScenePreviewEvent,
   validateScenePreviewMessage,
 } from './preview-protocol.js';
+
+export type { NotoSansArabicFace } from './fonts.js';
+export {
+  loadNotoSansArabicFaces,
+  loadNotoSansArabicPreviewFontFaces,
+  notoSansArabicFontCss,
+} from './fonts.js';
 
 export type {
   HeadlessCaptureRequest,

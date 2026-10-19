@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import type { Rational, TimeUs } from '@joy-media/project-schema';
 import type { SandboxedReactScene } from './runtime.js';
 import type { SceneResolvers } from './resolver.js';
+import type { ScenePaintLine } from './preview-protocol.js';
 
 export interface HeadlessCaptureRequest {
   readonly markup: string;
@@ -19,15 +20,20 @@ export interface HeadlessCaptureRequest {
   readonly frameRate: Rational;
   readonly locale: string;
   readonly seed: string;
+  /** Explicit shaped text lines forwarded to the shared preview painter. */
+  readonly lines?: readonly ScenePaintLine[];
 }
 
 export interface HeadlessSurface {
   readonly rgba: Uint8Array;
+  readonly loadedFonts?: readonly string[];
 }
 
 /** Implemented by the pinned Chromium/runtime process in WP-04.4 consumers. */
 export interface HeadlessSceneDriver {
   capture(request: HeadlessCaptureRequest): HeadlessSurface;
+  close?(): void;
+  readonly browserProcessId?: number | undefined;
 }
 
 export interface SceneCaptureRequest<TVariables> {
@@ -39,6 +45,8 @@ export interface SceneCaptureRequest<TVariables> {
   readonly resolvers?: SceneResolvers;
   /** Immutable asset/font revision, required when resolver handles are supplied. */
   readonly resolverKey?: string;
+  /** Optional explicit text-line boxes painted identically by desktop and headless. */
+  readonly lines?: readonly ScenePaintLine[];
 }
 
 export interface CapturedSceneSurface {
@@ -139,6 +147,7 @@ export function captureSceneSurface<TVariables>(
     frameRate: request.frameRate,
     locale: request.locale,
     seed: request.seed,
+    ...(request.lines === undefined ? {} : { lines: request.lines }),
   });
   const expectedLength = width * height * 4;
   if (surface.rgba.length !== expectedLength)
@@ -238,6 +247,7 @@ function frameKey<TVariables>(
       locale: request.locale,
       variables: request.variables,
       resolverKey: request.resolverKey ?? '',
+      lines: request.lines ?? [],
     }),
   );
 }
