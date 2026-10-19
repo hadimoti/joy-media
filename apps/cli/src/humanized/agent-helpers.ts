@@ -531,10 +531,16 @@ export function spawnCli(
     env?: Record<string, string | undefined>;
     input?: string;
     keepStdinOpen?: boolean;
+    /** Which shipped entry point to run (default `bin`). */
+    entry?: 'bin' | 'bundle';
   } = {},
 ): LiveRun {
   ensureCliBuilt();
-  const child = spawn(process.execPath, [join(CLI_ROOT, 'bin', 'joy-media.mjs'), ...args], {
+  const entryPath =
+    options.entry === 'bundle'
+      ? join(CLI_ROOT, 'dist', 'joy-media-bundle.mjs')
+      : join(CLI_ROOT, 'bin', 'joy-media.mjs');
+  const child = spawn(process.execPath, [entryPath, ...args], {
     cwd: sb.cwd,
     env: sb.env(options.env),
     stdio: ['pipe', 'pipe', 'pipe'],

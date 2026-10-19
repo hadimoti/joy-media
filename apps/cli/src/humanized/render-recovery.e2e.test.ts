@@ -92,131 +92,136 @@ describe.skipIf(!hasFfmpeg())('real render output recovery', () => {
     expect(existsSync(lockPath)).toBe(false);
   }, 120_000);
 
-  it.skipIf(process.platform !== 'win32')(
-    'taskkill stops a Windows render tree without losing the last good pair and a fresh render recovers',
-    async () => {
-      if (!sandbox) throw new Error('render recovery sandbox was not created');
-      const outDir = sandbox.path('windows-kill-output');
-      mkdirSync(outDir, { recursive: true });
-      const projectId = 'windows-kill-recovery';
-      const goodProject = writeSandboxFile(
-        sandbox,
-        'windows-good.json',
-        projectDoc({
-          id: projectId,
-          title: 'Last good render',
-          durationUs: 1_000_000,
-          tracks: [
-            { id: 'video-1', clips: [{ id: 'hard-cut', assetId: hardCut, durationUs: 1_000_000 }] },
+  for (const entry of ['bin', 'bundle'] as const) {
+    it.skipIf(process.platform !== 'win32')(
+      `taskkill stops a Windows render tree (${entry} entry) without losing the last good pair and a fresh render recovers`,
+      async () => {
+        if (!sandbox) throw new Error('render recovery sandbox was not created');
+        const outDir = sandbox.path('windows-kill-output');
+        mkdirSync(outDir, { recursive: true });
+        const projectId = 'windows-kill-recovery';
+        const goodProject = writeSandboxFile(
+          sandbox,
+          'windows-good.json',
+          projectDoc({
+            id: projectId,
+            title: 'Last good render',
+            durationUs: 1_000_000,
+            tracks: [
+              {
+                id: 'video-1',
+                clips: [{ id: 'hard-cut', assetId: hardCut, durationUs: 1_000_000 }],
+              },
+            ],
+          }),
+        );
+        const longMedia = sandbox.path('media', 'long.mp4');
+        mkdirSync(sandbox.path('media'), { recursive: true });
+        const generated = spawnSync(
+          'ffmpeg',
+          [
+            '-v',
+            'error',
+            '-y',
+            '-f',
+            'lavfi',
+            '-i',
+            'testsrc2=s=1280x720:r=30:d=30',
+            '-c:v',
+            'libx264',
+            '-preset',
+            'ultrafast',
+            '-pix_fmt',
+            'yuv420p',
+            longMedia,
           ],
-        }),
-      );
-      const longMedia = sandbox.path('media', 'long.mp4');
-      mkdirSync(sandbox.path('media'), { recursive: true });
-      const generated = spawnSync(
-        'ffmpeg',
-        [
-          '-v',
-          'error',
-          '-y',
-          '-f',
-          'lavfi',
-          '-i',
-          'testsrc2=s=1280x720:r=30:d=30',
-          '-c:v',
-          'libx264',
-          '-preset',
-          'ultrafast',
-          '-pix_fmt',
-          'yuv420p',
-          longMedia,
-        ],
-        { encoding: 'utf8', timeout: 120_000, windowsHide: true },
-      );
-      expect(generated.status, generated.stderr).toBe(0);
+          { encoding: 'utf8', timeout: 120_000, windowsHide: true },
+        );
+        expect(generated.status, generated.stderr).toBe(0);
 
-      const goodRender = await sandbox.run([
-        'render',
-        '--project',
-        goodProject,
-        '--out',
-        outDir,
-        '--json',
-      ]);
-      expect(goodRender.code, describeRun(goodRender)).toBe(0);
-      const mediaPath = join(outDir, `${projectId}.mp4`);
-      const manifestPath = `${mediaPath}.manifest.json`;
-      const lastGoodMedia = readFileSync(mediaPath);
-      const lastGoodManifest = readFileSync(manifestPath);
-      const longProject = writeSandboxFile(
-        sandbox,
-        'windows-long.json',
-        projectDoc({
-          id: projectId,
-          title: 'Interrupted long render',
-          durationUs: 30_000_000,
-          tracks: [
-            { id: 'video-1', clips: [{ id: 'long', assetId: longMedia, durationUs: 30_000_000 }] },
-          ],
-        }),
-      );
+        const goodRender = await sandbox.run([
+          'render',
+          '--project',
+          goodProject,
+          '--out',
+          outDir,
+          '--json',
+        ]);
+        expect(goodRender.code, describeRun(goodRender)).toBe(0);
+        const mediaPath = join(outDir, `${projectId}.mp4`);
+        const manifestPath = `${mediaPath}.manifest.json`;
+        const lastGoodMedia = readFileSync(mediaPath);
+        const lastGoodManifest = readFileSync(manifestPath);
+        const longProject = writeSandboxFile(
+          sandbox,
+          'windows-long.json',
+          projectDoc({
+            id: projectId,
+            title: 'Interrupted long render',
+            durationUs: 30_000_000,
+            tracks: [
+              {
+                id: 'video-1',
+                clips: [{ id: 'long', assetId: longMedia, durationUs: 30_000_000 }],
+              },
+            ],
+          }),
+        );
 
-      let foundPartial = false;
-      let killError: Error | undefined;
-      const killedRender = await spawnCli(
-        sandbox,
-        ['render', '--project', longProject, '--out', outDir, '--json'],
-        {
-          timeoutMs: 120_000,
-          onSpawn: (child) => {
-            void (async () => {
-              const deadline = Date.now() + 30_000;
-              while (Date.now() < deadline) {
-                foundPartial = readdirSync(outDir).some((entry) => entry.endsWith('.partial'));
-                if (foundPartial) break;
-                await new Promise((resolveWait) => setTimeout(resolveWait, 10));
-              }
-              if (!foundPartial || child.pid === undefined) {
-                throw new Error('Windows render did not expose a staged output before exit.');
-              }
-              execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
-                encoding: 'utf8',
-                windowsHide: true,
-                timeout: 15_000,
+        let foundPartial = false;
+        let killError: Error | undefined;
+        const killedRender = await spawnCli(
+          sandbox,
+          ['render', '--project', longProject, '--out', outDir, '--json'],
+          {
+            entry,
+            timeoutMs: 120_000,
+            onSpawn: (child) => {
+              void (async () => {
+                const deadline = Date.now() + 30_000;
+                while (Date.now() < deadline) {
+                  foundPartial = readdirSync(outDir).some((entry) => entry.endsWith('.partial'));
+                  if (foundPartial) break;
+                  await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+                }
+                if (!foundPartial || child.pid === undefined) {
+                  throw new Error('Windows render did not expose a staged output before exit.');
+                }
+                execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+                  encoding: 'utf8',
+                  windowsHide: true,
+                  timeout: 15_000,
+                });
+              })().catch((error: unknown) => {
+                killError = error instanceof Error ? error : new Error(String(error));
               });
-            })().catch((error: unknown) => {
-              killError = error instanceof Error ? error : new Error(String(error));
-            });
+            },
           },
-        },
-      );
-      expect(killError).toBeUndefined();
-      expect(foundPartial).toBe(true);
-      expect(killedRender.code).not.toBe(0);
-      expect(readFileSync(mediaPath)).toEqual(lastGoodMedia);
-      expect(readFileSync(manifestPath)).toEqual(lastGoodManifest);
+        );
+        expect(killError).toBeUndefined();
+        expect(foundPartial).toBe(true);
+        expect(killedRender.code).not.toBe(0);
+        expect(readFileSync(mediaPath)).toEqual(lastGoodMedia);
+        expect(readFileSync(manifestPath)).toEqual(lastGoodManifest);
 
-      const recovered = await sandbox.run([
-        'render',
-        '--project',
-        longProject,
-        '--out',
-        outDir,
-        '--json',
-      ]);
-      expect(recovered.code, describeRun(recovered)).toBe(0);
-      expect(expectNdjsonContract(recovered, ['complete']).at(-1)).toMatchObject({
-        type: 'complete',
-        mediaProduced: true,
-      });
-      expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
-        projectTitle: 'Interrupted long render',
-      });
-      expect(readdirSync(outDir).some((entry) => entry.endsWith('.partial'))).toBe(false);
-      expect(existsSync(join(outDir, `.${projectId}.mp4.render.lock`))).toBe(false);
-    },
-    240_000,
-  );
+        const recovered = await sandbox.run(
+          ['render', '--project', longProject, '--out', outDir, '--json'],
+          { entry },
+        );
+        expect(recovered.code, describeRun(recovered)).toBe(0);
+        expect(expectNdjsonContract(recovered, ['complete']).at(-1)).toMatchObject({
+          type: 'complete',
+          mediaProduced: true,
+        });
+        expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
+          projectTitle: 'Interrupted long render',
+        });
+        expect(readdirSync(outDir).some((entry) => entry.endsWith('.partial'))).toBe(false);
+        expect(existsSync(join(outDir, `.${projectId}.mp4.render.lock`))).toBe(false);
+      },
+      240_000,
+    );
+  }
 
   it('restores the last good pair when a process exits between media and manifest promotion', async () => {
     if (!sandbox) throw new Error('render recovery sandbox was not created');
