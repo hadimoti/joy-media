@@ -184,6 +184,12 @@ export {
   audioEffectPropertyBinding,
 } from './audio.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
+export {
+  DesktopProjectionError,
+  projectV3ToDesktopVisual,
+  projectV3ToDesktopDocuments,
+} from './desktop-projection.js';
+export type { DesktopTimelineSchema0 } from './desktop-projection.js';
 export type {
   P0TemplateId,
   FontChoice,

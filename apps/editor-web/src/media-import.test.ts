@@ -284,10 +284,10 @@ describe('describeMedia (timed-media blob lifecycle)', () => {
     const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
     const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
     const fakeDocument: DocumentLike = {
-      createElement(tag: string): HTMLElement {
+      createElement: ((tag: string): HTMLElement => {
         if (tag === 'video') return fakeVideo as unknown as HTMLElement;
         throw new Error(`describeMedia test stub does not implement createElement("${tag}")`);
-      },
+      }) as DocumentLike['createElement'],
     };
     // describeTimedMedia uses `window.setTimeout` / `window.clearTimeout`
     // for the metadata-read timeout; provide thin shims that delegate to

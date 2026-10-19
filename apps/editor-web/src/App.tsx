@@ -4565,11 +4565,15 @@ function EditorWorkspace({
             const scenes =
               exportSceneCache === undefined
                 ? undefined
-                : await exportSceneCache.captureFull(exportVisualProject.visualObjects, timeUs, {
-                    width,
-                    height,
-                    signal: abortController.signal,
-                  });
+                : await exportSceneCache.captureFull(
+                    { visual: exportVisualProject, timeline: exportTimelineProject },
+                    timeUs,
+                    {
+                      width,
+                      height,
+                      signal: abortController.signal,
+                    },
+                  );
             if (scenes !== undefined) {
               for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
             }
@@ -8280,7 +8284,7 @@ function MonitorPanelContent({
   useEffect(() => {
     let cancelled = false;
     void sceneCacheRef.current
-      .sync(previewVisualProject.visualObjects, state.playheadUs)
+      .sync({ visual: previewVisualProject, timeline: timelineProject }, state.playheadUs)
       .then(() => {
         if (cancelled) return;
         setSceneTick((value) => value + 1);
@@ -8288,7 +8292,7 @@ function MonitorPanelContent({
     return () => {
       cancelled = true;
     };
-  }, [state.playheadUs, previewVisualProject]);
+  }, [state.playheadUs, previewVisualProject, timelineProject]);
 
   useEffect(() => () => sceneCacheRef.current.destroy(), []);
 

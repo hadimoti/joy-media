@@ -12,6 +12,9 @@
 
 export const PACKAGE_NAME = '@joy-media/motion-core' as const;
 
+export { buildTitleSceneFrame } from './content-templates/scene-frame.js';
+export type { TitleSceneFrame, TitleSceneFrameInput } from './content-templates/scene-frame.js';
+
 export type {
   AnimatablePropertyV1,
   AnimationCurveV1,

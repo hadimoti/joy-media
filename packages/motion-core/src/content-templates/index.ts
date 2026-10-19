@@ -11,3 +11,5 @@ export { sampleTitleMotion } from './motion.js';
 export type { SampledTitleMotion } from './motion.js';
 export { createTimelineElementBindingPlacement } from './placement.js';
 export type { TimelineElementBindingPlacement } from './placement.js';
+export { buildTitleSceneFrame } from './scene-frame.js';
+export type { TitleSceneFrame, TitleSceneFrameInput } from './scene-frame.js';
