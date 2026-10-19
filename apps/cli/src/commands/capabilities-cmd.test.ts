@@ -18,7 +18,6 @@ import {
   RF_AUDIO_GAIN_RANGE,
   RF_AUDIO_PAN,
   RF_AUDIO_SOLO,
-  RF_CAPTION_RTL,
   RF_CAPTION_STYLE,
   RF_CAPTION_STYLE_OR_ANIMATION,
   RF_CLIP_COLOR_GRADES,
@@ -35,6 +34,8 @@ import {
   applyProbes,
   baseFeatureList,
   buildFeatureList,
+  buildTitleWorkflow,
+  REASON_RTL_CAPTION_FONT_MISSING,
 } from './render-features.js';
 import {
   buildCapabilities,
@@ -107,11 +108,11 @@ describe('capabilities command', () => {
     expect(code).toBe(0);
   });
 
-  it('--json parses and has schemaVersion "1"', async () => {
+  it('--json parses and has schemaVersion "2"', async () => {
     const { code, stdout } = await captureStdout(() => runCli(['capabilities', '--json']));
     expect(code).toBe(0);
     const doc = JSON.parse(stdout) as CapabilitiesDocument;
-    expect(doc.schemaVersion).toBe('1');
+    expect(doc.schemaVersion).toBe('2');
   });
 
   it('--json has cli.version equal to package.json version', async () => {
@@ -209,7 +210,7 @@ describe('capabilities command', () => {
   });
 
   it('render.alpha-media has a reason matching the renderer', async () => {
-    const features = buildFeatureList();
+    const features = await buildFeatureList();
     const alpha = features.find((f) => f.id === 'render.alpha-media');
     expect(alpha).toBeDefined();
     expect(alpha!.status).toBe('unsupported');
@@ -223,35 +224,36 @@ describe('capabilities command', () => {
   });
 
   it('renders markdown from the same capability document', async () => {
-    const expected = renderSupportMarkdown(buildCapabilities({ probes: false }));
+    const expected = renderSupportMarkdown(await buildCapabilities({ probes: false }));
     const { code, stdout } = await captureStdout(() =>
       handleCapabilitiesCommand(['--markdown'], { json: false }),
     );
     expect(code).toBe(0);
     expect(stdout.trim()).toBe(expected.trim());
     for (const id of FEATURE_IDS) expect(stdout).toContain(id);
-    expect(expected).not.toContain('setup-required');
+    expect(expected).toContain('design.title-video.v1');
+    expect(expected).toContain('Bundled Arabic WOFF2 loadability: unknown.');
     expect(expected).toContain('`color grading \\| clip color grades`');
   });
 });
 
 describe('capabilities feature list (buildFeatureList)', () => {
-  it('includes every expected feature id', () => {
-    const features = buildFeatureList();
+  it('includes every expected feature id', async () => {
+    const features = await buildFeatureList();
     const ids = features.map((f) => f.id);
     expect(ids).toEqual(FEATURE_IDS);
   });
 
-  it('has a reason for every feature', () => {
-    const features = buildFeatureList();
+  it('has a reason for every feature', async () => {
+    const features = await buildFeatureList();
     for (const feat of features) {
       expect(feat.reason).toBeTruthy();
       expect(typeof feat.reason).toBe('string');
     }
   });
 
-  it('every feature has a valid status', () => {
-    const features = buildFeatureList();
+  it('every feature has a valid status', async () => {
+    const features = await buildFeatureList();
     const valid = new Set(['available', 'setup-required', 'unsupported', 'unknown']);
     for (const feat of features) {
       expect(valid.has(feat.status)).toBe(true);
@@ -436,14 +438,6 @@ describe('capability executor agreement', () => {
           ]),
         },
         {
-          feature: 'captions.rtl',
-          kind: 'refuse',
-          fragments: [RF_CAPTION_RTL],
-          value: project({ captionDocuments: { doc: { direction: 'rtl' } } }, [
-            { id: 'caption', kind: 'caption', captionDocumentId: 'doc' },
-          ]),
-        },
-        {
           feature: 'audio.gain',
           kind: 'condition',
           fragments: [RF_AUDIO_GAIN_RANGE],
@@ -577,19 +571,134 @@ describe('capability probe status', () => {
     expect(result[0]?.reason).toContain('JOY_MEDIA_CAPTION_FONT');
   });
 
-  it('changes only captions.drawtext when only the caption font is missing', () => {
+  it('requires an explicit Arabic TrueType or OpenType face when bundled WOFF2 is unavailable', () => {
+    const rtl = baseFeatureList().filter((feature) => feature.id === 'captions.rtl');
+    const result = applyProbes(rtl, {
+      ffmpeg: true,
+      ffprobe: true,
+      captionFont: true,
+      libass: true,
+      woff2Font: 'unavailable',
+      chromium: true,
+      titleFont: true,
+    });
+    expect(result[0]?.status).toBe('setup-required');
+    expect(result[0]?.reason).toBe(REASON_RTL_CAPTION_FONT_MISSING);
+  });
+
+  it('requires both libass and a caption face for basic ASS captions', () => {
+    const ass = baseFeatureList().filter((feature) => feature.id === 'captions.ass-basic');
+    const unavailable = applyProbes(ass, {
+      ffmpeg: true,
+      ffprobe: true,
+      captionFont: true,
+      libass: false,
+      woff2Font: 'unknown',
+      chromium: true,
+      titleFont: true,
+    });
+    const available = applyProbes(ass, {
+      ffmpeg: true,
+      ffprobe: true,
+      captionFont: true,
+      libass: true,
+      woff2Font: 'unavailable',
+      chromium: true,
+      titleFont: true,
+    });
+    expect(unavailable[0]?.status).toBe('setup-required');
+    expect(available[0]?.status).toBe('available');
+  });
+
+  it('marks caption features setup-required when no caption font is found', () => {
     const features = baseFeatureList();
     const result = applyProbes(features, { ffmpeg: true, ffprobe: true, captionFont: false });
     for (const input of features) {
       const output = result.find((feature) => feature.id === input.id);
       expect(output, input.id).toBeDefined();
-      if (input.id === 'captions.drawtext') {
+      if (input.id === 'captions.drawtext' || input.id === 'captions.ass-basic') {
         expect(output?.status).toBe('setup-required');
         expect(output?.reason).toContain('JOY_MEDIA_CAPTION_FONT');
+      } else if (input.id === 'captions.rtl') {
+        expect(output?.status).toBe('setup-required');
+        expect(output?.reason).toBe(REASON_RTL_CAPTION_FONT_MISSING);
       } else {
         expect(output?.status, input.id).toBe(input.status);
         expect(output?.reason, input.id).toBe(input.reason);
       }
+    }
+  });
+
+  it('marks the title workflow setup-required without libass and available when probes pass', () => {
+    const missingLibass = buildTitleWorkflow({
+      ffmpeg: true,
+      ffprobe: true,
+      captionFont: true,
+      titleFont: true,
+      libass: false,
+      woff2Font: 'unavailable',
+      chromium: true,
+    });
+    expect(missingLibass).toMatchObject({
+      id: 'design.title-video.v1',
+      status: 'setup-required',
+      reason: 'FFmpeg libass is unavailable.',
+      renderer: 'chromium-scene-surface',
+      templates: ['joy.p0.lower-third', 'joy.p0.title'],
+      units: { time: 'us', position: 'px' },
+    });
+    expect(
+      buildTitleWorkflow({
+        ffmpeg: true,
+        ffprobe: true,
+        captionFont: true,
+        titleFont: true,
+        libass: true,
+        woff2Font: 'unavailable',
+        chromium: true,
+      }),
+    ).toMatchObject({ status: 'available', reason: 'All required probes passed' });
+  });
+
+  it('refuses RTL captions before output when libass is absent', () => {
+    const value = {
+      rootCompositionId: 'root',
+      compositions: {
+        root: {
+          width: 640,
+          height: 360,
+          tracks: [
+            {
+              id: 'captions',
+              enabled: true,
+              clips: [
+                {
+                  id: 'caption',
+                  kind: 'caption',
+                  captionDocumentId: 'doc',
+                  startUs: 0,
+                  durationUs: 1_000_000,
+                },
+              ],
+            },
+          ],
+        },
+      },
+      captionDocuments: {
+        doc: {
+          direction: 'rtl',
+          words: {},
+          segments: [{ startUs: 0, endUs: 1_000_000, textOverride: 'مرحبا' }],
+        },
+      },
+      assets: {},
+    };
+    const fallback = { width: 640, height: 360, fps: 30 };
+    const result = planMedia(value, { manifestOnly: false, libassAvailable: false }, fallback);
+    expect(result.mode).toBe('error');
+    if (result.mode === 'error') {
+      expect(result.message).toBe(REASON_RTL_CAPTION_FONT_MISSING);
+      expect(result.code).toBe('unsupported-feature');
     }
   });
 });
@@ -623,8 +732,17 @@ describe('CLI-RENDER-SUPPORT.md matches the static capability catalog', () => {
     }
   });
 
-  it('does not claim a setup state', () => {
+  it('records the static title workflow with the same workflow fields', async () => {
     const docContent = readFileSync(docPath, 'utf8');
-    expect(docContent).not.toContain('setup-required');
+    const catalog = await buildCapabilities({ probes: false });
+    const workflow = catalog.workflows[0]!;
+    const row = `| ${workflow.id} | ${workflow.status} | ${workflow.reason} | ${workflow.renderer} | ${workflow.templates.join(', ')} | time ${workflow.units.time}; position ${workflow.units.position} |`;
+    expect(docContent.split(/\r?\n/)).toContain(row);
+  });
+
+  it('includes the setup status for the static title workflow', () => {
+    const docContent = readFileSync(docPath, 'utf8');
+    expect(docContent).toContain('setup-required');
+    expect(docContent).toContain('design.title-video.v1');
   });
 });

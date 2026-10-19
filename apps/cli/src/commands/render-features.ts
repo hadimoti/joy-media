@@ -1,6 +1,7 @@
 /* global process */
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, extname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { ffmpegBinary, ffprobeBinary } from '../utils/media-probe.js';
 
@@ -59,6 +60,7 @@ export const FEATURE_IDS = [
   'render.track-mute-solo',
   'render.audio-processed-source',
   'captions.drawtext',
+  'captions.ass-basic',
   'captions.styling',
   'captions.rtl',
   'transitions.dissolve',
@@ -66,12 +68,15 @@ export const FEATURE_IDS = [
   'audio.gain',
   'audio.fades',
   'audio.mute',
+  'render.template-alpha',
 ] as const satisfies readonly string[];
 
 export type FeatureId = (typeof FEATURE_IDS)[number];
 
 export const REASON_CAPTION_FONT_MISSING =
   'Captions need a font file, and none was found. Set JOY_MEDIA_CAPTION_FONT to a .ttf or .otf file.';
+export const REASON_RTL_CAPTION_FONT_MISSING =
+  'RTL captions need a TrueType or OpenType Arabic font; set JOY_MEDIA_CAPTION_FONT';
 
 // ---------------------------------------------------------------------------
 // Feature descriptor
@@ -91,6 +96,19 @@ export interface FeatureProbes {
   readonly ffmpeg: boolean;
   readonly ffprobe: boolean;
   readonly captionFont: boolean;
+  readonly libass?: boolean;
+  readonly woff2Font?: 'loadable' | 'unavailable' | 'unknown';
+  readonly chromium?: boolean;
+  readonly titleFont?: boolean;
+}
+
+export interface WorkflowEntry {
+  readonly id: 'design.title-video.v1';
+  readonly status: 'available' | 'setup-required';
+  readonly reason: string;
+  readonly renderer: 'chromium-scene-surface';
+  readonly templates: readonly ['joy.p0.lower-third', 'joy.p0.title'];
+  readonly units: { readonly time: 'us'; readonly position: 'px' };
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +126,7 @@ function binaryAvailable(name: string): boolean {
 /** Caption font search shared with render-media.ts. */
 export function captionFontFile(): string | null {
   const override = process.env['JOY_MEDIA_CAPTION_FONT']?.trim();
-  if (override) return existsSync(override) ? override : null;
+  if (override) return isTrueTypeOrOpenType(override) && existsSync(override) ? override : null;
   const candidates =
     process.platform === 'win32'
       ? [join(process.env['WINDIR'] ?? 'C:\\Windows', 'Fonts', 'arial.ttf')]
@@ -118,7 +136,99 @@ export function captionFontFile(): string | null {
             '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
             '/usr/share/fonts/TTF/DejaVuSans.ttf',
           ];
-  return candidates.find((path) => existsSync(path)) ?? null;
+  return candidates.find((path) => existsSync(path) && isTrueTypeOrOpenType(path)) ?? null;
+}
+
+function isTrueTypeOrOpenType(path: string): boolean {
+  return ['.ttf', '.otf'].includes(extname(path).toLowerCase());
+}
+
+export function captionFontFamily(fontPath: string): string {
+  return basename(fontPath, extname(fontPath));
+}
+
+export function probeLibass(): boolean {
+  const binary = ffmpegBinary();
+  const build = spawnSync(binary, ['-buildconf'], { encoding: 'utf8', timeout: 5000 });
+  const filters = spawnSync(binary, ['-filters'], { encoding: 'utf8', timeout: 5000 });
+  if (build.status !== 0 || filters.status !== 0 || build.error || filters.error) return false;
+  return (
+    /--enable-libass\b/.test(build.stdout + build.stderr) &&
+    /\bass\s/.test(filters.stdout) &&
+    /\bsubtitles\s/.test(filters.stdout)
+  );
+}
+
+export function probeChromium(): Promise<boolean> {
+  return (async () => {
+    const runtime = await import('@joy-media/html-scene-runtime');
+    return runtime.findChromiumExecutable() !== null;
+  })().catch(() => false);
+}
+
+/** Checks whether this FFmpeg/libass build can load the bundled WOFF2 face. */
+export async function probeBundledWoff2(
+  libassAvailable = probeLibass(),
+): Promise<'loadable' | 'unavailable' | 'unknown'> {
+  if (!libassAvailable) return 'unknown';
+  const runtime = await import('@joy-media/html-scene-runtime').catch(() => undefined);
+  if (!runtime) return 'unknown';
+  const face = runtime
+    .loadNotoSansArabicFaces()
+    .find((item) => item.subset === 'arabic' && item.weight === 400);
+  if (!face) return 'unknown';
+  const directory = mkdtempSync(join(tmpdir(), 'joy-caption-woff2-'));
+  try {
+    const fontPath = join(directory, 'noto-sans-arabic-400.woff2');
+    const assPath = join(directory, 'probe.ass');
+    const outputPath = join(directory, 'probe.png');
+    writeFileSync(fontPath, face.bytes);
+    writeFileSync(
+      assPath,
+      [
+        '[Script Info]',
+        'ScriptType: v4.00+',
+        'PlayResX: 320',
+        'PlayResY: 180',
+        '',
+        '[V4+ Styles]',
+        'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+        'Style: Caption,Noto Sans Arabic,28,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,10,10,20,1',
+        '',
+        '[Events]',
+        'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+        'Dialogue: 0,0:00:00.00,0:00:01.00,Caption,,0,0,0,,مرحبا',
+        '',
+      ].join('\n'),
+    );
+    const result = spawnSync(
+      ffmpegBinary(),
+      [
+        '-hide_banner',
+        '-loglevel',
+        'debug',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=c=black:s=320x180:d=1',
+        '-vf',
+        `ass=${assPath.replace(/\\/g, '/')}:fontsdir=${directory.replace(/\\/g, '/')}`,
+        '-frames:v',
+        '1',
+        '-y',
+        outputPath,
+      ],
+      { encoding: 'utf8', timeout: 15000 },
+    );
+    const log = `${result.stdout}\n${result.stderr}`;
+    return result.status === 0 &&
+      /fontselect:.*Noto Sans Arabic/i.test(log) &&
+      !/Error opening memory font/i.test(log)
+      ? 'loadable'
+      : 'unavailable';
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 /** The static catalog: what the product supports, before this machine is probed. */
@@ -261,6 +371,14 @@ export function baseFeatureList(): FeatureEntry[] {
       refusal: [],
     },
     {
+      id: 'captions.ass-basic',
+      area: 'captions',
+      status: 'available',
+      reason:
+        'Basic captions render through FFmpeg libass when libass and a TrueType or OpenType caption face are available.',
+      refusal: [],
+    },
+    {
       id: 'captions.styling',
       area: 'captions',
       status: 'unsupported',
@@ -270,9 +388,10 @@ export function baseFeatureList(): FeatureEntry[] {
     {
       id: 'captions.rtl',
       area: 'captions',
-      status: 'unsupported',
-      reason: 'Right-to-left caption documents are refused.',
-      refusal: [RF_CAPTION_RTL],
+      status: 'available',
+      reason:
+        'Right-to-left captions are shaped by libass when libass and a supported caption face are available.',
+      refusal: [],
     },
     {
       id: 'transitions.dissolve',
@@ -310,6 +429,14 @@ export function baseFeatureList(): FeatureEntry[] {
       reason: 'Clip mute is rendered.',
       refusal: [],
     },
+    {
+      id: 'render.template-alpha',
+      area: 'render',
+      status: 'available',
+      reason:
+        'Template title layers render with alpha through Chromium when Chromium is available.',
+      refusal: [],
+    },
   ];
 }
 
@@ -329,12 +456,35 @@ export function applyProbes(
     .join('; ');
   return features.map((feature) => {
     if (feature.status !== 'available') return { ...feature };
-    if (feature.id === 'captions.drawtext' && !probes.captionFont) {
+    if (
+      (feature.id === 'captions.drawtext' || feature.id === 'captions.ass-basic') &&
+      !probes.captionFont
+    ) {
       const reason =
         missing.length > 0
           ? `${missingReason}; ${REASON_CAPTION_FONT_MISSING}`
           : REASON_CAPTION_FONT_MISSING;
       return { ...feature, status: 'setup-required', reason };
+    }
+    if (feature.id === 'captions.ass-basic' && probes.libass === false) {
+      const reason =
+        missing.length > 0
+          ? `${missingReason}; FFmpeg libass is unavailable.`
+          : 'FFmpeg libass is unavailable.';
+      return { ...feature, status: 'setup-required', reason };
+    }
+    if (
+      feature.id === 'captions.rtl' &&
+      (probes.libass === false || !probes.captionFont || probes.woff2Font === 'unavailable')
+    ) {
+      return {
+        ...feature,
+        status: 'setup-required',
+        reason: REASON_RTL_CAPTION_FONT_MISSING,
+      };
+    }
+    if (feature.id === 'render.template-alpha' && probes.chromium === false) {
+      return { ...feature, status: 'setup-required', reason: 'Chromium is not available.' };
     }
     if (missing.length > 0) {
       return { ...feature, status: 'setup-required', reason: missingReason };
@@ -343,11 +493,40 @@ export function applyProbes(
   });
 }
 
-/** Build the catalog using the real ffmpeg, ffprobe and caption-font probes. */
-export function buildFeatureList(): FeatureEntry[] {
+/** Build the catalog using the real machine probes. */
+export async function buildFeatureList(
+  overrides?: Partial<FeatureProbes>,
+): Promise<FeatureEntry[]> {
+  const libass = overrides?.libass ?? probeLibass();
+  const [chromium, woff2Font] = await Promise.all([
+    overrides?.chromium === undefined ? probeChromium() : Promise.resolve(overrides.chromium),
+    overrides?.woff2Font === undefined
+      ? probeBundledWoff2(libass)
+      : Promise.resolve(overrides.woff2Font),
+  ]);
   return applyProbes(baseFeatureList(), {
     ffmpeg: binaryAvailable(ffmpegBinary()),
     ffprobe: binaryAvailable(ffprobeBinary()),
     captionFont: captionFontFile() !== null,
+    libass,
+    woff2Font,
+    chromium,
+    titleFont: captionFontFile() !== null,
+    ...overrides,
   });
+}
+
+export function buildTitleWorkflow(probes: FeatureProbes): WorkflowEntry {
+  const missing: string[] = [];
+  if (!probes.chromium) missing.push('Chromium is not available');
+  if (!probes.libass) missing.push('FFmpeg libass is unavailable');
+  if (!probes.titleFont) missing.push('title font is not available');
+  return {
+    id: 'design.title-video.v1',
+    status: missing.length === 0 ? 'available' : 'setup-required',
+    reason: missing.length === 0 ? 'All required probes passed' : `${missing.join('; ')}.`,
+    renderer: 'chromium-scene-surface',
+    templates: ['joy.p0.lower-third', 'joy.p0.title'],
+    units: { time: 'us', position: 'px' },
+  };
 }

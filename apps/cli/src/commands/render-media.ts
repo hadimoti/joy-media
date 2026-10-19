@@ -1,9 +1,12 @@
 /* global Buffer */
 import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { statSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { loadAssetSources } from '../utils/asset-sources.js';
 import { ffmpegBinary, probeMedia, type MediaInfo } from '../utils/media-probe.js';
+import { compileCaptionAss } from '../services/captions-ass.js';
 import {
   RF_ALPHA,
   RF_AUDIO_BUS_GAIN,
@@ -16,7 +19,6 @@ import {
   RF_AUDIO_GAIN_RANGE,
   RF_AUDIO_PAN,
   RF_AUDIO_SOLO,
-  RF_CAPTION_RTL,
   RF_CAPTION_STYLE,
   RF_CAPTION_STYLE_OR_ANIMATION,
   RF_CLIP_COLOR_GRADES,
@@ -31,7 +33,10 @@ import {
   RF_TRANSITION_TYPE,
   RF_VISUAL_OBJECTS,
   captionFontFile,
+  captionFontFamily,
+  probeLibass,
   REASON_CAPTION_FONT_MISSING,
+  REASON_RTL_CAPTION_FONT_MISSING,
 } from './render-features.js';
 
 /**
@@ -70,6 +75,8 @@ export interface CaptionCue {
   readonly text: string;
   readonly startUs: number;
   readonly endUs: number;
+  readonly direction?: 'ltr' | 'rtl' | 'auto';
+  readonly karaoke?: boolean;
 }
 
 export interface MediaPlanReady {
@@ -78,6 +85,7 @@ export interface MediaPlanReady {
   readonly captions: readonly CaptionCue[];
   /** Font file for captions (null when there are none). */
   readonly fontFile: string | null;
+  readonly assDocument?: string | null;
   readonly width: number;
   readonly height: number;
   /** Frame rate as an ffmpeg rational, e.g. `30/1` or `30000/1001`. */
@@ -175,9 +183,8 @@ function captionCuesOf(
   if (doc['styleRef'] !== undefined || doc['animationRef'] !== undefined) {
     return `Caption clip "${clipId}" ${RF_CAPTION_STYLE_OR_ANIMATION}.`;
   }
-  if (doc['direction'] === 'rtl') {
-    return `Caption clip "${clipId}" ${RF_CAPTION_RTL}.`;
-  }
+  const direction =
+    doc['direction'] === 'rtl' || doc['direction'] === 'ltr' ? doc['direction'] : 'auto';
   const words: Record<string, unknown> = isRecord(doc['words']) ? doc['words'] : {};
   const segments = Array.isArray(doc['segments']) ? doc['segments'] : [];
   const clipStart = typeof clip['startUs'] === 'number' ? clip['startUs'] : 0;
@@ -185,6 +192,13 @@ function captionCuesOf(
   const cues: CaptionCue[] = [];
   for (const segment of segments) {
     if (!isRecord(segment)) continue;
+    if (
+      segment['karaoke'] === true ||
+      segment['style'] !== undefined ||
+      segment['animation'] !== undefined
+    ) {
+      return 'CAPTION_UNSUPPORTED: karaoke, per-cue styles, and animation tags are unsupported.';
+    }
     const start = Number(segment['startUs']);
     const end = Math.min(Number(segment['endUs']), clipLength);
     if (!(end > start)) continue;
@@ -199,7 +213,12 @@ function captionCuesOf(
             .filter((word) => word !== '')
             .join(' ');
     if (text.trim() === '') continue;
-    cues.push({ text, startUs: clipStart + start, endUs: clipStart + end });
+    cues.push({
+      text,
+      startUs: clipStart + start,
+      endUs: clipStart + end,
+      direction,
+    });
   }
   return cues;
 }
@@ -282,7 +301,7 @@ function resolveSource(
  */
 export function planMedia(
   project: unknown,
-  options: { manifestOnly: boolean; mediaDir?: string | undefined },
+  options: { manifestOnly: boolean; mediaDir?: string | undefined; libassAvailable?: boolean },
   fallback: PresetFallback,
 ): MediaPlan {
   if (options.manifestOnly) {
@@ -373,6 +392,13 @@ export function planMedia(
     }
   }
 
+  const libass = captions.length > 0 ? (options.libassAvailable ?? probeLibass()) : false;
+  const hasRtl = captions.some(
+    (cue) => cue.direction === 'rtl' || /[\u0590-\u08ff\ufb1d-\ufefc]/u.test(cue.text),
+  );
+  if (hasRtl && !libass) {
+    return { mode: 'error', code: 'unsupported-feature', message: REASON_RTL_CAPTION_FONT_MISSING };
+  }
   const fontFile = captions.length > 0 ? captionFontFile() : null;
   if (captions.length > 0 && fontFile === null) {
     return {
@@ -380,6 +406,33 @@ export function planMedia(
       code: 'unsupported-feature',
       message: REASON_CAPTION_FONT_MISSING,
     };
+  }
+  let assDocument: string | null = null;
+  if (captions.length > 0 && libass && fontFile !== null) {
+    try {
+      assDocument = compileCaptionAss({
+        width: even(
+          Math.round(
+            typeof root['width'] === 'number' && root['width'] > 0 ? root['width'] : fallback.width,
+          ),
+        ),
+        height: even(
+          Math.round(
+            typeof root['height'] === 'number' && root['height'] > 0
+              ? root['height']
+              : fallback.height,
+          ),
+        ),
+        fontFamily: captionFontFamily(fontFile),
+        cues: captions,
+      });
+    } catch (error) {
+      return {
+        mode: 'error',
+        code: 'unsupported-feature',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
   if (pending.length === 0) {
     return { mode: 'manifest-only', reason: 'The timeline has no video clips.' };
@@ -508,6 +561,7 @@ export function planMedia(
     clips,
     captions,
     fontFile,
+    assDocument,
     width: even(Math.round(width)),
     height: even(Math.round(height)),
     fps: num > 0 && den > 0 ? `${num}/${den}` : `${fallback.fps}/1`,
@@ -555,6 +609,7 @@ const CODEC_ARGS: Readonly<Record<MediaPresetId, readonly string[]>> = {
   prores: ['-c:v', 'prores_ks', '-profile:v', '3', '-pix_fmt', 'yuv422p10le', '-c:a', 'pcm_s24le'],
 };
 const FORMAT: Readonly<Record<MediaPresetId, string>> = { mp4: 'mp4', webm: 'webm', prores: 'mov' };
+const assTempDirectories = new Map<string, string>();
 
 /** The full ffmpeg argument list for one render (one input per clip, one filter graph). */
 export function buildFfmpegArgs(
@@ -664,16 +719,27 @@ export function buildFfmpegArgs(
     base += 1;
   });
 
-  plan.captions.forEach((cue) => {
-    // Option values are escaped twice: once for the filter graph and once for the drawtext option.
-    const fontfile = filterValue(filterValue((plan.fontFile ?? '').replace(/\\/g, '/')));
-    filters.push(
-      `[b${base}]drawtext=fontfile=${fontfile}:text=${filterValue(filterValue(cue.text))}:x=(w-text_w)/2:` +
-        `y=h*0.85-text_h:expansion=none:fontsize=${Math.round(H / 18)}:fontcolor=white:borderw=3:bordercolor=black:` +
-        `enable='gte(t,${secs(cue.startUs)})*lt(t,${secs(cue.endUs)})'[b${base + 1}]`,
-    );
+  if (plan.captions.length > 0 && typeof plan.assDocument === 'string' && plan.fontFile !== null) {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-caption-ass-'));
+    const assPath = join(directory, 'captions.ass');
+    writeFileSync(assPath, plan.assDocument, 'utf8');
+    assTempDirectories.set(assPath, directory);
+    const assFile = filterValue(assPath.replace(/\\/g, '/'));
+    const fontsDir = filterValue(dirname(plan.fontFile).replace(/\\/g, '/'));
+    filters.push(`[b${base}]ass=filename='${assFile}':fontsdir='${fontsDir}'[b${base + 1}]`);
     base += 1;
-  });
+  } else {
+    plan.captions.forEach((cue) => {
+      // Option values are escaped twice: once for the filter graph and once for the drawtext option.
+      const fontfile = filterValue(filterValue((plan.fontFile ?? '').replace(/\\/g, '/')));
+      filters.push(
+        `[b${base}]drawtext=fontfile=${fontfile}:text=${filterValue(filterValue(cue.text))}:x=(w-text_w)/2:` +
+          `y=h*0.85-text_h:expansion=none:fontsize=${Math.round(H / 18)}:fontcolor=white:borderw=3:bordercolor=black:` +
+          `enable='gte(t,${secs(cue.startUs)})*lt(t,${secs(cue.endUs)})'[b${base + 1}]`,
+      );
+      base += 1;
+    });
+  }
 
   if (audioLabels.length === 0) {
     filters.push(`anullsrc=r=48000:cl=stereo,atrim=0:${total}[aout]`);
@@ -719,6 +785,16 @@ export function startEncode(
   onProgress: (fraction: number) => void,
 ): EncodeHandle {
   const child = spawn(ffmpegBinary(), [...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const encodedArgs = args.join(' ');
+  const captionDirs = [...assTempDirectories.entries()]
+    .filter(([path]) => encodedArgs.includes(path.replace(/\\/g, '/')))
+    .map(([path, directory]) => {
+      assTempDirectories.delete(path);
+      return directory;
+    });
+  const cleanupCaptions = (): void => {
+    for (const directory of captionDirs) rmSync(directory, { recursive: true, force: true });
+  };
   let cancelled = false;
   let stderrTail = '';
   let pending = '';
@@ -740,6 +816,7 @@ export function startEncode(
 
   const done = new Promise<Awaited<EncodeHandle['done']>>((resolvePromise) => {
     child.on('error', (err: NodeJS.ErrnoException) => {
+      cleanupCaptions();
       resolvePromise({
         ok: false,
         code: 'ffmpeg-missing',
@@ -750,6 +827,7 @@ export function startEncode(
       });
     });
     child.on('close', (code) => {
+      cleanupCaptions();
       if (cancelled) {
         resolvePromise({ ok: false, code: 'cancelled', message: 'Render cancelled.' });
       } else if (code === 0) {
