@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,10 +24,18 @@ interface FontManifest {
   }[];
 }
 
-const FONT_DIRECTORY = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '../assets/fonts/noto-sans-arabic',
-);
+/**
+ * Search order: first fonts/noto-sans-arabic beside a packaged CLI bundle;
+ * then ../assets/fonts/noto-sans-arabic beside this package's src or dist
+ * module. The package-local path is shared by source and built distributions.
+ */
+function fontDirectories(): string[] {
+  const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+  return [
+    join(moduleDirectory, 'fonts', 'noto-sans-arabic'),
+    join(moduleDirectory, '../assets/fonts/noto-sans-arabic'),
+  ];
+}
 const EXPECTED_FONT_FILES = [
   'noto-sans-arabic-arabic-400-normal.woff2',
   'noto-sans-arabic-arabic-700-normal.woff2',
@@ -37,8 +45,16 @@ const EXPECTED_FONT_FILES = [
 
 /** Reads the bundled canonical font files and rejects any manifest drift. */
 export function loadNotoSansArabicFaces(): NotoSansArabicFace[] {
+  const fontDirectory = fontDirectories().find((directory) =>
+    existsSync(join(directory, 'manifest.json')),
+  );
+  if (!fontDirectory) {
+    throw new Error(
+      `Noto Sans Arabic fonts are missing. Searched: ${fontDirectories().join(', ')}`,
+    );
+  }
   const manifest = JSON.parse(
-    readFileSync(join(FONT_DIRECTORY, 'manifest.json'), 'utf8'),
+    readFileSync(join(fontDirectory, 'manifest.json'), 'utf8'),
   ) as FontManifest;
   if (manifest.source !== '@fontsource/noto-sans-arabic@5.2.6' || manifest.license !== 'OFL-1.1') {
     throw new Error('Noto Sans Arabic font manifest source or license is invalid');
@@ -60,7 +76,11 @@ export function loadNotoSansArabicFaces(): NotoSansArabicFace[] {
     ) {
       throw new Error(`Noto Sans Arabic font manifest entry is invalid: ${entry.file}`);
     }
-    const bytes = new Uint8Array(readFileSync(join(FONT_DIRECTORY, entry.file)));
+    const fontPath = join(fontDirectory, entry.file);
+    if (!existsSync(fontPath)) {
+      throw new Error(`Noto Sans Arabic font file is missing: ${fontPath}`);
+    }
+    const bytes = new Uint8Array(readFileSync(fontPath));
     const sha256 = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
     if (bytes.byteLength !== entry.byteLength || sha256 !== entry.sha256) {
       throw new Error(`Noto Sans Arabic font integrity check failed: ${entry.file}`);

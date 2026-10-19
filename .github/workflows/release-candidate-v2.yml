@@ -250,6 +250,20 @@ jobs:
           release_command="${JOY_MEDIA_CI_RELEASE_COMMAND:-}"
           test -x "$release_command" || { echo 'JOY_MEDIA_CI_RELEASE_COMMAND must point to the isolated Linux release harness' >&2; exit 1; }
           "$release_command" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "${{ matrix.pass }}"
+      - name: Run P0 font, browser, and render integration lane
+        shell: bash
+        run: |
+          set -euo pipefail
+          chromium_path="$(command -v chromium || command -v chromium-browser || true)"
+          test -n "$chromium_path" && test -x "$chromium_path" || { echo 'Chromium is required on the Linux P0 runner' >&2; exit 1; }
+          command -v ffmpeg >/dev/null || { echo 'ffmpeg is required on the Linux P0 runner' >&2; exit 1; }
+          command -v ffprobe >/dev/null || { echo 'ffprobe is required on the Linux P0 runner' >&2; exit 1; }
+          ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]](ass|subtitles)[[:space:]]' || { echo 'FFmpeg with libass filters is required on the Linux P0 runner' >&2; exit 1; }
+          export JOY_REQUIRE_CHROMIUM=1
+          export JOY_CHROMIUM_PATH="$chromium_path"
+          node node_modules/typescript/bin/tsc -b apps/cli
+          (cd apps/cli && node scripts/bundle.mjs)
+          node node_modules/vitest/vitest.mjs run --config vitest.p0.config.ts
       - name: Verify no untracked teardown residue
         if: always()
         shell: bash

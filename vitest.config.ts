@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 const pkg = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
 
@@ -76,6 +76,12 @@ export default defineConfig({
       '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
       'apps/desktop/scripts/install-electron-windows.test.mjs',
       'tests/e2e/helpers/browser-console-audit.unit.ts',
+    ],
+    exclude: [
+      ...configDefaults.exclude,
+      'packages/html-scene-runtime/src/**/*.e2e.test.ts',
+      'apps/editor-web/src/p0-desktop-handoff.test.ts',
+      'apps/cli/src/commands/p0-design.e2e.test.ts',
     ],
     environment: 'node',
   },
