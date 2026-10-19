@@ -9,10 +9,12 @@ import { handleWorkerCommand } from './commands/worker-cmd.js';
 import { trackLongRunning } from './long-running.js';
 import {
   type CliOptionSpec,
+  type FrameRate,
   NUMERIC_RANGES,
   UsageError,
   parseCommandLine,
   parseFloatFlag,
+  parseFrameRateFlag,
   parseIntFlag,
   suggest,
 } from './utils/flags.js';
@@ -33,6 +35,7 @@ export interface CliFlags {
   width: number | undefined;
   height: number | undefined;
   fps: number | undefined;
+  frameRate: FrameRate | undefined;
   track: string | undefined;
   clip: string | undefined;
   asset: string | undefined;
@@ -137,7 +140,7 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['import <file.json>', 'Import a project from JSON'],
     ],
     options: [
-      ['--width <px> --height <px> --fps <n>', 'Canvas settings for create'],
+      ['--width <px> --height <px> --fps <n|29.97|30000/1001>', 'Canvas settings for create'],
       ['--output, -o <file.json>', 'Export destination'],
       ['--sqlite-path <path>', 'Project database (default: the desktop project store; see doctor)'],
       ['--json', 'Machine-readable output where supported'],
@@ -304,6 +307,7 @@ export function printCommandHelp(command: string): boolean {
 function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
   const str = (key: string): string | undefined =>
     typeof v[key] === 'string' ? (v[key] as string) : undefined;
+  const frameRate = parseFrameRateFlag('fps', v.fps);
   return {
     project: str('project'),
     apply: v.apply === true,
@@ -316,7 +320,8 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
     output: str('output'),
     width: parseIntFlag('width', v.width, NUMERIC_RANGES.width),
     height: parseIntFlag('height', v.height, NUMERIC_RANGES.height),
-    fps: parseIntFlag('fps', v.fps, NUMERIC_RANGES.fps),
+    frameRate,
+    fps: frameRate === undefined ? undefined : Math.round(frameRate.num / frameRate.den),
     track: str('track'),
     clip: str('clip'),
     asset: str('asset'),

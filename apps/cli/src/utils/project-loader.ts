@@ -342,6 +342,8 @@ export function createDefaultProject(
         width?: number | undefined;
         height?: number | undefined;
         fps?: number | undefined;
+        /** An exact rate such as 30000/1001; wins over `fps`. */
+        frameRate?: { num: number; den: number } | undefined;
       }
     | undefined,
 ): JoyProjectV1 {
@@ -371,7 +373,7 @@ export function createDefaultProject(
         width,
         height,
         pixelAspectRatio: { num: 1, den: 1 },
-        frameRate: { num: fps, den: 1 },
+        frameRate: options?.frameRate ?? { num: fps, den: 1 },
         durationUs: 10_000_000,
         background: '#000000',
         tracks: [

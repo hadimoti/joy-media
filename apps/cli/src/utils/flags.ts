@@ -39,6 +39,45 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+/** A frame rate as an exact fraction, e.g. 30000/1001 for 29.97. */
+export interface FrameRate {
+  readonly num: number;
+  readonly den: number;
+}
+
+/** The NTSC rates people type by their rounded names, with their exact fractions. */
+const NAMED_FRAME_RATES: Readonly<Record<string, FrameRate>> = {
+  '23.976': { num: 24_000, den: 1001 },
+  '29.97': { num: 30_000, den: 1001 },
+  '59.94': { num: 60_000, den: 1001 },
+};
+
+/**
+ * Parse `--fps`: a whole number (25), a named NTSC rate (29.97), or an exact fraction (30000/1001).
+ * Anything else is a usage error. The rate itself must stay between 1 and 240 frames per second.
+ */
+export function parseFrameRateFlag(flag: string, raw: unknown): FrameRate | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const text = String(raw).trim();
+  const named = Object.hasOwn(NAMED_FRAME_RATES, text) ? NAMED_FRAME_RATES[text] : undefined;
+  let rate: FrameRate | undefined = named;
+  if (rate === undefined && /^\d+$/.test(text)) rate = { num: Number(text), den: 1 };
+  const ratio = /^(\d+)\/(\d+)$/.exec(text);
+  if (rate === undefined && ratio) rate = { num: Number(ratio[1]), den: Number(ratio[2]) };
+  if (rate === undefined || rate.den <= 0) {
+    throw new FlagValidationError(
+      flag,
+      'expected a whole number, 23.976, 29.97, 59.94, or a fraction such as 30000/1001',
+      raw,
+    );
+  }
+  const perSecond = rate.num / rate.den;
+  if (!(perSecond >= 1 && perSecond <= 240)) {
+    throw new FlagValidationError(flag, 'expected a frame rate from 1 to 240 per second', raw);
+  }
+  return rate;
+}
+
 export function parseIntFlag(flag: string, raw: unknown, range?: NumericRange): number | undefined {
   if (raw === undefined || raw === null || raw === '') return undefined;
   const text = String(raw).trim();

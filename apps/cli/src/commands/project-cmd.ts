@@ -34,6 +34,7 @@ export interface ProjectCommandFlags {
   width?: number | undefined;
   height?: number | undefined;
   fps?: number | undefined;
+  frameRate?: { num: number; den: number } | undefined;
   output?: string | undefined;
   sqlitePath?: string | undefined;
 }
@@ -131,6 +132,7 @@ function runCreate(args: string[], flags: CliFlags, json: boolean): number {
     width: flags.width,
     height: flags.height,
     fps: flags.fps,
+    frameRate: flags.frameRate,
   });
 
   const dbPath = flags.sqlitePath ?? getDefaultSqlitePath();

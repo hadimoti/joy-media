@@ -48,3 +48,7 @@ time remapping. Add these in the desktop editor and export there.
 A real render of a project with no clips fails with `nothing-to-render` (exit 1). Only
 `--manifest-only` may succeed without media. Every `--json` failure has the same envelope:
 `{"type":"error","code":...,"message":...}`.
+
+Projects may use NTSC rates (23.976, 29.97, 59.94) or an exact fraction (`--fps 30000/1001`).
+A real render encodes at that exact rate. A plan-only (`--manifest-only`) render still counts
+frames at the preset rate, and says so in its warnings.
