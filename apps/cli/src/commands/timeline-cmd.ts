@@ -41,11 +41,15 @@ interface TimelineTrack {
   name?: string;
   family?: string;
   kind?: string;
+  order?: number;
+  enabled?: boolean;
+  locked?: boolean;
   clips: TimelineClip[];
 }
 
-type Subcommand = 'add-clip' | 'split' | 'trim' | 'remove-clip';
-type ClipFlag = 'track' | 'clip' | 'asset' | 'start' | 'duration' | 'end' | 'at';
+type Subcommand = 'add-clip' | 'split' | 'trim' | 'remove-clip' | 'add-track' | 'move';
+type ClipFlag =
+  'track' | 'clip' | 'asset' | 'start' | 'duration' | 'end' | 'at' | 'family' | 'name';
 
 /** The only flags each subcommand understands. Anything else is a mistake, not a hint. */
 const ACCEPTED_FLAGS: Record<Subcommand, readonly ClipFlag[]> = {
@@ -53,6 +57,8 @@ const ACCEPTED_FLAGS: Record<Subcommand, readonly ClipFlag[]> = {
   split: ['clip', 'at', 'track'],
   trim: ['clip', 'start', 'end', 'duration', 'track'],
   'remove-clip': ['clip', 'track'],
+  'add-track': ['family', 'name'],
+  move: ['clip', 'start', 'track'],
 };
 
 const SUBCOMMANDS = Object.keys(ACCEPTED_FLAGS) as Subcommand[];
@@ -217,6 +223,8 @@ function checkFlags(sub: Subcommand, flags: CliFlags): void {
     duration: flags.duration,
     end: flags.end,
     at: flags.at,
+    family: flags.family,
+    name: flags.name,
   };
   const accepted = ACCEPTED_FLAGS[sub];
   for (const [name, value] of Object.entries(given)) {
@@ -227,6 +235,16 @@ function checkFlags(sub: Subcommand, flags: CliFlags): void {
     }
   }
 
+  if (sub === 'move' && flags.clip === undefined) {
+    throw usageFailure(
+      'Usage: joy-media timeline move --project <id> --clip <clipId> [--start <seconds>] [--track <id>]',
+    );
+  }
+  if (sub === 'add-track' && flags.family === undefined) {
+    throw usageFailure(
+      'Usage: joy-media timeline add-track --project <id> --family <visual|audio> [--name <text>]',
+    );
+  }
   if (sub === 'split' && (flags.clip === undefined || flags.at === undefined)) {
     throw usageFailure(
       'Usage: joy-media timeline split --project <id> --clip <clipId> --at <seconds>',
@@ -273,6 +291,10 @@ function apply(
       return trimClip(tracks, flags);
     case 'remove-clip':
       return removeClip(tracks, flags);
+    case 'add-track':
+      return addTrack(tracks, flags);
+    case 'move':
+      return moveClip(tracks, flags, assets);
   }
 }
 
@@ -444,6 +466,7 @@ function addClip(
   const trackId = flags.track ?? tracks[0]?.id;
   if (!trackId) throw new CommandFailure('TRACK_NOT_FOUND', 'No tracks available in project.');
   const track = requireTrack(tracks, trackId);
+  assertTrackEnabled(track);
 
   const startUs = toUs(flags.start ?? 0);
   const durationUs = toUs(flags.duration ?? 3);
@@ -575,6 +598,107 @@ function trimClip(tracks: TimelineTrack[], flags: CliFlags): Outcome {
     changed: true,
     human: (rev) => `Trimmed clip ${c(clipId, 'bold')} (saved rev ${rev}).`,
     doc: () => ({ trackId: track.id, clip: describeClip(clip) }),
+  };
+}
+
+type TrackFamily = 'visual' | 'audio';
+
+function isTrackFamily(value: string | undefined): value is TrackFamily {
+  return value === 'visual' || value === 'audio';
+}
+
+function familyOf(track: TimelineTrack): string {
+  return track.family ?? (track.kind === 'audio' ? 'audio' : 'visual');
+}
+
+/** Append an empty track of the given family, with the next free id and top layer. */
+function addTrack(tracks: TimelineTrack[], flags: CliFlags): Outcome {
+  const family = flags.family;
+  if (!isTrackFamily(family)) {
+    throw usageFailure(`--family must be visual or audio, not "${family ?? ''}".`);
+  }
+  const prefix = family === 'audio' ? 'a' : 'v';
+  const label = family === 'audio' ? 'Audio' : 'Video';
+  let n = tracks.filter((t) => familyOf(t) === family).length + 1;
+  while (tracks.some((t) => t.id === `track-${prefix}${n}`)) n += 1;
+  const id = `track-${prefix}${n}`;
+  const order = tracks.reduce((top, t) => Math.max(top, t.order ?? -1), -1) + 1;
+  tracks.push({
+    id,
+    kind: family === 'audio' ? 'audio' : 'video',
+    family,
+    name: flags.name ?? `${label} ${n}`,
+    order,
+    enabled: true,
+    locked: false,
+    clips: [],
+  });
+  return {
+    changed: true,
+    human: (rev) => `Added ${family} track ${c(id, 'bold')} (saved rev ${rev}).`,
+    doc: () => ({ trackId: id, family }),
+  };
+}
+
+/** A disabled track is not rendered, so a clip placed on it would silently vanish from the output. */
+function assertTrackEnabled(track: TimelineTrack): void {
+  if (track.enabled === false) {
+    throw new CommandFailure(
+      'TRACK_DISABLED',
+      `Track "${trackLabel(track)}" is disabled, so its clips would not render. Enable it first.`,
+    );
+  }
+}
+
+/**
+ * Move a clip in time, and optionally to another track. The clip keeps its source and length.
+ * Its media must still suit the destination track's family, and it must not overlap.
+ */
+function moveClip(
+  tracks: TimelineTrack[],
+  flags: CliFlags,
+  assets: Record<string, unknown> | undefined,
+): Outcome {
+  const clipId = flags.clip!;
+  // --track is the destination here, so the clip is looked up on every track.
+  const found = locateClip(tracks, clipId, undefined);
+  const target = requireTrack(tracks, flags.track ?? found.track.id);
+  const { clip } = found;
+  // Without --start the clip keeps its time, so moving it to another track is one flag.
+  const startUs = flags.start !== undefined ? toUs(flags.start) : clip.startUs;
+
+  if (target !== found.track) {
+    // A clip stays with its kind of track (family, and kind for caption/object tracks), whatever
+    // media it references, so a cross-kind move can never leave a project that will not load.
+    if (familyOf(target) !== familyOf(found.track) || target.kind !== found.track.kind) {
+      throw new CommandFailure(
+        'TRACK_KIND_MISMATCH',
+        `Clip "${clipId}" is on a ${familyOf(found.track)} track and cannot move to ${familyOf(target)} track "${trackLabel(target)}". Move it to a track of the same kind.`,
+      );
+    }
+    assertTrackEnabled(target);
+  }
+  const assetId = String(clip['assetId'] ?? 'asset-default');
+  const media = assetMedia(assets?.[assetId]);
+  if (media) assertMediaFits(target, media, assetId, clip.durationUs, true);
+  assertNoOverlap(target, startUs, clip.durationUs, clipId);
+
+  if (target === found.track && startUs === clip.startUs) {
+    return {
+      changed: false,
+      human: () => `Clip ${c(clipId, 'bold')} is already at ${fmt(startUs)}; nothing to change.`,
+      doc: () => ({ trackId: target.id, clip: describeClip(clip) }),
+    };
+  }
+
+  found.track.clips.splice(found.index, 1);
+  clip.startUs = startUs;
+  target.clips.push(clip);
+  return {
+    changed: true,
+    human: (rev) =>
+      `Moved clip ${c(clipId, 'bold')} to ${fmt(startUs)} on track ${c(trackLabel(target), 'cyan')} (saved rev ${rev}).`,
+    doc: () => ({ trackId: target.id, clip: describeClip(clip) }),
   };
 }
 

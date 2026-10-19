@@ -26,3 +26,25 @@ that depend on them. The renderer does not silently flatten or omit them.
 An unresolved real asset is an error. Only projects that contain labels and no real media files
 fall back to the plan manifest. This keeps planning useful without presenting a manifest as a
 playable export.
+
+## Timeline editing the CLI supports
+
+Every editing command is checked against the decoded output in tests, not only in the project file.
+
+- `timeline add-clip` checks the media before writing: a file-like `--asset` that is not on disk
+  is `MEDIA_NOT_FOUND`; audio-only media on a visual track, or media with picture on an audio
+  track, is `TRACK_KIND_MISMATCH`; a clip longer than its source is `CLIP_EXCEEDS_SOURCE` unless
+  `--allow-extend` is given. Still images are exempt from the source length.
+- `timeline add-track --family visual|audio [--name]` adds an empty track on top of the stack.
+  Its clips render with the same rules as the default tracks.
+- `timeline move --clip <id> [--start <s>] [--track <id>]` moves a clip in time, or to another
+  track of the same family. The source, length and overlap checks still apply.
+- `timeline split`, `trim` and `remove-clip` are unchanged.
+
+Not supported by the CLI yet, and rejected or absent rather than approximated: transitions, text
+and captions, audio gain/fades/mute, transforms and effects, playback-rate changes, reverse and
+time remapping. Add these in the desktop editor and export there.
+
+A real render of a project with no clips fails with `nothing-to-render` (exit 1). Only
+`--manifest-only` may succeed without media. Every `--json` failure has the same envelope:
+`{"type":"error","code":...,"message":...}`.

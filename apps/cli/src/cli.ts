@@ -24,6 +24,7 @@ export interface CliFlags {
   project: string | undefined;
   apply: boolean;
   name: string | undefined;
+  family: string | undefined;
   provider: string | undefined;
   model: string | undefined;
   apiKey: string | undefined;
@@ -65,6 +66,7 @@ export const CLI_OPTIONS = {
   apply: { type: 'boolean' },
   'allow-extend': { type: 'boolean' },
   name: { type: 'string', short: 'n' },
+  family: { type: 'string' },
   provider: { type: 'string' },
   model: { type: 'string', short: 'm' },
   'api-key': { type: 'string' },
@@ -149,6 +151,8 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['split', 'Split a clip (--clip --at)'],
       ['trim', 'Trim a clip (--clip --start --end|--duration)'],
       ['remove-clip', 'Remove a clip (--clip)'],
+      ['add-track', 'Add an empty track (--family visual|audio [--name])'],
+      ['move', 'Move a clip in time, or to another track (--clip [--start] [--track])'],
     ],
     options: [
       ['--project, -p <id|file.json>', 'Target project (required)'],
@@ -156,6 +160,7 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['--start <s> --end <s> --at <s>', 'Timeline positions in seconds (>= 0)'],
       ['--duration <s>', 'Clip length in seconds (>= 0.001)'],
       ['--allow-extend', 'add-clip: allow a clip longer than its source media'],
+      ['--family <visual|audio>', 'add-track: the kind of track to add'],
       ['--sqlite-path <path>', 'Project database'],
     ],
   },
@@ -303,6 +308,7 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
     project: str('project'),
     apply: v.apply === true,
     name: str('name'),
+    family: str('family'),
     provider: str('provider'),
     model: str('model'),
     apiKey: str('api-key'),
