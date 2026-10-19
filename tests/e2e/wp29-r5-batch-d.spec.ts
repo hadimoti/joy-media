@@ -228,7 +228,7 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     const introClip = page.locator('.timeline-clip').filter({ hasText: 'Intro' }).first();
     await expect(introClip).toBeVisible();
     await introClip.click();
-    await expect(introClip).toHaveAttribute('aria-pressed', 'true');
+    await expect(introClip).toHaveAttribute('aria-current', 'true');
     await openPanel(page, 'Audio');
     await page.getByRole('button', { name: 'Review Voice Polish changes' }).click();
     const browserRun = page.getByRole('button', { name: 'Apply changes' });

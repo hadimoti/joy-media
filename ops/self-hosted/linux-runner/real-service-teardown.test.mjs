@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { performance } from 'node:perf_hooks';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -22,8 +23,8 @@ function spawnGroup(body) {
 }
 
 async function waitGone(pid, timeoutMs = 8000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
     if (!isAlive(pid)) return true;
     await sleep(50);
   }
@@ -51,7 +52,24 @@ test(
       "process.on('SIGTERM', () => { setTimeout(() => process.exit(0), 800); }); setInterval(() => {}, 1000);",
     );
     await sleep(200);
-    const record = await terminateProcessTree(child, { graceMs: 5000, killMs: 3000, pollMs: 50 });
+    const originalDateNow = Date.now;
+    let wallClockJumped = false;
+    Date.now = () => (wallClockJumped ? originalDateNow() - 2000 : originalDateNow());
+    const recordPromise = terminateProcessTree(child, {
+      graceMs: 5000,
+      killMs: 3000,
+      pollMs: 50,
+    });
+    const wallClockJump = setTimeout(() => {
+      wallClockJumped = true;
+    }, 100);
+    let record;
+    try {
+      record = await recordPromise;
+    } finally {
+      clearTimeout(wallClockJump);
+      Date.now = originalDateNow;
+    }
     assert.equal(record.state, 'terminated');
     assert.equal(record.escalatedToKill, false);
     assert.ok(

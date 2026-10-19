@@ -91,10 +91,12 @@ export function allowExpectedHttpResponse(
     if (
       !Number.isInteger(count.min) ||
       !Number.isInteger(count.max) ||
-      count.min < 1 ||
+      count.min < 0 ||
       count.max < 1
     ) {
-      throw new Error('Expected HTTP response count range bounds must be positive integers');
+      throw new Error(
+        'Expected HTTP response count range min must be a nonnegative integer and max must be a positive integer',
+      );
     }
     if (count.max < count.min) {
       throw new Error('Expected HTTP response count range max must be >= min');

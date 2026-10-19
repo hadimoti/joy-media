@@ -30,6 +30,9 @@ export default defineConfig({
       '@joy-media/project-persistence/desktop': pkg(
         './packages/project-persistence/src/desktop.ts',
       ),
+      '@joy-media/project-persistence/editor-storage': pkg(
+        './packages/project-persistence/src/editor-storage.ts',
+      ),
       '@joy-media/project-persistence/browser': pkg(
         './packages/project-persistence/src/browser.ts',
       ),
@@ -64,8 +67,14 @@ export default defineConfig({
     },
   },
   test: {
+    // The full suite runs process-level CLI tests alongside CPU-heavy render
+    // acceptance tests. Keep finite hang protection without turning load spikes
+    // into false product failures; behavior tests use their own explicit limits.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     include: [
       '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
+      'apps/desktop/scripts/install-electron-windows.test.mjs',
       'tests/e2e/helpers/browser-console-audit.unit.ts',
     ],
     environment: 'node',

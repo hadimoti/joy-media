@@ -92,6 +92,31 @@ describe('acquireProjectWriter', () => {
     expect(locks.held).toBe(false);
   });
 
+  it('keeps storage enumeration current after guarded project writes', async () => {
+    const values = new Map<string, string>();
+    const storage: ProjectWriterStorage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+      get length() {
+        return values.size;
+      },
+      key: (index) => [...values.keys()][index] ?? null,
+    };
+    const acquired = await acquireProjectWriter({
+      storage,
+      lockManager: new FakeOriginWriterLockManager(),
+    });
+    expect(acquired.kind).toBe('owned');
+    if (acquired.kind !== 'owned') return;
+    const guarded = acquired.writer.guardStorage(storage);
+
+    guarded.setItem('joy-media.workflow.v1:index', '{"ids":[]}');
+
+    expect(guarded.length).toBe(2);
+    expect(guarded.key?.(1)).toBe('joy-media.workflow.v1:index');
+    await acquired.writer.release();
+  });
+
   it('reports a concurrent writer as busy and a missing Web Locks API as unsupported', async () => {
     const storage = new MemoryStorage();
     const locks = new FakeOriginWriterLockManager();

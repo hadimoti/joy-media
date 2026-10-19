@@ -135,7 +135,7 @@ async function assembleUnpacked() {
   // cleanly without relying on repository-root node_modules symlinks.
   const unpackedNodeModules = resolve(unpackedDir, 'node_modules', '@joy-media');
   await mkdir(unpackedNodeModules, { recursive: true });
-  for (const pkgName of ['provider-sdk', 'project-schema']) {
+  for (const pkgName of ['provider-sdk', 'project-schema', 'project-persistence']) {
     const pkgRoot = resolve(repoRoot, 'packages', pkgName);
     const dest = resolve(unpackedNodeModules, pkgName);
     await rm(dest, { recursive: true, force: true });

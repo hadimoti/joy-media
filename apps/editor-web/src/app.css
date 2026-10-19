@@ -37,7 +37,7 @@ textarea:focus:not(:focus-visible) {
   --joy-text: #ececef;
   --joy-text-secondary: rgba(255, 255, 255, 0.64);
   --joy-text-muted: #a8a8b0;
-  --joy-text-faint: #96969f;
+  --joy-text-faint: #9c9ca5;
   --joy-text-disabled: rgba(255, 255, 255, 0.28);
   --joy-accent: #f4b72f;
   --joy-accent-hover: #ffc94f;
@@ -860,7 +860,7 @@ main {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--joy-text-faint);
+  color: var(--joy-text-muted);
   font: inherit;
   font-size: var(--joy-type-2xs);
   font-variant-numeric: tabular-nums;
@@ -871,9 +871,10 @@ main {
   border-top: 1px solid var(--joy-border);
 }
 .app-menu-section-heading {
+  display: block;
   margin: 0.55rem 0 0.15rem;
   padding: 0 0.75rem;
-  color: var(--joy-text-faint);
+  color: var(--joy-text-muted);
   font-size: var(--joy-type-2xs);
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -3174,7 +3175,7 @@ label {
 .timeline-track[data-track-label-color] .timeline-clip {
   border-color: color-mix(in srgb, var(--clip-rail) 55%, var(--joy-border));
 }
-.timeline-clip[role='button']:focus-visible {
+.timeline-clip[role='group']:focus-visible {
   outline: 2px solid var(--joy-accent);
   outline-offset: 1px;
 }
@@ -3323,7 +3324,7 @@ label {
     linear-gradient(180deg, rgb(255 255 255 / 8%), transparent 42%, rgb(0 0 0 / 26%)),
     var(--joy-bg-active);
 }
-.timeline-clip[aria-pressed='true'] {
+.timeline-clip[aria-current='true'] {
   outline: 2px solid var(--joy-accent);
   outline-offset: 1px;
   border-color: var(--joy-accent);
@@ -4260,7 +4261,7 @@ label {
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--joy-bg-panel) 82%, transparent);
 }
-.caption-style-section h4 {
+.caption-style-section h3 {
   margin: 0 0 0.1rem;
   color: var(--joy-text);
   font-size: 0.7rem;
@@ -4512,7 +4513,7 @@ label {
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--joy-bg-panel) 82%, transparent);
 }
-.text-editor-section h4 {
+.text-editor-section h3 {
   margin: 0 0 0.1rem;
   color: var(--joy-text);
   font-size: 0.7rem;
@@ -9465,7 +9466,7 @@ label {
   border-radius: 0;
   margin-block: 0.15rem 0.35rem;
 }
-.workflow-run-modal h4 {
+.workflow-run-modal h2 {
   margin: 0;
   font-size: 0.72rem;
   font-weight: 600;
@@ -10061,13 +10062,13 @@ label {
   padding-bottom: 0.2rem;
   border-bottom: 1px solid #2e2e32;
 }
-.workflow-section-header h4 {
+.workflow-section-header h3 {
   margin: 0;
   font-size: 0.65rem;
   font-weight: 650;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #8a8a90;
+  color: var(--joy-text-muted);
 }
 .workflow-version-badge,
 .system-version-badge,
@@ -10176,13 +10177,13 @@ label {
   padding: 0;
   list-style: none;
 }
-.plugin-contribution h4 {
+.plugin-contribution h3 {
   margin: 0.35rem 0 0.15rem;
   font-size: 0.65rem;
   font-weight: 650;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #8a8a90;
+  color: var(--joy-text-muted);
 }
 .plugin-demo-surface {
   display: grid;
@@ -10755,6 +10756,20 @@ label {
   transition: border-color 0.12s ease;
   min-width: 0;
 }
+.transition-card-select {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
 .transition-card-thumb {
   display: flex;
   align-items: center;
@@ -10805,6 +10820,7 @@ label {
   transition: opacity 0.12s;
 }
 .transition-card:hover .card-fav-btn,
+.transition-card:focus-within .card-fav-btn,
 .effect-card:hover .card-fav-btn {
   opacity: 1;
 }
@@ -10816,7 +10832,7 @@ label {
 .transition-card:hover {
   border-color: var(--joy-accent);
 }
-.transition-card:focus-visible {
+.transition-card:focus-within {
   outline: 2px solid var(--joy-accent);
   outline-offset: 1px;
 }
@@ -15259,7 +15275,7 @@ label {
 .dual-time .timeline-clip .timeline-clip-duration {
   color: var(--joy-text-muted);
 }
-.dual-time .timeline-clip[aria-pressed='true'] {
+.dual-time .timeline-clip[aria-current='true'] {
   outline-color: var(--joy-accent);
   border-color: var(--joy-accent);
   box-shadow:

@@ -273,14 +273,14 @@ function MotionLibrarySection({
   if (motions.length === 0) {
     return (
       <section className="motion-library-section">
-        <h4 className="motion-library-section-title">{label}</h4>
+        <h3 className="motion-library-section-title">{label}</h3>
         <p className="motion-library-empty">{emptyMessage}</p>
       </section>
     );
   }
   return (
     <section className="motion-library-section">
-      <h4 className="motion-library-section-title">{label}</h4>
+      <h3 className="motion-library-section-title">{label}</h3>
       <div className="motion-library-grid" role="list" aria-label={label}>
         {motions.map((motion) => (
           <MotionCard

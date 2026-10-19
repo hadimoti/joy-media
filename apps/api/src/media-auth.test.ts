@@ -68,6 +68,28 @@ describe('MediaAuthService', () => {
     });
   });
 
+  it('rejects an OTP after its five-minute expiry', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-18T00:00:00.000Z'));
+      const { auth, mailer, db } = await service();
+      try {
+        await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });
+        await auth.requestOtp('user@example.com', 'gmail');
+        const code = sentCode(mailer);
+
+        vi.setSystemTime(new Date('2026-10-18T00:05:00.001Z'));
+        await expect(auth.verifyOtp('user@example.com', 'gmail', code)).rejects.toMatchObject({
+          code: 'OTP_INVALID',
+        });
+      } finally {
+        await db.end();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rejects a disabled allow-listed user even for their own valid code', async () => {
     const { auth, mailer } = await service();
     const user = await auth.addAllowed({ gmail: 'user@example.com', addedBy: 'admin' });

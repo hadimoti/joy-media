@@ -50,7 +50,7 @@ async function openMyMotions(page: Parameters<typeof openPanel>[0]): Promise<voi
 async function selectReferenceClip(page: Parameters<typeof openPanel>[0]): Promise<void> {
   const timeline = page.locator('.timeline-panel');
   if (!(await timeline.isVisible())) {
-    await page.locator('.panel-tab[aria-label="Timeline"]').first().click();
+    await page.locator('.dv-tab[role="tab"][aria-label="Timeline"]').first().click();
   }
   await expect(timeline).toBeVisible();
   // B-roll clips in the seeded timeline are intentionally media-only and do
@@ -59,7 +59,7 @@ async function selectReferenceClip(page: Parameters<typeof openPanel>[0]): Promi
   const introClip = page.locator('.timeline-clip').filter({ hasText: 'Intro' }).first();
   await expect(introClip).toBeVisible();
   await introClip.click();
-  await expect(introClip).toHaveAttribute('aria-pressed', 'true');
+  await expect(introClip).toHaveAttribute('aria-current', 'true');
 }
 
 async function applyArcInPreset(page: Parameters<typeof openPanel>[0]): Promise<void> {

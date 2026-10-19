@@ -211,11 +211,19 @@ class ActiveProjectWriter implements ProjectWriterHandle {
   guardStorage(storage: ProjectWriterStorage): ProjectWriterStorage {
     const removeItem = storage.removeItem;
     const readOnlyEnumeration = {
-      ...(storage.length === undefined ? {} : { length: storage.length }),
       ...(storage.key === undefined ? {} : { key: (index: number) => storage.key!(index) }),
     };
+    const preserveDynamicLength = <T extends ProjectWriterStorage>(guarded: T): T => {
+      if (storage.length !== undefined) {
+        Object.defineProperty(guarded, 'length', {
+          enumerable: true,
+          get: () => storage.length,
+        });
+      }
+      return guarded;
+    };
     if (removeItem === undefined) {
-      return {
+      return preserveDynamicLength({
         getItem: (key) => {
           return storage.getItem(key);
         },
@@ -225,9 +233,9 @@ class ActiveProjectWriter implements ProjectWriterHandle {
           storage.setItem(key, value);
         },
         ...readOnlyEnumeration,
-      };
+      });
     }
-    return {
+    return preserveDynamicLength({
       getItem: (key) => {
         return storage.getItem(key);
       },
@@ -242,7 +250,7 @@ class ActiveProjectWriter implements ProjectWriterHandle {
         removeItem.call(storage, key);
       },
       ...readOnlyEnumeration,
-    };
+    });
   }
 
   release(): Promise<void> {

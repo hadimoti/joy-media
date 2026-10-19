@@ -3,7 +3,7 @@ import type {
   JoyDocumentOperation,
   JoyTimelineOperation,
 } from '@joy-media/joy-agent-engine';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
+import type { CliProjectDocument } from '../utils/project-loader.js';
 
 export interface StagedOperationsSummary {
   readonly timelineOps: readonly JoyTimelineOperation[];
@@ -17,7 +17,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   private playheadUs: number = 0;
 
   constructor(
-    private project: JoyProjectV1,
+    private project: CliProjectDocument,
     private revision: number,
     private onStagedChange?: (summary: StagedOperationsSummary) => void,
   ) {}
@@ -173,7 +173,7 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
   /**
    * Applies all staged operations onto the project and returns a clean, modified project document.
    */
-  applyStaged(): { updatedProject: JoyProjectV1; appliedCount: number; errors: string[] } {
+  applyStaged(): { updatedProject: CliProjectDocument; appliedCount: number; errors: string[] } {
     const current = structuredClone(this.project);
     const errors: string[] = [];
     let appliedCount = 0;
@@ -200,6 +200,10 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           const track = tracks.find((t) => t.id === op.trackId);
           if (!track) {
             errors.push(`Track ${op.trackId} not found for insert`);
+            continue;
+          }
+          if (tracks.some((t) => t.clips.some((existing) => existing.id === op.id))) {
+            errors.push(`Clip id ${op.id} already exists; refusing to insert a duplicate`);
             continue;
           }
           track.clips.push({
@@ -250,6 +254,10 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
           targetTrack.clips.push(updated);
           appliedCount++;
         } else if (op.kind === 'trim') {
+          if (op.endUs <= op.startUs) {
+            errors.push(`Trim of clip ${op.clipId} has endUs <= startUs`);
+            continue;
+          }
           let found = false;
           for (const track of tracks) {
             const clip = track.clips.find((c) => c.id === op.clipId);
@@ -294,22 +302,11 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
       }
     }
 
-    // Apply document operations
+    // Document operations are not implemented by the CLI bridge yet. They used
+    // to be counted as "applied" while changing nothing; report them instead
+    // so a caller never commits a revision that silently dropped edits.
     for (const op of this.stagedDocument) {
-      try {
-        if (op.kind === 'set-text') {
-          // Update caption document or visual object
-          if (current.visualObjects && current.visualObjects[op.objectId]) {
-            appliedCount++;
-          } else {
-            appliedCount++;
-          }
-        } else if (op.kind === 'set-property' || op.kind === 'add-effect') {
-          appliedCount++;
-        }
-      } catch (err) {
-        errors.push(`Error applying ${op.kind}: ${String(err)}`);
-      }
+      errors.push(`Document operation ${op.kind} on ${op.objectId} is not supported by the CLI`);
     }
 
     this.project = current;

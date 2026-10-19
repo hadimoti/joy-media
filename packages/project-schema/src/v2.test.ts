@@ -102,6 +102,38 @@ describe('schema v2 — Dual Lens durable slices', () => {
       });
     });
 
+    it('reports the invalid clip id and duration field when a legacy range is rejected', () => {
+      const project = v1();
+      const root = project.compositions['comp-root']!;
+      const track = root.tracks[0]!;
+      const invalid = {
+        ...project,
+        compositions: {
+          ...project.compositions,
+          'comp-root': {
+            ...root,
+            tracks: [
+              {
+                ...track,
+                clips: [
+                  {
+                    kind: 'video' as const,
+                    id: 'clip-negative',
+                    assetId: 'asset-intro',
+                    startUs: 0,
+                    durationUs: -5,
+                    sourceInUs: 0,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      };
+
+      expect(() => migrateV1ToV2(invalid)).toThrow(/clip-negative.*durationUs/);
+    });
+
     it('changes nothing an editor can see', () => {
       // The Phase 1 exit criterion: old projects migrate without visible
       // change. Everything except the version and the new containers must be

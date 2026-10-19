@@ -115,7 +115,7 @@ test.describe('JOY Live Director lifecycle evidence', () => {
 
     // Flow and Timeline intentionally share one Dockview group. Switching to
     // Flow leaves Timeline mounted but makes it non-owner-visible.
-    await page.locator('.panel-tab[aria-label="Flow"]').first().click();
+    await page.locator('.dv-tab[role="tab"][aria-label="Flow"]').first().click();
     await expect(page.getByRole('article', { name: 'Dual Lens', exact: true })).toBeVisible();
     await expect(page.locator('.timeline-panel')).not.toBeVisible();
 

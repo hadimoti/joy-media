@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { runCli } from '../cli.js';
-import { runBenchmark } from './benchmark-cmd.js';
+import { perSecond, runBenchmark } from './benchmark-cmd.js';
 
 class StringWritable extends Writable {
   public chunks: Buffer[] = [];
@@ -130,5 +133,96 @@ describe('joy benchmark (diagnostic & benchmark command)', () => {
       expect(m.iterations).toBeGreaterThan(0);
       expect(m.totalMs).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it('only reports finite numbers, so nothing turns into null in JSON', async () => {
+    const capture = new StringWritable();
+    const result = await runBenchmark({ stdout: capture });
+    for (const m of result.measurements) {
+      for (const field of [m.value, m.iterations, m.totalMs, m.perOpMs ?? 0]) {
+        expect(Number.isFinite(field)).toBe(true);
+      }
+    }
+  });
+
+  it('compiles the Living Look for real instead of timing an instant rejection', async () => {
+    const capture = new StringWritable();
+    const result = await runBenchmark({ 'media-engine': true, stdout: capture });
+    const look = result.measurements.find((m) => m.name === 'living-look-compile');
+    expect(look?.failures).toBe(0);
+  });
+
+  it('gives each suite its own total time instead of the whole run for both', async () => {
+    const capture = new StringWritable();
+    const result = await runBenchmark({ json: true, stdout: capture });
+    const events = capture
+      .text()
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l));
+    const complete = events[events.length - 1];
+    expect(complete.type).toBe('complete');
+    expect(result.summaries).toHaveLength(2);
+    const sumOfSuites = result.summaries.reduce((sum, s) => sum + s.totalMs, 0);
+    expect(sumOfSuites).toBeLessThanOrEqual(complete.totalMs + 0.01);
+    for (const summary of result.summaries) {
+      const own = summary.measurements.reduce((sum, m) => sum + m.totalMs, 0);
+      expect(summary.totalMs).toBeGreaterThanOrEqual(own - 0.01);
+    }
+  });
+});
+
+describe('perSecond', () => {
+  it('never returns Infinity or NaN, even for a loop too fast to time', () => {
+    expect(perSecond(1000, 0)).toBeGreaterThan(0);
+    expect(Number.isFinite(perSecond(1000, 0))).toBe(true);
+    expect(Number.isFinite(perSecond(1000, Number.NaN))).toBe(true);
+    expect(Number.isFinite(perSecond(1000, -3))).toBe(true);
+    expect(perSecond(1000, 500)).toBe(2000);
+  });
+});
+
+describe('benchmark scratch files', () => {
+  function withTmpdir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+    const tempKeys = ['TMPDIR', 'TMP', 'TEMP'] as const;
+    const previous = new Map(tempKeys.map((key) => [key, process.env[key]]));
+    const dir = mkdtempSync(join(tmpdir(), 'joy-bench-unit-'));
+    for (const key of tempKeys) process.env[key] = dir;
+    return fn(dir).finally(() => {
+      for (const key of tempKeys) {
+        const value = previous.get(key);
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    });
+  }
+
+  it('removes its scratch directories when it is done', async () => {
+    await withTmpdir(async (dir) => {
+      const result = await runBenchmark({ system: true, json: true, stdout: new StringWritable() });
+      expect(result.exitCode).toBe(0);
+      expect(readdirSync(dir)).toEqual([]);
+    });
+  });
+
+  it('ends the JSON stream with an error event and exit code 1 when scratch space is unusable', async () => {
+    await withTmpdir(async (dir) => {
+      const file = join(dir, 'a-file');
+      writeFileSync(file, 'x');
+      for (const key of ['TMPDIR', 'TMP', 'TEMP'] as const) {
+        process.env[key] = join(file, 'nested');
+      }
+      const capture = new StringWritable();
+      const result = await runBenchmark({ system: true, json: true, stdout: capture });
+      expect(result.exitCode).toBe(1);
+      const lines = capture
+        .text()
+        .split('\n')
+        .filter((l) => l.trim().length > 0)
+        .map((l) => JSON.parse(l));
+      expect(lines[lines.length - 1]).toMatchObject({ type: 'error' });
+      expect(lines[lines.length - 1].message).toMatch(/Benchmark failed/);
+    });
   });
 });

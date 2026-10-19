@@ -30,3 +30,13 @@ export {
   createAnimationOwnershipFixture,
   createLegacyAnimationFixture,
 } from './wp34-animation-fixtures.js';
+export {
+  buildBasicAvDeliveryProject,
+  buildGapsParallelTracksProject,
+  buildHistoricalSchemaProjects,
+  buildKitchenSinkSupportedProject,
+  buildMissingRelinkedAssetsProject,
+  buildPersianRtlProject,
+  buildTenThousandClipProject,
+} from './readiness/projects.js';
+export { READINESS_TOLERANCES } from './readiness/tolerances.js';

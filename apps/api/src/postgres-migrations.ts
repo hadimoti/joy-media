@@ -310,6 +310,19 @@ const AGENT_USAGE_LEDGER_MIGRATION: PostgresMigration = {
   },
 };
 
+const USDC_PENDING_OWNER_PLAN_MIGRATION: PostgresMigration = {
+  id: '010-usdc-pending-owner-plan',
+  checksum: 'sha256:usdc-pending-owner-plan-2026-10-18',
+  up: async (database) => {
+    // Fail closed if older data already has duplicate pending invoices; do not silently
+    // invalidate an amount that a customer may have been given for payment.
+    await database.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS usdc_invoices_pending_owner_plan_idx
+        ON usdc_invoices (owner_id, plan) WHERE status = 'pending';
+    `);
+  },
+};
+
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   BASELINE_MIGRATION,
   ASSET_REVOCATION_PRIMARY_KEY_MIGRATION,
@@ -320,6 +333,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   ACCOUNT_DEVICES_SUBSCRIPTIONS_ENTITLEMENTS_MIGRATION,
   USDC_INVOICES_MIGRATION,
   AGENT_USAGE_LEDGER_MIGRATION,
+  USDC_PENDING_OWNER_PLAN_MIGRATION,
 ];
 
 export async function runPostgresMigrations(database: MigrationDatabase): Promise<void> {

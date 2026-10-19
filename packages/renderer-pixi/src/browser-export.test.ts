@@ -110,6 +110,26 @@ describe('browser export contracts', () => {
     expect(harness.removeTrack).toHaveBeenCalledWith(harness.audioTrack);
   });
 
+  it('starts authored media from the recorder start call, before its asynchronous event', async () => {
+    const harness = installRecorderHarness('video/mp4');
+    await downloadBrowserMp4({
+      manifest,
+      frameCount: 1,
+      canvas: harness.canvas,
+      audioTrack: harness.audioTrack,
+      mimeType: 'video/mp4',
+      paintFrame: () => {},
+      onRecordingStart: () => harness.events.push('authored media start'),
+    });
+
+    const recorderStartCall = harness.events.indexOf('recorder.start()');
+    const authoredMediaStart = harness.events.indexOf('authored media start');
+    const recorderStartEvent = harness.events.indexOf('recorder start event');
+    expect(recorderStartCall).toBeGreaterThanOrEqual(0);
+    expect(authoredMediaStart).toBeGreaterThan(recorderStartCall);
+    expect(authoredMediaStart).toBeLessThan(recorderStartEvent);
+  });
+
   it('falls back to a timed capture stream when manual frame requests are unavailable', async () => {
     const harness = installRecorderHarness('video/mp4', { manualCapture: false });
     await downloadBrowserMp4({
@@ -255,6 +275,7 @@ function installRecorderHarness(
   reportedMimeType: string,
   options: { readonly manualCapture?: boolean } = {},
 ) {
+  const events: string[] = [];
   const videoTrack =
     options.manualCapture === false
       ? { requestFrame: undefined, stop: vi.fn() }
@@ -301,9 +322,13 @@ function installRecorderHarness(
     }
 
     start(): void {
+      events.push('recorder.start()');
       recorderState.starts++;
       this.state = 'recording';
-      queueMicrotask(() => this.dispatchEvent(new Event('start')));
+      queueMicrotask(() => {
+        events.push('recorder start event');
+        this.dispatchEvent(new Event('start'));
+      });
     }
 
     stop(): void {
@@ -357,6 +382,7 @@ function installRecorderHarness(
     audioTrack: audioTrack as unknown as MediaStreamTrack,
     videoTrack,
     unsupportedManualTrack,
+    events,
     addTrack,
     removeTrack,
     captureStream,

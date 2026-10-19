@@ -5,6 +5,15 @@ export const ALLOWED_EDITOR_ORIGINS = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
 ] as const;
+/** Node's WHATWG URL reports `null` for Electron's standard custom app scheme. */
+export function editorOriginFromFrameUrl(frameUrl: string): string | undefined {
+  try {
+    const parsed = new URL(frameUrl);
+    return parsed.origin === 'null' ? `${parsed.protocol}//${parsed.host}` : parsed.origin;
+  } catch {
+    return undefined;
+  }
+}
 export function isAllowedEditorOrigin(origin: string): boolean {
   return (ALLOWED_EDITOR_ORIGINS as readonly string[]).includes(origin);
 }

@@ -10,6 +10,27 @@ console.log('=== JOY Media Installer & Package Verification Suite ===');
 const desktopDistDir = resolve('apps/desktop/dist');
 const standaloneDir = resolve(desktopDistDir, 'joy-media-win32-x64');
 const releasesDir = resolve(desktopDistDir, 'releases');
+const desktopManifest = JSON.parse(readFileSync(resolve('apps/desktop/package.json'), 'utf8'));
+const cliManifest = JSON.parse(readFileSync(resolve('apps/cli/package.json'), 'utf8'));
+const releaseManifest = JSON.parse(
+  readFileSync(resolve(releasesDir, 'joy-media-release-manifest.json'), 'utf8'),
+);
+const setupSource = readFileSync(resolve('apps/desktop/installer/Setup.cs'), 'utf8');
+
+assert.strictEqual(
+  desktopManifest.version,
+  cliManifest.version,
+  'Desktop and CLI versions differ.',
+);
+assert.strictEqual(
+  releaseManifest.version,
+  desktopManifest.version,
+  'Packaged release manifest version differs from the desktop package.',
+);
+assert.ok(
+  setupSource.includes(`public const string ProductVersion = "${desktopManifest.version}";`),
+  'Installer registry version differs from the desktop package.',
+);
 
 // 1. Verify Distribution Layout
 console.log('1. Verifying distribution files in joy-media-win32-x64...');
@@ -22,6 +43,7 @@ const requiredFiles = [
   'uninstall.cmd',
   'resources/app/worker/joy-worker.exe',
   'resources/app/cli/joy-media-bundle.mjs',
+  'resources/app/node_modules/@joy-media/project-persistence/dist/editor-storage.js',
   'resources/app/renderer/index.html',
   'resources/app/dist/main/electron-entry.js',
 ];
@@ -33,30 +55,87 @@ for (const relPath of requiredFiles) {
 console.log('✔ All required distribution files present.');
 
 // 2. Test Packaged CLI Execution via joy.cmd
-console.log('2. Testing packaged CLI execution (joy.cmd doctor)...');
+console.log('2. Testing packaged CLI execution (joy.cmd doctor) in a disposable profile...');
 const joyCmdPath = resolve(standaloneDir, 'joy.cmd');
-const doctorResult = spawnSync(joyCmdPath, ['doctor'], {
-  shell: true,
-  encoding: 'utf8',
-  timeout: 15000,
-});
-assert.strictEqual(doctorResult.status, 0, `joy.cmd doctor failed: ${doctorResult.stderr}`);
-assert.ok(doctorResult.stdout.includes('JOY MEDIA CLI'), 'Doctor output missing banner');
-assert.ok(
-  doctorResult.stdout.includes('All core system diagnostics passed'),
-  'Doctor diagnostics failed',
-);
-console.log('✔ Packaged CLI doctor passed cleanly.');
+const cliSandboxRoot = mkdtempSync(join(tmpdir(), 'joy-cli-package-check-'));
+const cliHome = join(cliSandboxRoot, 'profile');
+const cliTemp = join(cliSandboxRoot, 'temp');
+const cliDatabase = join(cliSandboxRoot, 'data', 'joy-media.sqlite3');
+mkdirSync(cliHome, { recursive: true });
+mkdirSync(cliTemp, { recursive: true });
+mkdirSync(join(cliSandboxRoot, 'data'), { recursive: true });
+const cliEnv = {
+  ...Object.fromEntries(
+    ['PATH', 'SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT'].flatMap((name) =>
+      process.env[name] ? [[name, process.env[name]]] : [],
+    ),
+  ),
+  HOME: cliHome,
+  USERPROFILE: cliHome,
+  APPDATA: join(cliHome, 'AppData', 'Roaming'),
+  LOCALAPPDATA: join(cliHome, 'AppData', 'Local'),
+  TEMP: cliTemp,
+  TMP: cliTemp,
+  JOY_MEDIA_SQLITE_PATH: cliDatabase,
+  JOY_MEDIA_EDGE_URL: 'off',
+  NODE_ENV: 'production',
+};
+mkdirSync(cliEnv.APPDATA, { recursive: true });
+mkdirSync(cliEnv.LOCALAPPDATA, { recursive: true });
+try {
+  const doctorResult = spawnSync(joyCmdPath, ['doctor'], {
+    shell: true,
+    env: cliEnv,
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  assert.strictEqual(doctorResult.status, 0, `joy.cmd doctor failed: ${doctorResult.stderr}`);
+  assert.ok(doctorResult.stdout.includes('JOY MEDIA CLI'), 'Doctor output missing banner');
+  assert.ok(
+    doctorResult.stdout.includes('Core checks passed with'),
+    'Doctor output did not report a successful core-check summary',
+  );
+  assert.ok(
+    doctorResult.stdout.includes('Disabled by JOY_MEDIA_EDGE_URL'),
+    'Package check must keep the doctor edge probe disabled and offline',
+  );
+  assert.ok(
+    doctorResult.stdout.includes(`v${desktopManifest.version}`),
+    'Packaged CLI banner version differs from the desktop package.',
+  );
+  console.log('✔ Packaged CLI doctor passed cleanly without a production network probe.');
 
-console.log('3. Testing packaged CLI project list...');
-const projectResult = spawnSync(joyCmdPath, ['project', 'list'], {
-  shell: true,
-  encoding: 'utf8',
-  timeout: 15000,
-});
-assert.strictEqual(projectResult.status, 0, `joy.cmd project list failed: ${projectResult.stderr}`);
-assert.ok(projectResult.stdout.includes('Local Projects'), 'Project list output unexpected');
-console.log('✔ Packaged CLI project list passed cleanly.');
+  console.log('3. Testing packaged CLI project create/list...');
+  const createResult = spawnSync(
+    joyCmdPath,
+    ['project', 'create', 'Installer package check', '--sqlite-path', cliDatabase, '--json'],
+    { shell: true, env: cliEnv, encoding: 'utf8', timeout: 15000 },
+  );
+  assert.strictEqual(
+    createResult.status,
+    0,
+    `joy.cmd project create failed: ${createResult.stderr}`,
+  );
+  const created = JSON.parse(createResult.stdout);
+  const projectResult = spawnSync(
+    joyCmdPath,
+    ['project', 'list', '--sqlite-path', cliDatabase, '--json'],
+    { shell: true, env: cliEnv, encoding: 'utf8', timeout: 15000 },
+  );
+  assert.strictEqual(
+    projectResult.status,
+    0,
+    `joy.cmd project list failed: ${projectResult.stderr}`,
+  );
+  const projects = JSON.parse(projectResult.stdout);
+  assert.ok(
+    projects.some((project) => project.id === created.id),
+    'Project list omitted created project',
+  );
+  console.log('✔ Packaged CLI project create/list passed in the disposable profile.');
+} finally {
+  rmSync(cliSandboxRoot, { recursive: true, force: true });
+}
 
 // 4. Test Standalone Uninstall Sandbox Isolation
 console.log('4. Testing standalone uninstall.cmd cleanup in an isolated sandbox...');
@@ -331,5 +410,117 @@ assert.strictEqual(
   `build-installer.ps1 syntax parsing failed:\n${parseResult.stderr || parseResult.stdout}`,
 );
 console.log('✔ build-installer.ps1 syntax parse check passed.');
+
+console.log('8. Verifying Windows installed-lifecycle hash control and harness syntax...');
+const lifecycleHarnessPath = resolve('tests/desktop/windows-lifecycle.ps1');
+const lifecycleHarness = readFileSync(lifecycleHarnessPath, 'utf8');
+assert.match(
+  lifecycleHarness,
+  /trap\s*\{[\s\S]*lifecycle diagnostic line/u,
+  'Lifecycle failures must report the PowerShell source line before cleanup.',
+);
+assert.match(
+  lifecycleHarness,
+  /function Test-UserPathEntry\([\s\S]*?\[string\]::IsNullOrWhiteSpace\(\$UserPath\)/u,
+  'Lifecycle User PATH inspection must safely handle an unset value.',
+);
+assert.doesNotMatch(
+  lifecycleHarness,
+  /\.Contains\([^\r\n]*,\s*\[StringComparison\]/u,
+  'Windows PowerShell 5.1 does not support the two-argument String.Contains overload.',
+);
+assert.match(
+  lifecycleHarness,
+  /function Assert-CleanCheckoutStatus\b/u,
+  'Lifecycle checkout validation must handle an empty git status result without calling methods on null.',
+);
+assert.match(
+  lifecycleHarness,
+  /\$statusLines\s*=\s*@\(& git -C \$repoRoot status --porcelain\)[\s\S]{0,220}Assert-CleanCheckoutStatus -StatusLines \$statusLines/u,
+  'Lifecycle checkout validation must capture porcelain output as a collection and validate it safely.',
+);
+assert.doesNotMatch(
+  lifecycleHarness,
+  /\(& git -C \$repoRoot status --porcelain\)\.Trim\(\)/u,
+  'A clean git status returns no output in Windows PowerShell 5.1, so Trim() would dereference null.',
+);
+assert.match(
+  lifecycleHarness,
+  /Invoke-VerifiedSetup \$testTamperedArtifact \$candidateSetup \$candidateVersion/u,
+  'Lifecycle hash negative control must exercise the same verified setup entrypoint.',
+);
+assert.match(
+  lifecycleHarness,
+  /if \(-not \$negativeControlRejected\).*Installer hash negative control was not rejected/su,
+  'Lifecycle harness must require a rejected tampered setup before any install.',
+);
+const lifecycleParseCommand = `
+  $errors = $null
+  [System.Management.Automation.Language.Parser]::ParseFile('${lifecycleHarnessPath.replace(/'/g, "''")}', [ref]$null, [ref]$errors)
+  if ($errors.Count -gt 0) {
+    Write-Error ($errors | Out-String)
+    exit 1
+  }
+`;
+const lifecycleParseResult = spawnSync(
+  'powershell.exe',
+  ['-NoProfile', '-NonInteractive', '-Command', lifecycleParseCommand],
+  { encoding: 'utf8', timeout: 15000 },
+);
+assert.strictEqual(
+  lifecycleParseResult.status,
+  0,
+  `Windows lifecycle harness syntax parsing failed:\n${lifecycleParseResult.stderr || lifecycleParseResult.stdout}`,
+);
+const lifecyclePathProbeCommand = String.raw`
+  $errors = $null
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile('${lifecycleHarnessPath.replace(/'/g, "''")}', [ref]$null, [ref]$errors)
+  if ($errors.Count -gt 0) { Write-Error ($errors | Out-String); exit 1 }
+  $function = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-UserPathEntry' }, $true)
+  if ($null -eq $function) { Write-Error 'Test-UserPathEntry function is missing'; exit 1 }
+  . ([ScriptBlock]::Create($function.Extent.Text))
+  $installPath = 'C:\Users\Disposable\Programs\JOY Media'
+  if (Test-UserPathEntry -UserPath $null -InstallPath $installPath) { Write-Error 'Null User PATH was accepted'; exit 1 }
+  if (Test-UserPathEntry -UserPath '' -InstallPath $installPath) { Write-Error 'Empty User PATH was accepted'; exit 1 }
+  if (-not (Test-UserPathEntry -UserPath 'C:\Other;C:\Users\Disposable\Programs\JOY Media\' -InstallPath $installPath)) { Write-Error 'A normalized installed User PATH entry was not detected'; exit 1 }
+  if (Test-UserPathEntry -UserPath 'C:\Users\Other\Programs\JOY Media' -InstallPath $installPath) { Write-Error 'A different User PATH entry was accepted'; exit 1 }
+`;
+const lifecyclePathProbeResult = spawnSync(
+  'powershell.exe',
+  ['-NoProfile', '-NonInteractive', '-Command', lifecyclePathProbeCommand],
+  { encoding: 'utf8', timeout: 15000 },
+);
+assert.strictEqual(
+  lifecyclePathProbeResult.status,
+  0,
+  `Windows lifecycle User PATH null/normalization probe failed:\n${lifecyclePathProbeResult.stderr || lifecyclePathProbeResult.stdout}`,
+);
+const lifecycleCheckoutProbeCommand = String.raw`
+  $errors = $null
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile('${lifecycleHarnessPath.replace(/'/g, "''")}', [ref]$null, [ref]$errors)
+  if ($errors.Count -gt 0) { Write-Error ($errors | Out-String); exit 1 }
+  $function = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-CleanCheckoutStatus' }, $true)
+  if ($null -eq $function) { Write-Error 'Assert-CleanCheckoutStatus function is missing'; exit 1 }
+  . ([ScriptBlock]::Create($function.Extent.Text))
+  Assert-CleanCheckoutStatus -StatusLines @()
+  $dirtyRejected = $false
+  try { Assert-CleanCheckoutStatus -StatusLines @(' M tracked-file.txt') }
+  catch {
+    if ($_.Exception.Message -ne 'Windows lifecycle checkout is not clean before generated artifacts.') { throw }
+    $dirtyRejected = $true
+  }
+  if (-not $dirtyRejected) { Write-Error 'A dirty lifecycle checkout was accepted'; exit 1 }
+`;
+const lifecycleCheckoutProbeResult = spawnSync(
+  'powershell.exe',
+  ['-NoProfile', '-NonInteractive', '-Command', lifecycleCheckoutProbeCommand],
+  { encoding: 'utf8', timeout: 15000 },
+);
+assert.strictEqual(
+  lifecycleCheckoutProbeResult.status,
+  0,
+  `Windows lifecycle empty/dirty checkout probe failed:\n${lifecycleCheckoutProbeResult.stderr || lifecycleCheckoutProbeResult.stdout}`,
+);
+console.log('✔ Windows installed-lifecycle harness syntax parse check passed.');
 
 console.log('\n=== All Installer & Packaging Checks PASSED! ===');

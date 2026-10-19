@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { DockviewReact } from 'dockview';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
+import { createEditorProjectStorageAdapter } from '@joy-media/project-persistence/editor-storage';
 import { PanelTab } from './PanelTab.js';
 import {
   EditorPanelContext,
@@ -319,6 +320,7 @@ import {
 import type { AudioState } from '@joy-media/commands';
 import { renderOfflineAudio } from '@joy-media/audio-core/offline';
 import type { ExportPresetId } from '@joy-media/project-schema';
+import { dimensionsForExportPreset } from '@joy-media/project-schema';
 import {
   AgentPanel,
   type AgentPanelCommand,
@@ -823,7 +825,11 @@ interface ProjectJoyAgentRunLifecycle {
 }
 
 function guardBrowserStorage(writer: ProjectWriterHandle): GuardedBrowserStorage {
-  const storage = writer.guardStorage(window.localStorage);
+  const editorStorage = createEditorProjectStorageAdapter(
+    window.localStorage,
+    window.joyDesktop?.projectStorage,
+  );
+  const storage = writer.guardStorage(editorStorage);
   if (storage.removeItem === undefined)
     throw new Error('The browser writer storage boundary does not support removal.');
   return storage as GuardedBrowserStorage;
@@ -1355,7 +1361,7 @@ function EditorWorkspace({
       onResult: (result) => {
         if (result.kind === 'conflict') {
           showToast(
-            'Cloud document changed elsewhere. Your local edits were kept; reload the project before saving again.',
+            'Cloud document changed since this browser last synced. Local edits are preserved here; export them before reloading to recover the conflict.',
             'error',
           );
         } else if (result.kind === 'request-failure') {
@@ -1674,9 +1680,8 @@ function EditorWorkspace({
           setRemoteDocumentBootstrapProjectId(controlPlaneProjectId);
           return;
         }
-        // Both an existing remote head and an explicit missing-document read
-        // are a write barrier: only after either result may ordinary editor
-        // mutations be auto-saved.
+        // A completed remote read resolves the bootstrap barrier. Autosync
+        // keeps its own write block active when this read found a conflict.
         setRemoteDocumentBootstrapProjectId(controlPlaneProjectId);
         if (result.kind === 'hydrated') setRevision((revision) => revision + 1);
       })
@@ -3929,6 +3934,7 @@ function EditorWorkspace({
       const retryPreset = retryEntry?.presetId;
       if (
         retryPreset !== undefined &&
+        retryPreset !== 'social-h264-aac' &&
         retryPreset !== 'reels-1080' &&
         retryPreset !== 'shorts-1080' &&
         retryPreset !== 'youtube-1080' &&
@@ -4029,19 +4035,10 @@ function EditorWorkspace({
           exportVisualProject.compositions[exportVisualProject.rootCompositionId];
         const baseWidth = compositionV1?.width ?? 1080;
         const baseHeight = compositionV1?.height ?? 1920;
-        const { width, height } = (() => {
-          switch (activeExportPreset) {
-            case 'reels-1080':
-            case 'shorts-1080':
-              return { width: 1080, height: 1920 };
-            case 'youtube-1080':
-              return { width: 1920, height: 1080 };
-            case 'high-bitrate':
-              return { width: Math.max(baseWidth, 1920), height: Math.max(baseHeight, 1080) };
-            default:
-              return { width: baseWidth, height: baseHeight };
-          }
-        })();
+        const { width, height } = dimensionsForExportPreset(activeExportPreset, {
+          width: baseWidth,
+          height: baseHeight,
+        });
         const compositionTimeline =
           exportTimelineProject.compositions[exportTimelineProject.rootCompositionId];
         const allTimelineClips = flattenRootTimelineVideoClips(exportTimelineProject);
@@ -6971,6 +6968,7 @@ function EditorWorkspace({
     <AgentPreviewProvider store={appAgentPreviewStore}>
       <AgentPresenceProvider store={appAgentPresenceStore}>
         <main>
+          <h1 className="sr-only">{controlPlaneProject.title || `${JOY_STUDIO_NAME} editor`}</h1>
           <header className="app-header">
             <AgentActivityIndicator
               onShowTarget={(target) => {

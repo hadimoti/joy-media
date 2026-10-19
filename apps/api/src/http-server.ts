@@ -144,6 +144,8 @@ export interface ControlPlaneHttpServerOptions {
   };
   /** Maximum size for ordinary JSON request bodies. Media/document routes have explicit limits. */
   readonly maxJsonBodyBytes?: number;
+  /** Exact browser origins allowed to call this API with cross-origin fetch. */
+  readonly corsAllowedOrigins?: readonly string[];
   /**
    * Opt-in, loopback test instrumentation. Production deployments leave this
    * off so database load never becomes a public response side channel.
@@ -177,12 +179,14 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
   };
   const rateLimitWindowMs = options.rateLimit?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
   const rateLimitMaxRequests = options.rateLimit?.maxRequests ?? DEFAULT_RATE_LIMIT_MAX_REQUESTS;
+  const corsAllowedOrigins = new Set(options.corsAllowedOrigins ?? []);
   const maxJsonBodyBytes = options.maxJsonBodyBytes ?? DEFAULT_MAX_JSON_BODY_BYTES;
   if (!Number.isSafeInteger(maxJsonBodyBytes) || maxJsonBodyBytes < 1)
     throw new RangeError('maxJsonBodyBytes must be a positive safe integer');
   const rateLimitBuckets = new Map<string, { windowStart: number; count: number }>();
   const clientAddressResolver = options.clientAddressResolver ?? createClientAddressResolver();
   return createServer(async (request, response) => {
+    if (handleCors(request, response, corsAllowedOrigins)) return;
     if (options.queryObservability === true) attachDbQueryCountHeader(response);
     await withDbQueryContext(async () => {
       const path = request.url?.split('?', 1)[0] ?? '/';
@@ -207,6 +211,72 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
       }
     });
   });
+}
+
+const CORS_ALLOWED_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
+const CORS_ALLOWED_REQUEST_HEADERS = new Set([
+  'authorization',
+  'content-type',
+  'x-joy-frame-rate',
+  'x-joy-frame-count',
+  'x-joy-sha256',
+  'x-joy-bytes',
+  'x-joy-mime-type',
+  'x-joy-part-sha256',
+]);
+
+function handleCors(
+  request: IncomingMessage,
+  response: ServerResponse,
+  allowedOrigins: ReadonlySet<string>,
+): boolean {
+  const requestOrigin = request.headers.origin;
+  const allowedOrigin = typeof requestOrigin === 'string' && allowedOrigins.has(requestOrigin);
+
+  if (allowedOrigin) {
+    response.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    response.setHeader('Vary', 'Origin');
+    response.setHeader('Access-Control-Allow-Methods', [...CORS_ALLOWED_METHODS].join(', '));
+    response.setHeader(
+      'Access-Control-Expose-Headers',
+      'x-joy-preview-renderer, x-joy-preview-quality, x-joy-preview-width, x-joy-preview-height, x-joy-preview-request-id, content-disposition',
+    );
+  }
+
+  if (
+    request.method !== 'OPTIONS' ||
+    request.headers['access-control-request-method'] === undefined
+  ) {
+    return false;
+  }
+
+  if (!allowedOrigin) {
+    response.statusCode = 403;
+    response.end();
+    return true;
+  }
+
+  const requestedMethod = request.headers['access-control-request-method']?.toUpperCase();
+  const requestedHeaders = (request.headers['access-control-request-headers'] ?? '')
+    .split(',')
+    .map((header) => header.trim().toLowerCase())
+    .filter(Boolean);
+  if (
+    requestedMethod === undefined ||
+    !CORS_ALLOWED_METHODS.has(requestedMethod) ||
+    requestedHeaders.some((header) => !CORS_ALLOWED_REQUEST_HEADERS.has(header))
+  ) {
+    response.statusCode = 403;
+    response.end();
+    return true;
+  }
+
+  if (requestedHeaders.length > 0)
+    response.setHeader('Access-Control-Allow-Headers', requestedHeaders.join(', '));
+  response.setHeader('Access-Control-Max-Age', '600');
+  response.statusCode = 204;
+  response.end();
+  return true;
 }
 
 async function route(

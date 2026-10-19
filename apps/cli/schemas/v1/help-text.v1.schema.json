@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.joy.media/cli/v1/help-text.schema.json",
+  "title": "JOY Media CLI help text v1",
+  "type": "string",
+  "allOf": [
+    { "pattern": "^[\\s\\S]*Usage: joy-media <command>" },
+    { "pattern": "^[\\s\\S]*Commands:" },
+    { "pattern": "^[\\s\\S]*project[\\s\\S]*Local SQLite project management" },
+    { "pattern": "^[\\s\\S]*render[\\s\\S]*Headless batch render" },
+    { "pattern": "^[\\s\\S]*Exit codes:" }
+  ]
+}

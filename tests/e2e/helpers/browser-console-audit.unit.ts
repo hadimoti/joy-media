@@ -74,6 +74,19 @@ describe('browser console HTTP conflict audit', () => {
   describe('proposed count range API', () => {
     const range: CountRange = { min: 1, max: 2 };
 
+    it('allows an optional expected miss with a zero lower bound and fixed maximum', async () => {
+      const { page } = createAuditPage();
+      setupBrowserAudit(page);
+      allowExpectedHttpResponse(page, {
+        status: 409,
+        pathname: '/api/v1/library/cloud-assets/asset-1/content',
+        code: 'ASSET_NOT_FOUND',
+        count: { min: 0, max: 5 },
+      });
+
+      await expect(assertBrowserAudit(page, testInfo)).resolves.toBeUndefined();
+    });
+
     it('passes when observed count is 1 (inside the closed interval [1,2])', async () => {
       const { page, emit } = createAuditPage();
       setupBrowserAudit(page);

@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { Buffer } from 'node:buffer';
 import { isAllowedIpcRequest } from '../ipc.js';
+import { SYNCHRONOUS_IPC_CHANNELS } from '../ipc.js';
 import type { IpcChannel, IpcRequest } from '../ipc.js';
 import type { DerivativeKind, OpaqueFileRef } from '../file-boundary.js';
 import { normalizeStartupPreference } from '../worker-status.js';
@@ -14,6 +16,11 @@ import type {
   ProviderProfile,
 } from '../store/local-database.js';
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
+import {
+  isEditorProjectStorageKey,
+  MAX_EDITOR_PROJECT_STORAGE_KEY_LENGTH,
+  MAX_EDITOR_PROJECT_STORAGE_VALUE_BYTES,
+} from '@joy-media/project-persistence/editor-storage';
 import type { DirectProviderProbeReport, SecretStore } from '@joy-media/provider-sdk';
 import type { AutoUpdateDecision, SignedReleaseManifest } from './auto-update-policy.js';
 
@@ -369,6 +376,28 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         };
       }
     },
+    'desktop.project-storage.get': (payload): IpcResult => {
+      const key = asEditorStorageKey(payload);
+      if (key === undefined) return { ok: false, error: 'Invalid editor project storage key' };
+      return { ok: true, data: deps.localDatabase.getEditorStorageItem(key) };
+    },
+    'desktop.project-storage.set': (payload): IpcResult => {
+      const request = asEditorStorageWrite(payload);
+      if (request === undefined)
+        return { ok: false, error: 'Invalid editor project storage value' };
+      deps.localDatabase.setEditorStorageItem(request.key, request.value);
+      return { ok: true };
+    },
+    'desktop.project-storage.remove': (payload): IpcResult => {
+      const key = asEditorStorageKey(payload);
+      if (key === undefined) return { ok: false, error: 'Invalid editor project storage key' };
+      deps.localDatabase.deleteEditorStorageItem(key);
+      return { ok: true };
+    },
+    'desktop.project-storage.keys': (): IpcResult => ({
+      ok: true,
+      data: deps.localDatabase.listEditorStorageKeys().filter(isEditorProjectStorageKey),
+    }),
   };
 }
 
@@ -397,6 +426,61 @@ export async function dispatchIpcRequest(
     return { ok: false, error: `Blocked IPC request: ${request.channel}` };
   }
   return handlers[request.channel](request.payload);
+}
+
+/** Dispatches only synchronous project-storage handlers for Electron's sendSync bridge. */
+export function dispatchSynchronousIpcRequest(
+  handlers: Record<IpcChannel, IpcHandler>,
+  request: IpcRequest,
+): IpcResult {
+  if (typeof request !== 'object' || request === null || !safeIsAllowedIpcRequest(request)) {
+    const channel =
+      typeof request === 'object' && request !== null && typeof request.channel === 'string'
+        ? request.channel
+        : 'unknown';
+    return { ok: false, error: `Blocked IPC request: ${channel}` };
+  }
+  if (!(SYNCHRONOUS_IPC_CHANNELS as readonly string[]).includes(request.channel)) {
+    return { ok: false, error: `Blocked synchronous IPC request: ${request.channel}` };
+  }
+  try {
+    const result = handlers[request.channel](request.payload);
+    if (isPromiseLike(result))
+      return { ok: false, error: 'Synchronous IPC handler returned a promise' };
+    return result;
+  } catch {
+    return { ok: false, error: 'Synchronous IPC request failed' };
+  }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<IpcResult> {
+  if ((typeof value !== 'object' || value === null) && typeof value !== 'function') return false;
+  return typeof (value as { then?: unknown }).then === 'function';
+}
+
+function asEditorStorageKey(payload: unknown): string | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  const key = (payload as { key?: unknown }).key;
+  return typeof key === 'string' &&
+    key.length <= MAX_EDITOR_PROJECT_STORAGE_KEY_LENGTH &&
+    isEditorProjectStorageKey(key)
+    ? key
+    : undefined;
+}
+
+function asEditorStorageWrite(
+  payload: unknown,
+): { readonly key: string; readonly value: string } | undefined {
+  const key = asEditorStorageKey(payload);
+  if (key === undefined || typeof payload !== 'object' || payload === null) return undefined;
+  const value = (payload as { value?: unknown }).value;
+  if (
+    typeof value !== 'string' ||
+    Buffer.byteLength(value, 'utf8') > MAX_EDITOR_PROJECT_STORAGE_VALUE_BYTES
+  ) {
+    return undefined;
+  }
+  return { key, value };
 }
 
 function asOpaqueFileRef(value: unknown): OpaqueFileRef | undefined {

@@ -1,0 +1,148 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.joy.media/cli/v1/render-event.schema.json",
+  "title": "JOY Media CLI render NDJSON event v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "projectId",
+        "title",
+        "preset",
+        "outDir",
+        "totalFrames",
+        "totalClips",
+        "concurrency",
+        "ts"
+      ],
+      "properties": {
+        "type": { "const": "start" },
+        "projectId": { "type": "string" },
+        "title": { "type": "string" },
+        "preset": { "enum": ["mp4", "webm", "prores"] },
+        "outDir": { "type": "string" },
+        "totalFrames": { "type": "integer", "minimum": 0 },
+        "totalClips": { "type": "integer", "minimum": 0 },
+        "concurrency": { "type": "integer", "minimum": 1 },
+        "ts": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "projectId", "trackId", "trackName", "clipCount"],
+      "properties": {
+        "type": { "const": "track" },
+        "projectId": { "type": "string" },
+        "trackId": { "type": "string" },
+        "trackName": { "type": "string" },
+        "clipCount": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "projectId",
+        "trackId",
+        "clipId",
+        "progress",
+        "framesRendered",
+        "totalFrames"
+      ],
+      "properties": {
+        "type": { "const": "clip" },
+        "projectId": { "type": "string" },
+        "trackId": { "type": "string" },
+        "clipId": { "type": "string" },
+        "progress": { "type": "number", "minimum": 0 },
+        "framesRendered": { "type": "integer", "minimum": 0 },
+        "totalFrames": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "projectId", "percent", "ts"],
+      "properties": {
+        "type": { "const": "progress" },
+        "projectId": { "type": "string" },
+        "percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "ts": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "projectId",
+        "preset",
+        "outDir",
+        "artifactPath",
+        "totalFrames",
+        "durationMs",
+        "ts",
+        "mediaProduced",
+        "manifestWritten",
+        "message",
+        "warnings"
+      ],
+      "properties": {
+        "type": { "const": "complete" },
+        "projectId": { "type": "string" },
+        "preset": { "enum": ["mp4", "webm", "prores"] },
+        "outDir": { "type": "string" },
+        "artifactPath": { "type": "string" },
+        "totalFrames": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "ts": { "type": "string", "format": "date-time" },
+        "mediaProduced": { "type": "boolean" },
+        "mediaPath": { "type": "string" },
+        "manifestPath": { "type": "string" },
+        "manifestWritten": { "type": "boolean" },
+        "message": { "type": "string" },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      },
+      "oneOf": [
+        {
+          "properties": { "mediaProduced": { "const": true } },
+          "required": ["mediaPath", "manifestPath"]
+        },
+        {
+          "properties": { "mediaProduced": { "const": false } },
+          "not": { "required": ["mediaPath"] }
+        }
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "projectId", "message", "ts"],
+      "properties": {
+        "type": { "const": "error" },
+        "projectId": { "type": "string" },
+        "message": { "type": "string" },
+        "ts": { "type": "string", "format": "date-time" },
+        "code": {
+          "enum": [
+            "usage",
+            "project-load",
+            "invalid-project",
+            "output",
+            "cancelled",
+            "internal",
+            "media-missing",
+            "media-unreadable",
+            "unsupported-feature",
+            "ffmpeg-missing",
+            "encode-failed"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

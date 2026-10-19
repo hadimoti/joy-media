@@ -165,6 +165,13 @@ export class LocalDatabase {
          updated_at TEXT NOT NULL
        )`,
     );
+    this.db.exec(
+      `CREATE TABLE IF NOT EXISTS editor_storage (
+         key TEXT PRIMARY KEY,
+         value TEXT NOT NULL,
+         updated_at TEXT NOT NULL
+       )`,
+    );
   }
 
   recordMedia(entry: MediaManifestEntry): void {
@@ -312,6 +319,29 @@ export class LocalDatabase {
 
   deleteSetting(key: string): void {
     this.db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+  }
+
+  getEditorStorageItem(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM editor_storage WHERE key = ?').get(key) as
+      { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  listEditorStorageKeys(): readonly string[] {
+    const rows = this.db
+      .prepare('SELECT key FROM editor_storage ORDER BY key ASC')
+      .all() as unknown as readonly { key: string }[];
+    return rows.map((row) => row.key);
+  }
+
+  setEditorStorageItem(key: string, value: string): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO editor_storage (key, value, updated_at) VALUES (?, ?, ?)')
+      .run(key, value, this.now());
+  }
+
+  deleteEditorStorageItem(key: string): void {
+    this.db.prepare('DELETE FROM editor_storage WHERE key = ?').run(key);
   }
 
   getDefaultAssetLibraryDirectory(): string {

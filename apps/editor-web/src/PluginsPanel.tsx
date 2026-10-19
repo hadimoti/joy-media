@@ -85,7 +85,7 @@ export function PluginsPanel({
       </ul>
 
       <section className="plugin-contribution">
-        <h4>Demo contribution</h4>
+        <h3>Demo contribution</h3>
         {demoMounted ? (
           <div className="plugin-demo-surface">
             <p>

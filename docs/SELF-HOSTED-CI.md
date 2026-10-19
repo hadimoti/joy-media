@@ -1,13 +1,15 @@
-# JOY Media self-hosted CI
+# JOY Media CI runner policy
 
-JOY Media's GitHub-hosted Actions minutes are exhausted and cannot be
-purchased from Iran, so the repository CI runs entirely on owner-
-controlled self-hosted runners. Every workflow job in `.github/workflows/`
-must target a self-hosted label tuple; no job may use `ubuntu-latest`,
-`windows-latest`, `macos-latest`, or any other GitHub-hosted label. The
-contract is enforced offline by
-`tooling/release/src/ci-runner-policy.test.ts` and the runner Dockerfile
-/ entrypoint / registration-token handling is locked down by
+The v2 release-candidate workflow uses standard GitHub-hosted
+`ubuntu-24.04` runners for candidate validation, `editor-web-bundle`, and
+responsive-only browser checks. The repository is public, so standard hosted
+runner minutes are free; artifact storage remains quota-limited. The repository's
+one-file artifact probe passed on 2026-10-18 (run `39084850937`), enabling this
+one-day renderer handoff. Media-export browser acceptance and shipped-bundle
+smoke use the dedicated Linux acceptance runner after hosted-runner export
+timeouts. The policy is enforced offline by
+`tooling/release/src/ci-runner-policy.test.ts`; runner image, entrypoint, and
+registration-token contracts remain locked down by
 `tooling/release/src/ci-runner-contract.test.ts`.
 
 ## Self-hosted runner inventory
@@ -54,13 +56,15 @@ a long-running container — both `entrypoint.sh` (Linux) and
 
 The runner policy is enforced by two offline test suites:
 
-- `tooling/release/src/ci-runner-policy.test.ts` scans every file under
-  `.github/workflows/` and asserts (a) no job uses `ubuntu-latest`,
-  `windows-latest`, `macos-latest`, or any other hosted label, and (b)
-  every job targets exactly one of the self-hosted Docker labels in the
-  table above. Adding a hosted label, or pointing a job at a label that
-  is not declared under `ops/self-hosted/`, fails this test before any
-  CI minute is consumed.
+- `tooling/release/src/ci-runner-policy.test.ts` scans every workflow and allows
+  exactly one hosted job: `release-candidate-v2.yml` / `editor-web-bundle` on
+  `ubuntu-24.04`. Every other job must target a declared self-hosted Docker
+  label. Adding any other hosted runner or unknown self-hosted tuple fails the
+  test.
+- `tooling/release/src/ci-artifact-policy.test.ts` permits exactly one
+  one-day upload/download pair for the source-bound editor bundle. The durable
+  real-service, P3, and final readiness evidence continues to use the
+  checksum-verified self-hosted evidence store.
 - `tooling/release/src/ci-runner-contract.test.ts` locks down the
   Dockerfile / entrypoint / registration-token handling for both the
   Linux (`ops/self-hosted/linux-runner/`) and the Windows-container
@@ -155,6 +159,15 @@ observation, not a durable state guarantee. WSL2 may stop an idle distribution,
 so the operator must verify `wsl -l -v`, the Docker daemon, and the GitHub
 runner inventory immediately before dispatching a gate.
 
+In `release-candidate-v2.yml`, `acceptance-primary` and `prod-build-smoke` also
+use this runner because their media-export browser paths exceeded GitHub-hosted
+download timeouts. They set `JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only` and
+clear the runner-local database, S3, Worker, evidence, real-acceptance command,
+and OpenCLI settings. They use the container's preinstalled Chromium system
+libraries and install only the Playwright browser binary. These jobs remain
+deterministic fixture runs; only the real-service jobs may use disposable
+runner-local service credentials.
+
 ## Release-candidate lanes
 
 The closure plan requires a separate, manually dispatched release workflow before promotion. It
@@ -224,8 +237,10 @@ table access as proof.
 
 - The release-candidate / r2-candidate `windows-worker-clean` /
   `worker-package` jobs target `self-hosted,windows,x64,joy-media-worker-docker`,
-  which is an owner-controlled Docker Windows container. It is NEVER
-  `windows-latest` and never consumes a GitHub-hosted Windows VM minute.
+  which is an owner-controlled Docker Windows container. It never uses a
+  GitHub-hosted Windows VM because the accepted lifecycle evidence requires
+  the real container ID, immutable image digest, and container-local process
+  observations.
 - The `windows-worker-clean` evidence record the gate binds from
   (`test-output/windows/acceptance.json`) is tagged in-source with
   `runner: "self-hosted,windows,x64,joy-media-worker-docker"` and
@@ -249,7 +264,10 @@ Linux-container or host-direct evidence ever presented as Windows acceptance.
 dispatched manually with a full 40-character candidate SHA. It runs the same lane inventory
 described above, but encodes the clean-state repeat explicitly as two in-workflow passes per
 matrix lane and restructures the browser viewport matrix so each pass stays inside its lane's
-timeout budget. It depends on the same `self-hosted` runners (`joy-media-ci`,
+timeout budget. Candidate validation, editor bundling, and responsive-only
+browser checks use GitHub-hosted Ubuntu. Media-export primary browser acceptance
+and shipped-bundle smoke use `joy-media-acceptance` because the hosted runner
+timed out on production exports. It depends on the same `self-hosted` runners (`joy-media-ci`,
 `joy-media-worker-docker`, `joy-media-acceptance`) and on the same runner-local env vars
 (`JOY_MEDIA_CI_RELEASE_COMMAND`, `JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND`,
 `JOY_MEDIA_CI_EVIDENCE_ROOT`).
@@ -285,17 +303,20 @@ orchestrator run history. The VPS Gbrain metadata is index-only; it never owns t
 authoritative evidence bytes. Operator-only buckets apply; never assume the public
 gh-pages index now reflects v2 runs.
 
-### v2 artifact upload policy
+### v2 artifact handoff and evidence policy
 
-v2 does not call `actions/upload-artifact` or `actions/download-artifact`. Both the
-real-service and the P3 pass instead write an `ARTIFACT-UPLOAD-STATUS.txt` receipt into
-their durable evidence directory with the fields `candidate_sha`, `run_id`, `attempt`,
-`pass`, `upload_outcome=disabled`, `source=durable-evidence-store`, and
-`reason=github-artifact-upload-disabled-by-policy`. The upload-policy unit test in
-`tooling/release/src/ci-artifact-policy.test.ts` asserts that contract directly against
-`release-candidate-v2.yml`. GitHub-hosted Actions minutes/quota is still exhausted on the
-GHA side; v2 keeps running entirely on the self-hosted runner set and does not depend on
-GitHub artifact quota being repaired.
+The `editor-web-bundle` job builds `apps/editor-web/dist` from the exact candidate
+on standard `ubuntu-24.04` and uploads a one-day artifact named with the workflow
+run, attempt, and candidate SHA. Its manifest records the candidate SHA, lockfile
+SHA-256, and every file's path, size, and SHA-256. The Windows Docker lane verifies
+the complete manifest before and after staging the renderer for packaging.
+
+This small build handoff is separate from acceptance evidence. The real-service
+and P3 passes still write `ARTIFACT-UPLOAD-STATUS.txt` receipts with
+`upload_outcome=disabled`, `source=durable-evidence-store`, and
+`reason=github-artifact-upload-disabled-by-policy`; their redacted, checksummed
+evidence remains in the self-hosted store. The final readiness gate continues to
+bind those durable records and the actual Windows release-package hashes.
 
 ## Re-registering a runner
 

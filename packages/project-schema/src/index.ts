@@ -184,6 +184,7 @@ export {
   audioEffectPropertyBinding,
 } from './audio.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
+export { dimensionsForExportPreset } from './export-preset.js';
 export type {
   PropertyOwnerKindV2,
   AnimationTimeDomainV2,

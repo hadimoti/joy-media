@@ -1,0 +1,4444 @@
+diff --git a/apps/cli/src/agent/bridge.ts b/apps/cli/src/agent/bridge.ts
+index d85b6e3..04173ce 100644
+--- a/apps/cli/src/agent/bridge.ts
++++ b/apps/cli/src/agent/bridge.ts
+@@ -202,6 +202,10 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
+             errors.push(`Track ${op.trackId} not found for insert`);
+             continue;
+           }
++          if (tracks.some((t) => t.clips.some((existing) => existing.id === op.id))) {
++            errors.push(`Clip id ${op.id} already exists; refusing to insert a duplicate`);
++            continue;
++          }
+           track.clips.push({
+             id: op.id,
+             kind: 'video',
+@@ -250,6 +254,10 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
+           targetTrack.clips.push(updated);
+           appliedCount++;
+         } else if (op.kind === 'trim') {
++          if (op.endUs <= op.startUs) {
++            errors.push(`Trim of clip ${op.clipId} has endUs <= startUs`);
++            continue;
++          }
+           let found = false;
+           for (const track of tracks) {
+             const clip = track.clips.find((c) => c.id === op.clipId);
+@@ -294,22 +302,11 @@ export class CliJoyAgentToolBridge implements JoyAgentToolBridge {
+       }
+     }
+ 
+-    // Apply document operations
++    // Document operations are not implemented by the CLI bridge yet. They used
++    // to be counted as "applied" while changing nothing; report them instead
++    // so a caller never commits a revision that silently dropped edits.
+     for (const op of this.stagedDocument) {
+-      try {
+-        if (op.kind === 'set-text') {
+-          // Update caption document or visual object
+-          if (current.visualObjects && current.visualObjects[op.objectId]) {
+-            appliedCount++;
+-          } else {
+-            appliedCount++;
+-          }
+-        } else if (op.kind === 'set-property' || op.kind === 'add-effect') {
+-          appliedCount++;
+-        }
+-      } catch (err) {
+-        errors.push(`Error applying ${op.kind}: ${String(err)}`);
+-      }
++      errors.push(`Document operation ${op.kind} on ${op.objectId} is not supported by the CLI`);
+     }
+ 
+     this.project = current;
+diff --git a/apps/cli/src/agent/joy-agent.ts b/apps/cli/src/agent/joy-agent.ts
+index 6bae2b6..2f38e4e 100644
+--- a/apps/cli/src/agent/joy-agent.ts
++++ b/apps/cli/src/agent/joy-agent.ts
+@@ -1,15 +1,19 @@
+-/* global console, process */
++/* global process, setTimeout, clearTimeout */
+ import {
+   JoyAgentEngine,
+   type JoyAgentSafeEvent,
+   type JoyAgentTaskKind,
++  type JoyDocumentOperation,
++  type JoyTimelineOperation,
+ } from '@joy-media/joy-agent-engine';
+ import type { JoyProjectV1 } from '@joy-media/project-schema';
+-import { c, logInfo, logStep, logSuccess, logWarn } from '../utils/logger.js';
++import { c } from '../utils/logger.js';
+ import { CliJoyAgentToolBridge, type StagedOperationsSummary } from './bridge.js';
++import { createAgentOutput, type AgentOutput } from './output.js';
+ import {
+   createModelFromConfig,
+   resolveByokConfig,
++  type ProviderTraffic,
+   type ResolveProviderOptions,
+ } from './provider.js';
+ 
+@@ -22,24 +26,108 @@ export interface RunAgentOptions {
+   readonly providerOptions?: ResolveProviderOptions | undefined;
+   readonly onEvent?: ((event: JoyAgentSafeEvent) => void) | undefined;
+   readonly onStagedChange?: ((summary: StagedOperationsSummary) => void) | undefined;
++  readonly output?: AgentOutput | undefined;
+ }
+ 
+-export interface RunAgentOutput {
+-  readonly resultText: string;
+-  readonly capability: string;
+-  readonly steps: number;
+-  readonly staged: StagedOperationsSummary;
++export interface ApplyOutcome {
++  /** True only when EVERY staged operation applied cleanly. */
+   readonly applied: boolean;
++  /** The edited project when `applied`, otherwise the untouched input project. */
+   readonly updatedProject: JoyProjectV1;
+   readonly appliedCount: number;
+   readonly errors: string[];
+ }
+ 
++export interface RunAgentOutput extends ApplyOutcome {
++  readonly resultText: string;
++  readonly capability: string;
++  readonly steps: number;
++  readonly staged: StagedOperationsSummary;
++  readonly modelId: string;
++  readonly provider: string;
++  /**
++   * Apply exactly the operations this run staged (all-or-nothing, no new
++   * model call). Used by the REPL once the user approves the proposal.
++   */
++  readonly applyStaged: () => ApplyOutcome;
++}
++
++/** A provider/model failure, with a human explanation (never a secret). */
++export class AgentRunError extends Error {
++  constructor(
++    readonly code: string,
++    message: string,
++    readonly httpStatus?: number | undefined,
++  ) {
++    super(message);
++    this.name = 'AgentRunError';
++  }
++}
++
++const DEFAULT_TIMEOUT_MS = 180_000;
++
++/** `JOY_AGENT_TIMEOUT_MS` bounds one agent run (the engine caps it at 180 s). */
++export function agentTimeoutMs(): number {
++  const raw = process.env.JOY_AGENT_TIMEOUT_MS;
++  if (raw === undefined || raw.trim() === '') return DEFAULT_TIMEOUT_MS;
++  const value = Number(raw);
++  return Number.isInteger(value) && value > 0
++    ? Math.min(value, DEFAULT_TIMEOUT_MS)
++    : DEFAULT_TIMEOUT_MS;
++}
++
++function explainFailure(
++  code: string,
++  traffic: ProviderTraffic,
++  baseUrl: string,
++  modelId: string,
++  timedOut: boolean,
++  timeoutMs: number,
++): string {
++  const status = traffic.lastStatus;
++  if (timedOut) {
++    return `No complete answer from the provider within ${Math.round(timeoutMs / 1000)}s; gave up (set JOY_AGENT_TIMEOUT_MS to change the limit).`;
++  }
++  if (status !== undefined && status >= 400) {
++    if (status === 401 || status === 403) {
++      return `The provider rejected the API key (HTTP ${status}). Check the key configured for this provider.`;
++    }
++    if (status === 404) {
++      return `The provider answered HTTP 404. Check that the URL is the API base (usually ending in /v1) and that model "${modelId}" exists.`;
++    }
++    if (status === 429) {
++      return 'The provider is rate-limiting requests (HTTP 429). Wait a moment and retry.';
++    }
++    if (status >= 500) return `The provider had a server error (HTTP ${status}). Retry later.`;
++    return `The provider answered HTTP ${status}.`;
++  }
++  if (traffic.networkErrorCode && traffic.lastStatus === undefined) {
++    return `Could not reach the provider at ${new URL(baseUrl).origin} (${traffic.networkErrorCode}).`;
++  }
++  switch (code) {
++    case 'JOY_AGENT_ABORTED':
++      return 'The agent run was cancelled.';
++    case 'JOY_AGENT_TIMEOUT':
++      return 'The provider timed out.';
++    case 'JOY_AGENT_RESPONSE_TOO_LARGE':
++      return 'The provider response was too large.';
++    case 'JOY_AGENT_INVALID_TOOL':
++      return 'The model produced an invalid tool call or an oversized answer.';
++    case 'JOY_AGENT_AUTH_FAILED':
++      return 'The provider rejected the credentials.';
++    case 'JOY_AGENT_CORS_OR_NETWORK':
++      return 'A network error occurred while talking to the provider.';
++    default:
++      return 'The provider returned something JOY could not use (is it an OpenAI-compatible chat-completions endpoint, and does the model support tool calls?).';
++  }
++}
++
+ export async function probeAgent(
+   providerOptions?: ResolveProviderOptions,
+-): Promise<{ capability: string; provider: string; modelId: string }> {
++): Promise<{ capability: string; provider: string; modelId: string; httpStatus?: number }> {
+   const config = resolveByokConfig(providerOptions);
+-  const model = createModelFromConfig(config);
++  const traffic: ProviderTraffic = { requests: 0 };
++  const model = createModelFromConfig(config, traffic);
+   const bridge = new CliJoyAgentToolBridge(
+     {
+       schemaVersion: 1,
+@@ -74,6 +162,23 @@ export async function probeAgent(
+ 
+   const engine = new JoyAgentEngine({ model, bridge });
+   const probeResult = await engine.probe();
++  if (probeResult.capability === 'incompatible') {
++    // The engine swallows the cause; report what the HTTP layer saw.
++    throw new AgentRunError(
++      'JOY_AGENT_PROVIDER_INCOMPATIBLE',
++      explainFailure(
++        'JOY_AGENT_PROVIDER_INCOMPATIBLE',
++        traffic,
++        config.baseUrl,
++        config.modelId,
++        false,
++        0,
++      ),
++      traffic.lastStatus !== undefined && traffic.lastStatus >= 400
++        ? traffic.lastStatus
++        : undefined,
++    );
++  }
+   return {
+     capability: probeResult.capability,
+     provider: config.provider,
+@@ -81,9 +186,50 @@ export async function probeAgent(
+   };
+ }
+ 
++/** One-line, human description of a staged operation. */
++export function describeOperation(op: JoyTimelineOperation | JoyDocumentOperation): string {
++  const sec = (us: number): string => `${(us / 1_000_000).toFixed(2)}s`;
++  switch (op.kind) {
++    case 'insert':
++      return `insert clip ${op.id} (asset ${op.assetId}) on track ${op.trackId} at ${sec(op.startUs)} for ${sec(op.durationUs)}`;
++    case 'remove':
++      return `remove clip ${op.clipId}`;
++    case 'move':
++      return `move clip ${op.clipId} to track ${op.trackId} at ${sec(op.startUs)}`;
++    case 'trim':
++      return `trim clip ${op.clipId} to ${sec(op.startUs)}-${sec(op.endUs)}`;
++    case 'split':
++      return `split clip ${op.clipId} at ${sec(op.atUs)}`;
++    case 'set-text':
++      return `set text of ${op.objectId}`;
++    case 'set-property':
++      return `set ${op.property} of ${op.objectId}`;
++    case 'add-effect':
++      return `add effect ${op.effectId} to ${op.objectId}`;
++  }
++}
++
++function applyAllOrNothing(
++  bridge: CliJoyAgentToolBridge,
++  original: JoyProjectV1,
++): ApplyOutcome {
++  const result = bridge.applyStaged();
++  if (result.errors.length > 0) {
++    return { applied: false, updatedProject: original, appliedCount: 0, errors: result.errors };
++  }
++  return {
++    applied: true,
++    updatedProject: result.updatedProject,
++    appliedCount: result.appliedCount,
++    errors: [],
++  };
++}
++
+ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOutput> {
++  const out = options.output ?? createAgentOutput(false);
+   const config = resolveByokConfig(options.providerOptions);
+-  const model = createModelFromConfig(config);
++  const traffic: ProviderTraffic = { requests: 0 };
++  const model = createModelFromConfig(config, traffic);
+ 
+   const bridge = new CliJoyAgentToolBridge(
+     options.project,
+@@ -94,75 +240,96 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
+   const eventLogger = (event: JoyAgentSafeEvent): void => {
+     options.onEvent?.(event);
+     if (event.type === 'activity') {
+-      logStep('Agent Phase', `${event.phase} (${event.activityCode})`);
++      out.step('Agent Phase', `${event.phase} (${event.activityCode})`);
+     } else if (event.type === 'text-delta') {
+-      process.stdout.write(c(event.text, 'dim'));
++      out.write(event.text);
+     } else if (event.type === 'proposal') {
+-      console.log();
+-      logInfo(`Staged proposal: ${event.operationCount} operations (hash: ${event.proposalHash})`);
++      out.line();
++      out.info(`Staged proposal: ${event.operationCount} operations (hash: ${event.proposalHash})`);
+     } else if (event.type === 'usage') {
+-      logStep(
++      out.step(
+         'Token Usage',
+         `Prompt: ${event.inputTokens} | Output: ${event.outputTokens} | Total: ${event.totalTokens}`,
+       );
+     }
+   };
+ 
+-  const engine = new JoyAgentEngine({
+-    model,
+-    bridge,
+-    onEvent: eventLogger,
+-  });
++  const engine = new JoyAgentEngine({ model, bridge, onEvent: eventLogger });
+ 
+   const runId = `cli-${Date.now().toString(36)}`;
+-  logInfo(
++  out.info(
+     `Connecting to Joy Agent with model ${c(config.modelId, 'bold')} (${config.provider})...`,
+   );
+ 
+-  const runResult = await engine.run({
+-    taskKind: options.taskKind ?? 'joy-code-edit',
+-    runId,
+-    baseRevision: `rev-${options.revision}`,
+-    request: options.prompt,
+-    context: {
+-      projectId: options.project.id,
+-      title: options.project.title,
+-    },
+-  });
++  // Our own deadline (<= the engine's 180 s cap). The engine reports an abort
++  // that lands mid-body as an unrelated error code, so remember it ourselves.
++  const timeoutMs = agentTimeoutMs();
++  const deadline = new AbortController();
++  let timedOut = false;
++  const timer = setTimeout(() => {
++    timedOut = true;
++    deadline.abort();
++  }, timeoutMs);
++  let runResult;
++  try {
++    runResult = await engine.run(
++      {
++        taskKind: options.taskKind ?? 'joy-code-edit',
++        runId,
++        baseRevision: `rev-${options.revision}`,
++        request: options.prompt,
++        context: {
++          projectId: options.project.id,
++          title: options.project.title,
++        },
++      },
++      deadline.signal,
++    );
++  } catch (error) {
++    const code = error instanceof Error ? error.message : 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
++    const status = traffic.lastStatus;
++    throw new AgentRunError(
++      timedOut ? 'JOY_AGENT_TIMEOUT' : code,
++      explainFailure(code, traffic, config.baseUrl, config.modelId, timedOut, timeoutMs),
++      status !== undefined && status >= 400 ? status : undefined,
++    );
++  } finally {
++    clearTimeout(timer);
++  }
+ 
+-  console.log(); // newline after text-deltas
+-  logSuccess(`Joy Agent finished in ${runResult.steps} step(s).`);
++  out.line(); // newline after text-deltas
++  out.success(`Joy Agent finished in ${runResult.steps} step(s).`);
+ 
+   const staged = bridge.getStagedOperations();
++  const applyStaged = (): ApplyOutcome => applyAllOrNothing(bridge, options.project);
+ 
+-  let updatedProject = options.project;
+-  let appliedCount = 0;
+-  let errors: string[] = [];
+-  let applied = false;
+-
++  let outcome: ApplyOutcome = {
++    applied: false,
++    updatedProject: options.project,
++    appliedCount: 0,
++    errors: [],
++  };
+   if (options.apply) {
+-    logInfo('Applying staged operations to project...');
+-    const applyRes = bridge.applyStaged();
+-    updatedProject = applyRes.updatedProject;
+-    appliedCount = applyRes.appliedCount;
+-    errors = applyRes.errors;
+-    applied = true;
+-    if (errors.length > 0) {
+-      logWarn(`Applied with ${errors.length} warning(s):`);
+-      for (const err of errors) console.log(`  ${c('!', 'yellow')} ${err}`);
++    out.info('Applying staged operations to project...');
++    outcome = applyStaged();
++    if (outcome.errors.length > 0) {
++      out.warn(
++        `Refusing to apply: ${outcome.errors.length} staged operation(s) are invalid, so nothing was changed:`,
++      );
++      for (const err of outcome.errors) out.line(`  ${c('!', 'yellow')} ${err}`);
+     } else {
+-      logSuccess(`Successfully applied ${appliedCount} operation(s).`);
++      out.success(`Successfully applied ${outcome.appliedCount} operation(s).`);
+     }
+   }
+ 
+   return {
++    ...outcome,
+     resultText: runResult.text,
+     capability: runResult.capability,
+     steps: runResult.steps,
+     staged,
+-    applied,
+-    updatedProject,
+-    appliedCount,
+-    errors,
++    modelId: config.modelId,
++    provider: config.provider,
++    applyStaged,
+   };
+ }
+diff --git a/apps/cli/src/agent/output.ts b/apps/cli/src/agent/output.ts
+new file mode 100644
+index 0000000..2fc0e6f
+--- /dev/null
++++ b/apps/cli/src/agent/output.ts
+@@ -0,0 +1,79 @@
++/* global console, process */
++import {
++  c,
++  logError,
++  logInfo,
++  logStep,
++  logSuccess,
++  logWarn,
++  printBanner,
++} from '../utils/logger.js';
++
++/**
++ * Output sink for the agent commands.
++ *
++ * Human mode prints exactly what the CLI always printed. In `--json` mode
++ * stdout is reserved for the single JSON result document; progress and
++ * human-readable notes go to stderr instead so a caller can `JSON.parse`
++ * stdout unconditionally.
++ */
++export interface AgentOutput {
++  readonly json: boolean;
++  banner(): void;
++  info(message: string): void;
++  success(message: string): void;
++  warn(message: string): void;
++  step(label: string, detail: string): void;
++  line(text?: string): void;
++  /** Streamed model text (no trailing newline). */
++  write(text: string): void;
++  error(message: string): void;
++  /** The machine-readable result (JSON mode only; ignored in human mode). */
++  result(payload: unknown): void;
++}
++
++export function createAgentOutput(json: boolean): AgentOutput {
++  if (!json) {
++    return {
++      json: false,
++      banner: printBanner,
++      info: logInfo,
++      success: logSuccess,
++      warn: logWarn,
++      step: logStep,
++      line: (text = '') => console.log(text),
++      write: (text) => {
++        process.stdout.write(c(text, 'dim'));
++      },
++      error: logError,
++      result: () => {},
++    };
++  }
++  const toStderr = (text: string): void => {
++    process.stderr.write(`${text}\n`);
++  };
++  return {
++    json: true,
++    banner: () => {},
++    info: (message) => toStderr(`i ${message}`),
++    success: (message) => toStderr(`ok ${message}`),
++    warn: (message) => toStderr(`! ${message}`),
++    step: (label, detail) => toStderr(`  - ${label}: ${detail}`),
++    line: (text = '') => {
++      if (text) toStderr(text);
++    },
++    write: (text) => {
++      process.stderr.write(text);
++    },
++    error: logError,
++    result: (payload) => {
++      process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
++    },
++  };
++}
++
++/** Mask a secret for display: never reveal more than its last 4 characters. */
++export function maskSecret(secret: string | undefined): string | null {
++  if (!secret) return null;
++  return secret.length >= 16 ? `****${secret.slice(-4)}` : '****';
++}
+diff --git a/apps/cli/src/agent/provider.ts b/apps/cli/src/agent/provider.ts
+index 348c650..780062d 100644
+--- a/apps/cli/src/agent/provider.ts
++++ b/apps/cli/src/agent/provider.ts
+@@ -1,11 +1,19 @@
+-/* global process */
++/* global process, fetch */
+ import {
++  OPENROUTER_BASE_URL,
++  ProviderConfigError,
+   createJoyAgentProvider,
+   normalizeByokSessionConfig,
+   type ByokSessionConfig,
++  type JoyFetch,
+ } from '@joy-media/joy-agent-engine';
+ import type { LanguageModel } from 'ai';
+-import { loadAiProviders, loadCliConfig } from '../utils/config.js';
++import {
++  hasAiProvider,
++  loadAiProviders,
++  loadCliConfig,
++  type AiProviderConfig,
++} from '../utils/config.js';
+ 
+ export interface ResolveProviderOptions {
+   readonly provider?: string | undefined;
+@@ -14,12 +22,156 @@ export interface ResolveProviderOptions {
+   readonly baseUrl?: string | undefined;
+ }
+ 
+-export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSessionConfig {
++/**
++ * The provider configuration is unusable as given (unknown provider, bad URL,
++ * missing API key...). Detected locally, before any network traffic; the CLI
++ * reports it as a usage error (exit 2).
++ */
++export class AgentConfigError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = 'AgentConfigError';
++  }
++}
++
++type ProviderKind = 'openrouter' | 'openai-compatible' | 'kilo' | 'custom';
++
++interface BuiltinProvider {
++  readonly kind: ProviderKind;
++  readonly baseUrl: string;
++  readonly model: string;
++  readonly envKey?: string;
++}
++
++/** Providers that work without `agent provider add`. */
++export const BUILTIN_PROVIDERS: Readonly<Record<string, BuiltinProvider>> = Object.freeze({
++  openrouter: {
++    kind: 'openrouter',
++    baseUrl: OPENROUTER_BASE_URL,
++    model: 'openrouter/auto',
++    envKey: 'OPENROUTER_API_KEY',
++  },
++  kilo: {
++    kind: 'kilo',
++    baseUrl: 'https://api.kilo.ai/api/gateway/v1',
++    model: 'minimax/minimax-m3',
++    envKey: 'KILO_API_KEY',
++  },
++  openai: {
++    kind: 'openai-compatible',
++    baseUrl: 'https://api.openai.com/v1',
++    model: 'gpt-4o',
++    envKey: 'OPENAI_API_KEY',
++  },
++  // Anthropic's OpenAI-compatible endpoint. An Anthropic key must never be
++  // sent to api.openai.com (the previous fallback for every other provider).
++  anthropic: {
++    kind: 'openai-compatible',
++    baseUrl: 'https://api.anthropic.com/v1',
++    model: 'claude-3-7-sonnet-20250219',
++    envKey: 'ANTHROPIC_API_KEY',
++  },
++  'lm-studio': { kind: 'custom', baseUrl: 'http://127.0.0.1:1234/v1', model: 'gpt-4o' },
++});
++
++function builtin(name: string): BuiltinProvider | undefined {
++  return Object.prototype.hasOwnProperty.call(BUILTIN_PROVIDERS, name)
++    ? BUILTIN_PROVIDERS[name]
++    : undefined;
++}
++
++export interface ResolvedProviderSettings {
++  /** Provider name as the user knows it (`openrouter`, or a stored name). */
++  readonly providerName: string;
++  readonly kind: ProviderKind;
++  readonly baseUrl: string;
++  readonly modelId: string;
++  readonly apiKey: string | undefined;
++  /** Where the key came from: `flag`, `env:<VAR>`, `provider:<name>` or `none`. */
++  readonly apiKeySource: string;
++  /** Loopback endpoint (LM Studio, Ollama, a local proxy, a test double). */
++  readonly local: boolean;
++}
++
++const MAX_MODEL_ID_LENGTH = 256;
++const MAX_API_KEY_LENGTH = 512;
++
++function isLoopbackHost(hostname: string): boolean {
++  const host = hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
++  return (
++    host === 'localhost' ||
++    host.endsWith('.localhost') ||
++    host === '::1' ||
++    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
++  );
++}
++
++/**
++ * Validate and normalise a provider base URL. Error messages never echo the
++ * URL itself: a malformed or credential-bearing URL may contain a secret.
++ */
++export function normalizeCliBaseUrl(raw: string): { readonly url: string; readonly local: boolean } {
++  const candidate = raw.trim();
++  let url: URL;
++  try {
++    url = new URL(candidate);
++  } catch {
++    throw new AgentConfigError(
++      'The provider URL is not a valid absolute URL (expected e.g. https://api.example.com/v1).',
++    );
++  }
++  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
++    throw new AgentConfigError('The provider URL must start with https:// (or http:// for localhost).');
++  }
++  if (url.username !== '' || url.password !== '') {
++    throw new AgentConfigError(
++      'The provider URL must not contain credentials. Pass the key with --api-key instead.',
++    );
++  }
++  if (url.search !== '' || url.hash !== '') {
++    throw new AgentConfigError('The provider URL must not contain a query string or fragment.');
++  }
++  const pathname = url.pathname.replace(/\/+$/, '');
++  if (pathname.toLowerCase().endsWith('/chat/completions')) {
++    throw new AgentConfigError(
++      'The provider URL must be the API base (e.g. https://host/v1), not the /chat/completions endpoint.',
++    );
++  }
++  const local = isLoopbackHost(url.hostname);
++  if (!local && url.protocol !== 'https:') {
++    throw new AgentConfigError(
++      'Remote provider URLs must use https:// (plain http:// is only allowed for localhost).',
++    );
++  }
++  return { url: `${url.origin}${pathname}`, local };
++}
++
++function storedProviderKind(stored: AiProviderConfig): ProviderKind {
++  switch (stored.provider) {
++    case 'openrouter':
++      return 'openrouter';
++    case 'kilo':
++      return 'kilo';
++    case 'custom':
++      return 'custom';
++    default:
++      return 'openai-compatible';
++  }
++}
++
++/**
++ * Work out which provider, endpoint, model and key a run would use, without
++ * contacting anything. Precedence: flags, then the stored/active provider
++ * configuration, then environment variables for the default provider choice.
++ */
++export function resolveProviderSettings(
++  options: ResolveProviderOptions = {},
++): ResolvedProviderSettings {
+   const cliConfig = loadCliConfig();
+   const aiProviders = loadAiProviders();
+ 
+-  // 1. Determine provider
+-  const provider =
++  // 1. Provider name
++  const providerName =
+     options.provider ??
+     cliConfig.activeProvider ??
+     (process.env.KILO_API_KEY
+@@ -31,78 +183,143 @@ export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSes
+           : process.env.ANTHROPIC_API_KEY
+             ? 'anthropic'
+             : 'openrouter');
++  const stored = hasAiProvider(aiProviders, providerName) ? aiProviders[providerName] : undefined;
++  const known = builtin(providerName);
+ 
+-  // 2. Determine API key
+-  let apiKey = options.apiKey;
+-  if (!apiKey) {
+-    if (provider === 'kilo' && process.env.KILO_API_KEY) {
+-      apiKey = process.env.KILO_API_KEY;
+-    } else if (provider === 'openrouter' && process.env.OPENROUTER_API_KEY) {
+-      apiKey = process.env.OPENROUTER_API_KEY;
+-    } else if (provider === 'openai' && process.env.OPENAI_API_KEY) {
+-      apiKey = process.env.OPENAI_API_KEY;
+-    } else if (provider === 'anthropic' && process.env.ANTHROPIC_API_KEY) {
+-      apiKey = process.env.ANTHROPIC_API_KEY;
+-    } else if (aiProviders[provider]?.apiKey) {
+-      apiKey = aiProviders[provider]!.apiKey;
+-    }
++  // `agent config --url/--model` and `agent model set` describe the ACTIVE
++  // provider. They must not leak onto a different provider picked with
++  // --provider (that would send this provider's key to another endpoint).
++  const usingConfigured =
++    options.provider === undefined || options.provider === cliConfig.activeProvider;
++  const configuredBaseUrl = usingConfigured ? cliConfig.customBaseUrl : undefined;
++
++  if (!stored && !known && !options.baseUrl && !configuredBaseUrl) {
++    throw new AgentConfigError(
++      `Unknown provider "${providerName}". Add it with "joy-media agent provider add ${providerName} --url <url>", ` +
++        'or pass --url for a one-off endpoint.',
++    );
+   }
+ 
+-  // 3. Determine base URL and normalized provider
+-  const actualProviderType =
+-    aiProviders[provider]?.provider ??
+-    (provider.includes('kilo')
+-      ? 'kilo'
+-      : provider.includes('openrouter')
+-        ? 'openrouter'
+-        : provider);
+-
+-  const normalizedProvider: 'openrouter' | 'openai-compatible' | 'kilo' | 'custom' =
+-    actualProviderType === 'openrouter'
+-      ? 'openrouter'
+-      : actualProviderType === 'kilo'
+-        ? 'kilo'
+-        : actualProviderType === 'custom'
+-          ? 'custom'
+-          : 'openai-compatible';
+-
+-  let resolvedBaseUrl =
+-    options.baseUrl ?? cliConfig.customBaseUrl ?? aiProviders[provider]?.baseUrl;
+-
+-  if (!resolvedBaseUrl) {
+-    if (normalizedProvider === 'openrouter') {
+-      resolvedBaseUrl = 'https://openrouter.ai/api/v1';
+-    } else if (normalizedProvider === 'kilo') {
+-      resolvedBaseUrl = 'https://api.kilo.ai/api/gateway/v1';
+-    } else if (provider === 'lm-studio') {
+-      resolvedBaseUrl = 'http://127.0.0.1:1234/v1';
+-    } else {
+-      resolvedBaseUrl = 'https://api.openai.com/v1';
+-    }
++  // 2. API key
++  let apiKey = options.apiKey?.trim() || undefined;
++  let apiKeySource = apiKey ? 'flag' : 'none';
++  if (!apiKey && known?.envKey && process.env[known.envKey]?.trim()) {
++    apiKey = process.env[known.envKey]!.trim();
++    apiKeySource = `env:${known.envKey}`;
++  }
++  if (!apiKey && stored?.apiKey?.trim()) {
++    apiKey = stored.apiKey.trim();
++    apiKeySource = `provider:${providerName}`;
+   }
+ 
+-  // 4. Determine model ID
+-  const modelId =
++  // 3. Base URL — a stored provider's key stays paired with its own URL.
++  const rawBaseUrl = options.baseUrl ?? stored?.baseUrl ?? configuredBaseUrl ?? known?.baseUrl;
++  if (rawBaseUrl === undefined) {
++    throw new AgentConfigError(`No base URL configured for provider "${providerName}".`);
++  }
++  const { url: baseUrl, local } = normalizeCliBaseUrl(rawBaseUrl);
++
++  let kind: ProviderKind = stored ? storedProviderKind(stored) : (known?.kind ?? 'custom');
++  if (local) kind = 'custom';
++
++  // 4. Model
++  const modelId = (
+     options.model ??
+-    cliConfig.defaultModel ??
+-    aiProviders[provider]?.defaultModel ??
+-    (provider === 'kilo'
+-      ? 'minimax/minimax-m3'
+-      : provider === 'openrouter'
+-        ? 'openrouter/auto'
+-        : provider === 'anthropic'
+-          ? 'claude-3-7-sonnet-20250219'
+-          : 'gpt-4o');
+-
+-  return normalizeByokSessionConfig({
+-    provider: normalizedProvider,
+-    baseUrl: resolvedBaseUrl,
+-    modelId,
+-    apiKey: apiKey ?? 'not-provided',
+-  });
++    (usingConfigured ? cliConfig.defaultModel : undefined) ??
++    stored?.defaultModel ??
++    known?.model ??
++    'gpt-4o'
++  ).trim();
++
++  return { providerName, kind, baseUrl, modelId, apiKey, apiKeySource, local };
++}
++
++export function missingApiKeyMessage(settings: ResolvedProviderSettings): string {
++  const envKey = builtin(settings.providerName)?.envKey;
++  return (
++    `No API key configured for provider "${settings.providerName}". ` +
++    'Pass --api-key <key> (or --api-key - to read it from stdin)' +
++    (envKey ? `, set ${envKey}` : '') +
++    `, or store one with "joy-media agent provider add ${settings.providerName} --url <url> --api-key -".`
++  );
++}
++
++/**
++ * Resolve and validate the provider configuration for a run or probe.
++ * Fails fast and locally (AgentConfigError) instead of sending a placeholder
++ * key to a real endpoint.
++ */
++export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSessionConfig {
++  const settings = resolveProviderSettings(options);
++  const { modelId, apiKey } = settings;
++  if (modelId.length === 0 || modelId.length > MAX_MODEL_ID_LENGTH) {
++    throw new AgentConfigError(`The model id must be 1-${MAX_MODEL_ID_LENGTH} characters long.`);
++  }
++  if (apiKey !== undefined && apiKey.length > MAX_API_KEY_LENGTH) {
++    throw new AgentConfigError(`The API key is longer than ${MAX_API_KEY_LENGTH} characters.`);
++  }
++
++  if (settings.local) {
++    // Local servers (LM Studio, Ollama...) usually need no key: send none.
++    return Object.freeze({
++      provider: 'custom' as const,
++      baseUrl: settings.baseUrl,
++      modelId,
++      apiKey: apiKey ?? '',
++    });
++  }
++
++  if (!apiKey) throw new AgentConfigError(missingApiKeyMessage(settings));
++
++  try {
++    return normalizeByokSessionConfig({
++      provider: settings.kind,
++      baseUrl: settings.baseUrl,
++      modelId,
++      apiKey,
++    });
++  } catch (error) {
++    if (error instanceof ProviderConfigError) {
++      throw new AgentConfigError(
++        settings.kind === 'openrouter'
++          ? `Provider "${settings.providerName}" is an OpenRouter provider and only accepts ${OPENROUTER_BASE_URL}.`
++          : `The endpoint for provider "${settings.providerName}" is not allowed: remote providers must be public https:// hosts (private-network addresses are blocked; use localhost for local servers).`,
++      );
++    }
++    throw error;
++  }
+ }
+ 
+-export function createModelFromConfig(config: ByokSessionConfig): LanguageModel {
+-  const { model } = createJoyAgentProvider(config);
++/** HTTP-level facts about the provider traffic of one run (never headers or bodies). */
++export interface ProviderTraffic {
++  requests: number;
++  lastStatus?: number | undefined;
++  lastStatusText?: string | undefined;
++  networkErrorCode?: string | undefined;
++}
++
++export function createModelFromConfig(
++  config: ByokSessionConfig,
++  traffic?: ProviderTraffic,
++): LanguageModel {
++  const observingFetch: JoyFetch = async (input, init) => {
++    if (traffic) traffic.requests += 1;
++    try {
++      const response = await fetch(input, init);
++      if (traffic) {
++        traffic.lastStatus = response.status;
++        traffic.lastStatusText = response.statusText;
++      }
++      return response;
++    } catch (error) {
++      if (traffic) {
++        const cause = (error as { cause?: { code?: unknown } }).cause;
++        traffic.networkErrorCode =
++          typeof cause?.code === 'string' ? cause.code : (error as Error).name || 'FetchError';
++      }
++      throw error;
++    }
++  };
++  const { model } = createJoyAgentProvider(config, observingFetch);
+   return model;
+ }
+diff --git a/apps/cli/src/agent/repl.ts b/apps/cli/src/agent/repl.ts
+index cc019d3..b9d661d 100644
+--- a/apps/cli/src/agent/repl.ts
++++ b/apps/cli/src/agent/repl.ts
+@@ -4,7 +4,7 @@ import type { JoyProjectV1 } from '@joy-media/project-schema';
+ import { compileLook, editorialClean } from '@joy-media/motion-core';
+ import { c, logInfo, logSuccess, logWarn, printBanner, printTable } from '../utils/logger.js';
+ import { saveProject } from '../utils/project-loader.js';
+-import { runJoyAgent } from './joy-agent.js';
++import { describeOperation, runJoyAgent } from './joy-agent.js';
+ import type { ResolveProviderOptions } from './provider.js';
+ 
+ export interface ReplOptions {
+@@ -50,17 +50,38 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
+     `  ${c('Type', 'dim')} ${c('/help', 'bold')} ${c('for commands, or ask Joy Agent in natural language.', 'dim')}\n`,
+   );
+ 
++  // Piped (non-TTY) stdin is a first-class input for AI callers: read it as a
++  // stream of lines. `rl.question()` dropped every line that arrived while no
++  // question was pending (so only the first piped command ran) and never
++  // settled on EOF.
++  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+   const rl = readline.createInterface({
+     input: process.stdin,
+     output: process.stdout,
++    terminal: interactive,
+   });
++  const lines = rl[Symbol.asyncIterator]();
++  const ask = async (prompt: string): Promise<string | undefined> => {
++    rl.setPrompt(prompt);
++    rl.prompt();
++    const next = await lines.next();
++    if (next.done) {
++      console.log();
++      return undefined;
++    }
++    return next.value;
++  };
+ 
+   let currentProject = options.project;
+   let currentRev = options.revision;
+ 
+   try {
+     while (true) {
+-      const input = await rl.question(`${c('joy-agent', 'magenta')}> `);
++      const input = await ask(`${c('joy-agent', 'magenta')}> `);
++      if (input === undefined) {
++        console.log(c('Goodbye!', 'dim'));
++        break;
++      }
+       const trimmed = input.trim();
+ 
+       if (!trimmed) continue;
+@@ -162,41 +183,36 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
+ 
+         if (totalStaged > 0) {
+           console.log(`\n  ${c('Proposed Modifications:', 'bold')}`);
+-          for (const op of result.staged.timelineOps) {
+-            console.log(
+-              `    ${c('+', 'green')} Timeline: ${c(op.kind, 'bold')} on track ${op.kind === 'insert' || op.kind === 'move' ? (op as { trackId: string }).trackId : 'current'}`,
+-            );
+-          }
+-          for (const op of result.staged.documentOps) {
+-            console.log(
+-              `    ${c('+', 'green')} Document: ${c(op.kind, 'bold')} object ${(op as { objectId: string }).objectId}`,
+-            );
++          for (const op of [...result.staged.timelineOps, ...result.staged.documentOps]) {
++            console.log(`    ${c('+', 'green')} ${describeOperation(op)}`);
+           }
+ 
+-          const answer = await rl.question(
+-            `\n  ${c('Apply these changes to project? [y/N]:', 'yellow')} `,
+-          );
++          const answer =
++            (await ask(`\n  ${c('Apply these changes to project? [y/N]:', 'yellow')} `)) ?? '';
+           if (answer.trim().toLowerCase() === 'y' || answer.trim().toLowerCase() === 'yes') {
+-            const applied = await runJoyAgent({
+-              project: currentProject,
+-              revision: currentRev,
+-              prompt: trimmed,
+-              apply: true,
+-              providerOptions: options.providerOptions,
+-            });
+-            currentProject = applied.updatedProject;
+-            currentRev = saveProject(currentProject, {
+-              source: options.source,
+-              path: options.path,
+-              revision: currentRev,
+-            });
+-            logSuccess(`Saved updated project revision ${currentRev}.`);
++            // Apply exactly what the user approved. (Re-running the model here
++            // used to apply a fresh, possibly different, proposal.)
++            const applied = result.applyStaged();
++            if (!applied.applied) {
++              logWarn(
++                `Nothing was changed: ${applied.errors.length} proposed operation(s) are invalid:`,
++              );
++              for (const message of applied.errors) console.log(`    ${c('!', 'yellow')} ${message}`);
++            } else {
++              currentProject = applied.updatedProject;
++              currentRev = saveProject(currentProject, {
++                source: options.source,
++                path: options.path,
++                revision: currentRev,
++              });
++              logSuccess(`Saved updated project revision ${currentRev}.`);
++            }
+           } else {
+             logInfo('Changes discarded.');
+           }
+         }
+       } catch (err) {
+-        logWarn(`Joy Agent run error: ${String(err)}`);
++        logWarn(`Joy Agent run error: ${err instanceof Error ? err.message : String(err)}`);
+       }
+       console.log();
+     }
+diff --git a/apps/cli/src/commands/agent-cmd.ts b/apps/cli/src/commands/agent-cmd.ts
+index dead8ee..157e192 100644
+--- a/apps/cli/src/commands/agent-cmd.ts
++++ b/apps/cli/src/commands/agent-cmd.ts
+@@ -1,28 +1,42 @@
+-/* global console */
++/* global process, fetch, AbortSignal, TextDecoder */
+ import type { CliFlags } from '../cli.js';
+-import { probeAgent, runJoyAgent } from '../agent/joy-agent.js';
++import {
++  AgentRunError,
++  describeOperation,
++  probeAgent,
++  runJoyAgent,
++  type RunAgentOutput,
++} from '../agent/joy-agent.js';
++import { createAgentOutput, maskSecret, type AgentOutput } from '../agent/output.js';
++import {
++  AgentConfigError,
++  BUILTIN_PROVIDERS,
++  normalizeCliBaseUrl,
++  resolveByokConfig,
++  resolveProviderSettings,
++  type ResolveProviderOptions,
++  type ResolvedProviderSettings,
++} from '../agent/provider.js';
+ import { startAgentRepl } from '../agent/repl.js';
+ import {
++  ConfigFileError,
+   deleteAiProvider,
++  getDefaultSqlitePath,
++  hasAiProvider,
+   loadAiProviders,
+   loadCliConfig,
+-  saveCliConfig,
+-  setAiProvider,
++  updateAiProviders,
++  updateCliConfig,
++  type AiProviderConfig,
++  type CliConfig,
+ } from '../utils/config.js';
+-import {
+-  c,
+-  logError,
+-  logInfo,
+-  logStep,
+-  logSuccess,
+-  logWarn,
+-  printBanner,
+-} from '../utils/logger.js';
++import { c } from '../utils/logger.js';
+ import {
+   createDefaultProject,
+   listProjects,
+   loadProject,
+   saveProject,
++  type ProjectLoadResult,
+ } from '../utils/project-loader.js';
+ 
+ export interface AgentCommandFlags {
+@@ -35,375 +49,741 @@ export interface AgentCommandFlags {
+   baseUrl?: string | undefined;
+ }
+ 
++/** Exit statuses: 1 = the command ran and failed, 2 = it was invoked wrongly. */
++const EXIT_FAILURE = 1;
++const EXIT_USAGE = 2;
++
++const PROVIDER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
++const DISCOVERY_TIMEOUT_MS = 10_000;
++const DISCOVERY_MAX_BYTES = 8 * 1024 * 1024;
++const MAX_CACHED_MODELS = 5_000;
++
++/** A command-level failure with its exit status and a stable machine code. */
++class AgentCommandError extends Error {
++  constructor(
++    message: string,
++    readonly exitCode: number,
++    readonly code: string,
++  ) {
++    super(message);
++    this.name = 'AgentCommandError';
++  }
++}
++
++const usage = (message: string): AgentCommandError =>
++  new AgentCommandError(message, EXIT_USAGE, 'USAGE');
++const failure = (message: string, code = 'FAILED'): AgentCommandError =>
++  new AgentCommandError(message, EXIT_FAILURE, code);
++
+ export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {
++  const out = createAgentOutput(flags.json);
++  try {
++    return await dispatch(args, flags, out);
++  } catch (error) {
++    return reportFailure(error, out);
++  }
++}
++
++function reportFailure(error: unknown, out: AgentOutput): number {
++  let exitCode: number;
++  let code: string;
++  let httpStatus: number | undefined;
++  if (error instanceof AgentCommandError) {
++    exitCode = error.exitCode;
++    code = error.code;
++  } else if (error instanceof AgentConfigError) {
++    exitCode = EXIT_USAGE;
++    code = 'AGENT_CONFIG_INVALID';
++  } else if (error instanceof ConfigFileError) {
++    exitCode = EXIT_FAILURE;
++    code = 'CONFIG_FILE_CORRUPT';
++  } else if (error instanceof AgentRunError) {
++    exitCode = EXIT_FAILURE;
++    code = error.code;
++    httpStatus = error.httpStatus;
++  } else {
++    throw error;
++  }
++  const message = (error as Error).message;
++  out.error(message);
++  out.result({
++    ok: false,
++    error: { code, message, ...(httpStatus === undefined ? {} : { httpStatus }) },
++  });
++  return exitCode;
++}
++
++async function dispatch(args: string[], flags: CliFlags, out: AgentOutput): Promise<number> {
+   const sub = args[0] ?? 'chat';
++  switch (sub) {
++    case 'provider':
++      return handleProvider(args, flags, out);
++    case 'models':
++      return handleModels(args, flags, out);
++    case 'model':
++      return handleModel(args, flags, out);
++    case 'probe':
++      return handleProbe(flags, out);
++    case 'config':
++      return handleConfig(flags, out);
++    case 'chat':
++      return handleChat(flags);
++    case 'run':
++      return handleRun(args, flags, out);
++    default:
++      out.error(`Unknown agent subcommand: ${sub}`);
++      out.line(
++        `Available: ${c('chat', 'cyan')}, ${c('run', 'cyan')}, ${c('probe', 'cyan')}, ${c('config', 'cyan')}, ${c('provider', 'cyan')}, ${c('model', 'cyan')}, ${c('models', 'cyan')}`,
++      );
++      out.result({
++        ok: false,
++        error: { code: 'UNKNOWN_SUBCOMMAND', message: `Unknown agent subcommand: ${sub}` },
++      });
++      return EXIT_FAILURE;
++  }
++}
+ 
+-  if (sub === 'provider') {
+-    const action = args[1] ?? 'list';
+-
+-    if (action === 'list' || action === 'ls') {
+-      const providers = loadAiProviders();
+-      const cfg = loadCliConfig();
+-      const active = cfg.activeProvider ?? 'openrouter';
+-
+-      console.log(`\n  ${c('Configured AI Providers:', 'bold')}\n`);
+-      const keys = Object.keys(providers);
+-      if (keys.length === 0) {
+-        logInfo(
+-          'No custom providers configured yet. Use "joy-media agent provider add" to add one.',
+-        );
+-      } else {
+-        for (const key of keys) {
+-          const p = providers[key]!;
+-          const isActive = key === active || (p.name && p.name === active);
+-          const marker = isActive ? c('● [ACTIVE]', 'green') : c('○', 'dim');
+-          console.log(`  ${marker} ${c(key, 'bold')} (${p.provider ?? 'custom'})`);
+-          logStep('  Base URL', p.baseUrl ?? 'default');
+-          logStep('  Default Model', p.defaultModel ?? 'not-set');
+-          logStep(
+-            '  API Key',
+-            p.apiKey ? `${p.apiKey.slice(0, 4)}...${p.apiKey.slice(-4)}` : 'none',
+-          );
+-          if (p.cachedModels && p.cachedModels.length > 0) {
+-            logStep('  Discovered Models', `${p.cachedModels.length} models cached`);
+-          }
+-          console.log();
+-        }
+-      }
+-      return 0;
+-    }
++// ---------------------------------------------------------------------------
++// Secrets from argv / stdin
++// ---------------------------------------------------------------------------
+ 
+-    if (action === 'add') {
+-      const name = args[2] ?? flags.name;
+-      if (!name) {
+-        logError(
+-          'Provider name required. Usage: joy-media agent provider add <name> --url <url> --api-key <key> [--model <model>]',
+-        );
+-        return 1;
+-      }
+-      if (!flags.baseUrl) {
+-        logError('Base URL required. Specify --url <url>');
+-        return 1;
+-      }
++async function readStdin(): Promise<string> {
++  const chunks: Buffer[] = [];
++  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
++  return Buffer.concat(chunks).toString('utf8');
++}
+ 
+-      let cachedModels: string[] | undefined;
+-      // Try to discover models behind link
+-      try {
+-        const normalized = flags.baseUrl.replace(/\/+$/, '');
+-        const headers: Record<string, string> = {};
+-        if (flags.apiKey) headers['Authorization'] = `Bearer ${flags.apiKey}`;
+-        const res = await fetch(`${normalized}/models`, { headers });
+-        if (res.ok) {
+-          const json = (await res.json()) as { data?: unknown };
+-          const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+-          cachedModels = raw
+-            .map((item: { id?: string } | string) => (typeof item === 'string' ? item : item.id))
+-            .filter((id): id is string => typeof id === 'string' && id.length > 0);
+-          if (cachedModels.length > 0) {
+-            logInfo(`Discovered ${cachedModels.length} models from endpoint.`);
+-          }
+-        }
+-      } catch {
+-        // Model discovery is optional
+-      }
++/**
++ * `--api-key -` reads the key from piped stdin, so it never appears in the
++ * process list or shell history (`--api-key <key>` on argv does).
++ */
++async function resolveApiKeyFlag(flags: CliFlags): Promise<string | undefined> {
++  if (flags.apiKey !== '-') return flags.apiKey;
++  if (process.stdin.isTTY) {
++    throw usage(
++      '--api-key - reads the key from piped stdin, e.g. `printenv MY_KEY | joy-media agent ... --api-key -`.',
++    );
++  }
++  const key = (await readStdin()).split(/\r?\n/).find((line) => line.trim().length > 0);
++  if (!key) throw usage('--api-key - was given but stdin did not contain a key.');
++  return key.trim();
++}
+ 
+-      const defaultModel =
+-        flags.model ??
+-        (cachedModels && cachedModels.length > 0 ? cachedModels[0] : 'minimax/minimax-m3');
++async function providerOptionsFrom(flags: CliFlags): Promise<ResolveProviderOptions> {
++  return {
++    provider: flags.provider,
++    model: flags.model,
++    apiKey: await resolveApiKeyFlag(flags),
++    baseUrl: flags.baseUrl,
++  };
++}
+ 
+-      setAiProvider(name, {
+-        name,
+-        provider:
+-          flags.provider ??
+-          (flags.baseUrl.includes('kilo')
+-            ? 'kilo'
+-            : flags.baseUrl.includes('openrouter')
+-              ? 'openrouter'
+-              : 'custom'),
+-        baseUrl: flags.baseUrl,
+-        apiKey: flags.apiKey,
+-        defaultModel,
+-        cachedModels,
+-      });
++// ---------------------------------------------------------------------------
++// provider list | add | use | remove
++// ---------------------------------------------------------------------------
+ 
+-      logSuccess(`Provider "${name}" configured successfully!`);
+-      logStep('Base URL', flags.baseUrl);
+-      if (defaultModel) {
+-        logStep('Default Model', defaultModel);
+-      }
+-      return 0;
+-    }
++function isKnownProvider(providers: Record<string, AiProviderConfig>, name: string): boolean {
++  return (
++    hasAiProvider(providers, name) || Object.prototype.hasOwnProperty.call(BUILTIN_PROVIDERS, name)
++  );
++}
+ 
+-    if (action === 'use') {
+-      const name = args[2] ?? flags.name;
+-      if (!name) {
+-        logError('Provider name required. Usage: joy-media agent provider use <name>');
+-        return 1;
+-      }
+-      const providers = loadAiProviders();
+-      if (!providers[name] && name !== 'openrouter' && name !== 'kilo' && name !== 'openai') {
+-        logError(
+-          `Unknown provider "${name}". Run "joy-media agent provider list" to see available providers.`,
+-        );
+-        return 1;
+-      }
+-      const current = loadCliConfig();
+-      const updated = {
+-        ...current,
+-        activeProvider: name,
+-        ...(providers[name]?.defaultModel ? { defaultModel: providers[name]!.defaultModel } : {}),
++function providerType(baseUrl: string, explicit: string | undefined): string {
++  if (explicit) return explicit;
++  const host = new URL(baseUrl).hostname.toLowerCase();
++  if (host === 'openrouter.ai') return 'openrouter';
++  if (host === 'kilo.ai' || host.endsWith('.kilo.ai')) return 'kilo';
++  return 'custom';
++}
++
++async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput): Promise<number> {
++  const action = args[1] ?? 'list';
++
++  if (action === 'list' || action === 'ls') {
++    const providers = loadAiProviders();
++    const active = loadCliConfig().activeProvider;
++    const entries = Object.keys(providers).map((name) => {
++      const p = providers[name]!;
++      return {
++        name,
++        provider: p.provider ?? 'custom',
++        baseUrl: p.baseUrl ?? null,
++        defaultModel: p.defaultModel ?? null,
++        apiKey: maskSecret(p.apiKey),
++        cachedModelCount: p.cachedModels?.length ?? 0,
++        active: name === active,
+       };
+-      saveCliConfig(updated);
+-      logSuccess(`Active provider set to "${name}".`);
+-      if (providers[name]?.defaultModel) {
+-        logStep('Default Model', providers[name]!.defaultModel);
++    });
++    out.result({ activeProvider: active ?? null, providers: entries });
++    if (out.json) return 0;
++
++    out.line(`\n  ${c('Configured AI Providers:', 'bold')}\n`);
++    if (entries.length === 0) {
++      out.info('No custom providers configured yet. Use "joy-media agent provider add" to add one.');
++    }
++    for (const entry of entries) {
++      const marker = entry.active ? c('● [ACTIVE]', 'green') : c('○', 'dim');
++      out.line(`  ${marker} ${c(entry.name, 'bold')} (${entry.provider})`);
++      out.step('  Base URL', entry.baseUrl ?? 'default');
++      out.step('  Default Model', entry.defaultModel ?? 'not-set');
++      out.step('  API Key', entry.apiKey ?? 'none');
++      if (entry.cachedModelCount > 0) {
++        out.step('  Discovered Models', `${entry.cachedModelCount} models cached`);
+       }
+-      return 0;
++      out.line();
+     }
++    if (!active) {
++      out.info('No provider selected; runs use the built-in default (see "joy-media agent config").');
++    }
++    return 0;
++  }
+ 
+-    if (action === 'remove' || action === 'delete' || action === 'rm') {
+-      const name = args[2] ?? flags.name;
+-      if (!name) {
+-        logError('Provider name required. Usage: joy-media agent provider remove <name>');
+-        return 1;
+-      }
+-      if (deleteAiProvider(name)) {
+-        logSuccess(`Provider "${name}" removed.`);
+-        const cfg = loadCliConfig();
+-        if (cfg.activeProvider === name) {
+-          const { activeProvider: _, ...rest } = cfg;
+-          saveCliConfig(rest);
+-        }
+-        return 0;
+-      } else {
+-        logError(`Provider "${name}" not found.`);
+-        return 1;
++  if (action === 'add') {
++    const name = args[2] ?? flags.name;
++    if (!name) {
++      throw usage(
++        'Provider name required. Usage: joy-media agent provider add <name> --url <url> [--api-key <key>|-] [--model <model>]',
++      );
++    }
++    if (!PROVIDER_NAME_RE.test(name)) {
++      throw usage(
++        `Invalid provider name "${name}": use 1-64 letters, digits, ".", "_" or "-", starting with a letter or digit.`,
++      );
++    }
++    if (!flags.baseUrl) throw usage('Base URL required. Specify --url <url>');
++    const { url: baseUrl } = normalizeCliBaseUrl(flags.baseUrl);
++    const apiKey = await resolveApiKeyFlag(flags);
++
++    const discovery = await discoverModels(baseUrl, apiKey);
++    let cachedModels: string[] | undefined;
++    if (discovery.ok) {
++      cachedModels = discovery.ids.length > 0 ? discovery.ids : undefined;
++      if (discovery.listed > 0) out.info(`Discovered ${discovery.listed} models from endpoint.`);
++      if (discovery.listed > discovery.ids.length) {
++        out.warn(`Cached the first ${discovery.ids.length} model ids only.`);
+       }
++    } else {
++      out.warn(`Model discovery skipped: ${discovery.problem}. The provider is saved anyway.`);
+     }
+ 
+-    logError(`Unknown provider action "${action}". Available actions: list, add, use, remove`);
+-    return 1;
++    const defaultModel = flags.model ?? cachedModels?.[0] ?? 'minimax/minimax-m3';
++    const entry: AiProviderConfig = {
++      name,
++      provider: providerType(baseUrl, flags.provider),
++      baseUrl,
++      ...(apiKey ? { apiKey } : {}),
++      defaultModel,
++      ...(cachedModels ? { cachedModels } : {}),
++    };
++    const replaced = updateAiProviders((providers) => {
++      const existed = hasAiProvider(providers, name);
++      providers[name] = entry;
++      return existed;
++    });
++
++    out.success(
++      replaced
++        ? `Provider "${name}" already existed and was replaced.`
++        : `Provider "${name}" configured successfully!`,
++    );
++    out.step('Base URL', baseUrl);
++    out.step('Default Model', defaultModel);
++    out.step('API Key', maskSecret(apiKey) ?? 'none');
++    out.result({
++      ok: true,
++      replaced,
++      provider: {
++        name,
++        provider: entry.provider,
++        baseUrl,
++        defaultModel,
++        apiKey: maskSecret(apiKey),
++        cachedModelCount: cachedModels?.length ?? 0,
++      },
++    });
++    return 0;
+   }
+ 
+-  if (sub === 'models') {
+-    const targetProviderName =
+-      args[1] ?? flags.provider ?? loadCliConfig().activeProvider ?? 'openrouter';
++  if (action === 'use') {
++    const name = args[2] ?? flags.name;
++    if (!name) throw usage('Provider name required. Usage: joy-media agent provider use <name>');
+     const providers = loadAiProviders();
+-    const providerConfig = providers[targetProviderName];
+-
+-    let baseUrl = flags.baseUrl ?? providerConfig?.baseUrl;
+-    let apiKey = flags.apiKey ?? providerConfig?.apiKey;
+-
+-    if (!baseUrl) {
+-      if (targetProviderName === 'kilo') {
+-        baseUrl = 'https://api.kilo.ai/api/gateway/v1';
+-        apiKey = apiKey ?? process.env.KILO_API_KEY;
+-      } else if (targetProviderName === 'openrouter') {
+-        baseUrl = 'https://openrouter.ai/api/v1';
+-        apiKey = apiKey ?? process.env.OPENROUTER_API_KEY;
+-      } else {
+-        logError(`No baseUrl found for provider "${targetProviderName}". Specify --url <url>`);
+-        return 1;
+-      }
++    if (!isKnownProvider(providers, name)) {
++      throw failure(
++        `Unknown provider "${name}". Run "joy-media agent provider list" to see available providers.`,
++        'UNKNOWN_PROVIDER',
++      );
+     }
++    const model = hasAiProvider(providers, name) ? providers[name]!.defaultModel : undefined;
++    updateCliConfig((current) => {
++      // The model / URL overrides belonged to the previously active provider.
++      const { defaultModel: _model, customBaseUrl: _url, ...rest } = current;
++      return { ...rest, activeProvider: name, ...(model ? { defaultModel: model } : {}) };
++    });
++    out.success(`Active provider set to "${name}".`);
++    if (model) out.step('Default Model', model);
++    out.result({ ok: true, activeProvider: name, defaultModel: model ?? null });
++    return 0;
++  }
+ 
+-    printBanner();
+-    logInfo(`Fetching models from ${c(baseUrl, 'bold')}...`);
+-
+-    try {
+-      const normalized = baseUrl.replace(/\/+$/, '');
+-      const headers: Record<string, string> = {};
+-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+-      const res = await fetch(`${normalized}/models`, { headers });
+-      if (!res.ok) {
+-        throw new Error(`Endpoint returned HTTP ${res.status}: ${res.statusText}`);
+-      }
+-      const json = (await res.json()) as { data?: unknown };
+-      const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+-      const modelIds: string[] = raw
+-        .map((item: { id?: string } | string) => (typeof item === 'string' ? item : item.id))
+-        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+-
+-      console.log(`\n  ${c(`Discovered ${modelIds.length} models:`, 'bold')}\n`);
+-      for (const id of modelIds) {
+-        console.log(`  • ${id}`);
+-      }
+-      console.log();
+-
+-      // Save to cache
+-      if (providerConfig) {
+-        setAiProvider(targetProviderName, {
+-          ...providerConfig,
+-          cachedModels: modelIds,
+-        });
++  if (action === 'remove' || action === 'delete' || action === 'rm') {
++    const name = args[2] ?? flags.name;
++    if (!name) throw usage('Provider name required. Usage: joy-media agent provider remove <name>');
++    const removedModel = hasAiProvider(loadAiProviders(), name)
++      ? loadAiProviders()[name]?.defaultModel
++      : undefined;
++    if (!deleteAiProvider(name)) {
++      throw failure(`Provider "${name}" not found.`, 'UNKNOWN_PROVIDER');
++    }
++    let wasActive = false;
++    updateCliConfig((cfg) => {
++      if (cfg.activeProvider !== name) return cfg;
++      wasActive = true;
++      const { activeProvider: _active, customBaseUrl: _url, ...rest } = cfg;
++      if (rest.defaultModel !== undefined && rest.defaultModel === removedModel) {
++        delete rest.defaultModel;
+       }
++      return rest;
++    });
++    out.success(`Provider "${name}" removed.`);
++    if (wasActive) {
++      out.warn(
++        'It was the active provider; no provider is selected now, so runs fall back to the built-in default. ' +
++          'Pick one with "joy-media agent provider use <name>".',
++      );
++    }
++    out.result({ ok: true, removed: name, wasActive });
++    return 0;
++  }
+ 
+-      return 0;
+-    } catch (err) {
+-      logError(`Failed to fetch models: ${String(err)}`);
+-      return 1;
++  throw failure(
++    `Unknown provider action "${action}". Available actions: list, add, use, remove`,
++    'UNKNOWN_SUBCOMMAND',
++  );
++}
++
++// ---------------------------------------------------------------------------
++// Model discovery (GET <base>/models)
++// ---------------------------------------------------------------------------
++
++type Discovery =
++  | { readonly ok: true; readonly ids: string[]; readonly listed: number }
++  | { readonly ok: false; readonly problem: string };
++
++async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
++  if (!response.body) return '';
++  const reader = response.body.getReader();
++  const decoder = new TextDecoder();
++  let total = 0;
++  let textValue = '';
++  for (;;) {
++    const { done, value } = await reader.read();
++    if (done) break;
++    total += value.byteLength;
++    if (total > maxBytes) {
++      await reader.cancel();
++      throw new Error('too large');
+     }
++    textValue += decoder.decode(value, { stream: true });
+   }
++  return textValue + decoder.decode();
++}
+ 
+-  if (sub === 'model') {
+-    const action = args[1] ?? 'get';
+-    if (action === 'set') {
+-      const modelId = args[2] ?? flags.model;
+-      if (!modelId) {
+-        logError('Model ID required. Usage: joy-media agent model set <model-id>');
+-        return 1;
+-      }
+-      const cfg = loadCliConfig();
+-      saveCliConfig({ ...cfg, defaultModel: modelId });
+-      logSuccess(`Default model set to "${modelId}".`);
+-      return 0;
++/**
++ * List the endpoint's models. Bounded in time and size, never follows a
++ * redirect with the API key, and never throws: discovery is optional.
++ */
++async function discoverModels(baseUrl: string, apiKey: string | undefined): Promise<Discovery> {
++  const headers: Record<string, string> = { accept: 'application/json' };
++  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
++  let response: Response;
++  try {
++    response = await fetch(`${baseUrl}/models`, {
++      headers,
++      redirect: 'manual',
++      signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS),
++    });
++  } catch (error) {
++    const name = (error as Error).name;
++    if (name === 'TimeoutError' || name === 'AbortError') {
++      return { ok: false, problem: `no answer within ${DISCOVERY_TIMEOUT_MS / 1000}s` };
+     }
+-    const cfg = loadCliConfig();
+-    logInfo(`Current default model: ${cfg.defaultModel ?? 'anthropic/claude-3.7-sonnet'}`);
+-    return 0;
++    const cause = (error as { cause?: { code?: unknown } }).cause;
++    return {
++      ok: false,
++      problem: `could not connect (${typeof cause?.code === 'string' ? cause.code : name})`,
++    };
+   }
++  if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
++    return {
++      ok: false,
++      problem: `the endpoint redirected (HTTP ${response.status}); not following it with the API key`,
++    };
++  }
++  if (response.status === 401 || response.status === 403) {
++    return { ok: false, problem: `the endpoint rejected the API key (HTTP ${response.status})` };
++  }
++  if (!response.ok) return { ok: false, problem: `the endpoint answered HTTP ${response.status}` };
++
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(await readBoundedText(response, DISCOVERY_MAX_BYTES));
++  } catch (error) {
++    const name = (error as Error).name;
++    if (name === 'TimeoutError' || name === 'AbortError') {
++      return { ok: false, problem: `no answer within ${DISCOVERY_TIMEOUT_MS / 1000}s` };
++    }
++    return {
++      ok: false,
++      problem:
++        (error as Error).message === 'too large'
++          ? 'the model list is larger than 8 MB'
++          : 'the response is not JSON',
++    };
++  }
++  const raw: unknown =
++    parsed !== null && typeof parsed === 'object' && 'data' in parsed
++      ? (parsed as { data: unknown }).data
++      : parsed;
++  if (!Array.isArray(raw)) return { ok: false, problem: 'unexpected response shape' };
++  const ids = [
++    ...new Set(
++      raw
++        .map((item: unknown) =>
++          typeof item === 'string'
++            ? item
++            : item !== null && typeof item === 'object'
++              ? (item as { id?: unknown }).id
++              : undefined,
++        )
++        .filter(
++          (id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 256,
++        ),
++    ),
++  ];
++  return { ok: true, ids: ids.slice(0, MAX_CACHED_MODELS), listed: ids.length };
++}
+ 
+-  if (sub === 'probe') {
+-    printBanner();
+-    logInfo('Probing LLM provider capabilities...');
+-    try {
+-      const res = await probeAgent({
+-        provider: flags.provider,
+-        model: flags.model,
+-        apiKey: flags.apiKey,
+-        baseUrl: flags.baseUrl,
+-      });
+-      console.log();
+-      logSuccess(`Probe Successful!`);
+-      logStep('Provider', res.provider);
+-      logStep('Model ID', res.modelId);
+-      logStep('Capability', c(res.capability, res.capability === 'tool-loop' ? 'green' : 'yellow'));
+-      return 0;
+-    } catch (err) {
+-      logError(`Probe failed: ${String(err)}`);
+-      return 1;
++async function handleModels(args: string[], flags: CliFlags, out: AgentOutput): Promise<number> {
++  const settings = resolveProviderSettings({
++    provider: args[1] ?? flags.provider,
++    baseUrl: flags.baseUrl,
++    apiKey: await resolveApiKeyFlag(flags),
++  });
++  out.banner();
++  out.info(`Fetching models from ${c(settings.baseUrl, 'bold')}...`);
++  const discovery = await discoverModels(settings.baseUrl, settings.apiKey);
++  if (!discovery.ok) {
++    throw failure(`Failed to fetch models: ${discovery.problem}.`, 'DISCOVERY_FAILED');
++  }
++  out.line(`\n  ${c(`Discovered ${discovery.listed} models:`, 'bold')}\n`);
++  for (const id of discovery.ids) out.line(`  • ${id}`);
++  out.line();
++  updateAiProviders((providers) => {
++    if (hasAiProvider(providers, settings.providerName)) {
++      providers[settings.providerName] = {
++        ...providers[settings.providerName],
++        cachedModels: discovery.ids,
++      };
+     }
++  });
++  out.result({ ok: true, provider: settings.providerName, models: discovery.ids });
++  return 0;
++}
++
++// ---------------------------------------------------------------------------
++// model | config | probe
++// ---------------------------------------------------------------------------
++
++function tryResolve(
++  options: ResolveProviderOptions = {},
++): { settings: ResolvedProviderSettings } | { problem: string } {
++  try {
++    return { settings: resolveProviderSettings(options) };
++  } catch (error) {
++    if (error instanceof AgentConfigError) return { problem: error.message };
++    throw error;
+   }
++}
++
++function effectiveJson(resolved: ReturnType<typeof tryResolve>): unknown {
++  if ('problem' in resolved) return null;
++  const s = resolved.settings;
++  return {
++    provider: s.providerName,
++    kind: s.kind,
++    baseUrl: s.baseUrl,
++    model: s.modelId,
++    apiKey: maskSecret(s.apiKey),
++    apiKeySource: s.apiKeySource,
++    local: s.local,
++  };
++}
+ 
+-  if (sub === 'config') {
+-    const current = loadCliConfig();
+-    if (flags.provider || flags.model || flags.baseUrl) {
+-      const updated = {
++async function handleModel(args: string[], flags: CliFlags, out: AgentOutput): Promise<number> {
++  const action = args[1] ?? 'get';
++  if (action === 'set') {
++    const modelId = (args[2] ?? flags.model)?.trim();
++    if (!modelId) throw usage('Model ID required. Usage: joy-media agent model set <model-id>');
++    if (modelId.length > 256) throw usage('The model id must be at most 256 characters long.');
++    updateCliConfig((cfg) => ({ ...cfg, defaultModel: modelId }));
++    out.success(`Default model set to "${modelId}".`);
++    out.result({ ok: true, defaultModel: modelId });
++    return 0;
++  }
++  if (action !== 'get') {
++    throw failure(`Unknown model action "${action}". Available actions: get, set`, 'UNKNOWN_SUBCOMMAND');
++  }
++  const resolved = tryResolve();
++  const model = 'settings' in resolved ? resolved.settings.modelId : loadCliConfig().defaultModel;
++  out.info(`Current default model: ${model ?? 'not set'}`);
++  out.result({ defaultModel: loadCliConfig().defaultModel ?? null, effectiveModel: model ?? null });
++  return 0;
++}
++
++async function handleConfig(flags: CliFlags, out: AgentOutput): Promise<number> {
++  if (flags.provider || flags.model || flags.baseUrl) {
++    const baseUrl = flags.baseUrl ? normalizeCliBaseUrl(flags.baseUrl).url : undefined;
++    if (flags.provider && !baseUrl && !isKnownProvider(loadAiProviders(), flags.provider)) {
++      throw failure(
++        `Unknown provider "${flags.provider}". Add it first with "joy-media agent provider add".`,
++        'UNKNOWN_PROVIDER',
++      );
++    }
++    updateCliConfig(
++      (current): CliConfig => ({
+         ...current,
+         ...(flags.provider ? { activeProvider: flags.provider } : {}),
+         ...(flags.model ? { defaultModel: flags.model } : {}),
+-        ...(flags.baseUrl ? { customBaseUrl: flags.baseUrl } : {}),
+-      };
+-      saveCliConfig(updated);
+-      logSuccess('Updated CLI configuration.');
+-    }
+-    const finalCfg = loadCliConfig();
+-    console.log(`\n  ${c('Current Joy Agent Configuration:', 'bold')}`);
+-    logStep('Active Provider', finalCfg.activeProvider ?? 'openrouter (default)');
+-    logStep('Default Model', finalCfg.defaultModel ?? 'anthropic/claude-3.7-sonnet');
+-    logStep('Custom Base URL', finalCfg.customBaseUrl ?? 'none');
+-    return 0;
++        ...(baseUrl ? { customBaseUrl: baseUrl } : {}),
++      }),
++    );
++    out.success('Updated CLI configuration.');
+   }
++  const cfg = loadCliConfig();
++  const resolved = tryResolve();
++  out.result({
++    activeProvider: cfg.activeProvider ?? null,
++    defaultModel: cfg.defaultModel ?? null,
++    customBaseUrl: cfg.customBaseUrl ?? null,
++    effective: effectiveJson(resolved),
++    ...('problem' in resolved ? { problem: resolved.problem } : {}),
++  });
++  if (out.json) return 0;
++
++  out.line(`\n  ${c('Current Joy Agent Configuration:', 'bold')}`);
++  out.step('Active Provider', cfg.activeProvider ?? 'none selected');
++  out.step('Default Model', cfg.defaultModel ?? 'provider default');
++  out.step('Custom Base URL', cfg.customBaseUrl ?? 'none');
++  out.line(`\n  ${c('A run would use:', 'bold')}`);
++  if ('problem' in resolved) {
++    out.warn(resolved.problem);
++  } else {
++    const s = resolved.settings;
++    out.step('Provider', `${s.providerName} (${s.kind})`);
++    out.step('Base URL', s.baseUrl);
++    out.step('Model', s.modelId);
++    out.step(
++      'API Key',
++      s.apiKey ? `${maskSecret(s.apiKey)} (from ${s.apiKeySource})` : s.local ? 'none (local endpoint)' : 'MISSING',
++    );
++  }
++  return 0;
++}
+ 
+-  // Resolve target project
+-  let projectInfo;
++async function handleProbe(flags: CliFlags, out: AgentOutput): Promise<number> {
++  const options = await providerOptionsFrom(flags);
++  resolveByokConfig(options); // fail fast, before the banner and any network traffic
++  out.banner();
++  out.info('Probing LLM provider capabilities...');
++  const res = await probeAgent(options);
++  out.line();
++  out.success('Probe Successful!');
++  out.step('Provider', res.provider);
++  out.step('Model ID', res.modelId);
++  out.step('Capability', c(res.capability, res.capability === 'tool-loop' ? 'green' : 'yellow'));
++  if (res.capability === 'plan-only') {
++    out.warn('This model cannot call tools; Joy Agent can only produce plans with it.');
++  }
++  out.result({ ok: true, provider: res.provider, modelId: res.modelId, capability: res.capability });
++  return 0;
++}
++
++// ---------------------------------------------------------------------------
++// chat | run
++// ---------------------------------------------------------------------------
++
++/**
++ * The project an agent command works on. Without --project this is the most
++ * recently updated project (deterministic), or a new "Default Project" that is
++ * only written to the database if changes are actually applied.
++ */
++function resolveTargetProject(flags: CliFlags, out: AgentOutput): ProjectLoadResult {
+   if (flags.project) {
+     try {
+-      projectInfo = loadProject(flags.project);
++      return loadProject(flags.project, flags.sqlitePath);
+     } catch (err) {
+-      logError(`Failed to load project "${flags.project}": ${String(err)}`);
+-      return 1;
+-    }
+-  } else {
+-    // Pick the newest project from SQLite or create a scratch project
+-    const available = listProjects();
+-    if (available.length > 0) {
+-      const newest = available[0]!;
+-      projectInfo = loadProject(newest.id);
+-      logInfo(
+-        `Using active project: ${c(projectInfo.project.title, 'bold')} (${projectInfo.project.id})`,
++      throw failure(
++        `Failed to load project "${flags.project}": ${err instanceof Error ? err.message : String(err)}`,
++        'PROJECT_NOT_FOUND',
+       );
+-    } else {
+-      logWarn('No existing projects found in database. Initializing default project...');
+-      const scratch = createDefaultProject('Default Project');
+-      projectInfo = {
+-        project: scratch,
+-        revision: 1,
+-        source: 'sqlite' as const,
+-        path: 'in-memory',
+-      };
+     }
+   }
++  const available = [...listProjects(flags.sqlitePath)].sort((a, b) =>
++    b.updatedAt.localeCompare(a.updatedAt),
++  );
++  const newest = available[0];
++  if (newest) {
++    const info = loadProject(newest.id, flags.sqlitePath);
++    out.info(
++      `Using the most recently updated project: ${c(info.project.title, 'bold')} (${info.project.id})` +
++        (available.length > 1 ? ` — pass --project <id> to pick one of the other ${available.length - 1}` : ''),
++    );
++    return info;
++  }
++  out.warn(
++    'No existing projects found in database. Using a new "Default Project" (saved only if changes are applied).',
++  );
++  return {
++    project: createDefaultProject('Default Project'),
++    revision: 0,
++    source: 'sqlite',
++    path: flags.sqlitePath ?? getDefaultSqlitePath(),
++  };
++}
+ 
+-  if (sub === 'chat') {
+-    if (flags.model) {
+-      console.log();
+-      logInfo(
+-        `${c('Dual-Brain:', 'bold')} ${c('Active', 'green')}  ` +
+-          `${c('Workhorse', 'cyan')}=openrouter/${c('openrouter/free', 'magenta')}  ` +
+-          `${c('Creative', 'cyan')}=kilo/${c('kilo-auto/efficient', 'magenta')}`,
+-      );
+-      logStep('Override model', flags.model);
++async function handleChat(flags: CliFlags): Promise<number> {
++  if (flags.json) {
++    throw usage('agent chat is interactive and has no --json mode; use "joy-media agent run --json".');
++  }
++  if (flags.apiKey === '-') {
++    throw usage('agent chat reads your messages from stdin, so --api-key - cannot be used with it.');
++  }
++  const out = createAgentOutput(false);
++  const providerOptions: ResolveProviderOptions = {
++    provider: flags.provider,
++    model: flags.model,
++    apiKey: flags.apiKey,
++    baseUrl: flags.baseUrl,
++  };
++  try {
++    resolveByokConfig(providerOptions);
++  } catch (error) {
++    if (!(error instanceof AgentConfigError)) throw error;
++    out.warn(`${error.message} Slash commands still work; agent prompts will fail.`);
++  }
++  const projectInfo = resolveTargetProject(flags, out);
++  if (flags.model) {
++    out.line();
++    out.step('Override model', flags.model);
++  }
++  await startAgentRepl({
++    project: projectInfo.project,
++    revision: projectInfo.revision,
++    source: projectInfo.source,
++    path: projectInfo.path,
++    providerOptions,
++  });
++  return 0;
++}
++
++function printProposal(out: AgentOutput, result: RunAgentOutput): void {
++  const ops = [...result.staged.timelineOps, ...result.staged.documentOps];
++  if (ops.length === 0) {
++    out.info('The agent proposed no changes.');
++    return;
++  }
++  out.line(`\n  ${c(`Proposed changes (${ops.length}):`, 'bold')}`);
++  for (const op of ops) out.line(`    ${c('+', 'green')} ${describeOperation(op)}`);
++}
++
++async function handleRun(args: string[], flags: CliFlags, out: AgentOutput): Promise<number> {
++  const prompt = args.slice(1).join(' ').trim();
++  if (!prompt) throw usage('Usage: joy-media agent run "<instruction>" [--project <id>] [--apply]');
++
++  const providerOptions = await providerOptionsFrom(flags);
++  // Fail fast and locally on a bad / missing provider configuration.
++  resolveByokConfig(providerOptions);
++
++  const projectInfo = resolveTargetProject(flags, out);
++  out.banner();
++  out.info(`Running Joy Agent on project: ${c(projectInfo.project.title, 'bold')}`);
++  out.step('Prompt', prompt);
++
++  const result = await runJoyAgent({
++    project: projectInfo.project,
++    revision: projectInfo.revision,
++    prompt,
++    apply: flags.apply,
++    providerOptions,
++    output: out,
++  });
++  printProposal(out, result);
++
++  const operations = {
++    timeline: result.staged.timelineOps,
++    document: result.staged.documentOps,
++  };
++  const base = {
++    project: { id: projectInfo.project.id, title: projectInfo.project.title },
++    provider: result.provider,
++    model: result.modelId,
++    baseRevision: projectInfo.revision,
++    text: result.resultText,
++    steps: result.steps,
++    operations,
++  };
++
++  if (!flags.apply) {
++    if (operations.timeline.length + operations.document.length > 0) {
++      out.info('Dry run: nothing was saved. Re-run with --apply to commit these changes.');
+     }
+-    await startAgentRepl({
+-      project: projectInfo.project,
++    out.result({ ok: true, dryRun: true, applied: false, revision: projectInfo.revision, ...base });
++    return 0;
++  }
++
++  if (result.errors.length > 0) {
++    out.result({
++      ok: false,
++      dryRun: false,
++      applied: false,
+       revision: projectInfo.revision,
+-      source: projectInfo.source,
+-      path: projectInfo.path,
+-      providerOptions: {
+-        provider: flags.provider,
+-        model: flags.model,
+-        apiKey: flags.apiKey,
+-        baseUrl: flags.baseUrl,
++      ...base,
++      errors: result.errors,
++      error: {
++        code: 'INVALID_PROPOSAL',
++        message: 'Some proposed operations are invalid; nothing was changed.',
+       },
+     });
+-    return 0;
++    out.error(
++      `Nothing was changed: ${result.errors.length} proposed operation(s) could not be applied.`,
++    );
++    return EXIT_FAILURE;
+   }
+ 
+-  if (sub === 'run') {
+-    const prompt = args.slice(1).join(' ').trim();
+-    if (!prompt) {
+-      logError('Usage: joy-media agent run "<instruction>" [--project <id>] [--apply]');
+-      return 1;
+-    }
+-
+-    printBanner();
+-    logInfo(`Running Joy Agent on project: ${c(projectInfo.project.title, 'bold')}`);
+-    logStep('Prompt', prompt);
+-
+-    try {
+-      const output = await runJoyAgent({
+-        project: projectInfo.project,
+-        revision: projectInfo.revision,
+-        prompt,
+-        apply: flags.apply,
+-        providerOptions: {
+-          provider: flags.provider,
+-          model: flags.model,
+-          apiKey: flags.apiKey,
+-          baseUrl: flags.baseUrl,
+-        },
+-      });
+-
+-      if (output.applied && projectInfo.source === 'sqlite') {
+-        const nextRev = saveProject(output.updatedProject, {
+-          source: projectInfo.source,
+-          path: projectInfo.path,
+-          revision: projectInfo.revision,
+-        });
+-        logSuccess(`Committed changes at project revision ${nextRev}.`);
+-      }
+-
+-      return 0;
+-    } catch (err) {
+-      logError(`Joy Agent execution failed: ${String(err)}`);
+-      return 1;
+-    }
++  if (result.appliedCount === 0) {
++    out.info(`No changes to commit; project stays at revision ${projectInfo.revision}.`);
++    out.result({ ok: true, dryRun: false, applied: false, revision: projectInfo.revision, ...base });
++    return 0;
+   }
+ 
+-  logError(`Unknown agent subcommand: ${sub}`);
+-  console.log(
+-    `Available: ${c('chat', 'cyan')}, ${c('run', 'cyan')}, ${c('probe', 'cyan')}, ${c('config', 'cyan')}`,
+-  );
+-  return 1;
++  let nextRev: number;
++  try {
++    nextRev = saveProject(result.updatedProject, {
++      source: projectInfo.source,
++      path: projectInfo.path,
++      revision: projectInfo.revision,
++    });
++  } catch (err) {
++    const message = err instanceof Error ? err.message : String(err);
++    throw failure(
++      /constraint|unique/i.test(message)
++        ? 'The project was modified by someone else while the agent was running; nothing was saved. Re-run the command.'
++        : `Could not save the project: ${message}`,
++      /constraint|unique/i.test(message) ? 'REVISION_CONFLICT' : 'SAVE_FAILED',
++    );
++  }
++  out.success(`Committed changes at project revision ${nextRev}.`);
++  out.result({ ok: true, dryRun: false, applied: true, revision: nextRev, ...base });
++  return 0;
+ }
+diff --git a/apps/cli/src/humanized/agent-chat.e2e.test.ts b/apps/cli/src/humanized/agent-chat.e2e.test.ts
+new file mode 100644
+index 0000000..0a94d3b
+--- /dev/null
++++ b/apps/cli/src/humanized/agent-chat.e2e.test.ts
+@@ -0,0 +1,161 @@
++/**
++ * `joy-media agent chat` driven through a pipe, the way an AI agent (or a
++ * shell script) uses a REPL: write lines, close stdin, read the transcript.
++ * It must process every line, never require a TTY, and exit on EOF.
++ */
++import { readdirSync } from 'node:fs';
++import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
++import {
++  clipsOf,
++  createAgentSandbox,
++  createProject,
++  fakeKey,
++  httpError,
++  proposeTimeline,
++  readProjects,
++  startMockLlm,
++  text,
++  toolCalls,
++  type AgentSandbox,
++  type MockLlmServer,
++} from './agent-helpers.js';
++import { describeRun, hasAnsi } from './harness.js';
++
++const KEY = fakeKey('chat');
++const insert = (id: string) => ({
++  kind: 'insert',
++  id,
++  assetId: 'asset-1',
++  trackId: 'track-v1',
++  startUs: 0,
++  durationUs: 2_000_000,
++  dependsOn: [],
++});
++
++describe('agent chat with piped stdin (real binary)', () => {
++  let mock: MockLlmServer;
++  let env: AgentSandbox;
++  let projectId: string;
++  const chat = (input: string, extra: string[] = []) =>
++    env.run(
++      ['agent', 'chat', '--project', projectId, '--url', mock.url, '--api-key', KEY, ...extra],
++      { input },
++    );
++  const project = () => readProjects(env.sb).find((p) => p.id === projectId)!;
++
++  beforeAll(async () => {
++    mock = await startMockLlm();
++  });
++  afterAll(async () => {
++    await mock.close();
++  });
++  beforeEach(async () => {
++    mock.reset();
++    env = createAgentSandbox('agent-chat');
++    projectId = await createProject(env.sb, 'Chat Target');
++  });
++  afterEach(() => {
++    expect(env.externalCalls()).toEqual([]);
++    env.cleanup();
++  });
++
++  it('processes every piped line, not just the first', async () => {
++    const r = await chat('/help\n/project\n/timeline\n/exit\n');
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/Interactive Joy Agent Commands/); // /help
++    expect(r.out).toMatch(/Title: Chat Target \| Rev: 1/); // /project
++    expect(r.out).toMatch(/Timeline: 3 track\(s\), 0 clip\(s\)/); // /timeline
++    expect(r.out).toMatch(/Goodbye!/); // /exit
++    expect(hasAnsi(r.stdout)).toBe(false);
++  });
++
++  it('exits 0 on EOF without an explicit /exit (never hangs)', async () => {
++    const r = await chat('/project\n/timeline');
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/Title: Chat Target/);
++    expect(r.out).toMatch(/Timeline:/);
++    expect(r.out).toMatch(/Goodbye!/);
++  });
++
++  it('exits 0 immediately on an empty stdin', async () => {
++    const r = await chat('');
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/Goodbye!/);
++    expect(mock.requests).toHaveLength(0);
++  });
++
++  it('applies exactly the proposal that was approved (no second model call)', async () => {
++    mock.script(
++      toolCalls(proposeTimeline(insert('approved-clip'))),
++      text('Proposed one clip.'),
++      // If the REPL re-ran the model after "y" it would get this instead:
++      toolCalls(proposeTimeline(insert('surprise-clip'))),
++      text('Surprise!'),
++    );
++    const r = await chat('add a clip please\ny\n/exit\n');
++
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/insert clip approved-clip/);
++    expect(r.out).toMatch(/Saved updated project revision 2/);
++    expect(mock.chatRequests).toHaveLength(2);
++    expect(project().revision).toBe(2);
++    expect(clipsOf(project()).map((c) => c.id)).toEqual(['approved-clip']);
++  });
++
++  it('"n" (or EOF at the confirmation) discards the proposal', async () => {
++    mock.fallback(text('ok'));
++    mock.script(toolCalls(proposeTimeline(insert('c1'))), text('Proposed.'));
++    const no = await chat('add a clip\nn\n');
++    expect(no.code, describeRun(no)).toBe(0);
++    expect(no.out).toMatch(/Changes discarded/);
++
++    mock.script(toolCalls(proposeTimeline(insert('c2'))), text('Proposed.'));
++    const eof = await chat('add a clip\n');
++    expect(eof.code, describeRun(eof)).toBe(0);
++    expect(eof.out).toMatch(/Changes discarded/);
++
++    expect(project().revision).toBe(1);
++  });
++
++  it('a provider error is reported and the session carries on with the next line', async () => {
++    mock.fallback(httpError(401));
++    const r = await chat('do something\n/project\n');
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/rejected the API key \(HTTP 401\)/);
++    expect(r.out).toMatch(/Title: Chat Target/);
++    expect(r.all).not.toContain(KEY);
++  });
++
++  it('--json is refused with a usage error (exit 2): a REPL has no JSON form', async () => {
++    const r = await chat('/exit\n', ['--json']);
++    expect(r.code, describeRun(r)).toBe(2);
++    expect(r.stdout).toMatch(/^\{/);
++    expect(r.json()).toMatchObject({ ok: false, error: { code: 'USAGE' } });
++  });
++});
++
++describe('agent chat without a configured provider or project', () => {
++  let env: AgentSandbox;
++  beforeEach(() => {
++    env = createAgentSandbox('agent-chat-bare');
++  });
++  afterEach(() => {
++    expect(env.externalCalls()).toEqual([]);
++    env.cleanup();
++  });
++
++  it('warns about the missing key up front, keeps slash commands working', async () => {
++    const r = await env.run(['agent', 'chat'], { input: '/project\nsplit the first clip\n/exit\n' });
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/No API key configured for provider "openrouter"/);
++    expect(r.out).toMatch(/Title: Default Project/);
++  });
++
++  it('/save on the scratch project writes the real database, not ./in-memory', async () => {
++    const r = await env.run(['agent', 'chat'], { input: '/save\n' });
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/Project saved at revision 1/);
++    expect(readdirSync(env.sb.cwd)).toEqual([]);
++    expect(readProjects(env.sb).map((p) => p.payload.title)).toEqual(['Default Project']);
++  });
++});
+diff --git a/apps/cli/src/humanized/agent-helpers.ts b/apps/cli/src/humanized/agent-helpers.ts
+new file mode 100644
+index 0000000..ff51529
+--- /dev/null
++++ b/apps/cli/src/humanized/agent-helpers.ts
+@@ -0,0 +1,680 @@
++/* global process, setTimeout, clearTimeout, Buffer */
++/**
++ * Fixtures for the `agent` command family's black-box tests.
++ *
++ * The centrepiece is a hermetic, scriptable OpenAI-compatible server that runs
++ * inside the test process on 127.0.0.1 (ephemeral port). The CLI child talks to
++ * it via `--url <mock.url>`; nothing ever reaches a real model provider and no
++ * real API key is used. Every request is recorded (method, path, headers incl.
++ * Authorization, raw body) so tests can assert exactly what the CLI sent.
++ */
++import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
++import {
++  createServer,
++  type IncomingHttpHeaders,
++  type IncomingMessage,
++  type Server,
++  type ServerResponse,
++} from 'node:http';
++import type { AddressInfo, Socket } from 'node:net';
++import {
++  existsSync,
++  mkdirSync,
++  readdirSync,
++  readFileSync,
++  statSync,
++  writeFileSync,
++} from 'node:fs';
++import { join } from 'node:path';
++import { DatabaseSync } from 'node:sqlite';
++import { pathToFileURL } from 'node:url';
++import {
++  CLI_ROOT,
++  createSandbox,
++  ensureCliBuilt,
++  stripAnsi,
++  type RunOptions,
++  type RunResult,
++  type Sandbox,
++} from './harness.js';
++
++// ---------------------------------------------------------------------------
++// Scripted replies
++// ---------------------------------------------------------------------------
++
++export interface MockToolCall {
++  readonly name: string;
++  /** Object → JSON-encoded; string → sent verbatim (use for malformed JSON args). */
++  readonly args: unknown;
++  readonly id?: string;
++}
++
++/** What the mock answers to one `POST /v1/chat/completions`. */
++export type ChatReply =
++  | { readonly kind: 'text'; readonly text: string }
++  | { readonly kind: 'tool-calls'; readonly calls: readonly MockToolCall[] }
++  | {
++      readonly kind: 'http-error';
++      readonly status: number;
++      readonly body?: unknown;
++      readonly headers?: Readonly<Record<string, string>>;
++    }
++  /** 200 with a body that is not valid OpenAI JSON (or not JSON at all). */
++  | { readonly kind: 'malformed'; readonly body: string; readonly contentType?: string }
++  /** Accept the request and never answer (until the server closes). */
++  | { readonly kind: 'hang' }
++  /** SSE: send `chunks` text deltas `intervalMs` apart, then finish normally. */
++  | { readonly kind: 'slow-stream'; readonly chunks: readonly string[]; readonly intervalMs: number }
++  /** SSE: send `chunks` text deltas and then stall forever (no finish, no [DONE]). */
++  | { readonly kind: 'stall-stream'; readonly chunks: readonly string[] }
++  /** Answer with whatever `reply` resolves to, whenever the test resolves it. */
++  | { readonly kind: 'deferred'; readonly reply: Promise<ChatReply> };
++
++/** What the mock answers to `GET /v1/models`. */
++export type ModelsReply =
++  | { readonly kind: 'list'; readonly ids: readonly string[] }
++  | { readonly kind: 'bare-array'; readonly ids: readonly string[] }
++  | { readonly kind: 'http-error'; readonly status: number; readonly body?: unknown }
++  | { readonly kind: 'html' }
++  | { readonly kind: 'hang' }
++  | { readonly kind: 'redirect'; readonly location: string }
++  /**
++   * Hold every `/models` response until `count` requests have arrived, then
++   * answer them all at once (forces concurrent CLI processes into lock-step).
++   */
++  | { readonly kind: 'barrier'; readonly count: number; readonly ids: readonly string[] };
++
++export const text = (value: string): ChatReply => ({ kind: 'text', text: value });
++export const toolCalls = (...calls: MockToolCall[]): ChatReply => ({ kind: 'tool-calls', calls });
++export const httpError = (status: number, body?: unknown): ChatReply => ({
++  kind: 'http-error',
++  status,
++  ...(body === undefined ? {} : { body }),
++});
++
++/** A promise the test resolves by hand (event-driven sequencing, no sleeps). */
++export function deferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void } {
++  let resolve!: (value: T) => void;
++  const promise = new Promise<T>((r) => {
++    resolve = r;
++  });
++  return { promise, resolve };
++}
++
++/** A tool call that stages one timeline operation through the engine's real tool. */
++export function proposeTimeline(...operations: readonly Record<string, unknown>[]): MockToolCall {
++  return { name: 'propose_timeline_operations', args: { operations } };
++}
++
++/** The tool call the engine's capability probe asks for. */
++export const probeToolCall: MockToolCall = { name: 'joy_probe', args: { value: 'JOY_PROBE' } };
++
++export interface RecordedRequest {
++  readonly method: string;
++  readonly path: string;
++  readonly headers: IncomingHttpHeaders;
++  readonly body: string;
++  /** Parsed JSON body, or `undefined` when the body is empty / not JSON. */
++  readonly json: Record<string, unknown> | undefined;
++}
++
++// ---------------------------------------------------------------------------
++// Mock server
++// ---------------------------------------------------------------------------
++
++export class MockLlmServer {
++  readonly requests: RecordedRequest[] = [];
++  private server: Server | undefined;
++  private port = 0;
++  private readonly sockets = new Set<Socket>();
++  private readonly chatQueue: ChatReply[] = [];
++  private chatFallback: ChatReply = text('OK from mock.');
++  private modelsReply: ModelsReply = { kind: 'list', ids: ['mock/model-a', 'mock/model-b'] };
++  private readonly heldModels: ServerResponse[] = [];
++  private readonly waiters: Array<() => void> = [];
++  private callCounter = 0;
++
++  /** Base URL to pass as `--url` (`http://127.0.0.1:<port>/v1`). */
++  get url(): string {
++    return `${this.origin}/v1`;
++  }
++
++  get origin(): string {
++    return `http://127.0.0.1:${this.port}`;
++  }
++
++  get chatRequests(): RecordedRequest[] {
++    return this.requests.filter((r) => r.path.endsWith('/chat/completions'));
++  }
++
++  get modelRequests(): RecordedRequest[] {
++    return this.requests.filter((r) => r.path.endsWith('/models'));
++  }
++
++  async start(): Promise<this> {
++    const server = createServer((req, res) => void this.handle(req, res));
++    server.on('connection', (socket) => {
++      this.sockets.add(socket);
++      socket.on('close', () => this.sockets.delete(socket));
++    });
++    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
++    this.server = server;
++    this.port = (server.address() as AddressInfo).port;
++    return this;
++  }
++
++  /** Queue replies for the next chat-completion calls (FIFO). */
++  script(...replies: ChatReply[]): this {
++    this.chatQueue.push(...replies);
++    return this;
++  }
++
++  /** Reply used once the scripted queue is empty. */
++  fallback(reply: ChatReply): this {
++    this.chatFallback = reply;
++    return this;
++  }
++
++  models(reply: ModelsReply): this {
++    this.modelsReply = reply;
++    return this;
++  }
++
++  reset(): void {
++    this.requests.length = 0;
++    this.chatQueue.length = 0;
++    this.chatFallback = text('OK from mock.');
++    this.modelsReply = { kind: 'list', ids: ['mock/model-a', 'mock/model-b'] };
++    this.heldModels.length = 0;
++  }
++
++  /** Resolves once at least `count` requests (optionally matching `path`) were received. */
++  waitForRequests(count: number, pathSuffix?: string): Promise<void> {
++    const satisfied = (): boolean =>
++      this.requests.filter((r) => pathSuffix === undefined || r.path.endsWith(pathSuffix))
++        .length >= count;
++    if (satisfied()) return Promise.resolve();
++    return new Promise<void>((resolve) => {
++      const check = (): void => {
++        if (satisfied()) resolve();
++        else this.waiters.push(check);
++      };
++      this.waiters.push(check);
++    });
++  }
++
++  async close(): Promise<void> {
++    for (const socket of this.sockets) socket.destroy();
++    const server = this.server;
++    this.server = undefined;
++    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
++  }
++
++  private notify(): void {
++    const pending = this.waiters.splice(0);
++    for (const waiter of pending) waiter();
++  }
++
++  private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
++    const chunks: Buffer[] = [];
++    for await (const chunk of req) chunks.push(chunk as Buffer);
++    const body = Buffer.concat(chunks).toString('utf8');
++    let json: Record<string, unknown> | undefined;
++    try {
++      json = body.length > 0 ? (JSON.parse(body) as Record<string, unknown>) : undefined;
++    } catch {
++      json = undefined;
++    }
++    const path = (req.url ?? '/').split('?')[0] ?? '/';
++    this.requests.push({ method: req.method ?? 'GET', path, headers: req.headers, body, json });
++
++    try {
++      if (req.method === 'GET' && path.endsWith('/models')) {
++        this.answerModels(res);
++      } else if (req.method === 'POST' && path.endsWith('/chat/completions')) {
++        const reply = this.chatQueue.shift() ?? this.chatFallback;
++        this.answerChat(res, reply, json);
++      } else {
++        sendJson(res, 404, { error: { message: `mock: no route for ${req.method} ${path}` } });
++      }
++    } finally {
++      this.notify();
++    }
++  }
++
++  private answerModels(res: ServerResponse): void {
++    const reply = this.modelsReply;
++    switch (reply.kind) {
++      case 'list':
++        sendJson(res, 200, { object: 'list', data: reply.ids.map((id) => ({ id })) });
++        return;
++      case 'bare-array':
++        sendJson(
++          res,
++          200,
++          reply.ids.map((id) => ({ id })),
++        );
++        return;
++      case 'http-error':
++        sendJson(res, reply.status, reply.body ?? { error: { message: 'mock error' } });
++        return;
++      case 'html':
++        res.writeHead(200, { 'content-type': 'text/html' });
++        res.end('<!doctype html><html><body>Login required</body></html>');
++        return;
++      case 'hang':
++        return;
++      case 'redirect':
++        res.writeHead(302, { location: reply.location });
++        res.end();
++        return;
++      case 'barrier': {
++        this.heldModels.push(res);
++        if (this.heldModels.length >= reply.count) {
++          const payload = { object: 'list', data: reply.ids.map((id) => ({ id })) };
++          for (const held of this.heldModels.splice(0)) sendJson(held, 200, payload);
++        }
++        return;
++      }
++    }
++  }
++
++  private answerChat(
++    res: ServerResponse,
++    reply: ChatReply,
++    request: Record<string, unknown> | undefined,
++  ): void {
++    const model = typeof request?.model === 'string' ? request.model : 'mock-model';
++    const streaming = request?.stream === true;
++    this.callCounter += 1;
++    const id = `chatcmpl-mock-${this.callCounter}`;
++
++    switch (reply.kind) {
++      case 'http-error':
++        res.writeHead(reply.status, { 'content-type': 'application/json', ...reply.headers });
++        res.end(
++          JSON.stringify(
++            reply.body ?? { error: { message: `mock HTTP ${reply.status}`, type: 'mock_error' } },
++          ),
++        );
++        return;
++      case 'malformed':
++        res.writeHead(200, { 'content-type': reply.contentType ?? 'application/json' });
++        res.end(reply.body);
++        return;
++      case 'hang':
++        return;
++      case 'deferred':
++        void reply.reply.then((next) => this.answerChat(res, next, request));
++        return;
++      case 'slow-stream':
++      case 'stall-stream': {
++        res.writeHead(200, {
++          'content-type': 'text/event-stream',
++          'cache-control': 'no-cache',
++          connection: 'keep-alive',
++        });
++        const send = (data: unknown): void => {
++          res.write(`data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`);
++        };
++        const pieces = [...reply.chunks];
++        const interval = reply.kind === 'slow-stream' ? reply.intervalMs : 0;
++        const step = (): void => {
++          const piece = pieces.shift();
++          if (piece !== undefined) {
++            send(chunk(id, model, { role: 'assistant', content: piece }, null));
++            setTimeout(step, interval);
++            return;
++          }
++          if (reply.kind === 'stall-stream') return; // never finish
++          send({ ...chunk(id, model, {}, 'stop'), usage: usage() });
++          send('[DONE]');
++          res.end();
++        };
++        step();
++        return;
++      }
++      case 'text':
++      case 'tool-calls': {
++        const toolCallsPayload =
++          reply.kind === 'tool-calls'
++            ? reply.calls.map((call, index) => ({
++                id: call.id ?? `call_${this.callCounter}_${index}`,
++                type: 'function',
++                function: {
++                  name: call.name,
++                  arguments: typeof call.args === 'string' ? call.args : JSON.stringify(call.args),
++                },
++              }))
++            : undefined;
++        const content = reply.kind === 'text' ? reply.text : null;
++        const finish = reply.kind === 'text' ? 'stop' : 'tool_calls';
++        if (streaming) {
++          res.writeHead(200, { 'content-type': 'text/event-stream' });
++          const send = (data: unknown): void => {
++            res.write(`data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`);
++          };
++          if (content !== null) send(chunk(id, model, { role: 'assistant', content }, null));
++          if (toolCallsPayload) {
++            send(
++              chunk(
++                id,
++                model,
++                {
++                  role: 'assistant',
++                  tool_calls: toolCallsPayload.map((call, index) => ({ index, ...call })),
++                },
++                null,
++              ),
++            );
++          }
++          send({ ...chunk(id, model, {}, finish), usage: usage() });
++          send('[DONE]');
++          res.end();
++          return;
++        }
++        sendJson(res, 200, {
++          id,
++          object: 'chat.completion',
++          created: 1_700_000_000,
++          model,
++          choices: [
++            {
++              index: 0,
++              message: {
++                role: 'assistant',
++                content,
++                ...(toolCallsPayload ? { tool_calls: toolCallsPayload } : {}),
++              },
++              finish_reason: finish,
++            },
++          ],
++          usage: usage(),
++        });
++        return;
++      }
++    }
++  }
++}
++
++function chunk(
++  id: string,
++  model: string,
++  delta: unknown,
++  finish: string | null,
++): Record<string, unknown> {
++  return {
++    id,
++    object: 'chat.completion.chunk',
++    created: 1_700_000_000,
++    model,
++    choices: [{ index: 0, delta, finish_reason: finish }],
++  };
++}
++
++function usage(): unknown {
++  return { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 };
++}
++
++function sendJson(res: ServerResponse, status: number, payload: unknown): void {
++  const encoded = JSON.stringify(payload);
++  res.writeHead(status, {
++    'content-type': 'application/json',
++    'content-length': Buffer.byteLength(encoded),
++  });
++  res.end(encoded);
++}
++
++export async function startMockLlm(): Promise<MockLlmServer> {
++  return new MockLlmServer().start();
++}
++
++// ---------------------------------------------------------------------------
++// Network guard: the CLI child may only reach loopback (the mock)
++// ---------------------------------------------------------------------------
++
++/**
++ * Preloaded into every agent CLI child (`NODE_OPTIONS=--import`). Any fetch
++ * to a non-loopback host is refused before a socket is opened and its origin
++ * is logged, so a test can assert "no network call was attempted" — and a
++ * regression can never reach a real provider with a key from the test.
++ */
++const NET_GUARD_SOURCE = `
++import { appendFileSync } from 'node:fs';
++const realFetch = globalThis.fetch;
++globalThis.fetch = async function joyTestGuardedFetch(input, init) {
++  const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
++  const url = new URL(raw);
++  const host = url.hostname.replace(/^\\[/, '').replace(/\\]$/, '');
++  if (host === '127.0.0.1' || host === 'localhost' || host === '::1') return realFetch(input, init);
++  if (process.env.JOY_TEST_NET_LOG) appendFileSync(process.env.JOY_TEST_NET_LOG, url.origin + '\\n');
++  const cause = Object.assign(new Error('blocked by test network guard'), { code: 'EJOYTESTBLOCKED' });
++  throw new TypeError('fetch failed', { cause });
++};
++`;
++
++export interface AgentSandbox {
++  readonly sb: Sandbox;
++  /** Run the CLI with the network guard (and any extra env). */
++  run(args: readonly string[], options?: RunOptions): Promise<RunResult>;
++  spawn(args: readonly string[], options?: Parameters<typeof spawnCli>[2]): LiveRun;
++  /** Origins of every non-loopback fetch the CLI attempted (and was refused). */
++  externalCalls(): string[];
++  /** Env that installs the guard (merge into custom spawns). */
++  readonly guardEnv: Record<string, string>;
++  cleanup(): void;
++}
++
++export function createAgentSandbox(label: string): AgentSandbox {
++  const sb = createSandbox(label);
++  const guardDir = join(sb.home, '..', 'guard');
++  mkdirSync(guardDir, { recursive: true });
++  const guardPath = join(guardDir, 'net-guard.mjs');
++  writeFileSync(guardPath, NET_GUARD_SOURCE, 'utf8');
++  const netLog = join(guardDir, 'external-calls.log');
++  const guardEnv = {
++    NODE_OPTIONS: `--import=${pathToFileURL(guardPath).href}`,
++    JOY_TEST_NET_LOG: netLog,
++  };
++  return {
++    sb,
++    guardEnv,
++    run: (args, options = {}) => sb.run(args, { ...options, env: { ...guardEnv, ...options.env } }),
++    spawn: (args, options = {}) => spawnCli(sb, args, { ...options, env: { ...guardEnv, ...options.env } }),
++    externalCalls: () =>
++      existsSync(netLog)
++        ? readFileSync(netLog, 'utf8')
++            .split('\n')
++            .filter((line) => line.length > 0)
++        : [],
++    cleanup: () => sb.cleanup(),
++  };
++}
++
++/** Write a config file into the sandbox's `~/.joy-media` (a "pre-existing" install). */
++export function writeJoyConfig(sb: Sandbox, file: string, content: string | object): string {
++  mkdirSync(sb.joyDir, { recursive: true });
++  const path = join(sb.joyDir, file);
++  writeFileSync(path, typeof content === 'string' ? content : JSON.stringify(content, null, 2));
++  return path;
++}
++
++export function readJoyConfig<T = Record<string, unknown>>(sb: Sandbox, file: string): T {
++  return JSON.parse(readFileSync(join(sb.joyDir, file), 'utf8')) as T;
++}
++
++// ---------------------------------------------------------------------------
++// Spawning with access to the child (for event-driven signals)
++// ---------------------------------------------------------------------------
++
++export interface LiveRun {
++  readonly child: ChildProcessWithoutNullStreams;
++  /** Resolves when the process exits. */
++  readonly done: Promise<RunResult>;
++  /** stdout + stderr seen so far (ANSI-stripped). */
++  output(): string;
++}
++
++/**
++ * Like `sb.run`, but hands back the child so a test can signal it at a
++ * precise, event-driven moment (e.g. once the mock has received a request).
++ */
++export function spawnCli(
++  sb: Sandbox,
++  args: readonly string[],
++  options: { env?: Record<string, string | undefined>; input?: string; keepStdinOpen?: boolean } = {},
++): LiveRun {
++  ensureCliBuilt();
++  const child = spawn(process.execPath, [join(CLI_ROOT, 'bin', 'joy-media.mjs'), ...args], {
++    cwd: sb.cwd,
++    env: sb.env(options.env),
++    stdio: ['pipe', 'pipe', 'pipe'],
++  });
++  const stdout: Buffer[] = [];
++  const stderr: Buffer[] = [];
++  child.stdout.on('data', (c: Buffer) => stdout.push(c));
++  child.stderr.on('data', (c: Buffer) => stderr.push(c));
++  if (options.input !== undefined) child.stdin.write(options.input);
++  if (!options.keepStdinOpen) child.stdin.end();
++  const startedAt = Date.now();
++  const killTimer = setTimeout(() => child.kill('SIGKILL'), 120_000);
++  const done = new Promise<RunResult>((resolve, reject) => {
++    child.on('error', reject);
++    child.on('close', (code, signal) => {
++      clearTimeout(killTimer);
++      const out = Buffer.concat(stdout).toString('utf8');
++      const err = Buffer.concat(stderr).toString('utf8');
++      resolve({
++        args,
++        code,
++        signal,
++        timedOut: false,
++        stdout: out,
++        stderr: err,
++        durationMs: Date.now() - startedAt,
++        out: stripAnsi(out),
++        err: stripAnsi(err),
++        all: stripAnsi(`${out}\n${err}`),
++        json<T>(): T {
++          return JSON.parse(out) as T;
++        },
++        ndjson<T>(): T[] {
++          return out
++            .split('\n')
++            .filter((line) => line.trim().length > 0)
++            .map((line) => JSON.parse(line) as T);
++        },
++      });
++    });
++  });
++  return {
++    child,
++    done,
++    output: () =>
++      stripAnsi(`${Buffer.concat(stdout).toString('utf8')}\n${Buffer.concat(stderr).toString('utf8')}`),
++  };
++}
++
++// ---------------------------------------------------------------------------
++// State inspection helpers
++// ---------------------------------------------------------------------------
++
++export interface ProjectRow {
++  readonly id: string;
++  readonly revision: number;
++  readonly payload: {
++    readonly title: string;
++    readonly compositions: Record<
++      string,
++      { tracks: Array<{ id: string; clips: Array<{ id: string; startUs: number; durationUs: number }> }> }
++    >;
++    readonly rootCompositionId: string;
++  };
++}
++
++/** Latest snapshot of every project in the sandbox's default SQLite database. */
++export function readProjects(sb: Sandbox): ProjectRow[] {
++  const dbPath = join(sb.joyDir, 'joy-media.sqlite3');
++  if (!existsSync(dbPath)) return [];
++  const db = new DatabaseSync(dbPath, { readOnly: true });
++  try {
++    const rows = db
++      .prepare(
++        `SELECT project_id, revision, payload FROM snapshots
++         WHERE (project_id, revision) IN (SELECT project_id, MAX(revision) FROM snapshots GROUP BY project_id)`,
++      )
++      .all() as Array<{ project_id: string; revision: number; payload: string }>;
++    return rows.map((row) => ({
++      id: row.project_id,
++      revision: row.revision,
++      payload: JSON.parse(row.payload) as ProjectRow['payload'],
++    }));
++  } finally {
++    db.close();
++  }
++}
++
++export function clipsOf(row: ProjectRow): Array<{ trackId: string; id: string }> {
++  const root = row.payload.compositions[row.payload.rootCompositionId];
++  return (root?.tracks ?? []).flatMap((t) => t.clips.map((c) => ({ trackId: t.id, id: c.id })));
++}
++
++/** POSIX permission bits (e.g. 0o600) of a path. */
++export function modeOf(path: string): number {
++  return statSync(path).mode & 0o777;
++}
++
++/** Every file below `dir` (recursively) — used to hunt for leaked secrets. */
++export function readTree(dir: string): Array<{ path: string; content: string }> {
++  if (!existsSync(dir)) return [];
++  const out: Array<{ path: string; content: string }> = [];
++  for (const entry of readdirSync(dir, { withFileTypes: true })) {
++    const full = join(dir, entry.name);
++    if (entry.isDirectory()) out.push(...readTree(full));
++    else out.push({ path: full, content: readFileSync(full).toString('latin1') });
++  }
++  return out;
++}
++
++/** Create a project through the real binary and return its id. */
++export async function createProject(sb: Sandbox, title: string): Promise<string> {
++  const before = new Set(readProjects(sb).map((p) => p.id));
++  const r = await sb.run(['project', 'create', title]);
++  if (r.code !== 0) throw new Error(`project create failed:\n${r.all}`);
++  const created = readProjects(sb).find((p) => !before.has(p.id));
++  if (!created) throw new Error(`project create did not persist a project:\n${r.all}`);
++  return created.id;
++}
++
++/** Add a clip through the real binary; returns the new clip id. */
++export async function addClip(
++  sb: Sandbox,
++  projectId: string,
++  opts: { track?: string; start?: number; duration?: number } = {},
++): Promise<string> {
++  const before = readProjects(sb).find((p) => p.id === projectId);
++  const known = new Set(before ? clipsOf(before).map((c) => c.id) : []);
++  const r = await sb.run([
++    'timeline',
++    'add-clip',
++    '--project',
++    projectId,
++    '--track',
++    opts.track ?? 'track-v1',
++    // `--start 0` is rejected by the shared flag validation (not this suite's
++    // area); omitting it means 0.
++    ...(opts.start ? ['--start', String(opts.start)] : []),
++    '--duration',
++    String(opts.duration ?? 4),
++  ]);
++  if (r.code !== 0) throw new Error(`add-clip failed:\n${r.all}`);
++  const after = readProjects(sb).find((p) => p.id === projectId);
++  const clip = after ? clipsOf(after).find((c) => !known.has(c.id)) : undefined;
++  if (!clip) throw new Error(`add-clip did not persist a clip:\n${r.all}`);
++  return clip.id;
++}
++
++/** Fake, obviously-not-real secrets. */
++export function fakeKey(label: string): string {
++  return `sk-test-${label}-0123456789abcdefFAKE`;
++}
+diff --git a/apps/cli/src/humanized/agent-providers.e2e.test.ts b/apps/cli/src/humanized/agent-providers.e2e.test.ts
+new file mode 100644
+index 0000000..cec90ac
+--- /dev/null
++++ b/apps/cli/src/humanized/agent-providers.e2e.test.ts
+@@ -0,0 +1,370 @@
++/**
++ * Provider lifecycle (`agent provider add|list|use|remove`, `agent model`,
++ * `agent config`) through the real binary. The provider file holds every API
++ * key the user owns, so the bar is: never lose it, never corrupt it, never
++ * hang on a slow endpoint, and keep exit codes honest.
++ */
++import { readFileSync, statSync } from 'node:fs';
++import { join } from 'node:path';
++import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
++import {
++  createAgentSandbox,
++  fakeKey,
++  readJoyConfig,
++  startMockLlm,
++  writeJoyConfig,
++  type AgentSandbox,
++  type MockLlmServer,
++} from './agent-helpers.js';
++import { describeRun, hasAnsi } from './harness.js';
++
++const KEY = fakeKey('providers');
++
++interface StoredProvider {
++  name?: string;
++  provider?: string;
++  baseUrl?: string;
++  apiKey?: string;
++  defaultModel?: string;
++  cachedModels?: string[];
++}
++type ProviderFile = Record<string, StoredProvider>;
++
++describe('agent provider add: model discovery against the endpoint', () => {
++  let mock: MockLlmServer;
++  let env: AgentSandbox;
++  const add = (name: string, ...extra: string[]) =>
++    env.run(['agent', 'provider', 'add', name, '--url', mock.url, '--api-key', KEY, ...extra]);
++  const stored = (name: string): StoredProvider =>
++    readJoyConfig<ProviderFile>(env.sb, 'ai-providers.json')[name]!;
++
++  beforeAll(async () => {
++    mock = await startMockLlm();
++  });
++  afterAll(async () => {
++    await mock.close();
++  });
++  beforeEach(() => {
++    mock.reset();
++    env = createAgentSandbox('agent-discovery');
++  });
++  afterEach(() => {
++    expect(env.externalCalls()).toEqual([]);
++    env.cleanup();
++  });
++
++  it('caches the OpenAI-style {data:[{id}]} list and defaults to its first model', async () => {
++    mock.models({ kind: 'list', ids: ['mock/alpha', 'mock/beta'] });
++    const r = await add('local');
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/Discovered 2 models/);
++    expect(stored('local')).toMatchObject({
++      baseUrl: mock.url,
++      defaultModel: 'mock/alpha',
++      cachedModels: ['mock/alpha', 'mock/beta'],
++    });
++    expect(mock.modelRequests[0]?.headers.authorization).toBe(`Bearer ${KEY}`);
++  });
++
++  it('accepts a bare JSON array too', async () => {
++    mock.models({ kind: 'bare-array', ids: ['m1'] });
++    const r = await add('bare');
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(stored('bare').cachedModels).toEqual(['m1']);
++  });
++
++  it('--model wins over the discovered default', async () => {
++    const r = await add('pinned', '--model', 'mock/beta');
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(stored('pinned').defaultModel).toBe('mock/beta');
++  });
++
++  for (const [label, reply, warning] of [
++    ['HTTP 401', { kind: 'http-error', status: 401 }, /rejected the API key \(HTTP 401\)/],
++    ['an HTML login page', { kind: 'html' }, /not JSON/],
++    ['HTTP 500', { kind: 'http-error', status: 500 }, /HTTP 500/],
++  ] as const) {
++    it(`${label} from /models: warns, still saves the provider, exits 0`, async () => {
++      mock.models(reply);
++      const r = await add('flaky');
++      expect(r.code, describeRun(r)).toBe(0);
++      expect(r.out).toMatch(warning);
++      expect(stored('flaky').apiKey).toBe(KEY);
++      expect(stored('flaky').cachedModels).toBeUndefined();
++    });
++  }
++
++  it('a /models endpoint that never answers does not hang the CLI', async () => {
++    mock.models({ kind: 'hang' });
++    const r = await add('slow');
++    expect(r.timedOut, describeRun(r)).toBe(false);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/no answer within 10s/);
++    expect(stored('slow').baseUrl).toBe(mock.url);
++  }, 60_000);
++
++  it('a huge model list is bounded before it bloats the key file', async () => {
++    const ids = Array.from({ length: 20_000 }, (_, i) => `vendor/model-${i}`);
++    mock.models({ kind: 'list', ids });
++    const r = await add('huge');
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/Discovered 20000 models/);
++    expect(stored('huge').cachedModels).toHaveLength(5_000);
++  });
++
++  it('does not follow a redirect with the API key to another origin', async () => {
++    const elsewhere = await startMockLlm();
++    try {
++      mock.models({ kind: 'redirect', location: `${elsewhere.url}/models` });
++      const r = await add('redirecting');
++      expect(r.code, describeRun(r)).toBe(0);
++      expect(r.out).toMatch(/redirected/);
++      expect(elsewhere.requests).toHaveLength(0);
++    } finally {
++      await elsewhere.close();
++    }
++  });
++});
++
++describe('agent provider lifecycle', () => {
++  let mock: MockLlmServer;
++  let env: AgentSandbox;
++  const add = (name: string, ...extra: string[]) =>
++    env.run(['agent', 'provider', 'add', name, '--url', mock.url, '--api-key', KEY, ...extra]);
++  const providerFile = (): ProviderFile => readJoyConfig<ProviderFile>(env.sb, 'ai-providers.json');
++
++  beforeAll(async () => {
++    mock = await startMockLlm();
++  });
++  afterAll(async () => {
++    await mock.close();
++  });
++  beforeEach(() => {
++    mock.reset();
++    env = createAgentSandbox('agent-lifecycle');
++  });
++  afterEach(() => {
++    expect(env.externalCalls()).toEqual([]);
++    env.cleanup();
++  });
++
++  it('add -> list -> use -> remove the active provider: what is active afterwards is stated', async () => {
++    expect((await add('studio')).code).toBe(0);
++
++    const list = await env.run(['agent', 'provider', 'list']);
++    expect(list.code, describeRun(list)).toBe(0);
++    expect(list.out).toMatch(/studio \(custom\)/);
++    expect(hasAnsi(list.stdout)).toBe(false);
++
++    const use = await env.run(['agent', 'provider', 'use', 'studio']);
++    expect(use.code, describeRun(use)).toBe(0);
++    expect(readJoyConfig(env.sb, 'cli-config.json')).toMatchObject({
++      activeProvider: 'studio',
++      defaultModel: 'mock/model-a',
++    });
++
++    const rm = await env.run(['agent', 'provider', 'remove', 'studio']);
++    expect(rm.code, describeRun(rm)).toBe(0);
++    expect(rm.out).toMatch(/was the active provider/);
++    // The removed provider's model must not linger as the global default.
++    expect(readJoyConfig(env.sb, 'cli-config.json')).toEqual({});
++
++    const cfg = await env.run(['agent', 'config', '--json']);
++    expect(cfg.code, describeRun(cfg)).toBe(0);
++    expect(cfg.json()).toMatchObject({
++      activeProvider: null,
++      effective: { provider: 'openrouter', model: 'openrouter/auto', apiKey: null },
++    });
++  });
++
++  it('--json works for list / add / use / remove and stdout is only JSON', async () => {
++    const added = await add('j1', '--json');
++    expect(added.code, describeRun(added)).toBe(0);
++    expect(added.json()).toMatchObject({ ok: true, provider: { name: 'j1', baseUrl: mock.url } });
++
++    const use = await env.run(['agent', 'provider', 'use', 'j1', '--json']);
++    expect(use.json()).toMatchObject({ ok: true, activeProvider: 'j1' });
++
++    const list = await env.run(['agent', 'provider', 'list', '--json']);
++    expect(list.code, describeRun(list)).toBe(0);
++    const doc = list.json<{ activeProvider: string; providers: Array<Record<string, unknown>> }>();
++    expect(doc.activeProvider).toBe('j1');
++    expect(doc.providers).toEqual([
++      expect.objectContaining({ name: 'j1', active: true, cachedModelCount: 2 }),
++    ]);
++
++    const rm = await env.run(['agent', 'provider', 'rm', 'j1', '--json']);
++    expect(rm.json()).toMatchObject({ ok: true, removed: 'j1', wasActive: true });
++  });
++
++  it('re-adding an existing name says it replaced it (one entry, new values)', async () => {
++    await add('dup', '--model', 'first');
++    const again = await add('dup', '--model', 'second');
++    expect(again.code, describeRun(again)).toBe(0);
++    expect(again.out).toMatch(/already existed and was replaced/);
++    expect(Object.keys(providerFile())).toEqual(['dup']);
++    expect(providerFile().dup?.defaultModel).toBe('second');
++  });
++
++  it('switching providers does not carry the previous provider model along', async () => {
++    await add('a', '--model', 'model-of-a');
++    writeJoyConfig(env.sb, 'ai-providers.json', {
++      ...providerFile(),
++      b: { name: 'b', provider: 'custom', baseUrl: mock.url, apiKey: KEY },
++    });
++    await env.run(['agent', 'provider', 'use', 'a']);
++    await env.run(['agent', 'provider', 'use', 'b']);
++    const cfg = await env.run(['agent', 'config', '--json']);
++    expect(cfg.json()).toMatchObject({ activeProvider: 'b', defaultModel: null });
++  });
++
++  it('rejects names that are not identifiers (exit 2) and handles Object.prototype names', async () => {
++    for (const bad of ['__proto__', '../escape', 'two words', '-flag-like']) {
++      const r = await add(bad);
++      expect(r.code, `${bad}: ${describeRun(r)}`).toBe(2);
++      expect(r.err).toMatch(/Invalid provider name/);
++    }
++    // Inherited Object.prototype members are not providers.
++    for (const name of ['constructor', 'toString', 'hasOwnProperty']) {
++      const use = await env.run(['agent', 'provider', 'use', name]);
++      expect(use.code, `use ${name}: ${describeRun(use)}`).toBe(1);
++      const rm = await env.run(['agent', 'provider', 'remove', name]);
++      expect(rm.code, `remove ${name}: ${describeRun(rm)}`).toBe(1);
++    }
++    // ...but a provider may legitimately be called "constructor".
++    expect((await add('constructor')).code).toBe(0);
++    expect(Object.keys(providerFile())).toEqual(['constructor']);
++    expect((await env.run(['agent', 'provider', 'use', 'constructor'])).code).toBe(0);
++  });
++
++  it('unknown provider for use / remove exits 1 and changes nothing', async () => {
++    await add('keep');
++    const before = readFileSync(join(env.sb.joyDir, 'ai-providers.json'), 'utf8');
++    for (const action of ['use', 'remove']) {
++      const r = await env.run(['agent', 'provider', action, 'ghost']);
++      expect(r.code, describeRun(r)).toBe(1);
++      expect(r.err).toMatch(/ghost/);
++    }
++    expect(readFileSync(join(env.sb.joyDir, 'ai-providers.json'), 'utf8')).toBe(before);
++  });
++
++  it('usage errors exit 2: missing name, missing --url, malformed --url, unknown action -> 1', async () => {
++    const noName = await env.run(['agent', 'provider', 'add']);
++    expect(noName.code, describeRun(noName)).toBe(2);
++    const noUrl = await env.run(['agent', 'provider', 'add', 'x']);
++    expect(noUrl.code, describeRun(noUrl)).toBe(2);
++    expect(noUrl.err).toMatch(/--url/);
++    for (const url of ['not a url', 'ftp://example.com/v1', `${mock.url}/chat/completions`]) {
++      const r = await env.run(['agent', 'provider', 'add', 'x', '--url', url]);
++      expect(r.code, `${url}: ${describeRun(r)}`).toBe(2);
++    }
++    const unknown = await env.run(['agent', 'provider', 'frobnicate']);
++    expect(unknown.code, describeRun(unknown)).toBe(1);
++    expect(mock.requests).toHaveLength(0);
++  });
++
++  it('agent model set / get and agent config --json report the effective settings', async () => {
++    await add('main');
++    await env.run(['agent', 'provider', 'use', 'main']);
++    const set = await env.run(['agent', 'model', 'set', 'mock/custom-model']);
++    expect(set.code, describeRun(set)).toBe(0);
++
++    const get = await env.run(['agent', 'model', '--json']);
++    expect(get.json()).toEqual({
++      defaultModel: 'mock/custom-model',
++      effectiveModel: 'mock/custom-model',
++    });
++
++    const cfg = await env.run(['agent', 'config', '--json']);
++    expect(cfg.code, describeRun(cfg)).toBe(0);
++    expect(cfg.json()).toMatchObject({
++      activeProvider: 'main',
++      effective: {
++        provider: 'main',
++        baseUrl: mock.url,
++        model: 'mock/custom-model',
++        apiKeySource: 'provider:main',
++        local: true,
++      },
++    });
++    const noModel = await env.run(['agent', 'model', 'set']);
++    expect(noModel.code, describeRun(noModel)).toBe(2);
++  });
++});
++
++describe('config files are never silently destroyed', () => {
++  let mock: MockLlmServer;
++  let env: AgentSandbox;
++
++  beforeAll(async () => {
++    mock = await startMockLlm();
++  });
++  afterAll(async () => {
++    await mock.close();
++  });
++  beforeEach(() => {
++    mock.reset();
++    env = createAgentSandbox('agent-corrupt');
++  });
++  afterEach(() => {
++    expect(env.externalCalls()).toEqual([]);
++    env.cleanup();
++  });
++
++  for (const [label, content] of [
++    ['truncated JSON', `{"work": {"apiKey": "${KEY}", "baseUrl": "https://api.example.com/v1"`],
++    ['a JSON array', '["not", "a", "map"]'],
++  ] as const) {
++    it(`ai-providers.json with ${label}: add/list/remove refuse (exit 1), file kept byte-for-byte`, async () => {
++      const path = writeJoyConfig(env.sb, 'ai-providers.json', content);
++      for (const args of [
++        ['agent', 'provider', 'add', 'new', '--url', mock.url, '--api-key', fakeKey('new')],
++        ['agent', 'provider', 'list'],
++        ['agent', 'provider', 'remove', 'work'],
++        ['agent', 'run', 'hello', '--url', mock.url],
++      ]) {
++        const r = await env.run(args);
++        expect(r.code, describeRun(r)).toBe(1);
++        expect(r.err).toMatch(/ai-providers\.json is not (valid JSON|a JSON object)/);
++        expect(r.all).not.toContain(KEY); // JSON.parse errors quote the source text
++        expect(readFileSync(path, 'utf8')).toBe(content);
++      }
++      expect(mock.chatRequests).toHaveLength(0);
++    });
++  }
++
++  it('corrupt cli-config.json: agent writes refuse, project commands keep working', async () => {
++    const path = writeJoyConfig(env.sb, 'cli-config.json', '{"activeProvider": ');
++    const use = await env.run(['agent', 'model', 'set', 'x/y']);
++    expect(use.code, describeRun(use)).toBe(1);
++    expect(use.err).toMatch(/cli-config\.json is not valid JSON/);
++    expect(readFileSync(path, 'utf8')).toBe('{"activeProvider": ');
++    const projects = await env.run(['project', 'list']);
++    expect(projects.code, describeRun(projects)).toBe(0);
++  });
++
++  it('concurrent `provider add` from many processes loses no provider', async () => {
++    const count = 8;
++    // Every process blocks in discovery until all of them are there, then all
++    // proceed to write at the same moment: the classic lost-update window.
++    mock.models({ kind: 'barrier', count, ids: ['m'] });
++    const runs = await Promise.all(
++      Array.from({ length: count }, (_, i) =>
++        env.run([
++          'agent',
++          'provider',
++          'add',
++          `p${i}`,
++          '--url',
++          mock.url,
++          '--api-key',
++          fakeKey(`p${i}`),
++        ]),
++      ),
++    );
++    for (const r of runs) expect(r.code, describeRun(r)).toBe(0);
++    const names = Object.keys(readJoyConfig<ProviderFile>(env.sb, 'ai-providers.json')).sort();
++    expect(names).toEqual(Array.from({ length: count }, (_, i) => `p${i}`).sort());
++    expect(statSync(join(env.sb.joyDir, 'ai-providers.json')).size).toBeGreaterThan(0);
++  });
++});
+diff --git a/apps/cli/src/humanized/agent-resilience.e2e.test.ts b/apps/cli/src/humanized/agent-resilience.e2e.test.ts
+new file mode 100644
+index 0000000..b9e2ad2
+--- /dev/null
++++ b/apps/cli/src/humanized/agent-resilience.e2e.test.ts
+@@ -0,0 +1,96 @@
++/**
++ * A provider that never answers must not wedge an AI caller: the run has to
++ * be interruptible (SIGINT -> exit 130) and bounded (timeout -> exit 1), and
++ * neither may leave a half-written project behind.
++ */
++import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
++import {
++  createAgentSandbox,
++  createProject,
++  fakeKey,
++  readProjects,
++  startMockLlm,
++  type AgentSandbox,
++  type MockLlmServer,
++} from './agent-helpers.js';
++import { describeRun } from './harness.js';
++
++const KEY = fakeKey('resilience');
++
++describe('agent run against a provider that stalls (real binary)', () => {
++  let mock: MockLlmServer;
++  let env: AgentSandbox;
++  let projectId: string;
++  const args = (): string[] => [
++    'agent',
++    'run',
++    'add an intro',
++    '--project',
++    projectId,
++    '--apply',
++    '--url',
++    mock.url,
++    '--api-key',
++    KEY,
++  ];
++
++  beforeAll(async () => {
++    mock = await startMockLlm();
++  });
++  afterAll(async () => {
++    await mock.close();
++  });
++  beforeEach(async () => {
++    mock.reset();
++    env = createAgentSandbox('agent-stall');
++    projectId = await createProject(env.sb, 'Stall Target');
++  });
++  afterEach(() => {
++    expect(env.externalCalls()).toEqual([]);
++    env.cleanup();
++  });
++
++  it('SIGINT while waiting on a hung connection exits 130 and changes nothing', async () => {
++    mock.fallback({ kind: 'hang' });
++    const live = env.spawn(args());
++    await mock.waitForRequests(1, '/chat/completions'); // the run is now blocked on the provider
++    live.child.kill('SIGINT');
++    const r = await live.done;
++
++    expect(r.signal, describeRun(r)).toBeNull(); // handled, not killed
++    expect(r.code, describeRun(r)).toBe(130);
++    expect(r.err).toMatch(/Received SIGINT/);
++    expect(readProjects(env.sb)[0]!.revision).toBe(1);
++  });
++
++  it('SIGTERM is handled the same way', async () => {
++    mock.fallback({ kind: 'stall-stream', chunks: ['Thinking'] });
++    const live = env.spawn(args());
++    await mock.waitForRequests(1, '/chat/completions');
++    live.child.kill('SIGTERM');
++    const r = await live.done;
++    expect(r.code, describeRun(r)).toBe(130);
++    expect(readProjects(env.sb)[0]!.revision).toBe(1);
++  });
++
++  for (const [label, reply] of [
++    ['a hung connection', { kind: 'hang' }],
++    ['a response stream that stalls half-way', { kind: 'stall-stream', chunks: ['Work', 'ing'] }],
++  ] as const) {
++    it(`${label} times out (JOY_AGENT_TIMEOUT_MS) with exit 1 and no mutation`, async () => {
++      mock.fallback(reply);
++      const r = await env.run(args(), { env: { JOY_AGENT_TIMEOUT_MS: '2000' } });
++      expect(r.timedOut, describeRun(r)).toBe(false);
++      expect(r.code, describeRun(r)).toBe(1);
++      expect(r.err).toMatch(/within 2s; gave up/);
++      expect(readProjects(env.sb)[0]!.revision).toBe(1);
++    });
++  }
++
++  it('--json timeout reports a JOY_AGENT_TIMEOUT error document', async () => {
++    mock.fallback({ kind: 'hang' });
++    const r = await env.run([...args(), '--json'], { env: { JOY_AGENT_TIMEOUT_MS: '1500' } });
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.json()).toMatchObject({ ok: false, error: { code: 'JOY_AGENT_TIMEOUT' } });
++  });
++});
+diff --git a/apps/cli/src/humanized/agent-run.e2e.test.ts b/apps/cli/src/humanized/agent-run.e2e.test.ts
+new file mode 100644
+index 0000000..5bd9207
+--- /dev/null
++++ b/apps/cli/src/humanized/agent-run.e2e.test.ts
+@@ -0,0 +1,462 @@
++/**
++ * `joy-media agent run "<instruction>" [--apply]` against the real binary and
++ * a hermetic mock LLM. What an AI caller relies on:
++ *   - without --apply nothing is written, and the output says what WOULD change;
++ *   - with --apply the change is committed exactly once, visible to a fresh process;
++ *   - provider failures (401/429/500/garbage/hang) exit 1 with an actionable
++ *     message and leave the project untouched;
++ *   - invalid proposals never partially mutate the project.
++ */
++import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
++import {
++  addClip,
++  clipsOf,
++  createAgentSandbox,
++  createProject,
++  deferred,
++  fakeKey,
++  httpError,
++  proposeTimeline,
++  readProjects,
++  startMockLlm,
++  text,
++  toolCalls,
++  type AgentSandbox,
++  type ChatReply,
++  type MockLlmServer,
++} from './agent-helpers.js';
++import { describeRun, hasAnsi } from './harness.js';
++
++const KEY = fakeKey('run');
++
++const insertOp = (id: string, trackId = 'track-v1') => ({
++  kind: 'insert',
++  id,
++  assetId: 'asset-intro',
++  trackId,
++  startUs: 0,
++  durationUs: 3_000_000,
++  dependsOn: [],
++});
++
++describe('agent run (real binary, mock LLM)', () => {
++  let mock: MockLlmServer;
++  let env: AgentSandbox;
++  let projectId: string;
++
++  const provider = (): string[] => ['--url', mock.url, '--api-key', KEY, '--model', 'mock/editor'];
++  const project = () => readProjects(env.sb).find((p) => p.id === projectId)!;
++
++  beforeAll(async () => {
++    mock = await startMockLlm();
++  });
++  afterAll(async () => {
++    await mock.close();
++  });
++  beforeEach(async () => {
++    mock.reset();
++    env = createAgentSandbox('agent-run');
++    projectId = await createProject(env.sb, 'Run Target');
++  });
++  afterEach(() => {
++    expect(env.externalCalls(), 'the CLI must never leave loopback in tests').toEqual([]);
++    env.cleanup();
++  });
++
++  it('dry run: shows the proposed change, sends a well-formed request, writes nothing', async () => {
++    mock.script(toolCalls(proposeTimeline(insertOp('agent-intro'))), text('Staged an intro clip.'));
++
++    const r = await env.run(['agent', 'run', 'add an intro clip', '--project', projectId, ...provider()]);
++
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/insert clip agent-intro .*track-v1/);
++    expect(r.out).toMatch(/Dry run: nothing was saved/);
++    expect(project().revision).toBe(1);
++    expect(clipsOf(project())).toEqual([]);
++
++    const [first] = mock.chatRequests;
++    expect(first?.headers.authorization).toBe(`Bearer ${KEY}`);
++    expect(first?.json?.model).toBe('mock/editor');
++    const tools = (first?.json?.tools as Array<{ function: { name: string } }>).map(
++      (t) => t.function.name,
++    );
++    expect(tools).toContain('propose_timeline_operations');
++    expect(JSON.stringify(first?.json?.messages)).toContain('add an intro clip');
++  });
++
++  it('--apply commits once; a fresh process sees the new revision and clip', async () => {
++    mock.script(toolCalls(proposeTimeline(insertOp('agent-intro'))), text('Done.'));
++
++    const r = await env.run([
++      'agent',
++      'run',
++      'add an intro clip',
++      '--project',
++      projectId,
++      '--apply',
++      ...provider(),
++    ]);
++
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/Committed changes at project revision 2/);
++    expect(project().revision).toBe(2);
++    expect(clipsOf(project()).map((c) => c.id)).toEqual(['agent-intro']);
++
++    const show = await env.run(['project', 'show', projectId]);
++    expect(show.code, describeRun(show)).toBe(0);
++    expect(show.out).toMatch(/Revision: 2/);
++    expect(show.out).toContain('agent-intro');
++  });
++
++  it('--json: stdout is exactly one JSON document describing the dry run (no ANSI)', async () => {
++    mock.script(toolCalls(proposeTimeline(insertOp('agent-intro'))), text('Staged.'));
++
++    const r = await env.run([
++      'agent',
++      'run',
++      'add an intro clip',
++      '--project',
++      projectId,
++      '--json',
++      ...provider(),
++    ]);
++
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(hasAnsi(r.stdout)).toBe(false);
++    const doc = r.json<{
++      ok: boolean;
++      dryRun: boolean;
++      applied: boolean;
++      revision: number;
++      project: { id: string };
++      operations: { timeline: Array<{ kind: string; id: string }> };
++    }>();
++    expect(doc).toMatchObject({ ok: true, dryRun: true, applied: false, revision: 1 });
++    expect(doc.project.id).toBe(projectId);
++    expect(doc.operations.timeline).toMatchObject([{ kind: 'insert', id: 'agent-intro' }]);
++  });
++
++  it('--json --apply reports the committed revision', async () => {
++    mock.script(toolCalls(proposeTimeline(insertOp('agent-intro'))), text('Done.'));
++    const r = await env.run([
++      'agent',
++      'run',
++      'add an intro clip',
++      '--project',
++      projectId,
++      '--apply',
++      '--json',
++      ...provider(),
++    ]);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.json()).toMatchObject({ ok: true, applied: true, revision: 2 });
++  });
++
++  const failures: Array<[string, ChatReply, RegExp]> = [
++    ['HTTP 401', httpError(401), /rejected the API key \(HTTP 401\)/],
++    ['HTTP 429', httpError(429), /rate-limiting requests \(HTTP 429\)/],
++    ['HTTP 500', httpError(500), /server error \(HTTP 500\)/],
++    [
++      'a 200 with a malformed JSON body',
++      { kind: 'malformed', body: '{"choices": [ this is not json' },
++      /could not use/,
++    ],
++    [
++      'an HTML error page',
++      { kind: 'malformed', body: '<html>502 Bad Gateway</html>', contentType: 'text/html' },
++      /could not use/,
++    ],
++  ];
++  for (const [label, reply, message] of failures) {
++    it(`${label}: exits 1 with an actionable message and leaves the project untouched`, async () => {
++      mock.fallback(reply);
++      const r = await env.run([
++        'agent',
++        'run',
++        'trim everything',
++        '--project',
++        projectId,
++        '--apply',
++        ...provider(),
++      ]);
++      expect(r.code, describeRun(r)).toBe(1);
++      expect(r.err).toMatch(message);
++      expect(r.all).not.toMatch(/at .*\.js:\d+/); // no stack trace
++      expect(r.all).not.toContain(KEY);
++      expect(project().revision).toBe(1);
++      // maxRetries is 0: one failing call, no retry storm against a rate limit.
++      expect(mock.chatRequests).toHaveLength(1);
++    });
++  }
++
++  it('--json failure: stdout is a JSON error with the HTTP status', async () => {
++    mock.fallback(httpError(429));
++    const r = await env.run([
++      'agent',
++      'run',
++      'x',
++      '--project',
++      projectId,
++      '--json',
++      ...provider(),
++    ]);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.json()).toMatchObject({ ok: false, error: { httpStatus: 429 } });
++  });
++
++  it('a model that only chats (no tool calls) proposes nothing and changes nothing', async () => {
++    mock.script(text('I would love to help, but here is a poem instead.'));
++    const r = await env.run([
++      'agent',
++      'run',
++      'make it pop',
++      '--project',
++      projectId,
++      '--apply',
++      ...provider(),
++    ]);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/proposed no changes/);
++    expect(r.out).toMatch(/No changes to commit; project stays at revision 1/);
++    expect(project().revision).toBe(1);
++  });
++
++  it('tool-call arguments that fail schema validation never reach the project', async () => {
++    mock.script(
++      toolCalls(proposeTimeline({ kind: 'insert', id: 'bad', trackId: 'track-v1', startUs: -5 })),
++      toolCalls({ name: 'propose_timeline_operations', args: '{"operations": [ {not json' }),
++      toolCalls({ name: 'delete_everything', args: {} }),
++      text('Gave up.'),
++    );
++    const r = await env.run([
++      'agent',
++      'run',
++      'break things',
++      '--project',
++      projectId,
++      '--apply',
++      ...provider(),
++    ]);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(project().revision).toBe(1);
++    expect(clipsOf(project())).toEqual([]);
++    // The engine fed the validation errors back to the model instead of crashing.
++    expect(mock.chatRequests.length).toBe(4);
++  });
++
++  it('a proposal that touches a missing clip is refused as a whole (no partial mutation)', async () => {
++    const existing = await addClip(env.sb, projectId);
++    mock.script(
++      toolCalls(
++        proposeTimeline(
++          insertOp('agent-new'),
++          { kind: 'remove', id: 'op-2', clipId: 'clip-that-does-not-exist', dependsOn: [] },
++        ),
++      ),
++      text('Done.'),
++    );
++    const r = await env.run([
++      'agent',
++      'run',
++      'swap clips',
++      '--project',
++      projectId,
++      '--apply',
++      ...provider(),
++    ]);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.all).toMatch(/clip-that-does-not-exist/);
++    expect(r.all).toMatch(/nothing was changed/i);
++    expect(project().revision).toBe(2); // project create + add-clip only
++    expect(clipsOf(project()).map((c) => c.id)).toEqual([existing]);
++  });
++
++  it('document operations the CLI cannot apply are refused, not reported as applied', async () => {
++    mock.script(
++      toolCalls({
++        name: 'propose_document_operations',
++        args: {
++          operations: [{ kind: 'set-text', id: 'op-1', objectId: 'title-1', text: 'Hello' }],
++        },
++      }),
++      text('Done.'),
++    );
++    const r = await env.run([
++      'agent',
++      'run',
++      'retitle',
++      '--project',
++      projectId,
++      '--apply',
++      ...provider(),
++    ]);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.all).toMatch(/not supported by the CLI/);
++    expect(r.all).not.toMatch(/Successfully applied/);
++    expect(project().revision).toBe(1);
++  });
++
++  it('a project changed by another process mid-run is not overwritten', async () => {
++    const release = deferred<ChatReply>();
++    mock.script(
++      { kind: 'deferred', reply: release.promise },
++      text('Done.'),
++    );
++    const live = env.spawn([
++      'agent',
++      'run',
++      'add an intro',
++      '--project',
++      projectId,
++      '--apply',
++      ...provider(),
++    ]);
++    await mock.waitForRequests(1, '/chat/completions');
++    const humanClip = await addClip(env.sb, projectId); // someone edits meanwhile (rev 2)
++    release.resolve(toolCalls(proposeTimeline(insertOp('agent-intro'))));
++    const r = await live.done;
++
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.err).toMatch(/modified by someone else/);
++    expect(project().revision).toBe(2);
++    expect(clipsOf(project()).map((c) => c.id)).toEqual([humanClip]);
++  });
++
++  it('Persian, emoji and a very long instruction reach the model byte-for-byte', async () => {
++    const instruction = `کلیپ اول را کوتاه کن 🎬✂️ — ${'افزودن زیرنویس '.repeat(2_000)}پایان 🚀`;
++    mock.script(text('باشه 👍'));
++    const r = await env.run(['agent', 'run', instruction, '--project', projectId, ...provider()]);
++    expect(r.code, describeRun(r)).toBe(0);
++    const messages = mock.chatRequests[0]?.json?.messages as Array<{ role: string; content: unknown }>;
++    const user = messages.find((m) => m.role === 'user');
++    const content =
++      typeof user?.content === 'string'
++        ? user.content
++        : (user?.content as Array<{ text: string }>).map((p) => p.text).join('');
++    expect(content).toBe(instruction);
++    expect(r.out).toContain('باشه 👍');
++  });
++
++  it('usage error: no instruction exits 2 without touching the database', async () => {
++    const r = await env.run(['agent', 'run', '--project', projectId, ...provider()]);
++    expect(r.code, describeRun(r)).toBe(2);
++    expect(r.err).toMatch(/Usage: joy-media agent run/);
++    expect(mock.requests).toHaveLength(0);
++  });
++
++  it('a missing --project id is a clear failure (exit 1), not a crash', async () => {
++    const r = await env.run(['agent', 'run', 'x', '--project', 'proj-nope', ...provider()]);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.err).toMatch(/Failed to load project "proj-nope"/);
++    expect(mock.requests).toHaveLength(0);
++  });
++});
++
++describe('agent run: which project, and where it is saved', () => {
++  let mock: MockLlmServer;
++  let env: AgentSandbox;
++  const provider = (): string[] => ['--url', mock.url, '--api-key', KEY];
++
++  beforeAll(async () => {
++    mock = await startMockLlm();
++  });
++  afterAll(async () => {
++    await mock.close();
++  });
++  beforeEach(() => {
++    mock.reset();
++    env = createAgentSandbox('agent-run-target');
++  });
++  afterEach(() => {
++    expect(env.externalCalls()).toEqual([]);
++    env.cleanup();
++  });
++
++  it('without --project it deterministically picks the most recently updated project', async () => {
++    const older = await createProject(env.sb, 'Older');
++    await createProject(env.sb, 'Newer');
++    await addClip(env.sb, older); // now "Older" is the most recently updated
++    mock.script(toolCalls(proposeTimeline(insertOp('agent-x'))), text('ok'));
++
++    const r = await env.run(['agent', 'run', 'add a clip', '--apply', ...provider()]);
++
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/most recently updated project: Older/);
++    const olderRow = readProjects(env.sb).find((p) => p.id === older)!;
++    expect(clipsOf(olderRow).map((c) => c.id)).toContain('agent-x');
++  });
++
++  it('with no projects, --apply saves a real "Default Project" (no stray file in cwd)', async () => {
++    mock.script(toolCalls(proposeTimeline(insertOp('agent-first'))), text('ok'));
++
++    const r = await env.run(['agent', 'run', 'start my video', '--apply', ...provider()]);
++
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(readdirSync(env.sb.cwd)).toEqual([]); // used to create ./in-memory (a SQLite file)
++    const rows = readProjects(env.sb);
++    expect(rows).toHaveLength(1);
++    expect(rows[0]!.payload.title).toBe('Default Project');
++    expect(rows[0]!.revision).toBe(1);
++    expect(clipsOf(rows[0]!).map((c) => c.id)).toEqual(['agent-first']);
++  });
++
++  it('with no projects, a dry run persists nothing at all', async () => {
++    mock.script(toolCalls(proposeTimeline(insertOp('agent-first'))), text('ok'));
++    const r = await env.run(['agent', 'run', 'start my video', ...provider()]);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(readdirSync(env.sb.cwd)).toEqual([]);
++    expect(readProjects(env.sb)).toEqual([]);
++  });
++
++  it('honours --sqlite-path like the other project commands', async () => {
++    const db = join(env.sb.cwd, 'elsewhere.sqlite3');
++    const create = await env.run(['project', 'create', 'Elsewhere', '--sqlite-path', db]);
++    expect(create.code, describeRun(create)).toBe(0);
++    mock.script(toolCalls(proposeTimeline(insertOp('agent-y'))), text('ok'));
++
++    const r = await env.run([
++      'agent',
++      'run',
++      'add',
++      '--apply',
++      '--sqlite-path',
++      db,
++      ...provider(),
++    ]);
++
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/Elsewhere/);
++    expect(readProjects(env.sb)).toEqual([]); // default DB untouched
++  });
++
++  it('--project <file.json> --apply writes the change back to that file', async () => {
++    const id = await createProject(env.sb, 'As File');
++    const file = join(env.sb.cwd, 'as-file.json');
++    const exp = await env.run(['project', 'export', id, '--output', file]);
++    expect(exp.code, describeRun(exp)).toBe(0);
++    mock.script(toolCalls(proposeTimeline(insertOp('agent-file'))), text('ok'));
++
++    const r = await env.run(['agent', 'run', 'add', '--project', file, '--apply', ...provider()]);
++
++    expect(r.code, describeRun(r)).toBe(0);
++    const saved = JSON.parse(readFileSync(file, 'utf8')) as {
++      revision: number;
++      project: { compositions: { root: { tracks: Array<{ clips: Array<{ id: string }> }> } } };
++    };
++    expect(saved.revision).toBe(2);
++    expect(saved.project.compositions.root.tracks[0]!.clips.map((c) => c.id)).toEqual([
++      'agent-file',
++    ]);
++  });
++
++  it('a corrupted project file is reported, not crashed on', async () => {
++    const file = join(env.sb.cwd, 'broken.json');
++    writeFileSync(file, '{ "project": ');
++    const r = await env.run(['agent', 'run', 'x', '--project', file, ...provider()]);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.err).toMatch(/Failed to load project/);
++    expect(existsSync(file)).toBe(true);
++  });
++});
+diff --git a/apps/cli/src/humanized/agent-secrets.e2e.test.ts b/apps/cli/src/humanized/agent-secrets.e2e.test.ts
+new file mode 100644
+index 0000000..51857cf
+--- /dev/null
++++ b/apps/cli/src/humanized/agent-secrets.e2e.test.ts
+@@ -0,0 +1,251 @@
++/**
++ * API keys: at rest (file modes), in transit (argv vs stdin) and in output
++ * (never printed in full, on any path — success, failure, --json, debug).
++ * All keys are fake; the only endpoint is the in-process mock.
++ */
++import { chmodSync, mkdirSync } from 'node:fs';
++import { join } from 'node:path';
++import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
++import {
++  createAgentSandbox,
++  createProject,
++  fakeKey,
++  httpError,
++  modeOf,
++  probeToolCall,
++  readJoyConfig,
++  readTree,
++  startMockLlm,
++  text,
++  toolCalls,
++  writeJoyConfig,
++  type AgentSandbox,
++  type MockLlmServer,
++} from './agent-helpers.js';
++import { describeRun, type RunResult } from './harness.js';
++
++const posix = process.platform !== 'win32';
++const KEY = fakeKey('secret');
++
++describe('API keys at rest', () => {
++  let mock: MockLlmServer;
++  let env: AgentSandbox;
++
++  beforeAll(async () => {
++    mock = await startMockLlm();
++  });
++  afterAll(async () => {
++    await mock.close();
++  });
++  beforeEach(() => {
++    mock.reset();
++    env = createAgentSandbox('agent-secrets-rest');
++  });
++  afterEach(() => {
++    expect(env.externalCalls()).toEqual([]);
++    env.cleanup();
++  });
++
++  it.runIf(posix)('ai-providers.json is 0600 and ~/.joy-media is 0700 on a fresh install', async () => {
++    const r = await env.run(['agent', 'provider', 'add', 'p', '--url', mock.url, '--api-key', KEY]);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(modeOf(join(env.sb.joyDir, 'ai-providers.json')).toString(8)).toBe('600');
++    expect(modeOf(env.sb.joyDir).toString(8)).toBe('700');
++    const use = await env.run(['agent', 'provider', 'use', 'p']);
++    expect(use.code).toBe(0);
++    expect(modeOf(join(env.sb.joyDir, 'cli-config.json')).toString(8)).toBe('600');
++  });
++
++  it.runIf(posix)('a world-readable key file left by an older version is tightened', async () => {
++    mkdirSync(env.sb.joyDir, { recursive: true });
++    chmodSync(env.sb.joyDir, 0o755);
++    const path = writeJoyConfig(env.sb, 'ai-providers.json', {
++      old: { name: 'old', provider: 'custom', baseUrl: mock.url, apiKey: KEY },
++    });
++    chmodSync(path, 0o644);
++
++    const r = await env.run(['agent', 'provider', 'list']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(modeOf(path).toString(8)).toBe('600');
++    expect(modeOf(env.sb.joyDir).toString(8)).toBe('700');
++    expect(readJoyConfig(env.sb, 'ai-providers.json')).toMatchObject({ old: { apiKey: KEY } });
++  });
++
++  it('a key that only came from the environment is never written to disk', async () => {
++    const envKey = fakeKey('from-env');
++    const add = await env.run(['agent', 'provider', 'add', 'nokey', '--url', mock.url], {
++      env: { OPENROUTER_API_KEY: envKey, KILO_API_KEY: envKey },
++    });
++    expect(add.code, describeRun(add)).toBe(0);
++    await env.run(['agent', 'provider', 'use', 'nokey']);
++    const projectId = await createProject(env.sb, 'Env');
++    mock.script(text('ok'));
++    const run = await env.run(
++      ['agent', 'run', 'x', '--project', projectId, '--provider', 'openrouter', '--url', mock.url],
++      { env: { OPENROUTER_API_KEY: envKey } },
++    );
++    expect(run.code, describeRun(run)).toBe(0);
++    expect(mock.chatRequests[0]?.headers.authorization).toBe(`Bearer ${envKey}`);
++    for (const file of readTree(env.sb.home)) {
++      expect(file.content, file.path).not.toContain(envKey);
++    }
++  });
++});
++
++describe('API keys never appear in output', () => {
++  let mock: MockLlmServer;
++  let env: AgentSandbox;
++  let projectId: string;
++  const outputs: RunResult[] = [];
++  const run = async (args: string[], extraEnv: Record<string, string> = {}) => {
++    const r = await env.run(args, { env: extraEnv });
++    outputs.push(r);
++    return r;
++  };
++
++  beforeAll(async () => {
++    mock = await startMockLlm();
++  });
++  afterAll(async () => {
++    await mock.close();
++  });
++  beforeEach(async () => {
++    mock.reset();
++    outputs.length = 0;
++    env = createAgentSandbox('agent-secrets-out');
++    projectId = await createProject(env.sb, 'Secrets');
++  });
++  afterEach(() => {
++    for (const r of outputs) {
++      expect(r.stdout, describeRun(r)).not.toContain(KEY);
++      expect(r.stderr, describeRun(r)).not.toContain(KEY);
++      // Not even a long fragment of it.
++      expect(r.all, describeRun(r)).not.toContain(KEY.slice(0, 16));
++    }
++    expect(env.externalCalls()).toEqual([]);
++    env.cleanup();
++  });
++
++  it('on every success path (human, --json, JOY_CLI_DEBUG)', async () => {
++    const debug = { JOY_CLI_DEBUG: '1' };
++    expect((await run(['agent', 'provider', 'add', 'p', '--url', mock.url, '--api-key', KEY])).code).toBe(0);
++    expect((await run(['agent', 'provider', 'use', 'p'])).code).toBe(0);
++    for (const args of [
++      ['agent', 'provider', 'list'],
++      ['agent', 'provider', 'list', '--json'],
++      ['agent', 'config'],
++      ['agent', 'config', '--json'],
++      ['agent', 'model'],
++      ['agent', 'models'],
++    ]) {
++      const r = await run(args, debug);
++      expect(r.code, describeRun(r)).toBe(0);
++    }
++    const list = outputs.find((r) => r.args.includes('list') && r.args.includes('--json'))!;
++    expect(list.json()).toMatchObject({ providers: [{ apiKey: `****${KEY.slice(-4)}` }] });
++
++    mock.script(toolCalls(probeToolCall));
++    expect((await run(['agent', 'probe'], debug)).code).toBe(0);
++    mock.script(text('done'));
++    expect((await run(['agent', 'run', 'x', '--project', projectId], debug)).code).toBe(0);
++    mock.script(text('done'));
++    const chat = await env.run(['agent', 'chat', '--project', projectId], {
++      env: debug,
++      input: 'hello\n/exit\n',
++    });
++    outputs.push(chat);
++    expect(chat.code, describeRun(chat)).toBe(0);
++  });
++
++  it('on every failure path (401, 500, malformed, debug mode)', async () => {
++    const debug = { JOY_CLI_DEBUG: '1' };
++    const provider = ['--url', mock.url, '--api-key', KEY];
++    for (const reply of [httpError(401, { error: { message: `bad key ${KEY}` } }), httpError(500)]) {
++      mock.fallback(reply);
++      const r = await run(['agent', 'run', 'x', '--project', projectId, ...provider], debug);
++      expect(r.code, describeRun(r)).toBe(1);
++      const probe = await run(['agent', 'probe', ...provider], debug);
++      expect(probe.code, describeRun(probe)).toBe(1);
++    }
++    mock.fallback({ kind: 'malformed', body: `{"echo": "${KEY}"` });
++    const malformed = await run(['agent', 'run', 'x', '--project', projectId, ...provider], debug);
++    expect(malformed.code).toBe(1);
++    mock.models({ kind: 'http-error', status: 401, body: { error: `invalid key ${KEY}` } });
++    const discovery = await run(['agent', 'provider', 'add', 'q', ...provider], debug);
++    expect(discovery.code).toBe(0);
++  });
++
++  it('a short key is fully masked in `provider list` (no first-4/last-4 reveal)', async () => {
++    const short = 'sk-short';
++    await run(['agent', 'provider', 'add', 's', '--url', mock.url, '--api-key', short]);
++    const list = await run(['agent', 'provider', 'list']);
++    expect(list.out).toMatch(/API Key: \*\*\*\*\n/);
++    expect(list.all).not.toContain(short);
++    // The old mask printed `${key.slice(0, 4)}...${key.slice(-4)}`, i.e. the whole key.
++    expect(list.all).not.toContain('sk-s...hort');
++  });
++
++  it('a URL carrying credentials or a query secret is refused without echoing it', async () => {
++    for (const url of [
++      `http://user:${KEY}@127.0.0.1:9/v1`,
++      `${mock.url}?api_key=${KEY}`,
++      `https://example.com/v1#${KEY}`,
++    ]) {
++      const r = await run(['agent', 'provider', 'add', 'leaky', '--url', url]);
++      expect(r.code, describeRun(r)).toBe(2);
++    }
++    const r = await run(['agent', 'run', 'x', '--project', projectId, '--url', `${mock.url}?k=${KEY}`]);
++    expect(r.code, describeRun(r)).toBe(2);
++    expect(mock.requests).toHaveLength(0);
++  });
++});
++
++describe('--api-key - reads the key from stdin (keeps it out of argv / ps)', () => {
++  let mock: MockLlmServer;
++  let env: AgentSandbox;
++
++  beforeAll(async () => {
++    mock = await startMockLlm();
++  });
++  afterAll(async () => {
++    await mock.close();
++  });
++  beforeEach(() => {
++    mock.reset();
++    env = createAgentSandbox('agent-secrets-stdin');
++  });
++  afterEach(() => {
++    expect(env.externalCalls()).toEqual([]);
++    env.cleanup();
++  });
++
++  it('provider add and agent run accept the key on stdin', async () => {
++    const add = await env.run(['agent', 'provider', 'add', 'p', '--url', mock.url, '--api-key', '-'], {
++      input: `${KEY}\n`,
++    });
++    expect(add.code, describeRun(add)).toBe(0);
++    expect(readJoyConfig<Record<string, { apiKey: string }>>(env.sb, 'ai-providers.json').p?.apiKey).toBe(KEY);
++    expect(mock.modelRequests[0]?.headers.authorization).toBe(`Bearer ${KEY}`);
++
++    const projectId = await createProject(env.sb, 'Stdin');
++    const other = fakeKey('other');
++    mock.script(text('ok'));
++    const r = await env.run(
++      ['agent', 'run', 'x', '--project', projectId, '--url', mock.url, '--api-key', '-'],
++      { input: other },
++    );
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(mock.chatRequests[0]?.headers.authorization).toBe(`Bearer ${other}`);
++    expect(r.all).not.toContain(other);
++  });
++
++  it('an empty stdin is a usage error (exit 2), and chat refuses it', async () => {
++    const r = await env.run(['agent', 'provider', 'add', 'p', '--url', mock.url, '--api-key', '-'], {
++      input: '\n',
++    });
++    expect(r.code, describeRun(r)).toBe(2);
++    expect(r.err).toMatch(/stdin did not contain a key/);
++    const chat = await env.run(['agent', 'chat', '--api-key', '-'], { input: 'k\n' });
++    expect(chat.code, describeRun(chat)).toBe(2);
++  });
++});
+diff --git a/apps/cli/src/utils/config.ts b/apps/cli/src/utils/config.ts
+index 8b42605..8764eed 100644
+--- a/apps/cli/src/utils/config.ts
++++ b/apps/cli/src/utils/config.ts
+@@ -1,5 +1,15 @@
+ /* global process */
+-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
++import {
++  chmodSync,
++  existsSync,
++  mkdirSync,
++  readFileSync,
++  renameSync,
++  rmdirSync,
++  statSync,
++  unlinkSync,
++  writeFileSync,
++} from 'node:fs';
+ import { homedir } from 'node:os';
+ import { join } from 'node:path';
+ 
+@@ -19,11 +29,36 @@ export interface AiProviderConfig {
+   cachedModels?: string[] | undefined;
+ }
+ 
++/**
++ * A config file exists but cannot be used (not JSON, wrong shape). Callers
++ * must NOT fall back to an empty config and save over it: that silently
++ * destroys every other provider and API key the user stored.
++ *
++ * The message deliberately never includes the file's contents (V8's
++ * JSON.parse errors quote the source text, which may contain API keys).
++ */
++export class ConfigFileError extends Error {
++  constructor(
++    readonly path: string,
++    reason: string,
++  ) {
++    super(
++      `${path} is ${reason}. It was left untouched so no stored provider or API key is lost; ` +
++        'fix or move the file and retry.',
++    );
++    this.name = 'ConfigFileError';
++  }
++}
++
++const IS_POSIX = process.platform !== 'win32';
++const PRIVATE_DIR_MODE = 0o700;
++const PRIVATE_FILE_MODE = 0o600;
++
+ export function getJoyMediaDir(): string {
+   const dir = join(homedir(), '.joy-media');
+   if (!existsSync(dir)) {
+     try {
+-      mkdirSync(dir, { recursive: true });
++      mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
+     } catch {
+       // Ignore if cannot create
+     }
+@@ -39,59 +74,175 @@ export function getAiProvidersPath(): string {
+   return join(getJoyMediaDir(), 'ai-providers.json');
+ }
+ 
+-export function loadCliConfig(): CliConfig {
+-  const path = getCliConfigPath();
+-  if (!existsSync(path)) return {};
++/** Tighten group/other permission bits on POSIX (best effort, never throws). */
++function makePrivate(path: string, mode: number): void {
++  if (!IS_POSIX) return;
+   try {
+-    const raw = readFileSync(path, 'utf8');
+-    return JSON.parse(raw) as CliConfig;
++    if ((statSync(path).mode & 0o077) !== 0) chmodSync(path, mode);
+   } catch {
+-    return {};
++    // Best effort: a read-only or foreign-owned file is reported elsewhere.
+   }
+ }
+ 
++function readJsonObject(path: string): Record<string, unknown> | undefined {
++  if (!existsSync(path)) return undefined;
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(readFileSync(path, 'utf8'));
++  } catch {
++    throw new ConfigFileError(path, 'not valid JSON');
++  }
++  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
++    throw new ConfigFileError(path, 'not a JSON object');
++  }
++  // Null prototype: names like "constructor" or "toString" must never resolve
++  // to Object.prototype members.
++  return Object.assign(Object.create(null) as Record<string, unknown>, parsed);
++}
++
++/** Atomic replace: readers never observe a half-written file. */
++function writeFileAtomic(path: string, content: string, mode: number): void {
++  const tmp = `${path}.${process.pid}.${Date.now().toString(36)}.tmp`;
++  try {
++    writeFileSync(tmp, content, { encoding: 'utf8', mode });
++    renameSync(tmp, path);
++  } catch (error) {
++    try {
++      unlinkSync(tmp);
++    } catch {
++      // tmp may not exist
++    }
++    throw error;
++  }
++  makePrivate(path, mode);
++}
++
++function sleepSync(ms: number): void {
++  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
++}
++
++const LOCK_STALE_MS = 10_000;
++const LOCK_WAIT_MS = 15_000;
++
++/**
++ * Serialise read-modify-write cycles on the config files across processes
++ * (AI agents happily run several `joy-media agent provider add` at once).
++ */
++function withConfigLock<T>(fn: () => T): T {
++  const lock = join(getJoyMediaDir(), '.config.lock');
++  const deadline = Date.now() + LOCK_WAIT_MS;
++  for (;;) {
++    try {
++      mkdirSync(lock);
++      break;
++    } catch (error) {
++      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
++      try {
++        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) rmdirSync(lock);
++      } catch {
++        // Lock released between our checks: retry.
++      }
++      if (Date.now() > deadline) {
++        throw new Error(`Timed out waiting for the config lock ${lock}. Remove it if stale.`);
++      }
++      sleepSync(15);
++    }
++  }
++  try {
++    return fn();
++  } finally {
++    try {
++      rmdirSync(lock);
++    } catch {
++      // Already gone.
++    }
++  }
++}
++
++/** @throws ConfigFileError when the file exists but is corrupt. */
++export function loadCliConfig(): CliConfig {
++  return (readJsonObject(getCliConfigPath()) ?? {}) as CliConfig;
++}
++
+ export function saveCliConfig(config: CliConfig): void {
+-  const path = getCliConfigPath();
+-  writeFileSync(path, JSON.stringify(config, null, 2), 'utf8');
++  writeFileAtomic(getCliConfigPath(), `${JSON.stringify(config, null, 2)}\n`, PRIVATE_FILE_MODE);
+ }
+ 
++/** Locked read-modify-write of `cli-config.json`. */
++export function updateCliConfig(mutate: (current: CliConfig) => CliConfig): CliConfig {
++  return withConfigLock(() => {
++    const next = mutate(loadCliConfig());
++    saveCliConfig(next);
++    return next;
++  });
++}
++
++/**
++ * Stored providers (with API keys), keyed by name, as a null-prototype map.
++ * @throws ConfigFileError when the file exists but is corrupt.
++ */
+ export function loadAiProviders(): Record<string, AiProviderConfig> {
+   const path = getAiProvidersPath();
+-  if (!existsSync(path)) return {};
+-  try {
+-    const raw = readFileSync(path, 'utf8');
+-    return JSON.parse(raw) as Record<string, AiProviderConfig>;
+-  } catch {
+-    return {};
+-  }
++  const providers = readJsonObject(path);
++  if (providers === undefined) return Object.create(null) as Record<string, AiProviderConfig>;
++  // Self-heal installs that stored keys world-readable before this fix.
++  makePrivate(getJoyMediaDir(), PRIVATE_DIR_MODE);
++  makePrivate(path, PRIVATE_FILE_MODE);
++  return providers as Record<string, AiProviderConfig>;
+ }
+ 
+ export function saveAiProviders(providers: Record<string, AiProviderConfig>): void {
+-  const path = getAiProvidersPath();
+-  writeFileSync(path, JSON.stringify(providers, null, 2), 'utf8');
++  makePrivate(getJoyMediaDir(), PRIVATE_DIR_MODE);
++  writeFileAtomic(
++    getAiProvidersPath(),
++    `${JSON.stringify({ ...providers }, null, 2)}\n`,
++    PRIVATE_FILE_MODE,
++  );
++}
++
++/** Locked read-modify-write of `ai-providers.json`. */
++export function updateAiProviders<T>(
++  mutate: (providers: Record<string, AiProviderConfig>) => T,
++): T {
++  return withConfigLock(() => {
++    const providers = loadAiProviders();
++    const result = mutate(providers);
++    saveAiProviders(providers);
++    return result;
++  });
++}
++
++export function hasAiProvider(providers: Record<string, AiProviderConfig>, name: string): boolean {
++  return Object.prototype.hasOwnProperty.call(providers, name);
+ }
+ 
+ export function setAiProvider(name: string, config: AiProviderConfig): void {
+-  const providers = loadAiProviders();
+-  providers[name] = config;
+-  saveAiProviders(providers);
++  updateAiProviders((providers) => {
++    providers[name] = config;
++  });
+ }
+ 
+ export function deleteAiProvider(name: string): boolean {
+-  const providers = loadAiProviders();
+-  if (name in providers) {
++  return withConfigLock(() => {
++    const providers = loadAiProviders();
++    if (!hasAiProvider(providers, name)) return false;
+     delete providers[name];
+     saveAiProviders(providers);
+     return true;
+-  }
+-  return false;
++  });
+ }
+ 
+ export function getDefaultSqlitePath(): string {
+   if (process.env.JOY_MEDIA_SQLITE_PATH) {
+     return process.env.JOY_MEDIA_SQLITE_PATH;
+   }
+-  const cliCfg = loadCliConfig();
++  let cliCfg: CliConfig = {};
++  try {
++    cliCfg = loadCliConfig();
++  } catch {
++    // A corrupt cli-config.json must not break project commands; the agent
++    // commands that write it report the problem instead.
++  }
+   if (cliCfg.sqlitePath) {
+     return cliCfg.sqlitePath;
+   }

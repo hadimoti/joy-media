@@ -87,6 +87,27 @@ async function buildFailedPassWorkspace() {
     }),
   );
   await writeFile(join(out, 'delivery/scratch-notes.txt'), `raw ${FAKE_SECRET}`); // NOT allowlisted
+  await mkdir(join(out, 'readiness/two-pass-evidence'), { recursive: true });
+  await writeFile(
+    join(out, 'readiness/two-pass-evidence/manifest.json'),
+    JSON.stringify({ schemaVersion: 1, sources: [] }),
+  );
+  await mkdir(join(out, 'windows/acceptance-passes'), { recursive: true });
+  await writeFile(join(out, 'windows/acceptance-passes/pass-1.json'), '{"pass":1}');
+  await writeFile(join(out, 'windows/acceptance-passes/pass-2.json'), '{"pass":2}');
+  await mkdir(join(out, 'release-gate'), { recursive: true });
+  await writeFile(
+    join(out, 'release-gate/report.json'),
+    JSON.stringify({ result: { passed: false }, diagnostic: `redact ${FAKE_SECRET}` }),
+  );
+  await writeFile(join(out, 'release-gate/manifest.json'), '{"schemaVersion":1}');
+  await writeFile(join(out, 'release-gate/sbom.json'), '{"bomFormat":"CycloneDX"}');
+  await writeFile(join(out, 'release-gate/artifact-hashes.json'), '{}');
+  await writeFile(join(out, 'release-gate/static-assets.json'), '{}');
+  await writeFile(
+    join(out, 'release-gate/release-manifest.sha256'),
+    `${'a'.repeat(64)}  manifest.json\n`,
+  );
   return ws;
 }
 
@@ -139,6 +160,41 @@ test(
       files.some((f) => f.endsWith('journey-failure.json')),
       'journey-failure.json should be retained',
     );
+    assert.ok(
+      files.some((f) => f.endsWith('release-gate/report.json')),
+      'the final source-bound release-gate report should be retained',
+    );
+    for (const name of [
+      'manifest.json',
+      'sbom.json',
+      'artifact-hashes.json',
+      'static-assets.json',
+      'release-manifest.sha256',
+    ]) {
+      assert.ok(
+        files.some((f) => f.endsWith(`release-gate/${name}`)),
+        `release-gate/${name} should be retained`,
+      );
+    }
+    const retainedGateReport = await readFile(
+      join(dest, 'test-output/release-gate/report.json'),
+      'utf8',
+    );
+    assert.ok(
+      !retainedGateReport.includes(FAKE_SECRET),
+      'release-gate report secrets must be redacted',
+    );
+    assert.ok(retainedGateReport.includes('<redacted:JOY_MEDIA_CI_S3_SECRET_KEY>'));
+    for (const path of [
+      'readiness/two-pass-evidence/manifest.json',
+      'windows/acceptance-passes/pass-1.json',
+      'windows/acceptance-passes/pass-2.json',
+    ]) {
+      assert.ok(
+        files.some((f) => f.endsWith(path)),
+        `${path} should be retained with the final gate receipt`,
+      );
+    }
     for (const expected of [
       'p3-export-matrix.json',
       'p3-export-matrix-copy.json',

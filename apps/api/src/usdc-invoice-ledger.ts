@@ -114,6 +114,12 @@ export class UsdcInvoiceLedger {
    * expires gets the same pending invoice back rather than accumulating duplicates.
    */
   async createInvoice(ownerId: string, plan: BillingPlan): Promise<Invoice> {
+    const now = new Date(this.now());
+    await this.pool.query(
+      `UPDATE usdc_invoices SET status = 'expired'
+       WHERE owner_id = $1 AND plan = $2 AND status = 'pending' AND expires_at <= $3`,
+      [ownerId, plan, now],
+    );
     const existing = await this.pendingInvoiceForOwnerPlan(ownerId, plan);
     if (existing !== undefined) return existing;
 
@@ -132,6 +138,7 @@ export class UsdcInvoiceLedger {
              (id, owner_id, plan, amount_usdc_base_units, recipient_address, contract_address,
               chain_id, status, created_at, expires_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
+           ON CONFLICT DO NOTHING
            RETURNING *`,
           [
             id,
@@ -147,7 +154,10 @@ export class UsdcInvoiceLedger {
         );
         const row = result.rows[0];
         if (row === undefined) {
-          throw new UsdcLedgerError('INVOICE_CREATE_FAILED', 'insert failed');
+          // A concurrent request for this owner/plan may have won the unique-index race.
+          const concurrent = await this.pendingInvoiceForOwnerPlan(ownerId, plan);
+          if (concurrent !== undefined) return concurrent;
+          continue; // a different invoice may own this amount; try a fresh nudge
         }
         return invoiceOf(row);
       } catch (error) {

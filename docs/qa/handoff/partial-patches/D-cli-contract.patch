@@ -1,0 +1,3411 @@
+diff --git a/apps/cli/bin/joy-media.mjs b/apps/cli/bin/joy-media.mjs
+index 86f52d3..b2a1e70 100644
+--- a/apps/cli/bin/joy-media.mjs
++++ b/apps/cli/bin/joy-media.mjs
+@@ -1,25 +1,17 @@
+ #!/usr/bin/env node
+-/* global process */
++/* global process, console */
+ import { existsSync } from 'node:fs';
+-import { fileURLToPath } from 'node:url';
+ import { dirname, join } from 'node:path';
++import { fileURLToPath, pathToFileURL } from 'node:url';
+ 
+-const __filename = fileURLToPath(import.meta.url);
+-const __dirname = dirname(__filename);
++const __dirname = dirname(fileURLToPath(import.meta.url));
+ const distBin = join(__dirname, '..', 'dist', 'bin.js');
+ 
+ if (existsSync(distBin)) {
+-  await import(`file://${distBin.replace(/\\/g, '/')}`);
++  // pathToFileURL (not string concatenation) so install paths containing
++  // '#', '%', '?' or spaces still resolve. dist/bin.js runs the CLI itself.
++  await import(pathToFileURL(distBin).href);
+ } else {
+-  // If not yet compiled, run directly via TypeScript loader or dynamic import
+-  try {
+-    const srcBin = join(__dirname, '..', 'src', 'bin.ts');
+-    // Use tsx or strip-types if available
+-    const { main } = await import(`file://${srcBin.replace(/\\/g, '/')}`);
+-    await main(process.argv.slice(2));
+-  } catch (error) {
+-    console.error('JOY Media CLI: Please build first via `pnpm --filter @joy-media/cli build`');
+-    console.error(error);
+-    process.exit(1);
+-  }
++  console.error('JOY Media CLI is not built yet. Run: pnpm --filter @joy-media/cli build');
++  process.exit(1);
+ }
+diff --git a/apps/cli/src/bin.ts b/apps/cli/src/bin.ts
+index 8ecfe9b..fcdd0e0 100644
+--- a/apps/cli/src/bin.ts
++++ b/apps/cli/src/bin.ts
+@@ -1,9 +1,17 @@
+ /* global process */
++// MUST stay the first import: silences node:sqlite's ExperimentalWarning before it is delivered.
++import './process-warnings.js';
+ import { runCli, formatError, handleUnhandledError } from './cli.js';
+ import { logError } from './utils/logger.js';
+ 
+ let exiting = false;
+ 
++/** Conventional shell exit status for a process stopped by a signal (128 + signo). */
++export const SIGNAL_EXIT_CODES: Readonly<Partial<Record<NodeJS.Signals, number>>> = {
++  SIGINT: 130,
++  SIGTERM: 143,
++};
++
+ async function exitWithCode(code: number, codeOverride?: NodeJS.Signals): Promise<void> {
+   if (exiting) {
+     process.exit(code);
+@@ -13,8 +21,8 @@ async function exitWithCode(code: number, codeOverride?: NodeJS.Signals): Promis
+   // Record the code first: if anything below lets the event loop drain, Node
+   // still exits with the right status instead of falling back to 0.
+   process.exitCode = code;
+-  const reason = codeOverride ? ` (signal: ${codeOverride})` : '';
+-  if (code !== 0) {
++  if (code !== 0 && process.env.JOY_CLI_DEBUG) {
++    const reason = codeOverride ? ` (signal: ${codeOverride})` : '';
+     logError(`Process exiting with code ${code}${reason}.`);
+   }
+   // Give async logs a chance to flush before exiting. The safety timer is
+@@ -41,17 +49,44 @@ function flushStream(stream: NodeJS.WriteStream | undefined): Promise<void> {
+   });
+ }
+ 
++/**
++ * The reader went away (`joy-media ... | head -1`). That is not a failure of
++ * the command: stop writing to that stream and let the command finish with its
++ * own exit code instead of dying with an unhandled `write EPIPE`.
++ */
++function isBrokenPipe(err: unknown): boolean {
++  const code = (err as NodeJS.ErrnoException | undefined)?.code;
++  return code === 'EPIPE' || code === 'ERR_STREAM_DESTROYED' || code === 'ECONNRESET';
++}
++
++function installStreamErrorHandlers(): void {
++  process.stdout.on('error', (err) => {
++    if (isBrokenPipe(err)) return;
++    logError(`Cannot write to stdout: ${formatError(err)}`);
++    void exitWithCode(1);
++  });
++  process.stderr.on('error', (err) => {
++    if (isBrokenPipe(err)) return;
++    void exitWithCode(1);
++  });
++}
++
+ function installSignalHandlers(): void {
+   const onSignal = (sig: NodeJS.Signals): void => {
+-    if (exiting) return;
++    const code = SIGNAL_EXIT_CODES[sig] ?? 130;
++    // A second signal while shutting down exits immediately.
++    if (exiting) {
++      process.exit(code);
++      return;
++    }
+     // For long-running operations (REPL, agent run), let the inner handler decide.
+     if (currentLongRunning > 0) {
+       logError(`Received ${sig}. Cancelling long-running operation...`);
+       currentLongRunning = -1; // mark cancel requested
+       return;
+     }
+-    logError(`Received ${sig}. Shutting down gracefully.`);
+-    void exitWithCode(130, sig);
++    logError(`Received ${sig}. Shutting down.`);
++    void exitWithCode(code, sig);
+   };
+   process.on('SIGINT', onSignal);
+   process.on('SIGTERM', onSignal);
+@@ -77,6 +112,7 @@ export function trackLongRunning<T>(fn: () => Promise<T>): Promise<T> {
+ }
+ 
+ export async function main(argv: string[] = process.argv.slice(2)): Promise<void> {
++  installStreamErrorHandlers();
+   installSignalHandlers();
+   try {
+     const code = await runCli(argv);
+diff --git a/apps/cli/src/cli.ts b/apps/cli/src/cli.ts
+index 37f2c5f..a5f9d5b 100644
+--- a/apps/cli/src/cli.ts
++++ b/apps/cli/src/cli.ts
+@@ -1,5 +1,4 @@
+ /* global console, process */
+-import { parseArgs } from 'node:util';
+ import { handleAgentCommand } from './commands/agent-cmd.js';
+ import { handleBenchmarkCommand } from './commands/benchmark-cmd.js';
+ import { handleDoctorCommand } from './commands/doctor-cmd.js';
+@@ -8,12 +7,17 @@ import { handleRenderCommand } from './commands/render-cmd.js';
+ import { handleTimelineCommand } from './commands/timeline-cmd.js';
+ import { handleWorkerCommand } from './commands/worker-cmd.js';
+ import {
+-  FlagValidationError,
++  type CliOptionSpec,
+   NUMERIC_RANGES,
++  UsageError,
++  parseCommandLine,
+   parseFloatFlag,
+   parseIntFlag,
++  suggest,
+ } from './utils/flags.js';
+-import { c, logError, logWarn, printBanner } from './utils/logger.js';
++import { c, logError, printBanner, printJson, setMachineOutput } from './utils/logger.js';
++
++export const CLI_VERSION = '1.0.1';
+ 
+ export interface CliFlags {
+   project: string | undefined;
+@@ -44,21 +48,178 @@ export interface CliFlags {
+   'media-engine': boolean;
+ }
+ 
++/**
++ * Every option any command reads. Options are global (accepted before or after
++ * the command); anything not listed here is a usage error (exit 2), so a new
++ * flag MUST be declared here before a command can read it.
++ */
++export const CLI_OPTIONS = {
++  help: { type: 'boolean', short: 'h' },
++  version: { type: 'boolean', short: 'v' },
++  json: { type: 'boolean' },
++  project: { type: 'string', short: 'p' },
++  apply: { type: 'boolean' },
++  name: { type: 'string', short: 'n' },
++  provider: { type: 'string' },
++  model: { type: 'string', short: 'm' },
++  'api-key': { type: 'string' },
++  'base-url': { type: 'string' },
++  url: { type: 'string', short: 'u' },
++  output: { type: 'string', short: 'o' },
++  width: { type: 'string', numeric: true },
++  height: { type: 'string', numeric: true },
++  fps: { type: 'string', numeric: true },
++  track: { type: 'string' },
++  clip: { type: 'string' },
++  asset: { type: 'string' },
++  start: { type: 'string', numeric: true },
++  duration: { type: 'string', numeric: true },
++  end: { type: 'string', numeric: true },
++  at: { type: 'string', numeric: true },
++  scale: { type: 'string', numeric: true },
++  'sqlite-path': { type: 'string' },
++  preset: { type: 'string' },
++  out: { type: 'string' },
++  concurrency: { type: 'string', numeric: true },
++  system: { type: 'boolean' },
++  'media-engine': { type: 'boolean' },
++} as const satisfies Record<string, CliOptionSpec>;
++
++interface CommandHelp {
++  readonly summary: string;
++  readonly usage: string;
++  readonly subcommands?: ReadonlyArray<readonly [string, string]>;
++  readonly options?: ReadonlyArray<readonly [string, string]>;
++  readonly notes?: readonly string[];
++}
++
++const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
++  agent: {
++    summary: 'Full-power Joy Agent AI editing commands',
++    usage: 'joy-media agent <subcommand> [options]',
++    subcommands: [
++      ['chat', 'Interactive Joy Agent REPL (default; needs a terminal)'],
++      ['run "<instruction>"', 'One-shot agent edit of a project'],
++      ['probe', 'Check the configured LLM provider capabilities'],
++      ['config', 'Show or update the agent configuration'],
++      ['provider [list|add|use|remove] <name>', 'Manage AI providers'],
++      ['model [get|set <model-id>]', 'Show or set the default model'],
++      ['models [provider]', 'List models offered by a provider (network)'],
++    ],
++    options: [
++      ['--project, -p <id|file.json>', 'Target project (default: newest)'],
++      ['--apply', 'Commit agent changes to the project'],
++      ['--provider <name>', 'Provider override'],
++      ['--model, -m <id>', 'Model override'],
++      ['--api-key <key>', 'API key override'],
++      ['--url, -u <url> / --base-url <url>', 'Provider base URL'],
++      ['--name, -n <name>', 'Provider name (provider add/use/remove)'],
++      ['--json', 'Machine-readable output where supported'],
++    ],
++  },
++  project: {
++    summary: 'Local SQLite project management',
++    usage: 'joy-media project <subcommand> [options]',
++    subcommands: [
++      ['list', 'List local projects (default)'],
++      ['create <title...>', 'Create a project'],
++      ['show <id|file.json>', 'Show tracks and clips'],
++      ['export <id>', 'Export a project to JSON'],
++      ['import <file.json>', 'Import a project from JSON'],
++    ],
++    options: [
++      ['--width <px> --height <px> --fps <n>', 'Canvas settings for create'],
++      ['--output, -o <file.json>', 'Export destination'],
++      ['--sqlite-path <path>', 'Project database (default ~/.joy-media/joy-media.sqlite3)'],
++      ['--json', 'Machine-readable output where supported'],
++    ],
++  },
++  timeline: {
++    summary: 'Direct scriptable timeline operations',
++    usage: 'joy-media timeline <subcommand> --project <id> [options]',
++    subcommands: [
++      ['add-clip', 'Add a clip (--track --asset --start --duration)'],
++      ['split', 'Split a clip (--clip --at)'],
++      ['trim', 'Trim a clip (--clip --start --end|--duration)'],
++      ['remove-clip', 'Remove a clip (--clip)'],
++    ],
++    options: [
++      ['--project, -p <id|file.json>', 'Target project (required)'],
++      ['--track <id> --clip <id> --asset <id>', 'Targets'],
++      ['--start <s> --end <s> --at <s>', 'Timeline positions in seconds (>= 0)'],
++      ['--duration <s>', 'Clip length in seconds (>= 0.001)'],
++      ['--sqlite-path <path>', 'Project database'],
++    ],
++  },
++  worker: {
++    summary: 'Local AI worker & GPU inference',
++    usage: 'joy-media worker <subcommand> [options]',
++    subcommands: [
++      ['status', 'GPU, AI environments and model weights (default)'],
++      ['upscale <input-image>', 'RealESRGAN upscale (--scale 1-16, default 4)'],
++      ['denoise <input-audio>', 'DeepFilterNet noise reduction'],
++    ],
++    options: [
++      ['--scale <n>', 'Upscale factor, integer 1-16'],
++      ['--output, -o <file>', 'Output file (default: <input>-upscaled-4x.<ext>)'],
++      ['--json', 'One JSON document on stdout'],
++    ],
++    notes: ['Environment: JOY_MODELS_DIR overrides the model weights directory.'],
++  },
++  render: {
++    summary: 'Headless batch render',
++    usage: 'joy-media render --project <id|file.json> [options]',
++    options: [
++      ['--project, -p <id|file.json>', 'Project to render (required)'],
++      ['--preset <mp4|webm|prores>', 'Output preset (default mp4)'],
++      ['--out <dir>', 'Output directory (default ./renders)'],
++      ['--concurrency <1-32>', 'Parallel clips (default 2)'],
++      ['--sqlite-path <path>', 'Project database'],
++      ['--json', 'Newline-delimited JSON progress events'],
++    ],
++  },
++  benchmark: {
++    summary: 'Diagnostic & benchmark suite',
++    usage: 'joy-media benchmark [options]',
++    options: [
++      ['--system', 'Disk I/O, SQLite and heap benchmarks'],
++      ['--media-engine', 'Timeline scrub, collision and look benchmarks'],
++      ['--json', 'Newline-delimited JSON measurements'],
++    ],
++  },
++  doctor: {
++    summary: 'System health check & diagnostics',
++    usage: 'joy-media doctor [--json]',
++    options: [['--json', 'One JSON document: { ok, summary, checks[] }']],
++    notes: [
++      'Exit code 1 when a check fails; warnings (optional features missing) exit 0.',
++      'Environment: JOY_MEDIA_EDGE_URL=<url>|off sets or disables the edge connectivity probe;',
++      'JOY_MODELS_DIR overrides the model weights directory.',
++    ],
++  },
++  help: {
++    summary: 'Show help for the CLI or one command',
++    usage: 'joy-media help [command]',
++  },
++};
++
++const COMMANDS = Object.keys(COMMAND_HELP);
++
+ export function printHelp(): void {
+   printBanner();
+   console.log(`  ${c('Usage:', 'bold')} joy-media <command> [subcommand] [options]\n`);
+   console.log(`  ${c('Commands:', 'bold')}`);
+   console.log(
+-    `    ${c('agent', 'cyan')} [chat|run|probe|config]    Full-power Joy Agent AI editing commands`,
++    `    ${c('agent', 'cyan')} [chat|run|probe|config|provider|model]  Full-power Joy Agent AI editing commands`,
+   );
+   console.log(
+-    `    ${c('project', 'cyan')} [list|create|show|export]  Local SQLite project management`,
++    `    ${c('project', 'cyan')} [list|create|show|export|import]   Local SQLite project management`,
+   );
+   console.log(
+-    `    ${c('timeline', 'cyan')} [add-clip|split|trim]     Direct scriptable timeline operations`,
++    `    ${c('timeline', 'cyan')} [add-clip|split|trim|remove-clip] Direct scriptable timeline operations`,
+   );
+   console.log(
+-    `    ${c('worker', 'cyan')} [status|upscale|denoise]    Local AI worker & GPU inference`,
++    `    ${c('worker', 'cyan')} [status|upscale|denoise]            Local AI worker & GPU inference`,
+   );
+   console.log(
+     `    ${c('render', 'cyan')} [--project --preset --out --concurrency --json]  Headless batch render`,
+@@ -67,9 +228,16 @@ export function printHelp(): void {
+     `    ${c('benchmark', 'cyan')} [--system --media-engine --json]                 Diagnostic & benchmark suite`,
+   );
+   console.log(
+-    `    ${c('doctor', 'cyan')}                            System health check & diagnostics`,
++    `    ${c('doctor', 'cyan')} [--json]                            System health check & diagnostics`,
++  );
++  console.log(
++    `    ${c('help', 'cyan')} [command]                             Show this help guide or a command's help\n`,
+   );
+-  console.log(`    ${c('help', 'cyan')}                              Show this help guide\n`);
++  console.log(`  ${c('Global options:', 'bold')}`);
++  console.log(`    --json           Machine output: stdout carries only JSON, logs go to stderr`);
++  console.log(`    --help, -h       Show help (also: joy-media <command> --help)`);
++  console.log(`    --version, -v    Print the CLI version\n`);
++  console.log(`  ${c('Exit codes:', 'bold')} 0 ok · 1 failure · 2 usage error · 130 interrupted\n`);
+   console.log(`  ${c('Examples:', 'bold')}`);
+   console.log(
+     `    ${c('joy-media agent chat', 'dim')}                          # Launch interactive Joy Agent REPL`,
+@@ -88,111 +256,137 @@ export function printHelp(): void {
+   );
+ }
+ 
+-function parseFlags(rawValues: Record<string, unknown>): CliFlags {
+-  const v = rawValues as Record<string, string | boolean | undefined>;
++/** Help for one command. Returns false if `command` is not a known command. */
++export function printCommandHelp(command: string): boolean {
++  const help = Object.hasOwn(COMMAND_HELP, command) ? COMMAND_HELP[command] : undefined;
++  if (!help) return false;
++  const pad = (rows: ReadonlyArray<readonly [string, string]>): number =>
++    Math.max(...rows.map(([left]) => left.length)) + 2;
++  console.log(`${c('Usage:', 'bold')} ${help.usage}\n`);
++  console.log(`${help.summary}\n`);
++  if (help.subcommands?.length) {
++    const width = pad(help.subcommands);
++    console.log(c('Subcommands:', 'bold'));
++    for (const [left, right] of help.subcommands) {
++      console.log(`  ${c(left.padEnd(width), 'cyan')}${right}`);
++    }
++    console.log();
++  }
++  const options: ReadonlyArray<readonly [string, string]> = [
++    ...(help.options ?? []),
++    ['--help, -h', 'Show this help'],
++  ];
++  const width = pad(options);
++  console.log(c('Options:', 'bold'));
++  for (const [left, right] of options) {
++    console.log(`  ${left.padEnd(width)}${right}`);
++  }
++  for (const note of help.notes ?? []) console.log(`\n${note}`);
++  console.log();
++  return true;
++}
++
++function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
++  const str = (key: string): string | undefined =>
++    typeof v[key] === 'string' ? (v[key] as string) : undefined;
+   return {
+-    project: typeof v.project === 'string' ? v.project : undefined,
+-    apply: Boolean(v.apply),
+-    name: typeof v.name === 'string' ? v.name : undefined,
+-    provider: typeof v.provider === 'string' ? v.provider : undefined,
+-    model: typeof v.model === 'string' ? v.model : undefined,
+-    apiKey: typeof v['api-key'] === 'string' ? v['api-key'] : undefined,
+-    baseUrl:
+-      typeof v['base-url'] === 'string'
+-        ? v['base-url']
+-        : typeof v.url === 'string'
+-          ? v.url
+-          : undefined,
+-    output: typeof v.output === 'string' ? v.output : undefined,
++    project: str('project'),
++    apply: v.apply === true,
++    name: str('name'),
++    provider: str('provider'),
++    model: str('model'),
++    apiKey: str('api-key'),
++    baseUrl: str('base-url') ?? str('url'),
++    output: str('output'),
+     width: parseIntFlag('width', v.width, NUMERIC_RANGES.width),
+     height: parseIntFlag('height', v.height, NUMERIC_RANGES.height),
+     fps: parseIntFlag('fps', v.fps, NUMERIC_RANGES.fps),
+-    track: typeof v.track === 'string' ? v.track : undefined,
+-    clip: typeof v.clip === 'string' ? v.clip : undefined,
+-    asset: typeof v.asset === 'string' ? v.asset : undefined,
++    track: str('track'),
++    clip: str('clip'),
++    asset: str('asset'),
+     start: parseFloatFlag('start', v.start, NUMERIC_RANGES.start),
+     duration: parseFloatFlag('duration', v.duration, NUMERIC_RANGES.duration),
+     end: parseFloatFlag('end', v.end, NUMERIC_RANGES.end),
+     at: parseFloatFlag('at', v.at, NUMERIC_RANGES.at),
+     scale: parseIntFlag('scale', v.scale, NUMERIC_RANGES.scale),
+-    sqlitePath: typeof v['sqlite-path'] === 'string' ? v['sqlite-path'] : undefined,
+-    preset: typeof v.preset === 'string' ? v.preset : undefined,
+-    out: typeof v.out === 'string' ? v.out : undefined,
++    sqlitePath: str('sqlite-path'),
++    preset: str('preset'),
++    out: str('out'),
+     concurrency: parseIntFlag('concurrency', v.concurrency, {
+       min: 1,
+       max: 32,
+       allowZero: false,
+     }),
+-    json: Boolean(v.json),
+-    system: Boolean(v.system),
+-    'media-engine': Boolean(v['media-engine']),
++    json: v.json === true,
++    system: v.system === true,
++    'media-engine': v['media-engine'] === true,
+   };
+ }
+ 
++/** `<message>. Run "joy-media <command> --help" for usage.` */
++function withUsageHint(message: string, command: string | undefined): string {
++  const known = command !== undefined && Object.hasOwn(COMMAND_HELP, command);
++  const sentence = /[.?!]$/.test(message) ? message : `${message}.`;
++  return `${sentence} Run "joy-media ${known ? `${command} ` : ''}--help" for usage.`;
++}
++
++function unknownCommandMessage(command: string): string {
++  const guess = suggest(command, COMMANDS);
++  const hint = guess ? ` Did you mean "${guess}"?` : '';
++  return `Unknown command "${command}".${hint} Run ${c('joy-media help', 'cyan')} for usage.`;
++}
++
+ export async function runCli(argv: string[]): Promise<number> {
+-  let parsedArgs;
++  setMachineOutput(false);
+   try {
+-    parsedArgs = parseArgs({
+-      args: argv,
+-      options: {
+-        help: { type: 'boolean', short: 'h', default: false },
+-        version: { type: 'boolean', short: 'v', default: false },
+-        project: { type: 'string', short: 'p' },
+-        apply: { type: 'boolean', default: false },
+-        name: { type: 'string', short: 'n' },
+-        provider: { type: 'string' },
+-        model: { type: 'string', short: 'm' },
+-        'api-key': { type: 'string' },
+-        'base-url': { type: 'string' },
+-        url: { type: 'string', short: 'u' },
+-        output: { type: 'string', short: 'o' },
+-        width: { type: 'string' },
+-        height: { type: 'string' },
+-        fps: { type: 'string' },
+-        track: { type: 'string' },
+-        clip: { type: 'string' },
+-        asset: { type: 'string' },
+-        start: { type: 'string' },
+-        duration: { type: 'string' },
+-        end: { type: 'string' },
+-        at: { type: 'string' },
+-        scale: { type: 'string' },
+-        'sqlite-path': { type: 'string' },
+-        preset: { type: 'string' },
+-        out: { type: 'string' },
+-        concurrency: { type: 'string' },
+-        json: { type: 'boolean', default: false },
+-        system: { type: 'boolean', default: false },
+-        'media-engine': { type: 'boolean', default: false },
+-      },
+-      allowPositionals: true,
+-      strict: false,
+-    });
++    return await dispatch(argv);
++  } finally {
++    setMachineOutput(false);
++  }
++}
++
++async function dispatch(argv: string[]): Promise<number> {
++  let parsed;
++  try {
++    parsed = parseCommandLine(argv, CLI_OPTIONS);
+   } catch (err) {
+     logError(`Failed to parse CLI arguments: ${formatError(err)}`);
+     return 2;
+   }
+ 
+-  const { values, positionals } = parsedArgs;
++  const { values, positionals } = parsed;
++  setMachineOutput(values.json === true);
++  const [command, ...subArgs] = positionals;
+ 
+-  if (values.version) {
+-    console.log('JOY Media CLI v1.0.1');
++  if (parsed.version) {
++    if (values.json === true) printJson({ name: 'joy-media', version: CLI_VERSION });
++    else console.log(`JOY Media CLI v${CLI_VERSION}`);
+     return 0;
+   }
+ 
+-  if (values.help || positionals.length === 0) {
+-    printHelp();
++  if (parsed.help) {
++    // `help project --help` -> project's help; `help --help` -> help's own help.
++    const target = command === 'help' ? (subArgs[0] ?? 'help') : command;
++    if (target === undefined || !printCommandHelp(target)) printHelp();
+     return 0;
+   }
+ 
+-  const [command, ...subArgs] = positionals;
++  if (parsed.error) {
++    logError(withUsageHint(parsed.error.message, command));
++    return 2;
++  }
++
++  if (command === undefined) {
++    printHelp();
++    return 0;
++  }
+ 
+   let flags: CliFlags;
+   try {
+-    flags = parseFlags(values as Record<string, unknown>);
++    flags = parseFlags(values);
+   } catch (err) {
+-    if (err instanceof FlagValidationError) {
+-      logError(err.message);
++    if (err instanceof UsageError) {
++      logError(withUsageHint(err.message, command));
+       if (process.env.JOY_CLI_DEBUG) {
+         console.error(err.stack);
+       }
+@@ -216,12 +410,19 @@ export async function runCli(argv: string[]): Promise<number> {
+       case 'benchmark':
+         return await handleBenchmarkCommand(subArgs, flags);
+       case 'doctor':
+-        return await handleDoctorCommand();
+-      case 'help':
+-        printHelp();
+-        return 0;
++        return await handleDoctorCommand(subArgs, flags);
++      case 'help': {
++        const target = subArgs[0];
++        if (target === undefined) {
++          printHelp();
++          return 0;
++        }
++        if (printCommandHelp(target)) return 0;
++        logError(unknownCommandMessage(target));
++        return 1;
++      }
+       default:
+-        logError(`Unknown command "${command}". Run ${c('joy-media help', 'cyan')} for usage.`);
++        logError(unknownCommandMessage(command));
+         return 1;
+     }
+   } catch (err) {
+@@ -245,14 +446,13 @@ export function formatError(err: unknown): string {
+ }
+ 
+ export function handleUnhandledError(err: unknown, context?: string): number {
+-  if (err instanceof FlagValidationError) {
++  if (err instanceof UsageError) {
+     logError(err.message);
+     return 2;
+   }
+   const ctx = context ? ` (during "${context}")` : '';
++  // With JOY_CLI_DEBUG, formatError() appends the stack. Diagnostics belong on
++  // stderr: stdout may be a JSON stream.
+   logError(`Unexpected error${ctx}: ${formatError(err)}`);
+-  if (process.env.JOY_CLI_DEBUG && err instanceof Error && err.stack) {
+-    logWarn(err.stack);
+-  }
+   return 1;
+ }
+diff --git a/apps/cli/src/commands/doctor-cmd.ts b/apps/cli/src/commands/doctor-cmd.ts
+index 97d22f7..9c8c91e 100644
+--- a/apps/cli/src/commands/doctor-cmd.ts
++++ b/apps/cli/src/commands/doctor-cmd.ts
+@@ -1,136 +1,273 @@
+-/* global console, process */
+-import { spawnSync } from 'node:child_process';
+-import { existsSync, readdirSync } from 'node:fs';
+-import { homedir } from 'node:os';
+-import { join } from 'node:path';
++/* global process, fetch, AbortSignal */
++import { existsSync } from 'node:fs';
+ import { DatabaseSync } from 'node:sqlite';
+ import { resolveByokConfig } from '../agent/provider.js';
++import type { CliFlags } from '../cli.js';
+ import { getDefaultSqlitePath } from '../utils/config.js';
+-import { c, logError, logSuccess, logWarn, printBanner } from '../utils/logger.js';
++import {
++  c,
++  logError,
++  logInfo,
++  logLine,
++  logSuccess,
++  logWarn,
++  printBanner,
++  printJson,
++} from '../utils/logger.js';
++import {
++  WORKER_ENVIRONMENTS,
++  detectGpu,
++  modelInventory,
++  venvPython,
++  joyMediaHome,
++} from './worker-cmd.js';
+ 
+-export async function handleDoctorCommand(): Promise<number> {
+-  printBanner();
+-  console.log(`  ${c('JOY Media System Diagnostic & Health Check (Doctor)', 'bold')}\n`);
++export type DoctorStatus = 'pass' | 'warn' | 'fail' | 'skip';
+ 
+-  let failures = 0;
++export interface DoctorCheck {
++  readonly id: string;
++  readonly label: string;
++  readonly status: DoctorStatus;
++  readonly message: string;
++  readonly details?: Record<string, unknown>;
++}
+ 
+-  // 1. Node.js Engine
+-  const nodeVer = process.versions.node;
+-  const major = parseInt(nodeVer.split('.')[0] ?? '0', 10);
+-  if (major >= 22) {
+-    logSuccess(`Node.js Runtime: v${nodeVer} (Supported >= 22)`);
+-  } else {
+-    logError(`Node.js Runtime: v${nodeVer} (Requires >= 22)`);
+-    failures++;
+-  }
++export interface DoctorReport {
++  readonly ok: boolean;
++  readonly summary: Readonly<Record<DoctorStatus, number>>;
++  readonly checks: readonly DoctorCheck[];
++}
++
++/** Default production edge readiness endpoint. Override with JOY_MEDIA_EDGE_URL (or `off`). */
++export const DEFAULT_EDGE_URL = 'https://joyst.ir/ready';
++export const EDGE_TIMEOUT_MS = 3000;
++
++function checkNode(): DoctorCheck {
++  const version = process.versions.node;
++  const major = Number.parseInt(version.split('.')[0] ?? '0', 10);
++  return major >= 22
++    ? { id: 'node', label: 'Node.js Runtime', status: 'pass', message: `v${version} (supported >= 22)` }
++    : { id: 'node', label: 'Node.js Runtime', status: 'fail', message: `v${version} (requires >= 22)` };
++}
+ 
+-  // 2. Built-in SQLite & WAL
++function checkSqlite(): DoctorCheck {
+   try {
+     const memDb = new DatabaseSync(':memory:');
+     memDb.exec('PRAGMA journal_mode = WAL');
+     memDb.exec('CREATE TABLE test (id INTEGER PRIMARY KEY)');
+     memDb.close();
+-    logSuccess('Built-in SQLite Engine: Functional (WAL enabled)');
++    return { id: 'sqlite', label: 'Built-in SQLite Engine', status: 'pass', message: 'Functional' };
+   } catch (err) {
+-    logError(`Built-in SQLite Engine Failed: ${String(err)}`);
+-    failures++;
++    return { id: 'sqlite', label: 'Built-in SQLite Engine', status: 'fail', message: String(err) };
+   }
++}
+ 
+-  // 3. Desktop Database Path
+-  const dbPath = getDefaultSqlitePath();
+-  if (existsSync(dbPath)) {
+-    logSuccess(`Desktop Project Store: Found at ${c(dbPath, 'cyan')}`);
+-  } else {
+-    logWarn(`Desktop Project Store: Not created yet (${dbPath})`);
++function checkProjectStore(): DoctorCheck {
++  const path = getDefaultSqlitePath();
++  return existsSync(path)
++    ? { id: 'project-store', label: 'Desktop Project Store', status: 'pass', message: `Found at ${path}`, details: { path } }
++    : {
++        id: 'project-store',
++        label: 'Desktop Project Store',
++        status: 'warn',
++        message: `Not created yet (${path})`,
++        details: { path },
++      };
++}
++
++function checkGpu(): DoctorCheck {
++  const gpu = detectGpu();
++  return gpu.name
++    ? { id: 'gpu', label: 'Hardware GPU', status: 'pass', message: gpu.name, details: { ...gpu } }
++    : {
++        id: 'gpu',
++        label: 'Hardware GPU',
++        status: 'warn',
++        message: `Not detected (${gpu.reason ?? 'unknown'}); GPU-accelerated workers unavailable`,
++        details: { ...gpu },
++      };
++}
++
++function checkModels(): DoctorCheck {
++  const models = modelInventory();
++  const details = { dir: models.dir, files: models.files.length };
++  if (!models.exists) {
++    return { id: 'models', label: 'Local Model Weights', status: 'warn', message: `Directory not found (${models.dir})`, details };
++  }
++  if (models.error) {
++    return { id: 'models', label: 'Local Model Weights', status: 'warn', message: `Cannot list ${models.dir}: ${models.error}`, details };
+   }
++  if (models.files.length === 0) {
++    return { id: 'models', label: 'Local Model Weights', status: 'warn', message: `No files in ${models.dir}`, details };
++  }
++  return {
++    id: 'models',
++    label: 'Local Model Weights',
++    status: 'pass',
++    message: `${models.files.length} file(s) found in ${models.dir}`,
++    details,
++  };
++}
++
++function checkVenvs(): DoctorCheck {
++  const missing = WORKER_ENVIRONMENTS.filter((env) => !existsSync(venvPython(env.dir))).map((env) => env.id);
++  const total = WORKER_ENVIRONMENTS.length;
++  const ready = total - missing.length;
++  const details = { dir: joyMediaHome(), ready, total, missing };
++  return missing.length === 0
++    ? { id: 'venvs', label: 'Local AI Venvs', status: 'pass', message: `All ${total}/${total} environments ready in ~/.joy-media`, details }
++    : {
++        id: 'venvs',
++        label: 'Local AI Venvs',
++        status: 'warn',
++        message: `${ready}/${total} ready in ~/.joy-media (missing: ${missing.join(', ')})`,
++        details,
++      };
++}
+ 
+-  // 4. GPU Telemetry
+-  let gpuName = 'Unknown';
++function checkAgentProvider(): DoctorCheck {
+   try {
+-    const res = spawnSync(
+-      'powershell',
+-      [
+-        '-NoProfile',
+-        '-Command',
+-        'Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name',
+-      ],
+-      { encoding: 'utf8' },
+-    );
+-    if (res.status === 0 && res.stdout.trim()) {
+-      gpuName = res.stdout.trim().split('\n')[0]?.trim() ?? 'Unknown';
++    const byok = resolveByokConfig();
++    const details = { provider: byok.provider, model: byok.modelId, apiKeyConfigured: false };
++    if (byok.apiKey && byok.apiKey !== 'not-provided') {
++      return {
++        id: 'agent-provider',
++        label: 'Joy Agent Provider',
++        status: 'pass',
++        message: `${byok.provider} (${byok.modelId}) [API key configured]`,
++        details: { ...details, apiKeyConfigured: true },
++      };
+     }
+-  } catch {
+-    // Ignore
+-  }
+-  if (gpuName.includes('NVIDIA') || gpuName.includes('AMD') || gpuName.includes('Intel')) {
+-    logSuccess(`Hardware GPU: ${c(gpuName, 'bold')}`);
+-  } else {
+-    logWarn(`Hardware GPU: ${gpuName}`);
++    return {
++      id: 'agent-provider',
++      label: 'Joy Agent Provider',
++      status: 'warn',
++      message: `${byok.provider} (${byok.modelId}) [no API key configured - set OPENROUTER_API_KEY]`,
++      details,
++    };
++  } catch (err) {
++    return { id: 'agent-provider', label: 'Joy Agent Provider', status: 'warn', message: `Cannot read configuration: ${String(err)}` };
+   }
++}
+ 
+-  // 5. Local Model Inventory
+-  const modelsDir = process.env.JOY_MODELS_DIR ?? join(homedir(), 'JOY', 'models');
+-  if (existsSync(modelsDir)) {
+-    const files = readdirSync(modelsDir);
+-    logSuccess(`Local Model Weights: ${files.length} file(s) found in ${modelsDir}`);
+-  } else {
+-    logWarn(`Local Model Weights: Directory not found (${modelsDir})`);
++/**
++ * Production edge reachability. JOY Media is offline-first, so an unreachable
++ * edge is a warning, never a failure, and the probe is bounded by
++ * {@link EDGE_TIMEOUT_MS}. `JOY_MEDIA_EDGE_URL=off` skips it.
++ */
++async function checkEdge(): Promise<DoctorCheck> {
++  const label = 'Production Edge';
++  const configured = process.env.JOY_MEDIA_EDGE_URL?.trim();
++  if (configured !== undefined && /^(?:off|0|false|none|)$/i.test(configured)) {
++    return { id: 'edge', label, status: 'skip', message: 'Disabled by JOY_MEDIA_EDGE_URL' };
+   }
+-
+-  // 6. Python Environments
+-  const joyMediaDir = join(homedir(), '.joy-media');
+-  const venvs = ['venv-realesrgan', 'venv-birefnet', 'venv-deepfilternet', 'venv-tts'];
+-  let venvsReady = 0;
+-  for (const v of venvs) {
+-    if (existsSync(join(joyMediaDir, v, 'Scripts', 'python.exe'))) {
+-      venvsReady++;
++  const url = configured || DEFAULT_EDGE_URL;
++  let parsed: URL;
++  try {
++    parsed = new URL(url);
++  } catch {
++    return { id: 'edge', label, status: 'warn', message: `Invalid JOY_MEDIA_EDGE_URL "${url}"`, details: { url } };
++  }
++  try {
++    const res = await fetch(parsed, { signal: AbortSignal.timeout(EDGE_TIMEOUT_MS) });
++    if (!res.ok) {
++      await res.body?.cancel().catch(() => undefined);
++      return {
++        id: 'edge',
++        label,
++        status: 'warn',
++        message: `HTTP ${res.status} from ${url} (offline fallback active)`,
++        details: { url, httpStatus: res.status },
++      };
++    }
++    let identity: { commitSha?: string; schemaVersion?: number } | undefined;
++    try {
++      const body = (await res.json()) as { releaseIdentity?: typeof identity };
++      identity = body.releaseIdentity;
++    } catch {
++      identity = undefined;
+     }
++    const commit = identity?.commitSha?.slice(0, 8) ?? 'live';
++    const schema = identity?.schemaVersion;
++    return {
++      id: 'edge',
++      label,
++      status: 'pass',
++      message: `Connected [release: ${commit}${schema !== undefined ? `, schema: v${schema}` : ''}]`,
++      details: { url, release: commit, schemaVersion: schema },
++    };
++  } catch (err) {
++    const timedOut = (err as Error | undefined)?.name === 'TimeoutError';
++    return {
++      id: 'edge',
++      label,
++      status: 'warn',
++      message: timedOut
++        ? `No response within ${EDGE_TIMEOUT_MS / 1000}s (offline-first mode active)`
++        : 'Unreachable (offline-first mode active)',
++      details: { url },
++    };
+   }
+-  if (venvsReady === venvs.length) {
+-    logSuccess(
+-      `Local AI Venvs: All ${venvsReady}/${venvs.length} environments ready in ~/.joy-media`,
+-    );
+-  } else {
+-    logWarn(`Local AI Venvs: ${venvsReady}/${venvs.length} ready in ~/.joy-media`);
++}
++
++export async function runDoctorChecks(): Promise<DoctorReport> {
++  const checks: DoctorCheck[] = [
++    checkNode(),
++    checkSqlite(),
++    checkProjectStore(),
++    checkGpu(),
++    checkModels(),
++    checkVenvs(),
++    checkAgentProvider(),
++    await checkEdge(),
++  ];
++  const summary: Record<DoctorStatus, number> = { pass: 0, warn: 0, fail: 0, skip: 0 };
++  for (const check of checks) summary[check.status]++;
++  return { ok: summary.fail === 0, summary, checks };
++}
++
++export async function handleDoctorCommand(args: string[] = [], flags?: CliFlags): Promise<number> {
++  void args;
++  const json = flags?.json === true;
++  if (!json) {
++    printBanner();
++    logLine(`  ${c('JOY Media System Diagnostic & Health Check (Doctor)', 'bold')}\n`);
+   }
+ 
+-  // 7. Joy Agent BYOK Configuration
+-  const byok = resolveByokConfig();
+-  if (byok.apiKey && byok.apiKey !== 'not-provided') {
+-    logSuccess(
+-      `Joy Agent Provider: ${c(byok.provider, 'bold')} (${c(byok.modelId, 'cyan')}) [API Key Configured]`,
+-    );
+-  } else {
+-    logWarn(
+-      `Joy Agent Provider: ${byok.provider} (${byok.modelId}) [No API Key configured - set OPENROUTER_API_KEY]`,
+-    );
++  const report = await runDoctorChecks();
++  const exitCode = report.ok ? 0 : 1;
++  const idsWith = (status: DoctorStatus): string[] =>
++    report.checks.filter((check) => check.status === status).map((check) => check.id);
++  const failed = idsWith('fail');
++  const warned = idsWith('warn');
++  const failureSummary =
++    `${failed.length} diagnostic check(s) failed: ${failed.join(', ')}.` +
++    (warned.length ? ` ${warned.length} warning(s): ${warned.join(', ')}.` : '');
++
++  if (json) {
++    printJson(report);
++    if (!report.ok) logError(failureSummary);
++    return exitCode;
+   }
+ 
+-  // 8. Production Edge & Control Plane Connectivity
+-  try {
+-    const edgeRes = await fetch('https://joyst.ir/ready', { signal: AbortSignal.timeout(3000) });
+-    if (edgeRes.ok) {
+-      const json = (await edgeRes.json()) as {
+-        releaseIdentity?: { commitSha?: string; schemaVersion?: number };
+-      };
+-      const commit = json.releaseIdentity?.commitSha?.slice(0, 8) ?? 'live';
+-      const schema = json.releaseIdentity?.schemaVersion ?? 9;
+-      logSuccess(
+-        `Production Edge (Sweden VPS): ${c('Connected', 'bold')} [release: ${c(commit, 'cyan')}, schema: v${schema}]`,
+-      );
+-    } else {
+-      logWarn(`Production Edge (Sweden VPS): HTTP ${edgeRes.status} (offline fallback active)`);
+-    }
+-  } catch {
+-    logWarn('Production Edge (Sweden VPS): Unreachable (100% offline-first mode active)');
++  for (const check of report.checks) {
++    const line = `${check.label}: ${check.message}`;
++    if (check.status === 'pass') logSuccess(line);
++    else if (check.status === 'warn') logWarn(line);
++    else if (check.status === 'skip') logInfo(`${check.label}: skipped (${check.message})`);
++    else logError(line);
+   }
+ 
+-  console.log();
+-  if (failures === 0) {
+-    logSuccess('All core system diagnostics passed! Joy Media CLI is ready for full operation.');
+-    return 0;
++  logLine();
++  if (!report.ok) {
++    logError(failureSummary);
++  } else if (warned.length > 0) {
++    logWarn(
++      `Core checks passed with ${warned.length} warning(s): ${warned.join(', ')}. ` +
++        'Optional features may be unavailable.',
++    );
+   } else {
+-    logError(`${failures} diagnostic check(s) failed.`);
+-    return 1;
++    logSuccess('All diagnostics passed! Joy Media CLI is ready for full operation.');
+   }
++  return exitCode;
+ }
+diff --git a/apps/cli/src/commands/worker-cmd.ts b/apps/cli/src/commands/worker-cmd.ts
+index bafe07e..0d22f3b 100644
+--- a/apps/cli/src/commands/worker-cmd.ts
++++ b/apps/cli/src/commands/worker-cmd.ts
+@@ -1,18 +1,21 @@
+-/* global console, process */
+-import { spawnSync } from 'node:child_process';
++/* global process */
++import { spawn, spawnSync } from 'node:child_process';
+ import { existsSync, readdirSync, statSync } from 'node:fs';
+ import { homedir } from 'node:os';
+-import { join } from 'node:path';
++import { basename, dirname, join, parse, resolve } from 'node:path';
+ import type { CliFlags } from '../cli.js';
+-import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
++import { FlagValidationError, NUMERIC_RANGES, suggest } from '../utils/flags.js';
+ import {
+   c,
++  isMachineOutput,
+   logError,
+   logInfo,
++  logLine,
+   logStep,
+   logSuccess,
+   logWarn,
+   printBanner,
++  printJson,
+ } from '../utils/logger.js';
+ 
+ export interface WorkerCommandFlags {
+@@ -20,142 +23,331 @@ export interface WorkerCommandFlags {
+   output?: string | undefined;
+ }
+ 
++export interface WorkerEnvironment {
++  readonly id: string;
++  readonly name: string;
++  readonly dir: string;
++}
++
++export const WORKER_ENVIRONMENTS: readonly WorkerEnvironment[] = [
++  { id: 'realesrgan', name: 'RealESRGAN (Upscaling)', dir: 'venv-realesrgan' },
++  { id: 'birefnet', name: 'BiRefNet (Background Removal)', dir: 'venv-birefnet' },
++  { id: 'deepfilternet', name: 'DeepFilterNet (Noise Reduction)', dir: 'venv-deepfilternet' },
++  { id: 'tts', name: 'Demucs / Qwen3 (Audio / TTS)', dir: 'venv-tts' },
++];
++
++const WORKER_SUBCOMMANDS = ['status', 'upscale', 'denoise'];
++
++export function joyMediaHome(): string {
++  return join(homedir(), '.joy-media');
++}
++
++export function modelsDirectory(): string {
++  return process.env.JOY_MODELS_DIR ?? join(homedir(), 'JOY', 'models');
++}
++
++/**
++ * Python interpreter of a venv under ~/.joy-media. Windows venvs keep it in
++ * `Scripts/python.exe`, POSIX venvs in `bin/python` (or `bin/python3`).
++ * Returns the conventional path even when nothing exists there.
++ */
++export function venvPython(venvDir: string): string {
++  const root = join(joyMediaHome(), venvDir);
++  const candidates =
++    process.platform === 'win32'
++      ? [join(root, 'Scripts', 'python.exe')]
++      : [join(root, 'bin', 'python'), join(root, 'bin', 'python3')];
++  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
++}
++
++export interface GpuInfo {
++  /** Detected adapter name, or undefined when none could be identified. */
++  readonly name: string | undefined;
++  /** How we looked: `powershell` (Windows) or `nvidia-smi` (elsewhere). */
++  readonly probe: 'powershell' | 'nvidia-smi';
++  /** Why nothing was detected, when nothing was. */
++  readonly reason?: string;
++}
++
++const GPU_PROBE_TIMEOUT_MS = 10_000;
++
++/**
++ * Identify the primary GPU without hanging: PowerShell/CIM on Windows only,
++ * `nvidia-smi` elsewhere. Never throws.
++ */
++export function detectGpu(): GpuInfo {
++  const windows = process.platform === 'win32';
++  const probe = windows ? 'powershell' : 'nvidia-smi';
++  try {
++    const res = windows
++      ? spawnSync(
++          'powershell',
++          [
++            '-NoProfile',
++            '-NonInteractive',
++            '-Command',
++            'Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name',
++          ],
++          { encoding: 'utf8', timeout: GPU_PROBE_TIMEOUT_MS, windowsHide: true, stdio: 'pipe' },
++        )
++      : spawnSync('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], {
++          encoding: 'utf8',
++          timeout: GPU_PROBE_TIMEOUT_MS,
++          stdio: 'pipe',
++        });
++    if (res.error) {
++      const code = (res.error as NodeJS.ErrnoException).code;
++      return {
++        name: undefined,
++        probe,
++        reason: code === 'ENOENT' ? `${probe} not found` : `${probe} failed (${code ?? 'error'})`,
++      };
++    }
++    const names = (res.stdout ?? '')
++      .split(/\r?\n/)
++      .map((line) => line.trim())
++      .filter(Boolean);
++    if (res.status !== 0 || names.length === 0) {
++      return { name: undefined, probe, reason: `${probe} reported no GPU` };
++    }
++    const preferred =
++      names.find((n) => /nvidia/i.test(n)) ?? names.find((n) => /amd|radeon/i.test(n)) ?? names[0];
++    return { name: preferred, probe };
++  } catch (err) {
++    return { name: undefined, probe, reason: String(err) };
++  }
++}
++
++export interface ModelInventory {
++  readonly dir: string;
++  readonly exists: boolean;
++  readonly files: ReadonlyArray<{ readonly name: string; readonly sizeBytes: number }>;
++  readonly error?: string;
++}
++
++export function modelInventory(): ModelInventory {
++  const dir = modelsDirectory();
++  if (!existsSync(dir)) return { dir, exists: false, files: [] };
++  try {
++    const files = readdirSync(dir)
++      .map((name) => ({ name, stat: statSync(join(dir, name)) }))
++      .filter((entry) => entry.stat.isFile())
++      .map((entry) => ({ name: entry.name, sizeBytes: entry.stat.size }));
++    return { dir, exists: true, files };
++  } catch (err) {
++    return { dir, exists: true, files: [], error: String(err) };
++  }
++}
++
+ export async function handleWorkerCommand(args: string[], flags: CliFlags): Promise<number> {
+   validateScale(flags.scale);
+   const sub = args[0] ?? 'status';
+ 
+-  const modelsDir = process.env.JOY_MODELS_DIR ?? join(homedir(), 'JOY', 'models');
+-  const joyMediaDir = join(homedir(), '.joy-media');
+-
+-  if (sub === 'status') {
+-    printBanner();
+-    console.log(`  ${c('Local AI Worker & Hardware Diagnostics:', 'bold')}\n`);
+-
+-    // 1. GPU Check
+-    let gpuName = 'Unknown';
+-    try {
+-      const wmic = spawnSync(
+-        'powershell',
+-        [
+-          '-NoProfile',
+-          '-Command',
+-          'Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name',
+-        ],
+-        { encoding: 'utf8' },
+-      );
+-      if (wmic.status === 0 && wmic.stdout.trim()) {
+-        gpuName = wmic.stdout.trim().split('\n')[0]?.trim() ?? 'Unknown';
+-      }
+-    } catch {
+-      // Ignore
+-    }
+-    logStep('Primary GPU', c(gpuName, gpuName.includes('NVIDIA') ? 'green' : 'yellow'));
+-
+-    // 2. Python Venvs
+-    console.log(`\n  ${c('Isolated AI Environments (.joy-media):', 'bold')}`);
+-    const venvs = [
+-      { name: 'RealESRGAN (Upscaling)', dir: 'venv-realesrgan' },
+-      { name: 'BiRefNet (Background Removal)', dir: 'venv-birefnet' },
+-      { name: 'DeepFilterNet (Noise Reduction)', dir: 'venv-deepfilternet' },
+-      { name: 'Demucs / Qwen3 (Audio / TTS)', dir: 'venv-tts' },
+-    ];
+-
+-    for (const v of venvs) {
+-      const pythonExe = join(joyMediaDir, v.dir, 'Scripts', 'python.exe');
+-      const ready = existsSync(pythonExe);
+-      logStep(v.name, ready ? `${c('READY', 'green')} (${pythonExe})` : c('NOT FOUND', 'dim'));
+-    }
++  if (sub === 'status') return workerStatus(flags);
+ 
+-    // 3. Models Inventory
+-    console.log(`\n  ${c('Local Model Weights (JOY/models):', 'bold')}`);
+-    if (existsSync(modelsDir)) {
+-      try {
+-        const files = readdirSync(modelsDir);
+-        for (const file of files) {
+-          const fullPath = join(modelsDir, file);
+-          const stat = statSync(fullPath);
+-          if (stat.isFile()) {
+-            const mb = (stat.size / (1024 * 1024)).toFixed(1);
+-            logStep(file, `${mb} MB`);
+-          }
+-        }
+-      } catch (err) {
+-        logWarn(`Cannot list models: ${String(err)}`);
+-      }
+-    } else {
+-      logWarn(`Models directory not found at ${modelsDir}`);
+-    }
++  if (sub === 'upscale') {
++    const scale = flags.scale ?? 4;
++    return runWorkerJob({
++      operation: 'upscale',
++      usage: 'joy-media worker upscale <input-image> [--scale 4] [--output <out-image>]',
++      args,
++      flags,
++      env: WORKER_ENVIRONMENTS[0]!,
++      outputSuffix: `-upscaled-${scale}x`,
++      describe: (input, output) => `Upscaling ${c(input, 'bold')} (${scale}x) -> ${c(output, 'cyan')}...`,
++      pythonArgs: (input, output) => ['-m', 'realesrgan', '-i', input, '-o', output, '-s', String(scale)],
++      extra: { scale },
++    });
++  }
++
++  if (sub === 'denoise') {
++    return runWorkerJob({
++      operation: 'denoise',
++      usage: 'joy-media worker denoise <input-audio> [--output <out-audio>]',
++      args,
++      flags,
++      env: WORKER_ENVIRONMENTS[2]!,
++      outputSuffix: '-denoised',
++      describe: (input, output) => `Denoising ${c(input, 'bold')} -> ${c(output, 'cyan')}...`,
++      pythonArgs: (input, output) => ['-m', 'df.enhance', input, '-o', output],
++      extra: {},
++    });
++  }
++
++  const guess = suggest(sub, WORKER_SUBCOMMANDS);
++  logError(
++    `Unknown worker subcommand "${sub}".${guess ? ` Did you mean "${guess}"?` : ''} ` +
++      `Available: ${WORKER_SUBCOMMANDS.join(', ')}.`,
++  );
++  return 1;
++}
++
++function workerStatus(flags: CliFlags): number {
++  const gpu = detectGpu();
++  const environments = WORKER_ENVIRONMENTS.map((env) => {
++    const python = venvPython(env.dir);
++    return { id: env.id, name: env.name, dir: env.dir, ready: existsSync(python), python };
++  });
++  const models = modelInventory();
+ 
++  if (flags.json) {
++    printJson({
++      gpu: { detected: gpu.name !== undefined, ...gpu },
++      environments,
++      models,
++    });
+     return 0;
+   }
+ 
+-  if (sub === 'upscale') {
+-    const input = args[1];
+-    if (!input || !existsSync(input)) {
+-      logError('Usage: joy-media worker upscale <input-image> [--scale 4] [--output <out-image>]');
+-      return 1;
++  printBanner();
++  logLine(`  ${c('Local AI Worker & Hardware Diagnostics:', 'bold')}\n`);
++  const gpuLabel = gpu.name ?? `Unknown (${gpu.reason ?? 'not detected'})`;
++  logStep('Primary GPU', c(gpuLabel, gpuLabel.includes('NVIDIA') ? 'green' : 'yellow'));
++
++  logLine(`\n  ${c('Isolated AI Environments (.joy-media):', 'bold')}`);
++  for (const env of environments) {
++    logStep(env.name, env.ready ? `${c('READY', 'green')} (${env.python})` : c('NOT FOUND', 'dim'));
++  }
++
++  logLine(`\n  ${c('Local Model Weights (JOY/models):', 'bold')}`);
++  if (!models.exists) {
++    logWarn(`Models directory not found at ${models.dir}`);
++  } else if (models.error) {
++    logWarn(`Cannot list models: ${models.error}`);
++  } else if (models.files.length === 0) {
++    logWarn(`No model weights in ${models.dir}`);
++  } else {
++    for (const file of models.files) {
++      logStep(file.name, `${(file.sizeBytes / (1024 * 1024)).toFixed(1)} MB`);
+     }
++  }
++  return 0;
++}
+ 
+-    const scale = flags.scale ?? 4;
+-    const output = flags.output ?? input.replace(/(\.[^.]+)$/, `-upscaled-${scale}x$1`);
++interface WorkerJob {
++  readonly operation: 'upscale' | 'denoise';
++  readonly usage: string;
++  readonly args: readonly string[];
++  readonly flags: CliFlags;
++  readonly env: WorkerEnvironment;
++  readonly outputSuffix: string;
++  readonly describe: (input: string, output: string) => string;
++  readonly pythonArgs: (input: string, output: string) => string[];
++  readonly extra: Record<string, unknown>;
++}
+ 
+-    logInfo(`Upscaling ${c(input, 'bold')} (${scale}x) -> ${c(output, 'cyan')}...`);
++/** `photo.png` -> `photo<suffix>.png`, kept next to the input; works without an extension. */
++export function defaultOutputPath(input: string, suffix: string): string {
++  const parsed = parse(input);
++  return join(parsed.dir, `${parsed.name}${suffix}${parsed.ext}`);
++}
+ 
+-    const pythonExe = join(joyMediaDir, 'venv-realesrgan', 'Scripts', 'python.exe');
+-    if (!existsSync(pythonExe)) {
+-      logError(`RealESRGAN venv python not found at ${pythonExe}`);
+-      return 1;
+-    }
++async function runWorkerJob(job: WorkerJob): Promise<number> {
++  const { operation, flags } = job;
++  const json = flags.json;
++  const positional = job.args.slice(1);
+ 
+-    const runner = spawnSync(
+-      pythonExe,
+-      ['-m', 'realesrgan', '-i', input, '-o', output, '-s', String(scale)],
+-      { stdio: 'inherit' },
++  if (positional.length === 0 || positional[0] === '') {
++    logError(`Missing input file. Usage: ${job.usage}`);
++    return 2;
++  }
++  if (positional.length > 1) {
++    logError(
++      `worker ${operation} takes exactly one input file, got ${positional.length}. Usage: ${job.usage}`,
+     );
++    return 2;
++  }
+ 
+-    if (runner.status === 0) {
+-      logSuccess(`Upscale completed successfully: ${output}`);
+-      return 0;
+-    } else {
+-      logError(`Upscale failed with exit code ${runner.status}`);
+-      return 1;
+-    }
++  const input = positional[0]!;
++  let output = job.flags.output ?? defaultOutputPath(input, job.outputSuffix);
++  if (existsSync(output) && statSync(output).isDirectory()) {
++    output = join(output, basename(defaultOutputPath(input, job.outputSuffix)));
+   }
+ 
+-  if (sub === 'denoise') {
+-    const input = args[1];
+-    if (!input || !existsSync(input)) {
+-      logError('Usage: joy-media worker denoise <input-audio> [--output <out-audio>]');
+-      return 1;
++  const fail = (message: string, details: Record<string, unknown> = {}): number => {
++    logError(message);
++    if (json) {
++      printJson({ ok: false, operation, input, output, ...job.extra, ...details, error: message });
+     }
++    return 1;
++  };
+ 
+-    const output = flags.output ?? input.replace(/(\.[^.]+)$/, '-denoised$1');
+-    logInfo(`Denoising ${c(input, 'bold')} -> ${c(output, 'cyan')}...`);
++  if (!existsSync(input)) return fail(`Input file not found: ${input}`);
++  if (!statSync(input).isFile()) return fail(`Input is not a file: ${input}`);
+ 
+-    const pythonExe = join(joyMediaDir, 'venv-deepfilternet', 'Scripts', 'python.exe');
+-    if (!existsSync(pythonExe)) {
+-      logError(`DeepFilterNet venv python not found at ${pythonExe}`);
+-      return 1;
+-    }
++  if (resolve(output) === resolve(input)) {
++    logError(
++      `Refusing to overwrite the input file ${input}. Choose a different --output for worker ${operation}.`,
++    );
++    return 2;
++  }
++  if (!existsSync(dirname(resolve(output)))) {
++    return fail(`Output directory does not exist: ${dirname(resolve(output))}`);
++  }
++
++  logInfo(job.describe(input, output));
+ 
+-    const runner = spawnSync(pythonExe, ['-m', 'df.enhance', input, '-o', output], {
+-      stdio: 'inherit',
++  const pythonExe = venvPython(job.env.dir);
++  if (!existsSync(pythonExe)) {
++    return fail(
++      `${job.env.name} environment is not installed (expected Python at ${pythonExe}). ` +
++        'Run "joy-media worker status" to see what is available.',
++      { python: pythonExe },
++    );
++  }
++
++  const result = await runChild(pythonExe, job.pythonArgs(input, output), isMachineOutput());
++  if (result.error) {
++    return fail(`Could not start ${job.env.name} worker (${pythonExe}): ${result.error}`, {
++      python: pythonExe,
+     });
++  }
++  if (result.code !== 0) {
++    return fail(
++      `${operation === 'upscale' ? 'Upscale' : 'Denoise'} failed: worker exited with ` +
++        `${result.signal ? `signal ${result.signal}` : `code ${result.code}`}.`,
++      { workerExitCode: result.code },
++    );
++  }
+ 
+-    if (runner.status === 0) {
+-      logSuccess(`Denoise completed: ${output}`);
+-      return 0;
+-    } else {
+-      logError(`Denoise failed with exit code ${runner.status}`);
+-      return 1;
+-    }
++  if (json) {
++    printJson({ ok: true, operation, input, output, ...job.extra });
++  } else {
++    logSuccess(`${operation === 'upscale' ? 'Upscale' : 'Denoise'} completed: ${output}`);
+   }
++  return 0;
++}
+ 
+-  logError(`Unknown worker subcommand: ${sub}`);
+-  console.log(
+-    `Available: ${c('status', 'cyan')}, ${c('upscale', 'cyan')}, ${c('denoise', 'cyan')}`,
+-  );
+-  return 1;
++interface ChildResult {
++  readonly code: number | null;
++  readonly signal: NodeJS.Signals | null;
++  readonly error?: string;
++}
++
++/**
++ * Run a worker process without ever handing it our stdin (it must not block on
++ * input), sending its stdout to our stderr in machine mode so stdout stays
++ * pure JSON, and killing it if the CLI exits first (Ctrl-C, SIGTERM).
++ */
++function runChild(command: string, args: string[], machine: boolean): Promise<ChildResult> {
++  return new Promise<ChildResult>((resolvePromise) => {
++    const child = spawn(command, args, {
++      stdio: ['ignore', machine ? 2 : 'inherit', 'inherit'],
++      windowsHide: true,
++    });
++    const killChild = (): void => {
++      if (child.exitCode === null && child.signalCode === null) child.kill();
++    };
++    process.once('exit', killChild);
++    child.once('error', (err) => {
++      process.removeListener('exit', killChild);
++      resolvePromise({ code: null, signal: null, error: err.message });
++    });
++    child.once('close', (code, signal) => {
++      process.removeListener('exit', killChild);
++      resolvePromise({ code, signal });
++    });
++  });
+ }
+ 
+ function validateScale(value: number | undefined): void {
+diff --git a/apps/cli/src/humanized/cli-contract.e2e.test.ts b/apps/cli/src/humanized/cli-contract.e2e.test.ts
+new file mode 100644
+index 0000000..d3d5bf1
+--- /dev/null
++++ b/apps/cli/src/humanized/cli-contract.e2e.test.ts
+@@ -0,0 +1,536 @@
++/**
++ * The AI-ready CLI contract, enforced against the REAL binary (both shipped
++ * entry points). These are the things a tool loop or a script relies on:
++ *
++ *   exit 0 ok · 1 runtime failure · 2 usage error · 130 SIGINT · 143 SIGTERM
++ *   a clean run has EMPTY stderr; `--json` stdout is only JSON, never ANSI
++ *   typos and missing values are usage errors with a "did you mean" hint
++ *   `--help` works per command; nothing blocks on a non-TTY stdin
++ */
++import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
++import { join } from 'node:path';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import {
++  ENTRIES,
++  describeRaw,
++  entryPath,
++  ptyAvailable,
++  refusedUrl,
++  runInPty,
++  spawnCli,
++  startServer,
++} from './cli-helpers.js';
++import { createSandbox, describeRun, hasAnsi, type Sandbox } from './harness.js';
++
++const COMMANDS = ['agent', 'project', 'timeline', 'worker', 'render', 'benchmark', 'doctor', 'help'];
++const OFFLINE = { JOY_MEDIA_EDGE_URL: 'off' };
++
++/** A minimal project file the timeline/render commands accept via `--project file.json`. */
++function writeProjectFile(sb: Sandbox, name = 'demo.json'): string {
++  const path = sb.path(name);
++  writeFileSync(
++    path,
++    JSON.stringify({
++      schemaVersion: 1,
++      id: 'proj-demo',
++      title: 'Demo',
++      rootCompositionId: 'root',
++      assets: {},
++      compositions: {
++        root: {
++          id: 'root',
++          name: 'Main',
++          width: 1080,
++          height: 1920,
++          frameRate: { num: 30, den: 1 },
++          durationUs: 10_000_000,
++          tracks: [{ id: 'track-v1', kind: 'video', name: 'V1', order: 0, enabled: true, clips: [] }],
++        },
++      },
++    }),
++  );
++  return path;
++}
++
++function clipsIn(path: string): Array<{ startUs: number; durationUs: number }> {
++  const doc = JSON.parse(readFileSync(path, 'utf8'));
++  const project = doc.project ?? doc;
++  return project.compositions.root.tracks[0].clips;
++}
++
++let sb: Sandbox;
++beforeEach(() => {
++  sb = createSandbox('contract');
++});
++afterEach(() => sb.cleanup());
++
++describe('stderr is empty on a clean run (so any stderr means trouble)', () => {
++  for (const entry of ENTRIES) {
++    it(`no startup noise from node:sqlite via ${entry}`, async () => {
++      for (const args of [
++        ['--version'],
++        ['--help'],
++        ['help'],
++        ['project', 'list'],
++        ['project', '--help'],
++        ['worker', 'status'],
++        ['doctor'],
++      ]) {
++        const r = await sb.run(args, { entry, env: OFFLINE });
++        expect(r.code, describeRun(r)).toBe(0);
++        expect(r.stderr, describeRun(r)).toBe('');
++      }
++    });
++
++    it(`other warnings still reach stderr via ${entry}`, async () => {
++      const canary = sb.path('canary.cjs');
++      writeFileSync(
++        canary,
++        "process.emitWarning('Canary feature is experimental', 'ExperimentalWarning');\n" +
++          "process.emitWarning('canary deprecation', 'DeprecationWarning', 'DEP_CANARY');\n",
++      );
++      const r = await sb.run(['project', 'list'], {
++        entry,
++        env: { NODE_OPTIONS: `--require ${JSON.stringify(canary)}` },
++      });
++      expect(r.code, describeRun(r)).toBe(0);
++      expect(r.err).toContain('Canary feature is experimental');
++      expect(r.err).toContain('canary deprecation');
++      expect(r.err).not.toContain('SQLite is an experimental feature');
++    });
++  }
++});
++
++describe('flag parsing: mistakes are usage errors (exit 2), never silently dropped', () => {
++  it('a human fat-fingers --projct and is told what they probably meant', async () => {
++    const r = await sb.run(['timeline', 'add-clip', '--projct', 'demo.json']);
++    expect(r.code, describeRun(r)).toBe(2);
++    expect(r.err).toMatch(/Unknown option --projct\. Did you mean --project\?/);
++    expect(r.err).toMatch(/joy-media timeline --help/);
++    expect(r.stdout).toBe('');
++  });
++
++  it('a trailing --name without a value is an error and creates nothing', async () => {
++    const r = await sb.run(['project', 'create', '--name']);
++    expect(r.code, describeRun(r)).toBe(2);
++    expect(r.err).toMatch(/--name requires a value/);
++    expect(existsSync(join(sb.joyDir, 'joy-media.sqlite3'))).toBe(false);
++  });
++
++  it('an option never swallows the next option as its value', async () => {
++    const r = await sb.run(['render', '--project', '--json']);
++    expect(r.code, describeRun(r)).toBe(2);
++    expect(r.err).toMatch(/--project requires a value but got the option "--json"/);
++  });
++
++  for (const entry of ENTRIES) {
++    it(`negative numbers reach the validator (--start -3 / --start=-3) via ${entry}`, async () => {
++      for (const args of [
++        ['timeline', 'add-clip', '--project', 'p', '--start', '-3'],
++        ['timeline', 'add-clip', '--project', 'p', '--start=-3'],
++      ]) {
++        const r = await sb.run(args, { entry });
++        expect(r.code, describeRun(r)).toBe(2);
++        expect(r.err).toMatch(/Invalid value for --start: value must be >= 0 \(received: -3\)/);
++      }
++    });
++  }
++
++  it('switches do not take values (--json=false is rejected, not treated as true)', async () => {
++    const r = await sb.run(['doctor', '--json=false'], { env: OFFLINE });
++    expect(r.code, describeRun(r)).toBe(2);
++    expect(r.err).toMatch(/--json is a switch and does not take a value/);
++    expect(r.stdout).toBe('');
++  });
++
++  it('-project (one dash) is caught instead of becoming --project "roject"', async () => {
++    const r = await sb.run(['timeline', 'add-clip', '-project', 'demo.json']);
++    expect(r.code, describeRun(r)).toBe(2);
++    expect(r.err).toMatch(/Unknown option -project\. Did you mean --project\?/);
++  });
++
++  it('an empty numeric value is an error, not "use the default"', async () => {
++    const r = await sb.run(['project', 'create', 'Wide', '--width', '']);
++    expect(r.code, describeRun(r)).toBe(2);
++    expect(r.err).toMatch(/--width requires a numeric value/);
++    expect(existsSync(join(sb.joyDir, 'joy-media.sqlite3'))).toBe(false);
++  });
++
++  it('a bare negative number explains how to pass it', async () => {
++    const r = await sb.run(['project', 'create', '-5']);
++    expect(r.code, describeRun(r)).toBe(2);
++    expect(r.err).toMatch(/Unknown option -5\..*after "--"/);
++  });
++
++  it('every flag a command reads is accepted (long, short and --flag=value forms)', async () => {
++    const r = await sb.run([
++      'help',
++      '--project',
++      'p',
++      '--apply',
++      '--name',
++      'n',
++      '--provider',
++      'openrouter',
++      '--model',
++      'm',
++      '--api-key',
++      'k',
++      '--base-url',
++      'http://127.0.0.1:1',
++      '--url',
++      'http://127.0.0.1:1',
++      '--output',
++      'o.json',
++      '--width',
++      '1920',
++      '--height',
++      '1080',
++      '--fps',
++      '30',
++      '--track',
++      't',
++      '--clip',
++      'c',
++      '--asset',
++      'a',
++      '--start',
++      '0',
++      '--duration',
++      '1.5',
++      '--end',
++      '2',
++      '--at',
++      '0',
++      '--scale',
++      '2',
++      '--sqlite-path',
++      'db.sqlite3',
++      '--preset',
++      'mp4',
++      '--out',
++      'renders',
++      '--concurrency',
++      '2',
++      '--json',
++      '--system',
++      '--media-engine',
++      '-p',
++      'p',
++      '-n',
++      'n',
++      '-m',
++      'm',
++      '-u',
++      'http://127.0.0.1:1',
++      '-o',
++      'o.json',
++      '--sqlite-path=db.sqlite3',
++      '--start=0.5',
++    ]);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.stderr, describeRun(r)).toBe('');
++  });
++
++  it('--help and --version still win over a typo', async () => {
++    const version = await sb.run(['project', 'list', '--projct', '--version']);
++    expect(version.code, describeRun(version)).toBe(0);
++    expect(version.out).toMatch(/JOY Media CLI v\d+\.\d+\.\d+/);
++    const help = await sb.run(['project', '--projct', '--help']);
++    expect(help.code, describeRun(help)).toBe(0);
++    expect(help.out).toMatch(/Usage: joy-media project/);
++  });
++});
++
++describe('timeline positions start at 0:00', () => {
++  it('timeline add-clip --start 0 is accepted and lands at the very start', async () => {
++    const file = writeProjectFile(sb);
++    const r = await sb.run(['timeline', 'add-clip', '--project', file, '--start', '0', '--duration', '2']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(clipsIn(file)).toEqual([expect.objectContaining({ startUs: 0, durationUs: 2_000_000 })]);
++  });
++
++  it('trim --start 0 and split --at 0 are judged by the command, not rejected as flags', async () => {
++    const file = writeProjectFile(sb);
++    await sb.run(['timeline', 'add-clip', '--project', file, '--start', '1', '--duration', '4']);
++    const clipId = (clipsIn(file)[0] as unknown as { id: string }).id;
++    const trim = await sb.run(['timeline', 'trim', '--project', file, '--clip', clipId, '--start', '0', '--end', '3']);
++    expect(trim.code, describeRun(trim)).toBe(0);
++    expect(clipsIn(file)[0]).toEqual(expect.objectContaining({ startUs: 0, durationUs: 3_000_000 }));
++    // 0s is a legal VALUE; splitting exactly at a clip edge is a runtime error (1), not usage (2).
++    const split = await sb.run(['timeline', 'split', '--project', file, '--clip', clipId, '--at', '0']);
++    expect(split.code, describeRun(split)).toBe(1);
++    expect(split.err).toMatch(/outside clip range/);
++  });
++
++  it('a negative position and a zero duration get accurate messages', async () => {
++    const neg = await sb.run(['timeline', 'add-clip', '--project', 'p', '--at', '-0.5']);
++    expect(neg.code, describeRun(neg)).toBe(2);
++    expect(neg.err).toMatch(/--at: value must be >= 0 \(received: -0\.5\)/);
++    const zero = await sb.run(['timeline', 'add-clip', '--project', 'p', '--duration', '0']);
++    expect(zero.code, describeRun(zero)).toBe(2);
++    expect(zero.err).toMatch(/--duration: value must be >= 0\.001 \(received: 0\)/);
++  });
++});
++
++describe('help: an AI agent can discover every command', () => {
++  it('every command answers --help and -h with its own usage on stdout, exit 0', async () => {
++    for (const command of COMMANDS) {
++      for (const flag of ['--help', '-h']) {
++        const r = await sb.run([command, flag]);
++        expect(r.code, describeRun(r)).toBe(0);
++        expect(r.out, describeRun(r)).toContain(`Usage: joy-media ${command}`);
++        expect(r.stderr, describeRun(r)).toBe('');
++      }
++    }
++  });
++
++  it('help <command> prints the same thing as <command> --help', async () => {
++    for (const command of ['project', 'worker', 'doctor']) {
++      const a = await sb.run(['help', command]);
++      const b = await sb.run([command, '--help']);
++      expect(a.code).toBe(0);
++      expect(a.stdout).toBe(b.stdout);
++    }
++  });
++
++  it('--help never runs the command it describes', async () => {
++    const r = await sb.run(['project', 'create', 'Should Not Exist', '--help']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(existsSync(join(sb.joyDir, 'joy-media.sqlite3'))).toBe(false);
++  });
++
++  it('help for an unknown command suggests the closest one', async () => {
++    const r = await sb.run(['help', 'projct']);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.err).toMatch(/Unknown command "projct"\. Did you mean "project"\?/);
++  });
++
++  it('the global help documents --json and the exit codes', async () => {
++    const r = await sb.run(['--help']);
++    expect(r.out).toMatch(/--json/);
++    expect(r.out).toMatch(/0 ok · 1 failure · 2 usage error · 130 interrupted/);
++    for (const command of COMMANDS) expect(r.out).toContain(command);
++  });
++});
++
++describe('dispatcher ergonomics', () => {
++  it('flags may come before the command, with --flag=value syntax', async () => {
++    const db = sb.path('early.sqlite3');
++    const r = await sb.run([`--sqlite-path=${db}`, 'project', 'create', 'Early']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(existsSync(db)).toBe(true);
++
++    const doc = await sb.run(['--json', 'doctor'], { env: OFFLINE });
++    expect(doc.code, describeRun(doc)).toBe(0);
++    expect(doc.json<{ checks: unknown[] }>().checks.length).toBeGreaterThan(0);
++  });
++
++  it('"--" ends option parsing so a title may start with a dash', async () => {
++    const db = sb.path('dash.sqlite3');
++    const r = await sb.run(['project', 'create', '--sqlite-path', db, '--', '--not-a-flag', '-5']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toContain('--not-a-flag -5');
++  });
++
++  it('a repeated flag: the last one wins', async () => {
++    const first = sb.path('first.sqlite3');
++    const last = sb.path('last.sqlite3');
++    const r = await sb.run(['project', 'create', 'Twice', '--sqlite-path', first, '--sqlite-path', last]);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(existsSync(last)).toBe(true);
++    expect(existsSync(first)).toBe(false);
++  });
++
++  it('--version wins wherever it appears and has a JSON form', async () => {
++    const r = await sb.run(['project', 'create', 'Nope', '--version']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out.trim()).toMatch(/^JOY Media CLI v\d+\.\d+\.\d+$/);
++    expect(existsSync(join(sb.joyDir, 'joy-media.sqlite3'))).toBe(false);
++    const j = await sb.run(['--version', '--json']);
++    expect(j.json()).toEqual({ name: 'joy-media', version: expect.stringMatching(/^\d+\.\d+\.\d+$/) });
++  });
++
++  it('commands are case-sensitive, but the error points at the right one', async () => {
++    const r = await sb.run(['PROJECT', 'list']);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.err).toMatch(/Unknown command "PROJECT"\. Did you mean "project"\?/);
++    const typo = await sb.run(['projct', 'list']);
++    expect(typo.err).toMatch(/Did you mean "project"\?/);
++    const nonsense = await sb.run(['zzzzzz']);
++    expect(nonsense.err).not.toMatch(/Did you mean/);
++  });
++
++  it('a failing command explains itself in ONE stderr line (no "Process exiting" echo)', async () => {
++    const r = await sb.run(['frobnicate']);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.err.trim().split('\n'), describeRun(r)).toHaveLength(1);
++  });
++
++  it('an empty-string command is reported, not crashed on', async () => {
++    const r = await sb.run(['']);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.err).toMatch(/Unknown command ""/);
++  });
++
++  it('unicode arguments survive the round trip', async () => {
++    const title = 'Café 日本語 🎬 ñandú';
++    const r = await sb.run(['project', 'create', title, '--sqlite-path', sb.path('u.sqlite3')]);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toContain(title);
++  });
++
++  it('a huge argv is handled', async () => {
++    const words = Array.from({ length: 5000 }, (_, i) => `w${i}`);
++    const r = await sb.run(['project', 'create', ...words, '--sqlite-path', sb.path('big.sqlite3')]);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toContain('w4999');
++  });
++
++  it('JOY_CLI_DEBUG puts stack traces on stderr only; without it there are none', async () => {
++    const bad = sb.path('bad.json');
++    writeFileSync(bad, JSON.stringify({ id: 'x', rootCompositionId: 'root' }));
++    const quiet = await sb.run(['timeline', 'add-clip', '--project', bad]);
++    expect(quiet.code, describeRun(quiet)).toBe(1);
++    expect(quiet.err).not.toMatch(/^\s+at /m);
++
++    const debug = await sb.run(['timeline', 'add-clip', '--project', bad], {
++      env: { JOY_CLI_DEBUG: '1' },
++    });
++    expect(debug.code, describeRun(debug)).toBe(1);
++    expect(debug.err).toMatch(/^\s+at /m);
++    expect(debug.stdout, describeRun(debug)).toBe('');
++  });
++
++  // Owner: utils/project-loader.ts / timeline-cmd.ts. A project file without
++  // `compositions` surfaces as a raw TypeError.
++  it.fails('a malformed project file gets a clear error, not a raw TypeError', async () => {
++    const bad = sb.path('bad.json');
++    writeFileSync(bad, JSON.stringify({ id: 'x', rootCompositionId: 'root' }));
++    const r = await sb.run(['timeline', 'add-clip', '--project', bad]);
++    expect(r.err).not.toMatch(/Cannot read properties of undefined/);
++  });
++});
++
++describe('colour: only for terminals, and decided per stream', () => {
++  it('piped output carries no ANSI by default', async () => {
++    const r = await sb.run(['help']);
++    expect(hasAnsi(r.stdout)).toBe(false);
++    const e = await sb.run(['frobnicate']);
++    expect(hasAnsi(e.stderr)).toBe(false);
++  });
++
++  it('FORCE_COLOR=1 forces colour on a pipe; FORCE_COLOR=0 keeps it off', async () => {
++    const forced = await sb.run(['help'], { env: { FORCE_COLOR: '1' } });
++    expect(hasAnsi(forced.stdout), describeRun(forced)).toBe(true);
++    const off = await sb.run(['help'], { env: { FORCE_COLOR: '0' } });
++    expect(hasAnsi(off.stdout)).toBe(false);
++  });
++
++  it('--json output is never coloured, even with FORCE_COLOR', async () => {
++    const r = await sb.run(['doctor', '--json'], { env: { ...OFFLINE, FORCE_COLOR: '1' } });
++    expect(hasAnsi(r.stdout) || hasAnsi(r.stderr), describeRun(r)).toBe(false);
++    expect(() => r.json()).not.toThrow();
++  });
++
++  it.runIf(ptyAvailable)('NO_COLOR is honoured on a real terminal', async () => {
++    const coloured = await runInPty(sb, ['help']);
++    expect(hasAnsi(coloured.terminal), coloured.terminal).toBe(true);
++    const plain = await runInPty(sb, ['help'], { env: { NO_COLOR: '1' } });
++    expect(hasAnsi(plain.terminal), plain.terminal).toBe(false);
++  });
++
++  it.runIf(ptyAvailable)('stdout on a terminal does not colour a redirected stderr', async () => {
++    const errFile = sb.path('stderr.txt');
++    const r = await runInPty(sb, ['frobnicate'], { redirect: `2>${errFile}` });
++    expect(r.code).toBe(1);
++    const stderr = readFileSync(errFile, 'utf8');
++    expect(stderr).toMatch(/Unknown command/);
++    expect(hasAnsi(stderr), JSON.stringify(stderr)).toBe(false);
++  });
++
++  it.runIf(ptyAvailable)('stderr on a terminal is coloured even when stdout is piped', async () => {
++    const r = await runInPty(sb, ['frobnicate'], { redirect: '| cat' });
++    expect(r.terminal).toMatch(/Unknown command/);
++    expect(hasAnsi(r.terminal), JSON.stringify(r.terminal)).toBe(true);
++  });
++});
++
++describe('process lifecycle', () => {
++  for (const entry of ENTRIES) {
++    it(`a reader that hangs up early (| head) is not a crash via ${entry}`, async () => {
++      const args = ['benchmark', '--media-engine', '--json'];
++      const r = await spawnCli(sb, args, { entry, closeStdoutImmediately: true });
++      expect(r.code, describeRaw(args, r)).toBe(0);
++      expect(r.stderr, describeRaw(args, r)).not.toMatch(/EPIPE|Unexpected error|^\s+at /m);
++    });
++
++    it(`SIGINT during a hung network call exits 130, cleanly, via ${entry}`, async () => {
++      const edge = await startServer(); // accepts, never answers
++      try {
++        const args = ['doctor'];
++        const r = await spawnCli(sb, args, {
++          entry,
++          env: { JOY_MEDIA_EDGE_URL: edge.url },
++          onSpawn: (child) => void edge.firstHit.then(() => child.kill('SIGINT')),
++        });
++        expect(r.code, describeRaw(args, r)).toBe(130);
++        expect(r.err).toMatch(/Received SIGINT/);
++        expect(r.err).not.toMatch(/^\s+at /m);
++      } finally {
++        await edge.close();
++      }
++    });
++
++    it(`SIGTERM exits 143 via ${entry}`, async () => {
++      const edge = await startServer();
++      try {
++        const args = ['doctor', '--json'];
++        const r = await spawnCli(sb, args, {
++          entry,
++          env: { JOY_MEDIA_EDGE_URL: edge.url },
++          onSpawn: (child) => void edge.firstHit.then(() => child.kill('SIGTERM')),
++        });
++        expect(r.code, describeRaw(args, r)).toBe(143);
++        expect(r.err).toMatch(/Received SIGTERM/);
++      } finally {
++        await edge.close();
++      }
++    });
++  }
++
++  it('non-interactive commands never wait on an open, silent stdin', async () => {
++    const refused = await refusedUrl();
++    for (const args of [['help'], ['project', 'list'], ['worker', 'status'], ['doctor']]) {
++      const r = await spawnCli(sb, args, {
++        keepStdinOpen: true,
++        env: { JOY_MEDIA_EDGE_URL: refused },
++        timeoutMs: 30_000,
++      });
++      expect(r.code, describeRaw(args, r)).toBe(0);
++    }
++  });
++
++  // Owner: commands/agent-cmd.ts / agent/repl.ts. `joy-media agent` defaults to
++  // the interactive REPL, which prints a prompt to stdout and blocks forever on
++  // an open non-TTY stdin (typical for tool runners). It should refuse (exit 2)
++  // or treat a non-TTY stdin as a script and stop at EOF.
++  it.fails('`joy-media agent` without a TTY does not hang a tool loop', async () => {
++    const r = await spawnCli(sb, ['agent'], { keepStdinOpen: true, timeoutMs: 5_000 });
++    expect(r.signal).toBeNull();
++    expect(r.code).not.toBeNull();
++  });
++
++  it('the launcher works from an install path containing "#"', async () => {
++    const install = sb.path('tools#1', 'joy-media');
++    mkdirSync(join(install, 'bin'), { recursive: true });
++    mkdirSync(join(install, 'dist'), { recursive: true });
++    copyFileSync(entryPath('bin'), join(install, 'bin', 'joy-media.mjs'));
++    // The single-file bundle is self-contained, so it can stand in for dist/bin.js.
++    copyFileSync(entryPath('bundle'), join(install, 'dist', 'bin.js'));
++    const args = ['--version'];
++    const r = await spawnCli(sb, args, { entryFile: join(install, 'bin', 'joy-media.mjs') });
++    expect(r.code, describeRaw(args, r)).toBe(0);
++    expect(r.out).toMatch(/JOY Media CLI v/);
++  });
++});
+diff --git a/apps/cli/src/humanized/cli-helpers.ts b/apps/cli/src/humanized/cli-helpers.ts
+new file mode 100644
+index 0000000..8bc739f
+--- /dev/null
++++ b/apps/cli/src/humanized/cli-helpers.ts
+@@ -0,0 +1,208 @@
++/* global process, Buffer, setTimeout, clearTimeout */
++/**
++ * Extra black-box helpers for the CLI-shell contract tests (process lifecycle,
++ * TTY/colour, local HTTP servers, fake tools on PATH). Built on `harness.ts`;
++ * nothing here talks to the real internet.
++ */
++import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
++import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
++import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
++import type { AddressInfo } from 'node:net';
++import { dirname, join } from 'node:path';
++import { CLI_ROOT, ensureCliBuilt, stripAnsi, type Sandbox } from './harness.js';
++
++export type Entry = 'bin' | 'bundle';
++export const ENTRIES: readonly Entry[] = ['bin', 'bundle'];
++
++export function entryPath(entry: Entry): string {
++  return entry === 'bundle'
++    ? join(CLI_ROOT, 'dist', 'joy-media-bundle.mjs')
++    : join(CLI_ROOT, 'bin', 'joy-media.mjs');
++}
++
++// ---------------------------------------------------------------------------
++// Local HTTP servers (stand-ins for the production edge)
++// ---------------------------------------------------------------------------
++
++export interface LocalServer {
++  readonly url: string;
++  /** Resolves when the first request arrives (i.e. the CLI is now waiting on us). */
++  readonly firstHit: Promise<void>;
++  hits(): number;
++  close(): Promise<void>;
++}
++
++/**
++ * Start a server on 127.0.0.1. Without a handler, requests are accepted and
++ * NEVER answered: a hung network peer.
++ */
++export async function startServer(
++  handler?: (req: IncomingMessage, res: ServerResponse) => void,
++): Promise<LocalServer> {
++  let hits = 0;
++  let markHit: () => void = () => undefined;
++  const firstHit = new Promise<void>((resolve) => {
++    markHit = resolve;
++  });
++  const server = createServer((req, res) => {
++    hits++;
++    markHit();
++    handler?.(req, res);
++  });
++  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
++  const { port } = server.address() as AddressInfo;
++  return {
++    url: `http://127.0.0.1:${port}/ready`,
++    firstHit,
++    hits: () => hits,
++    close: () =>
++      new Promise<void>((resolve) => {
++        server.closeAllConnections();
++        server.close(() => resolve());
++      }),
++  };
++}
++
++/** A URL on a port nothing listens on: connections are refused immediately. */
++export async function refusedUrl(): Promise<string> {
++  const server = await startServer();
++  const url = server.url;
++  await server.close();
++  return url;
++}
++
++// ---------------------------------------------------------------------------
++// Fine-grained process control (the harness covers the common case)
++// ---------------------------------------------------------------------------
++
++export interface RawRun {
++  readonly code: number | null;
++  readonly signal: NodeJS.Signals | null;
++  readonly stdout: string;
++  readonly stderr: string;
++  readonly out: string;
++  readonly err: string;
++}
++
++export interface SpawnCliOptions {
++  readonly entry?: Entry;
++  /** Run this file instead of a shipped entry point. */
++  readonly entryFile?: string;
++  readonly env?: Record<string, string | undefined>;
++  readonly cwd?: string;
++  /** Leave stdin as an open pipe that never delivers data or EOF. */
++  readonly keepStdinOpen?: boolean;
++  /** Close our read end of the child's stdout right away (`| head -0`). */
++  readonly closeStdoutImmediately?: boolean;
++  /** Called once the child exists, e.g. to send it a signal at the right moment. */
++  readonly onSpawn?: (child: ChildProcessWithoutNullStreams) => void;
++  readonly timeoutMs?: number;
++}
++
++export function spawnCli(
++  sb: Sandbox,
++  args: readonly string[],
++  options: SpawnCliOptions = {},
++): Promise<RawRun> {
++  ensureCliBuilt();
++  const file = options.entryFile ?? entryPath(options.entry ?? 'bin');
++  return new Promise<RawRun>((resolve, reject) => {
++    const child = spawn(process.execPath, [file, ...args], {
++      cwd: options.cwd ?? sb.cwd,
++      env: sb.env(options.env),
++      stdio: ['pipe', 'pipe', 'pipe'],
++    });
++    const stdout: Buffer[] = [];
++    const stderr: Buffer[] = [];
++    if (options.closeStdoutImmediately) {
++      child.stdout.destroy();
++    } else {
++      child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
++    }
++    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
++    child.on('error', reject);
++    const killTimer = setTimeout(() => child.kill('SIGKILL'), options.timeoutMs ?? 60_000);
++    if (!options.keepStdinOpen) child.stdin.end();
++    options.onSpawn?.(child);
++    child.on('close', (code, signal) => {
++      clearTimeout(killTimer);
++      const out = Buffer.concat(stdout).toString('utf8');
++      const err = Buffer.concat(stderr).toString('utf8');
++      resolve({ code, signal, stdout: out, stderr: err, out: stripAnsi(out), err: stripAnsi(err) });
++    });
++  });
++}
++
++export function describeRaw(args: readonly string[], r: RawRun): string {
++  return `\n$ joy-media ${args.join(' ')}\n[exit ${r.code}${r.signal ? ` signal ${r.signal}` : ''}]\n--- stdout ---\n${r.stdout}\n--- stderr ---\n${r.stderr}\n`;
++}
++
++// ---------------------------------------------------------------------------
++// Fake tools and files
++// ---------------------------------------------------------------------------
++
++/** Write an executable POSIX shell script (creating parent directories). */
++export function writeExecutable(path: string, body: string): string {
++  mkdirSync(dirname(path), { recursive: true });
++  writeFileSync(path, `#!/bin/sh\n${body}\n`, 'utf8');
++  chmodSync(path, 0o755);
++  return path;
++}
++
++export const isWindows = process.platform === 'win32';
++
++// ---------------------------------------------------------------------------
++// Pseudo-terminal (util-linux `script`) for TTY-dependent behaviour
++// ---------------------------------------------------------------------------
++
++export const ptyAvailable: boolean =
++  process.platform === 'linux' &&
++  spawnSync('script', ['--version'], { encoding: 'utf8' }).status === 0;
++
++function shellQuote(value: string): string {
++  return `'${value.replace(/'/g, `'\\''`)}'`;
++}
++
++export interface PtyRun {
++  readonly code: number | null;
++  /** Everything written to the terminal (stdout and stderr when not redirected). */
++  readonly terminal: string;
++}
++
++/**
++ * Run the CLI on a pseudo-terminal. `redirect` is appended verbatim to the
++ * shell command (e.g. `2>/path/err.txt` or `| cat`), so a single stream can be
++ * taken off the TTY.
++ */
++export function runInPty(
++  sb: Sandbox,
++  args: readonly string[],
++  options: { entry?: Entry; env?: Record<string, string | undefined>; redirect?: string } = {},
++): Promise<PtyRun> {
++  ensureCliBuilt();
++  const command = [process.execPath, entryPath(options.entry ?? 'bin'), ...args]
++    .map(shellQuote)
++    .join(' ');
++  const full = `${command} ${options.redirect ?? ''}`;
++  return new Promise<PtyRun>((resolve, reject) => {
++    const child = spawn('script', ['-qec', full, '/dev/null'], {
++      cwd: sb.cwd,
++      env: { ...sb.env(options.env), TERM: 'xterm-256color' },
++      stdio: ['pipe', 'pipe', 'pipe'],
++    });
++    const chunks: Buffer[] = [];
++    child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
++    child.stderr.on('data', (chunk: Buffer) => chunks.push(chunk));
++    child.on('error', reject);
++    child.on('close', (code) => {
++      resolve({ code, terminal: Buffer.concat(chunks).toString('utf8') });
++    });
++    child.stdin.end();
++  });
++}
++
++/** Make `dir` exist and return it. */
++export function ensureDir(dir: string): string {
++  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
++  return dir;
++}
+diff --git a/apps/cli/src/humanized/doctor-failures.test.ts b/apps/cli/src/humanized/doctor-failures.test.ts
+new file mode 100644
+index 0000000..9aad611
+--- /dev/null
++++ b/apps/cli/src/humanized/doctor-failures.test.ts
+@@ -0,0 +1,65 @@
++/**
++ * doctor's exit-code rule for a FAILED check (warnings alone exit 0; see
++ * doctor-worker.e2e.test.ts). A broken SQLite engine cannot be produced on a
++ * real machine on demand, so this runs in-process with `node:sqlite` mocked.
++ */
++import { mkdtempSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++
++vi.mock('node:sqlite', () => ({
++  DatabaseSync: class {
++    constructor() {
++      throw new Error('sqlite engine missing');
++    }
++  },
++}));
++
++const { runCli } = await import('../cli.js');
++
++describe('doctor with a failing core check', () => {
++  const savedEnv = { HOME: process.env.HOME, JOY_MEDIA_EDGE_URL: process.env.JOY_MEDIA_EDGE_URL };
++  let home: string;
++  let out: string[];
++  let err: string[];
++
++  beforeEach(() => {
++    home = mkdtempSync(join(tmpdir(), 'joy-doctor-fail-'));
++    process.env.HOME = home;
++    process.env.JOY_MEDIA_EDGE_URL = 'off';
++    out = [];
++    err = [];
++    vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => void out.push(a.join(' ')));
++    vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => void err.push(a.join(' ')));
++  });
++
++  afterEach(() => {
++    vi.restoreAllMocks();
++    for (const [key, value] of Object.entries(savedEnv)) {
++      if (value === undefined) delete process.env[key];
++      else process.env[key] = value;
++    }
++    rmSync(home, { recursive: true, force: true });
++  });
++
++  it('exits 1 and names the failed check on stderr', async () => {
++    const code = await runCli(['doctor']);
++    expect(code).toBe(1);
++    expect(err.join('\n')).toMatch(/Built-in SQLite Engine: Error: sqlite engine missing/);
++    expect(err.join('\n')).toMatch(/1 diagnostic check\(s\) failed: sqlite\./);
++    expect(out.join('\n')).not.toMatch(/passed/);
++  });
++
++  it('--json reports ok:false with the failing check and still exits 1', async () => {
++    const code = await runCli(['doctor', '--json']);
++    expect(code).toBe(1);
++    expect(out).toHaveLength(1);
++    const doc = JSON.parse(out[0]!) as { ok: boolean; summary: { fail: number }; checks: Array<{ id: string; status: string }> };
++    expect(doc.ok).toBe(false);
++    expect(doc.summary.fail).toBe(1);
++    expect(doc.checks.find((c) => c.id === 'sqlite')?.status).toBe('fail');
++    // The failure is also explained on stderr, in one line.
++    expect(err).toEqual([expect.stringMatching(/1 diagnostic check\(s\) failed: sqlite\./)]);
++  });
++});
+diff --git a/apps/cli/src/humanized/doctor-worker.e2e.test.ts b/apps/cli/src/humanized/doctor-worker.e2e.test.ts
+new file mode 100644
+index 0000000..eb9c5b3
+--- /dev/null
++++ b/apps/cli/src/humanized/doctor-worker.e2e.test.ts
+@@ -0,0 +1,305 @@
++/**
++ * `doctor` and `worker` against the real binary, on a machine that looks like
++ * a fresh laptop or an air-gapped box: no GPU tooling, no Python venvs, no
++ * model weights, and an edge server we control (never the real internet).
++ */
++import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
++import { delimiter, join } from 'node:path';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import {
++  describeRaw,
++  isWindows,
++  refusedUrl,
++  spawnCli,
++  startServer,
++  writeExecutable,
++} from './cli-helpers.js';
++import { createSandbox, describeRun, hasAnsi, type Sandbox } from './harness.js';
++
++interface DoctorJson {
++  ok: boolean;
++  summary: Record<'pass' | 'warn' | 'fail' | 'skip', number>;
++  checks: Array<{ id: string; label: string; status: string; message: string; details?: Record<string, unknown> }>;
++}
++
++const CHECK_IDS = ['node', 'sqlite', 'project-store', 'gpu', 'models', 'venvs', 'agent-provider', 'edge'];
++
++let sb: Sandbox;
++beforeEach(() => {
++  sb = createSandbox('doctor-worker');
++});
++afterEach(() => sb.cleanup());
++
++function check(doc: DoctorJson, id: string): DoctorJson['checks'][number] {
++  const found = doc.checks.find((c) => c.id === id);
++  if (!found) throw new Error(`doctor --json has no "${id}" check: ${JSON.stringify(doc)}`);
++  return found;
++}
++
++/** Fake venv python (POSIX) that records its argv, chats on stdout, creates `-o <out>`. */
++function installFakeVenv(venv: string, exitCode = 0): string {
++  return writeExecutable(
++    join(sb.joyDir, venv, 'bin', 'python'),
++    [
++      'out=""; prev=""',
++      'for a in "$@"; do if [ "$prev" = "-o" ]; then out="$a"; fi; prev="$a"; done',
++      'printf "%s\\n" "$@" > "$HOME/worker-args.txt"',
++      'echo "fake worker: processing on stdout"',
++      'cat > /dev/null', // would hang if the CLI handed us an open stdin
++      `if [ -n "$out" ]; then echo processed > "$out"; fi`,
++      `exit ${exitCode}`,
++    ].join('\n'),
++  );
++}
++
++describe('doctor on a machine without network, GPU or models', () => {
++  it('finishes, exits 0, lists what is missing and does not claim everything passed', async () => {
++    const r = await sb.run(['doctor'], { env: { JOY_MEDIA_EDGE_URL: await refusedUrl() } });
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.stderr, describeRun(r)).toBe('');
++    expect(r.out).toMatch(/Production Edge: Unreachable \(offline-first mode active\)/);
++    expect(r.out).toMatch(/Local AI Venvs: 0\/4 ready/);
++    expect(r.out).toMatch(/Local Model Weights: Directory not found/);
++    expect(r.out).not.toMatch(/All (core system )?diagnostics passed/);
++    expect(r.out).toMatch(/Core checks passed with \d+ warning\(s\): .*edge/);
++  });
++
++  it('gives up on an edge that accepts but never answers, and says so', async () => {
++    const edge = await startServer();
++    try {
++      const r = await sb.run(['doctor', '--json'], { env: { JOY_MEDIA_EDGE_URL: edge.url } });
++      expect(r.code, describeRun(r)).toBe(0);
++      const doc = r.json<DoctorJson>();
++      expect(check(doc, 'edge')).toMatchObject({ status: 'warn', message: expect.stringMatching(/No response within 3s/) });
++      expect(edge.hits()).toBe(1);
++    } finally {
++      await edge.close();
++    }
++  });
++
++  it('reports a healthy edge with its release identity', async () => {
++    const edge = await startServer((_req, res) => {
++      res.setHeader('content-type', 'application/json');
++      res.end(JSON.stringify({ releaseIdentity: { commitSha: 'abcdef1234567890', schemaVersion: 9 } }));
++    });
++    try {
++      const r = await sb.run(['doctor'], { env: { JOY_MEDIA_EDGE_URL: edge.url } });
++      expect(r.code, describeRun(r)).toBe(0);
++      expect(r.out).toMatch(/Production Edge: Connected \[release: abcdef12, schema: v9\]/);
++    } finally {
++      await edge.close();
++    }
++  });
++
++  it('an edge that answers 503 or garbage is a warning/pass, never "unreachable"', async () => {
++    const down = await startServer((_req, res) => {
++      res.statusCode = 503;
++      res.end('maintenance');
++    });
++    const garbage = await startServer((_req, res) => res.end('<html>not json</html>'));
++    try {
++      const r503 = await sb.run(['doctor', '--json'], { env: { JOY_MEDIA_EDGE_URL: down.url } });
++      expect(check(r503.json<DoctorJson>(), 'edge')).toMatchObject({
++        status: 'warn',
++        message: expect.stringMatching(/HTTP 503/),
++      });
++      const rHtml = await sb.run(['doctor', '--json'], { env: { JOY_MEDIA_EDGE_URL: garbage.url } });
++      expect(check(rHtml.json<DoctorJson>(), 'edge')).toMatchObject({
++        status: 'pass',
++        message: expect.stringMatching(/Connected \[release: live\]/),
++      });
++    } finally {
++      await down.close();
++      await garbage.close();
++    }
++  });
++
++  it('JOY_MEDIA_EDGE_URL=off skips the probe entirely', async () => {
++    const r = await sb.run(['doctor', '--json'], { env: { JOY_MEDIA_EDGE_URL: 'off' } });
++    expect(check(r.json<DoctorJson>(), 'edge').status).toBe('skip');
++  });
++
++  it('--json is exactly one document: ok, summary and checks[] with id/status/message', async () => {
++    const r = await sb.run(['doctor', '--json'], {
++      env: { JOY_MEDIA_EDGE_URL: await refusedUrl(), FORCE_COLOR: '1' },
++    });
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.stderr, describeRun(r)).toBe('');
++    expect(hasAnsi(r.stdout)).toBe(false);
++    const doc = r.json<DoctorJson>();
++    expect(doc.checks.map((c) => c.id)).toEqual(CHECK_IDS);
++    for (const c of doc.checks) {
++      expect(['pass', 'warn', 'fail', 'skip']).toContain(c.status);
++      expect(typeof c.message).toBe('string');
++    }
++    const counted = { pass: 0, warn: 0, fail: 0, skip: 0 } as DoctorJson['summary'];
++    for (const c of doc.checks) counted[c.status as keyof typeof counted]++;
++    expect(doc.summary).toEqual(counted);
++    expect(doc.ok).toBe(doc.summary.fail === 0);
++    expect(check(doc, 'gpu').status).toBe('warn');
++  });
++
++  it.skipIf(isWindows)('never shells out to PowerShell on a non-Windows machine', async () => {
++    const fakeBin = sb.path('fake-bin');
++    const marker = sb.path('powershell-was-run');
++    for (const tool of ['powershell', 'pwsh']) {
++      writeExecutable(join(fakeBin, tool), `touch '${marker}'\nsleep 5\necho "NVIDIA Fake"`);
++    }
++    const r = await sb.run(['doctor', '--json'], {
++      env: { JOY_MEDIA_EDGE_URL: 'off', PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}` },
++    });
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(existsSync(marker)).toBe(false);
++  });
++
++  it.skipIf(isWindows)('detects an NVIDIA GPU through nvidia-smi', async () => {
++    const fakeBin = sb.path('fake-bin');
++    writeExecutable(join(fakeBin, 'nvidia-smi'), 'echo "NVIDIA GeForce RTX 4090"');
++    const r = await sb.run(['doctor', '--json'], {
++      env: { JOY_MEDIA_EDGE_URL: 'off', PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}` },
++    });
++    expect(check(r.json<DoctorJson>(), 'gpu')).toMatchObject({
++      status: 'pass',
++      message: 'NVIDIA GeForce RTX 4090',
++    });
++  });
++
++  it.skipIf(isWindows)('recognises a POSIX venv layout (bin/python) and model files', async () => {
++    installFakeVenv('venv-realesrgan');
++    const models = sb.path('models');
++    mkdirSync(models);
++    writeFileSync(join(models, 'RealESRGAN_x4plus.pth'), 'weights');
++    const r = await sb.run(['doctor', '--json'], {
++      env: { JOY_MEDIA_EDGE_URL: 'off', JOY_MODELS_DIR: models },
++    });
++    const doc = r.json<DoctorJson>();
++    expect(check(doc, 'venvs').details).toMatchObject({ ready: 1, total: 4 });
++    expect(check(doc, 'models')).toMatchObject({ status: 'pass', message: expect.stringMatching(/1 file/) });
++  });
++});
++
++describe('worker status', () => {
++  it('without GPU, venvs or models: exit 0, explains each missing piece, quiet stderr', async () => {
++    const r = await sb.run(['worker', 'status']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.stderr, describeRun(r)).toBe('');
++    expect(r.out).toMatch(/Primary GPU: Unknown/);
++    expect(r.out).toMatch(/RealESRGAN \(Upscaling\): NOT FOUND/);
++    expect(r.out).toMatch(/Models directory not found/);
++  });
++
++  it('--json reports gpu, environments and models as one document', async () => {
++    const r = await sb.run(['worker', 'status', '--json']);
++    expect(r.code, describeRun(r)).toBe(0);
++    const doc = r.json<{
++      gpu: { detected: boolean };
++      environments: Array<{ id: string; ready: boolean; python: string }>;
++      models: { exists: boolean; files: unknown[] };
++    }>();
++    expect(doc.gpu.detected).toBe(false);
++    expect(doc.environments.map((e) => e.id)).toEqual(['realesrgan', 'birefnet', 'deepfilternet', 'tts']);
++    expect(doc.environments.every((e) => !e.ready)).toBe(true);
++    expect(doc.models).toMatchObject({ exists: false, files: [] });
++  });
++});
++
++describe('worker upscale / denoise', () => {
++  it('no input is a usage error (2); a missing file is a runtime error (1) that names the file', async () => {
++    const none = await sb.run(['worker', 'upscale']);
++    expect(none.code, describeRun(none)).toBe(2);
++    expect(none.err).toMatch(/Missing input file\. Usage: joy-media worker upscale/);
++
++    const missing = await sb.run(['worker', 'upscale', 'nope.png']);
++    expect(missing.code, describeRun(missing)).toBe(1);
++    expect(missing.err).toMatch(/Input file not found: nope\.png/);
++
++    mkdirSync(sb.path('a-folder'));
++    const folder = await sb.run(['worker', 'denoise', 'a-folder']);
++    expect(folder.code, describeRun(folder)).toBe(1);
++    expect(folder.err).toMatch(/Input is not a file: a-folder/);
++  });
++
++  it('bad --scale values are usage errors with accurate messages', async () => {
++    writeFileSync(sb.path('in.png'), 'png');
++    const cases: Array<[string, RegExp]> = [
++      ['0', /--scale: value must be >= 1 \(received: 0\)/],
++      ['17', /--scale: value must be <= 16/],
++      ['2.5', /--scale: expected an integer/],
++      ['-2', /--scale: value must be >= 1/],
++    ];
++    for (const [value, message] of cases) {
++      const r = await sb.run(['worker', 'upscale', 'in.png', '--scale', value]);
++      expect(r.code, describeRun(r)).toBe(2);
++      expect(r.err).toMatch(message);
++    }
++  });
++
++  it('without the Python environment it says exactly what is missing', async () => {
++    writeFileSync(sb.path('in.png'), 'png');
++    const r = await sb.run(['worker', 'upscale', 'in.png']);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.err).toMatch(/RealESRGAN \(Upscaling\) environment is not installed/);
++    expect(r.err).toContain(isWindows ? join('Scripts', 'python.exe') : join('bin', 'python'));
++  });
++
++  it.skipIf(isWindows)('with a working environment: output lands next to the input', async () => {
++    installFakeVenv('venv-realesrgan');
++    writeFileSync(sb.path('photo.png'), 'original');
++    const r = await sb.run(['worker', 'upscale', 'photo.png', '--scale', '2']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/Upscale completed: photo-upscaled-2x\.png/);
++    expect(readFileSync(sb.path('photo-upscaled-2x.png'), 'utf8')).toBe('processed\n');
++    expect(readFileSync(join(sb.home, 'worker-args.txt'), 'utf8').split('\n')).toEqual(
++      expect.arrayContaining(['-i', 'photo.png', '-o', 'photo-upscaled-2x.png', '-s', '2']),
++    );
++  });
++
++  it.skipIf(isWindows)('--json: stdout is one JSON document; worker chatter goes to stderr', async () => {
++    installFakeVenv('venv-deepfilternet');
++    writeFileSync(sb.path('voice.wav'), 'audio');
++    const r = await sb.run(['worker', 'denoise', 'voice.wav', '--json']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.json()).toEqual({ ok: true, operation: 'denoise', input: 'voice.wav', output: 'voice-denoised.wav' });
++    expect(r.err).toContain('fake worker: processing on stdout');
++    expect(r.err).toMatch(/Denoising voice\.wav/);
++  });
++
++  it.skipIf(isWindows)('a failing worker process is exit 1 with its exit status', async () => {
++    installFakeVenv('venv-realesrgan', 3);
++    writeFileSync(sb.path('photo.png'), 'original');
++    const r = await sb.run(['worker', 'upscale', 'photo.png', '--json']);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.json()).toMatchObject({ ok: false, operation: 'upscale', workerExitCode: 3 });
++    expect(r.err).toMatch(/Upscale failed: worker exited with code 3/);
++  });
++
++  it.skipIf(isWindows)('never clobbers the input: extension-less and dotted-directory inputs', async () => {
++    installFakeVenv('venv-realesrgan');
++    mkdirSync(sb.path('my.shots'));
++    writeFileSync(sb.path('my.shots', 'frame'), 'original');
++    const r = await sb.run(['worker', 'upscale', join('my.shots', 'frame')]);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(readFileSync(sb.path('my.shots', 'frame'), 'utf8')).toBe('original');
++    expect(readFileSync(sb.path('my.shots', 'frame-upscaled-4x'), 'utf8')).toBe('processed\n');
++
++    const same = await sb.run(['worker', 'upscale', 'my.shots/frame', '--output', './my.shots/frame']);
++    expect(same.code, describeRun(same)).toBe(2);
++    expect(same.err).toMatch(/Refusing to overwrite the input file/);
++    expect(readFileSync(sb.path('my.shots', 'frame'), 'utf8')).toBe('original');
++  });
++
++  it.skipIf(isWindows)('the worker never inherits an open stdin (no hang in a tool loop)', async () => {
++    installFakeVenv('venv-realesrgan'); // the fake reads stdin to EOF
++    writeFileSync(sb.path('photo.png'), 'original');
++    const args = ['worker', 'upscale', 'photo.png'];
++    const r = await spawnCli(sb, args, { keepStdinOpen: true, timeoutMs: 20_000 });
++    expect(r.code, describeRaw(args, r)).toBe(0);
++  });
++
++  it('an unknown worker subcommand is reported on stderr with a suggestion', async () => {
++    const r = await sb.run(['worker', 'upscal', 'x.png']);
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(r.err).toMatch(/Unknown worker subcommand "upscal"\. Did you mean "upscale"\?/);
++    expect(r.stdout).toBe('');
++  });
++});
+diff --git a/apps/cli/src/process-warnings.ts b/apps/cli/src/process-warnings.ts
+new file mode 100644
+index 0000000..2d044b7
+--- /dev/null
++++ b/apps/cli/src/process-warnings.ts
+@@ -0,0 +1,40 @@
++/* global process */
++/**
++ * Side-effect module: MUST be the first import of the CLI entry point (`bin.ts`).
++ *
++ * `node:sqlite` prints "ExperimentalWarning: SQLite is an experimental feature"
++ * on every run. AI callers treat any stderr as a problem signal, so this one
++ * known, harmless warning is dropped. Every other warning still prints.
++ *
++ * Why patch `process.emit` rather than `process.emitWarning`: ESM builtins are
++ * loaded while the module graph is LINKED, before any module body (this one
++ * included) runs, so `emitWarning` has already been called by then. The
++ * warning is only *delivered* on a later tick via `process.emit('warning')`,
++ * which this filter intercepts. Works for the tsc output (`dist/bin.js`) and
++ * the esbuild single-file bundle alike.
++ */
++
++type Emit = typeof process.emit;
++
++const FILTER_FLAG = Symbol.for('joy-media.cli.sqlite-warning-filter');
++
++export function isSqliteExperimentalWarning(warning: unknown): boolean {
++  return (
++    warning instanceof Error &&
++    warning.name === 'ExperimentalWarning' &&
++    /SQLite is an experimental feature/.test(warning.message)
++  );
++}
++
++export function installSqliteWarningFilter(): void {
++  const host = process as unknown as Record<symbol, unknown>;
++  if (host[FILTER_FLAG]) return;
++  host[FILTER_FLAG] = true;
++  const originalEmit = process.emit;
++  process.emit = function filteredEmit(this: NodeJS.Process, event: string | symbol, ...args) {
++    if (event === 'warning' && isSqliteExperimentalWarning(args[0])) return false;
++    return (originalEmit as (...a: unknown[]) => boolean).call(this, event, ...args);
++  } as Emit;
++}
++
++installSqliteWarningFilter();
+diff --git a/apps/cli/src/utils/flags.test.ts b/apps/cli/src/utils/flags.test.ts
+index 337cfc1..2982153 100644
+--- a/apps/cli/src/utils/flags.test.ts
++++ b/apps/cli/src/utils/flags.test.ts
+@@ -1,5 +1,15 @@
+ import { describe, expect, it } from 'vitest';
+-import { FlagValidationError, parseFloatFlag, parseIntFlag } from './flags.js';
++import {
++  type CliOptionSpec,
++  FlagValidationError,
++  NUMERIC_RANGES,
++  UsageError,
++  editDistance,
++  parseCommandLine,
++  parseFloatFlag,
++  parseIntFlag,
++  suggest,
++} from './flags.js';
+ 
+ describe('utils/flags (numeric flag validation)', () => {
+   describe('parseIntFlag', () => {
+@@ -24,7 +34,9 @@ describe('utils/flags (numeric flag validation)', () => {
+     });
+ 
+     it('enforces min/max ranges', () => {
+-      expect(() => parseIntFlag('fps', '0', { min: 1, max: 240 })).toThrow(/must be > 1/);
++      // 1 is allowed, so the message must not claim "> 1" (it used to).
++      expect(() => parseIntFlag('fps', '0', { min: 1, max: 240 })).toThrow(/must be >= 1 \(/);
++      expect(parseIntFlag('fps', '1', { min: 1, max: 240 })).toBe(1);
+       expect(() => parseIntFlag('fps', '300', { min: 1, max: 240 })).toThrow(/must be <= 240/);
+       expect(parseIntFlag('fps', '60', { min: 1, max: 240 })).toBe(60);
+     });
+@@ -48,13 +60,148 @@ describe('utils/flags (numeric flag validation)', () => {
+ 
+     it('enforces ranges', () => {
+       expect(() => parseFloatFlag('start', '-1', { min: 0, max: 100 })).toThrow(/must be >= 0/);
++      // The floor is 0.001, so "> 0" would be inaccurate for 0.0005.
+       expect(() => parseFloatFlag('duration', '0', { min: 0.001, max: 100 })).toThrow(
+-        /must be > 0/,
++        /must be >= 0\.001/,
++      );
++      expect(() => parseFloatFlag('duration', '0.0005', { min: 0.001, max: 100 })).toThrow(
++        /must be >= 0\.001/,
+       );
+       expect(parseFloatFlag('duration', '5', { min: 0.001, max: 100 })).toBe(5);
+     });
+   });
+ 
++  describe('range semantics', () => {
++    it('timeline positions accept 0 (a clip may start at 0:00)', () => {
++      for (const flag of ['start', 'end', 'at'] as const) {
++        expect(parseFloatFlag(flag, '0', NUMERIC_RANGES[flag])).toBe(0);
++        expect(parseFloatFlag(flag, '0.0', NUMERIC_RANGES[flag])).toBe(0);
++        expect(() => parseFloatFlag(flag, '-3', NUMERIC_RANGES[flag])).toThrow(
++          new RegExp(`--${flag}: value must be >= 0 \\(received: -3\\)`),
++        );
++      }
++    });
++
++    it('bounds are inclusive and messages are always true statements', () => {
++      expect(parseIntFlag('scale', '1', NUMERIC_RANGES.scale)).toBe(1);
++      expect(parseIntFlag('scale', '16', NUMERIC_RANGES.scale)).toBe(16);
++      expect(() => parseIntFlag('scale', '0', NUMERIC_RANGES.scale)).toThrow(/must be >= 1 \(/);
++      expect(() => parseIntFlag('scale', '17', NUMERIC_RANGES.scale)).toThrow(/must be <= 16/);
++      expect(() => parseIntFlag('width', '15', NUMERIC_RANGES.width)).toThrow(/must be >= 16/);
++    });
++
++    it('allowZero: false excludes 0 with a ">" message when 0 is the floor', () => {
++      const range = { min: 0, max: 10, allowZero: false };
++      expect(() => parseFloatFlag('gain', '0', range)).toThrow(/must be > 0/);
++      expect(() => parseFloatFlag('gain', '-1', range)).toThrow(/must be > 0/);
++      expect(parseFloatFlag('gain', '0.5', range)).toBe(0.5);
++      expect(() => parseFloatFlag('pan', '0', { min: -1, max: 1, allowZero: false })).toThrow(
++        /must not be 0/,
++      );
++      expect(parseFloatFlag('pan', '-1', { min: -1, max: 1, allowZero: false })).toBe(-1);
++    });
++
++    it('allowNegative: false raises a negative floor to 0', () => {
++      expect(() => parseIntFlag('n', '-1', { min: -5, max: 5, allowNegative: false })).toThrow(
++        /must be >= 0/,
++      );
++      expect(parseIntFlag('n', '0', { min: -5, max: 5, allowNegative: false })).toBe(0);
++    });
++
++    it('FlagValidationError is a UsageError (exit 2)', () => {
++      expect(() => parseIntFlag('fps', 'x')).toThrow(UsageError);
++    });
++  });
++
++  describe('parseCommandLine', () => {
++    const options = {
++      help: { type: 'boolean', short: 'h' },
++      version: { type: 'boolean', short: 'v' },
++      json: { type: 'boolean' },
++      project: { type: 'string', short: 'p' },
++      name: { type: 'string', short: 'n' },
++      start: { type: 'string', numeric: true },
++    } as const satisfies Record<string, CliOptionSpec>;
++
++    it('accepts known options in every syntax, before or after positionals', () => {
++      const parsed = parseCommandLine(
++        ['--json', 'project', 'create', '-p', 'a', '--name=x', '-nY', '--start', '-3'],
++        options,
++      );
++      expect(parsed.error).toBeUndefined();
++      expect(parsed.positionals).toEqual(['project', 'create']);
++      expect(parsed.values).toEqual({ json: true, project: 'a', name: 'Y', start: '-3' });
++    });
++
++    it('negative numbers are values, not options', () => {
++      for (const value of ['-3', '-0.5', '-.5', '-1e3']) {
++        const parsed = parseCommandLine(['--start', value], options);
++        expect(parsed.error, value).toBeUndefined();
++        expect(parsed.values.start).toBe(value);
++      }
++    });
++
++    it('reports unknown options with a suggestion', () => {
++      expect(parseCommandLine(['--projct', 'x'], options).error?.message).toBe(
++        'Unknown option --projct. Did you mean --project?',
++      );
++      expect(parseCommandLine(['--zzzzzz'], options).error?.message).toBe(
++        'Unknown option --zzzzzz.',
++      );
++      expect(parseCommandLine(['-project', 'x'], options).error?.message).toBe(
++        'Unknown option -project. Did you mean --project?',
++      );
++      expect(parseCommandLine(['-5'], options).error?.message).toMatch(/after "--"/);
++    });
++
++    it('reports a missing value instead of turning it into `true`', () => {
++      expect(parseCommandLine(['--name'], options).error?.message).toMatch(
++        /--name requires a value/,
++      );
++      expect(parseCommandLine(['--project', '--json'], options).error?.message).toMatch(
++        /--project requires a value but got the option "--json"/,
++      );
++      expect(parseCommandLine(['--start', ''], options).error?.message).toMatch(
++        /--start requires a numeric value/,
++      );
++      // An explicit `=` means the user really wants the dash value.
++      expect(parseCommandLine(['--project=--json'], options).values.project).toBe('--json');
++      // A lone "-" (stdin convention) is a value.
++      expect(parseCommandLine(['--name', '-'], options).values.name).toBe('-');
++    });
++
++    it('rejects values on switches', () => {
++      expect(parseCommandLine(['--json=false'], options).error?.message).toMatch(
++        /--json is a switch/,
++      );
++    });
++
++    it('detects help/version even when another option swallowed them', () => {
++      expect(parseCommandLine(['--name', '--help'], options).help).toBe(true);
++      expect(parseCommandLine(['-hv'], options)).toMatchObject({ help: true, version: true });
++      expect(parseCommandLine(['--', '--help'], options)).toMatchObject({
++        help: false,
++        positionals: ['--help'],
++      });
++    });
++
++    it('last occurrence wins for repeated options', () => {
++      expect(parseCommandLine(['-p', 'a', '--project', 'b'], options).values.project).toBe('b');
++    });
++  });
++
++  describe('suggest', () => {
++    it('finds close, case-insensitive and prefix matches only', () => {
++      const commands = ['agent', 'project', 'timeline', 'worker', 'render', 'doctor'];
++      expect(suggest('projct', commands)).toBe('project');
++      expect(suggest('PROJECT', commands)).toBe('project');
++      expect(suggest('time', commands)).toBe('timeline');
++      expect(suggest('xyzzy', commands)).toBeUndefined();
++      expect(suggest('', commands)).toBeUndefined();
++      expect(editDistance('kitten', 'sitting')).toBe(3);
++    });
++  });
++
+   it('FlagValidationError carries flag name and received value', () => {
+     try {
+       parseIntFlag('width', 'not-a-number');
+diff --git a/apps/cli/src/utils/flags.ts b/apps/cli/src/utils/flags.ts
+index 6c091ea..526a376 100644
+--- a/apps/cli/src/utils/flags.ts
++++ b/apps/cli/src/utils/flags.ts
+@@ -1,3 +1,10 @@
++import { parseArgs } from 'node:util';
++
++/**
++ * Inclusive numeric range for a flag value. `min`/`max` are the only bounds
++ * that apply by default; `allowZero: false` / `allowNegative: false` exclude
++ * zero / negative values that would otherwise fall inside `[min, max]`.
++ */
+ export interface NumericRange {
+   readonly min: number;
+   readonly max: number;
+@@ -5,7 +12,18 @@ export interface NumericRange {
+   readonly allowNegative?: boolean;
+ }
+ 
+-export class FlagValidationError extends Error {
++/**
++ * The caller invoked the CLI incorrectly (unknown option, missing value,
++ * malformed number...). The dispatcher maps it to exit code 2.
++ */
++export class UsageError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = 'UsageError';
++  }
++}
++
++export class FlagValidationError extends UsageError {
+   public readonly flag: string;
+   public readonly received: unknown;
+ 
+@@ -64,18 +82,23 @@ function enforceRange(flag: string, value: number, range?: NumericRange): number
+   if (!isFiniteNumber(value)) {
+     throw new FlagValidationError(flag, 'value is not a finite number', value);
+   }
+-  if (!range.allowNegative && value < 0) {
+-    throw new FlagValidationError(flag, `value must be >= ${range.min}`, value);
+-  }
+-  if (!range.allowZero && value === 0) {
+-    throw new FlagValidationError(flag, `value must be > ${range.min}`, value);
+-  }
+-  if (value < range.min) {
+-    throw new FlagValidationError(flag, `value must be >= ${range.min}`, value);
++  // Report against the effective lower bound so the message is always true:
++  // with `allowNegative: false` and a negative `min`, the floor is 0.
++  const floor = range.allowNegative === false ? Math.max(range.min, 0) : range.min;
++  if (value < floor) {
++    const zeroExcluded = range.allowZero === false && floor === 0;
++    throw new FlagValidationError(flag, `value must be ${zeroExcluded ? '>' : '>='} ${floor}`, value);
+   }
+   if (value > range.max) {
+     throw new FlagValidationError(flag, `value must be <= ${range.max}`, value);
+   }
++  if (range.allowZero === false && value === 0) {
++    throw new FlagValidationError(
++      flag,
++      floor === 0 ? 'value must be > 0' : 'value must not be 0',
++      value,
++    );
++  }
+   return value;
+ }
+ 
+@@ -83,6 +106,7 @@ export const NUMERIC_RANGES = {
+   width: { min: 16, max: 15360 } as NumericRange,
+   height: { min: 16, max: 8640 } as NumericRange,
+   fps: { min: 1, max: 240 } as NumericRange,
++  // Timeline positions: 0 (the very start of the timeline) is valid.
+   start: { min: 0, max: 86400 } as NumericRange,
+   duration: { min: 0.001, max: 86400 } as NumericRange,
+   end: { min: 0, max: 86400 } as NumericRange,
+@@ -95,3 +119,183 @@ export function assertFiniteNumber(flag: string, value: unknown): asserts value
+     throw new FlagValidationError(flag, 'expected a finite number', value);
+   }
+ }
++
++// ---------------------------------------------------------------------------
++// Command-line parsing (strict, with helpful usage errors)
++// ---------------------------------------------------------------------------
++
++export interface CliOptionSpec {
++  readonly type: 'string' | 'boolean';
++  readonly short?: string;
++  /** The value is numeric: an empty value is a usage error, a leading `-` is a negative number. */
++  readonly numeric?: boolean;
++}
++
++export interface ParsedCommandLine {
++  readonly values: Record<string, string | boolean | undefined>;
++  readonly positionals: string[];
++  /** `--help` / `-h` appeared before any `--` terminator. */
++  readonly help: boolean;
++  /** `--version` / `-v` appeared before any `--` terminator. */
++  readonly version: boolean;
++  /** The first usage problem found, if any. Help/version still win over it. */
++  readonly error: UsageError | undefined;
++}
++
++const NEGATIVE_NUMBER_RE = /^-(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
++
++/** Does `value` (taken from the NEXT argv entry) look like another option rather than a value? */
++function looksLikeOption(value: string): boolean {
++  return value.length > 1 && value.startsWith('-') && !NEGATIVE_NUMBER_RE.test(value);
++}
++
++/**
++ * Parse argv against a declared option table.
++ *
++ * Unlike `parseArgs({ strict: true })` this accepts negative numbers as option
++ * values (`--start -3` reaches the numeric validator), and unlike
++ * `strict: false` it never silently drops anything: unknown options, missing
++ * values and values on switches are reported as a {@link UsageError}.
++ */
++export function parseCommandLine(
++  argv: readonly string[],
++  options: Readonly<Record<string, CliOptionSpec>>,
++): ParsedCommandLine {
++  const { tokens, positionals } = parseArgs({
++    args: [...argv],
++    options: Object.fromEntries(
++      Object.entries(options).map(([name, spec]) => [
++        name,
++        spec.short ? { type: spec.type, short: spec.short } : { type: spec.type },
++      ]),
++    ),
++    allowPositionals: true,
++    strict: false,
++    tokens: true,
++  });
++
++  const values: Record<string, string | boolean | undefined> = {};
++  let help = false;
++  let version = false;
++  let error: UsageError | undefined;
++  const fail = (message: string): void => {
++    error ??= new UsageError(message);
++  };
++
++  for (const token of tokens) {
++    if (token.kind !== 'option') continue;
++    // `-project` / `-json`: a long option written with one dash would otherwise be
++    // read as a cluster of short options (`-p roject`) and silently do the wrong thing.
++    const raw = argv[token.index] ?? '';
++    const singleDashLong = /^-([a-z][a-z-]+)(?:=.*)?$/i.exec(raw)?.[1];
++    if (singleDashLong && suggest(singleDashLong, Object.keys(options), 0)) {
++      fail(
++        `Unknown option ${raw.split('=')[0]}. Did you mean --${suggest(singleDashLong, Object.keys(options), 0)}?`,
++      );
++      continue;
++    }
++    const spec = Object.hasOwn(options, token.name) ? options[token.name] : undefined;
++    if (!spec) {
++      fail(unknownOptionMessage(token.rawName, options));
++      continue;
++    }
++    if (token.name === 'help') help = true;
++    if (token.name === 'version') version = true;
++
++    if (spec.type === 'boolean') {
++      if (token.value !== undefined) {
++        fail(
++          `Option ${token.rawName} is a switch and does not take a value (got "${token.value}"). ` +
++            `Use ${token.rawName} on its own.`,
++        );
++        continue;
++      }
++      values[token.name] = true;
++      continue;
++    }
++
++    // String option.
++    const value = token.value;
++    if (value === undefined) {
++      fail(`Option ${token.rawName} requires a value: ${token.rawName} <value>.`);
++      continue;
++    }
++    if (!token.inlineValue && looksLikeOption(value)) {
++      if (value === '--help' || value === '-h') help = true;
++      if (value === '--version' || value === '-v') version = true;
++      fail(
++        `Option ${token.rawName} requires a value but got the option "${value}". ` +
++          `If the value really starts with "-", write ${token.rawName}=${value}.`,
++      );
++      continue;
++    }
++    if (spec.numeric && value.trim() === '') {
++      fail(`Option ${token.rawName} requires a numeric value, got an empty string.`);
++      continue;
++    }
++    values[token.name] = value;
++  }
++
++  return { values, positionals, help, version, error };
++}
++
++function unknownOptionMessage(
++  rawName: string,
++  options: Readonly<Record<string, CliOptionSpec>>,
++): string {
++  const isLong = rawName.startsWith('--');
++  const bare = rawName.replace(/^-+/, '');
++  let message = `Unknown option ${rawName}.`;
++  if (isLong) {
++    const guess = suggest(bare, Object.keys(options));
++    if (guess) message += ` Did you mean --${guess}?`;
++  } else if (/^\d/.test(bare)) {
++    message += ' To pass a negative number or a value starting with "-", put it after "--".';
++  }
++  return message;
++}
++
++/** Levenshtein edit distance (small inputs only). */
++export function editDistance(a: string, b: string): number {
++  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
++  for (let i = 1; i <= a.length; i++) {
++    let diagonal = prev[0]!;
++    prev[0] = i;
++    for (let j = 1; j <= b.length; j++) {
++      const above = prev[j]!;
++      prev[j] = Math.min(above + 1, prev[j - 1]! + 1, diagonal + (a[i - 1] === b[j - 1] ? 0 : 1));
++      diagonal = above;
++    }
++  }
++  return prev[b.length]!;
++}
++
++/**
++ * Closest candidate to `input` (case-insensitive), or undefined when nothing is
++ * plausibly what the user meant. `maxDistance` defaults to a third of the input
++ * length (at least 1); pass 0 to accept only case-insensitive exact matches.
++ */
++export function suggest(
++  input: string,
++  candidates: readonly string[],
++  maxDistance?: number,
++): string | undefined {
++  const needle = input.toLowerCase();
++  if (needle === '') return undefined;
++  let best: string | undefined;
++  let bestDistance = Number.POSITIVE_INFINITY;
++  for (const candidate of candidates) {
++    const hay = candidate.toLowerCase();
++    if (hay === needle) return candidate;
++    const distance = editDistance(needle, hay);
++    if (distance < bestDistance) {
++      best = candidate;
++      bestDistance = distance;
++    }
++  }
++  const tolerance = maxDistance ?? Math.max(1, Math.floor(needle.length / 3));
++  if (best !== undefined && bestDistance <= tolerance) return best;
++  if (maxDistance === 0) return undefined;
++  // A prefix is a good hint too (`--proj` -> `--project`).
++  return candidates.find((candidate) => needle.length >= 3 && candidate.startsWith(needle));
++}
+diff --git a/apps/cli/src/utils/logger.test.ts b/apps/cli/src/utils/logger.test.ts
+new file mode 100644
+index 0000000..7a3aa10
+--- /dev/null
++++ b/apps/cli/src/utils/logger.test.ts
+@@ -0,0 +1,160 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import {
++  c,
++  colorEnabled,
++  isMachineOutput,
++  logError,
++  logInfo,
++  logLine,
++  logStep,
++  logSuccess,
++  logWarn,
++  printBanner,
++  printJson,
++  printTable,
++  setMachineOutput,
++  stripAnsi,
++} from './logger.js';
++
++// eslint-disable-next-line no-control-regex
++const ANSI = /\u001b\[/;
++
++function setTty(stream: NodeJS.WriteStream, value: boolean | undefined): void {
++  Object.defineProperty(stream, 'isTTY', { value, configurable: true, writable: true });
++}
++
++describe('utils/logger', () => {
++  const saved = {
++    stdoutTty: process.stdout.isTTY,
++    stderrTty: process.stderr.isTTY,
++    env: { NO_COLOR: process.env.NO_COLOR, FORCE_COLOR: process.env.FORCE_COLOR, TERM: process.env.TERM },
++  };
++  let out: string[];
++  let err: string[];
++
++  beforeEach(() => {
++    out = [];
++    err = [];
++    vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
++      out.push(args.join(' '));
++    });
++    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
++      err.push(args.join(' '));
++    });
++    delete process.env.NO_COLOR;
++    delete process.env.FORCE_COLOR;
++    delete process.env.TERM;
++    setTty(process.stdout, false);
++    setTty(process.stderr, false);
++    setMachineOutput(false);
++  });
++
++  afterEach(() => {
++    vi.restoreAllMocks();
++    setMachineOutput(false);
++    setTty(process.stdout, saved.stdoutTty);
++    setTty(process.stderr, saved.stderrTty);
++    for (const [key, value] of Object.entries(saved.env)) {
++      if (value === undefined) delete process.env[key];
++      else process.env[key] = value;
++    }
++  });
++
++  describe('machine output mode', () => {
++    it('is off by default: human logs on stdout, errors on stderr', () => {
++      expect(isMachineOutput()).toBe(false);
++      printBanner();
++      logInfo('info');
++      logSuccess('done');
++      logWarn('careful');
++      logStep('Label', 'detail');
++      logLine('plain');
++      printTable(['A'], [['1']]);
++      logError('broken');
++      expect(out.join('\n')).toMatch(/JOY MEDIA CLI/);
++      expect(out.join('\n')).toMatch(/info[\s\S]*done[\s\S]*careful[\s\S]*Label: detail[\s\S]*plain/);
++      expect(err).toEqual(['✖ broken']);
++    });
++
++    it('keeps stdout for JSON only: no banner, every human log goes to stderr', () => {
++      setMachineOutput(true);
++      printBanner();
++      logInfo('info');
++      logSuccess('done');
++      logWarn('careful');
++      logStep('Label', 'detail');
++      logLine('plain');
++      printTable(['A'], [['1']]);
++      logError('broken');
++      printJson({ ok: true });
++      expect(out).toEqual([JSON.stringify({ ok: true }, null, 2)]);
++      expect(err.join('\n')).toMatch(/ℹ info[\s\S]*✔ done[\s\S]*▲ careful[\s\S]*Label: detail/);
++      expect(err).toContain('✖ broken');
++      expect(err.join('\n')).not.toMatch(/JOY MEDIA CLI/);
++    });
++
++    it('never colours anything, even with FORCE_COLOR and TTYs', () => {
++      process.env.FORCE_COLOR = '1';
++      setTty(process.stdout, true);
++      setTty(process.stderr, true);
++      setMachineOutput(true);
++      logWarn(`pre-coloured ${c('x', 'red')}`);
++      logError('broken');
++      expect(err.some((line) => ANSI.test(line))).toBe(false);
++      expect(c('x', 'red')).toBe('x');
++    });
++  });
++
++  describe('colour decisions', () => {
++    it('only TTYs get colour by default', () => {
++      expect(colorEnabled(process.stdout)).toBe(false);
++      setTty(process.stdout, true);
++      expect(colorEnabled(process.stdout)).toBe(true);
++      expect(ANSI.test(c('x', 'red'))).toBe(true);
++    });
++
++    it('honours NO_COLOR (non-empty), FORCE_COLOR and TERM=dumb', () => {
++      setTty(process.stdout, true);
++      process.env.NO_COLOR = '1';
++      expect(colorEnabled(process.stdout)).toBe(false);
++      process.env.NO_COLOR = '';
++      expect(colorEnabled(process.stdout)).toBe(true);
++      delete process.env.NO_COLOR;
++      process.env.TERM = 'dumb';
++      expect(colorEnabled(process.stdout)).toBe(false);
++      delete process.env.TERM;
++
++      setTty(process.stdout, false);
++      process.env.FORCE_COLOR = '1';
++      expect(colorEnabled(process.stdout)).toBe(true);
++      process.env.FORCE_COLOR = '';
++      expect(colorEnabled(process.stdout)).toBe(true);
++      process.env.FORCE_COLOR = '0';
++      expect(colorEnabled(process.stdout)).toBe(false);
++      process.env.FORCE_COLOR = 'false';
++      expect(colorEnabled(process.stdout)).toBe(false);
++    });
++
++    it('logError colours from STDERR, not stdout', () => {
++      setTty(process.stdout, true);
++      setTty(process.stderr, false);
++      logError(`see ${c('joy-media help', 'cyan')}`);
++      expect(ANSI.test(err[0]!)).toBe(false);
++      expect(err[0]).toBe('✖ see joy-media help');
++
++      err.length = 0;
++      setTty(process.stdout, false);
++      setTty(process.stderr, true);
++      logError('broken');
++      expect(ANSI.test(err[0]!)).toBe(true);
++      expect(stripAnsi(err[0]!)).toBe('✖ broken');
++    });
++
++    it('stdout logs carry no ANSI when stdout is piped', () => {
++      setTty(process.stderr, true);
++      logSuccess('done');
++      logStep('Label', 'detail');
++      expect(out.some((line) => ANSI.test(line))).toBe(false);
++    });
++  });
++});
+diff --git a/apps/cli/src/utils/logger.ts b/apps/cli/src/utils/logger.ts
+index a5c5484..5face13 100644
+--- a/apps/cli/src/utils/logger.ts
++++ b/apps/cli/src/utils/logger.ts
+@@ -19,14 +19,92 @@ export const colors = {
+   bgMagenta: '\x1b[45m',
+ };
+ 
+-const useColors = process.stdout.isTTY ?? false;
++// ---------------------------------------------------------------------------
++// Machine output mode
++// ---------------------------------------------------------------------------
+ 
++let machineOutput = false;
++
++/**
++ * Machine output mode (set by the dispatcher when `--json` is passed).
++ *
++ * While enabled, STDOUT IS RESERVED FOR THE COMMAND'S JSON: the banner is
++ * suppressed, every human log helper (`logInfo`, `logSuccess`, `logWarn`,
++ * `logStep`, `printTable`) writes to stderr instead, and no ANSI colour is
++ * emitted on either stream. Commands print their JSON with {@link printJson}
++ * (or their own `console.log(JSON.stringify(...))`).
++ */
++export function setMachineOutput(enabled: boolean): void {
++  machineOutput = enabled;
++}
++
++export function isMachineOutput(): boolean {
++  return machineOutput;
++}
++
++// ---------------------------------------------------------------------------
++// Colour
++// ---------------------------------------------------------------------------
++
++/**
++ * Whether ANSI colour may be written to `stream`. Decided per stream and per
++ * call: `FORCE_COLOR` (anything but `0`/`false`) forces colour on, a non-empty
++ * `NO_COLOR` or `TERM=dumb` turns it off, otherwise only TTYs get colour.
++ * Machine output mode never gets colour.
++ */
++export function colorEnabled(stream: { isTTY?: boolean } | undefined): boolean {
++  if (machineOutput) return false;
++  const env = process.env;
++  const force = env.FORCE_COLOR;
++  if (force !== undefined) return !(force === '0' || force.toLowerCase() === 'false');
++  if (env.NO_COLOR !== undefined && env.NO_COLOR !== '') return false;
++  if (env.TERM === 'dumb') return false;
++  return stream?.isTTY === true;
++}
++
++// eslint-disable-next-line no-control-regex
++const ANSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
++
++export function stripAnsi(text: string): string {
++  return text.replace(ANSI_RE, '');
++}
++
++/**
++ * Colourise `text` for STDOUT (where most composed text ends up). Text that is
++ * routed to stderr is re-checked against stderr's capabilities on write.
++ */
+ export function c(text: string, color: keyof typeof colors): string {
+-  if (!useColors) return text;
++  if (!colorEnabled(process.stdout)) return text;
+   return `${colors[color]}${text}${colors.reset}`;
+ }
+ 
++function paint(text: string, color: keyof typeof colors, stream: { isTTY?: boolean }): string {
++  return colorEnabled(stream) ? `${colors[color]}${text}${colors.reset}` : text;
++}
++
++function forStream(text: string, stream: { isTTY?: boolean }): string {
++  return colorEnabled(stream) ? text : stripAnsi(text);
++}
++
++/** Human-readable output: stdout normally, stderr in machine output mode. */
++function human(line: string): void {
++  if (machineOutput) {
++    console.error(forStream(line, process.stderr));
++  } else {
++    console.log(forStream(line, process.stdout));
++  }
++}
++
++function humanStream(): { isTTY?: boolean } {
++  return machineOutput ? process.stderr : process.stdout;
++}
++
++// ---------------------------------------------------------------------------
++// Output helpers
++// ---------------------------------------------------------------------------
++
+ export function printBanner(): void {
++  if (machineOutput) return;
+   console.log(
+     `${c('  ██████╗  ██████╗ ██╗   ██╗', 'magenta')}` +
+       `  ${c('JOY MEDIA CLI', 'bold')}` +
+@@ -42,24 +120,35 @@ export function printBanner(): void {
+   );
+ }
+ 
++/** Print one JSON document on stdout (the only thing stdout carries in machine mode). */
++export function printJson(value: unknown): void {
++  console.log(JSON.stringify(value, null, 2));
++}
++
++/** Print a plain human line (stdout, or stderr in machine output mode). */
++export function logLine(msg = ''): void {
++  human(msg);
++}
++
+ export function logInfo(msg: string): void {
+-  console.log(`${c('ℹ', 'cyan')} ${msg}`);
++  human(`${paint('ℹ', 'cyan', humanStream())} ${msg}`);
+ }
+ 
+ export function logSuccess(msg: string): void {
+-  console.log(`${c('✔', 'green')} ${msg}`);
++  human(`${paint('✔', 'green', humanStream())} ${msg}`);
+ }
+ 
+ export function logWarn(msg: string): void {
+-  console.log(`${c('▲', 'yellow')} ${msg}`);
++  human(`${paint('▲', 'yellow', humanStream())} ${msg}`);
+ }
+ 
+ export function logError(msg: string): void {
+-  console.error(`${c('✖', 'red')} ${msg}`);
++  console.error(forStream(`${paint('✖', 'red', process.stderr)} ${msg}`, process.stderr));
+ }
+ 
+ export function logStep(label: string, detail: string): void {
+-  console.log(`  ${c('•', 'dim')} ${c(label, 'bold')}: ${detail}`);
++  const stream = humanStream();
++  human(`  ${paint('•', 'dim', stream)} ${paint(label, 'bold', stream)}: ${detail}`);
+ }
+ 
+ export function printTable(headers: string[], rows: string[][]): void {
+@@ -74,12 +163,13 @@ export function printTable(headers: string[], rows: string[][]): void {
+ 
+   const separator = colWidths.map((w) => '─'.repeat(w)).join('──┼──');
+   const headerLine = headers.map((h, i) => h.padEnd(colWidths[i]!)).join('  │  ');
++  const stream = humanStream();
+ 
+-  console.log(`  ${c(headerLine, 'bold')}`);
+-  console.log(`  ${c(separator, 'dim')}`);
++  human(`  ${paint(headerLine, 'bold', stream)}`);
++  human(`  ${paint(separator, 'dim', stream)}`);
+ 
+   for (const row of rows) {
+     const rowLine = headers.map((_, i) => (row[i] ?? '').padEnd(colWidths[i]!)).join('  │  ');
+-    console.log(`  ${rowLine}`);
++    human(`  ${rowLine}`);
+   }
+ }
