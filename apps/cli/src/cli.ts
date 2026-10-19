@@ -27,6 +27,9 @@ export interface CliFlags {
   apply: boolean;
   name: string | undefined;
   family: string | undefined;
+  left: string | undefined;
+  right: string | undefined;
+  type: string | undefined;
   gain: number | undefined;
   mute: boolean;
   unmute: boolean;
@@ -76,6 +79,9 @@ export const CLI_OPTIONS = {
   name: { type: 'string', short: 'n' },
   family: { type: 'string' },
   gain: { type: 'string' },
+  left: { type: 'string' },
+  right: { type: 'string' },
+  type: { type: 'string' },
   mute: { type: 'boolean' },
   unmute: { type: 'boolean' },
   'fade-in': { type: 'string' },
@@ -170,6 +176,7 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
         'set-audio',
         'Set a clip gain, mute and fades (--clip [--gain] [--mute|--unmute] [--fade-in] [--fade-out])',
       ],
+      ['add-transition', 'Dissolve between two touching clips (--left --right --duration)'],
     ],
     options: [
       ['--project, -p <id|file.json>', 'Target project (required)'],
@@ -178,6 +185,10 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['--duration <s>', 'Clip length in seconds (>= 0.001)'],
       ['--allow-extend', 'add-clip: allow a clip longer than its source media'],
       ['--family <visual|audio>', 'add-track: the kind of track to add'],
+      [
+        '--left <clipId> --right <clipId>',
+        'add-transition: the clip before and the clip after the junction',
+      ],
       ['--gain <n>', 'set-audio: clip gain, 0 to 4 (1 is unchanged)'],
       ['--mute | --unmute', 'set-audio: silence the clip, or let it sound again'],
       ['--fade-in <s> --fade-out <s>', 'set-audio: fade the clip in or out, in seconds'],
@@ -331,6 +342,9 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
     name: str('name'),
     family: str('family'),
     gain: parseFloatFlag('gain', v.gain, { min: 0, max: 4 }),
+    left: str('left'),
+    right: str('right'),
+    type: str('type'),
     mute: v.mute === true,
     unmute: v.unmute === true,
     fadeIn: parseFloatFlag('fade-in', v['fade-in'], { min: 0, max: 86400 }),

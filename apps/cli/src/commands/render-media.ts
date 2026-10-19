@@ -30,6 +30,10 @@ export interface MediaClip {
   /** Contributes sound. */
   readonly audio: boolean;
   readonly audioSettings: ClipAudioSettings;
+  /** Length of the dissolve this clip fades in over (0 when none). */
+  readonly transitionInUs: number;
+  /** Length of the dissolve this clip fades out of (0 when none). */
+  readonly transitionOutUs: number;
 }
 
 export interface MediaPlanReady {
@@ -106,6 +110,17 @@ function clipAudioSettings(config: unknown): ClipAudioSettings {
   };
 }
 
+/** Transitions of the root composition (the place the schema stores them), plus any legacy list. */
+function transitionList(project: Record<string, unknown>): Record<string, unknown>[] {
+  const compositions = project['compositions'];
+  const rootId = project['rootCompositionId'];
+  const root =
+    isRecord(compositions) && typeof rootId === 'string' ? compositions[rootId] : undefined;
+  const rootList = isRecord(root) && Array.isArray(root['transitions']) ? root['transitions'] : [];
+  const legacy = Array.isArray(project['transitions']) ? project['transitions'] : [];
+  return [...rootList, ...legacy].filter(isRecord);
+}
+
 function unsupportedProjectFeature(project: Record<string, unknown>): string | null {
   const visualObjects = project['visualObjects'];
   if (isRecord(visualObjects) && Object.keys(visualObjects).length > 0)
@@ -113,8 +128,9 @@ function unsupportedProjectFeature(project: Record<string, unknown>): string | n
   const captionDocuments = project['captionDocuments'];
   if (isRecord(captionDocuments) && Object.keys(captionDocuments).length > 0)
     return 'caption documents';
-  if (Array.isArray(project['transitions']) && project['transitions'].length > 0)
-    return 'transitions';
+  const unsupportedTransition = transitionList(project).find((t) => t['type'] !== 'dissolve');
+  if (unsupportedTransition)
+    return `transition type "${String(unsupportedTransition['type'])}" (only dissolve is rendered)`;
   if (
     isRecord(project['propertyAnimations']) &&
     Object.keys(project['propertyAnimations']).length > 0
@@ -198,6 +214,16 @@ export function planMedia(
     return { mode: 'manifest-only', reason: 'The project has no timeline.' };
   }
   const unsupported = unsupportedProjectFeature(project);
+  // Dissolve lengths by clip: `dissolveIn` for the clip a dissolve comes into, `dissolveOut` for the one it leaves.
+  const dissolveIn = new Map<string, number>();
+  const dissolveOut = new Map<string, number>();
+  for (const transition of transitionList(project)) {
+    if (transition['type'] !== 'dissolve' || typeof transition['durationUs'] !== 'number') continue;
+    if (typeof transition['leftClipId'] === 'string')
+      dissolveOut.set(transition['leftClipId'], transition['durationUs']);
+    if (typeof transition['rightClipId'] === 'string')
+      dissolveIn.set(transition['rightClipId'], transition['durationUs']);
+  }
   const audioConfigs =
     isRecord(project['audio']) && isRecord(project['audio']['clips'])
       ? project['audio']['clips']
@@ -330,8 +356,33 @@ export function planMedia(
         `Clip "${entry.clipId}" runs past the end of its source (${(info.durationUs / 1e6).toFixed(2)}s long); the rest is left empty.`,
       );
     }
+    const transitionInUs = dissolveIn.get(entry.clipId) ?? 0;
+    const transitionOutUs = dissolveOut.get(entry.clipId) ?? 0;
+    // A dissolve takes half its length from the media beyond each edge of the junction.
+    // A real clip whose source has no such media cannot be dissolved; stills can always be held.
+    if (!info.isImage && info.durationUs > 0) {
+      if (
+        transitionOutUs > 0 &&
+        sourceInUs + durationUs + transitionOutUs / 2 > info.durationUs + 50_000
+      ) {
+        return {
+          mode: 'error',
+          code: 'unsupported-feature',
+          message: `Clip "${entry.clipId}" needs ${(transitionOutUs / 2_000_000).toFixed(2)} s more media after its end for its dissolve, and its source ends first.`,
+        };
+      }
+    }
+    if (!info.isImage && transitionInUs > 0 && sourceInUs < transitionInUs / 2) {
+      return {
+        mode: 'error',
+        code: 'unsupported-feature',
+        message: `Clip "${entry.clipId}" needs ${(transitionInUs / 2_000_000).toFixed(2)} s more media before its start for its dissolve, and its source begins there.`,
+      };
+    }
     clips.push({
       clipId: entry.clipId,
+      transitionInUs,
+      transitionOutUs,
       trackId: entry.trackId,
       startUs,
       durationUs,
@@ -424,23 +475,34 @@ export function buildFfmpegArgs(
   let base = 0;
 
   plan.clips.forEach((clip, i) => {
-    const start = secs(clip.startUs);
-    const end = secs(clip.startUs + clip.durationUs);
     const dur = secs(clip.durationUs);
     const from = secs(clip.sourceInUs);
     if (clip.info.isImage) args.push('-loop', '1', '-framerate', FPS, '-t', dur);
     args.push('-i', clip.sourcePath);
 
     if (clip.visual) {
+      // A dissolve reaches half its length past each edge of the clip, so the junction blends
+      // the outgoing clip's tail with the incoming clip's pre-roll.
+      const preUs = clip.transitionInUs / 2;
+      const postUs = clip.transitionOutUs / 2;
+      const visibleStart = secs(clip.startUs - preUs);
+      const visibleEnd = secs(clip.startUs + clip.durationUs + postUs);
       const trim = clip.info.isImage
         ? ''
-        : `trim=start=${from}:duration=${dur},setpts=PTS-STARTPTS,fps=${FPS},`;
+        : `trim=start=${secs(clip.sourceInUs - preUs)}:duration=${secs(clip.durationUs + preUs + postUs)},setpts=PTS-STARTPTS,fps=${FPS},`;
       const fit =
         `scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
         `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p`;
-      filters.push(`[${i}:v]${trim}${fit},setpts=PTS-STARTPTS+${start}/TB[v${i}]`);
+      // The incoming clip fades in over the dissolve. Its timestamps here still start at the pre-roll.
+      const dissolveIn =
+        clip.transitionInUs > 0
+          ? `,format=yuva420p,fade=t=in:st=0:d=${secs(clip.transitionInUs)}:alpha=1`
+          : '';
       filters.push(
-        `[b${base}][v${i}]overlay=x=0:y=0:eof_action=pass:enable='between(t,${start},${end})'[b${base + 1}]`,
+        `[${i}:v]${trim}${fit}${dissolveIn},setpts=PTS-STARTPTS+${visibleStart}/TB[v${i}]`,
+      );
+      filters.push(
+        `[b${base}][v${i}]overlay=x=0:y=0:eof_action=pass:enable='between(t,${visibleStart},${visibleEnd})'[b${base + 1}]`,
       );
       base += 1;
     }

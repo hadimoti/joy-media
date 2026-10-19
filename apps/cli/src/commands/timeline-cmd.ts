@@ -40,6 +40,8 @@ interface TimelineClip {
 interface TimelineProject {
   assets?: Record<string, unknown>;
   audio?: unknown;
+  rootCompositionId?: string;
+  compositions?: Record<string, unknown>;
 }
 
 interface TimelineTrack {
@@ -54,7 +56,14 @@ interface TimelineTrack {
 }
 
 type Subcommand =
-  'add-clip' | 'split' | 'trim' | 'remove-clip' | 'add-track' | 'move' | 'set-audio';
+  | 'add-clip'
+  | 'split'
+  | 'trim'
+  | 'remove-clip'
+  | 'add-track'
+  | 'move'
+  | 'set-audio'
+  | 'add-transition';
 type ClipFlag =
   | 'track'
   | 'clip'
@@ -69,7 +78,10 @@ type ClipFlag =
   | 'mute'
   | 'unmute'
   | 'fadeIn'
-  | 'fadeOut';
+  | 'fadeOut'
+  | 'left'
+  | 'right'
+  | 'type';
 
 /** The only flags each subcommand understands. Anything else is a mistake, not a hint. */
 const ACCEPTED_FLAGS: Record<Subcommand, readonly ClipFlag[]> = {
@@ -80,6 +92,7 @@ const ACCEPTED_FLAGS: Record<Subcommand, readonly ClipFlag[]> = {
   'add-track': ['family', 'name'],
   move: ['clip', 'start', 'track'],
   'set-audio': ['clip', 'gain', 'mute', 'unmute', 'fadeIn', 'fadeOut'],
+  'add-transition': ['left', 'right', 'duration', 'type'],
 };
 
 const SUBCOMMANDS = Object.keys(ACCEPTED_FLAGS) as Subcommand[];
@@ -251,6 +264,9 @@ function checkFlags(sub: Subcommand, flags: CliFlags): void {
     unmute: flags.unmute ? true : undefined,
     fadeIn: flags.fadeIn,
     fadeOut: flags.fadeOut,
+    left: flags.left,
+    right: flags.right,
+    type: flags.type,
   };
   const accepted = ACCEPTED_FLAGS[sub];
   for (const [name, value] of Object.entries(given)) {
@@ -330,15 +346,17 @@ function apply(
     case 'set-audio':
       return setClipAudio(tracks, flags, project);
     case 'split':
-      return splitClip(tracks, flags);
+      return splitClip(tracks, flags, project);
     case 'trim':
-      return trimClip(tracks, flags);
+      return trimClip(tracks, flags, project);
     case 'remove-clip':
-      return removeClip(tracks, flags);
+      return removeClip(tracks, flags, project);
     case 'add-track':
       return addTrack(tracks, flags);
     case 'move':
-      return moveClip(tracks, flags, project.assets);
+      return moveClip(tracks, flags, project);
+    case 'add-transition':
+      return addTransition(tracks, flags, project);
   }
 }
 
@@ -564,8 +582,9 @@ function advanceSource(clip: TimelineClip, deltaUs: number): TimelineClip {
   return { ...clip };
 }
 
-function splitClip(tracks: TimelineTrack[], flags: CliFlags): Outcome {
+function splitClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelineProject): Outcome {
   const clipId = flags.clip!;
+  assertNotInTransition(project, clipId);
   const { track, index, clip } = locateClip(tracks, clipId, flags.track);
 
   const atUs = toUs(flags.at!);
@@ -604,8 +623,9 @@ function splitClip(tracks: TimelineTrack[], flags: CliFlags): Outcome {
   };
 }
 
-function trimClip(tracks: TimelineTrack[], flags: CliFlags): Outcome {
+function trimClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelineProject): Outcome {
   const clipId = flags.clip!;
+  assertNotInTransition(project, clipId);
   const { track, clip } = locateClip(tracks, clipId, flags.track);
 
   const newStartUs = flags.start !== undefined ? toUs(flags.start) : clip.startUs;
@@ -698,12 +718,9 @@ function assertTrackEnabled(track: TimelineTrack): void {
  * Move a clip in time, and optionally to another track. The clip keeps its source and length.
  * Its media must still suit the destination track's family, and it must not overlap.
  */
-function moveClip(
-  tracks: TimelineTrack[],
-  flags: CliFlags,
-  assets: Record<string, unknown> | undefined,
-): Outcome {
+function moveClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelineProject): Outcome {
   const clipId = flags.clip!;
+  assertNotInTransition(project, clipId);
   // --track is the destination here, so the clip is looked up on every track.
   const found = locateClip(tracks, clipId, undefined);
   const target = requireTrack(tracks, flags.track ?? found.track.id);
@@ -723,7 +740,7 @@ function moveClip(
     assertTrackEnabled(target);
   }
   const assetId = String(clip['assetId'] ?? 'asset-default');
-  const media = assetMedia(assets?.[assetId]);
+  const media = assetMedia(project.assets?.[assetId]);
   if (media) assertMediaFits(target, media, assetId, clip.durationUs, true);
   assertNoOverlap(target, startUs, clip.durationUs, clipId);
 
@@ -789,15 +806,162 @@ function setClipAudio(tracks: TimelineTrack[], flags: CliFlags, project: Timelin
   };
 }
 
-function removeClip(tracks: TimelineTrack[], flags: CliFlags): Outcome {
+function removeClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelineProject): Outcome {
   const clipId = flags.clip!;
   const { track, index, clip } = locateClip(tracks, clipId, flags.track);
   track.clips.splice(index, 1);
+  // A transition needs both of its clips, so removing one removes the transitions it is part of.
+  const holder = rootTransitionsHolder(project);
+  const all = transitionsOf(project);
+  const dropped = all.filter((t) => t['leftClipId'] === clipId || t['rightClipId'] === clipId);
+  if (holder && dropped.length > 0) {
+    holder.transitions = all.filter((t) => !dropped.includes(t));
+  }
 
   return {
     changed: true,
-    human: (rev) => `Removed clip ${c(clipId, 'bold')} (saved rev ${rev}).`,
-    doc: () => ({ trackId: track.id, removed: describeClip(clip) }),
+    human: (rev) =>
+      `Removed clip ${c(clipId, 'bold')} (saved rev ${rev}).` +
+      (dropped.length > 0 ? ` Its ${dropped.length} transition(s) were removed too.` : ''),
+    doc: () => ({
+      trackId: track.id,
+      removed: describeClip(clip),
+      removedTransitions: dropped.map((t) => String(t['id'])),
+    }),
+  };
+}
+
+/** The root composition holds the transitions list. Timeline edits keep it in step with the clips. */
+function rootTransitionsHolder(project: TimelineProject): { transitions?: unknown } | undefined {
+  const id = project.rootCompositionId;
+  if (id === undefined) return undefined;
+  return project.compositions?.[id] as { transitions?: unknown } | undefined;
+}
+
+function transitionsOf(project: TimelineProject): Array<Record<string, unknown>> {
+  const list = rootTransitionsHolder(project)?.transitions;
+  return Array.isArray(list) ? (list as Array<Record<string, unknown>>) : [];
+}
+
+/** A clip inside a transition keeps its time, length and source, or the transition is left dangling. */
+function assertNotInTransition(project: TimelineProject, clipId: string): void {
+  const holding = transitionsOf(project).filter(
+    (t) => t['leftClipId'] === clipId || t['rightClipId'] === clipId,
+  );
+  if (holding.length > 0) {
+    throw new CommandFailure(
+      'TRANSITION_IN_USE',
+      `Clip "${clipId}" is part of transition ${holding.map((t) => String(t['id'])).join(', ')}. ` +
+        'Remove the clip with remove-clip (which removes its transitions), or leave it as it is.',
+    );
+  }
+}
+
+/**
+ * A dissolve blends across the junction: half its length comes from media past the outgoing
+ * clip's end and half from media before the incoming clip's start. Each side must have that media.
+ */
+function assertDissolveHandle(
+  clip: TimelineClip,
+  halfUs: number,
+  side: 'before' | 'after',
+  assets: Record<string, unknown> | undefined,
+): void {
+  const assetId = String(clip['assetId'] ?? 'asset-default');
+  const media = assetMedia(assets?.[assetId]);
+  if (!media) {
+    throw new CommandFailure(
+      'TRANSITION_INVALID',
+      `Clip "${clip.id}" has no media file, so a dissolve cannot take frames past its edge. Add it with a real file.`,
+    );
+  }
+  if (media.kind === 'image') return;
+  const sourceInUs = Number(clip['sourceInUs'] ?? 0);
+  if (side === 'before' && sourceInUs < halfUs) {
+    throw new CommandFailure(
+      'TRANSITION_INVALID',
+      `Clip "${clip.id}" starts ${fmt(sourceInUs)} into its media, but the dissolve needs ${fmt(halfUs)} before its start. Trim the clip's start so it has that much media before it.`,
+    );
+  }
+  if (side === 'after') {
+    const sourceEndUs = sourceInUs + clip.durationUs + halfUs;
+    if (media.durationUs !== undefined && sourceEndUs > media.durationUs + SOURCE_TOLERANCE_US) {
+      throw new CommandFailure(
+        'TRANSITION_INVALID',
+        `The dissolve needs ${fmt(halfUs)} of media after clip "${clip.id}", but its file ends first (${fmt(media.durationUs)}). Shorten the clip or the dissolve.`,
+      );
+    }
+  }
+}
+
+/** Blend two touching clips on one track: `--left` ends where `--right` starts. */
+function addTransition(
+  tracks: TimelineTrack[],
+  flags: CliFlags,
+  project: TimelineProject,
+): Outcome {
+  const left = locateClip(tracks, flags.left!, undefined);
+  const right = locateClip(tracks, flags.right!, undefined);
+  if (left.track !== right.track) {
+    throw new CommandFailure(
+      'TRANSITION_INVALID',
+      'Both clips of a transition must be on the same track.',
+    );
+  }
+  const type = flags.type ?? 'dissolve';
+  if (type !== 'dissolve') {
+    throw usageFailure(`Only dissolve transitions are supported (--type dissolve), not "${type}".`);
+  }
+  const durationUs = toUs(flags.duration!);
+  const endOfLeft = left.clip.startUs + left.clip.durationUs;
+  if (endOfLeft !== right.clip.startUs) {
+    throw new CommandFailure(
+      'TRANSITION_INVALID',
+      `The clips must touch: "${left.clip.id}" ends at ${fmt(endOfLeft)} and "${right.clip.id}" starts at ${fmt(right.clip.startUs)}.`,
+    );
+  }
+  const shorter = Math.min(left.clip.durationUs, right.clip.durationUs);
+  if (durationUs > shorter / 2) {
+    throw new CommandFailure(
+      'TRANSITION_INVALID',
+      `A dissolve may be at most half of the shorter clip, ${fmt(shorter / 2)}; ${fmt(durationUs)} was asked for.`,
+    );
+  }
+  assertDissolveHandle(left.clip, durationUs / 2, 'after', project.assets);
+  assertDissolveHandle(right.clip, durationUs / 2, 'before', project.assets);
+  const taken = transitionsOf(project).find(
+    (t) => t['leftClipId'] === left.clip.id || t['rightClipId'] === right.clip.id,
+  );
+  if (taken) {
+    throw new CommandFailure(
+      'TRANSITION_INVALID',
+      `Transition ${String(taken['id'])} already uses one of these clips. A clip can join at most one dissolve on each side.`,
+    );
+  }
+  const holder = rootTransitionsHolder(project);
+  if (!holder) throw new CommandFailure('PROJECT_FILE_INVALID', 'Project has no root composition.');
+  const id = `transition-${Date.now().toString(36)}${randomBytes(2).toString('hex')}`;
+  holder.transitions = [
+    ...transitionsOf(project),
+    {
+      id,
+      trackId: left.track.id,
+      leftClipId: left.clip.id,
+      rightClipId: right.clip.id,
+      type: 'dissolve',
+      durationUs,
+    },
+  ];
+  return {
+    changed: true,
+    human: (rev) =>
+      `Added a ${fmt(durationUs)} dissolve from ${c(left.clip.id, 'bold')} to ${c(right.clip.id, 'bold')} (saved rev ${rev}).`,
+    doc: () => ({
+      transitionId: id,
+      leftClipId: left.clip.id,
+      rightClipId: right.clip.id,
+      durationUs,
+    }),
   };
 }
 
