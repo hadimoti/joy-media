@@ -137,7 +137,7 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
     options: [
       ['--width <px> --height <px> --fps <n>', 'Canvas settings for create'],
       ['--output, -o <file.json>', 'Export destination'],
-      ['--sqlite-path <path>', 'Project database (default ~/.joy-media/joy-media.sqlite3)'],
+      ['--sqlite-path <path>', 'Project database (default: the desktop project store; see doctor)'],
       ['--json', 'Machine-readable output where supported'],
     ],
   },
@@ -349,13 +349,9 @@ function reportUsageError(command: string | undefined, message: string, json: bo
     logError(detail);
     return;
   }
-  if (command === 'render') {
-    // `render --json` is an NDJSON stream even when validation fails before the
-    // renderer starts. Keep the terminal failure machine-readable on stdout.
-    console.log(JSON.stringify({ type: 'error', code: 'usage_error', message: detail }));
-  } else {
-    printJson({ code: 'usage_error', error: detail });
-  }
+  // Same envelope as every other --json failure: {type, code, message}. `render --json` is
+  // an NDJSON stream, so its single error line is the same document as everywhere else.
+  console.log(JSON.stringify({ type: 'error', code: 'usage_error', message: detail }));
 }
 
 function unknownCommandMessage(command: string): string {
