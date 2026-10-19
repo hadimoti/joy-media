@@ -30,6 +30,9 @@ export interface CliFlags {
   left: string | undefined;
   right: string | undefined;
   type: string | undefined;
+  text: string | undefined;
+  language: string | undefined;
+  direction: string | undefined;
   gain: number | undefined;
   mute: boolean;
   unmute: boolean;
@@ -80,6 +83,9 @@ export const CLI_OPTIONS = {
   family: { type: 'string' },
   gain: { type: 'string' },
   left: { type: 'string' },
+  text: { type: 'string' },
+  language: { type: 'string' },
+  direction: { type: 'string' },
   right: { type: 'string' },
   type: { type: 'string' },
   mute: { type: 'boolean' },
@@ -177,6 +183,7 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
         'Set a clip gain, mute and fades (--clip [--gain] [--mute|--unmute] [--fade-in] [--fade-out])',
       ],
       ['add-transition', 'Dissolve between two touching clips (--left --right --duration)'],
+      ['add-caption', 'Add a caption to a caption track (--track --start --duration --text)'],
     ],
     options: [
       ['--project, -p <id|file.json>', 'Target project (required)'],
@@ -189,6 +196,9 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
         '--left <clipId> --right <clipId>',
         'add-transition: the clip before and the clip after the junction',
       ],
+      ['--text <words>', 'add-caption: the caption text'],
+      ['--language <tag>', 'add-caption: language tag, e.g. en or fa-IR (default en)'],
+      ['--direction <ltr|auto>', 'add-caption: text direction (default auto)'],
       ['--gain <n>', 'set-audio: clip gain, 0 to 4 (1 is unchanged)'],
       ['--mute | --unmute', 'set-audio: silence the clip, or let it sound again'],
       ['--fade-in <s> --fade-out <s>', 'set-audio: fade the clip in or out, in seconds'],
@@ -343,6 +353,9 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
     family: str('family'),
     gain: parseFloatFlag('gain', v.gain, { min: 0, max: 4 }),
     left: str('left'),
+    text: str('text'),
+    language: str('language'),
+    direction: str('direction'),
     right: str('right'),
     type: str('type'),
     mute: v.mute === true,

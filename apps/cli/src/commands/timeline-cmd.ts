@@ -40,6 +40,7 @@ interface TimelineClip {
 interface TimelineProject {
   assets?: Record<string, unknown>;
   audio?: unknown;
+  captionDocuments?: Record<string, unknown>;
   rootCompositionId?: string;
   compositions?: Record<string, unknown>;
 }
@@ -63,8 +64,12 @@ type Subcommand =
   | 'add-track'
   | 'move'
   | 'set-audio'
-  | 'add-transition';
+  | 'add-transition'
+  | 'add-caption';
 type ClipFlag =
+  | 'text'
+  | 'language'
+  | 'direction'
   | 'track'
   | 'clip'
   | 'asset'
@@ -93,6 +98,7 @@ const ACCEPTED_FLAGS: Record<Subcommand, readonly ClipFlag[]> = {
   move: ['clip', 'start', 'track'],
   'set-audio': ['clip', 'gain', 'mute', 'unmute', 'fadeIn', 'fadeOut'],
   'add-transition': ['left', 'right', 'duration', 'type'],
+  'add-caption': ['track', 'start', 'duration', 'text', 'language', 'direction'],
 };
 
 const SUBCOMMANDS = Object.keys(ACCEPTED_FLAGS) as Subcommand[];
@@ -267,6 +273,9 @@ function checkFlags(sub: Subcommand, flags: CliFlags): void {
     left: flags.left,
     right: flags.right,
     type: flags.type,
+    text: flags.text,
+    language: flags.language,
+    direction: flags.direction,
   };
   const accepted = ACCEPTED_FLAGS[sub];
   for (const [name, value] of Object.entries(given)) {
@@ -304,6 +313,14 @@ function checkFlags(sub: Subcommand, flags: CliFlags): void {
   ) {
     throw usageFailure(
       'Usage: joy-media timeline add-transition --project <id> --left <clipId> --right <clipId> --duration <seconds>',
+    );
+  }
+  if (
+    sub === 'add-caption' &&
+    (flags.track === undefined || flags.duration === undefined || flags.text === undefined)
+  ) {
+    throw usageFailure(
+      'Usage: joy-media timeline add-caption --project <id> --track <captionTrackId> --start <s> --duration <s> --text "..."',
     );
   }
   if (sub === 'add-track' && flags.family === undefined) {
@@ -365,6 +382,8 @@ function apply(
       return moveClip(tracks, flags, project);
     case 'add-transition':
       return addTransition(tracks, flags, project);
+    case 'add-caption':
+      return addCaption(tracks, flags, project);
   }
 }
 
@@ -594,6 +613,12 @@ function splitClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelinePr
   const clipId = flags.clip!;
   assertNotInTransition(project, clipId);
   const { track, index, clip } = locateClip(tracks, clipId, flags.track);
+  if (clip.kind === 'caption') {
+    throw new CommandFailure(
+      'CAPTION_CLIP_SPLIT',
+      `Caption clip "${clipId}" cannot be split: its cue times run from the clip's start. Add a new caption for the second part.`,
+    );
+  }
 
   const atUs = toUs(flags.at!);
   const endUs = clip.startUs + clip.durationUs;
@@ -678,32 +703,34 @@ function trimClip(tracks: TimelineTrack[], flags: CliFlags, project: TimelinePro
   };
 }
 
-type TrackFamily = 'visual' | 'audio';
+type TrackFamily = 'visual' | 'audio' | 'caption';
 
 function isTrackFamily(value: string | undefined): value is TrackFamily {
-  return value === 'visual' || value === 'audio';
+  return value === 'visual' || value === 'audio' || value === 'caption';
 }
 
 function familyOf(track: TimelineTrack): string {
-  return track.family ?? (track.kind === 'audio' ? 'audio' : 'visual');
+  if (track.family !== undefined) return track.family;
+  return track.kind === 'audio' ? 'audio' : track.kind === 'caption' ? 'caption' : 'visual';
 }
 
 /** Append an empty track of the given family, with the next free id and top layer. */
 function addTrack(tracks: TimelineTrack[], flags: CliFlags): Outcome {
   const family = flags.family;
   if (!isTrackFamily(family)) {
-    throw usageFailure(`--family must be visual or audio, not "${family ?? ''}".`);
+    throw usageFailure(`--family must be visual, audio or caption, not "${family ?? ''}".`);
   }
-  const prefix = family === 'audio' ? 'a' : 'v';
-  const label = family === 'audio' ? 'Audio' : 'Video';
+  const prefix = family === 'audio' ? 'a' : family === 'caption' ? 'c' : 'v';
+  const label = family === 'audio' ? 'Audio' : family === 'caption' ? 'Caption' : 'Video';
   let n = tracks.filter((t) => familyOf(t) === family).length + 1;
   while (tracks.some((t) => t.id === `track-${prefix}${n}`)) n += 1;
   const id = `track-${prefix}${n}`;
   const order = tracks.reduce((top, t) => Math.max(top, t.order ?? -1), -1) + 1;
   tracks.push({
     id,
-    kind: family === 'audio' ? 'audio' : 'video',
-    family,
+    kind: family === 'audio' ? 'audio' : family === 'caption' ? 'caption' : 'video',
+    // Caption tracks carry no family: the schema limits the family field to visual and audio.
+    ...(family === 'caption' ? {} : { family }),
     name: flags.name ?? `${label} ${n}`,
     order,
     enabled: true,
@@ -816,6 +843,77 @@ function setClipAudio(tracks: TimelineTrack[], flags: CliFlags, project: Timelin
         fadeOutUs,
       },
     }),
+  };
+}
+
+/** Add a caption: its text is spread evenly over the clip, word by word, as one segment. */
+function addCaption(tracks: TimelineTrack[], flags: CliFlags, project: TimelineProject): Outcome {
+  const track = requireTrack(tracks, flags.track!);
+  if (track.kind !== 'caption') {
+    throw new CommandFailure(
+      'TRACK_KIND_MISMATCH',
+      `Captions go on a caption track, and "${trackLabel(track)}" is not one. Add one with add-track --family caption.`,
+    );
+  }
+  const words = (flags.text ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word !== '');
+  if (words.length === 0) throw usageFailure('The caption text is empty.');
+  const direction = flags.direction ?? 'auto';
+  if (direction !== 'ltr' && direction !== 'rtl' && direction !== 'auto') {
+    throw usageFailure(`--direction must be ltr, rtl or auto, not "${direction}".`);
+  }
+  const language = flags.language ?? 'en';
+  if (!/^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/.test(language)) {
+    throw usageFailure(`--language must be a language tag such as en or fa-IR, not "${language}".`);
+  }
+  const startUs = toUs(flags.start ?? 0);
+  const durationUs = toUs(flags.duration!);
+  if (durationUs < words.length * 1000) {
+    throw usageFailure(
+      `The caption has ${words.length} words, which needs at least ${words.length} ms; give it a longer --duration.`,
+    );
+  }
+  assertNoOverlap(track, startUs, durationUs);
+
+  const docs = (project.captionDocuments ??= {});
+  let number = Object.keys(docs).length + 1;
+  while (docs[`caption-${number}`] !== undefined) number += 1;
+  const documentId = `caption-${number}`;
+  const wordTable: Record<string, unknown> = {};
+  const wordIds = words.map((text, i) => {
+    const id = `w${i + 1}`;
+    wordTable[id] = {
+      id,
+      text,
+      startUs: Math.round((i * durationUs) / words.length),
+      endUs: Math.round(((i + 1) * durationUs) / words.length),
+    };
+    return id;
+  });
+  docs[documentId] = {
+    id: documentId,
+    language,
+    direction,
+    speakers: [],
+    words: wordTable,
+    segments: [{ id: 's1', startUs: 0, endUs: durationUs, wordIds }],
+  };
+
+  const clip = {
+    id: uniqueClipId(tracks),
+    kind: 'caption',
+    startUs,
+    durationUs,
+    captionDocumentId: documentId,
+  } as unknown as TimelineClip;
+  track.clips.push(clip);
+  return {
+    changed: true,
+    human: (rev) =>
+      `Added caption ${c(clip.id, 'bold')} to track ${c(trackLabel(track), 'cyan')} (saved rev ${rev}).`,
+    doc: () => ({ trackId: track.id, clip: describeClip(clip), captionDocumentId: documentId }),
   };
 }
 

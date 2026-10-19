@@ -1,6 +1,6 @@
 /* global Buffer */
 import { spawn } from 'node:child_process';
-import { statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { loadAssetSources } from '../utils/asset-sources.js';
 import { ffmpegBinary, probeMedia, type MediaInfo } from '../utils/media-probe.js';
@@ -36,9 +36,19 @@ export interface MediaClip {
   readonly transitionOutUs: number;
 }
 
+/** One caption line on screen, in timeline time. */
+export interface CaptionCue {
+  readonly text: string;
+  readonly startUs: number;
+  readonly endUs: number;
+}
+
 export interface MediaPlanReady {
   readonly mode: 'media';
   readonly clips: readonly MediaClip[];
+  readonly captions: readonly CaptionCue[];
+  /** Font file for captions (null when there are none). */
+  readonly fontFile: string | null;
   readonly width: number;
   readonly height: number;
   /** Frame rate as an ffmpeg rational, e.g. `30/1` or `30000/1001`. */
@@ -121,13 +131,78 @@ function transitionList(project: Record<string, unknown>): Record<string, unknow
   return [...rootList, ...legacy].filter(isRecord);
 }
 
+/** Caption cues of one caption clip, or the reason the renderer cannot draw them. */
+function captionCuesOf(
+  project: Record<string, unknown>,
+  clip: Record<string, unknown>,
+): CaptionCue[] | string {
+  const clipId = String(clip['id']);
+  if (clip['style'] !== undefined) {
+    return `Caption clip "${clipId}" has its own style, which the CLI renderer does not draw yet.`;
+  }
+  const docs = isRecord(project['captionDocuments']) ? project['captionDocuments'] : {};
+  const doc = docs[String(clip['captionDocumentId'])];
+  if (!isRecord(doc)) return `Caption clip "${clipId}" refers to a missing caption document.`;
+  if (doc['styleRef'] !== undefined || doc['animationRef'] !== undefined) {
+    return `Caption clip "${clipId}" uses a caption style or animation, which the CLI renderer does not draw.`;
+  }
+  if (doc['direction'] === 'rtl') {
+    return `Caption clip "${clipId}" is right-to-left, which the CLI renderer does not draw yet.`;
+  }
+  const words: Record<string, unknown> = isRecord(doc['words']) ? doc['words'] : {};
+  const segments = Array.isArray(doc['segments']) ? doc['segments'] : [];
+  const clipStart = typeof clip['startUs'] === 'number' ? clip['startUs'] : 0;
+  const clipLength = typeof clip['durationUs'] === 'number' ? clip['durationUs'] : 0;
+  const cues: CaptionCue[] = [];
+  for (const segment of segments) {
+    if (!isRecord(segment)) continue;
+    const start = Number(segment['startUs']);
+    const end = Math.min(Number(segment['endUs']), clipLength);
+    if (!(end > start)) continue;
+    const text =
+      typeof segment['textOverride'] === 'string'
+        ? segment['textOverride']
+        : (Array.isArray(segment['wordIds']) ? segment['wordIds'] : [])
+            .map((id) => {
+              const word = words[String(id)];
+              return isRecord(word) ? String(word['text']) : '';
+            })
+            .filter((word) => word !== '')
+            .join(' ');
+    if (text.trim() === '') continue;
+    cues.push({ text, startUs: clipStart + start, endUs: clipStart + end });
+  }
+  return cues;
+}
+
+/**
+ * The font captions are drawn with: JOY_MEDIA_CAPTION_FONT when set, else a common system font
+ * for this platform. Null when none exists, so the render refuses instead of drawing nothing.
+ */
+export function captionFontFile(): string | null {
+  const override = process.env['JOY_MEDIA_CAPTION_FONT']?.trim();
+  if (override) return existsSync(override) ? override : null;
+  const candidates =
+    process.platform === 'win32'
+      ? [join(process.env['WINDIR'] ?? 'C:\\Windows', 'Fonts', 'arial.ttf')]
+      : process.platform === 'darwin'
+        ? ['/System/Library/Fonts/Supplemental/Arial.ttf', '/Library/Fonts/Arial.ttf']
+        : [
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            '/usr/share/fonts/TTF/DejaVuSans.ttf',
+          ];
+  return candidates.find((path) => existsSync(path)) ?? null;
+}
+
+/** Escape a value for an ffmpeg filter option: separators and quotes need a backslash. */
+function filterValue(value: string): string {
+  return value.replace(/[\\:,;'[\]%]/g, '\\$&');
+}
+
 function unsupportedProjectFeature(project: Record<string, unknown>): string | null {
   const visualObjects = project['visualObjects'];
   if (isRecord(visualObjects) && Object.keys(visualObjects).length > 0)
     return 'visual objects, transforms, and effects';
-  const captionDocuments = project['captionDocuments'];
-  if (isRecord(captionDocuments) && Object.keys(captionDocuments).length > 0)
-    return 'caption documents';
   const unsupportedTransition = transitionList(project).find((t) => t['type'] !== 'dissolve');
   if (unsupportedTransition)
     return `transition type "${String(unsupportedTransition['type'])}" (only dissolve is rendered)`;
@@ -249,6 +324,7 @@ export function planMedia(
     real: boolean;
   }> = [];
 
+  const captions: CaptionCue[] = [];
   for (const rawTrack of root['tracks'] as unknown[]) {
     if (!isRecord(rawTrack) || rawTrack['enabled'] === false) continue;
     const trackId = typeof rawTrack['id'] === 'string' ? rawTrack['id'] : '?';
@@ -263,6 +339,13 @@ export function planMedia(
     for (const rawClip of clips as unknown[]) {
       if (!isRecord(rawClip)) continue;
       const clipId = typeof rawClip['id'] === 'string' ? rawClip['id'] : '?';
+      if (rawClip['kind'] === 'caption') {
+        const read = captionCuesOf(project, rawClip);
+        if (typeof read === 'string')
+          return { mode: 'error', code: 'unsupported-feature', message: read };
+        captions.push(...read);
+        continue;
+      }
       if (rawClip['kind'] !== 'video' || typeof rawClip['assetId'] !== 'string') {
         return {
           mode: 'error',
@@ -282,6 +365,15 @@ export function planMedia(
     }
   }
 
+  const fontFile = captions.length > 0 ? captionFontFile() : null;
+  if (captions.length > 0 && fontFile === null) {
+    return {
+      mode: 'error',
+      code: 'unsupported-feature',
+      message:
+        'Captions need a font file, and none was found. Set JOY_MEDIA_CAPTION_FONT to a .ttf or .otf file.',
+    };
+  }
   if (pending.length === 0) {
     return { mode: 'manifest-only', reason: 'The timeline has no video clips.' };
   }
@@ -407,10 +499,15 @@ export function planMedia(
   return {
     mode: 'media',
     clips,
+    captions,
+    fontFile,
     width: even(Math.round(width)),
     height: even(Math.round(height)),
     fps: num > 0 && den > 0 ? `${num}/${den}` : `${fallback.fps}/1`,
-    durationUs: Math.max(...clips.map((c) => c.startUs + c.durationUs)),
+    durationUs: Math.max(
+      ...clips.map((c) => c.startUs + c.durationUs),
+      ...captions.map((cue) => cue.endUs),
+    ),
     warnings,
   };
 }
@@ -537,6 +634,17 @@ export function buildFfmpegArgs(
       );
       audioLabels.push(`[a${i}]`);
     }
+  });
+
+  plan.captions.forEach((cue) => {
+    // Option values are escaped twice: once for the filter graph and once for the drawtext option.
+    const fontfile = filterValue(filterValue((plan.fontFile ?? '').replace(/\\/g, '/')));
+    filters.push(
+      `[b${base}]drawtext=fontfile=${fontfile}:text=${filterValue(filterValue(cue.text))}:x=(w-text_w)/2:` +
+        `y=h*0.85-text_h:expansion=none:fontsize=${Math.round(H / 18)}:fontcolor=white:borderw=3:bordercolor=black:` +
+        `enable='gte(t,${secs(cue.startUs)})*lt(t,${secs(cue.endUs)})'[b${base + 1}]`,
+    );
+    base += 1;
   });
 
   if (audioLabels.length === 0) {

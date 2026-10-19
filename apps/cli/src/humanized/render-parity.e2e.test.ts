@@ -519,6 +519,26 @@ describe('render parity and unsupported-feature contract', () => {
             segments: [{ id: 'line', startUs: 0, endUs: 500_000, wordIds: ['hello'] }],
           },
         };
+        const compositions = document['compositions'] as Record<string, Record<string, unknown>>;
+        const tracks = compositions['root']!['tracks'] as Array<Record<string, unknown>>;
+        // On the timeline, so the renderer must refuse it rather than drop it.
+        tracks.push({
+          id: 'caption-1',
+          kind: 'caption',
+          name: 'Captions',
+          order: 9,
+          enabled: true,
+          locked: false,
+          clips: [
+            {
+              id: 'line-clip',
+              kind: 'caption',
+              startUs: 0,
+              durationUs: 500_000,
+              captionDocumentId: 'subtitles',
+            },
+          ],
+        });
       },
     ],
     [
