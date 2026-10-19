@@ -35,6 +35,13 @@ describe('project frame rates', () => {
     expect(r.code, describeRun(r)).toBe(0);
   });
 
+  it('project create --json reports the real rate, not its numerator', async () => {
+    const r = await sb.run(['project', 'create', 'Json rate', '--fps', '29.97', '--json']);
+    expect(r.code, describeRun(r)).toBe(0);
+    const created = r.json() as { fps: number };
+    expect(created.fps).toBeCloseTo(29.97, 2);
+  });
+
   it('a rate that is neither a known NTSC value nor a fraction is a usage error', async () => {
     const r = await sb.run(['project', 'create', 'Odd', '--fps', '29.9', '--json']);
     expect(r.code, describeRun(r)).toBe(2);

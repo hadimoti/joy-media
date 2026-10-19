@@ -146,7 +146,7 @@ function runCreate(args: string[], flags: CliFlags, json: boolean): number {
       revision: rev,
       width: root?.width,
       height: root?.height,
-      fps: root?.frameRate.num,
+      fps: root ? root.frameRate.num / root.frameRate.den : undefined,
       sqlitePath: resolve(dbPath),
     });
     return 0;
