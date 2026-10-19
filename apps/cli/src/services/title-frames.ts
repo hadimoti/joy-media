@@ -2,8 +2,7 @@ import { deflateSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 import type { TitleInstanceV1 } from '@joy-media/project-schema';
 import { P0_TEMPLATES, sampleTitleMotion, type P0TemplateDefinition } from '@joy-media/motion-core';
 
@@ -68,7 +67,7 @@ export async function titleRendererFacts(): Promise<{
   readonly fontManifestHashes: readonly string[];
 }> {
   try {
-    const runtime = (await importModule(runtimeModuleUrl())) as ChromiumDriverModule;
+    const runtime = (await import('@joy-media/html-scene-runtime')) as ChromiumDriverModule;
     const executable = runtime.findChromiumExecutable();
     let chromiumVersion: string | null = null;
     if (executable) {
@@ -152,7 +151,7 @@ export async function renderTitleFrames(
     throw new RangeError('SLICE_LIMIT: title rendering supports at most 1920x1920 and 60 fps');
   let runtime: ChromiumDriverModule;
   try {
-    runtime = (await importModule(runtimeModuleUrl())) as ChromiumDriverModule;
+    runtime = (await import('@joy-media/html-scene-runtime')) as ChromiumDriverModule;
   } catch (error) {
     throw new Error(
       `Title instance "${sources[0]!.instanceId}" cannot render: Chromium runtime is unavailable (${errorMessage(error)}).`,
@@ -325,15 +324,6 @@ function safeId(value: string): string {
 }
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-const importModule = (specifier: string): Promise<unknown> => import(specifier);
-function runtimeModuleUrl(): string {
-  return pathToFileURL(
-    resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      '../../../../packages/html-scene-runtime/dist/index.js',
-    ),
-  ).href;
 }
 export function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex');

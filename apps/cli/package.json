@@ -18,6 +18,7 @@
   "dependencies": {
     "@joy-media/agent-tools": "workspace:*",
     "@joy-media/commands": "workspace:*",
+    "@joy-media/html-scene-runtime": "workspace:*",
     "@joy-media/joy-agent-engine": "workspace:*",
     "@joy-media/motion-core": "workspace:*",
     "@joy-media/project-persistence": "workspace:*",

@@ -131,6 +131,9 @@ importers:
       '@joy-media/commands':
         specifier: workspace:*
         version: link:../../packages/commands
+      '@joy-media/html-scene-runtime':
+        specifier: workspace:*
+        version: link:../../packages/html-scene-runtime
       '@joy-media/joy-agent-engine':
         specifier: workspace:*
         version: link:../../packages/joy-agent-engine
