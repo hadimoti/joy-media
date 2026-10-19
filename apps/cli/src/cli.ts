@@ -3,7 +3,9 @@ import { handleAgentCommand } from './commands/agent-cmd.js';
 import { handleBenchmarkCommand } from './commands/benchmark-cmd.js';
 import { handleCapabilitiesCommand } from './commands/capabilities-cmd.js';
 import { handleDoctorCommand } from './commands/doctor-cmd.js';
+import { handlePlanCommand } from './commands/plan-cmd.js';
 import { handleProjectCommand } from './commands/project-cmd.js';
+import { handleQueryCommand } from './commands/query-cmd.js';
 import { handleRenderCommand } from './commands/render-cmd.js';
 import { handleTimelineCommand } from './commands/timeline-cmd.js';
 import { handleWorkerCommand } from './commands/worker-cmd.js';
@@ -67,6 +69,13 @@ export interface CliFlags {
   allowExtend?: boolean;
   markdown?: boolean;
   mediaDir?: string | undefined;
+  kind?: string | undefined;
+  unplaced?: boolean;
+  rangeUs?: string | undefined;
+  limit?: string | undefined;
+  cursor?: string | undefined;
+  expectedRevision?: string | undefined;
+  idempotencyKey?: string | undefined;
 }
 
 /**
@@ -119,6 +128,13 @@ export const CLI_OPTIONS = {
   system: { type: 'boolean' },
   'media-engine': { type: 'boolean' },
   'manifest-only': { type: 'boolean' },
+  kind: { type: 'string' },
+  unplaced: { type: 'boolean' },
+  'range-us': { type: 'string' },
+  limit: { type: 'string' },
+  cursor: { type: 'string' },
+  'expected-revision': { type: 'string' },
+  'idempotency-key': { type: 'string' },
   'media-dir': { type: 'string' },
 } as const satisfies Record<string, CliOptionSpec>;
 
@@ -244,6 +260,37 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['--system', 'Disk I/O, SQLite and heap benchmarks'],
       ['--media-engine', 'Timeline scrub, collision and look benchmarks'],
       ['--json', 'Newline-delimited JSON measurements'],
+    ],
+  },
+  query: {
+    summary: 'Bounded, paginated reads of a project',
+    usage:
+      'joy-media query <assets|clips|captions|tracks> --project <file> [--unplaced] [--kind K] [--track ID] [--clip ID] [--text S] [--range-us START:END] [--limit N] [--cursor C] [--json]',
+    subcommands: [
+      ['assets', 'Assets with placement count and local availability'],
+      ['clips', 'Clips with track, timing and source references'],
+      ['captions', 'Caption segments matched by text, with clip locators'],
+      ['tracks', 'Tracks with kind, enabled state and clip count'],
+    ],
+    options: [
+      ['--project', 'JSON project file to read'],
+      ['--limit', 'Items per page: default 50, maximum 200'],
+      ['--cursor', 'Continuation token from the previous page of the same query'],
+    ],
+  },
+  plan: {
+    summary: 'Prepare, inspect and apply an immutable edit plan',
+    usage: 'joy-media plan <prepare|inspect|apply> ...',
+    subcommands: [
+      ['prepare', 'Write a plan file for operations against the current project'],
+      ['inspect', 'Show a plan file: identity, changes, warnings and estimated work'],
+      ['apply', 'Apply a plan only if the expected revision and base still match'],
+    ],
+    options: [
+      ['--project', 'JSON project file the plan targets'],
+      ['--output', 'For prepare: the new plan file to write (must not exist)'],
+      ['--expected-revision', 'For apply: the project revision the plan was prepared against'],
+      ['--idempotency-key', 'For apply: a key that makes retries return the first receipt'],
     ],
   },
   capabilities: {
@@ -410,6 +457,13 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
     'media-engine': v['media-engine'] === true,
     manifestOnly: v['manifest-only'] === true,
     allowExtend: v['allow-extend'] === true,
+    kind: str('kind'),
+    unplaced: v.unplaced === true,
+    rangeUs: str('range-us'),
+    limit: str('limit'),
+    cursor: str('cursor'),
+    expectedRevision: str('expected-revision'),
+    idempotencyKey: str('idempotency-key'),
     mediaDir: str('media-dir'),
   };
 }
@@ -511,6 +565,10 @@ async function dispatch(argv: string[]): Promise<number> {
         return await trackLongRunning(() => handleRenderCommand(subArgs, flags));
       case 'benchmark':
         return await handleBenchmarkCommand(subArgs, flags);
+      case 'plan':
+        return await handlePlanCommand(subArgs, flags);
+      case 'query':
+        return await handleQueryCommand(subArgs, flags);
       case 'capabilities':
         return await handleCapabilitiesCommand(subArgs, flags);
       case 'doctor':
