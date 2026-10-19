@@ -15,6 +15,7 @@ import type { UniversalTimelineDocument } from './universal-timeline.js';
 import { validateUniversalTimelineDocument } from './universal-timeline.js';
 import type { TimelineTrackDeckDocument } from './timeline-track-deck.js';
 import { validateTimelineTrackDeckDocument } from './timeline-track-deck.js';
+import { CONTENT_TEMPLATES_PLUGIN_KEY, validateContentInstances } from './content-templates.js';
 
 export type EffectParamValue =
   | number
@@ -555,6 +556,8 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_PLUGIN_DATA', 'pluginData must be an object', 'pluginData'),
     );
+  else if (Object.prototype.hasOwnProperty.call(value.pluginData, CONTENT_TEMPLATES_PLUGIN_KEY))
+    diagnostics.push(...validateContentInstances(value));
   if (value.universalTimeline !== undefined) {
     diagnostics.push(...validateUniversalTimelineDocument(value.universalTimeline));
   }

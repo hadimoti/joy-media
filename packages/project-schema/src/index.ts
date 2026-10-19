@@ -184,6 +184,16 @@ export {
   audioEffectPropertyBinding,
 } from './audio.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
+export type {
+  P0TemplateId,
+  FontChoice,
+  TitlePlacement,
+  TitleMotion,
+  TitleLayout,
+  TitleInstanceV1,
+  ContentInstancesV1,
+} from './content-templates.js';
+export { CONTENT_TEMPLATES_PLUGIN_KEY, validateContentInstances } from './content-templates.js';
 export { dimensionsForExportPreset } from './export-preset.js';
 export type {
   PropertyOwnerKindV2,
