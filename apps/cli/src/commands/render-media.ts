@@ -561,6 +561,13 @@ export function buildFfmpegArgs(
   plan: MediaPlanReady,
   preset: MediaPresetId,
   outputPath: string,
+  titleLayers: readonly {
+    readonly instanceId: string;
+    readonly inputPattern: string;
+    readonly startUs: number;
+    readonly durationUs: number;
+  }[] = [],
+  preview?: { readonly timeUs: number },
 ): string[] {
   const { width: W, height: H, fps: FPS } = plan;
   const total = secs(plan.durationUs);
@@ -643,6 +650,20 @@ export function buildFfmpegArgs(
     }
   });
 
+  // Sequence inputs follow every source-media input; this preserves visual track order while
+  // keeping the no-title argument path byte-for-byte unchanged.
+  titleLayers.forEach((layer, layerIndex) => {
+    const inputIndex = ordered.length + layerIndex;
+    args.push('-framerate', plan.fps, '-i', layer.inputPattern);
+    const start = secs(layer.startUs);
+    const end = secs(layer.startUs + layer.durationUs);
+    filters.push(`[${inputIndex}:v]setpts=PTS+${start}/TB,format=rgba[title${layerIndex}]`);
+    filters.push(
+      `[b${base}][title${layerIndex}]overlay=x=0:y=0:eof_action=pass:enable='gte(t,${start})*lt(t,${end})'[b${base + 1}]`,
+    );
+    base += 1;
+  });
+
   plan.captions.forEach((cue) => {
     // Option values are escaped twice: once for the filter graph and once for the drawtext option.
     const fontfile = filterValue(filterValue((plan.fontFile ?? '').replace(/\\/g, '/')));
@@ -665,20 +686,21 @@ export function buildFfmpegArgs(
     );
   }
 
-  args.push(
-    '-filter_complex',
-    filters.join(';'),
-    '-map',
-    `[b${base}]`,
-    '-map',
-    '[aout]',
-    '-t',
-    total,
-    ...CODEC_ARGS[preset],
-    '-f',
-    FORMAT[preset],
-    outputPath,
-  );
+  args.push('-filter_complex', filters.join(';'), '-map', `[b${base}]`);
+  if (preview) {
+    args.push('-ss', secs(preview.timeUs), '-frames:v', '1', '-f', 'image2', outputPath);
+  } else {
+    args.push(
+      '-map',
+      '[aout]',
+      '-t',
+      total,
+      ...CODEC_ARGS[preset],
+      '-f',
+      FORMAT[preset],
+      outputPath,
+    );
+  }
   return args;
 }
 

@@ -164,7 +164,7 @@ describe('a creator renders a finished timeline', () => {
     const manifest = readManifest(sb.path('match-timeline', manifestName(reel.id)));
 
     expect(manifest).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       projectId: reel.id,
       projectTitle: 'Summer Reel',
       preset: 'mp4',

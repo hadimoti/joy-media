@@ -21,6 +21,7 @@
  * (exit non-zero).
  */
 import { randomBytes } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import {
   accessSync,
@@ -48,8 +49,21 @@ import {
   logWarn,
   printBanner,
 } from '../utils/logger.js';
-import { probeMedia } from '../utils/media-probe.js';
-import { buildFfmpegArgs, fileSize, planMedia, startEncode } from './render-media.js';
+import { CONTENT_TEMPLATES_PLUGIN_KEY, type TitleInstanceV1 } from '@joy-media/project-schema';
+import { ffmpegBinary, probeMedia } from '../utils/media-probe.js';
+import {
+  renderTitleFrames,
+  sha256Hex,
+  titleRendererFacts,
+  type TitleFrameSource,
+} from '../services/title-frames.js';
+import {
+  buildFfmpegArgs,
+  fileSize,
+  planMedia,
+  startEncode,
+  type MediaPlanReady,
+} from './render-media.js';
 import { listProjects, loadProject, type CliProjectDocument } from '../utils/project-loader.js';
 
 export interface RenderCommandFlags {
@@ -61,6 +75,7 @@ export interface RenderCommandFlags {
   sqlitePath?: string | undefined;
   manifestOnly?: boolean | undefined;
   mediaDir?: string | undefined;
+  frameUs?: number | undefined;
 }
 
 export interface RenderPresetSpec {
@@ -183,7 +198,9 @@ export type RenderErrorCode =
   | 'unsupported-feature'
   | 'ffmpeg-missing'
   | 'encode-failed'
-  | 'nothing-to-render';
+  | 'nothing-to-render'
+  | 'RANGE_ERROR'
+  | 'SLICE_LIMIT';
 
 /** Real render only: encoder progress, at most one event per whole percent. */
 export interface RenderProgressEvent {
@@ -202,13 +219,26 @@ export interface RenderErrorEvent {
   readonly code?: RenderErrorCode;
 }
 
+export interface RenderPreviewCompleteEvent {
+  readonly schemaVersion: 1;
+  readonly type: 'preview-complete';
+  readonly projectId: string;
+  readonly frameIndex: number;
+  readonly timeUs: number;
+  readonly width: number;
+  readonly height: number;
+  readonly artifactPath: string;
+  readonly mediaProduced: true;
+}
+
 export type RenderEvent =
   | RenderStartEvent
   | RenderClipEvent
   | RenderTrackEvent
   | RenderProgressEvent
   | RenderCompleteEvent
-  | RenderErrorEvent;
+  | RenderErrorEvent
+  | RenderPreviewCompleteEvent;
 
 export interface RenderCommandResult {
   readonly exitCode: number;
@@ -292,6 +322,7 @@ export async function handleRenderCommand(args: string[], flags: CliFlags): Prom
       json,
       manifestOnly: flags.manifestOnly === true,
       mediaDir: flags.mediaDir,
+      frameUs: flags.frameUs,
     });
 
     return result.exitCode;
@@ -319,6 +350,8 @@ export interface RunHeadlessRenderInput {
   readonly manifestOnly?: boolean | undefined;
   /** Folder to look in for media files an asset names (by id or display name). */
   readonly mediaDir?: string | undefined;
+  /** Render a single composed frame at this project-local microsecond. */
+  readonly frameUs?: number | undefined;
   /**
    * Draw the live progress bar (human mode only). Defaults to "stdout is a
    * terminal" so piped/redirected output is never spammed with `\r` frames.
@@ -533,6 +566,137 @@ export function safeFileStem(id: string): string {
   return cleaned === '' ? '_' : cleaned;
 }
 
+function collectTitleSources(project: CliProjectDocument): TitleFrameSource[] {
+  const namespace = project.pluginData[CONTENT_TEMPLATES_PLUGIN_KEY] as
+    { readonly instances?: Readonly<Record<string, TitleInstanceV1>> } | undefined;
+  const instances = namespace?.instances;
+  if (!instances || typeof instances !== 'object') return [];
+  const compositions = project.compositions as Record<string, unknown>;
+  const composition = compositions[project.rootCompositionId] as
+    | {
+        readonly tracks?: readonly {
+          readonly id?: string;
+          readonly kind?: string;
+          readonly family?: string;
+          readonly clips?: readonly Record<string, unknown>[];
+        }[];
+      }
+    | undefined;
+  const sources: Array<TitleFrameSource & { trackOrder: number }> = [];
+  for (const [instanceId, instance] of Object.entries(instances)) {
+    let found: { clip: Record<string, unknown>; trackOrder: number } | undefined;
+    composition?.tracks?.forEach((track, trackOrder) => {
+      if (track.kind !== 'video' || track.family === 'audio' || track.family === 'caption') return;
+      const clip = track.clips?.find((candidate) => candidate.id === instance.clipId);
+      if (clip) found = { clip, trackOrder };
+    });
+    if (!found) continue;
+    const startUs = Number(found.clip.startUs ?? 0);
+    const durationUs = Number(found.clip.durationUs ?? 0);
+    sources.push({ instanceId, instance, startUs, durationUs, trackOrder: found.trackOrder });
+  }
+  return sources
+    .sort((a, b) => a.trackOrder - b.trackOrder || a.startUs - b.startUs)
+    .map(({ trackOrder: _trackOrder, ...source }) => source);
+}
+
+function withoutTitleClips(
+  project: CliProjectDocument,
+  sources: readonly TitleFrameSource[],
+): CliProjectDocument {
+  const clipIds = new Set(sources.map((source) => source.instance.clipId));
+  if (clipIds.size === 0) return project;
+  const objectIds = new Set(sources.map((source) => source.instance.objectId));
+  const copy = structuredClone(project) as unknown as Record<string, unknown>;
+  const compositions = copy.compositions as Record<
+    string,
+    { tracks?: Array<{ clips?: Array<{ id?: string }> }> }
+  >;
+  const root = compositions[String(copy.rootCompositionId)];
+  for (const track of root?.tracks ?? [])
+    track.clips = (track.clips ?? []).filter((clip) => !clipIds.has(String(clip.id)));
+  const visualObjects = copy.visualObjects as Record<string, unknown> | undefined;
+  for (const objectId of objectIds) delete visualObjects?.[objectId];
+  const pluginData = copy.pluginData as Record<string, unknown> | undefined;
+  if (pluginData) {
+    delete pluginData[CONTENT_TEMPLATES_PLUGIN_KEY];
+    const rawBindings = pluginData['joy.clipObjects'];
+    if (isRecord(rawBindings)) {
+      const bindings = { ...rawBindings };
+      for (const clipId of clipIds) delete bindings[clipId];
+      pluginData['joy.clipObjects'] = bindings;
+    }
+  }
+  return copy as unknown as CliProjectDocument;
+}
+
+function rootCompositionOf(project: CliProjectDocument): Record<string, unknown> {
+  return project.compositions[project.rootCompositionId] as unknown as Record<string, unknown>;
+}
+
+function compositionFrameRate(project: CliProjectDocument): { num: number; den: number } {
+  const rate = rootCompositionOf(project)['frameRate'];
+  if (
+    isRecord(rate) &&
+    Number.isSafeInteger(rate['num']) &&
+    Number.isSafeInteger(rate['den']) &&
+    Number(rate['num']) > 0 &&
+    Number(rate['den']) > 0
+  ) {
+    return { num: Number(rate['num']), den: Number(rate['den']) };
+  }
+  return { num: 30, den: 1 };
+}
+
+function ffmpegVersionLine(): string {
+  const result = spawnSync(ffmpegBinary(), ['-version'], {
+    encoding: 'utf8',
+    timeout: 5_000,
+    windowsHide: true,
+  });
+  return result.status === 0
+    ? (result.stdout.split(/\r?\n/, 1)[0] ?? 'unavailable')
+    : 'unavailable';
+}
+
+function stableLayoutHash(layout: TitleInstanceV1['layout']): string {
+  return sha256Hex(
+    JSON.stringify({
+      primaryLines: layout.primaryLines,
+      secondaryLines: layout.secondaryLines,
+      fontSizePx: layout.fontSizePx,
+      secondarySizePx: layout.secondarySizePx,
+      lineHeightPx: layout.lineHeightPx,
+      boxHeightPx: layout.boxHeightPx,
+    }),
+  );
+}
+
+export function previewFrameIndex(
+  timeUs: number,
+  fps: { readonly num: number; readonly den: number },
+): number {
+  if (
+    !Number.isSafeInteger(timeUs) ||
+    timeUs < 0 ||
+    !Number.isSafeInteger(fps.num) ||
+    !Number.isSafeInteger(fps.den) ||
+    fps.num < 1 ||
+    fps.den < 1
+  )
+    throw new RangeError('preview time and frame rate must be non-negative safe integers');
+  return Number((BigInt(timeUs) * BigInt(fps.num)) / (1_000_000n * BigInt(fps.den)));
+}
+
+export function isPreviewTimeInRange(timeUs: number, durationUs: number): boolean {
+  return (
+    Number.isSafeInteger(timeUs) &&
+    Number.isSafeInteger(durationUs) &&
+    timeUs >= 0 &&
+    timeUs < durationUs
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Execution
 // ---------------------------------------------------------------------------
@@ -573,26 +737,58 @@ export async function runHeadlessRender(
   const plan = planRender(project, presetSpec);
   if (!plan.ok) return failure('invalid-project', plan.message);
 
+  const titleSources = collectTitleSources(project);
+  const composition = rootCompositionOf(project);
+  if (titleSources.length > 8)
+    return failure('SLICE_LIMIT', 'At most 8 title instances are supported.');
+  const titleWidth = Number(composition['width']);
+  const titleHeight = Number(composition['height']);
+  const titleFps = compositionFrameRate(project);
+  const compositionDurationUs = Number(composition['durationUs']);
+  if (
+    titleSources.length > 0 &&
+    (compositionDurationUs > 60_000_000 ||
+      titleWidth > 1920 ||
+      titleHeight > 1920 ||
+      titleFps.num > 60 * titleFps.den)
+  )
+    return failure(
+      'SLICE_LIMIT',
+      'Title rendering supports compositions up to 60 seconds, 1920x1920 and 60 fps.',
+    );
+
   const mediaPlan = planMedia(
-    project,
+    withoutTitleClips(project, titleSources),
     { manifestOnly: input.manifestOnly === true, mediaDir: input.mediaDir },
     presetSpec,
   );
   if (mediaPlan.mode === 'error') return failure(mediaPlan.code, mediaPlan.message);
-  const realMedia = mediaPlan.mode === 'media' ? mediaPlan : null;
+  const realMediaBase = mediaPlan.mode === 'media' ? mediaPlan : null;
+  const realMedia: MediaPlanReady | null = realMediaBase
+    ? {
+        ...realMediaBase,
+        durationUs:
+          titleSources.length > 0 && Number.isSafeInteger(compositionDurationUs)
+            ? Math.max(realMediaBase.durationUs, compositionDurationUs)
+            : realMediaBase.durationUs,
+      }
+    : null;
 
   const allClips = realMedia
     ? plan.clips.map((clip) => {
         const mediaClip = realMedia.clips.find(
           (candidate) => candidate.clipId === clip.clipId && candidate.trackId === clip.trackId,
         );
-        if (!mediaClip) return clip;
-        const firstFrame = frameBoundaryAtUs(mediaClip.startUs, realMedia.fps);
-        const endFrame = frameBoundaryAtUs(mediaClip.startUs + mediaClip.durationUs, realMedia.fps);
+        const titleSource = titleSources.find((source) => source.instance.clipId === clip.clipId);
+        if (!mediaClip && !titleSource) return clip;
+        const startUs = mediaClip?.startUs ?? titleSource!.startUs;
+        const durationUs = mediaClip?.durationUs ?? titleSource!.durationUs;
+        const firstFrame = frameBoundaryAtUs(startUs, realMedia.fps);
+        const endFrame = frameBoundaryAtUs(startUs + durationUs, realMedia.fps);
         return {
           ...clip,
-          startUs: mediaClip.startUs,
-          durationUs: mediaClip.durationUs,
+          startUs,
+          durationUs,
           firstFrame,
           frames: Math.max(1, endFrame - firstFrame),
         };
@@ -608,6 +804,86 @@ export async function runHeadlessRender(
     ...(realMedia ? realMedia.warnings : []),
   ];
   const totalClips = allClips.length;
+
+  if (input.frameUs !== undefined) {
+    const timeUs = input.frameUs;
+    const durationUs =
+      Number.isSafeInteger(compositionDurationUs) && compositionDurationUs > 0
+        ? compositionDurationUs
+        : (realMedia?.durationUs ?? plan.composition.durationUs ?? 0);
+    if (!isPreviewTimeInRange(timeUs, durationUs))
+      return failure(
+        'RANGE_ERROR',
+        `Preview time ${String(timeUs)}µs is outside [0, ${durationUs})µs.`,
+        totalFrames,
+        totalClips,
+      );
+    if (!realMedia)
+      return failure(
+        'nothing-to-render',
+        'Preview requires at least one resolvable media clip.',
+        totalFrames,
+        totalClips,
+      );
+    const frameIndex = previewFrameIndex(timeUs, titleFps);
+    const previewMedia = { ...realMedia, durationUs };
+    const artifactPath = join(outDir, `preview-${frameIndex}.png`);
+    const outputProblem = prepareOutputDir(outDir, [artifactPath]);
+    if (outputProblem) return failure('output', outputProblem, totalFrames, totalClips);
+    let captured;
+    try {
+      captured = await renderTitleFrames(titleSources, {
+        width: titleWidth,
+        height: titleHeight,
+        fps: titleFps,
+      });
+    } catch (error) {
+      return failure('unsupported-feature', errorMessage(error), totalFrames, totalClips);
+    }
+    try {
+      const handle = startEncode(
+        buildFfmpegArgs(previewMedia, preset, artifactPath, captured.layers, { timeUs }),
+        durationUs,
+        () => {},
+      );
+      const outcome = await handle.done;
+      if (!outcome.ok) return failure(outcome.code, outcome.message, totalFrames, totalClips);
+      if (!existsSync(artifactPath))
+        return failure(
+          'encode-failed',
+          'FFmpeg did not produce the requested preview PNG.',
+          totalFrames,
+          totalClips,
+        );
+      const previewEvent: RenderPreviewCompleteEvent = {
+        schemaVersion: 1,
+        type: 'preview-complete',
+        projectId: plan.projectId,
+        frameIndex,
+        timeUs,
+        width: titleWidth,
+        height: titleHeight,
+        artifactPath,
+        mediaProduced: true,
+      };
+      emitJson(previewEvent, json);
+      return {
+        exitCode: 0,
+        projectId: plan.projectId,
+        preset,
+        outDir,
+        artifactPath,
+        totalFrames: 1,
+        totalClips,
+        durationMs: performance.now() - startedAt,
+        mediaProduced: true,
+        manifestWritten: false,
+        warnings,
+      };
+    } finally {
+      captured.cleanup();
+    }
+  }
   const fileStem = safeFileStem(plan.projectId);
   const mediaName = `${fileStem}.${presetSpec.extension}`;
   const manifestName = `${fileStem}.${presetSpec.extension}.manifest.json`;
@@ -826,20 +1102,35 @@ export async function runHeadlessRender(
         );
       }
       let lastPercent = -1;
-      const handle = startEncode(
-        buildFfmpegArgs(realMedia, preset, partialPath),
-        realMedia.durationUs,
-        (fraction) => {
-          const percent = Math.floor(fraction * 100);
-          if (percent === lastPercent) return;
-          lastPercent = percent;
-          if (showProgress) drawProgress(Math.round(fraction * totalFrames), totalFrames, 32);
-          emitJson(
-            { type: 'progress', projectId: plan.projectId, percent, ts: new Date().toISOString() },
-            json,
-          );
-        },
-      );
+      let renderedTitles;
+      try {
+        renderedTitles = await renderTitleFrames(titleSources, {
+          width: titleWidth,
+          height: titleHeight,
+          fps: titleFps,
+        });
+      } catch (error) {
+        rmSync(partialPath, { force: true });
+        return failure('unsupported-feature', errorMessage(error), totalFrames, totalClips);
+      }
+      let ffmpegArgs: string[];
+      try {
+        ffmpegArgs = buildFfmpegArgs(realMedia, preset, partialPath, renderedTitles.layers);
+      } catch (error) {
+        renderedTitles.cleanup();
+        rmSync(partialPath, { force: true });
+        return failure('encode-failed', errorMessage(error), totalFrames, totalClips);
+      }
+      const handle = startEncode(ffmpegArgs, realMedia.durationUs, (fraction) => {
+        const percent = Math.floor(fraction * 100);
+        if (percent === lastPercent) return;
+        lastPercent = percent;
+        if (showProgress) drawProgress(Math.round(fraction * totalFrames), totalFrames, 32);
+        emitJson(
+          { type: 'progress', projectId: plan.projectId, percent, ts: new Date().toISOString() },
+          json,
+        );
+      });
       const discardPartial = (): void => {
         handle.cancel();
         try {
@@ -856,6 +1147,7 @@ export async function runHeadlessRender(
       } finally {
         process.off('SIGINT', discardPartial);
         process.off('SIGTERM', discardPartial);
+        renderedTitles.cleanup();
       }
       if (currentLongRunning < 0) {
         discardPartial();
@@ -922,8 +1214,18 @@ export async function runHeadlessRender(
     ? `Rendered ${basename(mediaPath)} with ffmpeg.`
     : MANIFEST_ONLY_MESSAGE;
 
+  const rendererFacts = await titleRendererFacts();
+  const rendererFingerprint = sha256Hex(
+    JSON.stringify({
+      ffmpegVersion: ffmpegVersionLine(),
+      chromiumVersion: rendererFacts.chromiumVersion,
+      templateSha256: titleSources.map((source) => source.instance.templateSha256),
+      fontManifestHashes: rendererFacts.fontManifestHashes,
+    }),
+  );
+
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     format: 'joy-media-render-manifest',
     mediaProduced: realMedia !== null,
     mediaFile: realMedia ? mediaName : null,
@@ -958,6 +1260,25 @@ export async function runHeadlessRender(
     durationMs,
     renderedAt: new Date().toISOString(),
     warnings,
+    renderer: {
+      id: 'ffmpeg+chromium-scene-surface',
+      version: 1,
+      fingerprint: rendererFingerprint,
+    },
+    design: {
+      units: { time: 'us', position: 'px' },
+      instances: titleSources.map((source) => ({
+        instanceId: source.instanceId,
+        objectId: source.instance.objectId,
+        clipId: source.instance.clipId,
+        templateId: source.instance.templateId,
+        templateVersion: source.instance.templateVersion,
+        startUs: source.startUs,
+        durationUs: source.durationUs,
+        fontSha256: source.instance.font.sha256,
+        layoutSha256: stableLayoutHash(source.instance.layout),
+      })),
+    },
     // Real-media frame ranges use output timeline positions. Manifest-only
     // planning retains its legacy sequential ranges because it has no encoder.
     clips: allClips.map((clip) => ({

@@ -69,6 +69,7 @@ export interface CliFlags {
   allowExtend?: boolean;
   markdown?: boolean;
   mediaDir?: string | undefined;
+  frameUs?: number | undefined;
   kind?: string | undefined;
   unplaced?: boolean;
   rangeUs?: string | undefined;
@@ -136,6 +137,7 @@ export const CLI_OPTIONS = {
   'expected-revision': { type: 'string' },
   'idempotency-key': { type: 'string' },
   'media-dir': { type: 'string' },
+  'frame-us': { type: 'string', numeric: true },
 } as const satisfies Record<string, CliOptionSpec>;
 
 interface CommandHelp {
@@ -248,6 +250,7 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['--out <dir>', 'Output directory (default ./renders)'],
       ['--concurrency <1-32>', 'Parallel clips (manifest-only mode; default 2)'],
       ['--media-dir <dir>', "Folder holding the media files the project's assets name"],
+      ['--frame-us <microseconds>', 'Render one composed preview frame at this project time'],
       ['--manifest-only', 'Write only the plan manifest; encode no video'],
       ['--sqlite-path <path>', 'Project database'],
       ['--json', 'Newline-delimited JSON progress events'],
@@ -465,6 +468,7 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
     expectedRevision: str('expected-revision'),
     idempotencyKey: str('idempotency-key'),
     mediaDir: str('media-dir'),
+    frameUs: parseIntFlag('frame-us', v['frame-us']),
   };
 }
 
