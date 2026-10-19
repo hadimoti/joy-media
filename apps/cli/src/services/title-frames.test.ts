@@ -1,7 +1,13 @@
 import { inflateSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { sampleTitleMotion } from '@joy-media/motion-core';
-import { encodeRgbaPng, titleFrameCount, titleFrameTimes } from './title-frames.js';
+import { compileTitleInstance, sampleTitleMotion } from '@joy-media/motion-core';
+import {
+  encodeRgbaPng,
+  renderTitleFrames,
+  titleFrameCount,
+  titleFrameTimes,
+} from './title-frames.js';
 
 describe('title frame timing and PNG encoding', () => {
   it('encodes RGBA pixels into a valid PNG with a round-trippable filter-0 IDAT', () => {
@@ -46,4 +52,43 @@ describe('title frame timing and PNG encoding', () => {
     expect(last.opacity).toBeLessThan(1);
     expect(last.translateYPx).toBe(0);
   });
+
+  it('renders a title frame from the shared title scene frame builder', async () => {
+    const result = compileTitleInstance(
+      {
+        instanceId: 'shared-frame-test',
+        templateId: 'joy.p0.title',
+        clipId: 'clip-shared-frame-test',
+        objectId: 'object-shared-frame-test',
+        lines: { primary: 'Shared frame', secondary: '' },
+        direction: 'ltr',
+        font: { family: 'Noto Sans Arabic', weight: 400 },
+        fontSha256: 'sha256:9a7c99eccfc3845950358733520688959bfa77ea14e6ef3b0a5efe3a8d52d28b',
+        placement: { xPx: 10, yPx: 20, maxWidthPx: 300, safeInsetPx: 8 },
+        motion: { presetId: 'hold', inUs: 0, outUs: 0 },
+        clipDurationUs: 33_334,
+        frame: { widthPx: 320, heightPx: 568 },
+      },
+      (text, size) => [...text].length * size * 0.55,
+    );
+    if (!result.ok) throw new Error(`P0 fixture compilation failed: ${result.code}`);
+    const rendered = await renderTitleFrames(
+      [
+        {
+          instanceId: 'shared-frame-test',
+          instance: result.instance,
+          startUs: 0,
+          durationUs: 33_334,
+        },
+      ],
+      { width: 320, height: 568, fps: { num: 30, den: 1 } },
+    );
+    try {
+      expect(rendered.layers).toHaveLength(1);
+      const png = readFileSync(rendered.layers[0]!.inputPattern.replace('%05d', '00000'));
+      expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    } finally {
+      rendered.cleanup();
+    }
+  }, 60_000);
 });

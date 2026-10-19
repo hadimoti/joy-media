@@ -4,7 +4,12 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TitleInstanceV1 } from '@joy-media/project-schema';
-import { P0_TEMPLATES, sampleTitleMotion, type P0TemplateDefinition } from '@joy-media/motion-core';
+import {
+  buildTitleSceneFrame,
+  P0_TEMPLATES,
+  type P0TemplateDefinition,
+  type TitleSceneFrame,
+} from '@joy-media/motion-core';
 
 export interface TitleFrameRate {
   readonly num: number;
@@ -187,21 +192,30 @@ export async function renderTitleFrames(
       const template = P0_TEMPLATES[source.instance.templateId];
       for (let index = 0; index < times.length; index++) {
         const timeUs = times[index]!;
-        const motion = sampleTitleMotion(source.instance.motion, source.durationUs, timeUs);
-        const lines = buildLines(source.instance, template, motion.opacity, motion.translateYPx);
-        const plate = template.plate.kind === 'translucent-rectangle';
-        const plateHeight = Math.max(1, source.instance.layout.boxHeightPx);
-        const markup = `<div id="joy-scene-root" style="position:relative;width:${frame.width}px;height:${frame.height}px;background:transparent;overflow:hidden">${plate ? `<div style="position:absolute;left:${source.instance.placement.xPx}px;top:${source.instance.placement.yPx}px;width:${source.instance.placement.maxWidthPx}px;height:${plateHeight}px;background:rgba(0,0,0,0.56);display:${motion.opacity === 0 ? 'none' : 'block'};opacity:${motion.opacity}" data-joy-translate-y="${motion.translateYPx}"></div>` : ''}</div>`;
-        try {
-          const surface = driver.capture({
-            markup,
-            width: frame.width,
-            height: frame.height,
-            transparent: true,
-            timeUs,
+        const sceneFrame = buildTitleSceneFrame(
+          source.instance,
+          source.instanceId,
+          source.durationUs,
+          timeUs,
+          {
+            widthPx: frame.width,
+            heightPx: frame.height,
             frameRate: frame.fps,
             locale: source.instance.direction === 'rtl' ? 'fa-IR' : 'en-US',
             seed: source.instanceId,
+          },
+        );
+        const lines = buildRuntimePaintLines(source, template, sceneFrame);
+        try {
+          const surface = driver.capture({
+            markup: sceneFrame.markup,
+            width: sceneFrame.viewport.width,
+            height: sceneFrame.viewport.height,
+            transparent: true,
+            timeUs: sceneFrame.timeUs,
+            frameRate: sceneFrame.frameRate,
+            locale: sceneFrame.locale,
+            seed: sceneFrame.seed,
             lines,
           });
           if (surface.rgba.byteLength !== frame.width * frame.height * 4)
@@ -234,12 +248,12 @@ export async function renderTitleFrames(
   }
 }
 
-function buildLines(
-  instance: TitleInstanceV1,
+function buildRuntimePaintLines(
+  source: TitleFrameSource,
   template: P0TemplateDefinition,
-  opacity: number,
-  translateY: number,
+  frame: TitleSceneFrame,
 ): ScenePaintLine[] {
+  const instance = source.instance;
   const alignment = template.alignment;
   const paddingX = template.plate.paddingX;
   const paddingY = template.plate.paddingY;
@@ -258,16 +272,16 @@ function buildLines(
     result.push({
       text,
       x,
-      y: y + translateY,
+      y: y + frame.motion.translateYPx,
       height,
       font: `${instance.font.weight} ${size}px "${instance.font.family}"`,
       color: '#ffffff',
       direction,
       align: alignment,
-      opacity,
+      opacity: frame.motion.opacity,
     });
   };
-  instance.layout.primaryLines.forEach((text, index) =>
+  frame.paintLines.primary.forEach((text, index) =>
     add(
       text,
       instance.placement.yPx + paddingY + index * instance.layout.lineHeightPx,
@@ -278,9 +292,9 @@ function buildLines(
   const secondaryTop =
     instance.placement.yPx +
     paddingY +
-    instance.layout.primaryLines.length * instance.layout.lineHeightPx;
+    frame.paintLines.primary.length * instance.layout.lineHeightPx;
   const secondaryLineHeight = Math.round(instance.layout.secondarySizePx * 1.25);
-  instance.layout.secondaryLines.forEach((text, index) =>
+  frame.paintLines.secondary.forEach((text, index) =>
     add(
       text,
       secondaryTop + index * secondaryLineHeight,

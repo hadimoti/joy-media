@@ -27,6 +27,7 @@ export const CLI_VERSION = '1.0.2';
 
 export interface CliFlags {
   project: string | undefined;
+  desktop: boolean;
   apply: boolean;
   name: string | undefined;
   family: string | undefined;
@@ -90,6 +91,7 @@ export const CLI_OPTIONS = {
   json: { type: 'boolean' },
   markdown: { type: 'boolean' },
   project: { type: 'string', short: 'p' },
+  desktop: { type: 'boolean' },
   apply: { type: 'boolean' },
   'allow-extend': { type: 'boolean' },
   name: { type: 'string', short: 'n' },
@@ -180,6 +182,7 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['create <title...>', 'Create a project'],
       ['show <id|file.json>', 'Show tracks and clips'],
       ['export <id>', 'Export a project to JSON'],
+      ['export <id> --desktop', 'Export a portable JOY Studio project with embedded media'],
       ['import <file.json>', 'Import a project from JSON'],
     ],
     options: [
@@ -415,6 +418,7 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
   const frameRate = parseFrameRateFlag('fps', v.fps);
   return {
     project: str('project'),
+    desktop: v.desktop === true,
     apply: v.apply === true,
     name: str('name'),
     family: str('family'),

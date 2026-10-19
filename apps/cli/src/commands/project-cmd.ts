@@ -3,6 +3,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { CliFlags } from '../cli.js';
 import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
+import { loadAssetSources } from '../utils/asset-sources.js';
+import { writeDesktopProjectExport } from '../services/desktop-export.js';
+import type { JoyProjectV3 } from '@joy-media/project-schema';
 import {
   c,
   logError,
@@ -283,6 +286,35 @@ function runExport(args: string[], flags: CliFlags, json: boolean): number {
   const outPath = flags.output ?? flags.out ?? `${res.project.id}.json`;
   if (process.platform === 'win32' && isWindowsReservedDevicePath(outPath)) {
     throw usageFailure(`The export path contains a reserved Windows device name: ${outPath}`);
+  }
+  if (flags.desktop) {
+    try {
+      if (res.project.schemaVersion !== 3)
+        throw Object.assign(new Error('Desktop export requires a schema-v3 project.'), {
+          code: 'DESKTOP_PROJECTION_INVALID_INPUT',
+        });
+      writeDesktopProjectExport(res.project as JoyProjectV3, loadAssetSources(), outPath);
+    } catch (error) {
+      const code =
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        typeof error.code === 'string'
+          ? error.code
+          : 'IO_ERROR';
+      throw new CommandFailure(code, `Desktop export failed: ${reason(error)}`);
+    }
+    if (json) {
+      emitJson({
+        id: res.project.id,
+        title: res.project.title,
+        revision: res.revision,
+        path: outPath,
+      });
+      return 0;
+    }
+    logSuccess(`Exported desktop project to ${c(outPath, 'bold')}.`);
+    return 0;
   }
   const appliedPlans = carriedLedger(outPath, res.project.id);
   const exported = {
