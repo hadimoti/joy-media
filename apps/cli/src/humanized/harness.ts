@@ -76,6 +76,27 @@ function buildIsStale(): boolean {
 let buildChecked = false;
 let buildFailure: Error | undefined;
 
+function pnpmBuildStep(): { command: string; args: string[]; cwd: string } {
+  return process.platform === 'win32'
+    ? {
+        command: process.env.ComSpec || 'cmd.exe',
+        args: ['/d', '/s', '/c', 'pnpm --filter @joy-media/cli build'],
+        cwd: REPO_ROOT,
+      }
+    : { command: 'pnpm', args: ['--filter', '@joy-media/cli', 'build'], cwd: REPO_ROOT };
+}
+
+function pnpmOnPath(): boolean {
+  const probe =
+    process.platform === 'win32'
+      ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'pnpm --version'], {
+          encoding: 'utf8',
+          windowsHide: true,
+        })
+      : spawnSync('pnpm', ['--version'], { encoding: 'utf8' });
+  return probe.status === 0;
+}
+
 /**
  * Build `apps/cli` if `dist/` is missing or older than its sources.
  * Safe to call from many parallel vitest workers: a mkdir-based lock makes
@@ -110,20 +131,32 @@ export function ensureCliBuilt(): void {
   }
   try {
     if (buildIsStale()) {
-      const command = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : 'pnpm';
-      const args =
-        process.platform === 'win32'
-          ? ['/d', '/s', '/c', 'pnpm --filter @joy-media/cli build']
-          : ['--filter', '@joy-media/cli', 'build'];
-      const res = spawnSync(command, args, {
-        cwd: REPO_ROOT,
-        encoding: 'utf8',
-      });
-      if (res.status !== 0) {
-        buildFailure = new Error(
-          `CLI build failed (exit ${res.status}):\n${res.stdout}\n${res.stderr}`,
-        );
-        throw buildFailure;
+      // The same steps as `pnpm --filter @joy-media/cli build`, run directly when pnpm is not
+      // on PATH (a plain Windows checkout with only the bundled Node runtime).
+      const steps = pnpmOnPath()
+        ? [pnpmBuildStep()]
+        : [
+            {
+              command: process.execPath,
+              args: [join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc'), '-b'],
+              cwd: CLI_ROOT,
+            },
+            {
+              command: process.execPath,
+              args: [join(CLI_ROOT, 'scripts', 'bundle.mjs')],
+              cwd: CLI_ROOT,
+            },
+          ];
+      for (const step of steps) {
+        const res = spawnSync(step.command, step.args, { cwd: step.cwd, encoding: 'utf8' });
+        if (res.status !== 0) {
+          buildFailure = new Error(
+            `CLI build failed (exit ${res.status}):
+${res.stdout}
+${res.stderr}`,
+          );
+          throw buildFailure;
+        }
       }
     }
   } finally {
