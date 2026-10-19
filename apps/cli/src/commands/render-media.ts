@@ -4,6 +4,12 @@ import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { loadAssetSources } from '../utils/asset-sources.js';
 import { ffmpegBinary, probeMedia, type MediaInfo } from '../utils/media-probe.js';
+import {
+  REASON_VISUAL_OBJECTS,
+  REASON_PROPERTY_ANIMATIONS,
+  REASON_AUDIO_EFFECTS,
+  REASON_AUDIO_BUS_ROUTING,
+} from './render-features.js';
 
 /**
  * Real media rendering for `joy-media render`: turn the project's timeline into one video file
@@ -202,7 +208,7 @@ function filterValue(value: string): string {
 function unsupportedProjectFeature(project: Record<string, unknown>): string | null {
   const visualObjects = project['visualObjects'];
   if (isRecord(visualObjects) && Object.keys(visualObjects).length > 0)
-    return 'visual objects, transforms, and effects';
+    return REASON_VISUAL_OBJECTS;
   const unsupportedTransition = transitionList(project).find((t) => t['type'] !== 'dissolve');
   if (unsupportedTransition)
     return `transition type "${String(unsupportedTransition['type'])}" (only dissolve is rendered)`;
@@ -210,7 +216,7 @@ function unsupportedProjectFeature(project: Record<string, unknown>): string | n
     isRecord(project['propertyAnimations']) &&
     Object.keys(project['propertyAnimations']).length > 0
   )
-    return 'property animations';
+    return REASON_PROPERTY_ANIMATIONS;
   if (isRecord(project['clipColorGrades']) && Object.keys(project['clipColorGrades']).length > 0)
     return 'clip color grades';
   if (project['colorGrade'] !== undefined) return 'color grading';
@@ -231,9 +237,9 @@ function unsupportedProjectFeature(project: Record<string, unknown>): string | n
       return `audio pan on clip "${clipId}"`;
     if (rawConfig['solo'] === true) return `audio solo on clip "${clipId}"`;
   }
-  if (Array.isArray(audio['effects']) && audio['effects'].length > 0) return 'audio effects';
+  if (Array.isArray(audio['effects']) && audio['effects'].length > 0) return REASON_AUDIO_EFFECTS;
   const buses = Array.isArray(audio['buses']) ? audio['buses'] : [];
-  if (buses.length > 1) return 'audio bus routing';
+  if (buses.length > 1) return REASON_AUDIO_BUS_ROUTING;
   for (const rawBus of buses) {
     if (!isRecord(rawBus)) continue;
     if (rawBus['gain'] !== undefined && rawBus['gain'] !== 1) return 'audio bus gain';

@@ -15,13 +15,49 @@ interrupted media/manifest replacement leave the last complete output pair intac
 on the next render.
 
 The CLI returns a machine-readable `unsupported-feature` error before starting output when a
-project asks for a feature the current renderer does not implement. This includes playback-rate
-changes, freeze frames, reverse playback, time remapping, nested compositions, captions and
-caption tracks, visual objects and their transforms/crops/effects, transitions, property
-animations, color grading, alpha-bearing media, track mute/solo, non-default audio gain/pan/mute/
-solo/fades, processed audio sources, audio effects, or non-default audio-bus routing and settings.
-These features are not represented in the encoded video; use the desktop export path for projects
-that depend on them. The renderer does not silently flatten or omit them.
+project asks for a feature the current renderer does not implement. Features the renderer does
+support and reject are listed in the capability catalog.
+
+## Source of truth: `joy-media capabilities --json`
+
+Run `joy-media capabilities --json` for the definitive, up-to-date list of features the CLI
+supports and rejects. The catalog is derived from the same code paths the renderer uses, so the
+two cannot drift.
+
+### Supported features
+
+| Feature ID                            | Area        | Notes                                                                                                                             |
+| ------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `render.real-media`                   | render      | Ordinary video, still images, and audio clips on enabled tracks. Needs ffmpeg/ffprobe (check with `joy-media doctor`).            |
+| `render.frame-rate.ntsc-and-fraction` | frame-rate  | NTSC rates (23.976, 29.97, 59.94) and exact fractions (e.g. 30000/1001).                                                          |
+| `captions.drawtext`                   | captions    | Captions rendered with ffmpeg drawtext. Needs a font file (set `JOY_MEDIA_CAPTION_FONT` or a system font is used when available). |
+| `transitions.dissolve`                | transitions | Dissolve transitions between touching clips are rendered.                                                                         |
+| `audio.gain`                          | audio       | Clip gain from 0 to 4 (0 to +12 dB).                                                                                              |
+| `audio.fades`                         | audio       | Audio fade-in and fade-out.                                                                                                       |
+| `audio.mute`                          | audio       | Clip mute.                                                                                                                        |
+
+### Unsupported features
+
+The following features cause an `unsupported-feature` error before any output is produced:
+
+| Feature ID                      | Area        | Reason                                                              |
+| ------------------------------- | ----------- | ------------------------------------------------------------------- |
+| `render.alpha-media`            | render      | Alpha-bearing media: the CLI renderer cannot preserve transparency. |
+| `render.playback-rate`          | render      | Playback rate changes are not supported.                            |
+| `render.freeze-frame`           | render      | Freeze frames are not explicitly supported.                         |
+| `render.reverse`                | render      | Reverse playback is not supported.                                  |
+| `render.time-remap`             | render      | Time remapping is not supported.                                    |
+| `render.nested-composition`     | render      | Nested compositions are rejected as non-video clips.                |
+| `render.visual-objects`         | render      | Visual objects, transforms, and effects.                            |
+| `render.property-animations`    | render      | Property animations.                                                |
+| `render.color-grade`            | render      | Color grading.                                                      |
+| `render.audio-effects`          | audio       | Audio effects.                                                      |
+| `render.audio-bus-routing`      | audio       | Audio bus routing.                                                  |
+| `render.audio-pan`              | audio       | Audio pan.                                                          |
+| `render.audio-solo`             | audio       | Audio solo.                                                         |
+| `render.track-mute-solo`        | render      | Track mute and solo.                                                |
+| `render.audio-processed-source` | audio       | Processed audio sources.                                            |
+| `transitions.other`             | transitions | Only dissolve transitions are rendered.                             |
 
 An unresolved real asset is an error. Only projects that contain labels and no real media files
 fall back to the plan manifest. This keeps planning useful without presenting a manifest as a
@@ -41,9 +77,10 @@ Every editing command is checked against the decoded output in tests, not only i
   track of the same family. The source, length and overlap checks still apply.
 - `timeline split`, `trim` and `remove-clip` are unchanged.
 
-Not supported by the CLI yet, and rejected or absent rather than approximated: transitions, text
-and captions, audio gain/fades/mute, transforms and effects, playback-rate changes, reverse and
-time remapping. Add these in the desktop editor and export there.
+The CLI supports dissolve transitions, captions, audio gain/fades/mute via `timeline set-audio`.
+Not supported: pan, solo, effects, bus routing, playback-rate changes, reverse and time remapping,
+visual objects, property animations, color grading, alpha media, and non-dissolve transitions.
+Add these in the desktop editor and export there.
 
 A real render of a project with no clips fails with `nothing-to-render` (exit 1). Only
 `--manifest-only` may succeed without media. Every `--json` failure has the same envelope:

@@ -1,6 +1,7 @@
 /* global console, process */
 import { handleAgentCommand } from './commands/agent-cmd.js';
 import { handleBenchmarkCommand } from './commands/benchmark-cmd.js';
+import { handleCapabilitiesCommand } from './commands/capabilities-cmd.js';
 import { handleDoctorCommand } from './commands/doctor-cmd.js';
 import { handleProjectCommand } from './commands/project-cmd.js';
 import { handleRenderCommand } from './commands/render-cmd.js';
@@ -127,7 +128,7 @@ interface CommandHelp {
   readonly notes?: readonly string[];
 }
 
-const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
+export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
   agent: {
     summary: 'Full-power Joy Agent AI editing commands',
     usage: 'joy-media agent <subcommand> [options]',
@@ -243,6 +244,11 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['--json', 'Newline-delimited JSON measurements'],
     ],
   },
+  capabilities: {
+    summary: 'Machine capability catalog',
+    usage: 'joy-media capabilities [--json]',
+    options: [['--json', 'One JSON document: { schemaVersion, cli, commands[], features[] }']],
+  },
   doctor: {
     summary: 'System health check & diagnostics',
     usage: 'joy-media doctor [--json]',
@@ -282,6 +288,9 @@ export function printHelp(): void {
   );
   console.log(
     `    ${c('benchmark', 'cyan')} [--system --media-engine --json]                 Diagnostic & benchmark suite`,
+  );
+  console.log(
+    `    ${c('capabilities', 'cyan')} [--json]                              Machine capability catalog`,
   );
   console.log(
     `    ${c('doctor', 'cyan')} [--json]                            System health check & diagnostics`,
@@ -493,6 +502,8 @@ async function dispatch(argv: string[]): Promise<number> {
         return await trackLongRunning(() => handleRenderCommand(subArgs, flags));
       case 'benchmark':
         return await handleBenchmarkCommand(subArgs, flags);
+      case 'capabilities':
+        return await handleCapabilitiesCommand(subArgs, flags);
       case 'doctor':
         return await handleDoctorCommand(subArgs, flags);
       case 'help': {
