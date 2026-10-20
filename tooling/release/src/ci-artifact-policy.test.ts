@@ -221,7 +221,7 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(windowsJob).toContain('Installed JOY Media files remained after lifecycle cleanup');
   });
 
-  it('declares 17 job instances across both passes and runtime versions', () => {
+  it('declares 18 job instances across both passes and runtime versions', () => {
     const jobKeys = Array.from(workflow.matchAll(/^\s{2}([a-z0-9-]+):$/gm), (m) => m[1]);
     const uniqueKeys = [...new Set(jobKeys)];
     expect(uniqueKeys).toEqual([
@@ -229,6 +229,7 @@ describe('v2 release-candidate artifact upload policy', () => {
       'node-contracts',
       'editor-web-bundle',
       'linux-real-services',
+      'windows-p0-real-services',
       'windows-worker-clean',
       'acceptance-primary',
       'acceptance-responsive',
@@ -243,11 +244,11 @@ describe('v2 release-candidate artifact upload policy', () => {
     const matrixPasses = workflow.match(/pass:\s*\[1,\s*2\]/g) ?? [];
     expect(matrixPasses.length).toBe(5);
     expect(matrixPasses.length * 2).toBe(10);
-    // 5 single-instance jobs (validate-candidate, editor-web-bundle,
-    // windows-worker-clean, prod-build-smoke, gate-summary), plus the
-    // 2-version node-contracts matrix. 10 + 5 + 2 = 17.
+    // 6 single-instance jobs (validate-candidate, editor-web-bundle,
+    // windows-p0-real-services, windows-worker-clean, prod-build-smoke,
+    // gate-summary), plus the 2-version node-contracts matrix. 10 + 6 + 2 = 18.
     expect(workflow).toMatch(/node:\s*\['22\.17\.0',\s*24\]/);
-    expect(matrixPasses.length * 2 + 5 + 2).toBe(17);
+    expect(matrixPasses.length * 2 + 6 + 2).toBe(18);
   });
 
   it('runs both passes for every matrix lane', () => {

@@ -1581,8 +1581,56 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
           expect(exit.code !== null || exit.signal !== null, `${caseName}: bundle exited`).toBe(
             true,
           );
-        } finally {
           const cleanupStart = cancelledAt ?? Date.now();
+          const after = await processSnapshot();
+          const surviving = ownedPids.filter((pid) => after.some((process) => process.pid === pid));
+          expect(surviving, `${caseName}: product cleanup leaves no owned process`).toEqual([]);
+          for (const path of ownedPaths)
+            expect(existsSync(path), `${caseName}: product cleanup removes ${path}`).toBe(false);
+          expect(
+            existsSync(cancellationOut),
+            `${caseName}: product cleanup removes its output directory`,
+          ).toBe(false);
+          const outputFiles = existsSync(cancellationOut) ? readdirSync(cancellationOut) : [];
+          const unexpectedOutput = outputFiles.filter((name) =>
+            /\.partial$|\.(?:mp4|webm|prores)$|\.manifest\.json$/u.test(name),
+          );
+          const elapsedMs = Date.now() - cleanupStart;
+          expect(
+            unexpectedOutput,
+            `${caseName}: partial/published output remained: ${JSON.stringify(unexpectedOutput)}`,
+          ).toEqual([]);
+          expect(
+            elapsedMs,
+            `${caseName}: cancellation and product cleanup <= 5 seconds (process exit ${processExitMs ?? 'unknown'} ms; stdout tail=${stdout.slice(-1200)}; stderr tail=${stderr.slice(-1200)})`,
+          ).toBeLessThanOrEqual(5_000);
+          cancellationCaseResults.push(
+            JSON.stringify({
+              type: 'cancel-case-result',
+              caseName,
+              result: 'PASS',
+              cleanupMs: elapsedMs,
+              processExitMs,
+              ownedPids,
+              ownedProcessesAliveAfter: surviving.length > 0,
+              unexpectedOutput,
+            }),
+          );
+          process.stderr.write(
+            `${JSON.stringify({
+              type: 'cancel-case-result',
+              caseName,
+              result: 'PRODUCT_CLEANUP_COMPLETE',
+              cleanupMs: elapsedMs,
+              ownedPids,
+              ownedProcessesAliveAfter: surviving.length > 0,
+              interruptMethod:
+                process.platform === 'win32' ? 'fork IPC' : 'POSIX process-group SIGINT',
+            })}\n`,
+          );
+        } finally {
+          // Assertions above observe product cleanup. Emergency cleanup below only protects the
+          // test host after those assertions have had a chance to fail honestly.
           const forceCleanupDeadline = Date.now() + 2_000;
           if (child?.pid && child.exitCode === null) {
             if (process.platform === 'win32') {
@@ -1619,68 +1667,12 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
           }
           if (profilePath) ownedPaths.add(profilePath);
           for (const path of ownedPaths) rmSync(path, { recursive: true, force: true });
+          rmSync(cancellationOut, { recursive: true, force: true });
           for (let attempt = 0; attempt < 100; attempt++) {
             const current = await processSnapshot();
             if (ownedPids.every((pid) => !current.some((process) => process.pid === pid))) break;
             await delay(25);
           }
-          const after = await processSnapshot();
-          const surviving = ownedPids.filter((pid) => after.some((process) => process.pid === pid));
-          expect(surviving, `${caseName}: cleanup leaves no owned process`).toEqual([]);
-          for (const path of ownedPaths)
-            expect(existsSync(path), `${caseName}: cleanup removes ${path}`).toBe(false);
-          // Each case gets a new output directory inside this test's temp root.
-          // Remove any staged files left by an interrupted encoder before checking the result.
-          rmSync(cancellationOut, { recursive: true, force: true });
-          expect(
-            existsSync(cancellationOut),
-            `${caseName}: cleanup removes its output directory`,
-          ).toBe(false);
-          const outputFiles = existsSync(cancellationOut) ? readdirSync(cancellationOut) : [];
-          const unexpectedOutput = outputFiles.filter((name) =>
-            /\.partial$|\.(?:mp4|webm|prores)$|\.manifest\.json$/u.test(name),
-          );
-          const elapsedMs = Date.now() - cleanupStart;
-          cancellationCaseResults.push(
-            JSON.stringify({
-              type: 'cancel-case-result',
-              caseName,
-              result:
-                cancelledResult &&
-                processExitMs !== undefined &&
-                processExitMs <= 5_000 &&
-                elapsedMs <= 5_000 &&
-                surviving.length === 0 &&
-                unexpectedOutput.length === 0
-                  ? 'PASS'
-                  : 'FAIL',
-              cleanupMs: elapsedMs,
-              processExitMs,
-              ownedPids,
-              ownedProcessesAliveAfter: surviving.length > 0,
-              unexpectedOutput,
-            }),
-          );
-          expect(
-            unexpectedOutput,
-            `${caseName}: partial/published output remained: ${JSON.stringify(unexpectedOutput)}`,
-          ).toEqual([]);
-          expect(
-            elapsedMs,
-            `${caseName}: cancellation and cleanup <= 5 seconds (process exit ${processExitMs ?? 'unknown'} ms; stdout tail=${stdout.slice(-1200)}; stderr tail=${stderr.slice(-1200)})`,
-          ).toBeLessThanOrEqual(5_000);
-          process.stderr.write(
-            `${JSON.stringify({
-              type: 'cancel-case-result',
-              caseName,
-              result: surviving.length === 0 ? 'CLEANUP_COMPLETE' : 'OWNED_PROCESS_SURVIVED',
-              cleanupMs: elapsedMs,
-              ownedPids,
-              ownedProcessesAliveAfter: surviving.length > 0,
-              interruptMethod:
-                process.platform === 'win32' ? 'fork IPC' : 'POSIX process-group SIGINT',
-            })}\n`,
-          );
         }
       };
       const caseFailures: string[] = [];

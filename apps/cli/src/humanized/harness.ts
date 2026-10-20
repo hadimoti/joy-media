@@ -15,12 +15,15 @@
 import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
+  closeSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   rmSync,
-  rmdirSync,
   statSync,
+  unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -76,31 +79,10 @@ function buildIsStale(): boolean {
 let buildChecked = false;
 let buildFailure: Error | undefined;
 
-function pnpmBuildStep(): { command: string; args: string[]; cwd: string } {
-  return process.platform === 'win32'
-    ? {
-        command: process.env.ComSpec || 'cmd.exe',
-        args: ['/d', '/s', '/c', 'pnpm --filter @joy-media/cli build'],
-        cwd: REPO_ROOT,
-      }
-    : { command: 'pnpm', args: ['--filter', '@joy-media/cli', 'build'], cwd: REPO_ROOT };
-}
-
-function pnpmOnPath(): boolean {
-  const probe =
-    process.platform === 'win32'
-      ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'pnpm --version'], {
-          encoding: 'utf8',
-          windowsHide: true,
-        })
-      : spawnSync('pnpm', ['--version'], { encoding: 'utf8' });
-  return probe.status === 0;
-}
-
 /**
  * Build `apps/cli` if `dist/` is missing or older than its sources.
- * Safe to call from many parallel vitest workers: a mkdir-based lock makes
- * exactly one of them build while the rest wait.
+ * Safe across parallel Vitest worker processes: an exclusive lock file makes
+ * exactly one worker build while the others wait.
  */
 export function ensureCliBuilt(): void {
   if (buildFailure) throw buildFailure;
@@ -109,15 +91,30 @@ export function ensureCliBuilt(): void {
     buildChecked = true;
     return;
   }
-  const lock = join(tmpdir(), 'joy-media-cli-build.lock');
-  const deadline = Date.now() + 240_000;
+  const lock = join(CLI_ROOT, 'dist', '.build.lock');
+  mkdirSync(join(CLI_ROOT, 'dist'), { recursive: true });
+  const deadline = Date.now() + 300_000;
+  let lockFd: number | undefined;
   for (;;) {
     try {
-      mkdirSync(lock);
+      lockFd = openSync(lock, 'wx');
+      writeFileSync(lockFd, `${process.pid}\n${Date.now()}\n`);
+      closeSync(lockFd);
+      lockFd = undefined;
       break;
-    } catch {
+    } catch (error) {
+      if (lockFd !== undefined) {
+        closeSync(lockFd);
+        lockFd = undefined;
+        try {
+          unlinkSync(lock);
+        } catch {
+          /* lock already removed */
+        }
+      }
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       try {
-        if (Date.now() - statSync(lock).mtimeMs > 200_000) rmdirSync(lock);
+        if (Date.now() - statSync(lock).mtimeMs > 600_000) unlinkSync(lock);
       } catch {
         /* lock vanished: retry */
       }
@@ -130,23 +127,22 @@ export function ensureCliBuilt(): void {
     }
   }
   try {
+    // Another worker may have completed between our first stale check and lock acquisition.
     if (buildIsStale()) {
-      // The same steps as `pnpm --filter @joy-media/cli build`, run directly when pnpm is not
-      // on PATH (a plain Windows checkout with only the bundled Node runtime).
-      const steps = pnpmOnPath()
-        ? [pnpmBuildStep()]
-        : [
-            {
-              command: process.execPath,
-              args: [join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc'), '-b'],
-              cwd: CLI_ROOT,
-            },
-            {
-              command: process.execPath,
-              args: [join(CLI_ROOT, 'scripts', 'bundle.mjs')],
-              cwd: CLI_ROOT,
-            },
-          ];
+      // Build with the checked-in toolchain directly so the harness does not depend on a
+      // package-manager shim being available in worker process PATHs.
+      const steps = [
+        {
+          command: process.execPath,
+          args: [join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc'), '-b'],
+          cwd: CLI_ROOT,
+        },
+        {
+          command: process.execPath,
+          args: [join(CLI_ROOT, 'scripts', 'bundle.mjs')],
+          cwd: CLI_ROOT,
+        },
+      ];
       for (const step of steps) {
         const res = spawnSync(step.command, step.args, { cwd: step.cwd, encoding: 'utf8' });
         if (res.status !== 0) {
@@ -161,7 +157,7 @@ ${res.stderr}`,
     }
   } finally {
     try {
-      rmdirSync(lock);
+      unlinkSync(lock);
     } catch {
       /* ignore */
     }

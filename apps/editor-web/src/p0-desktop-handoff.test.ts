@@ -1343,7 +1343,7 @@ describe('P0 desktop title handoff', () => {
         }
       }
     } finally {
-      rendered.cleanup();
+      await rendered.cleanup();
     }
   }, 300_000);
 
@@ -1419,7 +1419,7 @@ describe('P0 desktop title handoff', () => {
     if (!surface) throw new Error('Placement capture returned no title surface');
     const pixels = Buffer.from(surface.data);
     const plateBounds = { left: 1080, top: 1920, right: -1, bottom: -1 };
-    let textPixelCount = 0;
+    let glyphPixelCount = 0;
     for (let y = 0; y < surface.height; y++) {
       for (let x = 0; x < surface.width; x++) {
         const offset = (y * surface.width + x) * 4;
@@ -1429,11 +1429,24 @@ describe('P0 desktop title handoff', () => {
           pixels[offset + 2] === 0 &&
           pixels[offset + 3]! > 0
         ) {
-          textPixelCount++;
           plateBounds.left = Math.min(plateBounds.left, x);
           plateBounds.top = Math.min(plateBounds.top, y);
           plateBounds.right = Math.max(plateBounds.right, x);
           plateBounds.bottom = Math.max(plateBounds.bottom, y);
+        }
+        const insideTextBox = expectedTextBoxes.some(
+          (box) =>
+            x >= box.x - 1 &&
+            x <= box.x + box.width + 1 &&
+            y >= box.y - 1 &&
+            y <= box.y + box.height + 1,
+        );
+        if (
+          insideTextBox &&
+          pixels[offset + 3]! > 0 &&
+          (pixels[offset] !== 0 || pixels[offset + 1] !== 0 || pixels[offset + 2] !== 0)
+        ) {
+          glyphPixelCount++;
         }
         if (
           pixels[offset]! > 160 &&
@@ -1454,7 +1467,10 @@ describe('P0 desktop title handoff', () => {
         }
       }
     }
-    expect(textPixelCount).toBeGreaterThan(0);
+    expect(
+      glyphPixelCount,
+      'glyph pixels differ from the black plate within the text box',
+    ).toBeGreaterThan(0);
     expect(plateBounds.left).toBeGreaterThanOrEqual(expectedPlate.x - 1);
     expect(plateBounds.top).toBeGreaterThanOrEqual(expectedPlate.y - 1);
     expect(plateBounds.right).toBeLessThanOrEqual(expectedPlate.x + expectedPlate.width);
@@ -1463,6 +1479,25 @@ describe('P0 desktop title handoff', () => {
     expect(plateBounds.top).toBeLessThanOrEqual(expectedPlate.y + 1);
     expect(plateBounds.right).toBeGreaterThanOrEqual(expectedPlate.x + expectedPlate.width - 2);
     expect(plateBounds.bottom).toBeGreaterThanOrEqual(expectedPlate.y + expectedPlate.height - 2);
+  }, 180_000);
+
+  it('refuses a desktop font whose bytes do not match the descriptor', async () => {
+    const valid = makeInstance('joy.p0.title', 400, 'Wrong hash must be refused', 'ltr', 'hold');
+    const wrongHash = { ...valid, font: { ...valid.font, sha256: '0'.repeat(64) } };
+    const response = await runP0DesktopHandoff([
+      {
+        id: 'wrong-font-hash',
+        kind: 'capture',
+        context: projectContext(wrongHash),
+        timeUs: 500_000,
+        width: 720,
+        height: 1280,
+      },
+    ]);
+    const result = operationResult(response, 'wrong-font-hash');
+    expect(result.error, 'desktop capture must reject a mismatched font descriptor').toBeDefined();
+    expect(JSON.stringify(result.error)).toMatch(/font|integrity|sha256/i);
+    expect(result.surfaces).toEqual({});
   }, 180_000);
 });
 

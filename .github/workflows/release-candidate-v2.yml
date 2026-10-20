@@ -266,7 +266,7 @@ jobs:
           test -n "$chromium_path" && test -x "$chromium_path" || { echo 'Locked Playwright Chromium is required on the Linux P0 runner' >&2; exit 1; }
           command -v ffmpeg >/dev/null || { echo 'ffmpeg is required on the Linux P0 runner' >&2; exit 1; }
           command -v ffprobe >/dev/null || { echo 'ffprobe is required on the Linux P0 runner' >&2; exit 1; }
-          ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]](ass|subtitles)[[:space:]]' || { echo 'FFmpeg with libass filters is required on the Linux P0 runner' >&2; exit 1; }
+          ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]]ass[[:space:]]' || { echo 'FFmpeg with the ass filter is required on the Linux P0 runner' >&2; exit 1; }
           export JOY_REQUIRE_CHROMIUM=1
           export JOY_CHROMIUM_PATH="$chromium_path"
           node node_modules/typescript/bin/tsc -b apps/cli
@@ -324,7 +324,7 @@ jobs:
           ffprobe -version
           if ($LASTEXITCODE -ne 0) { throw "ffprobe check failed with exit code $LASTEXITCODE." }
           $ffmpegFilters = ffmpeg -hide_banner -filters 2>&1 | Out-String
-          if ($LASTEXITCODE -ne 0 -or $ffmpegFilters -notmatch '(?m)\s(ass|subtitles)\s') { throw 'FFmpeg with libass filters is required on the Windows P0 runner.' }
+          if ($LASTEXITCODE -ne 0 -or $ffmpegFilters -notmatch '(?m)\sass\s') { throw 'FFmpeg with the ass filter is required on the Windows P0 runner.' }
           $env:JOY_REQUIRE_CHROMIUM = '1'
           node node_modules/typescript/bin/tsc -b apps/cli
           if ($LASTEXITCODE -ne 0) { throw "CLI TypeScript build failed with exit code $LASTEXITCODE." }
@@ -337,6 +337,14 @@ jobs:
           }
           node node_modules/vitest/vitest.mjs run --config vitest.p0.config.ts
           if ($LASTEXITCODE -ne 0) { throw "P0 integration tests failed with exit code $LASTEXITCODE." }
+      - name: Check for untracked residue
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $status = git status --porcelain
+          if ($LASTEXITCODE -ne 0) { throw "git status failed with exit code $LASTEXITCODE." }
+          if ($status) { throw "Windows P0 left worktree residue:`n$status" }
 
   windows-worker-clean:
     name: windows-worker-clean (two exact passes)
@@ -1280,6 +1288,7 @@ jobs:
     needs:
       [
         linux-real-services,
+        windows-p0-real-services,
         node-contracts,
         windows-worker-clean,
         acceptance-primary,
@@ -1307,7 +1316,7 @@ jobs:
           # unexpected extra lane, fails), and require every lane's `result` to be
           # exactly "success" (failure / cancelled / skipped / timed_out all fail).
           node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$NEEDS_JSON" \
-            'linux-real-services,node-contracts,windows-worker-clean,acceptance-primary,acceptance-responsive,prod-build-smoke,real-service-acceptance,p3-real-services'
+            'linux-real-services,windows-p0-real-services,node-contracts,windows-worker-clean,acceptance-primary,acceptance-responsive,prod-build-smoke,real-service-acceptance,p3-real-services'
       - name: Install frozen workspace for the final source-bound gate
         shell: bash
         run: |

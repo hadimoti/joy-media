@@ -78,6 +78,24 @@ describe.runIf(requireChromium || findChromiumExecutable() !== undefined)(
         }
         expect(transparentPixels).toBeGreaterThan(0);
         expect(antialiasedPixels).toBeGreaterThan(0);
+        let glyphPixels = 0;
+        const plateRgb = [0x17, 0x32, 0x4d];
+        for (let y = 8; y <= 52; y++) {
+          for (let x = 24; x < 344; x++) {
+            const offset = (y * 360 + x) * 4;
+            const alpha = first.rgba[offset + 3]!;
+            const differsFromPlate =
+              first.rgba[offset] !== plateRgb[0] ||
+              first.rgba[offset + 1] !== plateRgb[1] ||
+              first.rgba[offset + 2] !== plateRgb[2];
+            const differsFromTransparentBackground = alpha > 0;
+            if (differsFromPlate && differsFromTransparentBackground) glyphPixels++;
+          }
+        }
+        expect(
+          glyphPixels,
+          'glyph pixels differ from the plate and transparent background',
+        ).toBeGreaterThan(0);
         const firstHash = createHash('sha256').update(first.rgba).digest('hex');
         const secondHash = createHash('sha256').update(second.rgba).digest('hex');
         expect(secondHash).toBe(firstHash);

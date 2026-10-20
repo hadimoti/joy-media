@@ -9,6 +9,7 @@ const RELEASE_WORKFLOW = readFileSync(
 
 const LANES = [
   'linux-real-services',
+  'windows-p0-real-services',
   'node-contracts',
   'windows-worker-clean',
   'acceptance-primary',
@@ -40,7 +41,7 @@ describe('release-gate summary evaluator — name-keyed', () => {
     expect(job).toContain('test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"');
     expect(job).toContain('vitest run apps/cli/src --no-file-parallelism');
     expect(RELEASE_WORKFLOW).toContain(
-      "'linux-real-services,node-contracts,windows-worker-clean,acceptance-primary,acceptance-responsive,prod-build-smoke,real-service-acceptance,p3-real-services'",
+      "'linux-real-services,windows-p0-real-services,node-contracts,windows-worker-clean,acceptance-primary,acceptance-responsive,prod-build-smoke,real-service-acceptance,p3-real-services'",
     );
     const gateStart = RELEASE_WORKFLOW.indexOf('\n  gate-summary:\n');
     expect(RELEASE_WORKFLOW.slice(gateStart)).toContain('        node-contracts,');
