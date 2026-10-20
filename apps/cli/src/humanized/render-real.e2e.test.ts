@@ -5,7 +5,7 @@
  *
  * Skipped when ffmpeg/ffprobe are not installed.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createSandbox, describeRun, type RunResult, type Sandbox } from './harness.js';
@@ -16,9 +16,26 @@ const HAS_FFMPEG = hasTool('ffmpeg') && hasTool('ffprobe');
 
 type Rgb = readonly [number, number, number];
 
-function ff(...args: string[]): void {
-  const res = spawnSync('ffmpeg', ['-v', 'error', '-y', ...args], { encoding: 'utf8' });
-  if (res.status !== 0) throw new Error(`ffmpeg ${args.join(' ')} failed: ${res.stderr}`);
+/**
+ * Encodes in an asynchronous child process. A synchronous spawn holds this worker's event loop for
+ * the whole encode; under full-suite load several encodes in one hook can exceed the runner's
+ * 60 s task-update timeout.
+ */
+function ff(...args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('ffmpeg', ['-v', 'error', '-y', ...args], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true,
+    });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => (stderr += chunk));
+    child.once('error', reject);
+    child.once('close', (status) => {
+      if (status === 0) resolve();
+      else reject(new Error(`ffmpeg ${args.join(' ')} failed: ${stderr}`));
+    });
+  });
 }
 
 function colourAt(file: string, seconds: number): Rgb {
@@ -91,11 +108,11 @@ describe.skipIf(!HAS_FFMPEG)('render makes real video (real binary + real ffmpeg
   let sb: Sandbox;
   let media: (name: string) => string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     sb = createSandbox('render-real');
     media = (name) => sb.path('media', name);
     mkdirSync(sb.path('media'), { recursive: true });
-    ff(
+    await ff(
       '-f',
       'lavfi',
       '-i',
@@ -113,7 +130,7 @@ describe.skipIf(!HAS_FFMPEG)('render makes real video (real binary + real ffmpeg
       'aac',
       media('red.mp4'),
     );
-    ff(
+    await ff(
       '-f',
       'lavfi',
       '-i',
@@ -132,7 +149,7 @@ describe.skipIf(!HAS_FFMPEG)('render makes real video (real binary + real ffmpeg
       media('blue.mp4'),
     );
     // red for 2 s, then blue for 2 s, one continuous source
-    ff(
+    await ff(
       '-f',
       'lavfi',
       '-i',
@@ -159,8 +176,8 @@ describe.skipIf(!HAS_FFMPEG)('render makes real video (real binary + real ffmpeg
       'aac',
       media('redblue.mp4'),
     );
-    ff('-f', 'lavfi', '-i', 'color=c=lime:s=400x400', '-frames:v', '1', media('green.png'));
-    ff('-f', 'lavfi', '-i', 'sine=f=660:d=3', media('tone.wav'));
+    await ff('-f', 'lavfi', '-i', 'color=c=lime:s=400x400', '-frames:v', '1', media('green.png'));
+    await ff('-f', 'lavfi', '-i', 'sine=f=660:d=3', media('tone.wav'));
   }, 120_000);
   afterAll(() => sb.cleanup());
 
@@ -413,7 +430,7 @@ describe.skipIf(!HAS_FFMPEG)('render makes real video (real binary + real ffmpeg
 
   it('a source file that disappears after it was added makes render fail loudly, with nothing written', async () => {
     const id = await newProject('Vanishing source');
-    ff(
+    await ff(
       '-f',
       'lavfi',
       '-i',
@@ -494,7 +511,7 @@ describe.skipIf(!HAS_FFMPEG)('render makes real video (real binary + real ffmpeg
   ])(
     '%s in the middle of an encode exits with its signal status and leaves no half-written video behind',
     async ({ signal, exitCode }) => {
-      ff(
+      await ff(
         '-f',
         'lavfi',
         '-i',
