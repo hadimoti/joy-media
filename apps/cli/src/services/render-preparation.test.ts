@@ -671,7 +671,11 @@ describe('RenderPreparationV1', () => {
   it('refuses a changed Chromium file before invoking its probe', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-render-chromium-before-probe-'));
     const executablePath = join(directory, 'chrome.exe');
+    const ffmpegPath = join(directory, 'ffmpeg.exe');
+    const previousFFmpegPath = process.env['JOY_MEDIA_FFMPEG'];
     writeFileSync(executablePath, 'changed chromium');
+    writeFileSync(ffmpegPath, 'stable ffmpeg fixture');
+    process.env['JOY_MEDIA_FFMPEG'] = ffmpegPath;
     let probes = 0;
     setRenderPreparationCommandRunnerForTests(async () => ({ status: 0, output: '' }));
     setRenderPreparationChromiumProbeForTests(async () => {
@@ -691,6 +695,8 @@ describe('RenderPreparationV1', () => {
     } finally {
       setRenderPreparationCommandRunnerForTests(undefined);
       setRenderPreparationChromiumProbeForTests(undefined);
+      if (previousFFmpegPath === undefined) delete process.env['JOY_MEDIA_FFMPEG'];
+      else process.env['JOY_MEDIA_FFMPEG'] = previousFFmpegPath;
       rmSync(directory, { recursive: true, force: true });
     }
   });

@@ -122,7 +122,7 @@ function findAssetIdCollision(
         path,
       );
     const isUniversalTimelineAssetReference =
-      /^documents\.timeline\.universalTimeline\.items\[\d+\]\.source\.id$/u.test(path);
+      /^documents\.(?:visual|timeline)\.universalTimeline\.items\[\d+\]\.source\.id$/u.test(path);
     const isVisualClipBindingAssetReference =
       /^documents\.(?:visual|timeline)\.clipBindings\[\d+\]\.clip\.assetId$/u.test(path);
     const isTimelineSourceBindingAssetReference =

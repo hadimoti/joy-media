@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { builtinModules } from 'node:module';
 
@@ -12,6 +12,8 @@ const { build } = await import(`file://${esbuildPath.replace(/\\/g, '/')}`);
 const nodeExternals = [...builtinModules, ...builtinModules.map((m) => `node:${m}`)];
 
 const cliRoot = resolve(import.meta.dirname, '..');
+const bundleOutput = resolve(cliRoot, 'dist', 'joy-media-bundle.mjs');
+const bundleTemporaryOutput = `${bundleOutput}.tmp-${process.pid}`;
 const fontSource = resolve(
   cliRoot,
   '..',
@@ -42,41 +44,49 @@ function copyVerified(file) {
   }
 }
 
-await build({
-  entryPoints: [resolve(cliRoot, 'src', 'bin.ts')],
-  bundle: true,
-  platform: 'node',
-  target: 'node22',
-  format: 'esm',
-  outfile: resolve(cliRoot, 'dist', 'joy-media-bundle.mjs'),
-  packages: 'bundle',
-  banner: {
-    js: `#!/usr/bin/env node
+try {
+  await build({
+    entryPoints: [resolve(cliRoot, 'src', 'bin.ts')],
+    bundle: true,
+    platform: 'node',
+    target: 'node22',
+    format: 'esm',
+    outfile: bundleTemporaryOutput,
+    packages: 'bundle',
+    banner: {
+      js: `#!/usr/bin/env node
 import { createRequire as __createRequire } from "node:module";
 const require = __createRequire(import.meta.url);
 `,
-  },
-  external: nodeExternals,
-});
+    },
+    external: nodeExternals,
+  });
 
-mkdirSync(fontOutput, { recursive: true });
-const fontManifest = JSON.parse(readFileSync(resolve(fontSource, 'manifest.json'), 'utf8'));
-if (
-  fontManifest.files.length !== expectedFontFiles.size ||
-  fontManifest.files.some((entry) => !expectedFontFiles.has(entry.file))
-) {
-  throw new Error('Noto Sans Arabic font manifest must list exactly the four bundled WOFF2 files');
-}
-for (const entry of fontManifest.files) {
-  const sourceBytes = readFileSync(resolve(fontSource, entry.file));
+  mkdirSync(fontOutput, { recursive: true });
+  const fontManifest = JSON.parse(readFileSync(resolve(fontSource, 'manifest.json'), 'utf8'));
   if (
-    sourceBytes.byteLength !== entry.byteLength ||
-    `sha256:${hash(sourceBytes)}` !== entry.sha256
+    fontManifest.files.length !== expectedFontFiles.size ||
+    fontManifest.files.some((entry) => !expectedFontFiles.has(entry.file))
   ) {
-    throw new Error(`Source font asset failed manifest verification: ${entry.file}`);
+    throw new Error(
+      'Noto Sans Arabic font manifest must list exactly the four bundled WOFF2 files',
+    );
   }
-  copyVerified(entry.file);
-}
-for (const file of ['manifest.json', 'LICENSE-OFL.txt']) copyVerified(file);
+  for (const entry of fontManifest.files) {
+    const sourceBytes = readFileSync(resolve(fontSource, entry.file));
+    if (
+      sourceBytes.byteLength !== entry.byteLength ||
+      `sha256:${hash(sourceBytes)}` !== entry.sha256
+    ) {
+      throw new Error(`Source font asset failed manifest verification: ${entry.file}`);
+    }
+    copyVerified(entry.file);
+  }
+  for (const file of ['manifest.json', 'LICENSE-OFL.txt']) copyVerified(file);
 
-console.log('Successfully bundled @joy-media/cli and verified its Noto Sans Arabic fonts');
+  renameSync(bundleTemporaryOutput, bundleOutput);
+  console.log('Successfully bundled @joy-media/cli and verified its Noto Sans Arabic fonts');
+} catch (error) {
+  rmSync(bundleTemporaryOutput, { force: true });
+  throw error;
+}

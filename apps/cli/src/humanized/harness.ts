@@ -59,10 +59,22 @@ function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+export function isCliBuildStale(state: {
+  readonly markerMtimeMs: number | undefined;
+  readonly binMtimeMs: number | undefined;
+  readonly bundleMtimeMs: number | undefined;
+  readonly newestSourceMtimeMs: number;
+}): boolean {
+  if (
+    state.markerMtimeMs === undefined ||
+    state.binMtimeMs === undefined ||
+    state.bundleMtimeMs === undefined
+  )
+    return true;
+  return state.newestSourceMtimeMs > state.markerMtimeMs + 1;
+}
+
 function buildIsStale(): boolean {
-  if (!existsSync(BUILD_COMPLETE)) return true;
-  if (!existsSync(DIST_BIN) || !existsSync(BUNDLE_ENTRY)) return true;
-  const builtAt = Math.min(statSync(DIST_BIN).mtimeMs, statSync(BUNDLE_ENTRY).mtimeMs);
   const skip = new Set(['node_modules', 'dist', '.git']);
   const watched = [
     join(CLI_ROOT, 'src'),
@@ -74,7 +86,13 @@ function buildIsStale(): boolean {
     join(REPO_ROOT, 'packages', 'motion-core', 'src'),
   ];
   // Test files do not affect the shipped binary.
-  return watched.some((dir) => newestMtime(dir, new Set([...skip, 'humanized'])) > builtAt + 1);
+  const sourceSkip = new Set([...skip, 'humanized']);
+  return isCliBuildStale({
+    markerMtimeMs: existsSync(BUILD_COMPLETE) ? statSync(BUILD_COMPLETE).mtimeMs : undefined,
+    binMtimeMs: existsSync(DIST_BIN) ? statSync(DIST_BIN).mtimeMs : undefined,
+    bundleMtimeMs: existsSync(BUNDLE_ENTRY) ? statSync(BUNDLE_ENTRY).mtimeMs : undefined,
+    newestSourceMtimeMs: Math.max(...watched.map((dir) => newestMtime(dir, sourceSkip))),
+  });
 }
 
 let buildChecked = false;

@@ -103,6 +103,53 @@ describe('desktop project export envelope', () => {
     );
   });
 
+  it('preserves asset references in the visual universal timeline', () => {
+    const { project, sources, id } = fixture();
+    const timelineProject = structuredClone(project) as unknown as {
+      rootCompositionId: string;
+      compositions: Record<
+        string,
+        { tracks: Array<{ id: string; kind: string; clips: unknown[] }> }
+      >;
+      universalTimeline: { schemaVersion: number; items: unknown[] };
+    };
+    const root = timelineProject.compositions[timelineProject.rootCompositionId]!;
+    const videoTrack = root.tracks.find((track) => track.kind === 'video');
+    expect(videoTrack).toBeDefined();
+    timelineProject.universalTimeline = {
+      schemaVersion: 1,
+      items: [
+        {
+          id: 'timeline-asset-reference',
+          compositionId: timelineProject.rootCompositionId,
+          trackId: videoTrack!.id,
+          elementKind: 'image',
+          startUs: 0,
+          durationUs: 1_000_000,
+          source: { kind: 'asset', id },
+          withinTrackOrder: 0,
+        },
+      ],
+    };
+
+    const envelope = buildDesktopProjectEnvelope(timelineProject as never, sources);
+
+    expect(envelope.documents.visual.universalTimeline).toMatchObject({
+      items: [{ source: { kind: 'asset', id } }],
+    });
+  });
+
+  it('refuses an asset id used as visual title text', () => {
+    const { project, sources, id } = fixture();
+
+    expect(() => buildDesktopProjectEnvelope({ ...project, title: id }, sources)).toThrowError(
+      expect.objectContaining({
+        code: 'DESKTOP_EXPORT_ASSET_ID_COLLISION',
+        message: expect.stringContaining('documents.visual.title'),
+      }),
+    );
+  });
+
   it('refuses asset ids inside an opaque namespace named assets', () => {
     const { project, sources, id } = fixture();
     const opaqueProject = {

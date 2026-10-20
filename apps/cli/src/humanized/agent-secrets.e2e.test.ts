@@ -24,6 +24,7 @@ import {
   type MockLlmServer,
 } from './agent-helpers.js';
 import { describeRun, type RunResult } from './harness.js';
+import { resolveWindowsSystemExecutablePath } from '../utils/config.js';
 
 const KEY = fakeKey('secret');
 const BROAD_WINDOWS_SIDS = ['S-1-1-0', 'S-1-5-11', 'S-1-5-32-545'];
@@ -60,7 +61,7 @@ function expectPrivateWindowsAcl(path: string): void {
   expect(sids, `${path} ACL`).toContain('S-1-5-18');
   expect(sids, `${path} ACL`).toContain('S-1-5-32-544');
   expect(sids, `${path} ACL`).toContain(
-    execFileSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], {
+    execFileSync(resolveWindowsSystemExecutablePath('whoami.exe'), ['/user', '/fo', 'csv', '/nh'], {
       encoding: 'utf8',
       windowsHide: true,
     }).match(/S-1-[0-9-]+/)?.[0],

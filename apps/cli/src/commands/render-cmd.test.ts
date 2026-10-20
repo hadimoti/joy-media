@@ -18,7 +18,6 @@ import {
   RENDER_PRESETS,
   runHeadlessRender,
   publishPreviewAtomically,
-  assertNoRenderOutputCollision,
   safeFileStem,
 } from './render-cmd.js';
 import { createDefaultProject, saveProject } from '../utils/project-loader.js';
@@ -328,23 +327,30 @@ describe('joy render (headless batch render command)', () => {
     }
   });
 
-  it('rejects a render output that resolves to an input file', () => {
+  it('refuses a normal render output that resolves to an input file', async () => {
     const directory = mkdtempSync(join(tempDir, 'render-output-collision-'));
-    const inputPath = join(directory, 'source.mp4');
-    const outputAlias = join(directory, '.', 'source.mp4');
-    writeFileSync(inputPath, 'media');
+    const inputPath = join(directory, 'collision.mp4.manifest.json');
+    const original = Buffer.from('original input bytes');
+    writeFileSync(inputPath, original);
+    const project = createDefaultProject('Collision', { id: 'collision' });
+    (project.assets as Record<string, unknown>)[inputPath] = { id: inputPath, kind: 'video' };
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
     try {
-      let error: unknown;
-      try {
-        assertNoRenderOutputCollision(outputAlias, [inputPath]);
-      } catch (caught) {
-        error = caught;
-      }
-      expect(error).toMatchObject({ code: 'RENDER_OUTPUT_COLLIDES_WITH_INPUT' });
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain(outputAlias);
-      expect((error as Error).message).toContain(inputPath);
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: directory,
+        concurrency: 1,
+        json: true,
+      });
+      expect(result.exitCode).toBe(1);
+      const event = JSON.parse(capture.text().trim()) as { code: string; message: string };
+      expect(event.code).toBe('RENDER_OUTPUT_COLLIDES_WITH_INPUT');
+      expect(event.message).toContain(inputPath);
+      expect(readFileSync(inputPath)).toEqual(original);
     } finally {
+      restore();
       rmSync(directory, { recursive: true, force: true });
     }
   });

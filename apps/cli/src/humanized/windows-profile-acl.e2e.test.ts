@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAgentSandbox, type AgentSandbox } from './agent-helpers.js';
 import { describeRun } from './harness.js';
+import { resolveWindowsSystemExecutablePath } from '../utils/config.js';
 
 function icaclsOf(path: string): string {
   const r = spawnSync('icacls.exe', [path], {
@@ -25,11 +26,15 @@ function icaclsOf(path: string): string {
 }
 
 function currentUserSid(): string {
-  const r = spawnSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], {
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 10_000,
-  });
+  const r = spawnSync(
+    resolveWindowsSystemExecutablePath('whoami.exe'),
+    ['/user', '/fo', 'csv', '/nh'],
+    {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 10_000,
+    },
+  );
   const sid = r.stdout.match(/S-1-[0-9-]+/)?.[0];
   if (!sid) throw new Error('Could not read the current user SID for the test.');
   return sid;
