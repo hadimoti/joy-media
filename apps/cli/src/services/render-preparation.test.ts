@@ -11,6 +11,7 @@ import {
   readRenderPreparation,
   setRenderPreparationFactsProviderForTests,
   setRenderPreparationCommandRunnerForTests,
+  setRenderPreparationChromiumProbeForTests,
   renderInputsDigest,
   validateRenderPreparation,
   type RenderPreparationFacts,
@@ -32,6 +33,9 @@ const facts: RenderPreparationFacts = {
     executablePath: 'ffmpeg',
     canonicalFace: 'Noto Sans Arabic Arabic 400',
     log: '',
+    libassVersion: '0.17',
+    shaperVersion: '10.0',
+    versionSource: 'canonical-caption-face-ass-probe',
   },
   libassAvailable: true,
   canonicalFaces: loadNotoSansArabicFaces(),
@@ -49,6 +53,7 @@ const facts: RenderPreparationFacts = {
     requiredFilters: ['ass', 'subtitles'],
     libassVersion: '0.17',
     shaperVersion: 'harfbuzz 10',
+    versionSource: 'canonical-caption-face-ass-probe',
   },
 };
 
@@ -392,7 +397,147 @@ describe('RenderPreparationV1', () => {
       ...captionProject,
       pluginData: { ...captionProject.pluginData, 'joy.renderPreparation': preparation },
     } as unknown as CliProjectDocument;
-    await expect(validateRenderPreparation(saved, measuredFacts)).resolves.toEqual(preparation);
+    setRenderPreparationFactsProviderForTests(async () => ({ ...facts }));
+    try {
+      await expect(validateRenderPreparation(saved)).resolves.toEqual(preparation);
+    } finally {
+      setRenderPreparationFactsProviderForTests(undefined);
+    }
+  });
+
+  it('refuses frozen caption widths that overflow their recorded available width', async () => {
+    const captionProject = makeCaptionProject();
+    const measuredFacts = { ...facts, measureText: (_text: string, size: number) => size * 3 };
+    const preparation = freezeRenderPreparation(
+      captionProject,
+      [{ op: 'addCaption' }],
+      measuredFacts,
+    );
+    const saved = structuredClone({
+      ...captionProject,
+      pluginData: { ...captionProject.pluginData, 'joy.renderPreparation': preparation },
+    }) as unknown as CliProjectDocument;
+    const record = saved.pluginData['joy.renderPreparation'] as any;
+    record.captions.cues[0].measuredWidthsPx[0] = record.captions.cues[0].maxWidthPx + 1;
+    await expect(validateRenderPreparation(saved, facts)).rejects.toMatchObject({
+      code: 'RENDER_PREPARATION_INVALID',
+    });
+  });
+
+  it('refuses missing or changed frozen caption measurement widths', async () => {
+    const captionProject = makeCaptionProject();
+    const measuredFacts = { ...facts, measureText: (_text: string, size: number) => size * 3 };
+    const preparation = freezeRenderPreparation(
+      captionProject,
+      [{ op: 'addCaption' }],
+      measuredFacts,
+    );
+    const makeSaved = () =>
+      structuredClone({
+        ...captionProject,
+        pluginData: { ...captionProject.pluginData, 'joy.renderPreparation': preparation },
+      }) as unknown as CliProjectDocument;
+    const missingWidth = makeSaved();
+    delete (missingWidth.pluginData['joy.renderPreparation'] as any).captions.cues[0]
+      .measuredWidthsPx;
+    await expect(validateRenderPreparation(missingWidth, facts)).rejects.toMatchObject({
+      code: 'RENDER_PREPARATION_INVALID',
+    });
+
+    const changedWidth = makeSaved();
+    (
+      changedWidth.pluginData['joy.renderPreparation'] as any
+    ).captions.cues[0].measuredWidthsPx[0] += 1;
+    await expect(validateRenderPreparation(changedWidth, facts)).rejects.toMatchObject({
+      code: 'RENDER_ENVIRONMENT_DRIFT',
+    });
+  });
+
+  it('refuses a changed Chromium file before invoking its probe', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-render-chromium-before-probe-'));
+    const executablePath = join(directory, 'chrome.exe');
+    writeFileSync(executablePath, 'changed chromium');
+    let probes = 0;
+    setRenderPreparationCommandRunnerForTests(async () => ({ status: 0, output: '' }));
+    setRenderPreparationChromiumProbeForTests(async () => {
+      probes += 1;
+      return { version: 'Chromium should not run' };
+    });
+    try {
+      await expect(
+        readRenderPreparationFacts({
+          title: true,
+          captions: false,
+          chromiumExecutablePath: executablePath,
+          expectedChromiumSha256: 'sha256:recorded-chromium',
+        }),
+      ).rejects.toMatchObject({ code: 'RENDER_ENVIRONMENT_DRIFT' });
+      expect(probes).toBe(0);
+    } finally {
+      setRenderPreparationCommandRunnerForTests(undefined);
+      setRenderPreparationChromiumProbeForTests(undefined);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a changed FFmpeg file before invoking any FFmpeg probe', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-render-ffmpeg-before-probe-'));
+    const executablePath = join(directory, 'ffmpeg.exe');
+    const previousFFmpegPath = process.env['JOY_MEDIA_FFMPEG'];
+    writeFileSync(executablePath, 'changed ffmpeg');
+    process.env['JOY_MEDIA_FFMPEG'] = executablePath;
+    let probes = 0;
+    setRenderPreparationCommandRunnerForTests(async () => {
+      probes += 1;
+      return { status: 0, output: '' };
+    });
+    try {
+      await expect(
+        readRenderPreparationFacts({
+          title: false,
+          captions: true,
+          expectedFFmpegSha256: 'sha256:recorded-ffmpeg',
+        }),
+      ).rejects.toMatchObject({ code: 'RENDER_ENVIRONMENT_DRIFT' });
+      expect(probes).toBe(0);
+    } finally {
+      setRenderPreparationCommandRunnerForTests(undefined);
+      if (previousFFmpegPath === undefined) delete process.env['JOY_MEDIA_FFMPEG'];
+      else process.env['JOY_MEDIA_FFMPEG'] = previousFFmpegPath;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('records libass and HarfBuzz versions from the canonical ASS probe output', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-render-ass-versions-'));
+    const executablePath = join(directory, 'ffmpeg.exe');
+    const previousFFmpegPath = process.env['JOY_MEDIA_FFMPEG'];
+    writeFileSync(executablePath, 'fake ffmpeg');
+    process.env['JOY_MEDIA_FFMPEG'] = executablePath;
+    setRenderPreparationCommandRunnerForTests(async (_binary, args) => {
+      if (args.includes('-buildconf'))
+        return { status: 0, output: 'libass 99.0 HarfBuzz 99.0 --enable-libass' };
+      if (args.includes('-filters')) return { status: 0, output: 'ass subtitles' };
+      if (args.includes('-version')) return { status: 0, output: 'ffmpeg version fake' };
+      return {
+        status: 0,
+        output:
+          'libass source: 0.17.2\nUsing HarfBuzz 9.1.0\nfontselect: (Noto Sans Arabic) -> Noto Sans Arabic,\n',
+      };
+    });
+    try {
+      const current = await readRenderPreparationFacts({ title: false, captions: true });
+      expect(current.ffmpeg).toMatchObject({
+        libassVersion: '0.17.2',
+        shaperVersion: '9.1.0',
+        versionSource: 'canonical-caption-face-ass-probe',
+      });
+    } finally {
+      setRenderPreparationCommandRunnerForTests(undefined);
+      if (previousFFmpegPath === undefined) delete process.env['JOY_MEDIA_FFMPEG'];
+      else process.env['JOY_MEDIA_FFMPEG'] = previousFFmpegPath;
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('refuses an older policy version as environment drift', async () => {

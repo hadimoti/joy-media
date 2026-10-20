@@ -1,7 +1,7 @@
 import { deflate, deflateSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
-import { rm, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -11,6 +11,8 @@ import type {
   TitleInstanceV1,
 } from '@joy-media/project-schema';
 import { buildTitleSceneFrame } from '@joy-media/motion-core';
+import { getValidatedChromiumSha256 } from './render-preparation.js';
+import { CommandFailure } from '../utils/project-loader.js';
 
 export interface TitleFrameRate {
   readonly num: number;
@@ -290,11 +292,26 @@ export async function renderTitleFrames(
       executablePath = options.chromiumExecutablePath ?? runtime.findChromiumExecutable();
       if (!executablePath) throw new Error('Chromium executable was not found');
       if (options.chromiumExecutablePath !== undefined) {
+        const expectedSha256 = getValidatedChromiumSha256(options.chromiumExecutablePath);
+        const bytesBeforeProbe = await readFile(options.chromiumExecutablePath);
+        const actualSha256 = `sha256:${createHash('sha256').update(bytesBeforeProbe).digest('hex')}`;
+        if (expectedSha256 !== undefined && actualSha256 !== expectedSha256)
+          throw new CommandFailure(
+            'RENDER_ENVIRONMENT_DRIFT',
+            `Frozen Chromium hash changed before title capture (${JSON.stringify(options.chromiumExecutablePath)}). Re-prepare the project.`,
+          );
         const probe = await runtime.probeChromium({
           executablePath: options.chromiumExecutablePath,
           ...(options.signal === undefined ? {} : { signal: options.signal }),
         });
         if ('reason' in probe) throw new Error(probe.reason);
+        const bytesAfterProbe = await readFile(options.chromiumExecutablePath);
+        const hashAfterProbe = `sha256:${createHash('sha256').update(bytesAfterProbe).digest('hex')}`;
+        if (hashAfterProbe !== actualSha256)
+          throw new CommandFailure(
+            'RENDER_ENVIRONMENT_DRIFT',
+            `Chromium changed during title capture probing (${JSON.stringify(options.chromiumExecutablePath)}). Re-prepare the project.`,
+          );
       }
       fontManifestHashes = runtime
         .loadNotoSansArabicFaces()
@@ -302,6 +319,7 @@ export async function renderTitleFrames(
         .sort();
       driver = runtime.createChromiumSceneDriver({ executablePath });
     } catch (error) {
+      if (error instanceof CommandFailure) throw error;
       throw new Error(
         `Title instance "${sources[0]!.instanceId}" cannot render: Chromium is unavailable (${errorMessage(error)}).`,
       );

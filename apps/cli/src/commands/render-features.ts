@@ -253,6 +253,27 @@ export interface CanonicalCaptionFaceProbe {
   readonly canonicalFace: 'Noto Sans Arabic Arabic 400';
   readonly reason?: string;
   readonly log: string;
+  readonly libassVersion?: string;
+  readonly shaperVersion?: string;
+  readonly versionSource?: 'canonical-caption-face-ass-probe';
+}
+
+export function captionEngineVersionsFromAssProbe(log: string): {
+  readonly libassVersion: string;
+  readonly shaperVersion: string;
+  readonly versionSource: 'canonical-caption-face-ass-probe';
+} {
+  const libassVersion =
+    /\blibass\s+(?:source|version)\s*:\s*([0-9][\w.-]*)/i.exec(log)?.[1] ??
+    /\blibass\s+([0-9]+(?:\.[0-9]+)+)\b/i.exec(log)?.[1];
+  const shaperVersion = /\bHarfBuzz(?:\s+version)?\s*[: ]+\s*v?([0-9]+(?:\.[0-9]+)+)\b/i.exec(
+    log,
+  )?.[1];
+  return {
+    libassVersion: libassVersion ?? 'unavailable',
+    shaperVersion: shaperVersion ?? 'unavailable',
+    versionSource: 'canonical-caption-face-ass-probe',
+  };
 }
 
 const canonicalCaptionProbeCache = new Map<string, CanonicalCaptionFaceProbe>();
@@ -275,6 +296,7 @@ export function probeCanonicalCaptionFace(
       canonicalFace: 'Noto Sans Arabic Arabic 400',
       reason: `Canonical Noto Sans Arabic Arabic 400 face could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
       log: '',
+      ...captionEngineVersionsFromAssProbe(''),
     };
     canonicalCaptionProbeCache.set(executablePath, unavailable);
     return unavailable;
@@ -286,6 +308,7 @@ export function probeCanonicalCaptionFace(
       canonicalFace: 'Noto Sans Arabic Arabic 400',
       reason: 'The canonical Noto Sans Arabic Arabic 400 face is missing.',
       log: '',
+      ...captionEngineVersionsFromAssProbe(''),
     };
     canonicalCaptionProbeCache.set(executablePath, unavailable);
     return unavailable;
@@ -359,6 +382,7 @@ export function probeCanonicalCaptionFace(
           }
         : {}),
       log,
+      ...captionEngineVersionsFromAssProbe(log),
     };
     canonicalCaptionProbeCache.set(executablePath, probe);
     return probe;

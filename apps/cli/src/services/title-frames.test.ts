@@ -1,6 +1,8 @@
 import { inflateSync } from 'node:zlib';
-import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { startEncode } from '../commands/render-media.js';
 import {
@@ -18,6 +20,55 @@ import {
 } from './title-frames.js';
 
 describe('title frame timing and PNG encoding', () => {
+  it('refuses a changed recorded Chromium file before invoking its probe', async () => {
+    const directory = join(tmpdir(), `joy-title-chromium-drift-${process.pid}`);
+    const executablePath = join(directory, 'chrome.exe');
+    rmSync(directory, { recursive: true, force: true });
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(executablePath, 'changed chromium');
+    let probes = 0;
+    vi.resetModules();
+    vi.doMock('@joy-media/html-scene-runtime', () => ({
+      findChromiumExecutable: () => executablePath,
+      probeChromium: async () => {
+        probes += 1;
+        return { version: 'Chromium should not run' };
+      },
+      loadNotoSansArabicFaces: () => [{ sha256: 'font-hash' }],
+      scenePaintFontDescriptors: () => [],
+      createChromiumSceneDriver: () => {
+        throw new Error('Chromium must not be launched');
+      },
+    }));
+    const { renderTitleFrames } = await import('./title-frames.js');
+    const { pinChromiumExecutableSha256ForTests } = await import('./render-preparation.js');
+    const recordedHash = `sha256:${createHash('sha256').update('recorded chromium').digest('hex')}`;
+    pinChromiumExecutableSha256ForTests(executablePath, recordedHash);
+    try {
+      await expect(
+        renderTitleFrames(
+          [
+            {
+              instanceId: 'drift',
+              instance: {} as any,
+              startUs: 0,
+              durationUs: 33_334,
+              trackOrder: 0,
+            },
+          ],
+          { width: 320, height: 568, fps: { num: 30, den: 1 } },
+          { chromiumExecutablePath: executablePath },
+        ),
+      ).rejects.toMatchObject({ code: 'RENDER_ENVIRONMENT_DRIFT' });
+      expect(probes).toBe(0);
+    } finally {
+      pinChromiumExecutableSha256ForTests(executablePath, undefined);
+      vi.doUnmock('@joy-media/html-scene-runtime');
+      vi.resetModules();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('reports RENDER_CANCEL_TIMEOUT at the five-second cleanup deadline', async () => {
     vi.useFakeTimers();
     const controller = new AbortController();
