@@ -232,6 +232,14 @@ jobs:
           test -n "${JOY_MEDIA_CI_S3_HEALTHCHECK_URL:-}" || { echo 'JOY_MEDIA_CI_S3_HEALTHCHECK_URL is not configured on this isolated runner' >&2; exit 1; }
           curl --fail --silent --show-error "$JOY_MEDIA_CI_S3_HEALTHCHECK_URL" >/dev/null
       - run: pnpm install --frozen-lockfile
+      - name: Install locked Playwright Chromium before the gates that need it
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec playwright install chromium
+          chromium_path="$(node -e "process.stdout.write(require('@playwright/test').chromium.executablePath())")"
+          test -x "$chromium_path" || { echo 'Locked Playwright Chromium executable is missing' >&2; exit 1; }
+          echo "JOY_CHROMIUM_PATH=$chromium_path" >> "$GITHUB_ENV"
       - name: Run source and real-service gates
         shell: bash
         run: |
@@ -250,14 +258,6 @@ jobs:
           release_command="${JOY_MEDIA_CI_RELEASE_COMMAND:-}"
           test -x "$release_command" || { echo 'JOY_MEDIA_CI_RELEASE_COMMAND must point to the isolated Linux release harness' >&2; exit 1; }
           "$release_command" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "${{ matrix.pass }}"
-      - name: Install locked Playwright Chromium for P0
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm exec playwright install chromium
-          chromium_path="$(node -e "process.stdout.write(require('@playwright/test').chromium.executablePath())")"
-          test -x "$chromium_path" || { echo 'Locked Playwright Chromium executable is missing' >&2; exit 1; }
-          echo "JOY_CHROMIUM_PATH=$chromium_path" >> "$GITHUB_ENV"
       - name: Run P0 font, browser, and render integration lane
         shell: bash
         run: |
@@ -401,6 +401,16 @@ jobs:
           if ($env:JOY_MEDIA_WINDOWS_IMAGE_DIGEST -notmatch '^sha256:[0-9a-f]{64}$') { throw 'the Windows Docker runner must expose its immutable image digest' }
       - run: pnpm install --frozen-lockfile
         shell: powershell
+      - name: Install locked Playwright Chromium for the packaged HTML scene
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm exec playwright install chromium
+          if ($LASTEXITCODE -ne 0) { throw "Locked Playwright Chromium install failed with exit code $LASTEXITCODE." }
+          $chromiumPath = node -e "process.stdout.write(require('@playwright/test').chromium.executablePath())"
+          if ($LASTEXITCODE -ne 0) { throw "Locked Playwright Chromium path lookup failed with exit code $LASTEXITCODE." }
+          if (-not (Test-Path -LiteralPath $chromiumPath -PathType Leaf)) { throw "Locked Playwright Chromium executable is missing: $chromiumPath" }
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "JOY_CHROMIUM_PATH=$chromiumPath$([Environment]::NewLine)")
       - name: Install and verify Electron runtime
         shell: powershell
         run: |
