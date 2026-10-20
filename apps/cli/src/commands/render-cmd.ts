@@ -31,12 +31,15 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  linkSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmdirSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -73,6 +76,8 @@ import {
   startEncode,
   type MediaPlanReady,
 } from './render-media.js';
+import { loadAssetSourcesIfPresent } from '../utils/asset-sources.js';
+import { resolveRenderMediaSource } from '../services/render-preparation.js';
 import {
   CommandFailure,
   listProjects,
@@ -221,6 +226,7 @@ export type RenderErrorCode =
   | 'RENDER_PREPARATION_INVALID'
   | 'RENDER_ENVIRONMENT_DRIFT'
   | 'RENDER_OUTPUT_COLLIDES_WITH_INPUT'
+  | 'RENDER_OUTPUT_BUSY'
   | 'CAPTION_UNSUPPORTED'
   | 'CAPTION_LAYOUT_OVERFLOW'
   | 'CAPTION_TIMING_UNREPRESENTABLE'
@@ -962,6 +968,8 @@ export async function runHeadlessRender(
     };
   };
 
+  const artifactOwnerReleases: Array<() => void> = [];
+
   try {
     const plan = planRender(project, presetSpec);
     if (!plan.ok) return failure('invalid-project', plan.message);
@@ -969,7 +977,12 @@ export async function runHeadlessRender(
     const titleSources = collectTitleSources(project);
     let renderPreparation: Awaited<ReturnType<typeof validateRenderPreparation>>;
     try {
-      renderPreparation = await validateRenderPreparation(project, undefined, cancellation.signal);
+      renderPreparation = await validateRenderPreparation(
+        project,
+        undefined,
+        cancellation.signal,
+        input.mediaDir,
+      );
     } catch (error) {
       if (cancellation.signal.aborted)
         return failure('cancelled', 'Render cancelled during validation.', 0, 0);
@@ -993,6 +1006,13 @@ export async function runHeadlessRender(
         error instanceof Error ? error.message : String(error),
       );
     }
+    const pinnedFfmpegExecutable =
+      renderPreparation?.ffmpeg.executablePath && renderPreparation.ffmpeg.executableSha256
+        ? {
+            path: renderPreparation.ffmpeg.executablePath,
+            sha256: renderPreparation.ffmpeg.executableSha256,
+          }
+        : undefined;
     const composition = rootCompositionOf(project);
     if (titleSources.length > 8)
       return failure('SLICE_LIMIT', 'At most 8 title instances are supported.');
@@ -1099,10 +1119,14 @@ export async function runHeadlessRender(
       }
       const stagingPath = join(
         outDir,
-        `.preview-${frameIndex}-${randomBytes(8).toString('hex')}.staging.png`,
+        `.${basename(artifactPath)}.${process.pid}.${randomBytes(8).toString('hex')}.staging.png`,
       );
       const outputProblem = prepareOutputDir(outDir, [artifactPath]);
       if (outputProblem) return failure('output', outputProblem, totalFrames, totalClips);
+      const previewOwner = acquireArtifactOwner(artifactPath);
+      if (!previewOwner.ok)
+        return failure('RENDER_OUTPUT_BUSY', previewOwner.message, totalFrames, totalClips);
+      artifactOwnerReleases.push(previewOwner.release);
       let captured;
       let previewHandle: ReturnType<typeof startEncode> | undefined;
       let encodeSettled = false;
@@ -1162,6 +1186,7 @@ export async function runHeadlessRender(
           () => {},
           ownedTempDirectories,
           cancellation.signal,
+          pinnedFfmpegExecutable,
         );
         const outcome = await previewHandle.done;
         encodeSettled = true;
@@ -1240,9 +1265,18 @@ export async function runHeadlessRender(
     const mediaName = `${fileStem}.${presetSpec.extension}`;
     const manifestName = `${fileStem}.${presetSpec.extension}.manifest.json`;
     try {
+      const projectAssets =
+        isRecord(project) && isRecord(project['assets']) ? project['assets'] : {};
+      const registeredSources = loadAssetSourcesIfPresent();
+      const resolvedProjectMedia = Object.entries(projectAssets)
+        .map(([assetId, asset]) =>
+          resolveRenderMediaSource(assetId, asset, registeredSources, input.mediaDir),
+        )
+        .filter((path): path is string => path !== null);
       const inputPaths = [
         ...(input.projectFilePath ? [input.projectFilePath] : []),
         ...(realMedia?.clips.map((clip) => clip.sourcePath) ?? []),
+        ...resolvedProjectMedia,
       ];
       for (const target of realMedia
         ? [join(outDir, mediaName), join(outDir, manifestName)]
@@ -1257,12 +1291,12 @@ export async function runHeadlessRender(
       warnings.push(`Project id "${plan.projectId}" is not a safe file name; using "${fileStem}".`);
     }
 
-    if (totalClips > 0) {
+    const outputTargets = realMedia
+      ? [join(outDir, mediaName), join(outDir, manifestName)]
+      : [join(outDir, manifestName)];
+    if (totalClips > 0 || input.manifestOnly) {
       // Fail before doing any work (and before announcing `start`) if the
       // destination can never be written.
-      const outputTargets = realMedia
-        ? [join(outDir, mediaName), join(outDir, manifestName)]
-        : [join(outDir, manifestName)];
       const outputProblem = prepareOutputDir(outDir, outputTargets);
       if (outputProblem) return failure('output', outputProblem, totalFrames, totalClips);
     }
@@ -1279,6 +1313,18 @@ export async function runHeadlessRender(
       releaseOutputLock = lock.release;
       recordOutputPartialPath = lock.recordPartialPath;
       recordOutputTransaction = lock.recordTransaction;
+    }
+
+    if (totalClips > 0 || input.manifestOnly) {
+      for (const target of outputTargets) {
+        const owner = acquireArtifactOwner(target);
+        if (!owner.ok) {
+          releaseOutputLock?.();
+          releaseOutputLock = null;
+          return failure('RENDER_OUTPUT_BUSY', owner.message, totalFrames, totalClips);
+        }
+        artifactOwnerReleases.push(owner.release);
+      }
     }
 
     if (!json) {
@@ -1597,6 +1643,7 @@ export async function runHeadlessRender(
             },
             ownedTempDirectories,
             cancellation.signal,
+            pinnedFfmpegExecutable,
           );
           outcome = await handle.done;
           encodeSettled = true;
@@ -1984,8 +2031,19 @@ export async function runHeadlessRender(
     const message = errorMessage(error);
     if (message.startsWith('RENDER_CANCEL_TIMEOUT:'))
       return failure('RENDER_CANCEL_TIMEOUT', message);
+    if (cancellation.signal.aborted || currentLongRunning < 0)
+      return failure('cancelled', 'Render cancelled.', 0, 0);
+    if (error instanceof CommandFailure && error.code === 'RENDER_ENVIRONMENT_DRIFT')
+      return failure('RENDER_ENVIRONMENT_DRIFT', error.message);
     throw error;
   } finally {
+    for (const release of artifactOwnerReleases.reverse()) {
+      try {
+        release();
+      } catch {
+        // Owner files remain recoverable if the output directory is temporarily unwritable.
+      }
+    }
     process.off('SIGINT', onSigint);
     process.off('SIGTERM', onSigterm);
     process.off('SIGBREAK', onSigbreak);
@@ -2212,6 +2270,131 @@ function isProcessAlive(pid: number): boolean {
     return true;
   } catch (err) {
     return (err as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+interface ArtifactOwnerRecord {
+  readonly pid: number;
+  readonly token: string;
+}
+
+function readArtifactOwner(path: string): ArtifactOwnerRecord | null {
+  try {
+    const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      Number.isSafeInteger((value as ArtifactOwnerRecord).pid) &&
+      typeof (value as ArtifactOwnerRecord).token === 'string'
+    )
+      return value as ArtifactOwnerRecord;
+  } catch {
+    // A malformed owner is busy; never guess that its output is safe to replace.
+  }
+  return null;
+}
+
+/** Claim one published file. Dead owners are moved aside atomically before cleanup. */
+function acquireArtifactOwner(
+  target: string,
+):
+  | { readonly ok: true; readonly release: () => void }
+  | { readonly ok: false; readonly message: string } {
+  const path = `${target}.owner`;
+  let recoveryPathPending: string | undefined;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const token = randomBytes(16).toString('hex');
+    const record: ArtifactOwnerRecord = { pid: process.pid, token };
+    let descriptor: number;
+    try {
+      descriptor = openSync(path, 'wx');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST')
+        return {
+          ok: false,
+          message: `Cannot claim render output owner ${path}: ${errorMessage(error)}`,
+        };
+      const observed = readArtifactOwner(path);
+      if (!observed || isProcessAlive(observed.pid))
+        return { ok: false, message: `Render output is busy at ${target} (owner: ${path}).` };
+      const recoveryPath = `${path}.stale-${randomBytes(8).toString('hex')}`;
+      try {
+        renameSync(path, recoveryPath);
+      } catch {
+        continue;
+      }
+      const recovered = readArtifactOwner(recoveryPath);
+      if (!recovered || recovered.token !== observed.token || isProcessAlive(recovered.pid)) {
+        try {
+          linkSync(recoveryPath, path);
+          unlinkSync(recoveryPath);
+        } catch {
+          // Keep the moved record if another owner appeared at the original path.
+        }
+        return {
+          ok: false,
+          message: `Render output is busy at ${target} (owner changed during recovery).`,
+        };
+      }
+      recoveryPathPending = recoveryPath;
+      continue;
+    }
+    try {
+      writeFileSync(descriptor, `${JSON.stringify(record)}\n`);
+    } catch (error) {
+      closeSync(descriptor);
+      try {
+        unlinkSync(path);
+      } catch {
+        // Best effort; the incomplete record will be treated as busy.
+      }
+      return {
+        ok: false,
+        message: `Cannot write render output owner ${path}: ${errorMessage(error)}`,
+      };
+    }
+    closeSync(descriptor);
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      process.off('exit', release);
+      if (readArtifactOwner(path)?.token !== token) return;
+      try {
+        unlinkSync(path);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    };
+    process.once('exit', release);
+    if (recoveryPathPending) {
+      try {
+        removeArtifactStagingFiles(target);
+        unlinkSync(recoveryPathPending);
+      } catch (recoveryError) {
+        release();
+        return {
+          ok: false,
+          message: `A dead render owner could not be recovered for ${target}: ${errorMessage(recoveryError)}`,
+        };
+      }
+      recoveryPathPending = undefined;
+    }
+    return { ok: true, release };
+  }
+  return { ok: false, message: `Render output is busy at ${target} (owner: ${path}).` };
+}
+
+function removeArtifactStagingFiles(target: string): void {
+  const directory = dirname(target);
+  const prefix = `.${basename(target)}.`;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (
+      entry.isFile() &&
+      entry.name.startsWith(prefix) &&
+      /(?:\.partial|\.tmp|\.staging(?:\.|$))/u.test(entry.name)
+    )
+      rmSync(join(directory, entry.name), { recursive: true, force: true });
   }
 }
 

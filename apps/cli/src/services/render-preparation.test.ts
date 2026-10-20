@@ -169,11 +169,26 @@ describe('RenderPreparationV1', () => {
     writeFileSync(mediaPath, 'original media bytes');
     const mediaProject = {
       ...project,
-      assets: { media: { id: 'media', sourcePath: mediaPath } },
+      assets: { [mediaPath]: { id: mediaPath, kind: 'video' } },
       compositions: {
         root: {
           ...project.compositions.root,
-          tracks: [{ id: 'video', kind: 'video', enabled: true, clips: [] }],
+          tracks: [
+            {
+              id: 'video',
+              kind: 'video',
+              enabled: true,
+              clips: [
+                {
+                  id: 'clip',
+                  kind: 'video',
+                  assetId: mediaPath,
+                  startUs: 0,
+                  durationUs: 1_000_000,
+                },
+              ],
+            },
+          ],
         },
       },
     } as unknown as CliProjectDocument;
@@ -191,6 +206,38 @@ describe('RenderPreparationV1', () => {
       await expect(validateRenderPreparation(saved, facts)).rejects.toMatchObject({
         code: 'RENDER_ENVIRONMENT_DRIFT',
       });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('includes renderer-resolved --media-dir bytes in the preparation digest', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-render-media-dir-digest-'));
+    const mediaPath = join(directory, 'clip.mp4');
+    writeFileSync(mediaPath, 'original bytes');
+    const mediaProject = {
+      ...project,
+      assets: { media: { id: 'media', kind: 'video', displayName: 'clip.mp4' } },
+      compositions: {
+        root: {
+          ...project.compositions.root,
+          tracks: [
+            {
+              id: 'video',
+              kind: 'video',
+              enabled: true,
+              clips: [
+                { id: 'clip', kind: 'video', assetId: 'media', startUs: 0, durationUs: 1_000_000 },
+              ],
+            },
+          ],
+        },
+      },
+    } as unknown as CliProjectDocument;
+    try {
+      const before = renderInputsDigest(mediaProject, directory);
+      writeFileSync(mediaPath, 'changed bytes');
+      expect(renderInputsDigest(mediaProject, directory)).not.toBe(before);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

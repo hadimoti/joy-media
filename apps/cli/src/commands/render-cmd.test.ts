@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -127,6 +128,28 @@ afterAll(() => {
 });
 
 describe('joy render (headless batch render command)', () => {
+  it('does not spawn FFmpeg when the pinned executable hash has drifted', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-ffmpeg-pin-'));
+    const executablePath = join(dir, 'ffmpeg');
+    writeFileSync(executablePath, 'validated executable');
+    const pinnedSha256 = `sha256:${createHash('sha256').update('validated executable').digest('hex')}`;
+    const spawn = vi.fn();
+    setEncodeSpawnForTests(spawn as never);
+    writeFileSync(executablePath, 'changed executable');
+    try {
+      expect(() =>
+        startEncode([], 1_000_000, () => {}, [], undefined, {
+          path: executablePath,
+          sha256: pinnedSha256,
+        }),
+      ).toThrowError(expect.objectContaining({ code: 'RENDER_ENVIRONMENT_DRIFT' }));
+      expect(spawn).not.toHaveBeenCalled();
+    } finally {
+      setEncodeSpawnForTests(undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.skipIf(process.platform !== 'win32')(
     'waits for the cancellation helper deadline before settling the encoder timeout',
     async () => {
@@ -174,8 +197,6 @@ describe('joy render (headless batch render command)', () => {
         exitCode: number | null;
         emit: (event: string, ...args: unknown[]) => boolean;
       }) {
-        this.exitCode = 1;
-        this.emit('close', null, 'SIGKILL');
         return true;
       }),
     });
@@ -185,9 +206,19 @@ describe('joy render (headless batch render command)', () => {
     const result = probeMediaAsync('long-running.mp4', { signal: controller.signal });
     setTimeout(() => controller.abort(), 0);
     try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(child.kill).toHaveBeenCalledOnce();
+      let settled = false;
+      void result.then(
+        () => (settled = true),
+        () => (settled = true),
+      );
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      child.exitCode = 1;
+      child.emit('close', null, 'SIGKILL');
       await expect(result).rejects.toMatchObject({ name: 'AbortError' });
       expect(performance.now() - started).toBeLessThan(100);
-      expect(child.kill).toHaveBeenCalled();
     } finally {
       setMediaProbeSpawnForTests(undefined);
     }
@@ -210,6 +241,90 @@ describe('joy render (headless batch render command)', () => {
       expect(existsSync(stagingPath)).toBe(false);
     } finally {
       rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a live owner of a manifest target', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-live-owner-'));
+    const target = join(dir, 'live-owner.mp4.manifest.json');
+    writeFileSync(`${target}.owner`, JSON.stringify({ pid: process.pid, token: 'live-owner' }));
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
+    try {
+      const result = await runHeadlessRender({
+        project: createDefaultProject('Live owner', { id: 'live-owner' }),
+        preset: 'mp4',
+        outDir: dir,
+        concurrency: 1,
+        json: true,
+        manifestOnly: true,
+      });
+      expect(result.exitCode).toBe(1);
+      const event = JSON.parse(capture.text().trim()) as { code: string; message: string };
+      expect(event.code).toBe('RENDER_OUTPUT_BUSY');
+      expect(event.message).toContain(target);
+    } finally {
+      restore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers a dead artifact owner, removes its staging files, and renders', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-dead-owner-'));
+    const target = join(dir, 'dead-owner.mp4.manifest.json');
+    const staging = join(dir, '.dead-owner.mp4.manifest.json.dead.staging');
+    writeFileSync(`${target}.owner`, JSON.stringify({ pid: 2_147_000_000, token: 'dead-owner' }));
+    writeFileSync(staging, 'partial');
+    const project = createDefaultProject('Dead owner', { id: 'dead-owner' });
+    const root = project.compositions['root'] as unknown as { tracks: Array<{ clips: unknown[] }> };
+    root.tracks[0]!.clips.push({
+      id: 'clip',
+      kind: 'video',
+      assetId: 'missing-media',
+      startUs: 0,
+      durationUs: 1_000_000,
+    });
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: dir,
+        concurrency: 1,
+        json: true,
+        manifestOnly: true,
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.artifactPath).toBe(target);
+      expect(existsSync(target)).toBe(true);
+      expect(existsSync(staging)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a manifest target that is also a media input', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-manifest-collision-'));
+    const media = join(dir, 'collision.mp4.manifest.json');
+    writeFileSync(media, 'original media');
+    const project = createDefaultProject('Collision', { id: 'collision' });
+    (project.assets as Record<string, unknown>)[media] = { id: media, kind: 'video' };
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: dir,
+        concurrency: 1,
+        json: true,
+        manifestOnly: true,
+      });
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(capture.text().trim()).code).toBe('RENDER_OUTPUT_COLLIDES_WITH_INPUT');
+      expect(readFileSync(media, 'utf8')).toBe('original media');
+    } finally {
+      restore();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

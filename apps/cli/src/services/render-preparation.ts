@@ -6,11 +6,12 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { canonicalJson, sha256Identity } from './prepared-edit.js';
 import {
@@ -456,9 +457,10 @@ function hashBytes(bytes: Uint8Array): string {
 function preparationInputDigest(
   project: unknown,
   recordWithoutDigest: Omit<RenderPreparationV1, 'renderInputsDigest'>,
+  mediaDir?: string,
 ): string {
   return sha256Identity({
-    project: renderInputsDigest(project),
+    project: renderInputsDigest(project, mediaDir),
     record: recordWithoutDigest,
   });
 }
@@ -1079,7 +1081,36 @@ function captionAssDocument(
   });
 }
 
-export function renderInputsDigest(project: unknown): string {
+/** Shared renderer resolver for a registered source, --media-dir name, or path asset id. */
+export function resolveRenderMediaSource(
+  assetId: string,
+  asset: unknown,
+  sources: Readonly<Record<string, string>>,
+  mediaDir?: string,
+): string | null {
+  const isFile = (path: string): boolean => {
+    try {
+      return existsSync(path) && statSync(path).isFile() && realpathSync(path) !== '';
+    } catch {
+      return false;
+    }
+  };
+  const registered = sources[assetId];
+  if (registered && isFile(registered)) return registered;
+  if (mediaDir) {
+    const displayName =
+      isRecord(asset) && typeof asset['displayName'] === 'string' ? asset['displayName'] : '';
+    for (const name of [assetId, displayName]) {
+      if (!name) continue;
+      const candidate = join(mediaDir, name);
+      if (isFile(candidate)) return resolve(candidate);
+    }
+  }
+  if (isFile(assetId)) return isAbsolute(assetId) ? assetId : resolve(assetId);
+  return null;
+}
+
+export function renderInputsDigest(project: unknown, mediaDir?: string): string {
   if (!isRecord(project)) return sha256Identity(project);
   const copy: Record<string, unknown> = { ...project };
   if (isRecord(copy['pluginData'])) {
@@ -1091,19 +1122,7 @@ export function renderInputsDigest(project: unknown): string {
   const registeredSources = loadAssetSourcesIfPresent();
   const files: Array<{ readonly path: string; readonly sha256: string }> = [];
   for (const [assetId, rawAsset] of Object.entries(assets)) {
-    const asset = isRecord(rawAsset) ? rawAsset : {};
-    const candidates = [
-      registeredSources[assetId],
-      ...['sourcePath', 'filePath', 'path', 'uri'].map((key) => asset[key]),
-      assetId,
-    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
-    const candidate = candidates.find((path) => {
-      try {
-        return existsSync(path) && realpathSync(path) !== '';
-      } catch {
-        return false;
-      }
-    });
+    const candidate = resolveRenderMediaSource(assetId, rawAsset, registeredSources, mediaDir);
     if (!candidate) continue;
     try {
       const canonicalPath = realpathSync(resolve(candidate));
@@ -1197,6 +1216,7 @@ export function freezeRenderPreparation(
   project: CliProjectDocument,
   operations: readonly { readonly op: string }[],
   facts: RenderPreparationFacts,
+  mediaDir?: string,
 ): RenderPreparationV1 {
   const title =
     operations.some(
@@ -1299,7 +1319,7 @@ export function freezeRenderPreparation(
   };
   return {
     ...recordWithoutDigest,
-    renderInputsDigest: preparationInputDigest(normalizedProject, recordWithoutDigest),
+    renderInputsDigest: preparationInputDigest(normalizedProject, recordWithoutDigest, mediaDir),
   };
 }
 
@@ -1326,6 +1346,7 @@ export async function validateRenderPreparation(
   project: CliProjectDocument,
   facts?: RenderPreparationFacts,
   signal?: AbortSignal,
+  mediaDir?: string,
 ): Promise<RenderPreparationV1 | undefined> {
   const title = projectHasTitles(project);
   const captions = projectHasCaptions(project);
@@ -1557,7 +1578,7 @@ export async function validateRenderPreparation(
       'RENDER_ENVIRONMENT_DRIFT',
       `Render environment or canonical font bytes changed after preparation (ffmpegShaMatch=${current.ffmpeg.executableSha256 === record.ffmpeg.executableSha256}, ffmpegVersionMatch=${current.ffmpeg.version === record.ffmpeg.version}, ffmpegBuildMatch=${(current.ffmpeg.executableSha256 !== null && current.ffmpeg.executableSha256 === record.ffmpeg.executableSha256) || current.ffmpeg.buildConfiguration === record.ffmpeg.buildConfiguration}, titleSettingsMatch=${!title || (record.chromium.locale === 'en-US' && record.chromium.deviceScaleFactor === 1 && canonicalJson(record.chromium.captureSettings) === canonicalJson({ transparent: true, animation: 'frozen' }))}, captionsMatch=${!captions || (current.libassAvailable && current.libassProbe.usable && canonicalJson(current.ffmpeg.requiredFilters) === canonicalJson(record.ffmpeg.requiredFilters))}). Re-prepare the project.`,
     );
-  if (preparationInputDigest(project, recordWithoutDigest) !== record.renderInputsDigest)
+  if (preparationInputDigest(project, recordWithoutDigest, mediaDir) !== record.renderInputsDigest)
     throw new CommandFailure(
       'RENDER_ENVIRONMENT_DRIFT',
       'Render inputs changed after preparation. Re-prepare the project.',

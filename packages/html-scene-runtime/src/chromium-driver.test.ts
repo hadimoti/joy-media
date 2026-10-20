@@ -175,8 +175,9 @@ describe('Chromium scene driver ownership', () => {
           if (message.type !== 'capture') return;
           setTimeout(() => {
             Atomics.store(new Int32Array(message.shared as SharedArrayBuffer, 0, 4), 3, 38123);
-          }, 5);
+          }, 25);
         });
+        fake.terminate = () => new Promise((resolve) => setTimeout(() => resolve(0), 20));
         return fake;
       },
       killTree: (pid) => {

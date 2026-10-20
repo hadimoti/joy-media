@@ -1,16 +1,19 @@
 /* global Buffer */
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { statSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { loadAssetSources } from '../utils/asset-sources.js';
 import { ffmpegBinary, probeMedia, probeMediaAsync, type MediaInfo } from '../utils/media-probe.js';
 import { compileCaptionAss } from '../services/captions-ass.js';
 import {
   RENDER_PREPARATION_KEY,
+  resolveRenderMediaSource,
   type RenderPreparationV1,
 } from '../services/render-preparation.js';
+import { CommandFailure } from '../utils/project-loader.js';
 import type { CanonicalCaptionFaceProbe } from './render-features.js';
 import { notoSansArabicArabic400Path } from '@joy-media/html-scene-runtime';
 import { normalizeUniversalTimeline, type JoyProjectV1 } from '@joy-media/project-schema';
@@ -140,14 +143,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const even = (n: number): number => Math.max(2, n - (n % 2));
-
-function fileExists(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
 
 /** Most gain a clip may take: +12 dB. */
 const MAX_CLIP_GAIN = 4;
@@ -304,20 +299,7 @@ function resolveSource(
   sources: Readonly<Record<string, string>>,
   mediaDir: string | undefined,
 ): string | null {
-  const registered = sources[assetId];
-  if (registered && fileExists(registered)) return registered;
-  if (mediaDir) {
-    const displayName =
-      isRecord(asset) && typeof asset['displayName'] === 'string' ? asset['displayName'] : '';
-    for (const name of [assetId, displayName]) {
-      if (!name) continue;
-      const candidate = join(mediaDir, name);
-      if (fileExists(candidate)) return resolve(candidate);
-    }
-  }
-  // The clip's asset label may itself be a path to a real file.
-  if (fileExists(assetId)) return isAbsolute(assetId) ? assetId : resolve(assetId);
-  return null;
+  return resolveRenderMediaSource(assetId, asset, sources, mediaDir);
 }
 
 /**
@@ -987,8 +969,26 @@ export function startEncode(
   onProgress: (fraction: number) => void,
   ownedTempDirectories: readonly string[] = [],
   signal?: AbortSignal,
+  pinnedExecutable?: { readonly path: string; readonly sha256: string },
 ): EncodeHandle {
-  const child = encodeSpawn(ffmpegBinary(), [...args], {
+  const executable = pinnedExecutable?.path ?? ffmpegBinary();
+  if (pinnedExecutable) {
+    let actualHash: string;
+    try {
+      actualHash = `sha256:${createHash('sha256').update(readFileSync(pinnedExecutable.path)).digest('hex')}`;
+    } catch (error) {
+      throw new CommandFailure(
+        'RENDER_ENVIRONMENT_DRIFT',
+        `The validated FFmpeg executable is no longer readable at ${pinnedExecutable.path}: ${String(error)}`,
+      );
+    }
+    if (actualHash !== pinnedExecutable.sha256)
+      throw new CommandFailure(
+        'RENDER_ENVIRONMENT_DRIFT',
+        `The validated FFmpeg executable changed before launch: ${pinnedExecutable.path}`,
+      );
+  }
+  const child = encodeSpawn(executable, [...args], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
     windowsHide: true,

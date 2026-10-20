@@ -150,79 +150,50 @@ export async function probeMediaAsync(
   const child: ChildProcess = mediaProbeSpawn(
     ffprobeBinary(),
     ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', path],
-    { windowsHide: true, ...(options.signal ? { signal: options.signal } : {}) },
+    { windowsHide: true },
   );
   return new Promise((resolve, reject) => {
     let output = '';
-    let settled = false;
-    const finish = (result: MediaInfo | null): void => {
-      if (settled) return;
-      settled = true;
+    let closed = false;
+    let stopResult:
+      | { readonly kind: 'resolve'; readonly value: null }
+      | { readonly kind: 'reject'; readonly error: unknown }
+      | undefined;
+    const finishOnClose = (status: number | null): void => {
+      if (closed) return;
+      closed = true;
       clearTimeout(timer);
       options.signal?.removeEventListener('abort', abort);
-      resolve(result);
-    };
-    const abort = (): void => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        options.signal?.removeEventListener('abort', abort);
-        reject(
-          options.signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'),
-        );
+      if (stopResult?.kind === 'reject') {
+        reject(stopResult.error);
+        return;
       }
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // The process may have exited at the same time as the cancellation.
+      if (stopResult?.kind === 'resolve' || status !== 0) {
+        resolve(null);
+        return;
       }
-    };
-    const timer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // A timed out process may already have exited.
-      }
-      finish(null);
-    }, timeoutMs);
-    child.stdout?.setEncoding('utf8');
-    child.stderr?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk: string) => {
-      output += chunk;
-      if (output.length > 16 * 1024 * 1024) {
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          // The process may be exiting already.
-        }
-        finish(null);
-      }
-    });
-    child.stderr?.on('data', (chunk: string) => {
-      output += chunk;
-      if (output.length > 16 * 1024 * 1024) finish(null);
-    });
-    child.once('error', () => finish(null));
-    child.once('close', (status) => {
-      if (status !== 0) return finish(null);
       let doc: { streams?: ProbeStream[]; format?: { format_name?: string; duration?: string } };
       try {
         doc = JSON.parse(output) as typeof doc;
       } catch {
-        return finish(null);
+        resolve(null);
+        return;
       }
       const streams = doc.streams ?? [];
       const video = streams.find(
         (stream) => stream.codec_type === 'video' && stream.disposition?.attached_pic !== 1,
       );
       const audio = streams.find((stream) => stream.codec_type === 'audio');
-      if (!video && !audio) return finish(null);
+      if (!video && !audio) {
+        resolve(null);
+        return;
+      }
       const formatName = doc.format?.format_name ?? '';
       const isImage = Boolean(video) && !audio && /image2|_pipe|png|jpeg|webp|bmp/.test(formatName);
       const seconds = Number.parseFloat(
         doc.format?.duration ?? video?.duration ?? audio?.duration ?? '',
       );
-      finish({
+      resolve({
         hasVideo: Boolean(video),
         hasAudio: Boolean(audio),
         hasAlpha: /(?:rgba|bgra|argb|abgr|yuva|gbrap|ya8|gray\d*a)/u.test(video?.pix_fmt ?? ''),
@@ -232,6 +203,92 @@ export async function probeMediaAsync(
         height: video?.height,
         mimeType: mimeTypeFor(path),
       });
+    };
+    const abort = (): void => {
+      if (stopResult || closed) return;
+      stopResult = {
+        kind: 'reject',
+        error:
+          options.signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'),
+      };
+      try {
+        if (!child.kill('SIGKILL'))
+          stopResult = {
+            kind: 'reject',
+            error: new Error('Media probe failed to terminate after cancellation.'),
+          };
+      } catch (error) {
+        stopResult = {
+          kind: 'reject',
+          error: new Error(`Media probe failed to terminate after cancellation: ${String(error)}`),
+        };
+      }
+    };
+    const timer = setTimeout(() => {
+      if (stopResult || closed) return;
+      stopResult = { kind: 'resolve', value: null };
+      try {
+        if (!child.kill('SIGKILL'))
+          stopResult = {
+            kind: 'reject',
+            error: new Error('Media probe failed to terminate after timeout.'),
+          };
+      } catch (error) {
+        stopResult = {
+          kind: 'reject',
+          error: new Error(`Media probe failed to terminate after timeout: ${String(error)}`),
+        };
+      }
+    }, timeoutMs);
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      if (stopResult) return;
+      output += chunk;
+      if (output.length > 16 * 1024 * 1024) {
+        stopResult = { kind: 'resolve', value: null };
+        try {
+          if (!child.kill('SIGKILL'))
+            stopResult = {
+              kind: 'reject',
+              error: new Error('Media probe failed to terminate after output overflow.'),
+            };
+        } catch (error) {
+          stopResult = {
+            kind: 'reject',
+            error: new Error(
+              `Media probe failed to terminate after output overflow: ${String(error)}`,
+            ),
+          };
+        }
+      }
+    });
+    child.stderr?.on('data', (chunk: string) => {
+      if (stopResult) return;
+      output += chunk;
+      if (output.length > 16 * 1024 * 1024) {
+        stopResult = { kind: 'resolve', value: null };
+        try {
+          if (!child.kill('SIGKILL'))
+            stopResult = {
+              kind: 'reject',
+              error: new Error('Media probe failed to terminate after output overflow.'),
+            };
+        } catch (error) {
+          stopResult = {
+            kind: 'reject',
+            error: new Error(
+              `Media probe failed to terminate after output overflow: ${String(error)}`,
+            ),
+          };
+        }
+      }
+    });
+    child.once('error', (error) => {
+      stopResult ??= { kind: 'reject', error };
+    });
+    child.once('close', (status) => {
+      finishOnClose(status);
     });
     options.signal?.addEventListener('abort', abort, { once: true });
     if (options.signal?.aborted) abort();
