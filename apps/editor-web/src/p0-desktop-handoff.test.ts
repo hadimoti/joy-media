@@ -15,7 +15,12 @@ import {
   type JoyProjectV3,
   type JsonValue,
 } from '@joy-media/project-schema';
-import { compileTitleInstance, P0_PAINT_POLICY, P0_TEMPLATES } from '@joy-media/motion-core';
+import {
+  compileTitleInstance,
+  P0_PAINT_POLICY,
+  P0_TEMPLATES,
+  sampleTitleMotion,
+} from '@joy-media/motion-core';
 import { importProjectPackage, parseProjectPackage } from './project-package.js';
 import { EditorSession } from './editor-session.js';
 import { readProjectBundle } from './project-lifecycle.js';
@@ -38,10 +43,31 @@ import { renderP0DesktopCompositorFrame } from './p0-desktop-handoff-harness.js'
 const hash = (bytes: ArrayLike<number>): string =>
   createHash('sha256').update(Buffer.from(bytes)).digest('hex');
 
-function nonTransparentPixels(rgba: Uint8Array): number {
+function inkPixelsAgainstPlate(
+  rendered: Uint8Array,
+  width: number,
+  box: { x: number; y: number; width: number; height: number },
+  plateRgb: readonly [number, number, number] = [0, 0, 0],
+): number {
   let count = 0;
-  for (let index = 3; index < rgba.length; index += 4) {
-    if (rgba[index]! > 0) count++;
+  const startY = Math.max(0, box.y);
+  const endY = Math.min(Math.floor(rendered.length / (width * 4)), box.y + box.height);
+  const startX = Math.max(0, box.x);
+  const endX = Math.min(width, box.x + box.width);
+  for (let y = startY; y < endY; y++) {
+    for (let x = startX; x < endX; x++) {
+      const offset = (y * width + x) * 4;
+      if (
+        rendered[offset + 3]! > 0 &&
+        Math.max(
+          Math.abs(rendered[offset]! - plateRgb[0]),
+          Math.abs(rendered[offset + 1]! - plateRgb[1]),
+          Math.abs(rendered[offset + 2]! - plateRgb[2]),
+        ) > 12
+      ) {
+        count++;
+      }
+    }
   }
   return count;
 }
@@ -1337,14 +1363,24 @@ describe('P0 desktop title handoff', () => {
           );
           const cliRgba = decodeFilterZeroRgbaPng(png);
           const desktopRgba = Buffer.from(surface.data);
+          // The desktop surface cannot be rendered with its text removed using this file's
+          // existing helpers without inventing an untracked capture path. Instead, this
+          // per-pixel plate-subtraction check compares the CLI surface inside the text box
+          // against the template's constant black plate colour ([0, 0, 0]), proving that text
+          // ink was actually drawn rather than an empty opaque plate. Because the assertion
+          // below verifies byte-for-byte identity between the CLI and desktop surfaces, proving
+          // text ink on the CLI surface also proves that the desktop surface rendered the text.
+          const motion = sampleTitleMotion(instance.motion, durationUs, timeUs);
+          const textBox = {
+            x: instance.placement.xPx,
+            y: Math.max(0, Math.floor(instance.placement.yPx + motion.translateYPx)),
+            width: instance.placement.maxWidthPx,
+            height: instance.layout.boxHeightPx,
+          };
           const minimumInkPixels = 100;
           expect(
-            nonTransparentPixels(cliRgba),
-            `${operationId}: CLI title surface must contain more than ${minimumInkPixels} non-transparent pixels`,
-          ).toBeGreaterThan(minimumInkPixels);
-          expect(
-            nonTransparentPixels(desktopRgba),
-            `${operationId}: desktop title surface must contain more than ${minimumInkPixels} non-transparent pixels`,
+            inkPixelsAgainstPlate(cliRgba, 720, textBox, [0, 0, 0]),
+            `${operationId}: CLI title surface must contain more than ${minimumInkPixels} ink pixels differing from plate`,
           ).toBeGreaterThan(minimumInkPixels);
           let firstDifference = -1;
           for (let index = 0; index < cliRgba.length; index++) {

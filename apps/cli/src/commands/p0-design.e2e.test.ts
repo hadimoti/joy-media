@@ -11,7 +11,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { templateSha256 } from '@joy-media/motion-core';
 
@@ -1019,6 +1020,48 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         fontManifestHashes: expect.any(Array),
         ffmpegVersionLine: expect.stringMatching(/^ffmpeg version /iu),
       });
+
+      // (a) fontManifestHashes: each hash must equal the sha256 of one of the four bundled
+      // Noto Sans Arabic font files named in packages/html-scene-runtime/assets/fonts/noto-sans-arabic/manifest.json.
+      const fontManifestPath = existsSync(
+        resolve('packages/html-scene-runtime/assets/fonts/noto-sans-arabic/manifest.json'),
+      )
+        ? resolve('packages/html-scene-runtime/assets/fonts/noto-sans-arabic/manifest.json')
+        : resolve(
+            fileURLToPath(new URL('.', import.meta.url)),
+            '../../../../packages/html-scene-runtime/assets/fonts/noto-sans-arabic/manifest.json',
+          );
+      const fontManifestDir = dirname(fontManifestPath);
+      const fontManifest = JSON.parse(readFileSync(fontManifestPath, 'utf8')) as {
+        files: readonly { file: string }[];
+      };
+      const expectedFontHashes = fontManifest.files
+        .map((entry) => {
+          const fontBytes = readFileSync(join(fontManifestDir, entry.file));
+          return `sha256:${createHash('sha256').update(fontBytes).digest('hex')}`;
+        })
+        .sort();
+      const reportedFontHashes = [...renderManifest.rendererFacts.fontManifestHashes].sort();
+      expect(reportedFontHashes).toEqual(expectedFontHashes);
+
+      // (b) ffmpegVersionLine: must equal the first line printed by running the same ffmpeg
+      // binary the render uses, with -version.
+      const ffmpegBinaryPath = process.env.JOY_MEDIA_FFMPEG?.trim() || ffmpeg || 'ffmpeg';
+      const ffmpegProbe = spawnSync(ffmpegBinaryPath, ['-version'], {
+        encoding: 'utf8',
+        timeout: 10_000,
+        windowsHide: true,
+      });
+      if (ffmpegProbe.error || ffmpegProbe.status !== 0) {
+        throw new Error(
+          `Cannot probe ffmpeg version: ${ffmpegProbe.error?.message ?? ffmpegProbe.stderr}`,
+        );
+      }
+      const expectedFfmpegVersionLine = ffmpegProbe.stdout.split(/\r?\n/, 1)[0] ?? '';
+      expect(renderManifest.rendererFacts.ffmpegVersionLine).toBe(expectedFfmpegVersionLine);
+
+      // chromiumVersion is reported rather than independently probed, because a second
+      // browser launch would add cost and risk to the test.
       expect(renderManifest.rendererFacts.chromiumVersion.trim()).not.toBe('');
       expect(renderManifest.rendererFacts.fontManifestHashes.length).toBeGreaterThan(0);
       expect(
