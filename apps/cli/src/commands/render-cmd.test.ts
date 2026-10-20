@@ -507,6 +507,64 @@ describe('joy render (headless batch render command)', () => {
     }
   });
 
+  it('refuses a preview path that equals an inactive registered asset', async () => {
+    const directory = mkdtempSync(join(tempDir, 'render-preview-inactive-collision-'));
+    const activePath = join(directory, 'active.mp4');
+    const previewPath = join(directory, 'preview-0.png');
+    const original = Buffer.from('inactive asset bytes');
+    writeFileSync(activePath, 'active media bytes');
+    writeFileSync(previewPath, original);
+    const project = createDefaultProject('Preview collision');
+    const root = project.compositions['root'] as unknown as { tracks: Array<{ clips: unknown[] }> };
+    root.tracks[0]!.clips.push({
+      id: 'active-clip',
+      kind: 'video',
+      assetId: activePath,
+      startUs: 0,
+      durationUs: 1_000_000,
+    });
+    (project.assets as Record<string, unknown>)[activePath] = { id: activePath, kind: 'video' };
+    (project.assets as Record<string, unknown>)[previewPath] = { id: previewPath, kind: 'video' };
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
+    setMediaProbeSpawnForTests(() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null as number | null,
+        kill: vi.fn(() => true),
+      });
+      setTimeout(() => {
+        child.stdout.end(
+          JSON.stringify({
+            streams: [{ codec_type: 'video', width: 320, height: 240, pix_fmt: 'yuv420p' }],
+            format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2', duration: '1.0' },
+          }),
+        );
+        child.exitCode = 0;
+        child.emit('close', 0, null);
+      }, 0);
+      return child as never;
+    });
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: directory,
+        concurrency: 1,
+        json: true,
+        frameUs: 0,
+      });
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(capture.text().trim()).code).toBe('RENDER_OUTPUT_COLLIDES_WITH_INPUT');
+      expect(readFileSync(previewPath)).toEqual(original);
+    } finally {
+      restore();
+      setMediaProbeSpawnForTests(undefined);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('rejects a PNG preview without IDAT image data', () => {
     const directory = mkdtempSync(join(tempDir, 'empty-png-preview-'));
     const artifactPath = join(directory, 'preview-0.png');
@@ -675,6 +733,59 @@ describe('joy render (headless batch render command)', () => {
 
     expect(collectTitleSources(project).map((source) => source.instanceId)).toEqual(['title-high']);
     expect(desktopItems.find((item) => item.trackId === 'low')?.trackEnabled).toBe(false);
+  });
+
+  it('uses deck activation for title preparation and drawing even when raw track is disabled', async () => {
+    const project = createDefaultProject('Deck enabled title');
+    const composition = project.compositions['root'] as unknown as {
+      tracks: Array<{ id: string; enabled?: boolean; clips: Array<{ id: string }> }>;
+    };
+    const track = composition.tracks[0]!;
+    const clip = {
+      id: 'deck-title',
+      kind: 'video',
+      assetId: 'asset-default',
+      startUs: 0,
+      durationUs: 1_000_000,
+    };
+    track.clips.push(clip as never);
+    track.enabled = false;
+    const mutableProject = project as unknown as {
+      timelineTrackDeck?: unknown;
+      pluginData: Record<string, unknown>;
+    };
+    mutableProject.timelineTrackDeck = {
+      rows: [{ compositionId: 'root', trackId: track.id, order: 0, enabled: true, locked: false }],
+    };
+    mutableProject.pluginData['joy.contentTemplates'] = {
+      instances: {
+        title: {
+          clipId: clip.id,
+          objectId: 'title-object',
+          lines: { primary: 'Title' },
+          font: { sha256: 'sha256:test' },
+          layout: {},
+        },
+      },
+    };
+
+    expect(collectTitleSources(project).map((source) => source.instanceId)).toEqual(['title']);
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: join(outDir, 'deck-enabled-title'),
+        concurrency: 1,
+        json: true,
+        manifestOnly: true,
+      });
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(capture.text().trim()).code).toBe('RENDER_PREPARATION_REQUIRED');
+    } finally {
+      restore();
+    }
   });
 
   it('exposes mp4/webm/prores render presets with deterministic specs', () => {

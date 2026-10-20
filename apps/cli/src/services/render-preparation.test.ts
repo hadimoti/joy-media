@@ -64,16 +64,103 @@ const project = {
   pluginData: {
     'joy.contentTemplates': {
       version: 1,
-      instances: { title: { lines: { primary: 'Sara' }, font: { weight: 700 } } },
+      instances: {
+        title: { clipId: 'title-clip', lines: { primary: 'Sara' }, font: { weight: 700 } },
+      },
     },
   },
   rootCompositionId: 'root',
+  assets: { 'asset-title': { id: 'asset-title', kind: 'video', displayName: 'title.mp4' } },
   compositions: {
-    root: { width: 1920, height: 1080, frameRate: { num: 30000, den: 1001 }, tracks: [] },
+    root: {
+      id: 'root',
+      width: 1920,
+      height: 1080,
+      frameRate: { num: 30000, den: 1001 },
+      tracks: [
+        {
+          id: 'title-track',
+          name: 'Title',
+          order: 0,
+          kind: 'video',
+          family: 'visual',
+          enabled: true,
+          clips: [
+            {
+              id: 'title-clip',
+              kind: 'video',
+              assetId: 'asset-title',
+              startUs: 0,
+              durationUs: 1_000_000,
+            },
+          ],
+        },
+      ],
+    },
   },
 } as unknown as CliProjectDocument;
 
 describe('RenderPreparationV1', () => {
+  it('activates title preparation from deck enablement instead of the raw track flag', () => {
+    const active = {
+      ...project,
+      compositions: {
+        root: {
+          ...project.compositions.root,
+          id: 'root',
+          tracks: [
+            {
+              id: 'title-track',
+              name: 'Title',
+              order: 0,
+              kind: 'video',
+              family: 'visual',
+              enabled: false,
+              clips: [
+                {
+                  id: 'title-clip',
+                  kind: 'video',
+                  assetId: 'asset-title',
+                  startUs: 0,
+                  durationUs: 1_000_000,
+                },
+              ],
+            },
+          ],
+        },
+      },
+      assets: { 'asset-title': { id: 'asset-title', kind: 'video', displayName: 'title.mp4' } },
+      timelineTrackDeck: {
+        rows: [
+          { compositionId: 'root', trackId: 'title-track', order: 0, enabled: true, locked: false },
+        ],
+      },
+      pluginData: {
+        ...project.pluginData,
+        'joy.contentTemplates': {
+          instances: { title: { clipId: 'title-clip', lines: { primary: 'Sara' } } },
+        },
+      },
+    } as unknown as CliProjectDocument;
+    expect(projectHasTitles(active)).toBe(true);
+
+    const inactive = {
+      ...active,
+      timelineTrackDeck: {
+        rows: [
+          {
+            compositionId: 'root',
+            trackId: 'title-track',
+            order: 0,
+            enabled: false,
+            locked: false,
+          },
+        ],
+      },
+    } as unknown as CliProjectDocument;
+    expect(projectHasTitles(inactive)).toBe(false);
+  });
+
   it('does not return a bare executable name when PATH lookup finds nothing', async () => {
     await expect(resolveExecutable('joy-media-missing-ffmpeg-test-binary')).rejects.toMatchObject({
       code: 'SETUP_REQUIRED',
@@ -177,9 +264,18 @@ describe('RenderPreparationV1', () => {
     const mediaProject = {
       ...project,
       assets: { [mediaPath]: { id: mediaPath, kind: 'video' } },
+      pluginData: {
+        ...project.pluginData,
+        'joy.contentTemplates': {
+          instances: {
+            title: { clipId: 'clip', lines: { primary: 'Sara' }, font: { weight: 700 } },
+          },
+        },
+      },
       compositions: {
         root: {
           ...project.compositions.root,
+          id: 'root',
           tracks: [
             {
               id: 'video',
@@ -245,6 +341,113 @@ describe('RenderPreparationV1', () => {
       const before = renderInputsDigest(mediaProject, directory);
       writeFileSync(mediaPath, 'changed bytes');
       expect(renderInputsDigest(mediaProject, directory)).not.toBe(before);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('includes renderer-resolved path references without asset registry entries', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-render-path-digest-'));
+    const mediaPath = join(directory, 'unregistered.mp4');
+    writeFileSync(mediaPath, 'first bytes');
+    const mediaProject = {
+      ...project,
+      assets: {},
+      pluginData: {
+        ...project.pluginData,
+        'joy.contentTemplates': {
+          instances: {
+            title: { clipId: 'clip', lines: { primary: 'Sara' }, font: { weight: 700 } },
+          },
+        },
+      },
+      compositions: {
+        root: {
+          ...project.compositions.root,
+          tracks: [
+            {
+              id: 'video',
+              name: 'Video',
+              order: 0,
+              kind: 'video',
+              family: 'visual',
+              enabled: true,
+              clips: [
+                {
+                  id: 'clip',
+                  kind: 'video',
+                  assetId: 'unregistered.mp4',
+                  startUs: 0,
+                  durationUs: 1_000_000,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    } as unknown as CliProjectDocument;
+    try {
+      const before = renderInputsDigest(mediaProject, directory);
+      writeFileSync(mediaPath, 'changed bytes');
+      expect(renderInputsDigest(mediaProject, directory)).not.toBe(before);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('freezes and validates the same --media-dir input inventory', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-render-prepared-media-dir-'));
+    const mediaPath = join(directory, 'unregistered.mp4');
+    writeFileSync(mediaPath, 'media bytes');
+    const mediaProject = {
+      ...project,
+      assets: {},
+      pluginData: {
+        ...project.pluginData,
+        'joy.contentTemplates': {
+          instances: {
+            title: { clipId: 'clip', lines: { primary: 'Sara' }, font: { weight: 700 } },
+          },
+        },
+      },
+      compositions: {
+        root: {
+          ...project.compositions.root,
+          id: 'root',
+          tracks: [
+            {
+              id: 'video',
+              name: 'Video',
+              order: 0,
+              kind: 'video',
+              family: 'visual',
+              enabled: true,
+              clips: [
+                {
+                  id: 'clip',
+                  kind: 'video',
+                  assetId: 'unregistered.mp4',
+                  startUs: 0,
+                  durationUs: 1_000_000,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    } as unknown as CliProjectDocument;
+    try {
+      const preparation = freezeRenderPreparation(mediaProject, [], facts, directory);
+      const saved = {
+        ...mediaProject,
+        pluginData: { ...mediaProject.pluginData, 'joy.renderPreparation': preparation },
+      } as unknown as CliProjectDocument;
+      await expect(validateRenderPreparation(saved, facts, undefined, directory)).resolves.toEqual(
+        preparation,
+      );
+      await expect(validateRenderPreparation(saved, facts)).rejects.toMatchObject({
+        code: 'RENDER_ENVIRONMENT_DRIFT',
+      });
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

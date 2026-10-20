@@ -1,6 +1,14 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSandbox, type Sandbox } from '../humanized/harness.js';
+import { handlePlanCommand } from './plan-cmd.js';
+import { setTitleTextMeasurer } from '../services/prepared-title.js';
+import { loadNotoSansArabicFaces } from '@joy-media/html-scene-runtime';
+import {
+  setRenderPreparationFactsProviderForTests,
+  validateRenderPreparation,
+  type RenderPreparationFacts,
+} from '../services/render-preparation.js';
 import {
   createProject,
   exportAndValidate,
@@ -12,7 +20,39 @@ let sb: Sandbox;
 beforeEach(() => {
   sb = createSandbox('prepared-plan');
 });
-afterEach(() => sb.cleanup());
+afterEach(() => {
+  setTitleTextMeasurer(undefined);
+  setRenderPreparationFactsProviderForTests(undefined);
+  sb.cleanup();
+});
+
+const preparationFacts: RenderPreparationFacts = {
+  libassProbe: {
+    usable: true,
+    executablePath: 'ffmpeg',
+    canonicalFace: 'Noto Sans Arabic Arabic 400',
+    log: '',
+    libassVersion: '0.17',
+    shaperVersion: '10.0',
+  },
+  libassAvailable: true,
+  canonicalFaces: loadNotoSansArabicFaces(),
+  chromium: {
+    launchable: true,
+    executablePath: 'chromium',
+    executableSha256: `sha256:${'c'.repeat(64)}`,
+    version: 'Chromium 140.0',
+  },
+  ffmpeg: {
+    executablePath: 'ffmpeg',
+    executableSha256: `sha256:${'f'.repeat(64)}`,
+    version: 'ffmpeg version 7',
+    buildConfiguration: '--enable-libass',
+    requiredFilters: ['ass', 'subtitles'],
+    libassVersion: '0.17',
+    shaperVersion: 'harfbuzz 10',
+  },
+};
 
 interface PlanSummary {
   planId: string;
@@ -130,6 +170,61 @@ function envelope(path: string): Envelope {
 }
 
 describe('plan prepare, inspect and apply', () => {
+  it('freezes media-dir inputs so the prepared project validates with that directory', async () => {
+    const project = await fileProject();
+    const mediaDir = sb.path('media');
+    mkdirSync(mediaDir, { recursive: true });
+    writeFileSync(sb.path('media', 'asset-default'), 'media bytes');
+    const operationsPath = sb.path('title-operations.json');
+    writeFileSync(
+      operationsPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        operations: [
+          {
+            id: 'add-title',
+            op: 'instantiateTemplate',
+            instanceId: 'speaker',
+            templateId: 'joy.p0.lower-third',
+            trackId: 'track-v2',
+            lines: { primary: 'Sara', secondary: 'Host' },
+            font: { family: 'Noto Sans Arabic', weight: 700 },
+            direction: 'ltr',
+            startUs: 1_000_000,
+            durationUs: 4_000_000,
+            placement: { xPx: 64, yPx: 650, maxWidthPx: 900, safeInsetPx: 36 },
+            motion: { presetId: 'hold', inUs: 0, outUs: 0 },
+          },
+        ],
+      }),
+    );
+    setTitleTextMeasurer((text, size) => Array.from(text).length * size * 0.45);
+    setRenderPreparationFactsProviderForTests(async () => preparationFacts);
+    const planPath = sb.path('media-dir-plan.json');
+    const prepareCode = await handlePlanCommand(['prepare', operationsPath], {
+      project: project.path,
+      output: planPath,
+      mediaDir,
+      json: true,
+    } as never);
+    expect(prepareCode).toBe(0);
+    const revision = envelope(project.path).revision;
+    const applyCode = await handlePlanCommand(['apply', planPath], {
+      project: project.path,
+      expectedRevision: String(revision),
+      idempotencyKey: 'media-dir-plan',
+      json: true,
+    } as never);
+    expect(applyCode).toBe(0);
+    const saved = envelope(project.path).project as never;
+    await expect(
+      validateRenderPreparation(saved, preparationFacts, undefined, mediaDir),
+    ).resolves.toBeDefined();
+    await expect(validateRenderPreparation(saved, preparationFacts)).rejects.toMatchObject({
+      code: 'RENDER_ENVIRONMENT_DRIFT',
+    });
+  });
+
   it('prepares a plan without changing a byte of the project and inspect shows its diff', async () => {
     const project = await fileProject();
     const before = readFileSync(project.path);

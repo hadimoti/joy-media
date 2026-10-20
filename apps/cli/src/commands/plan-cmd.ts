@@ -232,7 +232,12 @@ async function prepare(args: string[], flags: CliFlags): Promise<number> {
     (projectHasTitles(resultDocument) ||
       projectHasCaptions(resultDocument) ||
       operations.some(isTitleOperation))
-      ? freezeRenderPreparation(resultDocument, prepared.operations, preparationFacts)
+      ? freezeRenderPreparation(
+          resultDocument,
+          prepared.operations,
+          preparationFacts,
+          flags.mediaDir,
+        )
       : undefined;
   if (renderPreparation) {
     resultDocument = {

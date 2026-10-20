@@ -879,23 +879,21 @@ function enabledCaptionClipIds(project: Record<string, unknown>): ReadonlySet<st
   );
 }
 
-function enabledTitleClipIds(project: Record<string, unknown>): ReadonlySet<string> {
-  const rawTracks = root(project)['tracks'];
-  const tracks: unknown[] = Array.isArray(rawTracks) ? rawTracks : [];
-  return new Set(
-    normalizedRootItems(project)
-      .filter((item) => {
-        if (!item.trackEnabled || item.elementKind === 'audio') return false;
-        const track = tracks.find(
-          (candidate) => isRecord(candidate) && candidate['id'] === item.trackId,
-        );
-        if (!isRecord(track) || track['enabled'] === false || !Array.isArray(track['clips']))
-          return false;
-        return track['clips'].some(
-          (clip) => isRecord(clip) && clip['id'] === item.id && clip['enabled'] !== false,
-        );
-      })
-      .map((item) => item.id),
+export function isTitleClipActive(project: unknown, clipId: unknown): boolean {
+  if (!isRecord(project) || typeof clipId !== 'string') return false;
+  const item = normalizedRootItems(project).find((candidate) => candidate.id === clipId);
+  if (item === undefined || !item.trackEnabled || item.elementKind === 'audio') return false;
+  const tracks = root(project)['tracks'];
+  const track = (Array.isArray(tracks) ? tracks : []).find(
+    (candidate) => isRecord(candidate) && candidate['id'] === item.trackId,
+  );
+  return (
+    isRecord(track) &&
+    track['kind'] === 'video' &&
+    track['family'] !== 'audio' &&
+    track['family'] !== 'caption' &&
+    Array.isArray(track['clips']) &&
+    track['clips'].some((clip) => isRecord(clip) && clip['id'] === clipId)
   );
 }
 
@@ -903,13 +901,7 @@ function titleInstanceIsActive(
   project: Record<string, unknown>,
   instance: Record<string, unknown>,
 ): boolean {
-  const clipId = instance['clipId'];
-  if (typeof clipId !== 'string') return true;
-  if (enabledTitleClipIds(project).has(clipId)) return true;
-  return (
-    !isRecord(project['timelineTrackDeck']) &&
-    !normalizedRootItems(project).some((item) => item.id === clipId)
-  );
+  return isTitleClipActive(project, instance['clipId']);
 }
 
 export function projectHasCaptions(project: unknown): boolean {
@@ -1124,6 +1116,32 @@ export function resolveRenderMediaSource(
   return null;
 }
 
+export function resolveRenderInputPaths(project: unknown, mediaDir?: string): string[] {
+  if (!isRecord(project)) return [];
+  const assets = isRecord(project['assets']) ? project['assets'] : {};
+  const registeredSources = loadAssetSourcesIfPresent();
+  const references = new Map<string, unknown>(Object.entries(assets));
+  const composition = root(project);
+  for (const track of Array.isArray(composition['tracks']) ? composition['tracks'] : []) {
+    if (!isRecord(track) || !Array.isArray(track['clips'])) continue;
+    for (const clip of track['clips']) {
+      if (isRecord(clip) && typeof clip['assetId'] === 'string' && !references.has(clip['assetId']))
+        references.set(clip['assetId'], undefined);
+    }
+  }
+  const paths = new Set<string>();
+  for (const [assetId, rawAsset] of references) {
+    const candidate = resolveRenderMediaSource(assetId, rawAsset, registeredSources, mediaDir);
+    if (!candidate) continue;
+    try {
+      paths.add(realpathSync(resolve(candidate)));
+    } catch {
+      // A file disappearing during inventory collection is reported by media planning.
+    }
+  }
+  return [...paths].sort((left, right) => left.localeCompare(right));
+}
+
 export function renderInputsDigest(project: unknown, mediaDir?: string): string {
   if (!isRecord(project)) return sha256Identity(project);
   const copy: Record<string, unknown> = { ...project };
@@ -1132,22 +1150,10 @@ export function renderInputsDigest(project: unknown, mediaDir?: string): string 
     delete pluginData[RENDER_PREPARATION_KEY];
     copy['pluginData'] = pluginData;
   }
-  const assets = isRecord(copy['assets']) ? copy['assets'] : {};
-  const registeredSources = loadAssetSourcesIfPresent();
-  const files: Array<{ readonly path: string; readonly sha256: string }> = [];
-  for (const [assetId, rawAsset] of Object.entries(assets)) {
-    const candidate = resolveRenderMediaSource(assetId, rawAsset, registeredSources, mediaDir);
-    if (!candidate) continue;
-    try {
-      const canonicalPath = realpathSync(resolve(candidate));
-      files.push({
-        path: canonicalPath,
-        sha256: hashBytes(readFileSync(canonicalPath)),
-      });
-    } catch {
-      // A file disappearing during digest collection is reported by media planning.
-    }
-  }
+  const files = resolveRenderInputPaths(project, mediaDir).map((canonicalPath) => ({
+    path: canonicalPath,
+    sha256: hashBytes(readFileSync(canonicalPath)),
+  }));
   files.sort((left, right) => left.path.localeCompare(right.path));
   return sha256Identity({ project: copy, mediaFiles: files });
 }

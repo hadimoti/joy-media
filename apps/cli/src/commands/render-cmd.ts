@@ -76,8 +76,7 @@ import {
   startEncode,
   type MediaPlanReady,
 } from './render-media.js';
-import { loadAssetSourcesIfPresent } from '../utils/asset-sources.js';
-import { resolveRenderMediaSource } from '../services/render-preparation.js';
+import { isTitleClipActive, resolveRenderInputPaths } from '../services/render-preparation.js';
 import {
   CommandFailure,
   listProjects,
@@ -658,8 +657,9 @@ export function collectTitleSources(project: CliProjectDocument): TitleFrameSour
   );
   const sources: Array<TitleFrameSource & { trackOrder: number }> = [];
   for (const [instanceId, instance] of Object.entries(instances)) {
+    if (!isTitleClipActive(project, instance.clipId)) continue;
     const item = normalizedItems.find((candidate) => candidate.id === instance.clipId);
-    if (item === undefined || !item.trackEnabled || item.elementKind === 'audio') continue;
+    if (item === undefined) continue;
     const track = composition?.tracks?.find((candidate) => candidate.id === item.trackId);
     if (
       track === undefined ||
@@ -1111,6 +1111,7 @@ export async function runHeadlessRender(
         assertNoRenderOutputCollision(artifactPath, [
           ...(input.projectFilePath ? [input.projectFilePath] : []),
           ...realMedia.clips.map((clip) => clip.sourcePath),
+          ...resolveRenderInputPaths(project, input.mediaDir),
         ]);
       } catch (error) {
         if (error instanceof CommandFailure)
@@ -1265,14 +1266,7 @@ export async function runHeadlessRender(
     const mediaName = `${fileStem}.${presetSpec.extension}`;
     const manifestName = `${fileStem}.${presetSpec.extension}.manifest.json`;
     try {
-      const projectAssets =
-        isRecord(project) && isRecord(project['assets']) ? project['assets'] : {};
-      const registeredSources = loadAssetSourcesIfPresent();
-      const resolvedProjectMedia = Object.entries(projectAssets)
-        .map(([assetId, asset]) =>
-          resolveRenderMediaSource(assetId, asset, registeredSources, input.mediaDir),
-        )
-        .filter((path): path is string => path !== null);
+      const resolvedProjectMedia = resolveRenderInputPaths(project, input.mediaDir);
       const inputPaths = [
         ...(input.projectFilePath ? [input.projectFilePath] : []),
         ...(realMedia?.clips.map((clip) => clip.sourcePath) ?? []),
