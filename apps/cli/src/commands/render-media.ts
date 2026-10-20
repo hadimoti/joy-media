@@ -364,9 +364,18 @@ export function planMedia(
   }
   const assets = isRecord(project['assets']) ? project['assets'] : {};
   const sources = loadAssetSources();
+  const compositionId = rootId as string;
   const normalizedItems = normalizeUniversalTimeline({
     ...project,
     schemaVersion: 1,
+    assets: isRecord(project['assets']) ? project['assets'] : {},
+    visualObjects: isRecord(project['visualObjects']) ? project['visualObjects'] : {},
+    captionDocuments: isRecord(project['captionDocuments']) ? project['captionDocuments'] : {},
+    pluginData: isRecord(project['pluginData']) ? project['pluginData'] : {},
+    compositions: {
+      ...(compositions as Record<string, unknown>),
+      [compositionId]: { ...root, id: compositionId },
+    },
   } as unknown as JoyProjectV1).items.filter((item) => item.compositionId === rootId);
   const normalizedByClipId = new Map(normalizedItems.map((item) => [item.id, item]));
 

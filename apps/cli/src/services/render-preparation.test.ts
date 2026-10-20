@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { compileCaptionAss } from './captions-ass.js';
-import { loadNotoSansArabicFaces } from '@joy-media/html-scene-runtime';
+import { findChromiumExecutable, loadNotoSansArabicFaces } from '@joy-media/html-scene-runtime';
 import {
   freezeRenderPreparation,
   readRenderPreparationFacts,
@@ -185,26 +185,55 @@ describe('RenderPreparationV1', () => {
   });
 
   it('validates a title record against unchanged production probe facts', async () => {
-    const frozenFacts = await readRenderPreparationFacts({ title: true, captions: false });
-    const preparation = freezeRenderPreparation(
-      project,
-      [{ op: 'instantiateTemplate' }],
-      frozenFacts,
+    const environmentKeys = [
+      'JOY_CHROMIUM_PATH',
+      'PLAYWRIGHT_BROWSERS_PATH',
+      'ProgramFiles',
+      'ProgramFiles(x86)',
+      'LOCALAPPDATA',
+    ] as const;
+    const previousEnvironment = new Map(
+      environmentKeys.map((key) => [key, process.env[key]] as const),
     );
-    const preparedProject = {
-      ...project,
-      pluginData: { ...project.pluginData, 'joy.renderPreparation': preparation },
-    } as unknown as CliProjectDocument;
-    const currentFacts = await readRenderPreparationFacts({ title: true, captions: false });
+    const chromiumExecutablePath = findChromiumExecutable();
+    try {
+      expect(chromiumExecutablePath).toBeDefined();
+      process.env['JOY_CHROMIUM_PATH'] = chromiumExecutablePath;
+      const frozenFacts = await readRenderPreparationFacts({
+        title: true,
+        captions: false,
+        ...(chromiumExecutablePath ? { chromiumExecutablePath } : {}),
+      });
+      const preparation = freezeRenderPreparation(
+        project,
+        [{ op: 'instantiateTemplate' }],
+        frozenFacts,
+      );
+      const preparedProject = {
+        ...project,
+        pluginData: { ...project.pluginData, 'joy.renderPreparation': preparation },
+      } as unknown as CliProjectDocument;
+      const currentFacts = await readRenderPreparationFacts({
+        title: true,
+        captions: false,
+        ...(chromiumExecutablePath ? { chromiumExecutablePath } : {}),
+      });
 
-    expect(currentFacts.chromium).toMatchObject({
-      launchable: frozenFacts.chromium.launchable,
-      executableSha256: frozenFacts.chromium.executableSha256,
-      version: frozenFacts.chromium.version,
-    });
-    await expect(validateRenderPreparation(preparedProject, currentFacts)).resolves.toEqual(
-      preparation,
-    );
+      expect(currentFacts.chromium).toMatchObject({
+        launchable: frozenFacts.chromium.launchable,
+        executableSha256: frozenFacts.chromium.executableSha256,
+        version: frozenFacts.chromium.version,
+      });
+      await expect(validateRenderPreparation(preparedProject, currentFacts)).resolves.toEqual(
+        preparation,
+      );
+    } finally {
+      for (const key of environmentKeys) {
+        const value = previousEnvironment.get(key);
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 
   it('rejects a title record when the Chromium executable hash changes', async () => {

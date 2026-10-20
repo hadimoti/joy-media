@@ -602,7 +602,7 @@ export function safeFileStem(id: string): string {
 }
 
 export function collectTitleSources(project: CliProjectDocument): TitleFrameSource[] {
-  const namespace = project.pluginData[CONTENT_TEMPLATES_PLUGIN_KEY] as
+  const namespace = project.pluginData?.[CONTENT_TEMPLATES_PLUGIN_KEY] as
     { readonly instances?: Readonly<Record<string, TitleInstanceV1>> } | undefined;
   const instances = namespace?.instances;
   if (!instances || typeof instances !== 'object') return [];

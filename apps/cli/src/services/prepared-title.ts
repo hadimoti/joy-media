@@ -7,6 +7,10 @@ import {
   type TitlePlacement,
 } from '@joy-media/project-schema';
 import {
+  loadNotoSansArabicFaces,
+  missingCanonicalFontCodePoints,
+} from '@joy-media/html-scene-runtime';
+import {
   compileTitleInstance,
   createTimelineElementBindingPlacement,
   type TextMeasure,
@@ -349,6 +353,72 @@ function applyFrozen(project: CliProjectDocument, op: TitleOperation): CliProjec
 
 export function isTitleOperation(op: PreparedOperation): boolean {
   return op.op === 'instantiateTemplate' || op.op === 'updateTemplateText';
+}
+
+/** Check title glyph coverage before preparation probes Chromium or FFmpeg. */
+export function assertPreparedTitleFontCoverage(
+  project: CliProjectDocument,
+  operations: readonly PreparedOperation[],
+): void {
+  const checks: { readonly text: string; readonly weight: 400 | 700 }[] = [];
+  for (const instance of Object.values(instances(project))) {
+    checks.push({
+      text: `${instance.lines.primary}\n${instance.lines.secondary}`,
+      weight: instance.font.weight,
+    });
+  }
+  for (const operation of operations) {
+    if (!isTitleOperation(operation) || !record(operation.lines)) continue;
+    let weight: unknown;
+    let lines: { primary: string; secondary: string } | undefined;
+    if (operation.op === 'instantiateTemplate') {
+      weight = record(operation.font) ? operation.font.weight : undefined;
+      if (
+        typeof operation.lines.primary === 'string' &&
+        typeof operation.lines.secondary === 'string'
+      )
+        lines = { primary: operation.lines.primary, secondary: operation.lines.secondary };
+    } else {
+      const original = instances(project)[String(operation.instanceId ?? '')];
+      if (!original) continue;
+      weight = original.font.weight;
+      lines = {
+        primary:
+          typeof operation.lines.primary === 'string'
+            ? operation.lines.primary
+            : original.lines.primary,
+        secondary:
+          typeof operation.lines.secondary === 'string'
+            ? operation.lines.secondary
+            : original.lines.secondary,
+      };
+    }
+    if (lines && (weight === 400 || weight === 700))
+      checks.push({ text: `${lines.primary}\n${lines.secondary}`, weight });
+  }
+
+  if (checks.length === 0) return;
+  const faces = loadNotoSansArabicFaces();
+  for (const { text, weight } of checks) {
+    const subsetText = new Map<'arabic' | 'latin', string>();
+    for (const character of text) {
+      if (/[\n\r ]/u.test(character)) continue;
+      const subset = /[\u0600-\u08ff\ufb50-\ufeff]/u.test(character) ? 'arabic' : 'latin';
+      subsetText.set(subset, `${subsetText.get(subset) ?? ''}${character}`);
+    }
+    for (const [subset, checkedText] of subsetText) {
+      const face = faces.find(
+        (candidate) => candidate.subset === subset && candidate.weight === weight,
+      );
+      if (!face) fail('FONT_UNAVAILABLE', `Canonical ${subset} ${weight} font face is missing.`);
+      const missing = missingCanonicalFontCodePoints(face, checkedText);
+      if (missing.length > 0)
+        fail(
+          'FONT_UNSUPPORTED_GLYPH',
+          `Canonical font does not cover checked text: ${missing.map((code) => `U+${code.toString(16).toUpperCase()}`).join(', ')}`,
+        );
+    }
+  }
 }
 
 /** Resolve title layout during prepare, then write only the frozen result during apply. */

@@ -11,6 +11,7 @@ import {
 } from '../services/prepared-edit.js';
 import {
   applyPreparedTitleOperation,
+  assertPreparedTitleFontCoverage,
   getTitleTextMeasurer,
   isTitleOperation,
   validateFrozenTitleOutput,
@@ -207,6 +208,7 @@ async function prepare(args: string[], flags: CliFlags): Promise<number> {
     );
   }
   const operations = parseOperationsFile(args[1]!);
+  assertPreparedTitleFontCoverage(project, operations);
   // Probe prerequisites before Chromium's title measurer can be created or any plan is written.
   const facts = await preflightRenderPreparation(project, operations);
   const needsCaptionMeasure =

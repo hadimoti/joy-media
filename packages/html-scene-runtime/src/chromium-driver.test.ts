@@ -2,7 +2,11 @@ import { EventEmitter } from 'node:events';
 import { existsSync, rmSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { rational } from '@joy-media/project-schema';
-import { createChromiumSceneDriver, findChromiumExecutable } from './chromium-driver.js';
+import {
+  createChromiumSceneDriver,
+  findChromiumExecutable,
+  killChromiumTree,
+} from './chromium-driver.js';
 import { captureSceneSurface } from './headless.js';
 import { createSandboxedReactScene } from './runtime.js';
 
@@ -34,6 +38,15 @@ const unitRequest = {
 };
 
 describe('Chromium scene driver ownership', () => {
+  it.skipIf(process.platform !== 'win32')('does not scan processes after taskkill succeeds', () => {
+    const calls: string[][] = [];
+    killChromiumTree(27182, 'C:\\profile', ((command: string, args: string[]) => {
+      calls.push([command, ...args]);
+      return { status: 0, error: undefined, stderr: '', stdout: '' };
+    }) as never);
+    expect(calls).toEqual([['taskkill', '/T', '/F', '/PID', '27182']]);
+  });
+
   it('retries profile removal after the browser tree exits', async () => {
     let fake!: FakeWorker;
     let profileDirectory = '';

@@ -91,9 +91,13 @@ export function findChromiumExecutable(): string | undefined {
   );
 }
 
-function chromiumPidsForProfile(profileDirectory: string, timeoutMs = 1_500): number[] {
+function chromiumPidsForProfile(
+  profileDirectory: string,
+  timeoutMs = 1_500,
+  runSpawnSync: typeof spawnSync = spawnSync,
+): number[] {
   const escapedProfile = profileDirectory.replace(/'/g, "''");
-  const scan = spawnSync(
+  const scan = runSpawnSync(
     'powershell.exe',
     [
       '-NoProfile',
@@ -113,7 +117,11 @@ function chromiumPidsForProfile(profileDirectory: string, timeoutMs = 1_500): nu
     .filter((value) => Number.isSafeInteger(value) && value > 0);
 }
 
-function killChromiumTree(pid: number | undefined, profileDirectory?: string): void {
+export function killChromiumTree(
+  pid: number | undefined,
+  profileDirectory?: string,
+  runSpawnSync: typeof spawnSync = spawnSync,
+): void {
   if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) return;
   if (process.platform === 'win32') {
     const deadline = Date.now() + 2_000;
@@ -121,15 +129,20 @@ function killChromiumTree(pid: number | undefined, profileDirectory?: string): v
     for (let attempt = 0; attempt < 3; attempt += 1) {
       for (const remainingPid of remaining) {
         if (Date.now() >= deadline) break;
-        spawnSync('taskkill', ['/T', '/F', '/PID', String(remainingPid)], {
+        const killed = runSpawnSync('taskkill', ['/T', '/F', '/PID', String(remainingPid)], {
           encoding: 'utf8',
           windowsHide: true,
           shell: false,
           timeout: Math.max(1, deadline - Date.now()),
         });
+        if (!killed.error && killed.status === 0) return;
       }
       if (profileDirectory !== undefined) {
-        remaining = chromiumPidsForProfile(profileDirectory, Math.max(1, deadline - Date.now()));
+        remaining = chromiumPidsForProfile(
+          profileDirectory,
+          Math.max(1, deadline - Date.now()),
+          runSpawnSync,
+        );
       } else {
         try {
           process.kill(pid, 0);

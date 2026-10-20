@@ -339,7 +339,7 @@ describe('render parity and unsupported-feature contract', () => {
     };
     document.pluginData['joy.contentTemplates'] = {
       version: 1,
-      instances: { title: { lines: { primary: titleLine, secondary: '' } } },
+      instances: { title: { font: { weight: 700 }, lines: { primary: titleLine, secondary: '' } } },
     };
     const facts: RenderPreparationFacts = {
       libassProbe: {
