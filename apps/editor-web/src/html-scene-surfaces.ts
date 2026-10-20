@@ -376,8 +376,8 @@ export class HtmlSceneSurfaceCache {
               if (!this.#owns(object.id, ownership, generation)) return;
               host.update(title.localTimeUs, frame.variables);
               const bitmap = await host.capture(
-                Math.max(1, Math.round(composition.width / 4)),
-                Math.max(1, Math.round(composition.height / 4)),
+                composition.width,
+                composition.height,
                 2_500,
                 undefined,
                 false,

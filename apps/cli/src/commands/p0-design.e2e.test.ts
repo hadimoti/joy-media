@@ -1223,6 +1223,21 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         ],
         'caption ASS preparation must fail closed when the canonical face is unavailable',
       );
+      checkedCli(
+        [
+          'plan',
+          'apply',
+          planPath,
+          '--project',
+          captionProject.file,
+          '--expected-revision',
+          String((JSON.parse(readFileSync(captionProject.file, 'utf8')) as JsonRecord).revision),
+          '--idempotency-key',
+          'p0-caption-plan',
+          '--json',
+        ],
+        'caption ASS plan apply',
+      );
       const captionRender = runCli(
         [
           'render',

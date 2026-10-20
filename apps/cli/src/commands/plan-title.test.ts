@@ -179,7 +179,14 @@ describe('prepared title plan flow', () => {
   });
 
   it('refuses a caption plan before writing when the canonical libass face is unusable', async () => {
-    setRenderPreparationFactsProviderForTests(undefined);
+    setRenderPreparationFactsProviderForTests(async () => ({
+      ...usableFacts,
+      libassProbe: {
+        ...usableFacts.libassProbe,
+        usable: false,
+        reason: 'canonical-caption-face-unavailable',
+      },
+    }));
     const f = await fixture();
     const { result, output } = await prepare(f.path, [
       { id: 'caption-preflight', op: 'addCaption' },

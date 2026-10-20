@@ -125,6 +125,27 @@ describe('HTML scene export conformance', () => {
     expect(created.every((entry) => entry.destroy.mock.calls.length === 1)).toBe(true);
   });
 
+  it('captures P0 titles at composition size and leaves display scaling to the frame', async () => {
+    const titleHost = host();
+    mocks.create.mockReturnValue(titleHost);
+    const cache = new HtmlSceneSurfaceCache();
+
+    await cache.sync(p0Context('title-object', 'joy.p0.title', 640), 1);
+
+    expect(titleHost.capture).toHaveBeenCalledWith(640, 360, 2_500, undefined, false, {
+      fonts: [],
+    });
+    expect(cache.bitmaps().get('title-object')).toMatchObject({ width: 640, height: 360 });
+    expect(mocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scene: expect.objectContaining({
+          manifest: expect.objectContaining({ viewport: { width: 640, height: 360 } }),
+        }),
+      }),
+    );
+    cache.destroy();
+  });
+
   it.each(['fonts', 'readiness', 'capture'] as const)(
     'keeps a replaced P0 host from surviving stale work (%s)',
     async (phase) => {
