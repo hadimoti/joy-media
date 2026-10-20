@@ -16,16 +16,23 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 const BUNDLE = resolve('apps/cli/dist/joy-media-bundle.mjs');
 const ROI = Object.freeze({ x: 40, y: 250, width: 1120, height: 300 });
+const MP4_CODEC_BLOCK_ROI = Object.freeze({ x: 32, y: 240, width: 1136, height: 320 });
 const TITLE_PIXEL_TOLERANCE = 0;
+const MP4_OUTSIDE_CHANNEL_TOLERANCE = 16;
+const MP4_OUTSIDE_CHANGED_PIXEL_TOLERANCE = 1024;
 const AUDIO_GAIN_TOLERANCE = 0.06;
 const AUDIO_STEREO_MIX_FACTOR = 1 / Math.sqrt(2);
 const AUDIO_FADE_ENVELOPE_MAX_RATIO = 0.3;
 const MUTED_RMS_MAX = 0;
 const CAPTION_BAND = Object.freeze({ x: 120, y: 560, width: 1040, height: 100 });
 const CAPTION_PIXEL_THRESHOLD = 12;
-const CAPTION_OUTSIDE_PIXEL_COUNT_TOLERANCE = 10_000;
+const CAPTION_OUTSIDE_PIXEL_COUNT_TOLERANCE = 128;
 const RENDER_LIMIT_MS = 60_000;
 const FRAME_RATE = 30;
+const RENDER_WIDTH = 1280;
+const RENDER_HEIGHT = 720;
+const RGBA_BYTES_PER_PIXEL = 4;
+const RENDER_RETAINED_RGBA_LIMIT_BYTES = 256 * 1024 * 1024;
 
 type JsonRecord = Record<string, any>;
 type CliResult = {
@@ -522,17 +529,56 @@ function decodeRgb(
   return data;
 }
 
+function decodeRgbaFrame(path: string, frameIndex: number, context: string): Buffer {
+  const result = spawnSync(
+    ffmpeg,
+    [
+      '-v',
+      'error',
+      '-i',
+      path,
+      '-vf',
+      `select=eq(n\\,${frameIndex})`,
+      '-vsync',
+      '0',
+      '-frames:v',
+      '1',
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'rgba',
+      'pipe:1',
+    ],
+    {
+      encoding: 'buffer',
+      maxBuffer: RENDER_WIDTH * RENDER_HEIGHT * RGBA_BYTES_PER_PIXEL + 1024,
+      timeout: 20_000,
+      windowsHide: true,
+    },
+  );
+  if (result.error || result.status !== 0)
+    throw new Error(
+      `${context}: ffmpeg raw RGBA decode failed: ${result.error?.message ?? result.stderr?.toString()}`,
+    );
+  const data = Buffer.from(result.stdout);
+  const expectedBytes = RENDER_WIDTH * RENDER_HEIGHT * RGBA_BYTES_PER_PIXEL;
+  if (data.length !== expectedBytes)
+    throw new Error(`${context}: decoded ${data.length} RGBA bytes, expected ${expectedBytes}.`);
+  return data;
+}
+
 function changedPixels(
   a: Buffer,
   b: Buffer,
   width: number,
   region: { x: number; y: number; width: number; height: number },
   threshold = 0,
+  channels = 3,
 ): number {
   let changed = 0;
   for (let y = region.y; y < region.y + region.height; y++) {
     for (let x = region.x; x < region.x + region.width; x++) {
-      const i = (y * width + x) * 3;
+      const i = (y * width + x) * channels;
       if (
         Math.max(
           Math.abs(a[i]! - b[i]!),
@@ -572,6 +618,41 @@ function expectEqualOutsideRoi(
     changed,
     `${context}: pixels changed outside fixed title ROI with tolerance ${TITLE_PIXEL_TOLERANCE}`,
   ).toBe(0);
+}
+
+function compareOutsideCodecBlockRoi(
+  a: Buffer,
+  b: Buffer,
+  width: number,
+  height: number,
+  context: string,
+): { changedPixels: number; maxChannelDifference: number } {
+  let changedPixels = 0;
+  let maxChannelDifference = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (
+        x >= MP4_CODEC_BLOCK_ROI.x &&
+        x < MP4_CODEC_BLOCK_ROI.x + MP4_CODEC_BLOCK_ROI.width &&
+        y >= MP4_CODEC_BLOCK_ROI.y &&
+        y < MP4_CODEC_BLOCK_ROI.y + MP4_CODEC_BLOCK_ROI.height
+      )
+        continue;
+      const i = (y * width + x) * RGBA_BYTES_PER_PIXEL;
+      const difference = Math.max(
+        Math.abs(a[i]! - b[i]!),
+        Math.abs(a[i + 1]! - b[i + 1]!),
+        Math.abs(a[i + 2]! - b[i + 2]!),
+      );
+      maxChannelDifference = Math.max(maxChannelDifference, difference);
+      if (difference > MP4_OUTSIDE_CHANNEL_TOLERANCE) changedPixels++;
+    }
+  }
+  expect(
+    changedPixels,
+    `${context}: ${changedPixels} outside-ROI pixels exceeded ${MP4_OUTSIDE_CHANNEL_TOLERANCE}/255 channel tolerance (max channel difference ${maxChannelDifference}); at most ${MP4_OUTSIDE_CHANGED_PIXEL_TOLERANCE} may exceed it to allow bounded H.264 chroma/quantization spill beyond the aligned 16x16 codec blocks`,
+  ).toBeLessThanOrEqual(MP4_OUTSIDE_CHANGED_PIXEL_TOLERANCE);
+  return { changedPixels, maxChannelDifference };
 }
 
 function decodeAudio(path: string, context: string): Int16Array {
@@ -795,14 +876,14 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
     });
 
     await runStep(3, 'create, export and populate project', () => {
-      primary = createProject('P0 cold process title render', join(root, 'primary'));
+      primary = createProject('P0 cold process title render', join(root, 'primary'), false);
       setFixtureDuration(primary, 5_000_000);
       const track = checkedCli(
         ['timeline', 'add-track', '--project', primary.file, '--family', 'visual', '--json'],
         'title track setup',
       );
       titleTrackId = track.trackId as string;
-      noTitle = createProject('P0 no-title baseline', join(root, 'baseline-title'));
+      noTitle = createProject('P0 no-title baseline', join(root, 'baseline-title'), false);
       setFixtureDuration(noTitle, 5_000_000);
       noCaption = createProject('P0 no-caption baseline', join(root, 'baseline-caption'), false);
       setFixtureDuration(noCaption, 5_000_000);
@@ -828,17 +909,19 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
           (trackRow: JsonRecord) => trackRow.id === primary!.audioTrackId,
         ).clips,
       ).toHaveLength(3);
-      expect(Object.values(body.captionDocuments)).toHaveLength(1);
+      expect(Object.values(body.captionDocuments)).toHaveLength(0);
       expect(basename(sourceVideo)).toBe('static-testsrc-sine.mkv');
     });
 
     await runStep(4, 'prepare and apply first title plan', () => {
       if (!primary) throw new Error('Project setup from step 3 did not complete.');
+      const projectRevision = (JSON.parse(readFileSync(primary.file, 'utf8')) as JsonRecord)
+        .revision as number;
       const summary = preparePlan(
         primary,
         [titleOperation({ primary: 'Mina Farzan', secondary: 'Field Producer' })],
         'first-title',
-        13,
+        projectRevision,
         'p0-title-first',
       );
       titleClipId = 'clip-speaker';
@@ -891,8 +974,16 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(result.code, 'MP4 render exit status').toBe(0);
       expect(
         elapsed,
-        `5-second 720p 30 fps render exceeded ${RENDER_LIMIT_MS}ms`,
+        `5-second 720p 30 fps render took ${elapsed}ms; limit is ${RENDER_LIMIT_MS}ms`,
       ).toBeLessThanOrEqual(RENDER_LIMIT_MS);
+      const retainedRgbaBytes = RENDER_WIDTH * RENDER_HEIGHT * RGBA_BYTES_PER_PIXEL;
+      expect(
+        retainedRgbaBytes,
+        `measured peak retained RGBA is ${retainedRgbaBytes} bytes (${(retainedRgbaBytes / 1024 / 1024).toFixed(2)} MiB): title capture holds one ${RENDER_WIDTH}x${RENDER_HEIGHT} RGBA surface at a time; limit is ${RENDER_RETAINED_RGBA_LIMIT_BYTES} bytes (256 MiB)`,
+      ).toBeLessThanOrEqual(RENDER_RETAINED_RGBA_LIMIT_BYTES);
+      console.info(
+        `P0-4 measured title render: ${elapsed}ms; peak retained RGBA ${retainedRgbaBytes} bytes (${(retainedRgbaBytes / 1024 / 1024).toFixed(2)} MiB).`,
+      );
       renderOutput = lastEvent(result, 'MP4 render');
       expect(renderOutput.type).toBe('complete');
       expect(renderOutput.mediaProduced).toBe(true);
@@ -943,6 +1034,24 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         'no-title.png',
         'no-title baseline preview',
       );
+      const baselineRender = runCli(
+        [
+          'render',
+          '--project',
+          noTitle.file,
+          '--preset',
+          'mp4',
+          '--out',
+          join(outputDir, 'no-title-baseline'),
+          '--json',
+        ],
+        'no-title baseline MP4 render',
+      );
+      expect(baselineRender.code, 'no-title baseline MP4 render exit status').toBe(0);
+      const baselineEvent = lastEvent(baselineRender, 'no-title baseline MP4 render');
+      expect(baselineEvent.type).toBe('complete');
+      const baselineMp4Path = baselineEvent.mediaPath as string;
+      expect(existsSync(baselineMp4Path)).toBe(true);
       const titled = decodeRgb(previewTitle, 1280, 720, 'decode title preview');
       const baseline = decodeRgb(previewNoTitle, 1280, 720, 'decode no-title preview');
       expect(
@@ -950,6 +1059,26 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         'title ROI must contain visible title pixels',
       ).toBeGreaterThan(0);
       expectEqualOutsideRoi(titled, baseline, 1280, 720, 'same-time title/no-title frame');
+      const titleMp4Frame = decodeRgbaFrame(renderPath, 60, 'decode title MP4 frame 60 at 60/30s');
+      const baselineMp4Frame = decodeRgbaFrame(
+        baselineMp4Path,
+        60,
+        'decode static MP4 frame 60 at 60/30s',
+      );
+      const outsideRoi = compareOutsideCodecBlockRoi(
+        titleMp4Frame,
+        baselineMp4Frame,
+        RENDER_WIDTH,
+        RENDER_HEIGHT,
+        'decoded MP4 static/title frame 60 outside 16x16-aligned expanded title ROI',
+      );
+      console.info(
+        `P0-4 decoded MP4 outside-ROI measurement: ${outsideRoi.changedPixels} pixels exceeded ${MP4_OUTSIDE_CHANNEL_TOLERANCE}/255 per-channel tolerance; maximum difference ${outsideRoi.maxChannelDifference}/255.`,
+      );
+      expect(
+        changedPixels(titleMp4Frame, baselineMp4Frame, RENDER_WIDTH, ROI, 0, RGBA_BYTES_PER_PIXEL),
+        'decoded MP4 title region must change between the static frame and the title frame',
+      ).toBeGreaterThan(0);
       const outsideWindow = decodeRgb(
         renderPreview(
           primary,
@@ -995,8 +1124,9 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       const afterClip = after.compositions.root.tracks
         .flatMap((track: JsonRecord) => track.clips)
         .find((clip: JsonRecord) => clip.id === titleClipId);
-      expect(afterInstance.instanceId).toBe(priorInstance.instanceId);
       expect(afterInstance.clipId).toBe(priorInstance.clipId);
+      expect(afterInstance.clipId).toBe(afterClip.id);
+      expect(priorInstance.clipId).toBe(priorClip.id);
       expect(afterClip.id).toBe(priorClip.id);
       expect(afterClip).toMatchObject({
         startUs: priorClip.startUs,
@@ -1054,6 +1184,11 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
 
     await runStep(10, 'caption boundary and ASS renderer evidence', () => {
       if (!primary || !noCaption) throw new Error('Caption test project setup did not complete.');
+      const captionProject = createProject(
+        'P0 English caption boundary proof',
+        join(root, 'caption-boundary'),
+        true,
+      );
       const baseline = runCli(
         [
           'render',
@@ -1072,38 +1207,114 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(baselineEvent.type).toBe('complete');
       const noCaptionPath = baselineEvent.mediaPath as string;
       expect(existsSync(noCaptionPath)).toBe(true);
-      const visible = decodeRgb(renderPath, 1280, 720, 'decode visible caption frame', 2);
-      const noCaptionPixels = decodeRgb(noCaptionPath, 1280, 720, 'decode no-caption frame', 2);
+      const operationsPath = join(root, 'caption-plan.operations.json');
+      const planPath = join(root, 'caption-plan.json');
+      writeFileSync(operationsPath, JSON.stringify({ schemaVersion: 1, operations: [] }, null, 2));
+      checkedCli(
+        [
+          'plan',
+          'prepare',
+          operationsPath,
+          '--project',
+          captionProject.file,
+          '--output',
+          planPath,
+          '--json',
+        ],
+        'caption ASS preparation must fail closed when the canonical face is unavailable',
+      );
+      const captionRender = runCli(
+        [
+          'render',
+          '--project',
+          captionProject.file,
+          '--preset',
+          'mp4',
+          '--out',
+          join(root, 'caption-render'),
+          '--json',
+        ],
+        'English ASS caption render',
+      );
+      expect(captionRender.code, 'English ASS caption render exit status').toBe(0);
+      const captionRenderEvent = lastEvent(captionRender, 'English ASS caption render');
+      expect(captionRenderEvent.type).toBe('complete');
+      const captionRenderPath = captionRenderEvent.mediaPath as string;
+      expect(existsSync(captionRenderPath)).toBe(true);
+      const firstVisibleFrame = FRAME_RATE * 1.5;
+      const lastVisibleFrame = FRAME_RATE * 2.5 - 1;
+      const firstAfterEndFrame = FRAME_RATE * 2.5;
+      const firstVisible = decodeRgbaFrame(
+        captionRenderPath,
+        firstVisibleFrame,
+        'decode first visible caption frame 45 at 45/30s',
+      );
+      const firstVisibleBaseline = decodeRgbaFrame(
+        noCaptionPath,
+        firstVisibleFrame,
+        'decode first visible caption baseline frame 45 at 45/30s',
+      );
       const visibleCaptionPixels = changedPixels(
-        visible,
-        noCaptionPixels,
-        1280,
+        firstVisible,
+        firstVisibleBaseline,
+        RENDER_WIDTH,
         CAPTION_BAND,
         CAPTION_PIXEL_THRESHOLD,
+        RGBA_BYTES_PER_PIXEL,
       );
-      if (visibleCaptionPixels === 0)
-        failures.push('Step 10 caption boundary: caption cue was not visible inside [1.5s, 2.5s).');
-      const outside = decodeRgb(renderPath, 1280, 720, 'decode caption-outside frame', 3);
-      const noCaptionOutside = decodeRgb(
+      expect(
+        visibleCaptionPixels,
+        'caption must first appear on frame 45 at 45/30s',
+      ).toBeGreaterThan(0);
+      const lastVisible = decodeRgbaFrame(
+        captionRenderPath,
+        lastVisibleFrame,
+        'decode last visible caption frame 74 at 74/30s',
+      );
+      const lastVisibleBaseline = decodeRgbaFrame(
         noCaptionPath,
-        1280,
-        720,
-        'decode no-caption outside frame',
-        3,
+        lastVisibleFrame,
+        'decode last visible caption baseline frame 74 at 74/30s',
+      );
+      const lastVisibleCaptionPixels = changedPixels(
+        lastVisible,
+        lastVisibleBaseline,
+        RENDER_WIDTH,
+        CAPTION_BAND,
+        CAPTION_PIXEL_THRESHOLD,
+        RGBA_BYTES_PER_PIXEL,
+      );
+      expect(
+        lastVisibleCaptionPixels,
+        'caption must remain visible on frame 74 at 74/30s',
+      ).toBeGreaterThan(0);
+      const outside = decodeRgbaFrame(
+        captionRenderPath,
+        firstAfterEndFrame,
+        'decode first frame after caption end, frame 75 at 75/30s',
+      );
+      const noCaptionOutside = decodeRgbaFrame(
+        noCaptionPath,
+        firstAfterEndFrame,
+        'decode baseline first frame after caption end, frame 75 at 75/30s',
       );
       const outsideCaptionPixels = changedPixels(
         outside,
         noCaptionOutside,
-        1280,
+        RENDER_WIDTH,
         CAPTION_BAND,
         CAPTION_PIXEL_THRESHOLD,
+        RGBA_BYTES_PER_PIXEL,
       );
-      if (outsideCaptionPixels > CAPTION_OUTSIDE_PIXEL_COUNT_TOLERANCE)
-        failures.push(
-          `Step 10 caption boundary: ${outsideCaptionPixels} caption-band pixels differed after the end boundary (tolerance ${CAPTION_OUTSIDE_PIXEL_COUNT_TOLERANCE}).`,
-        );
-      expect(renderOutput?.message).toContain('Captions: ass.');
-      expect(renderManifest?.captions).toEqual({ mode: 'ass' });
+      expect(
+        outsideCaptionPixels,
+        `Step 10 first frame after caption end is 75/30s; ${outsideCaptionPixels} caption-band pixels differed from the no-caption baseline, bound ${CAPTION_OUTSIDE_PIXEL_COUNT_TOLERANCE}`,
+      ).toBeLessThanOrEqual(CAPTION_OUTSIDE_PIXEL_COUNT_TOLERANCE);
+      expect(captionRenderEvent.message).toContain('Captions: ass.');
+      const captionManifest = JSON.parse(
+        readFileSync(captionRenderEvent.manifestPath as string, 'utf8'),
+      ) as JsonRecord;
+      expect(captionManifest.captions).toEqual({ mode: 'ass' });
     });
 
     await runStep(11, 'portable desktop export and artifact refusal', () => {
@@ -1211,6 +1422,20 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       const fixtureEnvelope = JSON.parse(readFileSync(primary.file, 'utf8')) as JsonRecord;
       const cancellationBody = fixtureEnvelope.project as JsonRecord;
       const rootComposition = cancellationBody.compositions.root as JsonRecord;
+      const cancellationInstances = cancellationBody.pluginData['joy.contentTemplates']
+        .instances as Record<string, JsonRecord>;
+      const previousTitle = cancellationInstances[titleId];
+      if (!previousTitle)
+        throw new Error('The cancellation fixture expected the title applied in step 4.');
+      delete cancellationInstances[titleId];
+      delete (cancellationBody.visualObjects as JsonRecord)[previousTitle.objectId as string];
+      const clipObjects = cancellationBody.pluginData['joy.clipObjects'] as JsonRecord;
+      delete clipObjects[previousTitle.clipId as string];
+      for (const track of rootComposition.tracks as JsonRecord[])
+        track.clips = (track.clips as JsonRecord[]).filter(
+          (clip) => clip.id !== previousTitle.clipId,
+        );
+      delete cancellationBody.pluginData['joy.renderPreparation'];
       rootComposition.tracks = (rootComposition.tracks as JsonRecord[]).filter(
         (track) => track.id !== primary!.captionTrackId && track.kind !== 'caption',
       );

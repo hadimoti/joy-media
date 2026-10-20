@@ -532,16 +532,16 @@ describe('P0 desktop title handoff', () => {
     });
   });
 
-  it('rejects incompatible canonical font descriptors during title compilation', () => {
+  it('rejects a bad font family with correctly derived title IDs', () => {
     const result = compileTitleInstance(
       {
-        instanceId: 'bad-font',
+        instanceId: 'test-joy.p0.title-400',
         templateId: 'joy.p0.title',
-        clipId: 'bad-font-clip',
-        objectId: 'bad-font-object',
+        clipId: 'clip-test-joy.p0.title-400',
+        objectId: 'object-test-joy.p0.title-400',
         lines: { primary: 'Unsupported font', secondary: '' },
         direction: 'ltr',
-        font: { family: 'Noto Sans Arabic', weight: 400 },
+        font: { family: 'Unsupported font', weight: 400 },
         fontSha256: '0'.repeat(64),
         placement: { xPx: 40, yPx: 40, maxWidthPx: 800, safeInsetPx: 20 },
         motion: { presetId: 'hold', inUs: 0, outUs: 0 },

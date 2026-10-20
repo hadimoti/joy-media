@@ -2,6 +2,15 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { probeCanonicalCaptionFace } from '../commands/render-features.js';
+import {
+  freezeRenderPreparation,
+  type RenderPreparationFacts,
+} from '../services/render-preparation.js';
+import {
+  loadNotoSansArabicFaces,
+  missingCanonicalFontCodePoints,
+} from '@joy-media/html-scene-runtime';
 import { CLI_ROOT, createSandbox, describeRun, type Sandbox } from './harness.js';
 import { expectNdjsonContract, projectDoc, writeSandboxFile } from './render-helpers.js';
 
@@ -313,6 +322,178 @@ describe('render parity and unsupported-feature contract', () => {
     ]);
   });
 
+  it('refuses a Persian title line with a real uncovered canonical-font glyph', () => {
+    const titleLine = 'عنوان 🚀';
+    const rocket = 0x1f680;
+    const latinBoldFace = loadNotoSansArabicFaces().find(
+      (face) => face.subset === 'latin' && face.weight === 700,
+    );
+    expect(
+      latinBoldFace,
+      'canonical Latin 700 face is part of the bundled font fixture',
+    ).toBeDefined();
+    expect(missingCanonicalFontCodePoints(latinBoldFace!, titleLine)).toContain(rocket);
+
+    const document = projectDoc({ id: 'persian-title-uncovered-glyph' }) as {
+      pluginData: Record<string, unknown>;
+    };
+    document.pluginData['joy.contentTemplates'] = {
+      version: 1,
+      instances: { title: { lines: { primary: titleLine, secondary: '' } } },
+    };
+    const facts: RenderPreparationFacts = {
+      libassProbe: {
+        usable: true,
+        executablePath: 'ffmpeg',
+        canonicalFace: 'Noto Sans Arabic Arabic 400',
+        log: '',
+      },
+      libassAvailable: true,
+      canonicalFaces: loadNotoSansArabicFaces(),
+      chromium: {
+        launchable: true,
+        executablePath: 'fixture-chromium',
+        executableSha256: 'sha256:fixture-chromium',
+        version: 'Chromium fixture',
+      },
+      ffmpeg: {
+        executablePath: 'ffmpeg',
+        executableSha256: 'sha256:fixture-ffmpeg',
+        version: 'ffmpeg fixture',
+        buildConfiguration: '--enable-libass',
+        requiredFilters: ['ass', 'subtitles'],
+        libassVersion: 'fixture-libass',
+        shaperVersion: 'fixture-harfbuzz',
+      },
+    };
+    let refusal: unknown;
+    try {
+      freezeRenderPreparation(document as never, [{ op: 'instantiateTemplate' }], facts);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toMatchObject({ code: 'FONT_UNSUPPORTED_GLYPH' });
+  });
+
+  it('renders Persian captions when the canonical face probe is usable and refuses honestly otherwise', async () => {
+    if (!sandbox) throw new Error('render parity sandbox was not created');
+    const id = 'persian-caption-face-contract';
+    const document: Record<string, unknown> = projectDoc({
+      id,
+      durationUs: 1_000_000,
+      frameRate: { num: 30, den: 1 },
+      tracks: [
+        { id: 'video-1', clips: [{ id: 'picture', assetId: source, durationUs: 1_000_000 }] },
+      ],
+    });
+    const compositions = document['compositions'] as Record<string, Record<string, unknown>>;
+    const tracks = compositions['root']!['tracks'] as Array<Record<string, unknown>>;
+    tracks.push({
+      id: 'caption-1',
+      kind: 'caption',
+      family: 'caption',
+      name: 'Persian captions',
+      order: 1,
+      enabled: true,
+      locked: false,
+      clips: [
+        {
+          id: 'persian-line',
+          kind: 'caption',
+          startUs: 0,
+          durationUs: 1_000_000,
+          captionDocumentId: 'persian-subtitles',
+        },
+      ],
+    });
+    document['captionDocuments'] = {
+      'persian-subtitles': {
+        id: 'persian-subtitles',
+        language: 'fa',
+        direction: 'rtl',
+        speakers: [],
+        words: { greeting: { id: 'greeting', text: 'سلام دنیا', startUs: 0, endUs: 1_000_000 } },
+        segments: [{ id: 'greeting-line', startUs: 0, endUs: 1_000_000, wordIds: ['greeting'] }],
+      },
+    };
+    const projectPath = writeSandboxFile(sandbox, `${id}.json`, document);
+    const outputDirectory = sandbox.path('output', id);
+    const operationsPath = writeSandboxFile(sandbox, `${id}-operations.json`, {
+      schemaVersion: 1,
+      operations: [],
+    });
+    const planPath = sandbox.path(`${id}-plan.json`);
+    const faceProbe = probeCanonicalCaptionFace();
+    const preparation = await sandbox.run([
+      'plan',
+      'prepare',
+      operationsPath,
+      '--project',
+      projectPath,
+      '--output',
+      planPath,
+      '--json',
+    ]);
+    if (!faceProbe.usable) {
+      expect(preparation.code, describeRun(preparation)).toBe(1);
+      const refusal = expectNdjsonContract(preparation, ['error']).at(-1);
+      expect(refusal).toMatchObject({ type: 'error', code: 'SETUP_REQUIRED' });
+      const refusalMessage = String(refusal?.['message']);
+      expect(JSON.parse(refusalMessage.slice(refusalMessage.indexOf('{')))).toMatchObject({
+        kind: 'canonical-caption-face-unavailable',
+      });
+      expect(existsSync(planPath)).toBe(false);
+      expect(existsSync(outputDirectory)).toBe(false);
+      return;
+    }
+
+    expect(preparation.code, describeRun(preparation)).toBe(0);
+    expect(expectNdjsonContract(preparation, ['complete']).at(-1)?.['type']).toBe('complete');
+    const preparedPlan = JSON.parse(readFileSync(planPath, 'utf8')) as {
+      baseRevision: number;
+    };
+    const applied = await sandbox.run([
+      'plan',
+      'apply',
+      planPath,
+      '--project',
+      projectPath,
+      '--expected-revision',
+      String(preparedPlan.baseRevision),
+      '--idempotency-key',
+      `${id}-apply`,
+      '--json',
+    ]);
+    expect(applied.code, describeRun(applied)).toBe(0);
+    expect(expectNdjsonContract(applied, ['complete']).at(-1)?.['type']).toBe('complete');
+    const result = await sandbox.run([
+      'render',
+      '--project',
+      projectPath,
+      '--out',
+      outputDirectory,
+      '--json',
+    ]);
+    expect(result.code, describeRun(result)).toBe(0);
+    const complete = expectNdjsonContract(result, ['complete']).at(-1)!;
+    expect(complete).toMatchObject({ type: 'complete', mediaProduced: true });
+    const mediaPath = String(complete['mediaPath']);
+    expect(existsSync(mediaPath)).toBe(true);
+    expect(readFileSync(mediaPath).byteLength).toBeGreaterThan(0);
+    const probe = spawnSync(
+      'ffprobe',
+      ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', mediaPath],
+      { encoding: 'utf8' },
+    );
+    expect(probe.status, probe.stderr).toBe(0);
+    const media = JSON.parse(probe.stdout) as {
+      streams: Array<{ codec_type: string }>;
+      format: { duration: string };
+    };
+    expect(media.streams.some((stream) => stream.codec_type === 'video')).toBe(true);
+    expect(Number(media.format.duration)).toBeCloseTo(1, 2);
+  });
+
   // Gain, mute and fades are rendered now (timeline-audio.e2e.test.ts checks the decoded sound).
   // Pan, solo and out-of-range gain still fail closed.
   it.each([
@@ -504,41 +685,6 @@ describe('render parity and unsupported-feature contract', () => {
             effects: [{ id: 'blur', effectId: 'blur', enabled: true, params: { radius: 8 } }],
           },
         };
-      },
-    ],
-    [
-      'Persian captions',
-      (document: Record<string, unknown>) => {
-        document['captionDocuments'] = {
-          subtitles: {
-            id: 'subtitles',
-            language: 'fa',
-            direction: 'rtl',
-            speakers: [],
-            words: { hello: { id: 'hello', text: 'سلام', startUs: 0, endUs: 500_000 } },
-            segments: [{ id: 'line', startUs: 0, endUs: 500_000, wordIds: ['hello'] }],
-          },
-        };
-        const compositions = document['compositions'] as Record<string, Record<string, unknown>>;
-        const tracks = compositions['root']!['tracks'] as Array<Record<string, unknown>>;
-        // On the timeline, so the renderer must refuse it rather than drop it.
-        tracks.push({
-          id: 'caption-1',
-          kind: 'caption',
-          name: 'Captions',
-          order: 9,
-          enabled: true,
-          locked: false,
-          clips: [
-            {
-              id: 'line-clip',
-              kind: 'caption',
-              startUs: 0,
-              durationUs: 500_000,
-              captionDocumentId: 'subtitles',
-            },
-          ],
-        });
       },
     ],
     [
