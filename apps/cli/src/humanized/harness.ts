@@ -88,7 +88,9 @@ let buildFailure: Error | undefined;
 export function ensureCliBuilt(): void {
   if (buildFailure) throw buildFailure;
   if (buildChecked) return;
-  if (!buildIsStale()) {
+  // A bundle whose mtime looks fresh can still be half written while another worker is building
+  // it, so a held build lock always means "wait for the completion marker", never "built".
+  if (!buildIsStale() && !existsSync(BUILD_LOCK)) {
     buildChecked = true;
     return;
   }
@@ -104,7 +106,7 @@ export function ensureCliBuilt(): void {
     else sleepSync(250);
     if (Date.now() > deadline)
       throw new Error(`Timed out waiting for CLI build lock ${BUILD_LOCK}`);
-    if (!buildIsStale()) {
+    if (!buildIsStale() && !existsSync(BUILD_LOCK)) {
       buildChecked = true;
       return;
     }
