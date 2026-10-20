@@ -526,7 +526,9 @@ describe('title frame timing and PNG encoding', () => {
       process.env.JOY_MEDIA_FFMPEG = 'fake-ffmpeg';
       const encoder = mockedStartEncode([], 1_000_000, () => {});
       const started = performance.now();
-      await expect(encoder.cancel()).rejects.toThrow('RENDER_CANCEL_TIMEOUT');
+      // cancel() resolves once the cancellation has finished; the timeout is reported as the
+      // encode settlement, which is where render-cmd reads it.
+      await expect(encoder.cancel()).resolves.toBeUndefined();
       expect(await encoder.done).toMatchObject({ ok: false, code: 'RENDER_CANCEL_TIMEOUT' });
       const elapsedMs = performance.now() - started;
       expect(elapsedMs).toBeGreaterThanOrEqual(4_500);

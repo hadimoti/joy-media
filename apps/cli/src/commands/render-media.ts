@@ -1035,18 +1035,20 @@ export function startEncode(
       resolvePromise(value);
     };
     settleWhenReady = (): void => {
-      if (!processResult || (cancelled && !cancellationFinished)) return;
+      if (cancelled && !cancellationFinished) return;
+      // A cancel that timed out settles the handle even when the process never reported a close,
+      // so a caller waiting on `done` cannot wait forever.
+      const result: Awaited<EncodeHandle['done']> | undefined = cancellationTimedOut
+        ? {
+            ok: false,
+            code: 'RENDER_CANCEL_TIMEOUT',
+            message:
+              'RENDER_CANCEL_TIMEOUT: cancellation helper or FFmpeg did not stop within five seconds.',
+          }
+        : processResult;
+      if (!result) return;
       cleanupCaptions();
-      resolveDone(
-        cancellationTimedOut
-          ? {
-              ok: false,
-              code: 'RENDER_CANCEL_TIMEOUT',
-              message:
-                'RENDER_CANCEL_TIMEOUT: cancellation helper or FFmpeg did not stop within five seconds.',
-            }
-          : processResult,
-      );
+      resolveDone(result);
     };
     child.on('error', (err: NodeJS.ErrnoException) => {
       processResult = {
@@ -1150,11 +1152,9 @@ export function startEncode(
       cancellationFinished = true;
       if (!processResult && child.exitCode !== null)
         processResult = { ok: false, code: 'cancelled', message: 'Render cancelled.' };
-      if (processResult) {
-        // The close listener owns result construction; this call only releases it after the
-        // helper has stopped or the shared cancellation deadline has elapsed.
-        settleWhenReady();
-      }
+      // The close listener owns result construction; this call releases the handle once the
+      // helper has stopped or the shared cancellation deadline has elapsed, with or without a close.
+      settleWhenReady();
     })();
     return cancelTask;
   };
