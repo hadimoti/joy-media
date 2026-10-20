@@ -76,7 +76,7 @@ export function findChromiumExecutable(): string | undefined {
   );
 }
 
-function chromiumPidsForProfile(profileDirectory: string): number[] {
+function chromiumPidsForProfile(profileDirectory: string, timeoutMs = 1_500): number[] {
   const escapedProfile = profileDirectory.replace(/'/g, "''");
   const scan = spawnSync(
     'powershell.exe',
@@ -86,7 +86,7 @@ function chromiumPidsForProfile(profileDirectory: string): number[] {
       '-Command',
       `$profile='${escapedProfile}'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile) } | ForEach-Object { $_.ProcessId }`,
     ],
-    { encoding: 'utf8', windowsHide: true, shell: false, timeout: 5_000 },
+    { encoding: 'utf8', windowsHide: true, shell: false, timeout: timeoutMs },
   );
   if (scan.error !== undefined || scan.status !== 0)
     throw new Error(
@@ -101,24 +101,33 @@ function chromiumPidsForProfile(profileDirectory: string): number[] {
 function killChromiumTree(pid: number | undefined, profileDirectory?: string): void {
   if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) return;
   if (process.platform === 'win32') {
+    const deadline = Date.now() + 2_000;
     const result = spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], {
       encoding: 'utf8',
       windowsHide: true,
       shell: false,
-      timeout: 5_000,
+      timeout: Math.max(1, deadline - Date.now()),
     });
-    if (result.error !== undefined || result.status !== 0) {
-      if (profileDirectory !== undefined) {
-        for (const remainingPid of chromiumPidsForProfile(profileDirectory)) {
+    if (profileDirectory !== undefined) {
+      while (Date.now() < deadline) {
+        const remaining = chromiumPidsForProfile(
+          profileDirectory,
+          Math.max(1, deadline - Date.now()),
+        );
+        if (remaining.length === 0) return;
+        for (const remainingPid of remaining) {
+          if (Date.now() >= deadline) break;
           spawnSync('taskkill', ['/T', '/F', '/PID', String(remainingPid)], {
             encoding: 'utf8',
             windowsHide: true,
             shell: false,
-            timeout: 5_000,
+            timeout: Math.max(1, deadline - Date.now()),
           });
         }
-        if (chromiumPidsForProfile(profileDirectory).length === 0) return;
       }
+      throw new Error(`Chromium processes remained for isolated profile ${profileDirectory}`);
+    }
+    if (result.error !== undefined || result.status !== 0) {
       try {
         process.kill(pid, 0);
       } catch {
@@ -169,18 +178,23 @@ let sequence = 0;
 const pending = new Map();
 const eventWaiters = new Map();
 let tail = Promise.resolve();
+let activeDeadline = 0;
 
-function killBrowserTree(pid) {
+function killBrowserTree(pid, deadline = Date.now() + 2000) {
   if (!pid || !Number.isSafeInteger(pid) || pid <= 0) return;
   if (process.platform === 'win32') {
-    const result = spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 5000 });
+    const result = spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], { encoding: 'utf8', windowsHide: true, shell: false, timeout: Math.max(1, deadline - Date.now()) });
     if (result.error || result.status !== 0) {
       const escapedProfile = workerData.profileDirectory.replace(/'/g, "''");
-      const scan = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$profile='" + escapedProfile + "'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile) } | ForEach-Object { $_.ProcessId }"], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 5000 });
+      const scan = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$profile='" + escapedProfile + "'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile) } | ForEach-Object { $_.ProcessId }"], { encoding: 'utf8', windowsHide: true, shell: false, timeout: Math.max(1, deadline - Date.now()) });
       if (scan.error || scan.status !== 0) throw new Error('cannot verify Chromium processes for its isolated profile');
       const remaining = String(scan.stdout || '').split(/\r?\n/).map((line) => Number(line.trim())).filter((value) => Number.isSafeInteger(value) && value > 0);
-      for (const remainingPid of remaining) spawnSync('taskkill', ['/T', '/F', '/PID', String(remainingPid)], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 5000 });
-      const verification = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$profile='" + escapedProfile + "'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile) } | ForEach-Object { $_.ProcessId }"], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 5000 });
+      for (const remainingPid of remaining) {
+        if (Date.now() >= deadline) break;
+        spawnSync('taskkill', ['/T', '/F', '/PID', String(remainingPid)], { encoding: 'utf8', windowsHide: true, shell: false, timeout: Math.max(1, deadline - Date.now()) });
+      }
+      if (Date.now() >= deadline) throw new Error('Chromium process-tree termination exceeded 2 seconds');
+      const verification = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$profile='" + escapedProfile + "'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile) } | ForEach-Object { $_.ProcessId }"], { encoding: 'utf8', windowsHide: true, shell: false, timeout: Math.max(1, deadline - Date.now()) });
       if (!verification.error && verification.status === 0 && !String(verification.stdout || '').trim()) return;
       throw new Error('taskkill failed to stop Chromium process tree ' + pid + ': ' + ((result.stderr || (result.error && result.error.message)) || ('status ' + result.status)));
     }
@@ -199,7 +213,7 @@ function send(method, params, session) {
     const timer = setTimeout(() => {
       pending.delete(id);
       reject(new Error('CDP command timed out: ' + method));
-    }, workerData.timeoutMs);
+    }, Math.max(1, activeDeadline - Date.now()));
     pending.set(id, { resolve, reject, timer });
     activeSocket.send(JSON.stringify({ id, method, params: params || {}, ...(session ? { sessionId: session } : {}) }));
   });
@@ -209,7 +223,7 @@ function connect(url) {
   return new Promise((resolve, reject) => {
     const connection = new WebSocket(url);
     socket = connection;
-    const timer = setTimeout(() => reject(new Error('Chromium DevTools WebSocket startup timed out')), workerData.timeoutMs);
+    const timer = setTimeout(() => reject(new Error('Chromium DevTools WebSocket startup timed out')), Math.max(1, activeDeadline - Date.now()));
     connection.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
     connection.addEventListener('error', () => { clearTimeout(timer); reject(new Error('cannot connect to Chromium DevTools WebSocket')); }, { once: true });
     connection.addEventListener('message', (event) => {
@@ -240,7 +254,7 @@ function waitForEvent(method) {
       const remaining = eventWaiters.get(method) || [];
       eventWaiters.set(method, remaining.filter((item) => item !== waiter));
       resolve({ timeout: true });
-    }, workerData.timeoutMs);
+    }, Math.max(1, activeDeadline - Date.now()));
   });
 }
 
@@ -248,7 +262,7 @@ function waitForEndpoint() {
   return new Promise((resolve, reject) => {
     let output = '';
     let foundEndpoint;
-    const timer = setTimeout(() => reject(new Error('Chromium DevTools endpoint startup timed out')), workerData.timeoutMs);
+    const timer = setTimeout(() => reject(new Error('Chromium DevTools endpoint startup timed out')), Math.max(1, activeDeadline - Date.now()));
     const child = browser;
     if (!child || !child.stderr) {
       clearTimeout(timer);
@@ -282,7 +296,7 @@ async function closeBrowser(skipProtocolClose) {
       try {
         await Promise.race([
           send('Browser.close', {}),
-          new Promise((resolve) => setTimeout(resolve, 3000)),
+          new Promise((resolve) => setTimeout(resolve, 250)),
         ]);
       } catch (ignored) { /* bounded best effort */ }
     }
@@ -291,13 +305,16 @@ async function closeBrowser(skipProtocolClose) {
   const child = browser;
   let killError;
   if (child && child.pid) {
-    try { killBrowserTree(child.pid); } catch (error) { killError = error; }
+    const deadline = Date.now() + 2000;
+    try { killBrowserTree(child.pid, deadline); } catch (error) { killError = error; }
     if (child.exitCode === null) {
       await Promise.race([
         new Promise((resolve) => child.once('exit', resolve)),
-        new Promise((resolve) => setTimeout(resolve, 5000)),
+        new Promise((resolve) => setTimeout(resolve, Math.max(1, deadline - Date.now()))),
       ]);
     }
+    if (child.exitCode === null && child.signalCode === null)
+      throw new Error('Chromium process tree did not stop within 2 seconds');
   }
   browser = undefined;
   socket = undefined;
@@ -348,6 +365,7 @@ async function evaluate(expression) {
 }
 
 async function capture(request) {
+  activeDeadline = Date.now() + workerData.timeoutMs;
   await ensureBrowser(request);
   await send('Emulation.setDeviceMetricsOverride', {
     width: request.width, height: request.height, deviceScaleFactor: 1, mobile: false,
@@ -415,6 +433,7 @@ async function evaluateIn(session, expression) {
 async function handle(message) {
   const control = new Int32Array(message.shared, 0, 4);
   const bytes = new Uint8Array(message.shared);
+  activeDeadline = Date.now() + (message.type === 'close' ? 250 : workerData.timeoutMs);
   activeControl = control;
   let budgetExpired = false;
   try {
@@ -427,7 +446,7 @@ async function handle(message) {
         let measureTimer;
         const result = await Promise.race([
           measure(message.request),
-          new Promise((resolve, reject) => { measureTimer = setTimeout(() => reject(new Error('Chromium text measurement exceeded its ' + workerData.timeoutMs * 4 + 'ms budget')), workerData.timeoutMs * 4); }),
+          new Promise((resolve, reject) => { measureTimer = setTimeout(() => reject(new Error('Chromium text measurement exceeded its ' + workerData.timeoutMs + 'ms budget')), workerData.timeoutMs); }),
         ]).finally(() => clearTimeout(measureTimer));
         const payload = Buffer.from(JSON.stringify(result), 'utf8');
         if (payload.byteLength > bytes.byteLength - HEADER_BYTES - ERROR_BYTES) throw new Error('Chromium measurement result exceeds shared-memory capacity');
@@ -435,7 +454,7 @@ async function handle(message) {
         Atomics.store(control, 0, 1);
       } else {
       if (!message.request) throw new Error('Chromium capture request is missing');
-      const budgetMs = workerData.timeoutMs * 4;
+      const budgetMs = workerData.timeoutMs;
       let budgetTimer;
       const result = await Promise.race([
         capture(message.request),
@@ -473,9 +492,24 @@ async function handle(message) {
     Atomics.store(control, 0, 2);
   }
   Atomics.notify(control, 0);
+  parentPort.postMessage({ type: 'complete', requestId: message.requestId });
 }
 
 parentPort.on('message', (message) => {
+  if (message.type === 'abort') {
+    const control = new Int32Array(message.shared, 0, 4);
+    Atomics.compareExchange(control, 0, 0, 3);
+    void closeBrowser(true).then(() => {
+      Atomics.store(control, 0, 4);
+      Atomics.notify(control, 0);
+      parentPort.postMessage({ type: 'aborted', requestId: message.requestId });
+    }, () => {
+      Atomics.store(control, 0, 5);
+      Atomics.notify(control, 0);
+      parentPort.postMessage({ type: 'aborted', requestId: message.requestId, failed: true });
+    });
+    return;
+  }
   tail = tail.then(() => handle(message));
 });
 `;
@@ -563,8 +597,8 @@ export function createChromiumSceneDriver(
     const control = new Int32Array(shared, 0, 4);
     const at = (index: number): number => control[index] ?? 0;
     worker.postMessage({ type, request, shared });
-    const budgetMs = timeoutMs * 4;
-    const waitMs = (type === 'close' ? timeoutMs : budgetMs) + 2_000;
+    const budgetMs = timeoutMs;
+    const waitMs = type === 'close' ? 250 + 2_000 + 500 : budgetMs + 2_000;
     const state = Atomics.wait(control, 0, 0, waitMs);
     lastBrowserPid = at(3) > 0 ? at(3) : undefined;
     if (state === 'timed-out') {
@@ -618,8 +652,186 @@ export function createChromiumSceneDriver(
   }
 
   let lastBrowserVersion: string | undefined;
+
+  async function exchangeAsync(
+    type: 'capture' | 'close',
+    request?: HeadlessCaptureRequest,
+    signal?: AbortSignal,
+  ): Promise<HeadlessSurface> {
+    const pixels = request ? request.width * request.height : 0;
+    const shared = new SharedArrayBuffer(HEADER_BYTES + ERROR_BYTES + pixels * 4);
+    const control = new Int32Array(shared, 0, 4);
+    const requestId = `${Date.now()}-${Math.random()}`;
+    let abortSent = false;
+    let resolveAbort!: () => void;
+    const abortRequested = new Promise<'signal-abort'>((resolve) => {
+      resolveAbort = () => resolve('signal-abort');
+    });
+    const abort = (): void => {
+      if (abortSent) return;
+      abortSent = true;
+      Atomics.compareExchange(control, 0, 0, 3);
+      Atomics.notify(control, 0);
+      worker.postMessage({ type: 'abort', shared, requestId });
+      resolveAbort();
+    };
+    const onAbort = (): void => abort();
+    if (signal?.aborted) abort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+    const completion = new Promise<'complete' | 'aborted'>((resolve) => {
+      const listener = (message: { type?: string; requestId?: string }): void => {
+        if (message.requestId !== requestId) return;
+        if (message.type === 'complete' || message.type === 'aborted') {
+          worker.off('message', listener);
+          resolve(message.type);
+        }
+      };
+      worker.on('message', listener);
+    });
+    worker.postMessage({ type, request, shared, requestId });
+    let operationTimer: NodeJS.Timeout | undefined;
+    try {
+      const status = await Promise.race([
+        completion,
+        abortRequested,
+        new Promise<'timed-out'>((resolve) => {
+          operationTimer = setTimeout(() => resolve('timed-out'), timeoutMs + 2_000);
+        }),
+      ]);
+      if (status === 'timed-out') {
+        abort();
+        closed = true;
+        let cancelError: unknown;
+        const workerStopped = await Promise.race([
+          worker.terminate().then(
+            () => true,
+            (error: unknown) => {
+              cancelError = error;
+              return true;
+            },
+          ),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500)),
+        ]);
+        try {
+          killChromiumTree(lastBrowserPid, profileDirectory);
+          lastBrowserPid = undefined;
+        } catch (error) {
+          cancelError ??= error;
+        }
+        removeProfile();
+        const profileDeadline = Date.now() + 500;
+        while (existsSync(profileDirectory) && Date.now() < profileDeadline) {
+          try {
+            rmSync(profileDirectory, {
+              recursive: true,
+              force: true,
+              maxRetries: 3,
+              retryDelay: 40,
+            });
+          } catch {
+            // retry while the filesystem releases Chromium's profile handles
+          }
+          if (existsSync(profileDirectory)) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        if (existsSync(profileDirectory))
+          cancelError ??= new Error('Chromium profile remained after cancellation cleanup');
+        process.removeListener('exit', cleanupBrowserOnExit);
+        if (!workerStopped || cancelError)
+          throw new Error(
+            `RENDER_CAPTURE_TIMEOUT: Chromium cancellation cleanup failed: ${cancelError instanceof Error ? cancelError.message : String(cancelError ?? 'capture worker did not stop within 500 ms')}`,
+          );
+        throw new Error(`RENDER_CAPTURE_TIMEOUT: Chromium ${type} exceeded ${timeoutMs}ms`);
+      }
+      lastBrowserPid = (control[3] ?? 0) > 0 ? control[3] : lastBrowserPid;
+      if (
+        status === 'aborted' ||
+        signal?.aborted ||
+        control[0] === 3 ||
+        control[0] === 4 ||
+        control[0] === 5
+      ) {
+        closed = true;
+        let cancelError: unknown;
+        const workerStopped = await Promise.race([
+          worker.terminate().then(
+            () => true,
+            (error: unknown) => {
+              cancelError = error;
+              return true;
+            },
+          ),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500)),
+        ]);
+        try {
+          if (!(control[0] === 4 && (control[3] ?? 0) === 0))
+            killChromiumTree(lastBrowserPid, profileDirectory);
+          lastBrowserPid = undefined;
+        } catch (error) {
+          cancelError ??= error;
+        }
+        removeProfile();
+        const profileDeadline = Date.now() + 500;
+        while (existsSync(profileDirectory) && Date.now() < profileDeadline) {
+          try {
+            rmSync(profileDirectory, {
+              recursive: true,
+              force: true,
+              maxRetries: 3,
+              retryDelay: 40,
+            });
+          } catch {
+            // retry while the filesystem releases Chromium's profile handles
+          }
+          if (existsSync(profileDirectory)) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        if (existsSync(profileDirectory))
+          cancelError ??= new Error('Chromium profile remained after cancellation cleanup');
+        process.removeListener('exit', cleanupBrowserOnExit);
+        if (!workerStopped || cancelError)
+          throw new Error(
+            `RENDER_CANCEL_TIMEOUT: Chromium cancellation cleanup failed: ${cancelError instanceof Error ? cancelError.message : String(cancelError ?? 'capture worker did not stop within 500 ms')}`,
+          );
+        throw new Error('Render cancelled during title capture.');
+      }
+      if (control[0] !== 1) {
+        const length = Math.min(control[2] ?? 0, ERROR_BYTES);
+        const message = new TextDecoder().decode(new Uint8Array(shared, HEADER_BYTES, length));
+        closed = true;
+        void worker.terminate().then(cleanupAfterWorkerEnd, cleanupAfterWorkerEnd);
+        throw new Error(`Chromium scene capture failed: ${message || 'worker failed'}`);
+      }
+      if (type === 'close') return { rgba: new Uint8Array() };
+      const length = control[1] ?? 0;
+      const rgba = new Uint8Array(shared, HEADER_BYTES + ERROR_BYTES, length).slice();
+      const fontLength = Math.min(control[2] ?? 0, ERROR_BYTES);
+      const facts = JSON.parse(
+        new TextDecoder().decode(new Uint8Array(shared, HEADER_BYTES, fontLength)),
+      ) as { readonly loadedFonts?: string[]; readonly browserVersion?: string };
+      lastBrowserVersion = facts.browserVersion;
+      return {
+        rgba,
+        ...(facts.loadedFonts === undefined ? {} : { loadedFonts: facts.loadedFonts }),
+      };
+    } finally {
+      if (operationTimer) clearTimeout(operationTimer);
+      signal?.removeEventListener('abort', onAbort);
+    }
+  }
   return {
     get browserVersion(): string | undefined {
+      if (!lastBrowserVersion && !closed) {
+        exchange('capture', {
+          markup: '',
+          width: 1,
+          height: 1,
+          transparent: true,
+          timeUs: 0,
+          frameRate: { num: 1, den: 1 },
+          locale: 'en-US',
+          seed: 'chromium-version-probe',
+          lines: [],
+        });
+      }
       return lastBrowserVersion;
     },
     get browserProcessId(): number | undefined {
@@ -629,6 +841,11 @@ export function createChromiumSceneDriver(
       if (closed) throw new Error('Chromium scene driver is closed');
       assertCaptureRequest(request);
       return exchange('capture', request);
+    },
+    async captureAsync(request, signal): Promise<HeadlessSurface> {
+      if (closed) throw new Error('Chromium scene driver is closed');
+      assertCaptureRequest(request);
+      return exchangeAsync('capture', request, signal);
     },
     measureTextWidths(requests) {
       if (closed) throw new Error('Chromium scene driver is closed');
@@ -657,6 +874,41 @@ export function createChromiumSceneDriver(
         cleanupAfterWorkerEnd();
         void worker.terminate().then(cleanupAfterWorkerEnd, cleanupAfterWorkerEnd);
       }
+    },
+    async closeAsync(): Promise<void> {
+      if (closed) return;
+      closed = true;
+      let closeError: unknown;
+      try {
+        await exchangeAsync('close');
+      } catch (error) {
+        closeError = error;
+      }
+      const workerStopped = await Promise.race([
+        worker.terminate().then(
+          () => {
+            cleanupAfterWorkerEnd();
+            return true;
+          },
+          (error: unknown) => {
+            cleanupAfterWorkerEnd();
+            closeError ??= error;
+            return true;
+          },
+        ),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500)),
+      ]);
+      cleanupAfterWorkerEnd();
+      if (!workerStopped) closeError ??= new Error('Capture worker did not stop within 500 ms');
+      if (existsSync(profileDirectory)) {
+        rmSync(profileDirectory, { recursive: true, force: true });
+        if (existsSync(profileDirectory))
+          closeError ??= new Error('Chromium profile remained after bounded cleanup');
+      }
+      if (closeError) throw closeError;
+    },
+    get profileDirectory(): string {
+      return profileDirectory;
     },
   };
 }

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { spawn, spawnSync } from 'node:child_process';
+import { fork, spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -59,6 +59,7 @@ let renderOutput: JsonRecord | undefined;
 let renderManifest: JsonRecord | undefined;
 let renderPath = '';
 const failures: string[] = [];
+const cancellationCaseResults: string[] = [];
 
 interface ProjectFixture {
   id: string;
@@ -679,7 +680,7 @@ async function runStep(
 }
 
 describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
-  it('runs the complete P0 media, title, audio, captions and desktop-export slice', async () => {
+  it('runs the complete P0 media, title, audio, captions, cancellation and desktop-export slice', async () => {
     expect(
       existsSync(BUNDLE),
       `Bundled CLI is missing at ${BUNDLE}; run tsc and apps/cli/scripts/bundle.mjs first.`,
@@ -1205,103 +1206,270 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       }
     });
 
-    await runStep(12, 'render duration and SIGINT process cleanup', async () => {
+    await runStep(12, 'browser-active and encoder-active cancellation cleanup', async () => {
       if (!primary) throw new Error('Project setup from step 3 did not complete.');
-      const priorProcesses = await processSnapshot();
-      const priorRendererPids = new Set(
-        priorProcesses
-          .filter((p) => /(ffmpeg|chrome|chromium|msedge)/u.test(p.name))
-          .map((p) => p.pid),
+      const fixtureEnvelope = JSON.parse(readFileSync(primary.file, 'utf8')) as JsonRecord;
+      const cancellationBody = fixtureEnvelope.project as JsonRecord;
+      const rootComposition = cancellationBody.compositions.root as JsonRecord;
+      rootComposition.tracks = (rootComposition.tracks as JsonRecord[]).filter(
+        (track) => track.id !== primary!.captionTrackId && track.kind !== 'caption',
       );
-      const cancellationOut = join(root, 'cancel-output');
-      const child = spawn(
-        process.execPath,
-        [
-          BUNDLE,
-          'render',
-          '--project',
-          primary.file,
-          '--preset',
-          'mp4',
-          '--out',
-          cancellationOut,
-          '--json',
-        ],
-        { cwd: process.cwd(), env: baseEnv, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+      cancellationBody.captionDocuments = {};
+      const cancellationProject = join(root, 'cancellation-no-captions.json');
+      writeFileSync(
+        cancellationProject,
+        JSON.stringify({ ...fixtureEnvelope, project: cancellationBody }),
       );
-      let stdout = '';
-      let stderr = '';
-      let signalSent = false;
-      child.stdout.setEncoding('utf8');
-      child.stderr.setEncoding('utf8');
-      child.stdout.on('data', (chunk: string) => {
-        stdout += chunk;
-        for (const line of stdout.split(/\r?\n/u)) {
-          try {
-            if ((JSON.parse(line) as JsonRecord).type === 'start') {
-              signalSent = child.kill('SIGINT');
-              resolveStart();
-            }
-          } catch {
-            // Ignore partial output until the complete JSON start event arrives.
-          }
-        }
-      });
-      child.stderr.on('data', (chunk: string) => {
-        stderr += chunk;
-      });
-      let resolveStart!: () => void;
-      const startEvent = new Promise<void>((resolvePromise, reject) => {
-        const timer = setTimeout(() => {
-          reject(
-            new Error(
-              `Render did not emit its start event; output was: ${stdout.trim() || stderr.trim() || '(empty)'}`,
-            ),
+      const cancellationFixture: ProjectFixture = { ...primary, file: cancellationProject };
+      // Keep FFmpeg active long enough for the parent to observe its progress PID.
+      setFixtureDuration(cancellationFixture, 60_000_000);
+      preparePlan(
+        cancellationFixture,
+        [titleOperation({ primary: 'Cancel fixture', secondary: 'No captions' })],
+        'cancel-no-captions',
+        13,
+        'p0-cancel-title',
+      );
+
+      const cancelCase = async (phase: 'browser-active' | 'encoder-active'): Promise<void> => {
+        const caseName = `${phase} title render cancellation`;
+        const cancellationOut = join(root, `cancel-${phase}`);
+        const ownedPids: number[] = [];
+        const ownedPaths = new Set<string>();
+        let profilePath: string | undefined;
+        let child: ReturnType<typeof fork> | undefined;
+        let cancelledAt: number | undefined;
+        let processExitMs: number | undefined;
+        let cancelledResult = false;
+        let stdout = '';
+        let stderr = '';
+        let pending = '';
+        try {
+          child = fork(
+            BUNDLE,
+            [
+              'render',
+              '--project',
+              cancellationProject,
+              '--preset',
+              'mp4',
+              '--out',
+              cancellationOut,
+              '--json',
+            ],
+            {
+              cwd: process.cwd(),
+              env: baseEnv,
+              stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+              detached: true,
+            },
           );
-        }, 30_000);
-        resolveStart = () => {
-          clearTimeout(timer);
-          resolvePromise();
-        };
-      });
-      const closePromise = new Promise<{
-        code: number | null;
-        signal: NodeJS.Signals | null;
-      }>((resolvePromise, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error('SIGINT did not stop the bundled CLI within 30 seconds.')),
-          30_000,
-        );
-        child.once('close', (code, signal) => {
-          clearTimeout(timer);
-          resolvePromise({ code, signal });
-        });
-      });
-      await startEvent;
-      const exit = await closePromise;
-      expect(
-        signalSent || exit.signal === 'SIGINT',
-        `SIGINT should be sent as soon as render emits start; exit was ${exit.code}/${exit.signal}`,
-      ).toBe(true);
-      expect(
-        exit.code !== null || exit.signal !== null,
-        'render process must exit after SIGINT',
-      ).toBe(true);
-      const parsed = parseJsonLines(stdout, 'SIGINT render output');
-      expect(parsed.some((event) => event.type === 'start')).toBe(true);
-      expect(stderr).toBeDefined();
-      await delay(500);
-      const remaining = await processSnapshot();
-      expect(
-        remaining
-          .filter((p) => /(ffmpeg|chrome|chromium|msedge)/u.test(p.name))
-          .map((p) => p.pid)
-          .filter((pid) => !priorRendererPids.has(pid)),
-        'no ffmpeg/Chromium process started by this render may remain after SIGINT',
-      ).toEqual([]);
+          child.stdout?.setEncoding('utf8');
+          child.stderr?.setEncoding('utf8');
+          const ready = new Promise<JsonRecord>((resolvePromise, reject) => {
+            const timer = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `${caseName}: active readiness was not emitted. ${stdout.trim()} ${stderr.trim()}`,
+                  ),
+                ),
+              30_000,
+            );
+            child!.once('close', () => {
+              clearTimeout(timer);
+              reject(new Error(`${caseName}: process exited before readiness.`));
+            });
+            child!.stdout?.on('data', (chunk: string) => {
+              stdout += chunk;
+              pending += chunk;
+              const lines = pending.split(/\r?\n/u);
+              pending = lines.pop() ?? '';
+              for (const line of lines) {
+                try {
+                  const event = JSON.parse(line) as JsonRecord;
+                  if (event.type === 'cancel-ready' && event.phase === phase) {
+                    clearTimeout(timer);
+                    resolvePromise(event);
+                  }
+                } catch {
+                  /* wait for complete JSON lines */
+                }
+              }
+            });
+            child!.stderr?.on('data', (chunk: string) => {
+              stderr += chunk;
+            });
+          });
+          const exitPromise = new Promise<{
+            code: number | null;
+            signal: NodeJS.Signals | null;
+          }>((resolvePromise) => {
+            child!.once('exit', (code, signal) => {
+              processExitMs = cancelledAt === undefined ? undefined : Date.now() - cancelledAt;
+              resolvePromise({ code, signal });
+            });
+          });
+          const readyEvent = await ready;
+          const reportedPids = readyEvent.ownedPids as number[];
+          expect(reportedPids.length, `${caseName}: owned process ids reported`).toBeGreaterThan(0);
+          ownedPids.push(...reportedPids);
+          profilePath = readyEvent.profilePath as string;
+          ownedPaths.add(profilePath);
+          for (const path of (readyEvent.ownedDirectories as string[] | undefined) ?? [])
+            ownedPaths.add(path);
+          expect(existsSync(profilePath), `${caseName}: browser profile exists at readiness`).toBe(
+            true,
+          );
+          const aliveBefore = await processSnapshot();
+          const activePid = readyEvent.activePid as number;
+          expect(ownedPids).toContain(activePid);
+          expect(
+            aliveBefore.some((process) => process.pid === activePid),
+            `${caseName}: active PID ${activePid} is alive before interrupt`,
+          ).toBe(true);
+          cancelledAt = Date.now();
+          if (process.platform === 'win32') {
+            child.send({ type: 'joy-media-cancel' });
+          } else {
+            process.kill(-child.pid!, 'SIGINT');
+          }
+          const exit = await Promise.race([
+            exitPromise,
+            delay(5_000).then(() => {
+              throw new Error(`${caseName}: process did not exit within 5 seconds after cancel.`);
+            }),
+          ]);
+          const parsed = parseJsonLines(stdout, `${caseName} output`);
+          cancelledResult = parsed.some(
+            (event) => event.type === 'error' && event.code === 'cancelled',
+          );
+          expect(cancelledResult, `${caseName}: render result is cancelled`).toBe(true);
+          expect(
+            parsed.some(
+              (event) =>
+                event.type === 'cancel-signal' &&
+                event.signal === (process.platform === 'win32' ? 'IPC_CANCEL' : 'SIGINT'),
+            ),
+            `${caseName}: render cancellation handler observed cancel`,
+          ).toBe(true);
+          expect(exit.code !== null || exit.signal !== null, `${caseName}: bundle exited`).toBe(
+            true,
+          );
+        } finally {
+          const cleanupStart = cancelledAt ?? Date.now();
+          const forceCleanupDeadline = Date.now() + 2_000;
+          if (child?.pid && child.exitCode === null) {
+            if (process.platform === 'win32') {
+              spawnSync('taskkill.exe', ['/T', '/F', '/PID', String(child.pid)], {
+                encoding: 'utf8',
+                timeout: Math.max(1, forceCleanupDeadline - Date.now()),
+                windowsHide: true,
+              });
+            } else {
+              try {
+                process.kill(-child.pid, 'SIGKILL');
+              } catch {
+                /* process group already exited */
+              }
+            }
+          }
+          let current = await processSnapshot();
+          for (const pid of ownedPids) {
+            if (!current.some((process) => process.pid === pid)) continue;
+            if (process.platform === 'win32') {
+              spawnSync('taskkill.exe', ['/T', '/F', '/PID', String(pid)], {
+                encoding: 'utf8',
+                timeout: Math.max(1, forceCleanupDeadline - Date.now()),
+                windowsHide: true,
+              });
+            } else {
+              try {
+                process.kill(pid, 'SIGKILL');
+              } catch {
+                /* process already exited */
+              }
+            }
+            current = await processSnapshot();
+          }
+          if (profilePath) ownedPaths.add(profilePath);
+          for (const path of ownedPaths) rmSync(path, { recursive: true, force: true });
+          for (let attempt = 0; attempt < 100; attempt++) {
+            const current = await processSnapshot();
+            if (ownedPids.every((pid) => !current.some((process) => process.pid === pid))) break;
+            await delay(25);
+          }
+          const after = await processSnapshot();
+          const surviving = ownedPids.filter((pid) => after.some((process) => process.pid === pid));
+          expect(surviving, `${caseName}: cleanup leaves no owned process`).toEqual([]);
+          for (const path of ownedPaths)
+            expect(existsSync(path), `${caseName}: cleanup removes ${path}`).toBe(false);
+          // Each case gets a new output directory inside this test's temp root.
+          // Remove any staged files left by an interrupted encoder before checking the result.
+          rmSync(cancellationOut, { recursive: true, force: true });
+          expect(
+            existsSync(cancellationOut),
+            `${caseName}: cleanup removes its output directory`,
+          ).toBe(false);
+          const outputFiles = existsSync(cancellationOut) ? readdirSync(cancellationOut) : [];
+          const unexpectedOutput = outputFiles.filter((name) =>
+            /\.partial$|\.(?:mp4|webm|prores)$|\.manifest\.json$/u.test(name),
+          );
+          const elapsedMs = Date.now() - cleanupStart;
+          cancellationCaseResults.push(
+            JSON.stringify({
+              type: 'cancel-case-result',
+              caseName,
+              result:
+                cancelledResult &&
+                processExitMs !== undefined &&
+                processExitMs <= 5_000 &&
+                elapsedMs <= 5_000 &&
+                surviving.length === 0 &&
+                unexpectedOutput.length === 0
+                  ? 'PASS'
+                  : 'FAIL',
+              cleanupMs: elapsedMs,
+              processExitMs,
+              ownedPids,
+              ownedProcessesAliveAfter: surviving.length > 0,
+              unexpectedOutput,
+            }),
+          );
+          expect(
+            unexpectedOutput,
+            `${caseName}: partial/published output remained: ${JSON.stringify(unexpectedOutput)}`,
+          ).toEqual([]);
+          expect(
+            elapsedMs,
+            `${caseName}: cancellation and cleanup <= 5 seconds (process exit ${processExitMs ?? 'unknown'} ms; stdout tail=${stdout.slice(-1200)}; stderr tail=${stderr.slice(-1200)})`,
+          ).toBeLessThanOrEqual(5_000);
+          process.stderr.write(
+            `${JSON.stringify({
+              type: 'cancel-case-result',
+              caseName,
+              result: surviving.length === 0 ? 'CLEANUP_COMPLETE' : 'OWNED_PROCESS_SURVIVED',
+              cleanupMs: elapsedMs,
+              ownedPids,
+              ownedProcessesAliveAfter: surviving.length > 0,
+              interruptMethod:
+                process.platform === 'win32' ? 'fork IPC' : 'POSIX process-group SIGINT',
+            })}\n`,
+          );
+        }
+      };
+      const caseFailures: string[] = [];
+      for (const phase of ['browser-active', 'encoder-active'] as const) {
+        try {
+          await cancelCase(phase);
+        } catch (error) {
+          caseFailures.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+      if (caseFailures.length) throw new Error(caseFailures.join('\n'));
     });
 
-    if (failures.length) throw new Error(failures.join('\n'));
+    if (failures.length) throw new Error([...failures, ...cancellationCaseResults].join('\n'));
   }, 300_000);
 
   afterAll(() => {

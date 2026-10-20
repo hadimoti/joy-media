@@ -1,8 +1,10 @@
-import { deflateSync } from 'node:zlib';
+import { deflate, deflateSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
+import { rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import type {
   FontFaceDescriptorV1,
   ScenePaintFrameV1,
@@ -37,7 +39,7 @@ export interface RenderedTitleFrames {
     readonly chromiumVersion: string;
     readonly fontManifestHashes: readonly string[];
   };
-  cleanup(): void;
+  cleanup(): Promise<void>;
 }
 
 interface ChromiumDriverModule {
@@ -55,8 +57,26 @@ interface ChromiumDriverModule {
       paint?: ScenePaintFrameV1;
       rejectImages?: boolean;
     }): { readonly rgba: Uint8Array };
+    captureAsync?(
+      request: {
+        markup: string;
+        width: number;
+        height: number;
+        transparent: boolean;
+        timeUs: number;
+        frameRate: TitleFrameRate;
+        locale: string;
+        seed: string;
+        paint?: ScenePaintFrameV1;
+        rejectImages?: boolean;
+      },
+      signal?: AbortSignal,
+    ): Promise<{ readonly rgba: Uint8Array }>;
     readonly browserVersion?: string;
+    readonly browserProcessId?: number;
+    readonly profileDirectory?: string;
     close?(): void;
+    closeAsync?(): Promise<void>;
   };
   readonly findChromiumExecutable: () => string | undefined;
   readonly loadNotoSansArabicFaces: () => readonly { readonly sha256: string }[];
@@ -134,13 +154,22 @@ export function encodeRgbaPng(width: number, height: number, rgba: Uint8Array): 
 export async function renderTitleFrames(
   sources: readonly TitleFrameSource[],
   frame: { readonly width: number; readonly height: number; readonly fps: TitleFrameRate },
-  options: { readonly isCancelled?: () => boolean } = {},
+  options: {
+    readonly isCancelled?: () => boolean;
+    readonly signal?: AbortSignal;
+    readonly captureTimeoutMs?: number;
+    readonly onCaptureReady?: (ready: {
+      readonly browserPid?: number;
+      readonly profilePath?: string;
+      readonly ownedDirectories?: readonly string[];
+    }) => void;
+  } = {},
 ): Promise<RenderedTitleFrames> {
   if (sources.length === 0)
     return {
       layers: [],
       rendererFacts: { chromiumVersion: '', fontManifestHashes: [] },
-      cleanup() {},
+      async cleanup() {},
     };
   if (sources.length > 8)
     throw new RangeError('SLICE_LIMIT: at most 8 title instances are supported');
@@ -156,17 +185,39 @@ export async function renderTitleFrames(
   }
   const directories: string[] = [];
   let driver: ReturnType<ChromiumDriverModule['createChromiumSceneDriver']> | undefined;
-  const cleanup = (): void => {
+  const cleanup = async (): Promise<void> => {
+    let driverError: unknown;
     try {
-      driver?.close?.();
-    } finally {
-      for (const directory of directories) rmSync(directory, { recursive: true, force: true });
-      directories.length = 0;
+      if (driver?.closeAsync) await driver.closeAsync();
+      else driver?.close?.();
+    } catch (error) {
+      driverError = error;
     }
+    let directoryError: unknown;
+    for (const directory of directories) {
+      const cleanupDeadline = Date.now() + 1_000;
+      let cleanupError: unknown;
+      while (Date.now() < cleanupDeadline) {
+        try {
+          await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 40 });
+          cleanupError = undefined;
+          break;
+        } catch (error) {
+          cleanupError = error;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      }
+      if (cleanupError) directoryError = cleanupError;
+    }
+    directories.length = 0;
+    if (driverError) throw driverError;
+    if (directoryError) throw directoryError;
   };
   let rendererFacts: RenderedTitleFrames['rendererFacts'] | undefined;
   let fontManifestHashes: string[];
   let captureCompleted = false;
+  let renderedResult: RenderedTitleFrames | undefined;
+  let renderError: unknown;
   try {
     let executablePath: string | undefined;
     try {
@@ -189,9 +240,8 @@ export async function renderTitleFrames(
       const pattern = join(directory, `title-${safeId(source.instanceId)}-%05d.png`);
       const times = titleFrameTimes(source.durationUs, frame.fps);
       for (let index = 0; index < times.length; index++) {
-        if (options.isCancelled?.()) throw new Error('Render cancelled during title capture.');
-        if (index > 0) await new Promise<void>((resolve) => setImmediate(resolve));
-        if (options.isCancelled?.()) throw new Error('Render cancelled during title capture.');
+        if (options.signal?.aborted || options.isCancelled?.())
+          throw new Error('Render cancelled during title capture.');
         const timeUs = times[index]!;
         const sceneFrame = buildTitleSceneFrame(
           source.instance,
@@ -208,7 +258,7 @@ export async function renderTitleFrames(
           },
         );
         try {
-          const surface = driver.capture({
+          const captureRequest = {
             markup: sceneFrame.markup,
             width: sceneFrame.viewport.width,
             height: sceneFrame.viewport.height,
@@ -219,18 +269,40 @@ export async function renderTitleFrames(
             seed: sceneFrame.seed,
             paint: sceneFrame.paint,
             rejectImages: true,
-          });
+          };
+          const surface = driver.captureAsync
+            ? await withCaptureDeadline(
+                (signal) => driver!.captureAsync!(captureRequest, signal),
+                options.captureTimeoutMs ?? 15_000,
+                options.signal,
+              )
+            : driver.capture(captureRequest);
+          if (options.signal?.aborted || options.isCancelled?.())
+            throw new Error('Render cancelled during title capture.');
           const chromiumVersion = driver.browserVersion;
           if (!chromiumVersion?.trim())
             throw new Error('Chromium capture session did not report its browser version');
           rendererFacts = { chromiumVersion, fontManifestHashes };
           if (surface.rgba.byteLength !== frame.width * frame.height * 4)
             throw new Error('Chromium returned an invalid RGBA surface');
-          writeFileSync(
+          await writeFile(
             pattern.replace('%05d', String(index).padStart(5, '0')),
-            encodeRgbaPng(frame.width, frame.height, surface.rgba),
+            await encodeRgbaPngAsync(frame.width, frame.height, surface.rgba),
           );
+          if (options.signal?.aborted || options.isCancelled?.())
+            throw new Error('Render cancelled during title capture.');
+          options.onCaptureReady?.({
+            ...(driver.browserProcessId === undefined
+              ? {}
+              : { browserPid: driver.browserProcessId }),
+            ...(driver.profileDirectory === undefined
+              ? {}
+              : { profilePath: driver.profileDirectory }),
+            ownedDirectories: [...directories],
+          });
         } catch (error) {
+          if (options.signal?.aborted || options.isCancelled?.())
+            throw new Error('Render cancelled during title capture.');
           throw new Error(
             `Title instance "${source.instanceId}" capture failed: ${errorMessage(error)}.`,
           );
@@ -249,15 +321,81 @@ export async function renderTitleFrames(
         `Title instance "${sources[0]!.instanceId}" cannot render: Chromium capture session did not report its browser version.`,
       );
     captureCompleted = true;
-    return { layers, rendererFacts, cleanup };
-  } finally {
-    if (!captureCompleted) {
-      try {
-        cleanup();
-      } catch {
-        /* preserve the capture failure */
-      }
+    renderedResult = { layers, rendererFacts, cleanup };
+  } catch (error) {
+    renderError = error;
+  }
+  if (!captureCompleted) {
+    try {
+      await cleanup();
+    } catch (cleanupError) {
+      if (renderError)
+        throw new Error(
+          `${errorMessage(renderError)} Cleanup failed: ${errorMessage(cleanupError)}.`,
+        );
+      throw cleanupError;
     }
+  }
+  if (renderError) throw renderError;
+  if (!renderedResult) throw new Error('Title capture completed without a frame result');
+  return renderedResult;
+}
+
+const deflateAsync = promisify(deflate);
+
+async function encodeRgbaPngAsync(
+  width: number,
+  height: number,
+  rgba: Uint8Array,
+): Promise<Buffer> {
+  if (rgba.byteLength !== width * height * 4)
+    throw new RangeError(`PNG requires ${width * height * 4} RGBA bytes`);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  const rows = Buffer.alloc(height * (width * 4 + 1));
+  for (let row = 0; row < height; row++) {
+    const destination = row * (width * 4 + 1);
+    rows[destination] = 0;
+    Buffer.from(rgba.buffer, rgba.byteOffset + row * width * 4, width * 4).copy(
+      rows,
+      destination + 1,
+    );
+  }
+  const compressed = await deflateAsync(rows);
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', compressed),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+async function withCaptureDeadline<T>(
+  capture: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  parentSignal?: AbortSignal,
+): Promise<T> {
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  if (parentSignal?.aborted) abort();
+  else parentSignal?.addEventListener('abort', abort, { once: true });
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      capture(controller.signal),
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('RENDER_CAPTURE_TIMEOUT: title frame capture exceeded 15 seconds'));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    parentSignal?.removeEventListener('abort', abort);
   }
 }
 

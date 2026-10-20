@@ -209,7 +209,9 @@ export type RenderErrorCode =
   | 'RENDER_ENVIRONMENT_DRIFT'
   | 'CAPTION_UNSUPPORTED'
   | 'CAPTION_LAYOUT_OVERFLOW'
-  | 'CAPTION_TIMING_UNREPRESENTABLE';
+  | 'CAPTION_TIMING_UNREPRESENTABLE'
+  | 'RENDER_CAPTURE_TIMEOUT'
+  | 'RENDER_CANCEL_TIMEOUT';
 
 /** Real render only: encoder progress, at most one event per whole percent. */
 export interface RenderProgressEvent {
@@ -217,6 +219,22 @@ export interface RenderProgressEvent {
   readonly projectId: string;
   readonly percent: number;
   readonly ts: string;
+}
+
+export interface RenderCancelReadyEvent {
+  readonly type: 'cancel-ready';
+  readonly phase: 'browser-active' | 'encoder-active';
+  readonly ownedPids: readonly number[];
+  readonly activePid: number;
+  readonly profilePath: string;
+  readonly ownedDirectories?: readonly string[];
+  readonly frameAcknowledged?: number;
+  readonly encoderProgress?: number;
+}
+
+export interface RenderCancelSignalEvent {
+  readonly type: 'cancel-signal';
+  readonly signal: NodeJS.Signals | 'IPC_CANCEL';
 }
 
 export interface RenderErrorEvent {
@@ -245,6 +263,8 @@ export type RenderEvent =
   | RenderClipEvent
   | RenderTrackEvent
   | RenderProgressEvent
+  | RenderCancelReadyEvent
+  | RenderCancelSignalEvent
   | RenderCompleteEvent
   | RenderErrorEvent
   | RenderPreviewCompleteEvent;
@@ -726,6 +746,34 @@ export async function runHeadlessRender(
   const startedAt = performance.now();
   const rawId = (project as { id?: unknown } | null | undefined)?.id;
   const knownProjectId = typeof rawId === 'string' ? rawId : '';
+  const cancellation = new AbortController();
+  let cancellationStartedAt: number | undefined;
+  let ipcCancellationRequested = false;
+  const cancelRender = (signal: NodeJS.Signals | 'IPC_CANCEL'): void => {
+    cancellationStartedAt ??= Date.now();
+    if (json) emitJson({ type: 'cancel-signal', signal }, true);
+    cancellation.abort();
+  };
+  const cancellationOverdue = (): boolean =>
+    cancellationStartedAt !== undefined && Date.now() - cancellationStartedAt > 5_000;
+  const onSigint = (): void => cancelRender('SIGINT');
+  const onSigterm = (): void => cancelRender('SIGTERM');
+  const onSigbreak = (): void => cancelRender('SIGBREAK');
+  const onIpcMessage = (message: unknown): void => {
+    if (
+      typeof message === 'object' &&
+      message !== null &&
+      'type' in message &&
+      message.type === 'joy-media-cancel'
+    ) {
+      ipcCancellationRequested = true;
+      cancelRender('IPC_CANCEL');
+    }
+  };
+  process.prependListener('SIGINT', onSigint);
+  process.prependListener('SIGTERM', onSigterm);
+  process.prependListener('SIGBREAK', onSigbreak);
+  process.on('message', onIpcMessage);
 
   const failure = (
     code: RenderErrorCode,
@@ -750,524 +798,433 @@ export async function runHeadlessRender(
     };
   };
 
-  const plan = planRender(project, presetSpec);
-  if (!plan.ok) return failure('invalid-project', plan.message);
-
-  const titleSources = collectTitleSources(project);
   try {
-    await validateRenderPreparation(project);
-  } catch (error) {
-    const code =
-      typeof error === 'object' && error !== null && 'code' in error
-        ? String(error.code)
-        : 'RENDER_PREPARATION_INVALID';
-    const allowed: RenderErrorCode[] = [
-      'SETUP_REQUIRED',
-      'RENDER_PREPARATION_REQUIRED',
-      'RENDER_PREPARATION_INVALID',
-      'RENDER_ENVIRONMENT_DRIFT',
-      'CAPTION_UNSUPPORTED',
-      'CAPTION_LAYOUT_OVERFLOW',
-      'CAPTION_TIMING_UNREPRESENTABLE',
-    ];
-    return failure(
-      allowed.includes(code as RenderErrorCode)
-        ? (code as RenderErrorCode)
-        : 'RENDER_PREPARATION_INVALID',
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-  const composition = rootCompositionOf(project);
-  if (titleSources.length > 8)
-    return failure('SLICE_LIMIT', 'At most 8 title instances are supported.');
-  const titleWidth = Number(composition['width']);
-  const titleHeight = Number(composition['height']);
-  const titleFps = compositionFrameRate(project);
-  const compositionDurationUs = Number(composition['durationUs']);
-  if (
-    titleSources.length > 0 &&
-    (compositionDurationUs > 60_000_000 ||
-      titleWidth > 1920 ||
-      titleHeight > 1920 ||
-      titleFps.num > 60 * titleFps.den)
-  )
-    return failure(
-      'SLICE_LIMIT',
-      'Title rendering supports compositions up to 60 seconds, 1920x1920 and 60 fps.',
-    );
+    const plan = planRender(project, presetSpec);
+    if (!plan.ok) return failure('invalid-project', plan.message);
 
-  const mediaPlan = planMedia(
-    withoutTitleClips(project, titleSources),
-    { manifestOnly: input.manifestOnly === true, mediaDir: input.mediaDir },
-    presetSpec,
-  );
-  if (mediaPlan.mode === 'error') return failure(mediaPlan.code, mediaPlan.message);
-  const realMediaBase = mediaPlan.mode === 'media' ? mediaPlan : null;
-  const realMedia: MediaPlanReady | null = realMediaBase
-    ? {
-        ...realMediaBase,
-        durationUs:
-          titleSources.length > 0 && Number.isSafeInteger(compositionDurationUs)
-            ? Math.max(realMediaBase.durationUs, compositionDurationUs)
-            : realMediaBase.durationUs,
-      }
-    : null;
-
-  const allClips = realMedia
-    ? plan.clips.map((clip) => {
-        const mediaClip = realMedia.clips.find(
-          (candidate) => candidate.clipId === clip.clipId && candidate.trackId === clip.trackId,
-        );
-        const titleSource = titleSources.find((source) => source.instance.clipId === clip.clipId);
-        if (!mediaClip && !titleSource) return clip;
-        const startUs = mediaClip?.startUs ?? titleSource!.startUs;
-        const durationUs = mediaClip?.durationUs ?? titleSource!.durationUs;
-        const firstFrame = frameBoundaryAtUs(startUs, realMedia.fps);
-        const endFrame = frameBoundaryAtUs(startUs + durationUs, realMedia.fps);
-        return {
-          ...clip,
-          startUs,
-          durationUs,
-          firstFrame,
-          frames: Math.max(1, endFrame - firstFrame),
-        };
-      })
-    : plan.clips;
-  const totalFrames = realMedia
-    ? Math.max(1, ...allClips.map((clip) => clip.firstFrame + clip.frames))
-    : plan.totalFrames;
-  // A real render uses the project's own size and frame rate, so the "preset is fixed at ..."
-  // note from planning does not apply to it.
-  const warnings = [
-    ...(realMedia ? plan.warnings.filter((w) => !w.includes('is fixed at')) : plan.warnings),
-    ...(realMedia ? realMedia.warnings : []),
-  ];
-  const totalClips = allClips.length;
-  let titleCaptureFacts:
-    | { readonly chromiumVersion: string; readonly fontManifestHashes: readonly string[] }
-    | undefined;
-
-  if (input.frameUs !== undefined) {
-    const timeUs = input.frameUs;
-    const durationUs =
-      Number.isSafeInteger(compositionDurationUs) && compositionDurationUs > 0
-        ? compositionDurationUs
-        : (realMedia?.durationUs ?? plan.composition.durationUs ?? 0);
-    if (!isPreviewTimeInRange(timeUs, durationUs))
-      return failure(
-        'RANGE_ERROR',
-        `Preview time ${String(timeUs)}µs is outside [0, ${durationUs})µs.`,
-        totalFrames,
-        totalClips,
-      );
-    if (!realMedia)
-      return failure(
-        'nothing-to-render',
-        'Preview requires at least one resolvable media clip.',
-        totalFrames,
-        totalClips,
-      );
-    const frameIndex = previewFrameIndex(timeUs, titleFps);
-    const previewMedia = { ...realMedia, durationUs };
-    const artifactPath = join(outDir, `preview-${frameIndex}.png`);
-    const outputProblem = prepareOutputDir(outDir, [artifactPath]);
-    if (outputProblem) return failure('output', outputProblem, totalFrames, totalClips);
-    let captured;
-    let captureCancelled = false;
-    let previewHandle: ReturnType<typeof startEncode> | undefined;
-    let encodeSettled = false;
-    const ownedTempDirectories: string[] = [];
-    const cancelCapture = (): void => {
-      captureCancelled = true;
-      previewHandle?.cancel();
-    };
-    process.prependListener('SIGINT', cancelCapture);
-    process.prependListener('SIGTERM', cancelCapture);
+    const titleSources = collectTitleSources(project);
     try {
-      captured = await renderTitleFrames(
-        titleSources,
-        {
+      await validateRenderPreparation(project);
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String(error.code)
+          : 'RENDER_PREPARATION_INVALID';
+      const allowed: RenderErrorCode[] = [
+        'SETUP_REQUIRED',
+        'RENDER_PREPARATION_REQUIRED',
+        'RENDER_PREPARATION_INVALID',
+        'RENDER_ENVIRONMENT_DRIFT',
+        'CAPTION_UNSUPPORTED',
+        'CAPTION_LAYOUT_OVERFLOW',
+        'CAPTION_TIMING_UNREPRESENTABLE',
+      ];
+      return failure(
+        allowed.includes(code as RenderErrorCode)
+          ? (code as RenderErrorCode)
+          : 'RENDER_PREPARATION_INVALID',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    const composition = rootCompositionOf(project);
+    if (titleSources.length > 8)
+      return failure('SLICE_LIMIT', 'At most 8 title instances are supported.');
+    const titleWidth = Number(composition['width']);
+    const titleHeight = Number(composition['height']);
+    const titleFps = compositionFrameRate(project);
+    const compositionDurationUs = Number(composition['durationUs']);
+    if (
+      titleSources.length > 0 &&
+      (compositionDurationUs > 60_000_000 ||
+        titleWidth > 1920 ||
+        titleHeight > 1920 ||
+        titleFps.num > 60 * titleFps.den)
+    )
+      return failure(
+        'SLICE_LIMIT',
+        'Title rendering supports compositions up to 60 seconds, 1920x1920 and 60 fps.',
+      );
+
+    const mediaPlan = planMedia(
+      withoutTitleClips(project, titleSources),
+      { manifestOnly: input.manifestOnly === true, mediaDir: input.mediaDir },
+      presetSpec,
+    );
+    if (mediaPlan.mode === 'error') return failure(mediaPlan.code, mediaPlan.message);
+    const realMediaBase = mediaPlan.mode === 'media' ? mediaPlan : null;
+    const realMedia: MediaPlanReady | null = realMediaBase
+      ? {
+          ...realMediaBase,
+          durationUs:
+            titleSources.length > 0 && Number.isSafeInteger(compositionDurationUs)
+              ? Math.max(realMediaBase.durationUs, compositionDurationUs)
+              : realMediaBase.durationUs,
+        }
+      : null;
+
+    const allClips = realMedia
+      ? plan.clips.map((clip) => {
+          const mediaClip = realMedia.clips.find(
+            (candidate) => candidate.clipId === clip.clipId && candidate.trackId === clip.trackId,
+          );
+          const titleSource = titleSources.find((source) => source.instance.clipId === clip.clipId);
+          if (!mediaClip && !titleSource) return clip;
+          const startUs = mediaClip?.startUs ?? titleSource!.startUs;
+          const durationUs = mediaClip?.durationUs ?? titleSource!.durationUs;
+          const firstFrame = frameBoundaryAtUs(startUs, realMedia.fps);
+          const endFrame = frameBoundaryAtUs(startUs + durationUs, realMedia.fps);
+          return {
+            ...clip,
+            startUs,
+            durationUs,
+            firstFrame,
+            frames: Math.max(1, endFrame - firstFrame),
+          };
+        })
+      : plan.clips;
+    const totalFrames = realMedia
+      ? Math.max(1, ...allClips.map((clip) => clip.firstFrame + clip.frames))
+      : plan.totalFrames;
+    // A real render uses the project's own size and frame rate, so the "preset is fixed at ..."
+    // note from planning does not apply to it.
+    const warnings = [
+      ...(realMedia ? plan.warnings.filter((w) => !w.includes('is fixed at')) : plan.warnings),
+      ...(realMedia ? realMedia.warnings : []),
+    ];
+    const totalClips = allClips.length;
+    let titleCaptureFacts:
+      | { readonly chromiumVersion: string; readonly fontManifestHashes: readonly string[] }
+      | undefined;
+
+    if (input.frameUs !== undefined) {
+      const timeUs = input.frameUs;
+      const durationUs =
+        Number.isSafeInteger(compositionDurationUs) && compositionDurationUs > 0
+          ? compositionDurationUs
+          : (realMedia?.durationUs ?? plan.composition.durationUs ?? 0);
+      if (!isPreviewTimeInRange(timeUs, durationUs))
+        return failure(
+          'RANGE_ERROR',
+          `Preview time ${String(timeUs)}µs is outside [0, ${durationUs})µs.`,
+          totalFrames,
+          totalClips,
+        );
+      if (!realMedia)
+        return failure(
+          'nothing-to-render',
+          'Preview requires at least one resolvable media clip.',
+          totalFrames,
+          totalClips,
+        );
+      const frameIndex = previewFrameIndex(timeUs, titleFps);
+      const previewMedia = { ...realMedia, durationUs };
+      const artifactPath = join(outDir, `preview-${frameIndex}.png`);
+      const outputProblem = prepareOutputDir(outDir, [artifactPath]);
+      if (outputProblem) return failure('output', outputProblem, totalFrames, totalClips);
+      let captured;
+      let previewHandle: ReturnType<typeof startEncode> | undefined;
+      let encodeSettled = false;
+      const ownedTempDirectories: string[] = [];
+      try {
+        captured = await renderTitleFrames(
+          titleSources,
+          {
+            width: titleWidth,
+            height: titleHeight,
+            fps: titleFps,
+          },
+          { signal: cancellation.signal, isCancelled: () => currentLongRunning < 0 },
+        );
+      } catch (error) {
+        if (cancellation.signal.aborted || currentLongRunning < 0)
+          return failure(
+            'cancelled',
+            'Render cancelled; no preview was written.',
+            totalFrames,
+            totalClips,
+          );
+        return failure('unsupported-feature', errorMessage(error), totalFrames, totalClips);
+      }
+      try {
+        if (cancellation.signal.aborted || currentLongRunning < 0)
+          return failure(
+            'cancelled',
+            'Render cancelled; no preview was written.',
+            totalFrames,
+            totalClips,
+          );
+        const args = buildFfmpegArgs(
+          previewMedia,
+          preset,
+          artifactPath,
+          captured.layers,
+          { timeUs },
+          ownedTempDirectories,
+        );
+        if (cancellation.signal.aborted)
+          return failure(
+            'cancelled',
+            'Render cancelled; no preview was written.',
+            totalFrames,
+            totalClips,
+          );
+        previewHandle = startEncode(
+          args,
+          durationUs,
+          () => {},
+          ownedTempDirectories,
+          cancellation.signal,
+        );
+        const outcome = await previewHandle.done;
+        encodeSettled = true;
+        if (!outcome.ok) return failure(outcome.code, outcome.message, totalFrames, totalClips);
+        if (!existsSync(artifactPath))
+          return failure(
+            'encode-failed',
+            'FFmpeg did not produce the requested preview PNG.',
+            totalFrames,
+            totalClips,
+          );
+        const previewEvent: RenderPreviewCompleteEvent = {
+          schemaVersion: 1,
+          type: 'preview-complete',
+          projectId: plan.projectId,
+          frameIndex,
+          timeUs,
           width: titleWidth,
           height: titleHeight,
-          fps: titleFps,
-        },
-        { isCancelled: () => captureCancelled || currentLongRunning < 0 },
-      );
-    } catch (error) {
-      process.off('SIGINT', cancelCapture);
-      process.off('SIGTERM', cancelCapture);
-      if (captureCancelled || currentLongRunning < 0)
-        return failure(
-          'cancelled',
-          'Render cancelled; no preview was written.',
-          totalFrames,
+          artifactPath,
+          mediaProduced: true,
+        };
+        emitJson(previewEvent, json);
+        return {
+          exitCode: 0,
+          projectId: plan.projectId,
+          preset,
+          outDir,
+          artifactPath,
+          totalFrames: 1,
           totalClips,
-        );
-      return failure('unsupported-feature', errorMessage(error), totalFrames, totalClips);
+          durationMs: performance.now() - startedAt,
+          mediaProduced: true,
+          manifestWritten: false,
+          warnings,
+        };
+      } finally {
+        await (async () => {
+          let cleanupFailed = false;
+          if (!encodeSettled && previewHandle) {
+            try {
+              await previewHandle.cancel();
+            } catch {
+              cleanupFailed = true;
+            }
+          }
+          try {
+            await captured.cleanup();
+          } catch {
+            cleanupFailed = true;
+          }
+          for (const directory of ownedTempDirectories)
+            rmSync(directory, { recursive: true, force: true });
+          if (cancellationOverdue() || cleanupFailed)
+            throw new Error('RENDER_CANCEL_TIMEOUT: preview cleanup exceeded its deadline.');
+        })();
+      }
     }
-    try {
-      if (captureCancelled || currentLongRunning < 0)
-        return failure(
-          'cancelled',
-          'Render cancelled; no preview was written.',
-          totalFrames,
-          totalClips,
-        );
-      const args = buildFfmpegArgs(
-        previewMedia,
-        preset,
-        artifactPath,
-        captured.layers,
-        { timeUs },
-        ownedTempDirectories,
+    const fileStem = safeFileStem(plan.projectId);
+    const mediaName = `${fileStem}.${presetSpec.extension}`;
+    const manifestName = `${fileStem}.${presetSpec.extension}.manifest.json`;
+    if (fileStem !== plan.projectId) {
+      warnings.push(`Project id "${plan.projectId}" is not a safe file name; using "${fileStem}".`);
+    }
+
+    if (totalClips > 0) {
+      // Fail before doing any work (and before announcing `start`) if the
+      // destination can never be written.
+      const outputTargets = realMedia
+        ? [join(outDir, mediaName), join(outDir, manifestName)]
+        : [join(outDir, manifestName)];
+      const outputProblem = prepareOutputDir(outDir, outputTargets);
+      if (outputProblem) return failure('output', outputProblem, totalFrames, totalClips);
+    }
+
+    let releaseOutputLock: (() => void) | null = null;
+    let recordOutputPartialPath: ((partialPath: string | null) => void) | null = null;
+    let recordOutputTransaction: ((transaction: OutputTransactionRecord | null) => void) | null =
+      null;
+    let activeRenderPartialPath: string | null = null;
+    if (realMedia) {
+      const lockPath = join(outDir, `.${mediaName}.render.lock`);
+      const lock = acquireOutputLock(lockPath);
+      if (!lock.ok) return failure('output', lock.message, totalFrames, totalClips);
+      releaseOutputLock = lock.release;
+      recordOutputPartialPath = lock.recordPartialPath;
+      recordOutputTransaction = lock.recordTransaction;
+    }
+
+    if (!json) {
+      printBanner();
+      logInfo(`Headless render plan: ${c(plan.title, 'bold')} (${plan.projectId})`);
+      logStep('Preset', `${presetSpec.id} (${presetSpec.container}/${presetSpec.videoCodec})`);
+      logStep('Manifest', join(outDir, manifestName));
+      logStep(
+        'Media file',
+        realMedia
+          ? join(outDir, mediaName)
+          : 'none - manifest only, this command does not encode video',
       );
-      previewHandle = startEncode(args, durationUs, () => {}, ownedTempDirectories);
-      const outcome = await previewHandle.done;
-      encodeSettled = true;
-      if (!outcome.ok) return failure(outcome.code, outcome.message, totalFrames, totalClips);
-      if (!existsSync(artifactPath))
-        return failure(
-          'encode-failed',
-          'FFmpeg did not produce the requested preview PNG.',
-          totalFrames,
-          totalClips,
-        );
-      const previewEvent: RenderPreviewCompleteEvent = {
-        schemaVersion: 1,
-        type: 'preview-complete',
+      logStep('Concurrency', String(concurrency));
+      logStep('Tracks', String(plan.trackCount));
+      logStep('Clips', String(totalClips));
+      logStep('Total Frames', String(totalFrames));
+      for (const warning of warnings) logWarn(warning);
+      console.log();
+    }
+
+    emitJson(
+      {
+        type: 'start',
         projectId: plan.projectId,
-        frameIndex,
-        timeUs,
-        width: titleWidth,
-        height: titleHeight,
-        artifactPath,
-        mediaProduced: true,
-      };
-      emitJson(previewEvent, json);
+        title: plan.title,
+        preset,
+        outDir,
+        totalFrames,
+        totalClips,
+        concurrency,
+        ts: new Date().toISOString(),
+      },
+      json,
+    );
+
+    // Nothing to encode is a failure for a real render; only an explicit plan-only run may stop here.
+    if (totalClips === 0 && !input.manifestOnly) {
+      return failure('nothing-to-render', NOTHING_RENDERED_MESSAGE);
+    }
+
+    if (totalClips === 0) {
+      const emptyWarnings = [...warnings, NOTHING_RENDERED_MESSAGE];
+      if (!json) logWarn(NOTHING_RENDERED_MESSAGE);
+      emitJson(
+        {
+          type: 'complete',
+          projectId: plan.projectId,
+          preset,
+          outDir,
+          artifactPath: '',
+          totalFrames,
+          durationMs: 0,
+          ts: new Date().toISOString(),
+          mediaProduced: false,
+          manifestWritten: false,
+          message: NOTHING_RENDERED_MESSAGE,
+          warnings: emptyWarnings,
+        },
+        json,
+      );
       return {
         exitCode: 0,
         projectId: plan.projectId,
         preset,
         outDir,
-        artifactPath,
-        totalFrames: 1,
-        totalClips,
-        durationMs: performance.now() - startedAt,
-        mediaProduced: true,
-        manifestWritten: false,
-        warnings,
-      };
-    } finally {
-      if (!encodeSettled) previewHandle?.cancel();
-      captured.cleanup();
-      for (const directory of ownedTempDirectories)
-        rmSync(directory, { recursive: true, force: true });
-      process.off('SIGINT', cancelCapture);
-      process.off('SIGTERM', cancelCapture);
-    }
-  }
-  const fileStem = safeFileStem(plan.projectId);
-  const mediaName = `${fileStem}.${presetSpec.extension}`;
-  const manifestName = `${fileStem}.${presetSpec.extension}.manifest.json`;
-  if (fileStem !== plan.projectId) {
-    warnings.push(`Project id "${plan.projectId}" is not a safe file name; using "${fileStem}".`);
-  }
-
-  if (totalClips > 0) {
-    // Fail before doing any work (and before announcing `start`) if the
-    // destination can never be written.
-    const outputTargets = realMedia
-      ? [join(outDir, mediaName), join(outDir, manifestName)]
-      : [join(outDir, manifestName)];
-    const outputProblem = prepareOutputDir(outDir, outputTargets);
-    if (outputProblem) return failure('output', outputProblem, totalFrames, totalClips);
-  }
-
-  let releaseOutputLock: (() => void) | null = null;
-  let recordOutputPartialPath: ((partialPath: string | null) => void) | null = null;
-  let recordOutputTransaction: ((transaction: OutputTransactionRecord | null) => void) | null =
-    null;
-  let activeRenderPartialPath: string | null = null;
-  if (realMedia) {
-    const lockPath = join(outDir, `.${mediaName}.render.lock`);
-    const lock = acquireOutputLock(lockPath);
-    if (!lock.ok) return failure('output', lock.message, totalFrames, totalClips);
-    releaseOutputLock = lock.release;
-    recordOutputPartialPath = lock.recordPartialPath;
-    recordOutputTransaction = lock.recordTransaction;
-  }
-
-  if (!json) {
-    printBanner();
-    logInfo(`Headless render plan: ${c(plan.title, 'bold')} (${plan.projectId})`);
-    logStep('Preset', `${presetSpec.id} (${presetSpec.container}/${presetSpec.videoCodec})`);
-    logStep('Manifest', join(outDir, manifestName));
-    logStep(
-      'Media file',
-      realMedia
-        ? join(outDir, mediaName)
-        : 'none - manifest only, this command does not encode video',
-    );
-    logStep('Concurrency', String(concurrency));
-    logStep('Tracks', String(plan.trackCount));
-    logStep('Clips', String(totalClips));
-    logStep('Total Frames', String(totalFrames));
-    for (const warning of warnings) logWarn(warning);
-    console.log();
-  }
-
-  emitJson(
-    {
-      type: 'start',
-      projectId: plan.projectId,
-      title: plan.title,
-      preset,
-      outDir,
-      totalFrames,
-      totalClips,
-      concurrency,
-      ts: new Date().toISOString(),
-    },
-    json,
-  );
-
-  // Nothing to encode is a failure for a real render; only an explicit plan-only run may stop here.
-  if (totalClips === 0 && !input.manifestOnly) {
-    return failure('nothing-to-render', NOTHING_RENDERED_MESSAGE);
-  }
-
-  if (totalClips === 0) {
-    const emptyWarnings = [...warnings, NOTHING_RENDERED_MESSAGE];
-    if (!json) logWarn(NOTHING_RENDERED_MESSAGE);
-    emitJson(
-      {
-        type: 'complete',
-        projectId: plan.projectId,
-        preset,
-        outDir,
         artifactPath: '',
-        totalFrames,
+        totalFrames: 0,
+        totalClips: 0,
         durationMs: 0,
-        ts: new Date().toISOString(),
         mediaProduced: false,
         manifestWritten: false,
-        message: NOTHING_RENDERED_MESSAGE,
         warnings: emptyWarnings,
-      },
-      json,
-    );
-    return {
-      exitCode: 0,
-      projectId: plan.projectId,
-      preset,
-      outDir,
-      artifactPath: '',
-      totalFrames: 0,
-      totalClips: 0,
-      durationMs: 0,
-      mediaProduced: false,
-      manifestWritten: false,
-      warnings: emptyWarnings,
-    };
-  }
-
-  // Track-level events, in timeline order, one per track that has clips.
-  const trackBuckets: Array<{
-    trackId: string;
-    trackName: string;
-    clipCount: number;
-  }> = [];
-  for (const clip of allClips) {
-    const last = trackBuckets[trackBuckets.length - 1];
-    if (last && last.trackId === clip.trackId) {
-      last.clipCount += 1;
-    } else {
-      trackBuckets.push({ trackId: clip.trackId, trackName: clip.trackName, clipCount: 1 });
+      };
     }
-  }
-  for (const trk of trackBuckets) {
-    emitJson(
-      {
-        type: 'track',
-        projectId: plan.projectId,
-        trackId: trk.trackId,
-        trackName: trk.trackName,
-        clipCount: trk.clipCount,
-      },
-      json,
-    );
-  }
 
-  // Process clips with a concurrency-bounded async pool. `renderedFrames` is
-  // only a progress counter; each clip's `frameRange` was fixed at planning
-  // time (see PlannedClip.firstFrame), so the manifest does not depend on the
-  // order workers happen to finish in.
-  let renderedFrames = 0;
-  let lastDrawnPercent = -1;
-  let framesSinceYield = 0;
-  let nextClip = 0;
-  const workerCount = realMedia ? 0 : Math.min(concurrency, totalClips);
-  const workers: Array<Promise<void>> = [];
-  for (let w = 0; w < workerCount; w += 1) {
-    workers.push(
-      (async () => {
-        for (;;) {
-          if (currentLongRunning < 0) return;
-          const next = allClips[nextClip];
-          nextClip += 1;
-          if (!next) break;
-          for (let f = 0; f < next.frames; f += 1) {
-            if (currentLongRunning < 0) return;
-            // Deterministic per-frame work. A real engine would push pixels
-            // through an encoder here; this is a placeholder busy-step.
-            Math.sin(f * 0.001 + next.frames * 0.0001);
-            renderedFrames += 1;
-            framesSinceYield += 1;
-            if (showProgress) {
-              const percent = Math.floor((renderedFrames * 100) / totalFrames);
-              if (percent !== lastDrawnPercent) {
-                lastDrawnPercent = percent;
-                drawProgress(renderedFrames, totalFrames, 32);
+    // Track-level events, in timeline order, one per track that has clips.
+    const trackBuckets: Array<{
+      trackId: string;
+      trackName: string;
+      clipCount: number;
+    }> = [];
+    for (const clip of allClips) {
+      const last = trackBuckets[trackBuckets.length - 1];
+      if (last && last.trackId === clip.trackId) {
+        last.clipCount += 1;
+      } else {
+        trackBuckets.push({ trackId: clip.trackId, trackName: clip.trackName, clipCount: 1 });
+      }
+    }
+    for (const trk of trackBuckets) {
+      emitJson(
+        {
+          type: 'track',
+          projectId: plan.projectId,
+          trackId: trk.trackId,
+          trackName: trk.trackName,
+          clipCount: trk.clipCount,
+        },
+        json,
+      );
+    }
+
+    // Process clips with a concurrency-bounded async pool. `renderedFrames` is
+    // only a progress counter; each clip's `frameRange` was fixed at planning
+    // time (see PlannedClip.firstFrame), so the manifest does not depend on the
+    // order workers happen to finish in.
+    let renderedFrames = 0;
+    let lastDrawnPercent = -1;
+    let framesSinceYield = 0;
+    let nextClip = 0;
+    const workerCount = realMedia ? 0 : Math.min(concurrency, totalClips);
+    const workers: Array<Promise<void>> = [];
+    for (let w = 0; w < workerCount; w += 1) {
+      workers.push(
+        (async () => {
+          for (;;) {
+            if (currentLongRunning < 0 || cancellation.signal.aborted) return;
+            const next = allClips[nextClip];
+            nextClip += 1;
+            if (!next) break;
+            for (let f = 0; f < next.frames; f += 1) {
+              if (currentLongRunning < 0 || cancellation.signal.aborted) return;
+              // Deterministic per-frame work. A real engine would push pixels
+              // through an encoder here; this is a placeholder busy-step.
+              Math.sin(f * 0.001 + next.frames * 0.0001);
+              renderedFrames += 1;
+              framesSinceYield += 1;
+              if (showProgress) {
+                const percent = Math.floor((renderedFrames * 100) / totalFrames);
+                if (percent !== lastDrawnPercent) {
+                  lastDrawnPercent = percent;
+                  drawProgress(renderedFrames, totalFrames, 32);
+                }
+              }
+              if (framesSinceYield >= FRAMES_PER_SLICE) {
+                framesSinceYield = 0;
+                await yieldToEventLoop();
+                if (currentLongRunning < 0 || cancellation.signal.aborted) return;
               }
             }
-            if (framesSinceYield >= FRAMES_PER_SLICE) {
-              framesSinceYield = 0;
-              await yieldToEventLoop();
-              if (currentLongRunning < 0) return;
-            }
-          }
-          if (currentLongRunning < 0) return;
-          emitJson(
-            {
-              type: 'clip',
-              projectId: plan.projectId,
-              trackId: next.trackId,
-              clipId: next.clipId,
-              progress: 1,
-              framesRendered: renderedFrames,
-              totalFrames,
-            },
-            json,
-          );
-        }
-      })(),
-    );
-  }
-
-  const mediaPath = realMedia ? join(outDir, mediaName) : '';
-  let stagedMediaPath: string | null = null;
-  try {
-    await Promise.all(workers);
-    if (currentLongRunning < 0) {
-      return failure(
-        'cancelled',
-        'Render cancelled; no media or manifest was written.',
-        totalFrames,
-        totalClips,
-      );
-    }
-    if (realMedia) {
-      const partialPath = join(
-        outDir,
-        `.${mediaName}.${process.pid}.${randomBytes(4).toString('hex')}.partial`,
-      );
-      try {
-        if (!recordOutputPartialPath) throw new Error('Render output lock is unavailable.');
-        recordOutputPartialPath(partialPath);
-        activeRenderPartialPath = partialPath;
-      } catch (err) {
-        return failure(
-          'output',
-          `Cannot record staged media path ${partialPath}: ${errorMessage(err)}`,
-          totalFrames,
-          totalClips,
-        );
-      }
-      let lastPercent = -1;
-      let renderedTitles: Awaited<ReturnType<typeof renderTitleFrames>> | undefined;
-      let handle: ReturnType<typeof startEncode> | undefined;
-      let encodeSettled = false;
-      let captureCancelled = false;
-      const ownedTempDirectories: string[] = [];
-      const discardPartial = (): void => {
-        captureCancelled = true;
-        handle?.cancel();
-        try {
-          rmSync(partialPath, { force: true });
-        } catch {
-          /* best effort: the partial file is hidden and ignored by every reader */
-        }
-      };
-      process.prependListener('SIGINT', discardPartial);
-      process.prependListener('SIGTERM', discardPartial);
-      let outcome: Awaited<ReturnType<typeof startEncode>['done']>;
-      try {
-        renderedTitles = await renderTitleFrames(
-          titleSources,
-          { width: titleWidth, height: titleHeight, fps: titleFps },
-          { isCancelled: () => captureCancelled || currentLongRunning < 0 },
-        );
-        if (titleSources.length > 0) {
-          if (
-            !renderedTitles.rendererFacts.chromiumVersion.trim() ||
-            renderedTitles.rendererFacts.fontManifestHashes.length === 0
-          )
-            throw new Error('Title renderer facts are missing from the Chromium capture session.');
-          titleCaptureFacts = renderedTitles.rendererFacts;
-        }
-        const ffmpegArgs = buildFfmpegArgs(
-          realMedia,
-          preset,
-          partialPath,
-          renderedTitles.layers,
-          undefined,
-          ownedTempDirectories,
-        );
-        handle = startEncode(
-          ffmpegArgs,
-          realMedia.durationUs,
-          (fraction) => {
-            const percent = Math.floor(fraction * 100);
-            if (percent === lastPercent) return;
-            lastPercent = percent;
-            if (showProgress) drawProgress(Math.round(fraction * totalFrames), totalFrames, 32);
+            if (currentLongRunning < 0 || cancellation.signal.aborted) return;
             emitJson(
               {
-                type: 'progress',
+                type: 'clip',
                 projectId: plan.projectId,
-                percent,
-                ts: new Date().toISOString(),
+                trackId: next.trackId,
+                clipId: next.clipId,
+                progress: 1,
+                framesRendered: renderedFrames,
+                totalFrames,
               },
               json,
             );
-          },
-          ownedTempDirectories,
-        );
-        outcome = await handle.done;
-        encodeSettled = true;
-      } catch (error) {
-        if (handle) handle.cancel();
-        for (const directory of ownedTempDirectories)
-          rmSync(directory, { recursive: true, force: true });
-        rmSync(partialPath, { force: true });
-        if (captureCancelled || currentLongRunning < 0)
-          return failure(
-            'cancelled',
-            'Render cancelled; no media or manifest was written.',
-            totalFrames,
-            totalClips,
-          );
-        return failure('unsupported-feature', errorMessage(error), totalFrames, totalClips);
-      } finally {
-        if (!encodeSettled) handle?.cancel();
-        process.off('SIGINT', discardPartial);
-        process.off('SIGTERM', discardPartial);
-        renderedTitles?.cleanup();
-        for (const directory of ownedTempDirectories)
-          rmSync(directory, { recursive: true, force: true });
-      }
-      if (currentLongRunning < 0) {
-        discardPartial();
+          }
+        })(),
+      );
+    }
+
+    const mediaPath = realMedia ? join(outDir, mediaName) : '';
+    let stagedMediaPath: string | null = null;
+    try {
+      await Promise.all(workers);
+      if (currentLongRunning < 0 || cancellation.signal.aborted) {
         return failure(
           'cancelled',
           'Render cancelled; no media or manifest was written.',
@@ -1275,43 +1232,449 @@ export async function runHeadlessRender(
           totalClips,
         );
       }
-      if (!outcome.ok) {
-        discardPartial();
-        if (showProgress) process.stdout.write('\n');
-        return failure(
-          outcome.code === 'cancelled' ? 'cancelled' : outcome.code,
-          outcome.message,
-          totalFrames,
-          totalClips,
+      if (realMedia) {
+        const partialPath = join(
+          outDir,
+          `.${mediaName}.${process.pid}.${randomBytes(4).toString('hex')}.partial`,
         );
+        try {
+          if (!recordOutputPartialPath) throw new Error('Render output lock is unavailable.');
+          recordOutputPartialPath(partialPath);
+          activeRenderPartialPath = partialPath;
+        } catch (err) {
+          return failure(
+            'output',
+            `Cannot record staged media path ${partialPath}: ${errorMessage(err)}`,
+            totalFrames,
+            totalClips,
+          );
+        }
+        let lastPercent = -1;
+        let renderedTitles: Awaited<ReturnType<typeof renderTitleFrames>> | undefined;
+        let handle: ReturnType<typeof startEncode> | undefined;
+        let encodeSettled = false;
+        let captureReady: {
+          browserPid?: number;
+          profilePath?: string;
+          ownedDirectories?: readonly string[];
+        } = {};
+        let encoderReadySent = false;
+        const ownedTempDirectories: string[] = [];
+        const discardPartial = async (): Promise<void> => {
+          let cancelError: unknown;
+          try {
+            await handle?.cancel();
+          } catch (error) {
+            cancelError = error;
+          }
+          const cleanupDeadline = Date.now() + 1_000;
+          while (existsSync(partialPath) && Date.now() < cleanupDeadline) {
+            try {
+              rmSync(partialPath, { force: true, maxRetries: 3, retryDelay: 40 });
+            } catch {
+              // Retry while FFmpeg releases its output handle.
+            }
+            if (existsSync(partialPath)) await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          if (existsSync(partialPath))
+            throw new Error('RENDER_CANCEL_TIMEOUT: staged media remained after cancellation.');
+          if (cancelError) throw cancelError;
+        };
+        let outcome: Awaited<ReturnType<typeof startEncode>['done']>;
+        try {
+          renderedTitles = await renderTitleFrames(
+            titleSources,
+            { width: titleWidth, height: titleHeight, fps: titleFps },
+            {
+              signal: cancellation.signal,
+              isCancelled: () => currentLongRunning < 0,
+              onCaptureReady: ({ browserPid, profilePath, ownedDirectories }) => {
+                captureReady = {
+                  ...(browserPid === undefined ? {} : { browserPid }),
+                  ...(profilePath === undefined ? {} : { profilePath }),
+                  ...(ownedDirectories === undefined ? {} : { ownedDirectories }),
+                };
+                if (browserPid !== undefined && profilePath !== undefined)
+                  emitJson(
+                    {
+                      type: 'cancel-ready',
+                      phase: 'browser-active',
+                      ownedPids: [process.pid, browserPid],
+                      activePid: browserPid,
+                      profilePath,
+                      ...(ownedDirectories === undefined ? {} : { ownedDirectories }),
+                      frameAcknowledged: 1,
+                    },
+                    json,
+                  );
+              },
+            },
+          );
+          if (titleSources.length > 0) {
+            if (
+              !renderedTitles.rendererFacts.chromiumVersion.trim() ||
+              renderedTitles.rendererFacts.fontManifestHashes.length === 0
+            )
+              throw new Error(
+                'Title renderer facts are missing from the Chromium capture session.',
+              );
+            titleCaptureFacts = renderedTitles.rendererFacts;
+          }
+          const ffmpegArgs = buildFfmpegArgs(
+            realMedia,
+            preset,
+            partialPath,
+            renderedTitles.layers,
+            undefined,
+            ownedTempDirectories,
+          );
+          if (cancellation.signal.aborted) throw new Error('Render cancelled before encoding.');
+          handle = startEncode(
+            ffmpegArgs,
+            realMedia.durationUs,
+            (fraction) => {
+              const percent = Math.floor(fraction * 100);
+              if (
+                fraction > 0 &&
+                !encoderReadySent &&
+                handle?.pid !== undefined &&
+                captureReady.profilePath
+              ) {
+                encoderReadySent = true;
+                emitJson(
+                  {
+                    type: 'cancel-ready',
+                    phase: 'encoder-active',
+                    ownedPids: [
+                      process.pid,
+                      ...(captureReady.browserPid === undefined ? [] : [captureReady.browserPid]),
+                      handle.pid,
+                    ],
+                    activePid: handle.pid,
+                    profilePath: captureReady.profilePath,
+                    ownedDirectories: [
+                      ...(captureReady.ownedDirectories ?? []),
+                      ...ownedTempDirectories,
+                    ],
+                    encoderProgress: fraction,
+                  },
+                  json,
+                );
+              }
+              if (percent === lastPercent) return;
+              lastPercent = percent;
+              if (showProgress) drawProgress(Math.round(fraction * totalFrames), totalFrames, 32);
+              emitJson(
+                {
+                  type: 'progress',
+                  projectId: plan.projectId,
+                  percent,
+                  ts: new Date().toISOString(),
+                },
+                json,
+              );
+            },
+            ownedTempDirectories,
+            cancellation.signal,
+          );
+          outcome = await handle.done;
+          encodeSettled = true;
+        } catch (error) {
+          let cancelFailed = false;
+          if (handle) {
+            try {
+              await handle.cancel();
+            } catch {
+              cancelFailed = true;
+            }
+          }
+          for (const directory of ownedTempDirectories)
+            rmSync(directory, { recursive: true, force: true });
+          rmSync(partialPath, { force: true });
+          if (cancelFailed || cancellationOverdue())
+            return failure(
+              'RENDER_CANCEL_TIMEOUT',
+              'RENDER_CANCEL_TIMEOUT: render cleanup exceeded 5 seconds.',
+              totalFrames,
+              totalClips,
+            );
+          if (cancellation.signal.aborted || currentLongRunning < 0)
+            return failure(
+              'cancelled',
+              'Render cancelled; no media or manifest was written.',
+              totalFrames,
+              totalClips,
+            );
+          const message = errorMessage(error);
+          return failure(
+            message.startsWith('RENDER_CAPTURE_TIMEOUT:')
+              ? 'RENDER_CAPTURE_TIMEOUT'
+              : 'unsupported-feature',
+            message,
+            totalFrames,
+            totalClips,
+          );
+        } finally {
+          await (async () => {
+            if (!encodeSettled && handle) {
+              try {
+                await handle.cancel();
+              } catch {
+                /* the catch path reports the timeout */
+              }
+            }
+            try {
+              await renderedTitles?.cleanup();
+            } catch {
+              if (cancellation.signal.aborted)
+                throw new Error('RENDER_CANCEL_TIMEOUT: Chromium cleanup failed.');
+              throw new Error('Chromium capture cleanup failed.');
+            }
+            for (const directory of ownedTempDirectories)
+              rmSync(directory, { recursive: true, force: true });
+            if (cancellation.signal.aborted) await discardPartial();
+            if (cancellationOverdue())
+              throw new Error('RENDER_CANCEL_TIMEOUT: render cleanup exceeded 5 seconds.');
+          })();
+        }
+        if (currentLongRunning < 0 || cancellation.signal.aborted) {
+          await discardPartial();
+          return failure(
+            'cancelled',
+            'Render cancelled; no media or manifest was written.',
+            totalFrames,
+            totalClips,
+          );
+        }
+        if (!outcome.ok) {
+          await discardPartial();
+          if (showProgress) process.stdout.write('\n');
+          return failure(
+            outcome.code === 'cancelled' ? 'cancelled' : outcome.code,
+            outcome.message,
+            totalFrames,
+            totalClips,
+          );
+        }
+        const encodedInfo = probeMedia(partialPath);
+        const [fpsNumerator, fpsDenominator] = realMedia.fps.split('/').map(Number);
+        const frameDurationUs =
+          fpsNumerator && fpsDenominator
+            ? (1_000_000 * fpsDenominator) / fpsNumerator
+            : Number.POSITIVE_INFINITY;
+        if (
+          !encodedInfo?.hasVideo ||
+          !encodedInfo.hasAudio ||
+          encodedInfo.width !== realMedia.width ||
+          encodedInfo.height !== realMedia.height ||
+          encodedInfo.durationUs <= 0 ||
+          Math.abs(encodedInfo.durationUs - realMedia.durationUs) > frameDurationUs
+        ) {
+          await discardPartial();
+          return failure(
+            'encode-failed',
+            `FFmpeg exited successfully but did not produce playable ${presetSpec.container} media ` +
+              `matching the planned ${realMedia.width}x${realMedia.height} ${realMedia.fps} ${realMedia.durationUs}µs timeline.`,
+            totalFrames,
+            totalClips,
+          );
+        }
+        if (cancellation.signal.aborted) {
+          await discardPartial();
+          return failure(
+            'cancelled',
+            'Render cancelled; no media or manifest was written.',
+            totalFrames,
+            totalClips,
+          );
+        }
+        stagedMediaPath = partialPath;
       }
-      const encodedInfo = probeMedia(partialPath);
-      const [fpsNumerator, fpsDenominator] = realMedia.fps.split('/').map(Number);
-      const frameDurationUs =
-        fpsNumerator && fpsDenominator
-          ? (1_000_000 * fpsDenominator) / fpsNumerator
-          : Number.POSITIVE_INFINITY;
-      if (
-        !encodedInfo?.hasVideo ||
-        !encodedInfo.hasAudio ||
-        encodedInfo.width !== realMedia.width ||
-        encodedInfo.height !== realMedia.height ||
-        encodedInfo.durationUs <= 0 ||
-        Math.abs(encodedInfo.durationUs - realMedia.durationUs) > frameDurationUs
-      ) {
-        discardPartial();
-        return failure(
-          'encode-failed',
-          `FFmpeg exited successfully but did not produce playable ${presetSpec.container} media ` +
-            `matching the planned ${realMedia.width}x${realMedia.height} ${realMedia.fps} ${realMedia.durationUs}µs timeline.`,
-          totalFrames,
-          totalClips,
-        );
+    } finally {
+      if (realMedia && stagedMediaPath === null) {
+        if (cancellation.signal.aborted && activeRenderPartialPath) {
+          const partialPath = activeRenderPartialPath;
+          const cleanupDeadline = Date.now() + 1_000;
+          while (existsSync(partialPath) && Date.now() < cleanupDeadline) {
+            try {
+              rmSync(partialPath, { force: true, maxRetries: 3, retryDelay: 40 });
+            } catch {
+              // Retry after the encoder's close event releases the output handle.
+            }
+            if (existsSync(partialPath)) await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          if (existsSync(partialPath)) {
+            // Cancellation must fail if its staged output still exists.
+            // eslint-disable-next-line no-unsafe-finally
+            throw new Error('RENDER_CANCEL_TIMEOUT: staged media remained after cancellation.');
+          }
+        }
+        if (activeRenderPartialPath && !existsSync(activeRenderPartialPath)) {
+          try {
+            recordOutputPartialPath?.(null);
+            activeRenderPartialPath = null;
+          } catch {
+            // Keep the stale path in the lock so the next process can clean it safely.
+          }
+        }
+        releaseOutputLock?.();
       }
-      stagedMediaPath = partialPath;
     }
-  } finally {
-    if (realMedia && stagedMediaPath === null) {
+
+    const durationMs = performance.now() - startedAt;
+    const manifestPath = join(outDir, manifestName);
+    const artifactPath = realMedia ? mediaPath : manifestPath;
+    const renderedCaptionMode = realMedia ? captionRenderMode(realMedia) : 'none';
+    const doneMessage = realMedia
+      ? `Rendered ${basename(mediaPath)} with ffmpeg. Captions: ${renderedCaptionMode}.`
+      : MANIFEST_ONLY_MESSAGE;
+
+    const rendererFacts = titleCaptureFacts ?? (await titleRendererFacts());
+    const ffmpegVersion = ffmpegVersionLine();
+    const rendererFingerprint = sha256Hex(
+      JSON.stringify({
+        ffmpegVersion,
+        chromiumVersion: rendererFacts.chromiumVersion,
+        templateSha256: titleSources.map((source) => source.instance.templateSha256),
+        fontManifestHashes: rendererFacts.fontManifestHashes,
+      }),
+    );
+
+    const manifest = {
+      schemaVersion: 2,
+      format: 'joy-media-render-manifest',
+      mediaProduced: realMedia !== null,
+      mediaFile: realMedia ? mediaName : null,
+      note: realMedia
+        ? 'Video rendered with ffmpeg; this manifest describes the timeline plan it came from.'
+        : MANIFEST_ONLY_MESSAGE,
+      ...(realMedia
+        ? {
+            media: {
+              width: realMedia.width,
+              height: realMedia.height,
+              fps: realMedia.fps,
+              durationUs: realMedia.durationUs,
+              bytes: fileSize(stagedMediaPath ?? mediaPath),
+            },
+          }
+        : {}),
+      projectId: plan.projectId,
+      projectTitle: plan.title,
+      preset,
+      captions: { mode: renderedCaptionMode },
+      spec: realMedia
+        ? {
+            ...presetSpec,
+            width: realMedia.width,
+            height: realMedia.height,
+            fps: Number(realMedia.fps.split('/')[0]) / Number(realMedia.fps.split('/')[1] ?? 1),
+          }
+        : presetSpec,
+      composition: plan.composition,
+      totalFrames,
+      totalClips,
+      durationMs,
+      renderedAt: new Date().toISOString(),
+      warnings,
+      renderer: {
+        id: 'ffmpeg+chromium-scene-surface',
+        version: 1,
+        fingerprint: rendererFingerprint,
+      },
+      rendererFacts: {
+        chromiumVersion: rendererFacts.chromiumVersion,
+        fontManifestHashes: rendererFacts.fontManifestHashes,
+        ffmpegVersionLine: ffmpegVersion,
+      },
+      design: {
+        units: { time: 'us', position: 'px' },
+        instances: titleSources.map((source) => ({
+          instanceId: source.instanceId,
+          objectId: source.instance.objectId,
+          clipId: source.instance.clipId,
+          templateId: source.instance.templateId,
+          templateVersion: source.instance.templateVersion,
+          startUs: source.startUs,
+          durationUs: source.durationUs,
+          fontSha256: source.instance.font.sha256,
+          layoutSha256: stableLayoutHash(source.instance.layout),
+        })),
+      },
+      // Real-media frame ranges use output timeline positions. Manifest-only
+      // planning retains its legacy sequential ranges because it has no encoder.
+      clips: allClips.map((clip) => ({
+        clipId: clip.clipId,
+        trackId: clip.trackId,
+        frames: clip.frames,
+        frameRange: { first: clip.firstFrame, last: clip.firstFrame + clip.frames - 1 },
+        startUs: clip.startUs,
+        durationUs: clip.durationUs,
+      })),
+    };
+
+    try {
+      const manifestData = `${JSON.stringify(manifest, null, 2)}\n`;
+      if (realMedia && stagedMediaPath) {
+        if (cancellation.signal.aborted)
+          throw new Error('Render cancelled before output publication.');
+        const stagedManifestPath = writeFileTemp(manifestPath, manifestData);
+        try {
+          if (!recordOutputTransaction) throw new Error('Render output lock is unavailable.');
+          installOutputPair(
+            stagedMediaPath,
+            mediaPath,
+            stagedManifestPath,
+            manifestPath,
+            recordOutputTransaction,
+          );
+        } catch (err) {
+          rmSync(stagedManifestPath, { force: true });
+          throw err;
+        }
+        stagedMediaPath = null;
+        activeRenderPartialPath = null;
+        releaseOutputLock?.();
+        releaseOutputLock = null;
+        // Timeline order, so the reported progress never moves backward.
+        const inTimelineOrder = [...allClips].sort(
+          (a, b) => a.firstFrame + a.frames - (b.firstFrame + b.frames),
+        );
+        for (const clip of inTimelineOrder) {
+          emitJson(
+            {
+              type: 'clip',
+              projectId: plan.projectId,
+              trackId: clip.trackId,
+              clipId: clip.clipId,
+              progress: 1,
+              // Progress through the whole timeline: the frame this clip's output reaches.
+              framesRendered: clip.firstFrame + clip.frames,
+              totalFrames,
+            },
+            json,
+          );
+        }
+      } else {
+        if (cancellation.signal.aborted)
+          return failure(
+            'cancelled',
+            'Render cancelled; no media or manifest was written.',
+            totalFrames,
+            totalClips,
+          );
+        writeFileAtomic(manifestPath, manifestData);
+      }
+    } catch (err) {
+      const cleanupFailures: string[] = [];
+      if (stagedMediaPath) {
+        try {
+          rmSync(stagedMediaPath, { force: true });
+        } catch (cleanupErr) {
+          // Keep the lock's staged-path journal intact so the next render can recover it.
+          cleanupFailures.push(errorMessage(cleanupErr));
+        }
+      }
       if (activeRenderPartialPath && !existsSync(activeRenderPartialPath)) {
         try {
           recordOutputPartialPath?.(null);
@@ -1320,239 +1683,94 @@ export async function runHeadlessRender(
           // Keep the stale path in the lock so the next process can clean it safely.
         }
       }
-      releaseOutputLock?.();
-    }
-  }
-
-  const durationMs = performance.now() - startedAt;
-  const manifestPath = join(outDir, manifestName);
-  const artifactPath = realMedia ? mediaPath : manifestPath;
-  const renderedCaptionMode = realMedia ? captionRenderMode(realMedia) : 'none';
-  const doneMessage = realMedia
-    ? `Rendered ${basename(mediaPath)} with ffmpeg. Captions: ${renderedCaptionMode}.`
-    : MANIFEST_ONLY_MESSAGE;
-
-  const rendererFacts = titleCaptureFacts ?? (await titleRendererFacts());
-  const ffmpegVersion = ffmpegVersionLine();
-  const rendererFingerprint = sha256Hex(
-    JSON.stringify({
-      ffmpegVersion,
-      chromiumVersion: rendererFacts.chromiumVersion,
-      templateSha256: titleSources.map((source) => source.instance.templateSha256),
-      fontManifestHashes: rendererFacts.fontManifestHashes,
-    }),
-  );
-
-  const manifest = {
-    schemaVersion: 2,
-    format: 'joy-media-render-manifest',
-    mediaProduced: realMedia !== null,
-    mediaFile: realMedia ? mediaName : null,
-    note: realMedia
-      ? 'Video rendered with ffmpeg; this manifest describes the timeline plan it came from.'
-      : MANIFEST_ONLY_MESSAGE,
-    ...(realMedia
-      ? {
-          media: {
-            width: realMedia.width,
-            height: realMedia.height,
-            fps: realMedia.fps,
-            durationUs: realMedia.durationUs,
-            bytes: fileSize(stagedMediaPath ?? mediaPath),
-          },
-        }
-      : {}),
-    projectId: plan.projectId,
-    projectTitle: plan.title,
-    preset,
-    captions: { mode: renderedCaptionMode },
-    spec: realMedia
-      ? {
-          ...presetSpec,
-          width: realMedia.width,
-          height: realMedia.height,
-          fps: Number(realMedia.fps.split('/')[0]) / Number(realMedia.fps.split('/')[1] ?? 1),
-        }
-      : presetSpec,
-    composition: plan.composition,
-    totalFrames,
-    totalClips,
-    durationMs,
-    renderedAt: new Date().toISOString(),
-    warnings,
-    renderer: {
-      id: 'ffmpeg+chromium-scene-surface',
-      version: 1,
-      fingerprint: rendererFingerprint,
-    },
-    rendererFacts: {
-      chromiumVersion: rendererFacts.chromiumVersion,
-      fontManifestHashes: rendererFacts.fontManifestHashes,
-      ffmpegVersionLine: ffmpegVersion,
-    },
-    design: {
-      units: { time: 'us', position: 'px' },
-      instances: titleSources.map((source) => ({
-        instanceId: source.instanceId,
-        objectId: source.instance.objectId,
-        clipId: source.instance.clipId,
-        templateId: source.instance.templateId,
-        templateVersion: source.instance.templateVersion,
-        startUs: source.startUs,
-        durationUs: source.durationUs,
-        fontSha256: source.instance.font.sha256,
-        layoutSha256: stableLayoutHash(source.instance.layout),
-      })),
-    },
-    // Real-media frame ranges use output timeline positions. Manifest-only
-    // planning retains its legacy sequential ranges because it has no encoder.
-    clips: allClips.map((clip) => ({
-      clipId: clip.clipId,
-      trackId: clip.trackId,
-      frames: clip.frames,
-      frameRange: { first: clip.firstFrame, last: clip.firstFrame + clip.frames - 1 },
-      startUs: clip.startUs,
-      durationUs: clip.durationUs,
-    })),
-  };
-
-  try {
-    const manifestData = `${JSON.stringify(manifest, null, 2)}\n`;
-    if (realMedia && stagedMediaPath) {
-      const stagedManifestPath = writeFileTemp(manifestPath, manifestData);
       try {
-        if (!recordOutputTransaction) throw new Error('Render output lock is unavailable.');
-        installOutputPair(
-          stagedMediaPath,
-          mediaPath,
-          stagedManifestPath,
-          manifestPath,
-          recordOutputTransaction,
-        );
-      } catch (err) {
-        rmSync(stagedManifestPath, { force: true });
-        throw err;
-      }
-      stagedMediaPath = null;
-      activeRenderPartialPath = null;
-      releaseOutputLock?.();
-      releaseOutputLock = null;
-      // Timeline order, so the reported progress never moves backward.
-      const inTimelineOrder = [...allClips].sort(
-        (a, b) => a.firstFrame + a.frames - (b.firstFrame + b.frames),
-      );
-      for (const clip of inTimelineOrder) {
-        emitJson(
-          {
-            type: 'clip',
-            projectId: plan.projectId,
-            trackId: clip.trackId,
-            clipId: clip.clipId,
-            progress: 1,
-            // Progress through the whole timeline: the frame this clip's output reaches.
-            framesRendered: clip.firstFrame + clip.frames,
-            totalFrames,
-          },
-          json,
-        );
-      }
-    } else {
-      writeFileAtomic(manifestPath, manifestData);
-    }
-  } catch (err) {
-    const cleanupFailures: string[] = [];
-    if (stagedMediaPath) {
-      try {
-        rmSync(stagedMediaPath, { force: true });
+        releaseOutputLock?.();
       } catch (cleanupErr) {
-        // Keep the lock's staged-path journal intact so the next render can recover it.
+        // A read-only output directory can prevent lock removal. The stale journal
+        // remains recoverable once the user restores write permission.
         cleanupFailures.push(errorMessage(cleanupErr));
       }
+      releaseOutputLock = null;
+      if (showProgress) process.stdout.write('\n');
+      const cleanupNote =
+        cleanupFailures.length > 0
+          ? ` Output cleanup is deferred until the directory is writable again: ${cleanupFailures.join('; ')}`
+          : '';
+      return failure(
+        'output',
+        `Failed to write render manifest ${manifestPath}: ${errorMessage(err)}${cleanupNote}`,
+        totalFrames,
+        totalClips,
+      );
     }
-    if (activeRenderPartialPath && !existsSync(activeRenderPartialPath)) {
-      try {
-        recordOutputPartialPath?.(null);
-        activeRenderPartialPath = null;
-      } catch {
-        // Keep the stale path in the lock so the next process can clean it safely.
+
+    if (!json) {
+      if (showProgress) {
+        drawProgress(totalFrames, totalFrames, 32);
+        process.stdout.write('\n\n');
+      }
+      if (realMedia) {
+        const megabytes = (fileSize(mediaPath) / (1024 * 1024)).toFixed(1);
+        logSuccess(
+          `Rendered ${basename(mediaPath)} (${(realMedia.durationUs / 1e6).toFixed(2)}s, ` +
+            `${realMedia.width}x${realMedia.height}, ${megabytes} MB) in ${durationMs}ms.`,
+        );
+        logStep('Video', mediaPath);
+        logStep('Manifest', manifestPath);
+      } else {
+        logSuccess(
+          `Wrote render manifest for ${totalClips} clip(s) / ${totalFrames} frame(s) in ${durationMs}ms.`,
+        );
+        logWarn(MANIFEST_ONLY_MESSAGE);
+        logStep('Manifest', artifactPath);
       }
     }
-    try {
-      releaseOutputLock?.();
-    } catch (cleanupErr) {
-      // A read-only output directory can prevent lock removal. The stale journal
-      // remains recoverable once the user restores write permission.
-      cleanupFailures.push(errorMessage(cleanupErr));
-    }
-    releaseOutputLock = null;
-    if (showProgress) process.stdout.write('\n');
-    const cleanupNote =
-      cleanupFailures.length > 0
-        ? ` Output cleanup is deferred until the directory is writable again: ${cleanupFailures.join('; ')}`
-        : '';
-    return failure(
-      'output',
-      `Failed to write render manifest ${manifestPath}: ${errorMessage(err)}${cleanupNote}`,
-      totalFrames,
-      totalClips,
+
+    emitJson(
+      {
+        type: 'complete',
+        projectId: plan.projectId,
+        preset,
+        outDir,
+        artifactPath,
+        totalFrames,
+        durationMs,
+        ts: new Date().toISOString(),
+        mediaProduced: realMedia !== null,
+        ...(realMedia ? { mediaPath, manifestPath } : {}),
+        manifestWritten: true,
+        message: doneMessage,
+        warnings,
+      },
+      json,
     );
-  }
 
-  if (!json) {
-    if (showProgress) {
-      drawProgress(totalFrames, totalFrames, 32);
-      process.stdout.write('\n\n');
-    }
-    if (realMedia) {
-      const megabytes = (fileSize(mediaPath) / (1024 * 1024)).toFixed(1);
-      logSuccess(
-        `Rendered ${basename(mediaPath)} (${(realMedia.durationUs / 1e6).toFixed(2)}s, ` +
-          `${realMedia.width}x${realMedia.height}, ${megabytes} MB) in ${durationMs}ms.`,
-      );
-      logStep('Video', mediaPath);
-      logStep('Manifest', manifestPath);
-    } else {
-      logSuccess(
-        `Wrote render manifest for ${totalClips} clip(s) / ${totalFrames} frame(s) in ${durationMs}ms.`,
-      );
-      logWarn(MANIFEST_ONLY_MESSAGE);
-      logStep('Manifest', artifactPath);
-    }
-  }
-
-  emitJson(
-    {
-      type: 'complete',
+    return {
+      exitCode: 0,
       projectId: plan.projectId,
       preset,
       outDir,
       artifactPath,
       totalFrames,
+      totalClips,
       durationMs,
-      ts: new Date().toISOString(),
       mediaProduced: realMedia !== null,
-      ...(realMedia ? { mediaPath, manifestPath } : {}),
+      ...(realMedia ? { mediaPath } : {}),
       manifestWritten: true,
-      message: doneMessage,
       warnings,
-    },
-    json,
-  );
-
-  return {
-    exitCode: 0,
-    projectId: plan.projectId,
-    preset,
-    outDir,
-    artifactPath,
-    totalFrames,
-    totalClips,
-    durationMs,
-    mediaProduced: realMedia !== null,
-    ...(realMedia ? { mediaPath } : {}),
-    manifestWritten: true,
-    warnings,
-  };
+    };
+  } catch (error) {
+    const message = errorMessage(error);
+    if (message.startsWith('RENDER_CANCEL_TIMEOUT:'))
+      return failure('RENDER_CANCEL_TIMEOUT', message);
+    throw error;
+  } finally {
+    process.off('SIGINT', onSigint);
+    process.off('SIGTERM', onSigterm);
+    process.off('SIGBREAK', onSigbreak);
+    process.off('message', onIpcMessage);
+    if (ipcCancellationRequested && process.connected) process.disconnect();
+  }
 }
 
 export function isRenderPresetId(value: string): value is RenderPresetSpec['id'] {

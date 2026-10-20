@@ -170,6 +170,41 @@ describe.runIf(requireChromium || findChromiumExecutable() !== undefined)(
       }
     });
 
+    it('aborts an active asynchronous capture after a CDP frame acknowledgement', async () => {
+      const driver = createChromiumSceneDriver();
+      const request = {
+        markup: '<div style="width:100%;height:100%;background:#fff"></div>',
+        width: 1400,
+        height: 1400,
+        transparent: true,
+        timeUs: 0,
+        frameRate: rational(30, 1),
+        locale: 'en-US',
+        seed: 'p0-cancel-active-capture',
+        lines: [],
+      };
+      const profilePath = driver.profileDirectory;
+      let browserPid: number | undefined;
+      try {
+        const ready = await driver.captureAsync?.({ ...request, width: 120, height: 80 });
+        expect(ready?.rgba).toHaveLength(120 * 80 * 4);
+        browserPid = driver.browserProcessId;
+        expect(browserPid).toBeTypeOf('number');
+        expect(profilePath).toBeTypeOf('string');
+        process.kill(browserPid!, 0);
+        const controller = new AbortController();
+        const capture = driver.captureAsync!(request, controller.signal);
+        setTimeout(() => controller.abort(), 5);
+        await expect(capture).rejects.toThrow('Render cancelled during title capture');
+      } finally {
+        await driver.closeAsync?.();
+      }
+      for (let attempt = 0; attempt < 100 && existsSync(profilePath!); attempt++)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      if (browserPid !== undefined) expect(() => process.kill(browserPid!, 0)).toThrow();
+      expect(existsSync(profilePath!)).toBe(false);
+    }, 60_000);
+
     it('refuses images', () => {
       const driver = createChromiumSceneDriver();
       try {

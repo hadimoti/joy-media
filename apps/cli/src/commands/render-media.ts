@@ -862,11 +862,16 @@ export function buildFfmpegArgs(
 }
 
 export interface EncodeHandle {
+  readonly pid: number | undefined;
   readonly done: Promise<
     | { ok: true }
-    | { ok: false; message: string; code: 'ffmpeg-missing' | 'encode-failed' | 'cancelled' }
+    | {
+        ok: false;
+        message: string;
+        code: 'ffmpeg-missing' | 'encode-failed' | 'cancelled' | 'RENDER_CANCEL_TIMEOUT';
+      }
   >;
-  cancel(): void;
+  cancel(): Promise<void>;
 }
 
 /** Run ffmpeg. `onProgress` gets 0..1 as the encoder advances through the timeline. */
@@ -875,8 +880,13 @@ export function startEncode(
   durationUs: number,
   onProgress: (fraction: number) => void,
   ownedTempDirectories: readonly string[] = [],
+  signal?: AbortSignal,
 ): EncodeHandle {
-  const child = spawn(ffmpegBinary(), [...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(ffmpegBinary(), [...args], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
+    windowsHide: true,
+  });
   const cleanupCaptions = (): void => {
     for (const directory of ownedTempDirectories) {
       try {
@@ -887,6 +897,9 @@ export function startEncode(
     }
   };
   let cancelled = false;
+  let settled = false;
+  let resolveDone!: (value: Awaited<EncodeHandle['done']>) => void;
+  let cancelTask: Promise<void> | undefined;
   let stderrTail = '';
   let pending = '';
 
@@ -906,9 +919,14 @@ export function startEncode(
   });
 
   const done = new Promise<Awaited<EncodeHandle['done']>>((resolvePromise) => {
+    resolveDone = (value) => {
+      if (settled) return;
+      settled = true;
+      resolvePromise(value);
+    };
     child.on('error', (err: NodeJS.ErrnoException) => {
       cleanupCaptions();
-      resolvePromise({
+      resolveDone({
         ok: false,
         code: 'ffmpeg-missing',
         message:
@@ -920,11 +938,11 @@ export function startEncode(
     child.on('close', (code) => {
       cleanupCaptions();
       if (cancelled) {
-        resolvePromise({ ok: false, code: 'cancelled', message: 'Render cancelled.' });
+        resolveDone({ ok: false, code: 'cancelled', message: 'Render cancelled.' });
       } else if (code === 0) {
-        resolvePromise({ ok: true });
+        resolveDone({ ok: true });
       } else {
-        resolvePromise({
+        resolveDone({
           ok: false,
           code: 'encode-failed',
           message: `ffmpeg failed (exit ${code}): ${stderrTail.trim().split('\n').slice(-6).join(' | ') || 'no error output'}`,
@@ -933,12 +951,69 @@ export function startEncode(
     });
   });
 
+  const cancel = (): Promise<void> => {
+    if (cancelTask) return cancelTask;
+    cancelled = true;
+    const deadline = Date.now() + 2_000;
+    cancelTask = (async () => {
+      if (child.pid !== undefined && child.exitCode === null) {
+        if (process.platform === 'win32') {
+          await new Promise<void>((resolve) => {
+            const killer = spawn('taskkill', ['/T', '/F', '/PID', String(child.pid)], {
+              stdio: 'ignore',
+              windowsHide: true,
+              shell: false,
+            });
+            killer.once('error', () => resolve());
+            killer.once('close', () => resolve());
+            setTimeout(resolve, Math.max(1, deadline - Date.now()));
+          });
+        } else {
+          try {
+            process.kill(-child.pid, 'SIGKILL');
+          } catch {
+            try {
+              child.kill('SIGKILL');
+            } catch {
+              /* already exited */
+            }
+          }
+        }
+      }
+      const remaining = Math.max(1, deadline - Date.now());
+      const exit =
+        child.exitCode !== null
+          ? Promise.resolve(true)
+          : new Promise<boolean>((resolve) => {
+              child.once('close', () => resolve(true));
+              setTimeout(() => resolve(false), remaining);
+            });
+      if (!(await exit)) {
+        cleanupCaptions();
+        resolveDone({
+          ok: false,
+          code: 'RENDER_CANCEL_TIMEOUT',
+          message: 'RENDER_CANCEL_TIMEOUT: FFmpeg process tree did not stop within 2 seconds.',
+        });
+        throw new Error(
+          'RENDER_CANCEL_TIMEOUT: FFmpeg process tree did not stop within 2 seconds.',
+        );
+      }
+      await done;
+    })();
+    return cancelTask;
+  };
+  const abortListener = (): void => {
+    void cancel().catch(() => undefined);
+  };
+  if (signal?.aborted) abortListener();
+  else signal?.addEventListener('abort', abortListener, { once: true });
+  void done.finally(() => signal?.removeEventListener('abort', abortListener));
+
   return {
+    pid: child.pid,
     done,
-    cancel: () => {
-      cancelled = true;
-      child.kill('SIGKILL');
-    },
+    cancel,
   };
 }
 

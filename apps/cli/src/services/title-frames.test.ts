@@ -2,6 +2,7 @@ import { inflateSync } from 'node:zlib';
 import { readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
+import { startEncode } from '../commands/render-media.js';
 import {
   buildTitleSceneFrame,
   compileTitleInstance,
@@ -94,7 +95,7 @@ describe('title frame timing and PNG encoding', () => {
       const png = readFileSync(rendered.layers[0]!.inputPattern.replace('%05d', '00000'));
       expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
     } finally {
-      rendered.cleanup();
+      await rendered.cleanup();
     }
   }, 60_000);
 
@@ -151,7 +152,7 @@ describe('title frame timing and PNG encoding', () => {
         { width: 320, height: 568, fps: { num: 30, den: 1 } },
       );
       expect(rendered.rendererFacts.chromiumVersion).toBe('Chromium 123.4.5');
-      rendered.cleanup();
+      await rendered.cleanup();
     } finally {
       vi.doUnmock('@joy-media/html-scene-runtime');
       vi.resetModules();
@@ -234,6 +235,211 @@ describe('title frame timing and PNG encoding', () => {
     }
   });
 
+  it('aborts an in-flight capture, closes the driver and removes its frame sequence', async () => {
+    let closed = false;
+    let captureStarted = false;
+    vi.resetModules();
+    vi.doMock('@joy-media/html-scene-runtime', () => ({
+      findChromiumExecutable: () => 'fake-chromium',
+      loadNotoSansArabicFaces: () => [{ sha256: 'font-hash' }],
+      scenePaintFontDescriptors: () => [
+        {
+          family: 'Noto Sans Arabic',
+          weight: 400,
+          subset: 'arabic',
+          sha256: 'sha256:9a7c99eccfc3845950358733520688959bfa77ea14e6ef3b0a5efe3a8d52d28b',
+          length: 48820,
+        },
+      ],
+      createChromiumSceneDriver: () => ({
+        browserVersion: 'Chromium fake',
+        capture: () => ({ rgba: new Uint8Array(320 * 568 * 4) }),
+        captureAsync: (_request: unknown, signal?: AbortSignal) => {
+          captureStarted = true;
+          return new Promise((_resolve, reject) =>
+            signal?.addEventListener(
+              'abort',
+              () => setTimeout(() => reject(new Error('aborted')), 25),
+              { once: true },
+            ),
+          );
+        },
+        closeAsync: async () => {
+          closed = true;
+        },
+      }),
+    }));
+    const fixture = compileTitleInstance(
+      {
+        instanceId: 'cancel-inflight',
+        templateId: 'joy.p0.title',
+        clipId: 'clip-cancel-inflight',
+        objectId: 'object-cancel-inflight',
+        lines: { primary: 'Cancel', secondary: '' },
+        direction: 'ltr',
+        font: { family: 'Noto Sans Arabic', weight: 400 },
+        fontSha256: 'sha256:9a7c99eccfc3845950358733520688959bfa77ea14e6ef3b0a5efe3a8d52d28b',
+        placement: { xPx: 10, yPx: 20, maxWidthPx: 300, safeInsetPx: 8 },
+        motion: { presetId: 'hold', inUs: 0, outUs: 0 },
+        clipDurationUs: 100_000,
+        frame: { widthPx: 320, heightPx: 568 },
+      },
+      (text, size) => [...text].length * size * 0.55,
+    );
+    if (!fixture.ok) throw new Error(`P0 fixture compilation failed: ${fixture.code}`);
+    const before = readdirSync(tmpdir()).filter((name) =>
+      name.startsWith('title-cancel-inflight-'),
+    );
+    const controller = new AbortController();
+    try {
+      const rendering = renderTitleFrames(
+        [
+          {
+            instanceId: 'cancel-inflight',
+            instance: fixture.instance,
+            startUs: 0,
+            durationUs: 100_000,
+            trackOrder: 0,
+          },
+        ],
+        { width: 320, height: 568, fps: { num: 30, den: 1 } },
+        { signal: controller.signal },
+      );
+      await vi.waitFor(() => expect(captureStarted).toBe(true));
+      controller.abort();
+      await expect(rendering).rejects.toThrow('Render cancelled during title capture');
+      expect(closed).toBe(true);
+      expect(
+        readdirSync(tmpdir()).filter((name) => name.startsWith('title-cancel-inflight-')),
+      ).toEqual(before);
+    } finally {
+      vi.doUnmock('@joy-media/html-scene-runtime');
+      vi.resetModules();
+    }
+  });
+
+  it('reports RENDER_CAPTURE_TIMEOUT when one capture exceeds its deadline', async () => {
+    let closed = false;
+    vi.resetModules();
+    vi.doMock('@joy-media/html-scene-runtime', () => ({
+      findChromiumExecutable: () => 'fake-chromium',
+      loadNotoSansArabicFaces: () => [{ sha256: 'font-hash' }],
+      scenePaintFontDescriptors: () => [
+        {
+          family: 'Noto Sans Arabic',
+          weight: 400,
+          subset: 'arabic',
+          sha256: 'sha256:9a7c99eccfc3845950358733520688959bfa77ea14e6ef3b0a5efe3a8d52d28b',
+          length: 48820,
+        },
+      ],
+      createChromiumSceneDriver: () => ({
+        browserVersion: 'Chromium fake',
+        capture: () => ({ rgba: new Uint8Array(320 * 568 * 4) }),
+        captureAsync: () => new Promise(() => undefined),
+        closeAsync: async () => {
+          closed = true;
+        },
+      }),
+    }));
+    const fixture = compileTitleInstance(
+      {
+        instanceId: 'capture-timeout',
+        templateId: 'joy.p0.title',
+        clipId: 'clip-capture-timeout',
+        objectId: 'object-capture-timeout',
+        lines: { primary: 'Timeout', secondary: '' },
+        direction: 'ltr',
+        font: { family: 'Noto Sans Arabic', weight: 400 },
+        fontSha256: 'sha256:9a7c99eccfc3845950358733520688959bfa77ea14e6ef3b0a5efe3a8d52d28b',
+        placement: { xPx: 10, yPx: 20, maxWidthPx: 300, safeInsetPx: 8 },
+        motion: { presetId: 'hold', inUs: 0, outUs: 0 },
+        clipDurationUs: 33_334,
+        frame: { widthPx: 320, heightPx: 568 },
+      },
+      (text, size) => [...text].length * size * 0.55,
+    );
+    if (!fixture.ok) throw new Error(`P0 fixture compilation failed: ${fixture.code}`);
+    try {
+      await expect(
+        renderTitleFrames(
+          [
+            {
+              instanceId: 'capture-timeout',
+              instance: fixture.instance,
+              startUs: 0,
+              durationUs: 33_334,
+              trackOrder: 0,
+            },
+          ],
+          { width: 320, height: 568, fps: { num: 30, den: 1 } },
+          { captureTimeoutMs: 10 },
+        ),
+      ).rejects.toThrow('RENDER_CAPTURE_TIMEOUT');
+      expect(closed).toBe(true);
+    } finally {
+      vi.doUnmock('@joy-media/html-scene-runtime');
+      vi.resetModules();
+    }
+  });
+
+  it('kills a stalled encoder process tree within two seconds', async () => {
+    const previous = process.env.JOY_MEDIA_FFMPEG;
+    process.env.JOY_MEDIA_FFMPEG = process.execPath;
+    const encoder = startEncode(['-e', 'setInterval(() => {}, 1000)'], 1_000_000, () => {});
+    const pid = encoder.pid;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const started = performance.now();
+      await encoder.cancel();
+      const result = await encoder.done;
+      expect(result).toMatchObject({ ok: false, code: 'cancelled' });
+      expect(performance.now() - started).toBeLessThan(2_000);
+      if (pid !== undefined) expect(() => process.kill(pid, 0)).toThrow();
+    } finally {
+      if (previous === undefined) delete process.env.JOY_MEDIA_FFMPEG;
+      else process.env.JOY_MEDIA_FFMPEG = previous;
+    }
+  });
+
+  it('reports RENDER_CANCEL_TIMEOUT when an encoder process cannot be reaped', async () => {
+    vi.resetModules();
+    const { EventEmitter } = await import('node:events');
+    const fakeSpawn = vi.fn(() => {
+      const child = new EventEmitter() as InstanceType<typeof EventEmitter> & {
+        stdout: InstanceType<typeof EventEmitter>;
+        stderr: InstanceType<typeof EventEmitter>;
+        pid?: number;
+        exitCode: number | null;
+        kill: () => boolean;
+      };
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.exitCode = null;
+      child.kill = () => true;
+      return child;
+    });
+    vi.doMock('node:child_process', async () => ({
+      ...((await vi.importActual('node:child_process')) as Record<string, unknown>),
+      spawn: fakeSpawn,
+    }));
+    try {
+      const { startEncode: mockedStartEncode } = await import('../commands/render-media.js');
+      const previous = process.env.JOY_MEDIA_FFMPEG;
+      process.env.JOY_MEDIA_FFMPEG = 'fake-ffmpeg';
+      const encoder = mockedStartEncode([], 1_000_000, () => {});
+      const started = performance.now();
+      await expect(encoder.cancel()).rejects.toThrow('RENDER_CANCEL_TIMEOUT');
+      expect(await encoder.done).toMatchObject({ ok: false, code: 'RENDER_CANCEL_TIMEOUT' });
+      expect(performance.now() - started).toBeLessThan(2_500);
+      if (previous === undefined) delete process.env.JOY_MEDIA_FFMPEG;
+      else process.env.JOY_MEDIA_FFMPEG = previous;
+    } finally {
+      vi.doUnmock('node:child_process');
+      vi.resetModules();
+    }
+  });
+
   it('sends the builder paint to the capture request', async () => {
     const fontFace = {
       family: 'Noto Sans Arabic',
@@ -289,7 +495,7 @@ describe('title frame timing and PNG encoding', () => {
         ],
         { width: 320, height: 568, fps: { num: 30, den: 1 } },
       );
-      rendered.cleanup();
+      await rendered.cleanup();
       const expected = buildTitleSceneFrame(fixture.instance, 'paint-forwarding', 33_334, 0, {
         widthPx: 320,
         heightPx: 568,

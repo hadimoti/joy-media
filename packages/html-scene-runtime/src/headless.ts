@@ -34,12 +34,15 @@ export interface HeadlessSurface {
 /** Implemented by the pinned Chromium/runtime process in WP-04.4 consumers. */
 export interface HeadlessSceneDriver {
   capture(request: HeadlessCaptureRequest): HeadlessSurface;
+  captureAsync?(request: HeadlessCaptureRequest, signal?: AbortSignal): Promise<HeadlessSurface>;
   measureTextWidths?(
     requests: readonly { text: string; fontSizePx: number; weight: 400 | 700 }[],
   ): number[];
   close?(): void;
+  closeAsync?(): Promise<void>;
   readonly browserVersion?: string | undefined;
   readonly browserProcessId?: number | undefined;
+  readonly profileDirectory?: string | undefined;
 }
 
 export interface SceneCaptureRequest<TVariables> {
