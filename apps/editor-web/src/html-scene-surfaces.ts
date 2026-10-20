@@ -170,6 +170,13 @@ export interface HtmlSceneExportCaptureOptions {
   readonly maxFrameBytes?: number;
 }
 
+interface HostOwnership {
+  readonly key: string;
+  readonly created: Promise<ScenePreviewHost>;
+  host?: ScenePreviewHost;
+  serial: Promise<void>;
+}
+
 function waitForCapture<T>(
   operation: Promise<T>,
   signal: AbortSignal,
@@ -204,12 +211,76 @@ function waitForCapture<T>(
 }
 
 export class HtmlSceneSurfaceCache {
-  readonly #hosts = new Map<string, ScenePreviewHost>();
+  readonly #hosts = new Map<string, HostOwnership>();
   readonly #bitmaps = new Map<string, SceneSurfaceBitmap>();
   #generation = 0;
   #activeCapture: AbortController | undefined;
   #capturedFrames = 0;
   #peakFrameBytes = 0;
+  #captureDone: Promise<void> | undefined;
+
+  #acquireHost(
+    id: string,
+    key: string,
+    create: () => ScenePreviewHost | Promise<ScenePreviewHost>,
+  ): HostOwnership {
+    const current = this.#hosts.get(id);
+    if (current?.key === key) return current;
+    if (current !== undefined) this.#retireHost(id, current);
+    let resolveCreated!: (host: ScenePreviewHost) => void;
+    let rejectCreated!: (error: unknown) => void;
+    const created = new Promise<ScenePreviewHost>((resolve, reject) => {
+      resolveCreated = resolve;
+      rejectCreated = reject;
+    });
+    void created.catch(() => undefined);
+    const ownership: HostOwnership = { key, created, serial: Promise.resolve() };
+    // Publish the slot before running a factory that may itself await fonts.
+    this.#hosts.set(id, ownership);
+    let creation: ScenePreviewHost | Promise<ScenePreviewHost>;
+    try {
+      creation = create();
+    } catch (error) {
+      if (this.#hosts.get(id) === ownership) this.#hosts.delete(id);
+      rejectCreated(error);
+      return ownership;
+    }
+    Promise.resolve(creation).then(
+      (host) => {
+        if (this.#hosts.get(id) !== ownership) host.destroy();
+        else ownership.host = host;
+        resolveCreated(host);
+      },
+      (error: unknown) => {
+        if (this.#hosts.get(id) === ownership) this.#hosts.delete(id);
+        rejectCreated(error);
+      },
+    );
+    return ownership;
+  }
+
+  #retireHost(id: string, ownership: HostOwnership): void {
+    if (this.#hosts.get(id) !== ownership) return;
+    this.#hosts.delete(id);
+    this.#bitmaps.delete(id);
+    ownership.host?.destroy();
+  }
+
+  #withHost<T>(
+    ownership: HostOwnership,
+    operation: (host: ScenePreviewHost) => Promise<T>,
+  ): Promise<T> {
+    const result = ownership.serial.then(async () => operation(await ownership.created));
+    ownership.serial = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  #owns(id: string, ownership: HostOwnership, generation: number): boolean {
+    return generation === this.#generation && this.#hosts.get(id) === ownership;
+  }
 
   /** Owned RGBA only; browser/GPU allocations are not included. */
   exportMetrics(): {
@@ -225,7 +296,7 @@ export class HtmlSceneSurfaceCache {
         0,
       ),
       peakFrameBytes: this.#peakFrameBytes,
-      hosts: this.#hosts.size,
+      hosts: [...this.#hosts.values()].filter((entry) => entry.host !== undefined).length,
     };
   }
 
@@ -237,6 +308,7 @@ export class HtmlSceneSurfaceCache {
     input: Readonly<Record<string, VisualObjectV1>> | HtmlSceneProjectContext,
     timeUs: number,
   ): Promise<HtmlSceneBitmapMap> {
+    if (this.#captureDone !== undefined) await this.#captureDone;
     const generation = ++this.#generation;
     const context = isProjectContext(input) ? input : undefined;
     const objects: Readonly<Record<string, VisualObjectV1>> =
@@ -256,13 +328,8 @@ export class HtmlSceneSurfaceCache {
         .map((object) => object.id),
     );
 
-    for (const [id, host] of this.#hosts) {
-      if (!liveIds.has(id)) {
-        host.destroy();
-        this.#hosts.delete(id);
-        this.#bitmaps.delete(id);
-      }
-    }
+    for (const [id, ownership] of this.#hosts)
+      if (!liveIds.has(id)) this.#retireHost(id, ownership);
 
     await Promise.all(
       htmlScenes
@@ -275,7 +342,18 @@ export class HtmlSceneSurfaceCache {
             if (title === undefined) return;
             const composition = context?.visual.compositions[context.visual.rootCompositionId];
             if (composition === undefined) return;
-            const fontFaces = await p0TitleFontFaces();
+            const fontIdentity = JSON.stringify(scenePaintFontDescriptors());
+            const key = `${packageId}:${composition.width}x${composition.height}:${fontIdentity}`;
+            const fontPromise = p0TitleFontFaces();
+            const ownership = this.#acquireHost(object.id, key, async () =>
+              createScenePreviewHost({
+                instanceId: object.id,
+                scene: p0Scene(packageId, composition.width, composition.height) as never,
+                fontFaces: await fontPromise,
+              }),
+            );
+            const fontFaces = await fontPromise;
+            if (!this.#owns(object.id, ownership, generation)) return;
             const frame = buildTitleSceneFrame(
               title.instance,
               title.instanceId,
@@ -290,53 +368,47 @@ export class HtmlSceneSurfaceCache {
               },
             );
             await verifyScenePaintFontBytes(frame.paint, fontFaces);
-            let host = this.#hosts.get(object.id);
-            if (host === undefined) {
-              host = createScenePreviewHost({
-                instanceId: object.id,
-                scene: p0Scene(packageId, composition.width, composition.height) as never,
-                fontFaces,
-              });
-              this.#hosts.set(object.id, host);
-            }
-            await host.ready;
-            if (generation !== this.#generation) return;
-            await document.fonts.ready;
-            host.update(title.localTimeUs, frame.variables);
-            const bitmap = await host.capture(
-              Math.max(1, Math.round(composition.width / 4)),
-              Math.max(1, Math.round(composition.height / 4)),
-              2_500,
-              undefined,
-              false,
-              frame.paint,
-            );
-            if (generation === this.#generation) this.#bitmaps.set(object.id, bitmap);
+            if (!this.#owns(object.id, ownership, generation)) return;
+            await this.#withHost(ownership, async (host) => {
+              await host.ready;
+              if (!this.#owns(object.id, ownership, generation)) return;
+              await document.fonts.ready;
+              if (!this.#owns(object.id, ownership, generation)) return;
+              host.update(title.localTimeUs, frame.variables);
+              const bitmap = await host.capture(
+                Math.max(1, Math.round(composition.width / 4)),
+                Math.max(1, Math.round(composition.height / 4)),
+                2_500,
+                undefined,
+                false,
+                frame.paint,
+              );
+              if (!this.#owns(object.id, ownership, generation)) return;
+              this.#bitmaps.set(object.id, bitmap);
+            });
             return;
           }
           const scene = findFirstPartyScene(packageId);
           if (scene === undefined) return;
-          let host = this.#hosts.get(object.id);
-          if (host === undefined) {
-            host = createScenePreviewHost({ instanceId: object.id, scene });
-            this.#hosts.set(object.id, host);
-            try {
-              await host.ready;
-            } catch {
-              return;
-            }
-          }
-          if (generation !== this.#generation) return;
-          const variables = defaultVariablesForScene(packageId);
-          host.update(timeUs, variables);
           const viewport = viewportForScene(packageId);
+          const ownership = this.#acquireHost(
+            object.id,
+            `${packageId}:${viewport.width}x${viewport.height}:no-fonts`,
+            () => createScenePreviewHost({ instanceId: object.id, scene }),
+          );
+          const variables = defaultVariablesForScene(packageId);
           // Monitor-scale capture (¼) keeps playhead scrub responsive.
           const width = Math.max(1, Math.round(viewport.width / 4));
           const height = Math.max(1, Math.round(viewport.height / 4));
           try {
-            const bitmap = await host.capture(width, height);
-            if (generation !== this.#generation) return;
-            this.#bitmaps.set(object.id, bitmap);
+            await this.#withHost(ownership, async (host) => {
+              await host.ready;
+              if (!this.#owns(object.id, ownership, generation)) return;
+              host.update(timeUs, variables);
+              const bitmap = await host.capture(width, height);
+              if (!this.#owns(object.id, ownership, generation)) return;
+              this.#bitmaps.set(object.id, bitmap);
+            });
           } catch {
             // Keep last good frame; failure is non-fatal for Monitor paint.
           }
@@ -382,20 +454,19 @@ export class HtmlSceneSurfaceCache {
       throw new RangeError('HTML scene export exceeds the current-frame RGBA memory budget');
     const controller = new AbortController();
     this.#activeCapture = controller;
+    let finishCapture!: () => void;
+    this.#captureDone = new Promise<void>((resolve) => {
+      finishCapture = resolve;
+    });
     const abort = () => this.destroy();
     options.signal?.addEventListener('abort', abort, { once: true });
     if (options.signal?.aborted) abort();
-    this.#generation += 1;
+    const generation = ++this.#generation;
     // Release the previous frame before allocating this frame's surfaces.
     this.#bitmaps.clear();
     const liveIds = new Set(liveScenes.map((object) => object.id));
-    for (const [id, host] of this.#hosts) {
-      if (!liveIds.has(id)) {
-        host.destroy();
-        this.#hosts.delete(id);
-        this.#bitmaps.delete(id);
-      }
-    }
+    for (const [id, ownership] of this.#hosts)
+      if (!liveIds.has(id)) this.#retireHost(id, ownership);
     try {
       // Bound in-flight rasterization to one scene, not one burst per frame.
       for (const object of liveScenes) {
@@ -407,7 +478,18 @@ export class HtmlSceneSurfaceCache {
           const composition = context?.visual.compositions[context.visual.rootCompositionId];
           if (composition === undefined)
             throw new Error(`P0 title composition missing for ${title.instanceId}`);
-          const fontFaces = await p0TitleFontFaces();
+          const fontIdentity = JSON.stringify(scenePaintFontDescriptors());
+          const key = `${packageId}:${composition.width}x${composition.height}:${fontIdentity}`;
+          const fontPromise = p0TitleFontFaces();
+          const ownership = this.#acquireHost(object.id, key, async () =>
+            createScenePreviewHost({
+              instanceId: `export-${object.id}`,
+              scene: p0Scene(packageId, composition.width, composition.height) as never,
+              fontFaces: await fontPromise,
+            }),
+          );
+          const fontFaces = await fontPromise;
+          if (!this.#owns(object.id, ownership, generation)) continue;
           const frame = buildTitleSceneFrame(
             title.instance,
             title.instanceId,
@@ -422,29 +504,30 @@ export class HtmlSceneSurfaceCache {
             },
           );
           await verifyScenePaintFontBytes(frame.paint, fontFaces);
-          let host = this.#hosts.get(object.id);
-          if (host === undefined) {
-            host = createScenePreviewHost({
-              instanceId: `export-${object.id}`,
-              scene: p0Scene(packageId, composition.width, composition.height) as never,
-              fontFaces,
-            });
-            this.#hosts.set(object.id, host);
-          }
-          await waitForCapture(host.ready, controller.signal, timeoutMs);
-          await waitForCapture(
-            document.fonts.ready.then(() => undefined),
-            controller.signal,
-            timeoutMs,
-          );
+          if (!this.#owns(object.id, ownership, generation)) continue;
+          const bitmap = await this.#withHost(ownership, async (host) => {
+            await waitForCapture(host.ready, controller.signal, timeoutMs);
+            if (!this.#owns(object.id, ownership, generation)) return undefined;
+            await waitForCapture(
+              document.fonts.ready.then(() => undefined),
+              controller.signal,
+              timeoutMs,
+            );
+            if (!this.#owns(object.id, ownership, generation)) return undefined;
+            controller.signal.throwIfAborted();
+            if (!host.update(title.localTimeUs, frame.variables))
+              throw new Error(`HTML scene ${object.id} is suspended`);
+            const captured = await waitForCapture(
+              host.capture(width, height, timeoutMs, undefined, false, frame.paint),
+              controller.signal,
+              timeoutMs,
+            );
+            if (!this.#owns(object.id, ownership, generation)) return undefined;
+            return captured;
+          });
+          if (bitmap === undefined) continue;
           controller.signal.throwIfAborted();
-          if (!host.update(title.localTimeUs, frame.variables))
-            throw new Error(`HTML scene ${object.id} is suspended`);
-          const bitmap = await waitForCapture(
-            host.capture(width, height, timeoutMs, undefined, false, frame.paint),
-            controller.signal,
-            timeoutMs,
-          );
+          if (!this.#owns(object.id, ownership, generation)) continue;
           if (
             bitmap.width !== width ||
             bitmap.height !== height ||
@@ -460,20 +543,27 @@ export class HtmlSceneSurfaceCache {
         const scene = packageId === undefined ? undefined : findFirstPartyScene(packageId);
         if (scene === undefined || packageId === undefined)
           throw new Error(`HTML scene ${object.id} has no available scene package`);
-        let host = this.#hosts.get(object.id);
-        if (host === undefined) {
-          host = createScenePreviewHost({ instanceId: `export-${object.id}`, scene });
-          this.#hosts.set(object.id, host);
-        }
-        await waitForCapture(host.ready, controller.signal, timeoutMs);
-        controller.signal.throwIfAborted();
-        if (!host.update(timeUs, defaultVariablesForScene(packageId)))
-          throw new Error(`HTML scene ${object.id} is suspended`);
-        const bitmap = await waitForCapture(
-          host.capture(width, height, timeoutMs),
-          controller.signal,
-          timeoutMs,
+        const viewport = viewportForScene(packageId);
+        const ownership = this.#acquireHost(
+          object.id,
+          `${packageId}:${viewport.width}x${viewport.height}:no-fonts`,
+          () => createScenePreviewHost({ instanceId: `export-${object.id}`, scene }),
         );
+        const bitmap = await this.#withHost(ownership, async (host) => {
+          await waitForCapture(host.ready, controller.signal, timeoutMs);
+          if (!this.#owns(object.id, ownership, generation)) return undefined;
+          controller.signal.throwIfAborted();
+          if (!host.update(timeUs, defaultVariablesForScene(packageId)))
+            throw new Error(`HTML scene ${object.id} is suspended`);
+          const captured = await waitForCapture(
+            host.capture(width, height, timeoutMs),
+            controller.signal,
+            timeoutMs,
+          );
+          if (!this.#owns(object.id, ownership, generation)) return undefined;
+          return captured;
+        });
+        if (bitmap === undefined) continue;
         controller.signal.throwIfAborted();
         if (
           bitmap.width !== width ||
@@ -494,13 +584,15 @@ export class HtmlSceneSurfaceCache {
     } finally {
       options.signal?.removeEventListener('abort', abort);
       this.#activeCapture = undefined;
+      this.#captureDone = undefined;
+      finishCapture();
     }
   }
 
   destroy(): void {
     this.#activeCapture?.abort();
     this.#generation += 1;
-    for (const host of this.#hosts.values()) host.destroy();
+    for (const [id, ownership] of this.#hosts) this.#retireHost(id, ownership);
     this.#hosts.clear();
     this.#bitmaps.clear();
   }
