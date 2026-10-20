@@ -160,11 +160,9 @@ export function killChromiumTree(
         if (everyOwnedProcessExited && profileRemovedOnFirstAttempt) return;
       }
       if (profileDirectory !== undefined) {
-        remaining = chromiumPidsForProfile(
-          profileDirectory,
-          Math.max(1, deadline - Date.now()),
-          runSpawnSync,
-        );
+        // The scan has its own budget. taskkill can use most of the shared deadline on a loaded
+        // machine, and a scan starved of time reports a false "cannot verify" failure.
+        remaining = chromiumPidsForProfile(profileDirectory, 2_000, runSpawnSync);
       } else {
         try {
           process.kill(pid!, 0);
