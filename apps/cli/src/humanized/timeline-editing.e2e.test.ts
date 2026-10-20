@@ -847,6 +847,9 @@ describe('a long editing session', () => {
     const startedAt = performance.now();
     for (let i = 0; i < 200; i += 1) {
       await addClip(sb, id, { start: i * 2, duration: 1 });
+      // Each CLI call blocks this worker. Yield to the event loop between calls so the test runner
+      // can answer its task-update RPC; without this the run exceeds the 60 s RPC timeout.
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
     const elapsedMs = performance.now() - startedAt;
 

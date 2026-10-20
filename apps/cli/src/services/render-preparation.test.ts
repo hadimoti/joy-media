@@ -719,7 +719,8 @@ describe('RenderPreparationV1', () => {
         captions: false,
         signal: controller.signal,
       });
-      await vi.waitFor(() => expect(started).toBe(true));
+      // Only the probe's start is awaited here; the 100 ms bound below applies to cancellation.
+      await vi.waitFor(() => expect(started).toBe(true), { timeout: 5_000 });
       const startedAt = performance.now();
       controller.abort();
       await expect(validating).rejects.toThrow('aborted');

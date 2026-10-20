@@ -723,7 +723,8 @@ ssize_t pwrite64(int fd, const void *buffer, size_t count, off64_t offset) {
       runDiagnostics,
     ).toContainEqual([completed.length, failed.length]);
     for (const failedRun of failed) {
-      expect(failedRun.at(-1)).toMatchObject({ type: 'error', code: 'output' });
+      // Owner claims run before the output lock, so the losing render is refused by its owner.
+      expect(failedRun.at(-1)).toMatchObject({ type: 'error', code: 'RENDER_OUTPUT_BUSY' });
       expect(failedRun.some((event) => event.type === 'start')).toBe(false);
     }
 

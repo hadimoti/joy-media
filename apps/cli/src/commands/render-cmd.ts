@@ -46,6 +46,7 @@ import { FlagValidationError, parseIntFlag } from '../utils/flags.js';
 import {
   ExclusiveRecordBusyError,
   StaleRecoveryLockError,
+  UnreadableRecoveryLockError,
   acquireRecord,
   processIsAlive,
   withRecoveryMutex,
@@ -2207,12 +2208,23 @@ function acquireOutputLock(path: string):
           ownerStartedAt =
             typeof recordObject['startedAt'] === 'string' ? recordObject['startedAt'] : '';
           if (processIsAlive(ownerPid)) return null;
-          if (!isOutputLockRecord(parsedRecord)) {
-            recoveryFailure = 'the stale render lock contains an invalid journal or lock record';
+          // A dead record is replaced once its journal fields validate. A record without a journal
+          // (for example one written before the token existed) has nothing to protect.
+          const journal = recordObject['transaction'];
+          const partialPath = recordObject['activePartialPath'];
+          if (
+            (journal !== undefined && journal !== null && !isOutputTransactionRecord(journal)) ||
+            (partialPath !== undefined && partialPath !== null && typeof partialPath !== 'string')
+          ) {
+            recoveryFailure = 'the stale render lock contains an invalid journal';
             return null;
           }
           try {
-            recoverOutputLockState(path, parsedRecord.transaction, parsedRecord.activePartialPath);
+            recoverOutputLockState(
+              path,
+              isOutputTransactionRecord(journal) ? journal : null,
+              typeof partialPath === 'string' ? partialPath : null,
+            );
           } catch (error) {
             recoveryFailure = errorMessage(error);
             throw error;
@@ -2371,8 +2383,13 @@ function acquireArtifactOwner(
         { busyCode: 'RENDER_OUTPUT_BUSY' },
       );
     } catch (error) {
-      // A busy or stale recovery lock leaves the owner file in place; the next claim reports it.
-      if (!(error instanceof ExclusiveRecordBusyError || error instanceof StaleRecoveryLockError)) {
+      // A busy, stale or unreadable recovery lock leaves the owner file in place; the next claim
+      // reports it.
+      if (!(
+        error instanceof ExclusiveRecordBusyError ||
+        error instanceof StaleRecoveryLockError ||
+        error instanceof UnreadableRecoveryLockError
+      )) {
         throw error;
       }
     }
@@ -2381,15 +2398,17 @@ function acquireArtifactOwner(
   return { ok: true, release };
 }
 
-function removeArtifactStagingFiles(target: string): void {
+/**
+ * Remove only generated staging files for one target. The generated suffix is tested on its own,
+ * so a target name that itself contains ".partial" cannot make a backup match.
+ */
+export function removeArtifactStagingFiles(target: string): void {
   const directory = dirname(target);
   const prefix = `.${basename(target)}.`;
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (
-      entry.isFile() &&
-      entry.name.startsWith(prefix) &&
-      /(?:\.partial|\.tmp|\.staging(?:\.|$))/u.test(entry.name)
-    )
+    if (!entry.isFile() || !entry.name.startsWith(prefix)) continue;
+    const suffix = entry.name.slice(prefix.length);
+    if (/^(?:.+\.)?(?:partial|tmp|staging(?:\.png)?)$/u.test(suffix))
       rmSync(join(directory, entry.name), { recursive: true, force: true });
   }
 }
@@ -2410,12 +2429,11 @@ function isOutputTransactionRecord(value: unknown): value is OutputTransactionRe
   );
 }
 
-/** Recover a pair transaction left between file renames after its owner exited. */
-function recoverOutputTransaction(
+/** Check every path a journal names before anything is moved or removed. */
+function validateOutputTransactionPaths(
   lockPath: string,
-  transaction: OutputTransactionRecord | null,
+  transaction: OutputTransactionRecord,
 ): void {
-  if (!transaction) return;
   const parent = resolve(dirname(lockPath));
   const paths = [
     transaction.mediaPath,
@@ -2444,6 +2462,15 @@ function recoverOutputTransaction(
   ) {
     throw new Error('the output transaction journal contains unexpected output paths');
   }
+}
+
+/** Recover a pair transaction left between file renames after its owner exited. */
+function recoverOutputTransaction(
+  lockPath: string,
+  transaction: OutputTransactionRecord | null,
+): void {
+  if (!transaction) return;
+  validateOutputTransactionPaths(lockPath, transaction);
   if (transaction.phase === 'committed') {
     rmSync(transaction.mediaBackup, { force: true });
     rmSync(transaction.manifestBackup, { force: true });
@@ -2470,6 +2497,8 @@ function recoverOutputLockState(
   transaction: OutputTransactionRecord | null,
   activePartialPath: string | null,
 ): void {
+  // Validate the whole plan before anything is removed, so a refused journal leaves every file.
+  if (transaction) validateOutputTransactionPaths(lockPath, transaction);
   if (activePartialPath) {
     const mediaName = basename(lockPath)
       .replace(/^\./u, '')
@@ -2481,6 +2510,19 @@ function recoverOutputLockState(
       !basename(activePartialPath).endsWith('.partial')
     ) {
       throw new Error('the output lock contains an unexpected partial-media path');
+    }
+    if (
+      transaction &&
+      [
+        transaction.mediaPath,
+        transaction.stagedMediaPath,
+        transaction.mediaBackup,
+        transaction.manifestPath,
+        transaction.stagedManifestPath,
+        transaction.manifestBackup,
+      ].includes(activePartialPath)
+    ) {
+      throw new Error('the output lock partial path is also a journal path');
     }
     rmSync(activePartialPath, { force: true });
   }

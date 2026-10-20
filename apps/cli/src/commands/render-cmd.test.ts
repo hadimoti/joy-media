@@ -26,6 +26,7 @@ import {
   RENDER_PRESETS,
   runHeadlessRender,
   publishPreviewAtomically,
+  removeArtifactStagingFiles,
   safeFileStem,
 } from './render-cmd.js';
 import { CommandFailure, createDefaultProject, saveProject } from '../utils/project-loader.js';
@@ -443,6 +444,7 @@ describe('joy render (headless batch render command)', () => {
       };
       expect(event.code).toBe('output');
       expect(event.message).toContain('could not be recovered');
+      expect(event.message).toContain('invalid journal');
       expect(readFileSync(lockPath)).toEqual(originalLock);
       expect(readFileSync(mediaBackup, 'utf8')).toBe('backup that must survive');
     } finally {
@@ -530,12 +532,122 @@ describe('joy render (headless batch render command)', () => {
         message: string;
       };
       expect(event.code).toBe('output');
-      expect(event.message).toContain('could not be recovered');
+      expect(event.message).toContain('outside its output directory');
       expect(readFileSync(lockPath)).toEqual(originalLock);
       expect(readFileSync(mediaBackup, 'utf8')).toBe(
         'backup that must stay in the output directory',
       );
       expect(existsSync(join(elsewhere, 'outside-journal.mp4'))).toBe(false);
+    } finally {
+      restore();
+      setMediaProbeSpawnForTests(undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('removes generated staging files for a target whose name contains .partial, and keeps its backups', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-staging-names-'));
+    try {
+      const target = join(dir, 'clip.partial.mp4');
+      const backup = join(dir, '.clip.partial.mp4.1234.backup');
+      const partial = join(dir, '.clip.partial.mp4.1234.partial');
+      const staging = join(dir, '.clip.partial.mp4.1234.tmp');
+      writeFileSync(backup, 'backup that must survive');
+      writeFileSync(partial, 'partial');
+      writeFileSync(staging, 'staging');
+      removeArtifactStagingFiles(target);
+      expect(readFileSync(backup, 'utf8')).toBe('backup that must survive');
+      expect(existsSync(partial)).toBe(false);
+      expect(existsSync(staging)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a dead output lock whose partial path is also a journal path, leaving every file', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-alias-journal-'));
+    const mediaName = 'alias.mp4';
+    const mediaPath = join(dir, mediaName);
+    const manifestPath = join(dir, `${mediaName}.manifest.json`);
+    const lockPath = join(dir, `.${mediaName}.render.lock`);
+    const stagedMediaPath = join(dir, `.${mediaName}.interrupted.partial`);
+    const mediaBackup = join(dir, `.${mediaName}.interrupted.backup`);
+    const inputPath = join(dir, 'input.mp4');
+    writeFileSync(inputPath, 'probe fixture');
+    writeFileSync(stagedMediaPath, 'staged partial that must survive');
+    writeFileSync(mediaBackup, 'backup that must survive');
+    // The output file and its lock are named after the project id, so the id must be "alias".
+    const project = createDefaultProject('Alias journal', { id: 'alias' });
+    const root = project.compositions['root'] as unknown as { tracks: Array<{ clips: unknown[] }> };
+    root.tracks[0]!.clips.push({
+      id: 'alias-clip',
+      kind: 'video',
+      assetId: inputPath,
+      startUs: 0,
+      durationUs: 1_000_000,
+      sourceInUs: 0,
+    });
+    (project.assets as Record<string, unknown>)[inputPath] = { id: inputPath, kind: 'video' };
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: 2_147_000_000,
+        token: 'dead-alias-journal',
+        startedAt: new Date(1).toISOString(),
+        activePartialPath: stagedMediaPath,
+        transaction: {
+          phase: 'committing',
+          mediaPath,
+          stagedMediaPath,
+          mediaBackup,
+          hadMedia: true,
+          manifestPath,
+          stagedManifestPath: join(dir, `.${mediaName}.manifest.json.interrupted.tmp`),
+          manifestBackup: join(dir, `.${mediaName}.manifest.json.interrupted.backup`),
+          hadManifest: false,
+        },
+      }),
+    );
+    const originalLock = readFileSync(lockPath);
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
+    setMediaProbeSpawnForTests(() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null as number | null,
+        kill: vi.fn(() => true),
+      });
+      setTimeout(() => {
+        child.stdout.end(
+          JSON.stringify({
+            streams: [{ codec_type: 'video', width: 320, height: 240, pix_fmt: 'yuv420p' }],
+            format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2', duration: '1.0' },
+          }),
+        );
+        child.exitCode = 0;
+        child.emit('close', 0, null);
+      }, 0);
+      return child as never;
+    });
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: dir,
+        concurrency: 1,
+        json: true,
+      });
+      expect(result.exitCode).toBe(1);
+      const event = JSON.parse(capture.text().trim().split('\n').at(-1)!) as {
+        code: string;
+        message: string;
+      };
+      expect(event.code).toBe('output');
+      expect(event.message).toContain('also a journal path');
+      expect(readFileSync(stagedMediaPath, 'utf8')).toBe('staged partial that must survive');
+      expect(readFileSync(mediaBackup, 'utf8')).toBe('backup that must survive');
+      expect(readFileSync(lockPath)).toEqual(originalLock);
     } finally {
       restore();
       setMediaProbeSpawnForTests(undefined);

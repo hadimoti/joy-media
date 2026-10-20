@@ -53,6 +53,16 @@ export class StaleRecoveryLockError extends Error {
   }
 }
 
+/** A recovery lock that exists but holds no complete record, so its holder cannot be identified. */
+export class UnreadableRecoveryLockError extends Error {
+  constructor(path: string) {
+    super(
+      `The recovery lock at ${path} is unreadable and names no holder; a process may have crashed while creating it. Remove that file to continue.`,
+    );
+    this.name = 'UnreadableRecoveryLockError';
+  }
+}
+
 export type ExclusiveRecordFileSystem = Pick<
   typeof nodeFs,
   'openSync' | 'closeSync' | 'writeFileSync' | 'readFileSync' | 'linkSync' | 'unlinkSync'
@@ -129,6 +139,16 @@ function createMutexRecord(
   }
 }
 
+/** The file exists, whether or not its contents parse into a complete record. */
+function recoveryFileExists(path: string, fs: ExclusiveRecordFileSystem): boolean {
+  try {
+    fs.readFileSync(path, 'utf8');
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ENOENT';
+  }
+}
+
 function readMutex(path: string, fs: ExclusiveRecordFileSystem): MutexRecord | undefined {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(path, 'utf8'));
@@ -174,8 +194,13 @@ export function withRecoveryMutex<T>(
         // Fail closed: removing a dead holder's lock cannot be made atomic, so it is left in place.
         throw new StaleRecoveryLockError(options.busyCode ?? 'BUSY', mutexPath, observed.pid);
       }
-      if (now() >= deadline)
+      if (now() >= deadline) {
+        // A file that exists but cannot be read may be the remains of a crash during creation. It
+        // names no holder, so it is reported for removal rather than as an ordinary busy target.
+        if (!observed && recoveryFileExists(mutexPath, fs))
+          throw new UnreadableRecoveryLockError(mutexPath);
         throw new ExclusiveRecordBusyError(options.busyCode ?? 'BUSY', targetPath);
+      }
       sleep(Math.min(retryIntervalMs, Math.max(1, deadline - now())));
       continue;
     }

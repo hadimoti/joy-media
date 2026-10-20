@@ -4,11 +4,12 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ExclusiveRecordBusyError,
   type ExclusiveRecordFileSystem,
   StaleRecoveryLockError,
+  UnreadableRecoveryLockError,
   acquireRecord,
   processIsAlive,
   withRecoveryMutex,
@@ -99,28 +100,49 @@ describe('exclusive record protocol', () => {
     expect(processIsAlive(process.pid)).toBe(true);
   });
 
-  it('cleans up a failed staged mutex write so a later acquisition can proceed', () => {
+  it('removes its staged file and leaves no mutex when the fallback write fails', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-exclusive-staged-failure-'));
     const path = join(directory, 'owner');
     const mutexPath = `${path}.recover`;
     try {
+      // No hard links: the staged file is written, linking fails, and the fallback write fails.
       const fs = {
         ...nodeFs,
+        linkSync: () => {
+          throw Object.assign(new Error('hard links unavailable'), { code: 'EPERM' });
+        },
         writeFileSync: (
           file: number | nodeFs.PathOrFileDescriptor,
           data: string | NodeJS.ArrayBufferView,
           ...args: unknown[]
         ) => {
-          if (typeof file === 'string' && file.includes('.staged-'))
-            throw new Error('staged write failed');
+          if (typeof file === 'number') throw new Error('fallback write failed');
           return (nodeFs.writeFileSync as (...values: unknown[]) => void)(file, data, ...args);
         },
       } as unknown as ExclusiveRecordFileSystem;
       expect(() => withRecoveryMutex(path, () => 'unexpected', { fs })).toThrow(
-        'staged write failed',
+        'fallback write failed',
       );
-      expect(() => readFileSync(mutexPath, 'utf8')).toThrow();
+      expect(nodeFs.existsSync(mutexPath)).toBe(false);
+      expect(readdirSync(directory)).toEqual([]);
       expect(withRecoveryMutex(path, () => 'acquired')).toBe('acquired');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('reports an unreadable recovery lock by name instead of a generic busy error', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-exclusive-unreadable-'));
+    const path = join(directory, 'owner');
+    const mutexPath = `${path}.recover`;
+    try {
+      writeFileSync(mutexPath, '');
+      const action = vi.fn(() => 'unexpected');
+      expect(() => withRecoveryMutex(path, action, { timeoutMs: 0 })).toThrow(
+        UnreadableRecoveryLockError,
+      );
+      expect(action).not.toHaveBeenCalled();
+      expect(readFileSync(mutexPath, 'utf8')).toBe('');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -140,12 +162,14 @@ describe('exclusive record protocol', () => {
           return nodeFs.unlinkSync(target);
         },
       } as unknown as ExclusiveRecordFileSystem;
+      const action = vi.fn(() => 'unexpected');
       expect(() =>
-        withRecoveryMutex(path, () => 'unexpected', {
+        withRecoveryMutex(path, action, {
           fs,
           isAlive: (pid) => pid !== 2_147_000_000,
         }),
       ).toThrow(StaleRecoveryLockError);
+      expect(action).not.toHaveBeenCalled();
       expect(unlinked).not.toContain(mutexPath);
       expect(readdirSync(directory)).toEqual(['owner.recover']);
       expect(JSON.parse(readFileSync(mutexPath, 'utf8')).token).toBe('stale');
@@ -190,10 +214,13 @@ describe('exclusive record protocol', () => {
       import { writeFileSync } from 'node:fs';
       const [path, role] = process.argv.slice(1);
       try {
-        withRecoveryMutex(path, () => 'acquired');
-        writeFileSync(path + '.' + role + '.acquired', 'acquired');
-      } catch {
-        writeFileSync(path + '.' + role + '.refused', 'refused');
+        withRecoveryMutex(path, () => {
+          writeFileSync(path + '.' + role + '.acquired', 'acquired');
+          return 'acquired';
+        });
+      } catch (error) {
+        const kind = error && error.name === 'StaleRecoveryLockError' ? 'refused' : 'error';
+        writeFileSync(path + '.' + role + '.' + kind, kind);
       }
     `;
     try {
@@ -229,6 +256,7 @@ describe('exclusive record protocol', () => {
         { code: 0, stderr: '' },
       ]);
       expect(readdirSync(directory).filter((entry) => entry.endsWith('.acquired'))).toEqual([]);
+      expect(readdirSync(directory).filter((entry) => entry.endsWith('.error'))).toEqual([]);
       expect(readdirSync(directory).filter((entry) => entry.endsWith('.refused'))).toHaveLength(2);
     } finally {
       rmSync(directory, { recursive: true, force: true });

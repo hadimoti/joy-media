@@ -4,6 +4,7 @@ import {
   ExclusiveRecordBusyError,
   RECOVERY_MUTEX_RETRY_MS,
   StaleRecoveryLockError,
+  UnreadableRecoveryLockError,
   acquireRecord,
   processIsAlive,
   sleepSync,
@@ -92,10 +93,11 @@ export function tryAcquireBuildLock(
         } catch (error) {
           if (
             error instanceof ExclusiveRecordBusyError ||
-            error instanceof StaleRecoveryLockError
+            error instanceof StaleRecoveryLockError ||
+            error instanceof UnreadableRecoveryLockError
           ) {
             // Keep the owner record: releasing without its mutex could remove a newer owner. A
-            // stale recovery lock is reported by the next acquisition, not by this build's result.
+            // stale or unreadable recovery lock is reported by the next acquisition instead.
             return;
           }
           throw error;
