@@ -4,7 +4,8 @@ param(
     [ValidateSet('joy-media-worker-docker')]
     [string]$RunnerName = 'joy-media-worker-docker',
     [string]$Volume = '',
-    [ValidateRange(0,1500)][int]$MtuBytes = 1240
+    [ValidateRange(0,1500)][int]$MtuBytes = 1240,
+    [ValidatePattern('^[1-9][0-9]*[bkmgBKMG]$')][string]$Memory = '4g'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,6 +62,8 @@ $dockerRunArgs = @(
     $RunnerName
     '--restart'
     'unless-stopped'
+    '--memory'
+    $Memory
     '--env'
     "JOY_MEDIA_WINDOWS_IMAGE_DIGEST=$imageId"
     '--env'
@@ -207,3 +210,4 @@ Write-Output "Container ID: $containerId"
 Write-Output "Image ID: $imageId"
 Write-Output "Volume: $Volume"
 Write-Output "MTU: $MtuBytes"
+Write-Output "Memory: $Memory"
