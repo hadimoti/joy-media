@@ -703,6 +703,12 @@ describe('RenderPreparationV1', () => {
   });
 
   it('observes cancellation during asynchronous FFmpeg validation within 100 ms', async () => {
+    // An existing absolute path skips the PATH lookup, which is a separate process with its own
+    // 5 s limit. The probes themselves are the fake runner below, so nothing here executes it.
+    const fakeFfmpeg = join(tmpdir(), `joy-fake-ffmpeg-${process.pid}-${Date.now()}`);
+    writeFileSync(fakeFfmpeg, 'not executed: the command runner is faked');
+    const priorFfmpeg = process.env['JOY_MEDIA_FFMPEG'];
+    process.env['JOY_MEDIA_FFMPEG'] = fakeFfmpeg;
     let started = false;
     setRenderPreparationCommandRunnerForTests((_binary, _args, { signal }) => {
       started = true;
@@ -720,13 +726,16 @@ describe('RenderPreparationV1', () => {
         signal: controller.signal,
       });
       // Only the probe's start is awaited here; the 100 ms bound below applies to cancellation.
-      await vi.waitFor(() => expect(started).toBe(true), { timeout: 5_000 });
+      await vi.waitFor(() => expect(started).toBe(true), { timeout: 30_000 });
       const startedAt = performance.now();
       controller.abort();
       await expect(validating).rejects.toThrow('aborted');
       expect(performance.now() - startedAt).toBeLessThan(100);
     } finally {
       setRenderPreparationCommandRunnerForTests(undefined);
+      if (priorFfmpeg === undefined) delete process.env['JOY_MEDIA_FFMPEG'];
+      else process.env['JOY_MEDIA_FFMPEG'] = priorFfmpeg;
+      rmSync(fakeFfmpeg, { force: true });
     }
   });
 
