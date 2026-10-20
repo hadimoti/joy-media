@@ -334,12 +334,24 @@ describe('joy render (headless batch render command)', () => {
   it('refuses a live owner of a manifest target', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'joy-render-live-owner-'));
     const target = join(dir, 'live-owner.mp4.manifest.json');
-    writeFileSync(`${target}.owner`, JSON.stringify({ pid: process.pid, token: 'live-owner' }));
+    writeFileSync(
+      `${target}.owner`,
+      JSON.stringify({ pid: process.pid, token: 'live-owner', createdAt: Date.now() }),
+    );
+    const project = createDefaultProject('Live owner', { id: 'live-owner' });
+    const root = project.compositions['root'] as unknown as { tracks: Array<{ clips: unknown[] }> };
+    root.tracks[0]!.clips.push({
+      id: 'live-owner-clip',
+      kind: 'video',
+      assetId: 'missing-media',
+      startUs: 0,
+      durationUs: 1_000_000,
+    });
     const capture = new StringWritable();
     const restore = redirectStdout(capture);
     try {
       const result = await runHeadlessRender({
-        project: createDefaultProject('Live owner', { id: 'live-owner' }),
+        project,
         preset: 'mp4',
         outDir: dir,
         concurrency: 1,
@@ -385,6 +397,120 @@ describe('joy render (headless batch render command)', () => {
       expect(existsSync(target)).toBe(true);
       expect(existsSync(staging)).toBe(false);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not run journal recovery while a manifest-only result is owned', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-owner-journal-order-'));
+    const manifestPath = join(dir, 'manifest-guard.mp4.manifest.json');
+    const mediaPath = join(dir, 'input.mp4');
+    writeFileSync(mediaPath, 'probe fixture');
+    const manifestOnlyProject = createDefaultProject('Manifest guard', { id: 'manifest-guard' });
+    const manifestOnlyRoot = manifestOnlyProject.compositions['root'] as unknown as {
+      tracks: Array<{ clips: unknown[] }>;
+    };
+    manifestOnlyRoot.tracks[0]!.clips.push({
+      id: 'manifest-only-clip',
+      kind: 'video',
+      assetId: 'missing-media',
+      startUs: 0,
+      durationUs: 1_000_000,
+    });
+    const manifestOnly = await runHeadlessRender({
+      project: manifestOnlyProject,
+      preset: 'mp4',
+      outDir: dir,
+      concurrency: 1,
+      json: true,
+      manifestOnly: true,
+    });
+    expect(manifestOnly.exitCode).toBe(0);
+    const manifestFromManifestOnlyRender = readFileSync(manifestPath);
+    const mediaName = 'manifest-guard.mp4';
+    const stagedMediaPath = join(dir, `.${mediaName}.interrupted.partial`);
+    const mediaBackup = join(dir, `.${mediaName}.interrupted.backup`);
+    const stagedManifestPath = join(dir, `.manifest-guard.mp4.manifest.json.interrupted.tmp`);
+    const manifestBackup = join(dir, `.manifest-guard.mp4.manifest.json.interrupted.backup`);
+    writeFileSync(manifestBackup, 'older journal backup');
+    writeFileSync(
+      `${manifestPath}.owner`,
+      JSON.stringify({
+        pid: process.pid,
+        token: 'manifest-only-render-owner',
+        createdAt: Date.now(),
+      }),
+    );
+    writeFileSync(
+      join(dir, `.${mediaName}.render.lock`),
+      JSON.stringify({
+        pid: 2_147_000_000,
+        token: 'dead-render-lock',
+        startedAt: new Date(1).toISOString(),
+        activePartialPath: null,
+        transaction: {
+          phase: 'committing',
+          mediaPath: join(dir, mediaName),
+          stagedMediaPath,
+          mediaBackup,
+          hadMedia: false,
+          manifestPath,
+          stagedManifestPath,
+          manifestBackup,
+          hadManifest: true,
+        },
+      }),
+    );
+
+    const project = createDefaultProject('Manifest guard', { id: 'manifest-guard' });
+    const root = project.compositions['root'] as unknown as { tracks: Array<{ clips: unknown[] }> };
+    root.tracks[0]!.clips.push({
+      id: 'guard-clip',
+      kind: 'video',
+      assetId: mediaPath,
+      startUs: 0,
+      durationUs: 1_000_000,
+      sourceInUs: 0,
+    });
+    (project.assets as Record<string, unknown>)[mediaPath] = { id: mediaPath, kind: 'video' };
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
+    setMediaProbeSpawnForTests(() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null as number | null,
+        kill: vi.fn(() => true),
+      });
+      setTimeout(() => {
+        child.stdout.end(
+          JSON.stringify({
+            streams: [{ codec_type: 'video', width: 320, height: 240, pix_fmt: 'yuv420p' }],
+            format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2', duration: '1.0' },
+          }),
+        );
+        child.exitCode = 0;
+        child.emit('close', 0, null);
+      }, 0);
+      return child as never;
+    });
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: dir,
+        concurrency: 1,
+        json: true,
+      });
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(capture.text().trim())).toMatchObject({
+        code: 'RENDER_OUTPUT_BUSY',
+      });
+      expect(readFileSync(manifestPath)).toEqual(manifestFromManifestOnlyRender);
+      expect(readFileSync(manifestBackup, 'utf8')).toBe('older journal backup');
+    } finally {
+      restore();
+      setMediaProbeSpawnForTests(undefined);
       rmSync(dir, { recursive: true, force: true });
     }
   });

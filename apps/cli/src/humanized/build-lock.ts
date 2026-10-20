@@ -1,17 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import {
-  closeSync,
-  existsSync,
-  linkSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
-
-const MALFORMED_LOCK_GRACE_MS = 1_000;
+  ExclusiveRecordBusyError,
+  acquireRecord,
+  processIsAlive,
+  withRecoveryMutex,
+} from '../utils/exclusive-record.js';
 
 export interface BuildLockOwner {
   readonly token: string;
@@ -44,94 +38,50 @@ function readRecord(path: string): BuildLockRecord | undefined {
   return undefined;
 }
 
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function readBuildLockToken(path: string): string | undefined {
   return readRecord(path)?.token;
 }
 
 export function tryAcquireBuildLock(path: string): BuildLockOwner | null {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const token = randomUUID();
-    const pid = process.pid;
-    const createdAt = Date.now();
-    let descriptor: number;
-    try {
-      descriptor = openSync(path, 'wx');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const record = readRecord(path);
-      if (record && isProcessAlive(record.pid)) return null;
-      let staleMalformed = false;
-      if (!record) {
-        try {
-          staleMalformed = Date.now() - statSync(path).mtimeMs >= MALFORMED_LOCK_GRACE_MS;
-        } catch {
-          continue;
-        }
-        if (!staleMalformed) return null;
-      }
-      const recoveryPath = `${path}.stale-${randomUUID()}`;
-      try {
-        renameSync(path, recoveryPath);
-      } catch {
-        continue;
-      }
-      const recovered = readRecord(recoveryPath);
-      const stillStale = record
-        ? recovered?.token === record.token && !isProcessAlive(recovered.pid)
-        : recovered === undefined &&
-          Date.now() - statSync(recoveryPath).mtimeMs >= MALFORMED_LOCK_GRACE_MS;
-      if (!stillStale) {
-        try {
-          linkSync(recoveryPath, path);
-          unlinkSync(recoveryPath);
-        } catch {
-          // A new owner may have appeared at the original path; retain the moved file.
-        }
-        return null;
-      }
-      try {
-        unlinkSync(recoveryPath);
-      } catch (unlinkError) {
-        if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') return null;
-      }
-      continue;
-    }
-    try {
-      writeFileSync(descriptor, `${JSON.stringify({ token, pid, createdAt })}\n`);
-    } catch (error) {
-      closeSync(descriptor);
-      try {
-        unlinkSync(path);
-      } catch {
-        /* best effort */
-      }
-      throw error;
-    }
-    closeSync(descriptor);
+  try {
+    const record = withRecoveryMutex(
+      path,
+      () =>
+        acquireRecord(path, {
+          isComplete: (value): value is BuildLockRecord =>
+            typeof value === 'object' &&
+            value !== null &&
+            typeof (value as BuildLockRecord).token === 'string' &&
+            typeof (value as BuildLockRecord).pid === 'number' &&
+            Number.isSafeInteger((value as BuildLockRecord).pid) &&
+            typeof (value as BuildLockRecord).createdAt === 'number',
+          pidOf: (value) => value.pid,
+          makeRecord: () => ({ token: randomUUID(), pid: process.pid, createdAt: Date.now() }),
+        }),
+      { busyCode: 'BUILD_LOCK_BUSY' },
+    );
+    if (!record) return null;
     return {
-      token,
-      pid,
-      createdAt,
+      ...record,
       release: () => {
-        if (readRecord(path)?.token !== token) return;
-        try {
-          unlinkSync(path);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        }
+        withRecoveryMutex(
+          path,
+          () => {
+            if (readRecord(path)?.token !== record.token) return;
+            try {
+              unlinkSync(path);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+            }
+          },
+          { busyCode: 'BUILD_LOCK_BUSY' },
+        );
       },
     };
+  } catch (error) {
+    if (error instanceof ExclusiveRecordBusyError) return null;
+    throw error;
   }
-  return null;
 }
 
 function sleepSync(ms: number): void {
@@ -153,7 +103,7 @@ export function waitForBuildComplete(
     }
     if (lockPath) {
       const owner = readRecord(lockPath);
-      if (!owner || owner.token !== token || !isProcessAlive(owner.pid)) return;
+      if (!owner || owner.token !== token || !processIsAlive(owner.pid)) return;
     }
     sleep(Math.min(250, Math.max(1, deadline - Date.now())));
   }

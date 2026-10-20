@@ -369,6 +369,7 @@ describe('a creator chooses where the output goes', () => {
     expect(listTree(sb.path('blocked'))).toEqual([`${manifestName(reel.id)}/keep.txt`]);
   });
 
+  // Mutual exclusion is proved in the protocol tests; this end-to-end test checks outcomes only.
   it('publishes one complete result when two renders target the same folder at once', async () => {
     const [a, b] = await Promise.all([
       sb.run(['render', '--project', reel.id, '--out', 'race', '--json']),

@@ -26,12 +26,9 @@ import { performance } from 'node:perf_hooks';
 import { inflateSync } from 'node:zlib';
 import {
   accessSync,
-  closeSync,
   constants,
   existsSync,
   mkdirSync,
-  openSync,
-  linkSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -46,6 +43,12 @@ import { basename, dirname, join, resolve } from 'node:path';
 import type { CliFlags } from '../cli.js';
 import { currentLongRunning, longRunningCancellationExitCode } from '../long-running.js';
 import { FlagValidationError, parseIntFlag } from '../utils/flags.js';
+import {
+  ExclusiveRecordBusyError,
+  acquireRecord,
+  processIsAlive,
+  withRecoveryMutex,
+} from '../utils/exclusive-record.js';
 import {
   c,
   logError,
@@ -1300,6 +1303,17 @@ export async function runHeadlessRender(
     let recordOutputTransaction: ((transaction: OutputTransactionRecord | null) => void) | null =
       null;
     let activeRenderPartialPath: string | null = null;
+    if (totalClips > 0 || input.manifestOnly) {
+      for (const target of outputTargets) {
+        const owner = acquireArtifactOwner(target);
+        if (!owner.ok) {
+          return failure('RENDER_OUTPUT_BUSY', owner.message, totalFrames, totalClips);
+        }
+        artifactOwnerReleases.push(owner.release);
+      }
+    }
+
+    // Claim every published target before output-lock recovery can restore journaled files.
     if (realMedia) {
       const lockPath = join(outDir, `.${mediaName}.render.lock`);
       const lock = acquireOutputLock(lockPath);
@@ -1307,18 +1321,6 @@ export async function runHeadlessRender(
       releaseOutputLock = lock.release;
       recordOutputPartialPath = lock.recordPartialPath;
       recordOutputTransaction = lock.recordTransaction;
-    }
-
-    if (totalClips > 0 || input.manifestOnly) {
-      for (const target of outputTargets) {
-        const owner = acquireArtifactOwner(target);
-        if (!owner.ok) {
-          releaseOutputLock?.();
-          releaseOutputLock = null;
-          return failure('RENDER_OUTPUT_BUSY', owner.message, totalFrames, totalClips);
-        }
-        artifactOwnerReleases.push(owner.release);
-      }
     }
 
     if (!json) {
@@ -2134,10 +2136,34 @@ interface OutputTransactionRecord {
 }
 
 interface OutputLockRecord {
-  pid: number;
-  startedAt: string;
-  activePartialPath: string | null;
-  transaction: OutputTransactionRecord | null;
+  readonly pid: number;
+  readonly token: string;
+  readonly startedAt: string;
+  readonly activePartialPath: string | null;
+  readonly transaction: OutputTransactionRecord | null;
+}
+
+function isOutputLockRecord(value: unknown): value is OutputLockRecord {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Number.isSafeInteger((value as OutputLockRecord).pid) &&
+    typeof (value as OutputLockRecord).token === 'string' &&
+    typeof (value as OutputLockRecord).startedAt === 'string' &&
+    ((value as OutputLockRecord).activePartialPath === null ||
+      typeof (value as OutputLockRecord).activePartialPath === 'string') &&
+    ((value as OutputLockRecord).transaction === null ||
+      isOutputTransactionRecord((value as OutputLockRecord).transaction))
+  );
+}
+
+function readOutputLockRecord(path: string): OutputLockRecord | null {
+  try {
+    const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    return isOutputLockRecord(value) ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Claim one real output pair so concurrent renders cannot cross-publish it. */
@@ -2149,88 +2175,64 @@ function acquireOutputLock(path: string):
       readonly recordTransaction: (transaction: OutputTransactionRecord | null) => void;
     }
   | { readonly ok: false; readonly message: string } {
-  const create = (): number | null => {
-    try {
-      return openSync(path, 'wx');
-    } catch {
-      return null;
-    }
-  };
-  let descriptor = create();
   let recoveryFailure = '';
-  if (descriptor === null && existsSync(path)) {
-    let ownerPid = 0;
-    let ownerStartedAt = '';
-    let transaction: OutputTransactionRecord | null = null;
-    let activePartialPath: string | null = null;
-    try {
-      const owner = JSON.parse(readFileSync(path, 'utf8')) as {
-        pid?: unknown;
-        startedAt?: unknown;
-        activePartialPath?: unknown;
-        transaction?: unknown;
-      };
-      if (typeof owner.pid === 'number') ownerPid = owner.pid;
-      if (typeof owner.startedAt === 'string') ownerStartedAt = owner.startedAt;
-      if (typeof owner.activePartialPath === 'string') activePartialPath = owner.activePartialPath;
-      else if (owner.activePartialPath !== null && owner.activePartialPath !== undefined) {
-        recoveryFailure = 'the active partial path is malformed';
-      }
-      if (isOutputTransactionRecord(owner.transaction)) transaction = owner.transaction;
-      else if (owner.transaction !== null && owner.transaction !== undefined) {
-        recoveryFailure = 'the output transaction journal is malformed';
-      }
-    } catch {
-      // A malformed or partially written lock remains busy; never guess that it is stale.
-    }
-    if (ownerPid > 0 && !isProcessAlive(ownerPid)) {
-      try {
-        if (recoveryFailure) throw new Error(recoveryFailure);
-        recoverOutputLockState(path, transaction, activePartialPath);
-        rmSync(path, { force: true });
-        descriptor = create();
-      } catch (err) {
-        recoveryFailure = errorMessage(err);
-        descriptor = null;
-      }
-    }
-    if (descriptor === null) {
+  let ownerStartedAt = '';
+  let ownerPid = 0;
+  let record: OutputLockRecord | null = null;
+  try {
+    record = withRecoveryMutex(
+      path,
+      () => {
+        const existing = readOutputLockRecord(path);
+        if (existing) {
+          ownerPid = existing.pid;
+          ownerStartedAt = existing.startedAt;
+          if (processIsAlive(existing.pid)) return null;
+          try {
+            recoverOutputLockState(path, existing.transaction, existing.activePartialPath);
+          } catch (error) {
+            recoveryFailure = errorMessage(error);
+            throw error;
+          }
+        }
+        return acquireRecord(path, {
+          isComplete: isOutputLockRecord,
+          pidOf: (value) => value.pid,
+          makeRecord: () => ({
+            pid: process.pid,
+            token: randomBytes(16).toString('hex'),
+            startedAt: new Date().toISOString(),
+            activePartialPath: null,
+            transaction: null,
+          }),
+        });
+      },
+      { busyCode: 'RENDER_OUTPUT_BUSY' },
+    );
+  } catch (error) {
+    if (!(error instanceof ExclusiveRecordBusyError)) {
       return {
         ok: false,
-        message:
-          ownerPid > 0 && !isProcessAlive(ownerPid)
-            ? `A stale render lock could not be recovered at ${path}${recoveryFailure ? `: ${recoveryFailure}` : ''}.`
-            : `Another render is writing this output (lock: ${path}${ownerStartedAt ? `, started ${ownerStartedAt}` : ''}).`,
+        message: `A stale render lock could not be recovered at ${path}${recoveryFailure ? `: ${recoveryFailure}` : `: ${errorMessage(error)}`}.`,
       };
     }
   }
-  if (descriptor === null) {
-    return { ok: false, message: `Cannot claim render output lock ${path}.` };
+  if (!record) {
+    return {
+      ok: false,
+      message:
+        ownerPid > 0 && !processIsAlive(ownerPid)
+          ? `A stale render lock could not be recovered at ${path}${recoveryFailure ? `: ${recoveryFailure}` : ''}.`
+          : `Another render is writing this output (lock: ${path}${ownerStartedAt ? `, started ${ownerStartedAt}` : ''}).`,
+    };
   }
-  const record: OutputLockRecord = {
-    pid: process.pid,
-    startedAt: new Date().toISOString(),
-    activePartialPath: null,
-    transaction: null,
-  };
-  try {
-    writeFileSync(descriptor, JSON.stringify(record));
-  } catch (err) {
-    closeSync(descriptor);
-    rmSync(path, { force: true });
-    return { ok: false, message: `Cannot write render output lock ${path}: ${errorMessage(err)}` };
-  }
-  closeSync(descriptor);
   const recordPartialPath = (activePartialPath: string | null): void => {
     const next = { ...record, activePartialPath };
     writeFileAtomic(path, JSON.stringify(next));
-    record.activePartialPath = activePartialPath;
   };
   const recordTransaction = (transaction: OutputTransactionRecord | null): void => {
     const next = { ...record, activePartialPath: null, transaction };
     writeFileAtomic(path, JSON.stringify(next));
-    record.activePartialPath = null;
-    record.transaction = transaction;
   };
   let released = false;
   const release = (): void => {
@@ -2238,40 +2240,33 @@ function acquireOutputLock(path: string):
     released = true;
     process.off('exit', release);
     try {
-      const current = JSON.parse(readFileSync(path, 'utf8')) as {
-        pid?: unknown;
-        activePartialPath?: unknown;
-        transaction?: unknown;
-      };
-      if (
-        current.pid === process.pid &&
-        ((current.transaction !== null && current.transaction !== undefined) ||
-          (typeof current.activePartialPath === 'string' && current.activePartialPath.length > 0))
-      ) {
-        return;
-      }
+      withRecoveryMutex(
+        path,
+        () => {
+          const current = readOutputLockRecord(path);
+          if (!current || current.token !== record!.token) return;
+          if (
+            current.transaction !== null ||
+            (typeof current.activePartialPath === 'string' && current.activePartialPath.length > 0)
+          )
+            return;
+          unlinkSync(path);
+        },
+        { busyCode: 'RENDER_OUTPUT_BUSY' },
+      );
     } catch {
       // Leave a malformed lock in place; a later command will refuse unsafe recovery.
       return;
     }
-    rmSync(path, { force: true });
   };
   process.once('exit', release);
   return { ok: true, release, recordPartialPath, recordTransaction };
 }
 
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code !== 'ESRCH';
-  }
-}
-
 interface ArtifactOwnerRecord {
   readonly pid: number;
   readonly token: string;
+  readonly createdAt: number;
 }
 
 function readArtifactOwner(path: string): ArtifactOwnerRecord | null {
@@ -2281,7 +2276,8 @@ function readArtifactOwner(path: string): ArtifactOwnerRecord | null {
       typeof value === 'object' &&
       value !== null &&
       Number.isSafeInteger((value as ArtifactOwnerRecord).pid) &&
-      typeof (value as ArtifactOwnerRecord).token === 'string'
+      typeof (value as ArtifactOwnerRecord).token === 'string' &&
+      typeof (value as ArtifactOwnerRecord).createdAt === 'number'
     )
       return value as ArtifactOwnerRecord;
   } catch {
@@ -2290,95 +2286,73 @@ function readArtifactOwner(path: string): ArtifactOwnerRecord | null {
   return null;
 }
 
-/** Claim one published file. Dead owners are moved aside atomically before cleanup. */
+/** Claim one published file and recover stale ownership under its recovery mutex. */
 function acquireArtifactOwner(
   target: string,
 ):
   | { readonly ok: true; readonly release: () => void }
   | { readonly ok: false; readonly message: string } {
   const path = `${target}.owner`;
-  let recoveryPathPending: string | undefined;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const token = randomBytes(16).toString('hex');
-    const record: ArtifactOwnerRecord = { pid: process.pid, token };
-    let descriptor: number;
-    try {
-      descriptor = openSync(path, 'wx');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST')
-        return {
-          ok: false,
-          message: `Cannot claim render output owner ${path}: ${errorMessage(error)}`,
-        };
-      const observed = readArtifactOwner(path);
-      if (!observed || isProcessAlive(observed.pid))
-        return { ok: false, message: `Render output is busy at ${target} (owner: ${path}).` };
-      const recoveryPath = `${path}.stale-${randomBytes(8).toString('hex')}`;
-      try {
-        renameSync(path, recoveryPath);
-      } catch {
-        continue;
-      }
-      const recovered = readArtifactOwner(recoveryPath);
-      if (!recovered || recovered.token !== observed.token || isProcessAlive(recovered.pid)) {
-        try {
-          linkSync(recoveryPath, path);
-          unlinkSync(recoveryPath);
-        } catch {
-          // Keep the moved record if another owner appeared at the original path.
-        }
-        return {
-          ok: false,
-          message: `Render output is busy at ${target} (owner changed during recovery).`,
-        };
-      }
-      recoveryPathPending = recoveryPath;
-      continue;
-    }
-    try {
-      writeFileSync(descriptor, `${JSON.stringify(record)}\n`);
-    } catch (error) {
-      closeSync(descriptor);
-      try {
-        unlinkSync(path);
-      } catch {
-        // Best effort; the incomplete record will be treated as busy.
-      }
-      return {
-        ok: false,
-        message: `Cannot write render output owner ${path}: ${errorMessage(error)}`,
-      };
-    }
-    closeSync(descriptor);
-    let released = false;
-    const release = (): void => {
-      if (released) return;
-      released = true;
-      process.off('exit', release);
-      if (readArtifactOwner(path)?.token !== token) return;
-      try {
-        unlinkSync(path);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
+  let previousRecordPresent = false;
+  let record: ArtifactOwnerRecord | null;
+  try {
+    record = withRecoveryMutex(
+      path,
+      () => {
+        previousRecordPresent = existsSync(path);
+        const existing = readArtifactOwner(path);
+        if (existing && processIsAlive(existing.pid)) return null;
+        const acquired = acquireRecord(path, {
+          isComplete: (value): value is ArtifactOwnerRecord =>
+            typeof value === 'object' &&
+            value !== null &&
+            Number.isSafeInteger((value as ArtifactOwnerRecord).pid) &&
+            typeof (value as ArtifactOwnerRecord).token === 'string' &&
+            typeof (value as ArtifactOwnerRecord).createdAt === 'number',
+          pidOf: (value) => value.pid,
+          makeRecord: () => ({
+            pid: process.pid,
+            token: randomBytes(16).toString('hex'),
+            createdAt: Date.now(),
+          }),
+        });
+        if (acquired && previousRecordPresent) removeArtifactStagingFiles(target);
+        return acquired;
+      },
+      { busyCode: 'RENDER_OUTPUT_BUSY' },
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof ExclusiveRecordBusyError
+          ? `Render output is busy at ${target} (owner: ${path}).`
+          : `Cannot claim render output owner ${path}: ${errorMessage(error)}`,
     };
-    process.once('exit', release);
-    if (recoveryPathPending) {
-      try {
-        removeArtifactStagingFiles(target);
-        unlinkSync(recoveryPathPending);
-      } catch (recoveryError) {
-        release();
-        return {
-          ok: false,
-          message: `A dead render owner could not be recovered for ${target}: ${errorMessage(recoveryError)}`,
-        };
-      }
-      recoveryPathPending = undefined;
-    }
-    return { ok: true, release };
   }
-  return { ok: false, message: `Render output is busy at ${target} (owner: ${path}).` };
+  if (!record)
+    return { ok: false, message: `Render output is busy at ${target} (owner: ${path}).` };
+  const token = record.token;
+  let released = false;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    process.off('exit', release);
+    try {
+      withRecoveryMutex(
+        path,
+        () => {
+          if (readArtifactOwner(path)?.token !== token) return;
+          unlinkSync(path);
+        },
+        { busyCode: 'RENDER_OUTPUT_BUSY' },
+      );
+    } catch (error) {
+      if (!(error instanceof ExclusiveRecordBusyError)) throw error;
+    }
+  };
+  process.once('exit', release);
+  return { ok: true, release };
 }
 
 function removeArtifactStagingFiles(target: string): void {

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { tryAcquireBuildLock, waitForBuildComplete } from './build-lock.js';
 
 describe('CLI build lock', () => {
@@ -37,35 +39,86 @@ describe('CLI build lock', () => {
     }
   });
 
-  it('allows only one recoverer to acquire an atomically reclaimed stale lock', async () => {
+  it('allows only one of two real Node processes to acquire the same build lock', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-build-lock-race-'));
     const lockPath = join(directory, '.build.lock');
-    writeFileSync(
-      lockPath,
-      JSON.stringify({ token: 'dead-owner', pid: 2_147_000_000, createdAt: 1 }),
+    const moduleUrl = new URL('./build-lock.ts', import.meta.url).href;
+    const tsxEntry = readdirSync(join(process.cwd(), 'node_modules', '.pnpm')).find((entry) =>
+      entry.startsWith('tsx@'),
     );
+    expect(tsxEntry).toBeTruthy();
+    const tsxLoader = join(
+      process.cwd(),
+      'node_modules',
+      '.pnpm',
+      tsxEntry!,
+      'node_modules',
+      'tsx',
+      'dist',
+      'loader.mjs',
+    );
+    const worker = `
+      import { tryAcquireBuildLock } from ${JSON.stringify(moduleUrl)};
+      import { readFileSync, writeFileSync } from 'node:fs';
+      const [path, role] = process.argv.slice(1);
+      writeFileSync(path + '.' + role + '.attempt', 'attempt');
+      const owner = tryAcquireBuildLock(path);
+      if (owner) {
+        writeFileSync(path + '.' + role + '.held', 'held');
+        const until = Date.now() + 3000;
+        while (Date.now() < until) {
+          try { readFileSync(path + '.' + (role === 'one' ? 'two' : 'one') + '.busy'); break; } catch {}
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+        }
+        owner.release();
+      } else {
+        writeFileSync(path + '.' + role + '.busy', 'busy');
+      }
+    `;
     try {
-      const owners = await Promise.all([
-        Promise.resolve().then(() => tryAcquireBuildLock(lockPath)),
-        Promise.resolve().then(() => tryAcquireBuildLock(lockPath)),
+      const children = ['one', 'two'].map(
+        (role) =>
+          new Promise<{ code: number; stderr: string }>((resolve, reject) => {
+            const child = spawn(
+              process.execPath,
+              [
+                '--import',
+                pathToFileURL(tsxLoader).href,
+                '--input-type=module',
+                '-e',
+                worker,
+                lockPath,
+                role,
+              ],
+              { stdio: ['ignore', 'ignore', 'pipe'] },
+            );
+            let stderr = '';
+            child.stderr.setEncoding('utf8');
+            child.stderr.on('data', (chunk: string) => (stderr += chunk));
+            const timer = setTimeout(() => child.kill(), 8_000);
+            child.once('error', reject);
+            child.once('exit', (code) => {
+              clearTimeout(timer);
+              resolve({ code: code ?? -1, stderr });
+            });
+          }),
+      );
+      expect(await Promise.all(children)).toEqual([
+        { code: 0, stderr: '' },
+        { code: 0, stderr: '' },
       ]);
-      const acquired = owners.filter((owner) => owner !== null);
-      expect(acquired).toHaveLength(1);
-      expect(JSON.parse(readFileSync(lockPath, 'utf8')).token).toBe(acquired[0]?.token);
-      acquired[0]?.release();
+      expect(readdirSync(directory).filter((entry) => entry.endsWith('.held'))).toHaveLength(1);
+      expect(readdirSync(directory).filter((entry) => entry.endsWith('.busy'))).toHaveLength(1);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  it('recovers a malformed lock only after its grace period', () => {
+  it('recovers an incomplete lock immediately under the recovery mutex', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-build-lock-malformed-'));
     const lockPath = join(directory, '.build.lock');
     try {
       writeFileSync(lockPath, '{partial');
-      expect(tryAcquireBuildLock(lockPath)).toBeNull();
-      const old = new Date(Date.now() - 5_000);
-      utimesSync(lockPath, old, old);
       const owner = tryAcquireBuildLock(lockPath);
       expect(owner).not.toBeNull();
       expect(JSON.parse(readFileSync(lockPath, 'utf8')).token).toBe(owner?.token);
