@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { rational } from '@joy-media/project-schema';
 import {
   createChromiumSceneDriver,
@@ -363,8 +363,14 @@ describe('Chromium scene driver ownership', () => {
 const chromiumAvailable = findChromiumExecutable() !== undefined;
 
 describe.runIf(chromiumAvailable)('Chromium scene capture driver', () => {
+  // A real-browser driver keeps Chromium alive until it is closed, so close each one after its test.
+  const openedDrivers: ReturnType<typeof createChromiumSceneDriver>[] = [];
+  afterEach(() => {
+    for (const driver of openedDrivers.splice(0)) driver.close!();
+  }, 30_000);
   it('captures deterministic, alpha-aware RGBA pixels from the real browser', () => {
     const driver = createChromiumSceneDriver();
+    openedDrivers.push(driver);
     const request = {
       markup: '<div style="width:100%;height:100%;background:rgb(3,4,5)"></div>',
       width: 6,
@@ -400,6 +406,7 @@ describe.runIf(chromiumAvailable)('Chromium scene capture driver', () => {
       });`,
     );
     const driver = createChromiumSceneDriver();
+    openedDrivers.push(driver);
     const request = {
       timeUs: 0,
       frameRate: rational(30, 1),

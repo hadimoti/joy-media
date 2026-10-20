@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +17,18 @@ import {
 } from '@joy-media/html-scene-runtime';
 import { createParitySpikeFrame } from './index.js';
 
+// An open driver keeps its Chromium tree alive. Close each one after its test so browsers from
+// earlier scenes do not pile up on the runner and starve later captures past their budget.
+const openedDrivers: ReturnType<typeof createChromiumSceneDriver>[] = [];
+function openChromiumDriver(): ReturnType<typeof createChromiumSceneDriver> {
+  const driver = createChromiumSceneDriver({ timeoutMs: 90_000 });
+  openedDrivers.push(driver);
+  return driver;
+}
+afterEach(() => {
+  for (const driver of openedDrivers.splice(0)) driver.close!();
+}, 30_000);
+
 describe.runIf(findChromiumExecutable() !== undefined)(
   'P04.5 first-party scene pixel goldens',
   () => {
@@ -26,7 +38,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
       'pins $id Chromium RGBA frames and proves preview/export pixel parity',
       async (scene) => {
         // Each capture cold-starts Chromium. CI hosts ran past 45 s, so the budget leaves room.
-        const driver = createChromiumSceneDriver({ timeoutMs: 90_000 });
+        const driver = openChromiumDriver();
         const instance = resolveFirstPartySceneInstance(scene.id);
         expect(instance).toBeDefined();
         const runtime = createSandboxedReactScene(scene.manifest, scene.source);
@@ -63,7 +75,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
     });
 
     it('builds and exports a reel combining footage/caption motion with two scenes', () => {
-      const driver = createChromiumSceneDriver({ timeoutMs: 90_000 });
+      const driver = openChromiumDriver();
       const title = FIRST_PARTY_SCENES[0]!;
       const lowerThird = FIRST_PARTY_SCENES[2]!;
       const instances = [title, lowerThird].map((scene) => {
