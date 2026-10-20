@@ -208,7 +208,6 @@ async function prepare(args: string[], flags: CliFlags): Promise<number> {
     );
   }
   const operations = parseOperationsFile(args[1]!);
-  assertPreparedTitleFontCoverage(project, operations);
   // Probe prerequisites before Chromium's title measurer can be created or any plan is written.
   const facts = await preflightRenderPreparation(project, operations);
   const needsCaptionMeasure =
@@ -225,6 +224,7 @@ async function prepare(args: string[], flags: CliFlags): Promise<number> {
       : facts;
   const prepared = applyOperations(project, operations, true);
   const next = prepared.project;
+  assertPreparedTitleFontCoverage(next);
   const preparedAt = new Date().toISOString();
   let resultDocument: CliProjectDocument = { ...next, updatedAt: preparedAt };
   const renderPreparation =

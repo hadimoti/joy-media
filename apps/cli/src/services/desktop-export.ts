@@ -115,17 +115,26 @@ function findAssetIdCollision(
   value: unknown,
   assetIds: ReadonlySet<string>,
   path: string,
-  parentKey?: string,
-  parentKind?: unknown,
 ): string | undefined {
   if (typeof value === 'string') {
-    const isClipAssetReference =
-      parentKey === 'assetId' &&
-      /(?:\.clips\[\d+\]|\.clipBindings\[\d+\]\.clip)\.assetId$/u.test(path);
+    const isTimelineClipAssetReference =
+      /^documents\.(?:visual|timeline\.project)\.compositions\.[^.]+\.tracks\[\d+\]\.clips\[\d+\]\.assetId$/u.test(
+        path,
+      );
+    const isUniversalTimelineAssetReference =
+      /^documents\.timeline\.universalTimeline\.items\[\d+\]\.source\.id$/u.test(path);
+    const isVisualClipBindingAssetReference =
+      /^documents\.(?:visual|timeline)\.clipBindings\[\d+\]\.clip\.assetId$/u.test(path);
+    const isTimelineSourceBindingAssetReference =
+      /^documents\.timeline\.clipBindings\[\d+\]\.(?:clip\.assetId|sourceBinding\.source\.id)$/u.test(
+        path,
+      );
     if (
       assetIds.has(value) &&
-      !isClipAssetReference &&
-      !(parentKey === 'id' && parentKind === 'asset')
+      !isTimelineClipAssetReference &&
+      !isUniversalTimelineAssetReference &&
+      !isVisualClipBindingAssetReference &&
+      !isTimelineSourceBindingAssetReference
     )
       return path;
     return undefined;
@@ -144,7 +153,7 @@ function findAssetIdCollision(
     if (key === 'assets' && path === 'documents.visual') continue;
     const childPath = `${path}.${key}`;
     if (assetIds.has(key)) return childPath;
-    const collision = findAssetIdCollision(child, assetIds, childPath, key, record['kind']);
+    const collision = findAssetIdCollision(child, assetIds, childPath);
     if (collision !== undefined) return collision;
   }
   return undefined;

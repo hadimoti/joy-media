@@ -22,7 +22,12 @@ import {
 } from './render-cmd.js';
 import { createDefaultProject, saveProject } from '../utils/project-loader.js';
 import { encodeRgbaPng } from '../services/title-frames.js';
-import { buildFfmpegArgs, setAssFileWriterForTests } from './render-media.js';
+import {
+  buildFfmpegArgs,
+  setAssFileWriterForTests,
+  setEncodeSpawnForTests,
+  startEncode,
+} from './render-media.js';
 import { renderInputsDigest } from '../services/render-preparation.js';
 import { normalizeUniversalTimeline } from '@joy-media/project-schema';
 import { probeMediaAsync, setMediaProbeSpawnForTests } from '../utils/media-probe.js';
@@ -122,6 +127,44 @@ afterAll(() => {
 });
 
 describe('joy render (headless batch render command)', () => {
+  it.skipIf(process.platform !== 'win32')(
+    'waits for the cancellation helper deadline before settling the encoder timeout',
+    async () => {
+      const encoder = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        pid: 48123,
+        exitCode: null as number | null,
+        kill: vi.fn(),
+      });
+      const helper = Object.assign(new EventEmitter(), { kill: vi.fn() });
+      setEncodeSpawnForTests(
+        ((command: string) => (command === 'taskkill' ? helper : encoder) as never) as never,
+      );
+      const handle = startEncode([], 1_000_000, () => {});
+      const startedAt = performance.now();
+      const cancellation = handle.cancel();
+      setTimeout(() => {
+        encoder.exitCode = 1;
+        encoder.emit('close', 1, 'SIGKILL');
+      }, 10);
+      try {
+        await expect(
+          Promise.race([
+            handle.done,
+            new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 100)),
+          ]),
+        ).resolves.toBe('pending');
+        await expect(handle.done).resolves.toMatchObject({ code: 'RENDER_CANCEL_TIMEOUT' });
+        expect(performance.now() - startedAt).toBeGreaterThanOrEqual(4_900);
+        await cancellation;
+      } finally {
+        setEncodeSpawnForTests(undefined);
+      }
+    },
+    7_000,
+  );
+
   it('returns within 100 ms when cancelled during an in-flight media probe', async () => {
     const child = Object.assign(new EventEmitter(), {
       stdout: new PassThrough(),

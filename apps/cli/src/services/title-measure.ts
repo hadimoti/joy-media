@@ -1,9 +1,9 @@
-import { setTitleTextMeasurer } from './prepared-title.js';
+import { getTitleTextMeasurer, setTitleTextMeasurer } from './prepared-title.js';
 
-let initialized = false;
+// Registration follows the current measurer, not a one-time flag, so a measurer that was cleared
+// (for example by a test reset or an earlier failed start) is registered again on the next call.
 export async function ensureTitleTextMeasurer(): Promise<void> {
-  if (initialized) return;
-  initialized = true;
+  if (getTitleTextMeasurer()) return;
   try {
     const runtime = await import('@joy-media/html-scene-runtime');
     const driver = runtime.createChromiumSceneDriver();

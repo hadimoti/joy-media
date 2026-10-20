@@ -544,6 +544,35 @@ describe('RenderPreparationV1', () => {
     }
   });
 
+  it('prepares and validates a caption hard break that creates a measured blank line', async () => {
+    const captionProject = makeCaptionProject();
+    (captionProject.captionDocuments as any)['caption-doc'].segments[0].textOverride =
+      'Hello\n\nworld';
+    const measuredFacts = {
+      ...facts,
+      measureText: (text: string, size: number) => text.length * size,
+    };
+    const preparation = freezeRenderPreparation(
+      captionProject,
+      [{ op: 'addCaption' }],
+      measuredFacts,
+    );
+    expect(preparation.captions.cues[0]).toMatchObject({
+      lines: ['Hello', '', 'world'],
+      measuredWidthsPx: [300, 0, 300],
+    });
+    const saved = {
+      ...captionProject,
+      pluginData: { ...captionProject.pluginData, 'joy.renderPreparation': preparation },
+    } as unknown as CliProjectDocument;
+    setRenderPreparationFactsProviderForTests(async () => ({ ...measuredFacts }));
+    try {
+      await expect(validateRenderPreparation(saved)).resolves.toEqual(preparation);
+    } finally {
+      setRenderPreparationFactsProviderForTests(undefined);
+    }
+  });
+
   it('refuses frozen caption widths that overflow their recorded available width', async () => {
     const captionProject = makeCaptionProject();
     const measuredFacts = { ...facts, measureText: (_text: string, size: number) => size * 3 };

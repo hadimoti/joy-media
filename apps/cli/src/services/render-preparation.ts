@@ -216,6 +216,19 @@ function isDigest(value: unknown): value is string {
   return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/u.test(value);
 }
 
+function validMeasuredCaptionLine(
+  lines: readonly string[],
+  widths: readonly number[],
+  index: number,
+): boolean {
+  const line = lines[index];
+  const width = widths[index];
+  if (line === undefined || width === undefined || !Number.isFinite(width) || width < 0)
+    return false;
+  if (line.length > 0) return true;
+  return index > 0 && index < lines.length - 1 && width === 0;
+}
+
 function isExecutableIdentity(value: unknown): value is string {
   return typeof value === 'string' && /^sha256:.+$/u.test(value);
 }
@@ -407,7 +420,7 @@ function isPreparationRecord(value: unknown): value is RenderPreparationV1 {
         ]) &&
         Array.isArray(cue['lines']) &&
         cue['lines'].length > 0 &&
-        cue['lines'].every((line) => typeof line === 'string' && line.length > 0) &&
+        cue['lines'].every((line) => typeof line === 'string') &&
         Number.isSafeInteger(cue['startUs']) &&
         Number(cue['startUs']) >= 0 &&
         Number.isSafeInteger(cue['endUs']) &&
@@ -417,6 +430,13 @@ function isPreparationRecord(value: unknown): value is RenderPreparationV1 {
         Number(cue['maxWidthPx']) > 0 &&
         Array.isArray(cue['measuredWidthsPx']) &&
         cue['measuredWidthsPx'].length === cue['lines'].length &&
+        cue['lines'].every((line, index) =>
+          validMeasuredCaptionLine(
+            cue['lines'] as string[],
+            cue['measuredWidthsPx'] as number[],
+            index,
+          ),
+        ) &&
         cue['measuredWidthsPx'].every(
           (width) =>
             Number.isFinite(width) &&
@@ -471,17 +491,18 @@ function titleWeights(project: unknown, title: boolean): Array<400 | 700> {
     ? pluginData['joy.contentTemplates']
     : {};
   const instances = isRecord(templates['instances']) ? Object.values(templates['instances']) : [];
+  const projectRecord = isRecord(project) ? project : {};
   const weights = new Set<400 | 700>();
   for (const instance of instances) {
-    if (!isRecord(instance) || !isRecord(instance['font'])) continue;
+    if (
+      !isRecord(instance) ||
+      !titleInstanceIsActive(projectRecord, instance) ||
+      !isRecord(instance['font'])
+    )
+      continue;
     const weight = instance['font']['weight'];
     if (weight === 400 || weight === 700) weights.add(weight);
   }
-  if (weights.size === 0)
-    throw new CommandFailure(
-      'RENDER_PREPARATION_INVALID',
-      'Title preparation requires a supported font weight in each frozen title instance.',
-    );
   return [...weights];
 }
 
@@ -842,6 +863,39 @@ function enabledCaptionClipIds(project: Record<string, unknown>): ReadonlySet<st
   );
 }
 
+function enabledTitleClipIds(project: Record<string, unknown>): ReadonlySet<string> {
+  const rawTracks = root(project)['tracks'];
+  const tracks: unknown[] = Array.isArray(rawTracks) ? rawTracks : [];
+  return new Set(
+    normalizedRootItems(project)
+      .filter((item) => {
+        if (!item.trackEnabled || item.elementKind === 'audio') return false;
+        const track = tracks.find(
+          (candidate) => isRecord(candidate) && candidate['id'] === item.trackId,
+        );
+        if (!isRecord(track) || track['enabled'] === false || !Array.isArray(track['clips']))
+          return false;
+        return track['clips'].some(
+          (clip) => isRecord(clip) && clip['id'] === item.id && clip['enabled'] !== false,
+        );
+      })
+      .map((item) => item.id),
+  );
+}
+
+function titleInstanceIsActive(
+  project: Record<string, unknown>,
+  instance: Record<string, unknown>,
+): boolean {
+  const clipId = instance['clipId'];
+  if (typeof clipId !== 'string') return true;
+  if (enabledTitleClipIds(project).has(clipId)) return true;
+  return (
+    !isRecord(project['timelineTrackDeck']) &&
+    !normalizedRootItems(project).some((item) => item.id === clipId)
+  );
+}
+
 export function projectHasCaptions(project: unknown): boolean {
   if (!isRecord(project)) return false;
   const composition = root(project);
@@ -867,18 +921,8 @@ export function projectHasTitles(project: unknown): boolean {
   if (!isRecord(project) || !isRecord(project['pluginData'])) return false;
   const templates = project['pluginData']['joy.contentTemplates'];
   if (!isRecord(templates) || !isRecord(templates['instances'])) return false;
-  const enabledItems = new Set(
-    normalizedRootItems(project)
-      .filter((item) => item.trackEnabled && item.elementKind !== 'audio')
-      .map((item) => item.id),
-  );
   return Object.values(templates['instances']).some(
-    (instance) =>
-      isRecord(instance) &&
-      (typeof instance['clipId'] !== 'string' ||
-        enabledItems.has(instance['clipId']) ||
-        (!isRecord(project['timelineTrackDeck']) &&
-          !normalizedRootItems(project).some((item) => item.id === instance['clipId']))),
+    (instance) => isRecord(instance) && titleInstanceIsActive(project, instance),
   );
 }
 
@@ -951,6 +995,14 @@ function captionCues(
         const measuredWidthsPx = measureText
           ? lines.map((line) => measureText(line, fontSizePx, 400))
           : [];
+        if (
+          measuredWidthsPx.length > 0 &&
+          lines.some((_, index) => !validMeasuredCaptionLine(lines, measuredWidthsPx, index))
+        )
+          throw new CommandFailure(
+            'CAPTION_UNSUPPORTED',
+            'Caption blank lines must be hard breaks with a measured width of zero.',
+          );
         if (measuredWidthsPx.some((width) => !Number.isFinite(width) || width < 0))
           throw new CommandFailure(
             'CAPTION_UNSUPPORTED',
@@ -986,7 +1038,12 @@ function textOf(
     : {};
   const instances = isRecord(templates['instances']) ? templates['instances'] : {};
   for (const instance of Object.values(instances)) {
-    if (!isRecord(instance) || !isRecord(instance['lines'])) continue;
+    if (
+      !isRecord(instance) ||
+      !titleInstanceIsActive(project, instance) ||
+      !isRecord(instance['lines'])
+    )
+      continue;
     parts.push(
       ...Object.values(instance['lines']).filter(
         (value): value is string => typeof value === 'string',

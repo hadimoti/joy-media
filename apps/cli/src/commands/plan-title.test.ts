@@ -95,6 +95,30 @@ async function prepare(path: string, operations: unknown, name = 'plan.json') {
   ]);
   return { result, output };
 }
+async function seedUncoveredTitle(disabled = false) {
+  setTitleTextMeasurer((text, size) => Array.from(text).length * size * 0.45);
+  const f = await fixture();
+  const created = await prepare(f.path, [op()], 'seed-title.json');
+  expect(created.result.code).toBe(0);
+  expect((await apply(f.path, created.output, f.revision, 'seed-title')).code).toBe(0);
+  const saved = JSON.parse(readFileSync(f.path, 'utf8'));
+  const instance = saved.project.pluginData['joy.contentTemplates'].instances.speaker;
+  instance.lines.primary = '🚀';
+  instance.layout.primaryLines = ['🚀'];
+  delete saved.project.pluginData['joy.renderPreparation'];
+  if (disabled) {
+    const titleTrack = saved.project.compositions.root.tracks.find(
+      (track: { id: string }) => track.id === 'track-v1',
+    );
+    titleTrack.enabled = false;
+    const deckRow = saved.project.timelineTrackDeck?.rows?.find(
+      (row: { trackId: string }) => row.trackId === 'track-v1',
+    );
+    if (deckRow) deckRow.enabled = false;
+  }
+  writeFileSync(f.path, JSON.stringify(saved));
+  return f;
+}
 async function apply(path: string, plan: string, revision: number, key: string) {
   return call([
     'plan',
@@ -117,6 +141,45 @@ afterEach(() => {
 beforeEach(() => setRenderPreparationFactsProviderForTests(async () => usableFacts));
 
 describe('prepared title plan flow', () => {
+  it('accepts a plan that repairs an uncovered glyph in an active title', async () => {
+    const f = await seedUncoveredTitle();
+    const { result } = await prepare(f.path, [
+      {
+        id: 'repair-title',
+        op: 'updateTemplateText',
+        instanceId: 'speaker',
+        lines: { primary: 'Sara' },
+      },
+    ]);
+    expect(result.code, result.output).toBe(0);
+  });
+
+  it('refuses an uncovered glyph left in an active title candidate', async () => {
+    const f = await seedUncoveredTitle();
+    const { result } = await prepare(f.path, [
+      {
+        id: 'keep-uncovered-title',
+        op: 'updateTemplateText',
+        instanceId: 'speaker',
+        lines: { secondary: 'Host' },
+      },
+    ]);
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain('FONT_UNSUPPORTED_GLYPH');
+  });
+
+  it('does not block a plan on an uncovered glyph in a disabled title', async () => {
+    const f = await seedUncoveredTitle(true);
+    const { result } = await prepare(f.path, [
+      {
+        id: 'disabled-uncovered-title',
+        op: 'updateTemplateText',
+        instanceId: 'speaker',
+        lines: { secondary: 'Host' },
+      },
+    ]);
+    expect(result.code, result.output).toBe(0);
+  });
   it.runIf(process.env.JOY_REQUIRE_CHROMIUM === '1' || findChromiumExecutable() !== undefined)(
     'prepares a title with the real Chromium measurer and writes frozen layout',
     async () => {

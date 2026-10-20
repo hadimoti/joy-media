@@ -974,6 +974,12 @@ export interface EncodeHandle {
   cancel(): Promise<void>;
 }
 
+let encodeSpawn: typeof spawn = spawn;
+
+export function setEncodeSpawnForTests(value: typeof spawn | undefined): void {
+  encodeSpawn = value ?? spawn;
+}
+
 /** Run ffmpeg. `onProgress` gets 0..1 as the encoder advances through the timeline. */
 export function startEncode(
   args: readonly string[],
@@ -982,7 +988,7 @@ export function startEncode(
   ownedTempDirectories: readonly string[] = [],
   signal?: AbortSignal,
 ): EncodeHandle {
-  const child = spawn(ffmpegBinary(), [...args], {
+  const child = encodeSpawn(ffmpegBinary(), [...args], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
     windowsHide: true,
@@ -998,6 +1004,10 @@ export function startEncode(
   };
   let cancelled = false;
   let settled = false;
+  let processResult: Awaited<EncodeHandle['done']> | undefined;
+  let cancellationFinished = false;
+  let cancellationTimedOut = false;
+  let settleWhenReady = (): void => {};
   let resolveDone!: (value: Awaited<EncodeHandle['done']>) => void;
   let cancelTask: Promise<void> | undefined;
   let stderrTail = '';
@@ -1024,30 +1034,44 @@ export function startEncode(
       settled = true;
       resolvePromise(value);
     };
-    child.on('error', (err: NodeJS.ErrnoException) => {
+    settleWhenReady = (): void => {
+      if (!processResult || (cancelled && !cancellationFinished)) return;
       cleanupCaptions();
-      resolveDone({
+      resolveDone(
+        cancellationTimedOut
+          ? {
+              ok: false,
+              code: 'RENDER_CANCEL_TIMEOUT',
+              message:
+                'RENDER_CANCEL_TIMEOUT: cancellation helper or FFmpeg did not stop within five seconds.',
+            }
+          : processResult,
+      );
+    };
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      processResult = {
         ok: false,
         code: 'ffmpeg-missing',
         message:
           err.code === 'ENOENT'
             ? `ffmpeg was not found (looked for "${ffmpegBinary()}"). Install ffmpeg or set JOY_MEDIA_FFMPEG to its path.`
             : `Could not start ffmpeg: ${err.message}`,
-      });
+      };
+      settleWhenReady();
     });
     child.on('close', (code) => {
-      cleanupCaptions();
       if (cancelled) {
-        resolveDone({ ok: false, code: 'cancelled', message: 'Render cancelled.' });
+        processResult = { ok: false, code: 'cancelled', message: 'Render cancelled.' };
       } else if (code === 0) {
-        resolveDone({ ok: true });
+        processResult = { ok: true };
       } else {
-        resolveDone({
+        processResult = {
           ok: false,
           code: 'encode-failed',
           message: `ffmpeg failed (exit ${code}): ${stderrTail.trim().split('\n').slice(-6).join(' | ') || 'no error output'}`,
-        });
+        };
       }
+      settleWhenReady();
     });
   });
 
@@ -1059,7 +1083,7 @@ export function startEncode(
       let helperLeft = false;
       if (child.pid !== undefined && child.exitCode === null) {
         if (process.platform === 'win32') {
-          const killer = spawn('taskkill', ['/T', '/F', '/PID', String(child.pid)], {
+          const killer = encodeSpawn('taskkill', ['/T', '/F', '/PID', String(child.pid)], {
             stdio: 'ignore',
             windowsHide: true,
             shell: false,
@@ -1098,15 +1122,7 @@ export function startEncode(
             }
             helperLeft = !(await waitForHelper(Math.max(1, deadline - Date.now())));
           }
-          if (helperLeft) {
-            cleanupCaptions();
-            resolveDone({
-              ok: false,
-              code: 'RENDER_CANCEL_TIMEOUT',
-              message: 'RENDER_CANCEL_TIMEOUT: taskkill helper did not stop within five seconds.',
-            });
-            return;
-          }
+          if (helperLeft) cancellationTimedOut = true;
         } else {
           try {
             process.kill(-child.pid, 'SIGKILL');
@@ -1120,25 +1136,25 @@ export function startEncode(
         }
       }
       const remaining = Math.max(1, deadline - Date.now());
-      const exit =
-        child.exitCode !== null
-          ? Promise.resolve(true)
-          : new Promise<boolean>((resolve) => {
-              child.once('close', () => resolve(true));
-              setTimeout(() => resolve(false), remaining);
-            });
-      if (!(await exit)) {
-        cleanupCaptions();
-        resolveDone({
-          ok: false,
-          code: 'RENDER_CANCEL_TIMEOUT',
-          message: 'RENDER_CANCEL_TIMEOUT: FFmpeg process tree did not stop within five seconds.',
-        });
-        throw new Error(
-          'RENDER_CANCEL_TIMEOUT: FFmpeg process tree did not stop within five seconds.',
-        );
+      if (!processResult) {
+        let exitTimer: ReturnType<typeof setTimeout> | undefined;
+        const exited = await Promise.race([
+          new Promise<boolean>((resolve) => child.once('close', () => resolve(true))),
+          new Promise<boolean>((resolve) => {
+            exitTimer = setTimeout(() => resolve(false), remaining);
+          }),
+        ]);
+        if (exitTimer !== undefined) clearTimeout(exitTimer);
+        if (!exited) cancellationTimedOut = true;
       }
-      await done;
+      cancellationFinished = true;
+      if (!processResult && child.exitCode !== null)
+        processResult = { ok: false, code: 'cancelled', message: 'Render cancelled.' };
+      if (processResult) {
+        // The close listener owns result construction; this call only releases it after the
+        // helper has stopped or the shared cancellation deadline has elapsed.
+        settleWhenReady();
+      }
     })();
     return cancelTask;
   };

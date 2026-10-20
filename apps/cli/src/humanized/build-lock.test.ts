@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { tryAcquireBuildLock, waitForBuildComplete } from './build-lock.js';
@@ -28,6 +28,44 @@ describe('CLI build lock', () => {
       JSON.stringify({ token: 'dead-owner', pid: 2_147_000_000, createdAt: 1 }),
     );
     try {
+      const owner = tryAcquireBuildLock(lockPath);
+      expect(owner).not.toBeNull();
+      expect(JSON.parse(readFileSync(lockPath, 'utf8')).token).toBe(owner?.token);
+      owner?.release();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('allows only one recoverer to acquire an atomically reclaimed stale lock', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-build-lock-race-'));
+    const lockPath = join(directory, '.build.lock');
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ token: 'dead-owner', pid: 2_147_000_000, createdAt: 1 }),
+    );
+    try {
+      const owners = await Promise.all([
+        Promise.resolve().then(() => tryAcquireBuildLock(lockPath)),
+        Promise.resolve().then(() => tryAcquireBuildLock(lockPath)),
+      ]);
+      const acquired = owners.filter((owner) => owner !== null);
+      expect(acquired).toHaveLength(1);
+      expect(JSON.parse(readFileSync(lockPath, 'utf8')).token).toBe(acquired[0]?.token);
+      acquired[0]?.release();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers a malformed lock only after its grace period', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-build-lock-malformed-'));
+    const lockPath = join(directory, '.build.lock');
+    try {
+      writeFileSync(lockPath, '{partial');
+      expect(tryAcquireBuildLock(lockPath)).toBeNull();
+      const old = new Date(Date.now() - 5_000);
+      utimesSync(lockPath, old, old);
       const owner = tryAcquireBuildLock(lockPath);
       expect(owner).not.toBeNull();
       expect(JSON.parse(readFileSync(lockPath, 'utf8')).token).toBe(owner?.token);

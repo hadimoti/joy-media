@@ -1,5 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  linkSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+
+const MALFORMED_LOCK_GRACE_MS = 1_000;
 
 export interface BuildLockOwner {
   readonly token: string;
@@ -56,10 +68,38 @@ export function tryAcquireBuildLock(path: string): BuildLockOwner | null {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       const record = readRecord(path);
-      if (!record || isProcessAlive(record.pid)) return null;
-      if (readRecord(path)?.token !== record.token) continue;
+      if (record && isProcessAlive(record.pid)) return null;
+      let staleMalformed = false;
+      if (!record) {
+        try {
+          staleMalformed = Date.now() - statSync(path).mtimeMs >= MALFORMED_LOCK_GRACE_MS;
+        } catch {
+          continue;
+        }
+        if (!staleMalformed) return null;
+      }
+      const recoveryPath = `${path}.stale-${randomUUID()}`;
       try {
-        unlinkSync(path);
+        renameSync(path, recoveryPath);
+      } catch {
+        continue;
+      }
+      const recovered = readRecord(recoveryPath);
+      const stillStale = record
+        ? recovered?.token === record.token && !isProcessAlive(recovered.pid)
+        : recovered === undefined &&
+          Date.now() - statSync(recoveryPath).mtimeMs >= MALFORMED_LOCK_GRACE_MS;
+      if (!stillStale) {
+        try {
+          linkSync(recoveryPath, path);
+          unlinkSync(recoveryPath);
+        } catch {
+          // A new owner may have appeared at the original path; retain the moved file.
+        }
+        return null;
+      }
+      try {
+        unlinkSync(recoveryPath);
       } catch (unlinkError) {
         if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') return null;
       }

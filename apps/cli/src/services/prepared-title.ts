@@ -356,45 +356,27 @@ export function isTitleOperation(op: PreparedOperation): boolean {
 }
 
 /** Check title glyph coverage before preparation probes Chromium or FFmpeg. */
-export function assertPreparedTitleFontCoverage(
-  project: CliProjectDocument,
-  operations: readonly PreparedOperation[],
-): void {
+export function assertPreparedTitleFontCoverage(project: CliProjectDocument): void {
   const checks: { readonly text: string; readonly weight: 400 | 700 }[] = [];
+  const deckRows =
+    record(project.timelineTrackDeck) && Array.isArray(project.timelineTrackDeck.rows)
+      ? project.timelineTrackDeck.rows.filter(record)
+      : [];
+  const activeClipIds = new Set(
+    root(project).tracks.flatMap((track) => {
+      const deckRow = deckRows.find((row) => row.trackId === track.id);
+      if (track.enabled === false || deckRow?.enabled === false) return [];
+      return track.clips.flatMap((clip) =>
+        clip.enabled === false || typeof clip.id !== 'string' ? [] : [clip.id],
+      );
+    }),
+  );
   for (const instance of Object.values(instances(project))) {
+    if (typeof instance.clipId !== 'string' || !activeClipIds.has(instance.clipId)) continue;
     checks.push({
       text: `${instance.lines.primary}\n${instance.lines.secondary}`,
       weight: instance.font.weight,
     });
-  }
-  for (const operation of operations) {
-    if (!isTitleOperation(operation) || !record(operation.lines)) continue;
-    let weight: unknown;
-    let lines: { primary: string; secondary: string } | undefined;
-    if (operation.op === 'instantiateTemplate') {
-      weight = record(operation.font) ? operation.font.weight : undefined;
-      if (
-        typeof operation.lines.primary === 'string' &&
-        typeof operation.lines.secondary === 'string'
-      )
-        lines = { primary: operation.lines.primary, secondary: operation.lines.secondary };
-    } else {
-      const original = instances(project)[String(operation.instanceId ?? '')];
-      if (!original) continue;
-      weight = original.font.weight;
-      lines = {
-        primary:
-          typeof operation.lines.primary === 'string'
-            ? operation.lines.primary
-            : original.lines.primary,
-        secondary:
-          typeof operation.lines.secondary === 'string'
-            ? operation.lines.secondary
-            : original.lines.secondary,
-      };
-    }
-    if (lines && (weight === 400 || weight === 700))
-      checks.push({ text: `${lines.primary}\n${lines.secondary}`, weight });
   }
 
   if (checks.length === 0) return;

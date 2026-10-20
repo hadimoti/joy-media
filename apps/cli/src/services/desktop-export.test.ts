@@ -123,6 +123,24 @@ describe('desktop project export envelope', () => {
     );
   });
 
+  it('refuses asset-shaped objects inside opaque namespaces', () => {
+    const { project, sources, id } = fixture();
+    const opaqueProject = {
+      ...project,
+      pluginData: {
+        ...project.pluginData,
+        'third-party.opaque': { reference: { kind: 'asset', id } },
+      },
+    };
+
+    expect(() => buildDesktopProjectEnvelope(opaqueProject, sources)).toThrowError(
+      expect.objectContaining({
+        code: 'DESKTOP_EXPORT_ASSET_ID_COLLISION',
+        message: expect.stringContaining('third-party.opaque.reference.id'),
+      }),
+    );
+  });
+
   it('allows the visual document asset registry while checking other content', () => {
     const { project, sources, id } = fixture();
 

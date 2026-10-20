@@ -38,13 +38,38 @@ const unitRequest = {
 };
 
 describe('Chromium scene driver ownership', () => {
-  it.skipIf(process.platform !== 'win32')('does not scan processes after taskkill succeeds', () => {
-    const calls: string[][] = [];
+  it.skipIf(process.platform !== 'win32')(
+    'scans after taskkill to verify all profile processes stopped',
+    () => {
+      const calls: string[][] = [];
+      killChromiumTree(27182, 'C:\\profile', ((command: string, args: string[]) => {
+        calls.push([command, ...args]);
+        return {
+          status: 0,
+          error: undefined,
+          stderr: '',
+          stdout: command === 'powershell.exe' ? '' : '',
+        };
+      }) as never);
+      expect(calls).toContainEqual(['taskkill', '/T', '/F', '/PID', '27182']);
+      expect(calls.some(([command]) => command === 'powershell.exe')).toBe(true);
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')('kills every survivor returned by a profile scan', () => {
+    const killed: string[] = [];
+    let scans = 0;
     killChromiumTree(27182, 'C:\\profile', ((command: string, args: string[]) => {
-      calls.push([command, ...args]);
-      return { status: 0, error: undefined, stderr: '', stdout: '' };
+      if (command === 'taskkill') killed.push(args[args.indexOf('/PID') + 1]!);
+      if (command === 'powershell.exe') scans += 1;
+      return {
+        status: 0,
+        error: undefined,
+        stderr: '',
+        stdout: command === 'powershell.exe' && scans === 1 ? '27182\n31415\n' : '',
+      };
     }) as never);
-    expect(calls).toEqual([['taskkill', '/T', '/F', '/PID', '27182']]);
+    expect(killed).toEqual(['27182', '27182', '31415']);
   });
 
   it('retries profile removal after the browser tree exits', async () => {
@@ -84,19 +109,21 @@ describe('Chromium scene driver ownership', () => {
     }
   });
 
-  it('kills the known browser PID before terminating a timed-out worker', async () => {
+  it('terminates a timed-out worker before killing its newly published browser PID', async () => {
     const order: string[] = [];
     let fake!: FakeWorker;
+    let control: Int32Array | undefined;
     const driver = createChromiumSceneDriver({
       executablePath: process.execPath,
       timeoutMs: 1,
       workerFactory: () => {
         fake = new FakeWorker((message) => {
           if (message.type === 'capture')
-            Atomics.store(new Int32Array(message.shared as SharedArrayBuffer, 0, 4), 3, 31415);
+            control = new Int32Array(message.shared as SharedArrayBuffer, 0, 4);
         });
         fake.terminate = async () => {
           order.push('terminate');
+          if (control) Atomics.store(control, 3, 31415);
           return 0;
         };
         return fake;
@@ -106,8 +133,7 @@ describe('Chromium scene driver ownership', () => {
       },
     });
     await expect(driver.captureAsync!(unitRequest)).rejects.toThrow('RENDER_CAPTURE_TIMEOUT');
-    expect(order[0]).toBe('kill:31415');
-    expect(order.indexOf('kill:31415')).toBeLessThan(order.indexOf('terminate'));
+    expect(order.indexOf('terminate')).toBeLessThan(order.indexOf('kill:31415'));
   }, 5_000);
 
   it('keeps the capture error first and retains the PID when cleanup fails', async () => {

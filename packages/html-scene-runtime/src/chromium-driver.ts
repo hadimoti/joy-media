@@ -129,13 +129,14 @@ export function killChromiumTree(
     for (let attempt = 0; attempt < 3; attempt += 1) {
       for (const remainingPid of remaining) {
         if (Date.now() >= deadline) break;
-        const killed = runSpawnSync('taskkill', ['/T', '/F', '/PID', String(remainingPid)], {
+        runSpawnSync('taskkill', ['/T', '/F', '/PID', String(remainingPid)], {
           encoding: 'utf8',
           windowsHide: true,
           shell: false,
           timeout: Math.max(1, deadline - Date.now()),
         });
-        if (!killed.error && killed.status === 0) return;
+        // Keep processing every profile-owned PID from the scan. A successful parent kill
+        // does not prove that previously discovered browser processes have all exited.
       }
       if (profileDirectory !== undefined) {
         remaining = chromiumPidsForProfile(
@@ -602,6 +603,24 @@ export function createChromiumSceneDriver(
   const cleanupAfterWorkerEnd = (): Promise<void> => {
     if (cleanupTask) return cleanupTask;
     cleanupTask = (async () => {
+      const deadline = cancellationDeadlineAt ?? Date.now() + 2_000;
+      let terminationTimer: ReturnType<typeof setTimeout> | undefined;
+      let workerStopped: boolean;
+      try {
+        workerStopped = await Promise.race([
+          worker.terminate().then(
+            () => true,
+            () => false,
+          ),
+          new Promise<boolean>((resolve) => {
+            terminationTimer = setTimeout(() => resolve(false), Math.max(1, deadline - Date.now()));
+          }),
+        ]);
+      } finally {
+        if (terminationTimer !== undefined) clearTimeout(terminationTimer);
+      }
+      if (!workerStopped)
+        throw new Error('Capture worker did not stop before its cleanup deadline');
       const sharedPid = sessionPidControl ? Atomics.load(sessionPidControl, 3) : 0;
       const pid = sharedPid > 0 ? sharedPid : lastBrowserPid;
       killTree(pid, profileDirectory);

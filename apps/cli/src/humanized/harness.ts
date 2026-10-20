@@ -110,10 +110,10 @@ export function ensureCliBuilt(): void {
     }
   }
   if (!owner) throw new Error(`Could not acquire CLI build lock ${BUILD_LOCK}`);
-  rmSync(BUILD_COMPLETE, { force: true });
   try {
     // Another worker may have completed between our first stale check and lock acquisition.
     if (buildIsStale()) {
+      rmSync(BUILD_COMPLETE, { force: true });
       // Build with the checked-in toolchain directly so the harness does not depend on a
       // package-manager shim being available in worker process PATHs.
       const steps = [
