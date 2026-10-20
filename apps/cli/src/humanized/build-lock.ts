@@ -3,6 +3,7 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import {
   ExclusiveRecordBusyError,
   RECOVERY_MUTEX_RETRY_MS,
+  StaleRecoveryLockError,
   acquireRecord,
   processIsAlive,
   sleepSync,
@@ -89,8 +90,12 @@ export function tryAcquireBuildLock(
             },
           );
         } catch (error) {
-          if (error instanceof ExclusiveRecordBusyError) {
-            // Keep the owner record: releasing without its mutex could remove a newer owner.
+          if (
+            error instanceof ExclusiveRecordBusyError ||
+            error instanceof StaleRecoveryLockError
+          ) {
+            // Keep the owner record: releasing without its mutex could remove a newer owner. A
+            // stale recovery lock is reported by the next acquisition, not by this build's result.
             return;
           }
           throw error;

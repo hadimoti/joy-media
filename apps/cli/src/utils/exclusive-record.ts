@@ -6,12 +6,12 @@ import * as nodeFs from 'node:fs';
 // found under the mutex has no living creator and can be removed immediately without a grace
 // period.
 //
-// Residual limits. A stale steal verifies the token through a second name and then unlinks the
-// well-known name. Two recoverers stealing the same dead mutex at once can race, so a live mutex
-// taken between that check and the unlink can be lost, because link and unlink cannot make the
-// sequence atomic. On volumes without hard links, the wx-and-write fallback can still leave an
-// incomplete mutex if the process crashes between creating the file and writing its complete
-// record.
+// Residual limits. A recovery lock whose holder has exited is never removed automatically. Any
+// method that verifies its token and then unlinks the well-known name can remove a lock another
+// recoverer has just taken, and nothing available here makes those two steps atomic. Such a lock
+// is reported by StaleRecoveryLockError and must be removed by hand. On volumes without hard
+// links, the wx-and-write fallback can still leave an incomplete lock if the process crashes
+// between creating the file and writing its complete record.
 
 export const RECOVERY_MUTEX_RETRY_MS = 5_000;
 const RECOVERY_MUTEX_RETRY_INTERVAL_MS = 10;
@@ -35,6 +35,21 @@ export class ExclusiveRecordBusyError extends Error {
     super(`Exclusive record is busy at ${path}.`);
     this.name = 'ExclusiveRecordBusyError';
     this.code = code;
+  }
+}
+
+/** A recovery lock whose holder has exited. It is never removed by the protocol itself. */
+export class StaleRecoveryLockError extends Error {
+  public readonly code: string;
+  public readonly holderPid: number;
+
+  constructor(code: string, path: string, holderPid: number) {
+    super(
+      `A recovery lock at ${path} was left by process ${holderPid}, which has exited. Remove that file to continue.`,
+    );
+    this.name = 'StaleRecoveryLockError';
+    this.code = code;
+    this.holderPid = holderPid;
   }
 }
 
@@ -156,29 +171,8 @@ export function withRecoveryMutex<T>(
     if (!created) {
       const observed = readMutex(mutexPath, fs);
       if (observed && !isAlive(observed.pid)) {
-        const uniquePath = `${mutexPath}.unique-${randomUUID()}`;
-        let removedObservedMutex = false;
-        try {
-          fs.linkSync(mutexPath, uniquePath);
-          const linked = readMutex(uniquePath, fs);
-          const current = readMutex(mutexPath, fs);
-          if (linked?.token === observed.token && current?.token === observed.token) {
-            try {
-              fs.unlinkSync(mutexPath);
-              removedObservedMutex = true;
-            } catch (unlinkError) {
-              if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError;
-            }
-          }
-        } catch {
-          // Another recovery may have changed the well-known mutex while this link was made.
-        }
-        try {
-          fs.unlinkSync(uniquePath);
-        } catch (unlinkError) {
-          if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError;
-        }
-        if (removedObservedMutex) continue;
+        // Fail closed: removing a dead holder's lock cannot be made atomic, so it is left in place.
+        throw new StaleRecoveryLockError(options.busyCode ?? 'BUSY', mutexPath, observed.pid);
       }
       if (now() >= deadline)
         throw new ExclusiveRecordBusyError(options.busyCode ?? 'BUSY', targetPath);

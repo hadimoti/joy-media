@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ExclusiveRecordBusyError,
   type ExclusiveRecordFileSystem,
+  StaleRecoveryLockError,
   acquireRecord,
   processIsAlive,
   withRecoveryMutex,
@@ -125,18 +126,29 @@ describe('exclusive record protocol', () => {
     }
   });
 
-  it('steals a stale mutex through link, token verification, and unlink, but keeps a live mutex', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'joy-exclusive-mutex-'));
+  it('refuses a stale recovery lock without removing it, but keeps a live mutex', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-exclusive-stale-'));
     const path = join(directory, 'owner');
     const mutexPath = `${path}.recover`;
     try {
       writeFileSync(mutexPath, JSON.stringify({ pid: 2_147_000_000, token: 'stale', time: 1 }));
-      expect(
-        withRecoveryMutex(path, () => 'acquired', {
+      const unlinked: string[] = [];
+      const fs = {
+        ...nodeFs,
+        unlinkSync: (target: nodeFs.PathLike) => {
+          unlinked.push(String(target));
+          return nodeFs.unlinkSync(target);
+        },
+      } as unknown as ExclusiveRecordFileSystem;
+      expect(() =>
+        withRecoveryMutex(path, () => 'unexpected', {
+          fs,
           isAlive: (pid) => pid !== 2_147_000_000,
         }),
-      ).toBe('acquired');
-      expect(readdirSync(directory).filter((entry) => entry.includes('.unique-'))).toEqual([]);
+      ).toThrow(StaleRecoveryLockError);
+      expect(unlinked).not.toContain(mutexPath);
+      expect(readdirSync(directory)).toEqual(['owner.recover']);
+      expect(JSON.parse(readFileSync(mutexPath, 'utf8')).token).toBe('stale');
 
       writeFileSync(mutexPath, JSON.stringify({ pid: process.pid, token: 'live', time: 2 }));
       expect(() =>
@@ -151,30 +163,73 @@ describe('exclusive record protocol', () => {
     }
   });
 
-  it('abandons stale-mutex stealing when the linked inode token differs from the observed token', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'joy-exclusive-mismatch-'));
+  it('makes both of two real Node processes refuse a stale recovery lock', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-exclusive-stale-race-'));
     const path = join(directory, 'owner');
-    const mutexPath = `${path}.recover`;
-    writeFileSync(mutexPath, JSON.stringify({ pid: 2_147_000_000, token: 'observed', time: 1 }));
+    writeFileSync(
+      `${path}.recover`,
+      JSON.stringify({ pid: 2_147_000_000, token: 'stale', time: 1 }),
+    );
+    const moduleUrl = new URL('./exclusive-record.ts', import.meta.url).href;
+    const tsxEntry = readdirSync(join(process.cwd(), 'node_modules', '.pnpm')).find((entry) =>
+      entry.startsWith('tsx@'),
+    );
+    expect(tsxEntry).toBeTruthy();
+    const tsxLoader = join(
+      process.cwd(),
+      'node_modules',
+      '.pnpm',
+      tsxEntry!,
+      'node_modules',
+      'tsx',
+      'dist',
+      'loader.mjs',
+    );
+    const worker = `
+      import { withRecoveryMutex } from ${JSON.stringify(moduleUrl)};
+      import { writeFileSync } from 'node:fs';
+      const [path, role] = process.argv.slice(1);
+      try {
+        withRecoveryMutex(path, () => 'acquired');
+        writeFileSync(path + '.' + role + '.acquired', 'acquired');
+      } catch {
+        writeFileSync(path + '.' + role + '.refused', 'refused');
+      }
+    `;
     try {
-      const fs = {
-        ...nodeFs,
-        readFileSync: (readPath: string, encoding: BufferEncoding) => {
-          const value = readFileSync(readPath, encoding);
-          return readPath.includes('.unique-')
-            ? JSON.stringify({ pid: 2_147_000_000, token: 'changed', time: 1 })
-            : value;
-        },
-      } as unknown as ExclusiveRecordFileSystem;
-      expect(() =>
-        withRecoveryMutex(path, () => 'unexpected', {
-          fs,
-          isAlive: () => false,
-          timeoutMs: 0,
-        }),
-      ).toThrow(ExclusiveRecordBusyError);
-      expect(JSON.parse(readFileSync(mutexPath, 'utf8')).token).toBe('observed');
-      expect(readdirSync(directory).filter((entry) => entry.includes('.unique-'))).toEqual([]);
+      const children = ['one', 'two'].map(
+        (role) =>
+          new Promise<{ code: number; stderr: string }>((resolve, reject) => {
+            const child = spawn(
+              process.execPath,
+              [
+                '--import',
+                pathToFileURL(tsxLoader).href,
+                '--input-type=module',
+                '-e',
+                worker,
+                path,
+                role,
+              ],
+              { stdio: ['ignore', 'ignore', 'pipe'] },
+            );
+            let stderr = '';
+            child.stderr.setEncoding('utf8');
+            child.stderr.on('data', (chunk: string) => (stderr += chunk));
+            const timer = setTimeout(() => child.kill(), 8_000);
+            child.once('error', reject);
+            child.once('exit', (code) => {
+              clearTimeout(timer);
+              resolve({ code: code ?? -1, stderr });
+            });
+          }),
+      );
+      expect(await Promise.all(children)).toEqual([
+        { code: 0, stderr: '' },
+        { code: 0, stderr: '' },
+      ]);
+      expect(readdirSync(directory).filter((entry) => entry.endsWith('.acquired'))).toEqual([]);
+      expect(readdirSync(directory).filter((entry) => entry.endsWith('.refused'))).toHaveLength(2);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

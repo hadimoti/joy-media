@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tryAcquireBuildLock, waitForBuildComplete } from './build-lock.js';
+import { StaleRecoveryLockError } from '../utils/exclusive-record.js';
 
 describe('CLI build lock', () => {
   it('does not evict a live owner', () => {
@@ -159,6 +160,23 @@ describe('CLI build lock', () => {
       expect(() => owner?.release()).not.toThrow();
       expect(JSON.parse(readFileSync(recoverPath, 'utf8')).token).toBe('busy-recovery');
       expect(JSON.parse(readFileSync(lockPath, 'utf8')).token).toBe(owner?.token);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to acquire while a recovery lock from an exited process is present', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-build-lock-stale-'));
+    const lockPath = join(directory, '.build.lock');
+    const recoverPath = `${lockPath}.recover`;
+    try {
+      writeFileSync(
+        recoverPath,
+        JSON.stringify({ pid: 2_147_000_000, token: 'stale-recovery', time: 1 }),
+      );
+      expect(() => tryAcquireBuildLock(lockPath)).toThrow(StaleRecoveryLockError);
+      expect(JSON.parse(readFileSync(recoverPath, 'utf8')).token).toBe('stale-recovery');
+      expect(() => readFileSync(lockPath, 'utf8')).toThrow();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

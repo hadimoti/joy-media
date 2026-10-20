@@ -45,6 +45,7 @@ import { currentLongRunning, longRunningCancellationExitCode } from '../long-run
 import { FlagValidationError, parseIntFlag } from '../utils/flags.js';
 import {
   ExclusiveRecordBusyError,
+  StaleRecoveryLockError,
   acquireRecord,
   processIsAlive,
   withRecoveryMutex,
@@ -1303,7 +1304,8 @@ export async function runHeadlessRender(
     let recordOutputTransaction: ((transaction: OutputTransactionRecord | null) => void) | null =
       null;
     let activeRenderPartialPath: string | null = null;
-    if (totalClips > 0 || input.manifestOnly) {
+    // Claim every target whenever the output lock is taken, so recovery never runs unowned.
+    if (realMedia || totalClips > 0 || input.manifestOnly) {
       for (const target of outputTargets) {
         const owner = acquireArtifactOwner(target);
         if (!owner.ok) {
@@ -2369,7 +2371,10 @@ function acquireArtifactOwner(
         { busyCode: 'RENDER_OUTPUT_BUSY' },
       );
     } catch (error) {
-      if (!(error instanceof ExclusiveRecordBusyError)) throw error;
+      // A busy or stale recovery lock leaves the owner file in place; the next claim reports it.
+      if (!(error instanceof ExclusiveRecordBusyError || error instanceof StaleRecoveryLockError)) {
+        throw error;
+      }
     }
   };
   process.once('exit', release);
