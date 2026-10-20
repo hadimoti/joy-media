@@ -53,6 +53,14 @@ jobs:
           ffmpeg -version
           ffprobe -version
       - run: pnpm install --frozen-lockfile
+      - name: Install locked Playwright Chromium before the gates that need it
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec playwright install chromium
+          chromium_path="$(node -e "process.stdout.write(require('@playwright/test').chromium.executablePath())")"
+          test -x "$chromium_path" || { echo 'Locked Playwright Chromium executable is missing' >&2; exit 1; }
+          echo "JOY_CHROMIUM_PATH=$chromium_path" >> "$GITHUB_ENV"
       - run: pnpm run verify:ci
   worker-package:
     needs: check
