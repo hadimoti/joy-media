@@ -219,7 +219,10 @@ export function visualObjectToRenderNode(
 
   if (object.kind === 'html-scene') {
     // RGBA pixels arrive out-of-band via Pixi videoBitmaps keyed by object id.
-    const viewport = { width: 1080, height: 1920 };
+    const viewport =
+      object.scenePackageId?.startsWith('joy.p0.') === true
+        ? (imageSize ?? { width: 1080, height: 1920 })
+        : { width: 1080, height: 1920 };
     return {
       kind: 'video-frame',
       id: object.id,
@@ -289,7 +292,12 @@ export function buildRenderFrameIR(
       options.propertyAnimations,
     );
     const imageSize = options.imageSizesByObjectId?.[resolved.object.id];
-    const node = visualObjectToRenderNode(resolved, effects, imageSize);
+    const p0CompositionSize =
+      resolved.object.kind === 'html-scene' &&
+      resolved.object.scenePackageId?.startsWith('joy.p0.') === true
+        ? { width, height }
+        : undefined;
+    const node = visualObjectToRenderNode(resolved, effects, p0CompositionSize ?? imageSize);
     if (node) {
       const zIndex = options.zIndexByObjectId?.[node.id];
       nodes.push(zIndex === undefined ? node : { ...node, zIndex });

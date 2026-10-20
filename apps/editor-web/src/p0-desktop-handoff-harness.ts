@@ -6,6 +6,10 @@ import { resolve } from 'node:path';
 import { chromium, type Browser, type Page } from '@playwright/test';
 import { createServer, type Plugin } from 'vite';
 import { P0_TITLE_FONTS } from './p0-title-fonts.js';
+import { applyP0DesktopLayers } from './p0-desktop-layers.js';
+import type { RenderFrameIR } from '@joy-media/render-ir';
+import type { HtmlSceneProjectContext } from './html-scene-surfaces.js';
+import type { BrowserPixiRenderer } from '@joy-media/renderer-pixi/browser';
 import { findChromiumExecutable } from '@joy-media/html-scene-runtime';
 import type {
   P0DesktopHandoffFont,
@@ -35,6 +39,126 @@ export interface DesktopHandoffResponse {
 export interface BrowserTitleCapture {
   readonly png: Uint8Array;
   close(): Promise<void>;
+}
+
+export interface P0CompositorBitmap {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Uint8Array;
+}
+
+/** Render a layered frame through the same browser Pixi adapter used by the monitor. */
+export async function renderP0DesktopCompositorFrame(
+  frame: RenderFrameIR,
+  context: HtmlSceneProjectContext,
+  timeUs: number,
+  surfaces: Readonly<Record<string, P0CompositorBitmap>>,
+  videoBitmaps: Readonly<Record<string, P0CompositorBitmap>> = {},
+): Promise<P0CompositorBitmap> {
+  const layeredFrame = applyP0DesktopLayers(frame, context, timeUs);
+  const { page } = await openPage();
+  try {
+    const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
+    const rendererModuleUrl = `/@fs/${resolve(root, '..', '..', 'packages', 'renderer-pixi', 'src', 'browser.ts').replaceAll('\\', '/')}`;
+    const titleInputs = Object.entries(surfaces).map(([id, bitmap]) => ({
+      id,
+      width: bitmap.width,
+      height: bitmap.height,
+      dataBase64: Buffer.from(bitmap.data).toString('base64'),
+    }));
+    const videoInputs = Object.entries(videoBitmaps).map(([id, bitmap]) => ({
+      id,
+      width: bitmap.width,
+      height: bitmap.height,
+      dataBase64: Buffer.from(bitmap.data).toString('base64'),
+    }));
+    const pixels = await page.evaluate(
+      async ({
+        serializedFrame,
+        titleBitmaps,
+        videoFrames,
+        moduleUrl,
+      }: {
+        serializedFrame: RenderFrameIR;
+        titleBitmaps: { id: string; width: number; height: number; dataBase64: string }[];
+        videoFrames: { id: string; width: number; height: number; dataBase64: string }[];
+        moduleUrl: string;
+      }) => {
+        let renderer: BrowserPixiRenderer | undefined;
+        try {
+          // Keep import() native in the Playwright page; Vite cannot rewrite a browser-serialized callback.
+          const importBrowserModule = new Function('url', 'return import(url)') as (
+            url: string,
+          ) => Promise<{
+            createBrowserPixiRenderer: (options: {
+              width: number;
+              height: number;
+              resolution: number;
+              preference: 'webgl';
+            }) => Promise<BrowserPixiRenderer>;
+          }>;
+          const { createBrowserPixiRenderer } = await importBrowserModule(moduleUrl);
+          const createdRenderer = await createBrowserPixiRenderer({
+            width: serializedFrame.viewport.width,
+            height: serializedFrame.viewport.height,
+            resolution: serializedFrame.viewport.dpr,
+            preference: 'webgl',
+          });
+          renderer = createdRenderer;
+          const gl =
+            createdRenderer.canvas.getContext('webgl2') ??
+            createdRenderer.canvas.getContext('webgl') ??
+            createdRenderer.canvas.getContext('experimental-webgl');
+          if (gl === null)
+            throw new Error('Pixi initialized without a WebGL context in headless Chromium');
+          const bitmaps = new Map<
+            string,
+            { width: number; height: number; data: Uint8ClampedArray }
+          >();
+          for (const bitmap of [...titleBitmaps, ...videoFrames]) {
+            const binary = atob(bitmap.dataBase64);
+            const data = new Uint8ClampedArray(binary.length);
+            for (let index = 0; index < binary.length; index++)
+              data[index] = binary.charCodeAt(index);
+            bitmaps.set(bitmap.id, {
+              width: bitmap.width,
+              height: bitmap.height,
+              data,
+            });
+          }
+          createdRenderer.render(serializedFrame, bitmaps);
+          const output = createdRenderer.readPixels(
+            serializedFrame.viewport.width,
+            serializedFrame.viewport.height,
+          );
+          if (output === undefined)
+            throw new Error('Production Pixi renderer did not return compositor pixels');
+          return Array.from(output.data);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          if (detail.includes('WebGL')) throw error;
+          throw new Error(
+            `Production compositor WebGL render failed in headless Chromium: ${detail}`,
+          );
+        } finally {
+          renderer?.destroy();
+        }
+      },
+      {
+        serializedFrame: layeredFrame,
+        titleBitmaps: titleInputs,
+        videoFrames: videoInputs,
+        moduleUrl: rendererModuleUrl,
+      },
+    );
+    return {
+      width: layeredFrame.viewport.width,
+      height: layeredFrame.viewport.height,
+      data: Uint8Array.from(pixels),
+    };
+  } finally {
+    await closePage(page);
+  }
 }
 
 interface FontManifest {

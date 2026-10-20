@@ -32,6 +32,8 @@ import { buildTitleSceneFrame } from '@joy-media/motion-core';
 // @ts-ignore -- this cross-project source import is intentionally outside the editor tsconfig root.
 import { renderTitleFrames } from '../../cli/src/services/title-frames.js';
 import { scenePaintFontDescriptors } from '../../../packages/html-scene-runtime/src/font-descriptors.js';
+import type { RenderFrameIR, VideoFrameNode } from '@joy-media/render-ir';
+import { renderP0DesktopCompositorFrame } from './p0-desktop-handoff-harness.js';
 
 const hash = (bytes: ArrayLike<number>): string =>
   createHash('sha256').update(Buffer.from(bytes)).digest('hex');
@@ -156,6 +158,155 @@ function projectContext(
     visual,
     timeline: projectV3ToDesktopDocuments(base).timeline.project,
   };
+}
+
+function compositorContext(
+  lower: ReturnType<typeof makeInstance>,
+  upper: ReturnType<typeof makeInstance>,
+  reverseVideoOrder = false,
+): ReturnType<typeof projectContext> {
+  const source = buildHistoricalSchemaProjects().v3;
+  const base = projectV3ToDesktopVisual(source);
+  const baseWithoutDeck = { ...base };
+  delete baseWithoutDeck.timelineTrackDeck;
+  const root = base.compositions.root!;
+  const order = reverseVideoOrder
+    ? { video: 0, lower: 1, upper: 2 }
+    : { lower: 0, upper: 1, video: 2 };
+  const trackTemplate = root.tracks[0]!;
+  const tracks = Array.from({ length: 3 }, (_, index) => ({
+    ...trackTemplate,
+    id: `p0-compositor-track-${index}`,
+    order: index,
+    enabled: true,
+  }));
+  const trackFor = (layer: keyof typeof order) => `p0-compositor-track-${order[layer]}`;
+  const visual = {
+    ...baseWithoutDeck,
+    compositions: {
+      ...base.compositions,
+      root: { ...root, tracks },
+    },
+    visualObjects: {
+      ...base.visualObjects,
+      [lower.objectId]: {
+        id: lower.objectId,
+        kind: 'html-scene' as const,
+        scenePackageId: lower.templateId,
+        transform: {
+          x: 0,
+          y: 0,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        },
+      },
+      [upper.objectId]: {
+        id: upper.objectId,
+        kind: 'html-scene' as const,
+        scenePackageId: upper.templateId,
+        transform: {
+          x: 0,
+          y: 0,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        },
+      },
+    },
+    pluginData: {
+      ...base.pluginData,
+      'joy.contentTemplates': {
+        version: 1,
+        instances: {
+          [titleInstanceId(lower)]: lower,
+          [titleInstanceId(upper)]: upper,
+        },
+      },
+      'joy.clipObjects': {
+        [lower.clipId]: lower.objectId,
+        [upper.clipId]: upper.objectId,
+      },
+    },
+    universalTimeline: {
+      schemaVersion: 1 as const,
+      items: [
+        {
+          id: lower.clipId,
+          compositionId: 'root',
+          trackId: trackFor('lower'),
+          elementKind: 'html-scene' as const,
+          startUs: 0,
+          durationUs: 1_000_000,
+          source: { kind: 'object' as const, id: lower.objectId },
+          withinTrackOrder: 0,
+        },
+        {
+          id: upper.clipId,
+          compositionId: 'root',
+          trackId: trackFor('upper'),
+          elementKind: 'html-scene' as const,
+          startUs: 0,
+          durationUs: 1_000_000,
+          source: { kind: 'object' as const, id: upper.objectId },
+          withinTrackOrder: 0,
+        },
+        {
+          id: 'compositor-video',
+          compositionId: 'root',
+          trackId: trackFor('video'),
+          elementKind: 'video' as const,
+          startUs: 0,
+          durationUs: 1_000_000,
+          source: { kind: 'asset' as const, id: 'asset-video' },
+          withinTrackOrder: 0,
+        },
+      ],
+    },
+  } as unknown as JoyProjectV1;
+  return {
+    visual,
+    timeline: projectV3ToDesktopDocuments(source).timeline.project,
+  };
+}
+
+function compositorFrame(
+  lower: ReturnType<typeof makeInstance>,
+  upper: ReturnType<typeof makeInstance>,
+  includeVideo: boolean,
+): RenderFrameIR {
+  const node = (id: string, translateX = 250): VideoFrameNode => ({
+    kind: 'video-frame',
+    id,
+    zIndex: 0,
+    opacity: 1,
+    transform: { translateX, translateY: 0, scaleX: 1, scaleY: 1 },
+    width: 540,
+    height: 960,
+    sourceTimeUs: 0,
+    color: { r: 0, g: 0, b: 0, a: 0 },
+  });
+  return {
+    version: 1,
+    compositionId: 'root',
+    timeUs: 360_000,
+    viewport: { width: 540, height: 960, dpr: 1 },
+    background: { r: 24, g: 28, b: 38, a: 1 },
+    nodes: [
+      node(lower.objectId),
+      node(upper.objectId),
+      ...(includeVideo ? [node('compositor-video', 0)] : []),
+    ],
+  };
+}
+
+function pixelAt(pixels: Uint8Array, width: number, x: number, y: number): number[] {
+  const offset = (y * width + x) * 4;
+  return [...pixels.slice(offset, offset + 4)];
 }
 
 describe('P0 desktop title handoff', () => {
@@ -847,6 +998,140 @@ describe('P0 desktop title handoff', () => {
     expect(orderedCapture.error).toBeUndefined();
     expect(orderedCapture.surfaceIds).toEqual([first.objectId, second.objectId]);
     expect(Object.keys(orderedCapture.surfaces)).toEqual([first.objectId, second.objectId]);
+  }, 180_000);
+
+  it('occludes lower-track titles with upper video in production compositor pixels', async () => {
+    const lower = makeInstance('joy.p0.lower-third', 400, 'Lower title');
+    const upper = makeInstance('joy.p0.title', 700, 'Upper title');
+    const context = compositorContext(lower, upper);
+    const reversedContext = compositorContext(lower, upper, true);
+    const captureResponse = await runP0DesktopHandoff([
+      {
+        id: 'compositor-surfaces',
+        kind: 'capture',
+        context,
+        timeUs: 360_000,
+        width: 540,
+        height: 960,
+      },
+    ]);
+    const captured = operationResult(captureResponse, 'compositor-surfaces');
+    expect(captured.error).toBeUndefined();
+    const lowerSurface = captured.surfaces[lower.objectId];
+    const upperSurface = captured.surfaces[upper.objectId];
+    expect(lowerSurface).toBeDefined();
+    expect(upperSurface).toBeDefined();
+    if (lowerSurface === undefined || upperSurface === undefined)
+      throw new Error('Desktop surface cache did not return both real title surfaces');
+
+    const videoData = new Uint8Array(540 * 960 * 4);
+    for (let y = 0; y < 960; y++) {
+      for (let x = 250; x < 350; x++) {
+        const offset = (y * 540 + x) * 4;
+        videoData[offset] = 20;
+        videoData[offset + 1] = 220;
+        videoData[offset + 2] = 40;
+        videoData[offset + 3] = 255;
+      }
+    }
+    const surfaces = {
+      [lower.objectId]: lowerSurface,
+      [upper.objectId]: upperSurface,
+    };
+    const video = {
+      'compositor-video': { width: 540, height: 960, data: videoData },
+    };
+    const completeFrame = compositorFrame(lower, upper, true);
+    const titleFrame: RenderFrameIR = {
+      ...completeFrame,
+      nodes: completeFrame.nodes.filter((node) => node.id !== 'compositor-video'),
+    };
+    const videoOnlyFrame: RenderFrameIR = {
+      ...completeFrame,
+      nodes: completeFrame.nodes.filter((node) => node.id === 'compositor-video'),
+    };
+    const titleOnly = await renderP0DesktopCompositorFrame(titleFrame, context, 360_000, surfaces);
+    const videoOnly = await renderP0DesktopCompositorFrame(
+      videoOnlyFrame,
+      context,
+      360_000,
+      surfaces,
+      video,
+    );
+    const composited = await renderP0DesktopCompositorFrame(
+      completeFrame,
+      context,
+      360_000,
+      surfaces,
+      video,
+    );
+    const reversed = await renderP0DesktopCompositorFrame(
+      completeFrame,
+      reversedContext,
+      360_000,
+      surfaces,
+      video,
+    );
+
+    const lowerPixels = Buffer.from(lowerSurface.data);
+    const findLowerPixel = (minX: number, maxX: number) => {
+      for (let y = 0; y < lowerSurface.height; y++) {
+        for (let x = minX; x < maxX; x++) {
+          if (lowerPixels[(y * lowerSurface.width + x) * 4 + 3]! > 0) return { x, y };
+        }
+      }
+      throw new Error(`No rendered lower-title pixels found in x=${minX}..${maxX}`);
+    };
+    const opaqueTitlePixel = findLowerPixel(40, 100);
+    const transparentTitlePixel = findLowerPixel(100, lowerSurface.width - 250);
+    const opaquePoint = { x: opaqueTitlePixel.x + 250, y: opaqueTitlePixel.y };
+    const transparentPoint = { x: transparentTitlePixel.x + 250, y: transparentTitlePixel.y };
+    expect(opaquePoint.x).toBeLessThan(350);
+    expect(transparentPoint.x).toBeGreaterThanOrEqual(350);
+
+    const opaqueComposited = pixelAt(
+      composited.data,
+      composited.width,
+      opaquePoint.x,
+      opaquePoint.y,
+    );
+    const opaqueVideoOnly = pixelAt(videoOnly.data, videoOnly.width, opaquePoint.x, opaquePoint.y);
+    expect(opaqueComposited).toEqual(opaqueVideoOnly);
+
+    const transparentComposited = pixelAt(
+      composited.data,
+      composited.width,
+      transparentPoint.x,
+      transparentPoint.y,
+    );
+    const transparentTitleOnly = pixelAt(
+      titleOnly.data,
+      titleOnly.width,
+      transparentPoint.x,
+      transparentPoint.y,
+    );
+    const transparentBackground = pixelAt(
+      videoOnly.data,
+      videoOnly.width,
+      transparentPoint.x,
+      transparentPoint.y,
+    );
+    expect(transparentComposited).toEqual(transparentTitleOnly);
+    expect(transparentComposited).not.toEqual(transparentBackground);
+
+    const reversePointForward = pixelAt(
+      composited.data,
+      composited.width,
+      opaquePoint.x,
+      opaquePoint.y,
+    );
+    const reversePointReversed = pixelAt(
+      reversed.data,
+      reversed.width,
+      opaquePoint.x,
+      opaquePoint.y,
+    );
+    expect(reversePointReversed).not.toEqual(reversePointForward);
   }, 180_000);
 
   it.each([

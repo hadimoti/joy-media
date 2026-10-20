@@ -222,6 +222,7 @@ import {
   type BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
 import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
+import { applyP0DesktopLayers } from './p0-desktop-layers.js';
 import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
@@ -4580,7 +4581,14 @@ function EditorWorkspace({
             for (const [id, bitmap] of stickerImageCache.bitmaps(timeUs)) bitmaps.set(id, bitmap);
             applyClipGradesToTransitionBitmaps(exportVisualProject, transition, timeUs, bitmaps);
             const frame = buildFrame(timeUs);
-            renderer.render(withVideoFrameNodes(frame, nodes), bitmaps);
+            renderer.render(
+              applyP0DesktopLayers(
+                withVideoFrameNodes(frame, nodes),
+                { visual: exportVisualProject, timeline: exportTimelineProject },
+                timeUs,
+              ),
+              bitmaps,
+            );
             // CanvasCaptureMediaStreamTrack can sample a WebGL surface before
             // its GPU work is committed on cold/software renderers. Copying
             // into a 2D staging canvas synchronizes the exact painted frame.
@@ -8021,10 +8029,15 @@ function MonitorPanelContent({
       ),
       previewVisualProject,
     );
-    const frame =
+    const assembledFrame =
       previewVideoFrame === undefined
         ? visualFrame
         : withVideoFrameNode(visualFrame, previewVideoFrame.node);
+    const frame = applyP0DesktopLayers(
+      assembledFrame,
+      { visual: previewVisualProject, timeline: timelineProject },
+      state.playheadUs,
+    );
     currentFrameRef.current = frame;
     const videoBitmaps = new Map(clipFrameCache);
     if (previewVideoFrame !== undefined) {
