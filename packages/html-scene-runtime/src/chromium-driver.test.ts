@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { rational } from '@joy-media/project-schema';
 import {
@@ -39,18 +41,110 @@ const unitRequest = {
 
 describe('Chromium scene driver ownership', () => {
   it.skipIf(process.platform !== 'win32')(
+    'skips the process scan when no owned process remains and the profile is removed immediately',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'chromium-cleanup-test-'));
+      const profile = join(root, 'profile');
+      mkdirSync(profile);
+      const calls: string[] = [];
+      try {
+        killChromiumTree(
+          undefined,
+          profile,
+          ((command: string) => {
+            calls.push(command);
+            return { status: 0, error: undefined, stderr: '', stdout: '' };
+          }) as never,
+          (directory) => rmSync(directory, { recursive: true, force: true }),
+        );
+        expect(calls).not.toContain('powershell.exe');
+        expect(existsSync(profile)).toBe(false);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'still refuses when an owned Chromium process survives and the process scan times out',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'chromium-cleanup-test-'));
+      const profile = join(root, 'profile');
+      mkdirSync(profile);
+      const calls: string[] = [];
+      try {
+        expect(() =>
+          killChromiumTree(
+            process.pid,
+            profile,
+            ((command: string) => {
+              calls.push(command);
+              if (command === 'powershell.exe') {
+                const error = Object.assign(new Error('scan timed out'), { code: 'ETIMEDOUT' });
+                return { status: null, error, stderr: '', stdout: '' };
+              }
+              return { status: 0, error: undefined, stderr: '', stdout: '' };
+            }) as never,
+            () => {},
+          ),
+        ).toThrow('cannot verify Chromium processes');
+        expect(calls).toContain('powershell.exe');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'scans the process list when first profile removal fails with EBUSY',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'chromium-cleanup-test-'));
+      const profile = join(root, 'profile');
+      mkdirSync(profile);
+      const calls: string[] = [];
+      let scans = 0;
+      try {
+        killChromiumTree(
+          2_147_483_000,
+          profile,
+          ((command: string) => {
+            calls.push(command);
+            if (command === 'powershell.exe') scans += 1;
+            return { status: 0, error: undefined, stderr: '', stdout: '' };
+          }) as never,
+          () => {
+            const error = Object.assign(new Error('profile busy'), { code: 'EBUSY' });
+            throw error;
+          },
+        );
+        expect(scans).toBeGreaterThan(0);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
     'scans after taskkill to verify all profile processes stopped',
     () => {
       const calls: string[][] = [];
-      killChromiumTree(27182, 'C:\\profile', ((command: string, args: string[]) => {
-        calls.push([command, ...args]);
-        return {
-          status: 0,
-          error: undefined,
-          stderr: '',
-          stdout: command === 'powershell.exe' ? '' : '',
-        };
-      }) as never);
+      killChromiumTree(
+        27182,
+        'C:\\profile',
+        ((command: string, args: string[]) => {
+          calls.push([command, ...args]);
+          return {
+            status: 0,
+            error: undefined,
+            stderr: '',
+            stdout: command === 'powershell.exe' ? '' : '',
+          };
+        }) as never,
+        () => {
+          const error = Object.assign(new Error('profile busy'), { code: 'EBUSY' });
+          throw error;
+        },
+      );
       expect(calls).toContainEqual(['taskkill', '/T', '/F', '/PID', '27182']);
       expect(calls.some(([command]) => command === 'powershell.exe')).toBe(true);
     },
@@ -59,16 +153,24 @@ describe('Chromium scene driver ownership', () => {
   it.skipIf(process.platform !== 'win32')('kills every survivor returned by a profile scan', () => {
     const killed: string[] = [];
     let scans = 0;
-    killChromiumTree(27182, 'C:\\profile', ((command: string, args: string[]) => {
-      if (command === 'taskkill') killed.push(args[args.indexOf('/PID') + 1]!);
-      if (command === 'powershell.exe') scans += 1;
-      return {
-        status: 0,
-        error: undefined,
-        stderr: '',
-        stdout: command === 'powershell.exe' && scans === 1 ? '27182\n31415\n' : '',
-      };
-    }) as never);
+    killChromiumTree(
+      27182,
+      'C:\\profile',
+      ((command: string, args: string[]) => {
+        if (command === 'taskkill') killed.push(args[args.indexOf('/PID') + 1]!);
+        if (command === 'powershell.exe') scans += 1;
+        return {
+          status: 0,
+          error: undefined,
+          stderr: '',
+          stdout: command === 'powershell.exe' && scans === 1 ? '27182\n31415\n' : '',
+        };
+      }) as never,
+      () => {
+        const error = Object.assign(new Error('profile busy'), { code: 'EBUSY' });
+        throw error;
+      },
+    );
     expect(killed).toEqual(['27182', '27182', '31415']);
   });
 

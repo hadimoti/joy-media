@@ -121,11 +121,14 @@ export function killChromiumTree(
   pid: number | undefined,
   profileDirectory?: string,
   runSpawnSync: typeof spawnSync = spawnSync,
+  removeProfileDirectory: (directory: string) => void = (directory) =>
+    rmSync(directory, { recursive: true, force: true }),
 ): void {
-  if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) return;
+  const validPid = pid !== undefined && Number.isSafeInteger(pid) && pid > 0;
+  if (!validPid && (process.platform !== 'win32' || profileDirectory === undefined)) return;
   if (process.platform === 'win32') {
     const deadline = Date.now() + 2_000;
-    let remaining: number[] = [pid];
+    let remaining: number[] = validPid ? [pid!] : [];
     for (let attempt = 0; attempt < 3; attempt += 1) {
       for (const remainingPid of remaining) {
         if (Date.now() >= deadline) break;
@@ -138,6 +141,24 @@ export function killChromiumTree(
         // Keep processing every profile-owned PID from the scan. A successful parent kill
         // does not prove that previously discovered browser processes have all exited.
       }
+      if (attempt === 0 && profileDirectory !== undefined) {
+        const everyOwnedProcessExited = remaining.every((ownedPid) => {
+          try {
+            process.kill(ownedPid, 0);
+            return false;
+          } catch (error) {
+            return (error as NodeJS.ErrnoException).code !== 'EPERM';
+          }
+        });
+        let profileRemovedOnFirstAttempt = false;
+        try {
+          removeProfileDirectory(profileDirectory);
+          profileRemovedOnFirstAttempt = !existsSync(profileDirectory);
+        } catch {
+          // A failed first removal requires the process scan, even when the root PID exited.
+        }
+        if (everyOwnedProcessExited && profileRemovedOnFirstAttempt) return;
+      }
       if (profileDirectory !== undefined) {
         remaining = chromiumPidsForProfile(
           profileDirectory,
@@ -146,8 +167,8 @@ export function killChromiumTree(
         );
       } else {
         try {
-          process.kill(pid, 0);
-          remaining = [pid];
+          process.kill(pid!, 0);
+          remaining = [pid!];
         } catch {
           remaining = [];
         }
@@ -159,10 +180,10 @@ export function killChromiumTree(
     );
   }
   try {
-    process.kill(-pid, 'SIGKILL');
+    process.kill(-pid!, 'SIGKILL');
   } catch {
     try {
-      process.kill(pid, 'SIGKILL');
+      process.kill(pid!, 'SIGKILL');
     } catch {
       /* already exited */
     }
@@ -549,10 +570,13 @@ export function createChromiumSceneDriver(
   const faces = loadNotoSansArabicFaces();
   const profileDirectory = mkdtempSync(join(tmpdir(), 'joy-scene-cdp-'));
   let worker: ChromiumWorker;
-  const killTree = options.killTree ?? killChromiumTree;
   const removeProfileDirectory =
     options.removeProfile ??
     ((directory: string) => rmSync(directory, { recursive: true, force: true }));
+  const killTree =
+    options.killTree ??
+    ((pid: number | undefined, profile?: string) =>
+      killChromiumTree(pid, profile, spawnSync, removeProfileDirectory));
   try {
     const workerOptions: WorkerOptions = {
       eval: true,

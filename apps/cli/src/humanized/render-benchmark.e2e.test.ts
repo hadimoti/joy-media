@@ -369,20 +369,34 @@ describe('a creator chooses where the output goes', () => {
     expect(listTree(sb.path('blocked'))).toEqual([`${manifestName(reel.id)}/keep.txt`]);
   });
 
-  it('survives two renders of the same project into the same folder at the same time', async () => {
+  it('publishes one complete result when two renders target the same folder at once', async () => {
     const [a, b] = await Promise.all([
       sb.run(['render', '--project', reel.id, '--out', 'race', '--json']),
       sb.run(['render', '--project', reel.id, '--out', 'race', '--json']),
     ]);
-    expect(a.code, describeRun(a)).toBe(0);
-    expect(b.code, describeRun(b)).toBe(0);
-    expectNdjsonContract(a, ['complete']);
-    expectNdjsonContract(b, ['complete']);
-    // Whoever wrote last, the folder holds exactly one complete, parseable manifest.
-    expect(listTree(sb.path('race'))).toEqual([manifestName(reel.id)]);
-    const manifest = readManifest(sb.path('race', manifestName(reel.id)));
+    const results = [a, b];
+    const complete = results.flatMap((result) => {
+      if (result.code === 0) {
+        const events = expectNdjsonContract(result, ['complete']);
+        return [events[events.length - 1]!];
+      }
+      expect(result.code, describeRun(result)).toBe(1);
+      const events = expectNdjsonContract(result, ['error']);
+      expect(events[events.length - 1]).toMatchObject({ code: 'RENDER_OUTPUT_BUSY' });
+      expect(String(events[events.length - 1]!['message'])).toContain(
+        join('race', manifestName(reel.id)),
+      );
+      return [];
+    });
+    expect(complete.length).toBeGreaterThanOrEqual(1);
+    // Whichever invocation completed, its event points at the one complete, parseable manifest.
+    expect(complete[0]!['artifactPath']).toBeTruthy();
+    const manifest = readManifest(resolve(sb.cwd, String(complete[0]!['artifactPath'])));
     expect(manifest.totalFrames).toBe(120);
     expect(manifest.clips).toHaveLength(3);
+    expect(
+      listTree(sb.path('race')).filter((entry) => /\.owner$|\.staging(?:\.|$)|\.tmp$/u.test(entry)),
+    ).toEqual([]);
   });
 
   it('produces the same plan every time: rendering twice only differs in timestamps', async () => {

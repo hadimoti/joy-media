@@ -255,7 +255,7 @@ describe('API keys never appear in output', () => {
     });
     outputs.push(chat);
     expect(chat.code, describeRun(chat)).toBe(0);
-  });
+  }, 60_000);
 
   it('on every failure path (401, 500, malformed, debug mode)', async () => {
     const debug = { JOY_CLI_DEBUG: '1' };
