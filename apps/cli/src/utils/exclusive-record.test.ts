@@ -131,6 +131,38 @@ describe('exclusive record protocol', () => {
     }
   });
 
+  it('leaves no staged file and no mutex when the staged write itself fails', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-exclusive-staged-write-'));
+    const path = join(directory, 'owner');
+    const mutexPath = `${path}.recover`;
+    try {
+      // A partly written staged file must not survive the failed write.
+      const fs = {
+        ...nodeFs,
+        writeFileSync: (
+          file: number | nodeFs.PathOrFileDescriptor,
+          data: string | NodeJS.ArrayBufferView,
+          ...args: unknown[]
+        ) => {
+          const write = nodeFs.writeFileSync as (...values: unknown[]) => void;
+          if (typeof file === 'string' && file.includes('.staged-')) {
+            write(file, String(data).slice(0, 4), ...args);
+            throw new Error('staged write failed');
+          }
+          return write(file, data, ...args);
+        },
+      } as unknown as ExclusiveRecordFileSystem;
+      expect(() => withRecoveryMutex(path, () => 'unexpected', { fs })).toThrow(
+        'staged write failed',
+      );
+      expect(nodeFs.existsSync(mutexPath)).toBe(false);
+      expect(readdirSync(directory)).toEqual([]);
+      expect(withRecoveryMutex(path, () => 'acquired')).toBe('acquired');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('reports an unreadable recovery lock by name instead of a generic busy error', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-exclusive-unreadable-'));
     const path = join(directory, 'owner');

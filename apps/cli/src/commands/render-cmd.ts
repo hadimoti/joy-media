@@ -2290,7 +2290,8 @@ function acquireOutputLock(path: string):
         { busyCode: 'RENDER_OUTPUT_BUSY' },
       );
     } catch {
-      // Leave a malformed lock in place; a later command will refuse unsafe recovery.
+      // Any release failure leaves the record in place. The next claim recovers it under the same
+      // journal rules, so keeping the record is the fail-closed outcome.
       return;
     }
   };
@@ -2399,8 +2400,21 @@ function acquireArtifactOwner(
 }
 
 /**
- * Remove only generated staging files for one target. The generated suffix is tested on its own,
- * so a target name that itself contains ".partial" cannot make a backup match.
+ * The generated staging names for one target, tested on the part after `.<target>.`:
+ * a media encode `<pid>.<hex>.partial`, a preview `<pid>.<hex>.staging.png`, the temp file of a
+ * media's manifest `manifest.json.<pid>.<hex>.tmp`, and the temp file of a manifest target
+ * `<pid>.<hex>.tmp`. Backups, other targets' files and user files are not in this format.
+ */
+const GENERATED_STAGING_SUFFIXES: readonly RegExp[] = [
+  /^\d+\.[0-9a-f]+\.partial$/u,
+  /^\d+\.[0-9a-f]+\.staging\.png$/u,
+  /^manifest\.json\.\d+\.[0-9a-f]+\.tmp$/u,
+  /^\d+\.[0-9a-f]+\.tmp$/u,
+];
+
+/**
+ * Remove only the generated staging files for one target. The caller holds that target's owner
+ * claim, so no other render of the same target can be writing them.
  */
 export function removeArtifactStagingFiles(target: string): void {
   const directory = dirname(target);
@@ -2408,7 +2422,7 @@ export function removeArtifactStagingFiles(target: string): void {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.startsWith(prefix)) continue;
     const suffix = entry.name.slice(prefix.length);
-    if (/^(?:.+\.)?(?:partial|tmp|staging(?:\.png)?)$/u.test(suffix))
+    if (GENERATED_STAGING_SUFFIXES.some((pattern) => pattern.test(suffix)))
       rmSync(join(directory, entry.name), { recursive: true, force: true });
   }
 }
@@ -2492,6 +2506,13 @@ function recoverOutputTransaction(
   rmSync(transaction.stagedManifestPath, { force: true });
 }
 
+/** Compare two output paths by the file they name, not by how they are spelled. */
+function samePath(left: string, right: string): boolean {
+  const key = (path: string): string =>
+    process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path);
+  return key(left) === key(right);
+}
+
 function recoverOutputLockState(
   lockPath: string,
   transaction: OutputTransactionRecord | null,
@@ -2520,7 +2541,7 @@ function recoverOutputLockState(
         transaction.manifestPath,
         transaction.stagedManifestPath,
         transaction.manifestBackup,
-      ].includes(activePartialPath)
+      ].some((journalPath) => samePath(journalPath, activePartialPath))
     ) {
       throw new Error('the output lock partial path is also a journal path');
     }
