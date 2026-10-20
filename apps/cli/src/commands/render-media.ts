@@ -722,10 +722,20 @@ export async function planMediaAsync(
 
 const secs = (us: number): string => (us / 1_000_000).toFixed(6);
 
+// Output must not depend on the host's logical-processor count. libx264 sizes its lookahead and
+// slice threads from the machine, and its CPU-specific algorithm choices can differ. Pinning all of
+// them keeps MP4 exports identical across hosts.
+const H264_ENCODER_THREADS = 1;
+const X264_DETERMINISTIC_PARAMS =
+  'threads=1:lookahead-threads=1:sync-lookahead=0:sliced-threads=0:cpu-independent=1';
 const CODEC_ARGS: Readonly<Record<MediaPresetId, readonly string[]>> = {
   mp4: [
     '-c:v',
     'libx264',
+    '-threads',
+    String(H264_ENCODER_THREADS),
+    '-x264-params',
+    X264_DETERMINISTIC_PARAMS,
     '-preset',
     'veryfast',
     '-crf',
@@ -783,6 +793,12 @@ export function buildFfmpegArgs(
     '-progress',
     'pipe:1',
     '-nostats',
+    // Filter threads default to the logical-processor count, and slicing can change scaler and
+    // overlay results. One thread per graph keeps the decoded pixels host-independent.
+    '-filter_threads',
+    '1',
+    '-filter_complex_threads',
+    '1',
   ];
   const filters: string[] = [`color=c=black:s=${W}x${H}:r=${FPS}:d=${total},format=yuv420p[b0]`];
   const audioLabels: string[] = [];
