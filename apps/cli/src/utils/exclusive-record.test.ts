@@ -84,6 +84,47 @@ describe('exclusive record protocol', () => {
     ).toBe(true);
   });
 
+  it('treats ESRCH as dead, other kill errors as alive, and the current pid as alive', () => {
+    expect(
+      processIsAlive(42, () => {
+        throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+      }),
+    ).toBe(false);
+    expect(
+      processIsAlive(42, () => {
+        throw Object.assign(new Error('invalid pid'), { code: 'EINVAL' });
+      }),
+    ).toBe(true);
+    expect(processIsAlive(process.pid)).toBe(true);
+  });
+
+  it('cleans up a failed staged mutex write so a later acquisition can proceed', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-exclusive-staged-failure-'));
+    const path = join(directory, 'owner');
+    const mutexPath = `${path}.recover`;
+    try {
+      const fs = {
+        ...nodeFs,
+        writeFileSync: (
+          file: number | nodeFs.PathOrFileDescriptor,
+          data: string | NodeJS.ArrayBufferView,
+          ...args: unknown[]
+        ) => {
+          if (typeof file === 'string' && file.includes('.staged-'))
+            throw new Error('staged write failed');
+          return (nodeFs.writeFileSync as (...values: unknown[]) => void)(file, data, ...args);
+        },
+      } as unknown as ExclusiveRecordFileSystem;
+      expect(() => withRecoveryMutex(path, () => 'unexpected', { fs })).toThrow(
+        'staged write failed',
+      );
+      expect(() => readFileSync(mutexPath, 'utf8')).toThrow();
+      expect(withRecoveryMutex(path, () => 'acquired')).toBe('acquired');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('steals a stale mutex through link, token verification, and unlink, but keeps a live mutex', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-exclusive-mutex-'));
     const path = join(directory, 'owner');

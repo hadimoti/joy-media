@@ -5,6 +5,13 @@ import * as nodeFs from 'node:fs';
 // mutex. Creators write a complete record before releasing the mutex, so an incomplete record
 // found under the mutex has no living creator and can be removed immediately without a grace
 // period.
+//
+// Residual limits. A stale steal verifies the token through a second name and then unlinks the
+// well-known name. Two recoverers stealing the same dead mutex at once can race, so a live mutex
+// taken between that check and the unlink can be lost, because link and unlink cannot make the
+// sequence atomic. On volumes without hard links, the wx-and-write fallback can still leave an
+// incomplete mutex if the process crashes between creating the file and writing its complete
+// record.
 
 export const RECOVERY_MUTEX_RETRY_MS = 5_000;
 const RECOVERY_MUTEX_RETRY_INTERVAL_MS = 10;
@@ -53,9 +60,58 @@ interface MutexRecord {
   readonly time: number;
 }
 
-function sleepSync(milliseconds: number): void {
+export function sleepSync(milliseconds: number): void {
   if (milliseconds <= 0) return;
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function createMutexRecord(
+  mutexPath: string,
+  record: string,
+  fs: ExclusiveRecordFileSystem,
+): boolean {
+  const stagedPath = `${mutexPath}.staged-${randomUUID()}`;
+  try {
+    fs.writeFileSync(stagedPath, record, { flag: 'wx' });
+    try {
+      fs.linkSync(stagedPath, mutexPath);
+      return true;
+    } catch (linkError) {
+      if ((linkError as NodeJS.ErrnoException).code === 'EEXIST') return false;
+
+      // Hard links are unavailable on some volumes; this fallback can still leave an incomplete
+      // mutex if the process crashes between exclusive creation and writing the record.
+      let descriptor: number | undefined;
+      try {
+        descriptor = fs.openSync(mutexPath, 'wx');
+        fs.writeFileSync(descriptor, record);
+        fs.closeSync(descriptor);
+        descriptor = undefined;
+        return true;
+      } catch (error) {
+        if (descriptor !== undefined) {
+          try {
+            fs.closeSync(descriptor);
+          } catch {
+            // The descriptor may already be closed.
+          }
+          try {
+            fs.unlinkSync(mutexPath);
+          } catch {
+            // Best effort cleanup while this caller still owns the mutex creation.
+          }
+        }
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+        throw error;
+      }
+    }
+  } finally {
+    try {
+      fs.unlinkSync(stagedPath);
+    } catch {
+      // Staged names are unique and temporary; cleanup is best effort.
+    }
+  }
 }
 
 function readMutex(path: string, fs: ExclusiveRecordFileSystem): MutexRecord | undefined {
@@ -92,30 +148,12 @@ export function withRecoveryMutex<T>(
 
   while (true) {
     const token = randomUUID();
-    let descriptor: number | undefined;
-    try {
-      descriptor = fs.openSync(mutexPath, 'wx');
-      fs.writeFileSync(descriptor, `${JSON.stringify({ pid: holderPid, token, time: now() })}\n`);
-      fs.closeSync(descriptor);
-      descriptor = undefined;
-    } catch (error) {
-      if (descriptor !== undefined) {
-        try {
-          fs.closeSync(descriptor);
-        } catch {
-          // The descriptor may already be closed.
-        }
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-          try {
-            fs.unlinkSync(mutexPath);
-          } catch {
-            // Best effort cleanup while this caller still owns the mutex creation.
-          }
-          throw error;
-        }
-      } else if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-        throw error;
-      }
+    const created = createMutexRecord(
+      mutexPath,
+      `${JSON.stringify({ pid: holderPid, token, time: now() })}\n`,
+      fs,
+    );
+    if (!created) {
       const observed = readMutex(mutexPath, fs);
       if (observed && !isAlive(observed.pid)) {
         const uniquePath = `${mutexPath}.unique-${randomUUID()}`;
@@ -132,10 +170,8 @@ export function withRecoveryMutex<T>(
               if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError;
             }
           }
-        } catch (linkError) {
-          if ((linkError as NodeJS.ErrnoException).code !== 'ENOENT') {
-            // Another recovery may have changed the well-known mutex while this link was made.
-          }
+        } catch {
+          // Another recovery may have changed the well-known mutex while this link was made.
         }
         try {
           fs.unlinkSync(uniquePath);

@@ -145,6 +145,25 @@ describe('CLI build lock', () => {
     }
   });
 
+  it('does not throw or release the build lock when its recovery mutex is busy', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-build-lock-release-busy-'));
+    const lockPath = join(directory, '.build.lock');
+    try {
+      const owner = tryAcquireBuildLock(lockPath, { mutexTimeoutMs: 0 });
+      expect(owner).not.toBeNull();
+      const recoverPath = `${lockPath}.recover`;
+      writeFileSync(
+        recoverPath,
+        JSON.stringify({ pid: process.pid, token: 'busy-recovery', time: Date.now() }),
+      );
+      expect(() => owner?.release()).not.toThrow();
+      expect(JSON.parse(readFileSync(recoverPath, 'utf8')).token).toBe('busy-recovery');
+      expect(JSON.parse(readFileSync(lockPath, 'utf8')).token).toBe(owner?.token);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('waits until the completed-build marker exists', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-build-marker-'));
     const markerPath = join(directory, '.build.complete');

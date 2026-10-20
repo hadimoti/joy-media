@@ -2,7 +2,15 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
@@ -339,14 +347,6 @@ describe('joy render (headless batch render command)', () => {
       JSON.stringify({ pid: process.pid, token: 'live-owner', createdAt: Date.now() }),
     );
     const project = createDefaultProject('Live owner', { id: 'live-owner' });
-    const root = project.compositions['root'] as unknown as { tracks: Array<{ clips: unknown[] }> };
-    root.tracks[0]!.clips.push({
-      id: 'live-owner-clip',
-      kind: 'video',
-      assetId: 'missing-media',
-      startUs: 0,
-      durationUs: 1_000_000,
-    });
     const capture = new StringWritable();
     const restore = redirectStdout(capture);
     try {
@@ -364,6 +364,181 @@ describe('joy render (headless batch render command)', () => {
       expect(event.message).toContain(target);
     } finally {
       restore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a dead output lock whose journal phase is not recognised, without discarding its backup', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-invalid-lock-journal-'));
+    const manifestPath = join(dir, 'invalid-journal.mp4.manifest.json');
+    const mediaPath = join(dir, 'input.mp4');
+    const lockPath = join(dir, '.invalid-journal.mp4.render.lock');
+    const mediaBackup = join(dir, '.invalid-journal.mp4.interrupted.backup');
+    writeFileSync(mediaPath, 'probe fixture');
+    writeFileSync(mediaBackup, 'backup that must survive');
+    const project = createDefaultProject('Invalid journal', { id: 'invalid-journal' });
+    const root = project.compositions['root'] as unknown as { tracks: Array<{ clips: unknown[] }> };
+    root.tracks[0]!.clips.push({
+      id: 'invalid-journal-clip',
+      kind: 'video',
+      assetId: mediaPath,
+      startUs: 0,
+      durationUs: 1_000_000,
+      sourceInUs: 0,
+    });
+    (project.assets as Record<string, unknown>)[mediaPath] = { id: mediaPath, kind: 'video' };
+    const lockRecord = {
+      pid: 2_147_000_000,
+      token: 'dead-invalid-journal',
+      startedAt: new Date(1).toISOString(),
+      activePartialPath: null,
+      transaction: {
+        // Not a phase the CLI writes, so only the record-shape check can refuse this journal.
+        phase: 'half-committed',
+        mediaPath: join(dir, 'invalid-journal.mp4'),
+        stagedMediaPath: join(dir, '.invalid-journal.mp4.interrupted.partial'),
+        mediaBackup,
+        hadMedia: true,
+        manifestPath,
+        stagedManifestPath: join(dir, '.invalid-journal.mp4.manifest.json.interrupted.tmp'),
+        manifestBackup: join(dir, '.invalid-journal.mp4.manifest.json.interrupted.backup'),
+        hadManifest: true,
+      },
+    };
+    writeFileSync(lockPath, JSON.stringify(lockRecord));
+    const originalLock = readFileSync(lockPath);
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
+    setMediaProbeSpawnForTests(() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null as number | null,
+        kill: vi.fn(() => true),
+      });
+      setTimeout(() => {
+        child.stdout.end(
+          JSON.stringify({
+            streams: [{ codec_type: 'video', width: 320, height: 240, pix_fmt: 'yuv420p' }],
+            format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2', duration: '1.0' },
+          }),
+        );
+        child.exitCode = 0;
+        child.emit('close', 0, null);
+      }, 0);
+      return child as never;
+    });
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: dir,
+        concurrency: 1,
+        json: true,
+      });
+      expect(result.exitCode).toBe(1);
+      const event = JSON.parse(capture.text().trim().split('\n').at(-1)!) as {
+        code: string;
+        message: string;
+      };
+      expect(event.code).toBe('output');
+      expect(event.message).toContain('could not be recovered');
+      expect(readFileSync(lockPath)).toEqual(originalLock);
+      expect(readFileSync(mediaBackup, 'utf8')).toBe('backup that must survive');
+    } finally {
+      restore();
+      setMediaProbeSpawnForTests(undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a dead output lock whose journal points outside the output directory', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-outside-journal-'));
+    const elsewhere = join(dir, 'elsewhere');
+    mkdirSync(elsewhere);
+    const manifestPath = join(dir, 'outside-journal.mp4.manifest.json');
+    const mediaPath = join(dir, 'input.mp4');
+    const lockPath = join(dir, '.outside-journal.mp4.render.lock');
+    const mediaBackup = join(dir, '.outside-journal.mp4.interrupted.backup');
+    writeFileSync(mediaPath, 'probe fixture');
+    writeFileSync(mediaBackup, 'backup that must stay in the output directory');
+    const project = createDefaultProject('Outside journal', { id: 'outside-journal' });
+    const root = project.compositions['root'] as unknown as { tracks: Array<{ clips: unknown[] }> };
+    root.tracks[0]!.clips.push({
+      id: 'outside-journal-clip',
+      kind: 'video',
+      assetId: mediaPath,
+      startUs: 0,
+      durationUs: 1_000_000,
+      sourceInUs: 0,
+    });
+    (project.assets as Record<string, unknown>)[mediaPath] = { id: mediaPath, kind: 'video' };
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: 2_147_000_000,
+        token: 'dead-outside-journal',
+        startedAt: new Date(1).toISOString(),
+        activePartialPath: null,
+        transaction: {
+          // A well-formed journal whose media path lies in a subfolder, outside the output directory.
+          phase: 'committing',
+          mediaPath: join(elsewhere, 'outside-journal.mp4'),
+          stagedMediaPath: join(dir, '.outside-journal.mp4.interrupted.partial'),
+          mediaBackup,
+          hadMedia: true,
+          manifestPath,
+          stagedManifestPath: join(dir, '.outside-journal.mp4.manifest.json.interrupted.tmp'),
+          manifestBackup: join(dir, '.outside-journal.mp4.manifest.json.interrupted.backup'),
+          hadManifest: false,
+        },
+      }),
+    );
+    const originalLock = readFileSync(lockPath);
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
+    setMediaProbeSpawnForTests(() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null as number | null,
+        kill: vi.fn(() => true),
+      });
+      setTimeout(() => {
+        child.stdout.end(
+          JSON.stringify({
+            streams: [{ codec_type: 'video', width: 320, height: 240, pix_fmt: 'yuv420p' }],
+            format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2', duration: '1.0' },
+          }),
+        );
+        child.exitCode = 0;
+        child.emit('close', 0, null);
+      }, 0);
+      return child as never;
+    });
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: dir,
+        concurrency: 1,
+        json: true,
+      });
+      expect(result.exitCode).toBe(1);
+      const event = JSON.parse(capture.text().trim().split('\n').at(-1)!) as {
+        code: string;
+        message: string;
+      };
+      expect(event.code).toBe('output');
+      expect(event.message).toContain('could not be recovered');
+      expect(readFileSync(lockPath)).toEqual(originalLock);
+      expect(readFileSync(mediaBackup, 'utf8')).toBe(
+        'backup that must stay in the output directory',
+      );
+      expect(existsSync(join(elsewhere, 'outside-journal.mp4'))).toBe(false);
+    } finally {
+      restore();
+      setMediaProbeSpawnForTests(undefined);
       rmSync(dir, { recursive: true, force: true });
     }
   });

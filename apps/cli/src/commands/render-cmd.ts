@@ -2183,13 +2183,34 @@ function acquireOutputLock(path: string):
     record = withRecoveryMutex(
       path,
       () => {
-        const existing = readOutputLockRecord(path);
-        if (existing) {
-          ownerPid = existing.pid;
-          ownerStartedAt = existing.startedAt;
-          if (processIsAlive(existing.pid)) return null;
+        let parsedRecord: unknown;
+        let parsed = false;
+        try {
+          parsedRecord = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+          parsed = true;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+        }
+        if (parsed) {
+          const recordObject =
+            typeof parsedRecord === 'object' && parsedRecord !== null
+              ? (parsedRecord as Record<string, unknown>)
+              : null;
+          if (!recordObject || !Number.isSafeInteger(recordObject['pid'])) {
+            recoveryFailure = 'the parsed render lock does not contain a verifiable owner pid';
+            return null;
+          }
+          ownerPid = recordObject['pid'] as number;
+          ownerStartedAt =
+            typeof recordObject['startedAt'] === 'string' ? recordObject['startedAt'] : '';
+          if (processIsAlive(ownerPid)) return null;
+          if (!isOutputLockRecord(parsedRecord)) {
+            recoveryFailure = 'the stale render lock contains an invalid journal or lock record';
+            return null;
+          }
           try {
-            recoverOutputLockState(path, existing.transaction, existing.activePartialPath);
+            recoverOutputLockState(path, parsedRecord.transaction, parsedRecord.activePartialPath);
           } catch (error) {
             recoveryFailure = errorMessage(error);
             throw error;
@@ -2221,7 +2242,7 @@ function acquireOutputLock(path: string):
     return {
       ok: false,
       message:
-        ownerPid > 0 && !processIsAlive(ownerPid)
+        recoveryFailure || (ownerPid > 0 && !processIsAlive(ownerPid))
           ? `A stale render lock could not be recovered at ${path}${recoveryFailure ? `: ${recoveryFailure}` : ''}.`
           : `Another render is writing this output (lock: ${path}${ownerStartedAt ? `, started ${ownerStartedAt}` : ''}).`,
     };

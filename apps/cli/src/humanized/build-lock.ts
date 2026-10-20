@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import {
   ExclusiveRecordBusyError,
+  RECOVERY_MUTEX_RETRY_MS,
   acquireRecord,
   processIsAlive,
+  sleepSync,
   withRecoveryMutex,
 } from '../utils/exclusive-record.js';
 
@@ -42,7 +44,10 @@ export function readBuildLockToken(path: string): string | undefined {
   return readRecord(path)?.token;
 }
 
-export function tryAcquireBuildLock(path: string): BuildLockOwner | null {
+export function tryAcquireBuildLock(
+  path: string,
+  options: { readonly mutexTimeoutMs?: number } = {},
+): BuildLockOwner | null {
   try {
     const record = withRecoveryMutex(
       path,
@@ -58,34 +63,44 @@ export function tryAcquireBuildLock(path: string): BuildLockOwner | null {
           pidOf: (value) => value.pid,
           makeRecord: () => ({ token: randomUUID(), pid: process.pid, createdAt: Date.now() }),
         }),
-      { busyCode: 'BUILD_LOCK_BUSY' },
+      {
+        busyCode: 'BUILD_LOCK_BUSY',
+        timeoutMs: options.mutexTimeoutMs ?? RECOVERY_MUTEX_RETRY_MS,
+      },
     );
     if (!record) return null;
     return {
       ...record,
       release: () => {
-        withRecoveryMutex(
-          path,
-          () => {
-            if (readRecord(path)?.token !== record.token) return;
-            try {
-              unlinkSync(path);
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-            }
-          },
-          { busyCode: 'BUILD_LOCK_BUSY' },
-        );
+        try {
+          withRecoveryMutex(
+            path,
+            () => {
+              if (readRecord(path)?.token !== record.token) return;
+              try {
+                unlinkSync(path);
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+              }
+            },
+            {
+              busyCode: 'BUILD_LOCK_BUSY',
+              timeoutMs: options.mutexTimeoutMs ?? RECOVERY_MUTEX_RETRY_MS,
+            },
+          );
+        } catch (error) {
+          if (error instanceof ExclusiveRecordBusyError) {
+            // Keep the owner record: releasing without its mutex could remove a newer owner.
+            return;
+          }
+          throw error;
+        }
       },
     };
   } catch (error) {
     if (error instanceof ExclusiveRecordBusyError) return null;
     throw error;
   }
-}
-
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 export function waitForBuildComplete(
