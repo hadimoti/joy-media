@@ -21,6 +21,50 @@ import { createDefaultProject, saveProject } from '../utils/project-loader.js';
 import { encodeRgbaPng } from '../services/title-frames.js';
 import { buildFfmpegArgs, setAssFileWriterForTests } from './render-media.js';
 import { renderInputsDigest } from '../services/render-preparation.js';
+import { normalizeUniversalTimeline } from '@joy-media/project-schema';
+
+function timelineOrderProject(trackIds: readonly string[], disabledTrack?: string) {
+  const tracks = trackIds.map((id) => ({
+    id,
+    kind: 'video',
+    order: id === 'low' ? 0 : 1,
+    enabled: true,
+    clips: [
+      {
+        kind: 'video',
+        id: `clip-${id}`,
+        assetId: 'asset-test',
+        startUs: 0,
+        durationUs: 1_000_000,
+      },
+    ],
+  }));
+  return {
+    schemaVersion: 1,
+    rootCompositionId: 'root',
+    compositions: { root: { id: 'root', tracks } },
+    assets: { 'asset-test': { id: 'asset-test', kind: 'video', displayName: 'test' } },
+    timelineTrackDeck: {
+      rows: ['low', 'high'].map((trackId, order) => ({
+        compositionId: 'root',
+        trackId,
+        order,
+        enabled: trackId !== disabledTrack,
+        locked: false,
+      })),
+    },
+    pluginData: {
+      'joy.contentTemplates': {
+        instances: Object.fromEntries(
+          ['low', 'high'].map((id) => [
+            `title-${id}`,
+            { clipId: `clip-${id}`, objectId: `object-${id}` },
+          ]),
+        ),
+      },
+    },
+  } as never;
+}
 
 class StringWritable extends Writable {
   public chunks: Buffer[] = [];
@@ -132,7 +176,9 @@ describe('joy render (headless batch render command)', () => {
 
   it('excludes title instances bound to disabled tracks', () => {
     const project = {
+      schemaVersion: 1,
       rootCompositionId: 'root',
+      assets: {},
       compositions: {
         root: {
           tracks: [
@@ -160,6 +206,33 @@ describe('joy render (headless batch render command)', () => {
       },
     } as never;
     expect(collectTitleSources(project)).toEqual([]);
+  });
+
+  it('keeps title stacking in normalized order when the track array is reordered', () => {
+    const forward = timelineOrderProject(['low', 'high']);
+    const reversed = timelineOrderProject(['high', 'low']);
+    const desktopItems = normalizeUniversalTimeline(reversed).items;
+
+    expect(
+      collectTitleSources(forward).map((source) => [source.instanceId, source.trackOrder]),
+    ).toEqual([
+      ['title-low', 0],
+      ['title-high', 1],
+    ]);
+    expect(
+      collectTitleSources(reversed).map((source) => [source.instanceId, source.trackOrder]),
+    ).toEqual(collectTitleSources(forward).map((source) => [source.instanceId, source.trackOrder]));
+    expect(desktopItems.filter((item) => item.trackEnabled).map((item) => item.trackOrder)).toEqual(
+      [0, 1],
+    );
+  });
+
+  it('honors an authoritative deck row that disables a title track', () => {
+    const project = timelineOrderProject(['low', 'high'], 'low');
+    const desktopItems = normalizeUniversalTimeline(project).items;
+
+    expect(collectTitleSources(project).map((source) => source.instanceId)).toEqual(['title-high']);
+    expect(desktopItems.find((item) => item.trackId === 'low')?.trackEnabled).toBe(false);
   });
 
   it('exposes mp4/webm/prores render presets with deterministic specs', () => {

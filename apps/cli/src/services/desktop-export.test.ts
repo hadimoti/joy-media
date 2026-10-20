@@ -79,6 +79,30 @@ describe('desktop project export envelope', () => {
     );
   });
 
+  it('refuses a title line that would be remapped as an asset id on import', () => {
+    const { project, sources, id } = fixture();
+    const collidingProject = {
+      ...project,
+      pluginData: {
+        ...project.pluginData,
+        'third-party.opaque': {
+          title: {
+            lines: { primary: id, secondary: '' },
+          },
+        },
+      },
+    };
+
+    expect(() => buildDesktopProjectEnvelope(collidingProject, sources)).toThrowError(
+      expect.objectContaining({
+        code: 'DESKTOP_EXPORT_ASSET_ID_COLLISION',
+        message: expect.stringContaining(
+          'documents.visual.pluginData.third-party.opaque.title.lines.primary',
+        ),
+      }),
+    );
+  });
+
   it('refuses an original larger than the 256 MiB package limit', () => {
     const { project, sources, id } = fixture(Buffer.alloc(1));
     const oversizedProject = {

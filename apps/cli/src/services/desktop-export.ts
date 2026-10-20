@@ -111,6 +111,45 @@ function fail(code: string, message: string): never {
   throw new DesktopExportError(code, message);
 }
 
+function findAssetIdCollision(
+  value: unknown,
+  assetIds: ReadonlySet<string>,
+  path: string,
+  parentKey?: string,
+  parentKind?: unknown,
+): string | undefined {
+  if (typeof value === 'string') {
+    const isClipAssetReference =
+      parentKey === 'assetId' &&
+      /(?:\.clips\[\d+\]|\.clipBindings\[\d+\]\.clip)\.assetId$/u.test(path);
+    if (
+      assetIds.has(value) &&
+      !isClipAssetReference &&
+      !(parentKey === 'id' && parentKind === 'asset')
+    )
+      return path;
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      const collision = findAssetIdCollision(value[index], assetIds, `${path}[${index}]`);
+      if (collision !== undefined) return collision;
+    }
+    return undefined;
+  }
+  if (value === null || typeof value !== 'object') return undefined;
+
+  const record = value as Record<string, unknown>;
+  for (const [key, child] of Object.entries(record)) {
+    if (key === 'assets') continue;
+    const childPath = `${path}.${key}`;
+    if (assetIds.has(key)) return childPath;
+    const collision = findAssetIdCollision(child, assetIds, childPath, key, record['kind']);
+    if (collision !== undefined) return collision;
+  }
+  return undefined;
+}
+
 export function buildDesktopProjectEnvelope(
   project: JoyProjectV3,
   sources: Readonly<Record<string, string>>,
@@ -119,6 +158,16 @@ export function buildDesktopProjectEnvelope(
   readMedia: (path: string, asset: JoyProjectV3['assets'][string]) => Buffer = readBoundedMedia,
 ) {
   const documents = projectedDocuments;
+  const collision = findAssetIdCollision(
+    documents,
+    new Set(Object.keys(project.assets)),
+    'documents',
+  );
+  if (collision !== undefined)
+    fail(
+      'DESKTOP_EXPORT_ASSET_ID_COLLISION',
+      `Exported document string at ${collision} equals an asset id and would be remapped on import.`,
+    );
   const media = Object.values(project.assets).map((asset) => {
     const path = sources[asset.id];
     if (path === undefined)

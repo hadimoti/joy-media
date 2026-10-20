@@ -12,6 +12,7 @@ import {
   type RenderPreparationV1,
 } from '../services/render-preparation.js';
 import { notoSansArabicArabic400Path } from '@joy-media/html-scene-runtime';
+import { normalizeUniversalTimeline, type JoyProjectV1 } from '@joy-media/project-schema';
 import {
   RF_ALPHA,
   RF_AUDIO_BUS_GAIN,
@@ -363,6 +364,11 @@ export function planMedia(
   }
   const assets = isRecord(project['assets']) ? project['assets'] : {};
   const sources = loadAssetSources();
+  const normalizedItems = normalizeUniversalTimeline({
+    ...project,
+    schemaVersion: 1,
+  } as unknown as JoyProjectV1).items.filter((item) => item.compositionId === rootId);
+  const normalizedByClipId = new Map(normalizedItems.map((item) => [item.id, item]));
 
   const warnings: string[] = [];
   const pending: Array<{
@@ -379,9 +385,13 @@ export function planMedia(
   const captions: CaptionCue[] = [];
   const pluginData = isRecord(project['pluginData']) ? project['pluginData'] : {};
   const frozenPreparation = pluginData[RENDER_PREPARATION_KEY] as RenderPreparationV1 | undefined;
-  for (const [trackOrder, rawTrack] of (root['tracks'] as unknown[]).entries()) {
-    if (!isRecord(rawTrack) || rawTrack['enabled'] === false) continue;
+  for (const rawTrack of root['tracks'] as unknown[]) {
+    if (!isRecord(rawTrack)) continue;
     const trackId = typeof rawTrack['id'] === 'string' ? rawTrack['id'] : '?';
+    const trackItems = normalizedItems.filter(
+      (item) => item.trackId === trackId && item.trackEnabled,
+    );
+    if (trackItems.length === 0) continue;
     if (rawTrack['muted'] === true || rawTrack['solo'] === true) {
       return {
         mode: 'error',
@@ -393,6 +403,13 @@ export function planMedia(
     for (const rawClip of clips as unknown[]) {
       if (!isRecord(rawClip)) continue;
       const clipId = typeof rawClip['id'] === 'string' ? rawClip['id'] : '?';
+      const normalizedItem = normalizedByClipId.get(clipId);
+      if (
+        normalizedItem === undefined ||
+        normalizedItem.trackId !== trackId ||
+        !normalizedItem.trackEnabled
+      )
+        continue;
       if (rawClip['kind'] === 'caption') {
         if (
           frozenPreparation?.captions?.wrapping === 'measured-hard-breaks' &&
@@ -426,7 +443,7 @@ export function planMedia(
         clip: rawClip,
         clipId,
         trackId,
-        trackOrder,
+        trackOrder: normalizedItem.trackOrder,
         assetId,
         path: resolveSource(assetId, assets[assetId], sources, options.mediaDir),
         real: sources[assetId] !== undefined || isRecord(assets[assetId]),

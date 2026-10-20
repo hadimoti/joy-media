@@ -12,6 +12,7 @@ import {
   encodeRgbaPng,
   renderTitleFrames,
   titleFrameCount,
+  titleFrameLocalTimes,
   titleFrameTimes,
   withCaptureDeadline,
 } from './title-frames.js';
@@ -76,6 +77,16 @@ describe('title frame timing and PNG encoding', () => {
     expect(times[0]).toBe(0);
     expect(times[1]).toBe(33_333);
     expect(times[44]).toBe(1_466_667);
+  });
+
+  it('samples title time from the global rational frame grid at a fractional clip start', () => {
+    const startUs = 350_000;
+    const localTimes = titleFrameLocalTimes(startUs, 100_000, { num: 30, den: 1 });
+    const desktopGlobalFrameUs = Number((11n * 1_000_000n + 15n) / 30n);
+
+    expect(localTimes[0]).toBe(16_667);
+    expect(localTimes[0]).toBe(desktopGlobalFrameUs - startUs);
+    expect(localTimes).toHaveLength(titleFrameCount(100_000, { num: 30, den: 1 }));
   });
 
   it('samples a slide-up title at its first, middle and last frames', () => {

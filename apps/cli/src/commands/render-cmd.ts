@@ -50,7 +50,12 @@ import {
   logWarn,
   printBanner,
 } from '../utils/logger.js';
-import { CONTENT_TEMPLATES_PLUGIN_KEY, type TitleInstanceV1 } from '@joy-media/project-schema';
+import {
+  CONTENT_TEMPLATES_PLUGIN_KEY,
+  normalizeUniversalTimeline,
+  type JoyProjectV1,
+  type TitleInstanceV1,
+} from '@joy-media/project-schema';
 import { ffmpegBinary, probeMedia } from '../utils/media-probe.js';
 import {
   renderTitleFrames,
@@ -613,24 +618,33 @@ export function collectTitleSources(project: CliProjectDocument): TitleFrameSour
         }[];
       }
     | undefined;
+  const normalizedItems = normalizeUniversalTimeline({
+    ...project,
+    schemaVersion: 1,
+  } as unknown as JoyProjectV1).items.filter(
+    (item) => item.compositionId === project.rootCompositionId,
+  );
   const sources: Array<TitleFrameSource & { trackOrder: number }> = [];
   for (const [instanceId, instance] of Object.entries(instances)) {
-    let found: { clip: Record<string, unknown>; trackOrder: number } | undefined;
-    composition?.tracks?.forEach((track, trackOrder) => {
-      if (
-        track.enabled === false ||
-        track.kind !== 'video' ||
-        track.family === 'audio' ||
-        track.family === 'caption'
-      )
-        return;
-      const clip = track.clips?.find((candidate) => candidate.id === instance.clipId);
-      if (clip) found = { clip, trackOrder };
+    const item = normalizedItems.find((candidate) => candidate.id === instance.clipId);
+    if (item === undefined || !item.trackEnabled || item.elementKind === 'audio') continue;
+    const track = composition?.tracks?.find((candidate) => candidate.id === item.trackId);
+    if (
+      track === undefined ||
+      track.kind !== 'video' ||
+      track.family === 'audio' ||
+      track.family === 'caption'
+    )
+      continue;
+    const clip = track.clips?.find((candidate) => candidate.id === instance.clipId);
+    if (clip === undefined) continue;
+    sources.push({
+      instanceId,
+      instance,
+      startUs: Number(clip.startUs ?? item.startUs),
+      durationUs: Number(clip.durationUs ?? item.durationUs),
+      trackOrder: item.trackOrder,
     });
-    if (!found) continue;
-    const startUs = Number(found.clip.startUs ?? 0);
-    const durationUs = Number(found.clip.durationUs ?? 0);
-    sources.push({ instanceId, instance, startUs, durationUs, trackOrder: found.trackOrder });
   }
   return sources
     .sort((a, b) => a.trackOrder - b.trackOrder || a.startUs - b.startUs)

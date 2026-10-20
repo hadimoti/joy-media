@@ -146,6 +146,27 @@ export function titleFrameTimes(durationUs: number, fps: TitleFrameRate): number
   );
 }
 
+/** Sample local title times at the first global frame on or after the clip start. */
+export function titleFrameLocalTimes(
+  startUs: number,
+  durationUs: number,
+  fps: TitleFrameRate,
+): number[] {
+  validateFrameRate(fps);
+  if (!Number.isSafeInteger(startUs) || startUs < 0)
+    throw new RangeError('title startUs must be a non-negative safe integer');
+  const frameRate = BigInt(fps.num);
+  const frameDurationNumerator = 1_000_000n * BigInt(fps.den);
+  const start = BigInt(startUs);
+  const firstFrame = (start * frameRate + frameDurationNumerator - 1n) / frameDurationNumerator;
+  const count = titleFrameCount(durationUs, fps);
+  return Array.from({ length: count }, (_, index) => {
+    const frame = firstFrame + BigInt(index);
+    const globalTimeUs = (frame * frameDurationNumerator * 2n + frameRate) / (2n * frameRate);
+    return Number(globalTimeUs - start);
+  });
+}
+
 /** Encode one tightly packed RGBA surface as a minimal PNG using filter type 0. */
 export function encodeRgbaPng(width: number, height: number, rgba: Uint8Array): Buffer {
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1)
@@ -290,7 +311,7 @@ export async function renderTitleFrames(
       const directory = mkdtempSync(join(tmpdir(), `title-${safeId(source.instanceId)}-`));
       directories.push(directory);
       const pattern = join(directory, `title-${safeId(source.instanceId)}-%05d.png`);
-      const times = titleFrameTimes(source.durationUs, frame.fps);
+      const times = titleFrameLocalTimes(source.startUs, source.durationUs, frame.fps);
       for (let index = 0; index < times.length; index++) {
         if (options.signal?.aborted || options.isCancelled?.())
           throw new Error('Render cancelled during title capture.');

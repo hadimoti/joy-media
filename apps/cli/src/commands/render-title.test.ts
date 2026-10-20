@@ -7,6 +7,7 @@ import { encodeRgbaPng } from '../services/title-frames.js';
 import { isPreviewTimeInRange, previewFrameIndex } from './render-cmd.js';
 import { buildFfmpegArgs, startEncode, type MediaPlanReady } from './render-media.js';
 import { hasUsableChromium } from './render-features.js';
+import { normalizeUniversalTimeline } from '@joy-media/project-schema';
 
 const emptyPlan: MediaPlanReady = {
   mode: 'media',
@@ -113,6 +114,87 @@ describe('title composition rendering', () => {
         trackOrder: 1,
       },
     ]).join(' ');
+    expect(graph.indexOf('[b0][v0]')).toBeLessThan(graph.indexOf('[b1][title0]'));
+    expect(graph.indexOf('[b1][title0]')).toBeLessThan(graph.indexOf('[b2][v1]'));
+  });
+
+  it('stacks overlapping title and media layers by normalized track order', () => {
+    const project = {
+      schemaVersion: 1,
+      rootCompositionId: 'root',
+      compositions: {
+        root: {
+          id: 'root',
+          tracks: ['top', 'bottom', 'middle'].map((id, index) => ({
+            id,
+            kind: 'video',
+            order: index,
+            enabled: true,
+            clips: [
+              {
+                kind: 'video',
+                id: `clip-${id}`,
+                assetId: `asset-${id}`,
+                startUs: 0,
+                durationUs: 2_000_000,
+              },
+            ],
+          })),
+        },
+      },
+      assets: Object.fromEntries(
+        ['top', 'bottom', 'middle'].map((id) => [
+          `asset-${id}`,
+          { id: `asset-${id}`, kind: 'video', displayName: id },
+        ]),
+      ),
+      timelineTrackDeck: {
+        rows: [
+          { compositionId: 'root', trackId: 'bottom', order: 0, enabled: true, locked: false },
+          { compositionId: 'root', trackId: 'middle', order: 1, enabled: true, locked: false },
+          { compositionId: 'root', trackId: 'top', order: 2, enabled: true, locked: false },
+        ],
+      },
+      pluginData: {},
+    } as never;
+    const items = normalizeUniversalTimeline(project).items;
+    const mediaTracks = ['bottom', 'top'];
+    const clips = mediaTracks.map((trackId, index) => ({
+      clipId: `clip-${trackId}`,
+      trackId,
+      trackOrder: items.find((item) => item.trackId === trackId)!.trackOrder,
+      startUs: 0,
+      durationUs: 2_000_000,
+      sourceInUs: 0,
+      assetId: `asset-${trackId}`,
+      sourcePath: `input-${index}.mp4`,
+      info: {
+        hasVideo: true,
+        hasAudio: false,
+        hasAlpha: false,
+        isImage: false,
+        durationUs: 2_000_000,
+        width: 320,
+        height: 240,
+        mimeType: 'video/mp4',
+      },
+      visual: true,
+      audio: false,
+      audioSettings: { gain: 1, mute: false, fadeInUs: 0, fadeOutUs: 0 },
+      transitionInUs: 0,
+      transitionOutUs: 0,
+    }));
+    const middleTrackOrder = items.find((item) => item.trackId === 'middle')!.trackOrder;
+    const graph = buildFfmpegArgs({ ...emptyPlan, clips }, 'mp4', 'out.mp4', [
+      {
+        instanceId: 'middle-title',
+        inputPattern: 'title-%05d.png',
+        startUs: 0,
+        durationUs: 2_000_000,
+        trackOrder: middleTrackOrder,
+      },
+    ]).join(' ');
+
     expect(graph.indexOf('[b0][v0]')).toBeLessThan(graph.indexOf('[b1][title0]'));
     expect(graph.indexOf('[b1][title0]')).toBeLessThan(graph.indexOf('[b2][v1]'));
   });
