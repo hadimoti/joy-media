@@ -15,19 +15,17 @@
 import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
-  closeSync,
   mkdirSync,
   mkdtempSync,
-  openSync,
   readdirSync,
   rmSync,
   statSync,
-  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readBuildLockToken, tryAcquireBuildLock, waitForBuildComplete } from './build-lock.js';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 export const CLI_ROOT = resolve(HERE, '..', '..');
@@ -35,6 +33,8 @@ export const REPO_ROOT = resolve(CLI_ROOT, '..', '..');
 const BIN_ENTRY = join(CLI_ROOT, 'bin', 'joy-media.mjs');
 const BUNDLE_ENTRY = join(CLI_ROOT, 'dist', 'joy-media-bundle.mjs');
 const DIST_BIN = join(CLI_ROOT, 'dist', 'bin.js');
+const BUILD_LOCK = join(CLI_ROOT, 'dist', '.build.lock');
+const BUILD_COMPLETE = join(CLI_ROOT, 'dist', '.build.complete');
 
 // ---------------------------------------------------------------------------
 // Build management (tests run against dist/, so make sure it is fresh)
@@ -60,6 +60,7 @@ function sleepSync(ms: number): void {
 }
 
 function buildIsStale(): boolean {
+  if (!existsSync(BUILD_COMPLETE)) return true;
   if (!existsSync(DIST_BIN) || !existsSync(BUNDLE_ENTRY)) return true;
   const builtAt = Math.min(statSync(DIST_BIN).mtimeMs, statSync(BUNDLE_ENTRY).mtimeMs);
   const skip = new Set(['node_modules', 'dist', '.git']);
@@ -91,41 +92,25 @@ export function ensureCliBuilt(): void {
     buildChecked = true;
     return;
   }
-  const lock = join(CLI_ROOT, 'dist', '.build.lock');
   mkdirSync(join(CLI_ROOT, 'dist'), { recursive: true });
   const deadline = Date.now() + 300_000;
-  let lockFd: number | undefined;
+  let owner: ReturnType<typeof tryAcquireBuildLock> = null;
   for (;;) {
-    try {
-      lockFd = openSync(lock, 'wx');
-      writeFileSync(lockFd, `${process.pid}\n${Date.now()}\n`);
-      closeSync(lockFd);
-      lockFd = undefined;
-      break;
-    } catch (error) {
-      if (lockFd !== undefined) {
-        closeSync(lockFd);
-        lockFd = undefined;
-        try {
-          unlinkSync(lock);
-        } catch {
-          /* lock already removed */
-        }
-      }
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > 600_000) unlinkSync(lock);
-      } catch {
-        /* lock vanished: retry */
-      }
-      if (Date.now() > deadline) throw new Error(`Timed out waiting for CLI build lock ${lock}`);
-      sleepSync(250);
-      if (!buildIsStale()) {
-        buildChecked = true;
-        return;
-      }
+    owner = tryAcquireBuildLock(BUILD_LOCK);
+    if (owner) break;
+    const ownerToken = readBuildLockToken(BUILD_LOCK);
+    if (ownerToken)
+      waitForBuildComplete(BUILD_COMPLETE, deadline, ownerToken, undefined, BUILD_LOCK);
+    else sleepSync(250);
+    if (Date.now() > deadline)
+      throw new Error(`Timed out waiting for CLI build lock ${BUILD_LOCK}`);
+    if (!buildIsStale()) {
+      buildChecked = true;
+      return;
     }
   }
+  if (!owner) throw new Error(`Could not acquire CLI build lock ${BUILD_LOCK}`);
+  rmSync(BUILD_COMPLETE, { force: true });
   try {
     // Another worker may have completed between our first stale check and lock acquisition.
     if (buildIsStale()) {
@@ -154,13 +139,10 @@ ${res.stderr}`,
           throw buildFailure;
         }
       }
+      writeFileSync(BUILD_COMPLETE, `${owner.token}\n`);
     }
   } finally {
-    try {
-      unlinkSync(lock);
-    } catch {
-      /* ignore */
-    }
+    owner.release();
   }
   buildChecked = true;
 }

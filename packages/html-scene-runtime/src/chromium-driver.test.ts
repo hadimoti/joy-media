@@ -138,6 +138,84 @@ describe('Chromium scene driver ownership', () => {
     expect(driver.browserProcessId).toBe(27182);
   });
 
+  it('kills a browser PID published after the timeout snapshot', async () => {
+    let fake!: FakeWorker;
+    const killed: number[] = [];
+    const driver = createChromiumSceneDriver({
+      executablePath: process.execPath,
+      timeoutMs: 20,
+      workerFactory: () => {
+        fake = new FakeWorker((message) => {
+          if (message.type !== 'capture') return;
+          setTimeout(() => {
+            Atomics.store(new Int32Array(message.shared as SharedArrayBuffer, 0, 4), 3, 38123);
+          }, 5);
+        });
+        return fake;
+      },
+      killTree: (pid) => {
+        if (pid !== undefined) killed.push(pid);
+      },
+    });
+    await expect(driver.captureAsync!(unitRequest)).rejects.toThrow('RENDER_CAPTURE_TIMEOUT');
+    expect(killed).toContain(38123);
+  });
+
+  it('kills the session PID on worker error before lastBrowserPid is populated', async () => {
+    let fake!: FakeWorker;
+    const killed: number[] = [];
+    const driver = createChromiumSceneDriver({
+      executablePath: process.execPath,
+      timeoutMs: 100,
+      workerFactory: () => {
+        fake = new FakeWorker((message) => {
+          if (message.type !== 'capture') return;
+          const control = new Int32Array(message.shared as SharedArrayBuffer, 0, 4);
+          Atomics.store(control, 3, 39123);
+          Atomics.store(control, 2, 0);
+          Atomics.store(control, 0, 2);
+          fake.emit('message', { type: 'complete', requestId: message.requestId });
+          fake.emit('error', new Error('worker startup failure'));
+        });
+        return fake;
+      },
+      killTree: (pid) => {
+        if (pid !== undefined) killed.push(pid);
+      },
+    });
+    await expect(driver.captureAsync!(unitRequest)).rejects.toThrow();
+    expect(killed).toContain(39123);
+  });
+
+  it('retries failed browser cleanup when close is called later', async () => {
+    let fake!: FakeWorker;
+    const attempts: Array<number | undefined> = [];
+    const driver = createChromiumSceneDriver({
+      executablePath: process.execPath,
+      workerFactory: () => {
+        fake = new FakeWorker((message) => {
+          if (message.type !== 'capture') return;
+          const buffer = message.shared as SharedArrayBuffer;
+          const control = new Int32Array(buffer, 0, 4);
+          const bytes = new TextEncoder().encode('capture failed');
+          new Uint8Array(buffer, 16, bytes.length).set(bytes);
+          Atomics.store(control, 2, bytes.length);
+          Atomics.store(control, 3, 40123);
+          Atomics.store(control, 0, 2);
+          fake.emit('message', { type: 'complete', requestId: message.requestId });
+        });
+        return fake;
+      },
+      killTree: (pid) => {
+        attempts.push(pid);
+        if (attempts.length === 1) throw new Error('temporary kill failure');
+      },
+    });
+    await expect(driver.captureAsync!(unitRequest)).rejects.toThrow('temporary kill failure');
+    await driver.closeAsync!();
+    expect(attempts).toEqual([40123, 40123]);
+  });
+
   it('does not post a capture for a pre-aborted request', async () => {
     let fake!: FakeWorker;
     const driver = createChromiumSceneDriver({

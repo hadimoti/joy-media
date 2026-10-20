@@ -574,6 +574,8 @@ export function createChromiumSceneDriver(
   worker.unref();
   let closed = false;
   let lastBrowserPid: number | undefined;
+  let sessionPidControl: Int32Array | undefined;
+  let cleanupTask: Promise<void> | undefined;
   let cancellationDeadlineAt: number | undefined;
   let profileRemoved = false;
   const removeProfile = (): void => {
@@ -588,7 +590,8 @@ export function createChromiumSceneDriver(
   };
   const cleanupBrowserOnExit = (): void => {
     try {
-      killTree(lastBrowserPid, profileDirectory);
+      const sharedPid = sessionPidControl ? Atomics.load(sessionPidControl, 3) : 0;
+      killTree(sharedPid > 0 ? sharedPid : lastBrowserPid, profileDirectory);
     } catch {
       /* process exit must continue; normal operations surface the cleanup error */
     }
@@ -596,16 +599,21 @@ export function createChromiumSceneDriver(
   };
   process.once('exit', cleanupBrowserOnExit);
 
-  const cleanupAfterWorkerEnd = (): void => {
-    let browserTreeGone = false;
-    try {
-      killTree(lastBrowserPid, profileDirectory);
-      browserTreeGone = true;
-    } catch {
-      /* Keep the profile until the browser tree can be confirmed gone. */
-    }
-    if (browserTreeGone) removeProfile();
-    process.removeListener('exit', cleanupBrowserOnExit);
+  const cleanupAfterWorkerEnd = (): Promise<void> => {
+    if (cleanupTask) return cleanupTask;
+    cleanupTask = (async () => {
+      const sharedPid = sessionPidControl ? Atomics.load(sessionPidControl, 3) : 0;
+      const pid = sharedPid > 0 ? sharedPid : lastBrowserPid;
+      killTree(pid, profileDirectory);
+      lastBrowserPid = undefined;
+      if (sessionPidControl) Atomics.store(sessionPidControl, 3, 0);
+      await removeProfileWithRetries(cancellationDeadlineAt ?? Date.now() + 2_000);
+      process.removeListener('exit', cleanupBrowserOnExit);
+    })().catch((error: unknown) => {
+      cleanupTask = undefined;
+      throw error;
+    });
+    return cleanupTask;
   };
   const removeProfileWithRetries = async (deadline: number): Promise<void> => {
     let lastError: unknown;
@@ -626,9 +634,16 @@ export function createChromiumSceneDriver(
     if (existsSync(profileDirectory))
       throw lastError ?? new Error('Chromium profile remained after bounded cleanup');
   };
-  worker.once('error', cleanupAfterWorkerEnd);
+  worker.once('error', () => {
+    void cleanupAfterWorkerEnd().catch(() => {
+      /* Keep ownership and the exit hook so close() can retry. */
+    });
+  });
   worker.once('exit', (code) => {
-    if (code !== 0 && !closed) cleanupAfterWorkerEnd();
+    if (code !== 0 && !closed)
+      void cleanupAfterWorkerEnd().catch(() => {
+        /* Keep ownership and the exit hook so close() can retry. */
+      });
   });
 
   function exchange(
@@ -641,21 +656,20 @@ export function createChromiumSceneDriver(
       type === 'measure' ? Math.max(1024, JSON.stringify(request).length * 4) : pixels * 4;
     const shared = new SharedArrayBuffer(HEADER_BYTES + ERROR_BYTES + extra);
     const control = new Int32Array(shared, 0, 4);
+    sessionPidControl = control;
     const at = (index: number): number => control[index] ?? 0;
     worker.postMessage({ type, request, shared });
     const budgetMs = timeoutMs;
     const waitMs = type === 'close' ? 250 + 2_000 + 500 : budgetMs + 2_000;
     const state = Atomics.wait(control, 0, 0, waitMs);
-    lastBrowserPid = at(3) > 0 ? at(3) : undefined;
+    lastBrowserPid = at(3) > 0 ? at(3) : lastBrowserPid;
     if (state === 'timed-out') {
       Atomics.store(control, 0, 3);
       closed = true;
-      try {
-        killChromiumTree(lastBrowserPid, profileDirectory);
-      } finally {
-        worker.terminate().then(cleanupAfterWorkerEnd, cleanupAfterWorkerEnd);
-        cleanupAfterWorkerEnd();
-      }
+      void worker.terminate();
+      void cleanupAfterWorkerEnd().catch(() => {
+        /* Keep ownership and the exit hook so close() can retry. */
+      });
       throw new Error(
         `Chromium ${type === 'measure' ? 'text measurement' : 'scene capture'} exceeded ${type === 'close' ? waitMs : budgetMs}ms; browser process tree was stopped and its profile removed`,
       );
@@ -664,12 +678,10 @@ export function createChromiumSceneDriver(
       const size = Math.min(at(2), ERROR_BYTES);
       const message = new TextDecoder().decode(new Uint8Array(shared, HEADER_BYTES, size));
       closed = true;
-      try {
-        killChromiumTree(lastBrowserPid, profileDirectory);
-      } finally {
-        worker.terminate().then(cleanupAfterWorkerEnd, cleanupAfterWorkerEnd);
-        cleanupAfterWorkerEnd();
-      }
+      void worker.terminate();
+      void cleanupAfterWorkerEnd().catch(() => {
+        /* Keep ownership and the exit hook so close() can retry. */
+      });
       throw new Error(
         `Chromium ${type === 'measure' ? 'text measurement' : 'scene capture'} failed: ${message || 'worker failed'}`,
       );
@@ -708,6 +720,7 @@ export function createChromiumSceneDriver(
     const pixels = request ? request.width * request.height : 0;
     const shared = new SharedArrayBuffer(HEADER_BYTES + ERROR_BYTES + pixels * 4);
     const control = new Int32Array(shared, 0, 4);
+    sessionPidControl = control;
     const requestId = `${Date.now()}-${Math.random()}`;
     let abortSent = false;
     let resolveAbort!: () => void;
@@ -756,21 +769,19 @@ export function createChromiumSceneDriver(
           );
         }),
       ]);
+      lastBrowserPid = Atomics.load(control, 3) > 0 ? Atomics.load(control, 3) : lastBrowserPid;
       if (status === 'timed-out') {
-        lastBrowserPid = (control[3] ?? 0) > 0 ? control[3] : lastBrowserPid;
         abort();
         if (type !== 'close')
           await Promise.race([
             completion,
             new Promise<void>((resolve) => setTimeout(resolve, 250)),
           ]);
+        lastBrowserPid = Atomics.load(control, 3) > 0 ? Atomics.load(control, 3) : lastBrowserPid;
         closed = true;
         let cancelError: unknown;
-        let browserTreeGone = false;
         try {
-          killTree(lastBrowserPid, profileDirectory);
-          lastBrowserPid = undefined;
-          browserTreeGone = true;
+          await cleanupAfterWorkerEnd();
         } catch (error) {
           cancelError = error;
         }
@@ -789,14 +800,6 @@ export function createChromiumSceneDriver(
             ),
           ),
         ]);
-        if (browserTreeGone) {
-          try {
-            await removeProfileWithRetries(cancellationDeadlineAt ?? Date.now());
-          } catch (error) {
-            cancelError ??= error;
-          }
-        }
-        process.removeListener('exit', cleanupBrowserOnExit);
         if (!workerStopped || cancelError || Date.now() >= (cancellationDeadlineAt ?? 0))
           throw new Error(
             `RENDER_CANCEL_TIMEOUT: Chromium cancellation cleanup exceeded five seconds: ${cancelError instanceof Error ? cancelError.message : String(cancelError ?? 'capture worker did not stop within 500 ms')}`,
@@ -812,16 +815,12 @@ export function createChromiumSceneDriver(
         control[0] === 4 ||
         control[0] === 5
       ) {
-        lastBrowserPid = (control[3] ?? 0) > 0 ? control[3] : lastBrowserPid;
         closed = true;
         await Promise.race([completion, new Promise<void>((resolve) => setTimeout(resolve, 250))]);
+        lastBrowserPid = Atomics.load(control, 3) > 0 ? Atomics.load(control, 3) : lastBrowserPid;
         let cancelError: unknown;
-        let browserTreeGone = false;
         try {
-          if (!(control[0] === 4 && (control[3] ?? 0) === 0))
-            killTree(lastBrowserPid, profileDirectory);
-          lastBrowserPid = undefined;
-          browserTreeGone = true;
+          await cleanupAfterWorkerEnd();
         } catch (error) {
           cancelError = error;
         }
@@ -840,14 +839,6 @@ export function createChromiumSceneDriver(
             ),
           ),
         ]);
-        if (browserTreeGone) {
-          try {
-            await removeProfileWithRetries(cancellationDeadlineAt ?? Date.now());
-          } catch (error) {
-            cancelError ??= error;
-          }
-        }
-        process.removeListener('exit', cleanupBrowserOnExit);
         if (!workerStopped || cancelError || Date.now() >= (cancellationDeadlineAt ?? 0))
           throw new Error(
             `RENDER_CANCEL_TIMEOUT: Chromium cancellation cleanup exceeded five seconds: ${cancelError instanceof Error ? cancelError.message : String(cancelError ?? 'capture worker did not stop within 500 ms')}`,
@@ -857,16 +848,17 @@ export function createChromiumSceneDriver(
       if (control[0] !== 1) {
         const length = Math.min(control[2] ?? 0, ERROR_BYTES);
         const message = new TextDecoder().decode(new Uint8Array(shared, HEADER_BYTES, length));
+        lastBrowserPid = Atomics.load(control, 3) > 0 ? Atomics.load(control, 3) : lastBrowserPid;
         closed = true;
         try {
-          killTree(lastBrowserPid, profileDirectory);
+          await cleanupAfterWorkerEnd();
           lastBrowserPid = undefined;
         } catch (cleanupError) {
           throw new Error(
             `Chromium scene capture failed: ${message || 'worker failed'}; browser cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
           );
         } finally {
-          void worker.terminate().then(cleanupAfterWorkerEnd, cleanupAfterWorkerEnd);
+          void worker.terminate();
         }
         throw new Error(`Chromium scene capture failed: ${message || 'worker failed'}`);
       }
@@ -905,7 +897,8 @@ export function createChromiumSceneDriver(
       return lastBrowserVersion;
     },
     get browserProcessId(): number | undefined {
-      return lastBrowserPid;
+      const sharedPid = sessionPidControl ? Atomics.load(sessionPidControl, 3) : 0;
+      return sharedPid > 0 ? sharedPid : lastBrowserPid;
     },
     capture(request): HeadlessSurface {
       if (closed) throw new Error('Chromium scene driver is closed');
@@ -931,35 +924,31 @@ export function createChromiumSceneDriver(
       return (result.loadedFonts ?? []).map(Number);
     },
     close(): void {
-      if (closed) return;
+      const shouldCloseWorker = !closed;
       closed = true;
       try {
-        try {
-          exchange('close');
-        } catch (error) {
-          killTree(lastBrowserPid, profileDirectory);
-          throw error;
-        }
+        if (shouldCloseWorker) exchange('close');
       } finally {
-        cleanupAfterWorkerEnd();
-        void worker.terminate().then(cleanupAfterWorkerEnd, cleanupAfterWorkerEnd);
+        void cleanupAfterWorkerEnd().catch(() => {
+          /* Keep ownership so a later closeAsync can retry. */
+        });
+        if (shouldCloseWorker) void worker.terminate();
       }
     },
     async closeAsync(deadlineAt?: number): Promise<void> {
-      if (closed) return;
       cancellationDeadlineAt ??= deadlineAt ?? Date.now() + 5_000;
+      const shouldCloseWorker = !closed;
       closed = true;
       let closeError: unknown;
-      try {
-        await exchangeAsync('close');
-      } catch (error) {
-        closeError = error;
+      if (shouldCloseWorker) {
+        try {
+          await exchangeAsync('close');
+        } catch (error) {
+          closeError = error;
+        }
       }
-      let browserTreeGone = false;
       try {
-        killTree(lastBrowserPid, profileDirectory);
-        lastBrowserPid = undefined;
-        browserTreeGone = true;
+        await cleanupAfterWorkerEnd();
       } catch (error) {
         closeError ??= error;
       }
@@ -979,14 +968,6 @@ export function createChromiumSceneDriver(
         ),
       ]);
       if (!workerStopped) closeError ??= new Error('Capture worker did not stop within 500 ms');
-      if (browserTreeGone) {
-        try {
-          await removeProfileWithRetries(cancellationDeadlineAt!);
-        } catch (error) {
-          closeError ??= error;
-        }
-      }
-      process.removeListener('exit', cleanupBrowserOnExit);
       if (Date.now() >= cancellationDeadlineAt!)
         closeError ??= new Error('RENDER_CANCEL_TIMEOUT: Chromium cleanup exceeded five seconds');
       if (closeError) throw closeError;

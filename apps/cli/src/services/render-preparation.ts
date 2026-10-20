@@ -1,8 +1,16 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { spawn, spawnSync } from 'node:child_process';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { canonicalJson, sha256Identity } from './prepared-edit.js';
 import {
@@ -13,6 +21,7 @@ import {
 import { CommandFailure, type CliProjectDocument } from '../utils/project-loader.js';
 import { ffmpegBinary } from '../utils/media-probe.js';
 import { compileCaptionAss } from './captions-ass.js';
+import { loadAssetSourcesIfPresent } from '../utils/asset-sources.js';
 import {
   captionEngineVersionsFromAssProbe,
   type CanonicalCaptionFaceProbe,
@@ -710,7 +719,36 @@ export function renderInputsDigest(project: unknown): string {
     delete pluginData[RENDER_PREPARATION_KEY];
     copy['pluginData'] = pluginData;
   }
-  return sha256Identity(copy);
+  const assets = isRecord(copy['assets']) ? copy['assets'] : {};
+  const registeredSources = loadAssetSourcesIfPresent();
+  const files: Array<{ readonly path: string; readonly sha256: string }> = [];
+  for (const [assetId, rawAsset] of Object.entries(assets)) {
+    const asset = isRecord(rawAsset) ? rawAsset : {};
+    const candidates = [
+      registeredSources[assetId],
+      ...['sourcePath', 'filePath', 'path', 'uri'].map((key) => asset[key]),
+      assetId,
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+    const candidate = candidates.find((path) => {
+      try {
+        return existsSync(path) && realpathSync(path) !== '';
+      } catch {
+        return false;
+      }
+    });
+    if (!candidate) continue;
+    try {
+      const canonicalPath = realpathSync(resolve(candidate));
+      files.push({
+        path: canonicalPath,
+        sha256: hashBytes(readFileSync(canonicalPath)),
+      });
+    } catch {
+      // A file disappearing during digest collection is reported by media planning.
+    }
+  }
+  files.sort((left, right) => left.path.localeCompare(right.path));
+  return sha256Identity({ project: copy, mediaFiles: files });
 }
 
 function selectedFaces(

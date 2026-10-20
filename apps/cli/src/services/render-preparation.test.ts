@@ -162,6 +162,39 @@ describe('RenderPreparationV1', () => {
     }
   });
 
+  it('detects changed media bytes as render environment drift', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-render-media-drift-'));
+    const mediaPath = join(directory, 'source.mp4');
+    writeFileSync(mediaPath, 'original media bytes');
+    const mediaProject = {
+      ...project,
+      assets: { media: { id: 'media', sourcePath: mediaPath } },
+      compositions: {
+        root: {
+          ...project.compositions.root,
+          tracks: [{ id: 'video', kind: 'video', enabled: true, clips: [] }],
+        },
+      },
+    } as unknown as CliProjectDocument;
+    const preparation = freezeRenderPreparation(
+      mediaProject,
+      [{ op: 'instantiateTemplate' }],
+      facts,
+    );
+    const saved = {
+      ...mediaProject,
+      pluginData: { ...mediaProject.pluginData, 'joy.renderPreparation': preparation },
+    } as unknown as CliProjectDocument;
+    writeFileSync(mediaPath, 'changed media bytes');
+    try {
+      await expect(validateRenderPreparation(saved, facts)).rejects.toMatchObject({
+        code: 'RENDER_ENVIRONMENT_DRIFT',
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('refuses a frozen title record without its Chromium executable path', async () => {
     const preparation = freezeRenderPreparation(project, [{ op: 'instantiateTemplate' }], facts);
     const { executablePath: _executablePath, ...chromiumWithoutPath } = preparation.chromium;

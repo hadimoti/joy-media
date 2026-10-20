@@ -23,6 +23,7 @@
 import { randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
+import { inflateSync } from 'node:zlib';
 import {
   accessSync,
   closeSync,
@@ -31,6 +32,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmdirSync,
   rmSync,
@@ -71,7 +73,12 @@ import {
   startEncode,
   type MediaPlanReady,
 } from './render-media.js';
-import { listProjects, loadProject, type CliProjectDocument } from '../utils/project-loader.js';
+import {
+  CommandFailure,
+  listProjects,
+  loadProject,
+  type CliProjectDocument,
+} from '../utils/project-loader.js';
 import { validateRenderPreparation } from '../services/render-preparation.js';
 
 export interface RenderCommandFlags {
@@ -213,6 +220,7 @@ export type RenderErrorCode =
   | 'RENDER_PREPARATION_REQUIRED'
   | 'RENDER_PREPARATION_INVALID'
   | 'RENDER_ENVIRONMENT_DRIFT'
+  | 'RENDER_OUTPUT_COLLIDES_WITH_INPUT'
   | 'CAPTION_UNSUPPORTED'
   | 'CAPTION_LAYOUT_OVERFLOW'
   | 'CAPTION_TIMING_UNREPRESENTABLE'
@@ -357,6 +365,7 @@ export async function handleRenderCommand(args: string[], flags: CliFlags): Prom
       json,
       manifestOnly: flags.manifestOnly === true,
       mediaDir: flags.mediaDir,
+      ...(projectInfo.source === 'file' ? { projectFilePath: projectInfo.path } : {}),
       frameUs: flags.frameUs,
     });
 
@@ -385,6 +394,8 @@ export interface RunHeadlessRenderInput {
   readonly manifestOnly?: boolean | undefined;
   /** Folder to look in for media files an asset names (by id or display name). */
   readonly mediaDir?: string | undefined;
+  /** Source file when the project was loaded from JSON. */
+  readonly projectFilePath?: string | undefined;
   /** Render a single composed frame at this project-local microsecond. */
   readonly frameUs?: number | undefined;
   /**
@@ -777,21 +788,96 @@ function isCompletePng(bytes: Buffer, width: number, height: number): boolean {
     return false;
   let offset = 8;
   let sawHeader = false;
+  let sawData = false;
+  let endedData = false;
+  const idat: Buffer[] = [];
+  let bitDepth = 0;
+  let colorType = 0;
+  const expectedLength = height * (1 + width * 4);
+  if (!Number.isSafeInteger(expectedLength) || expectedLength < 1) return false;
   while (offset + 12 <= bytes.length) {
     const length = bytes.readUInt32BE(offset);
     const end = offset + length + 12;
     if (end > bytes.length) return false;
     const type = bytes.toString('ascii', offset + 4, offset + 8);
+    const chunkEnd = offset + 8 + length;
+    if (bytes.readUInt32BE(chunkEnd) !== pngCrc32(bytes.subarray(offset + 4, chunkEnd)))
+      return false;
     if (type === 'IHDR') {
       if (sawHeader || length !== 13) return false;
       sawHeader = true;
       if (bytes.readUInt32BE(offset + 8) !== width || bytes.readUInt32BE(offset + 12) !== height)
         return false;
+      bitDepth = bytes[offset + 16] ?? 0;
+      colorType = bytes[offset + 17] ?? 0;
+      if (
+        bitDepth !== 8 ||
+        colorType !== 6 ||
+        bytes[offset + 18] !== 0 ||
+        bytes[offset + 19] !== 0 ||
+        bytes[offset + 20] !== 0
+      )
+        return false;
     }
-    if (type === 'IEND') return sawHeader && length === 0 && end === bytes.length;
+    if (type === 'IDAT') {
+      if (!sawHeader || endedData) return false;
+      sawData = true;
+      idat.push(bytes.subarray(offset + 8, chunkEnd));
+    } else if (sawData && type !== 'IEND') {
+      endedData = true;
+    }
+    if (type === 'IEND') {
+      if (!sawHeader || !sawData || length !== 0 || end !== bytes.length) return false;
+      try {
+        const raw = inflateSync(Buffer.concat(idat), { maxOutputLength: expectedLength });
+        if (raw.byteLength !== expectedLength) return false;
+        const stride = 1 + width * 4;
+        for (let y = 0; y < height; y += 1) if ((raw[y * stride] ?? 255) > 4) return false;
+        return true;
+      } catch {
+        return false;
+      }
+    }
     offset = end;
   }
   return false;
+}
+
+function pngCrc32(bytes: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+export function assertNoRenderOutputCollision(
+  outputPath: string,
+  inputPaths: readonly string[],
+): void {
+  const identity = (path: string): { readonly path: string; readonly fileId?: string } => {
+    const absolutePath = resolve(path);
+    try {
+      const canonicalPath = realpathSync(absolutePath);
+      const info = statSync(canonicalPath);
+      return {
+        path: canonicalPath,
+        ...(info.dev !== 0 || info.ino !== 0 ? { fileId: `${info.dev}:${info.ino}` } : {}),
+      };
+    } catch {
+      return { path: absolutePath };
+    }
+  };
+  const output = identity(outputPath);
+  for (const inputPath of inputPaths) {
+    const input = identity(inputPath);
+    if (output.path === input.path || (output.fileId && output.fileId === input.fileId))
+      throw new CommandFailure(
+        'RENDER_OUTPUT_COLLIDES_WITH_INPUT',
+        `Render output ${outputPath} resolves to input ${inputPath}; choose a different output path.`,
+      );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -984,6 +1070,16 @@ export async function runHeadlessRender(
       const frameIndex = previewFrameIndex(timeUs, titleFps);
       const previewMedia = { ...realMedia, durationUs };
       const artifactPath = join(outDir, `preview-${frameIndex}.png`);
+      try {
+        assertNoRenderOutputCollision(artifactPath, [
+          ...(input.projectFilePath ? [input.projectFilePath] : []),
+          ...realMedia.clips.map((clip) => clip.sourcePath),
+        ]);
+      } catch (error) {
+        if (error instanceof CommandFailure)
+          return failure(error.code as RenderErrorCode, error.message, totalFrames, totalClips);
+        throw error;
+      }
       const stagingPath = join(
         outDir,
         `.preview-${frameIndex}-${randomBytes(8).toString('hex')}.staging.png`,
@@ -1126,6 +1222,20 @@ export async function runHeadlessRender(
     const fileStem = safeFileStem(plan.projectId);
     const mediaName = `${fileStem}.${presetSpec.extension}`;
     const manifestName = `${fileStem}.${presetSpec.extension}.manifest.json`;
+    try {
+      const inputPaths = [
+        ...(input.projectFilePath ? [input.projectFilePath] : []),
+        ...(realMedia?.clips.map((clip) => clip.sourcePath) ?? []),
+      ];
+      for (const target of realMedia
+        ? [join(outDir, mediaName), join(outDir, manifestName)]
+        : [join(outDir, manifestName)])
+        assertNoRenderOutputCollision(target, inputPaths);
+    } catch (error) {
+      if (error instanceof CommandFailure)
+        return failure(error.code as RenderErrorCode, error.message, totalFrames, totalClips);
+      throw error;
+    }
     if (fileStem !== plan.projectId) {
       warnings.push(`Project id "${plan.projectId}" is not a safe file name; using "${fileStem}".`);
     }

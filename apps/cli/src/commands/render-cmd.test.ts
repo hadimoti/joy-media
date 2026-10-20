@@ -15,6 +15,7 @@ import {
   RENDER_PRESETS,
   runHeadlessRender,
   publishPreviewAtomically,
+  assertNoRenderOutputCollision,
   safeFileStem,
 } from './render-cmd.js';
 import { createDefaultProject, saveProject } from '../utils/project-loader.js';
@@ -132,6 +133,48 @@ describe('joy render (headless batch render command)', () => {
       );
       expect(readFileSync(artifactPath)).toEqual(previous);
       expect(existsSync(stagingPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a render output that resolves to an input file', () => {
+    const directory = mkdtempSync(join(tempDir, 'render-output-collision-'));
+    const inputPath = join(directory, 'source.mp4');
+    const outputAlias = join(directory, '.', 'source.mp4');
+    writeFileSync(inputPath, 'media');
+    try {
+      let error: unknown;
+      try {
+        assertNoRenderOutputCollision(outputAlias, [inputPath]);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toMatchObject({ code: 'RENDER_OUTPUT_COLLIDES_WITH_INPUT' });
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(outputAlias);
+      expect((error as Error).message).toContain(inputPath);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a PNG preview without IDAT image data', () => {
+    const directory = mkdtempSync(join(tempDir, 'empty-png-preview-'));
+    const artifactPath = join(directory, 'preview-0.png');
+    const stagingPath = join(directory, '.preview-0-staging.png');
+    const validPng = encodeRgbaPng(1, 1, Uint8Array.from([1, 2, 3, 255]));
+    const png = Buffer.concat([
+      validPng.subarray(0, 8),
+      validPng.subarray(8, 33),
+      validPng.subarray(validPng.length - 12),
+    ]);
+    try {
+      writeFileSync(stagingPath, png);
+      expect(
+        publishPreviewAtomically(stagingPath, artifactPath, new AbortController().signal, 1, 1),
+      ).toBe(false);
+      expect(existsSync(artifactPath)).toBe(false);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
