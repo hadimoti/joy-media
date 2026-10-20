@@ -22,6 +22,11 @@ const MP4_CODEC_BLOCK_ROI = Object.freeze({ x: 32, y: 240, width: 1136, height: 
 const TITLE_PIXEL_TOLERANCE = 0;
 const MP4_OUTSIDE_CHANNEL_TOLERANCE = 16;
 const MP4_OUTSIDE_CHANGED_PIXEL_TOLERANCE = 1024;
+// Step 7 limit, recalibrated by explicit owner decision (2026-10-20). With the pinned source fixture and
+// the pinned H.264 and filter settings, step 7 measured 4070 outside-ROI pixels (max channel difference
+// 56) on both 2 and 32 logical processors, with identical numbers. The limit keeps 26 pixels of headroom.
+// Step 8 keeps MP4_OUTSIDE_CHANGED_PIXEL_TOLERANCE: it passes within that limit with the same settings.
+const MP4_STEP7_OUTSIDE_CHANGED_PIXEL_TOLERANCE = 4096;
 const AUDIO_GAIN_TOLERANCE = 0.06;
 const AUDIO_STEREO_MIX_FACTOR = 1 / Math.sqrt(2);
 const AUDIO_FADE_ENVELOPE_MAX_RATIO = 0.3;
@@ -144,7 +149,9 @@ function parseJsonLines(stdout: string, context: string): JsonRecord[] {
   });
 }
 
-function runCli(args: string[], context: string): CliResult {
+// Runs the bundled CLI and returns its result, including a non-zero exit. Use runCli when a non-zero
+// exit is a failure, and this when the exit itself is part of what the step checks.
+function runCliAllowingExit(args: string[], context: string): CliResult {
   const result = spawnSync(process.execPath, [BUNDLE, ...args], {
     cwd: process.cwd(),
     env: baseEnv,
@@ -155,20 +162,32 @@ function runCli(args: string[], context: string): CliResult {
   });
   if (result.error)
     throw new Error(`${context}: bundled CLI did not start: ${result.error.message}`);
-  const events = parseJsonLines(result.stdout ?? '', context);
-  if (result.status !== 0) {
-    const event = events.at(-1);
-    throw new Error(
-      `${context}: exit ${String(result.status)}${event?.code ? ` (${event.code})` : ''}: ${event?.message ?? result.stderr?.trim() ?? 'no error message'}`,
-    );
-  }
   return {
     code: result.status,
     signal: null,
-    events,
+    events: parseJsonLines(result.stdout ?? '', context),
     stdout: result.stdout ?? '',
     stderr: result.stderr ?? '',
   };
+}
+
+function runCli(args: string[], context: string): CliResult {
+  const result = runCliAllowingExit(args, context);
+  if (result.code !== 0) {
+    const event = result.events.at(-1);
+    throw new Error(
+      `${context}: exit ${String(result.code)}${event?.code ? ` (${event.code})` : ''}: ${event?.message ?? result.stderr?.trim() ?? 'no error message'}`,
+    );
+  }
+  return result;
+}
+
+// The refusal message when the CLI stopped because libass cannot load the canonical caption face.
+function captionFaceRefusal(result: CliResult): string | undefined {
+  const event = result.events.at(-1);
+  if (result.code === 0 || event?.code !== 'SETUP_REQUIRED') return undefined;
+  const message = String(event.message ?? '');
+  return message.includes('canonical-caption-face-unavailable') ? message : undefined;
 }
 
 function lastEvent(result: CliResult, context: string): JsonRecord {
@@ -628,6 +647,7 @@ function compareOutsideCodecBlockRoi(
   width: number,
   height: number,
   context: string,
+  maxChangedPixels = MP4_OUTSIDE_CHANGED_PIXEL_TOLERANCE,
 ): { changedPixels: number; maxChannelDifference: number } {
   let changedPixels = 0;
   let maxChannelDifference = 0;
@@ -652,8 +672,8 @@ function compareOutsideCodecBlockRoi(
   }
   expect(
     changedPixels,
-    `${context}: ${changedPixels} outside-ROI pixels exceeded ${MP4_OUTSIDE_CHANNEL_TOLERANCE}/255 channel tolerance (max channel difference ${maxChannelDifference}); at most ${MP4_OUTSIDE_CHANGED_PIXEL_TOLERANCE} may exceed it to allow bounded H.264 chroma/quantization spill beyond the aligned 16x16 codec blocks`,
-  ).toBeLessThanOrEqual(MP4_OUTSIDE_CHANGED_PIXEL_TOLERANCE);
+    `${context}: ${changedPixels} outside-ROI pixels exceeded ${MP4_OUTSIDE_CHANNEL_TOLERANCE}/255 channel tolerance (max channel difference ${maxChannelDifference}); at most ${maxChangedPixels} may exceed it to allow bounded H.264 chroma/quantization spill beyond the aligned 16x16 codec blocks`,
+  ).toBeLessThanOrEqual(maxChangedPixels);
   return { changedPixels, maxChannelDifference };
 }
 
@@ -841,6 +861,11 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
           '5',
           '-c:v',
           'libx264',
+          // The source must be identical on every host: x264 output depends on the processor count.
+          '-threads',
+          '1',
+          '-x264-params',
+          'threads=1:lookahead-threads=1:sync-lookahead=0:sliced-threads=0:cpu-independent=1',
           '-preset',
           'ultrafast',
           '-pix_fmt',
@@ -1152,6 +1177,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         RENDER_WIDTH,
         RENDER_HEIGHT,
         'decoded MP4 static/title frame 60 outside 16x16-aligned expanded title ROI',
+        MP4_STEP7_OUTSIDE_CHANGED_PIXEL_TOLERANCE,
       );
       console.info(
         `P0-4 decoded MP4 outside-ROI measurement: ${outsideRoi.changedPixels} pixels exceeded ${MP4_OUTSIDE_CHANNEL_TOLERANCE}/255 per-channel tolerance; maximum difference ${outsideRoi.maxChannelDifference}/255.`,
@@ -1327,7 +1353,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       const operationsPath = join(root, 'caption-plan.operations.json');
       const planPath = join(root, 'caption-plan.json');
       writeFileSync(operationsPath, JSON.stringify({ schemaVersion: 1, operations: [] }, null, 2));
-      checkedCli(
+      const prepared = runCliAllowingExit(
         [
           'plan',
           'prepare',
@@ -1338,8 +1364,22 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
           planPath,
           '--json',
         ],
-        'caption ASS preparation must fail closed when the canonical face is unavailable',
+        'caption ASS preparation',
       );
+      const refusal = captionFaceRefusal(prepared);
+      if (refusal !== undefined) {
+        // Accepted on this host (owner decision, 2026-10-20). Its libass cannot load the canonical WOFF2
+        // caption face, so the CLI refuses captions before any caption pixel exists. The caption render
+        // and boundary checks below run only on a host where that face loads.
+        console.info(`P0-4 caption step: captions refused on this host: ${refusal}`);
+        return;
+      }
+      if (prepared.code !== 0) {
+        const event = prepared.events.at(-1);
+        throw new Error(
+          `caption ASS preparation: exit ${String(prepared.code)}: ${event?.message ?? prepared.stderr.trim()}`,
+        );
+      }
       checkedCli(
         [
           'plan',
