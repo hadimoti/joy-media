@@ -59,6 +59,7 @@ import {
 } from '../services/title-frames.js';
 import {
   buildFfmpegArgs,
+  captionRenderMode,
   fileSize,
   planMedia,
   startEncode,
@@ -1210,8 +1211,9 @@ export async function runHeadlessRender(
   const durationMs = performance.now() - startedAt;
   const manifestPath = join(outDir, manifestName);
   const artifactPath = realMedia ? mediaPath : manifestPath;
+  const renderedCaptionMode = realMedia ? captionRenderMode(realMedia) : 'none';
   const doneMessage = realMedia
-    ? `Rendered ${basename(mediaPath)} with ffmpeg.`
+    ? `Rendered ${basename(mediaPath)} with ffmpeg. Captions: ${renderedCaptionMode}.`
     : MANIFEST_ONLY_MESSAGE;
 
   const rendererFacts = await titleRendererFacts();
@@ -1246,6 +1248,7 @@ export async function runHeadlessRender(
     projectId: plan.projectId,
     projectTitle: plan.title,
     preset,
+    captions: { mode: renderedCaptionMode },
     spec: realMedia
       ? {
           ...presetSpec,

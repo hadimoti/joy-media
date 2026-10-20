@@ -94,6 +94,16 @@ export interface MediaPlanReady {
   readonly warnings: readonly string[];
 }
 
+export type CaptionRenderMode = 'ass' | 'drawtext' | 'none';
+
+/** The caption mode shared by FFmpeg filter construction and render reporting. */
+export function captionRenderMode(
+  plan: Pick<MediaPlanReady, 'captions' | 'assDocument' | 'fontFile'>,
+): CaptionRenderMode {
+  if (plan.captions.length === 0) return 'none';
+  return typeof plan.assDocument === 'string' && plan.fontFile !== null ? 'ass' : 'drawtext';
+}
+
 export type MediaPlan =
   | { readonly mode: 'manifest-only'; readonly reason: string }
   | MediaPlanReady
@@ -625,6 +635,7 @@ export function buildFfmpegArgs(
   preview?: { readonly timeUs: number },
 ): string[] {
   const { width: W, height: H, fps: FPS } = plan;
+  const captionsMode = captionRenderMode(plan);
   const total = secs(plan.durationUs);
   const args: string[] = [
     '-hide_banner',
@@ -683,7 +694,7 @@ export function buildFfmpegArgs(
       );
       base += 1;
     }
-    if (clip.audio) {
+    if (clip.audio && !preview) {
       const ms = Math.round(clip.startUs / 1000);
       // Gain, mute and fades act on the clip's own timeline, before it is delayed onto the timeline.
       const { gain, mute, fadeInUs, fadeOutUs } = clip.audioSettings;
@@ -719,16 +730,16 @@ export function buildFfmpegArgs(
     base += 1;
   });
 
-  if (plan.captions.length > 0 && typeof plan.assDocument === 'string' && plan.fontFile !== null) {
+  if (captionsMode === 'ass') {
     const directory = mkdtempSync(join(tmpdir(), 'joy-caption-ass-'));
     const assPath = join(directory, 'captions.ass');
-    writeFileSync(assPath, plan.assDocument, 'utf8');
+    writeFileSync(assPath, plan.assDocument!, 'utf8');
     assTempDirectories.set(assPath, directory);
     const assFile = filterValue(assPath.replace(/\\/g, '/'));
-    const fontsDir = filterValue(dirname(plan.fontFile).replace(/\\/g, '/'));
+    const fontsDir = filterValue(dirname(plan.fontFile!).replace(/\\/g, '/'));
     filters.push(`[b${base}]ass=filename='${assFile}':fontsdir='${fontsDir}'[b${base + 1}]`);
     base += 1;
-  } else {
+  } else if (captionsMode === 'drawtext') {
     plan.captions.forEach((cue) => {
       // Option values are escaped twice: once for the filter graph and once for the drawtext option.
       const fontfile = filterValue(filterValue((plan.fontFile ?? '').replace(/\\/g, '/')));
@@ -741,15 +752,17 @@ export function buildFfmpegArgs(
     });
   }
 
-  if (audioLabels.length === 0) {
-    filters.push(`anullsrc=r=48000:cl=stereo,atrim=0:${total}[aout]`);
-  } else if (audioLabels.length === 1) {
-    filters.push(`${audioLabels[0]}apad=whole_dur=${total},atrim=0:${total}[aout]`);
-  } else {
-    filters.push(
-      `${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=longest:normalize=0:dropout_transition=0,` +
-        `apad=whole_dur=${total},atrim=0:${total}[aout]`,
-    );
+  if (!preview) {
+    if (audioLabels.length === 0) {
+      filters.push(`anullsrc=r=48000:cl=stereo,atrim=0:${total}[aout]`);
+    } else if (audioLabels.length === 1) {
+      filters.push(`${audioLabels[0]}apad=whole_dur=${total},atrim=0:${total}[aout]`);
+    } else {
+      filters.push(
+        `${audioLabels.join('')}amix=inputs=${audioLabels.length}:duration=longest:normalize=0:dropout_transition=0,` +
+          `apad=whole_dur=${total},atrim=0:${total}[aout]`,
+      );
+    }
   }
 
   args.push('-filter_complex', filters.join(';'), '-map', `[b${base}]`);

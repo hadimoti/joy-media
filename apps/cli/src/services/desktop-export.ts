@@ -1,16 +1,16 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { projectV3ToDesktopDocuments, type JoyProjectV3 } from '@joy-media/project-schema';
 
 const MAX_MEDIA_BYTES = 256 * 1024 * 1024;
-const FONT_DIRECTORY = fileURLToPath(
-  new URL(
-    '../../../../packages/html-scene-runtime/assets/fonts/noto-sans-arabic/',
-    import.meta.url,
-  ),
-);
+interface NotoSansArabicFace {
+  readonly family: string;
+  readonly weight: number;
+  readonly subset: string;
+  readonly sha256: string;
+  readonly bytes: Uint8Array;
+}
 
 export class DesktopExportError extends Error {
   constructor(
@@ -22,30 +22,26 @@ export class DesktopExportError extends Error {
   }
 }
 
-interface FontManifest {
-  readonly files: readonly {
-    readonly family: string;
-    readonly weight: number;
-    readonly subset: string;
-    readonly file: string;
-    readonly byteLength: number;
-    readonly sha256: string;
-  }[];
-}
-
-function verifyBundledFonts(): ReadonlyMap<number, string> {
-  let manifest: FontManifest;
+async function verifyBundledFonts(): Promise<ReadonlyMap<number, string>> {
+  let faces: NotoSansArabicFace[];
   try {
-    manifest = JSON.parse(
-      readFileSync(join(FONT_DIRECTORY, 'manifest.json'), 'utf8'),
-    ) as FontManifest;
+    const runtime = await import('@joy-media/html-scene-runtime');
+    faces = runtime.loadNotoSansArabicFaces();
   } catch {
     throw new DesktopExportError(
       'DESKTOP_EXPORT_FONT_UNSUPPORTED',
       'The bundled Noto Sans Arabic font manifest is unavailable or invalid.',
     );
   }
-  if (!Array.isArray(manifest.files))
+  if (
+    faces.length !== 4 ||
+    faces.some(
+      (face) =>
+        face.family !== 'Noto Sans Arabic' ||
+        (face.weight !== 400 && face.weight !== 700) ||
+        (face.subset !== 'arabic' && face.subset !== 'latin'),
+    )
+  )
     throw new DesktopExportError(
       'DESKTOP_EXPORT_FONT_UNSUPPORTED',
       'The bundled Noto Sans Arabic font manifest is unavailable or invalid.',
@@ -53,36 +49,27 @@ function verifyBundledFonts(): ReadonlyMap<number, string> {
   const arabicHashes = new Map<number, string>();
   for (const weight of [400, 700]) {
     for (const subset of ['arabic', 'latin']) {
-      const entry = manifest.files.find(
-        (candidate) =>
-          candidate.family === 'Noto Sans Arabic' &&
-          candidate.weight === weight &&
-          candidate.subset === subset,
+      const face = faces.find(
+        (candidate) => candidate.weight === weight && candidate.subset === subset,
       );
-      if (entry === undefined)
+      if (face === undefined)
         throw new DesktopExportError(
           'DESKTOP_EXPORT_FONT_UNSUPPORTED',
           `The bundled Noto Sans Arabic ${subset} font at weight ${weight} is unavailable.`,
         );
-      try {
-        const bytes = readFileSync(join(FONT_DIRECTORY, entry.file));
-        const hash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-        if (bytes.byteLength !== entry.byteLength || hash !== entry.sha256)
-          throw new Error('font integrity mismatch');
-      } catch {
+      const hash = `sha256:${createHash('sha256').update(face.bytes).digest('hex')}`;
+      if (hash !== face.sha256)
         throw new DesktopExportError(
           'DESKTOP_EXPORT_FONT_UNSUPPORTED',
           `The bundled Noto Sans Arabic ${subset} font at weight ${weight} failed integrity verification.`,
         );
-      }
-      if (subset === 'arabic') arabicHashes.set(weight, entry.sha256);
+      if (subset === 'arabic') arabicHashes.set(weight, face.sha256);
     }
   }
   return arabicHashes;
 }
 
-function validateTitleFonts(project: JoyProjectV3): void {
-  const hashes = verifyBundledFonts();
+function validateTitleFonts(project: JoyProjectV3, hashes: ReadonlyMap<number, string>): void {
   const plugin = project.pluginData['joy.contentTemplates'];
   if (plugin === null || typeof plugin !== 'object' || Array.isArray(plugin)) return;
   const instances = (plugin as Record<string, unknown>).instances;
@@ -120,9 +107,9 @@ export function buildDesktopProjectEnvelope(
   project: JoyProjectV3,
   sources: Readonly<Record<string, string>>,
   exportedAt = new Date(),
+  projectedDocuments = projectV3ToDesktopDocuments(project),
 ) {
-  validateTitleFonts(project);
-  const documents = projectV3ToDesktopDocuments(project);
+  const documents = projectedDocuments;
   const media = Object.values(project.assets).map((asset) => {
     const path = sources[asset.id];
     if (path === undefined)
@@ -185,8 +172,25 @@ export function writeDesktopProjectExport(
   sources: Readonly<Record<string, string>>,
   outputPath: string,
   exportedAt = new Date(),
+): void | Promise<void> {
+  const documents = projectV3ToDesktopDocuments(project);
+  const write = () => {
+    const envelope = buildDesktopProjectEnvelope(project, sources, exportedAt, documents);
+    installDesktopEnvelope(envelope, outputPath);
+  };
+  if (process.argv[1]?.includes('joy-media-bundle')) {
+    return verifyBundledFonts().then((hashes) => {
+      validateTitleFonts(project, hashes);
+      write();
+    });
+  }
+  write();
+}
+
+function installDesktopEnvelope(
+  envelope: ReturnType<typeof buildDesktopProjectEnvelope>,
+  outputPath: string,
 ): void {
-  const envelope = buildDesktopProjectEnvelope(project, sources, exportedAt);
   const temporaryPath = join(
     dirname(outputPath),
     `.${basename(outputPath)}.${process.pid}.${Date.now()}.tmp`,
