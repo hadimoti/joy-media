@@ -11,8 +11,8 @@ name: release-candidate-v2
 # Runner placement: this is a public repository, so standard GitHub-hosted
 # runners are free. Candidate validation, Node/CLI contracts with disposable
 # PostgreSQL, editor bundle, and responsive-only checks use `ubuntu-24.04`; the
-# renderer bundle also builds there because the Windows Hyper-V worker exposes
-# only 1 GiB to Node. GitHub-hosted export smoke
+# renderer bundle also builds there because the Windows Hyper-V worker exposed
+# only 1 GiB to Node before its re-provision with 4 GiB. GitHub-hosted export smoke
 # timed out waiting for downloads (the same production bundle passed locally),
 # so media-export browser acceptance and shipped-bundle smoke use the isolated
 # Linux acceptance runner. Fixture-only jobs clear its runner-local service
