@@ -717,7 +717,7 @@ describe('joy render (headless batch render command)', () => {
     },
   );
 
-  it('recovers a dead artifact owner, removes its staging files, and renders', async () => {
+  it('recovers a dead manifest owner and renders, leaving its staging file for a real-media claim', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'joy-render-dead-owner-'));
     const target = join(dir, 'dead-owner.mp4.manifest.json');
     const staging = join(dir, '.dead-owner.mp4.manifest.json.1234.abcdef12.tmp');
@@ -747,7 +747,66 @@ describe('joy render (headless batch render command)', () => {
       expect(result.exitCode).toBe(0);
       expect(result.artifactPath).toBe(target);
       expect(existsSync(target)).toBe(true);
-      expect(existsSync(staging)).toBe(false);
+      // A manifest-only render takes no output lock, so it leaves staging files alone.
+      expect(existsSync(staging)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the staged manifest temp that a real-media journal names when a manifest-only render replaces a dead owner', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-journal-guard-'));
+    const mediaName = 'journal-guard.mp4';
+    const mediaPath = join(dir, mediaName);
+    const manifestPath = join(dir, `${mediaName}.manifest.json`);
+    const lockPath = join(dir, `.${mediaName}.render.lock`);
+    const stagedManifestPath = join(dir, `.${mediaName}.manifest.json.1234.abcdef12.tmp`);
+    writeFileSync(stagedManifestPath, 'staged manifest that the journal names');
+    writeFileSync(
+      `${manifestPath}.owner`,
+      JSON.stringify({ pid: 2_147_000_000, token: 'dead-manifest-owner', createdAt: 1 }),
+    );
+    const lockRecord = JSON.stringify({
+      pid: 2_147_000_000,
+      token: 'dead-journal-guard',
+      startedAt: new Date(1).toISOString(),
+      activePartialPath: null,
+      transaction: {
+        phase: 'committing',
+        mediaPath,
+        stagedMediaPath: join(dir, `.${mediaName}.1234.abcdef12.partial`),
+        mediaBackup: join(dir, `.${mediaName}.1234.abcdef12.backup`),
+        hadMedia: false,
+        manifestPath,
+        stagedManifestPath,
+        manifestBackup: join(dir, `.${mediaName}.manifest.json.1234.abcdef12.backup`),
+        hadManifest: false,
+      },
+    });
+    writeFileSync(lockPath, lockRecord);
+    const project = createDefaultProject('Journal guard', { id: 'journal-guard' });
+    const root = project.compositions['root'] as unknown as { tracks: Array<{ clips: unknown[] }> };
+    root.tracks[0]!.clips.push({
+      id: 'clip',
+      kind: 'video',
+      assetId: 'missing-media',
+      startUs: 0,
+      durationUs: 1_000_000,
+    });
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: dir,
+        concurrency: 1,
+        json: true,
+        manifestOnly: true,
+      });
+      expect(result.exitCode).toBe(0);
+      expect(readFileSync(stagedManifestPath, 'utf8')).toBe(
+        'staged manifest that the journal names',
+      );
+      expect(readFileSync(lockPath, 'utf8')).toBe(lockRecord);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

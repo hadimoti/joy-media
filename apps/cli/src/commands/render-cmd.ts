@@ -1316,7 +1316,9 @@ export async function runHeadlessRender(
           return failure('RENDER_OUTPUT_BUSY', owner.message, totalFrames, totalClips);
         }
         artifactOwnerReleases.push(owner.release);
-        if (owner.replacedStaleRecord) staleOutputTargets.push(target);
+        // A manifest-only render takes no output lock, so it cannot see a real-media journal that
+        // may still name this target's staging files. Only a real-media claim may remove them.
+        if (owner.replacedStaleRecord && realMedia) staleOutputTargets.push(target);
       }
     }
 
