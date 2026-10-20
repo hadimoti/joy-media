@@ -808,8 +808,6 @@ function isCompletePng(bytes: Buffer, width: number, height: number): boolean {
   const idat: Buffer[] = [];
   let bitDepth = 0;
   let colorType = 0;
-  const expectedLength = height * (1 + width * 4);
-  if (!Number.isSafeInteger(expectedLength) || expectedLength < 1) return false;
   while (offset + 12 <= bytes.length) {
     const length = bytes.readUInt32BE(offset);
     const end = offset + length + 12;
@@ -827,7 +825,7 @@ function isCompletePng(bytes: Buffer, width: number, height: number): boolean {
       colorType = bytes[offset + 17] ?? 0;
       if (
         bitDepth !== 8 ||
-        colorType !== 6 ||
+        (colorType !== 2 && colorType !== 6) ||
         bytes[offset + 18] !== 0 ||
         bytes[offset + 19] !== 0 ||
         bytes[offset + 20] !== 0
@@ -844,9 +842,12 @@ function isCompletePng(bytes: Buffer, width: number, height: number): boolean {
     if (type === 'IEND') {
       if (!sawHeader || !sawData || length !== 0 || end !== bytes.length) return false;
       try {
+        const channels = colorType === 6 ? 4 : 3;
+        const expectedLength = height * (1 + width * channels);
+        if (!Number.isSafeInteger(expectedLength) || expectedLength < 1) return false;
         const raw = inflateSync(Buffer.concat(idat), { maxOutputLength: expectedLength });
         if (raw.byteLength !== expectedLength) return false;
-        const stride = 1 + width * 4;
+        const stride = 1 + width * channels;
         for (let y = 0; y < height; y += 1) if ((raw[y * stride] ?? 255) > 4) return false;
         return true;
       } catch {

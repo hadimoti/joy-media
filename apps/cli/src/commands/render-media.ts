@@ -332,6 +332,7 @@ export function planMedia(
     mediaDir?: string | undefined;
     libassAvailable?: boolean;
     canonicalFaceProbe?: CanonicalCaptionFaceProbe;
+    deferDissolveHandleChecks?: boolean;
   },
   fallback: PresetFallback,
   probe: (path: string) => MediaInfo | null = probeMedia,
@@ -614,7 +615,7 @@ export function planMedia(
     const transitionOutUs = dissolveOut.get(entry.clipId) ?? 0;
     // A dissolve takes half its length from the media beyond each edge of the junction.
     // A real clip whose source has no such media cannot be dissolved; stills can always be held.
-    if (!info.isImage && info.durationUs > 0) {
+    if (!options.deferDissolveHandleChecks && !info.isImage && info.durationUs > 0) {
       if (
         transitionOutUs > 0 &&
         sourceInUs + durationUs + transitionOutUs / 2 > info.durationUs + 50_000
@@ -626,7 +627,12 @@ export function planMedia(
         };
       }
     }
-    if (!info.isImage && transitionInUs > 0 && sourceInUs < transitionInUs / 2) {
+    if (
+      !options.deferDissolveHandleChecks &&
+      !info.isImage &&
+      transitionInUs > 0 &&
+      sourceInUs < transitionInUs / 2
+    ) {
       return {
         mode: 'error',
         code: 'unsupported-feature',
@@ -713,10 +719,15 @@ export async function planMediaAsync(
     height: undefined,
     mimeType: 'application/octet-stream',
   };
-  const prepared = planMedia(project, captionOptions, fallback, (path) => {
-    paths.add(path);
-    return placeholder;
-  });
+  const prepared = planMedia(
+    project,
+    { ...captionOptions, deferDissolveHandleChecks: true },
+    fallback,
+    (path) => {
+      paths.add(path);
+      return placeholder;
+    },
+  );
   if (prepared.mode !== 'media' || paths.size === 0) return prepared;
   const probed = new Map<string, MediaInfo | null>();
   for (const path of paths) {

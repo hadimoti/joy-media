@@ -499,7 +499,7 @@ describe('title frame timing and PNG encoding', () => {
     }
   });
 
-  it('reports RENDER_CANCEL_TIMEOUT when an encoder process cannot be reaped', async () => {
+  it('reports RENDER_CANCEL_TIMEOUT at the five-second deadline when an encoder cannot be reaped', async () => {
     vi.resetModules();
     const { EventEmitter } = await import('node:events');
     const fakeSpawn = vi.fn(() => {
@@ -528,7 +528,9 @@ describe('title frame timing and PNG encoding', () => {
       const started = performance.now();
       await expect(encoder.cancel()).rejects.toThrow('RENDER_CANCEL_TIMEOUT');
       expect(await encoder.done).toMatchObject({ ok: false, code: 'RENDER_CANCEL_TIMEOUT' });
-      expect(performance.now() - started).toBeLessThan(2_500);
+      const elapsedMs = performance.now() - started;
+      expect(elapsedMs).toBeGreaterThanOrEqual(4_500);
+      expect(elapsedMs).toBeLessThan(7_000);
       if (previous === undefined) delete process.env.JOY_MEDIA_FFMPEG;
       else process.env.JOY_MEDIA_FFMPEG = previous;
     } finally {

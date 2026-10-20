@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -97,6 +98,7 @@ function redirectStdout(target: StringWritable): () => void {
 }
 
 const tempDir = mkdtempSync(join(tmpdir(), 'joy-render-cmd-test-'));
+const HAS_FFMPEG = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
 const testDbPath = join(tempDir, 'render-test.sqlite3');
 const outDir = join(tempDir, 'renders');
 
@@ -205,6 +207,57 @@ describe('joy render (headless batch render command)', () => {
         publishPreviewAtomically(stagingPath, artifactPath, new AbortController().signal, 1, 1),
       ).toBe(false);
       expect(existsSync(artifactPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a PNG preview with a truncated IDAT chunk', () => {
+    const directory = mkdtempSync(join(tempDir, 'truncated-png-preview-'));
+    const artifactPath = join(directory, 'preview-0.png');
+    const stagingPath = join(directory, '.preview-0-staging.png');
+    const validPng = encodeRgbaPng(1, 1, Uint8Array.from([1, 2, 3, 255]));
+    try {
+      writeFileSync(stagingPath, validPng.subarray(0, validPng.length - 15));
+      expect(
+        publishPreviewAtomically(stagingPath, artifactPath, new AbortController().signal, 1, 1),
+      ).toBe(false);
+      expect(existsSync(artifactPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!HAS_FFMPEG)('publishes a complete PNG written by FFmpeg', () => {
+    const directory = mkdtempSync(join(tempDir, 'ffmpeg-png-preview-'));
+    const artifactPath = join(directory, 'preview-0.png');
+    const stagingPath = join(directory, '.preview-0-staging.png');
+    try {
+      const encoded = spawnSync(
+        'ffmpeg',
+        [
+          '-v',
+          'error',
+          '-f',
+          'lavfi',
+          '-i',
+          'color=c=red:s=2x2:d=0.1',
+          '-frames:v',
+          '1',
+          '-f',
+          'image2pipe',
+          '-vcodec',
+          'png',
+          'pipe:1',
+        ],
+        { encoding: 'buffer' },
+      );
+      expect(encoded.status, encoded.stderr.toString()).toBe(0);
+      writeFileSync(stagingPath, encoded.stdout);
+      expect(
+        publishPreviewAtomically(stagingPath, artifactPath, new AbortController().signal, 2, 2),
+      ).toBe(true);
+      expect(existsSync(artifactPath)).toBe(true);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
