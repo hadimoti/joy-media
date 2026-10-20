@@ -1031,7 +1031,8 @@ test('packaged Monitor samples agree with decoded export frames', async () => {
     await expect
       .poll(() => capturePackagedMonitorFrame(page), {
         message: 'Adding an HTML scene to the packaged project must change Monitor pixels.',
-        timeout: 10_000,
+        // One HTML scene capture can use the renderer's full 15-second budget.
+        timeout: 30_000,
       })
       .not.toBe(frameBeforeScene);
     await seekPackagedPlayhead(page, 0);

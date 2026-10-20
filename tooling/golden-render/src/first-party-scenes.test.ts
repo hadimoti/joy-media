@@ -25,7 +25,8 @@ describe.runIf(findChromiumExecutable() !== undefined)(
     it.each(FIRST_PARTY_SCENES)(
       'pins $id Chromium RGBA frames and proves preview/export pixel parity',
       async (scene) => {
-        const driver = createChromiumSceneDriver({ timeoutMs: 45_000 });
+        // Each capture cold-starts Chromium. CI hosts ran past 45 s, so the budget leaves room.
+        const driver = createChromiumSceneDriver({ timeoutMs: 90_000 });
         const instance = resolveFirstPartySceneInstance(scene.id);
         expect(instance).toBeDefined();
         const runtime = createSandboxedReactScene(scene.manifest, scene.source);
@@ -53,7 +54,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
         // Vitest's worker RPC can publish progress on slower CI hosts.
         await new Promise<void>((resolve) => setImmediate(resolve));
       },
-      90_000,
+      200_000,
     );
 
     afterAll(() => {
@@ -62,7 +63,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
     });
 
     it('builds and exports a reel combining footage/caption motion with two scenes', () => {
-      const driver = createChromiumSceneDriver({ timeoutMs: 45_000 });
+      const driver = createChromiumSceneDriver({ timeoutMs: 90_000 });
       const title = FIRST_PARTY_SCENES[0]!;
       const lowerThird = FIRST_PARTY_SCENES[2]!;
       const instances = [title, lowerThird].map((scene) => {
@@ -109,7 +110,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
         videoCodec: 'h264',
         audioCodec: 'aac',
       });
-    }, 60_000);
+    }, 300_000);
   },
 );
 

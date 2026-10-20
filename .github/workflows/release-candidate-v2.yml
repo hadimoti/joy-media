@@ -314,6 +314,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Locked Playwright Chromium path lookup failed with exit code $LASTEXITCODE." }
           if (-not (Test-Path -LiteralPath $chromiumPath -PathType Leaf)) { throw "Locked Playwright Chromium executable is missing: $chromiumPath" }
           [IO.File]::AppendAllText($env:GITHUB_ENV, "JOY_CHROMIUM_PATH=$chromiumPath$([Environment]::NewLine)")
+      - name: Build editor-web workspace dependencies for the P0 lane
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm --workspace-concurrency=1 --filter @joy-media/editor-web... build
+          if ($LASTEXITCODE -ne 0) { throw "editor-web workspace dependency build failed with exit code $LASTEXITCODE." }
       - name: Run P0 font, browser, and render integration lane
         shell: powershell
         run: |

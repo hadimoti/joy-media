@@ -221,22 +221,29 @@ let activeDeadline = 0;
 function killBrowserTree(pid, deadline = Date.now() + 2000) {
   if (!pid || !Number.isSafeInteger(pid) || pid <= 0) return;
   if (process.platform === 'win32') {
-    const result = spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], { encoding: 'utf8', windowsHide: true, shell: false, timeout: Math.max(1, deadline - Date.now()) });
-    if (result.error || result.status !== 0) {
-      const escapedProfile = workerData.profileDirectory.replace(/'/g, "''");
-      const scan = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$profile='" + escapedProfile + "'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile) } | ForEach-Object { $_.ProcessId }"], { encoding: 'utf8', windowsHide: true, shell: false, timeout: Math.max(1, deadline - Date.now()) });
+    // taskkill and PowerShell startup can use most of a 2-second shared deadline on a loaded host.
+    // Windows cleanup gets its own budget, so a starved scan is not reported as a failed kill.
+    const cleanupDeadline = Math.max(deadline, Date.now() + 10000);
+    const remainingMs = () => Math.max(1, cleanupDeadline - Date.now());
+    const result = spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], { encoding: 'utf8', windowsHide: true, shell: false, timeout: remainingMs() });
+    if (!result.error && result.status === 0) return;
+    // taskkill exits non-zero when a child process exited before its own kill. That is benign, so the
+    // profile scan decides whether any Chromium process survived.
+    const escapedProfile = workerData.profileDirectory.replace(/'/g, "''");
+    const scanProfile = () => {
+      const scan = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$profile='" + escapedProfile + "'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile) } | ForEach-Object { $_.ProcessId }"], { encoding: 'utf8', windowsHide: true, shell: false, timeout: remainingMs() });
       if (scan.error || scan.status !== 0) throw new Error('cannot verify Chromium processes for its isolated profile');
-      const remaining = String(scan.stdout || '').split(/\r?\n/).map((line) => Number(line.trim())).filter((value) => Number.isSafeInteger(value) && value > 0);
+      return String(scan.stdout || '').split(/\r?\n/).map((line) => Number(line.trim())).filter((value) => Number.isSafeInteger(value) && value > 0);
+    };
+    let remaining = scanProfile();
+    for (let attempt = 0; attempt < 2 && remaining.length > 0; attempt += 1) {
       for (const remainingPid of remaining) {
-        if (Date.now() >= deadline) break;
-        spawnSync('taskkill', ['/T', '/F', '/PID', String(remainingPid)], { encoding: 'utf8', windowsHide: true, shell: false, timeout: Math.max(1, deadline - Date.now()) });
+        spawnSync('taskkill', ['/T', '/F', '/PID', String(remainingPid)], { encoding: 'utf8', windowsHide: true, shell: false, timeout: remainingMs() });
       }
-      if (Date.now() >= deadline) throw new Error('Chromium process-tree termination exceeded 2 seconds');
-      const verification = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$profile='" + escapedProfile + "'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile) } | ForEach-Object { $_.ProcessId }"], { encoding: 'utf8', windowsHide: true, shell: false, timeout: Math.max(1, deadline - Date.now()) });
-      if (!verification.error && verification.status === 0 && !String(verification.stdout || '').trim()) return;
-      throw new Error('taskkill failed to stop Chromium process tree ' + pid + ': ' + ((result.stderr || (result.error && result.error.message)) || ('status ' + result.status)));
+      remaining = scanProfile();
     }
-    return;
+    if (remaining.length === 0) return;
+    throw new Error('Chromium process tree survivors after taskkill of ' + pid + ': ' + remaining.join(', ') + ' (' + ((result.stderr || (result.error && result.error.message)) || ('status ' + result.status)) + ')');
   }
   try { process.kill(-pid, 'SIGKILL'); } catch (ignored) {
     try { process.kill(pid, 'SIGKILL'); } catch (alreadyExited) { /* already exited */ }
@@ -701,7 +708,8 @@ export function createChromiumSceneDriver(
     const at = (index: number): number => control[index] ?? 0;
     worker.postMessage({ type, request, shared });
     const budgetMs = timeoutMs;
-    const waitMs = type === 'close' ? 250 + 2_000 + 500 : budgetMs + 2_000;
+    // A Windows worker's cleanup can use its own 10-second budget before it reports.
+    const waitMs = type === 'close' ? 250 + 10_000 + 2_000 + 500 : budgetMs + 2_000;
     const state = Atomics.wait(control, 0, 0, waitMs);
     lastBrowserPid = at(3) > 0 ? at(3) : lastBrowserPid;
     if (state === 'timed-out') {
