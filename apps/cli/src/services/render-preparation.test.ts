@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +17,7 @@ import {
   validateRenderPreparation,
   projectHasTitles,
   resolveExecutable,
+  setRenderPreparationSpawnForTests,
   type RenderPreparationFacts,
 } from './render-preparation.js';
 import type { CliProjectDocument } from '../utils/project-loader.js';
@@ -101,6 +103,35 @@ const project = {
 } as unknown as CliProjectDocument;
 
 describe('RenderPreparationV1', () => {
+  it('kills an aborted executable lookup and rejects when the child never closes', async () => {
+    vi.useFakeTimers();
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: null;
+      stderr: null;
+      kill: ReturnType<typeof vi.fn>;
+    };
+    child.stdout = null;
+    child.stderr = null;
+    child.kill = vi.fn(() => true);
+    setRenderPreparationSpawnForTests(() => child as never);
+    const controller = new AbortController();
+    let resolved = false;
+    const lookup = resolveExecutable('fake-ffmpeg', controller.signal).then((value) => {
+      resolved = true;
+      return value;
+    });
+    const rejection = expect(lookup).rejects.toThrow('failed to terminate');
+
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await rejection;
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(resolved).toBe(false);
+    setRenderPreparationSpawnForTests(undefined);
+    vi.useRealTimers();
+  });
+
   it('activates title preparation from deck enablement instead of the raw track flag', () => {
     const active = {
       ...project,

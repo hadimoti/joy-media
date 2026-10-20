@@ -378,12 +378,22 @@ describe('render parity and unsupported-feature contract', () => {
     ).toBeDefined();
     expect(missingCanonicalFontCodePoints(latinBoldFace!, titleLine)).toContain(rocket);
 
-    const document = projectDoc({ id: 'persian-title-uncovered-glyph' }) as {
+    // A title is checked only while its clip is on an enabled video track, so the fixture places it there.
+    const document = projectDoc({
+      id: 'persian-title-uncovered-glyph',
+      tracks: [{ id: 'title-track', clips: [{ id: 'title-clip', durationUs: 2_000_000 }] }],
+    }) as {
       pluginData: Record<string, unknown>;
     };
     document.pluginData['joy.contentTemplates'] = {
       version: 1,
-      instances: { title: { font: { weight: 700 }, lines: { primary: titleLine, secondary: '' } } },
+      instances: {
+        title: {
+          clipId: 'title-clip',
+          font: { weight: 700 },
+          lines: { primary: titleLine, secondary: '' },
+        },
+      },
     };
     const facts: RenderPreparationFacts = {
       libassProbe: {
@@ -419,7 +429,7 @@ describe('render parity and unsupported-feature contract', () => {
     expect(refusal).toMatchObject({ code: 'FONT_UNSUPPORTED_GLYPH' });
   });
 
-  it('renders Persian captions when the canonical face probe is usable and refuses honestly otherwise', async () => {
+  it('changes the caption band when Persian captions render and refuses when the canonical face is unavailable', async () => {
     if (!sandbox) throw new Error('render parity sandbox was not created');
     const id = 'persian-caption-face-contract';
     const document: Record<string, unknown> = projectDoc({
@@ -566,7 +576,7 @@ describe('render parity and unsupported-feature contract', () => {
     const minimumPersianInkPixels = Math.ceil(captionBandPixels * 0.0001);
     expect(
       captionBandDifferencePixels(mediaPath, baselineMediaPath),
-      `Persian caption band must differ from the no-caption render by more than ${minimumPersianInkPixels} pixels (0.01% of the lower fifth band)`,
+      `caption band change detection must exceed ${minimumPersianInkPixels} pixels (0.01% of the lower fifth band)`,
     ).toBeGreaterThan(minimumPersianInkPixels);
   });
 

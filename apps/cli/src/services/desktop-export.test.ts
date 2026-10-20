@@ -37,7 +37,7 @@ function fixture(bytes = Buffer.from('original media')) {
 
 describe('desktop project export envelope', () => {
   it('exports an audio clip that references its embedded asset', () => {
-    const { project, sources, id } = fixture();
+    const { project, sources, id, bytes } = fixture();
     const audioProject = structuredClone(project) as unknown as {
       assets: Record<string, { kind: string; descriptor: { mimeType: string } }>;
       rootCompositionId: string;
@@ -76,6 +76,13 @@ describe('desktop project export envelope', () => {
         (candidate) => candidate.id === 'audio-track',
       )!.clips,
     ).toContainEqual(expect.objectContaining({ id: 'audio-clip', assetId: id }));
+    expect(envelope.media).toContainEqual(
+      expect.objectContaining({
+        asset: expect.objectContaining({ id }),
+        status: 'embedded',
+        dataBase64: bytes.toString('base64'),
+      }),
+    );
   });
 
   it('projects the v3 project and embeds verified original media', () => {

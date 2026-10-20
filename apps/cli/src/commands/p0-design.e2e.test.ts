@@ -763,7 +763,7 @@ async function runStep(
 }
 
 describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
-  it('runs the complete P0 media, title, audio, captions, cancellation and desktop-export slice', async () => {
+  it('runs the P0 slice with independently checked font bytes and FFmpeg version plus reported Chromium', async () => {
     expect(
       existsSync(BUNDLE),
       `Bundled CLI is missing at ${BUNDLE}; run tsc and apps/cli/scripts/bundle.mjs first.`,
@@ -1021,6 +1021,10 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         ffmpegVersionLine: expect.stringMatching(/^ffmpeg version /iu),
       });
 
+      // fontManifestHashes are independently verified against bundled font bytes; FFmpeg's
+      // version line is independently queried below. chromiumVersion is self-reported by the
+      // render and then included in the fingerprint, so that fingerprint does not independently
+      // verify Chromium.
       // (a) fontManifestHashes: each hash must equal the sha256 of one of the four bundled
       // Noto Sans Arabic font files named in packages/html-scene-runtime/assets/fonts/noto-sans-arabic/manifest.json.
       const fontManifestPath = existsSync(
@@ -1060,8 +1064,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       const expectedFfmpegVersionLine = ffmpegProbe.stdout.split(/\r?\n/, 1)[0] ?? '';
       expect(renderManifest.rendererFacts.ffmpegVersionLine).toBe(expectedFfmpegVersionLine);
 
-      // chromiumVersion is reported rather than independently probed, because a second
-      // browser launch would add cost and risk to the test.
+      // chromiumVersion is only self-reported; a second browser launch would add cost and risk.
       expect(renderManifest.rendererFacts.chromiumVersion.trim()).not.toBe('');
       expect(renderManifest.rendererFacts.fontManifestHashes.length).toBeGreaterThan(0);
       expect(

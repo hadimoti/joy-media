@@ -156,36 +156,77 @@ let chromiumProbeForTests: ChromiumProbe | undefined;
 export function setRenderPreparationChromiumProbeForTests(probe: ChromiumProbe | undefined): void {
   chromiumProbeForTests = probe;
 }
+type RenderPreparationSpawn = typeof spawn;
+let renderPreparationSpawn: RenderPreparationSpawn = spawn;
+export function setRenderPreparationSpawnForTests(
+  spawner: RenderPreparationSpawn | undefined,
+): void {
+  renderPreparationSpawn = spawner ?? spawn;
+}
 export type PreparationCommandResult = { readonly status: number | null; readonly output: string };
 export type PreparationCommandRunner = (
   binary: string,
   args: readonly string[],
   options: { readonly signal?: AbortSignal; readonly timeoutMs: number; readonly cwd?: string },
 ) => Promise<PreparationCommandResult>;
+const PREPARATION_TERMINATION_GRACE_MS = 5_000;
 let preparationCommandRunner: PreparationCommandRunner = (binary, args, options) =>
   new Promise((resolve, reject) => {
-    const child = spawn(binary, [...args], {
-      signal: options.signal,
-      timeout: options.timeoutMs,
+    const child = renderPreparationSpawn(binary, [...args], {
       windowsHide: true,
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     });
     let output = '';
     let settled = false;
+    let stopError: unknown;
+    let terminationTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (status: number | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (terminationTimer !== undefined) clearTimeout(terminationTimer);
+      options.signal?.removeEventListener('abort', abort);
+      if (stopError !== undefined) reject(stopError);
+      else resolve({ status, output });
+    };
+    const terminate = (error: unknown): void => {
+      if (settled || stopError !== undefined) return;
+      stopError = error;
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // The process may have exited before termination was requested.
+      }
+      terminationTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutTimer);
+        options.signal?.removeEventListener('abort', abort);
+        reject(
+          new Error(
+            `Preparation command failed to terminate within ${PREPARATION_TERMINATION_GRACE_MS}ms.`,
+          ),
+        );
+      }, PREPARATION_TERMINATION_GRACE_MS);
+    };
+    const abort = (): void =>
+      terminate(
+        options.signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'),
+      );
+    const timeoutTimer = setTimeout(() => {
+      const error = Object.assign(new Error('Preparation command timed out.'), {
+        code: 'ETIMEDOUT',
+      });
+      terminate(error);
+    }, options.timeoutMs);
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => (output += chunk));
     child.stderr?.on('data', (chunk: string) => (output += chunk));
-    child.once('error', (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    });
-    child.once('close', (status) => {
-      if (settled) return;
-      settled = true;
-      resolve({ status, output });
-    });
+    child.once('error', terminate);
+    child.once('close', finish);
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) abort();
   });
 
 export function setRenderPreparationCommandRunnerForTests(
@@ -532,19 +573,28 @@ export async function resolveExecutable(binary: string, signal?: AbortSignal): P
       `SETUP_REQUIRED: FFmpeg executable was not found at its configured absolute path ${JSON.stringify(binary)}. Install FFmpeg or set JOY_MEDIA_FFMPEG to a valid path.`,
     );
   }
-  const child = spawn(process.platform === 'win32' ? 'where.exe' : 'which', [binary], {
-    windowsHide: true,
-    ...(signal === undefined ? {} : { signal }),
-  });
+  const child = renderPreparationSpawn(
+    process.platform === 'win32' ? 'where.exe' : 'which',
+    [binary],
+    {
+      windowsHide: true,
+      ...(signal === undefined ? {} : { signal }),
+    },
+  );
   let output = '';
   return new Promise<string>((resolve, reject) => {
     let settled = false;
+    let stopReason: 'abort' | 'timeout' | 'error' | undefined;
+    let terminationTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (path: string | undefined): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (terminationTimer !== undefined) clearTimeout(terminationTimer);
       signal?.removeEventListener('abort', abort);
-      if (path !== undefined && isAbsolute(path)) resolve(path);
+      if (stopReason === 'abort')
+        reject(signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+      else if (path !== undefined && isAbsolute(path)) resolve(path);
       else
         reject(
           new CommandFailure(
@@ -553,36 +603,40 @@ export async function resolveExecutable(binary: string, signal?: AbortSignal): P
           ),
         );
     };
-    const abort = (): void => {
+    const terminate = (reason: 'abort' | 'timeout' | 'error'): void => {
+      if (settled || stopReason !== undefined) return;
+      stopReason = reason;
       try {
         child.kill('SIGKILL');
       } catch {
         // The lookup may have exited concurrently.
       }
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+      terminationTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        reject(
+          new Error(
+            `Executable lookup failed to terminate within ${PREPARATION_TERMINATION_GRACE_MS}ms.`,
+          ),
+        );
+      }, PREPARATION_TERMINATION_GRACE_MS);
     };
+    const abort = (): void => terminate('abort');
     const timer = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // A timed-out lookup may already have exited.
-      }
-      finish(undefined);
+      terminate('timeout');
     }, 5_000);
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => (output += chunk));
     child.once('error', (error) => {
-      if (signal?.aborted) abort();
-      else {
-        void error;
-        finish(undefined);
-      }
+      void error;
+      terminate(signal?.aborted ? 'abort' : 'error');
     });
     child.once('close', (status) =>
-      finish(status === 0 ? output.split(/\r?\n/, 1)[0]?.trim() : undefined),
+      finish(
+        stopReason === undefined && status === 0 ? output.split(/\r?\n/, 1)[0]?.trim() : undefined,
+      ),
     );
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();

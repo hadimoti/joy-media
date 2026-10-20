@@ -1036,7 +1036,7 @@ describe('joy render (headless batch render command)', () => {
     expect(desktopItems.find((item) => item.trackId === 'low')?.trackEnabled).toBe(false);
   });
 
-  it('uses deck activation for title preparation and drawing even when raw track is disabled', async () => {
+  it('uses deck activation for title source collection and preparation refusal when raw track is disabled', async () => {
     const project = createDefaultProject('Deck enabled title');
     const composition = project.compositions['root'] as unknown as {
       tracks: Array<{ id: string; enabled?: boolean; clips: Array<{ id: string }> }>;

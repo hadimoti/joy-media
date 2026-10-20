@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { cliBuildInputs, isCliBuildStale } from './harness.js';
 
 describe('CLI build staleness', () => {
-  it('watches every CLI workspace dependency source and the bundler script', () => {
+  it('returns every CLI workspace dependency source and the bundler script as build inputs', () => {
     const inputs = cliBuildInputs('cli-root', 'repo-root');
 
     expect(inputs).toContain(join('repo-root', 'packages', 'html-scene-runtime', 'src'));
