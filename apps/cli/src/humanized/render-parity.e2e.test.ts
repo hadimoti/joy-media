@@ -26,6 +26,50 @@ const hasFfmpeg = (): boolean => {
   );
 };
 
+function captionBandDifferencePixels(withCaptions: string, withoutCaptions: string): number {
+  const band = (path: string): Buffer => {
+    const decoded = spawnSync(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-ss',
+        '0.5',
+        '-i',
+        path,
+        '-vf',
+        'crop=iw:ih/5:0:ih*4/5',
+        '-frames:v',
+        '1',
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'rgb24',
+        'pipe:1',
+      ],
+      { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 },
+    );
+    if (decoded.status !== 0) throw new Error(decoded.stderr.toString('utf8'));
+    return Buffer.from(decoded.stdout);
+  };
+  const caption = band(withCaptions);
+  const baseline = band(withoutCaptions);
+  if (caption.length !== baseline.length || caption.length % 3 !== 0)
+    throw new Error('Caption and baseline band decodes have incompatible dimensions.');
+  let changed = 0;
+  for (let index = 0; index < caption.length; index += 3) {
+    if (
+      Math.max(
+        Math.abs(caption[index]! - baseline[index]!),
+        Math.abs(caption[index + 1]! - baseline[index + 1]!),
+        Math.abs(caption[index + 2]! - baseline[index + 2]!),
+      ) > 12
+    )
+      changed++;
+  }
+  return changed;
+}
+
 function decodedPcm(path: string): Float32Array {
   const result = spawnSync(
     'ffmpeg',
@@ -492,6 +536,38 @@ describe('render parity and unsupported-feature contract', () => {
     };
     expect(media.streams.some((stream) => stream.codec_type === 'video')).toBe(true);
     expect(Number(media.format.duration)).toBeCloseTo(1, 2);
+
+    const baselineId = `${id}-without-captions`;
+    const baselineDocument = projectDoc({
+      id: baselineId,
+      width: 1080,
+      height: 1920,
+      durationUs: 1_000_000,
+      frameRate: { num: 30, den: 1 },
+      tracks: [
+        { id: 'video-1', clips: [{ id: 'picture', assetId: source, durationUs: 1_000_000 }] },
+      ],
+    });
+    const baselineProjectPath = writeSandboxFile(sandbox, `${baselineId}.json`, baselineDocument);
+    const baselineOutputDirectory = sandbox.path('output', baselineId);
+    const baselineResult = await sandbox.run([
+      'render',
+      '--project',
+      baselineProjectPath,
+      '--out',
+      baselineOutputDirectory,
+      '--json',
+    ]);
+    expect(baselineResult.code, describeRun(baselineResult)).toBe(0);
+    const baselineComplete = expectNdjsonContract(baselineResult, ['complete']).at(-1)!;
+    const baselineMediaPath = String(baselineComplete['mediaPath']);
+    expect(existsSync(baselineMediaPath)).toBe(true);
+    const captionBandPixels = 1080 * (1920 / 5);
+    const minimumPersianInkPixels = Math.ceil(captionBandPixels * 0.0001);
+    expect(
+      captionBandDifferencePixels(mediaPath, baselineMediaPath),
+      `Persian caption band must differ from the no-caption render by more than ${minimumPersianInkPixels} pixels (0.01% of the lower fifth band)`,
+    ).toBeGreaterThan(minimumPersianInkPixels);
   });
 
   // Gain, mute and fades are rendered now (timeline-audio.e2e.test.ts checks the decoded sound).

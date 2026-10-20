@@ -5,7 +5,7 @@
  * Real binary and real ffmpeg; fixtures are generated inside the sandbox.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { probeCanonicalCaptionFace } from '../commands/render-features.js';
@@ -53,11 +53,6 @@ async function expectCaptionOutcome(
   outputDirectory: string,
   usableOutcome: (result: RunResult) => void | Promise<void>,
 ): Promise<void> {
-  if (faceProbe.usable) {
-    await usableOutcome(await render());
-    return;
-  }
-
   const operationsPath = sandbox.path(`${projectId}-caption-prepare.operations.json`);
   const planPath = sandbox.path(`${projectId}-caption-prepare.plan.json`);
   writeFileSync(operationsPath, JSON.stringify({ schemaVersion: 1, operations: [] }));
@@ -71,17 +66,40 @@ async function expectCaptionOutcome(
     planPath,
     '--json',
   ]);
-  expect(preparation.code, describeRun(preparation)).toBe(1);
-  expect(errorCode(preparation)).toBe('SETUP_REQUIRED');
-  const setupMessage = (preparation.json() as { message: string }).message;
-  expect(JSON.parse(setupMessage.slice(setupMessage.indexOf('{')))).toMatchObject({
-    kind: 'canonical-caption-face-unavailable',
-  });
-  expect(existsSync(planPath), 'unusable caption setup must not write a plan').toBe(false);
-  const renderResult = await render();
-  expect(renderResult.code, describeRun(renderResult)).toBe(1);
-  expect(errorCode(renderResult)).toBe('RENDER_PREPARATION_REQUIRED');
-  expect(existsSync(outputDirectory) ? readdirSync(outputDirectory) : []).toEqual([]);
+  if (!faceProbe.usable) {
+    expect(preparation.code, describeRun(preparation)).toBe(1);
+    expect(errorCode(preparation)).toBe('SETUP_REQUIRED');
+    const setupMessage = (preparation.json() as { message: string }).message;
+    expect(JSON.parse(setupMessage.slice(setupMessage.indexOf('{')))).toMatchObject({
+      kind: 'canonical-caption-face-unavailable',
+    });
+    expect(existsSync(planPath), 'unusable caption setup must not write a plan').toBe(false);
+    const unpreparedRender = await render();
+    expect(unpreparedRender.code, describeRun(unpreparedRender)).toBe(1);
+    expect(errorCode(unpreparedRender)).toBe('RENDER_PREPARATION_REQUIRED');
+    expect(
+      existsSync(outputDirectory) ? readdirSync(outputDirectory) : [],
+      'unusable caption setup must not write render output',
+    ).toEqual([]);
+    return;
+  }
+
+  expect(preparation.code, describeRun(preparation)).toBe(0);
+  const preparedPlan = JSON.parse(readFileSync(planPath, 'utf8')) as { baseRevision: number };
+  const applied = await sandbox.run([
+    'plan',
+    'apply',
+    planPath,
+    '--project',
+    projectId,
+    '--expected-revision',
+    String(preparedPlan.baseRevision),
+    '--idempotency-key',
+    `${projectId}-caption-apply`,
+    '--json',
+  ]);
+  expect(applied.code, describeRun(applied)).toBe(0);
+  await usableOutcome(await render());
 }
 
 describe('captions are drawn over the picture while they are on screen', () => {

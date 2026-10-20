@@ -327,7 +327,7 @@ describe('joy render (headless batch render command)', () => {
     }
   });
 
-  it('refuses a normal render output that resolves to an input file', async () => {
+  it('refuses a manifest-only output that resolves to an input at the manifest path', async () => {
     const directory = mkdtempSync(join(tempDir, 'render-output-collision-'));
     const inputPath = join(directory, 'collision.mp4.manifest.json');
     const original = Buffer.from('original input bytes');
@@ -351,6 +351,70 @@ describe('joy render (headless batch render command)', () => {
       expect(readFileSync(inputPath)).toEqual(original);
     } finally {
       restore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses real media output that resolves to a video input before rendering', async () => {
+    const directory = mkdtempSync(join(tempDir, 'render-media-output-collision-'));
+    const mediaPath = join(directory, 'collision.mp4');
+    const manifestPath = `${mediaPath}.manifest.json`;
+    const original = Buffer.from('placeholder input bytes, deliberately not a video');
+    writeFileSync(mediaPath, original);
+    const project = createDefaultProject('Collision', { id: 'collision' });
+    const root = project.compositions['root'] as unknown as {
+      tracks: Array<{ clips: unknown[] }>;
+    };
+    root.tracks[0]!.clips.push({
+      id: 'collision-video',
+      kind: 'video',
+      assetId: mediaPath,
+      startUs: 0,
+      durationUs: 1_000_000,
+      sourceInUs: 0,
+    });
+    (project.assets as Record<string, unknown>)[mediaPath] = { id: mediaPath, kind: 'video' };
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
+    let mediaProbes = 0;
+    setMediaProbeSpawnForTests(() => {
+      mediaProbes++;
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null as number | null,
+        kill: vi.fn(() => true),
+      });
+      setTimeout(() => {
+        child.stdout.end(
+          JSON.stringify({
+            streams: [{ codec_type: 'video', width: 320, height: 240, pix_fmt: 'yuv420p' }],
+            format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2', duration: '1.0' },
+          }),
+        );
+        child.exitCode = 0;
+        child.emit('close', 0, null);
+      }, 0);
+      return child as never;
+    });
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: directory,
+        concurrency: 1,
+        json: true,
+      });
+      expect(result.exitCode).toBe(1);
+      const event = JSON.parse(capture.text().trim()) as { code: string; message: string };
+      expect(event.code).toBe('RENDER_OUTPUT_COLLIDES_WITH_INPUT');
+      expect(event.message).toContain(mediaPath);
+      expect(readFileSync(mediaPath)).toEqual(original);
+      expect(existsSync(manifestPath)).toBe(false);
+      expect(mediaProbes).toBe(1);
+    } finally {
+      restore();
+      setMediaProbeSpawnForTests(undefined);
       rmSync(directory, { recursive: true, force: true });
     }
   });

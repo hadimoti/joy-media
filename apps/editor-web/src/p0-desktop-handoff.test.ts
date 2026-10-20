@@ -38,6 +38,14 @@ import { renderP0DesktopCompositorFrame } from './p0-desktop-handoff-harness.js'
 const hash = (bytes: ArrayLike<number>): string =>
   createHash('sha256').update(Buffer.from(bytes)).digest('hex');
 
+function nonTransparentPixels(rgba: Uint8Array): number {
+  let count = 0;
+  for (let index = 3; index < rgba.length; index += 4) {
+    if (rgba[index]! > 0) count++;
+  }
+  return count;
+}
+
 function makeInstance(
   templateId: 'joy.p0.lower-third' | 'joy.p0.title',
   weight: 400 | 700,
@@ -1329,6 +1337,15 @@ describe('P0 desktop title handoff', () => {
           );
           const cliRgba = decodeFilterZeroRgbaPng(png);
           const desktopRgba = Buffer.from(surface.data);
+          const minimumInkPixels = 100;
+          expect(
+            nonTransparentPixels(cliRgba),
+            `${operationId}: CLI title surface must contain more than ${minimumInkPixels} non-transparent pixels`,
+          ).toBeGreaterThan(minimumInkPixels);
+          expect(
+            nonTransparentPixels(desktopRgba),
+            `${operationId}: desktop title surface must contain more than ${minimumInkPixels} non-transparent pixels`,
+          ).toBeGreaterThan(minimumInkPixels);
           let firstDifference = -1;
           for (let index = 0; index < cliRgba.length; index++) {
             if (cliRgba[index] !== desktopRgba[index]) {
@@ -1481,7 +1498,8 @@ describe('P0 desktop title handoff', () => {
     expect(plateBounds.bottom).toBeGreaterThanOrEqual(expectedPlate.y + expectedPlate.height - 2);
   }, 180_000);
 
-  it('refuses a desktop font whose bytes do not match the descriptor', async () => {
+  // The fetched-bytes path is not covered because the harness exposes no font-source override.
+  it('refuses a desktop title whose font descriptor hash disagrees with the bundled bytes', async () => {
     const valid = makeInstance('joy.p0.title', 400, 'Wrong hash must be refused', 'ltr', 'hold');
     const wrongHash = { ...valid, font: { ...valid.font, sha256: '0'.repeat(64) } };
     const response = await runP0DesktopHandoff([

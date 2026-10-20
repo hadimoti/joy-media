@@ -299,17 +299,36 @@ describe('RenderPreparationV1', () => {
       (face) => !selected.has(`${face.family}:${face.weight}:${face.subset}`),
     );
     expect(unselectedIndex).toBeGreaterThanOrEqual(0);
-    const changedFaces = facts.canonicalFaces.map((face, index) =>
-      index === unselectedIndex
-        ? { ...face, sha256: 'sha256:changed-unselected-face' as `sha256:${string}` }
-        : face,
-    );
-
-    await expect(
-      validateRenderPreparation(saved, { ...facts, canonicalFaces: changedFaces }),
-    ).rejects.toMatchObject({
-      code: 'RENDER_ENVIRONMENT_DRIFT',
+    const directory = mkdtempSync(join(tmpdir(), 'joy-canonical-font-bytes-'));
+    const fontPaths = facts.canonicalFaces.map((face, index) => {
+      const path = join(directory, `${index}.woff2`);
+      writeFileSync(path, face.bytes);
+      return path;
     });
+    try {
+      const changedPath = fontPaths[unselectedIndex]!;
+      const changedBytes = readFileSync(changedPath);
+      changedBytes[0] = changedBytes[0]! ^ 0xff;
+      writeFileSync(changedPath, changedBytes);
+      setRenderPreparationFactsProviderForTests(async () => ({
+        ...facts,
+        canonicalFaces: facts.canonicalFaces.map((face, index) => {
+          const bytes = readFileSync(fontPaths[index]!);
+          return {
+            ...face,
+            bytes,
+            sha256: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+          };
+        }),
+      }));
+
+      await expect(validateRenderPreparation(saved)).rejects.toMatchObject({
+        code: 'RENDER_ENVIRONMENT_DRIFT',
+      });
+    } finally {
+      setRenderPreparationFactsProviderForTests(undefined);
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('excludes a title on a track disabled by the normalized timeline deck', () => {
@@ -690,7 +709,10 @@ describe('RenderPreparationV1', () => {
           chromiumExecutablePath: executablePath,
           expectedChromiumSha256: 'sha256:recorded-chromium',
         }),
-      ).rejects.toMatchObject({ code: 'RENDER_ENVIRONMENT_DRIFT' });
+      ).rejects.toMatchObject({
+        code: 'RENDER_ENVIRONMENT_DRIFT',
+        message: expect.stringMatching(/chromium/i),
+      });
       expect(probes).toBe(0);
     } finally {
       setRenderPreparationCommandRunnerForTests(undefined);

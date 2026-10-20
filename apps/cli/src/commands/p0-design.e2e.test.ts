@@ -13,6 +13,7 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { templateSha256 } from '@joy-media/motion-core';
 
 const BUNDLE = resolve('apps/cli/dist/joy-media-bundle.mjs');
 const ROI = Object.freeze({ x: 40, y: 250, width: 1120, height: 300 });
@@ -976,13 +977,13 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         elapsed,
         `5-second 720p 30 fps render took ${elapsed}ms; limit is ${RENDER_LIMIT_MS}ms`,
       ).toBeLessThanOrEqual(RENDER_LIMIT_MS);
-      const retainedRgbaBytes = RENDER_WIDTH * RENDER_HEIGHT * RGBA_BYTES_PER_PIXEL;
+      const computedSingleSurfaceRgbaBytes = RENDER_WIDTH * RENDER_HEIGHT * RGBA_BYTES_PER_PIXEL;
       expect(
-        retainedRgbaBytes,
-        `measured peak retained RGBA is ${retainedRgbaBytes} bytes (${(retainedRgbaBytes / 1024 / 1024).toFixed(2)} MiB): title capture holds one ${RENDER_WIDTH}x${RENDER_HEIGHT} RGBA surface at a time; limit is ${RENDER_RETAINED_RGBA_LIMIT_BYTES} bytes (256 MiB)`,
+        computedSingleSurfaceRgbaBytes,
+        `computed size of one ${RENDER_WIDTH}x${RENDER_HEIGHT} RGBA surface is ${computedSingleSurfaceRgbaBytes} bytes (${(computedSingleSurfaceRgbaBytes / 1024 / 1024).toFixed(2)} MiB); this is not a measured process peak; limit is ${RENDER_RETAINED_RGBA_LIMIT_BYTES} bytes (256 MiB)`,
       ).toBeLessThanOrEqual(RENDER_RETAINED_RGBA_LIMIT_BYTES);
       console.info(
-        `P0-4 measured title render: ${elapsed}ms; peak retained RGBA ${retainedRgbaBytes} bytes (${(retainedRgbaBytes / 1024 / 1024).toFixed(2)} MiB).`,
+        `P0-4 title render: ${elapsed}ms; computed single-surface RGBA size ${computedSingleSurfaceRgbaBytes} bytes (${(computedSingleSurfaceRgbaBytes / 1024 / 1024).toFixed(2)} MiB); process peak memory was not measured.`,
       );
       renderOutput = lastEvent(result, 'MP4 render');
       expect(renderOutput.type).toBe('complete');
@@ -1013,7 +1014,31 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
           }),
         ]),
       );
-      expect(renderManifest.renderer.facts ?? renderManifest.renderer).toBeDefined();
+      expect(renderManifest.rendererFacts).toMatchObject({
+        chromiumVersion: expect.any(String),
+        fontManifestHashes: expect.any(Array),
+        ffmpegVersionLine: expect.stringMatching(/^ffmpeg version /iu),
+      });
+      expect(renderManifest.rendererFacts.chromiumVersion.trim()).not.toBe('');
+      expect(renderManifest.rendererFacts.fontManifestHashes.length).toBeGreaterThan(0);
+      expect(
+        renderManifest.rendererFacts.fontManifestHashes.every((value: unknown) =>
+          /^(?:sha256:)?[a-f0-9]{64}$/u.test(String(value)),
+        ),
+      ).toBe(true);
+      const expectedRendererFingerprint = createHash('sha256')
+        .update(
+          JSON.stringify({
+            ffmpegVersion: renderManifest.rendererFacts.ffmpegVersionLine,
+            chromiumVersion: renderManifest.rendererFacts.chromiumVersion,
+            templateSha256: renderManifest.design.instances.map((instance: JsonRecord) =>
+              templateSha256(instance.templateId),
+            ),
+            fontManifestHashes: renderManifest.rendererFacts.fontManifestHashes,
+          }),
+        )
+        .digest('hex');
+      expect(renderManifest.renderer.fingerprint).toBe(expectedRendererFingerprint);
       const probed = ffprobeJson(renderPath);
       const video = probed.streams.filter((stream: JsonRecord) => stream.codec_type === 'video');
       const audio = probed.streams.filter((stream: JsonRecord) => stream.codec_type === 'audio');
@@ -1145,6 +1170,42 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         'second title text must change pixels in title ROI',
       ).toBeGreaterThan(0);
       expectEqualOutsideRoi(oldPixels, newPixels, 1280, 720, 'first/second title text frames');
+
+      const secondRender = runCli(
+        [
+          'render',
+          '--project',
+          primary.file,
+          '--preset',
+          'mp4',
+          '--out',
+          join(outputDir, 'primary-second-title'),
+          '--json',
+        ],
+        'second title MP4 render',
+      );
+      expect(secondRender.code, 'second title MP4 render exit status').toBe(0);
+      const secondRenderEvent = lastEvent(secondRender, 'second title MP4 render');
+      expect(secondRenderEvent).toMatchObject({ type: 'complete', mediaProduced: true });
+      const secondRenderPath = String(secondRenderEvent.mediaPath);
+      expect(existsSync(secondRenderPath)).toBe(true);
+      const firstMp4Frame = decodeRgbaFrame(renderPath, 60, 'decode first title MP4 frame 60');
+      const secondMp4Frame = decodeRgbaFrame(
+        secondRenderPath,
+        60,
+        'decode second title MP4 frame 60',
+      );
+      expect(
+        changedPixels(firstMp4Frame, secondMp4Frame, RENDER_WIDTH, ROI, 0, RGBA_BYTES_PER_PIXEL),
+        'second MP4 title must differ from the first render in the title ROI',
+      ).toBeGreaterThan(0);
+      compareOutsideCodecBlockRoi(
+        firstMp4Frame,
+        secondMp4Frame,
+        RENDER_WIDTH,
+        RENDER_HEIGHT,
+        'decoded first/second title MP4 frames outside the title region',
+      );
     });
 
     await runStep(9, 'decoded audio gain, fade and mute envelope', () => {

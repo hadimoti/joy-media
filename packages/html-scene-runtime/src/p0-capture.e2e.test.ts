@@ -8,6 +8,30 @@ import { rational } from '@joy-media/project-schema';
 import { createChromiumSceneDriver, findChromiumExecutable } from './chromium-driver.js';
 import { scenePaintFontDescriptors } from './font-descriptors.js';
 
+function inkPixelsAgainstPlate(
+  rendered: Uint8Array,
+  plate: Uint8Array,
+  width: number,
+  box: { x: number; y: number; width: number; height: number },
+): number {
+  let count = 0;
+  for (let y = box.y; y < box.y + box.height; y++) {
+    for (let x = box.x; x < box.x + box.width; x++) {
+      const offset = (y * width + x) * 4;
+      if (
+        Math.max(
+          Math.abs(rendered[offset]! - plate[offset]!),
+          Math.abs(rendered[offset + 1]! - plate[offset + 1]!),
+          Math.abs(rendered[offset + 2]! - plate[offset + 2]!),
+          Math.abs(rendered[offset + 3]! - plate[offset + 3]!),
+        ) > 12
+      )
+        count++;
+    }
+  }
+  return count;
+}
+
 // The browser test runs wherever Chromium is installed. Where JOY_REQUIRE_CHROMIUM=1 says the browser
 // must exist (the real-services lane installs it), a missing browser makes the test fail instead.
 const requireChromium = process.env.JOY_REQUIRE_CHROMIUM === '1';
@@ -67,6 +91,26 @@ describe.runIf(requireChromium || findChromiumExecutable() !== undefined)(
       try {
         const first = driver.capture(request);
         const second = driver.capture(request);
+        const plateOnly = driver.capture({ ...request, lines: [] });
+        const minimumInkPixels = 20;
+        expect(
+          inkPixelsAgainstPlate(first.rgba, plateOnly.rgba, request.width, {
+            x: 20,
+            y: 20,
+            width: 320,
+            height: 52,
+          }),
+          'RTL text box must contain at least 20 pixels of ink beyond its plate-only frame',
+        ).toBeGreaterThan(minimumInkPixels);
+        expect(
+          inkPixelsAgainstPlate(first.rgba, plateOnly.rgba, request.width, {
+            x: 20,
+            y: 84,
+            width: 320,
+            height: 48,
+          }),
+          'Latin text box must contain at least 20 pixels of ink beyond its plate-only frame',
+        ).toBeGreaterThan(minimumInkPixels);
         expect(first.rgba).toHaveLength(request.width * request.height * 4);
         expect(first.loadedFonts).toEqual(['arabic:400', 'arabic:700', 'latin:400', 'latin:700']);
         expect(first.rgba.subarray(0, 4)).toEqual(new Uint8Array([0, 0, 0, 0]));
@@ -150,6 +194,20 @@ describe.runIf(requireChromium || findChromiumExecutable() !== undefined)(
       try {
         const first = driver.capture(request);
         const second = driver.capture(request);
+        const plateOnly = driver.capture({
+          ...request,
+          paint: { ...paint, lines: [] },
+        });
+        const minimumInkPixels = 20;
+        expect(
+          inkPixelsAgainstPlate(first.rgba, plateOnly.rgba, request.width, {
+            x: 24,
+            y: 52,
+            width: 312,
+            height: 44,
+          }),
+          'explicit-frame text box must contain at least 20 pixels of ink beyond its plate-only frame',
+        ).toBeGreaterThan(minimumInkPixels);
         expect(first.rgba).toEqual(second.rgba);
         let transparentPixels = 0;
         let antialiasedPixels = 0;
