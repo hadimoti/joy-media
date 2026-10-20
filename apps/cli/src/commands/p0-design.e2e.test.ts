@@ -23,9 +23,10 @@ const TITLE_PIXEL_TOLERANCE = 0;
 const MP4_OUTSIDE_CHANNEL_TOLERANCE = 16;
 const MP4_OUTSIDE_CHANGED_PIXEL_TOLERANCE = 1024;
 // Step 7 limit, recalibrated by explicit owner decision (2026-10-20). With the pinned source fixture and
-// the pinned H.264 and filter settings, step 7 measured 4070 outside-ROI pixels (max channel difference
-// 56) on both 2 and 32 logical processors, with identical numbers. The limit keeps 26 pixels of headroom.
-// Step 8 keeps MP4_OUTSIDE_CHANGED_PIXEL_TOLERANCE: it passes within that limit with the same settings.
+// the pinned H.264 and filter settings (8 encoder threads), step 7 measured 3984 outside-ROI pixels (max
+// channel difference 66) on both 2 and 32 logical processors, with identical numbers. The earlier
+// single-thread setting measured 4070 pixels. The limit keeps 112 pixels of headroom over the 8-thread
+// measurement. Step 8 keeps MP4_OUTSIDE_CHANGED_PIXEL_TOLERANCE: it passes within that limit with the same settings.
 const MP4_STEP7_OUTSIDE_CHANGED_PIXEL_TOLERANCE = 4096;
 const AUDIO_GAIN_TOLERANCE = 0.06;
 const AUDIO_STEREO_MIX_FACTOR = 1 / Math.sqrt(2);
@@ -164,7 +165,7 @@ function runCliAllowingExit(args: string[], context: string): CliResult {
     throw new Error(`${context}: bundled CLI did not start: ${result.error.message}`);
   return {
     code: result.status,
-    signal: null,
+    signal: result.signal,
     events: parseJsonLines(result.stdout ?? '', context),
     stdout: result.stdout ?? '',
     stderr: result.stderr ?? '',
@@ -182,10 +183,13 @@ function runCli(args: string[], context: string): CliResult {
   return result;
 }
 
-// The refusal message when the CLI stopped because libass cannot load the canonical caption face.
+// The refusal message when the CLI exited with a non-zero status, not a signal, because libass cannot
+// load the canonical caption face.
 function captionFaceRefusal(result: CliResult): string | undefined {
   const event = result.events.at(-1);
-  if (result.code === 0 || event?.code !== 'SETUP_REQUIRED') return undefined;
+  const exitedWithError =
+    typeof result.code === 'number' && result.code !== 0 && result.signal === null;
+  if (!exitedWithError || event?.code !== 'SETUP_REQUIRED') return undefined;
   const message = String(event.message ?? '');
   return message.includes('canonical-caption-face-unavailable') ? message : undefined;
 }
