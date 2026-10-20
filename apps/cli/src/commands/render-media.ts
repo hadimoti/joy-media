@@ -725,9 +725,8 @@ const secs = (us: number): string => (us / 1_000_000).toFixed(6);
 // Output must not depend on the host's logical-processor count. libx264 sizes its lookahead and
 // slice threads from the machine, and its CPU-specific algorithm choices can differ. Pinning all of
 // them keeps MP4 exports identical across hosts.
-const H264_ENCODER_THREADS = 1;
-const X264_DETERMINISTIC_PARAMS =
-  'threads=1:lookahead-threads=1:sync-lookahead=0:sliced-threads=0:cpu-independent=1';
+const H264_ENCODER_THREADS = 8;
+const X264_DETERMINISTIC_PARAMS = `threads=${H264_ENCODER_THREADS}:lookahead-threads=1:sync-lookahead=0:sliced-threads=0:cpu-independent=1`;
 const CODEC_ARGS: Readonly<Record<MediaPresetId, readonly string[]>> = {
   mp4: [
     '-c:v',
