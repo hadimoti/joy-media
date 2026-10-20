@@ -706,6 +706,16 @@ function ffprobeJson(path: string): JsonRecord {
   return JSON.parse(result.stdout) as JsonRecord;
 }
 
+/** Whether a process exists right now. Much faster than a full process snapshot. */
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
 async function processSnapshot(): Promise<Array<{ pid: number; ppid: number; name: string }>> {
   if (process.platform === 'win32') {
     const script =
@@ -1568,7 +1578,8 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         JSON.stringify({ ...fixtureEnvelope, project: cancellationBody }),
       );
       const cancellationFixture: ProjectFixture = { ...primary, file: cancellationProject };
-      // Keep FFmpeg active long enough for the parent to observe its progress PID.
+      // Keep FFmpeg active long enough for the parent to observe its progress PID. 60 s is the
+      // longest composition a title operation accepts.
       setFixtureDuration(cancellationFixture, 60_000_000);
       preparePlan(
         cancellationFixture,
@@ -1668,11 +1679,12 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
           expect(existsSync(profilePath), `${caseName}: browser profile exists at readiness`).toBe(
             true,
           );
-          const aliveBefore = await processSnapshot();
           const activePid = readyEvent.activePid as number;
           expect(ownedPids).toContain(activePid);
+          // Probe the active PID at once. A full process snapshot takes long enough on a loaded
+          // machine for a short encode to finish first, and this check needs only one PID.
           expect(
-            aliveBefore.some((process) => process.pid === activePid),
+            processIsAlive(activePid),
             `${caseName}: active PID ${activePid} is alive before interrupt`,
           ).toBe(true);
           cancelledAt = Date.now();
