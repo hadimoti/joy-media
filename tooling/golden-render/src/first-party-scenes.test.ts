@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +6,7 @@ import { rational } from '@joy-media/project-schema';
 import { renderRgbaFrames, verifyExport } from '@joy-media/export-core';
 import { renderHeadlessFrame } from '@joy-media/renderer-headless';
 import {
-  captureSceneSurface,
+  captureSceneSurfaceAsync,
   compareSceneSurfaces,
   createChromiumSceneDriver,
   createSandboxedReactScene,
@@ -25,14 +25,42 @@ function openChromiumDriver(): ReturnType<typeof createChromiumSceneDriver> {
   openedDrivers.push(driver);
   return driver;
 }
-afterEach(() => {
-  for (const driver of openedDrivers.splice(0)) driver.close!();
+afterEach(async () => {
+  for (const driver of openedDrivers.splice(0)) await driver.closeAsync!();
 }, 30_000);
 
 describe.runIf(findChromiumExecutable() !== undefined)(
   'P04.5 first-party scene pixel goldens',
   () => {
     const hashes = new Map<string, string>();
+
+    // The first Chromium launch on a fresh runner can build its font cache and outlast a scene
+    // budget. Pay that cost once here, with the largest budget the driver allows, before the
+    // measured scenes run. A second attempt covers a launch the first one cut short.
+    beforeAll(async () => {
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        const driver = createChromiumSceneDriver({ timeoutMs: 120_000 });
+        try {
+          await driver.captureAsync!({
+            markup: '<div style="width:16px;height:16px;background:#000"></div>',
+            width: 16,
+            height: 16,
+            transparent: false,
+            timeUs: 0,
+            frameRate: rational(30, 1),
+            locale: 'en',
+            seed: 'warm-up',
+          });
+          return;
+        } catch (error) {
+          // A failed warm-up is reported again by the scene that needs the browser.
+          const reason = error instanceof Error ? error.message : String(error);
+          console.warn(`Chromium warm-up attempt ${attempt} failed: ${reason}`);
+        } finally {
+          await driver.closeAsync!();
+        }
+      }
+    }, 300_000);
 
     it.each(FIRST_PARTY_SCENES)(
       'pins $id Chromium RGBA frames and proves preview/export pixel parity',
@@ -49,8 +77,18 @@ describe.runIf(findChromiumExecutable() !== undefined)(
           variables: instance!.variables,
           locale: 'en',
         };
-        const preview = captureSceneSurface(runtime, driver, request, new SceneCaptureCache());
-        const finalRender = captureSceneSurface(runtime, driver, request, new SceneCaptureCache());
+        const preview = await captureSceneSurfaceAsync(
+          runtime,
+          driver,
+          request,
+          new SceneCaptureCache(),
+        );
+        const finalRender = await captureSceneSurfaceAsync(
+          runtime,
+          driver,
+          request,
+          new SceneCaptureCache(),
+        );
         expect(compareSceneSurfaces(preview, finalRender)).toEqual({
           matches: true,
           maxChannelDelta: 0,
@@ -62,8 +100,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
         expect(typeof preview.sha256).toBe('string');
         expect(preview.sha256.length).toBe(64);
         hashes.set(scene.id, preview.sha256);
-        // Each capture is synchronous by design. Yield between scene cases so
-        // Vitest's worker RPC can publish progress on slower CI hosts.
+        // Yield between scene cases so Vitest's worker RPC can publish progress on slower CI hosts.
         await new Promise<void>((resolve) => setImmediate(resolve));
       },
       200_000,
@@ -74,7 +111,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
       expect(new Set(hashes.values()).size).toBe(FIRST_PARTY_SCENES.length);
     });
 
-    it('builds and exports a reel combining footage/caption motion with two scenes', () => {
+    it('builds and exports a reel combining footage/caption motion with two scenes', async () => {
       const driver = openChromiumDriver();
       const title = FIRST_PARTY_SCENES[0]!;
       const lowerThird = FIRST_PARTY_SCENES[2]!;
@@ -88,18 +125,22 @@ describe.runIf(findChromiumExecutable() !== undefined)(
           variables: instance.variables,
         };
       });
-      const frames = [0, 50_000, 100_000].map((timeUs) => {
+      const frames: Uint8Array[] = [];
+      for (const timeUs of [0, 50_000, 100_000]) {
         const base = renderHeadlessFrame(createParitySpikeFrame(timeUs));
-        const surfaces = instances.map(({ runtime, variables }) =>
-          captureSceneSurface(
-            runtime,
-            driver,
-            { timeUs, frameRate: rational(30, 1), seed: 'p04-reel', variables, locale: 'en' },
-            new SceneCaptureCache(),
-          ),
-        );
-        return composite(base.pixels, base.width, base.height, surfaces[0]!, surfaces[1]!);
-      });
+        const surfaces = [];
+        for (const { runtime, variables } of instances) {
+          surfaces.push(
+            await captureSceneSurfaceAsync(
+              runtime,
+              driver,
+              { timeUs, frameRate: rational(30, 1), seed: 'p04-reel', variables, locale: 'en' },
+              new SceneCaptureCache(),
+            ),
+          );
+        }
+        frames.push(composite(base.pixels, base.width, base.height, surfaces[0]!, surfaces[1]!));
+      }
       const directory = mkdtempSync(join(tmpdir(), 'joy-p04-reel-'));
       const output = join(directory, 'p04-two-scenes.mp4');
       renderRgbaFrames(

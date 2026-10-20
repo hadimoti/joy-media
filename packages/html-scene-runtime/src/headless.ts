@@ -139,6 +139,37 @@ export function captureSceneSurface<TVariables>(
   if (request.resolvers !== undefined && request.resolverKey === undefined) {
     throw new RangeError('scene capture with resolvers requires an immutable resolverKey');
   }
+  const surface = driver.capture(sceneCaptureRequest(scene, request));
+  return recordSceneSurface(scene, request, key, surface, cache);
+}
+
+/**
+ * Same result as captureSceneSurface, but the browser runs asynchronously. Use it where the calling
+ * thread must stay responsive while Chromium starts, such as a test runner's worker.
+ */
+export async function captureSceneSurfaceAsync<TVariables>(
+  scene: SandboxedReactScene<TVariables>,
+  driver: HeadlessSceneDriver,
+  request: SceneCaptureRequest<TVariables>,
+  cache = new SceneCaptureCache(),
+): Promise<CapturedSceneSurface> {
+  const key = frameKey(scene, request);
+  const cached = cache.getFrame(key);
+  if (cached !== undefined) return cached;
+  if (request.resolvers !== undefined && request.resolverKey === undefined) {
+    throw new RangeError('scene capture with resolvers requires an immutable resolverKey');
+  }
+  if (driver.captureAsync === undefined) {
+    throw new RangeError('scene capture driver does not support asynchronous capture');
+  }
+  const surface = await driver.captureAsync(sceneCaptureRequest(scene, request));
+  return recordSceneSurface(scene, request, key, surface, cache);
+}
+
+function sceneCaptureRequest<TVariables>(
+  scene: SandboxedReactScene<TVariables>,
+  request: SceneCaptureRequest<TVariables>,
+): HeadlessCaptureRequest {
   const frame = scene.render({
     timeUs: request.timeUs,
     frameRate: request.frameRate,
@@ -148,7 +179,7 @@ export function captureSceneSurface<TVariables>(
     ...(request.resolvers === undefined ? {} : { resolvers: request.resolvers }),
   });
   const { width, height } = scene.manifest.viewport;
-  const surface = driver.capture({
+  return {
     markup: frame.markup,
     width,
     height,
@@ -159,7 +190,17 @@ export function captureSceneSurface<TVariables>(
     seed: request.seed,
     ...(request.lines === undefined ? {} : { lines: request.lines }),
     ...(request.paint === undefined ? {} : { paint: request.paint }),
-  });
+  };
+}
+
+function recordSceneSurface<TVariables>(
+  scene: SandboxedReactScene<TVariables>,
+  request: SceneCaptureRequest<TVariables>,
+  key: string,
+  surface: HeadlessSurface,
+  cache: SceneCaptureCache,
+): CapturedSceneSurface {
+  const { width, height } = scene.manifest.viewport;
   const expectedLength = width * height * 4;
   if (surface.rgba.length !== expectedLength)
     throw new RangeError(`headless capture must return ${expectedLength} RGBA bytes`);

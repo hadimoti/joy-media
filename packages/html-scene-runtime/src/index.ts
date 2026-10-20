@@ -101,6 +101,7 @@ export type {
 export {
   captureSceneRegion,
   captureSceneSurface,
+  captureSceneSurfaceAsync,
   compareSceneSurfaces,
   SceneCaptureCache,
 } from './headless.js';
