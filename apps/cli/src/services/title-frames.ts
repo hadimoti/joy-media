@@ -76,10 +76,34 @@ interface ChromiumDriverModule {
     readonly browserProcessId?: number;
     readonly profileDirectory?: string;
     close?(): void;
-    closeAsync?(): Promise<void>;
+    closeAsync?(deadlineAt?: number): Promise<void>;
   };
   readonly findChromiumExecutable: () => string | undefined;
+  readonly probeChromium: (options?: {
+    readonly executablePath?: string;
+    readonly signal?: AbortSignal;
+  }) => Promise<{ readonly version: string } | { readonly reason: string }>;
   readonly loadNotoSansArabicFaces: () => readonly { readonly sha256: string }[];
+}
+
+const cancellationDeadlines = new WeakMap<AbortSignal, number>();
+function cancellationDeadline(signal: AbortSignal): number {
+  const reason = signal.reason;
+  if (
+    typeof reason === 'object' &&
+    reason !== null &&
+    'deadlineAt' in reason &&
+    typeof reason.deadlineAt === 'number' &&
+    Number.isFinite(reason.deadlineAt)
+  ) {
+    cancellationDeadlines.set(signal, reason.deadlineAt);
+    return reason.deadlineAt;
+  }
+  const existing = cancellationDeadlines.get(signal);
+  if (existing !== undefined) return existing;
+  const deadlineAt = Date.now() + 5_000;
+  cancellationDeadlines.set(signal, deadlineAt);
+  return deadlineAt;
 }
 
 export async function titleRendererFacts(): Promise<{
@@ -157,6 +181,7 @@ export async function renderTitleFrames(
   options: {
     readonly isCancelled?: () => boolean;
     readonly signal?: AbortSignal;
+    readonly chromiumExecutablePath?: string;
     readonly captureTimeoutMs?: number;
     readonly onCaptureReady?: (ready: {
       readonly browserPid?: number;
@@ -185,31 +210,51 @@ export async function renderTitleFrames(
   }
   const directories: string[] = [];
   let driver: ReturnType<ChromiumDriverModule['createChromiumSceneDriver']> | undefined;
+  let cancellationDeadlineAt: number | undefined;
+  const startCancellationDeadline = (): number =>
+    (cancellationDeadlineAt ??= options.signal
+      ? cancellationDeadline(options.signal)
+      : Date.now() + 5_000);
+  if (options.signal?.aborted) startCancellationDeadline();
+  else options.signal?.addEventListener('abort', startCancellationDeadline, { once: true });
   const cleanup = async (): Promise<void> => {
+    const deadline = cancellationDeadlineAt ?? Date.now() + 5_000;
     let driverError: unknown;
     try {
-      if (driver?.closeAsync) await driver.closeAsync();
+      if (driver?.closeAsync) await driver.closeAsync(deadline);
       else driver?.close?.();
     } catch (error) {
       driverError = error;
     }
     let directoryError: unknown;
     for (const directory of directories) {
-      const cleanupDeadline = Date.now() + 1_000;
       let cleanupError: unknown;
-      while (Date.now() < cleanupDeadline) {
+      while (Date.now() < deadline) {
         try {
           await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 40 });
           cleanupError = undefined;
           break;
         } catch (error) {
           cleanupError = error;
-          await new Promise((resolve) => setTimeout(resolve, 25));
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== 'EBUSY' && code !== 'EPERM' && code !== 'ENOTEMPTY') break;
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.min(25, Math.max(1, deadline - Date.now()))),
+          );
         }
       }
       if (cleanupError) directoryError = cleanupError;
+      if (Date.now() >= deadline && cleanupError)
+        directoryError = new Error(
+          'RENDER_CANCEL_TIMEOUT: title frame cleanup exceeded its deadline.',
+        );
     }
     directories.length = 0;
+    options.signal?.removeEventListener('abort', startCancellationDeadline);
+    if (cancellationDeadlineAt !== undefined && Date.now() >= deadline && !directoryError)
+      directoryError = new Error(
+        'RENDER_CANCEL_TIMEOUT: title frame cleanup exceeded its deadline.',
+      );
     if (driverError) throw driverError;
     if (directoryError) throw directoryError;
   };
@@ -221,8 +266,15 @@ export async function renderTitleFrames(
   try {
     let executablePath: string | undefined;
     try {
-      executablePath = runtime.findChromiumExecutable();
+      executablePath = options.chromiumExecutablePath ?? runtime.findChromiumExecutable();
       if (!executablePath) throw new Error('Chromium executable was not found');
+      if (options.chromiumExecutablePath !== undefined) {
+        const probe = await runtime.probeChromium({
+          executablePath: options.chromiumExecutablePath,
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+        });
+        if ('reason' in probe) throw new Error(probe.reason);
+      }
       fontManifestHashes = runtime
         .loadNotoSansArabicFaces()
         .map((face) => face.sha256)
@@ -373,28 +425,66 @@ async function encodeRgbaPngAsync(
   ]);
 }
 
-async function withCaptureDeadline<T>(
+export async function withCaptureDeadline<T>(
   capture: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
   parentSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
-  const abort = (): void => controller.abort();
+  let cancelDeadlineTimer: NodeJS.Timeout | undefined;
+  let captureTimer: NodeJS.Timeout | undefined;
+  let cancelRequested = false;
+  let cancellationDeadlineAt: number | undefined;
+  let resolveCancelDeadline!: () => void;
+  const cancelDeadline = new Promise<void>((resolve) => {
+    resolveCancelDeadline = resolve;
+  });
+  const abort = (): void => {
+    if (cancelRequested) return;
+    cancelRequested = true;
+    const deadlineAt = parentSignal
+      ? cancellationDeadline(parentSignal)
+      : (cancellationDeadlineAt ??= Date.now() + 5_000);
+    controller.abort({ deadlineAt });
+    cancelDeadlineTimer = setTimeout(resolveCancelDeadline, Math.max(0, deadlineAt - Date.now()));
+  };
   if (parentSignal?.aborted) abort();
   else parentSignal?.addEventListener('abort', abort, { once: true });
-  let timer: NodeJS.Timeout | undefined;
+  let timedOut = false;
+  const captureTask = Promise.resolve().then(() => capture(controller.signal));
+  const captureOutcome = captureTask.then(
+    (value) => ({ kind: 'complete' as const, value }),
+    (error: unknown) => ({ kind: 'error' as const, error }),
+  );
   try {
-    return await Promise.race([
-      capture(controller.signal),
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => {
-          controller.abort();
-          reject(new Error('RENDER_CAPTURE_TIMEOUT: title frame capture exceeded 15 seconds'));
-        }, timeoutMs);
-      }),
+    if (!cancelRequested) {
+      const first = await Promise.race([
+        captureOutcome,
+        cancelDeadline.then(() => ({ kind: 'cancel-timeout' as const })),
+        new Promise<{ kind: 'capture-timeout' }>((resolve) => {
+          captureTimer = setTimeout(() => resolve({ kind: 'capture-timeout' }), timeoutMs);
+        }),
+      ]);
+      if (first.kind === 'complete') return first.value;
+      if (first.kind === 'error') throw first.error;
+      if (first.kind === 'cancel-timeout')
+        throw new Error('RENDER_CANCEL_TIMEOUT: title capture cleanup exceeded five seconds.');
+      timedOut = true;
+      abort();
+    }
+    const settled = await Promise.race([
+      captureOutcome,
+      cancelDeadline.then(() => ({ kind: 'cancel-timeout' as const })),
     ]);
+    if (settled.kind === 'cancel-timeout')
+      throw new Error('RENDER_CANCEL_TIMEOUT: title capture cleanup exceeded five seconds.');
+    if (timedOut)
+      throw new Error('RENDER_CAPTURE_TIMEOUT: title frame capture exceeded 15 seconds');
+    if (settled.kind === 'error') throw settled.error;
+    return settled.value;
   } finally {
-    if (timer) clearTimeout(timer);
+    if (captureTimer) clearTimeout(captureTimer);
+    if (cancelDeadlineTimer) clearTimeout(cancelDeadlineTimer);
     parentSignal?.removeEventListener('abort', abort);
   }
 }

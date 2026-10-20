@@ -39,7 +39,7 @@ export interface HeadlessSceneDriver {
     requests: readonly { text: string; fontSizePx: number; weight: 400 | 700 }[],
   ): number[];
   close?(): void;
-  closeAsync?(): Promise<void>;
+  closeAsync?(deadlineAt?: number): Promise<void>;
   readonly browserVersion?: string | undefined;
   readonly browserProcessId?: number | undefined;
   readonly profileDirectory?: string | undefined;

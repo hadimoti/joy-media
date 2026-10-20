@@ -99,6 +99,11 @@ export interface MediaPlanReady {
 }
 
 export type CaptionRenderMode = 'ass' | 'drawtext' | 'none';
+let writeAssFile: typeof writeFileSync = writeFileSync;
+
+export function setAssFileWriterForTests(writer: typeof writeFileSync | undefined): void {
+  writeAssFile = writer ?? writeFileSync;
+}
 
 /** The caption mode shared by FFmpeg filter construction and render reporting. */
 export function captionRenderMode(
@@ -810,9 +815,9 @@ export function buildFfmpegArgs(
 
   if (captionsMode === 'ass') {
     const directory = mkdtempSync(join(tmpdir(), 'joy-caption-ass-'));
-    const assPath = join(directory, 'captions.ass');
-    writeFileSync(assPath, plan.assDocument!, 'utf8');
     ownedTempDirectories.push(directory);
+    const assPath = join(directory, 'captions.ass');
+    writeAssFile(assPath, plan.assDocument!, 'utf8');
     const assFile = filterValue(assPath.replace(/\\/g, '/'));
     const fontsDir = filterValue(dirname(plan.fontFile!).replace(/\\/g, '/'));
     filters.push(`[b${base}]ass=filename='${assFile}':fontsdir='${fontsDir}'[b${base + 1}]`);

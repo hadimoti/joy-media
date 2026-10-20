@@ -14,9 +14,13 @@ import {
   planRender,
   RENDER_PRESETS,
   runHeadlessRender,
+  publishPreviewAtomically,
   safeFileStem,
 } from './render-cmd.js';
 import { createDefaultProject, saveProject } from '../utils/project-loader.js';
+import { encodeRgbaPng } from '../services/title-frames.js';
+import { buildFfmpegArgs, setAssFileWriterForTests } from './render-media.js';
+import { renderInputsDigest } from '../services/render-preparation.js';
 
 class StringWritable extends Writable {
   public chunks: Buffer[] = [];
@@ -69,6 +73,63 @@ afterAll(() => {
 });
 
 describe('joy render (headless batch render command)', () => {
+  it('keeps a prior preview and removes staging output when cancelled', () => {
+    const directory = mkdtempSync(join(tempDir, 'atomic-preview-'));
+    const artifactPath = join(directory, 'preview-0.png');
+    const stagingPath = join(directory, '.preview-0-staging.png');
+    const previous = encodeRgbaPng(1, 1, Uint8Array.from([1, 2, 3, 255]));
+    try {
+      writeFileSync(artifactPath, previous);
+      writeFileSync(stagingPath, Buffer.from('partial png'));
+      const controller = new AbortController();
+      controller.abort();
+      expect(publishPreviewAtomically(stagingPath, artifactPath, controller.signal, 1, 1)).toBe(
+        false,
+      );
+      expect(readFileSync(artifactPath)).toEqual(previous);
+      expect(existsSync(stagingPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('retains ASS directory ownership when writing the ASS file throws', () => {
+    const ownedDirectories: string[] = [];
+    const plan = {
+      mode: 'media',
+      clips: [],
+      captions: [{ text: 'Caption', startUs: 0, endUs: 1_000_000 }],
+      fontFile: 'font.ttf',
+      assDocument: '[Events]',
+      width: 320,
+      height: 180,
+      fps: '30/1',
+      durationUs: 1_000_000,
+      warnings: [],
+    } as never;
+    setAssFileWriterForTests(() => {
+      throw new Error('ASS write failed');
+    });
+    try {
+      expect(() =>
+        buildFfmpegArgs(
+          plan,
+          'mp4',
+          join(tempDir, 'ass-output.mp4'),
+          [],
+          undefined,
+          ownedDirectories,
+        ),
+      ).toThrow('ASS write failed');
+      expect(ownedDirectories).toHaveLength(1);
+      expect(existsSync(ownedDirectories[0]!)).toBe(true);
+    } finally {
+      setAssFileWriterForTests(undefined);
+      for (const directory of ownedDirectories) rmSync(directory, { recursive: true, force: true });
+    }
+    expect(existsSync(ownedDirectories[0]!)).toBe(false);
+  });
+
   it('excludes title instances bound to disabled tracks', () => {
     const project = {
       rootCompositionId: 'root',
@@ -470,6 +531,26 @@ describe('runHeadlessRender writes an honest, atomic, deterministic manifest', (
         manifestWritten: true,
         message: MANIFEST_ONLY_MESSAGE,
       });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not change the project input digest while rendering', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-input-digest-'));
+    const project = timelineProject('input-digest-1');
+    const digestBefore = renderInputsDigest(project);
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: dir,
+        concurrency: 2,
+        json: true,
+        manifestOnly: true,
+      });
+      expect(result.exitCode).toBe(0);
+      expect(renderInputsDigest(project)).toBe(digestBefore);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

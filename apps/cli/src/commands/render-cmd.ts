@@ -32,6 +32,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -733,6 +734,52 @@ export function isPreviewTimeInRange(timeUs: number, durationUs: number): boolea
   );
 }
 
+export function publishPreviewAtomically(
+  stagingPath: string,
+  artifactPath: string,
+  signal: AbortSignal,
+  width: number,
+  height: number,
+): boolean {
+  if (signal.aborted) {
+    rmSync(stagingPath, { force: true });
+    return false;
+  }
+  const bytes = readFileSync(stagingPath);
+  if (!isCompletePng(bytes, width, height)) return false;
+  if (signal.aborted) {
+    rmSync(stagingPath, { force: true });
+    return false;
+  }
+  renameSync(stagingPath, artifactPath);
+  return true;
+}
+
+function isCompletePng(bytes: Buffer, width: number, height: number): boolean {
+  if (
+    bytes.length < 45 ||
+    !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  )
+    return false;
+  let offset = 8;
+  let sawHeader = false;
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const end = offset + length + 12;
+    if (end > bytes.length) return false;
+    const type = bytes.toString('ascii', offset + 4, offset + 8);
+    if (type === 'IHDR') {
+      if (sawHeader || length !== 13) return false;
+      sawHeader = true;
+      if (bytes.readUInt32BE(offset + 8) !== width || bytes.readUInt32BE(offset + 12) !== height)
+        return false;
+    }
+    if (type === 'IEND') return sawHeader && length === 0 && end === bytes.length;
+    offset = end;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Execution
 // ---------------------------------------------------------------------------
@@ -741,6 +788,7 @@ export async function runHeadlessRender(
   input: RunHeadlessRenderInput,
 ): Promise<RenderCommandResult> {
   const { project, preset, outDir, concurrency, json } = input;
+  const outputDirectoryExistedAtStart = existsSync(outDir);
   const showProgress = !json && (input.progress ?? Boolean(process.stdout.isTTY));
   const presetSpec = RENDER_PRESETS[preset];
   const startedAt = performance.now();
@@ -752,7 +800,7 @@ export async function runHeadlessRender(
   const cancelRender = (signal: NodeJS.Signals | 'IPC_CANCEL'): void => {
     cancellationStartedAt ??= Date.now();
     if (json) emitJson({ type: 'cancel-signal', signal }, true);
-    cancellation.abort();
+    cancellation.abort({ deadlineAt: cancellationStartedAt + 5_000 });
   };
   const cancellationOverdue = (): boolean =>
     cancellationStartedAt !== undefined && Date.now() - cancellationStartedAt > 5_000;
@@ -803,9 +851,12 @@ export async function runHeadlessRender(
     if (!plan.ok) return failure('invalid-project', plan.message);
 
     const titleSources = collectTitleSources(project);
+    let renderPreparation: Awaited<ReturnType<typeof validateRenderPreparation>>;
     try {
-      await validateRenderPreparation(project);
+      renderPreparation = await validateRenderPreparation(project, undefined, cancellation.signal);
     } catch (error) {
+      if (cancellation.signal.aborted)
+        return failure('cancelled', 'Render cancelled during validation.', 0, 0);
       const code =
         typeof error === 'object' && error !== null && 'code' in error
           ? String(error.code)
@@ -919,6 +970,10 @@ export async function runHeadlessRender(
       const frameIndex = previewFrameIndex(timeUs, titleFps);
       const previewMedia = { ...realMedia, durationUs };
       const artifactPath = join(outDir, `preview-${frameIndex}.png`);
+      const stagingPath = join(
+        outDir,
+        `.preview-${frameIndex}-${randomBytes(8).toString('hex')}.staging.png`,
+      );
       const outputProblem = prepareOutputDir(outDir, [artifactPath]);
       if (outputProblem) return failure('output', outputProblem, totalFrames, totalClips);
       let captured;
@@ -933,7 +988,13 @@ export async function runHeadlessRender(
             height: titleHeight,
             fps: titleFps,
           },
-          { signal: cancellation.signal, isCancelled: () => currentLongRunning < 0 },
+          {
+            signal: cancellation.signal,
+            isCancelled: () => currentLongRunning < 0,
+            ...(renderPreparation?.chromium.executablePath
+              ? { chromiumExecutablePath: renderPreparation.chromium.executablePath }
+              : {}),
+          },
         );
       } catch (error) {
         if (cancellation.signal.aborted || currentLongRunning < 0)
@@ -956,7 +1017,7 @@ export async function runHeadlessRender(
         const args = buildFfmpegArgs(
           previewMedia,
           preset,
-          artifactPath,
+          stagingPath,
           captured.layers,
           { timeUs },
           ownedTempDirectories,
@@ -978,10 +1039,21 @@ export async function runHeadlessRender(
         const outcome = await previewHandle.done;
         encodeSettled = true;
         if (!outcome.ok) return failure(outcome.code, outcome.message, totalFrames, totalClips);
-        if (!existsSync(artifactPath))
+        if (
+          !existsSync(stagingPath) ||
+          !publishPreviewAtomically(
+            stagingPath,
+            artifactPath,
+            cancellation.signal,
+            titleWidth,
+            titleHeight,
+          )
+        )
           return failure(
             'encode-failed',
-            'FFmpeg did not produce the requested preview PNG.',
+            cancellation.signal.aborted
+              ? 'Render cancelled; no preview was written.'
+              : 'FFmpeg did not produce a complete preview PNG.',
             totalFrames,
             totalClips,
           );
@@ -1019,6 +1091,11 @@ export async function runHeadlessRender(
             } catch {
               cleanupFailed = true;
             }
+          }
+          try {
+            rmSync(stagingPath, { force: true });
+          } catch {
+            cleanupFailed = true;
           }
           try {
             await captured.cleanup();
@@ -1288,6 +1365,9 @@ export async function runHeadlessRender(
             {
               signal: cancellation.signal,
               isCancelled: () => currentLongRunning < 0,
+              ...(renderPreparation?.chromium.executablePath
+                ? { chromiumExecutablePath: renderPreparation.chromium.executablePath }
+                : {}),
               onCaptureReady: ({ browserPid, profilePath, ownedDirectories }) => {
                 captureReady = {
                   ...(browserPid === undefined ? {} : { browserPid }),
@@ -1770,6 +1850,13 @@ export async function runHeadlessRender(
     process.off('SIGBREAK', onSigbreak);
     process.off('message', onIpcMessage);
     if (ipcCancellationRequested && process.connected) process.disconnect();
+    if (cancellation.signal.aborted && !outputDirectoryExistedAtStart) {
+      try {
+        rmdirSync(outDir);
+      } catch {
+        // Remove only the empty directory created by this render.
+      }
+    }
   }
 }
 

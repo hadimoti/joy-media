@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { canonicalJson, sha256Identity } from './prepared-edit.js';
 import {
   loadNotoSansArabicFaces,
@@ -10,11 +13,7 @@ import {
 import { CommandFailure, type CliProjectDocument } from '../utils/project-loader.js';
 import { ffmpegBinary } from '../utils/media-probe.js';
 import { compileCaptionAss } from './captions-ass.js';
-import {
-  probeCanonicalCaptionFace,
-  probeLibass,
-  type CanonicalCaptionFaceProbe,
-} from '../commands/render-features.js';
+import type { CanonicalCaptionFaceProbe } from '../commands/render-features.js';
 
 export const RENDER_PREPARATION_KEY = 'joy.renderPreparation';
 export const RENDER_PREPARATION_VERSION = 'RenderPreparationV1';
@@ -109,9 +108,55 @@ export interface RenderPreparationV1 {
   readonly renderInputsDigest: string;
 }
 
-let factsProvider: (() => Promise<RenderPreparationFacts>) | undefined;
+type RenderPreparationFactsOptions = {
+  title: boolean;
+  captions: boolean;
+  signal?: AbortSignal;
+  chromiumExecutablePath?: string;
+};
+let factsProvider:
+  ((options: RenderPreparationFactsOptions) => Promise<RenderPreparationFacts>) | undefined;
+export type PreparationCommandResult = { readonly status: number | null; readonly output: string };
+export type PreparationCommandRunner = (
+  binary: string,
+  args: readonly string[],
+  options: { readonly signal?: AbortSignal; readonly timeoutMs: number; readonly cwd?: string },
+) => Promise<PreparationCommandResult>;
+let preparationCommandRunner: PreparationCommandRunner = (binary, args, options) =>
+  new Promise((resolve, reject) => {
+    const child = spawn(binary, [...args], {
+      signal: options.signal,
+      timeout: options.timeoutMs,
+      windowsHide: true,
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    });
+    let output = '';
+    let settled = false;
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => (output += chunk));
+    child.stderr?.on('data', (chunk: string) => (output += chunk));
+    child.once('error', (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+    child.once('close', (status) => {
+      if (settled) return;
+      settled = true;
+      resolve({ status, output });
+    });
+  });
+
+export function setRenderPreparationCommandRunnerForTests(
+  runner: PreparationCommandRunner | undefined,
+): void {
+  preparationCommandRunner = runner ?? defaultPreparationCommandRunner;
+}
+const defaultPreparationCommandRunner = preparationCommandRunner;
 export function setRenderPreparationFactsProviderForTests(
-  provider: (() => Promise<RenderPreparationFacts>) | undefined,
+  provider:
+    ((options: RenderPreparationFactsOptions) => Promise<RenderPreparationFacts>) | undefined,
 ): void {
   factsProvider = provider;
 }
@@ -176,9 +221,19 @@ function titleWeights(project: unknown, title: boolean): Array<400 | 700> {
   return [...weights];
 }
 
-function command(binary: string, args: string[]): string {
-  const result = spawnSync(binary, args, { encoding: 'utf8', timeout: 5000, windowsHide: true });
-  return result.status === 0 && !result.error ? `${result.stdout}${result.stderr}` : '';
+async function command(binary: string, args: string[], signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  try {
+    const result = await preparationCommandRunner(binary, args, {
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: 5_000,
+    });
+    signal?.throwIfAborted();
+    return result.status === 0 ? result.output : '';
+  } catch {
+    signal?.throwIfAborted();
+    return '';
+  }
 }
 
 function resolveExecutable(binary: string): string {
@@ -197,42 +252,55 @@ function resolveExecutable(binary: string): string {
   }
 }
 
-async function chromiumFacts(): Promise<RenderPreparationFacts['chromium']> {
+async function chromiumFacts(
+  signal?: AbortSignal,
+  frozenExecutablePath?: string,
+): Promise<RenderPreparationFacts['chromium']> {
   try {
     const runtime = (await import('@joy-media/html-scene-runtime')) as {
       findChromiumExecutable(): string | undefined;
-      createChromiumSceneDriver(options?: { executablePath?: string }): {
-        readonly browserVersion?: string;
-        close?(): void;
-      };
+      probeChromium(options?: {
+        executablePath?: string;
+        signal?: AbortSignal;
+      }): Promise<{ readonly version: string } | { readonly reason: string }>;
     };
-    const executablePath = runtime.findChromiumExecutable();
-    if (!executablePath)
+    const configuredExecutablePath = process.env['JOY_CHROMIUM_PATH']?.trim();
+    const executablePath =
+      frozenExecutablePath ?? configuredExecutablePath ?? runtime.findChromiumExecutable();
+    if (!executablePath || !existsSync(executablePath))
       return {
         launchable: false,
-        executablePath: null,
+        executablePath: executablePath ?? null,
         executableSha256: null,
         version: null,
-        reason: 'Chromium executable was not found.',
+        reason: executablePath
+          ? `Chromium executable was not found at ${executablePath}.`
+          : 'Chromium executable was not found.',
       };
-    const driver = runtime.createChromiumSceneDriver({ executablePath });
-    const version = driver.browserVersion?.trim() ?? '';
-    driver.close?.();
-    if (!version)
+    const result = await runtime.probeChromium({
+      executablePath,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    signal?.throwIfAborted();
+    if ('reason' in result)
       return {
         launchable: false,
         executablePath,
-        executableSha256: hashBytes(readFileSync(executablePath)),
+        executableSha256: hashBytes(await readFile(executablePath)),
         version: null,
-        reason: 'Chromium did not report a browser version.',
+        reason: result.reason,
       };
+    const version = result.version.trim();
+    if (!version) throw new Error('Chromium did not report a browser version.');
+    const executableSha256 = hashBytes(await readFile(executablePath));
     return {
       launchable: true,
       executablePath,
-      executableSha256: hashBytes(readFileSync(executablePath)),
+      executableSha256,
       version,
     };
   } catch (error) {
+    signal?.throwIfAborted();
     return {
       launchable: false,
       executablePath: null,
@@ -246,30 +314,43 @@ async function chromiumFacts(): Promise<RenderPreparationFacts['chromium']> {
 export async function readRenderPreparationFacts(options: {
   title: boolean;
   captions: boolean;
+  signal?: AbortSignal;
+  chromiumExecutablePath?: string;
 }): Promise<RenderPreparationFacts> {
-  if (factsProvider) return factsProvider();
+  options.signal?.throwIfAborted();
+  if (factsProvider) return factsProvider(options);
   const executablePath = resolveExecutable(ffmpegBinary());
   const runBinary = ffmpegBinary();
-  const buildConfiguration = command(runBinary, ['-buildconf']);
-  const filterList = command(runBinary, ['-filters']);
-  const version = command(runBinary, ['-version']).split(/\r?\n/, 1)[0]?.trim() || 'unavailable';
+  const [buildConfiguration, filterList, versionOutput, libassProbe] = await Promise.all([
+    command(runBinary, ['-buildconf'], options.signal),
+    command(runBinary, ['-filters'], options.signal),
+    command(runBinary, ['-version'], options.signal),
+    canonicalCaptionFaceProbe(executablePath, options.signal),
+  ]);
+  options.signal?.throwIfAborted();
+  const version = versionOutput.split(/\r?\n/, 1)[0]?.trim() || 'unavailable';
+  const libassAvailable =
+    /--enable-libass\b/.test(buildConfiguration) &&
+    /\bass\s/.test(filterList) &&
+    /\bsubtitles\s/.test(filterList);
+  let ffmpegExecutableSha256: string | null = null;
+  try {
+    ffmpegExecutableSha256 = hashBytes(await readFile(executablePath));
+  } catch {
+    ffmpegExecutableSha256 = null;
+  }
+  options.signal?.throwIfAborted();
   const facts: RenderPreparationFacts = {
-    libassProbe: probeCanonicalCaptionFace(executablePath),
-    libassAvailable: probeLibass(),
+    libassProbe,
+    libassAvailable,
     canonicalFaces: loadNotoSansArabicFaces(),
     chromium:
       options.title || options.captions
-        ? await chromiumFacts()
+        ? await chromiumFacts(options.signal, options.chromiumExecutablePath)
         : { launchable: true, executablePath: null, executableSha256: null, version: null },
     ffmpeg: {
       executablePath,
-      executableSha256: (() => {
-        try {
-          return hashBytes(readFileSync(executablePath));
-        } catch {
-          return null;
-        }
-      })(),
+      executableSha256: ffmpegExecutableSha256,
       version,
       buildConfiguration: buildConfiguration.split(/\r?\n/).join('\n').trim(),
       requiredFilters: ['ass', 'subtitles'].filter((filter) =>
@@ -282,6 +363,108 @@ export async function readRenderPreparationFacts(options: {
     },
   };
   return facts;
+}
+
+async function canonicalCaptionFaceProbe(
+  executablePath: string,
+  signal?: AbortSignal,
+): Promise<CanonicalCaptionFaceProbe> {
+  const unavailable = (reason: string): CanonicalCaptionFaceProbe => ({
+    usable: false,
+    executablePath,
+    canonicalFace: 'Noto Sans Arabic Arabic 400',
+    reason,
+    log: '',
+  });
+  let face: NotoSansArabicFace | undefined;
+  try {
+    face = loadNotoSansArabicFaces().find(
+      (item) => item.subset === 'arabic' && item.weight === 400,
+    );
+  } catch (error) {
+    return unavailable(
+      `Canonical Noto Sans Arabic Arabic 400 face could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!face) return unavailable('The canonical Noto Sans Arabic Arabic 400 face is missing.');
+  signal?.throwIfAborted();
+  const directory = mkdtempSync(join(tmpdir(), 'joy-caption-canonical-'));
+  const fontsDirectory = join(directory, 'fonts');
+  const fontFile = 'noto-sans-arabic-arabic-400-normal.woff2';
+  try {
+    mkdirSync(fontsDirectory);
+    writeFileSync(join(fontsDirectory, fontFile), face.bytes);
+    writeFileSync(
+      join(directory, 'probe.ass'),
+      [
+        '[Script Info]',
+        'ScriptType: v4.00+',
+        'PlayResX: 320',
+        'PlayResY: 180',
+        '',
+        '[V4+ Styles]',
+        'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+        'Style: Caption,Noto Sans Arabic,28,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,10,10,20,1',
+        '',
+        '[Events]',
+        'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+        'Dialogue: 0,0:00:00.00,0:00:01.00,Caption,,0,0,0,,مرحبا',
+        '',
+      ].join('\n'),
+    );
+    let result: PreparationCommandResult;
+    try {
+      result = await preparationCommandRunner(
+        executablePath,
+        [
+          '-hide_banner',
+          '-loglevel',
+          'debug',
+          '-f',
+          'lavfi',
+          '-i',
+          'color=c=black:s=320x180:d=1',
+          '-vf',
+          'ass=filename=probe.ass:fontsdir=fonts',
+          '-frames:v',
+          '1',
+          '-y',
+          'probe.png',
+        ],
+        { ...(signal === undefined ? {} : { signal }), timeoutMs: 15_000, cwd: directory },
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      return unavailable(
+        `FFmpeg canonical face probe failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    signal?.throwIfAborted();
+    const fontSelectLines = result.output
+      .split(/\r?\n/)
+      .filter((line) => /fontselect:.*\(Noto Sans Arabic,/i.test(line));
+    const openedError = result.output
+      .split(/\r?\n/)
+      .some((line) => /Error opening/i.test(line) && line.includes(fontFile));
+    const selectedCanonical =
+      fontSelectLines.length > 0 &&
+      fontSelectLines.every((line) => /->\s*Noto Sans Arabic(?:,|\s|$)/i.test(line));
+    const usable = result.status === 0 && !openedError && selectedCanonical;
+    return {
+      usable,
+      executablePath,
+      canonicalFace: 'Noto Sans Arabic Arabic 400',
+      ...(!usable
+        ? {
+            reason:
+              'FFmpeg libass cannot load or select the canonical Noto Sans Arabic Arabic 400 WOFF2 face; captions require this face and will fail closed.',
+          }
+        : {}),
+      log: result.output,
+    };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 function root(project: Record<string, unknown>): Record<string, unknown> {
@@ -507,6 +690,7 @@ export async function preflightRenderPreparation(
   project: CliProjectDocument,
   operations: readonly { readonly op: string }[],
   facts?: RenderPreparationFacts,
+  signal?: AbortSignal,
 ): Promise<RenderPreparationFacts | undefined> {
   const title =
     operations.some(
@@ -517,7 +701,13 @@ export async function preflightRenderPreparation(
     projectHasCaptions(project) ||
     operations.some((operation) => operation.op.toLowerCase().includes('caption'));
   if (!title && !captions) return undefined;
-  const current = facts ?? (await readRenderPreparationFacts({ title, captions }));
+  const current =
+    facts ??
+    (await readRenderPreparationFacts({
+      title,
+      captions,
+      ...(signal === undefined ? {} : { signal }),
+    }));
   if (title && !current.chromium.launchable)
     throw new CommandFailure(
       'SETUP_REQUIRED',
@@ -680,6 +870,7 @@ export function readRenderPreparation(project: unknown): RenderPreparationV1 {
 export async function validateRenderPreparation(
   project: CliProjectDocument,
   facts?: RenderPreparationFacts,
+  signal?: AbortSignal,
 ): Promise<RenderPreparationV1 | undefined> {
   const title = projectHasTitles(project);
   const captions = projectHasCaptions(project);
@@ -706,7 +897,22 @@ export async function validateRenderPreparation(
       'RENDER_PREPARATION_INVALID',
       'Frozen renderer choices do not match the project.',
     );
-  const current = facts ?? (await readRenderPreparationFacts({ title, captions }));
+  if (
+    title &&
+    (typeof record.chromium.executablePath !== 'string' || !record.chromium.executablePath.trim())
+  )
+    throw new CommandFailure(
+      'RENDER_PREPARATION_INVALID',
+      'Frozen render preparation record has no Chromium executable path. Re-prepare the project.',
+    );
+  const current =
+    facts ??
+    (await readRenderPreparationFacts({
+      title,
+      captions,
+      ...(title ? { chromiumExecutablePath: record.chromium.executablePath! } : {}),
+      ...(signal === undefined ? {} : { signal }),
+    }));
   if (
     captions &&
     [record.ffmpeg.libassVersion, record.ffmpeg.shaperVersion].some(
@@ -785,12 +991,24 @@ export async function validateRenderPreparation(
       'RENDER_PREPARATION_INVALID',
       'Frozen selected font faces do not match the weights in the title instances.',
     );
+  const chromiumFactsChanged =
+    title &&
+    (!current.chromium.launchable ||
+      current.chromium.executablePath !== record.chromium.executablePath ||
+      current.chromium.version !== record.chromium.version ||
+      current.chromium.executableSha256 !== record.chromium.executableSha256);
+  if (chromiumFactsChanged)
+    throw new CommandFailure(
+      'RENDER_ENVIRONMENT_DRIFT',
+      `Frozen Chromium changed after preparation (path ${JSON.stringify(record.chromium.executablePath)} / ${JSON.stringify(current.chromium.executablePath)}, version ${JSON.stringify(record.chromium.version)} / ${JSON.stringify(current.chromium.version)}, sha256 ${JSON.stringify(record.chromium.executableSha256)} / ${JSON.stringify(current.chromium.executableSha256)}). Re-prepare the project.`,
+    );
   if (
     canonicalJson(fontFacts) !== canonicalJson(record.fonts) ||
     !current.libassProbe ||
     current.ffmpeg.executableSha256 !== record.ffmpeg.executableSha256 ||
     current.ffmpeg.version !== record.ffmpeg.version ||
-    current.ffmpeg.buildConfiguration !== record.ffmpeg.buildConfiguration ||
+    (current.ffmpeg.executableSha256 === null &&
+      current.ffmpeg.buildConfiguration !== record.ffmpeg.buildConfiguration) ||
     (captions &&
       (current.ffmpeg.libassVersion !== record.ffmpeg.libassVersion ||
         current.ffmpeg.shaperVersion !== record.ffmpeg.shaperVersion)) ||
@@ -799,10 +1017,6 @@ export async function validateRenderPreparation(
         record.chromium.deviceScaleFactor !== 1 ||
         canonicalJson(record.chromium.captureSettings) !==
           canonicalJson({ transparent: true, animation: 'frozen' }))) ||
-    (title &&
-      (!current.chromium.launchable ||
-        current.chromium.version !== record.chromium.version ||
-        current.chromium.executableSha256 !== record.chromium.executableSha256)) ||
     (captions &&
       (!current.libassAvailable ||
         !current.libassProbe.usable ||
@@ -811,7 +1025,7 @@ export async function validateRenderPreparation(
   )
     throw new CommandFailure(
       'RENDER_ENVIRONMENT_DRIFT',
-      'Render environment or canonical font bytes changed after preparation. Re-prepare the project.',
+      `Render environment or canonical font bytes changed after preparation (fontBytesMatch=${canonicalJson(fontFacts) === canonicalJson(record.fonts)}, ffmpegShaMatch=${current.ffmpeg.executableSha256 === record.ffmpeg.executableSha256}, ffmpegVersionMatch=${current.ffmpeg.version === record.ffmpeg.version}, ffmpegBuildMatch=${(current.ffmpeg.executableSha256 !== null && current.ffmpeg.executableSha256 === record.ffmpeg.executableSha256) || current.ffmpeg.buildConfiguration === record.ffmpeg.buildConfiguration}, titleSettingsMatch=${!title || (record.chromium.locale === 'en-US' && record.chromium.deviceScaleFactor === 1 && canonicalJson(record.chromium.captureSettings) === canonicalJson({ transparent: true, animation: 'frozen' }))}, captionsMatch=${!captions || (current.libassAvailable && current.libassProbe.usable && canonicalJson(current.ffmpeg.requiredFilters) === canonicalJson(record.ffmpeg.requiredFilters))}). Re-prepare the project.`,
     );
   if (preparationInputDigest(project, recordWithoutDigest) !== record.renderInputsDigest)
     throw new CommandFailure(

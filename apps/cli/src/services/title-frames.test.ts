@@ -13,9 +13,41 @@ import {
   renderTitleFrames,
   titleFrameCount,
   titleFrameTimes,
+  withCaptureDeadline,
 } from './title-frames.js';
 
 describe('title frame timing and PNG encoding', () => {
+  it('reports RENDER_CANCEL_TIMEOUT at the five-second cleanup deadline', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    let cleanupStarted = false;
+    try {
+      const capture = withCaptureDeadline(
+        (signal) =>
+          new Promise<void>((_resolve, reject) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                cleanupStarted = true;
+                setTimeout(() => reject(new Error('stalled cleanup')), 6_000);
+              },
+              { once: true },
+            );
+          }),
+        15_000,
+        controller.signal,
+      );
+      await Promise.resolve();
+      controller.abort();
+      expect(cleanupStarted).toBe(true);
+      const assertion = expect(capture).rejects.toThrow('RENDER_CANCEL_TIMEOUT');
+      await vi.advanceTimersByTimeAsync(5_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('encodes RGBA pixels into a valid PNG with a round-trippable filter-0 IDAT', () => {
     const rgba = Uint8Array.from([255, 0, 0, 255, 0, 255, 0, 128]);
     const png = encodeRgbaPng(2, 1, rgba);
@@ -336,7 +368,10 @@ describe('title frame timing and PNG encoding', () => {
       createChromiumSceneDriver: () => ({
         browserVersion: 'Chromium fake',
         capture: () => ({ rgba: new Uint8Array(320 * 568 * 4) }),
-        captureAsync: () => new Promise(() => undefined),
+        captureAsync: (_request: unknown, signal?: AbortSignal) =>
+          new Promise((_resolve, reject) =>
+            signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }),
+          ),
         closeAsync: async () => {
           closed = true;
         },

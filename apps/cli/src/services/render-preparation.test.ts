@@ -1,10 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { compileCaptionAss } from './captions-ass.js';
 import { loadNotoSansArabicFaces } from '@joy-media/html-scene-runtime';
 import {
   freezeRenderPreparation,
+  readRenderPreparationFacts,
   readRenderPreparation,
+  setRenderPreparationFactsProviderForTests,
+  setRenderPreparationCommandRunnerForTests,
   renderInputsDigest,
   validateRenderPreparation,
   type RenderPreparationFacts,
@@ -61,6 +67,197 @@ const project = {
 } as unknown as CliProjectDocument;
 
 describe('RenderPreparationV1', () => {
+  it('validates with the frozen Chromium path when discovery would select another executable', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-render-chromium-pin-'));
+    const executableA = join(directory, 'chrome-a.exe');
+    const executableB = join(directory, 'chrome-b.exe');
+    writeFileSync(executableA, 'chrome A');
+    writeFileSync(executableB, 'chrome B');
+    const frozenFacts: RenderPreparationFacts = {
+      ...facts,
+      chromium: {
+        launchable: true,
+        executablePath: executableA,
+        executableSha256: `sha256:${createHash('sha256').update('chrome A').digest('hex')}`,
+        version: 'Chromium 151.0',
+      },
+    };
+    const preparation = freezeRenderPreparation(
+      project,
+      [{ op: 'instantiateTemplate' }],
+      frozenFacts,
+    );
+    const saved = {
+      ...project,
+      pluginData: { ...project.pluginData, 'joy.renderPreparation': preparation },
+    } as unknown as CliProjectDocument;
+    let requestedPath: string | undefined;
+    const previousChromiumPath = process.env['JOY_CHROMIUM_PATH'];
+    process.env['JOY_CHROMIUM_PATH'] = executableB;
+    setRenderPreparationFactsProviderForTests(async (options) => {
+      requestedPath = options.chromiumExecutablePath;
+      return {
+        ...frozenFacts,
+        chromium: {
+          ...frozenFacts.chromium,
+          executablePath: options.chromiumExecutablePath ?? null,
+        },
+      };
+    });
+    try {
+      await expect(validateRenderPreparation(saved)).resolves.toEqual(preparation);
+      expect(requestedPath).toBe(executableA);
+      expect(process.env['JOY_CHROMIUM_PATH']).toBe(executableB);
+    } finally {
+      setRenderPreparationFactsProviderForTests(undefined);
+      if (previousChromiumPath === undefined) delete process.env['JOY_CHROMIUM_PATH'];
+      else process.env['JOY_CHROMIUM_PATH'] = previousChromiumPath;
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects when the executable at the frozen Chromium path changes bytes', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-render-chromium-drift-'));
+    const executableA = join(directory, 'chrome-a.exe');
+    writeFileSync(executableA, 'chrome A');
+    const frozenFacts: RenderPreparationFacts = {
+      ...facts,
+      chromium: {
+        launchable: true,
+        executablePath: executableA,
+        executableSha256: `sha256:${createHash('sha256').update('chrome A').digest('hex')}`,
+        version: 'Chromium 151.0',
+      },
+    };
+    const preparation = freezeRenderPreparation(
+      project,
+      [{ op: 'instantiateTemplate' }],
+      frozenFacts,
+    );
+    const saved = {
+      ...project,
+      pluginData: { ...project.pluginData, 'joy.renderPreparation': preparation },
+    } as unknown as CliProjectDocument;
+    writeFileSync(executableA, 'changed bytes');
+    setRenderPreparationFactsProviderForTests(async (options) => ({
+      ...frozenFacts,
+      chromium: {
+        ...frozenFacts.chromium,
+        executablePath: options.chromiumExecutablePath ?? null,
+        executableSha256: `sha256:${createHash('sha256').update(readFileSync(executableA)).digest('hex')}`,
+      },
+    }));
+    try {
+      await expect(validateRenderPreparation(saved)).rejects.toMatchObject({
+        code: 'RENDER_ENVIRONMENT_DRIFT',
+      });
+    } finally {
+      setRenderPreparationFactsProviderForTests(undefined);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a frozen title record without its Chromium executable path', async () => {
+    const preparation = freezeRenderPreparation(project, [{ op: 'instantiateTemplate' }], facts);
+    const { executablePath: _executablePath, ...chromiumWithoutPath } = preparation.chromium;
+    const saved = {
+      ...project,
+      pluginData: {
+        ...project.pluginData,
+        'joy.renderPreparation': { ...preparation, chromium: chromiumWithoutPath },
+      },
+    } as unknown as CliProjectDocument;
+    await expect(validateRenderPreparation(saved, facts)).rejects.toMatchObject({
+      code: 'RENDER_PREPARATION_INVALID',
+    });
+  });
+
+  it('uses the explicitly selected Chromium executable when probing at runtime', async () => {
+    const priorExecutable = process.env['JOY_CHROMIUM_PATH'];
+    process.env['JOY_CHROMIUM_PATH'] = join(tmpdir(), 'missing-explicit-joy-chromium.exe');
+    try {
+      const currentFacts = await readRenderPreparationFacts({ title: true, captions: false });
+      expect(currentFacts.chromium.launchable).toBe(false);
+    } finally {
+      if (priorExecutable === undefined) delete process.env['JOY_CHROMIUM_PATH'];
+      else process.env['JOY_CHROMIUM_PATH'] = priorExecutable;
+    }
+  });
+
+  it('validates a title record against unchanged production probe facts', async () => {
+    const frozenFacts = await readRenderPreparationFacts({ title: true, captions: false });
+    const preparation = freezeRenderPreparation(
+      project,
+      [{ op: 'instantiateTemplate' }],
+      frozenFacts,
+    );
+    const preparedProject = {
+      ...project,
+      pluginData: { ...project.pluginData, 'joy.renderPreparation': preparation },
+    } as unknown as CliProjectDocument;
+    const currentFacts = await readRenderPreparationFacts({ title: true, captions: false });
+
+    expect(currentFacts.chromium).toMatchObject({
+      launchable: frozenFacts.chromium.launchable,
+      executableSha256: frozenFacts.chromium.executableSha256,
+      version: frozenFacts.chromium.version,
+    });
+    await expect(validateRenderPreparation(preparedProject, currentFacts)).resolves.toEqual(
+      preparation,
+    );
+  });
+
+  it('rejects a title record when the Chromium executable hash changes', async () => {
+    const frozenFacts = await readRenderPreparationFacts({ title: true, captions: false });
+    const preparation = freezeRenderPreparation(
+      project,
+      [{ op: 'instantiateTemplate' }],
+      frozenFacts,
+    );
+    const preparedProject = {
+      ...project,
+      pluginData: { ...project.pluginData, 'joy.renderPreparation': preparation },
+    } as unknown as CliProjectDocument;
+    const changedFacts: RenderPreparationFacts = {
+      ...frozenFacts,
+      chromium: {
+        ...frozenFacts.chromium,
+        executableSha256: 'sha256:changed-executable',
+      },
+    };
+
+    await expect(validateRenderPreparation(preparedProject, changedFacts)).rejects.toMatchObject({
+      code: 'RENDER_ENVIRONMENT_DRIFT',
+    });
+  });
+
+  it('observes cancellation during asynchronous FFmpeg validation within 100 ms', async () => {
+    let started = false;
+    setRenderPreparationCommandRunnerForTests((_binary, _args, { signal }) => {
+      started = true;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('probe aborted')), {
+          once: true,
+        });
+      });
+    });
+    const controller = new AbortController();
+    try {
+      const validating = readRenderPreparationFacts({
+        title: false,
+        captions: false,
+        signal: controller.signal,
+      });
+      await vi.waitFor(() => expect(started).toBe(true));
+      const startedAt = performance.now();
+      controller.abort();
+      await expect(validating).rejects.toThrow('aborted');
+      expect(performance.now() - startedAt).toBeLessThan(100);
+    } finally {
+      setRenderPreparationCommandRunnerForTests(undefined);
+    }
+  });
+
   it('freezes renderer, font, coverage, composition, and input digests', () => {
     const preparation = freezeRenderPreparation(project, [{ op: 'instantiateTemplate' }], facts);
     expect(preparation).toMatchObject({

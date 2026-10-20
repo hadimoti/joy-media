@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { existsSync, rmSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { rational } from '@joy-media/project-schema';
 import { createChromiumSceneDriver, findChromiumExecutable } from './chromium-driver.js';
@@ -33,6 +34,43 @@ const unitRequest = {
 };
 
 describe('Chromium scene driver ownership', () => {
+  it('retries profile removal after the browser tree exits', async () => {
+    let fake!: FakeWorker;
+    let profileDirectory = '';
+    let removalAttempts = 0;
+    const driver = createChromiumSceneDriver({
+      executablePath: process.execPath,
+      workerFactory: (_source, options) => {
+        profileDirectory = String(
+          (options.workerData as { readonly profileDirectory: string }).profileDirectory,
+        );
+        fake = new FakeWorker((message) => {
+          if (message.type !== 'close') return;
+          Atomics.store(new Int32Array(message.shared as SharedArrayBuffer, 0, 4), 0, 1);
+          fake.emit('message', { type: 'complete', requestId: message.requestId });
+        });
+        return fake;
+      },
+      killTree: () => {},
+      removeProfile: (directory) => {
+        removalAttempts += 1;
+        if (removalAttempts <= 2) {
+          const error = new Error('profile busy') as NodeJS.ErrnoException;
+          error.code = 'EBUSY';
+          throw error;
+        }
+        rmSync(directory, { recursive: true, force: true });
+      },
+    });
+    try {
+      await driver.closeAsync!();
+      expect(removalAttempts).toBeGreaterThanOrEqual(3);
+      expect(existsSync(profileDirectory)).toBe(false);
+    } finally {
+      rmSync(profileDirectory, { recursive: true, force: true });
+    }
+  });
+
   it('kills the known browser PID before terminating a timed-out worker', async () => {
     const order: string[] = [];
     let fake!: FakeWorker;
