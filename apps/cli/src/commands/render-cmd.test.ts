@@ -551,29 +551,42 @@ describe('joy render (headless batch render command)', () => {
       const target = join(dir, 'clip.partial.mp4');
       const backup = join(dir, '.clip.partial.mp4.1234.abcdef12.backup');
       const partial = join(dir, '.clip.partial.mp4.1234.abcdef12.partial');
-      const manifestTemp = join(dir, '.clip.partial.mp4.manifest.json.1234.abcdef12.tmp');
       const preview = join(dir, '.clip.partial.mp4.1234.0123456789abcdef.staging.png');
       writeFileSync(backup, 'backup that must survive');
       writeFileSync(partial, 'partial');
-      writeFileSync(manifestTemp, 'manifest temp');
       writeFileSync(preview, 'preview');
       removeArtifactStagingFiles(target);
       expect(readFileSync(backup, 'utf8')).toBe('backup that must survive');
       expect(existsSync(partial)).toBe(false);
-      expect(existsSync(manifestTemp)).toBe(false);
       expect(existsSync(preview)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('keeps files that only share the target prefix: another target, a backup and user files', () => {
+  it('removes a manifest temp file only for its manifest target, never for the media target', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-manifest-temp-'));
+    try {
+      const manifestTemp = join(dir, '.clip.mp4.manifest.json.1234.abcdef12.tmp');
+      writeFileSync(manifestTemp, 'manifest temp that a live manifest-only render may own');
+      removeArtifactStagingFiles(join(dir, 'clip.mp4'));
+      expect(existsSync(manifestTemp)).toBe(true);
+      removeArtifactStagingFiles(join(dir, 'clip.mp4.manifest.json'));
+      expect(existsSync(manifestTemp)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps files that only share the target prefix: a backup, another target, a short name, and user files', () => {
     const dir = mkdtempSync(join(tmpdir(), 'joy-render-staging-prefix-'));
     try {
       const target = join(dir, 'clip.mp4');
       const ownPartial = join(dir, '.clip.mp4.1234.abcdef12.partial');
       const kept = [
+        join(dir, '.clip.mp4.1234.abcdef12.backup'),
         join(dir, '.clip.mp4.other.mp4.1234.abcdef12.partial'),
+        join(dir, '.clip.mp4.1234.a.partial'),
         join(dir, '.clip.mp4.interrupted.partial'),
         join(dir, '.clip.mp4.notes.tmp'),
       ];
@@ -588,25 +601,40 @@ describe('joy render (headless batch render command)', () => {
   });
 
   it.each([
-    ['the same path', (path: string): string => path],
+    ['the same path', (path: string): string => path, '.interrupted.partial', false],
     [
       'another spelling of the same file',
       (path: string): string => path.replace(/([\\/])([^\\/]+)$/u, '$1.$1$2'),
+      '.interrupted.partial',
+      false,
+    ],
+    [
+      'a generated partial name whose dead owner is replaced',
+      (path: string): string => path,
+      '.1234.abcdef12.partial',
+      true,
     ],
   ])(
     'refuses a dead output lock whose partial path is a journal path (%s), leaving every file',
-    async (_label, spell) => {
+    async (_label, spell, stagedSuffix, staleOwner) => {
       const dir = mkdtempSync(join(tmpdir(), 'joy-render-alias-journal-'));
       const mediaName = 'alias.mp4';
       const mediaPath = join(dir, mediaName);
       const manifestPath = join(dir, `${mediaName}.manifest.json`);
       const lockPath = join(dir, `.${mediaName}.render.lock`);
-      const stagedMediaPath = join(dir, `.${mediaName}.interrupted.partial`);
+      const stagedMediaPath = join(dir, `.${mediaName}${stagedSuffix}`);
       const mediaBackup = join(dir, `.${mediaName}.interrupted.backup`);
       const inputPath = join(dir, 'input.mp4');
       writeFileSync(inputPath, 'probe fixture');
       writeFileSync(stagedMediaPath, 'staged partial that must survive');
       writeFileSync(mediaBackup, 'backup that must survive');
+      if (staleOwner) {
+        // A dead owner makes the claim replace its record, which used to clean staging early.
+        writeFileSync(
+          `${mediaPath}.owner`,
+          JSON.stringify({ pid: 2_147_000_000, token: 'dead-owner-alias', createdAt: 1 }),
+        );
+      }
       // The output file and its lock are named after the project id, so the id must be "alias".
       const project = createDefaultProject('Alias journal', { id: 'alias' });
       const root = project.compositions['root'] as unknown as {
@@ -693,7 +721,10 @@ describe('joy render (headless batch render command)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'joy-render-dead-owner-'));
     const target = join(dir, 'dead-owner.mp4.manifest.json');
     const staging = join(dir, '.dead-owner.mp4.manifest.json.1234.abcdef12.tmp');
-    writeFileSync(`${target}.owner`, JSON.stringify({ pid: 2_147_000_000, token: 'dead-owner' }));
+    writeFileSync(
+      `${target}.owner`,
+      JSON.stringify({ pid: 2_147_000_000, token: 'dead-owner', createdAt: 1 }),
+    );
     writeFileSync(staging, 'partial');
     const project = createDefaultProject('Dead owner', { id: 'dead-owner' });
     const root = project.compositions['root'] as unknown as { tracks: Array<{ clips: unknown[] }> };

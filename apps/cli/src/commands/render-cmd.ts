@@ -1133,6 +1133,8 @@ export async function runHeadlessRender(
       if (!previewOwner.ok)
         return failure('RENDER_OUTPUT_BUSY', previewOwner.message, totalFrames, totalClips);
       artifactOwnerReleases.push(previewOwner.release);
+      // Preview staging files have no journal, so a dead owner's leftovers can go now.
+      if (previewOwner.replacedStaleRecord) removeArtifactStagingFiles(artifactPath);
       let captured;
       let previewHandle: ReturnType<typeof startEncode> | undefined;
       let encodeSettled = false;
@@ -1306,6 +1308,7 @@ export async function runHeadlessRender(
       null;
     let activeRenderPartialPath: string | null = null;
     // Claim every target whenever the output lock is taken, so recovery never runs unowned.
+    const staleOutputTargets: string[] = [];
     if (realMedia || totalClips > 0 || input.manifestOnly) {
       for (const target of outputTargets) {
         const owner = acquireArtifactOwner(target);
@@ -1313,6 +1316,7 @@ export async function runHeadlessRender(
           return failure('RENDER_OUTPUT_BUSY', owner.message, totalFrames, totalClips);
         }
         artifactOwnerReleases.push(owner.release);
+        if (owner.replacedStaleRecord) staleOutputTargets.push(target);
       }
     }
 
@@ -1325,6 +1329,9 @@ export async function runHeadlessRender(
       recordOutputPartialPath = lock.recordPartialPath;
       recordOutputTransaction = lock.recordTransaction;
     }
+    // Only now, after the journal has been validated and recovered, may a dead owner's leftover
+    // staging files be removed. Removing them earlier would change what recovery sees.
+    for (const target of staleOutputTargets) removeArtifactStagingFiles(target);
 
     if (!json) {
       printBanner();
@@ -2326,7 +2333,7 @@ function readArtifactOwner(path: string): ArtifactOwnerRecord | null {
 function acquireArtifactOwner(
   target: string,
 ):
-  | { readonly ok: true; readonly release: () => void }
+  | { readonly ok: true; readonly release: () => void; readonly replacedStaleRecord: boolean }
   | { readonly ok: false; readonly message: string } {
   const path = `${target}.owner`;
   let previousRecordPresent = false;
@@ -2352,7 +2359,6 @@ function acquireArtifactOwner(
             createdAt: Date.now(),
           }),
         });
-        if (acquired && previousRecordPresent) removeArtifactStagingFiles(target);
         return acquired;
       },
       { busyCode: 'RENDER_OUTPUT_BUSY' },
@@ -2396,20 +2402,21 @@ function acquireArtifactOwner(
     }
   };
   process.once('exit', release);
-  return { ok: true, release };
+  // The caller decides when a replaced stale record's staging files may be removed.
+  return { ok: true, release, replacedStaleRecord: previousRecordPresent };
 }
 
 /**
  * The generated staging names for one target, tested on the part after `.<target>.`:
- * a media encode `<pid>.<hex>.partial`, a preview `<pid>.<hex>.staging.png`, the temp file of a
- * media's manifest `manifest.json.<pid>.<hex>.tmp`, and the temp file of a manifest target
- * `<pid>.<hex>.tmp`. Backups, other targets' files and user files are not in this format.
+ * a media encode `<pid>.<8 hex>.partial`, a preview `<pid>.<16 hex>.staging.png`, and the atomic
+ * temp file of a manifest target `<pid>.<8 hex>.tmp`. The temp file of a media's manifest is
+ * `manifest.json.<pid>.<8 hex>.tmp` under the media name, so it never matches here: it belongs to
+ * the manifest target, which removes it under its own owner.
  */
 const GENERATED_STAGING_SUFFIXES: readonly RegExp[] = [
-  /^\d+\.[0-9a-f]+\.partial$/u,
-  /^\d+\.[0-9a-f]+\.staging\.png$/u,
-  /^manifest\.json\.\d+\.[0-9a-f]+\.tmp$/u,
-  /^\d+\.[0-9a-f]+\.tmp$/u,
+  /^\d+\.[0-9a-f]{8}\.partial$/u,
+  /^\d+\.[0-9a-f]{16}\.staging\.png$/u,
+  /^\d+\.[0-9a-f]{8}\.tmp$/u,
 ];
 
 /**
