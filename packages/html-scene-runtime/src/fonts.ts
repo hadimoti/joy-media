@@ -95,6 +95,18 @@ export function loadNotoSansArabicFaces(): NotoSansArabicFace[] {
   });
 }
 
+/** Returns the integrity-checked bundled Arabic 400 WOFF2 path for external renderers. */
+export function notoSansArabicArabic400Path(): string {
+  const faces = loadNotoSansArabicFaces();
+  const face = faces.find((item) => item.subset === 'arabic' && item.weight === 400);
+  if (!face) throw new Error('Canonical Noto Sans Arabic Arabic 400 face is missing');
+  const directory = fontDirectories().find((candidate) =>
+    existsSync(join(candidate, 'manifest.json')),
+  );
+  if (!directory) throw new Error('Canonical Noto Sans Arabic font directory is missing');
+  return join(directory, EXPECTED_FONT_FILES[0]!);
+}
+
 /** Makes byte-identical data URLs for isolated document @font-face rules. */
 export function notoSansArabicFontCss(faces = loadNotoSansArabicFaces()): string {
   return faces

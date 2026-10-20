@@ -7,6 +7,7 @@ import { runCli } from '../cli.js';
 import { cliSchemaErrors } from '../humanized/schema-validation.js';
 import {
   handleRenderCommand,
+  collectTitleSources,
   isRenderPresetId,
   MANIFEST_ONLY_MESSAGE,
   MAX_CLIP_DURATION_US,
@@ -68,6 +69,38 @@ afterAll(() => {
 });
 
 describe('joy render (headless batch render command)', () => {
+  it('excludes title instances bound to disabled tracks', () => {
+    const project = {
+      rootCompositionId: 'root',
+      compositions: {
+        root: {
+          tracks: [
+            {
+              id: 'disabled',
+              kind: 'video',
+              enabled: false,
+              clips: [{ id: 'title-clip', startUs: 0, durationUs: 1_000_000 }],
+            },
+            {
+              id: 'enabled',
+              kind: 'video',
+              enabled: true,
+              clips: [{ id: 'other-clip', startUs: 0, durationUs: 1_000_000 }],
+            },
+          ],
+        },
+      },
+      pluginData: {
+        'joy.contentTemplates': {
+          instances: {
+            title: { clipId: 'title-clip' },
+          },
+        },
+      },
+    } as never;
+    expect(collectTitleSources(project)).toEqual([]);
+  });
+
   it('exposes mp4/webm/prores render presets with deterministic specs', () => {
     expect(isRenderPresetId('mp4')).toBe(true);
     expect(isRenderPresetId('webm')).toBe(true);

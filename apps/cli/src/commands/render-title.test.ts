@@ -1,11 +1,12 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { encodeRgbaPng } from '../services/title-frames.js';
 import { isPreviewTimeInRange, previewFrameIndex } from './render-cmd.js';
-import { buildFfmpegArgs, type MediaPlanReady } from './render-media.js';
+import { buildFfmpegArgs, startEncode, type MediaPlanReady } from './render-media.js';
+import { hasUsableChromium } from './render-features.js';
 
 const emptyPlan: MediaPlanReady = {
   mode: 'media',
@@ -72,6 +73,74 @@ describe('title composition rendering', () => {
     expect(args).toContain('frames/title-speaker-%05d.png');
     expect(args.join(' ')).toContain('[0:v]setpts=PTS+0.500000/TB,format=rgba[title0]');
     expect(args.join(' ')).toContain("enable='gte(t,0.500000)*lt(t,1.500000)'");
+  });
+
+  it('composes title and media overlays in track order', () => {
+    const mediaPlan: MediaPlanReady = {
+      ...emptyPlan,
+      clips: [0, 2].map((trackOrder, index) => ({
+        clipId: `clip-${index}`,
+        trackId: `track-${trackOrder}`,
+        trackOrder,
+        startUs: 0,
+        durationUs: 2_000_000,
+        sourceInUs: 0,
+        assetId: `asset-${index}`,
+        sourcePath: `input-${index}.mp4`,
+        info: {
+          hasVideo: true,
+          hasAudio: false,
+          hasAlpha: false,
+          isImage: false,
+          durationUs: 2_000_000,
+          width: 320,
+          height: 240,
+          mimeType: 'video/mp4',
+        },
+        visual: true,
+        audio: false,
+        audioSettings: { gain: 1, mute: false, fadeInUs: 0, fadeOutUs: 0 },
+        transitionInUs: 0,
+        transitionOutUs: 0,
+      })),
+    };
+    const graph = buildFfmpegArgs(mediaPlan, 'mp4', 'out.mp4', [
+      {
+        instanceId: 'middle-title',
+        inputPattern: 'title-%05d.png',
+        startUs: 0,
+        durationUs: 2_000_000,
+        trackOrder: 1,
+      },
+    ]).join(' ');
+    expect(graph.indexOf('[b0][v0]')).toBeLessThan(graph.indexOf('[b1][title0]'));
+    expect(graph.indexOf('[b1][title0]')).toBeLessThan(graph.indexOf('[b2][v1]'));
+  });
+
+  it('does not advertise Chromium when discovery returns undefined', () => {
+    const readVersion = (path: string): string => `Chromium ${path}`;
+    expect(hasUsableChromium(undefined, readVersion)).toBe(false);
+    expect(hasUsableChromium('browser.exe', readVersion)).toBe(true);
+    expect(() =>
+      hasUsableChromium('bad.exe', () => {
+        throw new Error('launch failed');
+      }),
+    ).toThrow('launch failed');
+  });
+
+  it('removes explicitly owned ASS directories even when Windows filter paths are escaped', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-caption-ass-win-'));
+    writeFileSync(join(directory, 'owned.txt'), 'owned');
+    const windowsFilterPath = `C:/${directory.replace(/\\/g, '/')}`.replace(/^([A-Z]):/, '$1\\:');
+    expect(windowsFilterPath).toContain('\\:');
+    const handle = startEncode(
+      ['-filter_complex', `ass=filename=${windowsFilterPath}`],
+      1,
+      () => {},
+      [directory],
+    );
+    await handle.done;
+    expect(existsSync(directory)).toBe(false);
   });
 
   it('uses integer arithmetic for the 2.5 second preview index at 30 fps', () => {

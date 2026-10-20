@@ -1,5 +1,5 @@
 import type { FontChoice, P0TemplateId, TitleInstanceV1 } from '@joy-media/project-schema';
-import { P0_TEMPLATES, templateSha256 } from './catalog.js';
+import { P0_PAINT_POLICY, P0_TEMPLATES, templateSha256 } from './catalog.js';
 
 export interface TitleCompileRequest {
   readonly instanceId: string;
@@ -159,10 +159,11 @@ export function compileTitleInstance(
   if (primaryLines === undefined || secondaryLines === undefined)
     return failure('TEXT_OVERFLOW', 'text does not fit at the minimum supported size');
 
-  const lineHeightPx = Math.round(fontSizePx * 1.25);
-  const secondaryLineHeight = Math.round(secondarySizePx * 1.25);
-  // Include the full 80px entrance excursion for slide-up in the reserved height.
-  const slideReserve = request.motion.presetId === 'joy-slide-up' ? 80 : 0;
+  const lineHeightPx = Math.round(fontSizePx * P0_PAINT_POLICY.lineHeightMultiplier);
+  const secondaryLineHeight = Math.round(secondarySizePx * P0_PAINT_POLICY.lineHeightMultiplier);
+  // Include the full slide excursion in the reserved height.
+  const slideReserve =
+    request.motion.presetId === 'joy-slide-up' ? P0_PAINT_POLICY.slideExcursionPx : 0;
   const boxHeightPx =
     primaryLines.length * lineHeightPx +
     secondaryLines.length * secondaryLineHeight +

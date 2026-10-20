@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  fstatSync,
+  openSync,
+  readSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { projectV3ToDesktopDocuments, type JoyProjectV3 } from '@joy-media/project-schema';
 
@@ -108,31 +116,19 @@ export function buildDesktopProjectEnvelope(
   sources: Readonly<Record<string, string>>,
   exportedAt = new Date(),
   projectedDocuments = projectV3ToDesktopDocuments(project),
+  readMedia: (path: string, asset: JoyProjectV3['assets'][string]) => Buffer = readBoundedMedia,
 ) {
   const documents = projectedDocuments;
   const media = Object.values(project.assets).map((asset) => {
     const path = sources[asset.id];
     if (path === undefined)
       fail('DESKTOP_EXPORT_MEDIA_MISSING', `Original media is missing for asset ${asset.id}.`);
-    let bytes: Buffer;
-    try {
-      bytes = readFileSync(path);
-    } catch {
-      fail(
-        'DESKTOP_EXPORT_MEDIA_MISSING',
-        `Original media is missing or unreadable for asset ${asset.id}.`,
-      );
-    }
-    if (
-      bytes.byteLength > MAX_MEDIA_BYTES ||
-      (asset.bytes !== undefined && asset.bytes > MAX_MEDIA_BYTES)
-    )
+    if (asset.bytes !== undefined && asset.bytes > MAX_MEDIA_BYTES)
       fail(
         'DESKTOP_EXPORT_MEDIA_TOO_LARGE',
         `Original media for asset ${asset.id} exceeds 256 MiB.`,
       );
-    if (asset.bytes !== undefined && bytes.byteLength !== asset.bytes)
-      fail('DESKTOP_EXPORT_MEDIA_CORRUPT', `Original media size does not match asset ${asset.id}.`);
+    const bytes = readMedia(path, asset);
     if (asset.sha256 !== undefined) {
       const hash = createHash('sha256').update(bytes).digest('hex');
       if (hash !== asset.sha256.replace(/^sha256:/u, ''))
@@ -161,30 +157,67 @@ export function buildDesktopProjectEnvelope(
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
     },
-    documents,
+    documents: { ...documents, timeline: documents.timeline.project },
     media,
   };
 }
 
+function readBoundedMedia(path: string, asset: JoyProjectV3['assets'][string]): Buffer {
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, 'r');
+  } catch {
+    fail(
+      'DESKTOP_EXPORT_MEDIA_MISSING',
+      `Original media is missing or unreadable for asset ${asset.id}.`,
+    );
+  }
+  try {
+    const recordedSize = fstatSync(descriptor).size;
+    if (recordedSize > MAX_MEDIA_BYTES)
+      fail(
+        'DESKTOP_EXPORT_MEDIA_TOO_LARGE',
+        `Original media for asset ${asset.id} exceeds 256 MiB.`,
+      );
+    if (asset.bytes !== undefined && recordedSize !== asset.bytes)
+      fail('DESKTOP_EXPORT_MEDIA_CORRUPT', `Original media size does not match asset ${asset.id}.`);
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    while (totalBytes < recordedSize) {
+      const chunk = Buffer.allocUnsafe(Math.min(1024 * 1024, recordedSize - totalBytes));
+      const bytesRead = readSync(descriptor, chunk, 0, chunk.byteLength, totalBytes);
+      if (bytesRead === 0)
+        fail(
+          'DESKTOP_EXPORT_MEDIA_CORRUPT',
+          `Original media size changed while reading asset ${asset.id}.`,
+        );
+      chunks.push(chunk.subarray(0, bytesRead));
+      totalBytes += bytesRead;
+    }
+    const growthProbe = Buffer.allocUnsafe(1);
+    if (readSync(descriptor, growthProbe, 0, 1, recordedSize) !== 0)
+      fail('DESKTOP_EXPORT_MEDIA_CORRUPT', `Original media grew while reading asset ${asset.id}.`);
+    return Buffer.concat(chunks, totalBytes);
+  } catch (error) {
+    if (error instanceof DesktopExportError) throw error;
+    fail('DESKTOP_EXPORT_MEDIA_CORRUPT', `Original media could not be read for asset ${asset.id}.`);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 /** Write the complete desktop package to a sibling temp file before replacing the destination. */
-export function writeDesktopProjectExport(
+export async function writeDesktopProjectExport(
   project: JoyProjectV3,
   sources: Readonly<Record<string, string>>,
   outputPath: string,
   exportedAt = new Date(),
-): void | Promise<void> {
+): Promise<void> {
   const documents = projectV3ToDesktopDocuments(project);
-  const write = () => {
-    const envelope = buildDesktopProjectEnvelope(project, sources, exportedAt, documents);
-    installDesktopEnvelope(envelope, outputPath);
-  };
-  if (process.argv[1]?.includes('joy-media-bundle')) {
-    return verifyBundledFonts().then((hashes) => {
-      validateTitleFonts(project, hashes);
-      write();
-    });
-  }
-  write();
+  const hashes = await verifyBundledFonts();
+  validateTitleFonts(project, hashes);
+  const envelope = buildDesktopProjectEnvelope(project, sources, exportedAt, documents);
+  installDesktopEnvelope(envelope, outputPath);
 }
 
 function installDesktopEnvelope(

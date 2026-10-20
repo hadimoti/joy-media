@@ -8,6 +8,8 @@ import { generateSceneCsp } from './csp.js';
 import { isRecord, sceneDiagnostic } from './diagnostics.js';
 import type { SceneDiagnostic } from './diagnostics.js';
 import type { SceneManifestV1 } from './manifest.js';
+import type { ScenePaintFrameV1 } from '@joy-media/project-schema';
+import { isCanonicalScenePaintFont, SCENE_PAINT_FONT_DESCRIPTORS } from './font-descriptors.js';
 
 export interface ScenePreviewUpdate {
   readonly type: 'joy.scene.update.v1';
@@ -30,6 +32,10 @@ export interface ScenePreviewCapture {
   readonly height: number;
   /** Optional explicit shaped text lines; existing capture messages remain valid. */
   readonly lines?: readonly ScenePaintLine[];
+  /** Complete explicit frame painted directly by the shared script. */
+  readonly paint?: ScenePaintFrameV1;
+  /** Reject image nodes for capture paths that require image-free markup. Defaults to skipping them. */
+  readonly rejectImages?: boolean;
 }
 
 export interface ScenePaintLine {
@@ -92,8 +98,38 @@ const SAFE_BUNDLE_URL = /^(blob:|data:text\/javascript(?:;[^,]*)?,)/i;
  */
 export const SCENE_PAINT_SCRIPT = `(function () {
   'use strict';
+  var canonicalFonts = ${JSON.stringify(SCENE_PAINT_FONT_DESCRIPTORS)};
   var instanceId = null;
   var suspended = false;
+  function validPaintFrame(frame) {
+    if (!frame || typeof frame !== 'object' || !Number.isSafeInteger(frame.width) ||
+        !Number.isSafeInteger(frame.height) || frame.width < 1 || frame.height < 1 ||
+        frame.width > 4096 || frame.height > 4096 || frame.width * frame.height > 8388608 ||
+        (frame.background !== undefined && typeof frame.background !== 'string') ||
+        !Array.isArray(frame.rects) || frame.rects.length > 128 ||
+        !Array.isArray(frame.lines) || frame.lines.length > 128 ||
+        !Array.isArray(frame.fonts) || frame.fonts.length < 1 || frame.fonts.length > 4) return false;
+    var knownFonts = frame.fonts.every(function (font) {
+      return canonicalFonts.some(function (canonical) {
+        return font && font.family === canonical.family && font.weight === canonical.weight &&
+          font.subset === canonical.subset && font.sha256 === canonical.sha256 && font.length === canonical.length;
+      });
+    });
+    if (!knownFonts) return false;
+    return frame.rects.every(function (rect) {
+      return rect && [rect.x, rect.y, rect.width, rect.height, rect.opacity].every(Number.isFinite) &&
+        rect.width > 0 && rect.height > 0 && rect.opacity >= 0 && rect.opacity <= 1 &&
+        typeof rect.colour === 'string' && rect.colour.length > 0;
+    }) && frame.lines.every(function (line) {
+      return line && typeof line.text === 'string' && typeof line.font === 'string' &&
+        typeof line.colour === 'string' && line.face && ['ltr', 'rtl', 'auto'].indexOf(line.direction) !== -1 &&
+        ['left', 'center', 'right'].indexOf(line.align) !== -1 &&
+        [line.x, line.y, line.height, line.opacity].every(Number.isFinite) && line.height > 0 &&
+        line.opacity >= 0 && line.opacity <= 1 && frame.fonts.some(function (font) {
+          return font.family === line.face.family && font.weight === line.face.weight && font.subset === line.face.subset;
+        });
+    });
+  }
   function validVariables(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     return Object.keys(value).every(function (key) {
@@ -110,7 +146,55 @@ export const SCENE_PAINT_SCRIPT = `(function () {
     if (textAlign === 'right' || textAlign === 'left') return textAlign;
     return rtl ? 'right' : 'left';
   }
-  function paintTree(ctx, root, width, height, explicitLines, background) {
+  function paintExplicitFrame(ctx, width, height, frame) {
+    var sx = width / frame.width;
+    var sy = height / frame.height;
+    ctx.clearRect(0, 0, width, height);
+    if (frame.background && !isTransparent(frame.background)) {
+      ctx.fillStyle = frame.background;
+      ctx.fillRect(0, 0, width, height);
+    }
+    frame.rects.forEach(function (rect) {
+      ctx.save();
+      ctx.globalAlpha = rect.opacity;
+      ctx.fillStyle = rect.colour;
+      ctx.fillRect(rect.x * sx, rect.y * sy, rect.width * sx, rect.height * sy);
+      ctx.restore();
+    });
+    frame.lines.forEach(function (line) {
+      ctx.save();
+      ctx.scale(sx, sy);
+      ctx.font = line.font;
+      ctx.fillStyle = line.colour;
+      if (line.direction === 'auto') {
+        var rtl = false;
+        for (var character = 0; character < line.text.length; character++) {
+          var code = line.text.charCodeAt(character);
+          if ((code >= 0x0590 && code <= 0x08ff) || (code >= 0xfb1d && code <= 0xfefc)) {
+            rtl = true;
+            break;
+          }
+        }
+        ctx.direction = rtl ? 'rtl' : 'ltr';
+      } else {
+        ctx.direction = line.direction;
+      }
+      ctx.textAlign = line.align;
+      ctx.textBaseline = 'alphabetic';
+      ctx.globalAlpha = line.opacity;
+      var metrics = ctx.measureText(line.text);
+      var ascent = metrics.fontBoundingBoxAscent || metrics.actualBoundingBoxAscent || 0;
+      var descent = metrics.fontBoundingBoxDescent || metrics.actualBoundingBoxDescent || 0;
+      var baseline = line.y + (line.height - ascent - descent) / 2 + ascent;
+      ctx.fillText(line.text, line.x, baseline);
+      ctx.restore();
+    });
+  }
+  function paintTree(ctx, root, width, height, explicitLines, background, rejectImages, paintFrame) {
+    if (paintFrame) {
+      paintExplicitFrame(ctx, width, height, paintFrame);
+      return;
+    }
     var rootRect = root.getBoundingClientRect();
     var rw = Math.max(1, rootRect.width || width);
     var rh = Math.max(1, rootRect.height || height);
@@ -157,7 +241,7 @@ export const SCENE_PAINT_SCRIPT = `(function () {
       }
       if (node.nodeType !== 1) return;
       var el = node;
-      if (el.tagName === 'IMG') throw new Error('scene painter does not draw images');
+      if (el.tagName === 'IMG' && rejectImages) throw new Error('scene painter does not draw images');
       var style = window.getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden') return;
       var alpha = parseFloat(style.opacity);
@@ -211,7 +295,7 @@ export const SCENE_PAINT_SCRIPT = `(function () {
       });
     }
   }
-  async function captureSurface(requestId, width, height, lines) {
+  async function captureSurface(requestId, width, height, lines, rejectImages, paintFrame) {
     var root = document.getElementById('joy-scene-root');
     if (!root) {
       window.parent.postMessage({
@@ -236,6 +320,9 @@ export const SCENE_PAINT_SCRIPT = `(function () {
     // Paint the live laid-out DOM. SVG HTML embedding taints getImageData in Chromium.
     try {
       var fonts = [];
+      if (paintFrame) {
+        paintFrame.lines.forEach(function (line) { fonts.push([line.font, line.text]); });
+      }
       (lines || []).forEach(function (line) { fonts.push([line.font, line.text]); });
       var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       for (var node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -252,7 +339,7 @@ export const SCENE_PAINT_SCRIPT = `(function () {
         });
       }));
       await document.fonts.ready;
-      paintTree(ctx, root, width, height, lines);
+      paintTree(ctx, root, width, height, lines, undefined, rejectImages === true, paintFrame);
       var imageData = ctx.getImageData(0, 0, width, height);
       var buffer = imageData.data.buffer;
       window.parent.postMessage(
@@ -282,14 +369,14 @@ export const SCENE_PAINT_SCRIPT = `(function () {
       canvas.height = 0;
     }
   }
-  window.__joyPaintSceneSurface = function (width, height, lines, background) {
+  window.__joyPaintSceneSurface = function (width, height, lines, background, rejectImages, paintFrame) {
     var root = document.getElementById('joy-scene-root');
     if (!root) throw new Error('joy-scene-root missing');
     var canvas = document.createElement('canvas');
     canvas.width = width; canvas.height = height;
     var ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) throw new Error('2d context unavailable');
-    paintTree(ctx, root, width, height, lines || [], background);
+    paintTree(ctx, root, width, height, lines || [], background, rejectImages === true, paintFrame);
     var bytes = ctx.getImageData(0, 0, width, height).data;
     var binary = '';
     for (var start = 0; start < bytes.length; start += 0x8000) {
@@ -311,7 +398,8 @@ export const SCENE_PAINT_SCRIPT = `(function () {
       if (typeof message.requestId !== 'string' ||
           !Number.isSafeInteger(message.width) || message.width < 1 ||
           !Number.isSafeInteger(message.height) || message.height < 1) return;
-      void captureSurface(message.requestId, message.width, message.height, message.lines);
+      if (message.paint !== undefined && !validPaintFrame(message.paint)) return;
+      void captureSurface(message.requestId, message.width, message.height, message.lines, message.rejectImages, message.paint);
       return;
     }
     if (message.type !== 'joy.scene.update.v1' || suspended ||
@@ -416,10 +504,14 @@ export class ScenePreviewSession {
     width: number,
     height: number,
     lines?: readonly ScenePaintLine[],
+    rejectImages = false,
+    paint?: ScenePaintFrameV1,
   ): boolean {
     if (requestId.length === 0) throw new RangeError('scene capture requestId must be non-empty');
     if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1)
       throw new RangeError('scene capture size must be positive safe integers');
+    if (paint !== undefined && (!isScenePaintFrame(paint) || paint.width < 1 || paint.height < 1))
+      throw new RangeError('scene paint frame is invalid');
     if (this.#suspended) return false;
     this.endpoint.postMessage(
       {
@@ -429,6 +521,8 @@ export class ScenePreviewSession {
         width,
         height,
         ...(lines === undefined ? {} : { lines }),
+        ...(paint === undefined ? {} : { paint }),
+        ...(rejectImages ? { rejectImages: true } : {}),
       },
       '*',
     );
@@ -464,7 +558,10 @@ export function validateScenePreviewMessage(value: unknown): ScenePreviewMessage
     Number.isSafeInteger(value.height) &&
     value.height > 0
   ) {
+    if (value.rejectImages !== undefined && typeof value.rejectImages !== 'boolean')
+      return undefined;
     if (value.lines !== undefined && !isScenePaintLines(value.lines)) return undefined;
+    if (value.paint !== undefined && !isScenePaintFrame(value.paint)) return undefined;
     return {
       type: value.type,
       instanceId: value.instanceId,
@@ -472,6 +569,8 @@ export function validateScenePreviewMessage(value: unknown): ScenePreviewMessage
       width: value.width,
       height: value.height,
       ...(value.lines === undefined ? {} : { lines: value.lines }),
+      ...(value.paint === undefined ? {} : { paint: value.paint }),
+      ...(value.rejectImages === true ? { rejectImages: true } : {}),
     };
   }
   if (
@@ -488,6 +587,78 @@ export function validateScenePreviewMessage(value: unknown): ScenePreviewMessage
       variables: value.variables,
     };
   return undefined;
+}
+
+/** Validates transient explicit paint data before either capture transport posts it. */
+export function isScenePaintFrame(value: unknown): value is ScenePaintFrameV1 {
+  if (!isRecord(value)) return false;
+  const frame = value as unknown as ScenePaintFrameV1;
+  const isFiniteNumber = (number: unknown): number is number =>
+    typeof number === 'number' && Number.isFinite(number);
+  if (
+    !Number.isSafeInteger(frame.width) ||
+    frame.width < 1 ||
+    frame.width > 4096 ||
+    !Number.isSafeInteger(frame.height) ||
+    frame.height < 1 ||
+    frame.height > 4096 ||
+    frame.width * frame.height > 8_388_608 ||
+    (frame.background !== undefined && typeof frame.background !== 'string') ||
+    !Array.isArray(frame.rects) ||
+    frame.rects.length > 128 ||
+    !Array.isArray(frame.lines) ||
+    frame.lines.length > 128 ||
+    !Array.isArray(frame.fonts) ||
+    frame.fonts.length < 1 ||
+    frame.fonts.length > 4 ||
+    !frame.fonts.every(isCanonicalScenePaintFont)
+  )
+    return false;
+  const hasFace = (ref: unknown): boolean =>
+    isRecord(ref) &&
+    frame.fonts.some(
+      (font) =>
+        isRecord(font) &&
+        ref.family === font.family &&
+        ref.weight === font.weight &&
+        ref.subset === font.subset,
+    );
+  return (
+    frame.rects.every(
+      (rect) =>
+        isRecord(rect) &&
+        isFiniteNumber(rect.x) &&
+        isFiniteNumber(rect.y) &&
+        isFiniteNumber(rect.width) &&
+        isFiniteNumber(rect.height) &&
+        isFiniteNumber(rect.opacity) &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.opacity >= 0 &&
+        rect.opacity <= 1 &&
+        typeof rect.colour === 'string' &&
+        rect.colour.length > 0,
+    ) &&
+    frame.lines.every(
+      (line) =>
+        isRecord(line) &&
+        typeof line.text === 'string' &&
+        typeof line.font === 'string' &&
+        line.font.length > 0 &&
+        typeof line.colour === 'string' &&
+        line.colour.length > 0 &&
+        ['ltr', 'rtl', 'auto'].includes(String(line.direction)) &&
+        ['left', 'center', 'right'].includes(String(line.align)) &&
+        isFiniteNumber(line.x) &&
+        isFiniteNumber(line.y) &&
+        isFiniteNumber(line.height) &&
+        isFiniteNumber(line.opacity) &&
+        line.height > 0 &&
+        line.opacity >= 0 &&
+        line.opacity <= 1 &&
+        hasFace(line.face),
+    )
+  );
 }
 
 function isScenePaintLines(value: unknown): value is readonly ScenePaintLine[] {

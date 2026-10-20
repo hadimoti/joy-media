@@ -7,8 +7,8 @@ import {
   findFirstPartyScene,
   viewportForScene,
   type ScenePreviewHost,
+  type ScenePreviewFontFace,
   type SceneSurfaceBitmap,
-  type ScenePaintLine,
 } from '@joy-media/html-scene-runtime/browser';
 import type { VisualObjectV1 } from '@joy-media/project-schema';
 import type {
@@ -19,6 +19,8 @@ import type {
 } from '@joy-media/project-schema';
 import { normalizeUniversalTimeline } from '@joy-media/project-schema';
 import { buildTitleSceneFrame } from '@joy-media/motion-core';
+import type { ScenePaintFrameV1 } from '@joy-media/project-schema';
+import { scenePaintFontDescriptors } from '../../../packages/html-scene-runtime/src/font-descriptors.js';
 import { p0TitleFontFaces } from './p0-title-fonts.js';
 
 export type HtmlSceneBitmapMap = ReadonlyMap<string, SceneSurfaceBitmap>;
@@ -132,61 +134,31 @@ function p0Scene(id: string, width: number, height: number) {
   };
 }
 
-function paintLines(
-  title: TitleInstanceV1,
-  timeUs: number,
-  durationUs: number,
-): readonly ScenePaintLine[] {
-  const primary = title.layout.primaryLines;
-  const secondary = title.layout.secondaryLines;
-  const fadeIn =
-    title.motion.presetId === 'hold' || title.motion.inUs <= 0
-      ? 1
-      : Math.min(1, timeUs / title.motion.inUs);
-  const exitStart = durationUs - title.motion.outUs;
-  const opacity = Math.max(
-    0,
-    Math.min(
-      1,
-      fadeIn *
-        (title.motion.outUs <= 0 || timeUs <= exitStart
-          ? 1
-          : 1 - (timeUs - exitStart) / title.motion.outUs),
-    ),
-  );
-  const rows = [
-    ...primary.map((text) => ({
-      text,
-      size: title.layout.fontSizePx,
-      height: title.layout.lineHeightPx,
-    })),
-    ...secondary.map((text) => ({
-      text,
-      size: title.layout.secondarySizePx,
-      height: Math.round(title.layout.secondarySizePx * 1.25),
-    })),
-  ];
-  let y = title.placement.yPx + (title.motion.presetId === 'joy-slide-up' ? 80 * (1 - fadeIn) : 0);
-  return rows.map((row) => {
-    const line: ScenePaintLine = {
-      text: row.text,
-      x: title.placement.xPx,
-      y: y + row.height,
-      height: row.height,
-      font: `${title.font.weight} ${row.size}px "Noto Sans Arabic"`,
-      color: '#ffffff',
-      direction: title.direction === 'rtl' ? 'rtl' : 'ltr',
-      align:
-        title.templateId === 'joy.p0.title'
-          ? 'center'
-          : title.direction === 'rtl'
-            ? 'right'
-            : 'left',
-      opacity,
-    };
-    y += row.height;
-    return line;
-  });
+async function verifyScenePaintFontBytes(
+  frame: ScenePaintFrameV1,
+  browserFaces: readonly ScenePreviewFontFace[],
+): Promise<void> {
+  for (const descriptor of frame.fonts) {
+    const face = browserFaces.find(
+      (candidate) =>
+        candidate.family === descriptor.family &&
+        candidate.weight === descriptor.weight &&
+        candidate.subset === descriptor.subset,
+    );
+    if (face === undefined)
+      throw new Error(`Fetched P0 font is missing: ${descriptor.subset} ${descriptor.weight}`);
+    const binary = atob(face.bytesBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    if (bytes.byteLength !== descriptor.length)
+      throw new Error(`Fetched P0 font length mismatch: ${descriptor.subset} ${descriptor.weight}`);
+    const digest = await crypto.subtle.digest('SHA-256', bytes.slice().buffer);
+    const sha256 = `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+    if (sha256 !== descriptor.sha256)
+      throw new Error(
+        `Fetched P0 font integrity mismatch: ${descriptor.subset} ${descriptor.weight}`,
+      );
+  }
 }
 
 export interface HtmlSceneExportCaptureOptions {
@@ -303,6 +275,7 @@ export class HtmlSceneSurfaceCache {
             if (title === undefined) return;
             const composition = context?.visual.compositions[context.visual.rootCompositionId];
             if (composition === undefined) return;
+            const fontFaces = await p0TitleFontFaces();
             const frame = buildTitleSceneFrame(
               title.instance,
               title.instanceId,
@@ -311,16 +284,18 @@ export class HtmlSceneSurfaceCache {
               {
                 widthPx: composition.width,
                 heightPx: composition.height,
+                fontFaces: scenePaintFontDescriptors(),
                 frameRate: composition.frameRate,
                 locale: context?.visual.settings.defaultLocale ?? 'en',
               },
             );
+            await verifyScenePaintFontBytes(frame.paint, fontFaces);
             let host = this.#hosts.get(object.id);
             if (host === undefined) {
               host = createScenePreviewHost({
                 instanceId: object.id,
                 scene: p0Scene(packageId, composition.width, composition.height) as never,
-                fontFaces: await p0TitleFontFaces(),
+                fontFaces,
               });
               this.#hosts.set(object.id, host);
             }
@@ -332,7 +307,9 @@ export class HtmlSceneSurfaceCache {
               Math.max(1, Math.round(composition.width / 4)),
               Math.max(1, Math.round(composition.height / 4)),
               2_500,
-              paintLines(title.instance, title.localTimeUs, title.durationUs),
+              undefined,
+              false,
+              frame.paint,
             );
             if (generation === this.#generation) this.#bitmaps.set(object.id, bitmap);
             return;
@@ -430,6 +407,7 @@ export class HtmlSceneSurfaceCache {
           const composition = context?.visual.compositions[context.visual.rootCompositionId];
           if (composition === undefined)
             throw new Error(`P0 title composition missing for ${title.instanceId}`);
+          const fontFaces = await p0TitleFontFaces();
           const frame = buildTitleSceneFrame(
             title.instance,
             title.instanceId,
@@ -438,16 +416,18 @@ export class HtmlSceneSurfaceCache {
             {
               widthPx: composition.width,
               heightPx: composition.height,
+              fontFaces: scenePaintFontDescriptors(),
               frameRate: composition.frameRate,
               locale: context?.visual.settings.defaultLocale ?? 'en',
             },
           );
+          await verifyScenePaintFontBytes(frame.paint, fontFaces);
           let host = this.#hosts.get(object.id);
           if (host === undefined) {
             host = createScenePreviewHost({
               instanceId: `export-${object.id}`,
               scene: p0Scene(packageId, composition.width, composition.height) as never,
-              fontFaces: await p0TitleFontFaces(),
+              fontFaces,
             });
             this.#hosts.set(object.id, host);
           }
@@ -461,12 +441,7 @@ export class HtmlSceneSurfaceCache {
           if (!host.update(title.localTimeUs, frame.variables))
             throw new Error(`HTML scene ${object.id} is suspended`);
           const bitmap = await waitForCapture(
-            host.capture(
-              width,
-              height,
-              timeoutMs,
-              paintLines(title.instance, title.localTimeUs, title.durationUs),
-            ),
+            host.capture(width, height, timeoutMs, undefined, false, frame.paint),
             controller.signal,
             timeoutMs,
           );

@@ -1,4 +1,15 @@
 import type { P0TemplateId } from '@joy-media/project-schema';
+import { EASED_HANDLES } from '../interpolation.js';
+
+/** Paint values shared by P0 compilation, motion sampling and scene painting. */
+export const P0_PAINT_POLICY = Object.freeze({
+  textColour: '#ffffff',
+  plateColour: '#000000',
+  plateOpacity: 153 / 255,
+  lineHeightMultiplier: 1.25,
+  slideExcursionPx: 80,
+  easedHandles: EASED_HANDLES,
+});
 
 export interface P0TemplateDefinition {
   readonly id: P0TemplateId;

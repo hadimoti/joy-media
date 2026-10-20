@@ -170,7 +170,6 @@ function planSummary(plan: EditPlan, path?: string): Record<string, unknown> {
 }
 
 async function prepare(args: string[], flags: CliFlags): Promise<number> {
-  await ensureTitleTextMeasurer();
   if (args.length !== 2 || !flags.project || !flags.output) {
     throw usageFailure(
       'Usage: joy-media plan prepare <operations.json> --project <file> --output <plan.json> [--json]',
@@ -187,6 +186,7 @@ async function prepare(args: string[], flags: CliFlags): Promise<number> {
     );
   }
   const operations = parseOperationsFile(args[1]!);
+  if (operations.some(isTitleOperation)) await ensureTitleTextMeasurer();
   const prepared = applyOperations(project, operations, true);
   const next = prepared.project;
   const preparedAt = new Date().toISOString();

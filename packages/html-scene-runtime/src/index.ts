@@ -64,19 +64,29 @@ export type {
 } from './preview-protocol.js';
 export {
   SCENE_PAINT_SCRIPT,
+  isScenePaintFrame,
   createSandboxedIframeDescriptor,
   invalidPreviewMessageDiagnostic,
   ScenePreviewSession,
   validateScenePreviewEvent,
   validateScenePreviewMessage,
 } from './preview-protocol.js';
+export type {
+  FontFaceDescriptorV1,
+  ScenePaintFaceRefV1,
+  ScenePaintFrameV1,
+  ScenePaintLineV1,
+  ScenePaintRectV1,
+} from '@joy-media/project-schema';
 
 export type { NotoSansArabicFace } from './fonts.js';
 export {
   loadNotoSansArabicFaces,
   loadNotoSansArabicPreviewFontFaces,
   notoSansArabicFontCss,
+  notoSansArabicArabic400Path,
 } from './fonts.js';
+export { missingCanonicalFontCodePoints } from './font-coverage.js';
 
 export type {
   HeadlessCaptureRequest,
@@ -96,12 +106,15 @@ export {
 } from './headless.js';
 
 export type { ChromiumSceneDriverOptions } from './chromium-driver.js';
+export type { ChromiumProbeResult } from './chromium-driver.js';
 export {
   createChromiumSceneDriver,
   findChromiumExecutable,
-  readChromiumVersion,
+  probeChromium,
 } from './chromium-driver.js';
 export { createChromiumTextMeasure } from './text-measure.js';
+
+export { SCENE_PAINT_FONT_DESCRIPTORS, scenePaintFontDescriptors } from './font-descriptors.js';
 
 export type { SceneDiagnosticPlaceholder } from './placeholder.js';
 export { createSceneDiagnosticPlaceholder } from './placeholder.js';

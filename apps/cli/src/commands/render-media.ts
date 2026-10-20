@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { loadAssetSources } from '../utils/asset-sources.js';
 import { ffmpegBinary, probeMedia, type MediaInfo } from '../utils/media-probe.js';
 import { compileCaptionAss } from '../services/captions-ass.js';
+import { notoSansArabicArabic400Path } from '@joy-media/html-scene-runtime';
 import {
   RF_ALPHA,
   RF_AUDIO_BUS_GAIN,
@@ -32,10 +33,8 @@ import {
   RF_TRACK_MUTE_SOLO,
   RF_TRANSITION_TYPE,
   RF_VISUAL_OBJECTS,
-  captionFontFile,
-  captionFontFamily,
   probeLibass,
-  REASON_CAPTION_FONT_MISSING,
+  probeCanonicalCaptionFace,
   REASON_RTL_CAPTION_FONT_MISSING,
 } from './render-features.js';
 
@@ -53,6 +52,7 @@ export type MediaPresetId = 'mp4' | 'webm' | 'prores';
 export interface MediaClip {
   readonly clipId: string;
   readonly trackId: string;
+  readonly trackOrder?: number;
   readonly startUs: number;
   readonly durationUs: number;
   readonly sourceInUs: number;
@@ -111,6 +111,11 @@ export type MediaPlan =
       readonly mode: 'error';
       readonly code: 'media-missing' | 'media-unreadable' | 'unsupported-feature';
       readonly message: string;
+      readonly reason?: {
+        readonly kind: 'canonical-caption-face-unavailable';
+        readonly canonicalFace: string;
+        readonly limitation: string;
+      };
     };
 
 interface PresetFallback {
@@ -355,6 +360,7 @@ export function planMedia(
     clip: Record<string, unknown>;
     clipId: string;
     trackId: string;
+    trackOrder: number;
     assetId: string;
     path: string | null;
     /** A real media asset (project record or CLI-registered file), not a bare label. */
@@ -362,7 +368,7 @@ export function planMedia(
   }> = [];
 
   const captions: CaptionCue[] = [];
-  for (const rawTrack of root['tracks'] as unknown[]) {
+  for (const [trackOrder, rawTrack] of (root['tracks'] as unknown[]).entries()) {
     if (!isRecord(rawTrack) || rawTrack['enabled'] === false) continue;
     const trackId = typeof rawTrack['id'] === 'string' ? rawTrack['id'] : '?';
     if (rawTrack['muted'] === true || rawTrack['solo'] === true) {
@@ -395,6 +401,7 @@ export function planMedia(
         clip: rawClip,
         clipId,
         trackId,
+        trackOrder,
         assetId,
         path: resolveSource(assetId, assets[assetId], sources, options.mediaDir),
         real: sources[assetId] !== undefined || isRecord(assets[assetId]),
@@ -403,20 +410,29 @@ export function planMedia(
   }
 
   const libass = captions.length > 0 ? (options.libassAvailable ?? probeLibass()) : false;
+  if (captions.length > 0) {
+    const faceProbe = probeCanonicalCaptionFace();
+    if (!faceProbe.usable) {
+      const reason = {
+        kind: 'canonical-caption-face-unavailable' as const,
+        canonicalFace: faceProbe.canonicalFace,
+        limitation: faceProbe.reason ?? 'FFmpeg libass did not select the canonical WOFF2 face.',
+      };
+      return {
+        mode: 'error',
+        code: 'SETUP_REQUIRED' as never,
+        message: `SETUP_REQUIRED: ${JSON.stringify(reason)}`,
+        reason,
+      };
+    }
+  }
   const hasRtl = captions.some(
     (cue) => cue.direction === 'rtl' || /[\u0590-\u08ff\ufb1d-\ufefc]/u.test(cue.text),
   );
   if (hasRtl && !libass) {
     return { mode: 'error', code: 'unsupported-feature', message: REASON_RTL_CAPTION_FONT_MISSING };
   }
-  const fontFile = captions.length > 0 ? captionFontFile() : null;
-  if (captions.length > 0 && fontFile === null) {
-    return {
-      mode: 'error',
-      code: 'unsupported-feature',
-      message: REASON_CAPTION_FONT_MISSING,
-    };
-  }
+  const fontFile = captions.length > 0 ? notoSansArabicArabic400Path() : null;
   let assDocument: string | null = null;
   if (captions.length > 0 && libass && fontFile !== null) {
     try {
@@ -433,7 +449,7 @@ export function planMedia(
               : fallback.height,
           ),
         ),
-        fontFamily: captionFontFamily(fontFile),
+        fontFamily: 'Noto Sans Arabic',
         cues: captions,
       });
     } catch (error) {
@@ -546,6 +562,7 @@ export function planMedia(
       transitionInUs,
       transitionOutUs,
       trackId: entry.trackId,
+      trackOrder: entry.trackOrder,
       startUs,
       durationUs,
       sourceInUs,
@@ -619,8 +636,6 @@ const CODEC_ARGS: Readonly<Record<MediaPresetId, readonly string[]>> = {
   prores: ['-c:v', 'prores_ks', '-profile:v', '3', '-pix_fmt', 'yuv422p10le', '-c:a', 'pcm_s24le'],
 };
 const FORMAT: Readonly<Record<MediaPresetId, string>> = { mp4: 'mp4', webm: 'webm', prores: 'mov' };
-const assTempDirectories = new Map<string, string>();
-
 /** The full ffmpeg argument list for one render (one input per clip, one filter graph). */
 export function buildFfmpegArgs(
   plan: MediaPlanReady,
@@ -631,8 +646,10 @@ export function buildFfmpegArgs(
     readonly inputPattern: string;
     readonly startUs: number;
     readonly durationUs: number;
+    readonly trackOrder?: number;
   }[] = [],
   preview?: { readonly timeUs: number },
+  ownedTempDirectories: string[] = [],
 ): string[] {
   const { width: W, height: H, fps: FPS } = plan;
   const captionsMode = captionRenderMode(plan);
@@ -649,6 +666,8 @@ export function buildFfmpegArgs(
   ];
   const filters: string[] = [`color=c=black:s=${W}x${H}:r=${FPS}:d=${total},format=yuv420p[b0]`];
   const audioLabels: string[] = [];
+  const overlays: Array<{ order: number; startUs: number; stableOrder: number; input: string }> =
+    [];
   let base = 0;
 
   const trackRank = new Map<string, number>();
@@ -657,7 +676,8 @@ export function buildFfmpegArgs(
   }
   const ordered = [...plan.clips].sort(
     (a, b) =>
-      (trackRank.get(a.trackId) ?? 0) - (trackRank.get(b.trackId) ?? 0) || a.startUs - b.startUs,
+      (a.trackOrder ?? trackRank.get(a.trackId) ?? 0) -
+        (b.trackOrder ?? trackRank.get(b.trackId) ?? 0) || a.startUs - b.startUs,
   );
   ordered.forEach((clip, i) => {
     const dur = secs(clip.durationUs);
@@ -689,10 +709,19 @@ export function buildFfmpegArgs(
       filters.push(
         `[${i}:v]${trim}${fit}${dissolveIn},setpts=PTS-STARTPTS+${visibleStart}/TB[v${i}]`,
       );
-      filters.push(
-        `[b${base}][v${i}]overlay=x=0:y=0:eof_action=pass:enable='between(t,${visibleStart},${visibleEnd})'[b${base + 1}]`,
-      );
-      base += 1;
+      if (titleLayers.length === 0) {
+        filters.push(
+          `[b${base}][v${i}]overlay=x=0:y=0:eof_action=pass:enable='between(t,${visibleStart},${visibleEnd})'[b${base + 1}]`,
+        );
+        base += 1;
+      } else {
+        overlays.push({
+          order: clip.trackOrder ?? trackRank.get(clip.trackId) ?? 0,
+          startUs: clip.startUs,
+          stableOrder: i,
+          input: `[v${i}]overlay=x=0:y=0:eof_action=pass:enable='between(t,${visibleStart},${visibleEnd})'`,
+        });
+      }
     }
     if (clip.audio && !preview) {
       const ms = Math.round(clip.startUs / 1000);
@@ -724,17 +753,28 @@ export function buildFfmpegArgs(
     const start = secs(layer.startUs);
     const end = secs(layer.startUs + layer.durationUs);
     filters.push(`[${inputIndex}:v]setpts=PTS+${start}/TB,format=rgba[title${layerIndex}]`);
-    filters.push(
-      `[b${base}][title${layerIndex}]overlay=x=0:y=0:eof_action=pass:enable='gte(t,${start})*lt(t,${end})'[b${base + 1}]`,
-    );
-    base += 1;
+    overlays.push({
+      order: layer.trackOrder ?? 0,
+      startUs: layer.startUs,
+      stableOrder: ordered.length + layerIndex,
+      input: `[title${layerIndex}]overlay=x=0:y=0:eof_action=pass:enable='gte(t,${start})*lt(t,${end})'`,
+    });
   });
+
+  if (titleLayers.length > 0) {
+    overlays
+      .sort((a, b) => a.order - b.order || a.startUs - b.startUs || a.stableOrder - b.stableOrder)
+      .forEach((overlay) => {
+        filters.push(`[b${base}]${overlay.input}[b${base + 1}]`);
+        base += 1;
+      });
+  }
 
   if (captionsMode === 'ass') {
     const directory = mkdtempSync(join(tmpdir(), 'joy-caption-ass-'));
     const assPath = join(directory, 'captions.ass');
     writeFileSync(assPath, plan.assDocument!, 'utf8');
-    assTempDirectories.set(assPath, directory);
+    ownedTempDirectories.push(directory);
     const assFile = filterValue(assPath.replace(/\\/g, '/'));
     const fontsDir = filterValue(dirname(plan.fontFile!).replace(/\\/g, '/'));
     filters.push(`[b${base}]ass=filename='${assFile}':fontsdir='${fontsDir}'[b${base + 1}]`);
@@ -796,17 +836,17 @@ export function startEncode(
   args: readonly string[],
   durationUs: number,
   onProgress: (fraction: number) => void,
+  ownedTempDirectories: readonly string[] = [],
 ): EncodeHandle {
   const child = spawn(ffmpegBinary(), [...args], { stdio: ['ignore', 'pipe', 'pipe'] });
-  const encodedArgs = args.join(' ');
-  const captionDirs = [...assTempDirectories.entries()]
-    .filter(([path]) => encodedArgs.includes(path.replace(/\\/g, '/')))
-    .map(([path, directory]) => {
-      assTempDirectories.delete(path);
-      return directory;
-    });
   const cleanupCaptions = (): void => {
-    for (const directory of captionDirs) rmSync(directory, { recursive: true, force: true });
+    for (const directory of ownedTempDirectories) {
+      try {
+        rmSync(directory, { recursive: true, force: true });
+      } catch {
+        /* cleanup must not prevent the encode handle from settling */
+      }
+    }
   };
   let cancelled = false;
   let stderrTail = '';

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildHistoricalSchemaProjects } from '@joy-media/test-fixtures';
 import { buildDesktopProjectEnvelope, writeDesktopProjectExport } from './desktop-export.js';
 
@@ -90,24 +90,38 @@ describe('desktop project export envelope', () => {
     );
   });
 
-  it('refuses corrupt media and preserves an existing output byte-for-byte', () => {
+  it('refuses oversized metadata before opening the small original file', () => {
+    const { project, sources, id } = fixture(Buffer.from('small original'));
+    const oversizedProject = {
+      ...project,
+      assets: { [id]: { ...project.assets[id]!, bytes: 256 * 1024 * 1024 + 1 } },
+    };
+    const readMedia = vi.fn(() => Buffer.alloc(0));
+
+    expect(() =>
+      buildDesktopProjectEnvelope(oversizedProject, sources, undefined, undefined, readMedia),
+    ).toThrowError(expect.objectContaining({ code: 'DESKTOP_EXPORT_MEDIA_TOO_LARGE' }));
+    expect(readMedia).not.toHaveBeenCalled();
+  });
+
+  it('refuses corrupt media and preserves an existing output byte-for-byte', async () => {
     const { project, sources, id } = fixture(Buffer.from('verified'));
     writeFileSync(sources[id]!, Buffer.from('corrupt'));
     const output = join(directories.at(-1)!, 'project.joy');
     const previous = Buffer.from('previous complete package');
     writeFileSync(output, previous);
 
-    expect(() => writeDesktopProjectExport(project, sources, output)).toThrowError(
+    await expect(writeDesktopProjectExport(project, sources, output)).rejects.toThrowError(
       expect.objectContaining({ code: 'DESKTOP_EXPORT_MEDIA_CORRUPT' }),
     );
     expect(readFileSync(output)).toEqual(previous);
   });
 
-  it('atomically writes a complete desktop envelope to the requested path', () => {
+  it('atomically writes a complete desktop envelope to the requested path', async () => {
     const { project, sources } = fixture();
     const output = join(directories.at(-1)!, 'project.joy');
 
-    writeDesktopProjectExport(project, sources, output, new Date('2026-10-20T00:00:00.000Z'));
+    await writeDesktopProjectExport(project, sources, output, new Date('2026-10-20T00:00:00.000Z'));
 
     expect(JSON.parse(readFileSync(output, 'utf8'))).toMatchObject({
       format: 'joy-media-project',

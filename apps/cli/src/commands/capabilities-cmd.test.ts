@@ -571,7 +571,7 @@ describe('capability probe status', () => {
     expect(result[0]?.reason).toContain('JOY_MEDIA_CAPTION_FONT');
   });
 
-  it('requires an explicit Arabic TrueType or OpenType face when bundled WOFF2 is unavailable', () => {
+  it('requires the canonical Arabic face when bundled WOFF2 is unavailable', () => {
     const rtl = baseFeatureList().filter((feature) => feature.id === 'captions.rtl');
     const result = applyProbes(rtl, {
       ffmpeg: true,
@@ -583,7 +583,7 @@ describe('capability probe status', () => {
       titleFont: true,
     });
     expect(result[0]?.status).toBe('setup-required');
-    expect(result[0]?.reason).toBe(REASON_RTL_CAPTION_FONT_MISSING);
+    expect(result[0]?.reason).toContain('canonical Noto Sans Arabic Arabic 400 face');
   });
 
   it('requires both libass and a caption face for basic ASS captions', () => {
@@ -593,7 +593,7 @@ describe('capability probe status', () => {
       ffprobe: true,
       captionFont: true,
       libass: false,
-      woff2Font: 'unknown',
+      woff2Font: 'unavailable',
       chromium: true,
       titleFont: true,
     });
@@ -602,12 +602,25 @@ describe('capability probe status', () => {
       ffprobe: true,
       captionFont: true,
       libass: true,
-      woff2Font: 'unavailable',
+      woff2Font: 'loadable',
       chromium: true,
       titleFont: true,
     });
     expect(unavailable[0]?.status).toBe('setup-required');
     expect(available[0]?.status).toBe('available');
+    expect(unavailable[0]?.reason).toContain('FFmpeg libass is unavailable');
+
+    const missingFace = applyProbes(ass, {
+      ffmpeg: true,
+      ffprobe: true,
+      captionFont: true,
+      libass: true,
+      woff2Font: 'unavailable',
+      chromium: true,
+      titleFont: true,
+    });
+    expect(missingFace[0]?.status).toBe('setup-required');
+    expect(missingFace[0]?.reason).toContain('canonical Noto Sans Arabic Arabic 400 WOFF2 face');
   });
 
   it('marks caption features setup-required when no caption font is found', () => {
@@ -616,9 +629,12 @@ describe('capability probe status', () => {
     for (const input of features) {
       const output = result.find((feature) => feature.id === input.id);
       expect(output, input.id).toBeDefined();
-      if (input.id === 'captions.drawtext' || input.id === 'captions.ass-basic') {
+      if (input.id === 'captions.drawtext') {
         expect(output?.status).toBe('setup-required');
         expect(output?.reason).toContain('JOY_MEDIA_CAPTION_FONT');
+      } else if (input.id === 'captions.ass-basic') {
+        expect(output?.status).toBe('setup-required');
+        expect(output?.reason).toContain('canonical Noto Sans Arabic Arabic 400 WOFF2 face');
       } else if (input.id === 'captions.rtl') {
         expect(output?.status).toBe('setup-required');
         expect(output?.reason).toBe(REASON_RTL_CAPTION_FONT_MISSING);
@@ -697,8 +713,8 @@ describe('capability probe status', () => {
     const result = planMedia(value, { manifestOnly: false, libassAvailable: false }, fallback);
     expect(result.mode).toBe('error');
     if (result.mode === 'error') {
-      expect(result.message).toBe(REASON_RTL_CAPTION_FONT_MISSING);
-      expect(result.code).toBe('unsupported-feature');
+      expect(result.code).toBe('SETUP_REQUIRED');
+      expect(result.reason?.canonicalFace).toBe('Noto Sans Arabic Arabic 400');
     }
   });
 });

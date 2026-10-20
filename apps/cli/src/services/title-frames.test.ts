@@ -1,7 +1,12 @@
 import { inflateSync } from 'node:zlib';
-import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import { compileTitleInstance, sampleTitleMotion } from '@joy-media/motion-core';
+import { readFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  buildTitleSceneFrame,
+  compileTitleInstance,
+  sampleTitleMotion,
+} from '@joy-media/motion-core';
 import {
   encodeRgbaPng,
   renderTitleFrames,
@@ -79,6 +84,7 @@ describe('title frame timing and PNG encoding', () => {
           instance: result.instance,
           startUs: 0,
           durationUs: 33_334,
+          trackOrder: 0,
         },
       ],
       { width: 320, height: 568, fps: { num: 30, den: 1 } },
@@ -91,4 +97,211 @@ describe('title frame timing and PNG encoding', () => {
       rendered.cleanup();
     }
   }, 60_000);
+
+  it('records the browser version reported by the capture driver', async () => {
+    vi.resetModules();
+    vi.doMock('@joy-media/html-scene-runtime', () => ({
+      findChromiumExecutable: () => 'fake-chromium',
+      loadNotoSansArabicFaces: () => [{ sha256: 'font-hash' }],
+      scenePaintFontDescriptors: () => [
+        {
+          family: 'Noto Sans Arabic',
+          weight: 400,
+          subset: 'arabic',
+          sha256: 'sha256:9a7c99eccfc3845950358733520688959bfa77ea14e6ef3b0a5efe3a8d52d28b',
+          length: 48820,
+        },
+      ],
+      createChromiumSceneDriver: () => ({
+        get browserVersion() {
+          return 'Chromium 123.4.5';
+        },
+        capture: () => ({ rgba: new Uint8Array(320 * 568 * 4) }),
+      }),
+    }));
+    const fixture = compileTitleInstance(
+      {
+        instanceId: 'version-from-driver',
+        templateId: 'joy.p0.title',
+        clipId: 'clip-version-from-driver',
+        objectId: 'object-version-from-driver',
+        lines: { primary: 'Version', secondary: '' },
+        direction: 'ltr',
+        font: { family: 'Noto Sans Arabic', weight: 400 },
+        fontSha256: 'sha256:9a7c99eccfc3845950358733520688959bfa77ea14e6ef3b0a5efe3a8d52d28b',
+        placement: { xPx: 10, yPx: 20, maxWidthPx: 300, safeInsetPx: 8 },
+        motion: { presetId: 'hold', inUs: 0, outUs: 0 },
+        clipDurationUs: 33_334,
+        frame: { widthPx: 320, heightPx: 568 },
+      },
+      (text, size) => [...text].length * size * 0.55,
+    );
+    if (!fixture.ok) throw new Error(`P0 fixture compilation failed: ${fixture.code}`);
+    try {
+      const rendered = await renderTitleFrames(
+        [
+          {
+            instanceId: 'version-from-driver',
+            instance: fixture.instance,
+            startUs: 0,
+            durationUs: 33_334,
+            trackOrder: 0,
+          },
+        ],
+        { width: 320, height: 568, fps: { num: 30, den: 1 } },
+      );
+      expect(rendered.rendererFacts.chromiumVersion).toBe('Chromium 123.4.5');
+      rendered.cleanup();
+    } finally {
+      vi.doUnmock('@joy-media/html-scene-runtime');
+      vi.resetModules();
+    }
+  });
+
+  it('closes the browser and removes capture files when cancellation arrives between frames', async () => {
+    let closed = false;
+    let captures = 0;
+    vi.resetModules();
+    vi.doMock('@joy-media/html-scene-runtime', () => ({
+      findChromiumExecutable: () => 'fake-chromium',
+      loadNotoSansArabicFaces: () => [{ sha256: 'font-hash' }],
+      scenePaintFontDescriptors: () => [
+        {
+          family: 'Noto Sans Arabic',
+          weight: 400,
+          subset: 'arabic',
+          sha256: 'sha256:9a7c99eccfc3845950358733520688959bfa77ea14e6ef3b0a5efe3a8d52d28b',
+          length: 48820,
+        },
+      ],
+      createChromiumSceneDriver: () => ({
+        get browserVersion() {
+          return 'Chromium fake';
+        },
+        capture: () => {
+          captures += 1;
+          return { rgba: new Uint8Array(320 * 568 * 4) };
+        },
+        close: () => {
+          closed = true;
+        },
+      }),
+    }));
+    const fixture = compileTitleInstance(
+      {
+        instanceId: 'cancel-loop',
+        templateId: 'joy.p0.title',
+        clipId: 'clip-cancel-loop',
+        objectId: 'object-cancel-loop',
+        lines: { primary: 'Cancel', secondary: '' },
+        direction: 'ltr',
+        font: { family: 'Noto Sans Arabic', weight: 400 },
+        fontSha256: 'sha256:9a7c99eccfc3845950358733520688959bfa77ea14e6ef3b0a5efe3a8d52d28b',
+        placement: { xPx: 10, yPx: 20, maxWidthPx: 300, safeInsetPx: 8 },
+        motion: { presetId: 'hold', inUs: 0, outUs: 0 },
+        clipDurationUs: 100_000,
+        frame: { widthPx: 320, heightPx: 568 },
+      },
+      (text, size) => [...text].length * size * 0.55,
+    );
+    if (!fixture.ok) throw new Error(`P0 fixture compilation failed: ${fixture.code}`);
+    let checks = 0;
+    const before = readdirSync(tmpdir()).filter((name) => name.startsWith('title-cancel-loop-'));
+    try {
+      await expect(
+        renderTitleFrames(
+          [
+            {
+              instanceId: 'cancel-loop',
+              instance: fixture.instance,
+              startUs: 0,
+              durationUs: 100_000,
+              trackOrder: 0,
+            },
+          ],
+          { width: 320, height: 568, fps: { num: 30, den: 1 } },
+          { isCancelled: () => ++checks >= 3 },
+        ),
+      ).rejects.toThrow('Render cancelled during title capture');
+      expect(captures).toBe(1);
+      expect(closed).toBe(true);
+      expect(readdirSync(tmpdir()).filter((name) => name.startsWith('title-cancel-loop-'))).toEqual(
+        before,
+      );
+    } finally {
+      vi.doUnmock('@joy-media/html-scene-runtime');
+      vi.resetModules();
+    }
+  });
+
+  it('sends the builder paint to the capture request', async () => {
+    const fontFace = {
+      family: 'Noto Sans Arabic',
+      weight: 400,
+      subset: 'arabic',
+      sha256: 'sha256:9a7c99eccfc3845950358733520688959bfa77ea14e6ef3b0a5efe3a8d52d28b',
+      length: 48820,
+    } as const;
+    const fixture = compileTitleInstance(
+      {
+        instanceId: 'paint-forwarding',
+        templateId: 'joy.p0.title',
+        clipId: 'clip-paint-forwarding',
+        objectId: 'object-paint-forwarding',
+        lines: { primary: 'Forward this paint', secondary: '' },
+        direction: 'ltr',
+        font: { family: 'Noto Sans Arabic', weight: 400 },
+        fontSha256: fontFace.sha256,
+        placement: { xPx: 10, yPx: 20, maxWidthPx: 300, safeInsetPx: 8 },
+        motion: { presetId: 'hold', inUs: 0, outUs: 0 },
+        clipDurationUs: 33_334,
+        frame: { widthPx: 320, heightPx: 568 },
+      },
+      (text, size) => [...text].length * size * 0.55,
+    );
+    if (!fixture.ok) throw new Error(`P0 fixture compilation failed: ${fixture.code}`);
+    const requests: { paint?: unknown }[] = [];
+    vi.resetModules();
+    vi.doMock('@joy-media/html-scene-runtime', () => ({
+      findChromiumExecutable: () => 'fake-chromium',
+      loadNotoSansArabicFaces: () => [{ sha256: fontFace.sha256 }],
+      scenePaintFontDescriptors: () => [fontFace],
+      createChromiumSceneDriver: () => ({
+        get browserVersion() {
+          return 'Chromium fake';
+        },
+        capture: (request: { paint?: unknown }) => {
+          requests.push(request);
+          return { rgba: new Uint8Array(320 * 568 * 4) };
+        },
+      }),
+    }));
+    try {
+      const rendered = await renderTitleFrames(
+        [
+          {
+            instanceId: 'paint-forwarding',
+            instance: fixture.instance,
+            startUs: 0,
+            durationUs: 33_334,
+            trackOrder: 0,
+          },
+        ],
+        { width: 320, height: 568, fps: { num: 30, den: 1 } },
+      );
+      rendered.cleanup();
+      const expected = buildTitleSceneFrame(fixture.instance, 'paint-forwarding', 33_334, 0, {
+        widthPx: 320,
+        heightPx: 568,
+        fontFaces: [fontFace],
+        frameRate: { num: 30, den: 1 },
+        locale: 'en-US',
+        seed: 'paint-forwarding',
+      });
+      expect(requests[0]?.paint).toEqual(expected.paint);
+    } finally {
+      vi.doUnmock('@joy-media/html-scene-runtime');
+      vi.resetModules();
+    }
+  });
 });

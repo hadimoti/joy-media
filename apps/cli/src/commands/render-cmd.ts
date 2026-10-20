@@ -567,7 +567,7 @@ export function safeFileStem(id: string): string {
   return cleaned === '' ? '_' : cleaned;
 }
 
-function collectTitleSources(project: CliProjectDocument): TitleFrameSource[] {
+export function collectTitleSources(project: CliProjectDocument): TitleFrameSource[] {
   const namespace = project.pluginData[CONTENT_TEMPLATES_PLUGIN_KEY] as
     { readonly instances?: Readonly<Record<string, TitleInstanceV1>> } | undefined;
   const instances = namespace?.instances;
@@ -579,6 +579,7 @@ function collectTitleSources(project: CliProjectDocument): TitleFrameSource[] {
           readonly id?: string;
           readonly kind?: string;
           readonly family?: string;
+          readonly enabled?: boolean;
           readonly clips?: readonly Record<string, unknown>[];
         }[];
       }
@@ -587,7 +588,13 @@ function collectTitleSources(project: CliProjectDocument): TitleFrameSource[] {
   for (const [instanceId, instance] of Object.entries(instances)) {
     let found: { clip: Record<string, unknown>; trackOrder: number } | undefined;
     composition?.tracks?.forEach((track, trackOrder) => {
-      if (track.kind !== 'video' || track.family === 'audio' || track.family === 'caption') return;
+      if (
+        track.enabled === false ||
+        track.kind !== 'video' ||
+        track.family === 'audio' ||
+        track.family === 'caption'
+      )
+        return;
       const clip = track.clips?.find((candidate) => candidate.id === instance.clipId);
       if (clip) found = { clip, trackOrder };
     });
@@ -598,7 +605,7 @@ function collectTitleSources(project: CliProjectDocument): TitleFrameSource[] {
   }
   return sources
     .sort((a, b) => a.trackOrder - b.trackOrder || a.startUs - b.startUs)
-    .map(({ trackOrder: _trackOrder, ...source }) => source);
+    .map((source) => source);
 }
 
 function withoutTitleClips(
@@ -805,6 +812,9 @@ export async function runHeadlessRender(
     ...(realMedia ? realMedia.warnings : []),
   ];
   const totalClips = allClips.length;
+  let titleCaptureFacts:
+    | { readonly chromiumVersion: string; readonly fontManifestHashes: readonly string[] }
+    | undefined;
 
   if (input.frameUs !== undefined) {
     const timeUs = input.frameUs;
@@ -832,22 +842,57 @@ export async function runHeadlessRender(
     const outputProblem = prepareOutputDir(outDir, [artifactPath]);
     if (outputProblem) return failure('output', outputProblem, totalFrames, totalClips);
     let captured;
+    let captureCancelled = false;
+    let previewHandle: ReturnType<typeof startEncode> | undefined;
+    let encodeSettled = false;
+    const ownedTempDirectories: string[] = [];
+    const cancelCapture = (): void => {
+      captureCancelled = true;
+      previewHandle?.cancel();
+    };
+    process.prependListener('SIGINT', cancelCapture);
+    process.prependListener('SIGTERM', cancelCapture);
     try {
-      captured = await renderTitleFrames(titleSources, {
-        width: titleWidth,
-        height: titleHeight,
-        fps: titleFps,
-      });
+      captured = await renderTitleFrames(
+        titleSources,
+        {
+          width: titleWidth,
+          height: titleHeight,
+          fps: titleFps,
+        },
+        { isCancelled: () => captureCancelled || currentLongRunning < 0 },
+      );
     } catch (error) {
+      process.off('SIGINT', cancelCapture);
+      process.off('SIGTERM', cancelCapture);
+      if (captureCancelled || currentLongRunning < 0)
+        return failure(
+          'cancelled',
+          'Render cancelled; no preview was written.',
+          totalFrames,
+          totalClips,
+        );
       return failure('unsupported-feature', errorMessage(error), totalFrames, totalClips);
     }
     try {
-      const handle = startEncode(
-        buildFfmpegArgs(previewMedia, preset, artifactPath, captured.layers, { timeUs }),
-        durationUs,
-        () => {},
+      if (captureCancelled || currentLongRunning < 0)
+        return failure(
+          'cancelled',
+          'Render cancelled; no preview was written.',
+          totalFrames,
+          totalClips,
+        );
+      const args = buildFfmpegArgs(
+        previewMedia,
+        preset,
+        artifactPath,
+        captured.layers,
+        { timeUs },
+        ownedTempDirectories,
       );
-      const outcome = await handle.done;
+      previewHandle = startEncode(args, durationUs, () => {}, ownedTempDirectories);
+      const outcome = await previewHandle.done;
+      encodeSettled = true;
       if (!outcome.ok) return failure(outcome.code, outcome.message, totalFrames, totalClips);
       if (!existsSync(artifactPath))
         return failure(
@@ -882,7 +927,12 @@ export async function runHeadlessRender(
         warnings,
       };
     } finally {
+      if (!encodeSettled) previewHandle?.cancel();
       captured.cleanup();
+      for (const directory of ownedTempDirectories)
+        rmSync(directory, { recursive: true, force: true });
+      process.off('SIGINT', cancelCapture);
+      process.off('SIGTERM', cancelCapture);
     }
   }
   const fileStem = safeFileStem(plan.projectId);
@@ -1103,52 +1153,87 @@ export async function runHeadlessRender(
         );
       }
       let lastPercent = -1;
-      let renderedTitles;
-      try {
-        renderedTitles = await renderTitleFrames(titleSources, {
-          width: titleWidth,
-          height: titleHeight,
-          fps: titleFps,
-        });
-      } catch (error) {
-        rmSync(partialPath, { force: true });
-        return failure('unsupported-feature', errorMessage(error), totalFrames, totalClips);
-      }
-      let ffmpegArgs: string[];
-      try {
-        ffmpegArgs = buildFfmpegArgs(realMedia, preset, partialPath, renderedTitles.layers);
-      } catch (error) {
-        renderedTitles.cleanup();
-        rmSync(partialPath, { force: true });
-        return failure('encode-failed', errorMessage(error), totalFrames, totalClips);
-      }
-      const handle = startEncode(ffmpegArgs, realMedia.durationUs, (fraction) => {
-        const percent = Math.floor(fraction * 100);
-        if (percent === lastPercent) return;
-        lastPercent = percent;
-        if (showProgress) drawProgress(Math.round(fraction * totalFrames), totalFrames, 32);
-        emitJson(
-          { type: 'progress', projectId: plan.projectId, percent, ts: new Date().toISOString() },
-          json,
-        );
-      });
+      let renderedTitles: Awaited<ReturnType<typeof renderTitleFrames>> | undefined;
+      let handle: ReturnType<typeof startEncode> | undefined;
+      let encodeSettled = false;
+      let captureCancelled = false;
+      const ownedTempDirectories: string[] = [];
       const discardPartial = (): void => {
-        handle.cancel();
+        captureCancelled = true;
+        handle?.cancel();
         try {
           rmSync(partialPath, { force: true });
         } catch {
-          // best effort: the partial file is hidden and ignored by every reader
+          /* best effort: the partial file is hidden and ignored by every reader */
         }
       };
       process.prependListener('SIGINT', discardPartial);
       process.prependListener('SIGTERM', discardPartial);
-      let outcome: Awaited<typeof handle.done>;
+      let outcome: Awaited<ReturnType<typeof startEncode>['done']>;
       try {
+        renderedTitles = await renderTitleFrames(
+          titleSources,
+          { width: titleWidth, height: titleHeight, fps: titleFps },
+          { isCancelled: () => captureCancelled || currentLongRunning < 0 },
+        );
+        if (titleSources.length > 0) {
+          if (
+            !renderedTitles.rendererFacts.chromiumVersion.trim() ||
+            renderedTitles.rendererFacts.fontManifestHashes.length === 0
+          )
+            throw new Error('Title renderer facts are missing from the Chromium capture session.');
+          titleCaptureFacts = renderedTitles.rendererFacts;
+        }
+        const ffmpegArgs = buildFfmpegArgs(
+          realMedia,
+          preset,
+          partialPath,
+          renderedTitles.layers,
+          undefined,
+          ownedTempDirectories,
+        );
+        handle = startEncode(
+          ffmpegArgs,
+          realMedia.durationUs,
+          (fraction) => {
+            const percent = Math.floor(fraction * 100);
+            if (percent === lastPercent) return;
+            lastPercent = percent;
+            if (showProgress) drawProgress(Math.round(fraction * totalFrames), totalFrames, 32);
+            emitJson(
+              {
+                type: 'progress',
+                projectId: plan.projectId,
+                percent,
+                ts: new Date().toISOString(),
+              },
+              json,
+            );
+          },
+          ownedTempDirectories,
+        );
         outcome = await handle.done;
+        encodeSettled = true;
+      } catch (error) {
+        if (handle) handle.cancel();
+        for (const directory of ownedTempDirectories)
+          rmSync(directory, { recursive: true, force: true });
+        rmSync(partialPath, { force: true });
+        if (captureCancelled || currentLongRunning < 0)
+          return failure(
+            'cancelled',
+            'Render cancelled; no media or manifest was written.',
+            totalFrames,
+            totalClips,
+          );
+        return failure('unsupported-feature', errorMessage(error), totalFrames, totalClips);
       } finally {
+        if (!encodeSettled) handle?.cancel();
         process.off('SIGINT', discardPartial);
         process.off('SIGTERM', discardPartial);
-        renderedTitles.cleanup();
+        renderedTitles?.cleanup();
+        for (const directory of ownedTempDirectories)
+          rmSync(directory, { recursive: true, force: true });
       }
       if (currentLongRunning < 0) {
         discardPartial();
@@ -1216,10 +1301,11 @@ export async function runHeadlessRender(
     ? `Rendered ${basename(mediaPath)} with ffmpeg. Captions: ${renderedCaptionMode}.`
     : MANIFEST_ONLY_MESSAGE;
 
-  const rendererFacts = await titleRendererFacts();
+  const rendererFacts = titleCaptureFacts ?? (await titleRendererFacts());
+  const ffmpegVersion = ffmpegVersionLine();
   const rendererFingerprint = sha256Hex(
     JSON.stringify({
-      ffmpegVersion: ffmpegVersionLine(),
+      ffmpegVersion,
       chromiumVersion: rendererFacts.chromiumVersion,
       templateSha256: titleSources.map((source) => source.instance.templateSha256),
       fontManifestHashes: rendererFacts.fontManifestHashes,
@@ -1267,6 +1353,11 @@ export async function runHeadlessRender(
       id: 'ffmpeg+chromium-scene-surface',
       version: 1,
       fingerprint: rendererFingerprint,
+    },
+    rendererFacts: {
+      chromiumVersion: rendererFacts.chromiumVersion,
+      fontManifestHashes: rendererFacts.fontManifestHashes,
+      ffmpegVersionLine: ffmpegVersion,
     },
     design: {
       units: { time: 'us', position: 'px' },

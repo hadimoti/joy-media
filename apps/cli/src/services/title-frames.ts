@@ -3,13 +3,12 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { TitleInstanceV1 } from '@joy-media/project-schema';
-import {
-  buildTitleSceneFrame,
-  P0_TEMPLATES,
-  type P0TemplateDefinition,
-  type TitleSceneFrame,
-} from '@joy-media/motion-core';
+import type {
+  FontFaceDescriptorV1,
+  ScenePaintFrameV1,
+  TitleInstanceV1,
+} from '@joy-media/project-schema';
+import { buildTitleSceneFrame } from '@joy-media/motion-core';
 
 export interface TitleFrameRate {
   readonly num: number;
@@ -21,6 +20,7 @@ export interface TitleFrameLayer {
   readonly inputPattern: string;
   readonly startUs: number;
   readonly durationUs: number;
+  readonly trackOrder: number;
 }
 
 export interface TitleFrameSource {
@@ -28,26 +28,20 @@ export interface TitleFrameSource {
   readonly instance: TitleInstanceV1;
   readonly startUs: number;
   readonly durationUs: number;
+  readonly trackOrder: number;
 }
 
 export interface RenderedTitleFrames {
   readonly layers: readonly TitleFrameLayer[];
+  readonly rendererFacts: {
+    readonly chromiumVersion: string;
+    readonly fontManifestHashes: readonly string[];
+  };
   cleanup(): void;
 }
 
-interface ScenePaintLine {
-  readonly text: string;
-  readonly x: number;
-  readonly y: number;
-  readonly height?: number;
-  readonly font: string;
-  readonly color: string;
-  readonly direction: 'ltr' | 'rtl';
-  readonly align: 'left' | 'center';
-  readonly opacity: number;
-}
-
 interface ChromiumDriverModule {
+  readonly scenePaintFontDescriptors: () => readonly FontFaceDescriptorV1[];
   readonly createChromiumSceneDriver: (options?: { executablePath?: string }) => {
     capture(request: {
       markup: string;
@@ -58,12 +52,13 @@ interface ChromiumDriverModule {
       frameRate: TitleFrameRate;
       locale: string;
       seed: string;
-      lines: readonly ScenePaintLine[];
+      paint?: ScenePaintFrameV1;
+      rejectImages?: boolean;
     }): { readonly rgba: Uint8Array };
+    readonly browserVersion?: string;
     close?(): void;
   };
   readonly findChromiumExecutable: () => string | undefined;
-  readonly readChromiumVersion: (executablePath: string) => string;
   readonly loadNotoSansArabicFaces: () => readonly { readonly sha256: string }[];
 }
 
@@ -73,17 +68,8 @@ export async function titleRendererFacts(): Promise<{
 }> {
   try {
     const runtime = (await import('@joy-media/html-scene-runtime')) as ChromiumDriverModule;
-    const executable = runtime.findChromiumExecutable();
-    let chromiumVersion: string | null = null;
-    if (executable) {
-      try {
-        chromiumVersion = runtime.readChromiumVersion(executable);
-      } catch {
-        /* manifest still records the remaining available facts */
-      }
-    }
     return {
-      chromiumVersion,
+      chromiumVersion: null,
       fontManifestHashes: runtime
         .loadNotoSansArabicFaces()
         .map((face) => face.sha256)
@@ -148,8 +134,14 @@ export function encodeRgbaPng(width: number, height: number, rgba: Uint8Array): 
 export async function renderTitleFrames(
   sources: readonly TitleFrameSource[],
   frame: { readonly width: number; readonly height: number; readonly fps: TitleFrameRate },
+  options: { readonly isCancelled?: () => boolean } = {},
 ): Promise<RenderedTitleFrames> {
-  if (sources.length === 0) return { layers: [], cleanup() {} };
+  if (sources.length === 0)
+    return {
+      layers: [],
+      rendererFacts: { chromiumVersion: '', fontManifestHashes: [] },
+      cleanup() {},
+    };
   if (sources.length > 8)
     throw new RangeError('SLICE_LIMIT: at most 8 title instances are supported');
   if (frame.width > 1920 || frame.height > 1920 || frame.fps.num > 60 * frame.fps.den)
@@ -172,11 +164,18 @@ export async function renderTitleFrames(
       directories.length = 0;
     }
   };
+  let rendererFacts: RenderedTitleFrames['rendererFacts'] | undefined;
+  let fontManifestHashes: string[];
+  let captureCompleted = false;
   try {
     let executablePath: string | undefined;
     try {
       executablePath = runtime.findChromiumExecutable();
       if (!executablePath) throw new Error('Chromium executable was not found');
+      fontManifestHashes = runtime
+        .loadNotoSansArabicFaces()
+        .map((face) => face.sha256)
+        .sort();
       driver = runtime.createChromiumSceneDriver({ executablePath });
     } catch (error) {
       throw new Error(
@@ -189,8 +188,10 @@ export async function renderTitleFrames(
       directories.push(directory);
       const pattern = join(directory, `title-${safeId(source.instanceId)}-%05d.png`);
       const times = titleFrameTimes(source.durationUs, frame.fps);
-      const template = P0_TEMPLATES[source.instance.templateId];
       for (let index = 0; index < times.length; index++) {
+        if (options.isCancelled?.()) throw new Error('Render cancelled during title capture.');
+        if (index > 0) await new Promise<void>((resolve) => setImmediate(resolve));
+        if (options.isCancelled?.()) throw new Error('Render cancelled during title capture.');
         const timeUs = times[index]!;
         const sceneFrame = buildTitleSceneFrame(
           source.instance,
@@ -200,12 +201,12 @@ export async function renderTitleFrames(
           {
             widthPx: frame.width,
             heightPx: frame.height,
+            fontFaces: runtime.scenePaintFontDescriptors(),
             frameRate: frame.fps,
             locale: source.instance.direction === 'rtl' ? 'fa-IR' : 'en-US',
             seed: source.instanceId,
           },
         );
-        const lines = buildRuntimePaintLines(source, template, sceneFrame);
         try {
           const surface = driver.capture({
             markup: sceneFrame.markup,
@@ -216,8 +217,13 @@ export async function renderTitleFrames(
             frameRate: sceneFrame.frameRate,
             locale: sceneFrame.locale,
             seed: sceneFrame.seed,
-            lines,
+            paint: sceneFrame.paint,
+            rejectImages: true,
           });
+          const chromiumVersion = driver.browserVersion;
+          if (!chromiumVersion?.trim())
+            throw new Error('Chromium capture session did not report its browser version');
+          rendererFacts = { chromiumVersion, fontManifestHashes };
           if (surface.rgba.byteLength !== frame.width * frame.height * 4)
             throw new Error('Chromium returned an invalid RGBA surface');
           writeFileSync(
@@ -235,74 +241,24 @@ export async function renderTitleFrames(
         inputPattern: pattern,
         startUs: source.startUs,
         durationUs: source.durationUs,
+        trackOrder: source.trackOrder,
       });
     }
-    return { layers, cleanup };
-  } catch (error) {
-    try {
-      cleanup();
-    } catch {
-      /* preserve the capture failure */
+    if (!rendererFacts)
+      throw new Error(
+        `Title instance "${sources[0]!.instanceId}" cannot render: Chromium capture session did not report its browser version.`,
+      );
+    captureCompleted = true;
+    return { layers, rendererFacts, cleanup };
+  } finally {
+    if (!captureCompleted) {
+      try {
+        cleanup();
+      } catch {
+        /* preserve the capture failure */
+      }
     }
-    throw error;
   }
-}
-
-function buildRuntimePaintLines(
-  source: TitleFrameSource,
-  template: P0TemplateDefinition,
-  frame: TitleSceneFrame,
-): ScenePaintLine[] {
-  const instance = source.instance;
-  const alignment = template.alignment;
-  const paddingX = template.plate.paddingX;
-  const paddingY = template.plate.paddingY;
-  const x =
-    alignment === 'center'
-      ? instance.placement.xPx + instance.placement.maxWidthPx / 2
-      : instance.placement.xPx + paddingX;
-  const result: ScenePaintLine[] = [];
-  const add = (text: string, y: number, size: number, height: number): void => {
-    const direction =
-      instance.direction === 'auto'
-        ? /[\u0590-\u08ff\ufb1d-\ufefc]/u.test(text)
-          ? 'rtl'
-          : 'ltr'
-        : instance.direction;
-    result.push({
-      text,
-      x,
-      y: y + frame.motion.translateYPx,
-      height,
-      font: `${instance.font.weight} ${size}px "${instance.font.family}"`,
-      color: '#ffffff',
-      direction,
-      align: alignment,
-      opacity: frame.motion.opacity,
-    });
-  };
-  frame.paintLines.primary.forEach((text, index) =>
-    add(
-      text,
-      instance.placement.yPx + paddingY + index * instance.layout.lineHeightPx,
-      instance.layout.fontSizePx,
-      instance.layout.lineHeightPx,
-    ),
-  );
-  const secondaryTop =
-    instance.placement.yPx +
-    paddingY +
-    frame.paintLines.primary.length * instance.layout.lineHeightPx;
-  const secondaryLineHeight = Math.round(instance.layout.secondarySizePx * 1.25);
-  frame.paintLines.secondary.forEach((text, index) =>
-    add(
-      text,
-      secondaryTop + index * secondaryLineHeight,
-      instance.layout.secondarySizePx,
-      secondaryLineHeight,
-    ),
-  );
-  return result;
 }
 
 function pngChunk(type: string, data: Buffer): Buffer {

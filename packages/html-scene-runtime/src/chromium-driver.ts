@@ -7,7 +7,14 @@ import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import type { HeadlessCaptureRequest, HeadlessSceneDriver, HeadlessSurface } from './headless.js';
 import { loadNotoSansArabicFaces, notoSansArabicFontCss } from './fonts.js';
+import { isScenePaintFrame } from './preview-protocol.js';
 import { SCENE_PAINT_SCRIPT } from './preview-protocol.js';
+
+declare module './headless.js' {
+  interface HeadlessCaptureRequest {
+    readonly rejectImages?: boolean;
+  }
+}
 
 export interface ChromiumSceneDriverOptions {
   /** Absolute trusted path to JOY's Chromium binary. */
@@ -69,25 +76,68 @@ export function findChromiumExecutable(): string | undefined {
   );
 }
 
-function killVerifiedChromium(pid: number | undefined): void {
+function chromiumPidsForProfile(profileDirectory: string): number[] {
+  const escapedProfile = profileDirectory.replace(/'/g, "''");
+  const scan = spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `$profile='${escapedProfile}'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile) } | ForEach-Object { $_.ProcessId }`,
+    ],
+    { encoding: 'utf8', windowsHide: true, shell: false, timeout: 5_000 },
+  );
+  if (scan.error !== undefined || scan.status !== 0)
+    throw new Error(
+      `cannot verify Chromium processes for profile: ${scan.stderr || scan.error?.message || `status ${scan.status}`}`,
+    );
+  return scan.stdout
+    .split(/\r?\n/)
+    .map((line) => Number(line.trim()))
+    .filter((value) => Number.isSafeInteger(value) && value > 0);
+}
+
+function killChromiumTree(pid: number | undefined, profileDirectory?: string): void {
   if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) return;
-  const probe =
-    process.platform === 'win32'
-      ? spawnSync('tasklist', ['/FI', 'PID eq ' + pid, '/FO', 'CSV', '/NH'], {
-          encoding: 'utf8',
-          windowsHide: true,
-          shell: false,
-        })
-      : spawnSync('ps', ['-p', String(pid), '-o', 'comm='], {
-          encoding: 'utf8',
-          shell: false,
-        });
-  if (probe.error !== undefined || probe.status !== 0) return;
-  if (!/(chrom|msedge|headless_shell)/i.test(probe.stdout)) return;
+  if (process.platform === 'win32') {
+    const result = spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], {
+      encoding: 'utf8',
+      windowsHide: true,
+      shell: false,
+      timeout: 5_000,
+    });
+    if (result.error !== undefined || result.status !== 0) {
+      if (profileDirectory !== undefined) {
+        for (const remainingPid of chromiumPidsForProfile(profileDirectory)) {
+          spawnSync('taskkill', ['/T', '/F', '/PID', String(remainingPid)], {
+            encoding: 'utf8',
+            windowsHide: true,
+            shell: false,
+            timeout: 5_000,
+          });
+        }
+        if (chromiumPidsForProfile(profileDirectory).length === 0) return;
+      }
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return;
+      }
+      throw new Error(
+        `taskkill failed to stop Chromium process tree ${pid}: ${result.stderr || result.error?.message || `status ${result.status}`}`,
+      );
+    }
+    return;
+  }
   try {
-    process.kill(pid);
+    process.kill(-pid, 'SIGKILL');
   } catch {
-    /* already exited */
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      /* already exited */
+    }
   }
 }
 
@@ -103,7 +153,7 @@ const MAX_CAPTURE_PIXELS = 4_194_304;
  */
 const CHROMIUM_WORKER_SOURCE = String.raw`
 const { parentPort, workerData } = require('node:worker_threads');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const HEADER_BYTES = 16;
 const ERROR_BYTES = 8192;
 let browser;
@@ -111,6 +161,7 @@ let socket;
 let endpoint;
 let targetId;
 let sessionId;
+let browserVersion;
 let measureSessionId;
 let measurementPageReady = false;
 let activeControl;
@@ -118,6 +169,27 @@ let sequence = 0;
 const pending = new Map();
 const eventWaiters = new Map();
 let tail = Promise.resolve();
+
+function killBrowserTree(pid) {
+  if (!pid || !Number.isSafeInteger(pid) || pid <= 0) return;
+  if (process.platform === 'win32') {
+    const result = spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 5000 });
+    if (result.error || result.status !== 0) {
+      const escapedProfile = workerData.profileDirectory.replace(/'/g, "''");
+      const scan = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$profile='" + escapedProfile + "'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile) } | ForEach-Object { $_.ProcessId }"], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 5000 });
+      if (scan.error || scan.status !== 0) throw new Error('cannot verify Chromium processes for its isolated profile');
+      const remaining = String(scan.stdout || '').split(/\r?\n/).map((line) => Number(line.trim())).filter((value) => Number.isSafeInteger(value) && value > 0);
+      for (const remainingPid of remaining) spawnSync('taskkill', ['/T', '/F', '/PID', String(remainingPid)], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 5000 });
+      const verification = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$profile='" + escapedProfile + "'; Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'chrome.exe' -or $_.Name -eq 'msedge.exe') -and $_.CommandLine -and $_.CommandLine.Contains($profile) } | ForEach-Object { $_.ProcessId }"], { encoding: 'utf8', windowsHide: true, shell: false, timeout: 5000 });
+      if (!verification.error && verification.status === 0 && !String(verification.stdout || '').trim()) return;
+      throw new Error('taskkill failed to stop Chromium process tree ' + pid + ': ' + ((result.stderr || (result.error && result.error.message)) || ('status ' + result.status)));
+    }
+    return;
+  }
+  try { process.kill(-pid, 'SIGKILL'); } catch (ignored) {
+    try { process.kill(pid, 'SIGKILL'); } catch (alreadyExited) { /* already exited */ }
+  }
+}
 
 function send(method, params, session) {
   const activeSocket = socket;
@@ -207,22 +279,23 @@ async function closeBrowser(skipProtocolClose) {
   const activeSocket = socket;
   if (activeSocket) {
     if (!skipProtocolClose && activeSocket.readyState === WebSocket.OPEN) {
-      try { await send('Browser.close', {}); } catch (ignored) { /* bounded best effort */ }
+      try {
+        await Promise.race([
+          send('Browser.close', {}),
+          new Promise((resolve) => setTimeout(resolve, 3000)),
+        ]);
+      } catch (ignored) { /* bounded best effort */ }
     }
     try { activeSocket.close(); } catch (ignored) { /* already closed */ }
   }
   const child = browser;
-  if (child && child.exitCode === null) {
-    child.kill();
-    await Promise.race([
-      new Promise((resolve) => child.once('exit', resolve)),
-      new Promise((resolve) => setTimeout(resolve, 1000)),
-    ]);
+  let killError;
+  if (child && child.pid) {
+    try { killBrowserTree(child.pid); } catch (error) { killError = error; }
     if (child.exitCode === null) {
-      child.kill('SIGKILL');
       await Promise.race([
         new Promise((resolve) => child.once('exit', resolve)),
-        new Promise((resolve) => setTimeout(resolve, 1000)),
+        new Promise((resolve) => setTimeout(resolve, 5000)),
       ]);
     }
   }
@@ -231,9 +304,11 @@ async function closeBrowser(skipProtocolClose) {
   endpoint = undefined;
   targetId = undefined;
   sessionId = undefined;
+  browserVersion = undefined;
   measureSessionId = undefined;
   measurementPageReady = false;
-  if (activeControl) activeControl[3] = 0;
+  if (activeControl && !killError) activeControl[3] = 0;
+  if (killError) throw killError;
 }
 
 async function ensureBrowser(request) {
@@ -244,10 +319,12 @@ async function ensureBrowser(request) {
     '--no-first-run', '--hide-scrollbars', '--force-device-scale-factor=1', '--lang=en-US',
     '--host-resolver-rules=MAP * 0.0.0.0, EXCLUDE localhost', '--remote-debugging-port=0',
     '--user-data-dir=' + workerData.profileDirectory, '--window-size=' + request.width + ',' + request.height,
-  ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, shell: false });
+  ], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, shell: false, detached: process.platform !== 'win32' });
   if (activeControl && browser.pid) activeControl[3] = browser.pid;
   endpoint = await waitForEndpoint();
   await connect(endpoint);
+  const version = await send('Browser.getVersion');
+  browserVersion = typeof version.product === 'string' ? version.product.trim() : undefined;
   const created = await send('Target.createTarget', { url: 'about:blank' });
   targetId = created.targetId;
   const attached = await send('Target.attachToTarget', { targetId, flatten: true });
@@ -285,6 +362,7 @@ async function capture(request) {
   const loadFonts = '(async()=>{const faces=' + JSON.stringify(workerData.faces) + ';const loaded=[];for(const face of faces){const text=face.subset===\'arabic\'?String.fromCodePoint(0x627,0x644,0x639,0x631,0x628,0x64a,0x629,0x20,0x641,0x627,0x631,0x633,0x6cc):\'Noto Sans Arabic\';const list=await document.fonts.load(face.weight+\' 16px "Noto Sans Arabic"\',text);if(!list.length||!document.fonts.check(face.weight+\' 16px "Noto Sans Arabic"\',text))throw new Error("Noto Sans Arabic face failed to load: "+face.subset+" "+face.weight);loaded.push(face.subset+":"+face.weight)}return loaded})()';
   const loadedFonts = await evaluate(loadFonts);
   const lines = request.lines || [];
+  const rejectImages = request.rejectImages === true;
   const background = request.transparent ? 'transparent' : '#000';
   const result = await evaluate(
     'window.__joyPaintSceneSurface(' +
@@ -295,12 +373,16 @@ async function capture(request) {
       JSON.stringify(lines) +
       ',' +
       JSON.stringify(background) +
+      ',' +
+      JSON.stringify(rejectImages) +
+      ',' +
+      JSON.stringify(request.paint || null) +
       ')',
   );
   if (typeof result !== 'string') throw new Error('scene painter returned no RGBA payload');
   const rgba = Buffer.from(result, 'base64');
   if (rgba.byteLength !== request.width * request.height * 4) throw new Error('scene painter returned an invalid RGBA byte length');
-  return { rgba, loadedFonts };
+  return { rgba, loadedFonts, browserVersion };
 }
 
 async function measure(requests) {
@@ -366,7 +448,7 @@ async function handle(message) {
       ]).finally(() => clearTimeout(budgetTimer));
       const outputAt = HEADER_BYTES + ERROR_BYTES;
       bytes.set(result.rgba, outputAt);
-      const fonts = Buffer.from(JSON.stringify(result.loadedFonts || []), 'utf8');
+      const fonts = Buffer.from(JSON.stringify({ loadedFonts: result.loadedFonts || [], browserVersion: result.browserVersion }), 'utf8');
       control[1] = result.rgba.byteLength;
       control[2] = Math.min(fonts.byteLength, ERROR_BYTES);
       control[3] = browser ? browser.pid || 0 : 0;
@@ -378,9 +460,14 @@ async function handle(message) {
       }
     }
   } catch (error) {
-    await closeBrowser(budgetExpired);
+    let message = error && error.message ? error.message : String(error);
+    try {
+      await closeBrowser(budgetExpired);
+    } catch (cleanupError) {
+      message += '; browser cleanup failed: ' + (cleanupError && cleanupError.message ? cleanupError.message : String(cleanupError));
+    }
     control[3] = 0;
-    const messageBytes = Buffer.from(error && error.message ? error.message : String(error), 'utf8').subarray(0, ERROR_BYTES);
+    const messageBytes = Buffer.from(message, 'utf8').subarray(0, ERROR_BYTES);
     bytes.set(messageBytes, HEADER_BYTES);
     control[2] = messageBytes.byteLength;
     Atomics.store(control, 0, 2);
@@ -409,29 +496,60 @@ export function createChromiumSceneDriver(
   }
   const faces = loadNotoSansArabicFaces();
   const profileDirectory = mkdtempSync(join(tmpdir(), 'joy-scene-cdp-'));
-  const worker = new Worker(CHROMIUM_WORKER_SOURCE, {
-    eval: true,
-    workerData: {
-      executablePath,
-      timeoutMs,
-      profileDirectory,
-      painterScript: SCENE_PAINT_SCRIPT,
-      fontCss: notoSansArabicFontCss(faces),
-      faces: faces.map(({ weight, subset }) => ({ weight, subset })),
-    },
-  });
+  let worker: Worker;
+  try {
+    worker = new Worker(CHROMIUM_WORKER_SOURCE, {
+      eval: true,
+      workerData: {
+        executablePath,
+        timeoutMs,
+        profileDirectory,
+        painterScript: SCENE_PAINT_SCRIPT,
+        fontCss: notoSansArabicFontCss(faces),
+        faces: faces.map(({ weight, subset }) => ({ weight, subset })),
+      },
+    });
+  } catch (error) {
+    rmSync(profileDirectory, { recursive: true, force: true });
+    throw error;
+  }
   worker.unref();
   let closed = false;
   let lastBrowserPid: number | undefined;
-  const cleanupBrowserOnExit = (): void => {
-    killVerifiedChromium(lastBrowserPid);
+  let profileRemoved = false;
+  const removeProfile = (): void => {
+    if (profileRemoved) return;
+    profileRemoved = true;
     try {
       rmSync(profileDirectory, { recursive: true, force: true });
     } catch {
-      /* best effort during exit */
+      /* best effort during exit; normal close retries after worker termination */
+      profileRemoved = false;
     }
   };
+  const cleanupBrowserOnExit = (): void => {
+    try {
+      killChromiumTree(lastBrowserPid, profileDirectory);
+    } catch {
+      /* process exit must continue; normal operations surface the cleanup error */
+    }
+    removeProfile();
+  };
   process.once('exit', cleanupBrowserOnExit);
+
+  const cleanupAfterWorkerEnd = (): void => {
+    try {
+      killChromiumTree(lastBrowserPid, profileDirectory);
+    } catch {
+      /* worker failure still removes the isolated profile */
+    }
+    removeProfile();
+    process.removeListener('exit', cleanupBrowserOnExit);
+  };
+  worker.once('error', cleanupAfterWorkerEnd);
+  worker.once('exit', (code) => {
+    if (code !== 0 && !closed) cleanupAfterWorkerEnd();
+  });
 
   function exchange(
     type: 'capture' | 'close' | 'measure',
@@ -451,13 +569,27 @@ export function createChromiumSceneDriver(
     lastBrowserPid = at(3) > 0 ? at(3) : undefined;
     if (state === 'timed-out') {
       Atomics.store(control, 0, 3);
+      closed = true;
+      try {
+        killChromiumTree(lastBrowserPid, profileDirectory);
+      } finally {
+        worker.terminate().then(cleanupAfterWorkerEnd, cleanupAfterWorkerEnd);
+        cleanupAfterWorkerEnd();
+      }
       throw new Error(
-        `Chromium ${type === 'measure' ? 'text measurement' : 'scene capture'} exceeded ${type === 'close' ? timeoutMs : budgetMs}ms; browser cleanup is pending`,
+        `Chromium ${type === 'measure' ? 'text measurement' : 'scene capture'} exceeded ${type === 'close' ? waitMs : budgetMs}ms; browser process tree was stopped and its profile removed`,
       );
     }
     if (at(0) !== 1) {
       const size = Math.min(at(2), ERROR_BYTES);
       const message = new TextDecoder().decode(new Uint8Array(shared, HEADER_BYTES, size));
+      closed = true;
+      try {
+        killChromiumTree(lastBrowserPid, profileDirectory);
+      } finally {
+        worker.terminate().then(cleanupAfterWorkerEnd, cleanupAfterWorkerEnd);
+        cleanupAfterWorkerEnd();
+      }
       throw new Error(
         `Chromium ${type === 'measure' ? 'text measurement' : 'scene capture'} failed: ${message || 'worker failed'}`,
       );
@@ -475,13 +607,21 @@ export function createChromiumSceneDriver(
     const length = at(1);
     const rgba = new Uint8Array(shared, HEADER_BYTES + ERROR_BYTES, length).slice();
     const fontLength = Math.min(at(2), ERROR_BYTES);
-    const loadedFonts = JSON.parse(
+    const captureFacts = JSON.parse(
       new TextDecoder().decode(new Uint8Array(shared, HEADER_BYTES, fontLength)),
-    ) as string[];
-    return { rgba, loadedFonts };
+    ) as { readonly loadedFonts?: string[]; readonly browserVersion?: string };
+    lastBrowserVersion = captureFacts.browserVersion;
+    return {
+      rgba,
+      ...(captureFacts.loadedFonts === undefined ? {} : { loadedFonts: captureFacts.loadedFonts }),
+    };
   }
 
+  let lastBrowserVersion: string | undefined;
   return {
+    get browserVersion(): string | undefined {
+      return lastBrowserVersion;
+    },
     get browserProcessId(): number | undefined {
       return lastBrowserPid;
     },
@@ -510,19 +650,12 @@ export function createChromiumSceneDriver(
         try {
           exchange('close');
         } catch (error) {
-          killVerifiedChromium(lastBrowserPid);
+          killChromiumTree(lastBrowserPid, profileDirectory);
           throw error;
         }
       } finally {
-        const removeProfile = (): void => {
-          try {
-            rmSync(profileDirectory, { recursive: true, force: true });
-          } catch {
-            /* best effort after worker termination */
-          }
-          process.removeListener('exit', cleanupBrowserOnExit);
-        };
-        void worker.terminate().then(removeProfile, removeProfile);
+        cleanupAfterWorkerEnd();
+        void worker.terminate().then(cleanupAfterWorkerEnd, cleanupAfterWorkerEnd);
       }
     },
   };
@@ -542,6 +675,8 @@ function assertCaptureRequest(request: HeadlessCaptureRequest): void {
     throw new RangeError('scene capture timeUs must be a non-negative safe integer');
   if (typeof request.markup !== 'string')
     throw new TypeError('scene capture markup must be a string');
+  if (request.paint !== undefined && !isScenePaintFrame(request.paint))
+    throw new TypeError('scene capture paint frame is invalid');
   for (const line of request.lines ?? []) {
     if (
       !line.text ||
@@ -556,17 +691,41 @@ function assertCaptureRequest(request: HeadlessCaptureRequest): void {
   }
 }
 
-/** Exposed for integration diagnostics without leaking the temporary profile. */
-export function readChromiumVersion(executablePath: string): string {
-  const version = spawnSync(executablePath, ['--version'], {
-    encoding: 'utf8',
-    timeout: 5_000,
-    windowsHide: true,
-    shell: false,
-  });
-  if (version.error !== undefined || version.status !== 0) {
-    const detail = version.error?.message ?? version.stderr ?? `status ${version.status}`;
-    throw new Error(`cannot read Chromium version: ${detail}`);
+export type ChromiumProbeResult = { readonly version: string } | { readonly reason: string };
+
+/** Starts a short-lived isolated headless session and reads its version over CDP. */
+export async function probeChromium(
+  options: ChromiumSceneDriverOptions = {},
+): Promise<ChromiumProbeResult> {
+  const executablePath = options.executablePath ?? findChromiumExecutable();
+  if (!executablePath) return { reason: 'Chromium executable was not found.' };
+  let driver: HeadlessSceneDriver | undefined;
+  try {
+    driver = createChromiumSceneDriver({ ...options, executablePath, timeoutMs: 3_000 });
+    driver.capture({
+      markup: '',
+      width: 1,
+      height: 1,
+      transparent: true,
+      timeUs: 0,
+      frameRate: { num: 1, den: 1 },
+      locale: 'en-US',
+      seed: 'chromium-version-probe',
+      lines: [],
+    });
+    const version = driver.browserVersion?.trim();
+    if (!version) return { reason: 'Chromium capture session did not report its browser version.' };
+    driver.close?.();
+    driver = undefined;
+    return { version };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { reason: `Chromium could not be launched headlessly: ${message}` };
+  } finally {
+    try {
+      driver?.close?.();
+    } catch {
+      /* close performs tree termination and profile cleanup before reporting an error */
+    }
   }
-  return version.stdout.trim();
 }

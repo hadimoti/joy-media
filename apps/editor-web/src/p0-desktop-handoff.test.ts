@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { inflateSync } from 'node:zlib';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildHistoricalSchemaProjects } from '@joy-media/test-fixtures';
 import {
   projectV3ToDesktopDocuments,
@@ -11,27 +15,23 @@ import {
   type JoyProjectV3,
   type JsonValue,
 } from '@joy-media/project-schema';
-import { compileTitleInstance } from '@joy-media/motion-core';
-import {
-  createProjectPackage,
-  importProjectPackage,
-  parseProjectPackage,
-  serializeProjectPackage,
-} from './project-package.js';
+import { compileTitleInstance, P0_PAINT_POLICY, P0_TEMPLATES } from '@joy-media/motion-core';
+import { importProjectPackage, parseProjectPackage } from './project-package.js';
 import { EditorSession } from './editor-session.js';
 import { readProjectBundle } from './project-lifecycle.js';
-import { upsertCatalogProject } from './project-catalog.js';
 import { P0_TITLE_FONTS } from './p0-title-fonts.js';
 import {
   captureTitleMarkup,
   closeP0DesktopHandoff,
-  p0DesktopHandoffChromiumExecutable,
   prepareP0DesktopHandoff,
   runP0DesktopHandoff,
   type P0DesktopHandoffOperation,
 } from './p0-desktop-handoff-harness.js';
 import { buildTitleSceneFrame } from '@joy-media/motion-core';
-import { createChromiumSceneDriver, findChromiumExecutable } from '@joy-media/html-scene-runtime';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment -- direct source import is required for parity.
+// @ts-ignore -- this cross-project source import is intentionally outside the editor tsconfig root.
+import { renderTitleFrames } from '../../cli/src/services/title-frames.js';
+import { scenePaintFontDescriptors } from '../../../packages/html-scene-runtime/src/font-descriptors.js';
 
 const hash = (bytes: ArrayLike<number>): string =>
   createHash('sha256').update(Buffer.from(bytes)).digest('hex');
@@ -403,38 +403,119 @@ describe('P0 desktop title handoff', () => {
   });
 
   it('round-trips the projected package through import and a reopened EditorSession', async () => {
-    const projected = projectV3ToDesktopDocuments(buildHistoricalSchemaProjects().v3);
+    const source = buildHistoricalSchemaProjects().v3;
+    const instance = makeInstance('joy.p0.title', 400, 'Imported desktop title');
+    const media = Buffer.from('desktop export media');
+    const directory = mkdtempSync(join(tmpdir(), 'joy-p0-desktop-roundtrip-'));
+    const mediaPath = join(directory, 'original.mp4');
+    const outputPath = join(directory, 'project.joy');
+    writeFileSync(mediaPath, media);
+    const root = source.compositions.root!;
+    const project = {
+      ...source,
+      title: 'Desktop export round trip',
+      assets: {
+        ...source.assets,
+        'asset-video': {
+          ...source.assets['asset-video']!,
+          bytes: media.byteLength,
+          sha256: hash(media),
+          descriptor: { mimeType: 'video/mp4' },
+        },
+      },
+      compositions: {
+        ...source.compositions,
+        root: {
+          ...root,
+          tracks: root.tracks.map((track) => ({
+            ...track,
+            clips: [
+              ...track.clips,
+              {
+                kind: 'video' as const,
+                id: instance.clipId,
+                startUs: 1_250_000,
+                durationUs: 2_000_000,
+                assetId: 'asset-video',
+                sourceInUs: 250_000,
+              },
+            ],
+          })),
+        },
+      },
+      visualObjects: {
+        ...source.visualObjects,
+        [instance.objectId]: {
+          id: instance.objectId,
+          kind: 'html-scene' as const,
+          scenePackageId: instance.templateId,
+          transform: {
+            x: 0,
+            y: 0,
+            scaleX: 1,
+            scaleY: 1,
+            rotationDeg: 0,
+            opacity: 1,
+            crop: { left: 0, top: 0, right: 0, bottom: 0 },
+          },
+        },
+      },
+      pluginData: {
+        ...source.pluginData,
+        'joy.contentTemplates': {
+          version: 1,
+          instances: { [titleInstanceId(instance)]: instance },
+        },
+        'joy.clipObjects': { [instance.clipId]: instance.objectId },
+      },
+    } as JoyProjectV3;
+    const projected = projectV3ToDesktopDocuments(project);
+    try {
+      const { writeDesktopProjectExport } = (await vi.importActual(
+        '../../cli/src/services/desktop-export.js',
+      )) as {
+        writeDesktopProjectExport: (
+          project: JoyProjectV3,
+          sources: Readonly<Record<string, string>>,
+          outputPath: string,
+          exportedAt?: Date,
+        ) => Promise<void>;
+      };
+      await writeDesktopProjectExport(
+        project,
+        { 'asset-video': mediaPath },
+        outputPath,
+        new Date(),
+      );
+    } catch (error) {
+      rmSync(directory, { recursive: true, force: true });
+      throw error;
+    }
+    const exportedPackage = JSON.parse(readFileSync(outputPath, 'utf8')) as unknown;
     const records = new Map<string, string>();
     const storage = {
       getItem: (key: string) => records.get(key) ?? null,
       setItem: (key: string, value: string) => records.set(key, value),
       removeItem: (key: string) => records.delete(key),
     };
-    const entry = {
-      id: projected.visual.id,
-      title: projected.visual.title,
-      createdAt: projected.visual.createdAt,
-      updatedAt: projected.visual.updatedAt,
-      timelineProjectId: projected.timeline.project.id,
-      visualProjectId: projected.visual.id,
-    };
-    upsertCatalogProject(storage, entry);
-    new EditorSession(storage, projected.timeline.project, projected.visual, {
-      lookInstances: projected.lookInstances,
-    });
-    const created = await createProjectPackage(entry, storage, {
-      now: () => '2026-01-01T00:00:00.000Z',
-    });
-    const parsed = parseProjectPackage(JSON.parse(serializeProjectPackage(created)));
+    const parsed = parseProjectPackage(exportedPackage);
+    const importedAssets: Array<{ assetId: string; bytes: Uint8Array }> = [];
     const imported = await importProjectPackage(storage, parsed, {
       collision: 'rename',
       createId: () => 'p0-desktop-roundtrip',
       now: () => '2026-01-02T00:00:00.000Z',
+      assetWriter: async (asset) => {
+        importedAssets.push({
+          assetId: asset.assetId,
+          bytes: new Uint8Array(await asset.blob.arrayBuffer()),
+        });
+      },
     });
     const bundle = readProjectBundle(storage, imported.entry);
     const reopened = new EditorSession(storage, bundle.timeline, bundle.visual, {
       lookInstances: bundle.lookInstances,
     });
+    rmSync(directory, { recursive: true, force: true });
     expect(reopened.timelineProject.schemaVersion).toBe(0);
     expect(reopened.visualProject.schemaVersion).toBe(1);
     const expectedCompositions = Object.fromEntries(
@@ -454,7 +535,28 @@ describe('P0 desktop title handoff', () => {
       ]),
     );
     expect(reopened.visualProject.compositions).toEqual(expectedCompositions);
-    expect(imported.missingAssetIds).toContain(imported.assetIdMap['asset-video']);
+    expect(reopened.timelineProject.compositions.root?.tracks[0]?.clips).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: instance.clipId,
+          startUs: 1_250_000,
+          durationUs: 2_000_000,
+          sourceInUs: 250_000,
+        }),
+      ]),
+    );
+    expect(reopened.visualProject.pluginData['joy.contentTemplates']).toMatchObject({
+      instances: { [titleInstanceId(instance)]: instance },
+    });
+    expect(reopened.visualProject.assets[imported.assetIdMap['asset-video']!]).toMatchObject({
+      bytes: media.byteLength,
+      sha256: hash(media),
+      descriptor: { mimeType: 'video/mp4' },
+    });
+    expect(importedAssets).toEqual([
+      { assetId: imported.assetIdMap['asset-video'], bytes: new Uint8Array(media) },
+    ]);
+    expect(imported.missingAssetIds).toEqual([]);
   });
 
   it('wraps long title text into the stored layout lines', () => {
@@ -490,6 +592,7 @@ describe('P0 desktop title handoff', () => {
       const frame = buildTitleSceneFrame(instance, instance.objectId, 2_000_000, 360_000, {
         widthPx: 1080,
         heightPx: 1920,
+        fontFaces: scenePaintFontDescriptors(),
         frameRate: { num: 30, den: 1 },
         locale: direction === 'rtl' ? 'fa-IR' : 'en',
       });
@@ -509,21 +612,31 @@ describe('P0 desktop title handoff', () => {
     const slide = makeInstance('joy.p0.title', 400, 'Slide');
     const hold = makeInstance('joy.p0.title', 400, 'Hold', 'ltr', 'hold');
     expect(
-      buildTitleSceneFrame(fade, fade.objectId, 2_000_000, 0, { widthPx: 1080, heightPx: 1920 })
-        .motion.opacity,
+      buildTitleSceneFrame(fade, fade.objectId, 2_000_000, 0, {
+        widthPx: 1080,
+        heightPx: 1920,
+        fontFaces: scenePaintFontDescriptors(),
+      }).motion.opacity,
     ).toBe(0);
     expect(
-      buildTitleSceneFrame(slide, slide.objectId, 2_000_000, 0, { widthPx: 1080, heightPx: 1920 })
-        .motion.translateYPx,
+      buildTitleSceneFrame(slide, slide.objectId, 2_000_000, 0, {
+        widthPx: 1080,
+        heightPx: 1920,
+        fontFaces: scenePaintFontDescriptors(),
+      }).motion.translateYPx,
     ).toBeGreaterThan(0);
     expect(
-      buildTitleSceneFrame(hold, hold.objectId, 2_000_000, 0, { widthPx: 1080, heightPx: 1920 })
-        .motion.opacity,
+      buildTitleSceneFrame(hold, hold.objectId, 2_000_000, 0, {
+        widthPx: 1080,
+        heightPx: 1920,
+        fontFaces: scenePaintFontDescriptors(),
+      }).motion.opacity,
     ).toBe(1);
     expect(
       buildTitleSceneFrame(fade, fade.objectId, 2_000_000, 2_000_000, {
         widthPx: 1080,
         heightPx: 1920,
+        fontFaces: scenePaintFontDescriptors(),
       }).motion.opacity,
     ).toBe(0);
   });
@@ -595,6 +708,7 @@ describe('P0 desktop title handoff', () => {
     const frame = buildTitleSceneFrame(instance, titleInstanceId(instance), 1_000_000, 360_000, {
       widthPx: 1080,
       heightPx: 1920,
+      fontFaces: scenePaintFontDescriptors(),
       frameRate: { num: 30, den: 1 },
       locale: 'en',
     });
@@ -816,6 +930,7 @@ describe('P0 desktop title handoff', () => {
       const frame = buildTitleSceneFrame(instance, instance.objectId, 2_000_000, 360_000, {
         widthPx: 1080,
         heightPx: 1920,
+        fontFaces: scenePaintFontDescriptors(),
         frameRate: { num: 30, den: 1 },
         locale: direction === 'rtl' ? 'fa-IR' : 'en',
       });
@@ -834,97 +949,258 @@ describe('P0 desktop title handoff', () => {
     180_000,
   );
 
-  it('produces byte-identical title RGBA in desktop capture and the CLI Chromium driver', async () => {
-    const executablePath = findChromiumExecutable();
-    expect(executablePath).toBeDefined();
-    if (executablePath === undefined) throw new Error('Chromium executable is missing');
-    expect(p0DesktopHandoffChromiumExecutable()).toBe(executablePath);
-    const instance = makeInstance('joy.p0.title', 400, 'Shared desktop title', 'ltr', 'hold');
-    const instanceId = titleInstanceId(instance);
-    const durationUs = 2_000_000;
-    const timeUs = 360_000;
-    const frame = buildTitleSceneFrame(instance, instanceId, durationUs, timeUs, {
-      widthPx: 1080,
-      heightPx: 1920,
-      frameRate: { num: 30, den: 1 },
-      locale: 'en',
-      seed: instanceId,
-    });
-    const rows = [
-      ...frame.paintLines.primary.map((text) => ({
-        text,
-        size: instance.layout.fontSizePx,
-        height: instance.layout.lineHeightPx,
-      })),
-      ...frame.paintLines.secondary.map((text) => ({
-        text,
-        size: instance.layout.secondarySizePx,
-        height: Math.round(instance.layout.secondarySizePx * 1.25),
-      })),
-    ];
-    let y = instance.placement.yPx + frame.motion.translateYPx;
-    const lines = rows.map((row) => {
-      y += row.height;
-      return {
-        text: row.text,
-        x: instance.placement.xPx,
-        y,
-        height: row.height,
-        font: `${instance.font.weight} ${row.size}px "Noto Sans Arabic"`,
-        color: '#ffffff',
-        direction: 'ltr' as const,
-        align: 'center' as const,
-        opacity: frame.motion.opacity,
-      };
-    });
-    const sourceContext = projectContext(instance, { startUs: 0, durationUs });
-    const context = {
-      ...sourceContext,
-      visual: {
-        ...sourceContext.visual,
-        compositions: {
-          ...sourceContext.visual.compositions,
-          [sourceContext.visual.rootCompositionId]: {
-            ...sourceContext.visual.compositions[sourceContext.visual.rootCompositionId]!,
-            width: frame.viewport.width,
-            height: frame.viewport.height,
+  it('matches production renderTitleFrames and desktop title RGBA', async () => {
+    const durationUs = 3_000_000;
+    const fps = { num: 4, den: 1 };
+    const sampleFrames = [1, 6, 11] as const;
+    const cases = (['joy.p0.lower-third', 'joy.p0.title'] as const).flatMap((templateId) =>
+      ([400, 700] as const).flatMap((weight) =>
+        (
+          [
+            ['latin', 'JOY Media title', 'ltr'],
+            ['persian', '\u0633\u0644\u0627\u0645 \u062c\u0647\u0627\u0646', 'rtl'],
+          ] as const
+        ).map(([language, primary, direction]) => {
+          const font = P0_TITLE_FONTS.find(
+            (entry) => entry.subset === 'arabic' && entry.weight === weight,
+          );
+          if (!font) throw new Error(`Canonical font descriptor missing for ${weight}`);
+          const instanceId = `parity-${templateId}-${weight}-${language}`;
+          const compiled = compileTitleInstance(
+            {
+              instanceId,
+              templateId,
+              clipId: `clip-${instanceId}`,
+              objectId: `object-${instanceId}`,
+              lines: { primary, secondary: 'Parity' },
+              direction,
+              font: { family: 'Noto Sans Arabic', weight },
+              fontSha256: font.sha256,
+              placement: { xPx: 20, yPx: 420, maxWidthPx: 680, safeInsetPx: 10 },
+              motion: { presetId: 'joy-slide-up', inUs: 1_000_000, outUs: 1_000_000 },
+              clipDurationUs: durationUs,
+              frame: { widthPx: 720, heightPx: 1280 },
+            },
+            (text, size) => [...text].length * size * 0.55,
+          );
+          if (!compiled.ok) throw new Error(`P0 parity fixture failed: ${compiled.code}`);
+          return { language, instance: compiled.instance, instanceId };
+        }),
+      ),
+    );
+    const sources = cases.map(({ instance, instanceId }) => ({
+      instanceId,
+      instance,
+      startUs: 0,
+      durationUs,
+      trackOrder: 0,
+    }));
+    const rendered = await renderTitleFrames(sources, { width: 720, height: 1280, fps });
+    const operations = cases.flatMap(({ instance, instanceId }) => {
+      const sourceContext = projectContext(instance, { startUs: 0, durationUs });
+      const context = {
+        ...sourceContext,
+        visual: {
+          ...sourceContext.visual,
+          compositions: {
+            ...sourceContext.visual.compositions,
+            [sourceContext.visual.rootCompositionId]: {
+              ...sourceContext.visual.compositions[sourceContext.visual.rootCompositionId]!,
+              width: 720,
+              height: 1280,
+            },
           },
         },
-      },
-    };
-    const browser = await runP0DesktopHandoff([
-      {
-        id: 'shared-title-frame',
-        kind: 'capture',
+      };
+      return sampleFrames.map((sampleFrame) => ({
+        id: `${instanceId}-${sampleFrame}`,
+        kind: 'capture' as const,
         context,
-        timeUs,
-        width: frame.viewport.width,
-        height: frame.viewport.height,
+        timeUs: sampleFrame * 250_000,
+        width: 720,
+        height: 1280,
+      }));
+    });
+    try {
+      const browser = await runP0DesktopHandoff(operations);
+      for (const { instance, instanceId, language } of cases) {
+        const layer = rendered.layers.find((entry) => entry.instanceId === instanceId);
+        if (!layer) throw new Error(`CLI title layer missing for ${instanceId}`);
+        for (const sampleFrame of sampleFrames) {
+          const timeUs = sampleFrame * 250_000;
+          const operationId = `${instanceId}-${sampleFrame}`;
+          const operation = operationResult(browser, operationId);
+          expect(operation.error, operationId).toBeUndefined();
+          const surface = operation.surfaces[instance.objectId];
+          if (!surface) throw new Error(`Desktop RGBA missing for ${operationId}`);
+          const png = readFileSync(
+            layer.inputPattern.replace('%05d', String(sampleFrame).padStart(5, '0')),
+          );
+          const cliRgba = decodeFilterZeroRgbaPng(png);
+          const desktopRgba = Buffer.from(surface.data);
+          let firstDifference = -1;
+          for (let index = 0; index < cliRgba.length; index++) {
+            if (cliRgba[index] !== desktopRgba[index]) {
+              firstDifference = index;
+              break;
+            }
+          }
+          expect(
+            firstDifference,
+            `${instance.templateId} weight ${instance.font.weight} ${language} at ${timeUs}us; first differing byte ${firstDifference}`,
+          ).toBe(-1);
+        }
+      }
+    } finally {
+      rendered.cleanup();
+    }
+  }, 300_000);
+
+  it('keeps title text inside the safe area and paints the declared plate', async () => {
+    const instance = makeInstance('joy.p0.lower-third', 400, 'Placement check', 'ltr', 'hold');
+    const durationUs = 1_000_000;
+    const context = projectContext(instance, { startUs: 0, durationUs });
+    const template = P0_TEMPLATES[instance.templateId];
+    expect(template.plate.kind).toBe('translucent-rectangle');
+    const expectedPlate = {
+      x: instance.placement.xPx,
+      y: instance.placement.yPx,
+      width: instance.placement.maxWidthPx,
+      height: instance.layout.boxHeightPx,
+    };
+    const anchorX =
+      template.alignment === 'center'
+        ? instance.placement.xPx + instance.placement.maxWidthPx / 2
+        : instance.placement.xPx + template.plate.paddingX;
+    const primaryTop = instance.placement.yPx + template.plate.paddingY;
+    const expectedTextBoxes = [
+      ...instance.layout.primaryLines.map((text, index) => ({
+        text,
+        x: template.alignment === 'center' ? instance.placement.xPx : anchorX,
+        width:
+          template.alignment === 'center'
+            ? instance.placement.maxWidthPx
+            : instance.placement.maxWidthPx - template.plate.paddingX,
+        y: primaryTop + index * instance.layout.lineHeightPx,
+        height: instance.layout.lineHeightPx,
+      })),
+      ...instance.layout.secondaryLines.map((text, index) => ({
+        text,
+        x: template.alignment === 'center' ? instance.placement.xPx : anchorX,
+        width:
+          template.alignment === 'center'
+            ? instance.placement.maxWidthPx
+            : instance.placement.maxWidthPx - template.plate.paddingX,
+        y:
+          primaryTop +
+          instance.layout.primaryLines.length * instance.layout.lineHeightPx +
+          index *
+            Math.round(instance.layout.secondarySizePx * P0_PAINT_POLICY.lineHeightMultiplier),
+        height: Math.round(instance.layout.secondarySizePx * P0_PAINT_POLICY.lineHeightMultiplier),
+      })),
+    ];
+    const response = await runP0DesktopHandoff([
+      {
+        id: 'placement',
+        kind: 'capture',
+        context: {
+          ...context,
+          visual: {
+            ...context.visual,
+            compositions: {
+              ...context.visual.compositions,
+              [context.visual.rootCompositionId]: {
+                ...context.visual.compositions[context.visual.rootCompositionId]!,
+                width: 1080,
+                height: 1920,
+              },
+            },
+          },
+        },
+        timeUs: 500_000,
+        width: 1080,
+        height: 1920,
       },
     ]);
-    const browserOperation = operationResult(browser, 'shared-title-frame');
-    expect(browserOperation.error).toBeUndefined();
-    const browserSurface = browserOperation.surfaces[instance.objectId];
-    if (browserSurface === undefined) throw new Error('Desktop title RGBA surface is missing');
-
-    const driver = createChromiumSceneDriver({ executablePath });
-    try {
-      const nodeSurface = driver.capture({
-        markup: frame.markup,
-        width: frame.viewport.width,
-        height: frame.viewport.height,
-        transparent: true,
-        timeUs: frame.timeUs,
-        frameRate: frame.frameRate,
-        locale: frame.locale,
-        seed: frame.seed,
-        lines,
-      });
-      if (nodeSurface.rgba.byteLength === 0) throw new Error('Node title RGBA surface is missing');
-      expect(browserSurface.data.byteLength).toBe(nodeSurface.rgba.byteLength);
-      expect(hash(browserSurface.data)).toBe(hash(nodeSurface.rgba));
-    } finally {
-      driver.close?.();
+    const result = operationResult(response, 'placement');
+    expect(result.error).toBeUndefined();
+    const surface = result.surfaces[instance.objectId];
+    if (!surface) throw new Error('Placement capture returned no title surface');
+    const pixels = Buffer.from(surface.data);
+    const plateBounds = { left: 1080, top: 1920, right: -1, bottom: -1 };
+    let textPixelCount = 0;
+    for (let y = 0; y < surface.height; y++) {
+      for (let x = 0; x < surface.width; x++) {
+        const offset = (y * surface.width + x) * 4;
+        if (
+          pixels[offset] === 0 &&
+          pixels[offset + 1] === 0 &&
+          pixels[offset + 2] === 0 &&
+          pixels[offset + 3]! > 0
+        ) {
+          textPixelCount++;
+          plateBounds.left = Math.min(plateBounds.left, x);
+          plateBounds.top = Math.min(plateBounds.top, y);
+          plateBounds.right = Math.max(plateBounds.right, x);
+          plateBounds.bottom = Math.max(plateBounds.bottom, y);
+        }
+        if (
+          pixels[offset]! > 160 &&
+          pixels[offset + 1]! > 160 &&
+          pixels[offset + 2]! > 160 &&
+          pixels[offset + 3]! > 0
+        ) {
+          const inside = expectedTextBoxes.some(
+            (box) =>
+              x >= box.x - 1 &&
+              x <= box.x + box.width + 1 &&
+              y >= box.y - 1 &&
+              y <= box.y + box.height + 1,
+          );
+          expect(inside, `text raster pixel ${x},${y} is outside the declared text boxes`).toBe(
+            true,
+          );
+        }
+      }
     }
+    expect(textPixelCount).toBeGreaterThan(0);
+    expect(plateBounds.left).toBeGreaterThanOrEqual(expectedPlate.x - 1);
+    expect(plateBounds.top).toBeGreaterThanOrEqual(expectedPlate.y - 1);
+    expect(plateBounds.right).toBeLessThanOrEqual(expectedPlate.x + expectedPlate.width);
+    expect(plateBounds.bottom).toBeLessThanOrEqual(expectedPlate.y + expectedPlate.height);
+    expect(plateBounds.left).toBeLessThanOrEqual(expectedPlate.x + 1);
+    expect(plateBounds.top).toBeLessThanOrEqual(expectedPlate.y + 1);
+    expect(plateBounds.right).toBeGreaterThanOrEqual(expectedPlate.x + expectedPlate.width - 2);
+    expect(plateBounds.bottom).toBeGreaterThanOrEqual(expectedPlate.y + expectedPlate.height - 2);
   }, 180_000);
 });
+
+function decodeFilterZeroRgbaPng(png: Buffer): Buffer {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  if (!png.subarray(0, 8).equals(signature)) throw new Error('CLI title output is not a PNG');
+  let width = 0;
+  let height = 0;
+  let offset = 8;
+  const compressed: Buffer[] = [];
+  while (offset < png.length) {
+    const length = png.readUInt32BE(offset);
+    const type = png.toString('ascii', offset + 4, offset + 8);
+    const data = png.subarray(offset + 8, offset + 8 + length);
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      if (data[8] !== 8 || data[9] !== 6) throw new Error('CLI PNG is not 8-bit RGBA');
+    } else if (type === 'IDAT') compressed.push(data);
+    offset += length + 12;
+    if (type === 'IEND') break;
+  }
+  const raw = inflateSync(Buffer.concat(compressed));
+  const rowBytes = width * 4;
+  const rgba = Buffer.allocUnsafe(rowBytes * height);
+  for (let y = 0; y < height; y++) {
+    const source = y * (rowBytes + 1);
+    if (raw[source] !== 0) throw new Error('CLI PNG uses a nonzero row filter');
+    raw.copy(rgba, y * rowBytes, source + 1, source + 1 + rowBytes);
+  }
+  return rgba;
+}

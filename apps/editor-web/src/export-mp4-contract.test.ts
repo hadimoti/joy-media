@@ -14,7 +14,7 @@ describe('App MP4 export negotiation contract', () => {
     expect(exportCallback).toContain('for (const clip of activeClips)');
     expect(exportCallback).toContain('withVideoFrameNodes(frame, nodes)');
     expect(exportCallback).toMatch(
-      /captureFull\(exportVisualProject.visualObjects, timeUs,\s*\{\s*width,\s*height,\s*signal: abortController.signal/,
+      /captureFull\(\s*\{\s*visual:\s*exportVisualProject,\s*timeline:\s*exportTimelineProject\s*\},\s*timeUs,\s*\{\s*width,\s*height,\s*signal:\s*abortController\.signal/,
     );
     expect(exportCallback).toContain('exportSceneCache?.destroy()');
   });

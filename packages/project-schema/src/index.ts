@@ -199,6 +199,13 @@ export type {
   TitleInstanceV1,
   ContentInstancesV1,
 } from './content-templates.js';
+export type {
+  FontFaceDescriptorV1,
+  ScenePaintFaceRefV1,
+  ScenePaintFrameV1,
+  ScenePaintLineV1,
+  ScenePaintRectV1,
+} from './scene-paint.js';
 export { CONTENT_TEMPLATES_PLUGIN_KEY, validateContentInstances } from './content-templates.js';
 export { dimensionsForExportPreset } from './export-preset.js';
 export type {

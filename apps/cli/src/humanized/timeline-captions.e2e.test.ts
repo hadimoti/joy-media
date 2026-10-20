@@ -5,9 +5,10 @@
  * Real binary and real ffmpeg; fixtures are generated inside the sandbox.
  */
 import { spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { probeCanonicalCaptionFace } from '../commands/render-features.js';
 import { createSandbox, describeRun, type RunResult, type Sandbox } from './harness.js';
 import { addClip, createProject, showProject, track } from './project-helpers.js';
 
@@ -45,6 +46,26 @@ function brightPixelsInCaptionBand(file: string, seconds: number): number {
 
 function errorCode(r: RunResult): string {
   return (r.json() as { code: string }).code;
+}
+
+async function expectCaptionOutcome(
+  faceProbe: ReturnType<typeof probeCanonicalCaptionFace>,
+  render: RunResult,
+  outputDirectory: string,
+  usableOutcome: () => void | Promise<void>,
+): Promise<void> {
+  if (faceProbe.usable) {
+    await usableOutcome();
+    return;
+  }
+
+  expect(render.code, describeRun(render)).toBe(1);
+  expect(errorCode(render)).toBe('SETUP_REQUIRED');
+  const { message } = render.json() as { message: string };
+  expect(JSON.parse(message.slice(message.indexOf('{')))).toMatchObject({
+    kind: 'canonical-caption-face-unavailable',
+  });
+  expect(existsSync(outputDirectory) ? readdirSync(outputDirectory) : []).toEqual([]);
 }
 
 describe.skipIf(!hasMediaTools())(
@@ -135,15 +156,18 @@ describe.skipIf(!hasMediaTools())(
       ]);
       expect(added.code, describeRun(added)).toBe(0);
       const out = sb.path('out-caption');
+      const fontProbe = probeCanonicalCaptionFace();
       const r = await sb.run(['render', '--project', id, '--out', out, '--json']);
-      expect(r.code, describeRun(r)).toBe(0);
-      const file = join(
-        out,
-        readdirSync(out).find((n) => n.endsWith('.mp4'))!,
-      );
-      expect(brightPixelsInCaptionBand(file, 1.0)).toBeGreaterThan(40);
-      expect(brightPixelsInCaptionBand(file, 0.2)).toBeLessThan(5);
-      expect(brightPixelsInCaptionBand(file, 1.9)).toBeLessThan(5);
+      await expectCaptionOutcome(fontProbe, r, out, () => {
+        expect(r.code, describeRun(r)).toBe(0);
+        const file = join(
+          out,
+          readdirSync(out).find((n) => n.endsWith('.mp4'))!,
+        );
+        expect(brightPixelsInCaptionBand(file, 1.0)).toBeGreaterThan(40);
+        expect(brightPixelsInCaptionBand(file, 0.2)).toBeLessThan(5);
+        expect(brightPixelsInCaptionBand(file, 1.9)).toBeLessThan(5);
+      });
     });
 
     it('caption text with punctuation that ffmpeg treats specially still renders', async () => {
@@ -163,9 +187,12 @@ describe.skipIf(!hasMediaTools())(
       ]);
       expect(added.code, describeRun(added)).toBe(0);
       const out = sb.path('out-escape');
+      const fontProbe = probeCanonicalCaptionFace();
       const r = await sb.run(['render', '--project', id, '--out', out, '--json']);
-      expect(r.code, describeRun(r)).toBe(0);
-      expect(readdirSync(out).some((n) => n.endsWith('.mp4'))).toBe(true);
+      await expectCaptionOutcome(fontProbe, r, out, () => {
+        expect(r.code, describeRun(r)).toBe(0);
+        expect(readdirSync(out).some((n) => n.endsWith('.mp4'))).toBe(true);
+      });
     });
 
     it('a caption clip cannot be split, and nothing changes', async () => {
@@ -206,12 +233,15 @@ describe.skipIf(!hasMediaTools())(
         'Hi',
       ]);
       const out = sb.path('out-no-font');
+      const fontProbe = probeCanonicalCaptionFace();
       const r = await sb.run(['render', '--project', id, '--out', out, '--json'], {
         env: { JOY_MEDIA_CAPTION_FONT: sb.path('missing-font.ttf') },
       });
-      expect(r.code, describeRun(r)).toBe(1);
-      expect(r.stdout).toContain('unsupported-feature');
-      expect(track(await showProject(sb, id), 'track-c1').clips).toHaveLength(1);
+      await expectCaptionOutcome(fontProbe, r, out, async () => {
+        expect(r.code, describeRun(r)).toBe(1);
+        expect(r.stdout).toContain('unsupported-feature');
+        expect(track(await showProject(sb, id), 'track-c1').clips).toHaveLength(1);
+      });
     });
 
     it('caption text is drawn literally: %{n} and 100% are not expanded by ffmpeg', async () => {
@@ -231,13 +261,16 @@ describe.skipIf(!hasMediaTools())(
       ]);
       expect(added.code, describeRun(added)).toBe(0);
       const out = sb.path('out-literal');
+      const fontProbe = probeCanonicalCaptionFace();
       const r = await sb.run(['render', '--project', id, '--out', out, '--json']);
-      expect(r.code, describeRun(r)).toBe(0);
-      const file = join(
-        out,
-        readdirSync(out).find((n) => n.endsWith('.mp4'))!,
-      );
-      expect(brightPixelsInCaptionBand(file, 1.0)).toBeGreaterThan(40);
+      await expectCaptionOutcome(fontProbe, r, out, () => {
+        expect(r.code, describeRun(r)).toBe(0);
+        const file = join(
+          out,
+          readdirSync(out).find((n) => n.endsWith('.mp4'))!,
+        );
+        expect(brightPixelsInCaptionBand(file, 1.0)).toBeGreaterThan(40);
+      });
     });
 
     it('a caption with an unknown direction or an invalid language is refused, and nothing is written', async () => {
@@ -293,7 +326,7 @@ describe.skipIf(!hasMediaTools())(
       expect(r.code, describeRun(r)).toBe(2);
     });
 
-    it('a caption after the end of the video still appears: the output runs as long as the caption', async () => {
+    it('a caption after the end of the video still appears', async () => {
       const id = await project('Caption after video');
       await addClip(sb, id, { track: 'track-v1', start: 0, duration: 1, asset: blue });
       await add(id, ['add-track', '--family', 'caption']);
@@ -310,7 +343,15 @@ describe.skipIf(!hasMediaTools())(
       ]);
       expect(added.code, describeRun(added)).toBe(0);
       const out = sb.path('out-after-video');
+      const fontProbe = probeCanonicalCaptionFace();
       const r = await sb.run(['render', '--project', id, '--out', out, '--json']);
+      if (!fontProbe.usable) {
+        expect(r.code, describeRun(r)).toBe(1);
+        expect(errorCode(r)).toBe('SETUP_REQUIRED');
+        const outputFiles = existsSync(out) ? readdirSync(out) : [];
+        expect(outputFiles.some((file) => file.endsWith('.mp4'))).toBe(false);
+        return;
+      }
       expect(r.code, describeRun(r)).toBe(0);
       const file = join(
         out,

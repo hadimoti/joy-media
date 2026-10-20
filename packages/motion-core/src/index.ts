@@ -46,6 +46,7 @@ export {
 } from './curve.js';
 
 export { sampleSpatialPath } from './spatial.js';
+export { P0_PAINT_POLICY } from './content-templates/catalog.js';
 
 export {
   P0_TEMPLATES,

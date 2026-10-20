@@ -10,6 +10,7 @@ import type { Rational, TimeUs } from '@joy-media/project-schema';
 import type { SandboxedReactScene } from './runtime.js';
 import type { SceneResolvers } from './resolver.js';
 import type { ScenePaintLine } from './preview-protocol.js';
+import type { ScenePaintFrameV1 } from '@joy-media/project-schema';
 
 export interface HeadlessCaptureRequest {
   readonly markup: string;
@@ -22,6 +23,7 @@ export interface HeadlessCaptureRequest {
   readonly seed: string;
   /** Explicit shaped text lines forwarded to the shared preview painter. */
   readonly lines?: readonly ScenePaintLine[];
+  readonly paint?: ScenePaintFrameV1;
 }
 
 export interface HeadlessSurface {
@@ -36,6 +38,7 @@ export interface HeadlessSceneDriver {
     requests: readonly { text: string; fontSizePx: number; weight: 400 | 700 }[],
   ): number[];
   close?(): void;
+  readonly browserVersion?: string | undefined;
   readonly browserProcessId?: number | undefined;
 }
 
@@ -50,6 +53,7 @@ export interface SceneCaptureRequest<TVariables> {
   readonly resolverKey?: string;
   /** Optional explicit text-line boxes painted identically by desktop and headless. */
   readonly lines?: readonly ScenePaintLine[];
+  readonly paint?: ScenePaintFrameV1;
 }
 
 export interface CapturedSceneSurface {
@@ -151,6 +155,7 @@ export function captureSceneSurface<TVariables>(
     locale: request.locale,
     seed: request.seed,
     ...(request.lines === undefined ? {} : { lines: request.lines }),
+    ...(request.paint === undefined ? {} : { paint: request.paint }),
   });
   const expectedLength = width * height * 4;
   if (surface.rgba.length !== expectedLength)

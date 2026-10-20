@@ -69,7 +69,7 @@ export async function handleProjectCommand(args: string[], flags: CliFlags): Pro
       case 'show':
         return runShow(args, flags, json);
       case 'export':
-        return runExport(args, flags, json);
+        return await runExport(args, flags, json);
       case 'import':
         return runImport(args, flags, json);
       default:
@@ -275,7 +275,7 @@ function carriedLedger(path: string, projectId: string): unknown {
   return undefined;
 }
 
-function runExport(args: string[], flags: CliFlags, json: boolean): number {
+async function runExport(args: string[], flags: CliFlags, json: boolean): Promise<number> {
   const id = projectArgument(
     args,
     flags,
@@ -293,7 +293,7 @@ function runExport(args: string[], flags: CliFlags, json: boolean): number {
         throw Object.assign(new Error('Desktop export requires a schema-v3 project.'), {
           code: 'DESKTOP_PROJECTION_INVALID_INPUT',
         });
-      writeDesktopProjectExport(res.project as JoyProjectV3, loadAssetSources(), outPath);
+      await writeDesktopProjectExport(res.project as JoyProjectV3, loadAssetSources(), outPath);
     } catch (error) {
       const code =
         typeof error === 'object' &&
