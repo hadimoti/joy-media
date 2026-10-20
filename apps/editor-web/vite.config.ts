@@ -81,9 +81,6 @@ function p0FontAssets(): Plugin {
     configureServer(server) {
       server.middlewares.use(serveFont);
     },
-    configurePreviewServer(server) {
-      server.middlewares.use(serveFont);
-    },
     generateBundle() {
       for (const assetName of FONT_ASSET_FILES) {
         this.emitFile({

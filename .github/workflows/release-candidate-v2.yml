@@ -250,12 +250,20 @@ jobs:
           release_command="${JOY_MEDIA_CI_RELEASE_COMMAND:-}"
           test -x "$release_command" || { echo 'JOY_MEDIA_CI_RELEASE_COMMAND must point to the isolated Linux release harness' >&2; exit 1; }
           "$release_command" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "${{ matrix.pass }}"
+      - name: Install locked Playwright Chromium for P0
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec playwright install chromium
+          chromium_path="$(node -e "process.stdout.write(require('@playwright/test').chromium.executablePath())")"
+          test -x "$chromium_path" || { echo 'Locked Playwright Chromium executable is missing' >&2; exit 1; }
+          echo "JOY_CHROMIUM_PATH=$chromium_path" >> "$GITHUB_ENV"
       - name: Run P0 font, browser, and render integration lane
         shell: bash
         run: |
           set -euo pipefail
-          chromium_path="$(command -v chromium || command -v chromium-browser || true)"
-          test -n "$chromium_path" && test -x "$chromium_path" || { echo 'Chromium is required on the Linux P0 runner' >&2; exit 1; }
+          chromium_path="${JOY_CHROMIUM_PATH:-}"
+          test -n "$chromium_path" && test -x "$chromium_path" || { echo 'Locked Playwright Chromium is required on the Linux P0 runner' >&2; exit 1; }
           command -v ffmpeg >/dev/null || { echo 'ffmpeg is required on the Linux P0 runner' >&2; exit 1; }
           command -v ffprobe >/dev/null || { echo 'ffprobe is required on the Linux P0 runner' >&2; exit 1; }
           ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]](ass|subtitles)[[:space:]]' || { echo 'FFmpeg with libass filters is required on the Linux P0 runner' >&2; exit 1; }
@@ -270,6 +278,65 @@ jobs:
         run: |
           set -euo pipefail
           test -z "$(git status --porcelain)"
+
+  windows-p0-real-services:
+    name: windows-p0-real-services
+    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
+    needs: [validate-candidate]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify candidate and install frozen dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'candidate_sha must be a full lowercase commit SHA' }
+          if ((git rev-parse HEAD) -ne $env:CANDIDATE_SHA) { throw 'Windows P0 checkout does not match candidate_sha' }
+          node --version
+          if ($LASTEXITCODE -ne 0) { throw "Node version check failed with exit code $LASTEXITCODE." }
+          corepack enable pnpm
+          if ($LASTEXITCODE -ne 0) { throw "Corepack failed to enable pnpm with exit code $LASTEXITCODE." }
+          pnpm --version
+          if ($LASTEXITCODE -ne 0) { throw "pnpm version check failed with exit code $LASTEXITCODE." }
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw "Frozen dependency install failed with exit code $LASTEXITCODE." }
+      - name: Install locked Playwright Chromium for P0
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm exec playwright install chromium
+          if ($LASTEXITCODE -ne 0) { throw "Locked Playwright Chromium install failed with exit code $LASTEXITCODE." }
+          $chromiumPath = node -e "process.stdout.write(require('@playwright/test').chromium.executablePath())"
+          if ($LASTEXITCODE -ne 0) { throw "Locked Playwright Chromium path lookup failed with exit code $LASTEXITCODE." }
+          if (-not (Test-Path -LiteralPath $chromiumPath -PathType Leaf)) { throw "Locked Playwright Chromium executable is missing: $chromiumPath" }
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "JOY_CHROMIUM_PATH=$chromiumPath$([Environment]::NewLine)")
+      - name: Run P0 font, browser, and render integration lane
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:JOY_CHROMIUM_PATH -or -not (Test-Path -LiteralPath $env:JOY_CHROMIUM_PATH -PathType Leaf)) { throw 'Locked Playwright Chromium is required on the Windows P0 runner.' }
+          ffmpeg -version
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg check failed with exit code $LASTEXITCODE." }
+          ffprobe -version
+          if ($LASTEXITCODE -ne 0) { throw "ffprobe check failed with exit code $LASTEXITCODE." }
+          $ffmpegFilters = ffmpeg -hide_banner -filters 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0 -or $ffmpegFilters -notmatch '(?m)\s(ass|subtitles)\s') { throw 'FFmpeg with libass filters is required on the Windows P0 runner.' }
+          $env:JOY_REQUIRE_CHROMIUM = '1'
+          node node_modules/typescript/bin/tsc -b apps/cli
+          if ($LASTEXITCODE -ne 0) { throw "CLI TypeScript build failed with exit code $LASTEXITCODE." }
+          Push-Location apps/cli
+          try {
+            node scripts/bundle.mjs
+            if ($LASTEXITCODE -ne 0) { throw "CLI bundle failed with exit code $LASTEXITCODE." }
+          } finally {
+            Pop-Location
+          }
+          node node_modules/vitest/vitest.mjs run --config vitest.p0.config.ts
+          if ($LASTEXITCODE -ne 0) { throw "P0 integration tests failed with exit code $LASTEXITCODE." }
 
   windows-worker-clean:
     name: windows-worker-clean (two exact passes)
