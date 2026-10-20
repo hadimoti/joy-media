@@ -66,6 +66,7 @@ import {
   type MediaPlanReady,
 } from './render-media.js';
 import { listProjects, loadProject, type CliProjectDocument } from '../utils/project-loader.js';
+import { validateRenderPreparation } from '../services/render-preparation.js';
 
 export interface RenderCommandFlags {
   project?: string | undefined;
@@ -201,7 +202,14 @@ export type RenderErrorCode =
   | 'encode-failed'
   | 'nothing-to-render'
   | 'RANGE_ERROR'
-  | 'SLICE_LIMIT';
+  | 'SLICE_LIMIT'
+  | 'SETUP_REQUIRED'
+  | 'RENDER_PREPARATION_REQUIRED'
+  | 'RENDER_PREPARATION_INVALID'
+  | 'RENDER_ENVIRONMENT_DRIFT'
+  | 'CAPTION_UNSUPPORTED'
+  | 'CAPTION_LAYOUT_OVERFLOW'
+  | 'CAPTION_TIMING_UNREPRESENTABLE';
 
 /** Real render only: encoder progress, at most one event per whole percent. */
 export interface RenderProgressEvent {
@@ -746,6 +754,29 @@ export async function runHeadlessRender(
   if (!plan.ok) return failure('invalid-project', plan.message);
 
   const titleSources = collectTitleSources(project);
+  try {
+    await validateRenderPreparation(project);
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String(error.code)
+        : 'RENDER_PREPARATION_INVALID';
+    const allowed: RenderErrorCode[] = [
+      'SETUP_REQUIRED',
+      'RENDER_PREPARATION_REQUIRED',
+      'RENDER_PREPARATION_INVALID',
+      'RENDER_ENVIRONMENT_DRIFT',
+      'CAPTION_UNSUPPORTED',
+      'CAPTION_LAYOUT_OVERFLOW',
+      'CAPTION_TIMING_UNREPRESENTABLE',
+    ];
+    return failure(
+      allowed.includes(code as RenderErrorCode)
+        ? (code as RenderErrorCode)
+        : 'RENDER_PREPARATION_INVALID',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
   const composition = rootCompositionOf(project);
   if (titleSources.length > 8)
     return failure('SLICE_LIMIT', 'At most 8 title instances are supported.');

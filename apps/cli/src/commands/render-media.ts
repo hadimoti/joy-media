@@ -7,6 +7,10 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { loadAssetSources } from '../utils/asset-sources.js';
 import { ffmpegBinary, probeMedia, type MediaInfo } from '../utils/media-probe.js';
 import { compileCaptionAss } from '../services/captions-ass.js';
+import {
+  RENDER_PREPARATION_KEY,
+  type RenderPreparationV1,
+} from '../services/render-preparation.js';
 import { notoSansArabicArabic400Path } from '@joy-media/html-scene-runtime';
 import {
   RF_ALPHA,
@@ -368,6 +372,8 @@ export function planMedia(
   }> = [];
 
   const captions: CaptionCue[] = [];
+  const pluginData = isRecord(project['pluginData']) ? project['pluginData'] : {};
+  const frozenPreparation = pluginData[RENDER_PREPARATION_KEY] as RenderPreparationV1 | undefined;
   for (const [trackOrder, rawTrack] of (root['tracks'] as unknown[]).entries()) {
     if (!isRecord(rawTrack) || rawTrack['enabled'] === false) continue;
     const trackId = typeof rawTrack['id'] === 'string' ? rawTrack['id'] : '?';
@@ -383,10 +389,24 @@ export function planMedia(
       if (!isRecord(rawClip)) continue;
       const clipId = typeof rawClip['id'] === 'string' ? rawClip['id'] : '?';
       if (rawClip['kind'] === 'caption') {
-        const read = captionCuesOf(project, rawClip);
-        if (typeof read === 'string')
-          return { mode: 'error', code: 'unsupported-feature', message: read };
-        captions.push(...read);
+        if (
+          frozenPreparation?.captions?.wrapping === 'measured-hard-breaks' &&
+          captions.length === 0
+        ) {
+          captions.push(
+            ...frozenPreparation.captions.cues.map((cue) => ({
+              text: cue.lines.join('\n'),
+              startUs: cue.startUs,
+              endUs: cue.endUs,
+              direction: cue.direction,
+            })),
+          );
+        } else {
+          const read = captionCuesOf(project, rawClip);
+          if (typeof read === 'string')
+            return { mode: 'error', code: 'unsupported-feature', message: read };
+          captions.push(...read);
+        }
         continue;
       }
       if (rawClip['kind'] !== 'video' || typeof rawClip['assetId'] !== 'string') {
@@ -450,7 +470,25 @@ export function planMedia(
           ),
         ),
         fontFamily: 'Noto Sans Arabic',
-        cues: captions,
+        cues:
+          frozenPreparation?.captions?.wrapping === 'measured-hard-breaks'
+            ? frozenPreparation.captions.cues.map((cue) => ({
+                text: cue.lines.join('\n'),
+                lines: cue.lines,
+                measuredWidthsPx: cue.measuredWidthsPx,
+                maxWidthPx: cue.maxWidthPx,
+                startUs: cue.startUs,
+                endUs: cue.endUs,
+                direction: cue.direction,
+              }))
+            : captions,
+        ...(frozenPreparation?.captions?.wrapping === 'measured-hard-breaks'
+          ? {
+              frameRate: frozenPreparation.composition.fps,
+              fontSizePx: frozenPreparation.captions.fontSizePx,
+              marginBottomPx: frozenPreparation.captions.placement.marginBottomPx,
+            }
+          : {}),
       });
     } catch (error) {
       return {

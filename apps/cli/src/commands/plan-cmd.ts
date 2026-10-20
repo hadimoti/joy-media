@@ -11,10 +11,19 @@ import {
 } from '../services/prepared-edit.js';
 import {
   applyPreparedTitleOperation,
+  getTitleTextMeasurer,
   isTitleOperation,
   validateFrozenTitleOutput,
 } from '../services/prepared-title.js';
 import { ensureTitleTextMeasurer } from '../services/title-measure.js';
+import {
+  freezeRenderPreparation,
+  preflightRenderPreparation,
+  projectHasCaptions,
+  projectHasTitles,
+  RENDER_PREPARATION_KEY,
+  type RenderPreparationV1,
+} from '../services/render-preparation.js';
 import {
   CommandFailure,
   emitJson,
@@ -34,13 +43,14 @@ import type { CliProjectDocument } from '../utils/project-loader.js';
 type EditPlan = {
   kind: 'joy-media.prepared-edit';
   schemaVersion: 1;
-  semanticsVersion: 1 | 2;
+  semanticsVersion: 1 | 2 | 3;
   planId: string;
   projectId: string;
   baseRevision: number;
   baseHash: string;
   preparedAt: string;
   operations: PreparedOperation[];
+  renderPreparation?: RenderPreparationV1;
   resultHash: string;
   changedEntities: ReturnType<typeof changedEntities>;
   warnings: string[];
@@ -86,7 +96,7 @@ function parsePlan(path: string): EditPlan {
       'File is not a supported joy-media.prepared-edit plan (schemaVersion 1).',
     );
   }
-  if (plan.semanticsVersion !== 1 && plan.semanticsVersion !== 2)
+  if (plan.semanticsVersion !== 1 && plan.semanticsVersion !== 2 && plan.semanticsVersion !== 3)
     throw new CommandFailure(
       'PLAN_UNSUPPORTED_SEMANTICS',
       `Unsupported prepared plan semanticsVersion ${String(plan.semanticsVersion)}.`,
@@ -102,14 +112,25 @@ function parsePlan(path: string): EditPlan {
   ) {
     throw new CommandFailure('PLAN_INVALID', 'Plan is missing required immutable fields.');
   }
+  if (plan.semanticsVersion === 3 && !isRecord(plan.renderPreparation)) {
+    throw new CommandFailure(
+      'RENDER_PREPARATION_REQUIRED',
+      'SemanticsVersion 3 plans require a frozen render preparation record.',
+    );
+  }
   if (
     Array.isArray(plan.operations) &&
-    plan.operations.some((op) => isRecord(op) && isTitleOperation(op as PreparedOperation)) &&
-    plan.semanticsVersion !== 2
+    plan.operations.some(
+      (op) =>
+        isRecord(op) &&
+        (isTitleOperation(op as PreparedOperation) ||
+          String(op.op).toLowerCase().includes('caption')),
+    ) &&
+    plan.semanticsVersion !== 3
   )
     throw new CommandFailure(
       'PLAN_UNSUPPORTED_SEMANTICS',
-      'Title operations require semanticsVersion 2.',
+      'Title and caption operations require semanticsVersion 3.',
     );
   return plan as unknown as EditPlan;
 }
@@ -186,20 +207,51 @@ async function prepare(args: string[], flags: CliFlags): Promise<number> {
     );
   }
   const operations = parseOperationsFile(args[1]!);
+  // Probe prerequisites before Chromium's title measurer can be created or any plan is written.
+  const facts = await preflightRenderPreparation(project, operations);
+  const needsCaptionMeasure =
+    projectHasCaptions(project) ||
+    operations.some((operation) => operation.op.toLowerCase().includes('caption'));
   if (operations.some(isTitleOperation)) await ensureTitleTextMeasurer();
+  else if (needsCaptionMeasure && !facts?.measureText) await ensureTitleTextMeasurer();
+  const preparationFacts =
+    facts && needsCaptionMeasure && !facts.measureText
+      ? {
+          ...facts,
+          ...(getTitleTextMeasurer() ? { measureText: getTitleTextMeasurer()! } : {}),
+        }
+      : facts;
   const prepared = applyOperations(project, operations, true);
   const next = prepared.project;
   const preparedAt = new Date().toISOString();
-  const resultDocument = { ...next, updatedAt: preparedAt };
+  let resultDocument: CliProjectDocument = { ...next, updatedAt: preparedAt };
+  const renderPreparation =
+    preparationFacts &&
+    (projectHasTitles(resultDocument) ||
+      projectHasCaptions(resultDocument) ||
+      operations.some(isTitleOperation))
+      ? freezeRenderPreparation(resultDocument, prepared.operations, preparationFacts)
+      : undefined;
+  if (renderPreparation) {
+    resultDocument = {
+      ...resultDocument,
+      pluginData: {
+        ...resultDocument.pluginData,
+        [RENDER_PREPARATION_KEY]:
+          renderPreparation as unknown as CliProjectDocument['pluginData'][string],
+      },
+    };
+  }
   const withoutId: Omit<EditPlan, 'planId'> = {
     kind: 'joy-media.prepared-edit',
     schemaVersion: 1,
-    semanticsVersion: prepared.operations.some(isTitleOperation) ? 2 : 1,
+    semanticsVersion: renderPreparation ? 3 : 1,
     projectId: project.id,
     baseRevision: revision,
     baseHash: sha256Identity(project),
     preparedAt,
     operations: prepared.operations,
+    ...(renderPreparation ? { renderPreparation } : {}),
     resultHash: sha256Identity(resultDocument),
     changedEntities: changedEntities(project, resultDocument),
     warnings: [],
@@ -308,8 +360,18 @@ async function apply(args: string[], flags: CliFlags): Promise<number> {
       false,
     );
     void ignored;
-    const resultDocument = { ...next, updatedAt: plan.preparedAt };
-    if (plan.semanticsVersion === 2) validateFrozenTitleOutput(resultDocument);
+    let resultDocument: CliProjectDocument = { ...next, updatedAt: plan.preparedAt };
+    if (plan.renderPreparation) {
+      resultDocument = {
+        ...resultDocument,
+        pluginData: {
+          ...resultDocument.pluginData,
+          [RENDER_PREPARATION_KEY]:
+            plan.renderPreparation as unknown as CliProjectDocument['pluginData'][string],
+        },
+      };
+    }
+    if (plan.semanticsVersion >= 2) validateFrozenTitleOutput(resultDocument);
     const resultHash = sha256Identity(resultDocument);
     if (resultHash !== plan.resultHash)
       throw new CommandFailure(

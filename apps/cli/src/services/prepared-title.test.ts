@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runCli } from '../cli.js';
 import type { CliProjectDocument } from '../utils/project-loader.js';
+import { loadNotoSansArabicFaces } from '@joy-media/html-scene-runtime';
+import { preflightRenderPreparation, type RenderPreparationFacts } from './render-preparation.js';
 
 const measure = (text: string, size: number) => Array.from(text).length * size * 0.45;
 function expectCode(fn: () => unknown, code: string): void {
@@ -171,10 +173,52 @@ describe('prepared title resolution', () => {
       'TEMPLATE_NOT_FOUND',
     );
   });
-  it('produces frozen normalized data for a semantics-2 title plan', async () => {
+  it('produces frozen normalized data for a semantics-3 title plan', async () => {
     setTitleTextMeasurer(measure);
     expect(
       applyPreparedTitleOperation(await project(), instantiate(), true).operation,
     ).toHaveProperty('resolved');
+  });
+
+  it('refuses caption preparation before title measurement when canonical libass is unusable', async () => {
+    const p = await project();
+    const mutable = p as any;
+    mutable.compositions[mutable.rootCompositionId].tracks[0].clips.push({
+      id: 'caption',
+      kind: 'caption',
+      captionDocumentId: 'caption-doc',
+      startUs: 0,
+      durationUs: 1_000_000,
+    });
+    mutable.captionDocuments = { 'caption-doc': { segments: [] } };
+    const facts: RenderPreparationFacts = {
+      libassProbe: {
+        usable: false,
+        executablePath: 'ffmpeg',
+        canonicalFace: 'Noto Sans Arabic Arabic 400',
+        reason: 'probe failed',
+        log: '',
+      },
+      libassAvailable: true,
+      canonicalFaces: loadNotoSansArabicFaces(),
+      chromium: {
+        launchable: true,
+        executablePath: null,
+        executableSha256: null,
+        version: 'Chromium test',
+      },
+      ffmpeg: {
+        executablePath: 'ffmpeg',
+        executableSha256: null,
+        version: 'ffmpeg',
+        buildConfiguration: '',
+        requiredFilters: [],
+        libassVersion: 'unknown',
+        shaperVersion: 'unknown',
+      },
+    };
+    await expect(
+      preflightRenderPreparation(p, [{ op: 'addCaption' }], facts),
+    ).rejects.toMatchObject({ code: 'SETUP_REQUIRED' });
   });
 });

@@ -1,12 +1,43 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { validateJoyProjectV1 } from '@joy-media/project-schema';
 import { runCli } from '../cli.js';
 import { setTitleTextMeasurer } from '../services/prepared-title.js';
 import { preparedPlanId } from '../services/prepared-edit.js';
 import { findChromiumExecutable } from '@joy-media/html-scene-runtime';
+import { loadNotoSansArabicFaces } from '@joy-media/html-scene-runtime';
+import {
+  setRenderPreparationFactsProviderForTests,
+  type RenderPreparationFacts,
+} from '../services/render-preparation.js';
+
+const usableFacts: RenderPreparationFacts = {
+  libassProbe: {
+    usable: true,
+    executablePath: 'ffmpeg',
+    canonicalFace: 'Noto Sans Arabic Arabic 400',
+    log: '',
+  },
+  libassAvailable: true,
+  canonicalFaces: loadNotoSansArabicFaces(),
+  chromium: {
+    launchable: true,
+    executablePath: 'chromium',
+    executableSha256: 'sha256:chromium',
+    version: 'Chromium 140.0',
+  },
+  ffmpeg: {
+    executablePath: 'ffmpeg',
+    executableSha256: 'sha256:ffmpeg',
+    version: 'ffmpeg version 7',
+    buildConfiguration: '--enable-libass',
+    requiredFilters: ['ass', 'subtitles'],
+    libassVersion: '0.17',
+    shaperVersion: 'harfbuzz 10',
+  },
+};
 
 let dir = '';
 async function call(args: string[]): Promise<{ code: number; output: string }> {
@@ -80,29 +111,40 @@ async function apply(path: string, plan: string, revision: number, key: string) 
 }
 afterEach(() => {
   setTitleTextMeasurer(undefined);
+  setRenderPreparationFactsProviderForTests(undefined);
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
+beforeEach(() => setRenderPreparationFactsProviderForTests(async () => usableFacts));
 
 describe('prepared title plan flow', () => {
   it.runIf(process.env.JOY_REQUIRE_CHROMIUM === '1' || findChromiumExecutable() !== undefined)(
     'prepares a title with the real Chromium measurer and writes frozen layout',
     async () => {
+      setRenderPreparationFactsProviderForTests(async () => usableFacts);
       const f = await fixture();
       const { result, output } = await prepare(f.path, [op()], 'real-plan.json');
       expect(result.code).toBe(0);
       const plan = JSON.parse(readFileSync(output, 'utf8'));
-      expect(plan.semanticsVersion).toBe(2);
+      expect(plan.semanticsVersion).toBe(3);
       expect(plan.operations[0].resolved.layout.fontSizePx).toBeGreaterThan(0);
       expect(plan.operations[0].resolved.layout.primaryLines).toEqual(['Sara']);
     },
   );
   it('prepares and applies frozen title data and replays without a second write', async () => {
-    setTitleTextMeasurer((text, size) => Array.from(text).length * size * 0.45);
+    let measurements = 0;
+    setRenderPreparationFactsProviderForTests(async () => usableFacts);
+    setTitleTextMeasurer((text, size) => {
+      measurements += 1;
+      return Array.from(text).length * size * 0.45;
+    });
     const f = await fixture();
     const { result, output } = await prepare(f.path, [op()]);
     expect(result.code).toBe(0);
     const plan = JSON.parse(readFileSync(output, 'utf8'));
-    expect(plan.semanticsVersion).toBe(2);
+    expect(plan.semanticsVersion).toBe(3);
+    expect(plan.renderPreparation.version).toBe('RenderPreparationV1');
+    expect(plan.renderPreparation.renderers.title).toBe('chromium-scene-surface');
+    const measured = measurements;
     const first = await apply(f.path, output, f.revision, 'title-key');
     expect(first.code).toBe(0);
     const savedBytes = readFileSync(f.path);
@@ -121,6 +163,7 @@ describe('prepared title plan flow', () => {
       durationUs: 4_000_000,
     });
     expect(saved.pluginData['joy.clipObjects']['clip-speaker']).toBe('object-speaker');
+    expect(saved.pluginData['joy.renderPreparation']).toEqual(plan.renderPreparation);
     expect(saved.universalTimeline.items).toContainEqual(
       expect.objectContaining({
         id: 'clip-speaker',
@@ -132,6 +175,48 @@ describe('prepared title plan flow', () => {
     setTitleTextMeasurer(undefined);
     expect((await apply(f.path, output, f.revision + 1, 'title-key')).code).toBe(0);
     expect(readFileSync(f.path)).toEqual(savedBytes);
+    expect(measurements).toBe(measured);
+  });
+
+  it('refuses a caption plan before writing when the canonical libass face is unusable', async () => {
+    setRenderPreparationFactsProviderForTests(undefined);
+    const f = await fixture();
+    const { result, output } = await prepare(f.path, [
+      { id: 'caption-preflight', op: 'addCaption' },
+    ]);
+    expect(result.code).not.toBe(0);
+    expect(JSON.parse(result.output)).toMatchObject({ code: 'SETUP_REQUIRED' });
+    expect(result.output).toContain('canonical-caption-face-unavailable');
+    expect(existsSync(output)).toBe(false);
+  });
+
+  it('detects changed inputs at render and refuses a missing frozen record', async () => {
+    const f = await fixture();
+    setTitleTextMeasurer((text, size) => Array.from(text).length * size * 0.45);
+    const prepared = await prepare(f.path, [op()]);
+    expect(prepared.result.code).toBe(0);
+    expect((await apply(f.path, prepared.output, f.revision, 'render-record')).code).toBe(0);
+    const renderArgs = [
+      'render',
+      '--project',
+      f.path,
+      '--preset',
+      'mp4',
+      '--out',
+      join(dir, 'render'),
+      '--json',
+    ];
+    const applied = JSON.parse(readFileSync(f.path, 'utf8'));
+    applied.project.title = 'Changed after preparation';
+    writeFileSync(f.path, JSON.stringify(applied));
+    const drift = await call(renderArgs);
+    expect(drift.output).toContain('RENDER_ENVIRONMENT_DRIFT');
+
+    delete applied.project.pluginData['joy.renderPreparation'];
+    applied.project.title = 'Title test';
+    writeFileSync(f.path, JSON.stringify(applied));
+    const missing = await call(renderArgs);
+    expect(missing.output).toContain('RENDER_PREPARATION_REQUIRED');
   });
 
   it('refuses a stale revision and does not trim a managed clip', async () => {
