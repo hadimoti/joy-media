@@ -541,7 +541,13 @@ describe('P0 desktop title handoff', () => {
         objectId: 'object-test-joy.p0.title-400',
         lines: { primary: 'Unsupported font', secondary: '' },
         direction: 'ltr',
-        font: { family: 'Unsupported font', weight: 400 },
+        // Keep this invalid-family fixture out of the supported compile-time family union.
+        font: {
+          family: 'Unsupported font' as unknown as Parameters<
+            typeof compileTitleInstance
+          >[0]['font']['family'],
+          weight: 400,
+        },
         fontSha256: '0'.repeat(64),
         placement: { xPx: 40, yPx: 40, maxWidthPx: 800, safeInsetPx: 20 },
         motion: { presetId: 'hold', inUs: 0, outUs: 0 },

@@ -18,6 +18,14 @@ import {
 
 export const RENDER_PREPARATION_KEY = 'joy.renderPreparation';
 export const RENDER_PREPARATION_VERSION = 'RenderPreparationV1';
+const SUPPORTED_POLICY_VERSIONS = {
+  renderer: '1',
+  adapter: '1',
+  compiler: '1',
+  coverage: '1',
+  layout: '1',
+  timingPolicy: 'rational-centisecond-v1',
+} as const;
 
 export interface RenderPreparationFacts {
   readonly libassProbe: CanonicalCaptionFaceProbe;
@@ -76,7 +84,6 @@ export interface RenderPreparationV1 {
     readonly checkedTextDigest: string;
     readonly checkedTextLength: number;
     readonly supportedControls: readonly ['newline', 'space', 'ZWNJ', 'ZWJ'];
-    readonly fallbackVerified: true;
   };
   readonly composition: {
     readonly width: number;
@@ -115,6 +122,58 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hashBytes(bytes: Uint8Array): string {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+}
+
+function preparationInputDigest(
+  project: unknown,
+  recordWithoutDigest: Omit<RenderPreparationV1, 'renderInputsDigest'>,
+): string {
+  return sha256Identity({
+    project: renderInputsDigest(project),
+    record: recordWithoutDigest,
+  });
+}
+
+function captionSourceDigest(
+  cues: RenderPreparationV1['captions']['cues'],
+  fontSizePx: number,
+  placement: RenderPreparationV1['captions']['placement'],
+  direction: RenderPreparationV1['captions']['direction'],
+): string {
+  return sha256Identity({
+    cues: cues.map(({ lines, startUs, endUs, direction: cueDirection }) => ({
+      lines,
+      startUs,
+      endUs,
+      direction: cueDirection,
+    })),
+    fontSizePx,
+    placement,
+    direction,
+    wrapping: 'measured-hard-breaks',
+  });
+}
+
+function titleWeights(project: unknown, title: boolean): Array<400 | 700> {
+  if (!title) return [];
+  const pluginData =
+    isRecord(project) && isRecord(project['pluginData']) ? project['pluginData'] : {};
+  const templates = isRecord(pluginData['joy.contentTemplates'])
+    ? pluginData['joy.contentTemplates']
+    : {};
+  const instances = isRecord(templates['instances']) ? Object.values(templates['instances']) : [];
+  const weights = new Set<400 | 700>();
+  for (const instance of instances) {
+    if (!isRecord(instance) || !isRecord(instance['font'])) continue;
+    const weight = instance['font']['weight'];
+    if (weight === 400 || weight === 700) weights.add(weight);
+  }
+  if (weights.size === 0)
+    throw new CommandFailure(
+      'RENDER_PREPARATION_INVALID',
+      'Title preparation requires a supported font weight in each frozen title instance.',
+    );
+  return [...weights];
 }
 
 function command(binary: string, args: string[]): string {
@@ -410,6 +469,7 @@ function selectedFaces(
   text: string,
   title: boolean,
   captions: boolean,
+  titleFaceWeights: readonly (400 | 700)[],
 ): NotoSansArabicFace[] {
   const subsetText = new Map<'arabic' | 'latin', string>();
   for (const character of text) {
@@ -418,7 +478,7 @@ function selectedFaces(
     subsetText.set(subset, `${subsetText.get(subset) ?? ''}${character}`);
   }
   const weights = [
-    ...new Set([...(captions ? [400 as const] : []), ...(title ? [700 as const] : [])]),
+    ...new Set([...(captions ? [400 as const] : []), ...(title ? titleFaceWeights : [])]),
   ];
   const selected: NotoSansArabicFace[] = [];
   for (const [subset, checkedText] of subsetText) {
@@ -499,13 +559,17 @@ export function freezeRenderPreparation(
     fontSizePx,
   );
   const text = textOf(project as unknown as Record<string, unknown>, cues);
-  const faces = selectedFaces(facts.canonicalFaces, text, title, captions);
+  const faces = selectedFaces(
+    facts.canonicalFaces,
+    text,
+    title,
+    captions,
+    titleWeights(project, title),
+  );
   const composition = compositionFacts(project as unknown as Record<string, unknown>);
   const { height } = composition;
   const captionsRecord = {
-    sourceDigest: sha256Identity(
-      cues.map(({ lines, startUs, endUs, direction }) => ({ lines, startUs, endUs, direction })),
-    ),
+    sourceDigest: '',
     cues,
     fontSizePx,
     placement: { alignment: 'bottom-center' as const, marginBottomPx: Math.round(height * 0.15) },
@@ -517,6 +581,12 @@ export function freezeRenderPreparation(
     wrapping: 'measured-hard-breaks' as const,
     assDigest: null as string | null,
   };
+  captionsRecord.sourceDigest = captionSourceDigest(
+    cues,
+    captionsRecord.fontSizePx,
+    captionsRecord.placement,
+    captionsRecord.direction,
+  );
   const ass = captions ? captionAssDocument(composition, captionsRecord) : null;
   (captionsRecord as { assDigest: string | null }).assDigest =
     ass === null ? null : hashBytes(Buffer.from(ass));
@@ -524,19 +594,24 @@ export function freezeRenderPreparation(
     ...project,
     pluginData: { ...project.pluginData, [RENDER_PREPARATION_KEY]: undefined },
   };
-  const record: RenderPreparationV1 = {
+  if (
+    captions &&
+    [facts.ffmpeg.libassVersion, facts.ffmpeg.shaperVersion].some(
+      (version) => typeof version !== 'string' || !version.trim() || version === 'unavailable',
+    )
+  )
+    throw new CommandFailure(
+      'SETUP_REQUIRED',
+      'Caption preparation requires available libass and shaper version facts.',
+    );
+  const recordWithoutDigest: Omit<RenderPreparationV1, 'renderInputsDigest'> = {
     version: RENDER_PREPARATION_VERSION,
     renderers: {
       title: title ? 'chromium-scene-surface' : 'none',
       caption: captions ? 'ass-basic' : 'none',
     },
     versions: {
-      renderer: '1',
-      adapter: '1',
-      compiler: '1',
-      coverage: '1',
-      layout: '1',
-      timingPolicy: 'rational-centisecond-v1',
+      ...SUPPORTED_POLICY_VERSIONS,
     },
     ffmpeg: {
       ...facts.ffmpeg,
@@ -561,13 +636,14 @@ export function freezeRenderPreparation(
       checkedTextDigest: hashBytes(Buffer.from(text)),
       checkedTextLength: text.length,
       supportedControls: ['newline', 'space', 'ZWNJ', 'ZWJ'],
-      fallbackVerified: true,
     },
     composition,
     captions: captionsRecord,
-    renderInputsDigest: renderInputsDigest(normalizedProject),
   };
-  return record;
+  return {
+    ...recordWithoutDigest,
+    renderInputsDigest: preparationInputDigest(normalizedProject, recordWithoutDigest),
+  };
 }
 
 export function readRenderPreparation(project: unknown): RenderPreparationV1 {
@@ -609,6 +685,19 @@ export async function validateRenderPreparation(
   const captions = projectHasCaptions(project);
   if (!title && !captions) return undefined;
   const record = readRenderPreparation(project);
+  for (const [key, supported] of Object.entries(SUPPORTED_POLICY_VERSIONS)) {
+    const value = record.versions[key as keyof typeof SUPPORTED_POLICY_VERSIONS];
+    if (typeof value !== 'string' || !value.trim())
+      throw new CommandFailure(
+        'RENDER_PREPARATION_INVALID',
+        `Frozen ${key} policy version is malformed.`,
+      );
+    if (value !== supported)
+      throw new CommandFailure(
+        'RENDER_ENVIRONMENT_DRIFT',
+        `Frozen ${key} policy version is unsupported. Re-prepare the project.`,
+      );
+  }
   if (
     record.renderers.title !== (title ? 'chromium-scene-surface' : 'none') ||
     record.renderers.caption !== (captions ? 'ass-basic' : 'none')
@@ -618,22 +707,53 @@ export async function validateRenderPreparation(
       'Frozen renderer choices do not match the project.',
     );
   const current = facts ?? (await readRenderPreparationFacts({ title, captions }));
-  const sourceCues = captionCues(project as unknown as Record<string, unknown>);
+  if (
+    captions &&
+    [record.ffmpeg.libassVersion, record.ffmpeg.shaperVersion].some(
+      (version) => typeof version !== 'string' || !version.trim() || version === 'unavailable',
+    )
+  )
+    throw new CommandFailure(
+      'RENDER_PREPARATION_INVALID',
+      'Caption preparation record is missing an available libass or shaper version.',
+    );
+  const sourceFontSize = Math.round(
+    Number(root(project as unknown as Record<string, unknown>)['height'] ?? 1080) / 18,
+  );
+  const sourceCues = captionCues(
+    project as unknown as Record<string, unknown>,
+    current.measureText,
+    sourceFontSize,
+  );
   const text = textOf(project as unknown as Record<string, unknown>, sourceCues);
   const composition = compositionFacts(project as unknown as Record<string, unknown>);
-  const sourceDigest = sha256Identity(
-    sourceCues.map(({ lines, startUs, endUs, direction }) => ({
-      lines,
-      startUs,
-      endUs,
-      direction,
-    })),
+  const expectedPlacement = {
+    alignment: 'bottom-center' as const,
+    marginBottomPx: Math.round(composition.height * 0.15),
+  };
+  const expectedDirection = (
+    sourceCues.some((cue) => cue.direction === 'rtl')
+      ? 'rtl'
+      : sourceCues.some((cue) => cue.direction === 'ltr')
+        ? 'ltr'
+        : 'auto'
+  ) as 'ltr' | 'rtl' | 'auto';
+  const sourceDigest = captionSourceDigest(
+    sourceCues,
+    sourceFontSize,
+    expectedPlacement,
+    expectedDirection,
   );
   const expectedCaptions = record.captions;
   const ass = captions ? captionAssDocument(composition, expectedCaptions) : null;
   if (
     canonicalJson(record.composition) !== canonicalJson(composition) ||
     record.captions.sourceDigest !== sourceDigest ||
+    canonicalJson(record.captions.cues) !== canonicalJson(sourceCues) ||
+    record.captions.fontSizePx !== sourceFontSize ||
+    canonicalJson(record.captions.placement) !== canonicalJson(expectedPlacement) ||
+    record.captions.direction !== expectedDirection ||
+    record.captions.wrapping !== 'measured-hard-breaks' ||
     record.coverage.checkedTextDigest !== hashBytes(Buffer.from(text)) ||
     record.captions.assDigest !== (ass === null ? null : hashBytes(Buffer.from(ass)))
   )
@@ -641,12 +761,15 @@ export async function validateRenderPreparation(
       'RENDER_PREPARATION_INVALID',
       'Frozen composition, caption, or coverage facts are inconsistent with the project.',
     );
-  if (renderInputsDigest(project) !== record.renderInputsDigest)
-    throw new CommandFailure(
-      'RENDER_ENVIRONMENT_DRIFT',
-      'Render inputs changed after preparation. Re-prepare the project.',
-    );
-  const currentFaces = selectedFaces(current.canonicalFaces, text, title, captions);
+  const { renderInputsDigest: ignoredDigest, ...recordWithoutDigest } = record;
+  void ignoredDigest;
+  const currentFaces = selectedFaces(
+    current.canonicalFaces,
+    text,
+    title,
+    captions,
+    titleWeights(project, title),
+  );
   const fontFacts = currentFaces.map((face) => ({
     family: face.family,
     weight: face.weight,
@@ -655,10 +778,27 @@ export async function validateRenderPreparation(
     sha256: face.sha256,
   }));
   if (
+    canonicalJson(fontFacts.map(({ subset, weight }) => ({ subset, weight }))) !==
+    canonicalJson(record.fonts.map(({ subset, weight }) => ({ subset, weight })))
+  )
+    throw new CommandFailure(
+      'RENDER_PREPARATION_INVALID',
+      'Frozen selected font faces do not match the weights in the title instances.',
+    );
+  if (
     canonicalJson(fontFacts) !== canonicalJson(record.fonts) ||
     !current.libassProbe ||
     current.ffmpeg.executableSha256 !== record.ffmpeg.executableSha256 ||
     current.ffmpeg.version !== record.ffmpeg.version ||
+    current.ffmpeg.buildConfiguration !== record.ffmpeg.buildConfiguration ||
+    (captions &&
+      (current.ffmpeg.libassVersion !== record.ffmpeg.libassVersion ||
+        current.ffmpeg.shaperVersion !== record.ffmpeg.shaperVersion)) ||
+    (title &&
+      (record.chromium.locale !== 'en-US' ||
+        record.chromium.deviceScaleFactor !== 1 ||
+        canonicalJson(record.chromium.captureSettings) !==
+          canonicalJson({ transparent: true, animation: 'frozen' }))) ||
     (title &&
       (!current.chromium.launchable ||
         current.chromium.version !== record.chromium.version ||
@@ -672,6 +812,11 @@ export async function validateRenderPreparation(
     throw new CommandFailure(
       'RENDER_ENVIRONMENT_DRIFT',
       'Render environment or canonical font bytes changed after preparation. Re-prepare the project.',
+    );
+  if (preparationInputDigest(project, recordWithoutDigest) !== record.renderInputsDigest)
+    throw new CommandFailure(
+      'RENDER_ENVIRONMENT_DRIFT',
+      'Render inputs changed after preparation. Re-prepare the project.',
     );
   return record;
 }
