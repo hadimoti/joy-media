@@ -118,24 +118,12 @@ function findAssetIdCollision(
 ): string | undefined {
   if (typeof value === 'string') {
     const isTimelineClipAssetReference =
-      /^documents\.(?:visual|timeline\.project)\.compositions\.[^.]+\.tracks\[\d+\]\.clips\[\d+\]\.assetId$/u.test(
+      /^documents\.(?:visual|timeline)\.compositions\.[^.]+\.tracks\[\d+\]\.clips\[\d+\]\.assetId$/u.test(
         path,
       );
     const isUniversalTimelineAssetReference =
-      /^documents\.(?:visual|timeline)\.universalTimeline\.items\[\d+\]\.source\.id$/u.test(path);
-    const isVisualClipBindingAssetReference =
-      /^documents\.(?:visual|timeline)\.clipBindings\[\d+\]\.clip\.assetId$/u.test(path);
-    const isTimelineSourceBindingAssetReference =
-      /^documents\.timeline\.clipBindings\[\d+\]\.(?:clip\.assetId|sourceBinding\.source\.id)$/u.test(
-        path,
-      );
-    if (
-      assetIds.has(value) &&
-      !isTimelineClipAssetReference &&
-      !isUniversalTimelineAssetReference &&
-      !isVisualClipBindingAssetReference &&
-      !isTimelineSourceBindingAssetReference
-    )
+      /^documents\.visual\.universalTimeline\.items\[\d+\]\.source\.id$/u.test(path);
+    if (assetIds.has(value) && !isTimelineClipAssetReference && !isUniversalTimelineAssetReference)
       return path;
     return undefined;
   }
@@ -166,7 +154,7 @@ export function buildDesktopProjectEnvelope(
   projectedDocuments = projectV3ToDesktopDocuments(project),
   readMedia: (path: string, asset: JoyProjectV3['assets'][string]) => Buffer = readBoundedMedia,
 ) {
-  const documents = projectedDocuments;
+  const documents = { ...projectedDocuments, timeline: projectedDocuments.timeline.project };
   const collision = findAssetIdCollision(
     documents,
     new Set(Object.keys(project.assets)),
@@ -215,7 +203,7 @@ export function buildDesktopProjectEnvelope(
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
     },
-    documents: { ...documents, timeline: documents.timeline.project },
+    documents,
     media,
   };
 }

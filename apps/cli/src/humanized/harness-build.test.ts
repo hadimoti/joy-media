@@ -1,7 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { isCliBuildStale } from './harness.js';
+import { join } from 'node:path';
+import { cliBuildInputs, isCliBuildStale } from './harness.js';
 
 describe('CLI build staleness', () => {
+  it('watches every CLI workspace dependency source and the bundler script', () => {
+    const inputs = cliBuildInputs('cli-root', 'repo-root');
+
+    expect(inputs).toContain(join('repo-root', 'packages', 'html-scene-runtime', 'src'));
+    expect(inputs).toContain(join('cli-root', 'scripts', 'bundle.mjs'));
+    expect(inputs).toEqual(
+      expect.arrayContaining([
+        join('repo-root', 'packages', 'agent-tools', 'src'),
+        join('repo-root', 'packages', 'commands', 'src'),
+        join('repo-root', 'packages', 'joy-agent-engine', 'src'),
+        join('repo-root', 'packages', 'motion-core', 'src'),
+        join('repo-root', 'packages', 'project-persistence', 'src'),
+        join('repo-root', 'packages', 'project-schema', 'src'),
+      ]),
+    );
+  });
+
   it('is stale when the completion marker is missing', () => {
     expect(
       isCliBuildStale({

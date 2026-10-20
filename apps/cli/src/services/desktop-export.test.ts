@@ -36,6 +36,48 @@ function fixture(bytes = Buffer.from('original media')) {
 }
 
 describe('desktop project export envelope', () => {
+  it('exports an audio clip that references its embedded asset', () => {
+    const { project, sources, id } = fixture();
+    const audioProject = structuredClone(project) as unknown as {
+      assets: Record<string, { kind: string; descriptor: { mimeType: string } }>;
+      rootCompositionId: string;
+      compositions: Record<
+        string,
+        { tracks: Array<{ id: string; kind: string; clips: unknown[]; [key: string]: unknown }> }
+      >;
+    };
+    audioProject.assets[id]!.kind = 'audio';
+    audioProject.assets[id]!.descriptor.mimeType = 'audio/wav';
+    const root = audioProject.compositions[audioProject.rootCompositionId]!;
+    root.tracks.push({
+      ...structuredClone(root.tracks[0]!),
+      id: 'audio-track',
+      kind: 'audio',
+      family: 'audio',
+      clips: [
+        {
+          id: 'audio-clip',
+          kind: 'audio',
+          assetId: id,
+          startUs: 0,
+          durationUs: 1_000_000,
+          sourceInUs: 0,
+        },
+      ],
+    });
+
+    const envelope = buildDesktopProjectEnvelope(audioProject as never, sources);
+
+    const visual = envelope.documents.visual as unknown as {
+      compositions: Record<string, { tracks: Array<{ id: string; clips: unknown[] }> }>;
+    };
+    expect(
+      visual.compositions[audioProject.rootCompositionId]!.tracks.find(
+        (candidate) => candidate.id === 'audio-track',
+      )!.clips,
+    ).toContainEqual(expect.objectContaining({ id: 'audio-clip', assetId: id }));
+  });
+
   it('projects the v3 project and embeds verified original media', () => {
     const { project, sources, id, bytes } = fixture();
     const envelope = buildDesktopProjectEnvelope(

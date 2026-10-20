@@ -15,6 +15,7 @@ import {
   renderInputsDigest,
   validateRenderPreparation,
   projectHasTitles,
+  resolveExecutable,
   type RenderPreparationFacts,
 } from './render-preparation.js';
 import type { CliProjectDocument } from '../utils/project-loader.js';
@@ -73,6 +74,12 @@ const project = {
 } as unknown as CliProjectDocument;
 
 describe('RenderPreparationV1', () => {
+  it('does not return a bare executable name when PATH lookup finds nothing', async () => {
+    await expect(resolveExecutable('joy-media-missing-ffmpeg-test-binary')).rejects.toMatchObject({
+      code: 'SETUP_REQUIRED',
+    });
+  });
+
   it('validates with the frozen Chromium path when discovery would select another executable', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-render-chromium-pin-'));
     const executableA = join(directory, 'chrome-a.exe');

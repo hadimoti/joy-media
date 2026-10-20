@@ -271,7 +271,7 @@ describe('Chromium scene driver ownership', () => {
     const killed: number[] = [];
     const driver = createChromiumSceneDriver({
       executablePath: process.execPath,
-      timeoutMs: 20,
+      timeoutMs: 1,
       workerFactory: () => {
         fake = new FakeWorker((message) => {
           if (message.type !== 'capture') return;

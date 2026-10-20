@@ -129,6 +129,8 @@ export interface MediaProbeOptions {
   readonly timeoutMs?: number;
 }
 
+const PROBE_TERMINATION_GRACE_MS = 5_000;
+
 type MediaProbeSpawn = (
   binary: string,
   args: string[],
@@ -155,6 +157,7 @@ export async function probeMediaAsync(
   return new Promise((resolve, reject) => {
     let output = '';
     let closed = false;
+    let terminationTimer: ReturnType<typeof setTimeout> | undefined;
     let stopResult:
       | { readonly kind: 'resolve'; readonly value: null }
       | { readonly kind: 'reject'; readonly error: unknown }
@@ -163,6 +166,7 @@ export async function probeMediaAsync(
       if (closed) return;
       closed = true;
       clearTimeout(timer);
+      if (terminationTimer !== undefined) clearTimeout(terminationTimer);
       options.signal?.removeEventListener('abort', abort);
       if (stopResult?.kind === 'reject') {
         reject(stopResult.error);
@@ -204,6 +208,21 @@ export async function probeMediaAsync(
         mimeType: mimeTypeFor(path),
       });
     };
+    const armTerminationDeadline = (): void => {
+      if (terminationTimer !== undefined) clearTimeout(terminationTimer);
+      terminationTimer = setTimeout(() => {
+        if (closed) return;
+        closed = true;
+        clearTimeout(timer);
+        options.signal?.removeEventListener('abort', abort);
+        const detail = stopResult?.kind === 'reject' ? ` ${String(stopResult.error)}` : '';
+        reject(
+          new Error(
+            `Media probe failed to terminate within ${PROBE_TERMINATION_GRACE_MS}ms.${detail}`,
+          ),
+        );
+      }, PROBE_TERMINATION_GRACE_MS);
+    };
     const abort = (): void => {
       if (stopResult || closed) return;
       stopResult = {
@@ -223,6 +242,7 @@ export async function probeMediaAsync(
           error: new Error(`Media probe failed to terminate after cancellation: ${String(error)}`),
         };
       }
+      armTerminationDeadline();
     };
     const timer = setTimeout(() => {
       if (stopResult || closed) return;
@@ -239,6 +259,7 @@ export async function probeMediaAsync(
           error: new Error(`Media probe failed to terminate after timeout: ${String(error)}`),
         };
       }
+      armTerminationDeadline();
     }, timeoutMs);
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
@@ -261,6 +282,7 @@ export async function probeMediaAsync(
             ),
           };
         }
+        armTerminationDeadline();
       }
     });
     child.stderr?.on('data', (chunk: string) => {
@@ -282,6 +304,7 @@ export async function probeMediaAsync(
             ),
           };
         }
+        armTerminationDeadline();
       }
     });
     child.once('error', (error) => {

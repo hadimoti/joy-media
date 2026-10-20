@@ -74,24 +74,38 @@ export function isCliBuildStale(state: {
   return state.newestSourceMtimeMs > state.markerMtimeMs + 1;
 }
 
+export function cliBuildInputs(cliRoot = CLI_ROOT, repoRoot = REPO_ROOT): readonly string[] {
+  return [
+    join(cliRoot, 'src'),
+    ...[
+      'agent-tools',
+      'commands',
+      'html-scene-runtime',
+      'joy-agent-engine',
+      'motion-core',
+      'project-persistence',
+      'project-schema',
+    ].map((name) => join(repoRoot, 'packages', name, 'src')),
+    join(cliRoot, 'scripts', 'bundle.mjs'),
+  ];
+}
+
 function buildIsStale(): boolean {
   const skip = new Set(['node_modules', 'dist', '.git']);
-  const watched = [
-    join(CLI_ROOT, 'src'),
-    join(REPO_ROOT, 'packages', 'joy-agent-engine', 'src'),
-    join(REPO_ROOT, 'packages', 'project-schema', 'src'),
-    join(REPO_ROOT, 'packages', 'project-persistence', 'src'),
-    join(REPO_ROOT, 'packages', 'commands', 'src'),
-    join(REPO_ROOT, 'packages', 'agent-tools', 'src'),
-    join(REPO_ROOT, 'packages', 'motion-core', 'src'),
-  ];
+  const watched = cliBuildInputs();
   // Test files do not affect the shipped binary.
   const sourceSkip = new Set([...skip, 'humanized']);
   return isCliBuildStale({
     markerMtimeMs: existsSync(BUILD_COMPLETE) ? statSync(BUILD_COMPLETE).mtimeMs : undefined,
     binMtimeMs: existsSync(DIST_BIN) ? statSync(DIST_BIN).mtimeMs : undefined,
     bundleMtimeMs: existsSync(BUNDLE_ENTRY) ? statSync(BUNDLE_ENTRY).mtimeMs : undefined,
-    newestSourceMtimeMs: Math.max(...watched.map((dir) => newestMtime(dir, sourceSkip))),
+    newestSourceMtimeMs: Math.max(
+      ...watched.map((input) =>
+        existsSync(input) && statSync(input).isFile()
+          ? statSync(input).mtimeMs
+          : newestMtime(input, sourceSkip),
+      ),
+    ),
   });
 }
 

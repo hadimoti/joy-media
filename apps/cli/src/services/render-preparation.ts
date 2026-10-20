@@ -523,21 +523,35 @@ async function command(binary: string, args: string[], signal?: AbortSignal): Pr
   }
 }
 
-async function resolveExecutable(binary: string, signal?: AbortSignal): Promise<string> {
+export async function resolveExecutable(binary: string, signal?: AbortSignal): Promise<string> {
   signal?.throwIfAborted();
+  if (isAbsolute(binary)) {
+    if (existsSync(binary)) return binary;
+    throw new CommandFailure(
+      'SETUP_REQUIRED',
+      `SETUP_REQUIRED: FFmpeg executable was not found at its configured absolute path ${JSON.stringify(binary)}. Install FFmpeg or set JOY_MEDIA_FFMPEG to a valid path.`,
+    );
+  }
   const child = spawn(process.platform === 'win32' ? 'where.exe' : 'which', [binary], {
     windowsHide: true,
     ...(signal === undefined ? {} : { signal }),
   });
   let output = '';
-  return new Promise((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     let settled = false;
-    const finish = (path: string): void => {
+    const finish = (path: string | undefined): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', abort);
-      resolve(path);
+      if (path !== undefined && isAbsolute(path)) resolve(path);
+      else
+        reject(
+          new CommandFailure(
+            'SETUP_REQUIRED',
+            `SETUP_REQUIRED: FFmpeg executable "${binary}" was not found as an absolute path. Install FFmpeg or set JOY_MEDIA_FFMPEG to its absolute path.`,
+          ),
+        );
     };
     const abort = (): void => {
       try {
@@ -556,7 +570,7 @@ async function resolveExecutable(binary: string, signal?: AbortSignal): Promise<
       } catch {
         // A timed-out lookup may already have exited.
       }
-      finish(binary);
+      finish(undefined);
     }, 5_000);
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => (output += chunk));
@@ -564,11 +578,11 @@ async function resolveExecutable(binary: string, signal?: AbortSignal): Promise<
       if (signal?.aborted) abort();
       else {
         void error;
-        finish(binary);
+        finish(undefined);
       }
     });
     child.once('close', (status) =>
-      finish(status === 0 ? output.split(/\r?\n/, 1)[0]?.trim() || binary : binary),
+      finish(status === 0 ? output.split(/\r?\n/, 1)[0]?.trim() : undefined),
     );
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();

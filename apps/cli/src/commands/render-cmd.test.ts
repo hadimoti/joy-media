@@ -20,7 +20,7 @@ import {
   publishPreviewAtomically,
   safeFileStem,
 } from './render-cmd.js';
-import { createDefaultProject, saveProject } from '../utils/project-loader.js';
+import { CommandFailure, createDefaultProject, saveProject } from '../utils/project-loader.js';
 import { encodeRgbaPng } from '../services/title-frames.js';
 import {
   buildFfmpegArgs,
@@ -127,6 +127,94 @@ afterAll(() => {
 });
 
 describe('joy render (headless batch render command)', () => {
+  it('spawns the exact FFmpeg path whose hash was validated', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-render-pinned-ffmpeg-'));
+    const executablePath = join(dir, 'ffmpeg');
+    const bytes = Buffer.from('validated executable');
+    writeFileSync(executablePath, bytes);
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      pid: undefined,
+      kill: vi.fn(),
+    });
+    const spawn = vi.fn(() => child as never);
+    setEncodeSpawnForTests(spawn as never);
+    try {
+      const handle = startEncode([], 1_000_000, () => {}, [], undefined, {
+        path: executablePath,
+        sha256: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+      });
+      expect(spawn).toHaveBeenCalledWith(executablePath, [], expect.any(Object));
+      child.emit('close', 0, null);
+      await expect(handle.done).resolves.toEqual({ ok: true });
+    } finally {
+      setEncodeSpawnForTests(undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves FFmpeg environment drift through runHeadlessRender', async () => {
+    const directory = mkdtempSync(join(tempDir, 'render-ffmpeg-drift-map-'));
+    const mediaPath = join(directory, 'input.mp4');
+    writeFileSync(mediaPath, 'placeholder source');
+    const project = createDefaultProject('FFmpeg drift', { id: 'ffmpeg-drift-map' });
+    const root = project.compositions['root'] as unknown as { tracks: Array<{ clips: unknown[] }> };
+    root.tracks[0]!.clips.push({
+      id: 'drift-video',
+      kind: 'video',
+      assetId: mediaPath,
+      startUs: 0,
+      durationUs: 1_000_000,
+      sourceInUs: 0,
+    });
+    (project.assets as Record<string, unknown>)[mediaPath] = { id: mediaPath, kind: 'video' };
+    const capture = new StringWritable();
+    const restore = redirectStdout(capture);
+    setMediaProbeSpawnForTests(() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        exitCode: null as number | null,
+        kill: vi.fn(() => true),
+      });
+      setTimeout(() => {
+        child.stdout.end(
+          JSON.stringify({
+            streams: [{ codec_type: 'video', width: 320, height: 240, pix_fmt: 'yuv420p' }],
+            format: { format_name: 'mp4', duration: '1.0' },
+          }),
+        );
+        child.exitCode = 0;
+        child.emit('close', 0, null);
+      }, 0);
+      return child as never;
+    });
+    setEncodeSpawnForTests((() => {
+      throw new CommandFailure('RENDER_ENVIRONMENT_DRIFT', 'pinned FFmpeg changed');
+    }) as never);
+    try {
+      const result = await runHeadlessRender({
+        project,
+        preset: 'mp4',
+        outDir: directory,
+        concurrency: 1,
+        json: true,
+      });
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(capture.text().trim().split('\n').filter(Boolean).at(-1)!)).toMatchObject({
+        type: 'error',
+        code: 'RENDER_ENVIRONMENT_DRIFT',
+        message: 'pinned FFmpeg changed',
+      });
+    } finally {
+      restore();
+      setMediaProbeSpawnForTests(undefined);
+      setEncodeSpawnForTests(undefined);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('does not spawn FFmpeg when the pinned executable hash has drifted', () => {
     const dir = mkdtempSync(join(tmpdir(), 'joy-render-ffmpeg-pin-'));
     const executablePath = join(dir, 'ffmpeg');

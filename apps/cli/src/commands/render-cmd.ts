@@ -1674,6 +1674,8 @@ export async function runHeadlessRender(
               totalClips,
             );
           const message = errorMessage(error);
+          if (error instanceof CommandFailure && error.code === 'RENDER_ENVIRONMENT_DRIFT')
+            return failure('RENDER_ENVIRONMENT_DRIFT', error.message, totalFrames, totalClips);
           return failure(
             message.startsWith('RENDER_CAPTURE_TIMEOUT:')
               ? 'RENDER_CAPTURE_TIMEOUT'
