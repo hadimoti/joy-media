@@ -58,7 +58,7 @@ import {
   type JoyProjectV1,
   type TitleInstanceV1,
 } from '@joy-media/project-schema';
-import { ffmpegBinary, probeMedia } from '../utils/media-probe.js';
+import { ffmpegBinary, probeMediaAsync } from '../utils/media-probe.js';
 import {
   renderTitleFrames,
   sha256Hex,
@@ -69,7 +69,7 @@ import {
   buildFfmpegArgs,
   captionRenderMode,
   fileSize,
-  planMedia,
+  planMediaAsync,
   startEncode,
   type MediaPlanReady,
 } from './render-media.js';
@@ -496,6 +496,14 @@ export function planRender(project: unknown, presetSpec: RenderPresetSpec): Rend
       message: `Project "${projectId}": root composition "tracks" is not a list.`,
     };
   }
+  const normalizedRootItems = normalizeUniversalTimeline({
+    ...project,
+    schemaVersion: 1,
+    assets: isRecord(project['assets']) ? project['assets'] : {},
+    visualObjects: isRecord(project['visualObjects']) ? project['visualObjects'] : {},
+    captionDocuments: isRecord(project['captionDocuments']) ? project['captionDocuments'] : {},
+  } as unknown as JoyProjectV1).items.filter((item) => item.compositionId === rootId);
+  const hasTrackDeck = isRecord(project['timelineTrackDeck']);
 
   const frameRate = isRecord(root['frameRate']) ? root['frameRate'] : undefined;
   const num = finiteOrNull(frameRate?.['num']);
@@ -530,7 +538,14 @@ export function planRender(project: unknown, presetSpec: RenderPresetSpec): Rend
         message: `Project "${projectId}": track "${trackId}" has a "clips" value that is not a list.`,
       };
     }
-    if (rawTrack['enabled'] === false) {
+    const trackItems = normalizedRootItems.filter((item) => item.trackId === trackId);
+    const disabledByTimeline =
+      hasTrackDeck && trackItems.length > 0 && !trackItems.some((item) => item.trackEnabled);
+    if (
+      disabledByTimeline ||
+      (!hasTrackDeck && rawTrack['enabled'] === false) ||
+      (hasTrackDeck && trackItems.length === 0 && rawTrack['enabled'] === false)
+    ) {
       // Same rule the evaluator uses: a disabled track contributes nothing.
       if (rawClips.length > 0) {
         warnings.push(`Skipped disabled track "${trackId}" (${rawClips.length} clip(s)).`);
@@ -996,10 +1011,11 @@ export async function runHeadlessRender(
         'Title rendering supports compositions up to 60 seconds, 1920x1920 and 60 fps.',
       );
 
-    const mediaPlan = planMedia(
+    const mediaPlan = await planMediaAsync(
       withoutTitleClips(project, titleSources),
       { manifestOnly: input.manifestOnly === true, mediaDir: input.mediaDir },
       presetSpec,
+      cancellation.signal,
     );
     if (mediaPlan.mode === 'error') return failure(mediaPlan.code, mediaPlan.message);
     const realMediaBase = mediaPlan.mode === 'media' ? mediaPlan : null;
@@ -1660,7 +1676,7 @@ export async function runHeadlessRender(
             totalClips,
           );
         }
-        const encodedInfo = probeMedia(partialPath);
+        const encodedInfo = await probeMediaAsync(partialPath, { signal: cancellation.signal });
         const [fpsNumerator, fpsDenominator] = realMedia.fps.split('/').map(Number);
         const frameDurationUs =
           fpsNumerator && fpsDenominator

@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { canonicalJson, sha256Identity } from './prepared-edit.js';
@@ -26,6 +26,7 @@ import {
   captionEngineVersionsFromAssProbe,
   type CanonicalCaptionFaceProbe,
 } from '../commands/render-features.js';
+import { normalizeUniversalTimeline, type JoyProjectV1 } from '@joy-media/project-schema';
 
 export const RENDER_PREPARATION_KEY = 'joy.renderPreparation';
 export const RENDER_PREPARATION_VERSION = 'RenderPreparationV1';
@@ -203,6 +204,231 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const allowed = new Set(keys);
+  return (
+    Object.keys(value).every((key) => allowed.has(key)) &&
+    keys.filter((key) => Object.hasOwn(value, key)).length === Object.keys(value).length
+  );
+}
+
+function isDigest(value: unknown): value is string {
+  return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/u.test(value);
+}
+
+function isExecutableIdentity(value: unknown): value is string {
+  return typeof value === 'string' && /^sha256:.+$/u.test(value);
+}
+
+function isPreparationRecord(value: unknown): value is RenderPreparationV1 {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      'version',
+      'renderers',
+      'versions',
+      'ffmpeg',
+      'chromium',
+      'fonts',
+      'coverage',
+      'composition',
+      'captions',
+      'renderInputsDigest',
+    ]) ||
+    value['version'] !== RENDER_PREPARATION_VERSION ||
+    !isDigest(value['renderInputsDigest'])
+  )
+    return false;
+
+  const renderers = value['renderers'];
+  const versions = value['versions'];
+  const ffmpeg = value['ffmpeg'];
+  const chromium = value['chromium'];
+  const coverage = value['coverage'];
+  const composition = value['composition'];
+  const captions = value['captions'];
+  if (
+    !isRecord(renderers) ||
+    !hasOnlyKeys(renderers, ['title', 'caption']) ||
+    !['chromium-scene-surface', 'none'].includes(String(renderers['title'])) ||
+    !['ass-basic', 'none'].includes(String(renderers['caption'])) ||
+    !isRecord(versions) ||
+    !hasOnlyKeys(versions, Object.keys(SUPPORTED_POLICY_VERSIONS)) ||
+    !Object.keys(SUPPORTED_POLICY_VERSIONS).every((key) => typeof versions[key] === 'string') ||
+    !isRecord(ffmpeg) ||
+    !hasOnlyKeys(ffmpeg, [
+      'executablePath',
+      'executableSha256',
+      'version',
+      'buildConfiguration',
+      'requiredFilters',
+      'libassVersion',
+      'shaperVersion',
+      'versionSource',
+      'canonicalFaceProbe',
+    ]) ||
+    typeof ffmpeg['executablePath'] !== 'string' ||
+    ffmpeg['executablePath'].trim() === '' ||
+    !(ffmpeg['executableSha256'] === null || isExecutableIdentity(ffmpeg['executableSha256'])) ||
+    typeof ffmpeg['version'] !== 'string' ||
+    ffmpeg['version'].trim() === '' ||
+    typeof ffmpeg['buildConfiguration'] !== 'string' ||
+    !Array.isArray(ffmpeg['requiredFilters']) ||
+    !ffmpeg['requiredFilters'].every(
+      (filter) => typeof filter === 'string' && filter.trim() !== '',
+    ) ||
+    typeof ffmpeg['libassVersion'] !== 'string' ||
+    typeof ffmpeg['shaperVersion'] !== 'string' ||
+    ffmpeg['versionSource'] !== 'canonical-caption-face-ass-probe' ||
+    !isRecord(ffmpeg['canonicalFaceProbe']) ||
+    !hasOnlyKeys(ffmpeg['canonicalFaceProbe'], [
+      'usable',
+      'executablePath',
+      'canonicalFace',
+      'reason',
+      'log',
+      'libassVersion',
+      'shaperVersion',
+      'versionSource',
+    ]) ||
+    typeof ffmpeg['canonicalFaceProbe']['usable'] !== 'boolean' ||
+    typeof ffmpeg['canonicalFaceProbe']['executablePath'] !== 'string' ||
+    ffmpeg['canonicalFaceProbe']['executablePath'].trim() === '' ||
+    ffmpeg['canonicalFaceProbe']['canonicalFace'] !== 'Noto Sans Arabic Arabic 400' ||
+    (Object.hasOwn(ffmpeg['canonicalFaceProbe'], 'reason') &&
+      typeof ffmpeg['canonicalFaceProbe']['reason'] !== 'string') ||
+    typeof ffmpeg['canonicalFaceProbe']['log'] !== 'string' ||
+    (Object.hasOwn(ffmpeg['canonicalFaceProbe'], 'libassVersion') &&
+      typeof ffmpeg['canonicalFaceProbe']['libassVersion'] !== 'string') ||
+    (Object.hasOwn(ffmpeg['canonicalFaceProbe'], 'shaperVersion') &&
+      typeof ffmpeg['canonicalFaceProbe']['shaperVersion'] !== 'string') ||
+    (Object.hasOwn(ffmpeg['canonicalFaceProbe'], 'versionSource') &&
+      ffmpeg['canonicalFaceProbe']['versionSource'] !== 'canonical-caption-face-ass-probe') ||
+    !isRecord(chromium) ||
+    !hasOnlyKeys(chromium, [
+      'launchable',
+      'executablePath',
+      'executableSha256',
+      'version',
+      'reason',
+      'locale',
+      'deviceScaleFactor',
+      'captureSettings',
+    ]) ||
+    typeof chromium['launchable'] !== 'boolean' ||
+    !(chromium['executablePath'] === null || typeof chromium['executablePath'] === 'string') ||
+    !(
+      chromium['executableSha256'] === null || isExecutableIdentity(chromium['executableSha256'])
+    ) ||
+    !(chromium['version'] === null || typeof chromium['version'] === 'string') ||
+    (Object.hasOwn(chromium, 'reason') && typeof chromium['reason'] !== 'string') ||
+    chromium['locale'] !== 'en-US' ||
+    chromium['deviceScaleFactor'] !== 1 ||
+    (chromium['launchable'] &&
+      (typeof chromium['executablePath'] !== 'string' ||
+        chromium['executablePath'].trim() === '' ||
+        typeof chromium['version'] !== 'string' ||
+        chromium['version'].trim() === '')) ||
+    !isRecord(chromium['captureSettings']) ||
+    !hasOnlyKeys(chromium['captureSettings'], ['transparent', 'animation']) ||
+    chromium['captureSettings']['transparent'] !== true ||
+    chromium['captureSettings']['animation'] !== 'frozen' ||
+    !Array.isArray(value['fonts']) ||
+    !value['fonts'].every(
+      (font) =>
+        isRecord(font) &&
+        hasOnlyKeys(font, ['family', 'weight', 'subset', 'length', 'sha256']) &&
+        typeof font['family'] === 'string' &&
+        font['family'].length > 0 &&
+        (font['weight'] === 400 || font['weight'] === 700) &&
+        (font['subset'] === 'arabic' || font['subset'] === 'latin') &&
+        Number.isSafeInteger(font['length']) &&
+        Number(font['length']) > 0 &&
+        isDigest(font['sha256']),
+    ) ||
+    !isRecord(coverage) ||
+    !hasOnlyKeys(coverage, [
+      'result',
+      'checkedTextDigest',
+      'checkedTextLength',
+      'supportedControls',
+    ]) ||
+    coverage['result'] !== 'passed' ||
+    !isDigest(coverage['checkedTextDigest']) ||
+    !Number.isSafeInteger(coverage['checkedTextLength']) ||
+    Number(coverage['checkedTextLength']) < 0 ||
+    !Array.isArray(coverage['supportedControls']) ||
+    canonicalJson(coverage['supportedControls']) !==
+      canonicalJson(['newline', 'space', 'ZWNJ', 'ZWJ']) ||
+    !isRecord(composition) ||
+    !hasOnlyKeys(composition, ['width', 'height', 'fps']) ||
+    !Number.isSafeInteger(composition['width']) ||
+    Number(composition['width']) <= 0 ||
+    !Number.isSafeInteger(composition['height']) ||
+    Number(composition['height']) <= 0 ||
+    !isRecord(composition['fps']) ||
+    !hasOnlyKeys(composition['fps'], ['num', 'den']) ||
+    !Number.isSafeInteger(composition['fps']['num']) ||
+    Number(composition['fps']['num']) <= 0 ||
+    !Number.isSafeInteger(composition['fps']['den']) ||
+    Number(composition['fps']['den']) <= 0 ||
+    !isRecord(captions) ||
+    !hasOnlyKeys(captions, [
+      'sourceDigest',
+      'cues',
+      'fontSizePx',
+      'placement',
+      'direction',
+      'wrapping',
+      'assDigest',
+    ]) ||
+    !isDigest(captions['sourceDigest']) ||
+    !Array.isArray(captions['cues']) ||
+    !Number.isSafeInteger(captions['fontSizePx']) ||
+    Number(captions['fontSizePx']) <= 0 ||
+    !isRecord(captions['placement']) ||
+    !hasOnlyKeys(captions['placement'], ['alignment', 'marginBottomPx']) ||
+    captions['placement']['alignment'] !== 'bottom-center' ||
+    !Number.isSafeInteger(captions['placement']['marginBottomPx']) ||
+    Number(captions['placement']['marginBottomPx']) < 0 ||
+    !['ltr', 'rtl', 'auto'].includes(String(captions['direction'])) ||
+    captions['wrapping'] !== 'measured-hard-breaks' ||
+    !(captions['assDigest'] === null || isDigest(captions['assDigest'])) ||
+    !captions['cues'].every(
+      (cue) =>
+        isRecord(cue) &&
+        hasOnlyKeys(cue, [
+          'lines',
+          'startUs',
+          'endUs',
+          'direction',
+          'measuredWidthsPx',
+          'maxWidthPx',
+        ]) &&
+        Array.isArray(cue['lines']) &&
+        cue['lines'].length > 0 &&
+        cue['lines'].every((line) => typeof line === 'string' && line.length > 0) &&
+        Number.isSafeInteger(cue['startUs']) &&
+        Number(cue['startUs']) >= 0 &&
+        Number.isSafeInteger(cue['endUs']) &&
+        Number(cue['endUs']) > Number(cue['startUs']) &&
+        ['ltr', 'rtl', 'auto'].includes(String(cue['direction'])) &&
+        Number.isFinite(cue['maxWidthPx']) &&
+        Number(cue['maxWidthPx']) > 0 &&
+        Array.isArray(cue['measuredWidthsPx']) &&
+        cue['measuredWidthsPx'].length === cue['lines'].length &&
+        cue['measuredWidthsPx'].every(
+          (width) =>
+            Number.isFinite(width) &&
+            Number(width) >= 0 &&
+            Number(width) <= Number(cue['maxWidthPx']),
+        ),
+    )
+  )
+    return false;
+  return true;
+}
+
 function hashBytes(bytes: Uint8Array): string {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 }
@@ -274,20 +500,56 @@ async function command(binary: string, args: string[], signal?: AbortSignal): Pr
   }
 }
 
-function resolveExecutable(binary: string): string {
-  try {
-    return (
-      spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', [binary], {
-        encoding: 'utf8',
-        timeout: 5000,
-        windowsHide: true,
-      })
-        .stdout.split(/\r?\n/, 1)[0]
-        ?.trim() || binary
+async function resolveExecutable(binary: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  const child = spawn(process.platform === 'win32' ? 'where.exe' : 'which', [binary], {
+    windowsHide: true,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  let output = '';
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (path: string): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      resolve(path);
+    };
+    const abort = (): void => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // The lookup may have exited concurrently.
+      }
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // A timed-out lookup may already have exited.
+      }
+      finish(binary);
+    }, 5_000);
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => (output += chunk));
+    child.once('error', (error) => {
+      if (signal?.aborted) abort();
+      else {
+        void error;
+        finish(binary);
+      }
+    });
+    child.once('close', (status) =>
+      finish(status === 0 ? output.split(/\r?\n/, 1)[0]?.trim() || binary : binary),
     );
-  } catch {
-    return binary;
-  }
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+  });
 }
 
 async function chromiumFacts(
@@ -374,7 +636,7 @@ export async function readRenderPreparationFacts(options: {
 }): Promise<RenderPreparationFacts> {
   options.signal?.throwIfAborted();
   if (factsProvider) return factsProvider(options);
-  const executablePath = resolveExecutable(ffmpegBinary());
+  const executablePath = await resolveExecutable(ffmpegBinary(), options.signal);
   const runBinary = executablePath;
   let ffmpegExecutableSha256: string;
   try {
@@ -548,17 +810,55 @@ function root(project: Record<string, unknown>): Record<string, unknown> {
   return isRecord(found) ? found : {};
 }
 
+function normalizedRootItems(project: Record<string, unknown>) {
+  return normalizeUniversalTimeline({
+    ...project,
+    schemaVersion: 1,
+    assets: isRecord(project['assets']) ? project['assets'] : {},
+    visualObjects: isRecord(project['visualObjects']) ? project['visualObjects'] : {},
+    captionDocuments: isRecord(project['captionDocuments']) ? project['captionDocuments'] : {},
+  } as unknown as JoyProjectV1).items.filter(
+    (item) => item.compositionId === project['rootCompositionId'],
+  );
+}
+
+function enabledCaptionClipIds(project: Record<string, unknown>): ReadonlySet<string> {
+  if (!isRecord(project['timelineTrackDeck'])) {
+    const composition = root(project);
+    return new Set(
+      (Array.isArray(composition['tracks']) ? composition['tracks'] : []).flatMap((track) =>
+        isRecord(track) && track['enabled'] !== false && Array.isArray(track['clips'])
+          ? track['clips'].flatMap((clip) =>
+              isRecord(clip) && typeof clip['id'] === 'string' ? [clip['id']] : [],
+            )
+          : [],
+      ),
+    );
+  }
+  return new Set(
+    normalizedRootItems(project)
+      .filter((item) => item.trackEnabled)
+      .map((item) => item.id),
+  );
+}
+
 export function projectHasCaptions(project: unknown): boolean {
   if (!isRecord(project)) return false;
   const composition = root(project);
+  const enabledClipIds = enabledCaptionClipIds(project);
   return (
     Array.isArray(composition['tracks']) &&
     composition['tracks'].some(
       (track) =>
         isRecord(track) &&
-        track['enabled'] !== false &&
         Array.isArray(track['clips']) &&
-        track['clips'].some((clip) => isRecord(clip) && clip['kind'] === 'caption'),
+        track['clips'].some(
+          (clip) =>
+            isRecord(clip) &&
+            clip['kind'] === 'caption' &&
+            typeof clip['id'] === 'string' &&
+            enabledClipIds.has(clip['id']),
+        ),
     )
   );
 }
@@ -566,10 +866,19 @@ export function projectHasCaptions(project: unknown): boolean {
 export function projectHasTitles(project: unknown): boolean {
   if (!isRecord(project) || !isRecord(project['pluginData'])) return false;
   const templates = project['pluginData']['joy.contentTemplates'];
-  return (
-    isRecord(templates) &&
-    isRecord(templates['instances']) &&
-    Object.keys(templates['instances']).length > 0
+  if (!isRecord(templates) || !isRecord(templates['instances'])) return false;
+  const enabledItems = new Set(
+    normalizedRootItems(project)
+      .filter((item) => item.trackEnabled && item.elementKind !== 'audio')
+      .map((item) => item.id),
+  );
+  return Object.values(templates['instances']).some(
+    (instance) =>
+      isRecord(instance) &&
+      (typeof instance['clipId'] !== 'string' ||
+        enabledItems.has(instance['clipId']) ||
+        (!isRecord(project['timelineTrackDeck']) &&
+          !normalizedRootItems(project).some((item) => item.id === instance['clipId']))),
   );
 }
 
@@ -580,6 +889,7 @@ function captionCues(
 ): RenderPreparationV1['captions']['cues'] {
   const composition = root(project);
   const docs = isRecord(project['captionDocuments']) ? project['captionDocuments'] : {};
+  const enabledClipIds = enabledCaptionClipIds(project);
   const cues: Array<{
     lines: string[];
     startUs: number;
@@ -589,9 +899,10 @@ function captionCues(
     maxWidthPx: number;
   }> = [];
   for (const track of Array.isArray(composition['tracks']) ? composition['tracks'] : []) {
-    if (!isRecord(track) || track['enabled'] === false || !Array.isArray(track['clips'])) continue;
+    if (!isRecord(track) || !Array.isArray(track['clips'])) continue;
     for (const clip of track['clips']) {
-      if (!isRecord(clip) || clip['kind'] !== 'caption') continue;
+      if (!isRecord(clip) || clip['kind'] !== 'caption' || !enabledClipIds.has(String(clip['id'])))
+        continue;
       const doc = docs[String(clip['captionDocumentId'])];
       if (!isRecord(doc))
         throw new CommandFailure(
@@ -853,13 +1164,7 @@ export function freezeRenderPreparation(
     fontSizePx,
   );
   const text = textOf(project as unknown as Record<string, unknown>, cues);
-  const faces = selectedFaces(
-    facts.canonicalFaces,
-    text,
-    title,
-    captions,
-    titleWeights(project, title),
-  );
+  selectedFaces(facts.canonicalFaces, text, title, captions, titleWeights(project, title));
   const composition = compositionFacts(project as unknown as Record<string, unknown>);
   const { height } = composition;
   const captionsRecord = {
@@ -919,7 +1224,7 @@ export function freezeRenderPreparation(
       deviceScaleFactor: 1,
       captureSettings: { transparent: true, animation: 'frozen' },
     },
-    fonts: faces.map((face) => ({
+    fonts: facts.canonicalFaces.map((face) => ({
       family: face.family,
       weight: face.weight,
       subset: face.subset,
@@ -952,24 +1257,12 @@ export function readRenderPreparation(project: unknown): RenderPreparationV1 {
       'Title or caption rendering requires a frozen render preparation record.',
     );
   const record = project['pluginData'][RENDER_PREPARATION_KEY];
-  if (
-    !isRecord(record) ||
-    record['version'] !== RENDER_PREPARATION_VERSION ||
-    !isRecord(record['renderers']) ||
-    !isRecord(record['versions']) ||
-    !isRecord(record['ffmpeg']) ||
-    !isRecord(record['chromium']) ||
-    !Array.isArray(record['fonts']) ||
-    !isRecord(record['coverage']) ||
-    !isRecord(record['composition']) ||
-    !isRecord(record['captions']) ||
-    typeof record['renderInputsDigest'] !== 'string'
-  )
+  if (!isPreparationRecord(record))
     throw new CommandFailure(
       'RENDER_PREPARATION_INVALID',
       'Frozen render preparation record is malformed.',
     );
-  return record as unknown as RenderPreparationV1;
+  return record;
 }
 
 export async function validateRenderPreparation(
@@ -1039,6 +1332,13 @@ export async function validateRenderPreparation(
     throw new CommandFailure(
       'RENDER_PREPARATION_INVALID',
       'Caption preparation record is missing an available libass or shaper version.',
+    );
+  const recordedProbe = { ...record.ffmpeg.canonicalFaceProbe, log: undefined };
+  const currentProbe = { ...current.libassProbe, log: undefined };
+  if (canonicalJson(recordedProbe) !== canonicalJson(currentProbe))
+    throw new CommandFailure(
+      'RENDER_ENVIRONMENT_DRIFT',
+      'Canonical caption face probe facts changed after preparation.',
     );
   const sourceFontSize = Math.round(
     Number(root(project as unknown as Record<string, unknown>)['height'] ?? 1080) / 18,
@@ -1110,6 +1410,7 @@ export async function validateRenderPreparation(
     record.captions.direction !== expectedDirection ||
     record.captions.wrapping !== 'measured-hard-breaks' ||
     record.coverage.checkedTextDigest !== hashBytes(Buffer.from(text)) ||
+    record.coverage.checkedTextLength !== text.length ||
     record.captions.assDigest !== (ass === null ? null : hashBytes(Buffer.from(ass)))
   )
     throw new CommandFailure(
@@ -1125,24 +1426,46 @@ export async function validateRenderPreparation(
     captions,
     titleWeights(project, title),
   );
-  const fontFacts = currentFaces.map((face) => ({
+  const fontInventory = current.canonicalFaces.map((face) => ({
     family: face.family,
     weight: face.weight,
     subset: face.subset,
     length: face.bytes.byteLength,
     sha256: face.sha256,
   }));
+  const inventoryKeys = fontInventory.map(
+    ({ family, weight, subset }) => `${family}:${weight}:${subset}`,
+  );
+  const recordedKeys = record.fonts.map(
+    ({ family, weight, subset }) => `${family}:${weight}:${subset}`,
+  );
   if (
-    canonicalJson(fontFacts.map(({ subset, weight }) => ({ subset, weight }))) !==
-    canonicalJson(record.fonts.map(({ subset, weight }) => ({ subset, weight })))
+    new Set(recordedKeys).size !== recordedKeys.length ||
+    canonicalJson([...recordedKeys].sort()) !== canonicalJson([...inventoryKeys].sort())
   )
     throw new CommandFailure(
       'RENDER_PREPARATION_INVALID',
-      'Frozen selected font faces do not match the weights in the title instances.',
+      'Frozen font inventory does not contain the complete canonical face set.',
+    );
+  if (
+    canonicalJson(fontInventory) !== canonicalJson(record.fonts) ||
+    currentFaces.some(
+      (face) =>
+        !record.fonts.some(
+          (recorded) =>
+            recorded.family === face.family &&
+            recorded.weight === face.weight &&
+            recorded.subset === face.subset,
+        ),
+    )
+  )
+    throw new CommandFailure(
+      'RENDER_ENVIRONMENT_DRIFT',
+      'Canonical font inventory changed after preparation.',
     );
   const chromiumFactsChanged =
-    title &&
-    (!current.chromium.launchable ||
+    (title || captions) &&
+    (current.chromium.launchable !== record.chromium.launchable ||
       current.chromium.executablePath !== record.chromium.executablePath ||
       current.chromium.version !== record.chromium.version ||
       current.chromium.executableSha256 !== record.chromium.executableSha256);
@@ -1152,8 +1475,8 @@ export async function validateRenderPreparation(
       `Frozen Chromium changed after preparation (path ${JSON.stringify(record.chromium.executablePath)} / ${JSON.stringify(current.chromium.executablePath)}, version ${JSON.stringify(record.chromium.version)} / ${JSON.stringify(current.chromium.version)}, sha256 ${JSON.stringify(record.chromium.executableSha256)} / ${JSON.stringify(current.chromium.executableSha256)}). Re-prepare the project.`,
     );
   if (
-    canonicalJson(fontFacts) !== canonicalJson(record.fonts) ||
     !current.libassProbe ||
+    current.ffmpeg.executablePath !== record.ffmpeg.executablePath ||
     current.ffmpeg.executableSha256 !== record.ffmpeg.executableSha256 ||
     current.ffmpeg.version !== record.ffmpeg.version ||
     (current.ffmpeg.executableSha256 === null &&
@@ -1175,7 +1498,7 @@ export async function validateRenderPreparation(
   )
     throw new CommandFailure(
       'RENDER_ENVIRONMENT_DRIFT',
-      `Render environment or canonical font bytes changed after preparation (fontBytesMatch=${canonicalJson(fontFacts) === canonicalJson(record.fonts)}, ffmpegShaMatch=${current.ffmpeg.executableSha256 === record.ffmpeg.executableSha256}, ffmpegVersionMatch=${current.ffmpeg.version === record.ffmpeg.version}, ffmpegBuildMatch=${(current.ffmpeg.executableSha256 !== null && current.ffmpeg.executableSha256 === record.ffmpeg.executableSha256) || current.ffmpeg.buildConfiguration === record.ffmpeg.buildConfiguration}, titleSettingsMatch=${!title || (record.chromium.locale === 'en-US' && record.chromium.deviceScaleFactor === 1 && canonicalJson(record.chromium.captureSettings) === canonicalJson({ transparent: true, animation: 'frozen' }))}, captionsMatch=${!captions || (current.libassAvailable && current.libassProbe.usable && canonicalJson(current.ffmpeg.requiredFilters) === canonicalJson(record.ffmpeg.requiredFilters))}). Re-prepare the project.`,
+      `Render environment or canonical font bytes changed after preparation (ffmpegShaMatch=${current.ffmpeg.executableSha256 === record.ffmpeg.executableSha256}, ffmpegVersionMatch=${current.ffmpeg.version === record.ffmpeg.version}, ffmpegBuildMatch=${(current.ffmpeg.executableSha256 !== null && current.ffmpeg.executableSha256 === record.ffmpeg.executableSha256) || current.ffmpeg.buildConfiguration === record.ffmpeg.buildConfiguration}, titleSettingsMatch=${!title || (record.chromium.locale === 'en-US' && record.chromium.deviceScaleFactor === 1 && canonicalJson(record.chromium.captureSettings) === canonicalJson({ transparent: true, animation: 'frozen' }))}, captionsMatch=${!captions || (current.libassAvailable && current.libassProbe.usable && canonicalJson(current.ffmpeg.requiredFilters) === canonicalJson(record.ffmpeg.requiredFilters))}). Re-prepare the project.`,
     );
   if (preparationInputDigest(project, recordWithoutDigest) !== record.renderInputsDigest)
     throw new CommandFailure(

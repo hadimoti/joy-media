@@ -14,6 +14,7 @@ import {
   setRenderPreparationChromiumProbeForTests,
   renderInputsDigest,
   validateRenderPreparation,
+  projectHasTitles,
   type RenderPreparationFacts,
 } from './render-preparation.js';
 import type { CliProjectDocument } from '../utils/project-loader.js';
@@ -42,12 +43,12 @@ const facts: RenderPreparationFacts = {
   chromium: {
     launchable: true,
     executablePath: 'chromium',
-    executableSha256: 'sha256:chromium',
+    executableSha256: `sha256:${'c'.repeat(64)}`,
     version: 'Chromium 140.0',
   },
   ffmpeg: {
     executablePath: 'ffmpeg',
-    executableSha256: 'sha256:ffmpeg',
+    executableSha256: `sha256:${'f'.repeat(64)}`,
     version: 'ffmpeg version 7',
     buildConfiguration: '--enable-libass',
     requiredFilters: ['ass', 'subtitles'],
@@ -210,6 +211,102 @@ describe('RenderPreparationV1', () => {
     });
   });
 
+  it('refuses unknown fields in a frozen preparation record', async () => {
+    const preparation = freezeRenderPreparation(project, [{ op: 'instantiateTemplate' }], facts);
+    const saved = {
+      ...project,
+      pluginData: {
+        ...project.pluginData,
+        'joy.renderPreparation': { ...preparation, unexpected: true },
+      },
+    } as unknown as CliProjectDocument;
+
+    await expect(validateRenderPreparation(saved, facts)).rejects.toMatchObject({
+      code: 'RENDER_PREPARATION_INVALID',
+    });
+  });
+
+  it('refuses a preparation record with a missing canonical face', async () => {
+    const preparation = freezeRenderPreparation(project, [{ op: 'instantiateTemplate' }], facts);
+    const saved = {
+      ...project,
+      pluginData: {
+        ...project.pluginData,
+        'joy.renderPreparation': { ...preparation, fonts: preparation.fonts.slice(1) },
+      },
+    } as unknown as CliProjectDocument;
+
+    await expect(validateRenderPreparation(saved, facts)).rejects.toMatchObject({
+      code: 'RENDER_PREPARATION_INVALID',
+    });
+  });
+
+  it('refuses changed bytes in an unselected canonical face', async () => {
+    const preparation = freezeRenderPreparation(project, [{ op: 'instantiateTemplate' }], facts);
+    const saved = {
+      ...project,
+      pluginData: { ...project.pluginData, 'joy.renderPreparation': preparation },
+    } as unknown as CliProjectDocument;
+    const selected = new Set(['Noto Sans Arabic:700:latin']);
+    const unselectedIndex = facts.canonicalFaces.findIndex(
+      (face) => !selected.has(`${face.family}:${face.weight}:${face.subset}`),
+    );
+    expect(unselectedIndex).toBeGreaterThanOrEqual(0);
+    const changedFaces = facts.canonicalFaces.map((face, index) =>
+      index === unselectedIndex
+        ? { ...face, sha256: 'sha256:changed-unselected-face' as `sha256:${string}` }
+        : face,
+    );
+
+    await expect(
+      validateRenderPreparation(saved, { ...facts, canonicalFaces: changedFaces }),
+    ).rejects.toMatchObject({
+      code: 'RENDER_ENVIRONMENT_DRIFT',
+    });
+  });
+
+  it('excludes a title on a track disabled by the normalized timeline deck', () => {
+    const deckProject = {
+      ...project,
+      schemaVersion: 1,
+      compositions: {
+        root: {
+          ...project.compositions.root,
+          tracks: [
+            {
+              id: 'titles',
+              kind: 'video',
+              enabled: true,
+              clips: [{ id: 'title-clip', kind: 'video', durationUs: 1_000_000 }],
+            },
+          ],
+        },
+      },
+      timelineTrackDeck: {
+        rows: [
+          {
+            compositionId: 'root',
+            trackId: 'titles',
+            order: 0,
+            enabled: false,
+            locked: false,
+          },
+        ],
+      },
+      pluginData: {
+        ...project.pluginData,
+        'joy.contentTemplates': {
+          version: 1,
+          instances: {
+            title: { clipId: 'title-clip', lines: { primary: 'Sara' }, font: { weight: 700 } },
+          },
+        },
+      },
+    } as unknown as CliProjectDocument;
+
+    expect(projectHasTitles(deckProject)).toBe(false);
+  });
+
   it('uses the explicitly selected Chromium executable when probing at runtime', async () => {
     const priorExecutable = process.env['JOY_CHROMIUM_PATH'];
     process.env['JOY_CHROMIUM_PATH'] = join(tmpdir(), 'missing-explicit-joy-chromium.exe');
@@ -332,10 +429,19 @@ describe('RenderPreparationV1', () => {
       renderers: { title: 'chromium-scene-surface', caption: 'none' },
       composition: { width: 1920, height: 1080, fps: { num: 30000, den: 1001 } },
       coverage: { result: 'passed', checkedTextLength: 4 },
-      fonts: [{ family: 'Noto Sans Arabic', weight: 700, subset: 'latin' }],
+      fonts: expect.arrayContaining([
+        {
+          family: 'Noto Sans Arabic',
+          weight: 700,
+          subset: 'latin',
+          length: expect.any(Number),
+          sha256: expect.any(String),
+        },
+      ]),
     });
     expect(preparation.fonts[0]?.length).toBeGreaterThan(0);
     expect(preparation.fonts[0]?.sha256).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(preparation.fonts).toHaveLength(facts.canonicalFaces.length);
     expect(preparation.renderInputsDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
     const saved = {
       ...project,
@@ -638,7 +744,10 @@ describe('RenderPreparationV1', () => {
       ...project,
       pluginData: { ...project.pluginData, 'joy.renderPreparation': preparation },
     }) as unknown as CliProjectDocument;
-    (saved.pluginData['joy.renderPreparation'] as any).fonts[0].weight = 400;
+    const selected = (saved.pluginData['joy.renderPreparation'] as any).fonts.find(
+      (face: { subset: string; weight: number }) => face.subset === 'latin' && face.weight === 700,
+    );
+    selected.weight = 400;
     await expect(validateRenderPreparation(saved, facts)).rejects.toMatchObject({
       code: 'RENDER_PREPARATION_INVALID',
     });

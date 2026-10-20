@@ -5,12 +5,13 @@ import { tmpdir } from 'node:os';
 import { statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { loadAssetSources } from '../utils/asset-sources.js';
-import { ffmpegBinary, probeMedia, type MediaInfo } from '../utils/media-probe.js';
+import { ffmpegBinary, probeMedia, probeMediaAsync, type MediaInfo } from '../utils/media-probe.js';
 import { compileCaptionAss } from '../services/captions-ass.js';
 import {
   RENDER_PREPARATION_KEY,
   type RenderPreparationV1,
 } from '../services/render-preparation.js';
+import type { CanonicalCaptionFaceProbe } from './render-features.js';
 import { notoSansArabicArabic400Path } from '@joy-media/html-scene-runtime';
 import { normalizeUniversalTimeline, type JoyProjectV1 } from '@joy-media/project-schema';
 import {
@@ -326,8 +327,14 @@ function resolveSource(
  */
 export function planMedia(
   project: unknown,
-  options: { manifestOnly: boolean; mediaDir?: string | undefined; libassAvailable?: boolean },
+  options: {
+    manifestOnly: boolean;
+    mediaDir?: string | undefined;
+    libassAvailable?: boolean;
+    canonicalFaceProbe?: CanonicalCaptionFaceProbe;
+  },
   fallback: PresetFallback,
+  probe: (path: string) => MediaInfo | null = probeMedia,
 ): MediaPlan {
   if (options.manifestOnly) {
     return { mode: 'manifest-only', reason: '--manifest-only was given.' };
@@ -462,7 +469,7 @@ export function planMedia(
 
   const libass = captions.length > 0 ? (options.libassAvailable ?? probeLibass()) : false;
   if (captions.length > 0) {
-    const faceProbe = probeCanonicalCaptionFace();
+    const faceProbe = options.canonicalFaceProbe ?? probeCanonicalCaptionFace();
     if (!faceProbe.usable) {
       const reason = {
         kind: 'canonical-caption-face-unavailable' as const,
@@ -558,7 +565,7 @@ export function planMedia(
   const clips: MediaClip[] = [];
   for (const entry of pending) {
     const path = entry.path as string;
-    const info = probeMedia(path);
+    const info = probe(path);
     if (!info) {
       return {
         mode: 'error',
@@ -667,6 +674,57 @@ export function planMedia(
     ),
     warnings,
   };
+}
+
+/** Async render-time counterpart; the synchronous planner remains for non-cancelable callers. */
+export async function planMediaAsync(
+  project: unknown,
+  options: { manifestOnly: boolean; mediaDir?: string | undefined; libassAvailable?: boolean },
+  fallback: PresetFallback,
+  signal?: AbortSignal,
+): Promise<MediaPlan> {
+  signal?.throwIfAborted();
+  const pluginData =
+    isRecord(project) && isRecord(project['pluginData']) ? project['pluginData'] : {};
+  const preparation = pluginData[RENDER_PREPARATION_KEY] as RenderPreparationV1 | undefined;
+  const captionOptions = {
+    ...options,
+    libassAvailable:
+      options.libassAvailable ??
+      (preparation !== undefined &&
+        preparation.ffmpeg.requiredFilters.includes('ass') &&
+        preparation.ffmpeg.requiredFilters.includes('subtitles')),
+    canonicalFaceProbe: preparation?.ffmpeg.canonicalFaceProbe ?? {
+      usable: false,
+      executablePath: ffmpegBinary(),
+      canonicalFace: 'Noto Sans Arabic Arabic 400',
+      reason: 'Caption rendering requires frozen preparation facts.',
+      log: '',
+    },
+  };
+  const paths = new Set<string>();
+  const placeholder: MediaInfo = {
+    hasVideo: true,
+    hasAudio: true,
+    hasAlpha: false,
+    isImage: false,
+    durationUs: Number.MAX_SAFE_INTEGER,
+    width: undefined,
+    height: undefined,
+    mimeType: 'application/octet-stream',
+  };
+  const prepared = planMedia(project, captionOptions, fallback, (path) => {
+    paths.add(path);
+    return placeholder;
+  });
+  if (prepared.mode !== 'media' || paths.size === 0) return prepared;
+  const probed = new Map<string, MediaInfo | null>();
+  for (const path of paths) {
+    signal?.throwIfAborted();
+    probed.set(path, await probeMediaAsync(path, { ...(signal ? { signal } : {}) }));
+  }
+  signal?.throwIfAborted();
+  return planMedia(project, captionOptions, fallback, (path) => probed.get(path) ?? null);
 }
 
 const secs = (us: number): string => (us / 1_000_000).toFixed(6);
@@ -985,20 +1043,59 @@ export function startEncode(
   const cancel = (): Promise<void> => {
     if (cancelTask) return cancelTask;
     cancelled = true;
-    const deadline = Date.now() + 2_000;
+    const deadline = Date.now() + 5_000;
     cancelTask = (async () => {
+      let helperLeft = false;
       if (child.pid !== undefined && child.exitCode === null) {
         if (process.platform === 'win32') {
-          await new Promise<void>((resolve) => {
-            const killer = spawn('taskkill', ['/T', '/F', '/PID', String(child.pid)], {
-              stdio: 'ignore',
-              windowsHide: true,
-              shell: false,
-            });
-            killer.once('error', () => resolve());
-            killer.once('close', () => resolve());
-            setTimeout(resolve, Math.max(1, deadline - Date.now()));
+          const killer = spawn('taskkill', ['/T', '/F', '/PID', String(child.pid)], {
+            stdio: 'ignore',
+            windowsHide: true,
+            shell: false,
           });
+          let settled = false;
+          let resolveHelper!: (closed: boolean) => void;
+          const helperClosed = new Promise<boolean>((resolve) => {
+            resolveHelper = resolve;
+          });
+          const settleHelper = (closed: boolean): void => {
+            if (settled) return;
+            settled = true;
+            resolveHelper(closed);
+          };
+          killer.once('error', () => settleHelper(true));
+          killer.once('close', () => settleHelper(true));
+          const waitForHelper = async (budgetMs: number): Promise<boolean> => {
+            let timeout: ReturnType<typeof setTimeout> | undefined;
+            try {
+              return await Promise.race([
+                helperClosed,
+                new Promise<boolean>((resolve) => {
+                  timeout = setTimeout(() => resolve(false), budgetMs);
+                }),
+              ]);
+            } finally {
+              if (timeout !== undefined) clearTimeout(timeout);
+            }
+          };
+          const helperBudget = Math.max(1, deadline - Date.now() - 100);
+          if (!(await waitForHelper(helperBudget))) {
+            try {
+              killer.kill('SIGKILL');
+            } catch {
+              // The helper may already have exited.
+            }
+            helperLeft = !(await waitForHelper(Math.max(1, deadline - Date.now())));
+          }
+          if (helperLeft) {
+            cleanupCaptions();
+            resolveDone({
+              ok: false,
+              code: 'RENDER_CANCEL_TIMEOUT',
+              message: 'RENDER_CANCEL_TIMEOUT: taskkill helper did not stop within five seconds.',
+            });
+            return;
+          }
         } else {
           try {
             process.kill(-child.pid, 'SIGKILL');
@@ -1024,10 +1121,10 @@ export function startEncode(
         resolveDone({
           ok: false,
           code: 'RENDER_CANCEL_TIMEOUT',
-          message: 'RENDER_CANCEL_TIMEOUT: FFmpeg process tree did not stop within 2 seconds.',
+          message: 'RENDER_CANCEL_TIMEOUT: FFmpeg process tree did not stop within five seconds.',
         });
         throw new Error(
-          'RENDER_CANCEL_TIMEOUT: FFmpeg process tree did not stop within 2 seconds.',
+          'RENDER_CANCEL_TIMEOUT: FFmpeg process tree did not stop within five seconds.',
         );
       }
       await done;

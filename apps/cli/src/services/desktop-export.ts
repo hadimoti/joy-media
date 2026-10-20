@@ -141,7 +141,7 @@ function findAssetIdCollision(
 
   const record = value as Record<string, unknown>;
   for (const [key, child] of Object.entries(record)) {
-    if (key === 'assets') continue;
+    if (key === 'assets' && path === 'documents.visual') continue;
     const childPath = `${path}.${key}`;
     if (assetIds.has(key)) return childPath;
     const collision = findAssetIdCollision(child, assetIds, childPath, key, record['kind']);

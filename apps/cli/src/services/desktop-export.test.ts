@@ -103,6 +103,34 @@ describe('desktop project export envelope', () => {
     );
   });
 
+  it('refuses asset ids inside an opaque namespace named assets', () => {
+    const { project, sources, id } = fixture();
+    const opaqueProject = {
+      ...project,
+      pluginData: {
+        ...project.pluginData,
+        'third-party.opaque': { assets: { note: id } },
+      },
+    };
+
+    expect(() => buildDesktopProjectEnvelope(opaqueProject, sources)).toThrowError(
+      expect.objectContaining({
+        code: 'DESKTOP_EXPORT_ASSET_ID_COLLISION',
+        message: expect.stringContaining(
+          'documents.visual.pluginData.third-party.opaque.assets.note',
+        ),
+      }),
+    );
+  });
+
+  it('allows the visual document asset registry while checking other content', () => {
+    const { project, sources, id } = fixture();
+
+    const envelope = buildDesktopProjectEnvelope(project, sources);
+
+    expect(envelope.documents.visual.assets).toHaveProperty(id);
+  });
+
   it('refuses an original larger than the 256 MiB package limit', () => {
     const { project, sources, id } = fixture(Buffer.alloc(1));
     const oversizedProject = {

@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Writable } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import { runCli } from '../cli.js';
 import { cliSchemaErrors } from '../humanized/schema-validation.js';
 import {
@@ -23,6 +24,7 @@ import { encodeRgbaPng } from '../services/title-frames.js';
 import { buildFfmpegArgs, setAssFileWriterForTests } from './render-media.js';
 import { renderInputsDigest } from '../services/render-preparation.js';
 import { normalizeUniversalTimeline } from '@joy-media/project-schema';
+import { probeMediaAsync, setMediaProbeSpawnForTests } from '../utils/media-probe.js';
 
 function timelineOrderProject(trackIds: readonly string[], disabledTrack?: string) {
   const tracks = trackIds.map((id) => ({
@@ -118,6 +120,34 @@ afterAll(() => {
 });
 
 describe('joy render (headless batch render command)', () => {
+  it('returns within 100 ms when cancelled during an in-flight media probe', async () => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null as number | null,
+      kill: vi.fn(function (this: {
+        exitCode: number | null;
+        emit: (event: string, ...args: unknown[]) => boolean;
+      }) {
+        this.exitCode = 1;
+        this.emit('close', null, 'SIGKILL');
+        return true;
+      }),
+    });
+    setMediaProbeSpawnForTests(() => child as never);
+    const controller = new AbortController();
+    const started = performance.now();
+    const result = probeMediaAsync('long-running.mp4', { signal: controller.signal });
+    setTimeout(() => controller.abort(), 0);
+    try {
+      await expect(result).rejects.toMatchObject({ name: 'AbortError' });
+      expect(performance.now() - started).toBeLessThan(100);
+      expect(child.kill).toHaveBeenCalled();
+    } finally {
+      setMediaProbeSpawnForTests(undefined);
+    }
+  });
+
   it('keeps a prior preview and removes staging output when cancelled', () => {
     const directory = mkdtempSync(join(tempDir, 'atomic-preview-'));
     const artifactPath = join(directory, 'preview-0.png');
@@ -515,6 +545,15 @@ describe('planRender (pure planning of a project document)', () => {
     if (!plan.ok) throw new Error(plan.message);
     expect(plan.clips.map((c) => c.clipId)).toEqual(['real']);
     expect(plan.warnings).toEqual(['Skipped disabled track "off" (1 clip(s)).']);
+  });
+
+  it('honors disabled track deck rows when planning clips', () => {
+    const deckProject = timelineOrderProject(['low', 'high'], 'low') as Record<string, unknown>;
+    deckProject['id'] = 'deck-plan';
+    const plan = planRender(deckProject, mp4);
+
+    if (!plan.ok) throw new Error(plan.message);
+    expect(plan.clips.map((clip) => clip.clipId)).toEqual(['clip-high']);
   });
 
   it('warns once when the composition differs from the preset shape or rate', () => {
