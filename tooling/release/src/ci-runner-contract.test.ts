@@ -353,6 +353,8 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       );
       expect(provision).toContain('[ValidateRange(0,1500)]');
       expect(provision).toContain('[int]$MtuBytes = 1240');
+      expect(provision).toContain('[ValidateRange(1,32)][int]$Cpus = 8');
+      expect(provision).toContain("'--cpus'");
       expect(provision).toContain('MtuBytes -gt 0 -and $MtuBytes -lt 576');
       expect(provision).toContain('--labels self-hosted,windows,x64,joy-media-worker-docker');
     });

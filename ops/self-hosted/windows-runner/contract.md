@@ -54,10 +54,13 @@ non-loopback IPv4 subinterface to 1240 with `store=active` before starting the
 runner, then verifies the setting. Use `-MtuBytes 0` only when the container's
 network path does not require this adjustment.
 
-The provisioner also passes `--memory` (default `4g`; override with `-Memory`).
-Without a limit, a Hyper-V Windows container gets a 1 GiB utility VM, and Node's
-heap then tops out near 524 MB, which the P0 cold-process test exceeds. Docker
-does not support `docker update` on Windows containers, so a new limit needs the
+The provisioner also passes `--memory` (default `4g`; override with `-Memory`)
+and `--cpus` (default `8`; override with `-Cpus`, 1 to 32). Without a memory
+limit, a Hyper-V Windows container gets a 1 GiB utility VM, and Node's heap then
+tops out near 524 MB, which the P0 cold-process test exceeds. Without `--cpus`,
+the container gets 2 logical processors. The MP4 encoder's output depends on its
+thread count, and the P0 lane's steps 7 and 8 showed that. Docker does not
+support `docker update` on Windows containers, so a new limit needs the
 container removed and provisioned again.
 
 If a container with the exact runner name already exists, remove it explicitly
