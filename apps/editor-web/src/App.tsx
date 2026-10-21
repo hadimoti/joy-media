@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { DockviewReact } from 'dockview';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview';
+import { createEditorProjectStorageAdapter } from '@joy-media/project-persistence/editor-storage';
 import { PanelTab } from './PanelTab.js';
 import {
   EditorPanelContext,
@@ -221,6 +222,7 @@ import {
   type BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
 import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
+import { applyP0DesktopLayers } from './p0-desktop-layers.js';
 import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
@@ -229,7 +231,7 @@ import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js'
 import { prepareTimelinePresentation } from './timeline-presentation.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
-import { buildTimelineElementDocument } from './place-timeline-element.js';
+import { buildTimelineElementDocument, withVisualTrackMirror } from './place-timeline-element.js';
 import { nextProfessionalTrackId } from './timeline-track-family.js';
 import { nextTimelineMarkerId, nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
@@ -319,6 +321,7 @@ import {
 import type { AudioState } from '@joy-media/commands';
 import { renderOfflineAudio } from '@joy-media/audio-core/offline';
 import type { ExportPresetId } from '@joy-media/project-schema';
+import { dimensionsForExportPreset } from '@joy-media/project-schema';
 import {
   AgentPanel,
   type AgentPanelCommand,
@@ -823,7 +826,11 @@ interface ProjectJoyAgentRunLifecycle {
 }
 
 function guardBrowserStorage(writer: ProjectWriterHandle): GuardedBrowserStorage {
-  const storage = writer.guardStorage(window.localStorage);
+  const editorStorage = createEditorProjectStorageAdapter(
+    window.localStorage,
+    window.joyDesktop?.projectStorage,
+  );
+  const storage = writer.guardStorage(editorStorage);
   if (storage.removeItem === undefined)
     throw new Error('The browser writer storage boundary does not support removal.');
   return storage as GuardedBrowserStorage;
@@ -1355,7 +1362,7 @@ function EditorWorkspace({
       onResult: (result) => {
         if (result.kind === 'conflict') {
           showToast(
-            'Cloud document changed elsewhere. Your local edits were kept; reload the project before saving again.',
+            'Cloud document changed since this browser last synced. Local edits are preserved here; export them before reloading to recover the conflict.',
             'error',
           );
         } else if (result.kind === 'request-failure') {
@@ -1674,9 +1681,8 @@ function EditorWorkspace({
           setRemoteDocumentBootstrapProjectId(controlPlaneProjectId);
           return;
         }
-        // Both an existing remote head and an explicit missing-document read
-        // are a write barrier: only after either result may ordinary editor
-        // mutations be auto-saved.
+        // A completed remote read resolves the bootstrap barrier. Autosync
+        // keeps its own write block active when this read found a conflict.
         setRemoteDocumentBootstrapProjectId(controlPlaneProjectId);
         if (result.kind === 'hydrated') setRevision((revision) => revision + 1);
       })
@@ -3263,18 +3269,26 @@ function EditorWorkspace({
           crop: { left: 0, top: 0, right: 0, bottom: 0 },
         },
       };
-      const document = buildTimelineElementDocument({
-        baseProject: session.visualProject,
-        clipId,
-        planned: {
+      const document = withVisualTrackMirror(
+        buildTimelineElementDocument({
+          baseProject: session.visualProject,
+          clipId,
+          planned: {
+            compositionId: composition.id,
+            trackId: targetTrackId,
+            clip: insertClipCommand.payload.clip,
+          },
+          elementKind: 'html-scene',
+          source: { kind: 'object', id: objectId },
+          visualObject: object,
+        }),
+        {
           compositionId: composition.id,
           trackId: targetTrackId,
-          clip: insertClipCommand.payload.clip,
+          name: 'Scene',
+          order: targetExisting?.order ?? order,
         },
-        elementKind: 'html-scene',
-        source: { kind: 'object', id: objectId },
-        visualObject: object,
-      });
+      );
       const label = `Place HTML scene ${scenePackageId}`;
       session.dispatchCompound(label, {
         document,
@@ -3929,6 +3943,7 @@ function EditorWorkspace({
       const retryPreset = retryEntry?.presetId;
       if (
         retryPreset !== undefined &&
+        retryPreset !== 'social-h264-aac' &&
         retryPreset !== 'reels-1080' &&
         retryPreset !== 'shorts-1080' &&
         retryPreset !== 'youtube-1080' &&
@@ -4029,19 +4044,10 @@ function EditorWorkspace({
           exportVisualProject.compositions[exportVisualProject.rootCompositionId];
         const baseWidth = compositionV1?.width ?? 1080;
         const baseHeight = compositionV1?.height ?? 1920;
-        const { width, height } = (() => {
-          switch (activeExportPreset) {
-            case 'reels-1080':
-            case 'shorts-1080':
-              return { width: 1080, height: 1920 };
-            case 'youtube-1080':
-              return { width: 1920, height: 1080 };
-            case 'high-bitrate':
-              return { width: Math.max(baseWidth, 1920), height: Math.max(baseHeight, 1080) };
-            default:
-              return { width: baseWidth, height: baseHeight };
-          }
-        })();
+        const { width, height } = dimensionsForExportPreset(activeExportPreset, {
+          width: baseWidth,
+          height: baseHeight,
+        });
         const compositionTimeline =
           exportTimelineProject.compositions[exportTimelineProject.rootCompositionId];
         const allTimelineClips = flattenRootTimelineVideoClips(exportTimelineProject);
@@ -4568,18 +4574,29 @@ function EditorWorkspace({
             const scenes =
               exportSceneCache === undefined
                 ? undefined
-                : await exportSceneCache.captureFull(exportVisualProject.visualObjects, timeUs, {
-                    width,
-                    height,
-                    signal: abortController.signal,
-                  });
+                : await exportSceneCache.captureFull(
+                    { visual: exportVisualProject, timeline: exportTimelineProject },
+                    timeUs,
+                    {
+                      width,
+                      height,
+                      signal: abortController.signal,
+                    },
+                  );
             if (scenes !== undefined) {
               for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
             }
             for (const [id, bitmap] of stickerImageCache.bitmaps(timeUs)) bitmaps.set(id, bitmap);
             applyClipGradesToTransitionBitmaps(exportVisualProject, transition, timeUs, bitmaps);
             const frame = buildFrame(timeUs);
-            renderer.render(withVideoFrameNodes(frame, nodes), bitmaps);
+            renderer.render(
+              applyP0DesktopLayers(
+                withVideoFrameNodes(frame, nodes),
+                { visual: exportVisualProject, timeline: exportTimelineProject },
+                timeUs,
+              ),
+              bitmaps,
+            );
             // CanvasCaptureMediaStreamTrack can sample a WebGL surface before
             // its GPU work is committed on cold/software renderers. Copying
             // into a 2D staging canvas synchronizes the exact painted frame.
@@ -6971,6 +6988,7 @@ function EditorWorkspace({
     <AgentPreviewProvider store={appAgentPreviewStore}>
       <AgentPresenceProvider store={appAgentPresenceStore}>
         <main>
+          <h1 className="sr-only">{controlPlaneProject.title || `${JOY_STUDIO_NAME} editor`}</h1>
           <header className="app-header">
             <AgentActivityIndicator
               onShowTarget={(target) => {
@@ -8019,10 +8037,15 @@ function MonitorPanelContent({
       ),
       previewVisualProject,
     );
-    const frame =
+    const assembledFrame =
       previewVideoFrame === undefined
         ? visualFrame
         : withVideoFrameNode(visualFrame, previewVideoFrame.node);
+    const frame = applyP0DesktopLayers(
+      assembledFrame,
+      { visual: previewVisualProject, timeline: timelineProject },
+      state.playheadUs,
+    );
     currentFrameRef.current = frame;
     const videoBitmaps = new Map(clipFrameCache);
     if (previewVideoFrame !== undefined) {
@@ -8282,7 +8305,7 @@ function MonitorPanelContent({
   useEffect(() => {
     let cancelled = false;
     void sceneCacheRef.current
-      .sync(previewVisualProject.visualObjects, state.playheadUs)
+      .sync({ visual: previewVisualProject, timeline: timelineProject }, state.playheadUs)
       .then(() => {
         if (cancelled) return;
         setSceneTick((value) => value + 1);
@@ -8290,7 +8313,7 @@ function MonitorPanelContent({
     return () => {
       cancelled = true;
     };
-  }, [state.playheadUs, previewVisualProject]);
+  }, [state.playheadUs, previewVisualProject, timelineProject]);
 
   useEffect(() => () => sceneCacheRef.current.destroy(), []);
 

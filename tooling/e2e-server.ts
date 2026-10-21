@@ -150,6 +150,7 @@ createE2EAccountService().then((account) => {
     // cascade of unrelated 429s.
     rateLimit: { maxRequests: 100_000 },
     queryObservability: true,
+    corsAllowedOrigins: ['joy-media-app://renderer'],
     account,
   });
 

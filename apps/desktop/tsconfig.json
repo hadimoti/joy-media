@@ -2,5 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "outDir": "dist", "rootDir": "src" },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../../packages/provider-sdk" }]
+  "references": [
+    { "path": "../../packages/project-persistence" },
+    { "path": "../../packages/provider-sdk" }
+  ]
 }

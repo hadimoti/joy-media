@@ -70,5 +70,13 @@ describe('TransitionsPanel junction operations', () => {
     expect(markup).toContain('aria-label="Remove selected transition"');
     expect(markup).toContain('data-transition-id="transition-1"');
     expect(markup).toContain('transition-card is-active');
+
+    const activeCard = markup.match(/<div\b[^>]*class="transition-card is-active"[^>]*>/)?.[0];
+    expect(activeCard).toBeDefined();
+    expect(activeCard).not.toContain('role="button"');
+    expect(markup).toContain(
+      '<button type="button" class="transition-card-select" aria-pressed="true" aria-label="Selected Dissolve transition"',
+    );
+    expect(markup).toContain('class="icon-button card-fav-btn"');
   });
 });

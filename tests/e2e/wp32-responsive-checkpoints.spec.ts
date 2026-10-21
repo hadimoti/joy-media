@@ -41,7 +41,7 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
       'Joy Code',
       '3D Scene',
     ]) {
-      let navigation = page.locator('.panel-tab[aria-label="Timeline"]').first();
+      let navigation = page.locator('.dv-tab[role="tab"][aria-label="Timeline"]').first();
       if (label === 'Timeline') {
         await navigation.click();
         await expect(page.locator('.timeline-panel')).toBeVisible();

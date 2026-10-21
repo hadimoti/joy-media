@@ -222,6 +222,13 @@ async function start(): Promise<void> {
     },
     mediaAuth,
     account,
+    ...(process.env.JOY_MEDIA_CORS_ALLOWED_ORIGINS === undefined
+      ? {}
+      : {
+          corsAllowedOrigins: process.env.JOY_MEDIA_CORS_ALLOWED_ORIGINS.split(',')
+            .map((origin) => origin.trim())
+            .filter((origin) => origin.length > 0),
+        }),
     releases,
     entitlementPublicKeyPem: entitlementSigner.publicKeyPem,
     hostedRouteRetirement,

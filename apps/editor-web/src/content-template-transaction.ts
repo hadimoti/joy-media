@@ -3,7 +3,7 @@ import type { SpikeCommand } from '@joy-media/commands';
 import type { Clip, VisualObjectV1 } from '@joy-media/project-schema';
 import type { EditorSession } from './editor-session.js';
 import type { SeededContentTemplate } from './content-template-types.js';
-import { buildTimelineElementDocument } from './place-timeline-element.js';
+import { buildTimelineElementDocument, withVisualTrackMirror } from './place-timeline-element.js';
 import { nextProfessionalTrackId } from './timeline-track-family.js';
 
 export function buildContentTemplateTransaction(
@@ -51,6 +51,7 @@ export function buildContentTemplateTransaction(
       )
       .sort((left, right) => left.order - right.order)[0];
     const trackId = targetExisting?.id ?? nextProfessionalTrackId(composition.tracks, 'visual');
+    const trackOrder = targetExisting?.order ?? nextTrackOrder;
     if (targetExisting === undefined) {
       timelineCommands.push({
         type: 'timeline.addTrack',
@@ -93,14 +94,22 @@ export function buildContentTemplateTransaction(
         crop: { left: 0, top: 0, right: 0, bottom: 0 },
       },
     };
-    document = buildTimelineElementDocument({
-      baseProject: document,
-      clipId,
-      planned: { compositionId: composition.id, trackId, clip },
-      elementKind: 'html-scene',
-      source: { kind: 'object', id: objectId },
-      visualObject: object,
-    });
+    document = withVisualTrackMirror(
+      buildTimelineElementDocument({
+        baseProject: document,
+        clipId,
+        planned: { compositionId: composition.id, trackId, clip },
+        elementKind: 'html-scene',
+        source: { kind: 'object', id: objectId },
+        visualObject: object,
+      }),
+      {
+        compositionId: composition.id,
+        trackId,
+        name: targetExisting?.name ?? `Layer ${trackOrder + 1}`,
+        order: trackOrder,
+      },
+    );
     timelineCommands.push({
       type: 'timeline.insertClip',
       payload: { compositionId: composition.id, trackId, clip },

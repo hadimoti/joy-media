@@ -1,43 +1,36 @@
 {
-  "version": 1,
+  "version": 2,
   "generatedBy": "tooling/generate-media-fixtures.mjs",
+  "toolchain": {
+    "ffmpegVersion": "ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+    "ffprobeVersion": "ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers"
+  },
   "files": {
-    "image.png": {
-      "sha256": "2223b9dc12a59ef4f8b2dd98d669cad9c927b3264800e10c296de8dc9006cb0e",
-      "bytes": 625,
-      "name": "image.png",
-      "kind": "image",
-      "mimeType": "image/png",
-      "mime": "image/png",
-      "width": 320,
-      "height": 180
-    },
-    "image.jpg": {
-      "sha256": "d659a9c7075d3b6c017e431323f95338547e91cc2630426fac1e3a8b3c4d2469",
-      "bytes": 584,
-      "name": "image.jpg",
-      "kind": "image",
-      "mimeType": "image/jpeg",
-      "mime": "image/jpeg",
-      "width": 320,
-      "height": 180
-    },
-    "image.webp": {
-      "sha256": "b7d7aa6a0c8ce446cbfb35bd99fd00154655da9bb489c007179013992213b8c4",
-      "bytes": 44,
-      "name": "image.webp",
-      "kind": "image",
-      "mimeType": "image/webp",
-      "mime": "image/webp",
-      "width": 160,
-      "height": 96
-    },
     "animated.gif": {
       "sha256": "13e3ab7ffca3c711566277c6b39a1be3a301d969acf1581eab0ab6c2cd17a57e",
       "bytes": 12552,
       "name": "animated.gif",
       "kind": "image",
       "mimeType": "image/gif",
+      "purpose": "Deterministic image fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 160,
+        "height": 96,
+        "frames": 4,
+        "durationUs": 1000000,
+        "hasAlpha": true
+      },
       "mime": "image/gif",
       "width": 160,
       "height": 96,
@@ -54,6 +47,25 @@
       "name": "animated.webp",
       "kind": "image",
       "mimeType": "image/webp",
+      "purpose": "Deterministic image fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 160,
+        "height": 96,
+        "frames": 4,
+        "durationUs": 1000000,
+        "hasAlpha": true
+      },
       "mime": "image/webp",
       "width": 160,
       "height": 96,
@@ -64,16 +76,34 @@
         "hasAlpha": true
       }
     },
-    "video.mp4": {
-      "sha256": "ca3deb99602a39bc747e89599b3e05393f404721a7c99683b83399596248f24f",
-      "bytes": 43899,
-      "name": "video.mp4",
-      "kind": "video",
-      "mimeType": "video/mp4",
-      "mime": "video/mp4",
+    "audio.mp3": {
+      "sha256": "3c180c635cc31ade2f10e0f3159840ec82d5657646fc2c9faa3776b2972b9525",
+      "bytes": 24429,
+      "name": "audio.mp3",
+      "kind": "audio",
+      "mimeType": "audio/mpeg",
+      "purpose": "Deterministic audio fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "durationUs": 3000000,
+        "streams": [
+          "audio"
+        ],
+        "sampleRate": 48000,
+        "channels": 1
+      },
+      "mime": "audio/mpeg",
       "durationUs": 3000000,
-      "width": 320,
-      "height": 180,
       "sampleRate": 48000,
       "channels": 1
     },
@@ -83,18 +113,27 @@
       "name": "audio.wav",
       "kind": "audio",
       "mimeType": "audio/wav",
+      "purpose": "Deterministic audio fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "durationUs": 3000000,
+        "streams": [
+          "audio"
+        ],
+        "sampleRate": 48000,
+        "channels": 1
+      },
       "mime": "audio/wav",
-      "durationUs": 3000000,
-      "sampleRate": 48000,
-      "channels": 1
-    },
-    "audio.mp3": {
-      "sha256": "3c180c635cc31ade2f10e0f3159840ec82d5657646fc2c9faa3776b2972b9525",
-      "bytes": 24429,
-      "name": "audio.mp3",
-      "kind": "audio",
-      "mimeType": "audio/mpeg",
-      "mime": "audio/mpeg",
       "durationUs": 3000000,
       "sampleRate": 48000,
       "channels": 1
@@ -105,6 +144,22 @@
       "name": "captions-en.srt",
       "kind": "caption",
       "mimeType": "application/x-subrip",
+      "purpose": "Deterministic caption fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "kind": "caption-text",
+        "language": "en"
+      },
       "mime": "application/x-subrip"
     },
     "captions-fa.vtt": {
@@ -113,23 +168,24 @@
       "name": "captions-fa.vtt",
       "kind": "caption",
       "mimeType": "text/vtt",
+      "purpose": "Deterministic caption fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "kind": "caption-text",
+        "language": "fa",
+        "direction": "rtl"
+      },
       "mime": "text/vtt"
-    },
-    "invalid.txt": {
-      "sha256": "e2c5076bcc1bf5b0c8c375d5ee8bfbde111d7a699cdeed6d1787b53c1e8b3181",
-      "bytes": 26,
-      "name": "invalid.txt",
-      "kind": "invalid",
-      "mimeType": "text/plain",
-      "mime": "text/plain"
-    },
-    "corrupt.mp4": {
-      "sha256": "b471233970c5b1a63b56c16179dcbbf561a4924d1117a0880f936f47301033c6",
-      "bytes": 21,
-      "name": "corrupt.mp4",
-      "kind": "invalid",
-      "mimeType": "video/mp4",
-      "mime": "video/mp4"
     },
     "corrupt.gif": {
       "sha256": "a7a3eda6441d137cccef9700fa378c0099d647146be9167def705bf86bb634ec",
@@ -137,7 +193,45 @@
       "name": "corrupt.gif",
       "kind": "invalid",
       "mimeType": "image/gif",
+      "purpose": "Deterministic invalid fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "decodable": false
+      },
       "mime": "image/gif"
+    },
+    "corrupt.mp4": {
+      "sha256": "b471233970c5b1a63b56c16179dcbbf561a4924d1117a0880f936f47301033c6",
+      "bytes": 21,
+      "name": "corrupt.mp4",
+      "kind": "invalid",
+      "mimeType": "video/mp4",
+      "purpose": "Deterministic invalid fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "decodable": false
+      },
+      "mime": "video/mp4"
     },
     "corrupt.webp": {
       "sha256": "abcfd24c53563908873014d12d9c2edc860a1811af4f4cb6cdfb767dca18c2b3",
@@ -145,6 +239,21 @@
       "name": "corrupt.webp",
       "kind": "invalid",
       "mimeType": "image/webp",
+      "purpose": "Deterministic invalid fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "decodable": false
+      },
       "mime": "image/webp"
     },
     "empty.bin": {
@@ -153,7 +262,126 @@
       "name": "empty.bin",
       "kind": "invalid",
       "mimeType": "application/octet-stream",
+      "purpose": "Deterministic invalid fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "decodable": false
+      },
       "mime": "application/octet-stream"
+    },
+    "image.jpg": {
+      "sha256": "d659a9c7075d3b6c017e431323f95338547e91cc2630426fac1e3a8b3c4d2469",
+      "bytes": 584,
+      "name": "image.jpg",
+      "kind": "image",
+      "mimeType": "image/jpeg",
+      "purpose": "Deterministic image fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 320,
+        "height": 180,
+        "format": "jpeg"
+      },
+      "mime": "image/jpeg",
+      "width": 320,
+      "height": 180
+    },
+    "image.png": {
+      "sha256": "2223b9dc12a59ef4f8b2dd98d669cad9c927b3264800e10c296de8dc9006cb0e",
+      "bytes": 625,
+      "name": "image.png",
+      "kind": "image",
+      "mimeType": "image/png",
+      "purpose": "Deterministic image fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 320,
+        "height": 180,
+        "format": "png"
+      },
+      "mime": "image/png",
+      "width": 320,
+      "height": 180
+    },
+    "image.webp": {
+      "sha256": "b7d7aa6a0c8ce446cbfb35bd99fd00154655da9bb489c007179013992213b8c4",
+      "bytes": 44,
+      "name": "image.webp",
+      "kind": "image",
+      "mimeType": "image/webp",
+      "purpose": "Deterministic image fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 160,
+        "height": 96,
+        "format": "webp"
+      },
+      "mime": "image/webp",
+      "width": 160,
+      "height": 96
+    },
+    "invalid.txt": {
+      "sha256": "e2c5076bcc1bf5b0c8c375d5ee8bfbde111d7a699cdeed6d1787b53c1e8b3181",
+      "bytes": 26,
+      "name": "invalid.txt",
+      "kind": "invalid",
+      "mimeType": "text/plain",
+      "purpose": "Deterministic invalid fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "decodable": false
+      },
+      "mime": "text/plain"
     },
     "joycode-attachment.md": {
       "sha256": "a2b57ab1dce16d6e7ce7c6952222e52835cd5ec33eafe1e0fe3ccdd6ab4bf856",
@@ -161,7 +389,422 @@
       "name": "joycode-attachment.md",
       "kind": "attachment",
       "mimeType": "text/markdown",
+      "purpose": "Deterministic attachment fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "kind": "markdown-text"
+      },
       "mime": "text/markdown"
+    },
+    "paths with spaces/فارسی 😀 tone.wav": {
+      "sha256": "9f78d5a586ed5649d82f307d428de2971670fb9def26e73d2310fecfb040445e",
+      "bytes": 96078,
+      "name": "paths with spaces/فارسی 😀 tone.wav",
+      "kind": "audio",
+      "mimeType": "audio/wav",
+      "purpose": "Tone WAV at a Unicode path with spaces, RTL text, and emoji",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "sampleRate": 48000,
+        "channels": 1
+      }
+    },
+    "readiness-alpha.png": {
+      "sha256": "60648b444f0a2e6715bf5fe563dab5837f44ce1dfedcd9c8ea58e41b6756c431",
+      "bytes": 205,
+      "name": "readiness-alpha.png",
+      "kind": "image",
+      "mimeType": "image/png",
+      "purpose": "PNG with fully opaque left half and fully transparent right half",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 64,
+        "height": 64,
+        "hasAlpha": true,
+        "opaqueLeft": true,
+        "transparentRight": true
+      }
+    },
+    "readiness-audio-only.wav": {
+      "sha256": "292f0d0f72ff84d5f017cb19e48583ee4d1e5a919ee2b961a9a7eaec5ab27bec",
+      "bytes": 192078,
+      "name": "readiness-audio-only.wav",
+      "kind": "audio",
+      "mimeType": "audio/wav",
+      "purpose": "Audio-only WAV with no video stream",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "sampleRate": 48000,
+        "channels": 1,
+        "durationUs": 2000000
+      }
+    },
+    "readiness-flash-click.mkv": {
+      "sha256": "8bfc980388c613fe06384a6e632320da7f0e7516fdb83bd154db10264d8fdffc",
+      "bytes": 211024,
+      "name": "readiness-flash-click.mkv",
+      "kind": "video",
+      "mimeType": "video/x-matroska",
+      "purpose": "Single white video frame at 1 s and PCM click at 1 s on dark background",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 320,
+        "height": 180,
+        "onsetUs": 1000000,
+        "hasAudio": true
+      }
+    },
+    "readiness-hard-cut.mkv": {
+      "sha256": "03537ac9b822ef00a70cc387717e44c20672b7f5b5cd415780ecc6006ad20245",
+      "bytes": 211084,
+      "name": "readiness-hard-cut.mkv",
+      "kind": "video",
+      "mimeType": "video/x-matroska",
+      "purpose": "Hard cut from red to blue at 1 s with simultaneous audio",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 320,
+        "height": 180,
+        "frames": 50,
+        "durationUs": 2000000,
+        "hasAudio": true
+      }
+    },
+    "readiness-mislabeled.jpg": {
+      "sha256": "9f78d5a586ed5649d82f307d428de2971670fb9def26e73d2310fecfb040445e",
+      "bytes": 96078,
+      "name": "readiness-mislabeled.jpg",
+      "kind": "invalid",
+      "mimeType": "image/jpeg",
+      "purpose": "WAV audio payload deliberately named .jpg to catch extension-based misclassification",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "payloadFormat": "wav",
+        "sampleRate": 48000,
+        "channels": 1,
+        "extensionMismatch": true
+      }
+    },
+    "readiness-ntsc-30000-1001.mp4": {
+      "sha256": "b8eb14c4e611ca55ae47145d7ce250865614542ffc595667dba4533495edf1cd",
+      "bytes": 3258,
+      "name": "readiness-ntsc-30000-1001.mp4",
+      "kind": "video",
+      "mimeType": "video/mp4",
+      "purpose": "NTSC 30000/1001 fps video with 60 frames",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 320,
+        "height": 180,
+        "frames": 60,
+        "frameRate": "30000/1001"
+      }
+    },
+    "readiness-odd-161x91.mkv": {
+      "sha256": "fa433c6081d3bb81008373a98b7701a132f30e9da715bdd210dd64357e6b2a72",
+      "bytes": 7921,
+      "name": "readiness-odd-161x91.mkv",
+      "kind": "video",
+      "mimeType": "video/x-matroska",
+      "purpose": "Lossless video with odd dimensions 161x91",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 161,
+        "height": 91
+      }
+    },
+    "readiness-rotation.mp4": {
+      "sha256": "01cc432a388fdb84bad5082a904ea8258deb7a02173d4d6fb8e11d1f9a59a5e1",
+      "bytes": 3260,
+      "name": "readiness-rotation.mp4",
+      "kind": "video",
+      "mimeType": "video/mp4",
+      "purpose": "Video with 90-degree rotation metadata",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 320,
+        "height": 180,
+        "rotationDeg": 90
+      }
+    },
+    "readiness-silent.mp4": {
+      "sha256": "19d933eebd9e300fd95f4229963d6f6a544e001d91fa49585abe252066f429a7",
+      "bytes": 2995,
+      "name": "readiness-silent.mp4",
+      "kind": "video",
+      "mimeType": "video/mp4",
+      "purpose": "Silent video with no audio stream",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 320,
+        "height": 180,
+        "hasAudio": false
+      }
+    },
+    "readiness-stereo-tones.wav": {
+      "sha256": "92f1989d1e39d2a3d1744b71042dec687f90274cf77d9fd57457ce4e14a52371",
+      "bytes": 384078,
+      "name": "readiness-stereo-tones.wav",
+      "kind": "audio",
+      "mimeType": "audio/wav",
+      "purpose": "Stereo WAV with 440 Hz left and 880 Hz right at half amplitude",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "sampleRate": 48000,
+        "channels": 2,
+        "leftFrequencyHz": 440,
+        "rightFrequencyHz": 880
+      }
+    },
+    "readiness-tone-44100.wav": {
+      "sha256": "f72440d5af7823f45cfac297696d10d01a7eae936a7200a299e115712b29d63c",
+      "bytes": 176478,
+      "name": "readiness-tone-44100.wav",
+      "kind": "audio",
+      "mimeType": "audio/wav",
+      "purpose": "Mono tone at 44100 Hz sample rate",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "sampleRate": 44100,
+        "channels": 1
+      }
+    },
+    "readiness-tone-48000.wav": {
+      "sha256": "292f0d0f72ff84d5f017cb19e48583ee4d1e5a919ee2b961a9a7eaec5ab27bec",
+      "bytes": 192078,
+      "name": "readiness-tone-48000.wav",
+      "kind": "audio",
+      "mimeType": "audio/wav",
+      "purpose": "Mono tone at 48000 Hz sample rate",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "sampleRate": 48000,
+        "channels": 1
+      }
+    },
+    "readiness-truncated.mp4": {
+      "sha256": "9a2bfaef45e64a1908ebd65f8e4a8b0edd5d0ab485171b63eea13bb8f38a3ed2",
+      "bytes": 200,
+      "name": "readiness-truncated.mp4",
+      "kind": "invalid",
+      "mimeType": "video/mp4",
+      "purpose": "Truncated MP4 that fails ffprobe",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "truncated": true
+      }
+    },
+    "readiness-vfr.mkv": {
+      "sha256": "a66c1f8e29dfccd0e0c6e69b2a7fd63d2e63c5ff5ed6e3f4db1cc3cca2845ae9",
+      "bytes": 33124,
+      "name": "readiness-vfr.mkv",
+      "kind": "video",
+      "mimeType": "video/x-matroska",
+      "purpose": "Variable frame rate MKV with 5 frames at non-uniform PTS",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated for JOY Media readiness tests"
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 320,
+        "height": 180,
+        "frames": 5
+      }
+    },
+    "video.mp4": {
+      "sha256": "ca3deb99602a39bc747e89599b3e05393f404721a7c99683b83399596248f24f",
+      "bytes": 43899,
+      "name": "video.mp4",
+      "kind": "video",
+      "mimeType": "video/mp4",
+      "purpose": "Deterministic video fixture for JOY Media import and validation tests.",
+      "generatedBy": "tooling/generate-media-fixtures.mjs using ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers / ffprobe version 8.1.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers",
+      "provenance": {
+        "kind": "synthetic",
+        "license": "Generated deterministic developer fixture; no third-party media."
+      },
+      "consumers": [
+        "cli",
+        "editor",
+        "desktop",
+        "release"
+      ],
+      "expectedDecoded": {
+        "width": 320,
+        "height": 180,
+        "frames": 90,
+        "frameRate": "30/1",
+        "durationUs": 3000000,
+        "streams": [
+          "video",
+          "audio"
+        ],
+        "sampleRate": 48000,
+        "channels": 1
+      },
+      "mime": "video/mp4",
+      "durationUs": 3000000,
+      "width": 320,
+      "height": 180,
+      "sampleRate": 48000,
+      "channels": 1
     }
   }
 }

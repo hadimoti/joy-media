@@ -32,6 +32,8 @@ async function ledger(
     );
     CREATE UNIQUE INDEX usdc_invoices_pending_amount_idx
       ON usdc_invoices (recipient_address, amount_usdc_base_units) WHERE status = 'pending';
+    CREATE UNIQUE INDEX usdc_invoices_pending_owner_plan_idx
+      ON usdc_invoices (owner_id, plan) WHERE status = 'pending';
     CREATE UNIQUE INDEX usdc_invoices_txhash_logindex_idx ON usdc_invoices (tx_hash, log_index);
   `);
   let idCount = 0;
@@ -73,6 +75,33 @@ describe('UsdcInvoiceLedger.createInvoice', () => {
     const first = await l.createInvoice('user@example.com', 'monthly');
     const second = await l.createInvoice('user@example.com', 'monthly');
     expect(second).toEqual(first);
+  });
+
+  it('returns one pending invoice for concurrent retries by the same owner', async () => {
+    let nudge = 0;
+    const l = await ledger({ nudgeFactory: () => nudge++ });
+
+    const [first, second] = await Promise.all([
+      l.createInvoice('user@example.com', 'monthly'),
+      l.createInvoice('user@example.com', 'monthly'),
+    ]);
+
+    expect(second).toEqual(first);
+    expect(await l.listForReconciliation()).toHaveLength(1);
+  });
+
+  it('expires a stale pending invoice before allocating its replacement', async () => {
+    let now = 1_000;
+    let nudge = 0;
+    const l = await ledger({ now: () => now, invoiceTtlMs: 100, nudgeFactory: () => nudge++ });
+    const first = await l.createInvoice('user@example.com', 'monthly');
+
+    now = 1_100;
+    const replacement = await l.createInvoice('user@example.com', 'monthly');
+
+    expect(replacement.id).not.toBe(first.id);
+    expect((await l.getInvoice(first.id))?.status).toBe('expired');
+    expect(replacement.status).toBe('pending');
   });
 
   it('gives two different owners different, independently unique invoice amounts', async () => {

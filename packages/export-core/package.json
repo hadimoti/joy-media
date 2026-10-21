@@ -15,6 +15,9 @@
     "build": "tsc -b",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@joy-media/project-schema": "workspace:*"
+  },
   "devDependencies": {
     "@joy-media/test-fixtures": "workspace:*"
   }

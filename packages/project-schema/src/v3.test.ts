@@ -69,6 +69,13 @@ describe('schema v3 — Living Look instances', () => {
       }
     });
 
+    it('rejects a future schema instead of rewriting it as v2', () => {
+      const future = { ...migrateV2ToV3(v2()).project, schemaVersion: 4 };
+
+      expect(() => migrateToLatest(future as never)).toThrow(/unsupported.*schema version 4/i);
+      expect(future.schemaVersion).toBe(4);
+    });
+
     it('the migrated v3 document still passes the v2 body validator', () => {
       const project = migrateV2ToV3(v2()).project;
       expect(validateJoyProjectV2({ ...project, schemaVersion: 2 })).toEqual([]);

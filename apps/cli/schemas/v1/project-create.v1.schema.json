@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.joy.media/cli/v1/project-create.schema.json",
+  "title": "JOY Media CLI project create result v1",
+  "type": "object",
+  "required": ["id", "title", "revision", "width", "height", "fps", "sqlitePath"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "width": { "type": "integer", "minimum": 1 },
+    "height": { "type": "integer", "minimum": 1 },
+    "fps": { "type": "number", "exclusiveMinimum": 0 },
+    "sqlitePath": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

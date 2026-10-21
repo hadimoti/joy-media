@@ -200,9 +200,9 @@ function SelectedTransitionInspector({
   );
   return (
     <section className="transitions-subsection" aria-label="Selected transition inspector">
-      <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
+      <h3 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
         Selected transition
-      </h4>
+      </h3>
       <p className="monitor-meta" dir="ltr">
         {transition.type} · {(transition.durationUs / 1_000_000).toFixed(2)}s · {descriptors.length}{' '}
         animated uniform{descriptors.length === 1 ? '' : 's'}
@@ -266,38 +266,32 @@ function TransitionCard({
       ref={cardRef}
       className={`transition-card${isActive ? ' is-active' : ''}`}
       data-transition-type={entry.id}
-      role="button"
-      tabIndex={0}
-      aria-pressed={isActive}
-      aria-label={`${isActive ? 'Selected' : 'Apply'} ${entry.label} transition`}
       draggable
       onDragStart={onDragStart}
-      onClick={onAdd}
-      onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
-        onAdd();
-      }}
-      title={entry.label}
     >
-      <div className="transition-card-thumb">
-        {(visible || isActive) && shaderEntry !== undefined ? (
-          <TransitionPreviewCard entry={shaderEntry} isActive={isActive || visible} />
-        ) : (
-          <div className="transition-card-fallback" />
-        )}
-      </div>
-      <div className="transition-card-footer">
+      <button
+        type="button"
+        className="transition-card-select"
+        aria-pressed={isActive}
+        aria-label={`${isActive ? 'Selected' : 'Apply'} ${entry.label} transition`}
+        onClick={onAdd}
+        title={entry.label}
+      >
+        <div className="transition-card-thumb">
+          {(visible || isActive) && shaderEntry !== undefined ? (
+            <TransitionPreviewCard entry={shaderEntry} isActive={isActive || visible} />
+          ) : (
+            <div className="transition-card-fallback" />
+          )}
+        </div>
         <span className="transition-card-label">{entry.label}</span>
+      </button>
+      <div className="transition-card-footer">
         <button
           type="button"
           className="icon-button card-fav-btn"
           aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleFavorite();
-          }}
+          onClick={onToggleFavorite}
           title={isFavorite ? 'Remove favorite' : 'Add favorite'}
         >
           <svg
@@ -509,9 +503,9 @@ export function TransitionsPanel({
       <>
         {hasFavorites && !favoritesOnly && (
           <div className="transitions-subsection">
-            <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
+            <h3 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
               Favorites
-            </h4>
+            </h3>
             <div className="transition-type-picker" role="group" aria-label="Favorite transitions">
               {favItems.map((entry) => (
                 <TransitionCard
@@ -532,9 +526,9 @@ export function TransitionsPanel({
         )}
 
         <div className="transitions-subsection">
-          <h4 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
+          <h3 className="panel-section-title" style={{ marginBottom: 'var(--space-1)' }}>
             {favoritesOnly ? 'Favorites' : hasFavorites ? 'All' : 'All Transitions'}
-          </h4>
+          </h3>
           <div className="transition-type-picker" role="group" aria-label="Transition type">
             {catalog.map((entry) => (
               <TransitionCard

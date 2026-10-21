@@ -118,7 +118,7 @@ export interface BrowserMp4ExportSource {
   readonly audioTrack?: MediaStreamTrack;
   /** MP4 MIME selected by `selectBrowserMp4MimeType`; selected here when omitted. */
   readonly mimeType?: BrowserMp4MimeType;
-  /** Runs after MediaRecorder emits `start`, for synchronized media starts. */
+  /** Runs immediately after MediaRecorder.start(), aligned to the recorder clock. */
   readonly onRecordingStart?: () => void;
   readonly filename?: string;
   /** When false, the caller owns the final download (for server remux). */
@@ -275,12 +275,10 @@ export async function downloadBrowserMp4(
       await paintExportFrame(0);
       firstPendingIndex = 1;
     }
-    await startMediaRecorder(
-      recorder,
-      source.signal,
-      manualFrameCapture ? () => captureVideoTrack.requestFrame?.() : undefined,
-    );
-    source.onRecordingStart?.();
+    await startMediaRecorder(recorder, source.signal, () => {
+      source.onRecordingStart?.();
+      if (manualFrameCapture) captureVideoTrack.requestFrame?.();
+    });
     let nextFrameAt = performance.now();
     if (manualFrameCapture) {
       source.onProgress?.(1, frameCount);

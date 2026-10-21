@@ -54,6 +54,56 @@ afterEach(async () => {
 });
 
 describe('control-plane HTTP transport', () => {
+  it('answers desktop CORS preflight only for an explicitly allowed packaged origin', async () => {
+    const origin = await start(
+      { authenticate: () => undefined },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      ['joy-media-app://renderer'],
+    );
+
+    const allowed = await fetch(`${origin}/v1/projects`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'joy-media-app://renderer',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization,content-type,x-joy-sha256',
+      },
+    });
+    expect(allowed.status).toBe(204);
+    expect(allowed.headers.get('access-control-allow-origin')).toBe('joy-media-app://renderer');
+    expect(allowed.headers.get('access-control-allow-methods')).toContain('POST');
+    expect(allowed.headers.get('access-control-allow-headers')).toContain('authorization');
+    expect(allowed.headers.get('access-control-allow-headers')).toContain('x-joy-sha256');
+
+    const rejectedHeader = await fetch(`${origin}/v1/projects`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'joy-media-app://renderer',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization,x-unapproved-header',
+      },
+    });
+    expect(rejectedHeader.status).toBe(403);
+    expect(rejectedHeader.headers.get('access-control-allow-headers')).toBeNull();
+
+    const denied = await fetch(`${origin}/v1/projects`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://attacker.example',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization',
+      },
+    });
+    expect(denied.status).toBe(403);
+    expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
   it('separates liveness from fail-closed dependency readiness', async () => {
     const origin = await start(
       { authenticate: () => undefined },
@@ -1800,6 +1850,7 @@ async function start(
   rateLimit?: { readonly windowMs?: number; readonly maxRequests?: number },
   clientAddressResolver?: ClientAddressResolver,
   readiness?: ApiReadinessOptions,
+  corsAllowedOrigins?: readonly string[],
 ): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane,
@@ -1811,6 +1862,7 @@ async function start(
     ...(rateLimit === undefined ? {} : { rateLimit }),
     ...(clientAddressResolver === undefined ? {} : { clientAddressResolver }),
     ...(readiness === undefined ? {} : { readiness }),
+    ...(corsAllowedOrigins === undefined ? {} : { corsAllowedOrigins }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');

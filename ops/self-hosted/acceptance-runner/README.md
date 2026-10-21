@@ -2,9 +2,11 @@
 
 Labels: `self-hosted,linux,x64,joy-media-acceptance`
 
-The acceptance runner is a SECONDARY Linux Docker self-hosted runner
-used only by the isolated real-services acceptance lane of
-`release-candidate.yml` / `release-candidate-v2.yml`.
+The acceptance runner is a SECONDARY Linux Docker self-hosted runner used by
+the isolated real-services acceptance lane and the fixture-only primary /
+shipped-bundle browser lanes in `release-candidate-v2.yml`. The latter lanes
+run here because the GitHub-hosted runner timed out during production media
+exports; keep their runner-local service settings cleared in the workflow.
 
 ## Self-hosted label
 
@@ -21,7 +23,10 @@ checkout paths must remain unique to the acceptance job.
 
 Identical to `ops/self-hosted/linux-runner/Dockerfile` (Node 22, pnpm
 11.15.0, FFmpeg, PostgreSQL client, MinIO `mc`, Playwright Chromium
-system libraries, all hash-verified). Build the same way and register
+system libraries, all hash-verified). Browser jobs install Chromium with
+`pnpm exec playwright install chromium`; they must not use `--with-deps`,
+which would try to modify the already-built container's system packages.
+Build the same way and register
 with `RUNNER_LABELS=self-hosted,linux,x64,joy-media-acceptance`.
 
 ## Registration token handling

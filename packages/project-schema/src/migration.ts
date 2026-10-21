@@ -87,7 +87,7 @@ export function migrateV0ToV1(project: SpikeProject): MigrationResult {
   };
   const diagnostics = validateJoyProjectV1(migrated);
   if (diagnostics.length > 0)
-    throw new Error(`v0 migration produced invalid v1: ${diagnostics[0]!.message}`);
+    throw migrationValidationError('v0 migration produced invalid v1', diagnostics);
   return {
     project: migrated,
     report: {
@@ -128,7 +128,7 @@ export function migrateV1ToV2(project: JoyProjectV1): V2MigrationResult {
   };
   const diagnostics = validateJoyProjectV2(migrated);
   if (diagnostics.length > 0)
-    throw new Error(`v1 migration produced invalid v2: ${diagnostics[0]!.message}`);
+    throw migrationValidationError('v1 migration produced invalid v2', diagnostics);
   return {
     project: migrated,
     report: {
@@ -155,18 +155,32 @@ export function migrateV2ToV3(project: JoyProjectV2): V3MigrationResult {
   const migrated: JoyProjectV3 = { ...project, schemaVersion: 3 };
   const diagnostics = validateJoyProjectV3(migrated);
   if (diagnostics.length > 0)
-    throw new Error(`v2 migration produced invalid v3: ${diagnostics[0]!.message}`);
+    throw migrationValidationError('v2 migration produced invalid v3', diagnostics);
   return {
     project: migrated,
     report: { fromVersion: 2, toVersion: 3, defaultsApplied: [] },
   };
 }
 
+function migrationValidationError(
+  prefix: string,
+  diagnostics: readonly { readonly path?: string; readonly message: string }[],
+): Error {
+  const first = diagnostics[0]!;
+  const location = first.path === undefined ? '' : ` at ${first.path}`;
+  return new Error(`${prefix}${location}: ${first.message}`);
+}
+
 /** Brings any known project version up to the latest schema. */
 export function migrateToLatest(project: AnyJoyProject | JoyProjectV3): JoyProjectV3 {
   if (project.schemaVersion === 3) return project;
-  const v2 = project.schemaVersion === 2 ? project : migrateV1ToV2(project).project;
-  return migrateV2ToV3(v2).project;
+  if (project.schemaVersion === 1) {
+    return migrateV2ToV3(migrateV1ToV2(project).project).project;
+  }
+  if (project.schemaVersion === 2) return migrateV2ToV3(project).project;
+  throw new Error(
+    `Unsupported project schema version ${String((project as { schemaVersion: unknown }).schemaVersion)}`,
+  );
 }
 
 function migrateClip(clip: Clip, assets: Record<string, AssetRecordV1>): ClipV1 {

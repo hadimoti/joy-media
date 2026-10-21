@@ -25,10 +25,15 @@ import path, { dirname, join } from 'node:path';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseProjectDeepLink } from '../deep-link.js';
+import { editorOriginFromFrameUrl } from '../origin-policy.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
-import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
+import {
+  createIpcHandlers,
+  dispatchIpcRequest,
+  dispatchSynchronousIpcRequest,
+} from './ipc-handlers.js';
 import type { IpcRequest } from '../ipc.js';
 import {
   PACKAGED_RENDERER_SCHEME,
@@ -42,6 +47,11 @@ import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { probeOpenAiCompatibleProvider } from '@joy-media/provider-sdk';
 import { evaluateAutoUpdate } from './auto-update-policy.js';
+import {
+  DESKTOP_TEST_API_BASE_ARGUMENT,
+  resolveTestApiBaseUrl,
+  resolveTestDownloadDirectory,
+} from './test-api-override.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
@@ -51,6 +61,14 @@ const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
 // docs/joy-media-final-migration-progress.md (no prior session ever opened a real Electron
 // window). Never shows a window and never touches production data.
 const isSmokeMode = process.argv.includes('--smoke');
+const testApiBaseUrl = resolveTestApiBaseUrl({ argv: process.argv, env: process.env });
+const testDownloadDirectory = process.argv.includes('--joy-media-test-mode')
+  ? resolveTestDownloadDirectory({
+      argv: process.argv,
+      env: process.env,
+      userDataDirectory: app.getPath('userData'),
+    })
+  : undefined;
 
 // Privileged so the packaged renderer behaves like https:// (fetch, CSP, secure context)
 // instead of the restricted "file://"-style origin Electron gives unregistered schemes.
@@ -154,6 +172,20 @@ if (!app.requestSingleInstanceLock()) {
   ipcMain.handle('joy-desktop-ipc', (_event, request: IpcRequest) =>
     dispatchIpcRequest(ipcHandlers, request),
   );
+  ipcMain.on('joy-desktop-project-storage', (event, request: IpcRequest) => {
+    let senderOrigin = '';
+    senderOrigin = editorOriginFromFrameUrl(event.senderFrame?.url ?? '') ?? '';
+    if (typeof request !== 'object' || request === null) {
+      event.returnValue = { ok: false, error: 'Blocked IPC request: malformed request' };
+      return;
+    }
+    // Trust the actual frame URL, never an origin supplied by renderer JavaScript.
+    event.returnValue = dispatchSynchronousIpcRequest(ipcHandlers, {
+      origin: senderOrigin,
+      channel: request.channel,
+      payload: request.payload,
+    });
+  });
 
   app.on('second-instance', (_event, argv) => {
     const link = argv.find((arg) => arg.startsWith('joy://'));
@@ -172,6 +204,23 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
     app.setAsDefaultProtocolClient('joy');
+
+    session.defaultSession.on('will-download', (_event, item) => {
+      const filename = path.basename(item.getFilename());
+      if (testDownloadDirectory !== undefined) {
+        item.setSavePath(join(testDownloadDirectory, filename));
+        return;
+      }
+
+      const extension = path.extname(filename).slice(1).toLowerCase();
+      item.setSaveDialogOptions({
+        title: 'Save JOY Media export',
+        defaultPath: join(app.getPath('downloads'), filename),
+        ...(extension.length === 0
+          ? {}
+          : { filters: [{ name: 'Media file', extensions: [extension] }] }),
+      });
+    });
 
     if (!isDev) {
       protocol.handle(PACKAGED_RENDERER_SCHEME, (request) => {
@@ -249,7 +298,12 @@ if (!app.requestSingleInstanceLock()) {
       show: !isSmokeMode,
       frame: false,
       titleBarStyle: 'hidden',
-      webPreferences: buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
+      webPreferences: {
+        ...buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
+        ...(testApiBaseUrl === undefined
+          ? {}
+          : { additionalArguments: [`${DESKTOP_TEST_API_BASE_ARGUMENT}${testApiBaseUrl}`] }),
+      },
     });
     mainWindow = win;
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

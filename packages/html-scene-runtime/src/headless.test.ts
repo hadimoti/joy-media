@@ -4,6 +4,7 @@ import { createSandboxedReactScene } from './runtime.js';
 import {
   captureSceneRegion,
   captureSceneSurface,
+  captureSceneSurfaceAsync,
   compareSceneSurfaces,
   SceneCaptureCache,
 } from './headless.js';
@@ -48,6 +49,41 @@ describe('deterministic headless scene capture', () => {
     expect(first.sha256).toBe(second.sha256);
     second.rgba[0] = 99;
     expect(first.rgba[0]).toBe(1); // cached values are defensive copies
+  });
+
+  it('keeps frames with different paint payloads apart in the cache', async () => {
+    let captures = 0;
+    const driver = {
+      capture: () => {
+        captures++;
+        return { rgba: new Uint8Array(16).fill(captures) };
+      },
+      captureAsync: () => {
+        captures++;
+        return Promise.resolve({ rgba: new Uint8Array(16).fill(captures) });
+      },
+    };
+    const cache = new SceneCaptureCache();
+    const request = (background: string) => ({
+      timeUs: 0,
+      frameRate: rational(30, 1),
+      seed: 'fixed',
+      variables: {},
+      locale: 'en',
+      paint: { width: 2, height: 2, background, rects: [], lines: [], fonts: [] },
+    });
+    const red = captureSceneSurface(scene, driver, request('#ff0000'), cache);
+    const blue = captureSceneSurface(scene, driver, request('#0000ff'), cache);
+    expect(captures).toBe(2);
+    expect(blue.rgba[0]).toBe(2);
+    expect(captureSceneSurface(scene, driver, request('#ff0000'), cache).sha256).toBe(red.sha256);
+    expect(captures).toBe(2);
+    const green = await captureSceneSurfaceAsync(scene, driver, request('#00ff00'), cache);
+    expect(captures).toBe(3);
+    expect(green.rgba[0]).toBe(3);
+    const greenAgain = await captureSceneSurfaceAsync(scene, driver, request('#00ff00'), cache);
+    expect(captures).toBe(3);
+    expect(greenAgain.sha256).toBe(green.sha256);
   });
 
   it('caches cropped regions and rejects out-of-bounds requests', () => {

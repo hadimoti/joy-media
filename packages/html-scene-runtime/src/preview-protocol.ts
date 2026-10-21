@@ -8,6 +8,8 @@ import { generateSceneCsp } from './csp.js';
 import { isRecord, sceneDiagnostic } from './diagnostics.js';
 import type { SceneDiagnostic } from './diagnostics.js';
 import type { SceneManifestV1 } from './manifest.js';
+import type { ScenePaintFrameV1 } from '@joy-media/project-schema';
+import { isCanonicalScenePaintFont, SCENE_PAINT_FONT_DESCRIPTORS } from './font-descriptors.js';
 
 export interface ScenePreviewUpdate {
   readonly type: 'joy.scene.update.v1';
@@ -28,6 +30,32 @@ export interface ScenePreviewCapture {
   readonly requestId: string;
   readonly width: number;
   readonly height: number;
+  /** Optional explicit shaped text lines; existing capture messages remain valid. */
+  readonly lines?: readonly ScenePaintLine[];
+  /** Complete explicit frame painted directly by the shared script. */
+  readonly paint?: ScenePaintFrameV1;
+  /** Reject image nodes for capture paths that require image-free markup. Defaults to skipping them. */
+  readonly rejectImages?: boolean;
+}
+
+export interface ScenePaintLine {
+  readonly text: string;
+  readonly x: number;
+  readonly y: number;
+  readonly height?: number;
+  readonly font: string;
+  readonly color?: string;
+  readonly direction: 'ltr' | 'rtl';
+  readonly align: 'start' | 'end' | 'left' | 'right' | 'center';
+  readonly opacity?: number;
+}
+
+export interface ScenePreviewFontFace {
+  readonly family: string;
+  readonly weight: 400 | 700;
+  readonly subset: 'arabic' | 'latin';
+  /** Base64-encoded canonical WOFF2 bytes. */
+  readonly bytesBase64: string;
 }
 
 export type ScenePreviewMessage = ScenePreviewUpdate | ScenePreviewLifecycle | ScenePreviewCapture;
@@ -68,10 +96,40 @@ const SAFE_BUNDLE_URL = /^(blob:|data:text\/javascript(?:;[^,]*)?,)/i;
  * subscribe to the DOM events below (or read `window.__joySceneContext`) and
  * must not expect a host object, DOM handle, or arbitrary command channel.
  */
-const PREVIEW_BOOTSTRAP = `(function () {
+export const SCENE_PAINT_SCRIPT = `(function () {
   'use strict';
+  var canonicalFonts = ${JSON.stringify(SCENE_PAINT_FONT_DESCRIPTORS)};
   var instanceId = null;
   var suspended = false;
+  function validPaintFrame(frame) {
+    if (!frame || typeof frame !== 'object' || !Number.isSafeInteger(frame.width) ||
+        !Number.isSafeInteger(frame.height) || frame.width < 1 || frame.height < 1 ||
+        frame.width > 4096 || frame.height > 4096 || frame.width * frame.height > 8388608 ||
+        (frame.background !== undefined && typeof frame.background !== 'string') ||
+        !Array.isArray(frame.rects) || frame.rects.length > 128 ||
+        !Array.isArray(frame.lines) || frame.lines.length > 128 ||
+        !Array.isArray(frame.fonts) || frame.fonts.length < 1 || frame.fonts.length > 4) return false;
+    var knownFonts = frame.fonts.every(function (font) {
+      return canonicalFonts.some(function (canonical) {
+        return font && font.family === canonical.family && font.weight === canonical.weight &&
+          font.subset === canonical.subset && font.sha256 === canonical.sha256 && font.length === canonical.length;
+      });
+    });
+    if (!knownFonts) return false;
+    return frame.rects.every(function (rect) {
+      return rect && [rect.x, rect.y, rect.width, rect.height, rect.opacity].every(Number.isFinite) &&
+        rect.width > 0 && rect.height > 0 && rect.opacity >= 0 && rect.opacity <= 1 &&
+        typeof rect.colour === 'string' && rect.colour.length > 0;
+    }) && frame.lines.every(function (line) {
+      return line && typeof line.text === 'string' && typeof line.font === 'string' &&
+        typeof line.colour === 'string' && line.face && ['ltr', 'rtl', 'auto'].indexOf(line.direction) !== -1 &&
+        ['left', 'center', 'right'].indexOf(line.align) !== -1 &&
+        [line.x, line.y, line.height, line.opacity].every(Number.isFinite) && line.height > 0 &&
+        line.opacity >= 0 && line.opacity <= 1 && frame.fonts.some(function (font) {
+          return font.family === line.face.family && font.weight === line.face.weight && font.subset === line.face.subset;
+        });
+    });
+  }
   function validVariables(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     return Object.keys(value).every(function (key) {
@@ -82,14 +140,72 @@ const PREVIEW_BOOTSTRAP = `(function () {
   function isTransparent(color) {
     return !color || color === 'transparent' || color === 'rgba(0, 0, 0, 0)';
   }
-  function paintTree(ctx, root, width, height) {
+  function resolveAlign(textAlign, rtl) {
+    if (textAlign === 'center') return 'center';
+    if (textAlign === 'end') return rtl ? 'left' : 'right';
+    if (textAlign === 'right' || textAlign === 'left') return textAlign;
+    return rtl ? 'right' : 'left';
+  }
+  function paintExplicitFrame(ctx, width, height, frame) {
+    var sx = width / frame.width;
+    var sy = height / frame.height;
+    ctx.clearRect(0, 0, width, height);
+    if (frame.background && !isTransparent(frame.background)) {
+      ctx.fillStyle = frame.background;
+      ctx.fillRect(0, 0, width, height);
+    }
+    frame.rects.forEach(function (rect) {
+      ctx.save();
+      ctx.globalAlpha = rect.opacity;
+      ctx.fillStyle = rect.colour;
+      ctx.fillRect(rect.x * sx, rect.y * sy, rect.width * sx, rect.height * sy);
+      ctx.restore();
+    });
+    frame.lines.forEach(function (line) {
+      ctx.save();
+      ctx.scale(sx, sy);
+      ctx.font = line.font;
+      ctx.fillStyle = line.colour;
+      if (line.direction === 'auto') {
+        var rtl = false;
+        for (var character = 0; character < line.text.length; character++) {
+          var code = line.text.charCodeAt(character);
+          if ((code >= 0x0590 && code <= 0x08ff) || (code >= 0xfb1d && code <= 0xfefc)) {
+            rtl = true;
+            break;
+          }
+        }
+        ctx.direction = rtl ? 'rtl' : 'ltr';
+      } else {
+        ctx.direction = line.direction;
+      }
+      ctx.textAlign = line.align;
+      ctx.textBaseline = 'alphabetic';
+      ctx.globalAlpha = line.opacity;
+      var metrics = ctx.measureText(line.text);
+      var ascent = metrics.fontBoundingBoxAscent || metrics.actualBoundingBoxAscent || 0;
+      var descent = metrics.fontBoundingBoxDescent || metrics.actualBoundingBoxDescent || 0;
+      var baseline = line.y + (line.height - ascent - descent) / 2 + ascent;
+      ctx.fillText(line.text, line.x, baseline);
+      ctx.restore();
+    });
+  }
+  function paintTree(ctx, root, width, height, explicitLines, background, rejectImages, paintFrame) {
+    if (paintFrame) {
+      paintExplicitFrame(ctx, width, height, paintFrame);
+      return;
+    }
     var rootRect = root.getBoundingClientRect();
     var rw = Math.max(1, rootRect.width || width);
     var rh = Math.max(1, rootRect.height || height);
     var sx = width / rw;
     var sy = height / rh;
     ctx.clearRect(0, 0, width, height);
-    function walk(node) {
+    if (background && !isTransparent(background)) {
+      ctx.fillStyle = background;
+      ctx.fillRect(0, 0, width, height);
+    }
+    function walk(node, inheritedX, inheritedY) {
       if (!node) return;
       if (node.nodeType === 3) {
         var text = String(node.textContent || '').replace(/\\s+/g, ' ').trim();
@@ -99,33 +215,49 @@ const PREVIEW_BOOTSTRAP = `(function () {
         var ps = window.getComputedStyle(parent);
         if (ps.display === 'none' || ps.visibility === 'hidden') return;
         var opacity = parseFloat(ps.opacity);
+        if (Number.isNaN(opacity)) opacity = 1;
         if (!(opacity > 0)) return;
         var pr = parent.getBoundingClientRect();
         ctx.save();
-        ctx.globalAlpha = opacity;
         ctx.fillStyle = ps.color || '#fff';
         ctx.font = ps.font || '16px sans-serif';
+        ctx.direction = ps.direction === 'rtl' ? 'rtl' : 'ltr';
+        var textAlign = resolveAlign(ps.textAlign, ps.direction === 'rtl');
+        ctx.textAlign = textAlign;
         ctx.textBaseline = 'alphabetic';
         var metrics = ctx.measureText(text);
-        var textY = (pr.top - rootRect.top) * sy + Math.max(parseFloat(ps.fontSize) || 16, 12) * sy * 0.85;
-        ctx.fillText(text, (pr.left - rootRect.left) * sx, textY, Math.max(1, pr.width * sx));
-        void metrics;
+        var ascent = metrics.fontBoundingBoxAscent || metrics.actualBoundingBoxAscent || (parseFloat(ps.fontSize) || 16) * 0.8;
+        var textY = (pr.top - rootRect.top) * sy + inheritedY + ascent * sy;
+        var textX = textAlign === 'right'
+          ? (pr.right - rootRect.left) * sx + inheritedX
+          : textAlign === 'center'
+            ? (pr.left - rootRect.left + pr.width / 2) * sx + inheritedX
+            : (pr.left - rootRect.left) * sx + inheritedX;
+        if (!explicitLines || !explicitLines.length) {
+          ctx.fillText(text, textX, textY, Math.max(1, pr.width * sx));
+        }
         ctx.restore();
         return;
       }
       if (node.nodeType !== 1) return;
       var el = node;
+      if (el.tagName === 'IMG' && rejectImages) throw new Error('scene painter does not draw images');
       var style = window.getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden') return;
       var alpha = parseFloat(style.opacity);
+      if (Number.isNaN(alpha)) alpha = 1;
       if (!(alpha > 0)) return;
       var rect = el.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) {
-        for (var c = el.firstChild; c; c = c.nextSibling) walk(c);
+        for (var c = el.firstChild; c; c = c.nextSibling) walk(c, inheritedX, inheritedY);
         return;
       }
-      var x = (rect.left - rootRect.left) * sx;
-      var y = (rect.top - rootRect.top) * sy;
+      var localX = Number(el.getAttribute('data-joy-translate-x')) || 0;
+      var localY = Number(el.getAttribute('data-joy-translate-y')) || 0;
+      var translateX = inheritedX + localX * sx;
+      var translateY = inheritedY + localY * sy;
+      var x = (rect.left - rootRect.left) * sx + translateX;
+      var y = (rect.top - rootRect.top) * sy + translateY;
       var w = rect.width * sx;
       var h = rect.height * sy;
       ctx.save();
@@ -140,12 +272,30 @@ const PREVIEW_BOOTSTRAP = `(function () {
         ctx.lineWidth = Math.max(1, bw * Math.min(sx, sy));
         ctx.strokeRect(x + 0.5, y + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
       }
-      for (var child = el.firstChild; child; child = child.nextSibling) walk(child);
+      for (var child = el.firstChild; child; child = child.nextSibling) walk(child, translateX, translateY);
       ctx.restore();
     }
-    walk(root);
+    walk(root, 0, 0);
+    if (explicitLines && explicitLines.length) {
+      explicitLines.forEach(function (line) {
+        ctx.save();
+        ctx.font = line.font;
+        ctx.fillStyle = line.color || '#fff';
+        ctx.direction = line.direction === 'rtl' ? 'rtl' : 'ltr';
+        ctx.textAlign = line.align || 'start';
+        ctx.textBaseline = 'alphabetic';
+        ctx.globalAlpha = line.opacity === undefined ? 1 : Math.max(0, Math.min(1, line.opacity));
+        var metrics = ctx.measureText(line.text);
+        var ascent = metrics.fontBoundingBoxAscent || metrics.actualBoundingBoxAscent || 0;
+        var descent = metrics.fontBoundingBoxDescent || metrics.actualBoundingBoxDescent || 0;
+        var baseline = line.y + ascent;
+        if (line.height !== undefined) baseline = line.y + (line.height - ascent - descent) / 2 + ascent;
+        ctx.fillText(line.text, line.x * sx, baseline * sy);
+        ctx.restore();
+      });
+    }
   }
-  function captureSurface(requestId, width, height) {
+  async function captureSurface(requestId, width, height, lines, rejectImages, paintFrame) {
     var root = document.getElementById('joy-scene-root');
     if (!root) {
       window.parent.postMessage({
@@ -169,7 +319,27 @@ const PREVIEW_BOOTSTRAP = `(function () {
     }
     // Paint the live laid-out DOM. SVG HTML embedding taints getImageData in Chromium.
     try {
-      paintTree(ctx, root, width, height);
+      var fonts = [];
+      if (paintFrame) {
+        paintFrame.lines.forEach(function (line) { fonts.push([line.font, line.text]); });
+      }
+      (lines || []).forEach(function (line) { fonts.push([line.font, line.text]); });
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (var node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!String(node.textContent || '').trim() || !node.parentElement) continue;
+        var style = window.getComputedStyle(node.parentElement);
+        fonts.push([style.font || '16px sans-serif', String(node.textContent)]);
+      }
+      await Promise.all(fonts.map(function (entry) {
+        return document.fonts.load(entry[0], entry[1]).then(function (loaded) {
+          if (entry[0].indexOf('Noto Sans Arabic') !== -1 &&
+              (!loaded.length || !document.fonts.check(entry[0], entry[1]))) {
+            throw new Error('Noto Sans Arabic font face failed to load');
+          }
+        });
+      }));
+      await document.fonts.ready;
+      paintTree(ctx, root, width, height, lines, undefined, rejectImages === true, paintFrame);
       var imageData = ctx.getImageData(0, 0, width, height);
       var buffer = imageData.data.buffer;
       window.parent.postMessage(
@@ -199,6 +369,22 @@ const PREVIEW_BOOTSTRAP = `(function () {
       canvas.height = 0;
     }
   }
+  window.__joyPaintSceneSurface = function (width, height, lines, background, rejectImages, paintFrame) {
+    var root = document.getElementById('joy-scene-root');
+    if (!root) throw new Error('joy-scene-root missing');
+    var canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    var ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) throw new Error('2d context unavailable');
+    paintTree(ctx, root, width, height, lines || [], background, rejectImages === true, paintFrame);
+    var bytes = ctx.getImageData(0, 0, width, height).data;
+    var binary = '';
+    for (var start = 0; start < bytes.length; start += 0x8000) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(start, Math.min(start + 0x8000, bytes.length)));
+    }
+    canvas.width = 0; canvas.height = 0;
+    return btoa(binary);
+  };
   function receive(event) {
     if (event.source !== window.parent) return;
     var message = event.data;
@@ -212,7 +398,8 @@ const PREVIEW_BOOTSTRAP = `(function () {
       if (typeof message.requestId !== 'string' ||
           !Number.isSafeInteger(message.width) || message.width < 1 ||
           !Number.isSafeInteger(message.height) || message.height < 1) return;
-      captureSurface(message.requestId, message.width, message.height);
+      if (message.paint !== undefined && !validPaintFrame(message.paint)) return;
+      void captureSurface(message.requestId, message.width, message.height, message.lines, message.rejectImages, message.paint);
       return;
     }
     if (message.type !== 'joy.scene.update.v1' || suspended ||
@@ -230,6 +417,8 @@ const PREVIEW_BOOTSTRAP = `(function () {
   // so host.update/capture never race an empty root.
 }());`;
 
+const PREVIEW_BOOTSTRAP = SCENE_PAINT_SCRIPT;
+
 export interface ScenePreviewEndpoint {
   postMessage(message: ScenePreviewMessage, targetOrigin: '*'): void;
 }
@@ -241,6 +430,7 @@ export interface ScenePreviewEndpoint {
 export function createSandboxedIframeDescriptor(
   manifest: SceneManifestV1,
   bundleUrl: string,
+  fontFaces: readonly ScenePreviewFontFace[] = [],
 ): SandboxedIframeDescriptor {
   if (!SAFE_BUNDLE_URL.test(bundleUrl)) {
     throw new RangeError('scene bundle URL must be a controlled blob: or data:text/javascript URL');
@@ -248,6 +438,24 @@ export function createSandboxedIframeDescriptor(
   const csp = generateSceneCsp(manifest.permissions);
   const escapedCsp = csp.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
   const escapedBundleUrl = bundleUrl.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+  const fontCss = fontFaces
+    .map((face) => {
+      if (
+        face.family !== 'Noto Sans Arabic' ||
+        (face.weight !== 400 && face.weight !== 700) ||
+        (face.subset !== 'arabic' && face.subset !== 'latin') ||
+        face.bytesBase64.length > 200_000 ||
+        !/^[A-Za-z0-9+/]+={0,2}$/.test(face.bytesBase64)
+      ) {
+        throw new RangeError('scene font face descriptor is invalid');
+      }
+      const unicodeRange =
+        face.subset === 'arabic'
+          ? 'U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF'
+          : 'U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD';
+      return `@font-face{font-family:'${face.family}';font-style:normal;font-weight:${face.weight};font-display:block;unicode-range:${unicodeRange};src:url(data:font/woff2;base64,${face.bytesBase64}) format('woff2');}`;
+    })
+    .join('');
   return {
     sandbox: 'allow-scripts',
     csp,
@@ -255,7 +463,7 @@ export function createSandboxedIframeDescriptor(
       '<!doctype html>',
       '<html><head>',
       `<meta http-equiv="Content-Security-Policy" content="${escapedCsp}">`,
-      '<style>html,body,#joy-scene-root{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent;}</style>',
+      `<style>${fontCss}html,body,#joy-scene-root{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent;}</style>`,
       '</head><body><div id="joy-scene-root"></div>',
       `<script>${PREVIEW_BOOTSTRAP}</script>`,
       `<script type="module" src="${escapedBundleUrl}"></script>`,
@@ -291,10 +499,19 @@ export class ScenePreviewSession {
     return true;
   }
 
-  capture(requestId: string, width: number, height: number): boolean {
+  capture(
+    requestId: string,
+    width: number,
+    height: number,
+    lines?: readonly ScenePaintLine[],
+    rejectImages = false,
+    paint?: ScenePaintFrameV1,
+  ): boolean {
     if (requestId.length === 0) throw new RangeError('scene capture requestId must be non-empty');
     if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1)
       throw new RangeError('scene capture size must be positive safe integers');
+    if (paint !== undefined && (!isScenePaintFrame(paint) || paint.width < 1 || paint.height < 1))
+      throw new RangeError('scene paint frame is invalid');
     if (this.#suspended) return false;
     this.endpoint.postMessage(
       {
@@ -303,6 +520,9 @@ export class ScenePreviewSession {
         requestId,
         width,
         height,
+        ...(lines === undefined ? {} : { lines }),
+        ...(paint === undefined ? {} : { paint }),
+        ...(rejectImages ? { rejectImages: true } : {}),
       },
       '*',
     );
@@ -337,14 +557,22 @@ export function validateScenePreviewMessage(value: unknown): ScenePreviewMessage
     typeof value.height === 'number' &&
     Number.isSafeInteger(value.height) &&
     value.height > 0
-  )
+  ) {
+    if (value.rejectImages !== undefined && typeof value.rejectImages !== 'boolean')
+      return undefined;
+    if (value.lines !== undefined && !isScenePaintLines(value.lines)) return undefined;
+    if (value.paint !== undefined && !isScenePaintFrame(value.paint)) return undefined;
     return {
       type: value.type,
       instanceId: value.instanceId,
       requestId: value.requestId,
       width: value.width,
       height: value.height,
+      ...(value.lines === undefined ? {} : { lines: value.lines }),
+      ...(value.paint === undefined ? {} : { paint: value.paint }),
+      ...(value.rejectImages === true ? { rejectImages: true } : {}),
     };
+  }
   if (
     value.type === 'joy.scene.update.v1' &&
     typeof value.timeUs === 'number' &&
@@ -359,6 +587,105 @@ export function validateScenePreviewMessage(value: unknown): ScenePreviewMessage
       variables: value.variables,
     };
   return undefined;
+}
+
+/** Validates transient explicit paint data before either capture transport posts it. */
+export function isScenePaintFrame(value: unknown): value is ScenePaintFrameV1 {
+  if (!isRecord(value)) return false;
+  const frame = value as unknown as ScenePaintFrameV1;
+  const isFiniteNumber = (number: unknown): number is number =>
+    typeof number === 'number' && Number.isFinite(number);
+  if (
+    !Number.isSafeInteger(frame.width) ||
+    frame.width < 1 ||
+    frame.width > 4096 ||
+    !Number.isSafeInteger(frame.height) ||
+    frame.height < 1 ||
+    frame.height > 4096 ||
+    frame.width * frame.height > 8_388_608 ||
+    (frame.background !== undefined && typeof frame.background !== 'string') ||
+    !Array.isArray(frame.rects) ||
+    frame.rects.length > 128 ||
+    !Array.isArray(frame.lines) ||
+    frame.lines.length > 128 ||
+    !Array.isArray(frame.fonts) ||
+    frame.fonts.length < 1 ||
+    frame.fonts.length > 4 ||
+    !frame.fonts.every(isCanonicalScenePaintFont)
+  )
+    return false;
+  const hasFace = (ref: unknown): boolean =>
+    isRecord(ref) &&
+    frame.fonts.some(
+      (font) =>
+        isRecord(font) &&
+        ref.family === font.family &&
+        ref.weight === font.weight &&
+        ref.subset === font.subset,
+    );
+  return (
+    frame.rects.every(
+      (rect) =>
+        isRecord(rect) &&
+        isFiniteNumber(rect.x) &&
+        isFiniteNumber(rect.y) &&
+        isFiniteNumber(rect.width) &&
+        isFiniteNumber(rect.height) &&
+        isFiniteNumber(rect.opacity) &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.opacity >= 0 &&
+        rect.opacity <= 1 &&
+        typeof rect.colour === 'string' &&
+        rect.colour.length > 0,
+    ) &&
+    frame.lines.every(
+      (line) =>
+        isRecord(line) &&
+        typeof line.text === 'string' &&
+        typeof line.font === 'string' &&
+        line.font.length > 0 &&
+        typeof line.colour === 'string' &&
+        line.colour.length > 0 &&
+        ['ltr', 'rtl', 'auto'].includes(String(line.direction)) &&
+        ['left', 'center', 'right'].includes(String(line.align)) &&
+        isFiniteNumber(line.x) &&
+        isFiniteNumber(line.y) &&
+        isFiniteNumber(line.height) &&
+        isFiniteNumber(line.opacity) &&
+        line.height > 0 &&
+        line.opacity >= 0 &&
+        line.opacity <= 1 &&
+        hasFace(line.face),
+    )
+  );
+}
+
+function isScenePaintLines(value: unknown): value is readonly ScenePaintLine[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (line) =>
+        isRecord(line) &&
+        typeof line.text === 'string' &&
+        line.text.length > 0 &&
+        typeof line.x === 'number' &&
+        Number.isFinite(line.x) &&
+        typeof line.y === 'number' &&
+        Number.isFinite(line.y) &&
+        (line.height === undefined ||
+          (typeof line.height === 'number' && Number.isFinite(line.height) && line.height > 0)) &&
+        typeof line.font === 'string' &&
+        (line.direction === 'ltr' || line.direction === 'rtl') &&
+        ['start', 'end', 'left', 'right', 'center'].includes(String(line.align)) &&
+        (line.color === undefined || typeof line.color === 'string') &&
+        (line.opacity === undefined ||
+          (typeof line.opacity === 'number' &&
+            Number.isFinite(line.opacity) &&
+            line.opacity >= 0 &&
+            line.opacity <= 1)),
+    )
+  );
 }
 
 export function validateScenePreviewEvent(value: unknown): ScenePreviewEvent | undefined {

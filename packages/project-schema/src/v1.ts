@@ -15,6 +15,7 @@ import type { UniversalTimelineDocument } from './universal-timeline.js';
 import { validateUniversalTimelineDocument } from './universal-timeline.js';
 import type { TimelineTrackDeckDocument } from './timeline-track-deck.js';
 import { validateTimelineTrackDeckDocument } from './timeline-track-deck.js';
+import { CONTENT_TEMPLATES_PLUGIN_KEY, validateContentInstances } from './content-templates.js';
 
 export type EffectParamValue =
   | number
@@ -555,6 +556,8 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_PLUGIN_DATA', 'pluginData must be an object', 'pluginData'),
     );
+  else if (Object.prototype.hasOwnProperty.call(value.pluginData, CONTENT_TEMPLATES_PLUGIN_KEY))
+    diagnostics.push(...validateContentInstances(value));
   if (value.universalTimeline !== undefined) {
     diagnostics.push(...validateUniversalTimelineDocument(value.universalTimeline));
   }
@@ -1282,34 +1285,38 @@ function validateTrack(
     return;
   }
   for (const clip of value.clips) {
-    if (
-      !isRecord(clip) ||
-      !isNonEmptyString(clip.id) ||
-      !isNonNegativeSafeInteger(clip.startUs) ||
-      !isPositiveInteger(clip.durationUs)
-    ) {
+    if (!isRecord(clip) || !isNonEmptyString(clip.id)) {
       diagnostics.push(
-        diagnostic(
-          'PROJECT_SCHEMA_V1_CLIP',
-          'clip id/range are invalid',
-          `${path}.${value.id}.clips`,
-        ),
+        diagnostic('PROJECT_SCHEMA_V1_CLIP', 'clip id is invalid', `${path}.${value.id}.clips`),
       );
       continue;
     }
-    try {
-      clipTimeRange(clip.startUs, clip.durationUs);
-    } catch (error) {
+    const clipPath = `${path}.${value.id}.clips.${clip.id}`;
+    const validStart = isNonNegativeSafeInteger(clip.startUs);
+    const validDuration = isPositiveInteger(clip.durationUs);
+    if (!validStart)
       diagnostics.push(
         diagnostic(
           'PROJECT_SCHEMA_V1_CLIP',
-          (error as Error).message,
-          `${path}.${value.id}.clips.${clip.id}`,
+          'startUs must be a nonnegative safe integer',
+          `${clipPath}.startUs`,
         ),
       );
+    if (!validDuration)
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_CLIP',
+          'durationUs must be a positive safe integer',
+          `${clipPath}.durationUs`,
+        ),
+      );
+    if (!validStart || !validDuration) continue;
+    try {
+      clipTimeRange(clip.startUs as number, clip.durationUs as number);
+    } catch (error) {
+      diagnostics.push(diagnostic('PROJECT_SCHEMA_V1_CLIP', (error as Error).message, clipPath));
     }
     if (clip.kind === 'caption') {
-      const clipPath = `${path}.${value.id}.clips.${clip.id}`;
       if (value.kind !== 'caption')
         diagnostics.push(
           diagnostic(

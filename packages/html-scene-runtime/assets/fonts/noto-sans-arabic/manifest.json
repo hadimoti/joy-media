@@ -1,0 +1,38 @@
+{
+  "source": "@fontsource/noto-sans-arabic@5.2.6",
+  "license": "OFL-1.1",
+  "files": [
+    {
+      "family": "Noto Sans Arabic",
+      "weight": 400,
+      "subset": "arabic",
+      "file": "noto-sans-arabic-arabic-400-normal.woff2",
+      "byteLength": 48820,
+      "sha256": "sha256:9a7c99eccfc3845950358733520688959bfa77ea14e6ef3b0a5efe3a8d52d28b"
+    },
+    {
+      "family": "Noto Sans Arabic",
+      "weight": 700,
+      "subset": "arabic",
+      "file": "noto-sans-arabic-arabic-700-normal.woff2",
+      "byteLength": 50100,
+      "sha256": "sha256:b2b3ca0a17a734e33dd39b599faff30e6683f0df14cf3426a5015b22e1f28ca3"
+    },
+    {
+      "family": "Noto Sans Arabic",
+      "weight": 400,
+      "subset": "latin",
+      "file": "noto-sans-arabic-latin-400-normal.woff2",
+      "byteLength": 10676,
+      "sha256": "sha256:f9585bf238cf88ed66a321c4ae0179a756ee8820303279d80c84427672e9320a"
+    },
+    {
+      "family": "Noto Sans Arabic",
+      "weight": 700,
+      "subset": "latin",
+      "file": "noto-sans-arabic-latin-700-normal.woff2",
+      "byteLength": 10644,
+      "sha256": "sha256:6619b33801f18a3070793f6a3fff5203d48005eb0826d5feb97cce0dea17bbaa"
+    }
+  ]
+}

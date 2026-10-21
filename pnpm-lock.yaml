@@ -131,6 +131,9 @@ importers:
       '@joy-media/commands':
         specifier: workspace:*
         version: link:../../packages/commands
+      '@joy-media/html-scene-runtime':
+        specifier: workspace:*
+        version: link:../../packages/html-scene-runtime
       '@joy-media/joy-agent-engine':
         specifier: workspace:*
         version: link:../../packages/joy-agent-engine
@@ -147,9 +150,15 @@ importers:
         specifier: 7.0.92
         version: 7.0.92(zod@4.4.3)
     devDependencies:
+      '@joy-media/test-fixtures':
+        specifier: workspace:*
+        version: link:../../packages/test-fixtures
       '@types/node':
         specifier: ^22.16.0
         version: 22.20.1
+      ajv:
+        specifier: 6.15.0
+        version: 6.15.0
       typescript:
         specifier: ^5.8.0
         version: 5.9.3
@@ -159,6 +168,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@joy-media/project-persistence':
+        specifier: workspace:*
+        version: link:../../packages/project-persistence
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../../packages/provider-sdk
@@ -437,6 +449,10 @@ importers:
         version: link:../project-schema
 
   packages/export-core:
+    dependencies:
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
     devDependencies:
       '@joy-media/test-fixtures':
         specifier: workspace:*

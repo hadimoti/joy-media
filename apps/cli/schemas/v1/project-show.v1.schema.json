@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.joy.media/cli/v1/project-show.schema.json",
+  "title": "JOY Media CLI project show result v1",
+  "type": "object",
+  "required": [
+    "id",
+    "title",
+    "revision",
+    "source",
+    "path",
+    "width",
+    "height",
+    "frameRate",
+    "durationUs",
+    "assetCount",
+    "tracks"
+  ],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "source": { "enum": ["sqlite", "file"] },
+    "path": { "type": "string", "minLength": 1 },
+    "width": { "type": ["integer", "null"], "minimum": 1 },
+    "height": { "type": ["integer", "null"], "minimum": 1 },
+    "frameRate": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+    "durationUs": { "type": "integer", "minimum": 0 },
+    "assetCount": { "type": "integer", "minimum": 0 },
+    "tracks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "family", "order", "clips"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string" },
+          "family": { "type": "string" },
+          "order": { "type": "integer" },
+          "clips": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "assetId", "startUs", "durationUs", "endUs", "sourceInUs"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "assetId": { "type": ["string", "null"] },
+                "startUs": { "type": "integer", "minimum": 0 },
+                "durationUs": { "type": "integer", "minimum": 1 },
+                "endUs": { "type": "integer", "minimum": 1 },
+                "sourceInUs": { "type": ["integer", "null"], "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
