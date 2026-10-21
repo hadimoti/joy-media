@@ -205,16 +205,31 @@ export function joyMediaDirPath(): string {
   return join(homedir(), '.joy-media');
 }
 
+/**
+ * Whether the path exists, or exists but this process cannot inspect it. A directory whose ACL
+ * withholds read-attributes from the current user reports EPERM here, and existsSync would call
+ * it missing and skip the repair that makes it private again.
+ */
+function pathExistsOrIsLocked(path: string): boolean {
+  try {
+    statSync(path);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'EPERM' || code === 'EACCES';
+  }
+}
+
 export function getJoyMediaDir(): string {
   const dir = joyMediaDirPath();
-  if (!existsSync(dir)) {
+  if (!pathExistsOrIsLocked(dir)) {
     try {
       mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     } catch {
       // Ignore if cannot create
     }
   }
-  if (existsSync(dir)) makePrivate(dir, PRIVATE_DIR_MODE, true);
+  if (pathExistsOrIsLocked(dir)) makePrivate(dir, PRIVATE_DIR_MODE, true);
   return dir;
 }
 
