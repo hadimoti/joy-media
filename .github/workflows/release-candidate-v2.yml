@@ -343,6 +343,13 @@ jobs:
           }
           node node_modules/vitest/vitest.mjs run --config vitest.p0.config.ts
           if ($LASTEXITCODE -ne 0) { throw "P0 integration tests failed with exit code $LASTEXITCODE." }
+      - name: Run full CLI contract suite on Windows
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:JOY_REQUIRE_CHROMIUM = '1'
+          node node_modules/vitest/vitest.mjs run apps/cli/src --no-file-parallelism
+          if ($LASTEXITCODE -ne 0) { throw "Windows CLI contract suite failed with exit code $LASTEXITCODE." }
       - name: Check for untracked residue
         if: always()
         shell: powershell
