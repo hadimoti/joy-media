@@ -55,6 +55,8 @@ import {
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
+import { MissingMediaSection } from './MissingMediaSection.js';
+import type { MissingMediaHost } from './missing-media-host.js';
 import { ASSET_CATEGORY_ICONS, assetCollectionIconUrl } from './asset-library-icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import {
@@ -131,6 +133,7 @@ export function AssetLibraryPanel({
   onAddToTimeline,
   onEditWithAi,
   onOpenAssetSettings,
+  missingMedia,
 }: {
   readonly projectId: string;
   readonly projectTitle?: string;
@@ -157,6 +160,12 @@ export function AssetLibraryPanel({
     readonly displayName: string;
   }) => void;
   readonly onOpenAssetSettings?: () => void;
+  /** Missing project media, relinked from the panel's Missing media section. */
+  readonly missingMedia?: {
+    readonly host: MissingMediaHost;
+    readonly revision: string;
+    readonly onChanged?: (() => void) | undefined;
+  };
 }) {
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
   const resolver = useMemo(
@@ -844,6 +853,13 @@ export function AssetLibraryPanel({
           </div>
         </aside>
         <div className="asset-library-main">
+          {missingMedia !== undefined && (
+            <MissingMediaSection
+              host={missingMedia.host}
+              revision={missingMedia.revision}
+              onChanged={missingMedia.onChanged}
+            />
+          )}
           {importProgress !== undefined && (
             <div
               className="asset-upload-progress"
