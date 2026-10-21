@@ -564,6 +564,17 @@ jobs:
           $outputs = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-outputs-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".json")
           if (Test-Path -LiteralPath $outputs) { throw "Windows Worker acceptance outputs already exist for this run: $outputs" }
           Set-Content -LiteralPath $outputs -Value ($results | ConvertTo-Json) -Encoding utf8
+      - name: Show failed desktop acceptance page state
+        if: failure()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $snapshots = @(Get-ChildItem -Path test-results -Recurse -Filter error-context.md -ErrorAction SilentlyContinue)
+          if ($snapshots.Count -eq 0) { Write-Output 'No Playwright error-context snapshots were written.'; exit 0 }
+          foreach ($snapshot in $snapshots | Select-Object -First 6) {
+            Write-Output "===== $($snapshot.FullName) ====="
+            Get-Content -LiteralPath $snapshot.FullName -TotalCount 160 | ForEach-Object { $_ }
+          }
       - name: Publish Windows Worker acceptance outputs
         id: publish-evidence
         shell: powershell
