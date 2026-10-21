@@ -250,4 +250,89 @@ describe('JoyModelGateway', () => {
       totalBilledCostMicros: '0',
     });
   });
+
+  it('does not bill the user when the upstream connection fails', async () => {
+    const mockAuth = {
+      authenticate: async () => ({ id: 'user-pro' }),
+    } as unknown as MediaAuthService;
+    const mockAccount = {
+      getSubscription: async (): Promise<Subscription> => ({
+        ownerId: 'user-pro',
+        plan: 'monthly',
+        status: 'active',
+        updatedAt: Date.now(),
+      }),
+    } as unknown as AccountService;
+    const ledger = new MemoryAgentUsageLedger();
+    const gateway = new JoyModelGateway({
+      mediaAuth: mockAuth,
+      account: mockAccount,
+      ledger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () => {
+        throw new TypeError('fetch failed');
+      },
+    });
+
+    const { res, getStatus } = createMockRes();
+    await gateway.handleChatCompletions(
+      createMockReq({ body: { model: 'minimax/minimax-m3', messages: [] } }),
+      res,
+    );
+
+    expect(getStatus()).toBe(502);
+    await expect(ledger.getSummary('user-pro')).resolves.toMatchObject({
+      totalRequests: 0,
+      totalBilledCostMicros: '0',
+    });
+  });
+
+  it('records no usage when the upstream stream breaks before completion', async () => {
+    const mockAuth = {
+      authenticate: async () => ({ id: 'user-pro' }),
+    } as unknown as MediaAuthService;
+    const mockAccount = {
+      getSubscription: async (): Promise<Subscription> => ({
+        ownerId: 'user-pro',
+        plan: 'monthly',
+        status: 'active',
+        updatedAt: Date.now(),
+      }),
+    } as unknown as AccountService;
+    const ledger = new MemoryAgentUsageLedger();
+    const encoder = new TextEncoder();
+    const broken = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'),
+        );
+        controller.error(new Error('socket reset'));
+      },
+    });
+    const gateway = new JoyModelGateway({
+      mediaAuth: mockAuth,
+      account: mockAccount,
+      ledger,
+      openRouterApiKey: 'test-key',
+      fetchImpl: async () =>
+        new Response(broken, {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        }) as unknown as Response,
+    });
+
+    const { res } = createMockRes();
+    await expect(
+      gateway.handleChatCompletions(
+        createMockReq({
+          body: { model: 'minimax/minimax-m3', messages: [], stream: true },
+        }),
+        res,
+      ),
+    ).rejects.toThrow('socket reset');
+    await expect(ledger.getSummary('user-pro')).resolves.toMatchObject({
+      totalRequests: 0,
+      totalBilledCostMicros: '0',
+    });
+  });
 });
