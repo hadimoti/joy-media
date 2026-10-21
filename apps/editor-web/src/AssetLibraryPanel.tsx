@@ -79,6 +79,7 @@ import {
   type UiPreferenceStorage,
 } from './ui-preferences.js';
 import { StockVideoDiscovery, waitForStockVideoImport } from './StockVideoDiscovery.js';
+import { isStagedExportAssetId } from './staged-export-asset.js';
 
 type AssetSource = 'cloud' | 'user';
 type AssetLibraryStorage = UiPreferenceStorage & MediaSessionStorage;
@@ -320,8 +321,11 @@ export function AssetLibraryPanel({
         ownedResultPromise,
         sharedResultPromise,
       ]);
-      const ownedAssets =
-        ownedResult.status === 'fulfilled' ? ownedResult.value : ([] as readonly BrowserAsset[]);
+      // Staged export copies are internal to one export attempt: they are not library media, so they
+      // are neither listed nor asked for derivatives. Asking after the export deletes one returns 409.
+      const ownedAssets = (
+        ownedResult.status === 'fulfilled' ? ownedResult.value : ([] as readonly BrowserAsset[])
+      ).filter((asset) => !isStagedExportAssetId(asset.id));
       const sharedAssets =
         sharedResult.status === 'fulfilled' ? sharedResult.value : ([] as readonly BrowserAsset[]);
       if (ownedResult.status === 'rejected' && sharedResult.status === 'rejected') {

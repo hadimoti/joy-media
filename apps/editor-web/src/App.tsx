@@ -482,6 +482,7 @@ import {
 } from './export-audio.js';
 import { desktopAudioPresenceFor, findSilentVideoAssetIds } from './export-audio-presence.js';
 import { inspectAudioPresence } from './media-audio-presence.js';
+import { STAGED_EXPORT_ASSET_PREFIX } from './staged-export-asset.js';
 import { PlaybackOperationGate, playMediaWhenCurrent } from './playback-operation.js';
 import { seekPreviewMedia as seekDetachedVideo } from './preview-media-seek.js';
 import { playbackStartAtOrAfter, playbackTargetAfterClip } from './timeline-playback.js';
@@ -4654,7 +4655,7 @@ function EditorWorkspace({
         const stagedSha256 = await sha256Hex(stagedBytes);
         abortController.signal.throwIfAborted();
         const stagedMimeType = canonicalStagedExportMimeType(browserExportResult.mimeType);
-        stagedExportAssetId = `export-source-${attemptKey}`;
+        stagedExportAssetId = `${STAGED_EXPORT_ASSET_PREFIX}${attemptKey}`;
         const workerJobId = `render-${attemptKey}`;
         // Persist both server identities before the first network mutation.
         // If the tab dies during registration/upload/enqueue, reload recovery
