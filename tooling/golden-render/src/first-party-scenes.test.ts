@@ -50,10 +50,15 @@ async function retireStalledDriver(driver: ReturnType<typeof createChromiumScene
   const closeMessage = closeError instanceof Error ? closeError.message : '';
   const benign = BENIGN_CLOSE_ERRORS.some((message) => closeMessage.startsWith(message));
   if (closeError !== undefined && !benign) throw closeError;
-  if (existsSync(driver.profileDirectory)) {
+  // The driver's type marks its profile directory optional, but the implementation always sets it.
+  // Without a known path the stalled browser cannot be verified as stopped, so the scene fails.
+  const profile = driver.profileDirectory;
+  if (profile === undefined)
     throw new Error(
-      `Chromium profile is still on disk after a stalled capture: ${driver.profileDirectory}`,
+      'Chromium driver did not report its profile, so the stalled browser cannot be verified.',
     );
+  if (existsSync(profile)) {
+    throw new Error(`Chromium profile is still on disk after a stalled capture: ${profile}`);
   }
   const index = openedDrivers.indexOf(driver);
   if (index >= 0) openedDrivers.splice(index, 1);
