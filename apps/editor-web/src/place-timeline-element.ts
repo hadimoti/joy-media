@@ -164,3 +164,48 @@ export function buildTimelineElementDocument(
     }),
   );
 }
+
+type VisualTrackV1 = JoyProjectV1['compositions'][string]['tracks'][number];
+
+/**
+ * The universal timeline resolves a placement's track through the visual project, and the renderer
+ * draws a clip-bound overlay only while its clip exists there. A track or clip that exists only on
+ * the timeline leaves the placement dangling and never drawn, so the visual project mirrors both.
+ */
+export function withVisualPlacementMirror(
+  project: JoyProjectV1,
+  placement: {
+    readonly trackId: string;
+    readonly name: string;
+    readonly order: number;
+    readonly clip: VisualTrackV1['clips'][number];
+  },
+): JoyProjectV1 {
+  const composition = project.compositions[project.rootCompositionId];
+  if (composition === undefined) return project;
+  const tracks: VisualTrackV1[] = composition.tracks.some((track) => track.id === placement.trackId)
+    ? composition.tracks.map((track) =>
+        track.id === placement.trackId && !track.clips.some((clip) => clip.id === placement.clip.id)
+          ? { ...track, clips: [...track.clips, placement.clip] }
+          : track,
+      )
+    : [
+        ...composition.tracks,
+        {
+          id: placement.trackId,
+          kind: 'video',
+          name: placement.name,
+          order: placement.order,
+          enabled: true,
+          locked: false,
+          clips: [placement.clip],
+        },
+      ];
+  return {
+    ...project,
+    compositions: {
+      ...project.compositions,
+      [project.rootCompositionId]: { ...composition, tracks },
+    },
+  };
+}

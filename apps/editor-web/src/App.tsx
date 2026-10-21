@@ -231,7 +231,10 @@ import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js'
 import { prepareTimelinePresentation } from './timeline-presentation.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
-import { buildTimelineElementDocument } from './place-timeline-element.js';
+import {
+  buildTimelineElementDocument,
+  withVisualPlacementMirror,
+} from './place-timeline-element.js';
 import { nextProfessionalTrackId } from './timeline-track-family.js';
 import { nextTimelineMarkerId, nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
@@ -3269,18 +3272,26 @@ function EditorWorkspace({
           crop: { left: 0, top: 0, right: 0, bottom: 0 },
         },
       };
-      const document = buildTimelineElementDocument({
-        baseProject: session.visualProject,
-        clipId,
-        planned: {
-          compositionId: composition.id,
+      const document = withVisualPlacementMirror(
+        buildTimelineElementDocument({
+          baseProject: session.visualProject,
+          clipId,
+          planned: {
+            compositionId: composition.id,
+            trackId: targetTrackId,
+            clip: insertClipCommand.payload.clip,
+          },
+          elementKind: 'html-scene',
+          source: { kind: 'object', id: objectId },
+          visualObject: object,
+        }),
+        {
           trackId: targetTrackId,
+          name: 'Scene',
+          order: targetExisting?.order ?? order,
           clip: insertClipCommand.payload.clip,
         },
-        elementKind: 'html-scene',
-        source: { kind: 'object', id: objectId },
-        visualObject: object,
-      });
+      );
       const label = `Place HTML scene ${scenePackageId}`;
       session.dispatchCompound(label, {
         document,

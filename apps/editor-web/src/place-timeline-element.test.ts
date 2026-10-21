@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { normalizeUniversalTimeline } from '@joy-media/project-schema';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
-import { buildMediaPlacementDocument, withImportedAsset } from './place-timeline-element.js';
+import {
+  buildMediaPlacementDocument,
+  buildTimelineElementDocument,
+  withImportedAsset,
+  withVisualPlacementMirror,
+} from './place-timeline-element.js';
 
 describe('place-timeline-element', () => {
   it('plans asset, renderable image object, binding, and source timing together', () => {
@@ -90,6 +96,88 @@ describe('place-timeline-element', () => {
         },
       }),
     ).toBe(existing);
+  });
+
+  it('mirrors a timeline-only track so the universal timeline keeps the scene enabled', () => {
+    const clip = {
+      id: 'clip-scene',
+      kind: 'video' as const,
+      assetId: 'html-scene:joy.firstparty.title',
+      startUs: 1_000_000,
+      durationUs: 4_000_000,
+      sourceInUs: 0,
+    };
+    const placed = buildTimelineElementDocument({
+      baseProject: baseProject(),
+      clipId: 'clip-scene',
+      planned: { compositionId: 'root', trackId: 'track-2', clip },
+      elementKind: 'html-scene',
+      source: { kind: 'object', id: 'scene-title' },
+      visualObject: {
+        id: 'scene-title',
+        kind: 'html-scene',
+        scenePackageId: 'joy.firstparty.title',
+        transform: {
+          x: 0,
+          y: 0,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        },
+      },
+    });
+    expect(normalizeUniversalTimeline(placed).diagnostics.map((item) => item.code)).toContain(
+      'UNIVERSAL_TIMELINE_DANGLING_TRACK',
+    );
+
+    const mirrored = withVisualPlacementMirror(placed, {
+      trackId: 'track-2',
+      name: 'Scene',
+      order: 1,
+      clip,
+    });
+    const normalized = normalizeUniversalTimeline(mirrored);
+    expect(normalized.diagnostics.map((item) => item.code)).not.toContain(
+      'UNIVERSAL_TIMELINE_DANGLING_TRACK',
+    );
+    expect(normalized.items.find((item) => item.id === 'clip-scene')).toMatchObject({
+      trackEnabled: true,
+      startUs: 1_000_000,
+      durationUs: 4_000_000,
+    });
+  });
+
+  it('mirrors a placement once and leaves the existing visual tracks unchanged', () => {
+    const clip = {
+      id: 'clip-scene',
+      kind: 'video' as const,
+      assetId: 'html-scene:joy.firstparty.title',
+      startUs: 0,
+      durationUs: 2_000_000,
+      sourceInUs: 0,
+    };
+    const base = baseProject();
+    const once = withVisualPlacementMirror(base, {
+      trackId: 'track-1',
+      name: 'Scene',
+      order: 0,
+      clip,
+    });
+    const twice = withVisualPlacementMirror(once, {
+      trackId: 'track-1',
+      name: 'Scene',
+      order: 0,
+      clip,
+    });
+    const tracks = twice.compositions.root!.tracks;
+    expect(tracks.map((track) => track.id)).toEqual(
+      base.compositions.root!.tracks.map((track) => track.id),
+    );
+    expect(
+      tracks.flatMap((track) => track.clips).filter((item) => item.id === 'clip-scene'),
+    ).toHaveLength(1);
   });
 });
 
