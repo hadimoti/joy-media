@@ -66,6 +66,9 @@ const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
 // window). Never shows a window and never touches production data.
 const isSmokeMode = process.argv.includes('--smoke');
 const testApiBaseUrl = resolveTestApiBaseUrl({ argv: process.argv, env: process.env });
+const testSelectFile = process.argv.includes('--joy-media-test-mode')
+  ? process.env['JOY_MEDIA_TEST_SELECT_FILE']
+  : undefined;
 const testDownloadDirectory = process.argv.includes('--joy-media-test-mode')
   ? resolveTestDownloadDirectory({
       argv: process.argv,
@@ -151,6 +154,8 @@ if (!app.requestSingleInstanceLock()) {
       return { ...probe, kind: classifyMediaKind(path) };
     },
     showOpenDialog: async () => {
+      // Test mode only: a packaged test cannot drive the native dialog, so it names the file here.
+      if (testSelectFile !== undefined) return { canceled: false, path: testSelectFile };
       const win =
         BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
       const result = win

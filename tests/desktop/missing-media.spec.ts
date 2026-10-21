@@ -5,6 +5,7 @@ import {
   type ElectronApplication,
   type Page,
 } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -104,26 +105,92 @@ async function createHostProject(page: Page, title: string): Promise<void> {
   await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible();
 }
 
+/** A project media item: the name it is imported under, and the fixture whose bytes it carries. */
+interface MediaSpec {
+  readonly name: string;
+  readonly fixture: string;
+}
+
 async function createPackagedVideoProject(
   page: Page,
   projectTitle: string,
-  mediaName: string,
+  media: readonly MediaSpec[],
 ): Promise<void> {
   await createHostProject(page, projectTitle);
   await openPanel(page, 'Assets');
-  const importDialog = page.getByRole('dialog', { name: 'Import media' });
-  await page.getByRole('button', { name: 'Import media' }).first().click();
-  await importDialog.locator('input[type="file"][aria-label="Media file"]').setInputFiles({
-    name: mediaName,
-    mimeType: 'video/mp4',
-    buffer: readFileSync(join(fixtureDirectory, 'video.mp4')),
-  });
-  await expect(importDialog.getByText(mediaName, { exact: true })).toBeVisible();
-  await importDialog.getByRole('button', { name: 'Confirm import' }).click();
-  const assetCard = page.locator('.asset-card', { hasText: mediaName }).first();
-  await expect(assetCard).toBeVisible();
-  await assetCard.getByRole('button', { name: `Add ${mediaName} to timeline` }).click();
-  await expect(page.locator(`.timeline-clip[aria-label^="${mediaName},"]`).first()).toBeVisible();
+  for (const item of media) {
+    const importDialog = page.getByRole('dialog', { name: 'Import media' });
+    await page.getByRole('button', { name: 'Import media' }).first().click();
+    await importDialog.locator('input[type="file"][aria-label="Media file"]').setInputFiles({
+      name: item.name,
+      mimeType: 'video/mp4',
+      buffer: readFileSync(resolve(fixtureDirectory, item.fixture)),
+    });
+    await expect(importDialog.getByText(item.name, { exact: true })).toBeVisible();
+    await importDialog.getByRole('button', { name: 'Confirm import' }).click();
+    const assetCard = page.locator('.asset-card', { hasText: item.name }).first();
+    await expect(assetCard).toBeVisible();
+    await assetCard.getByRole('button', { name: `Add ${item.name} to timeline` }).click();
+    await expect(page.locator(`.timeline-clip[aria-label^="${item.name},"]`).first()).toBeVisible();
+  }
+}
+
+/**
+ * Renders the project with the editor's own MP4 export and returns the downloaded file's path.
+ * The render must finish as verified, not merely start.
+ */
+async function exportRenderedMp4(
+  app: ElectronApplication,
+  page: Page,
+  profile: string,
+): Promise<string> {
+  await page.getByRole('button', { name: 'Export MP4' }).click();
+  const recentProcesses = page.getByRole('button', { name: 'Recent processes' });
+  if ((await recentProcesses.getAttribute('aria-expanded')) !== 'true')
+    await recentProcesses.click();
+  await expect(page.getByRole('region', { name: 'Recent processes' })).toContainText(
+    'Completed — final MP4 verified',
+    { timeout: 240_000 },
+  );
+  const redownload = page.getByRole('link', { name: /Download .* again/ }).first();
+  await expect(redownload).toBeVisible();
+  const filename = await redownload.getAttribute('download');
+  if (filename === null || !/\.mp4$/iu.test(filename))
+    throw new Error('Export did not offer an MP4 download.');
+  const downloadFinished = waitForPackagedDownload(app, filename);
+  await redownload.click();
+  await downloadFinished;
+  return join(profile, 'downloads', filename);
+}
+
+/**
+ * A second, different file with the same audio and video streams: a stream copy with a distinct
+ * metadata tag. Batch and override matching is by content, so the copy must not be byte-identical.
+ */
+function distinctCopyOfFixture(directory: string, fixture: string, tag: string): string {
+  const output = join(directory, `distinct-${tag}.mp4`);
+  execFileSync('ffmpeg', [
+    '-y',
+    '-v',
+    'error',
+    '-i',
+    join(fixtureDirectory, fixture),
+    '-c',
+    'copy',
+    '-metadata',
+    `comment=${tag}`,
+    output,
+  ]);
+  return output;
+}
+
+function probeDurationSeconds(path: string): number {
+  const probe = JSON.parse(
+    execFileSync('ffprobe', ['-v', 'error', '-show_format', '-of', 'json', path], {
+      encoding: 'utf8',
+    }),
+  ) as { readonly format?: { readonly duration?: string } };
+  return Number(probe.format?.duration ?? 0);
 }
 
 async function exportEditableProject(
@@ -158,7 +225,7 @@ async function importEditableProject(page: Page, packagePath: string): Promise<v
  */
 async function openProjectWithMissingMedia(
   suffix: string,
-  mediaName: string,
+  media: readonly MediaSpec[],
   profiles: { readonly source: string; readonly fresh: string; readonly device: string },
 ): Promise<{ app: ElectronApplication; page: Page; projectTitle: string }> {
   const projectTitle = `MissingMedia${suffix}`;
@@ -166,7 +233,7 @@ async function openProjectWithMissingMedia(
   const source = await launchPackagedEditor(profiles.source);
   try {
     const sourcePage = await openEditorPage(source);
-    await createPackagedVideoProject(sourcePage, projectTitle, mediaName);
+    await createPackagedVideoProject(sourcePage, projectTitle, media);
     const packagePath = await exportEditableProject(
       source,
       sourcePage,
@@ -244,7 +311,11 @@ test.describe('desktop.missing-media relink', () => {
     };
     let app: ElectronApplication | undefined;
     try {
-      const opened = await openProjectWithMissingMedia(suffix, mediaName, profiles);
+      const opened = await openProjectWithMissingMedia(
+        suffix,
+        [{ name: mediaName, fixture: 'video.mp4' }],
+        profiles,
+      );
       app = opened.app;
       const page = opened.page;
       await openAssets(page);
@@ -268,7 +339,8 @@ test.describe('desktop.missing-media relink', () => {
       await expect(restarted.locator(`.timeline-clip[aria-label^="${mediaName},"]`)).toHaveCount(1);
     } finally {
       await app?.close().catch(() => undefined);
-      for (const dir of Object.values(profiles)) rmSync(dir, { recursive: true, force: true });
+      for (const dir of Object.values(profiles))
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     }
   });
 
@@ -283,7 +355,11 @@ test.describe('desktop.missing-media relink', () => {
     };
     let app: ElectronApplication | undefined;
     try {
-      const opened = await openProjectWithMissingMedia(suffix, mediaName, profiles);
+      const opened = await openProjectWithMissingMedia(
+        suffix,
+        [{ name: mediaName, fixture: 'video.mp4' }],
+        profiles,
+      );
       app = opened.app;
       const page = opened.page;
       await openAssets(page);
@@ -311,7 +387,8 @@ test.describe('desktop.missing-media relink', () => {
       await expect(page.locator('[data-missing-asset-id]', { hasText: mediaName })).toHaveCount(1);
     } finally {
       await app?.close().catch(() => undefined);
-      for (const dir of Object.values(profiles)) rmSync(dir, { recursive: true, force: true });
+      for (const dir of Object.values(profiles))
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     }
   });
 
@@ -326,7 +403,11 @@ test.describe('desktop.missing-media relink', () => {
     };
     let app: ElectronApplication | undefined;
     try {
-      const opened = await openProjectWithMissingMedia(suffix, mediaName, profiles);
+      const opened = await openProjectWithMissingMedia(
+        suffix,
+        [{ name: mediaName, fixture: 'video.mp4' }],
+        profiles,
+      );
       app = opened.app;
       const page = opened.page;
       await openAssets(page);
@@ -356,7 +437,8 @@ test.describe('desktop.missing-media relink', () => {
       await expect(page.locator('[data-missing-asset-id]', { hasText: mediaName })).toHaveCount(1);
     } finally {
       await app?.close().catch(() => undefined);
-      for (const dir of Object.values(profiles)) rmSync(dir, { recursive: true, force: true });
+      for (const dir of Object.values(profiles))
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     }
   });
 
@@ -371,7 +453,11 @@ test.describe('desktop.missing-media relink', () => {
     };
     let app: ElectronApplication | undefined;
     try {
-      const opened = await openProjectWithMissingMedia(suffix, mediaName, profiles);
+      const opened = await openProjectWithMissingMedia(
+        suffix,
+        [{ name: mediaName, fixture: 'video.mp4' }],
+        profiles,
+      );
       app = opened.app;
       const page = opened.page;
       await openAssets(page);
@@ -384,7 +470,118 @@ test.describe('desktop.missing-media relink', () => {
       ).toHaveCount(0);
     } finally {
       await app?.close().catch(() => undefined);
-      for (const dir of Object.values(profiles)) rmSync(dir, { recursive: true, force: true });
+      for (const dir of Object.values(profiles))
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    }
+  });
+
+  test('batch relink matches each missing file by content, reports the unmatched file, and the project then exports', async () => {
+    test.setTimeout(600_000);
+    const suffix = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+    const work = mkdtempSync(join(tmpdir(), 'joy-media-batch-work-'));
+    const distinct = distinctCopyOfFixture(work, 'video.mp4', suffix);
+    const media: MediaSpec[] = [
+      { name: `batch-a-${suffix}.mp4`, fixture: 'video.mp4' },
+      { name: `batch-b-${suffix}.mp4`, fixture: distinct },
+    ];
+    const profiles = {
+      source: mkdtempSync(join(tmpdir(), 'joy-media-batch-source-')),
+      fresh: mkdtempSync(join(tmpdir(), 'joy-media-batch-fresh-')),
+      device: mkdtempSync(join(tmpdir(), 'joy-media-batch-device-')),
+    };
+    let app: ElectronApplication | undefined;
+    try {
+      const opened = await openProjectWithMissingMedia(suffix, media, profiles);
+      app = opened.app;
+      const page = opened.page;
+      await openAssets(page);
+      await expect(page.locator('[data-missing-asset-id]')).toHaveCount(2);
+
+      // Files are matched by content, not by name: the names here are deliberately different.
+      await page.getByLabel('Match files to missing media').setInputFiles([
+        {
+          name: 'unrelated.jpg',
+          mimeType: 'image/jpeg',
+          buffer: readFileSync(join(fixtureDirectory, 'image.jpg')),
+        },
+        { name: `copy-b-${suffix}.mp4`, mimeType: 'video/mp4', buffer: readFileSync(distinct) },
+        {
+          name: `copy-a-${suffix}.mp4`,
+          mimeType: 'video/mp4',
+          buffer: readFileSync(join(fixtureDirectory, 'video.mp4')),
+        },
+      ]);
+      const region = page.getByRole('region', { name: 'Missing media' });
+      await expect(region.getByRole('status')).toContainText('Relinked 2 of 2 matched file(s).');
+      await expect(region.getByRole('status')).toContainText(
+        'No missing media matches: unrelated.jpg.',
+      );
+      await expect(page.locator('[data-missing-asset-id]')).toHaveCount(0);
+
+      const rendered = await exportRenderedMp4(app, page, profiles.fresh);
+      expect(probeDurationSeconds(rendered)).toBeGreaterThan(0);
+    } finally {
+      await app?.close().catch(() => undefined);
+      for (const dir of [...Object.values(profiles), work])
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    }
+  });
+
+  test('a Use Different File override survives a restart and the restarted project exports', async () => {
+    test.setTimeout(600_000);
+    const suffix = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+    const mediaName = `kept-${suffix}.mp4`;
+    const work = mkdtempSync(join(tmpdir(), 'joy-media-kept-work-'));
+    const distinct = distinctCopyOfFixture(work, 'video.mp4', suffix);
+    const profiles = {
+      source: mkdtempSync(join(tmpdir(), 'joy-media-kept-source-')),
+      fresh: mkdtempSync(join(tmpdir(), 'joy-media-kept-fresh-')),
+      device: mkdtempSync(join(tmpdir(), 'joy-media-kept-device-')),
+    };
+    let app: ElectronApplication | undefined;
+    try {
+      const opened = await openProjectWithMissingMedia(
+        suffix,
+        [{ name: mediaName, fixture: 'video.mp4' }],
+        profiles,
+      );
+      app = opened.app;
+      const page = opened.page;
+      await openAssets(page);
+      const original = readFileSync(join(fixtureDirectory, 'video.mp4'));
+
+      await page.getByLabel(`Relink ${mediaName}`).setInputFiles({
+        name: mediaName,
+        mimeType: 'video/mp4',
+        buffer: flippedFirstByte(original),
+      });
+      await expect(
+        page.getByRole('alert').filter({ hasText: 'does not match the original checksum' }),
+      ).toBeVisible();
+      // A different, valid video is the override, so the separate asset can be rendered.
+      await page.getByLabel(`Use a different file for ${mediaName}`).setInputFiles({
+        name: `other-${mediaName}`,
+        mimeType: 'video/mp4',
+        buffer: readFileSync(distinct),
+      });
+      await expect(
+        page.getByRole('status').filter({ hasText: 'is now a separate asset' }),
+      ).toBeVisible();
+      await expect(page.locator('[data-missing-asset-id]', { hasText: mediaName })).toHaveCount(0);
+
+      await app.close();
+      app = await launchPackagedEditor(profiles.fresh);
+      const restarted = await reopenAfterRestart(app, opened.projectTitle);
+      await openAssets(restarted);
+      await expect(restarted.getByRole('region', { name: 'Missing media' })).toHaveCount(0);
+      await expect(restarted.locator('.timeline-clip').first()).toBeVisible();
+
+      const rendered = await exportRenderedMp4(app, restarted, profiles.fresh);
+      expect(probeDurationSeconds(rendered)).toBeGreaterThan(0);
+    } finally {
+      await app?.close().catch(() => undefined);
+      for (const dir of [...Object.values(profiles), work])
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     }
   });
 });
