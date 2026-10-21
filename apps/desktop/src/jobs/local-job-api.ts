@@ -13,6 +13,11 @@ import { JobProtocolError, type JobOrchestrator } from './job-orchestrator.js';
 
 const MAX_JSON_BYTES = 64 * 1024;
 const MAX_DERIVATIVE_BYTES = 64 * 1024 * 1024;
+/**
+ * Largest source served over the loopback route. The source is read into memory on both sides, so
+ * a larger file is refused explicitly rather than risking the desktop process. Streaming is the follow-up.
+ */
+export const MAX_LOCAL_SOURCE_BYTES = 512 * 1024 * 1024;
 const MAX_CAPABILITIES = 64;
 const ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 const CAPABILITY_PATTERN = /^[a-z0-9._-]{1,64}$/;
@@ -26,8 +31,11 @@ export interface LocalJobApiOptions {
   readonly orchestrator: JobOrchestrator;
   /** Where accepted derivatives are written. Created on first use. */
   readonly derivativeDirectory: string;
+  /** Size in bytes of a registered local file, checked before any read. */
+  readonly sourceSize: (refId: string) => Promise<number>;
   /** Reads the bytes of a registered local file. The main process resolves the path, never the Worker. */
   readonly readSource: (refId: string) => Promise<Uint8Array>;
+  readonly maxSourceBytes?: number;
   readonly onWarning?: (message: string) => void;
   /** Fixed token for tests. Production always uses a fresh random token per app run. */
   readonly token?: string;
@@ -124,6 +132,9 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
         jobId,
         headerValue(request, 'x-joy-lease-token'),
       );
+      const limit = options.maxSourceBytes ?? MAX_LOCAL_SOURCE_BYTES;
+      if ((await options.sourceSize(job.refId)) > limit)
+        throw new JobProtocolError(413, 'source is larger than the local route allows');
       const bytes = await options.readSource(job.refId);
       response.writeHead(200, {
         'content-type': 'application/octet-stream',

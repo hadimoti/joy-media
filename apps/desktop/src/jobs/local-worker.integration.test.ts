@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -56,6 +56,9 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
         maxLeaseMs: LEASE_CAP_MS,
       }),
       derivativeDirectory: join(dir, 'derivatives'),
+      sourceSize: async (refId) =>
+        (await stat(registry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })))
+          .size,
       readSource: (refId) =>
         readFile(registry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })),
       onWarning: (message) => console.warn(message),

@@ -18,13 +18,17 @@ describe('local job API', () => {
   let api: LocalJobApi;
   let derivativeDirectory: string;
 
+  let reportedSourceSize: number;
+
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'joy-job-api-'));
     derivativeDirectory = join(dir, 'derivatives');
     database = new LocalDatabase({ filePath: join(dir, 'jobs.sqlite') });
+    reportedSourceSize = SOURCE.length;
     api = await startLocalJobApi({
       orchestrator: createJobOrchestrator({ store: database.jobDispatch }),
       derivativeDirectory,
+      sourceSize: async () => reportedSourceSize,
       readSource: async (refId) => {
         if (refId !== 'ref-1') throw new Error('unknown ref');
         return SOURCE;
@@ -134,6 +138,15 @@ describe('local job API', () => {
       headers: { 'x-joy-lease-token': 'not-the-lease' },
     });
     expect(stranger.status).toBe(409);
+  });
+
+  it('refuses to read a source larger than the local route limit, before reading it', async () => {
+    const leased = await queueThumbnailAndLease();
+    reportedSourceSize = 512 * 1024 * 1024 + 1;
+    const response = await call(`/v1/workers/${WORKER}/jobs/job-http/source`, {
+      headers: { 'x-joy-lease-token': leased.leaseToken },
+    });
+    expect(response.status).toBe(413);
   });
 
   it('rejects a derivative whose bytes do not match the reported digest and stores nothing', async () => {

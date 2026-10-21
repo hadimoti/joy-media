@@ -11,7 +11,7 @@ const MAX_ERROR_LENGTH = 240;
 /** Protocol refusal that the loopback API maps onto an HTTP status. */
 export class JobProtocolError extends Error {
   constructor(
-    readonly status: 404 | 409 | 422,
+    readonly status: 404 | 409 | 413 | 422,
     message: string,
   ) {
     super(message);

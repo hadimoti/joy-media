@@ -29,7 +29,7 @@ import { editorOriginFromFrameUrl } from '../origin-policy.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import { startLocalJobApi, type LocalJobApi } from '../jobs/local-job-api.js';
 import { localWorkerEnv } from '../jobs/worker-env.js';
@@ -113,6 +113,9 @@ if (!app.requestSingleInstanceLock()) {
   void startLocalJobApi({
     orchestrator: createJobOrchestrator({ store: localDatabase.jobDispatch }),
     derivativeDirectory: join(paths.mediaRoot, 'job-derivatives'),
+    sourceSize: async (refId) =>
+      (await stat(fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })))
+        .size,
     readSource: (refId) =>
       readFile(fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })),
     onWarning: (message) => console.warn(message),
