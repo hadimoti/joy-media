@@ -25,11 +25,22 @@ describe('exit codes are honest (real binary)', () => {
         }
       }, 30_000);
 
-      it('exits 1 when a human mistypes a command', async () => {
-        const r = await sb.run(['frobnicate'], { entry });
-        expect(r.code, describeRun(r)).toBe(1);
-        expect(r.err).toMatch(/Unknown command "frobnicate"/);
-      });
+      it('exits 2 for every mistyped command, sub-command or action (usage error)', async () => {
+        const cases: Array<{ args: string[]; stderr?: RegExp }> = [
+          { args: ['frobnicate'], stderr: /Unknown command "frobnicate"/ },
+          { args: ['worker', 'frobnicate'], stderr: /Unknown worker subcommand "frobnicate"/ },
+          { args: ['agent', 'frobnicate'] },
+          { args: ['agent', 'model', 'frobnicate'] },
+          { args: ['agent', 'provider', 'frobnicate'] },
+        ];
+        for (const { args, stderr } of cases) {
+          for (const extra of [[], ['--json']]) {
+            const r = await sb.run([...args, ...extra], { entry });
+            expect(r.code, describeRun(r)).toBe(2);
+            if (stderr !== undefined && extra.length === 0) expect(r.err).toMatch(stderr);
+          }
+        }
+      }, 120_000);
 
       it('exits 2 for an invalid numeric flag (usage error, not a crash)', async () => {
         const r = await sb.run(['timeline', 'add-clip', '--duration', 'abc'], { entry });

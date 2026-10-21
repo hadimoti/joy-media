@@ -444,7 +444,7 @@ describe('worker upscale / denoise', () => {
 
   it('an unknown worker subcommand is reported on stderr with a suggestion', async () => {
     const r = await sb.run(['worker', 'upscal', 'x.png']);
-    expect(r.code, describeRun(r)).toBe(1);
+    expect(r.code, describeRun(r)).toBe(2);
     expect(r.err).toMatch(/Unknown worker subcommand "upscal"\. Did you mean "upscale"\?/);
     expect(r.stdout).toBe('');
   });

@@ -344,7 +344,7 @@ describe('help: an AI agent can discover every command', () => {
 
   it('help for an unknown command suggests the closest one', async () => {
     const r = await sb.run(['help', 'projct']);
-    expect(r.code, describeRun(r)).toBe(1);
+    expect(r.code, describeRun(r)).toBe(2);
     expect(r.err).toMatch(/Unknown command "projct"\. Did you mean "project"\?/);
   });
 
@@ -382,13 +382,13 @@ describe('help: an AI agent can discover every command', () => {
     }
   });
 
-  it('a mistyped command under --json is a machine-readable error (exit 1, stderr empty)', async () => {
+  it('a mistyped command under --json is a machine-readable error (exit 2, stderr empty)', async () => {
     for (const args of [
       ['projct', '--json'],
       ['help', 'projct', '--json'],
     ]) {
       const r = await sb.run(args);
-      expect(r.code, describeRun(r)).toBe(1);
+      expect(r.code, describeRun(r)).toBe(2);
       expect(r.err, describeRun(r)).toBe('');
       expect(hasAnsi(r.out)).toBe(false);
       const doc = r.json() as { type: string; code: string; message: string };
@@ -456,7 +456,7 @@ describe('dispatcher ergonomics', () => {
 
   it('commands are case-sensitive, but the error points at the right one', async () => {
     const r = await sb.run(['PROJECT', 'list']);
-    expect(r.code, describeRun(r)).toBe(1);
+    expect(r.code, describeRun(r)).toBe(2);
     expect(r.err).toMatch(/Unknown command "PROJECT"\. Did you mean "project"\?/);
     const typo = await sb.run(['projct', 'list']);
     expect(typo.err).toMatch(/Did you mean "project"\?/);
@@ -466,13 +466,13 @@ describe('dispatcher ergonomics', () => {
 
   it('a failing command explains itself in ONE stderr line (no "Process exiting" echo)', async () => {
     const r = await sb.run(['frobnicate']);
-    expect(r.code, describeRun(r)).toBe(1);
+    expect(r.code, describeRun(r)).toBe(2);
     expect(r.err.trim().split('\n'), describeRun(r)).toHaveLength(1);
   });
 
   it('an empty-string command is reported, not crashed on', async () => {
     const r = await sb.run(['']);
-    expect(r.code, describeRun(r)).toBe(1);
+    expect(r.code, describeRun(r)).toBe(2);
     expect(r.err).toMatch(/Unknown command ""/);
   });
 
@@ -550,7 +550,7 @@ describe('colour: only for terminals, and decided per stream', () => {
   it.runIf(ptyAvailable)('stdout on a terminal does not colour a redirected stderr', async () => {
     const errFile = sb.path('stderr.txt');
     const r = await runInPty(sb, ['frobnicate'], { redirect: `2>${errFile}` });
-    expect(r.code).toBe(1);
+    expect(r.code).toBe(2);
     const stderr = readFileSync(errFile, 'utf8');
     expect(stderr).toMatch(/Unknown command/);
     expect(hasAnsi(stderr), JSON.stringify(stderr)).toBe(false);

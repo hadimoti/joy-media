@@ -70,8 +70,8 @@ class AgentCommandError extends Error {
   }
 }
 
-const usage = (message: string): AgentCommandError =>
-  new AgentCommandError(message, EXIT_USAGE, 'USAGE');
+const usage = (message: string, code = 'USAGE'): AgentCommandError =>
+  new AgentCommandError(message, EXIT_USAGE, code);
 const failure = (message: string, code = 'FAILED'): AgentCommandError =>
   new AgentCommandError(message, EXIT_FAILURE, code);
 
@@ -142,7 +142,7 @@ async function dispatch(args: string[], flags: CliFlags, out: AgentOutput): Prom
         ok: false,
         error: { code: 'UNKNOWN_SUBCOMMAND', message: `Unknown agent subcommand: ${sub}` },
       });
-      return EXIT_FAILURE;
+      return EXIT_USAGE;
   }
 }
 
@@ -363,7 +363,7 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
     return 0;
   }
 
-  throw failure(
+  throw usage(
     `Unknown provider action "${action}". Available actions: list, add, use, remove`,
     'UNKNOWN_SUBCOMMAND',
   );
@@ -537,7 +537,7 @@ async function handleModel(args: string[], flags: CliFlags, out: AgentOutput): P
     return 0;
   }
   if (action !== 'get') {
-    throw failure(
+    throw usage(
       `Unknown model action "${action}". Available actions: get, set`,
       'UNKNOWN_SUBCOMMAND',
     );

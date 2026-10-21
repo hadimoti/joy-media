@@ -507,7 +507,7 @@ function unknownCommandMessage(command: string, json = false): string {
   return `Unknown command "${command}".${hint} Run ${help} for usage.`;
 }
 
-/** Unknown command: exit 1, a document on stdout under `--json`, text on stderr otherwise. */
+/** Unknown command: exit 2 (usage error), a document on stdout under `--json`, text on stderr otherwise. */
 function reportUnknownCommand(command: string, json: boolean): number {
   if (json) {
     const message = unknownCommandMessage(command, true);
@@ -515,7 +515,7 @@ function reportUnknownCommand(command: string, json: boolean): number {
   } else {
     logError(unknownCommandMessage(command));
   }
-  return 1;
+  return 2;
 }
 
 /** `--json --help`: the same facts as the text help, as one document. */

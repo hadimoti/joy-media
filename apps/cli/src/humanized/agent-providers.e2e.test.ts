@@ -248,7 +248,7 @@ describe('agent provider lifecycle', () => {
     expect(readFileSync(join(env.sb.joyDir, 'ai-providers.json'), 'utf8')).toBe(before);
   });
 
-  it('usage errors exit 2: missing name, missing --url, malformed --url, unknown action -> 1', async () => {
+  it('usage errors exit 2: missing name, missing --url, malformed --url, unknown action', async () => {
     const noName = await env.run(['agent', 'provider', 'add']);
     expect(noName.code, describeRun(noName)).toBe(2);
     const noUrl = await env.run(['agent', 'provider', 'add', 'x']);
@@ -259,7 +259,11 @@ describe('agent provider lifecycle', () => {
       expect(r.code, `${url}: ${describeRun(r)}`).toBe(2);
     }
     const unknown = await env.run(['agent', 'provider', 'frobnicate']);
-    expect(unknown.code, describeRun(unknown)).toBe(1);
+    expect(unknown.code, describeRun(unknown)).toBe(2);
+    const unknownAgent = await env.run(['agent', 'frobnicate']);
+    expect(unknownAgent.code, describeRun(unknownAgent)).toBe(2);
+    const unknownModel = await env.run(['agent', 'model', 'frobnicate']);
+    expect(unknownModel.code, describeRun(unknownModel)).toBe(2);
     expect(mock.requests).toHaveLength(0);
   });
 

@@ -189,7 +189,7 @@ export async function handleWorkerCommand(args: string[], flags: CliFlags): Prom
     `Unknown worker subcommand "${sub}".${guess ? ` Did you mean "${guess}"?` : ''} ` +
       `Available: ${WORKER_SUBCOMMANDS.join(', ')}.`,
   );
-  return 1;
+  return 2;
 }
 
 function workerStatus(flags: CliFlags): number {
