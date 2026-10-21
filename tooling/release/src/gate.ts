@@ -1167,7 +1167,7 @@ export function writeReleaseEvidence(
   // workspace file on disk rather than accepting the in-memory record alone.
   // When the evidence file is missing, stale, or invalid, the workspace
   // result carries null evidence and blockers that the gate rejects.
-  const releaseScope = process.env.JOY_RELEASE_SCOPE === 'pass' ? 'pass' : 'release';
+  const releaseScope = releaseScopeFromEnv(process.env);
   const checkedEvidence: ReleaseEvidence =
     evidence.sourceProvenance !== undefined
       ? {
@@ -2001,6 +2001,11 @@ function isSvgDocument(value: string): boolean {
   );
 }
 
+/** Only an exact `pass` value evaluates one pass; anything else fails closed to release. */
+export function releaseScopeFromEnv(env: NodeJS.ProcessEnv): 'pass' | 'release' {
+  return env.JOY_RELEASE_SCOPE === 'pass' ? 'pass' : 'release';
+}
+
 export const RELEASE_COMMANDS: readonly [string, readonly string[]][] = [
   ['typecheck', ['typecheck']],
   ['lint', ['lint']],
@@ -2009,6 +2014,8 @@ export const RELEASE_COMMANDS: readonly [string, readonly string[]][] = [
   ['api-build', ['--filter', '@joy-media/api', 'build']],
   ['worker-build', ['--filter', '@joy-media/worker', 'build']],
   ['tests', ['test']],
+  // Chromium pixel goldens (first-party-scenes) run in the P0 lanes, which require Chromium and
+  // fail closed without it. This command covers the rest of the directory.
   ['goldens', ['exec', 'vitest', 'run', 'tooling/golden-render/src']],
 ];
 

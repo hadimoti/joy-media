@@ -6,7 +6,7 @@ Receipt for the readiness plan item "Run the contract suite on additional suppor
 - Node: v22.23.3, the minimum supported major (root `engines` is `>=22`).
 - pnpm: 11.15.0, installed with `npm i -g pnpm@11.15.0`.
 - FFmpeg and FFprobe: 6.1.1 (distribution package).
-- Source: the `hadimoti/joy-p0-query-plan` branch as a clean clone. The contract and render files were unchanged after that clone.
+- Source: a clean clone of `hadimoti/joy-p0-query-plan` at `2f779f4d155ac85e7c135a6b43ff695fab4136b6`, the bundle head. The five test files in the command were unchanged from that commit to candidate `34da662e`. The CI lane `node-contracts (Node 22.17.0)` in run 39527152795 runs the full `apps/cli/src` suite on Node 22 at `34da662e`, and it passed.
 
 Command, run from the repository root:
 
