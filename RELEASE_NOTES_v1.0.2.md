@@ -32,7 +32,10 @@ The full CLI suite was last run on the commit before these changes and was not r
 ### Candidate and approvals
 
 - **Candidate commit:** `1482aa7b13afde7b5d35b661b1029ba42454404e`, pushed to the branch `hadimoti/joy-v102-rc`. No PR is open.
-- **Candidate CI run:** `release-candidate-v2` run `39644275784` on that commit. It was still in progress when this draft was last updated. Its exact-candidate two-pass result, including the Windows installed-lifecycle lane, is not yet known.
+- **Candidate CI run:** `release-candidate-v2` run `39644275784` on that commit. Checked 2026-10-21 (server time 18:17Z), the run is still in progress.
+  - Completed and passed (10 of 11 jobs): `validate-candidate`, `windows-p0-real-services`, `node-contracts (Node 22.17.0)`, `node-contracts (Node 24)`, `prod-build-smoke (shipped bundle, public UI)`, `editor-web-bundle (standard hosted Linux)`, `linux-real-services (pass 1)`, `linux-real-services (pass 2)`, `p3-real-services (pass 1)`, `p3-real-services (pass 2)`.
+  - In progress: `windows-worker-clean (two exact passes)` on runner `joy-media-worker-docker`. Its steps so far (checkout, renderer artifact, bundle verification, clean Worker host check, frozen install, Chromium and Electron install) passed. It is building the frozen Windows desktop, CLI and Worker candidate. The step `Exercise Worker and installed desktop lifecycle in two exact passes` has not started.
+  - Not yet known: the exact-candidate two-pass gate receipt and the Windows installed-lifecycle result. Neither is recorded as passed.
 - **CLI readiness:** the owner approved the CLI as ready for the v1.0.2 candidate. Desktop rows are reported as the matrix shows them.
 - **Release:** none. This candidate is documented only. Release, deploy and publish need a separate owner approval.
 
@@ -50,6 +53,19 @@ The full CLI suite was last run on the commit before these changes and was not r
 | `project.persistence.fresh-process` (packaged case) | Open: the gate-required packaged case needs the SQLite-backed open/save proof                                 |
 | `desktop.windows.installed-lifecycle`               | Open: unrun locally; runs in the release workflow's Windows Docker container lane                             |
 | `release.exact-candidate-two-pass`                  | Open: result pending from run `39644275784`                                                                   |
+
+### Path to full readiness (not yet done)
+
+- **Gate:** the `windows-worker-clean` lane must finish with two passes on the frozen head. The gate result and the installed-lifecycle result must both pass with zero retries. Any failure must be diagnosed from its job log first.
+- **Installed lifecycle:** the generated setup still writes the user PATH, uninstall registry key and shortcuts even when given a temporary install path. The test needs a disposable Windows user or VM run, and the setup must be made clean for it.
+- **Release-gate evidence:** `tooling/release/src/readiness-evidence.ts` and `create-readiness-evidence.mjs` must derive scenario results from the real run artifacts, not mark them passed. Only then can the desktop rows be made required. This change needs owner approval.
+- **File-project package:** cross-device round trip, media relink, collision handling and malformed-package rejection need tests.
+- **Menu actions:** File (account, projects, media export, sign out), Edit (undo, redo, delete, duplicate, command palette, asset folder), clip split, Joy Code, view and fullscreen, and window controls each need a packaged test.
+- **Timeline and panels:** timeline edit depth, each panel's function (not only reachability), effects and transitions, and keyboard coverage need packaged tests.
+- **Project persistence (fresh process):** the packaged case needs a scenario result that the gate can require.
+- **Export parity:** deeper preview-to-export parity beyond the sampled frames, and the Persian caption canonical-face check (currently SETUP_REQUIRED on this host).
+- **NOT SUPPORTED:** worker jobs need dispatch and completion implemented and tested. Update and rollback needs signed distribution, which is owner-gated.
+- **LIMITED:** account connection needs the real-service acceptance harness with a synthetic account.
 
 ### Known gaps in this candidate
 
