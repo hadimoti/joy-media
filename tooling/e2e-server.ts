@@ -10,6 +10,11 @@ import { executeLeasedExport, type ExportJobPayload } from '../apps/worker/src/e
 // exercise stale or missing generated package output on a clean runner.
 import { verifyExport } from '../packages/export-core/src/index.ts';
 import { createControlPlaneHttpServer, LocalControlPlane } from '../apps/api/src/index.js';
+import {
+  createSyntheticAccountHarness,
+  startSyntheticControlServer,
+  syntheticControlToken,
+} from './e2e-synthetic-accounts.js';
 import type { ApiAuthentication } from '../apps/api/src/http-server.js';
 import type { MediaAuthApi, MediaAuthMethod } from '../apps/api/src/media-auth.js';
 import { AccountService } from '../apps/api/src/account-service.js';
@@ -138,11 +143,25 @@ controlPlane.helloWorker(E2E_WORKER_ID, ['render.export']);
 // bleeds into journey tests' http-error telemetry. Resolve a tiny pg-mem-backed
 // AccountService first so the route is reachable before the server is built
 // (see createE2EAccountService for the schema bootstrap).
-createE2EAccountService().then((account) => {
+createE2EAccountService().then(async (defaultAccount) => {
+  // Synthetic accounts are opt-in: without a control token the server behaves exactly as before.
+  const controlToken = syntheticControlToken(process.env);
+  const synthetic =
+    controlToken === undefined
+      ? undefined
+      : await createSyntheticAccountHarness({ fallback: new TestMediaAuth() });
+  const account = synthetic?.account ?? defaultAccount;
+  if (synthetic !== undefined && controlToken !== undefined) {
+    await startSyntheticControlServer(synthetic, {
+      token: controlToken,
+      port: Number(process.env.JOY_MEDIA_E2E_CONTROL_PORT ?? 4175),
+    });
+    process.stdout.write('JOY_MEDIA_E2E_SYNTHETIC_CONTROL_READY\n');
+  }
   const server = createControlPlaneHttpServer({
     controlPlane,
     authentication,
-    mediaAuth: new TestMediaAuth(),
+    mediaAuth: synthetic?.mediaAuth ?? new TestMediaAuth(),
     privateObjectStore: objectStore,
     // The browser suite intentionally exercises dozens of flows with one
     // disposable owner/IP. Abuse protection is covered by the API transport
