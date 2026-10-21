@@ -511,12 +511,15 @@ jobs:
           foreach ($path in @($candidateSetup, $candidateArchive, $candidateWorker, $previousSetup, $previousArchive, $previousChecksums)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required two-pass lifecycle artifact is missing: $path" }
           }
-          $workerSelfTest = & $candidateWorker --joy-worker-self-test
-          if ($LASTEXITCODE -ne 0 -or $workerSelfTest -notmatch '"ok"\s*:\s*true') { throw 'Frozen Worker executable failed its self-test before the acceptance passes.' }
+          # Match against the joined output: -notmatch on a captured array returns the lines that do
+          # not match, so any extra line would fail a healthy self-test. Report the exit code and
+          # output when it fails.
+          $workerSelfTest = (& $candidateWorker --joy-worker-self-test | Out-String)
+          if ($LASTEXITCODE -ne 0 -or $workerSelfTest -notmatch '"ok"\s*:\s*true') { throw "Frozen Worker executable failed its self-test before the acceptance passes (exit $LASTEXITCODE): $workerSelfTest" }
           $results = @{}
           foreach ($pass in @('1', '2')) {
-            $result = & $candidateWorker --joy-worker-self-test
-            if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw "Worker executable self-test failed for pass $pass." }
+            $result = (& $candidateWorker --joy-worker-self-test | Out-String)
+            if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw "Worker executable self-test failed for pass $pass (exit $LASTEXITCODE): $result" }
             $evidence = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".json")
             if (Test-Path -LiteralPath $evidence) { throw "Windows Worker acceptance output already exists for this run/pass: $evidence" }
             & powershell -NoProfile -ExecutionPolicy Bypass -File ops/self-hosted/windows-runner/worker-acceptance-container.ps1 `
