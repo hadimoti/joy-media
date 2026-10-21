@@ -193,6 +193,15 @@ test.describe('native stock video library', () => {
       cloudBacked: true,
     };
 
+    // The listing below fixes an imported asset that the real API does not hold, so the card's
+    // cloud-original fetch is answered with ASSET_NOT_FOUND. The count is a range because card
+    // thumbnail fetches depend on render timing; the request itself is the fixture's, not a defect.
+    allowExpectedHttpResponse(page, {
+      status: 409,
+      pathname: /^\/api\/v1\/projects\/[^/]+\/assets\/imported-stock-1\/original$/,
+      code: 'ASSET_NOT_FOUND',
+      count: { min: 0, max: 8 },
+    });
     await page.route('**/api/v1/library/my-assets**', async (route) => {
       const url = new URL(route.request().url());
       expect(url.pathname).toBe('/api/v1/library/my-assets');
@@ -694,7 +703,7 @@ test.describe('native stock video library', () => {
     await Promise.all(myAssetResponsePromises);
     const projectRequestErrors = projectRequestIds
       .filter((id) => !activeControlPlaneProjectIds.includes(id) && !myAssetProjectIds.includes(id))
-      .map(() => '/api/v1/projects/:projectId');
+      .map((id) => `/api/v1/projects/${id}`);
     expect(projectRequestErrors).toEqual([]);
     expect(stockRequestErrors).toEqual([]);
   });
