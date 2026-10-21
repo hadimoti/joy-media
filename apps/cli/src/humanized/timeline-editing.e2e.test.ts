@@ -861,7 +861,9 @@ describe('a long editing session', () => {
     expect(spans(show)).toEqual(Array.from({ length: 200 }, (_, i) => [i * 2, i * 2 + 1]));
     expect((await listProjects(sb))[0]).toMatchObject({ revision: 201, clipCount: 200 });
     expect(elapsedMs).toBeGreaterThan(0);
-  }, 240_000);
+    // 200 edits plus readbacks each start a fresh CLI process. A loaded Windows container
+    // takes about 1.2 s per process, which exceeded the previous 240 s limit.
+  }, 600_000);
 
   it('counts one revision per successful edit, stays readable, and keeps bounded history', async () => {
     const id = await createProject(sb, 'Session');
