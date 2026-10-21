@@ -1886,6 +1886,21 @@ describe('JOY Studio 1.0 release gate', () => {
       expect(result.passed).toBe(false);
     });
 
+    it('per-pass scope evaluates one pass without the aggregate readiness record', () => {
+      const input = { ...passingInput(), readinessEvidence: null } as unknown as ReleaseGateInput;
+      const failedIds = (result: ReturnType<typeof evaluateReleaseGate>) =>
+        result.checks.filter((c) => c.status === 'failed').map((c) => c.id);
+
+      const release = evaluateReleaseGate(input);
+      const pass = evaluateReleaseGate({ ...input, scope: 'pass' });
+
+      expect(failedIds(release)).toContain('readiness-evidence');
+      expect(pass.checks.some((c) => c.id === 'readiness-evidence')).toBe(false);
+      expect(failedIds(pass)).toEqual(
+        failedIds(release).filter((id) => id !== 'readiness-evidence'),
+      );
+    });
+
     it('fails closed when a source-bound release omits readiness evidence', () => {
       const result = evaluateReleaseGate({
         ...passingInput(),

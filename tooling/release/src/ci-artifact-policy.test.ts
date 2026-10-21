@@ -127,6 +127,7 @@ describe('v2 release-candidate artifact upload policy', () => {
 
     // Repetition contract item 6: each pass is evaluated independently, then both are bound together.
     expect(realAcceptance).toContain('pnpm run release:gate');
+    expect(realAcceptance).toContain('JOY_RELEASE_SCOPE: pass');
     expect(gateSummary).toContain('pnpm run release:gate');
     expect(gateSummary).toContain('runs-on: [self-hosted, linux, x64, joy-media-acceptance]');
     expect(gateSummary).toContain('linux-real-services');

@@ -98,6 +98,11 @@ export interface ReleaseGateInput {
   readonly readinessEvidence?: ReadinessEvidence | null;
   /** Workspace-level readiness errors (missing file, stale hashes, or unsafe artifacts). */
   readonly readinessEvidenceErrors?: readonly string[];
+  /**
+   * `pass` evaluates one isolated pass on its own evidence and leaves out the aggregate readiness
+   * record, which only exists once both passes are bound. The consolidated gate uses `release`.
+   */
+  readonly scope?: 'pass' | 'release';
   /** Present for real workspace evidence; omitted by the pure evaluator. */
   readonly sourceProvenance?: ReleaseSourceProvenance;
   /**
@@ -319,12 +324,16 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
       sourceProvenanceReady(input, now),
       sourceProvenanceMessage(input, now),
     ),
-    check(
-      'readiness-evidence',
-      readinessEvidenceBlockers(input).length === 0,
-      readinessEvidenceMessage(input),
-      true,
-    ),
+    ...(input.scope === 'pass'
+      ? []
+      : [
+          check(
+            'readiness-evidence',
+            readinessEvidenceBlockers(input).length === 0,
+            readinessEvidenceMessage(input),
+            true,
+          ),
+        ]),
     check(
       'tests',
       input.testSummary.collected > 0 && input.testSummary.failed === 0,
@@ -1158,10 +1167,12 @@ export function writeReleaseEvidence(
   // workspace file on disk rather than accepting the in-memory record alone.
   // When the evidence file is missing, stale, or invalid, the workspace
   // result carries null evidence and blockers that the gate rejects.
+  const releaseScope = process.env.JOY_RELEASE_SCOPE === 'pass' ? 'pass' : 'release';
   const checkedEvidence: ReleaseEvidence =
     evidence.sourceProvenance !== undefined
       ? {
           ...evidence,
+          scope: releaseScope,
           ...(() => {
             const workspace = readReadinessEvidenceFromWorkspace(
               root,
@@ -1173,7 +1184,7 @@ export function writeReleaseEvidence(
             };
           })(),
         }
-      : evidence;
+      : { ...evidence, scope: releaseScope };
 
   const result = evaluateReleaseGate(checkedEvidence, now);
   const manifestText = JSON.stringify(evidence.manifest, null, 2);
