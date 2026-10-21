@@ -25,8 +25,50 @@ function openChromiumDriver(): ReturnType<typeof createChromiumSceneDriver> {
   openedDrivers.push(driver);
   return driver;
 }
+// Only a stall is retried. A capture whose browser could not be stopped is a real failure, and so
+// is a retry that would run beside a browser that may still be alive.
+// The driver's stall messages: a budget or capture timeout, a DevTools or document-load timeout, or
+// a browser that exited before its DevTools endpoint came up.
+const STALLED_CAPTURE =
+  /RENDER_CAPTURE_TIMEOUT|exceeded (?:its )?\d+ms|timed out|exited before CDP startup/;
+const CLEANUP_FAILURE = /cleanup failed|RENDER_CANCEL_TIMEOUT|did not stop/;
+const CAPTURE_ATTEMPTS = 3;
+// Once cleanup has succeeded, closing a stalled driver can still report one of two benign errors:
+// a late cleanup after the stall's deadline, or a worker that missed its 500 ms stop window. Either
+// is accepted only when the profile is gone. Any other close failure fails the scene.
+const BENIGN_CLOSE_ERRORS = [
+  'RENDER_CANCEL_TIMEOUT: Chromium cleanup exceeded five seconds',
+  'Capture worker did not stop within 500 ms',
+];
+async function retireStalledDriver(driver: ReturnType<typeof createChromiumSceneDriver>) {
+  let closeError: unknown;
+  try {
+    await driver.closeAsync!();
+  } catch (error) {
+    closeError = error;
+  }
+  const closeMessage = closeError instanceof Error ? closeError.message : '';
+  const benign = BENIGN_CLOSE_ERRORS.some((message) => closeMessage.startsWith(message));
+  if (closeError !== undefined && !benign) throw closeError;
+  if (existsSync(driver.profileDirectory)) {
+    throw new Error(
+      `Chromium profile is still on disk after a stalled capture: ${driver.profileDirectory}`,
+    );
+  }
+  const index = openedDrivers.indexOf(driver);
+  if (index >= 0) openedDrivers.splice(index, 1);
+}
 afterEach(async () => {
-  for (const driver of openedDrivers.splice(0)) await driver.closeAsync!();
+  // Close every driver even when one fails, then report the first failure.
+  const failures: unknown[] = [];
+  for (const driver of openedDrivers.splice(0)) {
+    try {
+      await driver.closeAsync!();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) throw failures[0];
 }, 30_000);
 
 describe.runIf(findChromiumExecutable() !== undefined)(
@@ -66,7 +108,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
       'pins $id Chromium RGBA frames and proves preview/export pixel parity',
       async (scene) => {
         // Each capture cold-starts Chromium. CI hosts ran past 45 s, so the budget leaves room.
-        const driver = openChromiumDriver();
+        let driver = openChromiumDriver();
         const instance = resolveFirstPartySceneInstance(scene.id);
         expect(instance).toBeDefined();
         const runtime = createSandboxedReactScene(scene.manifest, scene.source);
@@ -77,18 +119,34 @@ describe.runIf(findChromiumExecutable() !== undefined)(
           variables: instance!.variables,
           locale: 'en',
         };
-        const preview = await captureSceneSurfaceAsync(
-          runtime,
-          driver,
-          request,
-          new SceneCaptureCache(),
-        );
-        const finalRender = await captureSceneSurfaceAsync(
-          runtime,
-          driver,
-          request,
-          new SceneCaptureCache(),
-        );
+        // A cold start on a loaded Linux container can stall past the capture budget. On CI, about
+        // 3 of every 100 captures stalled for the whole budget, and the rest started normally. A
+        // stalled capture is retired and retried on a fresh browser, up to three attempts. The
+        // pixel parity and pinned-hash checks run on whichever attempt succeeds. The scene's
+        // timeout allows six budgets: two captures, each with up to three attempts.
+        const capture = async () => {
+          for (let attempt = 1; ; attempt += 1) {
+            try {
+              return await captureSceneSurfaceAsync(
+                runtime,
+                driver,
+                request,
+                new SceneCaptureCache(),
+              );
+            } catch (error) {
+              const reason = error instanceof Error ? error.message : String(error);
+              const stalled = STALLED_CAPTURE.test(reason) && !CLEANUP_FAILURE.test(reason);
+              if (!stalled || attempt === CAPTURE_ATTEMPTS) throw error;
+              console.warn(
+                `${scene.id} stalled (attempt ${attempt}/${CAPTURE_ATTEMPTS}): ${reason}`,
+              );
+              await retireStalledDriver(driver);
+              driver = openChromiumDriver();
+            }
+          }
+        };
+        const preview = await capture();
+        const finalRender = await capture();
         expect(compareSceneSurfaces(preview, finalRender)).toEqual({
           matches: true,
           maxChannelDelta: 0,
@@ -103,7 +161,7 @@ describe.runIf(findChromiumExecutable() !== undefined)(
         // Yield between scene cases so Vitest's worker RPC can publish progress on slower CI hosts.
         await new Promise<void>((resolve) => setImmediate(resolve));
       },
-      200_000,
+      600_000,
     );
 
     afterAll(() => {

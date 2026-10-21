@@ -385,7 +385,8 @@ async function closeBrowser(skipProtocolClose) {
 async function ensureBrowser(request) {
   if (socket && targetId) return;
   browser = spawn(workerData.executablePath, [
-    '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-background-networking',
+    '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
+    '--disable-background-networking',
     '--disable-component-update', '--disable-default-apps', '--disable-extensions', '--disable-sync',
     '--no-first-run', '--hide-scrollbars', '--force-device-scale-factor=1', '--lang=en-US',
     '--host-resolver-rules=MAP * 0.0.0.0, EXCLUDE localhost', '--remote-debugging-port=0',
