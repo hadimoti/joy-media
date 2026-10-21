@@ -8,15 +8,19 @@ import {
 } from './media-relink.js';
 import type { OriginalAssetDescriptor } from './opfs-original-asset-cache.js';
 
-async function sha256(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
+function encodeText(text: string): Uint8Array<ArrayBuffer> {
+  return new Uint8Array(new TextEncoder().encode(text));
+}
+
+async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await new Blob([bytes]).arrayBuffer());
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-const original = new TextEncoder().encode('original clip bytes');
-const replacementSameSize = new TextEncoder().encode('tampered clip bytes');
+const original = encodeText('original clip bytes');
+const replacementSameSize = encodeText('tampered clip bytes');
 
-async function recordFor(bytes: Uint8Array): Promise<AssetRecordV1> {
+async function recordFor(bytes: Uint8Array<ArrayBuffer>): Promise<AssetRecordV1> {
   return {
     id: 'asset-clip',
     kind: 'video',

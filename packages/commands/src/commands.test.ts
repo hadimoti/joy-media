@@ -82,6 +82,7 @@ describe('applyCommand', () => {
       'timeline.reorderTracks',
       'timeline.restoreCompound',
       'timeline.restoreTrackClips',
+      'timeline.setClipAsset',
       'timeline.setClipRate',
       'timeline.setCompositionDimensions',
       'timeline.setTimeRemap',
@@ -550,6 +551,50 @@ describe('applyCommand', () => {
         }),
       'COMMAND_VALIDATION_UNSUPPORTED',
     );
+  });
+
+  it('repoints a video clip at another asset and the inverse restores the original asset', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, 2 * SECOND_US),
+    ]);
+    const { project: next, inverse } = applyCommand(project, {
+      type: 'timeline.setClipAsset',
+      payload: { ...TARGET, clipId: 'clip-a', assetId: 'asset-replacement' },
+    });
+    const clip = next.compositions['root']!.tracks[0]!.clips[0]!;
+    expect(clip).toMatchObject({
+      kind: 'video',
+      assetId: 'asset-replacement',
+      durationUs: 2 * SECOND_US,
+    });
+    expect(validateSpikeProject(next)).toEqual([]);
+    const restored = applyCommand(next, inverse).project;
+    expect(restored.compositions['root']!.tracks[0]!.clips[0]).toMatchObject({
+      assetId: 'asset-clip-a',
+    });
+  });
+
+  it('treats repointing a clip to the asset it already uses as a no-op', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, 2 * SECOND_US),
+    ]);
+    const { project: next } = applyCommand(project, {
+      type: 'timeline.setClipAsset',
+      payload: { ...TARGET, clipId: 'clip-a', assetId: 'asset-clip-a' },
+    });
+    expect(next).toBe(project);
+  });
+
+  it('refuses an empty asset id', () => {
+    const project = withClips(emptySpikeProject(), 'track-0', [
+      makeVideoClip('clip-a', 0, 2 * SECOND_US),
+    ]);
+    expect(() =>
+      applyCommand(project, {
+        type: 'timeline.setClipAsset',
+        payload: { ...TARGET, clipId: 'clip-a', assetId: '' },
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'COMMAND_VALIDATION_RANGE' }));
   });
 
   it('sets clip rate and preserves source range by rescaling duration', () => {

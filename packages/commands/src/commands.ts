@@ -121,6 +121,11 @@ export interface SetTrackMutedPayload extends TrackTarget {
 export interface SetTrackLabelColorPayload extends TrackTarget {
   readonly labelColor?: TimelineTrackLabelColor;
 }
+/** Repoints a video clip at another asset record. The inverse restores the old asset id. */
+export interface SetClipAssetPayload extends TrackTarget {
+  readonly clipId: string;
+  readonly assetId: string;
+}
 export interface DuplicateClipPayload extends TrackTarget {
   readonly clipId: string;
   readonly newClipId: string;
@@ -199,6 +204,7 @@ export type SpikeCommand =
   | { readonly type: 'timeline.joinClips'; readonly payload: JoinClipsPayload }
   | { readonly type: 'timeline.duplicateClip'; readonly payload: DuplicateClipPayload }
   | { readonly type: 'timeline.setClipRate'; readonly payload: SetClipRatePayload }
+  | { readonly type: 'timeline.setClipAsset'; readonly payload: SetClipAssetPayload }
   | { readonly type: 'timeline.freezeFrame'; readonly payload: FreezeFramePayload }
   | { readonly type: 'timeline.toggleClipReverse'; readonly payload: ToggleClipReversePayload }
   | { readonly type: 'timeline.setTimeRemap'; readonly payload: SetTimeRemapPayload }
@@ -238,6 +244,9 @@ export const COMMAND_REGISTRY: Readonly<
   'timeline.duplicateClip': { description: 'Clone a clip onto the same track after it.' },
   'timeline.setClipRate': {
     description: 'Set clip playback rate (0.1–8×); rescale duration by default.',
+  },
+  'timeline.setClipAsset': {
+    description: 'Repoint a video clip at another asset record (used by relink).',
   },
   'timeline.freezeFrame': {
     description: 'Insert a freeze/hold segment at a time inside a video clip.',
@@ -324,6 +333,8 @@ function applyCommandUnchecked(project: SpikeProject, command: SpikeCommand): Ap
       return applyDuplicateClip(project, command.payload);
     case 'timeline.setClipRate':
       return applySetClipRate(project, command.payload);
+    case 'timeline.setClipAsset':
+      return applySetClipAsset(project, command.payload);
     case 'timeline.freezeFrame':
       return applyFreezeFrame(project, command.payload);
     case 'timeline.toggleClipReverse':
@@ -963,6 +974,40 @@ function applySetClipRate(project: SpikeProject, payload: SetClipRatePayload): A
         clipId: clip.id,
         playbackRate: oldRate === 0 ? 1 : oldRate,
         preserveSourceRange: preserve,
+      },
+    },
+  };
+}
+
+function applySetClipAsset(project: SpikeProject, payload: SetClipAssetPayload): ApplyResult {
+  if (payload.assetId.length === 0 || payload.assetId.length > 256)
+    throw new CommandError(
+      'COMMAND_VALIDATION_RANGE',
+      'setClipAsset: assetId must be 1-256 characters',
+    );
+  const track = getTrack(project, payload);
+  const clip = getClip(track, payload.clipId);
+  if (clip.kind !== 'video') {
+    throw new CommandError(
+      'COMMAND_VALIDATION_UNSUPPORTED',
+      `setClipAsset: only video clips reference an asset (got "${clip.kind}")`,
+    );
+  }
+  if (clip.assetId === payload.assetId)
+    return { project, inverse: { type: 'timeline.setClipAsset', payload } };
+  const updated = { ...clip, assetId: payload.assetId };
+  return {
+    project: withTrackClips(project, payload, [
+      ...track.clips.filter((c) => c.id !== clip.id),
+      updated,
+    ]),
+    inverse: {
+      type: 'timeline.setClipAsset',
+      payload: {
+        compositionId: payload.compositionId,
+        trackId: payload.trackId,
+        clipId: clip.id,
+        assetId: clip.assetId,
       },
     },
   };
