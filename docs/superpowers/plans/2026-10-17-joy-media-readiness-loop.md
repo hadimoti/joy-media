@@ -497,8 +497,12 @@ explicit `joy.cmd` path and sanitized disposable state directory.
 - [ ] Exercise paths with spaces/Persian, non-admin install, locked output, and
       PowerShell 5.1/7 hosts. Verify executable precedence: `joy.cmd` invokes the CLI;
       the desktop executable must not accidentally satisfy a CLI version assertion.
-- [ ] Verify installer/archive/sidecar hashes and tamper rejection. Record actual
+- [x] Verify installer/archive/sidecar hashes and tamper rejection. Record actual
       signing status; unsigned acceptance remains an explicit owner release decision.
+      Evidence (2026-10-21): `tests/desktop/installer-package-check.mjs` verifies
+      artifact hashes, and the lifecycle harness rejects a tampered setup before any
+      install (`tests/desktop/windows-lifecycle.ps1`). The staged artifacts are unsigned;
+      signing remains an owner decision.
 - [x] Build with `pnpm --filter @joy-media/desktop package:unpacked` and run
       `pnpm --filter @joy-media/desktop test:smoke-packaged`. The packaged Playwright
       acceptance also passed with `--retries=0` (1 journey, including playable export).
@@ -541,8 +545,11 @@ explicitly per platform rather than copying POSIX signal numbers onto Windows.
       help, error, doctor, project create/list/show/export/import, timeline add/split/
       trim/remove, render errors, and plan-only events; real-media and agent-delivery
       suites validate encoded-render events.
-- [ ] Run the contract suite on additional supported Node versions that reproduced
-      the startup warning; current evidence is Node 24.19.0 only.
+- [x] Run the contract suite on additional supported Node versions that reproduced
+      the startup warning. Evidence (2026-10-21): Node 22.23.3, the minimum in the root
+      `engines` field, passes the `cli-contract`, `cli-schemas`, `agent-delivery`,
+      `agent-run`, and `render-real` e2e suites: 5 files, 91 tests, exit 0, on Ubuntu
+      24.04 with FFmpeg 6.1.1. Node 24.19.0 remains the Windows evidence.
 - [x] Verify Windows ACL inspection for synthetic credentials, `taskkill` process-tree
       termination, real SQLite writer-lock behavior, and paths containing spaces;
       the affected Windows selections passed. Both `bin` and `bundle` pass the new
