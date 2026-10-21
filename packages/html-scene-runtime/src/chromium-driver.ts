@@ -38,21 +38,25 @@ interface ChromiumWorker {
   unref(): void;
 }
 
-const CHROMIUM_CANDIDATES = [
-  process.env.JOY_CHROMIUM_PATH,
-  process.env.ProgramFiles &&
-    join(process.env.ProgramFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-  process.env['ProgramFiles(x86)'] &&
-    join(process.env['ProgramFiles(x86)'], 'Google', 'Chrome', 'Application', 'chrome.exe'),
-  process.env.ProgramFiles &&
-    join(process.env.ProgramFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-  process.env['ProgramFiles(x86)'] &&
-    join(process.env['ProgramFiles(x86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-  process.env.LOCALAPPDATA &&
-    join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-].filter((value): value is string => typeof value === 'string' && value.length > 0);
+// Read at call time: JOY_CHROMIUM_PATH is an explicit per-run choice and must not depend on
+// when this module happened to load.
+function chromiumCandidates(): string[] {
+  return [
+    process.env.JOY_CHROMIUM_PATH,
+    process.env.ProgramFiles &&
+      join(process.env.ProgramFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    process.env['ProgramFiles(x86)'] &&
+      join(process.env['ProgramFiles(x86)'], 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    process.env.ProgramFiles &&
+      join(process.env.ProgramFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    process.env['ProgramFiles(x86)'] &&
+      join(process.env['ProgramFiles(x86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    process.env.LOCALAPPDATA &&
+      join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium',
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+}
 
 function playwrightCandidates(): string[] {
   const roots = process.env.PLAYWRIGHT_BROWSERS_PATH
@@ -78,7 +82,7 @@ function playwrightCandidates(): string[] {
         paths:
           process.platform === 'win32'
             ? [join(base, 'chrome-win64', 'chrome.exe'), join(base, 'chrome-win', 'chrome.exe')]
-            : [join(base, 'chrome-linux', 'chrome')],
+            : [join(base, 'chrome-linux64', 'chrome'), join(base, 'chrome-linux', 'chrome')],
       });
     }
   }
@@ -86,7 +90,7 @@ function playwrightCandidates(): string[] {
 }
 
 export function findChromiumExecutable(): string | undefined {
-  return [...CHROMIUM_CANDIDATES, ...playwrightCandidates()].find((candidate) =>
+  return [...chromiumCandidates(), ...playwrightCandidates()].find((candidate) =>
     existsSync(candidate),
   );
 }
