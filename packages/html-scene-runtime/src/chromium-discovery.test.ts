@@ -1,15 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { findChromiumExecutable } from './chromium-driver.js';
 
 const KEYS = ['JOY_CHROMIUM_PATH', 'PLAYWRIGHT_BROWSERS_PATH'] as const;
-
-// Discovery only runs the Playwright cache fallback on non-Windows hosts when no explicit
-// Chromium is named. Skip where a system browser would legitimately win first.
-const systemChromiumInstalled =
-  existsSync('/usr/bin/google-chrome') || existsSync('/usr/bin/chromium');
 
 describe.runIf(process.platform !== 'win32')('Playwright Chromium discovery on Linux', () => {
   let previous: Record<string, string | undefined>;
@@ -31,15 +26,13 @@ describe.runIf(process.platform !== 'win32')('Playwright Chromium discovery on L
     rmSync(root, { recursive: true, force: true });
   });
 
-  it.skipIf(systemChromiumInstalled)(
-    'finds the chrome-linux64 layout that current Playwright installs',
-    () => {
-      const layout = join(root, 'chromium-1234', 'chrome-linux64');
-      mkdirSync(layout, { recursive: true });
-      const executable = join(layout, 'chrome');
-      writeFileSync(executable, '#!/bin/sh\n');
+  it('finds the chrome-linux64 layout that current Playwright installs', () => {
+    const layout = join(root, 'chromium-1234', 'chrome-linux64');
+    mkdirSync(layout, { recursive: true });
+    const executable = join(layout, 'chrome');
+    writeFileSync(executable, '#!/bin/sh\n');
 
-      expect(findChromiumExecutable()).toBe(executable);
-    },
-  );
+    // No system browser is injected, so the result depends only on the Playwright cache.
+    expect(findChromiumExecutable({ systemCandidates: [] })).toBe(executable);
+  });
 });

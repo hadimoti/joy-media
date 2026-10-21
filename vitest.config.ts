@@ -1,3 +1,4 @@
+import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { configDefaults, defineConfig } from 'vitest/config';
 
@@ -65,6 +66,7 @@ export default defineConfig({
       '@joy-media/worker': pkg('./apps/worker/src/index.ts'),
       '@joy-media/adapter-openrouter': pkg('./packages/adapter-openrouter/src/index.ts'),
       '@joy-media/adapter-mistral': pkg('./packages/adapter-mistral/src/index.ts'),
+      '@joy-media/transition-shaders': pkg('./packages/transition-shaders/src/index.ts'),
     },
   },
   test: {
@@ -73,7 +75,7 @@ export default defineConfig({
     // into false product failures; behavior tests use their own explicit limits.
     // Cap workers so a large host does not starve them of CPU: a worker that stops
     // answering vitest's task-update RPC fails the run even when every test passes.
-    maxWorkers: 8,
+    maxWorkers: Math.max(1, Math.min(8, availableParallelism() - 1)),
     testTimeout: 30_000,
     hookTimeout: 30_000,
     include: [

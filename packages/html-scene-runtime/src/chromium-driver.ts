@@ -89,10 +89,15 @@ function playwrightCandidates(): string[] {
   return candidates.sort((a, b) => b.revision - a.revision).flatMap(({ paths }) => paths);
 }
 
-export function findChromiumExecutable(): string | undefined {
-  return [...chromiumCandidates(), ...playwrightCandidates()].find((candidate) =>
-    existsSync(candidate),
-  );
+/**
+ * The first Chromium that exists. `systemCandidates` replaces the explicit and system browser
+ * paths; tests pass an empty list to exercise the Playwright cache alone.
+ */
+export function findChromiumExecutable(
+  options: { readonly systemCandidates?: readonly string[] } = {},
+): string | undefined {
+  const system = options.systemCandidates ?? chromiumCandidates();
+  return [...system, ...playwrightCandidates()].find((candidate) => existsSync(candidate));
 }
 
 function chromiumPidsForProfile(
