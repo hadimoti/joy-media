@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SpikeProject } from '@joy-media/project-schema';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
+import { normalizeUniversalTimeline } from '@joy-media/project-schema';
 import type { CommandTransaction } from '@joy-media/commands';
 import { emptySpikeProject } from '@joy-media/test-fixtures';
 import { buildContentTemplateTransaction } from './content-template-transaction.js';
@@ -122,6 +123,38 @@ describe('buildContentTemplateTransaction', () => {
 
     const boundProject = dispatchCompound.mock.calls[0]![1].document!;
     expect(boundProject.pluginData).toHaveProperty('joy.clipObjects');
+  });
+
+  it('mirrors the placed scene track into the visual project so the universal timeline resolves it', () => {
+    const { session, dispatchCompound } = makeMockSession(
+      emptyTimelineProject(),
+      emptyVisualProject(),
+    );
+    const seeded: SeededContentTemplate = {
+      template: {
+        id: 'joy.title',
+        label: 'JOY Title',
+        description: 'Main title',
+        category: 'Titles',
+        actions: [{ kind: 'html-scene', sceneId: 'joy.firstparty.title' }],
+      },
+      seed: 'abc',
+    };
+
+    buildContentTemplateTransaction(seeded, {
+      session,
+      selectedClipIds: [],
+      playheadUs: PLAYHEAD_US,
+    });
+
+    const placed = dispatchCompound.mock.calls[0]![1].document!;
+    const normalized = normalizeUniversalTimeline(placed);
+    expect(normalized.diagnostics.map((item) => item.code)).not.toContain(
+      'UNIVERSAL_TIMELINE_DANGLING_TRACK',
+    );
+    expect(normalized.items.find((item) => item.source.kind === 'object')).toMatchObject({
+      trackEnabled: true,
+    });
   });
 
   it('same seed produces same IDs across two calls', () => {
