@@ -3,6 +3,19 @@ import { panelLabel, panelTabIconUrl, panelTabSvgIcon } from './panel-tab-icons.
 import { useAgentPanelPresence } from './agent-presence.js';
 import type { PanelId } from './workspace.js';
 
+function CloseGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true" focusable="false">
+      <path
+        d="M3 3l10 10M13 3L3 13"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 /** Icon-only dock tab; the label becomes visible in Dockview's overflow menu. */
 export function PanelTab({ api }: IDockviewPanelHeaderProps) {
   const label = panelLabel(api.id);
@@ -35,6 +48,23 @@ export function PanelTab({ api }: IDockviewPanelHeaderProps) {
         <span className="panel-tab-fallback">{label}</span>
       )}
       <span className="panel-tab-label">{label}</span>
+      {api.id === 'agent' && (
+        <button
+          type="button"
+          className="panel-tab-close"
+          aria-label="Close Joy Code panel"
+          title={presence.active ? 'Stop Joy Code before closing it' : 'Close Joy Code'}
+          disabled={presence.active}
+          onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            api.close();
+          }}
+        >
+          <CloseGlyph />
+        </button>
+      )}
       {presence.active && (
         <span
           className="panel-tab-agent-marker"
