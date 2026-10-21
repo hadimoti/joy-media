@@ -497,12 +497,13 @@ explicit `joy.cmd` path and sanitized disposable state directory.
 - [ ] Exercise paths with spaces/Persian, non-admin install, locked output, and
       PowerShell 5.1/7 hosts. Verify executable precedence: `joy.cmd` invokes the CLI;
       the desktop executable must not accidentally satisfy a CLI version assertion.
-- [x] Verify installer/archive/sidecar hashes and tamper rejection. Record actual
+- [ ] Verify installer/archive/sidecar hashes and tamper rejection. Record actual
       signing status; unsigned acceptance remains an explicit owner release decision.
-      Evidence (2026-10-21): `tests/desktop/installer-package-check.mjs` verifies
-      artifact hashes, and the lifecycle harness rejects a tampered setup before any
-      install (`tests/desktop/windows-lifecycle.ps1`). The staged artifacts are unsigned;
-      signing remains an owner decision.
+      Partial evidence (2026-10-21): `tests/desktop/installer-package-check.mjs` checks
+      that manifest hashes agree with `SHA256SUMS.txt` (checksum-metadata consistency,
+      not a byte hash of the artifacts). The lifecycle harness's tampered-setup control
+      runs only in the disposable-host lifecycle, which has not executed here. The staged
+      artifacts are unsigned; signing remains an owner decision.
 - [x] Build with `pnpm --filter @joy-media/desktop package:unpacked` and run
       `pnpm --filter @joy-media/desktop test:smoke-packaged`. The packaged Playwright
       acceptance also passed with `--retries=0` (1 journey, including playable export).
@@ -546,10 +547,10 @@ explicitly per platform rather than copying POSIX signal numbers onto Windows.
       trim/remove, render errors, and plan-only events; real-media and agent-delivery
       suites validate encoded-render events.
 - [x] Run the contract suite on additional supported Node versions that reproduced
-      the startup warning. Evidence (2026-10-21): Node 22.23.3, the minimum in the root
-      `engines` field, passes the `cli-contract`, `cli-schemas`, `agent-delivery`,
-      `agent-run`, and `render-real` e2e suites: 5 files, 91 tests, exit 0, on Ubuntu
-      24.04 with FFmpeg 6.1.1. Node 24.19.0 remains the Windows evidence.
+      the startup warning. Evidence (2026-10-21): Node 22.23.3, in the minimum supported
+      major (`engines` is `>=22`), passes the `cli-contract`, `cli-schemas`,
+      `agent-delivery`, `agent-run`, and `render-real` e2e suites: 5 files, 91 tests, on
+      Ubuntu 24.04 with FFmpeg 6.1.1. Node 24.19.0 remains the Windows evidence.
 - [x] Verify Windows ACL inspection for synthetic credentials, `taskkill` process-tree
       termination, real SQLite writer-lock behavior, and paths containing spaces;
       the affected Windows selections passed. Both `bin` and `bundle` pass the new
