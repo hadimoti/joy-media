@@ -340,8 +340,11 @@ if (!app.requestSingleInstanceLock()) {
 
     // Deny any permission the desktop shell has no product reason to grant (camera/mic
     // access, if ever needed for capture, is a deliberate future decision, not a default).
-    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
-      callback(false);
+    // Element fullscreen is the one exception: Electron routes a renderer requestFullscreen()
+    // through this permission check, and a blanket denial leaves the request pending forever
+    // instead of rejecting it, so the Program Monitor's Fullscreen control silently did nothing.
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+      callback(permission === 'fullscreen');
     });
 
     const win = new BrowserWindow({
