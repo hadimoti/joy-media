@@ -230,19 +230,25 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
     ],
   },
   worker: {
-    summary: 'Local AI worker & GPU inference',
+    summary: 'Local AI worker & GPU inference (experimental; model setup required)',
     usage: 'joy-media worker <subcommand> [options]',
     subcommands: [
       ['status', 'GPU, AI environments and model weights (default)'],
-      ['upscale <input-image>', 'RealESRGAN upscale (--scale 1-16, default 4)'],
-      ['denoise <input-audio>', 'DeepFilterNet noise reduction'],
+      [
+        'upscale <input-image>',
+        'RealESRGAN upscale, experimental (--scale 1-16, default 4; needs model setup)',
+      ],
+      ['denoise <input-audio>', 'DeepFilterNet noise reduction, experimental (needs model setup)'],
     ],
     options: [
       ['--scale <n>', 'Upscale factor, integer 1-16'],
       ['--output, -o <file>', 'Output file (default: <input>-upscaled-4x.<ext>)'],
       ['--json', 'One JSON document on stdout'],
     ],
-    notes: ['Environment: JOY_MODELS_DIR overrides the model weights directory.'],
+    notes: [
+      'Upscale and denoise are experimental in this release and are not qualified. They need a separate model setup; `worker status` lists which model environments are installed.',
+      'Environment: JOY_MODELS_DIR overrides the model weights directory.',
+    ],
   },
   render: {
     summary: 'Headless batch render',
@@ -342,7 +348,7 @@ export function printHelp(): void {
     `    ${c('timeline', 'cyan')} [add-clip|split|trim|remove-clip] Direct scriptable timeline operations`,
   );
   console.log(
-    `    ${c('worker', 'cyan')} [status|upscale|denoise]            Local AI worker & GPU inference`,
+    `    ${c('worker', 'cyan')} [status|upscale|denoise]            Local AI worker & GPU inference (experimental)`,
   );
   console.log(
     `    ${c('render', 'cyan')} [--project --preset --out --concurrency --json]  Headless batch render`,

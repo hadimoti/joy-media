@@ -594,7 +594,9 @@ real services. Evidence must name which ran and what remained unavailable.
       behavior only; it does not qualify model output.
 - [ ] Real-GPU qualification: one supported job per advertised capability with
       decoded output checks; the local GPU is detected but all model runtimes and
-      weights are absent.
+      weights are absent. Decision (2026-10-21, codex gpt-6.1-sol): the model features are
+      relabeled experimental and excluded from this release; qualification stays open for a
+      later release.
 - [x] Add and run a 200-edit CLI persistence scenario: 200 real CLI processes add
       non-overlapping clips, then fresh-process readback verifies revision 201 and
       all 200 exact spans. Local Windows/Node 24.19.0 run: 59.89 s for the edits.

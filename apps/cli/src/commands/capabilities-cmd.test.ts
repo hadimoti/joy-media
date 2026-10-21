@@ -134,6 +134,14 @@ describe('capabilities command', () => {
     }
   });
 
+  it('keeps worker diagnostics available while stating that model features are experimental', async () => {
+    const { stdout } = await captureStdout(() => runCli(['capabilities', '--json']));
+    const doc = JSON.parse(stdout) as CapabilitiesDocument;
+    const worker = doc.commands.find((cmd) => cmd.name === 'worker');
+    expect(worker?.status).toBe('available');
+    expect(worker?.summary).toMatch(/experimental; model setup required/);
+  });
+
   it('every COMMAND_HELP key is dispatched', async () => {
     // The dispatch switch in cli.ts must have a case for every COMMAND_HELP key.
     const knownHandled = new Set([

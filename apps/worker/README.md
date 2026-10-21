@@ -1,7 +1,8 @@
 # worker
 
 > **Status:** paired outbound Worker with verified thumbnail, AI, audio, and
-> professional masking derivative jobs.
+> professional masking derivative jobs. Local AI models (upscale, denoise, matting) are
+> experimental, need separate model setup, and are not qualified in this release.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §26, §8.4 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Local/GPU worker daemon: probing, proxies, waveforms, FFmpeg, deterministic export, provider execution, resource governor.

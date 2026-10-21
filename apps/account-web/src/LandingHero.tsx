@@ -192,11 +192,11 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
 
           <div className="feature-card">
             <div className="feature-icon">🧠</div>
-            <h3>On-Device AI Acceleration</h3>
+            <h3>Experimental On-Device AI</h3>
             <p>
-              Embedded standalone <code>joy-worker.exe</code> executes Real-ESRGAN super-resolution,
-              DeepFilterNet real-time audio denoise, and BiRefNet matting directly on your local
-              GPU.
+              Local <code>joy-worker.exe</code> can run Real-ESRGAN super-resolution, DeepFilterNet
+              audio denoise, and BiRefNet matting on your GPU after a separate model setup. These
+              features are experimental and not qualified in this release.
             </p>
           </div>
 
