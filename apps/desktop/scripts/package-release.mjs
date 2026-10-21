@@ -135,7 +135,16 @@ async function assembleUnpacked() {
   // cleanly without relying on repository-root node_modules symlinks.
   const unpackedNodeModules = resolve(unpackedDir, 'node_modules', '@joy-media');
   await mkdir(unpackedNodeModules, { recursive: true });
-  for (const pkgName of ['provider-sdk', 'project-schema', 'project-persistence']) {
+  // The worker's runtime closure: export-core and job-protocol import project-schema and render-ir.
+  // Without them the staged Worker fails at import with ERR_MODULE_NOT_FOUND and never says hello.
+  for (const pkgName of [
+    'provider-sdk',
+    'project-schema',
+    'project-persistence',
+    'export-core',
+    'job-protocol',
+    'render-ir',
+  ]) {
     const pkgRoot = resolve(repoRoot, 'packages', pkgName);
     const dest = resolve(unpackedNodeModules, pkgName);
     await rm(dest, { recursive: true, force: true });
@@ -149,6 +158,28 @@ async function assembleUnpacked() {
       });
     }
   }
+  // The Worker imports playwright-core when it loads (GPU preview host). It is an external package,
+  // so it is copied from the Worker's own dependency tree; a missing copy is a packaging error.
+  const playwrightCoreSource = resolve(
+    repoRoot,
+    'apps',
+    'worker',
+    'node_modules',
+    'playwright-core',
+  );
+  if (!existsSync(resolve(playwrightCoreSource, 'package.json'))) {
+    throw new Error(
+      `playwright-core is not installed for the Worker at ${playwrightCoreSource}. Run pnpm install before packaging.`,
+    );
+  }
+  await rm(resolve(unpackedDir, 'node_modules', 'playwright-core'), {
+    recursive: true,
+    force: true,
+  });
+  await cp(playwrightCoreSource, resolve(unpackedDir, 'node_modules', 'playwright-core'), {
+    recursive: true,
+    dereference: true,
+  });
   process.stderr.write(`Staged workspace dependencies into ${unpackedNodeModules}\\n`);
 
   // Preserve the project license and desktop-specific dependency notices in the unpacked package.
