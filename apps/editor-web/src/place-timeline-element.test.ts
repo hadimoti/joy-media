@@ -5,7 +5,7 @@ import {
   buildMediaPlacementDocument,
   buildTimelineElementDocument,
   withImportedAsset,
-  withVisualPlacementMirror,
+  withVisualTrackMirror,
 } from './place-timeline-element.js';
 
 describe('place-timeline-element', () => {
@@ -132,12 +132,13 @@ describe('place-timeline-element', () => {
       'UNIVERSAL_TIMELINE_DANGLING_TRACK',
     );
 
-    const mirrored = withVisualPlacementMirror(placed, {
+    const mirrored = withVisualTrackMirror(placed, {
+      compositionId: 'root',
       trackId: 'track-2',
       name: 'Scene',
       order: 1,
-      clip,
     });
+    expect(mirrored.compositions.root!.tracks.map((track) => track.id)).toContain('track-2');
     const normalized = normalizeUniversalTimeline(mirrored);
     expect(normalized.diagnostics.map((item) => item.code)).not.toContain(
       'UNIVERSAL_TIMELINE_DANGLING_TRACK',
@@ -149,35 +150,17 @@ describe('place-timeline-element', () => {
     });
   });
 
-  it('mirrors a placement once and leaves the existing visual tracks unchanged', () => {
-    const clip = {
-      id: 'clip-scene',
-      kind: 'video' as const,
-      assetId: 'html-scene:joy.firstparty.title',
-      startUs: 0,
-      durationUs: 2_000_000,
-      sourceInUs: 0,
-    };
+  it('mirrors a new track once and leaves existing visual tracks unchanged', () => {
     const base = baseProject();
-    const once = withVisualPlacementMirror(base, {
-      trackId: 'track-1',
-      name: 'Scene',
-      order: 0,
-      clip,
-    });
-    const twice = withVisualPlacementMirror(once, {
-      trackId: 'track-1',
-      name: 'Scene',
-      order: 0,
-      clip,
-    });
-    const tracks = twice.compositions.root!.tracks;
-    expect(tracks.map((track) => track.id)).toEqual(
-      base.compositions.root!.tracks.map((track) => track.id),
-    );
-    expect(
-      tracks.flatMap((track) => track.clips).filter((item) => item.id === 'clip-scene'),
-    ).toHaveLength(1);
+    const placement = { compositionId: 'root', trackId: 'track-2', name: 'Scene', order: 1 };
+    const once = withVisualTrackMirror(base, placement);
+    const twice = withVisualTrackMirror(once, placement);
+    expect(twice.compositions.root!.tracks.map((track) => track.id)).toEqual([
+      ...base.compositions.root!.tracks.map((track) => track.id),
+      'track-2',
+    ]);
+    expect(withVisualTrackMirror(base, { ...placement, trackId: 'track-1', order: 0 })).toBe(base);
+    expect(withVisualTrackMirror(base, { ...placement, compositionId: 'missing' })).toBe(base);
   });
 });
 

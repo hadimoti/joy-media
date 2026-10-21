@@ -231,10 +231,7 @@ import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js'
 import { prepareTimelinePresentation } from './timeline-presentation.js';
 import { TimelinePanel } from './TimelinePanel.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
-import {
-  buildTimelineElementDocument,
-  withVisualPlacementMirror,
-} from './place-timeline-element.js';
+import { buildTimelineElementDocument, withVisualTrackMirror } from './place-timeline-element.js';
 import { nextProfessionalTrackId } from './timeline-track-family.js';
 import { nextTimelineMarkerId, nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
@@ -3272,7 +3269,7 @@ function EditorWorkspace({
           crop: { left: 0, top: 0, right: 0, bottom: 0 },
         },
       };
-      const document = withVisualPlacementMirror(
+      const document = withVisualTrackMirror(
         buildTimelineElementDocument({
           baseProject: session.visualProject,
           clipId,
@@ -3286,10 +3283,10 @@ function EditorWorkspace({
           visualObject: object,
         }),
         {
+          compositionId: composition.id,
           trackId: targetTrackId,
           name: 'Scene',
           order: targetExisting?.order ?? order,
-          clip: insertClipCommand.payload.clip,
         },
       );
       const label = `Place HTML scene ${scenePackageId}`;
