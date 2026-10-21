@@ -300,6 +300,7 @@ function frameKey<TVariables>(
       variables: request.variables,
       resolverKey: request.resolverKey ?? '',
       lines: request.lines ?? [],
+      paint: request.paint ?? null,
     }),
   );
 }
