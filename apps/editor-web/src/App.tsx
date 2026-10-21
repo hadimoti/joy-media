@@ -227,6 +227,7 @@ import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
 import { createMissingMediaHost, type MissingMediaHost } from './missing-media-host.js';
+import { JoyCodeCloseButton } from './JoyCodeCloseButton.js';
 import type { ProjectWriterHandle } from './project-writer.js';
 import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js';
 import { prepareTimelinePresentation } from './timeline-presentation.js';
@@ -5135,6 +5136,7 @@ function EditorWorkspace({
   function Panel({ api }: IDockviewPanelProps) {
     return (
       <PanelIdentityContext.Provider value={api.id as PanelId}>
+        {api.id === 'agent' && <JoyCodeCloseButton api={api} />}
         <PanelContent api={api} />
       </PanelIdentityContext.Provider>
     );

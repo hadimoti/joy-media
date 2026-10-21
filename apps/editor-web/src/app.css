@@ -18679,13 +18679,14 @@ label {
   line-height: 1.35;
 }
 
-/* Joy Code tab close control. Hidden until the tab is hovered or focused. */
-.panel-tab-close {
+/* Joy Code panel close control, in the panel itself rather than in the dock tab. */
+.joy-code-close {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 1.1rem;
-  height: 1.1rem;
+  top: 6px;
+  right: 6px;
+  z-index: 5;
+  width: 1.25rem;
+  height: 1.25rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -18693,19 +18694,13 @@ label {
   border-radius: var(--radius-sm, 4px);
   background: transparent;
   color: var(--joy-text-muted);
-  opacity: 0;
   cursor: pointer;
 }
-.panel-tab-close:hover,
-.panel-tab-close:focus-visible {
-  opacity: 1;
+.joy-code-close:hover,
+.joy-code-close:focus-visible {
   color: var(--joy-text);
 }
-.panel-tab-close:disabled {
-  opacity: 0.25;
+.joy-code-close:disabled {
+  opacity: 0.35;
   cursor: not-allowed;
-}
-.dv-tab:hover .panel-tab-close,
-.dv-tab:focus-within .panel-tab-close {
-  opacity: 1;
 }
