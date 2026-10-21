@@ -70,6 +70,9 @@ export default defineConfig({
     // The full suite runs process-level CLI tests alongside CPU-heavy render
     // acceptance tests. Keep finite hang protection without turning load spikes
     // into false product failures; behavior tests use their own explicit limits.
+    // Cap workers so a large host does not starve them of CPU: a worker that stops
+    // answering vitest's task-update RPC fails the run even when every test passes.
+    maxWorkers: 8,
     testTimeout: 30_000,
     hookTimeout: 30_000,
     include: [
