@@ -2,11 +2,14 @@ import { expect, test, type Page } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
 import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
 import {
-  allowExpectedAssetFixtureMisses,
+  allowReferenceFixtureMisses,
   assertBrowserAudit,
   setupBrowserAudit,
   type CountRange,
 } from './helpers/browser-console-audit.js';
+
+/** Reference assets of the reference workspace that have no uploaded bytes on the E2E server. */
+const REFERENCE_FIXTURE_MISSING_ASSET_IDS = ['product-still', 'asset-b-roll-a'] as const;
 
 const INVALID_CANONICAL_PROPOSAL = {
   summary: 'Apply a caption style to a missing clip',
@@ -56,7 +59,13 @@ test.describe('JOY Live Director runtime boundary', () => {
     cloud?: number | CountRange;
   };
   const DIRECTOR_ASSET_MISS_MAP: Record<string, AssetMissBounds> = {
-    'cancellation rejects a delayed provider reply before it can stage a preview': { original: 2 },
+    // Stop lands while the reference media reads are still in flight. Each declared-missing reference
+    // asset is read by the project route and the cloud route. Whether the Stop click precedes the
+    // second read is timing-dependent (observed: one read under parallel load, two in isolation), so
+    // the count is a bounded range. The cancellation assertions below stay exact.
+    'cancellation rejects a delayed provider reply before it can stage a preview': {
+      original: { min: 0, max: 2 },
+    },
     'proves the provider handshake, repairs only through the canonical host, and requires approval':
       {
         original: 9,
@@ -76,7 +85,14 @@ test.describe('JOY Live Director runtime boundary', () => {
   test.beforeEach(({ page }, testInfo) => {
     setupBrowserAudit(page);
     const bounds = DIRECTOR_ASSET_MISS_MAP[testInfo.title];
-    if (bounds != null) allowExpectedAssetFixtureMisses(page, bounds.original, bounds.cloud);
+    // Only the fixture's two declared-missing reference assets may miss. Any other asset ID fails.
+    if (bounds != null)
+      allowReferenceFixtureMisses(
+        page,
+        REFERENCE_FIXTURE_MISSING_ASSET_IDS,
+        bounds.original,
+        bounds.cloud,
+      );
   });
 
   test.afterEach(async ({ page }, testInfo) => {

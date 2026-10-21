@@ -133,6 +133,40 @@ export function allowExpectedAssetFixtureMisses(
   });
 }
 
+/**
+ * Narrow form of {@link allowExpectedAssetFixtureMisses} for a fixture whose reference assets are
+ * declared without uploaded bytes. Only the named asset IDs may answer 409 ASSET_NOT_FOUND, on the
+ * project original route and the cloud content route. The count is a bounded range, because the
+ * number of reads depends on when a user action lands relative to the background reference reads
+ * (an async, layout-dependent request). Any other asset ID still fails the audit.
+ */
+export function allowReferenceFixtureMisses(
+  page: Page,
+  assetIds: readonly string[],
+  count: number | CountRange,
+  cloud: number | CountRange = count,
+): void {
+  allowExpectedHttpResponse(page, {
+    status: 409,
+    pathname: /^\/api\/v1\/projects\/[^/]+\/assets$/,
+    code: 'PROJECT_NOT_FOUND',
+    count: 6,
+  });
+  const ids = assetIds.join('|');
+  allowExpectedHttpResponse(page, {
+    status: 409,
+    pathname: new RegExp(`^/api/v1/projects/[^/]+/assets/(?:${ids})/original$`),
+    code: 'ASSET_NOT_FOUND',
+    count,
+  });
+  allowExpectedHttpResponse(page, {
+    status: 409,
+    pathname: new RegExp(`^/api/v1/library/cloud-assets/(?:${ids})/content$`),
+    code: 'ASSET_NOT_FOUND',
+    count: cloud,
+  });
+}
+
 export async function assertBrowserAudit(page: Page, testInfo: TestInfo): Promise<void> {
   const state = stateByPage.get(page);
   if (!state) throw new Error('setupBrowserAudit was not called for this page');
