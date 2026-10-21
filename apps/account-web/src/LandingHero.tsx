@@ -152,7 +152,7 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
                     <span className="track-label">A1</span>
                     <div className="clip-box c-audio" style={{ width: '90%', left: '0%' }}>
                       <span className="clip-tag">AUDIO</span>
-                      <span className="clip-name">Voiceover (DeepFilterNet Denoised)</span>
+                      <span className="clip-name">Voiceover (experimental denoise)</span>
                     </div>
                   </div>
                 </div>
