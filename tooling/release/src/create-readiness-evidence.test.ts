@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { buildReadinessEvidence } from './create-readiness-evidence.mjs';
 import { REQUIRED_SCENARIOS } from './readiness-evidence.js';
@@ -10,6 +11,7 @@ const RUN_ID = '444';
 const ATTEMPT = '1';
 const LANES = [
   'linux-real-services',
+  'windows-p0-real-services',
   'node-contracts',
   'windows-worker-clean',
   'acceptance-primary',
@@ -158,6 +160,22 @@ function prepareWorkspace() {
 }
 
 describe('createReadinessEvidence', () => {
+  it('keeps the readiness lane list identical to the release workflow gate-summary needs', () => {
+    const workflow = readFileSync(
+      fileURLToPath(
+        new URL('../../../.github/workflows/release-candidate-v2.yml', import.meta.url),
+      ),
+      'utf8',
+    );
+    const block = /\n {2}gate-summary:[\s\S]*?\n {4}needs:\s*\[([\s\S]*?)\]/.exec(workflow);
+    expect(block).not.toBeNull();
+    const needs = block![1]!
+      .split(',')
+      .map((lane) => lane.trim())
+      .filter(Boolean);
+    expect([...needs].sort()).toEqual([...LANES].sort());
+  });
+
   it('emits eight first-attempt scenarios only from green, source-bound two-pass evidence', () => {
     const { workspaceRoot, needsJson } = prepareWorkspace();
     const evidence = buildReadinessEvidence({

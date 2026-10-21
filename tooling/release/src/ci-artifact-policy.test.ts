@@ -113,7 +113,7 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(workflow).toContain('REDACTION-FAILURES.txt');
   });
 
-  it('evaluates the source-bound release gate once after both isolated passes', () => {
+  it('evaluates the source-bound release gate per pass and once after both isolated passes', () => {
     expect(workflow).toContain('Evaluate source-bound release gate');
     const realAcceptanceStart = workflow.indexOf('\n  real-service-acceptance:');
     const realAcceptanceEnd = workflow.indexOf('\n  p3-real-services:', realAcceptanceStart);
@@ -125,7 +125,9 @@ describe('v2 release-candidate artifact upload policy', () => {
     const releaseGateEnd = gateSummary.indexOf('      - name:', releaseGateStart + 1);
     const releaseGateStep = gateSummary.slice(releaseGateStart, releaseGateEnd);
 
-    expect(realAcceptance).not.toContain('pnpm run release:gate');
+    // Repetition contract item 6: each pass is evaluated independently, then both are bound together.
+    expect(realAcceptance).toContain('pnpm run release:gate');
+    expect(gateSummary).toContain('pnpm run release:gate');
     expect(gateSummary).toContain('runs-on: [self-hosted, linux, x64, joy-media-acceptance]');
     expect(gateSummary).toContain('linux-real-services');
     expect(gateSummary).toContain('windows-worker-clean');

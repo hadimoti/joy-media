@@ -1058,6 +1058,16 @@ jobs:
             test-output/ci-janitor/inventory.json; do
             test -s "$required" || { echo "required real-service evidence is missing: $required" >&2; exit 1; }
           done
+      - name: Evaluate source-bound release gate for this pass
+        shell: bash
+        env:
+          JOY_RELEASE_OUTPUT: ${{ runner.temp }}/joy-media-release-gate-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          JOY_RELEASE_WORKFLOW_RUN_ID: ${{ github.run_id }}
+          JOY_RELEASE_WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOY_RELEASE_CANDIDATE_SHA: ${{ env.CANDIDATE_SHA }}
+        run: |
+          set -euo pipefail
+          pnpm run release:gate
       - name: Retain real-service evidence (durable, redacted, checksum-verified)
         if: always()
         shell: bash
