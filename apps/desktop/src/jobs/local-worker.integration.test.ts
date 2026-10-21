@@ -1,0 +1,248 @@
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createFileRegistry } from '../main/file-registry.js';
+import { LocalDatabase } from '../store/local-database.js';
+import type { DispatchJob } from './job-dispatch.js';
+import { createJobOrchestrator, EXPIRED_LEASE_ERROR } from './job-orchestrator.js';
+import { startLocalJobApi, type LocalJobApi } from './local-job-api.js';
+import { localWorkerEnv } from './worker-env.js';
+
+/**
+ * Runs the compiled Worker (`apps/worker/dist`) as a child process against the real loopback job
+ * API, with real FFmpeg. Nothing here is mocked: the Worker decodes real video and the desktop
+ * stores the JPEG the Worker uploads.
+ */
+
+const workerEntry = resolve('../worker/dist/index.js');
+const LEASE_CAP_MS = 3_000;
+const FIRST_JOB_TIMEOUT_MS = 60_000;
+
+describe('local Worker route (real worker process, real FFmpeg)', () => {
+  let dir: string;
+  let database: LocalDatabase;
+  let api: LocalJobApi;
+  let registry: ReturnType<typeof createFileRegistry>;
+  let workers: ChildProcess[];
+  let videoPath: string;
+
+  beforeEach(async () => {
+    if (!existsSync(workerEntry))
+      throw new Error(`Worker build missing at ${workerEntry}; run tsc -b apps/worker first`);
+    dir = mkdtempSync(join(tmpdir(), 'joy-local-worker-'));
+    mkdirSync(join(dir, 'worker'), { recursive: true });
+    videoPath = join(dir, 'clip.mp4');
+    execFileSync('ffmpeg', [
+      '-y',
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc=duration=2:size=320x240:rate=10',
+      '-pix_fmt',
+      'yuv420p',
+      videoPath,
+    ]);
+    database = new LocalDatabase({ filePath: join(dir, 'jobs.sqlite') });
+    registry = createFileRegistry();
+    api = await startLocalJobApi({
+      orchestrator: createJobOrchestrator({
+        store: database.jobDispatch,
+        maxLeaseMs: LEASE_CAP_MS,
+      }),
+      derivativeDirectory: join(dir, 'derivatives'),
+      readSource: (refId) =>
+        readFile(registry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })),
+      onWarning: (message) => console.warn(message),
+    });
+    workers = [];
+  });
+
+  afterEach(async () => {
+    for (const worker of workers) if (worker.exitCode === null) worker.kill('SIGKILL');
+    await api.close();
+    database.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function orchestrator() {
+    return createJobOrchestrator({ store: database.jobDispatch, maxLeaseMs: LEASE_CAP_MS });
+  }
+
+  function startWorker(): ChildProcess {
+    const child = spawn(process.execPath, [workerEntry], {
+      cwd: resolve('../worker'),
+      env: localWorkerEnv(process.env, { apiEnv: api.workerEnv, workerRoot: join(dir, 'worker') }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    child.stdout?.on('data', (chunk: Buffer) => process.stdout.write(`[worker] ${chunk}`));
+    child.stderr?.on('data', (chunk: Buffer) => process.stderr.write(`[worker] ${chunk}`));
+    workers.push(child);
+    return child;
+  }
+
+  async function waitFor<T>(
+    read: () => T | undefined,
+    timeoutMs: number,
+    label: string,
+  ): Promise<T> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const value = read();
+      if (value !== undefined) return value;
+      await new Promise((done) => setTimeout(done, 100));
+    }
+    throw new Error(`timed out waiting for ${label}`);
+  }
+
+  const terminal = (job: DispatchJob | undefined): DispatchJob | undefined =>
+    job !== undefined && ['done', 'failed', 'cancelled'].includes(job.status) ? job : undefined;
+
+  function refFor(path: string): string {
+    return registry.registerSelection(path, 'clip').id;
+  }
+
+  async function waitForWorker(): Promise<void> {
+    await waitFor(
+      () =>
+        database.jobDispatch.presence()?.capabilities.includes('asset.thumbnail')
+          ? true
+          : undefined,
+      FIRST_JOB_TIMEOUT_MS,
+      'the Worker to say hello with asset.thumbnail',
+    );
+  }
+
+  it('renders a real thumbnail through the Worker and stores the verified JPEG', async () => {
+    const job = orchestrator();
+    startWorker();
+    await waitForWorker();
+
+    const submitted = job.submit({
+      jobType: 'asset.thumbnail',
+      refId: refFor(videoPath),
+      kind: 'derivative:thumbnail',
+    });
+    if (!submitted.ok) throw new Error(`submit refused: ${submitted.message}`);
+
+    const finished = await waitFor(
+      () => terminal(database.jobDispatch.get(submitted.jobId)),
+      FIRST_JOB_TIMEOUT_MS,
+      'the thumbnail job to finish',
+    );
+    expect(finished).toMatchObject({ status: 'done', progress: 100 });
+    const derivative = finished.derivative;
+    if (derivative === undefined) throw new Error('expected a stored derivative');
+    const bytes = readFileSync(derivative.path);
+    expect(bytes.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(derivative.sha256);
+    expect(derivative).toMatchObject({ mimeType: 'image/jpeg', bytes: bytes.length });
+    expect(JSON.parse(finished.resultJson ?? '{}')).toMatchObject({ kind: 'asset.thumbnail' });
+  }, 90_000);
+
+  it('reports a real failure, with no derivative, when the source is not a video', async () => {
+    const job = orchestrator();
+    const notVideo = join(dir, 'not-a-video.bin');
+    writeFileSync(notVideo, 'this is plain text, not media');
+    startWorker();
+    await waitForWorker();
+
+    const submitted = job.submit({
+      jobType: 'asset.thumbnail',
+      refId: refFor(notVideo),
+      kind: 'derivative:thumbnail',
+    });
+    if (!submitted.ok) throw new Error(`submit refused: ${submitted.message}`);
+
+    const failed = await waitFor(
+      () => terminal(database.jobDispatch.get(submitted.jobId)),
+      FIRST_JOB_TIMEOUT_MS,
+      'the failing thumbnail job to finish',
+    );
+    expect(failed.status).toBe('failed');
+    expect(failed.error ?? '').not.toBe('');
+    expect(failed.derivative).toBeUndefined();
+  }, 90_000);
+
+  it('cancels a queued job before any Worker runs it, and never renders it', async () => {
+    const job = orchestrator();
+    const submitted = job.submit({
+      jobType: 'asset.thumbnail',
+      refId: refFor(videoPath),
+      kind: 'derivative:thumbnail',
+    });
+    if (!submitted.ok) throw new Error(`submit refused: ${submitted.message}`);
+    expect(job.requestCancel(submitted.jobId)).toMatchObject({
+      ok: true,
+      job: { status: 'cancelled' },
+    });
+
+    startWorker();
+    await waitForWorker();
+    await new Promise((done) => setTimeout(done, 1_500));
+    expect(database.jobDispatch.get(submitted.jobId)).toMatchObject({ status: 'cancelled' });
+    expect(database.jobDispatch.get(submitted.jobId)?.derivative).toBeUndefined();
+  }, 90_000);
+
+  it('refuses masking with SETUP_REQUIRED when the real Worker has no masking models', async () => {
+    const job = orchestrator();
+    startWorker();
+    await waitForWorker();
+    expect(
+      job.submit({ jobType: 'mask.image', refId: refFor(videoPath), kind: 'derivative:mask' }),
+    ).toMatchObject({
+      ok: false,
+      code: 'SETUP_REQUIRED',
+      jobType: 'mask.image',
+    });
+  }, 90_000);
+
+  it('survives a Worker killed mid-job: the lease expires instead of hanging, and a restarted Worker completes new work', async () => {
+    const job = orchestrator();
+    const first = startWorker();
+    await waitForWorker();
+
+    const interrupted = job.submit({
+      jobType: 'asset.thumbnail',
+      refId: refFor(videoPath),
+      kind: 'derivative:thumbnail',
+    });
+    if (!interrupted.ok) throw new Error(`submit refused: ${interrupted.message}`);
+
+    await waitFor(
+      () => (database.jobDispatch.get(interrupted.jobId)?.status === 'running' ? true : undefined),
+      FIRST_JOB_TIMEOUT_MS,
+      'the Worker to lease the job',
+    );
+    first.kill('SIGKILL');
+
+    const afterCrash = await waitFor(
+      () => terminal(database.jobDispatch.get(interrupted.jobId)),
+      FIRST_JOB_TIMEOUT_MS,
+      'the orphaned job to reach a terminal state',
+    );
+    // The kill may land after the upload had already completed; either way the job must not stay "running".
+    expect(['done', 'failed']).toContain(afterCrash.status);
+    if (afterCrash.status === 'failed') expect(afterCrash.error).toBe(EXPIRED_LEASE_ERROR);
+
+    startWorker();
+    await waitForWorker();
+    const next = job.submit({
+      jobType: 'asset.thumbnail',
+      refId: refFor(videoPath),
+      kind: 'derivative:thumbnail',
+    });
+    if (!next.ok) throw new Error(`submit refused: ${next.message}`);
+    const recovered = await waitFor(
+      () => terminal(database.jobDispatch.get(next.jobId)),
+      FIRST_JOB_TIMEOUT_MS,
+      'the post-restart thumbnail job to finish',
+    );
+    expect(recovered.status).toBe('done');
+  }, 180_000);
+});

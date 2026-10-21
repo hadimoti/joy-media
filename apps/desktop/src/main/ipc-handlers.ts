@@ -15,6 +15,8 @@ import type {
   MediaKind,
   ProviderProfile,
 } from '../store/local-database.js';
+import type { DispatchJob } from '../jobs/job-dispatch.js';
+import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
 import {
   isEditorProjectStorageKey,
@@ -85,9 +87,36 @@ export interface IpcResult {
 export type IpcHandler = (payload: unknown) => Promise<IpcResult> | IpcResult;
 
 /** Builds the channel -> handler dispatch table. Never exposed directly to the renderer. */
+/** Maps a renderer-visible derivative kind onto the Worker job type that produces it. */
+function derivativeJobType(kind: DerivativeKind): string {
+  return kind === 'thumbnail' ? 'asset.thumbnail' : 'render.export';
+}
+
+/** Renderer-safe view of a dispatched job: never the lease token or a local derivative path. */
+function publicJob(job: DispatchJob): Record<string, unknown> {
+  return {
+    id: job.id,
+    kind: job.kind,
+    jobType: job.jobType,
+    refId: job.refId,
+    status: job.status,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    progress: job.progress,
+    attempts: job.attempts,
+    cancelRequested: job.cancelRequested,
+    ...(job.error === undefined ? {} : { error: job.error }),
+  };
+}
+
 export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcHandler> {
   const now = deps.now ?? (() => new Date().toISOString());
   const newId = deps.newId ?? (() => crypto.randomUUID());
+  const jobs = createJobOrchestrator({
+    store: deps.localDatabase.jobDispatch,
+    now,
+    newId: () => deps.localDatabase.nextJobId(),
+  });
 
   return {
     'desktop.select-file': async () => {
@@ -118,8 +147,13 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (request === undefined) return { ok: false, error: 'Invalid derivative request' };
       try {
         const approval = deps.fileRegistry.requestDerivative(request.ref, request.kind);
-        const job = deps.localDatabase.enqueueJob(`derivative:${request.kind}`, request.ref.id);
-        return { ok: true, data: { ...approval, jobId: job.id } };
+        const submitted = jobs.submit({
+          jobType: derivativeJobType(request.kind),
+          refId: request.ref.id,
+          kind: `derivative:${request.kind}`,
+        });
+        if (!submitted.ok) return { ok: false, error: `${submitted.code}: ${submitted.message}` };
+        return { ok: true, data: { ...approval, jobId: submitted.jobId } };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : 'Unknown error' };
       }
@@ -133,6 +167,8 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.job-status': (payload): IpcResult => {
       const jobId = asJobId(payload);
       if (jobId === undefined) return { ok: false, error: 'Invalid job id' };
+      const dispatched = jobs.get(jobId);
+      if (dispatched !== undefined) return { ok: true, data: publicJob(dispatched) };
       const job = deps.localDatabase.getJob(jobId);
       if (job === undefined) return { ok: false, error: 'Unknown job id' };
       return { ok: true, data: job };
@@ -140,6 +176,13 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.cancel-job': (payload): IpcResult => {
       const jobId = asJobId(payload);
       if (jobId === undefined) return { ok: false, error: 'Invalid job id' };
+      if (jobs.get(jobId) !== undefined) {
+        // Worker-dispatched jobs are cancelled through the orchestrator: a running job is flagged
+        // and the Worker stops it on its next heartbeat, so the status never claims more than it did.
+        const cancelled = jobs.requestCancel(jobId);
+        if (!cancelled.ok) return { ok: false, error: cancelled.error };
+        return { ok: true, data: publicJob(cancelled.job) };
+      }
       const job = deps.localDatabase.getJob(jobId);
       if (job === undefined) return { ok: false, error: 'Unknown job id' };
       if (job.status !== 'queued' && job.status !== 'running') {

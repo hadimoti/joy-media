@@ -10,7 +10,7 @@ export interface SupervisedChild {
 export type SpawnFn = (
   command: string,
   args: readonly string[],
-  options: { readonly cwd?: string },
+  options: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv },
 ) => SupervisedChild;
 
 export interface WorkerSupervisorOptions {
@@ -18,6 +18,8 @@ export interface WorkerSupervisorOptions {
   readonly command: string;
   readonly args?: readonly string[];
   readonly cwd?: string;
+  /** Evaluated at each spawn, so a restarted Worker gets the current loopback job API settings. */
+  readonly env?: () => NodeJS.ProcessEnv;
   /** Consecutive crash-restarts allowed before the worker is marked degraded. Default 3. */
   readonly maxRestarts?: number;
   /** Schedules a restart attempt; overridable so tests can run synchronously. */
@@ -44,6 +46,7 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     command,
     args = [],
     cwd,
+    env,
     maxRestarts = DEFAULT_MAX_RESTARTS,
     scheduleRestart = (run, delayMs) => {
       setTimeout(run, delayMs);
@@ -64,7 +67,10 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     stopRequested = false;
     connection = 'starting';
     currentWorkerId = workerId();
-    const proc = spawn(command, args, cwd === undefined ? {} : { cwd });
+    const proc = spawn(command, args, {
+      ...(cwd === undefined ? {} : { cwd }),
+      ...(env === undefined ? {} : { env: env() }),
+    });
     child = proc;
     proc.once('error', () => {
       handleExit();

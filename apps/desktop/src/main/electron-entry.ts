@@ -29,6 +29,10 @@ import { editorOriginFromFrameUrl } from '../origin-policy.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
+import { readFile } from 'node:fs/promises';
+import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
+import { startLocalJobApi, type LocalJobApi } from '../jobs/local-job-api.js';
+import { localWorkerEnv } from '../jobs/worker-env.js';
 import {
   createIpcHandlers,
   dispatchIpcRequest,
@@ -101,11 +105,38 @@ if (!app.requestSingleInstanceLock()) {
   localDatabase.recoverInterrupted();
 
   const fileRegistry = createFileRegistry();
+  // The local Worker talks only to this app's loopback job API, which binds 127.0.0.1 on a random
+  // port with a per-run token. The supervisor refuses to spawn the Worker until that API is ready.
+  const localWorkerRoot = join(paths.mediaRoot, 'worker');
+  mkdirSync(localWorkerRoot, { recursive: true });
+  let localJobApi: LocalJobApi | undefined;
+  void startLocalJobApi({
+    orchestrator: createJobOrchestrator({ store: localDatabase.jobDispatch }),
+    derivativeDirectory: join(paths.mediaRoot, 'job-derivatives'),
+    readSource: (refId) =>
+      readFile(fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })),
+    onWarning: (message) => console.warn(message),
+  })
+    .then((api) => {
+      localJobApi = api;
+    })
+    .catch((error: unknown) => {
+      console.error(
+        `local job API failed to start: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    });
   const workerEntry = resolveWorkerEntry({ mainDirname: __dirname, execPath: process.execPath });
   const workerSupervisor = createWorkerSupervisor({
     spawn: (command, args, options) => spawn(command, args, options),
     command: workerEntry.command,
     args: workerEntry.args,
+    env: () => {
+      if (localJobApi === undefined) throw new Error('local job API is not ready');
+      return localWorkerEnv(process.env, {
+        apiEnv: localJobApi.workerEnv,
+        workerRoot: localWorkerRoot,
+      });
+    },
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
   const ipcHandlers = createIpcHandlers({
@@ -371,7 +402,10 @@ if (!app.requestSingleInstanceLock()) {
         else app.on('window-all-closed', listener);
       },
       onProcessSignal: (signalName, listener) => process.on(signalName, listener),
-      stopWorker: () => workerSupervisor.stop(),
+      stopWorker: () => {
+        workerSupervisor.stop();
+        void localJobApi?.close().catch(() => undefined);
+      },
       flush: () => {
         // SqliteProjectStore (packages/project-persistence's desktop subpath) is not yet
         // wired here: no IPC channel opens/saves a project through it yet (see
