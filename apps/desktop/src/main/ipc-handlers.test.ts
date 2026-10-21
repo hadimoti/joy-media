@@ -569,6 +569,7 @@ describe('IPC dispatch', () => {
     const handleWindowControl = vi.fn(async (action: string) => {
       if (action === 'maximize') return true;
       if (action === 'is-maximized') return false;
+      if (action === 'toggle-fullscreen') return true;
       return undefined;
     });
     const d = { ...deps(), handleWindowControl };
@@ -601,6 +602,13 @@ describe('IPC dispatch', () => {
     });
     expect(isMaxRes).toEqual({ ok: true, data: false });
     expect(handleWindowControl).toHaveBeenCalledWith('is-maximized');
+
+    const fullRes = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.window-toggle-fullscreen',
+    });
+    expect(fullRes).toEqual({ ok: true, data: true });
+    expect(handleWindowControl).toHaveBeenCalledWith('toggle-fullscreen');
   });
 
   it('handles asset library settings, directory selection, and catalog reading', async () => {

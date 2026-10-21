@@ -261,6 +261,17 @@ export async function minimizeDesktopWindow(): Promise<void> {
 }
 
 /**
+ * Toggles full screen on the host application window. Returns whether it is
+ * full screen after toggling. The main process owns the window state, so this
+ * does not depend on the renderer's Fullscreen API, which does not settle in
+ * every desktop environment.
+ */
+export async function toggleFullscreenDesktopWindow(): Promise<boolean> {
+  const isFull = await requireBridge().invoke('desktop.window-toggle-fullscreen');
+  return Boolean(isFull);
+}
+
+/**
  * Toggles maximize / restore on the host application window.
  * Returns whether the window is currently maximized after toggling.
  */

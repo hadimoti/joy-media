@@ -70,7 +70,7 @@ export interface IpcHandlerDeps {
   readonly probeProvider: ProbeProvider;
   readonly checkForUpdate: CheckForUpdate;
   readonly handleWindowControl?: (
-    action: 'minimize' | 'maximize' | 'close' | 'is-maximized',
+    action: 'minimize' | 'maximize' | 'close' | 'is-maximized' | 'toggle-fullscreen',
   ) => Promise<boolean | void> | boolean | void;
   readonly now?: () => string;
   readonly newId?: () => string;
@@ -318,6 +318,10 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.window-close': async () => {
       await deps.handleWindowControl?.('close');
       return { ok: true, data: undefined };
+    },
+    'desktop.window-toggle-fullscreen': async () => {
+      const isFull = await deps.handleWindowControl?.('toggle-fullscreen');
+      return { ok: true, data: Boolean(isFull) };
     },
     'desktop.window-is-maximized': async () => {
       const isMax = await deps.handleWindowControl?.('is-maximized');

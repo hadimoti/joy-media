@@ -342,6 +342,7 @@ import {
   beginDesktopProviderSession,
   isDesktopWindowMaximized,
   minimizeDesktopWindow,
+  toggleFullscreenDesktopWindow,
   toggleMaximizeDesktopWindow,
   closeDesktopWindow,
 } from './desktop-client.js';
@@ -5074,11 +5075,12 @@ function EditorWorkspace({
         case 'agent.active':
           break;
         case 'view.fullscreen':
-          if (!document.fullscreenElement) {
-            void document.documentElement.requestFullscreen();
-          } else {
-            void document.exitFullscreen();
-          }
+          // The host window owns full screen. The DOM Fullscreen API remains the
+          // fallback for a browser build with no desktop bridge.
+          void toggleFullscreenDesktopWindow().catch(() => {
+            if (!document.fullscreenElement) void document.documentElement.requestFullscreen();
+            else void document.exitFullscreen();
+          });
           break;
         case 'window.minimize':
           void minimizeDesktopWindow();

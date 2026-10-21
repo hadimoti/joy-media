@@ -165,6 +165,9 @@ if (!app.requestSingleInstanceLock()) {
           return true;
         case 'is-maximized':
           return win.isMaximized();
+        case 'toggle-fullscreen':
+          win.setFullScreen(!win.isFullScreen());
+          return win.isFullScreen();
       }
     },
   });
