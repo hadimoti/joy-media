@@ -84,6 +84,58 @@ describe('deterministic export contract', () => {
     renderRgbaFrames(manifest, [red, red], output);
     expect(verifyExport(output)).toMatchObject({ videoCodec: 'h264', audioCodec: 'aac' });
   });
+  it('keeps pure colours exact when a BT.709-tagged RGBA export is decoded', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-rgba-colour-'));
+    const output = join(directory, 'blue.mp4');
+    const blue = new Uint8Array(manifest.width * manifest.height * 4);
+    for (let offset = 0; offset < blue.length; offset += 4) {
+      blue[offset + 2] = 255;
+      blue[offset + 3] = 255;
+    }
+    renderRgbaFrames(manifest, [blue, blue], output);
+    const probe = spawnSync(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=color_space',
+        '-of',
+        'csv=p=0',
+        output,
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(probe.stdout.trim()).toBe('bt709');
+    // Decode with the BT.709 matrix that players apply to this tag. A BT.601
+    // conversion at encode time shows up here as green spill, (0,14,255).
+    const decoded = spawnSync(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-i',
+        output,
+        '-frames:v',
+        '1',
+        '-vf',
+        'scale=in_color_matrix=bt709:in_range=tv:out_range=pc',
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'rgb24',
+        'pipe:1',
+      ],
+      { maxBuffer: 1 << 20 },
+    );
+    const centre = (18 * manifest.width + 32) * 3;
+    const pixel = [...decoded.stdout.subarray(centre, centre + 3)];
+    expect(pixel[0]).toBeLessThanOrEqual(4);
+    expect(pixel[1]).toBeLessThanOrEqual(4);
+    expect(pixel[2]).toBeGreaterThanOrEqual(250);
+  });
   // This intentionally runs two full-size 100 ms FFmpeg encodes. Under the
   // parallel repository suite, CPU contention can exceed Vitest's
   // five-second default even though the export remains healthy.
@@ -118,6 +170,81 @@ describe('deterministic export contract', () => {
     expect(probe.audioStreamCount).toBe(1);
     expect(probe.frameRate).toBe(30);
     expect(readdirSync(directory).some((name) => name.includes('.partial.'))).toBe(false);
+  });
+  it('keeps pure blue exact after a browser capture is remuxed to a BT.709 export', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-colour-'));
+    const capture = join(directory, 'capture.mp4');
+    const outputPath = join(directory, 'remuxed.mp4');
+    // Untagged H.264 made from pure blue. FFmpeg's default RGB-to-YUV conversion is
+    // BT.601, which is the matrix Chromium's capture uses for its content.
+    const made = spawnSync(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=c=0x0000FF:s=64x36:r=30:d=0.1',
+        '-f',
+        'lavfi',
+        '-i',
+        'anullsrc=r=48000:cl=stereo',
+        '-shortest',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        capture,
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(made.status).toBe(0);
+    remuxBrowserMp4(capture, outputPath, 30, 3);
+    const probe = spawnSync(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=color_space',
+        '-of',
+        'csv=p=0',
+        outputPath,
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(probe.stdout.trim()).toBe('bt709');
+    // Decode with the BT.709 matrix that players apply to this tag.
+    const decoded = spawnSync(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-i',
+        outputPath,
+        '-frames:v',
+        '1',
+        '-vf',
+        'scale=in_color_matrix=bt709:in_range=tv:out_range=pc',
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'rgb24',
+        'pipe:1',
+      ],
+      { maxBuffer: 1 << 20 },
+    );
+    const centre = (18 * 64 + 32) * 3;
+    const pixel = [...decoded.stdout.subarray(centre, centre + 3)];
+    expect(pixel[0]).toBeLessThanOrEqual(4);
+    expect(pixel[1]).toBeLessThanOrEqual(4);
+    expect(pixel[2]).toBeGreaterThanOrEqual(250);
   });
   it('normalizes slow browser-capture timestamps to the authored frame count', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-timeline-'));

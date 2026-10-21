@@ -124,6 +124,19 @@ export function renderRgbaFrames(
         'anullsrc=r=48000:cl=stereo',
         '-frames:v',
         String(frames.length),
+        // RGB-to-YUV must use the matrix the stream is tagged with. Without this
+        // FFmpeg converts with BT.601 while players decode BT.709 tags, so pure
+        // blue exported as (0,14,255) instead of (0,0,255).
+        '-vf',
+        'scale=out_color_matrix=bt709:out_range=tv',
+        '-colorspace',
+        'bt709',
+        '-color_primaries',
+        'bt709',
+        '-color_trc',
+        'bt709',
+        '-color_range',
+        'tv',
         '-c:v',
         'libx264',
         '-pix_fmt',
@@ -255,17 +268,23 @@ export function remuxBrowserMp4(
     `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
   );
   try {
+    // Chromium's MediaRecorder converts canvas RGB to YUV with BT.601 coefficients
+    // but tags the stream BT.709. Decode with the BT.601 matrix that the content
+    // was made with, then encode with an explicit BT.709 matrix and tags, so
+    // players that honour the tag show the authored colours.
+    const colourFilter =
+      'scale=in_color_matrix=bt601:in_range=tv:out_color_matrix=bt709:out_range=tv';
     const normalizeTimeline =
       frameCount === undefined
         ? []
         : [
-            '-vf',
             // CanvasCaptureMediaStreamTrack is realtime and may deliver one
             // fewer frame on a cold/software Chromium encoder. Keep the
             // authored cadence and clone the terminal decoded frame when the
             // recorder is short, so the remuxed contract is exactly the
             // manifest's frame count rather than silently truncating it.
-            `setpts=N/(${frameRate}*TB),tpad=stop_mode=clone:stop=-1`,
+            '-vf',
+            `${colourFilter},setpts=N/(${frameRate}*TB),tpad=stop_mode=clone:stop=-1`,
             '-af',
             'asetpts=PTS-STARTPTS,apad',
             '-frames:v',
@@ -279,7 +298,15 @@ export function remuxBrowserMp4(
         '-y',
         '-i',
         inputPath,
-        ...normalizeTimeline,
+        ...(frameCount === undefined ? ['-vf', colourFilter] : normalizeTimeline),
+        '-colorspace',
+        'bt709',
+        '-color_primaries',
+        'bt709',
+        '-color_trc',
+        'bt709',
+        '-color_range',
+        'tv',
         '-c:v',
         'libx264',
         '-pix_fmt',
