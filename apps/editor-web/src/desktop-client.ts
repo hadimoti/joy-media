@@ -150,6 +150,142 @@ export async function selectDesktopFile(): Promise<DesktopFileSelection | undefi
   return data as DesktopFileSelection | undefined;
 }
 
+/** Identity of an imported original: the hash and size the browser registered it with. */
+export interface DesktopStageSource {
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly displayName: string;
+}
+
+/** Bytes per IPC message when staging. Bounds memory: the original is never read in one piece. */
+export const DESKTOP_STAGE_CHUNK_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Makes an imported original readable by the desktop Worker. The desktop host reuses a verified
+ * copy when it already holds one for this hash, so the bytes are sent only when it does not.
+ * Otherwise they are sent in fixed-size chunks and verified again on the desktop before use.
+ */
+export async function stageDesktopMedia(
+  source: DesktopStageSource,
+  blob: Blob,
+  onProgress?: (ratio: number) => void,
+): Promise<DesktopFileSelection> {
+  if (blob.size !== source.bytes) throw new Error('media bytes do not match the imported size');
+  const bridge = requireBridge();
+  const begun = (await bridge.invoke('desktop.media-stage.begin', source)) as
+    | { readonly status: 'cached'; readonly ref: DesktopFileSelection }
+    | { readonly status: 'upload'; readonly uploadId: string };
+  if (begun.status === 'cached') {
+    onProgress?.(1);
+    return begun.ref;
+  }
+  const { uploadId } = begun;
+  try {
+    for (let offset = 0; offset < blob.size; offset += DESKTOP_STAGE_CHUNK_BYTES) {
+      const data = new Uint8Array(
+        await blob.slice(offset, offset + DESKTOP_STAGE_CHUNK_BYTES).arrayBuffer(),
+      );
+      await bridge.invoke('desktop.media-stage.chunk', { uploadId, offset, data });
+      onProgress?.(Math.min(1, (offset + data.byteLength) / blob.size));
+    }
+    return (await bridge.invoke('desktop.media-stage.finish', {
+      uploadId,
+    })) as DesktopFileSelection;
+  } catch (error) {
+    await bridge.invoke('desktop.media-stage.abort', { uploadId }).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** A Worker job as the desktop host reports it. Never carries a path or lease token. */
+export interface DesktopJobView {
+  readonly id: string;
+  readonly status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | string;
+  readonly progress?: number;
+  readonly error?: string;
+}
+
+const TERMINAL_JOB_STATUSES: readonly string[] = ['done', 'failed', 'cancelled'];
+
+/**
+ * Starts the desktop's local Worker for this session. Asking for a derivative is an explicit
+ * request for the Worker, so the editor starts it here instead of leaving the job queued.
+ */
+export async function startDesktopWorker(): Promise<void> {
+  await requireBridge().invoke('desktop.startup-preference', 'start-worker');
+}
+
+/** Asks the desktop host for a thumbnail of a staged original. Resolves to the job id. */
+export async function requestDesktopThumbnail(ref: DesktopFileSelection): Promise<string> {
+  const data = (await requireBridge().invoke('desktop.request-derivative', {
+    ref,
+    kind: 'thumbnail',
+  })) as { readonly jobId: string };
+  return data.jobId;
+}
+
+/**
+ * Polls a job until it reaches a terminal state. The caller supplies the signal, so leaving the
+ * editor or cancelling the request stops polling without leaving a timer behind.
+ */
+export async function waitForDesktopJob(
+  jobId: string,
+  options: {
+    readonly signal?: AbortSignal;
+    readonly intervalMs?: number;
+    readonly timeoutMs?: number;
+    readonly onUpdate?: (job: DesktopJobView) => void;
+  } = {},
+): Promise<DesktopJobView> {
+  const interval = options.intervalMs ?? 500;
+  const deadline = Date.now() + (options.timeoutMs ?? 180_000);
+  for (;;) {
+    options.signal?.throwIfAborted();
+    const job = (await requireBridge().invoke('desktop.job-status', { jobId })) as DesktopJobView;
+    options.onUpdate?.(job);
+    if (TERMINAL_JOB_STATUSES.includes(job.status)) return job;
+    if (Date.now() > deadline) throw new Error('The desktop worker did not finish in time');
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(resolve, interval);
+      options.signal?.addEventListener(
+        'abort',
+        () => {
+          window.clearTimeout(timer);
+          reject(options.signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+        },
+        { once: true },
+      );
+    });
+  }
+}
+
+/** Reads a finished derivative back. The desktop host re-verifies its hash before sending it. */
+export async function readDesktopDerivative(jobId: string): Promise<Blob> {
+  const data = (await requireBridge().invoke('desktop.job-derivative.read', { jobId })) as {
+    readonly mimeType: string;
+    readonly bytes: Uint8Array;
+  };
+  return new Blob([data.bytes.slice()], { type: data.mimeType });
+}
+
+/**
+ * Whether a staged copy has an audio stream, from ffprobe on the desktop. `unknown` means the
+ * desktop could not answer (for example, no staged copy), and callers must not treat it as silent.
+ */
+export async function probeDesktopAudioPresence(
+  source: Pick<DesktopStageSource, 'sha256' | 'bytes'>,
+): Promise<DesktopAudioPresence> {
+  return (await requireBridge().invoke(
+    'desktop.media-audio-presence',
+    source,
+  )) as DesktopAudioPresence;
+}
+
+export type DesktopAudioPresence =
+  | { readonly status: 'present'; readonly streams: number }
+  | { readonly status: 'absent' }
+  | { readonly status: 'unknown'; readonly reason: string };
+
 export interface DesktopProviderProfile {
   readonly id: string;
   readonly name?: string | undefined;

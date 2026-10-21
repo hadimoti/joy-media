@@ -6,6 +6,7 @@ import {
   type Page,
 } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -182,6 +183,26 @@ function distinctCopyOfFixture(directory: string, fixture: string, tag: string):
     output,
   ]);
   return output;
+}
+
+/** Number of audio streams in a rendered file, read from its container headers. */
+function audioStreamCount(path: string): number {
+  const output = execFileSync(
+    'ffprobe',
+    [
+      '-v',
+      'error',
+      '-select_streams',
+      'a',
+      '-show_entries',
+      'stream=index',
+      '-of',
+      'csv=p=0',
+      path,
+    ],
+    { encoding: 'utf8' },
+  );
+  return output.split(/\r?\n/).filter((line) => line.trim().length > 0).length;
 }
 
 function probeDurationSeconds(path: string): number {
@@ -582,6 +603,153 @@ test.describe('desktop.missing-media relink', () => {
       await app?.close().catch(() => undefined);
       for (const dir of [...Object.values(profiles), work])
         rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    }
+  });
+});
+
+test.describe('desktop.silent-video-export', () => {
+  test('a silent video exports as a playable MP4 instead of failing the audio mix', async () => {
+    test.setTimeout(600_000);
+    const suffix = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+    const profile = mkdtempSync(join(tmpdir(), 'joy-media-silent-export-'));
+    let app: ElectronApplication | undefined;
+    try {
+      app = await launchPackagedEditor(profile);
+      const page = await openEditorPage(app);
+      await createPackagedVideoProject(page, `Silent${suffix}`, [
+        { name: `silent-${suffix}.mp4`, fixture: 'readiness-silent.mp4' },
+      ]);
+      const rendered = await exportRenderedMp4(app, page, profile);
+      expect(probeDurationSeconds(rendered)).toBeGreaterThan(0);
+    } finally {
+      await app?.close().catch(() => undefined);
+      rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    }
+  });
+
+  test('a video with an audio track exports with its sound', async () => {
+    test.setTimeout(600_000);
+    const suffix = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+    const profile = mkdtempSync(join(tmpdir(), 'joy-media-sound-export-'));
+    let app: ElectronApplication | undefined;
+    try {
+      app = await launchPackagedEditor(profile);
+      const page = await openEditorPage(app);
+      await createPackagedVideoProject(page, `Sound${suffix}`, [
+        { name: `sound-${suffix}.mp4`, fixture: 'video.mp4' },
+      ]);
+      const rendered = await exportRenderedMp4(app, page, profile);
+      expect(probeDurationSeconds(rendered)).toBeGreaterThan(0);
+      expect(audioStreamCount(rendered)).toBeGreaterThanOrEqual(1);
+    } finally {
+      await app?.close().catch(() => undefined);
+      rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    }
+  });
+
+  test('a mixed timeline of silent and audio videos exports, and keeps the sound of the audio video', async () => {
+    test.setTimeout(600_000);
+    const suffix = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+    const profile = mkdtempSync(join(tmpdir(), 'joy-media-mixed-export-'));
+    let app: ElectronApplication | undefined;
+    try {
+      app = await launchPackagedEditor(profile);
+      const page = await openEditorPage(app);
+      await createPackagedVideoProject(page, `Mixed${suffix}`, [
+        { name: `silent-${suffix}.mp4`, fixture: 'readiness-silent.mp4' },
+        { name: `sound-${suffix}.mp4`, fixture: 'video.mp4' },
+      ]);
+      const rendered = await exportRenderedMp4(app, page, profile);
+      expect(probeDurationSeconds(rendered)).toBeGreaterThan(0);
+      expect(audioStreamCount(rendered)).toBeGreaterThanOrEqual(1);
+    } finally {
+      await app?.close().catch(() => undefined);
+      rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    }
+  });
+
+  test('a silent video relinked to its original exports after the relink', async () => {
+    test.setTimeout(600_000);
+    const suffix = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+    const mediaName = `relinked-silent-${suffix}.mp4`;
+    const profiles = {
+      source: mkdtempSync(join(tmpdir(), 'joy-media-silent-relink-source-')),
+      fresh: mkdtempSync(join(tmpdir(), 'joy-media-silent-relink-fresh-')),
+      device: mkdtempSync(join(tmpdir(), 'joy-media-silent-relink-device-')),
+    };
+    let app: ElectronApplication | undefined;
+    try {
+      const opened = await openProjectWithMissingMedia(
+        suffix,
+        [{ name: mediaName, fixture: 'readiness-silent.mp4' }],
+        profiles,
+      );
+      app = opened.app;
+      const page = opened.page;
+      await openAssets(page);
+      await page.getByLabel(`Relink ${mediaName}`).setInputFiles({
+        name: mediaName,
+        mimeType: 'video/mp4',
+        buffer: readFileSync(join(fixtureDirectory, 'readiness-silent.mp4')),
+      });
+      await expect(
+        page.getByRole('region', { name: 'Missing media' }).getByRole('status'),
+      ).toContainText(`Relinked ${mediaName}.`);
+      const rendered = await exportRenderedMp4(app, page, profiles.fresh);
+      expect(probeDurationSeconds(rendered)).toBeGreaterThan(0);
+    } finally {
+      await app?.close().catch(() => undefined);
+      for (const dir of Object.values(profiles))
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    }
+  });
+});
+
+test.describe('desktop.editor-thumbnail-bridge', () => {
+  test('a desktop thumbnail is rendered by the local Worker from the imported original, and a repeat request reuses the verified copy', async () => {
+    test.setTimeout(600_000);
+    const suffix = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+    const mediaName = `thumb-${suffix}.mp4`;
+    const profile = mkdtempSync(join(tmpdir(), 'joy-media-thumb-bridge-'));
+    const originalBytes = readFileSync(join(fixtureDirectory, 'video.mp4'));
+    const originalHash = createHash('sha256').update(originalBytes).digest('hex');
+    let app: ElectronApplication | undefined;
+    try {
+      app = await launchPackagedEditor(profile);
+      const page = await openEditorPage(app);
+      await createPackagedVideoProject(page, `Thumb${suffix}`, [
+        { name: mediaName, fixture: 'video.mp4' },
+      ]);
+
+      const card = page.locator('.asset-card', { hasText: mediaName }).first();
+      await card.getByRole('button', { name: `Make desktop thumbnail for ${mediaName}` }).click();
+      const thumbnail = card.getByRole('img', { name: `Desktop thumbnail of ${mediaName}` });
+      await expect(thumbnail).toBeVisible({ timeout: 300_000 });
+      await expect
+        .poll(() => thumbnail.evaluate((element: HTMLImageElement) => element.naturalWidth))
+        .toBeGreaterThan(0);
+
+      // The original was staged under its hash, so the desktop can name it again without a re-upload.
+      expect(existsSync(join(profile, 'media', 'staged', `${originalHash}.bin`))).toBe(true);
+      const repeat = await page.evaluate(
+        async ({ sha256, bytes }) => {
+          const joy = (
+            window as unknown as {
+              joyDesktop: { invoke(channel: string, payload?: unknown): Promise<unknown> };
+            }
+          ).joyDesktop;
+          return joy.invoke('desktop.media-stage.begin', {
+            sha256,
+            bytes,
+            displayName: 'repeat.mp4',
+          });
+        },
+        { sha256: originalHash, bytes: originalBytes.byteLength },
+      );
+      expect(repeat).toMatchObject({ status: 'cached' });
+    } finally {
+      await app?.close().catch(() => undefined);
+      rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     }
   });
 });

@@ -38,6 +38,7 @@ import {
 } from './opfs-original-asset-cache.js';
 import { verifyOriginalRecoveryCandidate } from './asset-original-recovery.js';
 import { resolveAssetThumb, type AssetThumbSource } from './asset-card-preview.js';
+import { DesktopThumbnailAction } from './DesktopThumbnailAction.js';
 import {
   releaseMediaObjectUrl,
   usePendingObjectUrlOwner,
@@ -1578,6 +1579,16 @@ export function AssetLibraryPanel({
                           <TrashIcon />
                         </button>
                       </div>
+                      {asset.kind === 'video' && (
+                        <DesktopThumbnailAction
+                          asset={asset}
+                          loadOriginal={async () => {
+                            const local = await (await originalAssetCache).get(asset.id);
+                            if (local !== undefined) return local;
+                            return asset.cloudBacked ? fetchCloudOriginal(asset.id) : undefined;
+                          }}
+                        />
+                      )}
                     </li>
                   );
                 })}

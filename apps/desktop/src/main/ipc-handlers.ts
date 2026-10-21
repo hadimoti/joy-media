@@ -17,6 +17,10 @@ import type {
 } from '../store/local-database.js';
 import type { DispatchJob } from '../jobs/job-dispatch.js';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
+import type { MediaStage, StageBeginRequest } from './media-stage.js';
+import { probeAudioPresence, type AudioPresence } from './media-presence.js';
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
 import {
   isEditorProjectStorageKey,
@@ -76,7 +80,14 @@ export interface IpcHandlerDeps {
   ) => Promise<boolean | void> | boolean | void;
   readonly now?: () => string;
   readonly newId?: () => string;
+  /** Verified copies of editor-imported originals; absent when the staging root is unavailable. */
+  readonly mediaStage?: MediaStage;
+  /** ffprobe-backed audio check; injected so unit tests never spawn a process. */
+  readonly probeAudio?: (path: string) => Promise<AudioPresence>;
 }
+
+/** Largest derivative the renderer may read back (thumbnails are far smaller). */
+export const MAX_DERIVATIVE_READ_BYTES = 16 * 1024 * 1024;
 
 export interface IpcResult {
   readonly ok: boolean;
@@ -194,6 +205,69 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         'cancelled by user',
       );
       return { ok: true, data: updated };
+    },
+    'desktop.job-derivative.read': async (payload): Promise<IpcResult> => {
+      const jobId = asJobId(payload);
+      if (jobId === undefined) return { ok: false, error: 'Invalid job id' };
+      const derivative = deps.localDatabase.jobDispatch.get(jobId)?.derivative;
+      if (derivative === undefined) return { ok: false, error: 'This job has no derivative yet' };
+      if (derivative.bytes > MAX_DERIVATIVE_READ_BYTES)
+        return { ok: false, error: 'Derivative is too large to show here' };
+      return guarded(async () => {
+        const bytes = await readFile(derivative.path);
+        // The file is re-hashed before it reaches the renderer, so the derivative the editor shows
+        // is the exact one the Worker verified and stored.
+        if (createHash('sha256').update(bytes).digest('hex') !== derivative.sha256)
+          throw new Error('Derivative failed integrity verification');
+        return { mimeType: derivative.mimeType, bytes: new Uint8Array(bytes) };
+      });
+    },
+    'desktop.media-stage.begin': (payload): Promise<IpcResult> => {
+      const stage = deps.mediaStage;
+      if (stage === undefined) return Promise.resolve(STAGE_UNAVAILABLE);
+      const request = asStageBeginRequest(payload);
+      if (request === undefined)
+        return Promise.resolve({ ok: false, error: 'Invalid media stage request' });
+      return guarded(() => stage.begin(request));
+    },
+    'desktop.media-stage.chunk': (payload): Promise<IpcResult> => {
+      const stage = deps.mediaStage;
+      if (stage === undefined) return Promise.resolve(STAGE_UNAVAILABLE);
+      const request = asStageChunkRequest(payload);
+      if (request === undefined)
+        return Promise.resolve({ ok: false, error: 'Invalid media chunk' });
+      return guarded(() => stage.chunk(request));
+    },
+    'desktop.media-stage.finish': (payload): Promise<IpcResult> => {
+      const stage = deps.mediaStage;
+      if (stage === undefined) return Promise.resolve(STAGE_UNAVAILABLE);
+      const uploadId = asUploadId(payload);
+      if (uploadId === undefined)
+        return Promise.resolve({ ok: false, error: 'Invalid media upload' });
+      return guarded(() => stage.finish({ uploadId }));
+    },
+    'desktop.media-stage.abort': (payload): Promise<IpcResult> => {
+      const stage = deps.mediaStage;
+      if (stage === undefined) return Promise.resolve(STAGE_UNAVAILABLE);
+      const uploadId = asUploadId(payload);
+      if (uploadId === undefined)
+        return Promise.resolve({ ok: false, error: 'Invalid media upload' });
+      return guarded(async () => {
+        await stage.abort({ uploadId });
+        return undefined;
+      });
+    },
+    'desktop.media-audio-presence': (payload): Promise<IpcResult> => {
+      const stage = deps.mediaStage;
+      if (stage === undefined) return Promise.resolve(STAGE_UNAVAILABLE);
+      const request = asAudioPresenceRequest(payload);
+      if (request === undefined) return Promise.resolve({ ok: false, error: 'Invalid media hash' });
+      return guarded(async (): Promise<AudioPresence> => {
+        const path = await stage.cachedPath(request.sha256, request.bytes);
+        // Only a verified staged copy can be probed; anything else is reported as unknown.
+        if (path === undefined) return { status: 'unknown', reason: 'not-staged' };
+        return (deps.probeAudio ?? ((file: string) => probeAudioPresence(file)))(path);
+      });
     },
     'desktop.provider-profile.save': async (payload): Promise<IpcResult> => {
       const request = asSaveProviderProfileRequest(payload);
@@ -558,6 +632,52 @@ function asJobId(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = (value as { jobId?: unknown }).jobId;
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
+}
+
+const STAGE_UNAVAILABLE: IpcResult = { ok: false, error: 'Media staging is unavailable' };
+
+/** Runs a staging or read operation and turns a thrown error into a refusal the renderer can show. */
+async function guarded(run: () => Promise<unknown>): Promise<IpcResult> {
+  try {
+    return { ok: true, data: await run() };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
+function asUploadId(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = (value as { uploadId?: unknown }).uploadId;
+  return typeof candidate === 'string' && /^[0-9a-f-]{36}$/.test(candidate) ? candidate : undefined;
+}
+
+function asStageBeginRequest(value: unknown): StageBeginRequest | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Partial<Record<keyof StageBeginRequest, unknown>>;
+  if (typeof candidate.sha256 !== 'string' || typeof candidate.displayName !== 'string')
+    return undefined;
+  if (typeof candidate.bytes !== 'number') return undefined;
+  return { sha256: candidate.sha256, bytes: candidate.bytes, displayName: candidate.displayName };
+}
+
+function asStageChunkRequest(
+  value: unknown,
+): { readonly uploadId: string; readonly offset: number; readonly data: Uint8Array } | undefined {
+  const uploadId = asUploadId(value);
+  if (uploadId === undefined) return undefined;
+  const candidate = value as { offset?: unknown; data?: unknown };
+  if (typeof candidate.offset !== 'number' || !(candidate.data instanceof Uint8Array))
+    return undefined;
+  return { uploadId, offset: candidate.offset, data: candidate.data };
+}
+
+function asAudioPresenceRequest(
+  value: unknown,
+): { readonly sha256: string; readonly bytes: number } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as { sha256?: unknown; bytes?: unknown };
+  if (typeof candidate.sha256 !== 'string' || typeof candidate.bytes !== 'number') return undefined;
+  return { sha256: candidate.sha256, bytes: candidate.bytes };
 }
 
 function asProfileId(value: unknown): string | undefined {

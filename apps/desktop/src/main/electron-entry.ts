@@ -32,6 +32,7 @@ import { resolveWorkerEntry } from './worker-entry.js';
 import { readFile, stat } from 'node:fs/promises';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import { startLocalJobApi, type LocalJobApi } from '../jobs/local-job-api.js';
+import { createMediaStage } from './media-stage.js';
 import { localWorkerEnv } from '../jobs/worker-env.js';
 import {
   createIpcHandlers,
@@ -145,10 +146,19 @@ if (!app.requestSingleInstanceLock()) {
     },
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
+  // Verified copies of editor-imported originals, keyed by their SHA-256, so the Worker can read
+  // media the browser imported without the user locating the file again.
+  const mediaStage = createMediaStage({
+    directory: join(paths.mediaRoot, 'staged'),
+    registry: fileRegistry,
+    localDatabase,
+    now: () => new Date().toISOString(),
+  });
   const ipcHandlers = createIpcHandlers({
     fileRegistry,
     workerSupervisor,
     localDatabase,
+    mediaStage,
     probeMedia: async (path) => {
       const probe = await checksumFile(path);
       return { ...probe, kind: classifyMediaKind(path) };

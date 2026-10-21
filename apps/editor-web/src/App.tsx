@@ -480,6 +480,8 @@ import {
   prepareExportAudioChannels,
   selectExportAudioClips,
 } from './export-audio.js';
+import { desktopAudioPresenceFor, findSilentVideoAssetIds } from './export-audio-presence.js';
+import { inspectAudioPresence } from './media-audio-presence.js';
 import { PlaybackOperationGate, playMediaWhenCurrent } from './playback-operation.js';
 import { seekPreviewMedia as seekDetachedVideo } from './preview-media-seek.js';
 import { playbackStartAtOrAfter, playbackTargetAfterClip } from './timeline-playback.js';
@@ -4158,10 +4160,27 @@ function EditorWorkspace({
           throw new Error('No playable visual clips are available for export');
         // Audio lanes use video leaves in the timeline model, but have no visual
         // boundary. Keep their mix inputs independent of visual preparation.
-        const audioMixClips = selectExportAudioClips(
+        const audioMixCandidates = selectExportAudioClips(
           allTimelineClips,
           exportVisualProject.assets,
           exportAudioState.clips,
+        );
+        // A video proven to have no audio stream adds no sound, so it leaves the mix instead of
+        // being decoded. Anything unproven stays in and decodes as before.
+        const audioSourceAssetId = (clip: { readonly id: string; readonly assetId: string }) =>
+          exportAudioState.clips[clip.id]?.sourceAssetId ?? clip.assetId;
+        const silentAudioAssetIds = await findSilentVideoAssetIds(
+          audioMixCandidates.map(audioSourceAssetId),
+          exportVisualProject.assets,
+          {
+            loadBlob: loadProjectAssetBlob,
+            ...(isDesktopHost() ? { desktop: desktopAudioPresenceFor } : {}),
+            inspect: inspectAudioPresence,
+          },
+          setExportStatus,
+        );
+        const audioMixClips = audioMixCandidates.filter(
+          (clip) => !silentAudioAssetIds.has(audioSourceAssetId(clip)),
         );
         const preparationClips = [...exportClips, ...audioMixClips].filter(
           (clip, index, clips) =>
@@ -4988,6 +5007,7 @@ function EditorWorkspace({
       audioState,
       controlPlaneProject.controlPlaneProjectId,
       exportPreset,
+      loadProjectAssetBlob,
       mediaResolver,
       operationLedger,
       projectId,
