@@ -85,6 +85,9 @@ export default defineConfig({
     ],
     exclude: [
       ...configDefaults.exclude,
+      // Chromium pixel goldens run in the P0 lane, one worker at a time, where their capture
+      // budgets are not starved by parallel workers.
+      'tooling/golden-render/src/first-party-scenes.test.ts',
       'packages/html-scene-runtime/src/**/*.e2e.test.ts',
       'apps/editor-web/src/p0-desktop-handoff.test.ts',
       'apps/cli/src/commands/p0-design.e2e.test.ts',
