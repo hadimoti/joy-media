@@ -29,23 +29,32 @@ The full CLI suite was last run on the commit before these changes and was not r
 
 ---
 
+### Candidate and approvals
+
+- **Candidate commit:** `1482aa7b13afde7b5d35b661b1029ba42454404e`, pushed to the branch `hadimoti/joy-v102-rc`. No PR is open.
+- **Candidate CI run:** `release-candidate-v2` run `39644275784` on that commit. It was still in progress when this draft was last updated. Its exact-candidate two-pass result, including the Windows installed-lifecycle lane, is not yet known.
+- **CLI readiness:** the owner approved the CLI as ready for the v1.0.2 candidate. Desktop rows are reported as the matrix shows them.
+- **Release:** none. This candidate is documented only. Release, deploy and publish need a separate owner approval.
+
 ### Readiness status (see `docs/qa/READINESS-MATRIX.md`)
 
-| Area                                                                                  | Status                                                                                     |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `desktop.worker-jobs`                                                                 | **NOT SUPPORTED** for this release (dispatch and completion not implemented)               |
-| `desktop.update-and-rollback`                                                         | **NOT SUPPORTED** for public distribution; owner-approved manual install is the workaround |
-| `desktop.account-connection`                                                          | **LIMITED** (partial coverage; synthetic accounts only)                                    |
-| `desktop.file-project-package`, `desktop.menu-actions`, `desktop.timeline-and-panels` | Partial; open                                                                              |
-| `project.persistence.fresh-process` (packaged case)                                   | Open                                                                                       |
-| `desktop.windows.installed-lifecycle`                                                 | Open (needs a disposable Windows user or VM; unsigned distribution is owner-gated)         |
-| `release.exact-candidate-two-pass`                                                    | Open (not run on a frozen candidate; needs an approved `release-candidate-v2` dispatch)    |
+| Area                                                | Status                                                                                                        |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `desktop.worker-jobs`                               | **NOT SUPPORTED** for this release (dispatch and completion not implemented)                                  |
+| `desktop.update-and-rollback`                       | **NOT SUPPORTED** for public distribution; owner-approved manual install is the workaround                    |
+| `desktop.account-connection`                        | **LIMITED** (partial coverage; synthetic accounts only)                                                       |
+| `desktop.file-project-package`                      | Partial: packaged export and fresh-profile import pass; cross-device, relink and malformed-package cases open |
+| `desktop.menu-actions`                              | Partial: File and Edit menus, focus and axe scans pass; other menu actions open                               |
+| `desktop.timeline-and-panels`                       | Partial: panel tabs reachable with axe scan passing; timeline edit depth, effect and transition coverage open |
+| `desktop.export-media-semantics`                    | Passes its acceptance spec (picture, sound, timing, caption, Monitor/export parity); deeper parity still open |
+| `project.persistence.fresh-process` (packaged case) | Open: the gate-required packaged case needs the SQLite-backed open/save proof                                 |
+| `desktop.windows.installed-lifecycle`               | Open: unrun locally; runs in the release workflow's Windows Docker container lane                             |
+| `release.exact-candidate-two-pass`                  | Open: result pending from run `39644275784`                                                                   |
 
-### Not yet confirmed
+### Known gaps in this candidate
 
-- **Owner confirmation of CLI readiness has not been given.** Only Codex and Claude Sonnet reviews have approved the CLI changes.
-- The candidate has not been frozen, committed to a release branch, pushed, or run through `release-candidate-v2`.
-- Release-gate scripts (`tooling/release/src/readiness-evidence.ts`) are not updated for the newly accepted desktop rows.
+- Release-gate scripts (`tooling/release/src/readiness-evidence.ts`) are unchanged. The generator marks every scenario as passed without measuring it, so the new desktop rows are not required by the gate.
+- Caption acceptance step 10 refuses with SETUP_REQUIRED on this host. The owner accepted that refusal on 2026-10-20.
 
 ---
 
