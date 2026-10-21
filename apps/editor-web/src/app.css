@@ -18678,3 +18678,34 @@ label {
   font-size: 0.72rem;
   line-height: 1.35;
 }
+
+/* Joy Code tab close control. Hidden until the tab is hovered or focused. */
+.panel-tab-close {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 1.1rem;
+  height: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--joy-text-muted);
+  opacity: 0;
+  cursor: pointer;
+}
+.panel-tab-close:hover,
+.panel-tab-close:focus-visible {
+  opacity: 1;
+  color: var(--joy-text);
+}
+.panel-tab-close:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+.dv-tab:hover .panel-tab-close,
+.dv-tab:focus-within .panel-tab-close {
+  opacity: 1;
+}
