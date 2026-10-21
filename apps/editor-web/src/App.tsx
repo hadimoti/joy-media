@@ -226,6 +226,7 @@ import { applyP0DesktopLayers } from './p0-desktop-layers.js';
 import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
 import { EditorSession } from './editor-session.js';
+import { createMissingMediaHost, type MissingMediaHost } from './missing-media-host.js';
 import type { ProjectWriterHandle } from './project-writer.js';
 import { runReleaseObserverTimelineProbe } from './release-observer-timeline.js';
 import { prepareTimelinePresentation } from './timeline-presentation.js';
@@ -566,6 +567,16 @@ function renderFrameOptions(
 
 const stickerImageCache = new StickerImageCache();
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
+// One missing-media host per editor session, so the panel's list and operations share state.
+const missingMediaHosts = new WeakMap<EditorSession, MissingMediaHost>();
+function missingMediaHostFor(session: EditorSession): MissingMediaHost {
+  let host = missingMediaHosts.get(session);
+  if (host === undefined) {
+    host = createMissingMediaHost(session, () => originalAssetCachePromise);
+    missingMediaHosts.set(session, host);
+  }
+  return host;
+}
 const exportCachePromise = openOpfsExportCache();
 const mediaControlPlaneClient = new BrowserControlPlaneClient();
 
@@ -6790,6 +6801,14 @@ function EditorWorkspace({
             context.activatePanel('agent');
           }}
           onOpenAssetSettings={() => setAssetLibrarySettingsOpen(true)}
+          missingMedia={{
+            host: missingMediaHostFor(session),
+            revision: session.projectRevisionId,
+            onChanged: () => {
+              resyncTimelineMedia();
+              setRevision((current) => current + 1);
+            },
+          }}
         />,
       );
     if (api.id === 'agent') {

@@ -84,9 +84,10 @@ describe('repointClipsTransaction', () => {
       repointClipsTransaction(project, 'asset-clip-a', 'asset-replacement-1', 'Use different file'),
     );
     const undone = applyTransaction(relinked, { label: 'undo', commands: record.inverses }).project;
-    expect(undone.compositions['root']!.tracks[0]!.clips.map((clip) => clip.assetId)).toEqual([
-      'asset-clip-a',
-      'asset-clip-a',
-    ]);
+    expect(
+      undone.compositions['root']!.tracks[0]!.clips.map((clip) =>
+        clip.kind === 'video' ? clip.assetId : undefined,
+      ),
+    ).toEqual(['asset-clip-a', 'asset-clip-a']);
   });
 });

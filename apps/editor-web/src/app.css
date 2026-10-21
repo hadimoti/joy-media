@@ -18632,3 +18632,49 @@ label {
     animation: none;
   }
 }
+
+/* Missing media: project media whose original is not in this profile. */
+.missing-media {
+  border-color: var(--joy-warning);
+}
+.missing-media-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.missing-media-title {
+  font-weight: 650;
+  font-size: 0.8rem;
+}
+.missing-media-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--joy-border);
+  border-radius: var(--radius-md);
+}
+.missing-media-card-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 10rem;
+}
+.missing-media-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+.missing-media-warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  flex-basis: 100%;
+  color: var(--joy-danger);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
