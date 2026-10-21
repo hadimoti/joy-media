@@ -551,6 +551,7 @@ explicitly per platform rather than copying POSIX signal numbers onto Windows.
       major (`engines` is `>=22`), passes the `cli-contract`, `cli-schemas`,
       `agent-delivery`, `agent-run`, and `render-real` e2e suites: 5 files, 91 tests, on
       Ubuntu 24.04 with FFmpeg 6.1.1. Node 24.19.0 remains the Windows evidence.
+      Receipt: `docs/qa/evidence/2026-10-21-node22-contract.md`.
 - [x] Verify Windows ACL inspection for synthetic credentials, `taskkill` process-tree
       termination, real SQLite writer-lock behavior, and paths containing spaces;
       the affected Windows selections passed. Both `bin` and `bundle` pass the new
