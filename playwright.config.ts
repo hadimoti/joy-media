@@ -1,4 +1,9 @@
+import { randomBytes } from 'node:crypto';
 import { defineConfig, devices } from '@playwright/test';
+
+// Synthetic-account control routes on the E2E server run only with this token. It is generated per
+// run unless one is supplied, and the webServer and the specs both read it from the environment.
+process.env.JOY_MEDIA_E2E_CONTROL_TOKEN ??= randomBytes(32).toString('base64url');
 
 const e2eApiPort = process.env.JOY_MEDIA_E2E_API_PORT ?? '4174';
 const e2eWebPort = process.env.JOY_MEDIA_E2E_WEB_PORT ?? '4173';

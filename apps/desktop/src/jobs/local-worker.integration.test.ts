@@ -8,7 +8,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFileRegistry } from '../main/file-registry.js';
 import { LocalDatabase } from '../store/local-database.js';
 import type { DispatchJob } from './job-dispatch.js';
-import { createJobOrchestrator, EXPIRED_LEASE_ERROR } from './job-orchestrator.js';
+import {
+  CANCELLED_BY_USER,
+  createJobOrchestrator,
+  EXPIRED_LEASE_ERROR,
+} from './job-orchestrator.js';
 import { startLocalJobApi, type LocalJobApi } from './local-job-api.js';
 import { localWorkerEnv } from './worker-env.js';
 
@@ -29,6 +33,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
   let registry: ReturnType<typeof createFileRegistry>;
   let workers: ChildProcess[];
   let videoPath: string;
+  let sourceDelayMs = 0;
 
   beforeEach(async () => {
     if (!existsSync(workerEntry))
@@ -59,10 +64,16 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       sourceSize: async (refId) =>
         (await stat(registry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })))
           .size,
-      readSource: (refId) =>
-        readFile(registry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })),
+      readSource: async (refId) => {
+        // Holds the source read open for a while so a test can cancel a job that is genuinely running.
+        if (sourceDelayMs > 0) await new Promise((done) => setTimeout(done, sourceDelayMs));
+        return readFile(
+          registry.resolvePath({ kind: 'local-file', id: refId, displayName: refId }),
+        );
+      },
       onWarning: (message) => console.warn(message),
     });
+    sourceDelayMs = 0;
     workers = [];
   });
 
@@ -190,6 +201,37 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
     await new Promise((done) => setTimeout(done, 1_500));
     expect(database.jobDispatch.get(submitted.jobId)).toMatchObject({ status: 'cancelled' });
     expect(database.jobDispatch.get(submitted.jobId)?.derivative).toBeUndefined();
+  }, 90_000);
+
+  it('cancels a job that is already running on the real Worker, and the Worker stops before it renders', async () => {
+    sourceDelayMs = 4_000;
+    const job = orchestrator();
+    startWorker();
+    await waitForWorker();
+
+    const submitted = job.submit({
+      jobType: 'asset.thumbnail',
+      refId: refFor(videoPath),
+      kind: 'derivative:thumbnail',
+    });
+    if (!submitted.ok) throw new Error(`submit refused: ${submitted.message}`);
+    await waitFor(
+      () => (database.jobDispatch.get(submitted.jobId)?.status === 'running' ? true : undefined),
+      FIRST_JOB_TIMEOUT_MS,
+      'the Worker to lease the job',
+    );
+    expect(job.requestCancel(submitted.jobId)).toMatchObject({
+      ok: true,
+      job: { status: 'running', cancelRequested: true },
+    });
+
+    const cancelled = await waitFor(
+      () => terminal(database.jobDispatch.get(submitted.jobId)),
+      FIRST_JOB_TIMEOUT_MS,
+      'the cancelled job to reach a terminal state',
+    );
+    expect(cancelled).toMatchObject({ status: 'cancelled', error: CANCELLED_BY_USER });
+    expect(cancelled.derivative).toBeUndefined();
   }, 90_000);
 
   it('refuses masking with SETUP_REQUIRED when the real Worker has no masking models', async () => {
