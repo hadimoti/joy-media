@@ -3,7 +3,7 @@ import type { SpikeProject } from '@joy-media/project-schema';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { normalizeUniversalTimeline } from '@joy-media/project-schema';
 import type { CommandTransaction } from '@joy-media/commands';
-import { emptySpikeProject } from '@joy-media/test-fixtures';
+import { emptySpikeProject, makeVideoClip } from '@joy-media/test-fixtures';
 import { buildContentTemplateTransaction } from './content-template-transaction.js';
 import type { SeededContentTemplate } from './content-template-types.js';
 import type { EditorSession } from './editor-session.js';
@@ -155,6 +155,52 @@ describe('buildContentTemplateTransaction', () => {
     expect(normalized.items.find((item) => item.source.kind === 'object')).toMatchObject({
       trackEnabled: true,
     });
+  });
+
+  it('mirrors each new scene track with its timeline order when no existing track is free', () => {
+    const base = emptyTimelineProject();
+    const root = base.compositions.root!;
+    // Every existing track holds a clip over the first five seconds, so each scene needs a new track.
+    const timeline: SpikeProject = {
+      ...base,
+      compositions: {
+        ...base.compositions,
+        root: {
+          ...root,
+          tracks: root.tracks.map((track, index) => ({
+            ...track,
+            clips: [makeVideoClip(`clip-${index}`, 0, 5_000_000)],
+          })),
+        },
+      },
+    };
+    const { session, dispatchCompound } = makeMockSession(timeline, emptyVisualProject());
+    const sceneAction = { kind: 'html-scene', sceneId: 'joy.firstparty.title' } as const;
+    const seeded: SeededContentTemplate = {
+      template: {
+        id: 'joy.title',
+        label: 'JOY Title',
+        description: 'Main title',
+        category: 'Titles',
+        actions: [sceneAction, sceneAction],
+      },
+      seed: 'abc',
+    };
+
+    buildContentTemplateTransaction(seeded, {
+      session,
+      selectedClipIds: [],
+      playheadUs: PLAYHEAD_US,
+    });
+
+    const placed = dispatchCompound.mock.calls[0]![1].document!;
+    const normalized = normalizeUniversalTimeline(placed);
+    const sceneItems = normalized.items.filter((item) => item.source.kind === 'object');
+    expect(sceneItems.map((item) => item.trackOrder)).toEqual([2, 3]);
+    expect(sceneItems.every((item) => item.trackEnabled)).toBe(true);
+    expect(normalized.diagnostics.map((item) => item.code)).not.toContain(
+      'UNIVERSAL_TIMELINE_DANGLING_TRACK',
+    );
   });
 
   it('same seed produces same IDs across two calls', () => {
