@@ -31,7 +31,222 @@ interface AuditState {
 
 const stateByPage = new WeakMap<Page, AuditState>();
 
+/**
+ * Page-side fetch ledger. Playwright's `response` events can omit a response the page has already
+ * received: in the failing runs, a media read answered 409 was logged by the browser, yet no request or
+ * response event reached the audit. The ledger records each media read the page settles with an error
+ * status, and counts the media reads still in flight, so the audit can wait for them to settle and
+ * reconcile against what the page actually received.
+ */
+const FETCH_LEDGER_INIT_SCRIPT = `(() => {
+  const MEDIA_READ = /^\\/api\\/v1\\/(?:projects\\/[^/]+\\/assets(?:\\/|$)|library\\/cloud-assets\\/)/;
+  // The errors live in sessionStorage, so a reload (a new document) keeps the errors of earlier documents.
+  const STORE = 'joy-e2e-fetch-errors';
+  const persisted = (() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(STORE) ?? '[]');
+    } catch {
+      return [];
+    }
+  })();
+  const ledger = (window.__joyFetchLedger = { pending: 0, started: 0, errors: persisted });
+  const record = (entry) => {
+    ledger.errors.push(entry);
+    try {
+      sessionStorage.setItem(STORE, JSON.stringify(ledger.errors));
+    } catch {
+      // Storage unavailable: this document's errors are still in the ledger.
+    }
+  };
+  const codeOf = (text) => {
+    try {
+      const body = JSON.parse(text);
+      return typeof body?.error?.code === 'string' ? body.error.code : 'code-missing';
+    } catch {
+      return 'body-unreadable';
+    }
+  };
+  const originalFetch = window.fetch;
+  window.fetch = function (input, init) {
+    let pathname = '';
+    try {
+      const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      pathname = new URL(href, location.href).pathname;
+    } catch {
+      pathname = '';
+    }
+    const relevant = MEDIA_READ.test(pathname);
+    if (relevant) {
+      ledger.started += 1;
+      ledger.pending += 1;
+    }
+    let request;
+    try {
+      request = originalFetch.call(this, input, init);
+    } catch (error) {
+      if (relevant) ledger.pending -= 1;
+      throw error;
+    }
+    return request.then(
+      (response) => {
+        if (relevant) ledger.pending -= 1;
+        if (relevant && response.status >= 400) {
+          ledger.pending += 1;
+          const is409 = response.status === 409;
+          let reading;
+          try {
+            reading = response.clone().text();
+          } catch (error) {
+            reading = Promise.reject(error);
+          }
+          reading
+            .then(
+              (text) => {
+                record({
+                  pathname,
+                  status: response.status,
+                  ...(is409 ? { code: codeOf(text) } : {}),
+                });
+              },
+              () => {
+                record({
+                  pathname,
+                  status: response.status,
+                  ...(is409 ? { code: 'body-unreadable' } : {}),
+                });
+              },
+            )
+            .finally(() => {
+              ledger.pending -= 1;
+            });
+        }
+        return response;
+      },
+      (error) => {
+        if (relevant) ledger.pending -= 1;
+        throw error;
+      },
+    );
+  };
+})();`;
+
+type FetchLedger = {
+  readonly pending: number;
+  readonly started: number;
+  readonly errors: readonly { pathname: string; status: number; code?: string }[];
+};
+
+const MEDIA_READ_SETTLE_TIMEOUT_MS = 5_000;
+
+/**
+ * Waits inside the page until no media read is in flight, and none has started across two consecutive
+ * 50 ms samples. It is one round trip to the page, so a busy renderer does not stretch each sample.
+ * A document that never ran the ledger (such as about:blank) has no media read to wait for. Returns
+ * false only if the page does not settle before the deadline, or cannot be read.
+ */
+async function waitForMediaReadsToSettle(page: Page): Promise<boolean> {
+  return page
+    .evaluate(async (timeoutMs) => {
+      const ledger = (
+        window as unknown as { __joyFetchLedger?: { pending: number; started: number } }
+      ).__joyFetchLedger;
+      if (ledger === undefined) return true;
+      const deadline = Date.now() + timeoutMs;
+      let lastStarted = -1;
+      let quietSamples = 0;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        if (ledger.pending === 0 && ledger.started === lastStarted) {
+          quietSamples += 1;
+          if (quietSamples >= 2) return true;
+        } else {
+          quietSamples = 0;
+        }
+        lastStarted = ledger.started;
+      }
+      return false;
+    }, MEDIA_READ_SETTLE_TIMEOUT_MS)
+    .catch(() => false);
+}
+
+/**
+ * Waits until every 409 body that Playwright has seen is read, including bodies of responses that
+ * arrive while the loop runs. The audit cannot match a 409 until its code is known.
+ */
+async function settleResponseBodies(page: Page, state: AuditState): Promise<void> {
+  let previousResponseState = '';
+  let quietIntervals = 0;
+  for (let attempt = 0; attempt < 20 && quietIntervals < 2; attempt += 1) {
+    await Promise.all(state.pendingBodyReads);
+    await page.waitForTimeout(50);
+    const responseState = `${state.httpErrors.length}:${state.pendingBodyReads.length}`;
+    quietIntervals = responseState === previousResponseState ? quietIntervals + 1 : 0;
+    previousResponseState = responseState;
+  }
+}
+
+/**
+ * Adds to the audited HTTP errors each media-read error the page received that Playwright did not
+ * report. Each ledger error matches at most one audited error, and an unreadable Playwright body
+ * takes the page's code so that a response is not counted twice. Run it only after every 409 body
+ * has been read.
+ */
+async function reconcileWithFetchLedger(page: Page, state: AuditState): Promise<void> {
+  const ledgerErrors = await page
+    .evaluate(
+      () =>
+        (window as unknown as { __joyFetchLedger?: FetchLedger }).__joyFetchLedger?.errors ?? [],
+    )
+    .catch(() => []);
+  const keyOf = (error: { status: number; pathname: string; code?: string }) =>
+    `${error.status} ${error.pathname} ${error.code ?? ''}`;
+  const observed = new Map<string, number>();
+  for (const error of state.httpErrors) {
+    const key = keyOf(error);
+    observed.set(key, (observed.get(key) ?? 0) + 1);
+  }
+  const matched = new Set<AuditedHttpError>();
+  for (const entry of ledgerErrors) {
+    const key = keyOf(entry);
+    const count = observed.get(key) ?? 0;
+    if (count > 0) {
+      observed.set(key, count - 1);
+      if (entry.code === 'body-unreadable') {
+        const error = state.httpErrors.find(
+          (e) =>
+            e.status === entry.status &&
+            e.pathname === entry.pathname &&
+            e.code === 'body-unreadable' &&
+            !matched.has(e),
+        );
+        if (error) matched.add(error);
+      }
+      continue;
+    }
+    const unreadable = state.httpErrors.find(
+      (e) =>
+        e.code === 'body-unreadable' &&
+        e.status === entry.status &&
+        e.pathname === entry.pathname &&
+        !matched.has(e),
+    );
+    if (unreadable) {
+      const unreadableKey = keyOf(unreadable);
+      observed.set(unreadableKey, Math.max(0, (observed.get(unreadableKey) ?? 0) - 1));
+      unreadable.code = entry.code;
+      matched.add(unreadable);
+      continue;
+    }
+    state.httpErrors.push({
+      status: entry.status,
+      pathname: entry.pathname,
+      ...(entry.code === undefined ? {} : { code: entry.code }),
+    });
+  }
+}
+
 export function setupBrowserAudit(page: Page): void {
+  void page.addInitScript(FETCH_LEDGER_INIT_SCRIPT);
   const state: AuditState = {
     consoleErrors: [],
     pageErrors: [],
@@ -172,15 +387,9 @@ export async function assertBrowserAudit(page: Page, testInfo: TestInfo): Promis
   if (!state) throw new Error('setupBrowserAudit was not called for this page');
 
   await page.waitForLoadState('networkidle', { timeout: 2_000 }).catch(() => undefined);
-  let previousResponseState = '';
-  let quietIntervals = 0;
-  for (let attempt = 0; attempt < 20 && quietIntervals < 2; attempt += 1) {
-    await Promise.all(state.pendingBodyReads);
-    await page.waitForTimeout(50);
-    const responseState = `${state.httpErrors.length}:${state.pendingBodyReads.length}`;
-    quietIntervals = responseState === previousResponseState ? quietIntervals + 1 : 0;
-    previousResponseState = responseState;
-  }
+  const mediaReadsSettled = await waitForMediaReadsToSettle(page);
+  await settleResponseBodies(page, state);
+  await reconcileWithFetchLedger(page, state);
 
   const unexpectedHttpErrors: string[] = [];
   for (const error of state.httpErrors) {
@@ -226,6 +435,7 @@ export async function assertBrowserAudit(page: Page, testInfo: TestInfo): Promis
     (message) => !HTTP_STATUS_CONSOLE_ERROR.test(message),
   );
 
+  expect(mediaReadsSettled, `Media reads did not settle during ${testInfo.title}`).toBe(true);
   expect(unexpectedHttpErrors, `Unexpected HTTP errors during ${testInfo.title}`).toEqual([]);
   expect(unmetExpectedHttpErrors, `Expected HTTP errors missing during ${testInfo.title}`).toEqual(
     [],

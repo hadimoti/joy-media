@@ -10,7 +10,9 @@ import {
 
 type EventHandler = (payload: unknown) => void;
 
-function createAuditPage(): {
+function createAuditPage(
+  ledgerErrors: { pathname: string; status: number; code?: string }[] = [],
+): {
   readonly page: Page;
   readonly emit: (event: string, payload: unknown) => void;
 } {
@@ -21,6 +23,21 @@ function createAuditPage(): {
       eventHandlers.push(handler);
       handlers.set(event, eventHandlers);
       return mock;
+    },
+    addInitScript: async () => undefined,
+    // The helper reads its page-side ledger through evaluate. The fake page has no document, so the
+    // evaluated function runs against an empty window.
+    evaluate: async (fn: (arg?: unknown) => unknown, arg?: unknown) => {
+      const scope = globalThis as unknown as { window?: unknown };
+      const previousWindow = scope.window;
+      scope.window = {
+        __joyFetchLedger: { pending: 0, started: 0, errors: ledgerErrors },
+      };
+      try {
+        return await fn(arg);
+      } finally {
+        scope.window = previousWindow;
+      }
     },
     waitForLoadState: async () => undefined,
     waitForTimeout: async () => undefined,
@@ -186,5 +203,72 @@ describe('browser console HTTP conflict audit', () => {
     emit('response', conflict('/api/v1/assets/asset-1', 'PROJECT_NOT_FOUND'));
 
     await expect(assertBrowserAudit(page, testInfo)).rejects.toThrow(/Unexpected HTTP errors/);
+  });
+
+  it('counts a 409 once when Playwright cannot read its body', async () => {
+    const pathname = '/api/v1/projects/project-1/assets/asset-1/original';
+    const raw = new Response('not json', { status: 409 });
+    const response = {
+      status: () => raw.status,
+      url: () => `https://example.test${pathname}`,
+      json: () => raw.json(),
+    } as unknown as Response;
+
+    const { page, emit } = createAuditPage([{ status: 409, pathname, code: 'ASSET_NOT_FOUND' }]);
+    setupBrowserAudit(page);
+    allowExpectedHttpResponse(page, {
+      status: 409,
+      pathname: '/api/v1/projects/project-1/assets/asset-1/original',
+      code: 'ASSET_NOT_FOUND',
+      count: 1,
+    });
+
+    emit('response', response);
+    await expect(assertBrowserAudit(page, testInfo)).resolves.toBeUndefined();
+  });
+
+  it('adds an error the page received but Playwright did not report, once', async () => {
+    const pathname = '/api/v1/projects/project-1/assets';
+    const { page } = createAuditPage([{ status: 409, pathname, code: 'PROJECT_NOT_FOUND' }]);
+    setupBrowserAudit(page);
+    allowExpectedHttpResponse(page, {
+      status: 409,
+      pathname: '/api/v1/projects/project-1/assets',
+      code: 'PROJECT_NOT_FOUND',
+      count: 1,
+    });
+
+    await expect(assertBrowserAudit(page, testInfo)).resolves.toBeUndefined();
+  });
+
+  it('counts a mixed pair once when Playwright cannot read one of two responses', async () => {
+    const pathname = '/api/v1/projects/project-1/assets/asset-1/original';
+    const raw = new Response('not json', { status: 409 });
+    const response = {
+      status: () => raw.status,
+      url: () => `https://example.test${pathname}`,
+      json: () => raw.json(),
+    } as unknown as Response;
+
+    const { page, emit } = createAuditPage([
+      { status: 409, pathname, code: 'ASSET_NOT_FOUND' },
+      { status: 409, pathname, code: 'body-unreadable' },
+    ]);
+    setupBrowserAudit(page);
+    allowExpectedHttpResponse(page, {
+      status: 409,
+      pathname,
+      code: 'ASSET_NOT_FOUND',
+      count: 1,
+    });
+    allowExpectedHttpResponse(page, {
+      status: 409,
+      pathname,
+      code: 'body-unreadable',
+      count: 1,
+    });
+
+    emit('response', response);
+    await expect(assertBrowserAudit(page, testInfo)).resolves.toBeUndefined();
   });
 });
