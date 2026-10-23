@@ -69,7 +69,7 @@ The full CLI suite was last run on the commit before these changes and was not r
 
 ### Known gaps in this candidate
 
-- The release gate now derives every readiness result from receipts and the needs context, and it requires `desktop.export-media-semantics` as well as the other eight gate-required scenarios. The Windows lifecycle script has no measured step for export parity yet, so the gate fails closed on it.
+- The release gate now derives every readiness result from receipts and the needs context, and it requires `desktop.export-media-semantics` as well as the other eight gate-required scenarios. The Windows lifecycle script runs the export spec as a measured step, so the gate fails closed until an exact-candidate lifecycle receipt exists for it.
 - Caption acceptance step 10 refuses with SETUP_REQUIRED on this host. The owner accepted that refusal on 2026-10-20.
 
 ---
