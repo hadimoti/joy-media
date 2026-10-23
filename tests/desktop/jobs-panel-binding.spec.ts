@@ -9,7 +9,13 @@ import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { authenticate, importMediaFixture, openPanel } from '../e2e/wp29-r5-harness.js';
+import { E2E_TOKEN, authenticate, importMediaFixture, openPanel } from '../e2e/wp29-r5-harness.js';
+import {
+  ENSURE_PATH,
+  auditProjectRequests,
+  projectIdOf,
+  type OwnedAsset,
+} from './project-request-audit.js';
 
 // Packaged app against the live e2e control plane. The control plane's only Worker advertises
 // render.export, so the Jobs panel's thumbnail queue must stay disabled, with its capability reason,
@@ -17,8 +23,9 @@ import { authenticate, importMediaFixture, openPanel } from '../e2e/wp29-r5-harn
 //
 // The audit reads the API server's own request log (JOY_MEDIA_E2E_REQUEST_LOG), not the renderer's
 // page events, so it sees every request the packaged app sends, whichever process sends it. The test
-// reads only the lines written after its start offset. Every project path must name the one project
-// the packaged renderer bound for the E2E owner, and no unbound or transitional id may appear.
+// reads only the lines written after its start offset. Each project path must name the project the
+// packaged renderer bound for the E2E owner, or read a derivative of an asset in the owner's library
+// (project-request-audit.ts). No unbound or transitional id may appear.
 
 const desktopRoot = resolve('apps/desktop');
 const unpackedPackage = resolve(desktopRoot, 'dist/joy-media-unpacked');
@@ -29,14 +36,15 @@ const requestLogPath =
   process.env.JOY_MEDIA_E2E_REQUEST_LOG ?? join(tmpdir(), 'joy-media-desktop-api-requests.jsonl');
 const E2E_OWNER = 'e2e-owner@example.test';
 const BINDINGS_KEY = 'joy-media.control-plane-project-bindings.v1';
-const ENSURE_PATH = '/v1/projects/ensure';
 
 const THUMBNAIL_BLOCKED = /No connected Worker advertises asset\.thumbnail/u;
 
 interface ServedRequest {
   readonly method: string;
   readonly path: string;
-  readonly status: number;
+  readonly query: string;
+  /** Null when the client abandoned the response before the server finished it. */
+  readonly status: number | null;
 }
 
 /** The desktop bridge's synchronous project-storage reader, which the editor consults before localStorage. */
@@ -83,12 +91,16 @@ function requestsSince(offset: number): ServedRequest[] {
 }
 
 /**
- * The project a request path names. The ensure route names none in its path, and its body is not in
- * the log, so the ensure check below relies on its status alone.
+ * The owner's library as the API lists it. The audit reads it from the API, not from the app's own
+ * listing, so the app's derivative reads are checked against the server's record of ownership.
  */
-function projectIdOf(path: string): string | undefined {
-  if (path === ENSURE_PATH) return undefined;
-  return /^\/v1\/projects\/([^/]+)/u.exec(path)?.[1];
+async function ownedLibraryAssets(): Promise<OwnedAsset[]> {
+  const response = await fetch(`${apiBaseUrl}/v1/library/my-assets`, {
+    headers: { authorization: `Bearer ${E2E_TOKEN}` },
+  });
+  expect(response.status, 'the owner library lists').toBe(200);
+  const body = (await response.json()) as { data: { id: string; projectId: string }[] };
+  return body.data.map(({ id, projectId }) => ({ id, projectId }));
 }
 
 /**
@@ -189,10 +201,11 @@ test.describe('desktop.jobs-panel-binding', () => {
       // The server logs each request when its response finishes, so give in-flight responses a moment.
       await page.waitForTimeout(1_000);
 
-      // Server-side audit over the requests this test caused. The server keeps one E2E owner for the
-      // whole run, so the packaged project list also reads that owner's projects from earlier tests.
-      // Those reads are recorded as an annotation, not failed. Writes to a project this profile did
-      // not bind, refusals to its own project, unbound or transitional ids and job requests fail.
+      // Server-side audit over the requests this test caused. The window is taken before the audit makes
+      // its own API call, so that call is not classified as the session's traffic. The server keeps one
+      // E2E owner for the whole run, so the packaged library also reads derivatives of that owner's assets
+      // in projects this profile did not bind. The classifier passes only those reads, and fails every
+      // other request to a project the session did not bind, including reads that succeed.
       const served = requestsSince(offset);
       const projectRequests = served.filter((request) => request.path.startsWith('/v1/projects'));
       expect(projectRequests.length, 'the packaged session reached the API').toBeGreaterThan(0);
@@ -215,18 +228,19 @@ test.describe('desktop.jobs-panel-binding', () => {
       );
       expect(ownRequests.length, 'the session read its bound project').toBeGreaterThan(0);
 
-      const foreignRequests = projectRequests.filter((request) => {
-        const id = projectIdOf(request.path);
-        return id !== undefined && !bound.has(id);
-      });
-      test.info().annotations.push({
-        type: 'foreign-project-reads',
-        description: `${foreignRequests.length} requests named projects this profile did not bind`,
+      const audit = auditProjectRequests({
+        served,
+        boundProjectIds: bound,
+        ownedAssets: await ownedLibraryAssets(),
       });
       expect(
-        foreignRequests.filter((request) => !['GET', 'OPTIONS', 'HEAD'].includes(request.method)),
-        'the session wrote to no project it did not bind',
+        audit.violations,
+        'every request named the bound project or read a derivative of an owned asset',
       ).toEqual([]);
+      test.info().annotations.push({
+        type: 'owned-derivative-reads-of-other-projects',
+        description: `${audit.ownedForeignReads} successful GET derivative reads of owned assets in projects this profile did not bind`,
+      });
 
       const ensures = served.filter(
         (request) => request.method === 'POST' && request.path === ENSURE_PATH,
@@ -236,12 +250,12 @@ test.describe('desktop.jobs-panel-binding', () => {
         'the session created or reused its project through ensure',
       ).toBeGreaterThan(0);
       expect(
-        ensures.filter((request) => request.status >= 400),
+        ensures.filter((request) => request.status === null || request.status >= 400),
         'every ensure request succeeded',
       ).toEqual([]);
 
       expect(
-        ownRequests.filter((request) => request.status >= 400),
+        ownRequests.filter((request) => (request.status ?? 0) >= 400),
         'no request to the bound project was refused or failed',
       ).toEqual([]);
 

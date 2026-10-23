@@ -82,6 +82,7 @@ export default defineConfig({
       '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
       'apps/desktop/scripts/install-electron-windows.test.mjs',
       'tests/e2e/helpers/browser-console-audit.unit.ts',
+      'tests/desktop/project-request-audit.unit.ts',
     ],
     exclude: [
       ...configDefaults.exclude,

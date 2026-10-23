@@ -180,13 +180,21 @@ createE2EAccountService().then(async (defaultAccount) => {
   if (requestLogPath !== undefined) {
     writeFileSync(requestLogPath, '');
     server.on('request', (request: IncomingMessage, response: ServerResponse) => {
-      response.once('finish', () => {
-        const path = (request.url ?? '').split('?')[0];
+      // The path and query are logged as the router reads them, so a dot segment cannot hide a project id
+      // from the audit. A response the client abandons never finishes: 'close' logs it with a null status,
+      // which the audit neither counts as a success nor as a refusal. Each request is logged once.
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+      let logged = false;
+      const log = (status: number | null): void => {
+        if (logged) return;
+        logged = true;
         appendFileSync(
           requestLogPath,
-          `${JSON.stringify({ method: request.method, path, status: response.statusCode })}\n`,
+          `${JSON.stringify({ method: request.method, path: url.pathname, query: url.search, status })}\n`,
         );
-      });
+      };
+      response.once('finish', () => log(response.statusCode));
+      response.once('close', () => log(response.writableFinished ? response.statusCode : null));
     });
   }
 
