@@ -61,6 +61,73 @@ describe('importMediaFile', () => {
     expect(progress.at(-1)).toBe(1);
   });
 
+  it('reports registration progress only after the project is ensured', async () => {
+    const calls: string[] = [];
+    let registration: BrowserAssetRegistration | undefined;
+    const client = {
+      ensureProject: vi.fn(async () => {
+        calls.push('ensure');
+      }),
+      registerAsset: vi.fn(async (_projectId: string, next: BrowserAssetRegistration) => {
+        registration = next;
+        return browserAsset(next);
+      }),
+      assets: vi.fn(async () => []),
+      uploadAssetOriginal: vi.fn(async (_projectId, asset, _file, onProgress) => {
+        onProgress?.(1);
+        return { ...browserAsset(registration!), ...asset };
+      }),
+    } satisfies NonNullable<MediaImportOptions['client']>;
+    const input = new File(['ordered bytes'], 'clip.mp4', { type: 'video/mp4' });
+
+    await importMediaFile({
+      projectId: 'project-1',
+      projectTitle: 'Project',
+      file: input,
+      assetId: 'clip-1',
+      client,
+      originalAssetCache: { put: vi.fn(async () => undefined) },
+      describeMedia: async () => ({ mimeType: 'video/mp4', durationUs: 2_500_000 }),
+      onProgress: ({ message }) => calls.push(`progress:${message}`),
+    });
+
+    const ensured = calls.indexOf('ensure');
+    const registering = calls.indexOf('progress:Registering clip.mp4...');
+    expect(ensured).toBeGreaterThanOrEqual(0);
+    expect(registering).toBeGreaterThan(ensured);
+  });
+
+  it('shows no registration progress when the project cannot be ensured', async () => {
+    const input = new File(['rejected bytes'], 'clip.mp4', { type: 'video/mp4' });
+    const messages: string[] = [];
+    const client = {
+      ensureProject: vi.fn(async () => {
+        throw new Error('PROJECT_NOT_FOUND');
+      }),
+      registerAsset: vi.fn(async () => {
+        throw new Error('registration must not run');
+      }),
+      assets: vi.fn(async () => []),
+      uploadAssetOriginal: vi.fn(async () => {
+        throw new Error('upload must not run');
+      }),
+    } satisfies NonNullable<MediaImportOptions['client']>;
+
+    await expect(
+      importMediaFile({
+        projectId: 'project-1',
+        projectTitle: 'Project',
+        file: input,
+        assetId: 'clip-1',
+        client,
+        originalAssetCache: { put: vi.fn(async () => undefined) },
+        describeMedia: async () => ({ mimeType: 'video/mp4', durationUs: 2_500_000 }),
+        onProgress: ({ message }) => messages.push(message),
+      }),
+    ).rejects.toThrow('PROJECT_NOT_FOUND');
+    expect(messages.some((message) => message.startsWith('Registering'))).toBe(false);
+  });
+
   it('resumes a failed cloud upload when the prior registration matches', async () => {
     const input = new File(['retry bytes'], 'retry.wav', { type: 'audio/wav' });
     const sha256 = await digest(input);

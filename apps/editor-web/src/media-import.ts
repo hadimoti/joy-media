@@ -126,8 +126,8 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
     file,
   );
 
-  report(options, 0.82, `Registering ${file.name}...`);
   await client.ensureProject(options.projectId, options.projectTitle);
+  report(options, 0.82, `Registering ${file.name}...`);
   const registered = await registerOrResume(client, options.projectId, registration);
 
   report(options, 0.9, `Uploading ${file.name} to private cloud storage...`);
