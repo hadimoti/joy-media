@@ -782,6 +782,10 @@ test.describe('desktop.export-media-semantics', () => {
       await page.getByLabel('Monitor preview renderer').selectOption('local');
       await expect(page.locator('.monitor-preview-status')).toHaveText('Local');
       font = await captionReference(page);
+      if (!font.available && process.env.JOY_MEDIA_REQUIRE_CAPTION_FONT === '1')
+        throw new Error(
+          `Persian caption acceptance requires its font on this runner: ${font.reason}`,
+        );
       writeFileSync(
         join(evidence, 'caption-font.json'),
         JSON.stringify(
@@ -1096,6 +1100,10 @@ test.describe('desktop.export-media-semantics', () => {
 
   test('burns in the expected shaped Persian caption when its font is available', async () => {
     if (!font.available) {
+      if (process.env.JOY_MEDIA_REQUIRE_CAPTION_FONT === '1')
+        throw new Error(
+          `Persian caption acceptance requires its font on this runner: ${font.reason}`,
+        );
       test.info().annotations.push({ type: 'SETUP_REQUIRED', description: font.reason! });
       test.skip(true, `SETUP_REQUIRED: ${font.reason}`);
     }

@@ -454,11 +454,17 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     Set-ScenarioOutcome -Id 'desktop.app.restart-save-export' -ExitCode (Get-PlaywrightAccountingExitCode $editorReport)
     # Export parity runs the packaged export spec for picture, sound and timing against the preview.
     # A skipped case, such as the Persian caption when its font is missing, fails the scenario.
+    # The Persian caption renders in the font the editor uses by default, Windows' Arial. That file ships
+    # with Windows, so the runner needs no extra font. The gate refuses to run without it, and the caption
+    # case may not skip: JOY_MEDIA_REQUIRE_CAPTION_FONT turns a missing font into a failure.
+    $captionFontPath = Join-Path $env:WINDIR 'Fonts\arial.ttf'
+    if (-not (Test-Path -LiteralPath $captionFontPath -PathType Leaf)) { throw "Persian caption acceptance font is missing on this runner: $captionFontPath" }
     $exportReport = Join-Path $workRoot 'export-semantics.playwright.json'
     $null = Invoke-Pnpm 'installed candidate export picture, sound and timing acceptance' @('exec', 'playwright', 'test', '--config', 'playwright.desktop.config.ts', 'tests/desktop/export-semantics.spec.ts', '--retries=0', '--reporter=json') 900 @{
         JOY_MEDIA_TEST_EXECUTABLE = Join-Path $installRoot 'joy-media.exe'
         JOY_MEDIA_TEST_WORKING_DIRECTORY = $installRoot
         JOY_MEDIA_TEST_API_BASE_URL = 'http://127.0.0.1:4174'
+        JOY_MEDIA_REQUIRE_CAPTION_FONT = '1'
         PLAYWRIGHT_JSON_OUTPUT_NAME = $exportReport
     }
     Set-ScenarioOutcome -Id 'desktop.export-media-semantics' -ExitCode (Get-PlaywrightAccountingExitCode $exportReport)
