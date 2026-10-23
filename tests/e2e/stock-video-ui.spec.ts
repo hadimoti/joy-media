@@ -106,6 +106,32 @@ test.describe('native stock video library', () => {
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [] }) });
     });
 
+    // Started before the session, so the audit also covers the requests a session makes while it
+    // initializes, including any that name a project before the owner's binding exists.
+    const projectRequestIds: string[] = [];
+    page.on('request', (request) => {
+      const pathname = new URL(request.url()).pathname;
+      // A create or ensure request names its project in its body. Project-root and project-scoped
+      // routes name it in the path, with or without a trailing segment.
+      if (pathname === '/api/v1/projects' || pathname === '/api/v1/projects/ensure') {
+        let body: { id?: unknown } | null = null;
+        try {
+          body = request.postDataJSON() as { id?: unknown } | null;
+        } catch {
+          body = null;
+        }
+        // A create or ensure request whose project cannot be read from its body fails the audit.
+        projectRequestIds.push(
+          typeof body?.id === 'string' ? body.id : '<unidentified project request>',
+        );
+        return;
+      }
+      const match = pathname.match(/^\/api\/v1\/projects\/([^/]+)(?:\/|$)/);
+      if (match === null) return;
+      const projectId = decodeURIComponent(match[1]!);
+      projectRequestIds.push(projectId);
+    });
+
     await authenticate(page);
     await openDisposableWorkspace(page, `Stock UI ${Date.now()}`);
 
@@ -185,15 +211,7 @@ test.describe('native stock video library', () => {
         activeControlPlaneProjectIds: [...new Set(activeProjectIds)],
       };
     }, activeProject);
-    const projectRequestIds: string[] = [];
     const stockRequestErrors: string[] = [];
-    page.on('request', (request) => {
-      const pathname = new URL(request.url()).pathname;
-      const match = pathname.match(/^\/api\/v1\/projects\/([^/]+)\//);
-      if (match === null) return;
-      const projectId = decodeURIComponent(match[1]!);
-      projectRequestIds.push(projectId);
-    });
     page.on('request', (request) => {
       const pathname = new URL(request.url()).pathname;
       if (!pathname.includes('/api/v1/library/stock-videos')) return;
