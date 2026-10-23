@@ -611,6 +611,56 @@ jobs:
           $results = Get-Content -LiteralPath $outputs -Raw | ConvertFrom-Json
           [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence1=$($results.'1')$([Environment]::NewLine)")
           [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence2=$($results.'2')$([Environment]::NewLine)")
+      - name: Stage Windows release artifacts with their manifest
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repoRoot = (Resolve-Path $PWD).Path
+          $releaseDir = Join-Path $repoRoot 'apps\desktop\dist\releases'
+          $standalone = Join-Path $repoRoot 'apps\desktop\dist\joy-media-win32-x64'
+          $version = (Get-Content -LiteralPath (Join-Path $repoRoot 'apps\desktop\package.json') -Raw | ConvertFrom-Json).version
+          $stage = Join-Path $repoRoot 'test-output\release-artifacts'
+          if (Test-Path -LiteralPath $stage) { throw "Release artifact staging path already exists: $stage" }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          $sources = [ordered]@{
+            'joy-media-setup.exe' = Join-Path $releaseDir 'joy-media-setup.exe'
+            "joy-media-windows-x64-v$version.zip" = Join-Path $releaseDir "joy-media-windows-x64-v$version.zip"
+            'joy-media-release-manifest.json' = Join-Path $releaseDir 'joy-media-release-manifest.json'
+            'SHA256SUMS.txt' = Join-Path $releaseDir 'SHA256SUMS.txt'
+            'standalone/joy-media.exe' = Join-Path $standalone 'joy-media.exe'
+            'standalone/resources/app/cli/joy-media-bundle.mjs' = Join-Path $standalone 'resources\app\cli\joy-media-bundle.mjs'
+            'standalone/resources/app/worker/joy-worker.exe' = Join-Path $standalone 'resources\app\worker\joy-worker.exe'
+          }
+          $files = foreach ($name in $sources.Keys) {
+            $source = $sources[$name]
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Required release artifact is missing: $source" }
+            $target = Join-Path $stage ($name -replace '/', '\')
+            New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+            Copy-Item -LiteralPath $source -Destination $target -ErrorAction Stop
+            [ordered]@{
+              path = $name
+              bytes = [int64](Get-Item -LiteralPath $target).Length
+              sha256 = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          }
+          $manifest = [ordered]@{
+            format = 'joy-media-release-artifacts'
+            candidateSha = $env:CANDIDATE_SHA
+            runId = [int64]$env:GITHUB_RUN_ID
+            attempt = [int]$env:GITHUB_RUN_ATTEMPT
+            version = $version
+            files = @($files)
+          }
+          [IO.File]::WriteAllText((Join-Path $stage 'artifact-manifest.json'), ($manifest | ConvertTo-Json -Depth 6) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+      - name: Retain Windows release artifacts in the designated durable evidence store
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The store is designated by the runner operator, and the gate reads the same store. GitHub
+          # artifact upload is disabled by policy, so the bytes go to the store, not to Actions.
+          if ([string]::IsNullOrWhiteSpace($env:JOY_MEDIA_WINDOWS_EVIDENCE_ROOT)) { throw 'JOY_MEDIA_WINDOWS_EVIDENCE_ROOT must name the durable evidence store that the gate reads' }
+          node tooling/release/src/retain-release-artifacts.mjs test-output\release-artifacts $env:CANDIDATE_SHA $env:GITHUB_RUN_ID $env:GITHUB_RUN_ATTEMPT $env:JOY_MEDIA_WINDOWS_EVIDENCE_ROOT
+          if ($LASTEXITCODE -ne 0) { throw "Windows release artifact retention failed with exit code $LASTEXITCODE." }
       - name: Verify clean Worker teardown
         if: always()
         shell: powershell
@@ -703,6 +753,8 @@ jobs:
           }
           Get-ChildItem -LiteralPath $env:RUNNER_TEMP -Directory -Filter "acceptance-diagnostics-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)-*" -ErrorAction SilentlyContinue |
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          $stage = Join-Path (Resolve-Path $PWD).Path 'test-output\release-artifacts'
+          if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
 
   acceptance-primary:
     name: acceptance-primary desktop-primary (pass ${{ matrix.pass }})
@@ -1420,6 +1472,13 @@ jobs:
           set -euo pipefail
           node ops/self-hosted/linux-runner/restore-retained-evidence.mjs \
             "$JOY_MEDIA_CI_EVIDENCE_ROOT" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+      - name: Verify the retained Windows release artifacts in the evidence store
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Reads the bytes back from the store and re-hashes them against the manifest and SHA256SUMS.txt.
+          # A missing or altered copy fails the gate.
+          node tooling/release/src/retain-release-artifacts.mjs - "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$JOY_MEDIA_CI_EVIDENCE_ROOT" --verify-only
       - name: Build source-bound readiness evidence from all two-pass results
         shell: bash
         env:
