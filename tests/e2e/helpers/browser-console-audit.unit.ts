@@ -450,6 +450,23 @@ describe('browser console HTTP conflict audit', () => {
     await expect(assertBrowserAudit(page, testInfo)).resolves.toBeUndefined();
   });
 
+  it('rejects a write to another held project that the page never ensured', async () => {
+    const { page, emit } = createAuditPage();
+    setupBrowserAudit(page);
+    expectBoundProjectOnly(page);
+
+    emit('response', succeeded('POST', '/api/v1/projects/ensure', { id: 'project-1' }));
+    emit('response', ownerAssets(['project-2']));
+    emit('request', requestEvent('POST', '/api/v1/projects/project-2/rename', { title: 'x' }));
+    emit('response', succeeded('POST', '/api/v1/projects/project-2/rename', { id: 'project-2' }));
+    emit('request', requestEvent('GET', '/api/v1/projects/project-1/assets'));
+    emit('response', succeeded('GET', '/api/v1/projects/project-1/assets'));
+
+    await expect(assertBrowserAudit(page, testInfo)).rejects.toThrow(
+      /Writes to a project this page never ensured/,
+    );
+  });
+
   it('accepts a bound project read that follows its ensure', async () => {
     const { page, emit } = createAuditPage();
     setupBrowserAudit(page);

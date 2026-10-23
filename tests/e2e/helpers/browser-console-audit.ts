@@ -665,6 +665,20 @@ export async function assertBrowserAudit(page: Page, testInfo: TestInfo): Promis
       requestedBeforeEnsure,
       `Project requests preceded the ensure of their project during ${testInfo.title}`,
     ).toEqual([]);
+    // A bound-project page writes only to the project it ensured. A write to another project the owner
+    // holds is a request this page never bound, even though the owner may read that project.
+    const writesToUnensuredProjects = state.projectRequests
+      .filter(
+        (request) =>
+          !state.ensuredProjectIds.has(request.projectId) &&
+          request.method !== 'GET' &&
+          request.method !== 'OPTIONS',
+      )
+      .map((request) => `${request.method} ${request.projectId}`);
+    expect(
+      writesToUnensuredProjects,
+      `Writes to a project this page never ensured during ${testInfo.title}`,
+    ).toEqual([]);
     expect(
       state.ensuredProjectIds.size,
       `Expected one bound project during ${testInfo.title}`,
