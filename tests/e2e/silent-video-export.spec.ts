@@ -13,7 +13,11 @@ import {
 // Browser-only export (no desktop host), so audio presence comes from the MP4 metadata reader.
 // A silent video must export without an audio decode; a video with sound must keep it.
 
-async function importAndAddFixture(page: Page, fixture: string, displayName: string): Promise<void> {
+async function importAndAddFixture(
+  page: Page,
+  fixture: string,
+  displayName: string,
+): Promise<void> {
   await openPanel(page, 'Assets');
   await page.getByRole('button', { name: 'Import media' }).first().click();
   const drawer = page.getByRole('dialog', { name: 'Import media' });
@@ -55,7 +59,17 @@ function probe(path: string): { readonly duration: number; readonly audioStreams
   );
   const audio = execFileSync(
     'ffprobe',
-    ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', path],
+    [
+      '-v',
+      'error',
+      '-select_streams',
+      'a',
+      '-show_entries',
+      'stream=index',
+      '-of',
+      'csv=p=0',
+      path,
+    ],
     { encoding: 'utf8' },
   );
   return {
