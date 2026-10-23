@@ -1,8 +1,8 @@
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { IncomingMessage } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { newDb } from 'pg-mem';
 import type { Pool } from 'pg';
 import { executeLeasedExport, type ExportJobPayload } from '../apps/worker/src/export-job.js';
@@ -172,6 +172,23 @@ createE2EAccountService().then(async (defaultAccount) => {
     corsAllowedOrigins: ['joy-media-app://renderer'],
     account,
   });
+
+  // Opt-in request log for the packaged desktop acceptance. It records every request this server
+  // serves, whichever process of the packaged app sends it. The file starts empty for each server
+  // run; readers keep their own byte offset.
+  const requestLogPath = process.env.JOY_MEDIA_E2E_REQUEST_LOG;
+  if (requestLogPath !== undefined) {
+    writeFileSync(requestLogPath, '');
+    server.on('request', (request: IncomingMessage, response: ServerResponse) => {
+      response.once('finish', () => {
+        const path = (request.url ?? '').split('?')[0];
+        appendFileSync(
+          requestLogPath,
+          `${JSON.stringify({ method: request.method, path, status: response.statusCode })}\n`,
+        );
+      });
+    });
+  }
 
   const e2eWorkerPromise = runE2eRenderWorker();
 
