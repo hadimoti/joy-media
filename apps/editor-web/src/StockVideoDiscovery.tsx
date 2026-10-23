@@ -430,16 +430,23 @@ function formatDuration(durationUs: number): string {
   return `${(durationUs / 1_000_000).toFixed(1)}s`;
 }
 
+/**
+ * Polls a stock video import until it settles. Each status request runs `assertCurrent` first, so a
+ * session that has left the project stops polling for it.
+ */
 export async function waitForStockVideoImport(
   client: Pick<BrowserControlPlaneClient, 'stockVideoImportStatus'>,
   projectId: string,
   importId: string,
+  assertCurrent: () => void = () => undefined,
   wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ) {
+  assertCurrent();
   let current = await client.stockVideoImportStatus(projectId, importId);
   for (let attempt = 0; attempt < IMPORT_POLL_LIMIT; attempt += 1) {
     if (current.state === 'completed' || current.state === 'failed') return current;
     await wait(IMPORT_POLL_INTERVAL_MS);
+    assertCurrent();
     current = await client.stockVideoImportStatus(projectId, importId);
   }
   throw new Error('Stock video import is still processing; try again shortly.');

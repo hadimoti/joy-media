@@ -62,6 +62,7 @@ import {
   getDesktopAssetLibraryCatalog,
   resolveDesktopAssetUrl,
 } from './desktop-client.js';
+import { scopeStillHeld, startProjectScopeCheck } from './control-plane-scope.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
@@ -310,6 +311,9 @@ export function AssetLibraryPanel({
       return;
     }
     try {
+      // The derivative reads below name a project. The check is captured before the awaits, so a
+      // refresh that outlives the session's project asks for none.
+      const assertScope = startProjectScopeCheck(captureProjectScope, projectId);
       // Catalog listing must not create or reconcile a control-plane project.
       // My Media is the signed-in account library; importing still owns the
       // ensure-before-register transaction, so this remains read-only while
@@ -367,27 +371,29 @@ export function AssetLibraryPanel({
       }
       if (assets.length === 0) setImportOpen(true);
 
-      void Promise.all(
-        ownedAssets.map(async (asset) => {
-          try {
-            return [
-              asset.id,
-              await client.derivatives(asset.projectId || projectId, asset.id),
-            ] as const;
-          } catch {
-            return [asset.id, [] as readonly BrowserDerivative[]] as const;
-          }
-        }),
-      ).then((derivatives) => {
-        if (requestId !== refreshSeqRef.current) return;
-        const byAsset = new Map(derivatives);
-        setItems((current) =>
-          current.map((item) => ({
-            ...item,
-            derivatives: byAsset.get(item.asset.id) ?? item.derivatives,
-          })),
-        );
-      });
+      if (scopeStillHeld(assertScope)) {
+        void Promise.all(
+          ownedAssets.map(async (asset) => {
+            try {
+              return [
+                asset.id,
+                await client.derivatives(asset.projectId || projectId, asset.id),
+              ] as const;
+            } catch {
+              return [asset.id, [] as readonly BrowserDerivative[]] as const;
+            }
+          }),
+        ).then((derivatives) => {
+          if (requestId !== refreshSeqRef.current) return;
+          const byAsset = new Map(derivatives);
+          setItems((current) =>
+            current.map((item) => ({
+              ...item,
+              derivatives: byAsset.get(item.asset.id) ?? item.derivatives,
+            })),
+          );
+        });
+      }
     } catch (error) {
       if (requestId !== refreshSeqRef.current) return;
       const detail = message(error);
@@ -396,7 +402,7 @@ export function AssetLibraryPanel({
       setOwnedAssetIds(new Set());
       setStatus(`Failed to load media catalog: ${detail}`);
     }
-  }, [client, projectId, storage]);
+  }, [captureProjectScope, client, projectId, storage]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -547,9 +553,11 @@ export function AssetLibraryPanel({
         if (!res.ok) throw new Error(`Failed to load local asset: ${res.statusText}`);
         return await res.blob();
       }
+      // Refuses to name a project the session no longer holds, including from an earlier render.
+      captureProjectScope(projectId);
       return client.originalBytes(asset.projectId || projectId, id);
     },
-    [client, items, projectId],
+    [captureProjectScope, client, items, projectId],
   );
   const addAssetToTimeline = useCallback(
     async (asset: {
@@ -566,6 +574,8 @@ export function AssetLibraryPanel({
       }
       timelineAddRef.current.add(asset.assetId);
       try {
+        // Every control-plane read or write below names this project. Each one checks first.
+        const assertScope = startProjectScopeCheck(captureProjectScope, projectId);
         let descriptor = asset.descriptor;
         if (
           (asset.kind === 'video' || asset.kind === 'audio') &&
@@ -608,6 +618,7 @@ export function AssetLibraryPanel({
               }
               if (blob === undefined) {
                 try {
+                  assertScope();
                   blob = await client.originalBytes(projectId, asset.assetId);
                 } catch {
                   blob = await client.sharedCloudOriginalBytes(asset.assetId);
@@ -663,6 +674,7 @@ export function AssetLibraryPanel({
         if (catalogAsset !== undefined && catalogAsset.projectId !== projectId) {
           if (!isDesktopHost()) {
             setStatus(`Preparing ${asset.displayName} for this project…`);
+            assertScope();
             const associated = await withAssetTimelineTimeout(
               client.associateAsset(projectId, catalogAsset.id),
               `Preparing ${asset.displayName}`,
@@ -691,7 +703,7 @@ export function AssetLibraryPanel({
         timelineAddRef.current.delete(asset.assetId);
       }
     },
-    [client, items, onAddToTimeline, originalAssetCache, projectId],
+    [captureProjectScope, client, items, onAddToTimeline, originalAssetCache, projectId],
   );
 
   const openPreview = useCallback(
@@ -763,17 +775,25 @@ export function AssetLibraryPanel({
     async (asset: BrowserAsset, file: File) => {
       if (asset.cloudBacked || asset.kind !== 'video' || !ownedAssetIds.has(asset.id)) return;
       try {
+        // Captured before the verification await, so the upload's requests check the same scope.
+        const assertScope = startProjectScopeCheck(captureProjectScope, projectId);
         setStatus(`Verifying ${asset.displayName} before recovery…`);
         await verifyOriginalRecoveryCandidate(asset, file);
         setStatus(`Uploading the verified original for ${asset.displayName}…`);
-        await client.uploadAssetOriginal(asset.projectId || projectId, asset, file);
+        await client.uploadAssetOriginal(
+          asset.projectId || projectId,
+          asset,
+          file,
+          undefined,
+          assertScope,
+        );
         await refresh();
         setStatus(`${asset.displayName} is backed up to private cloud storage.`);
       } catch (error) {
         setStatus(`Original recovery stopped: ${message(error)}`);
       }
     },
-    [client, ownedAssetIds, projectId, refresh],
+    [captureProjectScope, client, ownedAssetIds, projectId, refresh],
   );
 
   const deleteAsset = useCallback(
@@ -781,6 +801,8 @@ export function AssetLibraryPanel({
       const ok = window.confirm(`Delete “${asset.displayName}” from the catalog?`);
       if (!ok) return;
       try {
+        // Refuses to name a project the session no longer holds, including from an earlier render.
+        captureProjectScope(projectId);
         const deleted = await client.deleteAsset(asset.projectId || projectId, asset.id);
         setSelectedAssetIds((current) => {
           if (!current.has(asset.id)) return current;
@@ -798,7 +820,7 @@ export function AssetLibraryPanel({
         setStatus(`Failed to delete media: ${message(error)}`);
       }
     },
-    [client, projectId, refresh],
+    [captureProjectScope, client, projectId, refresh],
   );
 
   const bulkEditWithAi = useCallback(() => {
@@ -831,8 +853,11 @@ export function AssetLibraryPanel({
     if (!ok) return;
     let deleted = 0;
     let cloudObjectPurgeFailures = 0;
+    // Each deletion checks the scope first. A session that has left the project deletes nothing more.
+    const assertScope = startProjectScopeCheck(captureProjectScope, projectId);
     for (const { asset } of targets) {
       try {
+        assertScope();
         const result = await client.deleteAsset(asset.projectId || projectId, asset.id);
         deleted += 1;
         cloudObjectPurgeFailures += result.cloudObjectPurgeFailures;
@@ -847,23 +872,28 @@ export function AssetLibraryPanel({
         cloudObjectPurgeFailures > 0 ? ' Some cloud objects need an operational cleanup retry.' : ''
       }`,
     );
-  }, [client, projectId, refresh, selectedAssetIds, visible]);
+  }, [captureProjectScope, client, projectId, refresh, selectedAssetIds, visible]);
 
   const importStockVideo = useCallback(
     async (video: BrowserStockVideo): Promise<void> => {
+      // The start, every status poll and the asset read all name this project. Each one checks first.
+      const assertScope = startProjectScopeCheck(captureProjectScope, projectId);
+      assertScope();
       const started = await client.startStockVideoImport(projectId, video.id);
       const completed =
         started.state === 'completed' || started.state === 'failed'
           ? started
-          : await waitForStockVideoImport(client, projectId, started.importId);
+          : await waitForStockVideoImport(client, projectId, started.importId, assertScope);
       if (completed.state === 'failed') {
         throw new Error(completed.errorCode ?? 'Native stock video import failed');
       }
-      const importedAsset =
-        completed.asset ??
-        (completed.assetId === undefined
-          ? undefined
-          : (await client.myAssets(projectId)).find(({ id }) => id === completed.assetId));
+      let importedAsset = completed.asset;
+      if (importedAsset === undefined && completed.assetId !== undefined) {
+        assertScope();
+        importedAsset = (await client.myAssets(projectId)).find(
+          ({ id }) => id === completed.assetId,
+        );
+      }
       if (importedAsset === undefined) throw new Error('Import completed without a My media asset');
       setItems((current) => includeOwnedAsset(current, new Set(), importedAsset).items);
       setOwnedAssetIds((current) => includeOwnedAsset([], current, importedAsset).ownedAssetIds);
@@ -876,7 +906,7 @@ export function AssetLibraryPanel({
       await refresh();
       setStatus(`${importedAsset.displayName} imported to My media.`);
     },
-    [client, projectId, refresh],
+    [captureProjectScope, client, projectId, refresh],
   );
 
   const visibleIds = useMemo(() => rendered.map(({ asset }) => asset.id), [rendered]);
