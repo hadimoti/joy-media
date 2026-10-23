@@ -654,4 +654,12 @@ describe('createReadinessEvidence', () => {
       }),
     ).toThrow(/workflow run id is invalid/u);
   });
+
+  it('never records project.persistence.fresh-process without a measured step for it', () => {
+    const lifecycle = readFileSync(
+      fileURLToPath(new URL('../../../tests/desktop/windows-lifecycle.ps1', import.meta.url)),
+      'utf8',
+    );
+    expect(lifecycle).not.toContain("'project.persistence.fresh-process'");
+  });
 });
