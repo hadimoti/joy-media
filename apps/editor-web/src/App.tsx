@@ -294,6 +294,7 @@ import {
   SESSION_LEFT_PROJECT_MESSAGE,
 } from './control-plane-scope.js';
 import { advanceActiveProjectScope, type ActiveProjectScope } from './active-project-scope.js';
+import { createProbedSessionToken } from './probed-session-token.js';
 import { getStoredMediaToken } from './media-session.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
@@ -1245,6 +1246,11 @@ function EditorWorkspace({
     agentConnectionStatus?.capability === 'tool-loop' ||
     agentConnectionStatus?.capability === 'plan-only';
   const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
+  // The stored token the owner was probed with. A token stored later, by another tab or a sign-in this
+  // editor has not probed yet, is another session: none of this editor's long operations may use it.
+  const [probedSessionToken] = useState(() =>
+    createProbedSessionToken(() => getStoredMediaToken(window.localStorage)),
+  );
   const avatarObjectUrl = joySession.kind === 'ready' ? joySession.avatarObjectUrl : undefined;
   const pendingAvatarOwner = usePendingObjectUrlOwner();
   const avatarObjectUrlRef = useReleasableObjectUrl<HTMLImageElement>(
@@ -1688,9 +1694,10 @@ function EditorWorkspace({
       projectId: controlPlaneScopeRef.current.projectId,
       // Both counters only rise, so their sum rises whenever either one does.
       generation: controlPlaneScopeRef.current.generation + activeProjectScope.current.generation,
-      token: getStoredMediaToken(window.localStorage),
+      // Only the token this owner was probed with is this editor's session.
+      token: probedSessionToken.current(),
     }));
-  }, [activeProjectScope, projectId]);
+  }, [activeProjectScope, probedSessionToken, projectId]);
   // For a caller that names the control-plane project it operates on. It refuses to start for a
   // project that this editor no longer holds, such as a closure from before a remount.
   const captureScopeFor = useCallback(
@@ -3596,6 +3603,7 @@ function EditorWorkspace({
   );
   const refreshJoySession = useCallback(() => {
     const requestId = ++joySessionRefreshSeqRef.current;
+    const probedToken = getStoredMediaToken(window.localStorage);
     void probeJoySession(storage)
       .then((next) => {
         if (requestId !== joySessionRefreshSeqRef.current) {
@@ -3607,10 +3615,11 @@ function EditorWorkspace({
         if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
           pendingAvatarOwner.track(next.avatarObjectUrl);
         }
+        probedSessionToken.record(probedToken);
         setJoySession(next);
       })
       .catch(() => undefined);
-  }, [pendingAvatarOwner, storage]);
+  }, [pendingAvatarOwner, probedSessionToken, storage]);
   useEffect(() => {
     if (session.recoveryWarnings.length === 0) return;
     showToast(

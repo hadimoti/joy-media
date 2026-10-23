@@ -49,7 +49,7 @@ const liveScope = { held: true };
 function editorContext(controlPlaneReady: boolean): EditorPanelContextValue {
   return {
     controlPlaneReady,
-    captureControlPlaneProjectScope: () => () => {
+    captureControlPlaneProjectScope: (_projectId: string) => () => {
       if (!liveScope.held) throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
     },
   } as EditorPanelContextValue;

@@ -553,8 +553,9 @@ export function AssetLibraryPanel({
         if (!res.ok) throw new Error(`Failed to load local asset: ${res.statusText}`);
         return await res.blob();
       }
-      // Refuses to name a project the session no longer holds, including from an earlier render.
-      captureProjectScope(projectId);
+      // The card's read names this project, so the full session check runs now. A stored token other
+      // than the one the editor was probed with fails it, as it fails an awaited operation.
+      startProjectScopeCheck(captureProjectScope, projectId)();
       return client.originalBytes(asset.projectId || projectId, id);
     },
     [captureProjectScope, client, items, projectId],
@@ -801,8 +802,8 @@ export function AssetLibraryPanel({
       const ok = window.confirm(`Delete “${asset.displayName}” from the catalog?`);
       if (!ok) return;
       try {
-        // Refuses to name a project the session no longer holds, including from an earlier render.
-        captureProjectScope(projectId);
+        // The delete names this project, so the full session check runs before it.
+        startProjectScopeCheck(captureProjectScope, projectId)();
         const deleted = await client.deleteAsset(asset.projectId || projectId, asset.id);
         setSelectedAssetIds((current) => {
           if (!current.has(asset.id)) return current;
