@@ -33,6 +33,89 @@ remain tracked gaps; when one becomes a supported release claim, add it to
 same change. Evidence for every required row must match the same candidate SHA and pass first try
 with zero retries.
 
+## Candidate evidence: `0e9d9cb8` (local, 2026-10-23)
+
+Code candidate verified: `0e9d9cb8` on the local branch `hadimoti/owner-binding-candidate`. It has five commits on base `46b78e73`: `6b4e5eb2` (owner binding under a ready session), `907bef16` (Worker build location and `pg-mem` dev dependency), `bf306f1a` (media registration reported after its project is ensured), `b6eb7b81` (owner-binding requests recorded from session start in the Stock Video audit), and `0e9d9cb8` (formatting of two files). The series changes 22 files, with 1,518 insertions and 170 deletions. It has not been pushed, dispatched to CI, frozen, merged or released.
+
+This section was committed afterwards in a documentation-only commit. A commit cannot record its own SHA, so that commit's SHA is reported separately from the code candidate, not in this file.
+
+### Passed locally on `0e9d9cb8`
+
+Pipeline `final6`, 2026-10-23, 08:19 to 08:50 local time.
+
+| Check                      | Command                                                    | Result                                                                              |
+| -------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| TypeScript                 | `node node_modules/typescript/bin/tsc -b`                  | exit 0                                                                              |
+| ESLint                     | `node node_modules/eslint/bin/eslint.js .`                 | exit 0                                                                              |
+| Prettier                   | `node node_modules/prettier/bin/prettier.cjs --check .`    | exit 0                                                                              |
+| Build                      | `pnpm run build`                                           | exit 0                                                                              |
+| Worker bundle verification | `node tooling/release/verify-joy-agent-worker.mjs`         | exit 0                                                                              |
+| Harness                    | `pnpm run test:harness`                                    | 39 passed, 0 failed, 11 skipped (50 tests)                                          |
+| Desktop unpacked package   | `pnpm --filter @joy-media/desktop run package:unpacked`    | exit 0                                                                              |
+| Packaged smoke             | `pnpm --filter @joy-media/desktop run test:smoke-packaged` | exit 0                                                                              |
+| Unit suite                 | `node node_modules/vitest/vitest.mjs run`                  | 6,147 tests passed, 0 failed, 30 skipped (6,177); 682 files passed, 3 skipped (685) |
+| Browser audit              | Playwright over `tests/e2e`, seven `--project` filters     | 854 passed, 0 failed, 0 flaky, 7 skipped (123 tests per project)                    |
+
+The seven projects are `desktop-primary`, `desktop-compact`, `desktop-minimum`, `desktop-1280`, `desktop-1440`, `desktop-1581` and `desktop-1920`. Two negative probes exit 1 by design and are not failures: an unrelated server on `127.0.0.1:4173` is refused, and an expect timeout fails at the configured 5,000 ms.
+
+Mutation harness: all required mutations are detected, and each mutated file is restored to HEAD. M1 to M6, M7 (M7a and M7b) and M8 to M11 are required. M12, M14 to M16 and M18 to M23 are detected as well. M13 is not defined in the harness and was not run.
+
+Review: review rounds 6 to 20 reported no blockers. Round 15 covered a change that was later reverted. Round 2 (Grok) did not complete, and the output of round 5 was not retained, so neither is counted. No external Claude Code review is recorded for this candidate.
+
+### Accepted skips (documented, not counted as passed)
+
+- CASE-66 (R5 ML Denoise): seven skips, one per viewport, declared `BLOCKED-INTEGRATION` at `tests/e2e/wp29-r5-harness.ts:408`. The case needs an independently running denoise Worker with the DeepFilterNet binary and the RNNoise model. Neither is provisioned or downloaded here. ML Denoise is not tested and not production-ready. Owner decision: skip accepted.
+- Pre-existing and unchanged by this candidate: 11 harness skips, 30 environment-conditional unit skips in `apps/api` and `apps/cli`, and 3 skipped unit test files.
+
+### Deferred acceptance (owner-deferred, not performed)
+
+- Real CASE-66 acceptance against an isolated, non-production control plane, with the denoise binary and model.
+- A packaged Electron regression test for the desktop-specific signed-out and unbound path, if the owner decides it is needed.
+
+### Owner decisions recorded (2026-10-23)
+
+1. CASE-66 skip accepted (see above).
+2. Requirement 3(c): client-level evidence accepted. A project-scoped request for an unbound ID rejects before any request is built, with "This project is not connected to a signed-in account yet. Sign in, then try again." No forced-state browser test is required.
+3. The five-file 409 expectation update in `6b4e5eb2` is approved, with strict behavioral assertions and unauthorized-request detection kept.
+4. `0e9d9cb8` (formatting only) is approved. Both files are formatting-only: the matrix's 82 table rows are identical after cell-padding normalization, and `tests/e2e/silent-video-export.spec.ts` has 1,105 identical code tokens and 3 identical comments.
+
+### Unresolved production-readiness requirements
+
+None of these is complete.
+
+- `release.exact-candidate-two-pass` has no receipt for `0e9d9cb8`. Run `39644275784` concluded `success` on `1482aa7b`, with all 18 jobs successful. It does not cover the 30 commits after `1482aa7b`, which include this candidate. The run's GitHub artifact list is now empty. The final gate keeps its evidence in the isolated acceptance runner's evidence store (`JOY_MEDIA_CI_EVIDENCE_ROOT`), which this checkout cannot read, so whether a receipt exists for `1482aa7b` was not verified here.
+- The validator and the matrix disagree. Six rows carry **gate-required**: `cli.render.unsupported-features`, `cli.render.windows-entrypoints`, `project.persistence.fresh-process`, `desktop.windows.installed-lifecycle`, `desktop.export-media-semantics` and `release.exact-candidate-two-pass`. `REQUIRED_SCENARIOS` lists eight IDs. It adds `cli.render.playable`, `cli.render.failure-recovery` and `desktop.app.restart-save-export`, and it omits `desktop.export-media-semantics`.
+- The readiness generator (`tooling/release/src/create-readiness-evidence.mjs`) writes `release.exact-candidate-two-pass` as `passed` without reading any lane result, and records the lanes as a fixed command with `exitCode: 0`. The Linux lanes are checked only by job result in `gate-summary`, not by scenario receipts.
+- `desktop.export-media-semantics` (P0): picture, audio and timing parity against the desktop preview is not accepted.
+- `desktop.windows.installed-lifecycle` (P0): no lifecycle result exists for `0e9d9cb8`. The setup still writes the user PATH, the uninstall key and shortcuts when given a temporary `-InstallPath`. The `windows-worker-clean` job, which runs the lifecycle, succeeded on `1482aa7b`. This row does not record that.
+- Exact-candidate receipts are still needed for `cli.render.playable`, `cli.render.failure-recovery` and `cli.render.windows-entrypoints`. `cli.render.unsupported-features` also keeps its desktop parity open. `project.persistence.fresh-process` keeps its packaged case open until the receipt exists, and its row says the packaged app does not yet prove the SQLite store is wired into editor open and save. `desktop.app.restart-save-export` keeps its fresh-profile reopen open.
+- P0 rows that are not gate-required still have open items: `cli.project.lifecycle` (packaged project-store gap), `cli.timeline.editing` (physical volume exhaustion and held-file publication unmeasured) and `cli.output.schemas` (additional Node-version coverage and exact-candidate evidence).
+- P1 rows still partial: `cli.agent.chat-run`, `cli.diagnostics`, `desktop.file-project-package`, `desktop.menu-actions` and `desktop.timeline-and-panels`. `desktop.update-and-rollback` is not supported for public distribution, but its supported claim still reads "Yes for a distributed desktop app".
+- External review and approval: no external Claude Code review is recorded. The exact-candidate approval by GPT-6.1-sol has not been run. Owner decision (2026-10-23): GPT-6.1-sol is the reviewer, and GPT-6 Astra is not used. The branch's plan copy names GPT-6.1-sol, and the workspace copy names GPT-6 Astra.
+- Owner release decision, including unsigned distribution. The installer and portable package are unsigned.
+- Optional feature: real-GPU and model qualification. None of the four model environments is ready, and there is no `JOY\models` directory.
+
+### Prior exact-candidate runs (failed, superseded)
+
+These runs are kept as evidence. Their failure points come from the continuation notes in the branch's copy of the readiness plan.
+
+- `39116255432` at `135363834ab7d0a182fc85dbc44449bc8f731438`: Windows lifecycle pass 2 failed the packaged editor's decoded-audio onset assertion.
+- `39119170732` at `4836ecef9009a804b83c526aaaa3b63829d28dab`: Windows lifecycle pass 1 failed in the packaged preset matrix, where `ffprobe` read a file before its download completed.
+- `39121380239` at `6552db81e593499386624a9c18f515c07979e7bf`: both `desktop-primary` passes failed on a CASE-74 selector assertion.
+- `39124132645` at `da4a831bc1f6b01801cf468083de7a564a6fab87`: both real-service acceptance passes failed on a selector.
+- `39128416727` at `3fff3745acfa45fc817230c394a2be746704f5fb`: final evidence binding failed on the P3 gallery restore allowlist.
+- `39137590603` at `57e55550d6096fbf7f0cac8106f0f0c3f2ab4ea5`: final evidence restore failed on a P3 sample-frame file.
+
+### Known inconsistencies (not changed in this commit)
+
+- The header sentence that says the validator requires "the eight P0 rows marked gate-required" does not match the six markers above.
+- `desktop.file-project-package`: the row says cross-device, collision and malformed-package cases remain open, and that batch relink is verified. The draft release notes say the first three are verified, and that batch relink and override persistence across a restart are open.
+- Fresh-profile reopen: `desktop.app.restart-save-export` lists it as open, pending the file-package round trip. `project.persistence.fresh-process` and `desktop.file-project-package` record a packaged fresh-profile import as passed.
+- `desktop.worker-jobs`: the row says Limited, with dispatch and completion verified on the local Worker. The draft release notes say NOT SUPPORTED, with dispatch and completion not implemented.
+- `desktop.account-connection`: the row says the real-service acceptance workflow has not run. Run `39644275784` shows both `real-service-acceptance` passes succeeded on `1482aa7b`.
+- `desktop.export-media-semantics`: the draft release notes list the export-semantics spec as passing, including Monitor-to-export parity. The row keeps picture, audio and timing parity against the preview as not accepted. The two need the same criterion.
+- The draft release notes say run `39644275784` was still in progress at 2026-10-21 18:17Z. It has since concluded `success`, so those notes are superseded.
+
 ## Command-line interface
 
 | Scenario ID                       | Documented operation                                                                                 | Supported claim                                                 | Priority | Fixture IDs                                                                 | Platform / entry                                                 | Test command                                                                                                                                                                                                                               | Current status                                                                                                                                                                                                                                       | Evidence path                                                  |
