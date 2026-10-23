@@ -40,6 +40,7 @@ export function verifyArtifacts({
   bytesByName,
   candidateSha,
   releaseManifest,
+  recordedNames = [],
 }) {
   if (releaseManifest?.targetCommit !== candidateSha) {
     throw new Error(
@@ -66,6 +67,17 @@ export function verifyArtifacts({
   });
   if (!Array.isArray(releaseManifest.artifacts)) {
     throw new Error('release manifest lists no artifacts');
+  }
+  // Each packaged artifact the manifest records must appear exactly once, with a digest. Otherwise a
+  // manifest could drop or duplicate an entry, or strip its digest, and still pass.
+  for (const name of recordedNames) {
+    const entries = releaseManifest.artifacts.filter((entry) => entry?.fileName === name);
+    if (entries.length !== 1) {
+      throw new Error(`release manifest does not list ${name} exactly once`);
+    }
+    if (typeof entries[0].sha256 !== 'string') {
+      throw new Error(`release manifest has no digest for ${name}`);
+    }
   }
   for (const entry of releaseManifest.artifacts) {
     if (entry === null || typeof entry !== 'object') {

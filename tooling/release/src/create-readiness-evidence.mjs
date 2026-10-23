@@ -371,6 +371,11 @@ export function buildReadinessEvidence({
     },
     candidateSha,
     releaseManifest,
+    // The packager records the four artifacts it hashes in the release manifest. The setup is only
+    // added to SHA256SUMS.txt after the packager has run, so it is not expected in the manifest.
+    recordedNames: releaseFiles
+      .map(([fileName]) => fileName)
+      .filter((fileName) => fileName !== 'joy-media-setup.exe'),
   });
   const installerArtifacts = verifiedArtifacts.map((artifact, index) => ({
     path: `remote/windows/${artifact.name}`,

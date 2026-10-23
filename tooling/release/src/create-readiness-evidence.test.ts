@@ -605,6 +605,41 @@ describe('createReadinessEvidence', () => {
     expect(() => build(workspaceRoot, needsJson)).toThrow(/release manifest lists no artifacts/u);
   });
 
+  it('rejects a release manifest that lists none of the packaged artifacts', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    write(RELEASE_MANIFEST, JSON.stringify({ ...releaseManifest(), artifacts: [] }));
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /does not list joy-media-windows-x64-v1\.0\.2\.zip exactly once/u,
+    );
+  });
+
+  it('rejects a packaged artifact entry that carries no digest', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const artifacts = releaseManifest().artifacts.map((entry) =>
+      entry.fileName === 'joy-media.exe' ? { fileName: entry.fileName, type: entry.type } : entry,
+    );
+    write(RELEASE_MANIFEST, JSON.stringify({ ...releaseManifest(), artifacts }));
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /release manifest has no digest for joy-media\.exe/u,
+    );
+  });
+
+  it('rejects a release manifest that lists a packaged artifact twice', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const artifacts = [
+      ...releaseManifest().artifacts,
+      {
+        fileName: 'joy-media-bundle.mjs',
+        type: 'standalone-cli-bundle',
+        sha256: digest('cli bytes'),
+      },
+    ];
+    write(RELEASE_MANIFEST, JSON.stringify({ ...releaseManifest(), artifacts }));
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /does not list joy-media-bundle\.mjs exactly once/u,
+    );
+  });
+
   it('fails closed when the release manifest is absent', () => {
     const { workspaceRoot, needsJson, remove } = prepareWorkspace();
     remove(RELEASE_MANIFEST);
