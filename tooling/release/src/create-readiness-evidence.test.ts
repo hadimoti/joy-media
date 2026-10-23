@@ -24,6 +24,8 @@ const LANES = [
 ];
 const IMAGE_DIGEST = `sha256:${'b'.repeat(64)}`;
 const MANIFEST_PATH = 'test-output/readiness/two-pass-evidence/manifest.json';
+const PORTABLE_ARCHIVE = 'joy-media-windows-x64-v1.0.2.zip';
+const RELEASE_MANIFEST = 'test-output/readiness/artifacts/joy-media-release-manifest.json';
 const PASS_PATH = {
   1: 'test-output/readiness/two-pass-evidence/windows/pass-1/acceptance.json',
   2: 'test-output/readiness/two-pass-evidence/windows/pass-2/acceptance.json',
@@ -37,10 +39,45 @@ function digest(text: string): string {
 // receipt's candidate digests match the retained artifacts unless a test changes one.
 let candidateDigests: Record<string, string> = {};
 
+// The release manifest the packager writes, bound to this candidate. A test that changes one fact
+// spreads this object and overrides only that field.
+function releaseManifest() {
+  return {
+    name: 'joy-media',
+    version: '1.0.2',
+    platform: 'windows-x64',
+    targetCommit: CANDIDATE_SHA,
+    artifacts: [
+      {
+        fileName: PORTABLE_ARCHIVE,
+        type: 'portable-archive',
+        sha256: candidateDigests[PORTABLE_ARCHIVE],
+      },
+      {
+        fileName: 'joy-media.exe',
+        type: 'standalone-binary',
+        sha256: candidateDigests['joy-media.exe'],
+      },
+      {
+        fileName: 'joy-worker.exe',
+        type: 'standalone-worker',
+        sha256: candidateDigests['joy-worker.exe'],
+      },
+      {
+        fileName: 'joy-media-bundle.mjs',
+        type: 'standalone-cli-bundle',
+        sha256: candidateDigests['joy-media-bundle.mjs'],
+      },
+      { fileName: 'joy.cmd', type: 'cli-launcher' },
+      { fileName: 'joy-media.cmd', type: 'cli-launcher' },
+    ] as Array<Record<string, unknown>>,
+  };
+}
+
 function lifecycle(pass: number) {
   const artifacts = {
     candidateSetupSha256: candidateDigests['joy-media-setup.exe'],
-    candidatePortableArchiveSha256: candidateDigests['joy-media-windows-x64.zip'],
+    candidatePortableArchiveSha256: candidateDigests[PORTABLE_ARCHIVE],
     candidateDesktopExecutableSha256: candidateDigests['joy-media.exe'],
     candidateCliBundleSha256: candidateDigests['joy-media-bundle.mjs'],
     candidateWorkerExecutableSha256: candidateDigests['joy-worker.exe'],
@@ -158,11 +195,11 @@ function prepareWorkspace() {
   write('pnpm-lock.yaml', 'frozen lockfile fixture');
   write('packages/test-fixtures/media/manifest.json', '{"fixture":"readiness"}');
   const artifactBytes: Record<string, string> = {
-    'joy-media-setup.exe': 'setup bytes',
-    'joy-media-windows-x64.zip': 'portable bytes',
+    [PORTABLE_ARCHIVE]: 'portable bytes',
     'joy-media.exe': 'desktop bytes',
     'joy-media-bundle.mjs': 'cli bytes',
     'joy-worker.exe': 'worker bytes',
+    'joy-media-setup.exe': 'setup bytes',
   };
   candidateDigests = Object.fromEntries(
     Object.entries(artifactBytes).map(([name, bytes]) => [name, digest(bytes)]),
@@ -176,10 +213,7 @@ function prepareWorkspace() {
       .map(([name, hash]) => `${hash}  ${name}`)
       .join('\n')}\n`,
   );
-  write(
-    'test-output/readiness/artifacts/artifact-manifest.json',
-    JSON.stringify({ candidateSha: CANDIDATE_SHA, artifacts: Object.keys(artifactBytes) }),
-  );
+  write(RELEASE_MANIFEST, JSON.stringify(releaseManifest()));
   write(PASS_PATH[1], JSON.stringify(lifecycle(1)));
   write(PASS_PATH[2], JSON.stringify(lifecycle(2)));
   writeSummary();
@@ -483,9 +517,9 @@ describe('createReadinessEvidence', () => {
 
   it('rejects an artifact that is missing from the retained evidence', () => {
     const { workspaceRoot, needsJson, remove } = prepareWorkspace();
-    remove('test-output/readiness/artifacts/joy-media-windows-x64.zip');
+    remove(`test-output/readiness/artifacts/${PORTABLE_ARCHIVE}`);
     expect(() => build(workspaceRoot, needsJson)).toThrow(
-      /artifact is missing: joy-media-windows-x64\.zip/u,
+      /artifact is missing: joy-media-windows-x64-v1\.0\.2\.zip/u,
     );
   });
 
@@ -536,13 +570,57 @@ describe('createReadinessEvidence', () => {
     );
   });
 
-  it('rejects an artifact manifest that is bound to another candidate SHA', () => {
+  it('rejects a release manifest that is bound to another candidate SHA', () => {
     const { workspaceRoot, needsJson, write } = prepareWorkspace();
-    write(
-      'test-output/readiness/artifacts/artifact-manifest.json',
-      JSON.stringify({ candidateSha: OTHER_SHA, artifacts: [] }),
-    );
+    write(RELEASE_MANIFEST, JSON.stringify({ ...releaseManifest(), targetCommit: OTHER_SHA }));
     expect(() => build(workspaceRoot, needsJson)).toThrow(/different candidate SHA/u);
+  });
+
+  it('rejects a release manifest digest that disagrees with the independent checksum file', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const artifacts = releaseManifest().artifacts.map((entry) =>
+      entry.fileName === 'joy-media.exe' ? { ...entry, sha256: digest('another desktop') } : entry,
+    );
+    write(RELEASE_MANIFEST, JSON.stringify({ ...releaseManifest(), artifacts }));
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /release manifest digest for joy-media\.exe does not match the checksum file/u,
+    );
+  });
+
+  it('rejects a release manifest that lists an artifact the checksum file does not', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const artifacts = [
+      ...releaseManifest().artifacts,
+      { fileName: 'joy-media-extra.exe', type: 'standalone-binary', sha256: digest('extra bytes') },
+    ];
+    write(RELEASE_MANIFEST, JSON.stringify({ ...releaseManifest(), artifacts }));
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /release manifest lists joy-media-extra\.exe but the checksum file does not/u,
+    );
+  });
+
+  it('rejects a release manifest without an artifact list', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    write(RELEASE_MANIFEST, JSON.stringify({ targetCommit: CANDIDATE_SHA }));
+    expect(() => build(workspaceRoot, needsJson)).toThrow(/release manifest lists no artifacts/u);
+  });
+
+  it('fails closed when the release manifest is absent', () => {
+    const { workspaceRoot, needsJson, remove } = prepareWorkspace();
+    remove(RELEASE_MANIFEST);
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /required artifact integrity file is missing: test-output\/readiness\/artifacts\/joy-media-release-manifest\.json/u,
+    );
+  });
+
+  it('rejects a checksum file that lists the portable archive without the candidate version', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const sumsPath = 'test-output/readiness/artifacts/SHA256SUMS.txt';
+    const sums = readFileSync(join(workspaceRoot, sumsPath), 'utf8');
+    write(sumsPath, sums.replace(`  ${PORTABLE_ARCHIVE}`, '  joy-media-windows-x64.zip'));
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /no independent checksum for joy-media-windows-x64-v1\.0\.2\.zip/u,
+    );
   });
 
   it('fails closed when the independent checksum file is absent', () => {

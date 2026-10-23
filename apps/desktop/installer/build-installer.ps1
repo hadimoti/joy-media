@@ -53,3 +53,22 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Successfully built $outExe ($((Get-Item $outExe).Length) bytes)."
+
+# The packager has already written SHA256SUMS.txt, and the setup is built after it, so the setup's
+# digest is appended here. The release gate uses this file as its independent checksum source, so a
+# missing file or a second setup line stops the build instead of guessing.
+$sumsPath = Join-Path $distReleases "SHA256SUMS.txt"
+if (-not (Test-Path -LiteralPath $sumsPath -PathType Leaf)) {
+    throw "SHA256SUMS.txt not found at $sumsPath. Run desktop packager first."
+}
+$sumsEntries = [System.Collections.Generic.List[string]]::new()
+foreach ($line in (Get-Content -LiteralPath $sumsPath)) {
+    if ($line.Trim() -ne "") { $sumsEntries.Add($line) }
+}
+if (@($sumsEntries | Where-Object { $_ -match '\sjoy-media-setup\.exe$' }).Count -gt 0) {
+    throw "SHA256SUMS.txt already lists joy-media-setup.exe."
+}
+$setupSha256 = (Get-FileHash -LiteralPath $outExe -Algorithm SHA256).Hash.ToLowerInvariant()
+$sumsEntries.Add("$setupSha256  joy-media-setup.exe")
+[IO.File]::WriteAllText($sumsPath, (($sumsEntries -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+Write-Host "Recorded joy-media-setup.exe in $sumsPath."

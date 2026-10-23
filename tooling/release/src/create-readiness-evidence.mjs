@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateGateSummary } from './ci-gate-summary.ts';
 import { REQUIRED_SCENARIOS, validateReadinessEvidence } from './readiness-evidence.ts';
@@ -29,22 +29,38 @@ const TWO_PASS_SCENARIO = 'release.exact-candidate-two-pass';
 // installed-lifecycle receipt of each exact pass. Deriving the list from the validator's
 // inventory keeps the producer and the gate from drifting apart.
 const LIFECYCLE_SCENARIOS = REQUIRED_SCENARIOS.filter((id) => id !== TWO_PASS_SCENARIO);
-const REMOTE_ARTIFACTS = [
-  ['joy-media-setup.exe', 'candidateSetupSha256'],
-  ['joy-media-windows-x64.zip', 'candidatePortableArchiveSha256'],
-  ['joy-media.exe', 'candidateDesktopExecutableSha256'],
-  ['joy-media-bundle.mjs', 'candidateCliBundleSha256'],
-  ['joy-worker.exe', 'candidateWorkerExecutableSha256'],
-];
+// The release artifacts the gate verifies, under the names the packager and the installer build
+// write to apps/desktop/dist/releases. The portable archive carries the candidate version, and the
+// setup line is appended to SHA256SUMS.txt by build-installer.ps1 after the packager has run.
+function releaseArtifacts(version) {
+  return [
+    ['joy-media-setup.exe', 'candidateSetupSha256'],
+    [`joy-media-windows-x64-v${version}.zip`, 'candidatePortableArchiveSha256'],
+    ['joy-media.exe', 'candidateDesktopExecutableSha256'],
+    ['joy-media-bundle.mjs', 'candidateCliBundleSha256'],
+    ['joy-worker.exe', 'candidateWorkerExecutableSha256'],
+  ];
+}
 const TWO_PASS_SUMMARY = 'test-output/readiness/two-pass-evidence/manifest.json';
-// Artifact bytes, the independent checksum file and the artifact manifest, as retained by the
+// Artifact bytes, the independent checksum file and the release manifest, as retained by the
 // evidence store. Expected digests come only from the checksum file, never from a receipt.
 const ARTIFACT_ROOT = 'test-output/readiness/artifacts';
 
 function readRequiredText(root, relativePath) {
-  const absolute = resolve(root, relativePath);
+  const absolute = evidencePath(root, relativePath);
   if (!existsSync(absolute)) fail(`required artifact integrity file is missing: ${relativePath}`);
   return readFileSync(absolute, 'utf8');
+}
+
+function readRequiredJson(root, relativePath) {
+  try {
+    return JSON.parse(readRequiredText(root, relativePath));
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      fail(`required artifact integrity file is invalid JSON: ${relativePath}`);
+    }
+    throw error;
+  }
 }
 const WINDOWS_PASS_PATHS = [
   'test-output/readiness/two-pass-evidence/windows/pass-1/acceptance.json',
@@ -53,7 +69,7 @@ const WINDOWS_PASS_PATHS = [
 const REDACTED_INPUT_PATHS = [
   TWO_PASS_SUMMARY,
   `${ARTIFACT_ROOT}/SHA256SUMS.txt`,
-  `${ARTIFACT_ROOT}/artifact-manifest.json`,
+  `${ARTIFACT_ROOT}/joy-media-release-manifest.json`,
   ...WINDOWS_PASS_PATHS,
   'test-output/windows/acceptance.json',
   'test-output/windows/acceptance-passes/pass-1.json',
@@ -73,11 +89,18 @@ function fail(message) {
   throw new Error(message);
 }
 
-function readJson(root, relativePath) {
+// Every evidence input resolves inside the workspace, so a relative path cannot reach a file outside
+// it. Each reader below goes through this check.
+function evidencePath(root, relativePath) {
   const absolute = resolve(root, relativePath);
-  if (!absolute.startsWith(`${resolve(root)}${process.platform === 'win32' ? '\\' : '/'}`)) {
+  if (!absolute.startsWith(`${resolve(root)}${sep}`)) {
     fail('readiness evidence input escaped the workspace');
   }
+  return absolute;
+}
+
+function readJson(root, relativePath) {
+  const absolute = evidencePath(root, relativePath);
   if (!existsSync(absolute)) fail(`required two-pass evidence file is missing: ${relativePath}`);
   try {
     return JSON.parse(readFileSync(absolute, 'utf8'));
@@ -88,7 +111,7 @@ function readJson(root, relativePath) {
 
 // Reads a receipt and the digest of its exact bytes, so the two-pass summary can bind it.
 function readReceipt(root, relativePath) {
-  const absolute = resolve(root, relativePath);
+  const absolute = evidencePath(root, relativePath);
   if (!existsSync(absolute)) fail(`required two-pass evidence file is missing: ${relativePath}`);
   const bytes = readFileSync(absolute);
   let evidence;
@@ -101,7 +124,7 @@ function readReceipt(root, relativePath) {
 }
 
 function hashFile(root, relativePath) {
-  const bytes = readFileSync(resolve(root, relativePath));
+  const bytes = readFileSync(evidencePath(root, relativePath));
   return createHash('sha256').update(bytes).digest('hex');
 }
 
@@ -247,6 +270,8 @@ export function buildReadinessEvidence({
     exitCode: needs[lane].result === 'success' ? 0 : 1,
   }));
 
+  const desktopPackage = readJson(root, 'apps/desktop/package.json');
+  const releaseFiles = releaseArtifacts(desktopPackage.version);
   const summary = readJson(root, TWO_PASS_SUMMARY);
   if (
     summary.schemaVersion !== 1 ||
@@ -288,7 +313,7 @@ export function buildReadinessEvidence({
   const outcomes = lifecycles.map((lifecycle, index) => measuredOutcomes(lifecycle, index + 1));
   const first = lifecycles[0];
   const second = lifecycles[1];
-  const artifactKeys = REMOTE_ARTIFACTS.map(([, key]) => key);
+  const artifactKeys = releaseFiles.map(([, key]) => key);
   if (
     first.versions.candidate !== second.versions.candidate ||
     first.containerIdentity.containerId !== second.containerIdentity.containerId ||
@@ -299,7 +324,6 @@ export function buildReadinessEvidence({
       'Windows acceptance passes do not use the same exact candidate artifacts and runner container',
     );
   }
-  const desktopPackage = readJson(root, 'apps/desktop/package.json');
   if (first.versions.candidate !== desktopPackage.version) {
     fail('Windows installed lifecycle version does not match the checked-out candidate package');
   }
@@ -325,15 +349,16 @@ export function buildReadinessEvidence({
   const lockfileSha256 = hashFile(root, 'pnpm-lock.yaml');
   const fixtureManifestSha256 = hashFile(root, 'packages/test-fixtures/media/manifest.json');
   const sourceEvidencePath = WINDOWS_PASS_PATHS[0];
-  // Expected digests come from the independent checksum file and artifact manifest. Observed digests
-  // come from hashing the artifact bytes. The Windows receipts are only cross-checked against the
-  // checksum file, and a receipt never supplies the expected value.
+  // Expected digests come from the independent checksum file, and the release manifest must agree
+  // with it. Observed digests come from hashing the artifact bytes. The Windows receipts are only
+  // cross-checked against the checksum file, and a receipt never supplies the expected value.
   const checksums = parseChecksumFile(readRequiredText(root, `${ARTIFACT_ROOT}/SHA256SUMS.txt`));
-  const artifactManifest = JSON.parse(
-    readRequiredText(root, `${ARTIFACT_ROOT}/artifact-manifest.json`),
+  const releaseManifest = readRequiredJson(
+    root,
+    `${ARTIFACT_ROOT}/joy-media-release-manifest.json`,
   );
   const verifiedArtifacts = verifyArtifacts({
-    artifacts: REMOTE_ARTIFACTS.map(([fileName, key]) => {
+    artifacts: releaseFiles.map(([fileName, key]) => {
       const digest = first.artifacts[key];
       if (!/^[0-9a-f]{64}$/u.test(digest ?? ''))
         fail(`Windows artifact hash is invalid for ${fileName}`);
@@ -341,18 +366,18 @@ export function buildReadinessEvidence({
     }),
     checksums,
     bytesByName: (name) => {
-      const absolute = resolve(root, ARTIFACT_ROOT, name);
+      const absolute = evidencePath(root, `${ARTIFACT_ROOT}/${name}`);
       return existsSync(absolute) ? readFileSync(absolute) : null;
     },
     candidateSha,
-    manifest: artifactManifest,
+    releaseManifest,
   });
   const installerArtifacts = verifiedArtifacts.map((artifact, index) => ({
     path: `remote/windows/${artifact.name}`,
     expectedSha256: artifact.expectedSha256,
     observedSha256: artifact.observedSha256,
     sourceEvidencePath,
-    sourceEvidenceKey: `desktopLifecycle.artifacts.${REMOTE_ARTIFACTS[index][1]}`,
+    sourceEvidenceKey: `desktopLifecycle.artifacts.${releaseFiles[index][1]}`,
   }));
 
   const redactedPaths = [...new Set(REDACTED_INPUT_PATHS)].sort();
