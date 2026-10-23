@@ -3,6 +3,7 @@ import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorPanelContext, type EditorPanelContextValue } from './editor-panel-context.js';
+import { SESSION_LEFT_PROJECT_MESSAGE } from './control-plane-scope.js';
 import appSource from './App.tsx?raw';
 
 const controlPlane = vi.hoisted(() => ({
@@ -11,6 +12,9 @@ const controlPlane = vi.hoisted(() => ({
   jobs: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
   associateAsset: vi.fn((): Promise<unknown> => Promise.resolve(undefined)),
   enqueueWorkerGeneration: vi.fn((): Promise<unknown> => Promise.resolve(undefined)),
+  derivatives: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
+  derivativeBytes: vi.fn((): Promise<Blob> => Promise.resolve(new Blob())),
+  assets: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
 }));
 
 vi.mock('./control-plane-client.js', () => ({
@@ -20,6 +24,9 @@ vi.mock('./control-plane-client.js', () => ({
     readonly jobs = controlPlane.jobs;
     readonly associateAsset = controlPlane.associateAsset;
     readonly enqueueWorkerGeneration = controlPlane.enqueueWorkerGeneration;
+    readonly derivatives = controlPlane.derivatives;
+    readonly derivativeBytes = controlPlane.derivativeBytes;
+    readonly assets = controlPlane.assets;
   },
   invalidateWorkerReadCache: () => undefined,
 }));
@@ -32,10 +39,20 @@ let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 let visibility: DocumentVisibilityState = 'visible';
 
-// JobsPanel reads only the readiness flag from the context, so the rest of the
-// context value is deliberately absent.
+// The session the editor holds. A test drops it without re-rendering the panel. That is how an editor
+// that has unmounted, or a token that has changed, looks from the panel: its readiness and project
+// props are the same as before, so only the context's live check sees the change.
+const liveScope = { held: true };
+
+// JobsPanel reads only the readiness flag and the live scope check from the context, so the rest of
+// the context value is deliberately absent.
 function editorContext(controlPlaneReady: boolean): EditorPanelContextValue {
-  return { controlPlaneReady } as EditorPanelContextValue;
+  return {
+    controlPlaneReady,
+    captureControlPlaneProjectScope: () => () => {
+      if (!liveScope.held) throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
+    },
+  } as EditorPanelContextValue;
 }
 
 function panel(
@@ -96,9 +113,16 @@ describe('JobsPanel project scope', () => {
     controlPlane.jobs.mockResolvedValue([]);
     controlPlane.associateAsset.mockClear();
     controlPlane.enqueueWorkerGeneration.mockClear();
+    controlPlane.derivatives.mockClear();
+    controlPlane.derivatives.mockResolvedValue([]);
+    controlPlane.derivativeBytes.mockClear();
+    controlPlane.assets.mockClear();
+    controlPlane.assets.mockResolvedValue([]);
+    liveScope.held = true;
   });
 
   afterEach(async () => {
+    liveScope.held = true;
     await act(async () => root?.unmount());
     container?.remove();
     root = undefined;
@@ -251,6 +275,106 @@ describe('JobsPanel project scope', () => {
     });
 
     expect(controlPlane.enqueueWorkerGeneration).not.toHaveBeenCalled();
+  });
+
+  it('sends no jobs request once the editor has left its project, though readiness did not change', async () => {
+    let finishEnsure: () => void = () => undefined;
+    controlPlane.ensureProject.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((resolve) => {
+          finishEnsure = () => resolve(undefined);
+        }),
+    );
+    await render(panel(true));
+    await vi.waitFor(() => expect(controlPlane.ensureProject).toHaveBeenCalled());
+
+    liveScope.held = false;
+    await act(async () => {
+      finishEnsure();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(controlPlane.jobs).not.toHaveBeenCalled();
+  });
+
+  it('queues no job once the editor has left its project, though readiness did not change', async () => {
+    let finishAssociation: () => void = () => undefined;
+    controlPlane.associateAsset.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((resolve) => {
+          finishAssociation = () => resolve(undefined);
+        }),
+    );
+    controlPlane.workers.mockResolvedValue([connectedAudioWorker()]);
+    await render(panel(true, 'project-1', 'asset-1'));
+    await vi.waitFor(() => expect(runButton()?.disabled).toBe(false));
+
+    await act(async () => {
+      runButton()?.click();
+    });
+    await vi.waitFor(() =>
+      expect(controlPlane.associateAsset).toHaveBeenCalledWith('project-1', 'asset-1'),
+    );
+
+    liveScope.held = false;
+    await act(async () => {
+      finishAssociation();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(controlPlane.enqueueWorkerGeneration).not.toHaveBeenCalled();
+  });
+
+  it('reads no derivative bytes or asset list for a Worker review the editor left mid-way', async () => {
+    controlPlane.jobs.mockResolvedValue([
+      {
+        id: 'job-1',
+        projectId: 'project-1',
+        type: 'audio.ml-denoise',
+        state: 'completed',
+        progress: 100,
+        cancelRequested: false,
+        assetId: 'asset-1',
+        derivative: { id: 'derivative-1', sha256: 'sha-1' },
+      },
+    ]);
+    controlPlane.derivatives.mockResolvedValueOnce([
+      { id: 'derivative-1', kind: 'audio', sha256: 'sha-1' },
+    ]);
+    let finishBytes: () => void = () => undefined;
+    controlPlane.derivativeBytes.mockImplementationOnce(
+      () =>
+        new Promise<Blob>((resolve) => {
+          finishBytes = () => resolve(new Blob());
+        }),
+    );
+    await render(panel(true));
+    await vi.waitFor(() => expect(controlPlane.jobs).toHaveBeenCalledWith('project-1'));
+    const queueTab = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.trim() === 'Queue',
+    );
+    await act(async () => queueTab?.click());
+    await vi.waitFor(() => expect(container?.querySelector('.jobs-review-button')).not.toBeNull());
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('.jobs-review-button')?.click();
+    });
+    await vi.waitFor(() =>
+      expect(controlPlane.derivativeBytes).toHaveBeenCalledWith(
+        'project-1',
+        'asset-1',
+        'derivative-1',
+      ),
+    );
+
+    liveScope.held = false;
+    await act(async () => {
+      finishBytes();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(controlPlane.assets).not.toHaveBeenCalled();
+    expect(container?.textContent).toContain('Could not verify Worker result');
   });
 
   it('never offers Initialize for an unbound project, even after a failed connection', async () => {

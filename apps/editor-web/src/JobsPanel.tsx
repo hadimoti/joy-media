@@ -5,6 +5,7 @@ import {
   type BrowserJob,
   type BrowserWorker,
 } from './control-plane-client.js';
+import { scopeStillHeld, startProjectScopeCheck } from './control-plane-scope.js';
 import { EditorPanelContext } from './editor-panel-context.js';
 import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
 import { BoundedPollingLoop } from './bounded-polling.js';
@@ -101,6 +102,7 @@ export function JobsPanel({
   // context fails closed: no project-scoped request and no Initialize action.
   const editorContext = useContext(EditorPanelContext);
   const controlPlaneReady = editorContext?.controlPlaneReady ?? false;
+  const captureControlPlaneProjectScope = editorContext?.captureControlPlaneProjectScope;
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
   const [workers, setWorkers] = useState<readonly BrowserWorker[]>([]);
   const [jobs, setJobs] = useState<readonly BrowserJob[]>([]);
@@ -157,20 +159,25 @@ export function JobsPanel({
 
   const load = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
-    // A load may send project-scoped requests only while it is the latest load and its
-    // scope is unchanged. Every await below can end after the session has moved on.
+    // Project-scoped requests wait for a ready session. The id prefix alone
+    // does not show that the session owns this project.
+    const projectScopeReady =
+      controlPlaneReady && (projectInitialized || projectId.startsWith('project-'));
+    // A load may send project-scoped requests only while it is the latest load and its scope is
+    // unchanged, including the session's owner, token and project. Every await below can end
+    // after the session has moved on.
+    const projectScopeCheck = projectScopeReady
+      ? startProjectScopeCheck(captureControlPlaneProjectScope, projectId)
+      : undefined;
     const stillInScope = () => {
       const latestScope = latestScopeRef.current;
       return (
         requestId === refreshSeqRef.current &&
         latestScope.controlPlaneReady === controlPlaneReady &&
-        latestScope.projectId === projectId
+        latestScope.projectId === projectId &&
+        (projectScopeCheck === undefined || scopeStillHeld(projectScopeCheck))
       );
     };
-    // Project-scoped requests wait for a ready session. The id prefix alone
-    // does not show that the session owns this project.
-    const projectScopeReady =
-      controlPlaneReady && (projectInitialized || projectId.startsWith('project-'));
     if (!projectScopeReady) {
       // Rows from an earlier project or owner must not stay actionable. Their
       // actions address the current project id, which the session cannot vouch for.
@@ -216,7 +223,14 @@ export function JobsPanel({
       setConnectionStatus(`Not connected or not signed in: ${message(error)}`);
       throw error;
     }
-  }, [client, controlPlaneReady, projectId, projectInitialized, projectTitle]);
+  }, [
+    captureControlPlaneProjectScope,
+    client,
+    controlPlaneReady,
+    projectId,
+    projectInitialized,
+    projectTitle,
+  ]);
 
   const refresh = useCallback(() => {
     // Pair/hello is also used directly by the protocol acceptance journeys;
@@ -337,9 +351,11 @@ export function JobsPanel({
     // request then has to stop, rather than name a project the session no longer holds.
     const scope = latestScopeRef.current;
     const leftProjectMessage = 'The session left this project before the job was queued.';
+    const projectScopeCheck = startProjectScopeCheck(captureControlPlaneProjectScope, projectId);
     const stillInScope = () =>
       latestScopeRef.current.controlPlaneReady === scope.controlPlaneReady &&
-      latestScopeRef.current.projectId === scope.projectId;
+      latestScopeRef.current.projectId === scope.projectId &&
+      scopeStillHeld(projectScopeCheck);
     try {
       setSubmitting(true);
       if (audioAssetId !== undefined) {
@@ -365,6 +381,7 @@ export function JobsPanel({
           revision: operationRevision,
         });
         operationStarted = true;
+        if (!stillInScope()) throw new Error(leftProjectMessage);
         await client.associateAsset(projectId, audioAssetId);
         if (!stillInScope()) throw new Error(leftProjectMessage);
         await client.enqueueWorkerGeneration(projectId, jobId, 'audio.ml-denoise', audioAssetId);
@@ -372,6 +389,7 @@ export function JobsPanel({
           'Audio denoise job queued. The Worker result will require review before insertion.',
         );
       } else if (thumbnailAssetId !== undefined) {
+        if (!stillInScope()) throw new Error(leftProjectMessage);
         await client.associateAsset(projectId, thumbnailAssetId);
         if (!stillInScope()) throw new Error(leftProjectMessage);
         await client.enqueueAssetThumbnail(
@@ -409,12 +427,16 @@ export function JobsPanel({
     reviewBusyRef.current = true;
     try {
       setReviewBusy(true);
+      const assertProjectScope = startProjectScopeCheck(captureControlPlaneProjectScope, projectId);
+      assertProjectScope();
       const derivatives = await client.derivatives(projectId, job.assetId);
       const derivative = derivatives.find(
         (candidate) => candidate.kind === 'audio' && candidate.sha256 === job.derivative?.sha256,
       );
       if (derivative === undefined) throw new Error('Verified audio derivative is unavailable');
+      assertProjectScope();
       const blob = await client.derivativeBytes(projectId, job.assetId, derivative.id);
+      assertProjectScope();
       const sourceAsset = (await client.assets(projectId)).find(
         (asset) => asset.id === job.assetId,
       );
