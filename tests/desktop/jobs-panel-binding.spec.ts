@@ -189,7 +189,10 @@ test.describe('desktop.jobs-panel-binding', () => {
       // The server logs each request when its response finishes, so give in-flight responses a moment.
       await page.waitForTimeout(1_000);
 
-      // Server-side binding audit over exactly the requests this test caused.
+      // Server-side audit over the requests this test caused. The server keeps one E2E owner for the
+      // whole run, so the packaged project list also reads that owner's projects from earlier tests.
+      // Those reads are recorded as an annotation, not failed. Writes to a project this profile did
+      // not bind, refusals to its own project, unbound or transitional ids and job requests fail.
       const served = requestsSince(offset);
       const projectRequests = served.filter((request) => request.path.startsWith('/v1/projects'));
       expect(projectRequests.length, 'the packaged session reached the API').toBeGreaterThan(0);
@@ -204,19 +207,25 @@ test.describe('desktop.jobs-panel-binding', () => {
         'the blocked thumbnail queue enqueued no job',
       ).toEqual([]);
 
-      const usedProjectIds = [
-        ...new Set(
-          projectRequests
-            .map((request) => projectIdOf(request.path))
-            .filter((id): id is string => id !== undefined),
-        ),
-      ];
-      expect(usedProjectIds, 'the session used exactly one project').toHaveLength(1);
-
       const bound = await boundProjectIds(page);
+      expect(bound.size, 'the session bound exactly the project it created').toBe(1);
+
+      const ownRequests = projectRequests.filter((request) =>
+        bound.has(projectIdOf(request.path) ?? ''),
+      );
+      expect(ownRequests.length, 'the session read its bound project').toBeGreaterThan(0);
+
+      const foreignRequests = projectRequests.filter((request) => {
+        const id = projectIdOf(request.path);
+        return id !== undefined && !bound.has(id);
+      });
+      test.info().annotations.push({
+        type: 'foreign-project-reads',
+        description: `${foreignRequests.length} requests named projects this profile did not bind`,
+      });
       expect(
-        usedProjectIds.filter((id) => !bound.has(id)),
-        'the project the session used is one the E2E owner bound',
+        foreignRequests.filter((request) => !['GET', 'OPTIONS', 'HEAD'].includes(request.method)),
+        'the session wrote to no project it did not bind',
       ).toEqual([]);
 
       const ensures = served.filter(
@@ -232,16 +241,16 @@ test.describe('desktop.jobs-panel-binding', () => {
       ).toEqual([]);
 
       expect(
-        projectRequests.filter((request) => request.status >= 400),
-        'no project request was refused or failed',
+        ownRequests.filter((request) => request.status >= 400),
+        'no request to the bound project was refused or failed',
       ).toEqual([]);
 
       const polledAfterReload = requestsSince(reloadOffset).filter(
-        (request) => request.method === 'GET' && projectIdOf(request.path) !== undefined,
+        (request) => request.method === 'GET' && bound.has(projectIdOf(request.path) ?? ''),
       );
       expect(
         polledAfterReload.length,
-        'the project was read again after the reload',
+        'the bound project was read again after the reload',
       ).toBeGreaterThan(0);
     } finally {
       await app?.close().catch(() => undefined);
