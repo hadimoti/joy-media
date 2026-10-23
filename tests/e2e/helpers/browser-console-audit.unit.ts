@@ -85,6 +85,15 @@ function requestEvent(method: string, pathname: string, postBody?: unknown) {
   };
 }
 
+/** A request whose URL carries a query, as the audit reads it from the page. */
+function requestEventAt(method: string, pathAndQuery: string, postBody?: unknown) {
+  return {
+    method: () => method,
+    url: () => `https://example.test${pathAndQuery}`,
+    postDataJSON: () => postBody ?? null,
+  };
+}
+
 /** A successful owner asset list, which names the projects the owner holds. */
 function ownerAssets(projectIds: readonly string[]): Response {
   return {
@@ -292,6 +301,45 @@ describe('browser console HTTP conflict audit', () => {
     emit('response', succeeded('GET', '/api/v1/projects/project-1/assets'));
 
     await expect(assertBrowserAudit(page, testInfo)).rejects.toThrow(/Unbound project requests/);
+  });
+
+  it('rejects a request that names an unbound project in its query', async () => {
+    const { page, emit } = createAuditPage();
+    setupBrowserAudit(page);
+    expectBoundProjectOnly(page);
+
+    emit('request', requestEventAt('GET', '/api/v1/library/my-assets?projectId=unbound-editor-1'));
+    emit('response', succeeded('POST', '/api/v1/projects/ensure', { id: 'project-1' }));
+    emit('response', succeeded('GET', '/api/v1/projects/project-1/assets'));
+
+    await expect(assertBrowserAudit(page, testInfo)).rejects.toThrow(/Unbound project requests/);
+  });
+
+  it('rejects a request that names an unbound project in its JSON body', async () => {
+    const { page, emit } = createAuditPage();
+    setupBrowserAudit(page);
+    expectBoundProjectOnly(page);
+
+    emit(
+      'request',
+      requestEventAt('POST', '/api/v1/gpu-preview-frame', { projectId: 'unbound-editor-1' }),
+    );
+    emit('response', succeeded('POST', '/api/v1/projects/ensure', { id: 'project-1' }));
+    emit('response', succeeded('GET', '/api/v1/projects/project-1/assets'));
+
+    await expect(assertBrowserAudit(page, testInfo)).rejects.toThrow(/Unbound project requests/);
+  });
+
+  it('rejects an ensure whose body names an empty project id', async () => {
+    const { page, emit } = createAuditPage();
+    setupBrowserAudit(page);
+    expectBoundProjectOnly(page);
+
+    emit('request', requestEvent('POST', '/api/v1/projects/ensure', { id: '' }));
+    emit('response', succeeded('POST', '/api/v1/projects/ensure', { id: '' }));
+    emit('response', succeeded('GET', '/api/v1/projects/project-1/assets'));
+
+    await expect(assertBrowserAudit(page, testInfo)).rejects.toThrow(/names no readable project/);
   });
 
   it('rejects a create whose body names an unbound project', async () => {
