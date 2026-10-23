@@ -29,6 +29,27 @@ $PreviousChecksumsSha256 = 'a7b933f44ec82edd2f166dcde0bb013e1febd0ebbd19aa42dd49
 $PreviousArchiveSha256 = '21be785e26c0d06cadba40929ada839cfd24345f17b828cdb735d4eff056a88c'
 $script:ownedInstall = $false
 $script:commands = [System.Collections.Generic.List[object]]::new()
+# Outcomes are recorded only after the measured step that produces them has returned. A
+# failed step throws first, so nothing below is pre-set to passed.
+$script:scenarioOutcomes = [ordered]@{}
+$script:transitionOutcomes = [ordered]@{
+    installPrevious = 'not-run'
+    upgradeCandidate = 'not-run'
+    repairCandidate = 'not-run'
+    rollbackPrevious = 'not-run'
+    uninstall = 'not-run'
+    userDataPreserved = 'not-run'
+}
+function Set-ScenarioOutcome([string]$Id, [int]$ExitCode) {
+    # Every measured step here runs with --retries=0 or without a retry setting, so the first
+    # attempt's exit code is the scenario's result.
+    $script:scenarioOutcomes[$Id] = [ordered]@{
+        id = $Id
+        status = $(if ($ExitCode -eq 0) { 'passed' } else { 'failed' })
+        firstAttemptPassed = ($ExitCode -eq 0)
+        retries = 0
+    }
+}
 $script:cliStateDirectories = [System.Collections.Generic.List[string]]::new()
 
 function Get-Sha256([string]$Path) {
@@ -401,28 +422,36 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     $previousExeSha = Assert-Sha256 (Join-Path $installRoot 'joy-media.exe') $previousDesktopExeSha 'Installed v1.0.1 app executable'
     $previousInstalledCliSha = Assert-Sha256 (Join-Path $installRoot 'resources\app\cli\joy-media-bundle.mjs') $previousCliBundleSha 'Installed v1.0.1 CLI bundle'
     Invoke-AppSmoke 'v1.0.1 initial install'
+    $script:transitionOutcomes['installPrevious'] = 'passed'
     $seedProof = Invoke-LifecycleFixture $devElectron 'seed'
     if ($seedProof.result -ne 'seeded' -or $seedProof.encryptionAvailable -ne $true) { throw 'v1.0.1 could not seed isolated settings, library, and DPAPI fixture data.' }
-    Invoke-Pnpm 'CLI render-real source and bundle acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-real.e2e.test.ts', '--no-file-parallelism') | Out-Null
-    Invoke-Pnpm 'CLI unsupported-feature acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-parity.e2e.test.ts', '--no-file-parallelism') | Out-Null
-    Invoke-Pnpm 'CLI render failure-recovery acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-recovery.e2e.test.ts', '--no-file-parallelism') | Out-Null
+    $renderReal = Invoke-Pnpm 'CLI render-real source and bundle acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-real.e2e.test.ts', '--no-file-parallelism')
+    Set-ScenarioOutcome -Id 'cli.render.playable' -ExitCode $renderReal.ExitCode
+    $renderParity = Invoke-Pnpm 'CLI unsupported-feature acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-parity.e2e.test.ts', '--no-file-parallelism')
+    Set-ScenarioOutcome -Id 'cli.render.unsupported-features' -ExitCode $renderParity.ExitCode
+    $renderRecovery = Invoke-Pnpm 'CLI render failure-recovery acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-recovery.e2e.test.ts', '--no-file-parallelism')
+    Set-ScenarioOutcome -Id 'cli.render.failure-recovery' -ExitCode $renderRecovery.ExitCode
     Invoke-VerifiedSetup $CandidateSetupPath $candidateSetup $candidateVersion | Out-Null
     Assert-UserIntegrations $candidateVersion
     if ((Get-InstalledFileHash 'joy-media.exe') -ne $candidateDesktopExeSha -or (Get-InstalledFileHash 'resources\app\cli\joy-media-bundle.mjs') -ne $candidateCliBundleSha -or (Get-InstalledFileHash 'resources\app\worker\joy-worker.exe') -ne $candidateWorkerSha) {
         throw 'Candidate upgrade did not install the exact frozen app, CLI, and Worker files.'
     }
     Invoke-AppSmoke 'v1.0.2 upgrade'
-    Invoke-Pnpm 'installed candidate editor restart-save-export acceptance' @('exec', 'playwright', 'test', '--config', 'playwright.desktop.config.ts', 'tests/desktop/editor-acceptance.spec.ts', '--retries=0') 900 @{
+    $script:transitionOutcomes['upgradeCandidate'] = 'passed'
+    $editorAcceptance = Invoke-Pnpm 'installed candidate editor restart-save-export acceptance' @('exec', 'playwright', 'test', '--config', 'playwright.desktop.config.ts', 'tests/desktop/editor-acceptance.spec.ts', '--retries=0') 900 @{
         JOY_MEDIA_TEST_EXECUTABLE = Join-Path $installRoot 'joy-media.exe'
         JOY_MEDIA_TEST_WORKING_DIRECTORY = $installRoot
         JOY_MEDIA_TEST_API_BASE_URL = 'http://127.0.0.1:4174'
-    } | Out-Null
+    }
+    Set-ScenarioOutcome -Id 'desktop.app.restart-save-export' -ExitCode $editorAcceptance.ExitCode
     $candidateSeedVerification = Invoke-LifecycleFixture $devElectron 'verify'
     if ($candidateSeedVerification.result -ne 'verified' -or $candidateSeedVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256 -or $candidateSeedVerification.directCiphertextSha256 -ne $seedProof.directCiphertextSha256) {
         throw 'Settings, asset-library catalog, or DPAPI ciphertext did not survive the candidate update.'
     }
+    Set-ScenarioOutcome -Id 'project.persistence.fresh-process' -ExitCode ([int](-not ($candidateSeedVerification.result -eq 'verified' -and $candidateSeedVerification.ciphertextSha256 -eq $seedProof.ciphertextSha256 -and $candidateSeedVerification.directCiphertextSha256 -eq $seedProof.directCiphertextSha256)))
     $cliJoyEvidence = Invoke-InstalledCliAcceptance 'joy.cmd' 'joy'
     $cliJoyMediaEvidence = Invoke-InstalledCliAcceptance 'joy-media.cmd' 'joy-media'
+    Set-ScenarioOutcome -Id 'cli.render.windows-entrypoints' -ExitCode ([int](-not (($cliJoyEvidence.status -eq 'passed') -and ($cliJoyMediaEvidence.status -eq 'passed'))))
 
     $rendererIndex = Join-Path $installRoot 'resources\app\renderer\index.html'
     if (-not (Test-Path -LiteralPath $rendererIndex -PathType Leaf)) { throw 'Installed candidate renderer is missing before repair test.' }
@@ -436,6 +465,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     if ($repairVerification.result -ne 'verified' -or $repairVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256) { throw 'Repair changed or lost user data.' }
     $script:commands.Add([pscustomobject]@{ name = 'installer repair restores removed renderer and preserves user data'; exitCode = 0 })
     Invoke-AppSmoke 'v1.0.2 repair'
+    $script:transitionOutcomes['repairCandidate'] = 'passed'
 
     Invoke-VerifiedSetup $PreviousSetupPath $PreviousSetupSha256 $PreviousVersion | Out-Null
     Assert-UserIntegrations $PreviousVersion
@@ -447,6 +477,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     if ($rollbackVerification.result -ne 'verified' -or $rollbackVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256 -or $rollbackVerification.directCiphertextSha256 -ne $seedProof.directCiphertextSha256) {
         throw 'Settings, Persian asset-library catalog, or DPAPI ciphertext did not survive rollback.'
     }
+    $script:transitionOutcomes['rollbackPrevious'] = 'passed'
 
     $uninstaller = Join-Path $installRoot 'uninstall.cmd'
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'Installed uninstaller is missing.' }
@@ -469,7 +500,10 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     if ($uninstalledDataVerification.result -ne 'verified' -or $uninstalledDataVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256) {
         throw 'User data could not be reopened after application uninstall.'
     }
+    $script:transitionOutcomes['userDataPreserved'] = 'passed'
     Assert-NoOwnedProcesses
+    $script:transitionOutcomes['uninstall'] = 'passed'
+    Set-ScenarioOutcome -Id 'desktop.windows.installed-lifecycle' -ExitCode ([int](@($script:transitionOutcomes.Values | Where-Object { $_ -ne 'passed' }).Count -gt 0))
 
     foreach ($stateDirectory in $script:cliStateDirectories) {
         if (Test-Path -LiteralPath $stateDirectory) { Remove-Item -LiteralPath $stateDirectory -Recurse -Force -ErrorAction Stop }
@@ -501,26 +535,11 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
             previousDesktopExecutableSha256 = $previousDesktopExeSha
             previousCliBundleSha256 = $previousCliBundleSha
         }
-        transitions = [ordered]@{
-            installPrevious = 'passed'
-            upgradeCandidate = 'passed'
-            repairCandidate = 'passed'
-            rollbackPrevious = 'passed'
-            uninstall = 'passed'
-            userDataPreserved = 'passed'
-        }
+        transitions = $script:transitionOutcomes
         cliAcceptance = [ordered]@{ joyCmd = $cliJoyEvidence; joyMediaCmd = $cliJoyMediaEvidence }
-        editorAcceptance = [ordered]@{ status = 'passed'; firstAttemptPassed = $true; retries = 0 }
+        editorAcceptance = [ordered]@{ status = $script:scenarioOutcomes['desktop.app.restart-save-export'].status; firstAttemptPassed = $script:scenarioOutcomes['desktop.app.restart-save-export'].firstAttemptPassed; retries = $script:scenarioOutcomes['desktop.app.restart-save-export'].retries }
         toolchain = $windowsToolchain
-        scenarios = @(
-            [ordered]@{ id = 'cli.render.playable'; status = 'passed'; firstAttemptPassed = $true; retries = 0 }
-            [ordered]@{ id = 'cli.render.unsupported-features'; status = 'passed'; firstAttemptPassed = $true; retries = 0 }
-            [ordered]@{ id = 'cli.render.failure-recovery'; status = 'passed'; firstAttemptPassed = $true; retries = 0 }
-            [ordered]@{ id = 'cli.render.windows-entrypoints'; status = 'passed'; firstAttemptPassed = $true; retries = 0 }
-            [ordered]@{ id = 'project.persistence.fresh-process'; status = 'passed'; firstAttemptPassed = $true; retries = 0 }
-            [ordered]@{ id = 'desktop.app.restart-save-export'; status = 'passed'; firstAttemptPassed = $true; retries = 0 }
-            [ordered]@{ id = 'desktop.windows.installed-lifecycle'; status = 'passed'; firstAttemptPassed = $true; retries = 0 }
-        )
+        scenarios = @($script:scenarioOutcomes.Values)
         commands = @($script:commands)
         startedAt = $startedAt
         finishedAt = $finishedAt
