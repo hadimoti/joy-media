@@ -48,6 +48,41 @@ describe('importMediaFile', () => {
     expect(client.uploadAssetOriginal).not.toHaveBeenCalled();
   });
 
+  it('passes the scope check into the cloud upload, so a session that leaves mid-upload stops it', async () => {
+    let scopeLeft = false;
+    let registration: BrowserAssetRegistration | undefined;
+    const client = {
+      ensureProject: vi.fn(async () => undefined),
+      registerAsset: vi.fn(async (_projectId: string, next: BrowserAssetRegistration) => {
+        registration = next;
+        return browserAsset(next);
+      }),
+      assets: vi.fn(async () => []),
+      uploadAssetOriginal: vi.fn(async (_projectId, asset, _file, _onProgress, assertCurrent) => {
+        scopeLeft = true;
+        assertCurrent?.();
+        return { ...browserAsset(registration!), ...asset };
+      }),
+    } satisfies NonNullable<MediaImportOptions['client']>;
+
+    await expect(
+      importMediaFile({
+        projectId: 'project-1',
+        projectTitle: 'Project',
+        file: new File(['mid-upload bytes'], 'clip.mp4', { type: 'video/mp4' }),
+        assetId: 'clip-1',
+        client,
+        originalAssetCache: { put: vi.fn(async () => undefined) },
+        describeMedia: async () => ({ mimeType: 'video/mp4', durationUs: 2_500_000 }),
+        assertCurrentProject: () => {
+          if (scopeLeft) throw new Error('the session left this project');
+        },
+      }),
+    ).rejects.toThrow('the session left this project');
+
+    expect(client.uploadAssetOriginal).toHaveBeenCalledTimes(1);
+  });
+
   it('verifies, registers, caches, and cloud-uploads the same original', async () => {
     const calls: string[] = [];
     let registration: BrowserAssetRegistration | undefined;
