@@ -1,5 +1,6 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
+import { SESSION_REQUIRED_MESSAGE } from './control-plane-scope.js';
 import { getRemoteApiBaseUrl } from './desktop-client.js';
 import { isUnboundControlPlaneProjectId } from './project-control-plane.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
@@ -542,6 +543,9 @@ export class BrowserControlPlaneClient {
     asset: Pick<BrowserAsset, 'id' | 'sha256' | 'bytes' | 'descriptor'>,
     file: Blob,
     onProgress?: (ratio: number) => void,
+    // Runs before each request this upload sends. A session that leaves the project mid-upload
+    // stops at its next request, rather than sending the rest of the file for that project.
+    assertCurrent: () => void = () => undefined,
   ): Promise<BrowserAsset> {
     // Refuse an unbound project before any progress is reported or any byte is sent.
     const route = projectPath(projectId);
@@ -550,9 +554,17 @@ export class BrowserControlPlaneClient {
       throw new Error('selected media bytes no longer match the registered asset');
     }
     if (file.size > RESUMABLE_ORIGINAL_UPLOAD_THRESHOLD_BYTES) {
-      return this.uploadAssetOriginalInParts(projectId, asset, file, token, onProgress);
+      return this.uploadAssetOriginalInParts(
+        projectId,
+        asset,
+        file,
+        token,
+        onProgress,
+        assertCurrent,
+      );
     }
     onProgress?.(0.05);
+    assertCurrent();
     const response = await fetch(
       `${this.apiUrl.replace(/\/$/, '')}${route}/assets/${encodeURIComponent(asset.id)}/original`,
       {
@@ -580,6 +592,7 @@ export class BrowserControlPlaneClient {
     file: Blob,
     token: string,
     onProgress?: (ratio: number) => void,
+    assertCurrent: () => void = () => undefined,
   ): Promise<BrowserAsset> {
     const baseUrl = `${this.apiUrl.replace(/\/$/, '')}${projectPath(projectId)}/assets/${encodeURIComponent(asset.id)}/original/uploads`;
     const identityHeaders = {
@@ -589,6 +602,7 @@ export class BrowserControlPlaneClient {
       'x-joy-mime-type': asset.descriptor.mimeType,
     };
     onProgress?.(0.02);
+    assertCurrent();
     let upload = await originalUploadStatus(
       await fetch(baseUrl, { method: 'POST', headers: identityHeaders }),
       'create',
@@ -605,6 +619,7 @@ export class BrowserControlPlaneClient {
             asset.descriptor.mimeType,
           );
           const partSha256 = await sha256Hex(part);
+          assertCurrent();
           upload = await originalUploadStatus(
             await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}/parts/${partIndex}`, {
               method: 'PUT',
@@ -623,6 +638,7 @@ export class BrowserControlPlaneClient {
         onProgress?.(0.05 + (0.8 * (partIndex + 1)) / upload.partCount);
       }
     }
+    assertCurrent();
     upload = await originalUploadStatus(
       await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}/complete`, {
         method: 'POST',
@@ -635,6 +651,7 @@ export class BrowserControlPlaneClient {
     assertOriginalUploadSession(upload, sessionId);
     onProgress?.(0.9);
     for (let poll = 0; poll < RESUMABLE_ORIGINAL_UPLOAD_POLL_LIMIT; poll += 1) {
+      assertCurrent();
       const response = await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}`, {
         method: 'GET',
         headers: identityHeaders,
@@ -1059,7 +1076,7 @@ export class BrowserControlPlaneClient {
   }
   private assertion(): string {
     const token = this.tokenProvider();
-    if (token === undefined) throw new Error('JOY Media session required');
+    if (token === undefined) throw new Error(SESSION_REQUIRED_MESSAGE);
     return token;
   }
 }

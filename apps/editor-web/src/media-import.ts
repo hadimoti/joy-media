@@ -147,6 +147,7 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
     (ratio) => {
       report(options, 0.9 + 0.1 * ratio, `Uploading ${file.name} to private cloud storage...`);
     },
+    assertCurrent,
   );
   report(options, 1, `${file.name} backed up to private cloud storage.`);
   if (explicitAssetId === undefined) {

@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   captureControlPlaneScope,
+  scopeStillHeld,
   SESSION_LEFT_PROJECT_MESSAGE,
+  SESSION_REQUIRED_MESSAGE,
+  startProjectScopeCheck,
   type ControlPlaneScope,
 } from './control-plane-scope.js';
 
@@ -73,7 +76,7 @@ describe('captureControlPlaneScope', () => {
     expect(() => check()).toThrow(SESSION_LEFT_PROJECT_MESSAGE);
   });
 
-  it('refuses an operation that starts without a ready owner', () => {
+  it('refuses an operation that starts without a ready owner, as a missing session', () => {
     const session = liveScope({
       ownerKey: undefined,
       projectId: 'unbound-editor-1',
@@ -82,13 +85,57 @@ describe('captureControlPlaneScope', () => {
     });
     const check = captureControlPlaneScope(session.current);
 
-    expect(() => check()).toThrow(SESSION_LEFT_PROJECT_MESSAGE);
+    expect(() => check()).toThrow(SESSION_REQUIRED_MESSAGE);
   });
 
-  it('refuses an operation that starts without a stored session token', () => {
+  it('refuses an operation that starts without a stored session token, as a missing session', () => {
     const session = liveScope({ ...READY, token: undefined });
     const check = captureControlPlaneScope(session.current);
 
+    expect(() => check()).toThrow(SESSION_REQUIRED_MESSAGE);
+  });
+});
+
+describe('startProjectScopeCheck', () => {
+  it('runs the check captured from the live scope', () => {
+    const session = liveScope(READY);
+    const check = startProjectScopeCheck(
+      (projectId) => captureControlPlaneScope(() => ({ ...session.current(), projectId })),
+      'project-1',
+    );
+
+    expect(() => check()).not.toThrow();
+    session.set({ ...READY, token: 'token-other' });
     expect(() => check()).toThrow(SESSION_LEFT_PROJECT_MESSAGE);
+  });
+
+  it('refuses every request when the editor does not hold the named project', () => {
+    const capture = vi.fn((_projectId: string) => {
+      throw new Error('another project');
+    });
+    const check = startProjectScopeCheck(capture, 'project-2');
+
+    expect(capture).toHaveBeenCalledWith('project-2');
+    expect(() => check()).toThrow(SESSION_LEFT_PROJECT_MESSAGE);
+  });
+
+  it('refuses every request when no capture is available', () => {
+    const check = startProjectScopeCheck(undefined, 'project-1');
+
+    expect(() => check()).toThrow(SESSION_LEFT_PROJECT_MESSAGE);
+  });
+});
+
+describe('scopeStillHeld', () => {
+  it('reports a held scope without throwing', () => {
+    expect(scopeStillHeld(() => undefined)).toBe(true);
+  });
+
+  it('reports a left scope as not held', () => {
+    expect(
+      scopeStillHeld(() => {
+        throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
+      }),
+    ).toBe(false);
   });
 });

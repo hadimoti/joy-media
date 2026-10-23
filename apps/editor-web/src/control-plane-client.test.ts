@@ -339,6 +339,61 @@ describe('BrowserControlPlaneClient', () => {
     }
   });
 
+  it('stops a resumed upload at its next request once the session has left the project', async () => {
+    const original = globalThis.fetch;
+    const sessionId = `upload-${'c'.repeat(48)}`;
+    const file = new Blob([new Uint8Array(RESUMABLE_ORIGINAL_UPLOAD_THRESHOLD_BYTES + 123)], {
+      type: 'video/mp4',
+    });
+    const requests: string[] = [];
+    let held = true;
+    const upload = (state: string, uploadedParts: number[]) => ({
+      sessionId,
+      state,
+      partSize: 4 * 1024 * 1024,
+      partCount: 3,
+      uploadedParts,
+    });
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push(`${init?.method ?? 'GET'} ${url.split('/').at(-1)}`);
+      if (url.includes('/parts/')) {
+        // The session leaves the project while the first part is in flight.
+        held = false;
+        return json(200, { data: { upload: upload('uploading', [0, 1]) } });
+      }
+      return json(200, { data: { upload: upload('uploading', [0]) } });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      await expect(
+        client.uploadAssetOriginal(
+          'project-1',
+          {
+            id: 'asset-1',
+            sha256: 'a'.repeat(64),
+            bytes: file.size,
+            descriptor: { mimeType: 'video/mp4' },
+          },
+          file,
+          undefined,
+          () => {
+            if (!held) throw new Error('The session left this project.');
+          },
+        ),
+      ).rejects.toThrow('The session left this project.');
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    // Part 1 was sent before the session left. The second part, the completion and the status
+    // polls were not.
+    expect(requests).toEqual(['POST uploads', 'PUT 1']);
+  });
+
   it('turns a Cloudflare 524 original-upload page into a concise retryable error', async () => {
     const original = globalThis.fetch;
     globalThis.fetch = async () =>
