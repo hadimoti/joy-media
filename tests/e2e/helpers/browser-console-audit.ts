@@ -359,8 +359,9 @@ export function setupBrowserAudit(page: Page): void {
     }
     const projectId = projectRouteId(request.url());
     if (projectId === ENSURE_ROUTE) {
-      const named = requestedProjectId(request);
-      if (named !== undefined) state.ensureRequestIds.push(named);
+      // An ensure whose body names no readable project is kept as unidentified, so the audit fails
+      // it instead of dropping it unjudged.
+      state.ensureRequestIds.push(requestedProjectId(request) ?? UNIDENTIFIED_PROJECT_REQUEST);
       return;
     }
     if (projectId === undefined) return;
@@ -594,6 +595,10 @@ export async function assertBrowserAudit(page: Page, testInfo: TestInfo): Promis
       .map((id) => `POST ensure ${id}`),
   ];
   expect(unboundRequests, `Unbound project requests during ${testInfo.title}`).toEqual([]);
+  expect(
+    state.ensureRequestIds.filter((id) => id === UNIDENTIFIED_PROJECT_REQUEST),
+    `Project ensures whose body names no readable project during ${testInfo.title}`,
+  ).toEqual([]);
   const unownedRequests = state.projectRequests
     .filter(
       (request) =>

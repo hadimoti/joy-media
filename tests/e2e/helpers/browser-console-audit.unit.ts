@@ -330,6 +330,18 @@ describe('browser console HTTP conflict audit', () => {
     await expect(assertBrowserAudit(page, testInfo)).rejects.toThrow(/does not hold/);
   });
 
+  it('rejects an ensure whose body names no readable project', async () => {
+    const { page, emit } = createAuditPage();
+    setupBrowserAudit(page);
+    expectBoundProjectOnly(page);
+
+    emit('request', requestEvent('POST', '/api/v1/projects/ensure'));
+    emit('response', succeeded('POST', '/api/v1/projects/ensure', { id: 'project-1' }));
+    emit('response', succeeded('GET', '/api/v1/projects/project-1/assets'));
+
+    await expect(assertBrowserAudit(page, testInfo)).rejects.toThrow(/names no readable project/);
+  });
+
   it('rejects an unbound request in an audit that does not check bound projects', async () => {
     const { page, emit } = createAuditPage();
     setupBrowserAudit(page);
