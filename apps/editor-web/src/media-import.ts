@@ -192,7 +192,9 @@ async function registerOrResume(
   } catch (error) {
     if (!message(error).includes('ASSET_EXISTS')) throw error;
     assertCurrent();
-    const existing = (await client.assets(projectId)).find((asset) => asset.id === registration.id);
+    const existing = (await client.assets(projectId, assertCurrent)).find(
+      (asset) => asset.id === registration.id,
+    );
     if (
       existing === undefined ||
       existing.sha256 !== registration.sha256 ||

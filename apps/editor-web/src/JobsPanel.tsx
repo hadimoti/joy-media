@@ -178,6 +178,12 @@ export function JobsPanel({
         (projectScopeCheck === undefined || scopeStillHeld(projectScopeCheck))
       );
     };
+    const leaveScope = () => {
+      if (requestId === refreshSeqRef.current) {
+        setJobs(NO_JOBS);
+        setInitializedProjectId(undefined);
+      }
+    };
     if (!projectScopeReady) {
       // Rows from an earlier project or owner must not stay actionable. Their
       // actions address the current project id, which the session cannot vouch for.
@@ -189,7 +195,10 @@ export function JobsPanel({
       const nextWorkers = await client.workers();
       // Readiness can drop while the Worker list is in flight. A load that started in an
       // earlier scope must not send a project-scoped request for that scope.
-      if (!stillInScope()) return;
+      if (!stillInScope()) {
+        leaveScope();
+        return;
+      }
       let nextJobs: readonly BrowserJob[] = [];
       let projectMissing = !projectScopeReady;
       if (projectScopeReady) {
@@ -203,15 +212,22 @@ export function JobsPanel({
             await client.ensureProject(projectId, projectTitle);
             // Ensure can outlast the scope. The jobs read names the same project, so it
             // must not follow a scope that has already changed.
-            if (!stillInScope()) return;
+            if (!stillInScope()) {
+              leaveScope();
+              return;
+            }
           }
-          nextJobs = await client.jobs(projectId);
+          nextJobs = await client.jobs(projectId, projectScopeCheck);
         } catch (error) {
           if (!message(error).includes('PROJECT_NOT_FOUND')) throw error;
           projectMissing = true;
         }
       }
       if (requestId !== refreshSeqRef.current) return;
+      if (!stillInScope()) {
+        leaveScope();
+        return;
+      }
       setWorkers(nextWorkers);
       if (projectScopeReady) {
         setJobs(nextJobs);
@@ -220,6 +236,7 @@ export function JobsPanel({
       }
     } catch (error) {
       if (requestId !== refreshSeqRef.current) return;
+      if (!stillInScope()) leaveScope();
       setConnectionStatus(`Not connected or not signed in: ${message(error)}`);
       throw error;
     }
@@ -327,7 +344,10 @@ export function JobsPanel({
     // Only a bound project under a ready session may be created on the server.
     if (!controlPlaneReady || !projectId.startsWith('project-')) return;
     try {
+      const assertScope = startProjectScopeCheck(captureControlPlaneProjectScope, projectId);
+      assertScope();
       await client.ensureProject(projectId, projectTitle);
+      assertScope();
       setInitializedProjectId(projectId);
       setStatus('Project is ready. Pair a Worker, then queue a job.');
       await refresh();
@@ -437,7 +457,7 @@ export function JobsPanel({
       assertProjectScope();
       const blob = await client.derivativeBytes(projectId, job.assetId, derivative.id);
       assertProjectScope();
-      const sourceAsset = (await client.assets(projectId)).find(
+      const sourceAsset = (await client.assets(projectId, assertProjectScope)).find(
         (asset) => asset.id === job.assetId,
       );
       if (sourceAsset === undefined)
@@ -740,7 +760,11 @@ export function JobsPanel({
                           data-guide="Cancel"
                           onClick={() => {
                             if (!window.confirm(`Cancel job ${job.id}?`)) return;
-                            void client.cancel(projectId, job.id).then(refresh).catch(report);
+                            void (async () => {
+                              startProjectScopeCheck(captureControlPlaneProjectScope, projectId)();
+                              await client.cancel(projectId, job.id);
+                              await refresh();
+                            })().catch(report);
                           }}
                         >
                           <CloseIcon />
@@ -759,9 +783,16 @@ export function JobsPanel({
                             aria-label={`Retry job ${job.id}`}
                             title="Retry"
                             data-guide="Retry"
-                            onClick={() =>
-                              void client.retry(projectId, job.id).then(refresh).catch(report)
-                            }
+                            onClick={() => {
+                              void (async () => {
+                                startProjectScopeCheck(
+                                  captureControlPlaneProjectScope,
+                                  projectId,
+                                )();
+                                await client.retry(projectId, job.id);
+                                await refresh();
+                              })().catch(report);
+                            }}
                           >
                             <RefreshIcon />
                           </button>

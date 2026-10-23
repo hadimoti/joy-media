@@ -151,7 +151,9 @@ describe('JobsPanel project scope', () => {
     expect(controlPlane.jobs).not.toHaveBeenCalled();
 
     await render(panel(true));
-    await vi.waitFor(() => expect(controlPlane.jobs).toHaveBeenCalledWith('project-1'));
+    await vi.waitFor(() =>
+      expect(controlPlane.jobs).toHaveBeenCalledWith('project-1', expect.any(Function)),
+    );
     expect(controlPlane.ensureProject).toHaveBeenCalledWith('project-1', 'Campaign cut');
     expect(container?.firstElementChild).toBe(mountedPanel);
   });
@@ -189,10 +191,14 @@ describe('JobsPanel project scope', () => {
 
   it('polls a switched project only after binding it', async () => {
     await render(panel(true, 'project-1'));
-    await vi.waitFor(() => expect(controlPlane.jobs).toHaveBeenCalledWith('project-1'));
+    await vi.waitFor(() =>
+      expect(controlPlane.jobs).toHaveBeenCalledWith('project-1', expect.any(Function)),
+    );
 
     await render(panel(true, 'project-2'));
-    await vi.waitFor(() => expect(controlPlane.jobs).toHaveBeenLastCalledWith('project-2'));
+    await vi.waitFor(() =>
+      expect(controlPlane.jobs).toHaveBeenLastCalledWith('project-2', expect.any(Function)),
+    );
     expect(controlPlane.ensureProject).toHaveBeenLastCalledWith('project-2', 'Campaign cut');
   });
 
@@ -247,6 +253,76 @@ describe('JobsPanel project scope', () => {
     });
 
     expect(controlPlane.jobs).not.toHaveBeenCalled();
+  });
+
+  it('publishes no rows when the scope is lost while the jobs read is in flight', async () => {
+    controlPlane.workers.mockResolvedValue([connectedAudioWorker()]);
+    await render(panel(true, 'project-1', 'asset-1'));
+    await vi.waitFor(() => expect(runButton()?.disabled).toBe(false));
+    await vi.waitFor(() =>
+      expect(controlPlane.jobs).toHaveBeenCalledWith('project-1', expect.any(Function)),
+    );
+
+    // Rows render only on the Queue tab, so the stale publication is visible only from there.
+    const tabButton = (label: string) =>
+      Array.from(container?.querySelectorAll('button') ?? []).find(
+        (button) => button.textContent?.trim() === label,
+      );
+    await act(async () => tabButton('Queue')?.click());
+
+    let finishJobs: (jobs: unknown[]) => void = () => undefined;
+    controlPlane.jobs.mockImplementationOnce(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          finishJobs = resolve;
+        }),
+    );
+    const jobsCallsBeforeRefresh = controlPlane.jobs.mock.calls.length;
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('button[aria-label="Refresh jobs"]')?.click();
+    });
+    await vi.waitFor(() =>
+      expect(controlPlane.jobs.mock.calls.length).toBeGreaterThan(jobsCallsBeforeRefresh),
+    );
+
+    // Record every job row added while the read is in flight. A publication that a later cleanup
+    // would clear still fails here, so the result does not depend on when that cleanup runs.
+    const mounted = container;
+    if (mounted === undefined) throw new Error('JobsPanel is not mounted');
+    const staleRowAdded = vi.fn();
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          const isStaleRow =
+            node instanceof Element &&
+            (node.matches('[data-job-id="job-1"]') ||
+              node.querySelector('[data-job-id="job-1"]') !== null);
+          if (isStaleRow) staleRowAdded();
+        }
+      }
+    });
+    observer.observe(mounted, { childList: true, subtree: true });
+
+    liveScope.held = false;
+    await act(async () => {
+      finishJobs([
+        {
+          id: 'job-1',
+          projectId: 'project-1',
+          type: 'export.video',
+          state: 'queued',
+          progress: 0,
+          cancelRequested: false,
+        },
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    observer.disconnect();
+
+    expect(staleRowAdded).not.toHaveBeenCalled();
+    expect(container?.querySelector('[data-job-id="job-1"]')).toBeNull();
+    await act(async () => tabButton('Workers')?.click());
+    expect(runButton()?.disabled).toBe(true);
   });
 
   it('queues no job for a project the session left while its asset was associated', async () => {
@@ -348,7 +424,9 @@ describe('JobsPanel project scope', () => {
         }),
     );
     await render(panel(true));
-    await vi.waitFor(() => expect(controlPlane.jobs).toHaveBeenCalledWith('project-1'));
+    await vi.waitFor(() =>
+      expect(controlPlane.jobs).toHaveBeenCalledWith('project-1', expect.any(Function)),
+    );
     const queueTab = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent?.trim() === 'Queue',
     );
@@ -394,6 +472,20 @@ describe('JobsPanel project scope', () => {
     expect(initializeButton()).not.toBeNull();
   });
 
+  it('sends no ensure request when Initialize is clicked after the scope is lost', async () => {
+    controlPlane.workers.mockRejectedValueOnce(new Error('offline'));
+    await render(panel(true));
+    await vi.waitFor(() => expect(initializeButton()).not.toBeNull());
+
+    liveScope.held = false;
+    await act(async () => {
+      (initializeButton() as HTMLButtonElement | null)?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(controlPlane.ensureProject).not.toHaveBeenCalled();
+  });
+
   it('offers no Initialize action to a session that is not ready', async () => {
     await render(panel(false));
     await vi.waitFor(() => expect(controlPlane.workers).toHaveBeenCalled());
@@ -414,7 +506,9 @@ describe('JobsPanel project scope', () => {
       },
     ]);
     await render(panel(true));
-    await vi.waitFor(() => expect(controlPlane.jobs).toHaveBeenCalledWith('project-1'));
+    await vi.waitFor(() =>
+      expect(controlPlane.jobs).toHaveBeenCalledWith('project-1', expect.any(Function)),
+    );
 
     const queueTab = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent?.trim() === 'Queue',
@@ -429,6 +523,60 @@ describe('JobsPanel project scope', () => {
 
     expect(container?.querySelector('[data-job-id="job-1"]')).toBeNull();
     expect(container?.querySelector('button[aria-label="Cancel job job-1"]')).toBeNull();
+  });
+
+  it('clears rows when the latest load loses scope while Workers are in flight', async () => {
+    controlPlane.workers.mockResolvedValue([connectedAudioWorker()]);
+    controlPlane.jobs.mockResolvedValue([
+      {
+        id: 'job-1',
+        projectId: 'project-1',
+        type: 'export.video',
+        state: 'queued',
+        progress: 0,
+        cancelRequested: false,
+      },
+    ]);
+    await render(panel(true, 'project-1', 'asset-1'));
+    await vi.waitFor(() => expect(runButton()?.disabled).toBe(false));
+    await vi.waitFor(() =>
+      expect(controlPlane.jobs).toHaveBeenCalledWith('project-1', expect.any(Function)),
+    );
+
+    const tabButton = (label: string) =>
+      Array.from(container?.querySelectorAll('button') ?? []).find(
+        (button) => button.textContent?.trim() === label,
+      );
+    await act(async () => tabButton('Queue')?.click());
+    await vi.waitFor(() =>
+      expect(container?.querySelector('[data-job-id="job-1"]')).not.toBeNull(),
+    );
+
+    let finishWorkers: (workers: unknown[]) => void = () => undefined;
+    controlPlane.workers.mockImplementationOnce(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          finishWorkers = resolve;
+        }),
+    );
+    const workersCallsBeforeRefresh = controlPlane.workers.mock.calls.length;
+    const refreshButton = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Refresh jobs"]',
+    );
+    await act(async () => refreshButton?.click());
+    await vi.waitFor(() =>
+      expect(controlPlane.workers.mock.calls.length).toBeGreaterThan(workersCallsBeforeRefresh),
+    );
+
+    liveScope.held = false;
+    await act(async () => {
+      finishWorkers([connectedAudioWorker()]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container?.querySelector('[data-job-id="job-1"]')).toBeNull();
+    await act(async () => tabButton('Workers')?.click());
+    expect(runButton()?.disabled).toBe(true);
   });
 
   it('fails closed when no session context is provided', async () => {
@@ -456,7 +604,9 @@ describe('editor dock wiring', () => {
 
     expect(resolveAudioAssetUrl).toContain('mediaResolverRef.current.resolve(assetId)');
     expect(resolveAudioAssetUrl.includes('mediaResolver.resolve(')).toBe(false);
-    expect(panelContent).toContain('mediaResolverRef.current.resolve(selectedAudioClip.assetId)');
+    expect(panelContent).toMatch(
+      /assertScope\(\);\s*const source = await mediaResolverRef\.current\.resolve\(\s*selectedAudioClip\.assetId,\s*assertScope,?\s*\);/,
+    );
     expect(panelContent).toContain('mediaResolverRef.current.resolve(targetAssetId)');
     expect(panelContent).toContain('resyncTimelineMediaRef.current();');
     expect(panelContent.includes('mediaResolver.resolve(')).toBe(false);

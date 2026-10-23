@@ -1,6 +1,7 @@
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { BrowserAsset, BrowserControlPlaneClient } from './control-plane-client.js';
 import type { OpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
+import { SESSION_LEFT_PROJECT_MESSAGE } from './control-plane-scope.js';
 import {
   clearMediaSource,
   revokeDetachedObjectUrl,
@@ -61,13 +62,14 @@ export class ProjectMediaResolver {
     this.#options = options;
   }
 
-  async resolve(assetId: string): Promise<ProjectMediaSource> {
+  async resolve(assetId: string, assertCurrent?: () => void): Promise<ProjectMediaSource> {
     const existing = this.#sources.get(assetId);
     if (existing !== undefined) return existing;
     const pending = this.#pending.get(assetId);
-    if (pending !== undefined) return pending;
+    // A guarded caller must not join a lookup that was started without its scope check.
+    if (pending !== undefined && assertCurrent === undefined) return pending;
     const epoch = this.#epoch;
-    const request = this.#resolve(assetId, epoch).finally(() => {
+    const request = this.#resolve(assetId, epoch, assertCurrent).finally(() => {
       // An older request must not remove a new epoch's in-flight lookup.
       if (this.#pending.get(assetId) === request) this.#pending.delete(assetId);
       this.#assertEpoch(epoch);
@@ -136,8 +138,12 @@ export class ProjectMediaResolver {
     this.#pending.clear();
   }
 
-  async #resolve(assetId: string, epoch: number): Promise<ProjectMediaSource> {
-    const descriptor = await this.#descriptor(assetId);
+  async #resolve(
+    assetId: string,
+    epoch: number,
+    assertCurrent?: () => void,
+  ): Promise<ProjectMediaSource> {
+    const descriptor = await this.#descriptor(assetId, assertCurrent);
     this.#assertEpoch(epoch);
     const local = await this.#options.originalCache.get(assetId);
     this.#assertEpoch(epoch);
@@ -174,12 +180,19 @@ export class ProjectMediaResolver {
       throw new Error('Authenticated media session is not ready');
     }
 
+    assertCurrent?.();
+    const projectOriginalBytes = this.#options.client.originalBytes(
+      this.#options.projectId,
+      assetId,
+    );
     try {
       let cloud: Blob;
       try {
-        cloud = await this.#options.client.originalBytes(this.#options.projectId, assetId);
+        cloud = await projectOriginalBytes;
       } catch {
         this.#assertEpoch(epoch);
+        // The caller's scope can end during the project read, so check it before the fallback request.
+        assertCurrent?.();
         // User-library assets can be placed on another project's timeline.
         // They remain owner-authorized through the shared library endpoint.
         cloud = await this.#options.client.sharedCloudOriginalBytes(assetId);
@@ -200,6 +213,9 @@ export class ProjectMediaResolver {
       return source;
     } catch (error) {
       this.#assertEpoch(epoch);
+      // A session that left the project is reported as such, not as a missing asset, and no
+      // reference fallback may stand in for it.
+      if (error instanceof Error && error.message === SESSION_LEFT_PROJECT_MESSAGE) throw error;
       if (
         REFERENCE_ASSET_IDS.has(assetId) &&
         (descriptor === undefined || !/^[a-f0-9]{64}$/.test(descriptor.sha256))
@@ -221,14 +237,17 @@ export class ProjectMediaResolver {
     }
   }
 
-  async #descriptor(assetId: string): Promise<BrowserAsset | undefined> {
+  async #descriptor(
+    assetId: string,
+    assertCurrent?: () => void,
+  ): Promise<BrowserAsset | undefined> {
     const projectAsset = this.#options.project?.assets[assetId];
     if (this.#options.controlPlaneReady === false)
       return projectAssetDescriptor(projectAsset, this.#options.projectId);
+    assertCurrent?.();
+    const projectAssets = this.#options.client.assets(this.#options.projectId, assertCurrent);
     try {
-      const catalogAsset = (await this.#options.client.assets(this.#options.projectId)).find(
-        (asset) => asset.id === assetId,
-      );
+      const catalogAsset = (await projectAssets).find((asset) => asset.id === assetId);
       if (catalogAsset !== undefined) return catalogAsset;
     } catch {
       /* OPFS and reference projects can resolve without a catalog request. */

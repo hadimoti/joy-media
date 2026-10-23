@@ -5414,6 +5414,7 @@ function EditorWorkspace({
       const assertScope = context.captureControlPlaneProjectScope(
         controlPlaneProject.controlPlaneProjectId,
       );
+      assertScope();
       const derivatives = await mediaControlPlaneClient.derivatives(
         controlPlaneProject.controlPlaneProjectId,
         target.assetId,
@@ -5481,6 +5482,7 @@ function EditorWorkspace({
       const assertScope = context.captureControlPlaneProjectScope(
         controlPlaneProject.controlPlaneProjectId,
       );
+      assertScope();
       const derivatives = await mediaControlPlaneClient.derivatives(
         controlPlaneProject.controlPlaneProjectId,
         target.assetId,
@@ -6242,6 +6244,7 @@ function EditorWorkspace({
               revision: context.session.historyCursorSequence,
             });
             try {
+              assertScope();
               await mediaControlPlaneClient.ensureProject(
                 controlPlaneProject.controlPlaneProjectId,
                 controlPlaneProject.title,
@@ -6253,6 +6256,7 @@ function EditorWorkspace({
               // row, so repair that durable source boundary before queueing.
               const catalogAssets = await mediaControlPlaneClient.assets(
                 controlPlaneProject.controlPlaneProjectId,
+                assertScope,
               );
               assertScope();
               const catalogAsset = catalogAssets.find(
@@ -6266,7 +6270,11 @@ function EditorWorkspace({
                   await originalAssetCachePromise
                 ).get(selectedAudioClip.assetId);
                 if (original === undefined) {
-                  const source = await mediaResolverRef.current.resolve(selectedAudioClip.assetId);
+                  assertScope();
+                  const source = await mediaResolverRef.current.resolve(
+                    selectedAudioClip.assetId,
+                    assertScope,
+                  );
                   const response = await fetch(source.url);
                   if (!response.ok)
                     throw new Error('The selected audio original is unavailable for Local Worker.');

@@ -62,7 +62,12 @@ import {
   getDesktopAssetLibraryCatalog,
   resolveDesktopAssetUrl,
 } from './desktop-client.js';
-import { scopeStillHeld, startProjectScopeCheck } from './control-plane-scope.js';
+import {
+  SESSION_LEFT_PROJECT_MESSAGE,
+  SESSION_REQUIRED_MESSAGE,
+  scopeStillHeld,
+  startProjectScopeCheck,
+} from './control-plane-scope.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
@@ -104,6 +109,13 @@ interface Preview {
 }
 
 const ASSET_TIMELINE_OPERATION_TIMEOUT_MS = 15_000;
+
+function isSessionScopeError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message === SESSION_LEFT_PROJECT_MESSAGE || error.message === SESSION_REQUIRED_MESSAGE)
+  );
+}
 
 /**
  * Bound catalog association/insertion work so a stalled control-plane request
@@ -621,7 +633,9 @@ export function AssetLibraryPanel({
                 try {
                   assertScope();
                   blob = await client.originalBytes(projectId, asset.assetId);
-                } catch {
+                } catch (error) {
+                  if (isSessionScopeError(error)) throw error;
+                  assertScope();
                   blob = await client.sharedCloudOriginalBytes(asset.assetId);
                 }
               }
@@ -880,7 +894,7 @@ export function AssetLibraryPanel({
       // The start, every status poll and the asset read all name this project. Each one checks first.
       const assertScope = startProjectScopeCheck(captureProjectScope, projectId);
       assertScope();
-      const started = await client.startStockVideoImport(projectId, video.id);
+      const started = await client.startStockVideoImport(projectId, video.id, assertScope);
       const completed =
         started.state === 'completed' || started.state === 'failed'
           ? started
@@ -891,7 +905,7 @@ export function AssetLibraryPanel({
       let importedAsset = completed.asset;
       if (importedAsset === undefined && completed.assetId !== undefined) {
         assertScope();
-        importedAsset = (await client.myAssets(projectId)).find(
+        importedAsset = (await client.myAssets(projectId, assertScope)).find(
           ({ id }) => id === completed.assetId,
         );
       }

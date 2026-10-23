@@ -1,6 +1,6 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
-import { SESSION_REQUIRED_MESSAGE } from './control-plane-scope.js';
+import { SESSION_LEFT_PROJECT_MESSAGE, SESSION_REQUIRED_MESSAGE } from './control-plane-scope.js';
 import { getRemoteApiBaseUrl } from './desktop-client.js';
 import { isUnboundControlPlaneProjectId } from './project-control-plane.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
@@ -383,12 +383,19 @@ export class BrowserControlPlaneClient {
       method: 'DELETE',
     });
   }
-  async jobs(projectId: string): Promise<readonly BrowserJob[]> {
+  /** `assertCurrent` runs after the projections load, right before the request is sent. */
+  async jobs(projectId: string, assertCurrent?: () => void): Promise<readonly BrowserJob[]> {
+    const storedToken = this.tokenProvider();
     const { browserJobList } = await browserProjections;
+    this.assertTokenUnchanged(storedToken);
+    assertCurrent?.();
     return browserJobList(await this.coalescedGet<unknown>(`${projectPath(projectId)}/jobs`));
   }
-  async assets(projectId: string): Promise<readonly BrowserAsset[]> {
+  async assets(projectId: string, assertCurrent?: () => void): Promise<readonly BrowserAsset[]> {
+    const storedToken = this.tokenProvider();
     const { browserAssetList } = await browserProjections;
+    this.assertTokenUnchanged(storedToken);
+    assertCurrent?.();
     return browserAssetList(await this.get<unknown>(`${projectPath(projectId)}/assets`));
   }
   /** Curated service-published cloud library visible to entitled Joy users. */
@@ -419,8 +426,12 @@ export class BrowserControlPlaneClient {
   async startStockVideoImport(
     projectId: string,
     catalogId: string,
+    assertCurrent?: () => void,
   ): Promise<BrowserStockVideoImport> {
+    const storedToken = this.tokenProvider();
     const { browserStockVideoImport } = await browserProjections;
+    this.assertTokenUnchanged(storedToken);
+    assertCurrent?.();
     return browserStockVideoImport(
       await this.post<unknown>(`${projectPath(projectId)}/stock-video-import`, {
         catalogId,
@@ -430,8 +441,12 @@ export class BrowserControlPlaneClient {
   async stockVideoImportStatus(
     projectId: string,
     importId: string,
+    assertCurrent?: () => void,
   ): Promise<BrowserStockVideoImport> {
+    const storedToken = this.tokenProvider();
     const { browserStockVideoImport } = await browserProjections;
+    this.assertTokenUnchanged(storedToken);
+    assertCurrent?.();
     return browserStockVideoImport(
       await this.get<unknown>(
         `${projectPath(projectId)}/stock-video-imports/${encodeURIComponent(importId)}`,
@@ -443,10 +458,13 @@ export class BrowserControlPlaneClient {
    * workspace focused on its own media while the unscoped catalog remains
    * available to cross-project library consumers.
    */
-  async myAssets(projectId?: string): Promise<readonly BrowserAsset[]> {
+  async myAssets(projectId?: string, assertCurrent?: () => void): Promise<readonly BrowserAsset[]> {
+    const storedToken = this.tokenProvider();
     const query =
       projectId === undefined ? '' : `?projectId=${encodeURIComponent(boundProjectId(projectId))}`;
     const { browserAssetList } = await browserProjections;
+    this.assertTokenUnchanged(storedToken);
+    assertCurrent?.();
     return browserAssetList(await this.get<unknown>(`/v1/library/my-assets${query}`));
   }
   /** Safe catalog only: model IDs and lifecycle state, never secret references or values. */
@@ -458,7 +476,7 @@ export class BrowserControlPlaneClient {
   }
   /** Fetch a curated original or a cloud-backed original owned by this identity. */
   async sharedCloudOriginalBytes(assetId: string): Promise<Blob> {
-    const token = await this.assertion();
+    const token = this.assertion();
     const response = await fetch(
       `${this.apiUrl.replace(/\/$/, '')}/v1/library/cloud-assets/${encodeURIComponent(assetId)}/content`,
       { method: 'GET', headers: { authorization: `Bearer ${token}` } },
@@ -688,7 +706,7 @@ export class BrowserControlPlaneClient {
   }
   /** Fetches an owner-authorized original from private object storage. */
   async originalBytes(projectId: string, assetId: string): Promise<Blob> {
-    const token = await this.assertion();
+    const token = this.assertion();
     const response = await fetch(
       `${this.apiUrl.replace(/\/$/, '')}${projectPath(projectId)}/assets/${encodeURIComponent(assetId)}/original`,
       { method: 'GET', headers: { authorization: `Bearer ${token}` } },
@@ -888,7 +906,7 @@ export class BrowserControlPlaneClient {
   }
   /** Fetches private derivative bytes only from the authenticated Media API. */
   async derivativeBytes(projectId: string, assetId: string, derivativeId: string): Promise<Blob> {
-    const token = await this.assertion();
+    const token = this.assertion();
     const response = await fetch(
       `${this.apiUrl.replace(/\/$/, '')}${projectPath(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives/${encodeURIComponent(derivativeId)}/content`,
       { method: 'GET', headers: { authorization: `Bearer ${token}` } },
@@ -1078,6 +1096,11 @@ export class BrowserControlPlaneClient {
     const token = this.tokenProvider();
     if (token === undefined) throw new Error(SESSION_REQUIRED_MESSAGE);
     return token;
+  }
+  // A project read captures the stored token before the projections module loads. If the token changed
+  // while it loaded, the request would use a token the editor did not check, so refuse it.
+  private assertTokenUnchanged(token: string | undefined): void {
+    if (this.tokenProvider() !== token) throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
   }
 }
 

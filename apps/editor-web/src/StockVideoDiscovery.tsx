@@ -442,12 +442,12 @@ export async function waitForStockVideoImport(
   wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ) {
   assertCurrent();
-  let current = await client.stockVideoImportStatus(projectId, importId);
+  let current = await client.stockVideoImportStatus(projectId, importId, assertCurrent);
   for (let attempt = 0; attempt < IMPORT_POLL_LIMIT; attempt += 1) {
     if (current.state === 'completed' || current.state === 'failed') return current;
     await wait(IMPORT_POLL_INTERVAL_MS);
     assertCurrent();
-    current = await client.stockVideoImportStatus(projectId, importId);
+    current = await client.stockVideoImportStatus(projectId, importId, assertCurrent);
   }
   throw new Error('Stock video import is still processing; try again shortly.');
 }

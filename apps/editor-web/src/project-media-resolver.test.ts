@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SESSION_LEFT_PROJECT_MESSAGE } from './control-plane-scope.js';
 import { ProjectMediaResolver } from './project-media-resolver.js';
 import { clearMediaSource } from './media-object-url.js';
 
@@ -475,5 +476,85 @@ describe('ProjectMediaResolver', () => {
     });
 
     expect(revokedUrls).toEqual(['blob:detached-partner']);
+  });
+
+  it('refuses control-plane reads when the project scope is no longer current', async () => {
+    const assets = vi.fn(async () => []);
+    const originalBytes = vi.fn(async () => new Blob(['cloud'], { type: 'video/mp4' }));
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      client: {
+        assets,
+        originalBytes,
+        sharedCloudOriginalBytes: vi.fn(async () => new Blob(['shared'])),
+      },
+      originalCache: { get: vi.fn(async () => undefined) },
+    });
+
+    await expect(
+      resolver.resolve('media-1', () => {
+        throw new Error('the session left this project');
+      }),
+    ).rejects.toThrow('the session left this project');
+    expect(assets).not.toHaveBeenCalled();
+    expect(originalBytes).not.toHaveBeenCalled();
+  });
+
+  it('reports a scope that left during the project read, and sends no shared-library fallback', async () => {
+    let inScope = true;
+    const originalBytes = vi.fn(async () => {
+      inScope = false;
+      throw new Error('not a project-owned asset');
+    });
+    const sharedCloudOriginalBytes = vi.fn(async () => new Blob(['shared']));
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes,
+        sharedCloudOriginalBytes,
+      },
+      originalCache: { get: vi.fn(async () => undefined) },
+    });
+
+    await expect(
+      resolver.resolve('media-1', () => {
+        if (!inScope) throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
+      }),
+    ).rejects.toThrow(SESSION_LEFT_PROJECT_MESSAGE);
+    expect(originalBytes).toHaveBeenCalledTimes(1);
+    expect(sharedCloudOriginalBytes).not.toHaveBeenCalled();
+  });
+
+  it('does not let a guarded resolve join a lookup started without a scope check', async () => {
+    const first = deferred<Blob | undefined>();
+    const second = deferred<Blob | undefined>();
+    const get = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const originalBytes = vi.fn(async () => new Blob(['cloud']));
+    let inScope = true;
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes,
+        sharedCloudOriginalBytes: vi.fn(async () => new Blob(['shared'])),
+      },
+      originalCache: { get },
+    });
+
+    const unguarded = resolver.resolve('media-1');
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+    const guarded = resolver.resolve('media-1', () => {
+      if (!inScope) throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
+    });
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+
+    inScope = false;
+    second.resolve(undefined);
+    await expect(guarded).rejects.toThrow(SESSION_LEFT_PROJECT_MESSAGE);
+    expect(originalBytes).not.toHaveBeenCalled();
+
+    first.resolve(undefined);
+    await unguarded.catch(() => undefined);
   });
 });

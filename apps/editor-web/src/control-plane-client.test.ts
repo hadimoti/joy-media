@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BrowserControlPlaneClient,
   RESUMABLE_ORIGINAL_UPLOAD_THRESHOLD_BYTES,
   invalidateWorkerReadCache,
 } from './control-plane-client.js';
+import { SESSION_LEFT_PROJECT_MESSAGE } from './control-plane-scope.js';
+import { setStoredMediaToken } from './media-session.js';
 
 describe('BrowserControlPlaneClient', () => {
   it('sends the local session token only to the Media API', async () => {
@@ -40,6 +42,111 @@ describe('BrowserControlPlaneClient', () => {
         authorization: 'Bearer joy-session-token',
       },
     ]);
+  });
+
+  it('refuses a project read when the stored token changes before the projections load', async () => {
+    const requests: string[] = [];
+    const original = globalThis.fetch;
+    let storedToken: string | undefined = 'joy-session-token';
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return json(200, { data: [] });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => storedToken,
+      );
+      const pending = client.jobs('project-1');
+      storedToken = 'changed-session-token';
+
+      await expect(pending).rejects.toThrow(SESSION_LEFT_PROJECT_MESSAGE);
+      expect(requests).not.toContain('https://media.joyteam.ir/api/v1/projects/project-1/jobs');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('refuses a project read when the renderer token changes before the projections load', async () => {
+    const requests: string[] = [];
+    const original = globalThis.fetch;
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+    };
+    vi.stubGlobal('window', Object.assign(new EventTarget(), { localStorage: storage }));
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return json(200, { data: [] });
+    };
+    try {
+      setStoredMediaToken('joy-session-token', storage);
+      const client = new BrowserControlPlaneClient('https://media.joyteam.ir/api');
+      const pending = client.jobs('project-1');
+      setStoredMediaToken('changed-session-token', storage);
+
+      await expect(pending).rejects.toThrow(SESSION_LEFT_PROJECT_MESSAGE);
+      expect(requests).not.toContain('https://media.joyteam.ir/api/v1/projects/project-1/jobs');
+    } finally {
+      globalThis.fetch = original;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('checks the caller scope after the projections load, before a project read is sent', async () => {
+    const requests: string[] = [];
+    const original = globalThis.fetch;
+    let inScope = true;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return json(200, { data: [] });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => 'joy-session-token',
+      );
+      const pending = client.jobs('project-1', () => {
+        if (!inScope) throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
+      });
+      inScope = false;
+
+      await expect(pending).rejects.toThrow(SESSION_LEFT_PROJECT_MESSAGE);
+      expect(requests).not.toContain('https://media.joyteam.ir/api/v1/projects/project-1/jobs');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('sends an owner original read in the same turn as its token check', async () => {
+    const authorizations: Array<string | null> = [];
+    const original = globalThis.fetch;
+    let storedToken: string | undefined = 'joy-session-token';
+    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      authorizations.push(new Headers(init?.headers).get('authorization'));
+      return new Response(new Blob(['original']), { status: 200 });
+    };
+    try {
+      const client = new BrowserControlPlaneClient(
+        'https://media.joyteam.ir/api',
+        () => storedToken,
+      );
+      const pending = client.originalBytes('project-1', 'asset-1');
+      // The request must already carry the token that was checked, before any other turn runs.
+      expect(authorizations).toEqual(['Bearer joy-session-token']);
+      storedToken = 'changed-session-token';
+
+      await expect(pending).resolves.toBeInstanceOf(Blob);
+      expect(authorizations).toEqual(['Bearer joy-session-token']);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 
   it('coalesces concurrent worker and same-project job reads', async () => {
