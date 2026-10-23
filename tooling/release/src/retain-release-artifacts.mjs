@@ -20,10 +20,13 @@
 import { createHash } from 'node:crypto';
 import {
   createReadStream,
+  closeSync,
   cpSync,
   existsSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -77,6 +80,9 @@ export function parseManifest(manifest, { candidate, runId, attempt }) {
     if (seen.has(path)) throw new Error(`manifest lists ${path} twice`);
     seen.add(path);
   }
+  // The checksum file is the independent record of every other file. A set that does not list it cannot be
+  // checked against it, so the manifest must list it.
+  if (!seen.has(SUMS)) throw new Error(`manifest does not list ${SUMS}`);
   return manifest.files;
 }
 
@@ -158,7 +164,46 @@ function assertStoreLocation(root, env) {
   }
 }
 
-export async function run(argv, env = process.env) {
+// Flushes one file to stable storage before the retention is reported. Windows needs a writable handle for
+// FlushFileBuffers. The copy has just created the file, so opening it for writing changes nothing in it.
+export function syncFile(path) {
+  const fd = openSync(path, 'r+');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// Flushes a directory entry on POSIX. Windows cannot open a directory for fsync, so there the file flushes
+// are the durability step, and the directory is not flushed separately.
+export function syncDirectory(path) {
+  if (process.platform === 'win32') return;
+  const fd = openSync(path, 'r');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// Every copied file, the manifest, and every directory that holds one reach stable storage. Directories flush
+// deepest first, after the entries they hold.
+export function syncTree(dir, entries, sync = { file: syncFile, directory: syncDirectory }) {
+  const directories = new Set([dir]);
+  for (const entry of entries) {
+    const parts = entry.path.split('/');
+    for (let depth = 1; depth < parts.length; depth += 1) {
+      directories.add(join(dir, ...parts.slice(0, depth)));
+    }
+    sync.file(join(dir, ...entry.path.split('/')));
+  }
+  for (const directory of [...directories].sort((a, b) => b.length - a.length)) {
+    sync.directory(directory);
+  }
+}
+
+export async function run(argv, env = process.env, options = {}) {
   const [stagedArg, candidate, runId, attempt, root, mode] = argv;
   if (!/^[0-9a-f]{40}$/u.test(candidate ?? ''))
     throw new Error('candidate sha must be 40 lowercase hex characters');
@@ -200,6 +245,9 @@ export async function run(argv, env = process.env) {
   }
   try {
     cpSync(stagedArg, dest, { recursive: true, errorOnExist: true, force: false });
+    // The copy must reach stable storage before the retention is reported. The manifest is flushed too, since
+    // verify mode reads it from the store.
+    syncTree(dest, [...entries, { path: MANIFEST }], options.sync);
     await verifyTree(dest, entries);
   } catch (error) {
     // This call created the folder, so a failed copy or check leaves no partial retention behind. A failed

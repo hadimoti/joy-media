@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { run } from './retain-release-artifacts.mjs';
 
@@ -254,6 +254,75 @@ describe('retain-release-artifacts', () => {
       await expect(
         run(['-', candidate, runId, attempt, evidence, '--verify-only']),
       ).rejects.toThrow(/sha256 mismatch for joy-media-setup\.exe/u);
+    });
+  });
+
+  it('flushes every copied file, the manifest and their directories before reporting the retention', async () => {
+    await withWork(async (work) => {
+      const staged = buildStaged(work);
+      const evidence = join(work, 'evidence');
+      const root = retainedDir(evidence);
+      const flushedFiles: string[] = [];
+      const flushedDirectories: string[] = [];
+      await run([staged, candidate, runId, attempt, evidence], process.env, {
+        sync: {
+          file: (path: string) => {
+            flushedFiles.push(relative(root, path).split(sep).join('/'));
+          },
+          directory: (path: string) => {
+            flushedDirectories.push(relative(root, path).split(sep).join('/'));
+          },
+        },
+      });
+      expect(flushedFiles.sort()).toEqual(
+        [setupName, zipName, workerName, sumsName, 'artifact-manifest.json'].sort(),
+      );
+      // The retained folder itself flushes last, after the folders that hold files.
+      expect(flushedDirectories.at(-1)).toBe('');
+      expect(flushedDirectories).toContain('standalone/resources/app/worker');
+    });
+  });
+
+  it('removes the retention when a flush fails, and reports the failure', async () => {
+    await withWork(async (work) => {
+      const staged = buildStaged(work);
+      const evidence = join(work, 'evidence');
+      await expect(
+        run([staged, candidate, runId, attempt, evidence], process.env, {
+          sync: {
+            file: () => {
+              throw new Error('disk write failed');
+            },
+            directory: () => undefined,
+          },
+        }),
+      ).rejects.toThrow('disk write failed');
+      expect(existsSync(retainedDir(evidence))).toBe(false);
+    });
+  });
+
+  it('refuses a manifest that does not list SHA256SUMS.txt', async () => {
+    await withWork(async (work) => {
+      const staged = buildStaged(work, null);
+      await expect(
+        run([staged, candidate, runId, attempt, join(work, 'evidence')]),
+      ).rejects.toThrow(/does not list SHA256SUMS\.txt/u);
+    });
+  });
+
+  it('lets exactly one of two concurrent retentions of the same run succeed', async () => {
+    await withWork(async (work) => {
+      const staged = buildStaged(work);
+      const evidence = join(work, 'evidence');
+      const results = await Promise.allSettled([
+        run([staged, candidate, runId, attempt, evidence]),
+        run([staged, candidate, runId, attempt, evidence]),
+      ]);
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      const failure = results.find((result) => result.status === 'rejected');
+      expect(String(failure?.reason)).toMatch(/write-once/u);
+      expect(readFileSync(join(retainedDir(evidence), setupName), 'utf8')).toBe('setup-bytes');
+      await run(['-', candidate, runId, attempt, evidence, '--verify-only']);
     });
   });
 });
