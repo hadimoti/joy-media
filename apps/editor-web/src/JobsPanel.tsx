@@ -157,6 +157,16 @@ export function JobsPanel({
 
   const load = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
+    // A load may send project-scoped requests only while it is the latest load and its
+    // scope is unchanged. Every await below can end after the session has moved on.
+    const stillInScope = () => {
+      const latestScope = latestScopeRef.current;
+      return (
+        requestId === refreshSeqRef.current &&
+        latestScope.controlPlaneReady === controlPlaneReady &&
+        latestScope.projectId === projectId
+      );
+    };
     // Project-scoped requests wait for a ready session. The id prefix alone
     // does not show that the session owns this project.
     const projectScopeReady =
@@ -172,13 +182,7 @@ export function JobsPanel({
       const nextWorkers = await client.workers();
       // Readiness can drop while the Worker list is in flight. A load that started in an
       // earlier scope must not send a project-scoped request for that scope.
-      const latestScope = latestScopeRef.current;
-      if (
-        requestId !== refreshSeqRef.current ||
-        latestScope.controlPlaneReady !== controlPlaneReady ||
-        latestScope.projectId !== projectId
-      )
-        return;
+      if (!stillInScope()) return;
       let nextJobs: readonly BrowserJob[] = [];
       let projectMissing = !projectScopeReady;
       if (projectScopeReady) {
@@ -188,7 +192,12 @@ export function JobsPanel({
           // avoidable API/PostgreSQL load. Switching projects makes
           // projectInitialized false again, so the new binding is never
           // assumed from the old project's successful bootstrap.
-          if (!projectInitialized) await client.ensureProject(projectId, projectTitle);
+          if (!projectInitialized) {
+            await client.ensureProject(projectId, projectTitle);
+            // Ensure can outlast the scope. The jobs read names the same project, so it
+            // must not follow a scope that has already changed.
+            if (!stillInScope()) return;
+          }
           nextJobs = await client.jobs(projectId);
         } catch (error) {
           if (!message(error).includes('PROJECT_NOT_FOUND')) throw error;
@@ -324,6 +333,13 @@ export function JobsPanel({
     }
     let operationId: string | undefined;
     let operationStarted = false;
+    // The session can leave this project while an asset is associated. Each follow-up
+    // request then has to stop, rather than name a project the session no longer holds.
+    const scope = latestScopeRef.current;
+    const leftProjectMessage = 'The session left this project before the job was queued.';
+    const stillInScope = () =>
+      latestScopeRef.current.controlPlaneReady === scope.controlPlaneReady &&
+      latestScopeRef.current.projectId === scope.projectId;
     try {
       setSubmitting(true);
       if (audioAssetId !== undefined) {
@@ -350,12 +366,14 @@ export function JobsPanel({
         });
         operationStarted = true;
         await client.associateAsset(projectId, audioAssetId);
+        if (!stillInScope()) throw new Error(leftProjectMessage);
         await client.enqueueWorkerGeneration(projectId, jobId, 'audio.ml-denoise', audioAssetId);
         setStatus(
           'Audio denoise job queued. The Worker result will require review before insertion.',
         );
       } else if (thumbnailAssetId !== undefined) {
         await client.associateAsset(projectId, thumbnailAssetId);
+        if (!stillInScope()) throw new Error(leftProjectMessage);
         await client.enqueueAssetThumbnail(
           projectId,
           `asset-thumbnail-${crypto.randomUUID()}`,

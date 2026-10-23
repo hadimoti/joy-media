@@ -9,6 +9,8 @@ const controlPlane = vi.hoisted(() => ({
   workers: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
   ensureProject: vi.fn(() => Promise.resolve(undefined)),
   jobs: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
+  associateAsset: vi.fn((): Promise<unknown> => Promise.resolve(undefined)),
+  enqueueWorkerGeneration: vi.fn((): Promise<unknown> => Promise.resolve(undefined)),
 }));
 
 vi.mock('./control-plane-client.js', () => ({
@@ -16,6 +18,8 @@ vi.mock('./control-plane-client.js', () => ({
     readonly workers = controlPlane.workers;
     readonly ensureProject = controlPlane.ensureProject;
     readonly jobs = controlPlane.jobs;
+    readonly associateAsset = controlPlane.associateAsset;
+    readonly enqueueWorkerGeneration = controlPlane.enqueueWorkerGeneration;
   },
   invalidateWorkerReadCache: () => undefined,
 }));
@@ -90,6 +94,8 @@ describe('JobsPanel project scope', () => {
     controlPlane.ensureProject.mockClear();
     controlPlane.jobs.mockClear();
     controlPlane.jobs.mockResolvedValue([]);
+    controlPlane.associateAsset.mockClear();
+    controlPlane.enqueueWorkerGeneration.mockClear();
   });
 
   afterEach(async () => {
@@ -197,6 +203,54 @@ describe('JobsPanel project scope', () => {
 
     expect(controlPlane.ensureProject).not.toHaveBeenCalled();
     expect(controlPlane.jobs).not.toHaveBeenCalled();
+  });
+
+  it('sends no jobs request for a project whose ensure resolved after the session left it', async () => {
+    let finishEnsure: () => void = () => undefined;
+    controlPlane.ensureProject.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((resolve) => {
+          finishEnsure = () => resolve(undefined);
+        }),
+    );
+    await render(panel(true));
+    await vi.waitFor(() => expect(controlPlane.ensureProject).toHaveBeenCalled());
+
+    await render(panel(false));
+    await act(async () => {
+      finishEnsure();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(controlPlane.jobs).not.toHaveBeenCalled();
+  });
+
+  it('queues no job for a project the session left while its asset was associated', async () => {
+    let finishAssociation: () => void = () => undefined;
+    controlPlane.associateAsset.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((resolve) => {
+          finishAssociation = () => resolve(undefined);
+        }),
+    );
+    controlPlane.workers.mockResolvedValue([connectedAudioWorker()]);
+    await render(panel(true, 'project-1', 'asset-1'));
+    await vi.waitFor(() => expect(runButton()?.disabled).toBe(false));
+
+    await act(async () => {
+      runButton()?.click();
+    });
+    await vi.waitFor(() =>
+      expect(controlPlane.associateAsset).toHaveBeenCalledWith('project-1', 'asset-1'),
+    );
+
+    await render(panel(false, 'project-1', 'asset-1'));
+    await act(async () => {
+      finishAssociation();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(controlPlane.enqueueWorkerGeneration).not.toHaveBeenCalled();
   });
 
   it('never offers Initialize for an unbound project, even after a failed connection', async () => {
