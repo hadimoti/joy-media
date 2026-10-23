@@ -40,8 +40,13 @@ export function verifyArtifacts({
   bytesByName,
   candidateSha,
   releaseManifest,
-  recordedNames = [],
+  recordedNames,
 }) {
+  // Without the packaged names the manifest check would have nothing to compare, so the caller must
+  // name them. Skipping the check silently would let an incomplete manifest pass.
+  if (!Array.isArray(recordedNames) || recordedNames.length === 0) {
+    throw new Error('packaged artifact names are required to verify the release manifest');
+  }
   if (releaseManifest?.targetCommit !== candidateSha) {
     throw new Error(
       `release manifest is for a different candidate SHA (${String(releaseManifest?.targetCommit)}); expected ${candidateSha}`,
