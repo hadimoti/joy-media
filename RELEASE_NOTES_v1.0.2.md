@@ -32,10 +32,10 @@ The full CLI suite was last run on the commit before these changes and was not r
 ### Candidate and approvals
 
 - **Candidate commit:** `1482aa7b13afde7b5d35b661b1029ba42454404e`, pushed to the branch `hadimoti/joy-v102-rc`. No PR is open.
-- **Candidate CI run:** `release-candidate-v2` run `39644275784` on that commit. Checked 2026-10-21 (server time 18:17Z), the run is still in progress.
-  - Completed and passed (10 of 11 jobs): `validate-candidate`, `windows-p0-real-services`, `node-contracts (Node 22.17.0)`, `node-contracts (Node 24)`, `prod-build-smoke (shipped bundle, public UI)`, `editor-web-bundle (standard hosted Linux)`, `linux-real-services (pass 1)`, `linux-real-services (pass 2)`, `p3-real-services (pass 1)`, `p3-real-services (pass 2)`.
-  - In progress: `windows-worker-clean (two exact passes)` on runner `joy-media-worker-docker`. Its steps so far (checkout, renderer artifact, bundle verification, clean Worker host check, frozen install, Chromium and Electron install) passed. It is building the frozen Windows desktop, CLI and Worker candidate. The step `Exercise Worker and installed desktop lifecycle in two exact passes` has not started.
-  - Not yet known: the exact-candidate two-pass gate receipt and the Windows installed-lifecycle result. Neither is recorded as passed.
+- **Candidate CI run:** `release-candidate-v2` run `39644275784` on that commit. Verified 2026-10-23 through the GitHub API: the run concluded `success` with all 18 jobs successful. It covers only `1482aa7b`, not the later commits.
+  - All 18 jobs succeeded, including `windows-worker-clean (two exact passes)`, `real-service-acceptance (pass 1)` and `(pass 2)`, the desktop-primary and responsive acceptance passes, and `gate-summary`.
+  - `windows-worker-clean` succeeded, and its job includes the installed desktop lifecycle steps. No receipt from that run is verified in this checkout, and the gate's receipt is kept in the isolated evidence store.
+  - No exact-candidate receipt for `1482aa7b` was checked in this checkout, and none exists for `0e9d9cb8` or any later commit.
 - **CLI readiness:** the owner approved the CLI as ready for the v1.0.2 candidate. Desktop rows are reported as the matrix shows them.
 - **Release:** none. This candidate is documented only. Release, deploy and publish need a separate owner approval.
 
@@ -69,7 +69,7 @@ The full CLI suite was last run on the commit before these changes and was not r
 
 ### Known gaps in this candidate
 
-- Release-gate scripts (`tooling/release/src/readiness-evidence.ts`) are unchanged. The generator marks every scenario as passed without measuring it, so the new desktop rows are not required by the gate.
+- The release gate now derives every readiness result from receipts and the needs context, and it requires `desktop.export-media-semantics` as well as the other eight gate-required scenarios. The Windows lifecycle script has no measured step for export parity yet, so the gate fails closed on it.
 - Caption acceptance step 10 refuses with SETUP_REQUIRED on this host. The owner accepted that refusal on 2026-10-20.
 
 ---
