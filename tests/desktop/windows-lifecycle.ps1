@@ -40,6 +40,21 @@ $script:transitionOutcomes = [ordered]@{
     uninstall = 'not-run'
     userDataPreserved = 'not-run'
 }
+# Test accounting. An exit code alone cannot show that every case ran, because skipped cases
+# exit 0. Each step writes a machine-readable report, and a scenario counts as passed only when
+# the report shows at least one passing case and no failed, skipped, pending or todo case.
+function Get-VitestAccountingExitCode([string]$ReportPath) {
+    if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) { throw "Vitest accounting report is missing: $ReportPath" }
+    $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
+    $clean = ([int]$report.numPassedTests -gt 0) -and ([int]$report.numFailedTests -eq 0) -and ([int]$report.numPendingTests -eq 0) -and ([int]$report.numTodoTests -eq 0)
+    return $(if ($clean) { 0 } else { 1 })
+}
+function Get-PlaywrightAccountingExitCode([string]$ReportPath) {
+    if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) { throw "Playwright accounting report is missing: $ReportPath" }
+    $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
+    $clean = ([int]$report.stats.expected -gt 0) -and ([int]$report.stats.unexpected -eq 0) -and ([int]$report.stats.skipped -eq 0) -and ([int]$report.stats.flaky -eq 0)
+    return $(if ($clean) { 0 } else { 1 })
+}
 function Set-ScenarioOutcome([string]$Id, [int]$ExitCode) {
     # Every measured step here runs with --retries=0 or without a retry setting, so the first
     # attempt's exit code is the scenario's result.
@@ -425,12 +440,15 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     $script:transitionOutcomes['installPrevious'] = 'passed'
     $seedProof = Invoke-LifecycleFixture $devElectron 'seed'
     if ($seedProof.result -ne 'seeded' -or $seedProof.encryptionAvailable -ne $true) { throw 'v1.0.1 could not seed isolated settings, library, and DPAPI fixture data.' }
-    $renderReal = Invoke-Pnpm 'CLI render-real source and bundle acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-real.e2e.test.ts', '--no-file-parallelism')
-    Set-ScenarioOutcome -Id 'cli.render.playable' -ExitCode $renderReal.ExitCode
-    $renderParity = Invoke-Pnpm 'CLI unsupported-feature acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-parity.e2e.test.ts', '--no-file-parallelism')
-    Set-ScenarioOutcome -Id 'cli.render.unsupported-features' -ExitCode $renderParity.ExitCode
-    $renderRecovery = Invoke-Pnpm 'CLI render failure-recovery acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-recovery.e2e.test.ts', '--no-file-parallelism')
-    Set-ScenarioOutcome -Id 'cli.render.failure-recovery' -ExitCode $renderRecovery.ExitCode
+    $renderRealReport = Join-Path $workRoot 'render-real.vitest.json'
+    $null = Invoke-Pnpm 'CLI render-real source and bundle acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-real.e2e.test.ts', '--no-file-parallelism', '--reporter=json', "--outputFile=$renderRealReport")
+    Set-ScenarioOutcome -Id 'cli.render.playable' -ExitCode (Get-VitestAccountingExitCode $renderRealReport)
+    $renderParityReport = Join-Path $workRoot 'render-parity.vitest.json'
+    $null = Invoke-Pnpm 'CLI unsupported-feature acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-parity.e2e.test.ts', '--no-file-parallelism', '--reporter=json', "--outputFile=$renderParityReport")
+    Set-ScenarioOutcome -Id 'cli.render.unsupported-features' -ExitCode (Get-VitestAccountingExitCode $renderParityReport)
+    $renderRecoveryReport = Join-Path $workRoot 'render-recovery.vitest.json'
+    $null = Invoke-Pnpm 'CLI render failure-recovery acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-recovery.e2e.test.ts', '--no-file-parallelism', '--reporter=json', "--outputFile=$renderRecoveryReport")
+    Set-ScenarioOutcome -Id 'cli.render.failure-recovery' -ExitCode (Get-VitestAccountingExitCode $renderRecoveryReport)
     Invoke-VerifiedSetup $CandidateSetupPath $candidateSetup $candidateVersion | Out-Null
     Assert-UserIntegrations $candidateVersion
     if ((Get-InstalledFileHash 'joy-media.exe') -ne $candidateDesktopExeSha -or (Get-InstalledFileHash 'resources\app\cli\joy-media-bundle.mjs') -ne $candidateCliBundleSha -or (Get-InstalledFileHash 'resources\app\worker\joy-worker.exe') -ne $candidateWorkerSha) {
@@ -438,17 +456,21 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     }
     Invoke-AppSmoke 'v1.0.2 upgrade'
     $script:transitionOutcomes['upgradeCandidate'] = 'passed'
-    $editorAcceptance = Invoke-Pnpm 'installed candidate editor restart-save-export acceptance' @('exec', 'playwright', 'test', '--config', 'playwright.desktop.config.ts', 'tests/desktop/editor-acceptance.spec.ts', '--retries=0') 900 @{
+    $editorReport = Join-Path $workRoot 'editor-acceptance.playwright.json'
+    $null = Invoke-Pnpm 'installed candidate editor restart-save-export acceptance' @('exec', 'playwright', 'test', '--config', 'playwright.desktop.config.ts', 'tests/desktop/editor-acceptance.spec.ts', '--retries=0', '--reporter=json') 900 @{
         JOY_MEDIA_TEST_EXECUTABLE = Join-Path $installRoot 'joy-media.exe'
         JOY_MEDIA_TEST_WORKING_DIRECTORY = $installRoot
         JOY_MEDIA_TEST_API_BASE_URL = 'http://127.0.0.1:4174'
+        PLAYWRIGHT_JSON_OUTPUT_NAME = $editorReport
     }
-    Set-ScenarioOutcome -Id 'desktop.app.restart-save-export' -ExitCode $editorAcceptance.ExitCode
+    Set-ScenarioOutcome -Id 'desktop.app.restart-save-export' -ExitCode (Get-PlaywrightAccountingExitCode $editorReport)
     $candidateSeedVerification = Invoke-LifecycleFixture $devElectron 'verify'
     if ($candidateSeedVerification.result -ne 'verified' -or $candidateSeedVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256 -or $candidateSeedVerification.directCiphertextSha256 -ne $seedProof.directCiphertextSha256) {
         throw 'Settings, asset-library catalog, or DPAPI ciphertext did not survive the candidate update.'
     }
-    Set-ScenarioOutcome -Id 'project.persistence.fresh-process' -ExitCode ([int](-not ($candidateSeedVerification.result -eq 'verified' -and $candidateSeedVerification.ciphertextSha256 -eq $seedProof.ciphertextSha256 -and $candidateSeedVerification.directCiphertextSha256 -eq $seedProof.directCiphertextSha256)))
+    # project.persistence.fresh-process is not recorded here. The DPAPI fixture check above does not
+    # save a project, close the app, reopen it from a fresh profile or render, so the scenario stays
+    # absent until a packaged save, fresh-profile reopen and render step exists.
     $cliJoyEvidence = Invoke-InstalledCliAcceptance 'joy.cmd' 'joy'
     $cliJoyMediaEvidence = Invoke-InstalledCliAcceptance 'joy-media.cmd' 'joy-media'
     Set-ScenarioOutcome -Id 'cli.render.windows-entrypoints' -ExitCode ([int](-not (($cliJoyEvidence.status -eq 'passed') -and ($cliJoyMediaEvidence.status -eq 'passed'))))
