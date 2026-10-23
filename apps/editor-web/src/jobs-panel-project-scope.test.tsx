@@ -338,14 +338,13 @@ describe('JobsPanel project scope', () => {
         derivative: { id: 'derivative-1', sha256: 'sha-1' },
       },
     ]);
-    controlPlane.derivatives.mockResolvedValueOnce([
-      { id: 'derivative-1', kind: 'audio', sha256: 'sha-1' },
-    ]);
-    let finishBytes: () => void = () => undefined;
-    controlPlane.derivativeBytes.mockImplementationOnce(
+    // The derivative list is in flight when the editor leaves, so the next read must not start.
+    let finishDerivatives: () => void = () => undefined;
+    controlPlane.derivatives.mockImplementationOnce(
       () =>
-        new Promise<Blob>((resolve) => {
-          finishBytes = () => resolve(new Blob());
+        new Promise<unknown[]>((resolve) => {
+          finishDerivatives = () =>
+            resolve([{ id: 'derivative-1', kind: 'audio', sha256: 'sha-1' }]);
         }),
     );
     await render(panel(true));
@@ -360,19 +359,16 @@ describe('JobsPanel project scope', () => {
       container?.querySelector<HTMLButtonElement>('.jobs-review-button')?.click();
     });
     await vi.waitFor(() =>
-      expect(controlPlane.derivativeBytes).toHaveBeenCalledWith(
-        'project-1',
-        'asset-1',
-        'derivative-1',
-      ),
+      expect(controlPlane.derivatives).toHaveBeenCalledWith('project-1', 'asset-1'),
     );
 
     liveScope.held = false;
     await act(async () => {
-      finishBytes();
+      finishDerivatives();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
+    expect(controlPlane.derivativeBytes).not.toHaveBeenCalled();
     expect(controlPlane.assets).not.toHaveBeenCalled();
     expect(container?.textContent).toContain('Could not verify Worker result');
   });
