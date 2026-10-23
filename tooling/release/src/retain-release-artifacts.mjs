@@ -1,0 +1,190 @@
+// Retains the Windows release artifacts of one candidate in the designated durable evidence store, and
+// verifies a retained copy. The Windows lane runs the retain mode under PowerShell, and the Linux gate
+// runs the verify mode, so this one implementation holds the contract for both.
+//
+//   node retain-release-artifacts.mjs <staged-dir> <candidate-sha> <run-id> <attempt> <evidence-root>
+//   node retain-release-artifacts.mjs - <candidate-sha> <run-id> <attempt> <evidence-root> --verify-only
+//
+// Retain mode: <staged-dir> holds artifact-manifest.json and exactly the files that manifest lists.
+// Every file is hashed here, not by the lane that wrote the manifest, and compared with the manifest.
+// Where SHA256SUMS.txt names a file, its digest must agree too. A mismatch, a missing or extra file, a
+// symlink, or an identity that does not match this run throws and writes nothing. The copy is written
+// once, under the candidate and run, and it is verified against the same manifest before the call
+// returns.
+//
+// Verify mode: the retained copy must already exist. The same checks run against the bytes in the store,
+// and nothing is written.
+//
+// Files are copied byte for byte. Release binaries never pass through the redaction that the JSON and
+// text evidence uses, because redaction rewrites bytes.
+import { createHash } from 'node:crypto';
+import {
+  createReadStream,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  accessSync,
+  constants,
+} from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const MANIFEST = 'artifact-manifest.json';
+const SUMS = 'SHA256SUMS.txt';
+const FORMAT = 'joy-media-release-artifacts';
+
+export function sha256File(path) {
+  return new Promise((resolveHash, rejectHash) => {
+    const hash = createHash('sha256');
+    const stream = createReadStream(path);
+    stream.on('error', rejectHash);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolveHash(hash.digest('hex')));
+  });
+}
+
+// The manifest's identity and its file list. Paths must stay inside the artifact directory.
+export function parseManifest(manifest, { candidate, runId, attempt }) {
+  if (manifest.format !== FORMAT) throw new Error('unexpected manifest format');
+  if (manifest.candidateSha !== candidate)
+    throw new Error('manifest candidateSha does not match the candidate');
+  if (String(manifest.runId) !== runId || String(manifest.attempt) !== attempt) {
+    throw new Error('manifest run identity does not match this run');
+  }
+  if (!Array.isArray(manifest.files) || manifest.files.length === 0)
+    throw new Error('manifest lists no files');
+  const seen = new Set();
+  for (const entry of manifest.files) {
+    const path = String(entry.path);
+    if (
+      path.startsWith('/') ||
+      path.split('/').some((part) => part === '' || part === '.' || part === '..')
+    ) {
+      throw new Error(`manifest path is not a plain relative path: ${path}`);
+    }
+    if (
+      !/^[0-9a-f]{64}$/u.test(String(entry.sha256)) ||
+      !Number.isSafeInteger(entry.bytes) ||
+      entry.bytes < 0
+    ) {
+      throw new Error(`manifest entry is malformed: ${path}`);
+    }
+    if (seen.has(path)) throw new Error(`manifest lists ${path} twice`);
+    seen.add(path);
+  }
+  return manifest.files;
+}
+
+// Every file under dir, as a posix relative path. A symlink anywhere in the tree throws.
+export function listFiles(dir) {
+  const found = [];
+  const walk = (current) => {
+    for (const name of readdirSync(current)) {
+      const full = join(current, name);
+      const info = lstatSync(full);
+      if (info.isSymbolicLink()) throw new Error(`symlinks are not allowed in ${dir}`);
+      if (info.isDirectory()) walk(full);
+      else if (info.isFile()) found.push(relative(dir, full).split(sep).join('/'));
+    }
+  };
+  walk(dir);
+  return found.filter((path) => path !== MANIFEST).sort();
+}
+
+// The directory holds exactly the manifest's files, each with the manifest's size and digest, and
+// SHA256SUMS.txt agrees with every file it names. Digests are computed here, from the bytes.
+export async function verifyTree(dir, entries) {
+  const expectedPaths = entries.map((entry) => entry.path).sort();
+  const actualPaths = listFiles(dir);
+  if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) {
+    throw new Error(`${dir} does not hold exactly the manifest's files`);
+  }
+  const digests = new Map();
+  for (const entry of entries) {
+    const full = join(dir, ...entry.path.split('/'));
+    if (statSync(full).size !== entry.bytes)
+      throw new Error(`byte count mismatch for ${entry.path} in ${dir}`);
+    const digest = await sha256File(full);
+    if (digest !== entry.sha256) throw new Error(`sha256 mismatch for ${entry.path} in ${dir}`);
+    digests.set(entry.path, digest);
+  }
+  const sumsPath = join(dir, SUMS);
+  if (existsSync(sumsPath)) {
+    for (const line of readFileSync(sumsPath, 'utf8').split('\n')) {
+      const text = line.replace(/\r$/u, '');
+      if (text.trim() === '') continue;
+      const match = /^([0-9a-fA-F]{64})\s+\*?(.+)$/u.exec(text);
+      if (!match) throw new Error(`SHA256SUMS.txt has a line that is not a checksum: ${text}`);
+      const [, sum, name] = match;
+      if (!digests.has(name))
+        throw new Error(`SHA256SUMS.txt names ${name}, which is not in ${dir}`);
+      if (digests.get(name) !== sum.toLowerCase())
+        throw new Error(`SHA256SUMS.txt disagrees with ${name}`);
+    }
+  }
+}
+
+// The evidence root must sit outside the checkout, _work and _temp, as the gate's other stores do.
+function assertStoreLocation(root, env) {
+  const normalized = resolve(root).split(sep).join('/');
+  const workspace = env.RUNNER_WORKSPACE ? resolve(env.RUNNER_WORKSPACE).split(sep).join('/') : '';
+  if (
+    (workspace !== '' && normalized.startsWith(workspace)) ||
+    /\/_work\//u.test(normalized) ||
+    /\/_temp\//u.test(normalized)
+  ) {
+    throw new Error('the evidence root must be outside the checkout, _work and _temp');
+  }
+}
+
+export async function run(argv, env = process.env) {
+  const [stagedArg, candidate, runId, attempt, root, mode] = argv;
+  if (!/^[0-9a-f]{40}$/u.test(candidate ?? ''))
+    throw new Error('candidate sha must be 40 lowercase hex characters');
+  if (!/^[0-9]+$/u.test(runId ?? '') || !/^[0-9]+$/u.test(attempt ?? ''))
+    throw new Error('run id and attempt must be numbers');
+  if (!root) throw new Error('a durable evidence root is required');
+  assertStoreLocation(root, env);
+  const identity = { candidate, runId, attempt };
+  const dest = join(root, candidate, `${runId}-${attempt}-release-artifacts`);
+
+  if (mode === '--verify-only') {
+    if (!existsSync(dest))
+      throw new Error(`no retained release artifacts for this candidate and run at ${dest}`);
+    const entries = parseManifest(JSON.parse(readFileSync(join(dest, MANIFEST), 'utf8')), identity);
+    await verifyTree(dest, entries);
+    return `verified ${entries.length} retained file(s) at ${dest}`;
+  }
+  if (mode !== undefined) throw new Error(`unknown mode: ${mode}`);
+
+  if (!existsSync(join(stagedArg, MANIFEST)))
+    throw new Error(`${MANIFEST} is missing from ${stagedArg}`);
+  const entries = parseManifest(
+    JSON.parse(readFileSync(join(stagedArg, MANIFEST), 'utf8')),
+    identity,
+  );
+  await verifyTree(stagedArg, entries);
+
+  mkdirSync(root, { recursive: true });
+  accessSync(root, constants.W_OK);
+  if (existsSync(dest)) throw new Error(`retention is write-once, and ${dest} already exists`);
+  mkdirSync(dest, { recursive: true });
+  cpSync(stagedArg, dest, { recursive: true, errorOnExist: true, force: false });
+  await verifyTree(dest, entries);
+  return `retained and re-verified ${entries.length} file(s) at ${dest}`;
+}
+
+const isEntry =
+  process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+if (isEntry) {
+  try {
+    console.log(`retain-release-artifacts: ${await run(process.argv.slice(2))}`);
+  } catch (error) {
+    console.error(`retain-release-artifacts: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
