@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -22,18 +23,27 @@ const LANES = [
   'p3-real-services',
 ];
 const IMAGE_DIGEST = `sha256:${'b'.repeat(64)}`;
+const MANIFEST_PATH = 'test-output/readiness/two-pass-evidence/manifest.json';
 const PASS_PATH = {
   1: 'test-output/readiness/two-pass-evidence/windows/pass-1/acceptance.json',
   2: 'test-output/readiness/two-pass-evidence/windows/pass-2/acceptance.json',
 } as const;
 
+function digest(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+// Digests of the candidate artifact bytes. prepareWorkspace sets them from the files it writes, so a
+// receipt's candidate digests match the retained artifacts unless a test changes one.
+let candidateDigests: Record<string, string> = {};
+
 function lifecycle(pass: number) {
   const artifacts = {
-    candidateSetupSha256: 'c'.repeat(64),
-    candidatePortableArchiveSha256: 'd'.repeat(64),
-    candidateDesktopExecutableSha256: 'e'.repeat(64),
-    candidateCliBundleSha256: 'f'.repeat(64),
-    candidateWorkerExecutableSha256: '1'.repeat(64),
+    candidateSetupSha256: candidateDigests['joy-media-setup.exe'],
+    candidatePortableArchiveSha256: candidateDigests['joy-media-windows-x64.zip'],
+    candidateDesktopExecutableSha256: candidateDigests['joy-media.exe'],
+    candidateCliBundleSha256: candidateDigests['joy-media-bundle.mjs'],
+    candidateWorkerExecutableSha256: candidateDigests['joy-worker.exe'],
     previousSetupSha256: '3f5fbe853de04a24aac22a46e28dd661cc1a80a2a6c5a1fa383fcd9ab3efde04',
     previousArchiveSha256: '21be785e26c0d06cadba40929ada839cfd24345f17b828cdb735d4eff056a88c',
     previousChecksumsSha256: 'a7b933f44ec82edd2f166dcde0bb013e1febd0ebbd19aa42dd49ac8e05adfe32',
@@ -117,27 +127,62 @@ function prepareWorkspace() {
     writeFileSync(absolute, contents);
   };
   const remove = (relativePath: string) => rmSync(join(workspaceRoot, relativePath));
+  const passDigests = () =>
+    [1, 2].map((pass) => ({
+      pass,
+      sha256: digest(readFileSync(join(workspaceRoot, PASS_PATH[pass as 1 | 2]), 'utf8')),
+    }));
+  const writeSummary = (overrides: { sources?: unknown[]; windowsWorkerPasses?: unknown[] } = {}) =>
+    write(
+      MANIFEST_PATH,
+      JSON.stringify({
+        schemaVersion: 1,
+        candidateSha: CANDIDATE_SHA,
+        runId: RUN_ID,
+        attempt: ATTEMPT,
+        sources: overrides.sources ?? [
+          { lane: 'real-service', pass: 1 },
+          { lane: 'real-service', pass: 2 },
+          { lane: 'p3', pass: 1 },
+          { lane: 'p3', pass: 2 },
+        ],
+        windowsWorkerPasses: overrides.windowsWorkerPasses ?? passDigests(),
+      }),
+    );
+  // A receipt written by a legitimate producer: the summary is re-sealed to its exact bytes.
+  const sealPass = (pass: 1 | 2, receipt: unknown) => {
+    write(PASS_PATH[pass], JSON.stringify(receipt));
+    writeSummary();
+  };
   write('apps/desktop/package.json', JSON.stringify({ version: '1.0.2' }));
   write('pnpm-lock.yaml', 'frozen lockfile fixture');
   write('packages/test-fixtures/media/manifest.json', '{"fixture":"readiness"}');
+  const artifactBytes: Record<string, string> = {
+    'joy-media-setup.exe': 'setup bytes',
+    'joy-media-windows-x64.zip': 'portable bytes',
+    'joy-media.exe': 'desktop bytes',
+    'joy-media-bundle.mjs': 'cli bytes',
+    'joy-worker.exe': 'worker bytes',
+  };
+  candidateDigests = Object.fromEntries(
+    Object.entries(artifactBytes).map(([name, bytes]) => [name, digest(bytes)]),
+  );
+  for (const [name, bytes] of Object.entries(artifactBytes)) {
+    write(`test-output/readiness/artifacts/${name}`, bytes);
+  }
   write(
-    'test-output/readiness/two-pass-evidence/manifest.json',
-    JSON.stringify({
-      schemaVersion: 1,
-      candidateSha: CANDIDATE_SHA,
-      runId: RUN_ID,
-      attempt: ATTEMPT,
-      sources: [
-        { lane: 'real-service', pass: 1 },
-        { lane: 'real-service', pass: 2 },
-        { lane: 'p3', pass: 1 },
-        { lane: 'p3', pass: 2 },
-      ],
-      windowsWorkerPasses: [{ pass: 1 }, { pass: 2 }],
-    }),
+    'test-output/readiness/artifacts/SHA256SUMS.txt',
+    `${Object.entries(candidateDigests)
+      .map(([name, hash]) => `${hash}  ${name}`)
+      .join('\n')}\n`,
+  );
+  write(
+    'test-output/readiness/artifacts/artifact-manifest.json',
+    JSON.stringify({ candidateSha: CANDIDATE_SHA, artifacts: Object.keys(artifactBytes) }),
   );
   write(PASS_PATH[1], JSON.stringify(lifecycle(1)));
   write(PASS_PATH[2], JSON.stringify(lifecycle(2)));
+  writeSummary();
   write('test-output/windows/acceptance.json', JSON.stringify(lifecycle(2)));
   write('test-output/windows/acceptance-passes/pass-1.json', JSON.stringify(lifecycle(1)));
   write('test-output/windows/acceptance-passes/pass-2.json', JSON.stringify(lifecycle(2)));
@@ -156,15 +201,7 @@ function prepareWorkspace() {
   const needsJson = JSON.stringify(
     Object.fromEntries(LANES.map((lane) => [lane, { result: 'success' }])),
   );
-  return { workspaceRoot, needsJson, write, remove };
-}
-
-function writePass(
-  write: (relativePath: string, contents: string) => void,
-  pass: 1 | 2,
-  receipt: unknown,
-) {
-  write(PASS_PATH[pass], JSON.stringify(receipt));
+  return { workspaceRoot, needsJson, write, remove, sealPass, writeSummary };
 }
 
 function build(workspaceRoot: string, needsJson: string, overrides: { headSha?: string } = {}) {
@@ -246,59 +283,69 @@ describe('createReadinessEvidence', () => {
   });
 
   it('fails when the second pass tests a different setup artifact', () => {
-    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const { workspaceRoot, needsJson, sealPass } = prepareWorkspace();
     const stale = lifecycle(2);
     stale.desktopLifecycle.artifacts.candidateSetupSha256 = '9'.repeat(64);
-    writePass(write, 2, stale);
+    sealPass(2, stale);
     expect(() => build(workspaceRoot, needsJson)).toThrow(/same exact candidate artifacts/u);
   });
 
   it('fails closed when either installed CLI launcher does not render playable video', () => {
-    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const { workspaceRoot, needsJson, sealPass } = prepareWorkspace();
     const secondPass = lifecycle(2);
     secondPass.desktopLifecycle.cliAcceptance.joyMediaCmd.videoCodec = 'vp9';
-    writePass(write, 2, secondPass);
+    sealPass(2, secondPass);
     expect(() => build(workspaceRoot, needsJson)).toThrow(
       /did not render playable H\.264\/AAC video through joyMediaCmd/u,
     );
   });
 
   it('fails closed when a desktop install lifecycle transition is missing', () => {
-    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const { workspaceRoot, needsJson, sealPass } = prepareWorkspace();
     const secondPass = lifecycle(2);
     secondPass.desktopLifecycle.transitions.repairCandidate = 'failed';
-    writePass(write, 2, secondPass);
+    sealPass(2, secondPass);
     expect(() => build(workspaceRoot, needsJson)).toThrow(
       /missing a required installer transition/u,
     );
   });
 
-  it('fails when a Windows pass has no measured result for a required scenario', () => {
+  it('rejects a Windows receipt changed after the two-pass summary recorded its digest', () => {
     const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const edited = lifecycle(2);
+    edited.desktopLifecycle.commands[0]!.name = 'edited after the summary was written';
+    write(PASS_PATH[2], JSON.stringify(edited));
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /Windows pass 2 receipt does not match the digest recorded in the two-pass summary/u,
+    );
+  });
+
+  it('rejects a two-pass summary that lists one Windows pass twice', () => {
+    const { workspaceRoot, needsJson, writeSummary } = prepareWorkspace();
+    const pass1Digest = digest(readFileSync(join(workspaceRoot, PASS_PATH[1]), 'utf8'));
+    writeSummary({
+      windowsWorkerPasses: [
+        { pass: 1, sha256: pass1Digest },
+        { pass: 1, sha256: pass1Digest },
+      ],
+    });
+    expect(() => build(workspaceRoot, needsJson)).toThrow(/exactly once/u);
+  });
+
+  it('fails when a Windows pass has no measured result for a required scenario', () => {
+    const { workspaceRoot, needsJson, sealPass } = prepareWorkspace();
     const secondPass = lifecycle(2);
     secondPass.desktopLifecycle.scenarios = secondPass.desktopLifecycle.scenarios.filter(
       (entry) => entry.id !== 'desktop.app.restart-save-export',
     );
-    writePass(write, 2, secondPass);
+    sealPass(2, secondPass);
     expect(() => build(workspaceRoot, needsJson)).toThrow(
       /has no measured result for desktop\.app\.restart-save-export/u,
     );
   });
 
-  it('fails when the export parity scenario is missing from a Windows pass', () => {
-    const { workspaceRoot, needsJson, write } = prepareWorkspace();
-    const firstPass = lifecycle(1);
-    firstPass.desktopLifecycle.scenarios = firstPass.desktopLifecycle.scenarios.filter(
-      (entry) => entry.id !== 'desktop.export-media-semantics',
-    );
-    writePass(write, 1, firstPass);
-    expect(() => build(workspaceRoot, needsJson)).toThrow(
-      /has no measured result for desktop\.export-media-semantics/u,
-    );
-  });
-
   it('rejects retry-only success in a required scenario', () => {
-    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const { workspaceRoot, needsJson, sealPass } = prepareWorkspace();
     const secondPass = lifecycle(2);
     const entry = secondPass.desktopLifecycle.scenarios.find(
       (scenario) => scenario.id === 'cli.render.playable',
@@ -306,31 +353,45 @@ describe('createReadinessEvidence', () => {
     expect(entry).toBeDefined();
     entry!.firstAttemptPassed = false;
     entry!.retries = 1;
-    writePass(write, 2, secondPass);
+    sealPass(2, secondPass);
     expect(() => build(workspaceRoot, needsJson)).toThrow(
       /did not pass cli\.render\.playable on its first attempt/u,
     );
   });
 
+  it('rejects a scenario that needed a retry even though its first attempt passed', () => {
+    const { workspaceRoot, needsJson, sealPass } = prepareWorkspace();
+    const secondPass = lifecycle(2);
+    const entry = secondPass.desktopLifecycle.scenarios.find(
+      (scenario) => scenario.id === 'cli.render.windows-entrypoints',
+    );
+    expect(entry).toBeDefined();
+    entry!.retries = 1;
+    sealPass(2, secondPass);
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /needed 1 retries for cli\.render\.windows-entrypoints/u,
+    );
+  });
+
   it('rejects a scenario that its receipt reports as failed', () => {
-    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const { workspaceRoot, needsJson, sealPass } = prepareWorkspace();
     const firstPass = lifecycle(1);
     const entry = firstPass.desktopLifecycle.scenarios.find(
       (scenario) => scenario.id === 'project.persistence.fresh-process',
     );
     expect(entry).toBeDefined();
     entry!.status = 'failed';
-    writePass(write, 1, firstPass);
+    sealPass(1, firstPass);
     expect(() => build(workspaceRoot, needsJson)).toThrow(
       /reports project\.persistence\.fresh-process as failed/u,
     );
   });
 
   it('rejects a Windows receipt bound to another candidate SHA', () => {
-    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const { workspaceRoot, needsJson, sealPass } = prepareWorkspace();
     const secondPass = lifecycle(2);
     secondPass.candidateSha = OTHER_SHA;
-    writePass(write, 2, secondPass);
+    sealPass(2, secondPass);
     expect(() => build(workspaceRoot, needsJson)).toThrow(/stale or has mismatched provenance/u);
   });
 
@@ -342,30 +403,37 @@ describe('createReadinessEvidence', () => {
   });
 
   it('rejects a two-pass summary that omits a Linux acceptance pass', () => {
-    const { workspaceRoot, needsJson, write } = prepareWorkspace();
-    write(
-      'test-output/readiness/two-pass-evidence/manifest.json',
-      JSON.stringify({
-        schemaVersion: 1,
-        candidateSha: CANDIDATE_SHA,
-        runId: RUN_ID,
-        attempt: ATTEMPT,
-        sources: [
-          { lane: 'real-service', pass: 1 },
-          { lane: 'real-service', pass: 2 },
-          { lane: 'p3', pass: 1 },
-        ],
-        windowsWorkerPasses: [{ pass: 1 }, { pass: 2 }],
-      }),
-    );
+    const { workspaceRoot, needsJson, writeSummary } = prepareWorkspace();
+    writeSummary({
+      sources: [
+        { lane: 'real-service', pass: 1 },
+        { lane: 'real-service', pass: 2 },
+        { lane: 'p3', pass: 1 },
+      ],
+    });
     expect(() => build(workspaceRoot, needsJson)).toThrow(/does not bind four/u);
   });
 
+  it('rejects a two-pass summary that repeats one Linux pass', () => {
+    const { workspaceRoot, needsJson, writeSummary } = prepareWorkspace();
+    writeSummary({
+      sources: [
+        { lane: 'real-service', pass: 1 },
+        { lane: 'real-service', pass: 1 },
+        { lane: 'p3', pass: 1 },
+        { lane: 'p3', pass: 2 },
+      ],
+    });
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /missing a required Linux acceptance pass/u,
+    );
+  });
+
   it('rejects a Windows receipt whose recorded command failed', () => {
-    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const { workspaceRoot, needsJson, sealPass } = prepareWorkspace();
     const secondPass = lifecycle(2);
     secondPass.desktopLifecycle.commands[0]!.exitCode = 1;
-    writePass(write, 2, secondPass);
+    sealPass(2, secondPass);
     expect(() => build(workspaceRoot, needsJson)).toThrow(/failed or missing command/u);
   });
 
@@ -391,54 +459,97 @@ describe('createReadinessEvidence', () => {
     ).toThrow(/first workflow attempt/u);
   });
 
-  it('rejects a scenario that needed a retry even though its first attempt passed', () => {
-    const { workspaceRoot, needsJson, write } = prepareWorkspace();
-    const secondPass = lifecycle(2);
-    const entry = secondPass.desktopLifecycle.scenarios.find(
-      (scenario) => scenario.id === 'cli.render.windows-entrypoints',
-    );
-    expect(entry).toBeDefined();
-    entry!.retries = 1;
-    writePass(write, 2, secondPass);
-    expect(() => build(workspaceRoot, needsJson)).toThrow(
-      /needed 1 retries for cli\.render\.windows-entrypoints/u,
-    );
-  });
-
   it('rejects duplicate measured results for one scenario', () => {
-    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const { workspaceRoot, needsJson, sealPass } = prepareWorkspace();
     const firstPass = lifecycle(1);
     const original = firstPass.desktopLifecycle.scenarios.find(
       (scenario) => scenario.id === 'cli.render.playable',
     );
     expect(original).toBeDefined();
     firstPass.desktopLifecycle.scenarios.push({ ...original! });
-    writePass(write, 1, firstPass);
+    sealPass(1, firstPass);
     expect(() => build(workspaceRoot, needsJson)).toThrow(
       /duplicate measured results for cli\.render\.playable/u,
     );
   });
 
-  it('rejects a two-pass summary that repeats one Linux pass', () => {
+  it('rejects an artifact whose bytes differ from the independent checksum file', () => {
     const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    write('test-output/readiness/artifacts/joy-media-setup.exe', 'tampered bytes');
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /hash mismatch for joy-media-setup\.exe/u,
+    );
+  });
+
+  it('rejects an artifact that is missing from the retained evidence', () => {
+    const { workspaceRoot, needsJson, remove } = prepareWorkspace();
+    remove('test-output/readiness/artifacts/joy-media-windows-x64.zip');
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /artifact is missing: joy-media-windows-x64\.zip/u,
+    );
+  });
+
+  it('rejects a checksum file that disagrees with the Windows receipts', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const sumsPath = join(workspaceRoot, 'test-output/readiness/artifacts/SHA256SUMS.txt');
+    const sums = readFileSync(sumsPath, 'utf8');
     write(
-      'test-output/readiness/two-pass-evidence/manifest.json',
-      JSON.stringify({
-        schemaVersion: 1,
-        candidateSha: CANDIDATE_SHA,
-        runId: RUN_ID,
-        attempt: ATTEMPT,
-        sources: [
-          { lane: 'real-service', pass: 1 },
-          { lane: 'real-service', pass: 1 },
-          { lane: 'p3', pass: 1 },
-          { lane: 'p3', pass: 2 },
-        ],
-        windowsWorkerPasses: [{ pass: 1 }, { pass: 2 }],
-      }),
+      'test-output/readiness/artifacts/SHA256SUMS.txt',
+      sums.replace(
+        /^[0-9a-f]{64} {2}joy-media-setup\.exe$/mu,
+        `${digest('a different setup')}  joy-media-setup.exe`,
+      ),
     );
     expect(() => build(workspaceRoot, needsJson)).toThrow(
-      /missing a required Linux acceptance pass/u,
+      /does not match the independent checksum file/u,
+    );
+  });
+
+  it('rejects a checksum file with no entry for a required artifact', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const sumsPath = join(workspaceRoot, 'test-output/readiness/artifacts/SHA256SUMS.txt');
+    const sums = readFileSync(sumsPath, 'utf8');
+    write(
+      'test-output/readiness/artifacts/SHA256SUMS.txt',
+      sums
+        .split('\n')
+        .filter((line) => !line.endsWith('  joy-worker.exe'))
+        .join('\n'),
+    );
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /no independent checksum for joy-worker\.exe/u,
+    );
+  });
+
+  it('rejects a malformed checksum line and a checksum entry listed twice', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const validSums = readFileSync(
+      join(workspaceRoot, 'test-output/readiness/artifacts/SHA256SUMS.txt'),
+      'utf8',
+    );
+    write('test-output/readiness/artifacts/SHA256SUMS.txt', 'not-a-digest  joy-media-setup.exe\n');
+    expect(() => build(workspaceRoot, needsJson)).toThrow(/checksum line is malformed/u);
+    const setupLine = validSums.split('\n').find((line) => line.endsWith('  joy-media-setup.exe'));
+    write('test-output/readiness/artifacts/SHA256SUMS.txt', `${validSums}${setupLine}\n`);
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /lists joy-media-setup\.exe more than once/u,
+    );
+  });
+
+  it('rejects an artifact manifest that is bound to another candidate SHA', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    write(
+      'test-output/readiness/artifacts/artifact-manifest.json',
+      JSON.stringify({ candidateSha: OTHER_SHA, artifacts: [] }),
+    );
+    expect(() => build(workspaceRoot, needsJson)).toThrow(/different candidate SHA/u);
+  });
+
+  it('fails closed when the independent checksum file is absent', () => {
+    const { workspaceRoot, needsJson, remove } = prepareWorkspace();
+    remove('test-output/readiness/artifacts/SHA256SUMS.txt');
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /required artifact integrity file is missing/u,
     );
   });
 

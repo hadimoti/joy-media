@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateGateSummary } from './ci-gate-summary.ts';
 import { REQUIRED_SCENARIOS, validateReadinessEvidence } from './readiness-evidence.ts';
+import { parseChecksumFile, verifyArtifacts } from './artifact-integrity.mjs';
 
 // Every value in the emitted record is derived from authenticated execution evidence:
 // the workflow's `needs` context, the two exact Windows lifecycle receipts, the two-pass
@@ -36,12 +37,23 @@ const REMOTE_ARTIFACTS = [
   ['joy-worker.exe', 'candidateWorkerExecutableSha256'],
 ];
 const TWO_PASS_SUMMARY = 'test-output/readiness/two-pass-evidence/manifest.json';
+// Artifact bytes, the independent checksum file and the artifact manifest, as retained by the
+// evidence store. Expected digests come only from the checksum file, never from a receipt.
+const ARTIFACT_ROOT = 'test-output/readiness/artifacts';
+
+function readRequiredText(root, relativePath) {
+  const absolute = resolve(root, relativePath);
+  if (!existsSync(absolute)) fail(`required artifact integrity file is missing: ${relativePath}`);
+  return readFileSync(absolute, 'utf8');
+}
 const WINDOWS_PASS_PATHS = [
   'test-output/readiness/two-pass-evidence/windows/pass-1/acceptance.json',
   'test-output/readiness/two-pass-evidence/windows/pass-2/acceptance.json',
 ];
 const REDACTED_INPUT_PATHS = [
   TWO_PASS_SUMMARY,
+  `${ARTIFACT_ROOT}/SHA256SUMS.txt`,
+  `${ARTIFACT_ROOT}/artifact-manifest.json`,
   ...WINDOWS_PASS_PATHS,
   'test-output/windows/acceptance.json',
   'test-output/windows/acceptance-passes/pass-1.json',
@@ -72,6 +84,20 @@ function readJson(root, relativePath) {
   } catch {
     fail(`required two-pass evidence file is invalid JSON: ${relativePath}`);
   }
+}
+
+// Reads a receipt and the digest of its exact bytes, so the two-pass summary can bind it.
+function readReceipt(root, relativePath) {
+  const absolute = resolve(root, relativePath);
+  if (!existsSync(absolute)) fail(`required two-pass evidence file is missing: ${relativePath}`);
+  const bytes = readFileSync(absolute);
+  let evidence;
+  try {
+    evidence = JSON.parse(bytes.toString('utf8'));
+  } catch {
+    fail(`required two-pass evidence file is invalid JSON: ${relativePath}`);
+  }
+  return { evidence, sha256: createHash('sha256').update(bytes).digest('hex') };
 }
 
 function hashFile(root, relativePath) {
@@ -240,7 +266,22 @@ export function buildReadinessEvidence({
     fail('two-pass summary does not contain both Windows acceptance passes');
   }
 
-  const windowsEvidence = WINDOWS_PASS_PATHS.map((path) => readJson(root, path));
+  // The two-pass summary records a digest of each Windows receipt. Every receipt must match its
+  // recorded digest byte for byte, and passes 1 and 2 must each appear exactly once.
+  const summaryPassNumbers = summary.windowsWorkerPasses.map((entry) => entry?.pass).sort();
+  if (summaryPassNumbers.join(',') !== '1,2') {
+    fail('two-pass summary does not list Windows passes 1 and 2 exactly once');
+  }
+  const receipts = WINDOWS_PASS_PATHS.map((path) => readReceipt(root, path));
+  receipts.forEach((receipt, index) => {
+    const entry = summary.windowsWorkerPasses.find((candidate) => candidate?.pass === index + 1);
+    if (entry?.sha256 !== receipt.sha256) {
+      fail(
+        `Windows pass ${index + 1} receipt does not match the digest recorded in the two-pass summary`,
+      );
+    }
+  });
+  const windowsEvidence = receipts.map((receipt) => receipt.evidence);
   const lifecycles = windowsEvidence.map((evidence, index) =>
     assertLifecycle(evidence, { candidateSha, runId, attempt, pass: index + 1 }),
   );
@@ -284,18 +325,35 @@ export function buildReadinessEvidence({
   const lockfileSha256 = hashFile(root, 'pnpm-lock.yaml');
   const fixtureManifestSha256 = hashFile(root, 'packages/test-fixtures/media/manifest.json');
   const sourceEvidencePath = WINDOWS_PASS_PATHS[0];
-  const installerArtifacts = REMOTE_ARTIFACTS.map(([fileName, key]) => {
-    const digest = first.artifacts[key];
-    if (!/^[0-9a-f]{64}$/u.test(digest ?? ''))
-      fail(`Windows artifact hash is invalid for ${fileName}`);
-    return {
-      path: `remote/windows/${fileName}`,
-      expectedSha256: digest,
-      observedSha256: digest,
-      sourceEvidencePath,
-      sourceEvidenceKey: `desktopLifecycle.artifacts.${key}`,
-    };
+  // Expected digests come from the independent checksum file and artifact manifest. Observed digests
+  // come from hashing the artifact bytes. The Windows receipts are only cross-checked against the
+  // checksum file, and a receipt never supplies the expected value.
+  const checksums = parseChecksumFile(readRequiredText(root, `${ARTIFACT_ROOT}/SHA256SUMS.txt`));
+  const artifactManifest = JSON.parse(
+    readRequiredText(root, `${ARTIFACT_ROOT}/artifact-manifest.json`),
+  );
+  const verifiedArtifacts = verifyArtifacts({
+    artifacts: REMOTE_ARTIFACTS.map(([fileName, key]) => {
+      const digest = first.artifacts[key];
+      if (!/^[0-9a-f]{64}$/u.test(digest ?? ''))
+        fail(`Windows artifact hash is invalid for ${fileName}`);
+      return { name: fileName, receiptSha256: digest };
+    }),
+    checksums,
+    bytesByName: (name) => {
+      const absolute = resolve(root, ARTIFACT_ROOT, name);
+      return existsSync(absolute) ? readFileSync(absolute) : null;
+    },
+    candidateSha,
+    manifest: artifactManifest,
   });
+  const installerArtifacts = verifiedArtifacts.map((artifact, index) => ({
+    path: `remote/windows/${artifact.name}`,
+    expectedSha256: artifact.expectedSha256,
+    observedSha256: artifact.observedSha256,
+    sourceEvidencePath,
+    sourceEvidenceKey: `desktopLifecycle.artifacts.${REMOTE_ARTIFACTS[index][1]}`,
+  }));
 
   const redactedPaths = [...new Set(REDACTED_INPUT_PATHS)].sort();
   const redactedHashes = Object.fromEntries(
