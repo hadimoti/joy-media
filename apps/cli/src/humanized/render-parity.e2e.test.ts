@@ -478,6 +478,14 @@ describe('render parity and unsupported-feature contract', () => {
     });
     const planPath = sandbox.path(`${id}-plan.json`);
     const faceProbe = probeCanonicalCaptionFace();
+    // The release gate sets JOY_MEDIA_REQUIRE_CAPTION_FACE=1. There the refusal below is not an
+    // acceptable outcome, because it would pass without rendering a caption. Ordinary runs keep the
+    // refusal check.
+    if (!faceProbe.usable && process.env['JOY_MEDIA_REQUIRE_CAPTION_FACE'] === '1') {
+      throw new Error(
+        'the canonical caption face is unavailable, so the release gate cannot accept a caption refusal in place of a rendered caption',
+      );
+    }
     const preparation = await sandbox.run([
       'plan',
       'prepare',

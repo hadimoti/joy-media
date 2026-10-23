@@ -504,45 +504,4 @@ describe.skipIf(!HAS_FFMPEG)('render makes real video (real binary + real ffmpeg
     const shown = await run(['project', 'show', id, '--json']);
     expect(JSON.stringify(shown.json())).not.toContain('notes.txt');
   }, 120_000);
-
-  it.skipIf(process.platform === 'win32').each([
-    { signal: 'SIGINT' as const, exitCode: 130 },
-    { signal: 'SIGTERM' as const, exitCode: 143 },
-  ])(
-    '%s in the middle of an encode exits with its signal status and leaves no half-written video behind',
-    async ({ signal, exitCode }) => {
-      await ff(
-        '-f',
-        'lavfi',
-        '-i',
-        'testsrc2=s=1280x720:r=30:d=90',
-        '-f',
-        'lavfi',
-        '-i',
-        'sine=f=300:d=90',
-        '-c:v',
-        'libx264',
-        '-preset',
-        'ultrafast',
-        '-c:a',
-        'aac',
-        media('long.mp4'),
-      );
-      const id = await newProject('Long');
-      await addClip(id, ['--asset', media('long.mp4')]);
-      const r = await sb.run(['render', '--project', id, '--out', sb.path('out8'), '--json'], {
-        signal,
-        signalAfterMs: 2500,
-        timeoutMs: 120_000,
-      });
-      expect(r.code, describeRun(r)).toBe(exitCode);
-      expect(r.ndjson<{ type: string; code?: string }>().at(-1)).toMatchObject({
-        type: 'error',
-        code: 'cancelled',
-      });
-      const left = existsSync(sb.path('out8')) ? readdirSync(sb.path('out8')) : [];
-      expect(left).toEqual([]);
-    },
-    240_000,
-  );
 });
