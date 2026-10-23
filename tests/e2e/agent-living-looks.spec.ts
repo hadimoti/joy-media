@@ -25,12 +25,12 @@ test.describe('JOY Living Looks', () => {
     'keeps the Looks setup in one owned viewport': { original: 2 },
     'renders the five shipping packs and runs one through approve + Undo': { original: 7 },
     'matches the Edit composer while keeping Looks controls reachable without overflow': {
-      original: { min: 1, max: 2 },
+      original: 2,
       cloud: 2,
     },
     'shows an unavailable pack honestly when the editor lacks a capability': { original: 2 },
     'a saved Look survives reload and can be reopened, adjusted, and detached (GAP 1b/1c)': {
-      original: { min: 11, max: 12 },
+      original: 11,
       cloud: 11,
     },
   };

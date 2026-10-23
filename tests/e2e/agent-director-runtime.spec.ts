@@ -60,25 +60,20 @@ test.describe('JOY Live Director runtime boundary', () => {
     cloud?: number | CountRange;
   };
   const DIRECTOR_ASSET_MISS_MAP: Record<string, AssetMissBounds> = {
-    // Stop lands while the reference media reads are still in flight. Each declared-missing reference
-    // asset is read by the project route and the cloud route. Whether the Stop click precedes the
-    // second read is timing-dependent (observed: one read under parallel load, two in isolation), so
-    // the count is a bounded range. The cancellation assertions below stay exact.
-    'cancellation rejects a delayed provider reply before it can stage a preview': {
-      original: { min: 0, max: 2 },
-    },
+    // Each declared-missing reference asset is read by the project route and the cloud route. The
+    // counts below were measured on all seven viewports across repeated parallel and single-worker
+    // runs, and each is exact, so a change that adds or drops a read fails here.
+    'cancellation rejects a delayed provider reply before it can stage a preview': { original: 2 },
     'proves the provider handshake, repairs only through the canonical host, and requires approval':
       {
         original: 9,
       },
     'invalidates a real Worker preview when its revision becomes stale': {
       original: 5,
-      // Optional missing cloud reference media can be probed fewer times at some viewport sizes.
-      cloud: { min: 0, max: 5 },
+      cloud: 5,
     },
     'clearing a model connection terminalizes an in-flight run without reviving a preview': {
-      // Optional absent reference media can be read zero, one, or two times across layouts.
-      original: { min: 0, max: 2 },
+      original: 2,
     },
     'reports a provider adapter failure without suggesting an edit was applied': { original: 2 },
   };
