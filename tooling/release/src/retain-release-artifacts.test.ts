@@ -180,6 +180,43 @@ describe('retain-release-artifacts', () => {
     });
   });
 
+  it('accepts an evidence root that only shares a name prefix with the checkout', async () => {
+    await withWork(async (work) => {
+      const staged = buildStaged(work);
+      await expect(
+        run([staged, candidate, runId, attempt, join(work, 'checkout-evidence')], {
+          RUNNER_WORKSPACE: join(work, 'checkout'),
+        }),
+      ).resolves.toMatch(/retained and re-verified 4 file/u);
+    });
+  });
+
+  it.skipIf(process.platform !== 'win32')(
+    'refuses the checkout spelled in another case on Windows',
+    async () => {
+      await withWork(async (work) => {
+        const staged = buildStaged(work);
+        await expect(
+          run([staged, candidate, runId, attempt, join(work, 'Checkout', 'evidence')], {
+            RUNNER_WORKSPACE: join(work, 'checkout'),
+          }),
+        ).rejects.toThrow(/must be outside the checkout/u);
+      });
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'refuses a _work folder whose name carries a trailing dot on Windows',
+    async () => {
+      await withWork(async (work) => {
+        const staged = buildStaged(work);
+        await expect(
+          run([staged, candidate, runId, attempt, join(work, '_work.', 'evidence')]),
+        ).rejects.toThrow(/must be outside the checkout/u);
+      });
+    },
+  );
+
   it.skipIf(!canSymlink)('refuses a staged symlink', async () => {
     await withWork(async (work) => {
       const staged = buildStaged(work);

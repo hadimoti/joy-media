@@ -26,11 +26,12 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   accessSync,
   constants,
 } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MANIFEST = 'artifact-manifest.json';
@@ -128,14 +129,30 @@ export async function verifyTree(dir, entries) {
   }
 }
 
-// The evidence root must sit outside the checkout, _work and _temp, as the gate's other stores do.
+// The evidence root must sit outside the checkout, _work and _temp, as the gate's other stores do. The
+// comparison works on whole path segments and folds case on Windows: a sibling folder that only shares a
+// name prefix with the checkout is accepted, and the same checkout spelled in another case is refused.
 function assertStoreLocation(root, env) {
-  const normalized = resolve(root).split(sep).join('/');
-  const workspace = env.RUNNER_WORKSPACE ? resolve(env.RUNNER_WORKSPACE).split(sep).join('/') : '';
+  // The Win32 layer ignores letter case and strips trailing dots and spaces from each name, so `_work.` is
+  // `_work`. Both are normalized away on Windows before any comparison.
+  const normalize = (path) =>
+    resolve(path)
+      .split(sep)
+      .map((segment) =>
+        process.platform === 'win32' ? segment.toLowerCase().replace(/[. ]+$/u, '') : segment,
+      )
+      .join(sep);
+  const target = normalize(root);
+  const within = (anchor) => {
+    const rel = relative(normalize(anchor), target);
+    return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+  };
+  const workspace = env.RUNNER_WORKSPACE ?? '';
+  const segments = target.split(sep);
   if (
-    (workspace !== '' && normalized.startsWith(workspace)) ||
-    /\/_work\//u.test(normalized) ||
-    /\/_temp\//u.test(normalized)
+    (workspace !== '' && within(workspace)) ||
+    segments.includes('_work') ||
+    segments.includes('_temp')
   ) {
     throw new Error('the evidence root must be outside the checkout, _work and _temp');
   }
@@ -171,10 +188,29 @@ export async function run(argv, env = process.env) {
 
   mkdirSync(root, { recursive: true });
   accessSync(root, constants.W_OK);
-  if (existsSync(dest)) throw new Error(`retention is write-once, and ${dest} already exists`);
-  mkdirSync(dest, { recursive: true });
-  cpSync(stagedArg, dest, { recursive: true, errorOnExist: true, force: false });
-  await verifyTree(dest, entries);
+  mkdirSync(join(root, candidate), { recursive: true });
+  // A non-recursive mkdir is the write-once gate: when two retentions race, exactly one creates this
+  // run's folder and the other fails with EEXIST.
+  try {
+    mkdirSync(dest);
+  } catch (error) {
+    if (error.code === 'EEXIST')
+      throw new Error(`retention is write-once, and ${dest} already exists`);
+    throw error;
+  }
+  try {
+    cpSync(stagedArg, dest, { recursive: true, errorOnExist: true, force: false });
+    await verifyTree(dest, entries);
+  } catch (error) {
+    // This call created the folder, so a failed copy or check leaves no partial retention behind. A failed
+    // removal must not hide the error that made the retention fail.
+    try {
+      rmSync(dest, { recursive: true, force: true });
+    } catch {
+      // The original failure is the one to report.
+    }
+    throw error;
+  }
   return `retained and re-verified ${entries.length} file(s) at ${dest}`;
 }
 
