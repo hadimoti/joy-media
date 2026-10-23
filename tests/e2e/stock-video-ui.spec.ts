@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { authenticate, openDisposableWorkspace, openPanel } from './wp29-r5-harness.js';
@@ -22,6 +23,9 @@ const STOCK_CATEGORIES = [
 const FIXTURE_MEDIA_DIR = join(process.cwd(), 'packages/test-fixtures/media');
 const POSTER_BYTES = readFileSync(join(FIXTURE_MEDIA_DIR, 'image.png'));
 const PREVIEW_BYTES = readFileSync(join(FIXTURE_MEDIA_DIR, 'video.mp4'));
+// The descriptor of the imported asset describes the bytes the fixture serves. ffprobe reports the
+// video as 320x180 and 3.0 s, and the card's own metadata is checked against those values below.
+const PREVIEW_SHA256 = createHash('sha256').update(PREVIEW_BYTES).digest('hex');
 
 function stockFixtureId(category: (typeof STOCK_CATEGORIES)[number], suffix: string): string {
   return `${category}-${suffix}`;
@@ -240,9 +244,9 @@ test.describe('native stock video library', () => {
       id: 'imported-stock-1',
       kind: 'video',
       displayName: 'Imported stock fixture.mp4',
-      sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-      bytes: 1024,
-      descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 640, height: 360 },
+      sha256: PREVIEW_SHA256,
+      bytes: PREVIEW_BYTES.byteLength,
+      descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
       createdAt: 1_700_000_000_000,
       cloudBacked: true,
     };
@@ -781,5 +785,16 @@ test.describe('native stock video library', () => {
         timeout: 15_000,
       })
       .toBeGreaterThanOrEqual(1);
+    // The bytes came from the fixture's original route, which is the only cloud source this test serves.
+    await expect(importedCard.locator('.asset-card-media')).toHaveAttribute('data-source', 'cloud');
+    // The decoded metadata is the fixture's own, so the card shows that media and not a placeholder.
+    const decoded = await importedVideo.evaluate((video: HTMLVideoElement) => ({
+      width: video.videoWidth,
+      height: video.videoHeight,
+      duration: video.duration,
+    }));
+    expect(decoded.width).toBe(320);
+    expect(decoded.height).toBe(180);
+    expect(decoded.duration).toBeCloseTo(3, 0);
   });
 });

@@ -42,6 +42,12 @@ describe('auditProjectRequests', () => {
     expect(audit([get('/v1/projects/project-a/document')]).violations).toHaveLength(1);
   });
 
+  it('fails a bare project create, which names no project in its path', () => {
+    const result = audit([{ method: 'POST', path: '/v1/projects', status: 201 }]);
+    expect(result.violations.map((violation) => violation.request.path)).toEqual(['/v1/projects']);
+    expect(result.violations[0]?.reason).toMatch(/creates a project/u);
+  });
+
   it('fails a derivative read of an asset the owner does not hold', () => {
     expect(audit([get(derivatives('project-a', 'asset-stranger'))]).violations).toHaveLength(1);
   });

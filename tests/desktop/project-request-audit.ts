@@ -45,6 +45,8 @@ export interface ProjectRequestAudit {
 }
 
 export const ENSURE_PATH = '/v1/projects/ensure';
+/** The collection path. A create names no project in its path, so the path rules never see it. */
+const PROJECTS_PATH = '/v1/projects';
 
 const PROJECT_PATH = /^\/v1\/projects\/([^/]+)/u;
 const DERIVATIVE_PATH = /^\/v1\/projects\/([^/]+)\/assets\/([^/]+)\/derivatives$/u;
@@ -88,6 +90,13 @@ export function auditProjectRequests(input: ProjectRequestAuditInput): ProjectRe
   const violations: ProjectRequestViolation[] = [];
   let ownedForeignReads = 0;
   for (const request of input.served) {
+    if (request.path === PROJECTS_PATH && request.method === 'POST') {
+      violations.push({
+        request,
+        reason: 'creates a project; the session binds projects through ensure only',
+      });
+      continue;
+    }
     if (UNBOUND_OR_TRANSITIONAL.test(`${request.path}?${request.query ?? ''}`)) {
       violations.push({ request, reason: 'names an unbound or transitional id' });
       continue;

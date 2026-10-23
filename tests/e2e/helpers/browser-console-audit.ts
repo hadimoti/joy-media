@@ -84,11 +84,16 @@ function projectRouteId(url: string): string | undefined {
   return /^\/api\/v1\/projects\/([^/?#]+)/.exec(new URL(url).pathname)?.[1];
 }
 
+/** A project id as a body or query names it. An empty or blank id names no project. */
+function namedProjectId(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined;
+}
+
 /** The project id an ensure request names in its body, or undefined when the body names none. */
 function requestedProjectId(request: Request): string | undefined {
   try {
     const body = request.postDataJSON() as { id?: unknown } | null;
-    return typeof body?.id === 'string' ? body.id : undefined;
+    return namedProjectId(body?.id);
   } catch {
     return undefined;
   }
@@ -98,10 +103,29 @@ function requestedProjectId(request: Request): string | undefined {
 function ensuredProjectId(response: Response): string | undefined {
   try {
     const body = response.request().postDataJSON() as { id?: unknown } | null;
-    return typeof body?.id === 'string' ? body.id : undefined;
+    return namedProjectId(body?.id);
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The project ids a request names outside its path: a `projectId` query parameter, or a `projectId`
+ * field of a JSON body. The audit judges them as it judges a path name, so a request cannot pass by
+ * naming an unbound project in its query or body.
+ */
+function projectIdsOutsidePath(request: Request): string[] {
+  const named: string[] = [];
+  const inQuery = namedProjectId(new URL(request.url()).searchParams.get('projectId') ?? undefined);
+  if (inQuery !== undefined) named.push(inQuery);
+  try {
+    const body = request.postDataJSON() as { projectId?: unknown } | null;
+    const inBody = namedProjectId(body?.projectId);
+    if (inBody !== undefined) named.push(inBody);
+  } catch {
+    // Not a JSON body, so the request names no project in it.
+  }
+  return named;
 }
 
 const stateByPage = new WeakMap<Page, AuditState>();
@@ -364,8 +388,17 @@ export function setupBrowserAudit(page: Page): void {
       state.ensureRequestIds.push(requestedProjectId(request) ?? UNIDENTIFIED_PROJECT_REQUEST);
       return;
     }
-    if (projectId === undefined) return;
-    state.projectRequests.push({ projectId, method: request.method(), order: state.eventOrder++ });
+    const named = [
+      ...(projectId === undefined ? [] : [projectId]),
+      ...projectIdsOutsidePath(request),
+    ];
+    for (const namedId of named) {
+      state.projectRequests.push({
+        projectId: namedId,
+        method: request.method(),
+        order: state.eventOrder++,
+      });
+    }
   });
 
   // The owner's own asset list names the projects the owner holds. A read of any other project

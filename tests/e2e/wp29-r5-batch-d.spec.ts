@@ -330,7 +330,6 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
       if (sessionLeft && pathname.startsWith('/api/v1/projects'))
         projectRequests.push(`${request.method()} ${pathname}`);
     });
-
     await localRun.click();
     await ensureHeld;
     // Another tab signs in with a different token. This tab does not hear about it: no session event
@@ -339,6 +338,85 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     await page.evaluate(() => {
       window.localStorage.setItem('joy-media-session-token', 'joy-media-other-owner-token');
     });
+    sessionLeft = true;
+    releaseEnsure();
+    // The run is still waiting on the released ensure. Give it time to send whatever it sends next.
+    await page.waitForTimeout(2_000);
+
+    expect(projectRequests, 'project requests sent after the session left the project').toEqual([]);
+    await assertBrowserAudit(page, testInfo);
+  });
+
+  test('[R5 CASE-66 remount] the Local Worker run sends no project request after the session returns to the library', async ({
+    page,
+  }, testInfo) => {
+    setupBrowserAudit(page);
+    const title = `R5-66-remount-${testInfo.project.name}`;
+    await openDisposableWorkspace(page, title);
+    const audioName = `wp29-case66-remount-${testInfo.project.name}-${Date.now()}.wav`;
+    await importMediaFixture(page, 'audio.wav', audioName);
+    await page
+      .locator('.asset-card', { hasText: audioName })
+      .first()
+      .dragTo(
+        page
+          .locator('.timeline-track[data-track-family="audio"] .timeline-lane[data-track-id]')
+          .first(),
+        {
+          targetPosition: { x: 70, y: 20 },
+        },
+      );
+    await page.locator('.timeline-clip[data-clip-id]').first().click();
+    await offerAndPairWorker(page, ['audio.ml-denoise']);
+    await page.reload();
+    if (await page.getByRole('heading', { name: 'Projects' }).isVisible()) {
+      await page
+        .getByRole('button', { name: new RegExp(title) })
+        .first()
+        .click();
+    }
+    await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
+    await page.locator('.timeline-clip[data-clip-id]').first().click();
+    await openPanel(page, 'Audio');
+    await page.getByRole('tab', { name: 'Runtime' }).click();
+    await expect(page.locator('.audio-runtime-cell', { hasText: 'Local Worker' })).toContainText(
+      'Connected',
+    );
+    const localRun = page.locator('[data-audio-route="local-worker"]');
+    await expect(localRun).toBeEnabled();
+
+    // Hold the first ensure that the run sends. The run then waits on it while the session returns
+    // to the library, which unmounts the editor that started the run.
+    let releaseEnsure: () => void = () => undefined;
+    let holdFirstEnsure = true;
+    const ensureHeld = new Promise<void>((resolveHeld) => {
+      void page.route(/\/api\/v1\/projects\/ensure$/, async (route) => {
+        if (!holdFirstEnsure) {
+          await route.continue();
+          return;
+        }
+        holdFirstEnsure = false;
+        resolveHeld();
+        await new Promise<void>((release) => {
+          releaseEnsure = release;
+        });
+        await route.continue();
+      });
+    });
+
+    let sessionLeft = false;
+    const projectRequests: string[] = [];
+    page.on('request', (request) => {
+      const { pathname } = new URL(request.url());
+      if (sessionLeft && pathname.startsWith('/api/v1/projects'))
+        projectRequests.push(`${request.method()} ${pathname}`);
+    });
+
+    await localRun.click();
+    await ensureHeld;
+    await page.getByRole('button', { name: 'File' }).click();
+    await page.getByRole('menuitem', { name: 'Projects Library…' }).click();
+    await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
     sessionLeft = true;
     releaseEnsure();
     // The run is still waiting on the released ensure. Give it time to send whatever it sends next.
