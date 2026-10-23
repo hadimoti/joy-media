@@ -287,7 +287,11 @@ import {
 } from './control-plane-client.js';
 import { ProjectDocumentAutosync } from './project-document-autosync.js';
 import { importMediaFile } from './media-import.js';
-import { captureControlPlaneScope, type ControlPlaneScope } from './control-plane-scope.js';
+import {
+  captureControlPlaneScope,
+  type ControlPlaneScope,
+  SESSION_LEFT_PROJECT_MESSAGE,
+} from './control-plane-scope.js';
 import { getStoredMediaToken } from './media-session.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
@@ -1660,11 +1664,23 @@ function EditorWorkspace({
       generation: controlPlaneScopeRef.current.generation + 1,
     };
   }
-  const captureScope = (): (() => void) =>
-    captureControlPlaneScope(() => ({
-      ...controlPlaneScopeRef.current,
-      token: getStoredMediaToken(window.localStorage),
-    }));
+  const captureScope = useCallback(
+    (): (() => void) =>
+      captureControlPlaneScope(() => ({
+        ...controlPlaneScopeRef.current,
+        token: getStoredMediaToken(window.localStorage),
+      })),
+    [],
+  );
+  // For a caller that names the project it operates on. It refuses to start once the session holds another.
+  const captureScopeFor = useCallback(
+    (projectId: string): (() => void) => {
+      if (controlPlaneScopeRef.current.projectId !== projectId)
+        throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
+      return captureScope();
+    },
+    [captureScope],
+  );
   useEffect(() => {
     let cancelled = false;
     let retryTimer: number | undefined;
@@ -3102,6 +3118,7 @@ function EditorWorkspace({
       // pipeline so the exact PNG is registered and uploaded before the
       // document points at it. Signed-out/offline sessions retain the local
       // integrity-checked cache path and can be backed up later from Media.
+      const assertScope = captureScope();
       const mimeType = asset.blob.type || 'image/png';
       let persistedAsset:
         | Awaited<ReturnType<typeof importMediaFile>>
@@ -3118,6 +3135,7 @@ function EditorWorkspace({
           assetId: asset.assetId,
           client: mediaControlPlaneClient,
           originalAssetCache: originalAssetCachePromise,
+          assertCurrentProject: assertScope,
         });
       } else {
         const assetSha256 = await sha256Hex(new Uint8Array(await asset.blob.arrayBuffer()));
@@ -3159,6 +3177,7 @@ function EditorWorkspace({
     },
     [
       controlPlaneProject,
+      captureScope,
       controlPlaneOwnerKey,
       session,
       showToast,
@@ -3989,6 +4008,7 @@ function EditorWorkspace({
   const handleExport = useCallback(
     async (retryEntry?: ProjectExportProcessEntry) => {
       if (exportInFlightRef.current) return;
+      const assertScope = captureScope();
       const retryPreset = retryEntry?.presetId;
       if (
         retryPreset !== undefined &&
@@ -4709,6 +4729,7 @@ function EditorWorkspace({
           workerJobId,
           stagedAssetId: stagedExportAssetId,
         });
+        assertScope();
         const stagedAsset = await mediaControlPlaneClient.registerAsset(
           controlPlaneProject.controlPlaneProjectId,
           {
@@ -4726,12 +4747,14 @@ function EditorWorkspace({
             locations: [{ kind: 'opfs-cache', ref: `export-stage-${entryId}` }],
           },
         );
+        assertScope();
         await mediaControlPlaneClient.uploadAssetOriginal(
           controlPlaneProject.controlPlaneProjectId,
           stagedAsset,
           browserExportResult.blob,
         );
         abortController.signal.throwIfAborted();
+        assertScope();
         await mediaControlPlaneClient.enqueueRenderExport(
           controlPlaneProject.controlPlaneProjectId,
           workerJobId,
@@ -4755,6 +4778,7 @@ function EditorWorkspace({
         // normal headless Worker time to recover without pinning the tab.
         const workerExportDeadline = Date.now() + 30 * 60_000;
         while (!abortController.signal.aborted) {
+          assertScope();
           workerJob = (
             await mediaControlPlaneClient.jobs(controlPlaneProject.controlPlaneProjectId)
           ).find((candidate) => candidate.id === workerJobId);
@@ -4794,6 +4818,7 @@ function EditorWorkspace({
         if (workerJob.state === 'canceled') throw new Error('Worker export was canceled');
         if (workerJob.derivative === undefined)
           throw new Error('Worker export completed without a verified derivative');
+        assertScope();
         const remuxedBlob = await mediaControlPlaneClient.derivativeBytes(
           controlPlaneProject.controlPlaneProjectId,
           stagedExportAssetId,
@@ -5039,6 +5064,7 @@ function EditorWorkspace({
     },
     [
       audioState,
+      captureScope,
       controlPlaneProject.controlPlaneProjectId,
       exportPreset,
       loadProjectAssetBlob,
@@ -5346,6 +5372,7 @@ function EditorWorkspace({
     ): Promise<string> => {
       if (job.state !== 'completed' || job.derivative === undefined)
         throw new Error('Mask result is not complete.');
+      const assertScope = captureScope();
       const derivatives = await mediaControlPlaneClient.derivatives(
         controlPlaneProject.controlPlaneProjectId,
         target.assetId,
@@ -5356,6 +5383,7 @@ function EditorWorkspace({
           .filter((candidate) => candidate.kind === 'mask')
           .sort((left, right) => right.verifiedAt - left.verifiedAt)[0];
       if (derivative === undefined) throw new Error('Verified mask derivative is unavailable.');
+      assertScope();
       const blob = await mediaControlPlaneClient.derivativeBytes(
         controlPlaneProject.controlPlaneProjectId,
         target.assetId,
@@ -5372,6 +5400,7 @@ function EditorWorkspace({
         file,
         client: mediaControlPlaneClient,
         originalAssetCache: originalAssetCachePromise,
+        assertCurrentProject: assertScope,
       });
       if (context.session.historyCursorSequence !== expectedRevision)
         throw new Error('The project changed while the mask result was being prepared.');
@@ -5408,6 +5437,7 @@ function EditorWorkspace({
     ): Promise<string> => {
       if (job.state !== 'completed' || job.derivative === undefined)
         throw new Error('Upscale result is not complete.');
+      const assertScope = captureScope();
       const derivatives = await mediaControlPlaneClient.derivatives(
         controlPlaneProject.controlPlaneProjectId,
         target.assetId,
@@ -5418,6 +5448,7 @@ function EditorWorkspace({
           .filter((candidate) => candidate.kind === 'upscale')
           .sort((left, right) => right.verifiedAt - left.verifiedAt)[0];
       if (derivative === undefined) throw new Error('Verified upscale derivative is unavailable.');
+      assertScope();
       const blob = await mediaControlPlaneClient.derivativeBytes(
         controlPlaneProject.controlPlaneProjectId,
         target.assetId,
@@ -5442,6 +5473,7 @@ function EditorWorkspace({
         file,
         client: mediaControlPlaneClient,
         originalAssetCache: originalAssetCachePromise,
+        assertCurrentProject: assertScope,
       });
       if (context.session.historyCursorSequence !== expectedRevision)
         throw new Error('The project changed while the upscale result was being prepared.');
@@ -6246,6 +6278,7 @@ function EditorWorkspace({
           onRunRemoteMediaJob={async (workflowId) => {
             if (selectedAudioClip === undefined)
               throw new Error('Place a video or audio clip before running a remote provider job.');
+            const assertScope = captureScope();
             const targetClipId = selectedAudioClip.id;
             const targetAssetId = selectedAudioClip.assetId;
             const sourceProjectRevisionId = context.session.projectRevisionId;
@@ -6261,6 +6294,7 @@ function EditorWorkspace({
               return;
             }
             const source = await mediaResolverRef.current.resolve(targetAssetId);
+            assertScope();
             const response = await fetch(source.url);
             if (!response.ok)
               throw new Error('The remote provider could not read the selected media.');
@@ -6282,14 +6316,17 @@ function EditorWorkspace({
                 revision: sourceRevision,
               });
             try {
+              assertScope();
               await mediaControlPlaneClient.ensureProject(
                 controlPlaneProject.controlPlaneProjectId,
                 controlPlaneProject.title,
               );
+              assertScope();
               let recovered:
                 | Awaited<ReturnType<typeof mediaControlPlaneClient.denoiseAudioOperation>>
                 | undefined;
               if (existing !== undefined) {
+                assertScope();
                 recovered = await mediaControlPlaneClient.denoiseAudioOperation(
                   controlPlaneProject.controlPlaneProjectId,
                   operationId,
@@ -6323,6 +6360,7 @@ function EditorWorkspace({
                   fingerprint,
                   revision: sourceRevision,
                 });
+              assertScope();
               const result =
                 recovered?.result ??
                 (await mediaControlPlaneClient.denoiseAudio({
@@ -6618,12 +6656,14 @@ function EditorWorkspace({
               })}
           onOpenAssetLibrary={() => context.activatePanel('media')}
           onImportMedia={async (file) => {
+            const assertScope = captureScope();
             const asset = await importMediaFile({
               projectId: controlPlaneProject.controlPlaneProjectId,
               projectTitle: controlPlaneProject.title,
               file,
               client: mediaControlPlaneClient,
               originalAssetCache: originalAssetCachePromise,
+              assertCurrentProject: assertScope,
             });
             rememberImportedAsset(asset);
             return asset;
@@ -6632,6 +6672,7 @@ function EditorWorkspace({
             Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
           )}
           onImportFiles={(files) => {
+            const assertScope = captureScope();
             for (const file of files) {
               void importMediaFile({
                 projectId: controlPlaneProject.controlPlaneProjectId,
@@ -6639,6 +6680,7 @@ function EditorWorkspace({
                 file,
                 client: mediaControlPlaneClient,
                 originalAssetCache: originalAssetCachePromise,
+                assertCurrentProject: assertScope,
               })
                 .then((asset) => {
                   rememberImportedAsset(asset);
@@ -6854,6 +6896,7 @@ function EditorWorkspace({
     if (effectivePanelId === 'media')
       return withFeatureHub(
         <AssetLibraryPanel
+          captureProjectScope={captureScopeFor}
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
           storage={context.storage}

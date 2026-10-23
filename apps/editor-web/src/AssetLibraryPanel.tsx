@@ -140,6 +140,7 @@ export function withAssetTimelineTimeout<T>(
  */
 export function AssetLibraryPanel({
   projectId,
+  captureProjectScope,
   projectTitle = 'Editor project',
   storage,
   onAddSticker: _onAddSticker,
@@ -149,6 +150,8 @@ export function AssetLibraryPanel({
   missingMedia,
 }: {
   readonly projectId: string;
+  /** Starts a scope check for the project the panel names. It throws once the session holds another project. */
+  readonly captureProjectScope: (projectId: string) => () => void;
   readonly projectTitle?: string;
   /** Root writer-gated browser persistence for UI preferences and session state. */
   readonly storage: AssetLibraryStorage;
@@ -486,12 +489,14 @@ export function AssetLibraryPanel({
       return;
     }
     try {
+      const assertScope = captureProjectScope(projectId);
       const imported = await importMediaFile({
         projectId,
         projectTitle,
         file: selectedFile,
         client,
         originalAssetCache,
+        assertCurrentProject: assertScope,
         onProgress: ({ ratio, message: progressMessage }) => {
           setImportProgress(ratio);
           setStatus(progressMessage);
@@ -520,7 +525,15 @@ export function AssetLibraryPanel({
       setImportProgress(undefined);
       setStatus(`Media import failed: ${message(error)}`);
     }
-  }, [client, originalAssetCache, projectId, projectTitle, refresh, selectedFile]);
+  }, [
+    captureProjectScope,
+    client,
+    originalAssetCache,
+    projectId,
+    projectTitle,
+    refresh,
+    selectedFile,
+  ]);
   const fetchCloudOriginal = useCallback(
     async (id: string) => {
       const asset = items.find((candidate) => candidate.asset.id === id)?.asset;
