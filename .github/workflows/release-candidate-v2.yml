@@ -419,8 +419,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           # accounting.test.mjs runs only under Windows PowerShell, so it runs here rather than in the
-          # Linux harness, where every case would be skipped. A skipped, todo, failed or cancelled case,
-          # or fewer passing cases than the suite defines, fails this step. Update the floor with the suite.
+          # Linux harness, where every case would be skipped. The step counts the cases the file defines
+          # and fails on any skipped, todo, failed or cancelled case, or on any defined case that does
+          # not run and pass.
+          $defined = @(Select-String -LiteralPath 'tests/desktop/accounting.test.mjs' -Pattern '^test\(').Count
           $tap = node --test --test-reporter=tap tests/desktop/accounting.test.mjs
           Write-Output $tap
           if ($LASTEXITCODE -ne 0) { throw "Lifecycle accounting negative tests failed with exit code $LASTEXITCODE." }
@@ -429,9 +431,15 @@ jobs:
               throw "Lifecycle accounting negative tests reported $counter cases."
             }
           }
+          $ranLine = @($tap | Where-Object { $_ -match '^# tests [0-9]+$' })
           $passLine = @($tap | Where-Object { $_ -match '^# pass [0-9]+$' })
-          if ($passLine.Count -ne 1 -or [int]([regex]::Match($passLine[0], '[0-9]+$').Value) -lt 18) {
-            throw 'Lifecycle accounting negative tests did not all run; the suite defines 18 cases.'
+          if ($ranLine.Count -ne 1 -or $passLine.Count -ne 1) {
+            throw 'Lifecycle accounting negative tests reported no totals.'
+          }
+          $ran = [int]([regex]::Match($ranLine[0], '[0-9]+$').Value)
+          $passed = [int]([regex]::Match($passLine[0], '[0-9]+$').Value)
+          if ($defined -eq 0 -or $ran -ne $defined -or $passed -ne $defined) {
+            throw "Lifecycle accounting negative tests did not all run: the file defines $defined, ran $ran and passed $passed."
           }
       - name: Install locked Playwright Chromium for the packaged HTML scene
         shell: powershell
