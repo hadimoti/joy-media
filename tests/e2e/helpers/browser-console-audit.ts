@@ -492,9 +492,9 @@ export function allowExpectedAssetFixtureMisses(
 /**
  * Narrow form of {@link allowExpectedAssetFixtureMisses} for a fixture whose reference assets are
  * declared without uploaded bytes. Only the named asset IDs may answer 409 ASSET_NOT_FOUND, on the
- * project original route and the cloud content route. The count is a bounded range, because the
- * number of reads depends on when a user action lands relative to the background reference reads
- * (an async, layout-dependent request). Any other asset ID still fails the audit.
+ * project original route and the cloud content route. Give the exact count that was measured. A
+ * range is for a count that measurements show varies, and the reason should name that evidence.
+ * Any other asset ID still fails the audit.
  */
 export function allowReferenceFixtureMisses(
   page: Page,
