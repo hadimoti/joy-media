@@ -627,9 +627,9 @@ jobs:
             "joy-media-windows-x64-v$version.zip" = Join-Path $releaseDir "joy-media-windows-x64-v$version.zip"
             'joy-media-release-manifest.json' = Join-Path $releaseDir 'joy-media-release-manifest.json'
             'SHA256SUMS.txt' = Join-Path $releaseDir 'SHA256SUMS.txt'
-            'standalone/joy-media.exe' = Join-Path $standalone 'joy-media.exe'
-            'standalone/resources/app/cli/joy-media-bundle.mjs' = Join-Path $standalone 'resources\app\cli\joy-media-bundle.mjs'
-            'standalone/resources/app/worker/joy-worker.exe' = Join-Path $standalone 'resources\app\worker\joy-worker.exe'
+            'joy-media.exe' = Join-Path $standalone 'joy-media.exe'
+            'joy-media-bundle.mjs' = Join-Path $standalone 'resources\app\cli\joy-media-bundle.mjs'
+            'joy-worker.exe' = Join-Path $standalone 'resources\app\worker\joy-worker.exe'
           }
           $files = foreach ($name in $sources.Keys) {
             $source = $sources[$name]
