@@ -9,6 +9,45 @@ import {
 } from './media-import.js';
 
 describe('importMediaFile', () => {
+  it('stops before registering or uploading once the project scope has changed', async () => {
+    const calls: string[] = [];
+    let scopeLeft = false;
+    const client = {
+      ensureProject: vi.fn(async () => {
+        calls.push('ensure');
+        scopeLeft = true;
+      }),
+      registerAsset: vi.fn(async () => {
+        calls.push('register');
+        throw new Error('must not register');
+      }),
+      assets: vi.fn(async () => []),
+      uploadAssetOriginal: vi.fn(async () => {
+        calls.push('upload');
+        throw new Error('must not upload');
+      }),
+    } satisfies NonNullable<MediaImportOptions['client']>;
+
+    await expect(
+      importMediaFile({
+        projectId: 'project-1',
+        projectTitle: 'Project',
+        file: new File(['scope bytes'], 'clip.mp4', { type: 'video/mp4' }),
+        assetId: 'clip-1',
+        client,
+        originalAssetCache: { put: vi.fn(async () => undefined) },
+        describeMedia: async () => ({ mimeType: 'video/mp4', durationUs: 2_500_000 }),
+        assertCurrentProject: () => {
+          if (scopeLeft) throw new Error('the session left this project');
+        },
+      }),
+    ).rejects.toThrow('the session left this project');
+
+    expect(calls).toEqual(['ensure']);
+    expect(client.registerAsset).not.toHaveBeenCalled();
+    expect(client.uploadAssetOriginal).not.toHaveBeenCalled();
+  });
+
   it('verifies, registers, caches, and cloud-uploads the same original', async () => {
     const calls: string[] = [];
     let registration: BrowserAssetRegistration | undefined;
