@@ -472,9 +472,18 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     if ($candidateSeedVerification.result -ne 'verified' -or $candidateSeedVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256 -or $candidateSeedVerification.directCiphertextSha256 -ne $seedProof.directCiphertextSha256) {
         throw 'Settings, asset-library catalog, or DPAPI ciphertext did not survive the candidate update.'
     }
-    # project.persistence.fresh-process is not recorded here. The DPAPI fixture check above does not
-    # save a project, close the app, reopen it from a fresh profile or render, so the scenario stays
-    # absent until a packaged save, fresh-profile reopen and render step exists.
+    # project.persistence.fresh-process: a packaged project saved in one process reopens from a fresh
+    # profile in a new process and renders to an MP4 that ffprobe accepts. The scenario is recorded from
+    # the spec's own accounting, so a save, reopen or render that cannot run fails it.
+    $freshProcessReport = Join-Path $workRoot 'fresh-process-persistence.playwright.json'
+    $null = Invoke-Pnpm 'installed candidate fresh-process save, reopen and render acceptance' @('exec', 'playwright', 'test', '--config', 'playwright.desktop.config.ts', 'tests/desktop/fresh-process-persistence.spec.ts', '--retries=0', '--reporter=json') 900 @{
+        JOY_MEDIA_TEST_EXECUTABLE = Join-Path $installRoot 'joy-media.exe'
+        JOY_MEDIA_TEST_WORKING_DIRECTORY = $installRoot
+        JOY_MEDIA_TEST_API_BASE_URL = 'http://127.0.0.1:4174'
+        PLAYWRIGHT_JSON_OUTPUT_NAME = $freshProcessReport
+    }
+    Set-ScenarioOutcome -Id 'project.persistence.fresh-process' -ExitCode (Get-PlaywrightAccountingExitCode $freshProcessReport)
+    # The DPAPI fixture check below does not save a project, so it records no scenario of its own.
     $cliJoyEvidence = Invoke-InstalledCliAcceptance 'joy.cmd' 'joy'
     $cliJoyMediaEvidence = Invoke-InstalledCliAcceptance 'joy-media.cmd' 'joy-media'
     Set-ScenarioOutcome -Id 'cli.render.windows-entrypoints' -ExitCode ([int](-not (($cliJoyEvidence.status -eq 'passed') -and ($cliJoyMediaEvidence.status -eq 'passed'))))

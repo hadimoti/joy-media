@@ -690,11 +690,17 @@ describe('createReadinessEvidence', () => {
     ).toThrow(/workflow run id is invalid/u);
   });
 
-  it('never records project.persistence.fresh-process without a measured step for it', () => {
+  it('records project.persistence.fresh-process only from its measured Playwright step', () => {
     const lifecycle = readFileSync(
       fileURLToPath(new URL('../../../tests/desktop/windows-lifecycle.ps1', import.meta.url)),
       'utf8',
     );
-    expect(lifecycle).not.toContain("'project.persistence.fresh-process'");
+    const recordings = lifecycle
+      .split('\n')
+      .filter((line) => line.includes("'project.persistence.fresh-process'"));
+    expect(recordings).toHaveLength(1);
+    expect(recordings[0]).toContain('Set-ScenarioOutcome');
+    expect(recordings[0]).toContain('Get-PlaywrightAccountingExitCode');
+    expect(lifecycle).toContain('tests/desktop/fresh-process-persistence.spec.ts');
   });
 });
