@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EditorSession } from './editor-session.js';
 import { createBlankProjectDocuments } from './project-factory.js';
 import {
@@ -9,9 +9,15 @@ import {
   type ProjectCatalogEntry,
 } from './project-catalog.js';
 import {
+  getControlPlaneProjectBinding,
+  upsertControlPlaneProjectBinding,
+} from './project-control-plane.js';
+import { setStoredMediaToken } from './media-session.js';
+import {
   duplicateLocalProject,
   purgeLocalProject,
   renameLocalProject,
+  renameProject,
   restoreLocalProject,
   trashLocalProject,
 } from './project-lifecycle.js';
@@ -45,6 +51,37 @@ function createEntry(
 }
 
 describe('project lifecycle', () => {
+  it('renames only the local catalog while the session is not ready', async () => {
+    const storage = memoryStorage();
+    const entry = createEntry(storage);
+    setStoredMediaToken('session-token', storage);
+    upsertControlPlaneProjectBinding(
+      storage,
+      { editorProjectId: entry.id, controlPlaneProjectId: 'project-legacy', title: entry.title },
+      'signed-in',
+    );
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return new Response('unavailable', { status: 503 });
+    });
+
+    try {
+      const renamed = await renameProject(storage, entry, 'Renamed project');
+
+      expect(renamed.title).toBe('Renamed project');
+      expect(requests.some((url) => url.endsWith('/v1/auth/session'))).toBe(true);
+      expect(requests.some((url) => url.includes('/v1/projects/'))).toBe(false);
+      expect(getControlPlaneProjectBinding(storage, entry.id, 'signed-in')).toEqual({
+        editorProjectId: entry.id,
+        controlPlaneProjectId: 'project-legacy',
+        title: entry.title,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('renames the catalog and persisted visual document without adding editor history', () => {
     const storage = memoryStorage();
     const entry = createEntry(storage);

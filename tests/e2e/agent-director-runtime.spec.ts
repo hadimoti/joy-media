@@ -4,6 +4,7 @@ import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-op
 import {
   allowReferenceFixtureMisses,
   assertBrowserAudit,
+  expectBoundProjectOnly,
   setupBrowserAudit,
   type CountRange,
 } from './helpers/browser-console-audit.js';
@@ -86,13 +87,15 @@ test.describe('JOY Live Director runtime boundary', () => {
     setupBrowserAudit(page);
     const bounds = DIRECTOR_ASSET_MISS_MAP[testInfo.title];
     // Only the fixture's two declared-missing reference assets may miss. Any other asset ID fails.
-    if (bounds != null)
+    if (bounds != null) {
       allowReferenceFixtureMisses(
         page,
         REFERENCE_FIXTURE_MISSING_ASSET_IDS,
         bounds.original,
         bounds.cloud,
       );
+      expectBoundProjectOnly(page);
+    }
   });
 
   test.afterEach(async ({ page }, testInfo) => {

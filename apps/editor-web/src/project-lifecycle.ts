@@ -32,6 +32,7 @@ import { getStoredMediaToken } from './media-session.js';
 import type { MediaSessionStorage } from './media-session.js';
 import { probeJoySession } from './identity.js';
 import {
+  controlPlaneOwnerKeyFor,
   getControlPlaneProjectBinding,
   removeControlPlaneProjectBinding,
   upsertControlPlaneProjectBinding,
@@ -364,7 +365,9 @@ async function openRemoteProject(
   const sessionStorage = storage as BrowserKeyValueStore & MediaSessionStorage;
   if (getStoredMediaToken(sessionStorage) === undefined) return undefined;
   const session = await probeJoySession(sessionStorage);
-  const ownerKey = session.kind === 'ready' ? (session.subject ?? 'signed-in') : 'signed-in';
+  // A stored token does not name an owner. Only a ready session selects a binding.
+  const ownerKey = controlPlaneOwnerKeyFor(session);
+  if (ownerKey === undefined) return undefined;
   const client = new BrowserControlPlaneClient();
   const binding = getControlPlaneProjectBinding(storage, entry.id, ownerKey);
   if (binding === undefined) return undefined;

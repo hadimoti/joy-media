@@ -106,13 +106,16 @@ export default defineConfig({
           {
             command: 'pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts',
             url: `${e2eApiUrl}/health`,
-            reuseExistingServer: !process.env.CI,
+            // Never reuse a running server: stale in-memory state and an outdated control token
+            // from an earlier run would leak into this one.
+            reuseExistingServer: false,
             timeout: 120_000,
           },
           {
             command: `pnpm --filter @joy-media/editor-web dev --host 127.0.0.1 --port ${e2eWebPort}`,
             url: e2eBaseUrl,
-            reuseExistingServer: !process.env.CI,
+            // Never reuse a running server, for the same reason as the API server above.
+            reuseExistingServer: false,
             timeout: 120_000,
           },
         ]

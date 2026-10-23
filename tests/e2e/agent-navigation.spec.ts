@@ -3,6 +3,7 @@ import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harne
 import {
   allowExpectedAssetFixtureMisses,
   assertBrowserAudit,
+  expectBoundProjectOnly,
   setupBrowserAudit,
 } from './helpers/browser-console-audit.js';
 
@@ -21,7 +22,10 @@ test.describe('JOY Agent navigation', () => {
   test.beforeEach(({ page }, testInfo) => {
     setupBrowserAudit(page);
     const count = NAV_ASSET_MISS_MAP[testInfo.title];
-    if (count != null) allowExpectedAssetFixtureMisses(page, count);
+    if (count != null) {
+      allowExpectedAssetFixtureMisses(page, count);
+      expectBoundProjectOnly(page);
+    }
   });
 
   test.afterEach(async ({ page }, testInfo) => {

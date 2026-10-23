@@ -98,6 +98,14 @@ test.describe('native stock video library', () => {
       }
     });
 
+    // Until the disposable project is active, the catalog answers empty. Otherwise the shared
+    // server's assets from other tests join the allowlist below, and the audit would accept project
+    // requests for projects this test never bound. The catalog route further down takes over once
+    // the active project is known.
+    await page.route('**/api/v1/library/my-assets**', async (route) => {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [] }) });
+    });
+
     await authenticate(page);
     await openDisposableWorkspace(page, `Stock UI ${Date.now()}`);
 
@@ -115,6 +123,32 @@ test.describe('native stock video library', () => {
         throw new Error('malformed active project binding');
       return (value as { projectId: string }).projectId;
     });
+    // The owner's binding for the active project is written only once the session is ready.
+    // Wait for that readiness condition, bounded, instead of reading the bindings at a fixed point.
+    await page
+      .waitForFunction(
+        (activeEditorProjectId) => {
+          const raw = window.localStorage.getItem('joy-media.control-plane-project-bindings.v1');
+          if (raw === null) return false;
+          try {
+            const value = JSON.parse(raw) as {
+              bindingsByOwner?: Record<string, Record<string, { controlPlaneProjectId?: unknown }>>;
+            };
+            const binding =
+              value.bindingsByOwner?.['e2e-owner@example.test']?.[activeEditorProjectId];
+            return typeof binding?.controlPlaneProjectId === 'string';
+          } catch {
+            return false;
+          }
+        },
+        activeProject,
+        { timeout: 15_000 },
+      )
+      .catch((error: unknown) => {
+        throw new Error(
+          `The e2e owner's binding for the active project was not written within 15 s. The session did not become ready. ${String(error)}`,
+        );
+      });
     const { activeControlPlaneProjectIds } = await page.evaluate((activeEditorProjectId) => {
       const raw = window.localStorage.getItem('joy-media.control-plane-project-bindings.v1');
       if (raw === null) throw new Error('missing control-plane project bindings');

@@ -4,6 +4,7 @@ import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-op
 import {
   allowExpectedAssetFixtureMisses,
   assertBrowserAudit,
+  expectBoundProjectOnly,
   setupBrowserAudit,
 } from './helpers/browser-console-audit.js';
 
@@ -37,7 +38,10 @@ test.describe('JOY Living Looks', () => {
   test.beforeEach(({ page }, testInfo) => {
     setupBrowserAudit(page);
     const config = LOOKS_ASSET_MISS_MAP[testInfo.title];
-    if (config != null) allowExpectedAssetFixtureMisses(page, config.original, config.cloud);
+    if (config != null) {
+      allowExpectedAssetFixtureMisses(page, config.original, config.cloud);
+      expectBoundProjectOnly(page);
+    }
   });
 
   test.afterEach(async ({ page }, testInfo) => {

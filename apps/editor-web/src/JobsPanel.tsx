@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BrowserControlPlaneClient,
   invalidateWorkerReadCache,
   type BrowserJob,
   type BrowserWorker,
 } from './control-plane-client.js';
+import { EditorPanelContext } from './editor-panel-context.js';
 import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
 import { BoundedPollingLoop } from './bounded-polling.js';
 import { CloseIcon, ImageIcon, PlusIcon, RefreshIcon } from './icons.js';
@@ -19,6 +20,8 @@ import {
 } from './media-object-url.js';
 
 const PRESENCE_ORDER = { connected: 0, disconnected: 1, revoked: 2 } as const;
+
+const NO_JOBS: readonly BrowserJob[] = [];
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'workers', label: 'Workers' },
@@ -75,7 +78,6 @@ export function queueWorkerReadiness(
 export function JobsPanel({
   projectId,
   projectTitle,
-  controlPlaneReady = true,
   audioAssetId,
   thumbnailAssetId,
   onApplyWorkerAudioResult,
@@ -84,7 +86,6 @@ export function JobsPanel({
 }: {
   projectId: string;
   projectTitle: string;
-  readonly controlPlaneReady?: boolean;
   readonly audioAssetId?: string;
   /** Selected visual asset that can be rendered by the Worker thumbnail path. */
   readonly thumbnailAssetId?: string;
@@ -95,6 +96,11 @@ export function JobsPanel({
   readonly operationLedger?: Pick<ProjectOperationLedger, 'begin' | 'finish' | 'get'>;
   readonly operationRevision?: number;
 }) {
+  // Readiness comes from the panel context on every render. The dock creates its
+  // panel closures once, so a value captured there would stay stale. A missing
+  // context fails closed: no project-scoped request and no Initialize action.
+  const editorContext = useContext(EditorPanelContext);
+  const controlPlaneReady = editorContext?.controlPlaneReady ?? false;
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
   const [workers, setWorkers] = useState<readonly BrowserWorker[]>([]);
   const [jobs, setJobs] = useState<readonly BrowserJob[]>([]);
@@ -127,6 +133,12 @@ export function JobsPanel({
   const refreshSeqRef = useRef(0);
   const pollingRef = useRef<BoundedPollingLoop | undefined>(undefined);
   const projectInitialized = initializedProjectId === projectId;
+  // Run and Queue also need a ready session, so a session that leaves its project
+  // loses them at once, before the next refresh runs.
+  const projectReady = controlPlaneReady && projectInitialized;
+  // The scope as of the latest render. A load compares against it after each await.
+  const latestScopeRef = useRef({ controlPlaneReady, projectId });
+  latestScopeRef.current = { controlPlaneReady, projectId };
 
   useEffect(() => {
     let cancelled = false;
@@ -145,11 +157,29 @@ export function JobsPanel({
 
   const load = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
+    // Project-scoped requests wait for a ready session. The id prefix alone
+    // does not show that the session owns this project.
+    const projectScopeReady =
+      controlPlaneReady && (projectInitialized || projectId.startsWith('project-'));
+    if (!projectScopeReady) {
+      // Rows from an earlier project or owner must not stay actionable. Their
+      // actions address the current project id, which the session cannot vouch for.
+      setJobs(NO_JOBS);
+      // The next binding, even of the same id, must run its own bootstrap.
+      setInitializedProjectId(undefined);
+    }
     try {
       const nextWorkers = await client.workers();
+      // Readiness can drop while the Worker list is in flight. A load that started in an
+      // earlier scope must not send a project-scoped request for that scope.
+      const latestScope = latestScopeRef.current;
+      if (
+        requestId !== refreshSeqRef.current ||
+        latestScope.controlPlaneReady !== controlPlaneReady ||
+        latestScope.projectId !== projectId
+      )
+        return;
       let nextJobs: readonly BrowserJob[] = [];
-      const projectScopeReady =
-        controlPlaneReady || projectInitialized || projectId.startsWith('project-');
       let projectMissing = !projectScopeReady;
       if (projectScopeReady) {
         try {
@@ -233,12 +263,14 @@ export function JobsPanel({
   );
   const queueUnavailableReason =
     queueReadiness.kind === 'ready' ? undefined : queueReadiness.reason;
-  // A ready authenticated session initializes its opaque project binding during
-  // refresh. Do not briefly mount an action that that same refresh immediately
-  // removes; it produces a real UI flicker and can detach a user's click.
+  // A ready session initializes its opaque project binding during refresh. Show
+  // Initialize only when that refresh failed, so the action never flashes in
+  // before it has run. Signed-out and settling sessions get no project action.
   const showInitialize =
+    controlPlaneReady &&
     !projectInitialized &&
-    (!controlPlaneReady || connectionStatus.startsWith('Not connected or not signed in:'));
+    projectId.startsWith('project-') &&
+    connectionStatus.startsWith('Not connected or not signed in:');
 
   useEffect(() => {
     if (pendingPairWorkerId === undefined) return;
@@ -269,6 +301,8 @@ export function JobsPanel({
   };
 
   const initialize = async () => {
+    // Only a bound project under a ready session may be created on the server.
+    if (!controlPlaneReady || !projectId.startsWith('project-')) return;
     try {
       await client.ensureProject(projectId, projectTitle);
       setInitializedProjectId(projectId);
@@ -280,7 +314,7 @@ export function JobsPanel({
   };
 
   const submit = async () => {
-    if (!projectInitialized) {
+    if (!projectReady) {
       setStatus('Initialize this project before queueing a derivative job.');
       return;
     }
@@ -480,7 +514,7 @@ export function JobsPanel({
               (audioAssetId === undefined ? 'Queue thumbnail derivative' : 'Run audio denoise')
             }
             data-guide={audioAssetId === undefined ? 'Queue thumbnail' : 'Run audio denoise'}
-            disabled={!projectInitialized || submitting || queueUnavailableReason !== undefined}
+            disabled={!projectReady || submitting || queueUnavailableReason !== undefined}
             onClick={() => void submit()}
           >
             <ImageIcon />

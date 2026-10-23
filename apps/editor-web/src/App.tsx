@@ -382,7 +382,12 @@ import { buildContentTemplateTransaction } from './content-template-transaction.
 import { createEditorPluginHost } from './plugin-host.js';
 import { createAgentCommandBus } from './agent-command-bus.js';
 import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
-import { getOrCreateControlPlaneProjectBinding } from './project-control-plane.js';
+import {
+  controlPlaneOwnerKeyFor,
+  controlPlaneProjectIsReady,
+  getOrCreateControlPlaneProjectBinding,
+  unboundControlPlaneProject,
+} from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { ProjectMediaResolver } from './project-media-resolver.js';
 import { createObservationCache } from './media-observation/observation-cache.js';
@@ -445,7 +450,6 @@ import {
   ZoomInIcon,
 } from './icons.js';
 import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
-import { getStoredMediaToken } from './media-session.js';
 import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   markCompletedExportCacheUnavailable,
@@ -1610,32 +1614,48 @@ function EditorWorkspace({
     } else setAudioStateRaw(canonical);
     setAudioHydrated(true);
   }, [projectId, session, storage]);
-  const controlPlaneOwnerKey =
-    joySession.kind === 'ready'
-      ? (joySession.subject ?? 'signed-in')
-      : getStoredMediaToken(storage) !== undefined
-        ? 'signed-in'
-        : 'signed-out';
+  // Only a ready session names an owner. Until then, and when signed out, the
+  // editor project stays unbound: no binding is stored and no request is sent
+  // under a provisional owner.
+  const controlPlaneOwnerKey = controlPlaneOwnerKeyFor(joySession);
   const controlPlaneProject = useMemo(
     () =>
-      getOrCreateControlPlaneProjectBinding(storage, session.visualProject, {
-        ownerKey: controlPlaneOwnerKey,
-      }),
+      controlPlaneOwnerKey === undefined
+        ? unboundControlPlaneProject(session.visualProject)
+        : getOrCreateControlPlaneProjectBinding(storage, session.visualProject, {
+            ownerKey: controlPlaneOwnerKey,
+          }),
     [controlPlaneOwnerKey, session.visualProject, storage],
   );
-  const [controlPlaneProjectReady, setControlPlaneProjectReady] = useState(false);
+  // The project whose ensure has completed. It is keyed by id, so a change of project is not
+  // ready for the new project until that project's own ensure completes. An effect sets it, so
+  // it cannot be a bare flag: the flag would stay true for one render after a project change.
+  const [controlPlaneReadyFor, setControlPlaneReadyFor] = useState<{
+    readonly ownerKey: string;
+    readonly projectId: string;
+  }>();
+  const controlPlaneProjectReady = controlPlaneProjectIsReady(
+    controlPlaneReadyFor,
+    controlPlaneOwnerKey,
+    controlPlaneProject.controlPlaneProjectId,
+  );
+  // A bound project counts as ready only while a ready owner names it.
+  const controlPlaneBindingReady = controlPlaneOwnerKey !== undefined && controlPlaneProjectReady;
   useEffect(() => {
     let cancelled = false;
     let retryTimer: number | undefined;
     const controlPlaneProjectId = controlPlaneProject.controlPlaneProjectId;
-    setControlPlaneProjectReady(false);
-    if (joySession.kind !== 'ready') return () => undefined;
+    setControlPlaneReadyFor(undefined);
+    if (controlPlaneOwnerKey === undefined) return () => undefined;
     void mediaControlPlaneClient
       .ensureProject(controlPlaneProject.controlPlaneProjectId, controlPlaneProject.title)
       .then(() => {
         if (cancelled) return;
         controlPlaneProjectEnsureFailuresRef.current.delete(controlPlaneProjectId);
-        setControlPlaneProjectReady(true);
+        setControlPlaneReadyFor({
+          ownerKey: controlPlaneOwnerKey,
+          projectId: controlPlaneProjectId,
+        });
       })
       .catch(() => {
         if (cancelled) return;
@@ -1664,12 +1684,12 @@ function EditorWorkspace({
   }, [
     controlPlaneProject.controlPlaneProjectId,
     controlPlaneProject.title,
+    controlPlaneOwnerKey,
     controlPlaneProjectEnsureRetry,
-    joySession.kind,
     showToast,
   ]);
   useEffect(() => {
-    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return;
+    if (!controlPlaneProjectReady || controlPlaneOwnerKey === undefined) return;
     const controlPlaneProjectId = controlPlaneProject.controlPlaneProjectId;
     if (remoteDocumentHydrationRef.current.has(controlPlaneProjectId)) return;
     remoteDocumentHydrationRef.current.add(controlPlaneProjectId);
@@ -1734,7 +1754,7 @@ function EditorWorkspace({
     showToast,
   ]);
   useEffect(() => {
-    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return;
+    if (!controlPlaneProjectReady || controlPlaneOwnerKey === undefined) return;
     if (remoteDocumentBootstrapProjectId !== controlPlaneProject.controlPlaneProjectId) return;
     remoteDocumentAutosyncRef.current?.schedule(
       controlPlaneProject,
@@ -1851,27 +1871,17 @@ function EditorWorkspace({
     () =>
       new ProjectMediaResolver({
         projectId: controlPlaneProject.controlPlaneProjectId,
-        // The auth probe runs asynchronously after the editor mounts. A valid
-        // stored token is already sufficient for owner-authorized media reads;
-        // waiting for the probe to flip to `ready` creates a real user-facing
-        // race where Cloud/Worker actions fail with a misleading "session is
-        // not ready" error immediately after opening a project.
-        controlPlaneReady:
-          controlPlaneProjectReady ||
-          (joySession.kind === 'unknown' && getStoredMediaToken(storage) !== undefined),
+        // Media reads wait for a ready session. A stored token does not name the
+        // owner, so reads stay on the reference path until the bound project is
+        // ready.
+        controlPlaneReady: controlPlaneBindingReady,
         project: session.visualProject,
         client: mediaControlPlaneClient,
         originalCache: {
           get: (assetId) => originalAssetCachePromise.then((cache) => cache.get(assetId)),
         },
       }),
-    [
-      controlPlaneProject.controlPlaneProjectId,
-      controlPlaneProjectReady,
-      joySession.kind,
-      session.visualProject,
-      storage,
-    ],
+    [controlPlaneProject.controlPlaneProjectId, controlPlaneBindingReady, session.visualProject],
   );
   useLayoutEffect(
     () => () =>
@@ -1989,13 +1999,10 @@ function EditorWorkspace({
     },
     [mediaResolver],
   );
-  const resolveAudioAssetUrl = useCallback(
-    async (assetId: string): Promise<string> => {
-      const source = await mediaResolver.resolve(assetId);
-      return source.url;
-    },
-    [mediaResolver],
-  );
+  const resolveAudioAssetUrl = useCallback(async (assetId: string): Promise<string> => {
+    const source = await mediaResolverRef.current.resolve(assetId);
+    return source.url;
+  }, []);
   const exportEditableProject = useCallback(async () => {
     const entry = getCatalogProject(storage, projectId);
     if (entry === undefined) {
@@ -2426,6 +2433,8 @@ function EditorWorkspace({
         setState((active) => ({ ...active, playing: false }));
       });
   }, [syncMediaToPlayhead]);
+  const resyncTimelineMediaRef = useRef(resyncTimelineMedia);
+  resyncTimelineMediaRef.current = resyncTimelineMedia;
   useEffect(() => {
     if (!state.playing) return;
     const video = videoRef.current;
@@ -3073,7 +3082,7 @@ function EditorWorkspace({
       let persistedAsset:
         | Awaited<ReturnType<typeof importMediaFile>>
         | { readonly id: string; readonly sha256: string; readonly bytes: number };
-      if (joySession.kind === 'ready') {
+      if (controlPlaneOwnerKey !== undefined) {
         const generatedFile = new File([asset.blob], `${asset.assetId}.png`, {
           type: mimeType,
         });
@@ -3126,7 +3135,7 @@ function EditorWorkspace({
     },
     [
       controlPlaneProject,
-      joySession.kind,
+      controlPlaneOwnerKey,
       session,
       showToast,
       state.playheadUs,
@@ -6153,7 +6162,7 @@ function EditorWorkspace({
                   await originalAssetCachePromise
                 ).get(selectedAudioClip.assetId);
                 if (original === undefined) {
-                  const source = await mediaResolver.resolve(selectedAudioClip.assetId);
+                  const source = await mediaResolverRef.current.resolve(selectedAudioClip.assetId);
                   const response = await fetch(source.url);
                   if (!response.ok)
                     throw new Error('The selected audio original is unavailable for Local Worker.');
@@ -6221,7 +6230,7 @@ function EditorWorkspace({
               context.showToast('This remote provider result is already applied.', 'info');
               return;
             }
-            const source = await mediaResolver.resolve(targetAssetId);
+            const source = await mediaResolverRef.current.resolve(targetAssetId);
             const response = await fetch(source.url);
             if (!response.ok)
               throw new Error('The remote provider could not read the selected media.');
@@ -6802,7 +6811,6 @@ function EditorWorkspace({
         <JobsPanel
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
-          controlPlaneReady={controlPlaneProjectReady}
           {...(selectedAudioAssetId === undefined ? {} : { audioAssetId: selectedAudioAssetId })}
           {...(selectedThumbnailAssetId === undefined
             ? {}
@@ -6830,7 +6838,7 @@ function EditorWorkspace({
             host: missingMediaHostFor(session),
             revision: session.projectRevisionId,
             onChanged: () => {
-              resyncTimelineMedia();
+              resyncTimelineMediaRef.current();
               setRevision((current) => current + 1);
             },
           }}
@@ -7599,7 +7607,7 @@ function EditorWorkspace({
               timelineProject: session.timelineProject,
               visualProject: session.visualProject,
               controlPlaneProject,
-              controlPlaneReady: controlPlaneProjectReady,
+              controlPlaneReady: controlPlaneBindingReady,
               loadProjectAssetBlob,
               playback: playbackDiagnostics.current.snapshot(),
               canUndo: session.canUndo,

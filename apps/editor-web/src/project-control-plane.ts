@@ -1,7 +1,10 @@
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
+import type { JoySessionState } from './identity.js';
 
 const STORAGE_KEY = 'joy-media.control-plane-project-bindings.v1';
+/** Prefix of the placeholder id an editor project carries while no ready session owns it. */
+const UNBOUND_PREFIX = 'unbound-';
 
 export interface ControlPlaneProjectBinding {
   /** Stable local creative-document identity; never sent as a Worker path. */
@@ -119,6 +122,54 @@ export function getOrCreateControlPlaneProjectBinding(
   };
   upsertControlPlaneProjectBinding(storage, binding, ownerKey);
   return binding;
+}
+
+/**
+ * The control-plane owner an editor project binds under. Only a ready session
+ * with a subject names one: a stored token, an unresolved probe, a signed-out
+ * state, or a ready session without a subject all name none.
+ */
+export function controlPlaneOwnerKeyFor(session: JoySessionState): string | undefined {
+  if (session.kind !== 'ready') return undefined;
+  const subject = session.subject?.trim();
+  return subject === undefined || subject === '' ? undefined : subject;
+}
+
+/**
+ * Whether the project's ensure has completed for this owner and this project. A
+ * record for another owner or another project never counts, so a change of owner
+ * or project is not ready until that pair's own ensure completes.
+ */
+export function controlPlaneProjectIsReady(
+  readyFor: { readonly ownerKey: string; readonly projectId: string } | undefined,
+  ownerKey: string | undefined,
+  projectId: string,
+): boolean {
+  return (
+    readyFor !== undefined &&
+    ownerKey !== undefined &&
+    readyFor.ownerKey === ownerKey &&
+    readyFor.projectId === projectId
+  );
+}
+
+/**
+ * The binding an editor project has while no ready session owns it. The value
+ * is never stored, and its id matches no control-plane project.
+ */
+export function unboundControlPlaneProject(
+  project: Pick<JoyProjectV1, 'id' | 'title'>,
+): ControlPlaneProjectBinding {
+  return {
+    editorProjectId: project.id,
+    controlPlaneProjectId: `${UNBOUND_PREFIX}${project.id}`,
+    title: project.title,
+  };
+}
+
+/** True for the placeholder id of an editor project that no ready session owns. */
+export function isUnboundControlPlaneProjectId(id: string): boolean {
+  return id.startsWith(UNBOUND_PREFIX);
 }
 
 function normalizeOptions(
