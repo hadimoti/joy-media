@@ -234,6 +234,8 @@ test.describe('native stock video library', () => {
     let _holdImportStart: (() => void) | undefined;
     let importHoldPromise: Promise<void> | undefined;
     let resolveImportHold: (() => void) | undefined;
+    // Once the import completes, the owner's unfiltered library lists the imported asset.
+    let importedAssetCompleted = false;
     const completedAsset = {
       id: 'imported-stock-1',
       kind: 'video',
@@ -255,9 +257,13 @@ test.describe('native stock video library', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           data:
-            projectId === null || !activeControlPlaneProjectIds.includes(projectId)
-              ? []
-              : [{ ...completedAsset, projectId }],
+            projectId === null
+              ? importedAssetCompleted && activeControlPlaneProjectIds.length > 0
+                ? [{ ...completedAsset, projectId: activeControlPlaneProjectIds[0] }]
+                : []
+              : !activeControlPlaneProjectIds.includes(projectId)
+                ? []
+                : [{ ...completedAsset, projectId }],
         }),
       });
     });
@@ -376,6 +382,20 @@ test.describe('native stock video library', () => {
     );
     await expect(page.locator('.stock-video-poster')).toHaveCount(6);
     await page.getByRole('button', { name: 'Search Assets' }).click();
+    // The imported asset is cloud-backed with no local copy, so its card fetches the original from the
+    // project route. Serve real bytes there, so the card can show its own media.
+    await page.route('**/api/v1/projects/*/assets/imported-stock-1/original', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'video/mp4', body: PREVIEW_BYTES });
+    });
+    // The fixture never registers the imported asset with the server, so it has no derivatives. An empty
+    // list lets the card fall back to the original above, instead of a server miss.
+    await page.route('**/api/v1/projects/*/assets/imported-stock-1/derivatives', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: [] }),
+      });
+    });
     await page.getByPlaceholder('Search media…').fill('fixture');
     await expect(page.locator('.stock-video-card[data-orientation="portrait"]')).toHaveCount(2);
 
@@ -738,6 +758,7 @@ test.describe('native stock video library', () => {
     await expect(
       page.getByRole('button', { name: /Importing Landscape fixture to My media/ }),
     ).toBeVisible();
+    importedAssetCompleted = true;
     resolveImportHold?.();
     importHoldPromise = undefined;
     await expect(page.getByText('Imported stock fixture.mp4 imported to My media.')).toBeVisible({
@@ -749,5 +770,16 @@ test.describe('native stock video library', () => {
       .map((id) => `/api/v1/projects/${id}`);
     expect(projectRequestErrors).toEqual([]);
     expect(stockRequestErrors).toEqual([]);
+    // The import has to show up as media, not only as a notice: the imported card's video must resolve
+    // its own blob source and load the metadata of the fixture it was given.
+    const importedCard = page.locator('.asset-card[data-asset-id="imported-stock-1"]');
+    await importedCard.scrollIntoViewIfNeeded();
+    const importedVideo = importedCard.locator('.asset-card-media video');
+    await expect(importedVideo).toHaveAttribute('src', /^blob:/, { timeout: 15_000 });
+    await expect
+      .poll(() => importedVideo.evaluate((video: HTMLVideoElement) => video.readyState), {
+        timeout: 15_000,
+      })
+      .toBeGreaterThanOrEqual(1);
   });
 });
