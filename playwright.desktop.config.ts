@@ -4,9 +4,13 @@ import { defineConfig } from '@playwright/test';
 
 const apiPort = process.env.JOY_MEDIA_E2E_API_PORT ?? '4174';
 const apiUrl = `http://127.0.0.1:${apiPort}`;
-// The API server records every request it serves here. The packaged jobs-panel spec reads the same file.
+// The API server records every request it serves here. This config names the file once per Playwright
+// run and exports it, so the server, the workers and the packaged jobs-panel spec read the same file, and
+// two runs on one host never share it.
 const requestLogPath =
-  process.env.JOY_MEDIA_E2E_REQUEST_LOG ?? join(tmpdir(), 'joy-media-desktop-api-requests.jsonl');
+  process.env.JOY_MEDIA_E2E_REQUEST_LOG ??
+  join(tmpdir(), `joy-media-desktop-api-requests-${process.pid}.jsonl`);
+process.env.JOY_MEDIA_E2E_REQUEST_LOG = requestLogPath;
 
 export default defineConfig({
   testDir: './tests/desktop',
