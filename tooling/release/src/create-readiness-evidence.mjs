@@ -1,11 +1,17 @@
 /* global process */
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateGateSummary } from './ci-gate-summary.ts';
-import { validateReadinessEvidence } from './readiness-evidence.ts';
+import { REQUIRED_SCENARIOS, validateReadinessEvidence } from './readiness-evidence.ts';
 
+// Every value in the emitted record is derived from authenticated execution evidence:
+// the workflow's `needs` context, the two exact Windows lifecycle receipts, the two-pass
+// summary, and the checked-out tree. Anything missing, failed, first-attempt-only or
+// inconsistent makes the build throw, so no record is written. Nothing is filled in
+// from a constant.
 const RELEASE_LANES = [
   'linux-real-services',
   'windows-p0-real-services',
@@ -17,15 +23,11 @@ const RELEASE_LANES = [
   'real-service-acceptance',
   'p3-real-services',
 ];
-const WINDOWS_SCENARIOS = [
-  'cli.render.playable',
-  'cli.render.unsupported-features',
-  'cli.render.failure-recovery',
-  'cli.render.windows-entrypoints',
-  'project.persistence.fresh-process',
-  'desktop.app.restart-save-export',
-  'desktop.windows.installed-lifecycle',
-];
+const TWO_PASS_SCENARIO = 'release.exact-candidate-two-pass';
+// Every required scenario except the two-pass verdict is measured by the Windows
+// installed-lifecycle receipt of each exact pass. Deriving the list from the validator's
+// inventory keeps the producer and the gate from drifting apart.
+const LIFECYCLE_SCENARIOS = REQUIRED_SCENARIOS.filter((id) => id !== TWO_PASS_SCENARIO);
 const REMOTE_ARTIFACTS = [
   ['joy-media-setup.exe', 'candidateSetupSha256'],
   ['joy-media-windows-x64.zip', 'candidatePortableArchiveSha256'],
@@ -101,18 +103,6 @@ function assertLifecycle(evidence, expected) {
   ) {
     fail(`Windows desktop lifecycle pass ${expected.pass} is stale or has mismatched provenance`);
   }
-  for (const id of WINDOWS_SCENARIOS) {
-    const scenario = lifecycle.scenarios?.find((entry) => entry.id === id);
-    if (
-      scenario?.status !== 'passed' ||
-      scenario.firstAttemptPassed !== true ||
-      scenario.retries !== 0
-    ) {
-      fail(
-        `Windows desktop lifecycle pass ${expected.pass} did not pass ${id} on its first attempt`,
-      );
-    }
-  }
   const requiredTransitions = [
     'installPrevious',
     'upgradeCandidate',
@@ -162,9 +152,43 @@ function assertLifecycle(evidence, expected) {
   return lifecycle;
 }
 
+// Each exact pass must report its own measured result for every lifecycle scenario. A
+// scenario counts only when the pass reports it as passed, on its first attempt, with
+// zero retries. A missing entry fails closed.
+function measuredOutcomes(lifecycle, pass) {
+  return new Map(
+    LIFECYCLE_SCENARIOS.map((id) => {
+      const entry = lifecycle.scenarios?.find((candidate) => candidate?.id === id);
+      if (entry === undefined) {
+        fail(`Windows desktop lifecycle pass ${pass} has no measured result for ${id}`);
+      }
+      if (entry.status !== 'passed') {
+        fail(`Windows desktop lifecycle pass ${pass} reports ${id} as ${String(entry.status)}`);
+      }
+      if (entry.firstAttemptPassed !== true) {
+        fail(`Windows desktop lifecycle pass ${pass} did not pass ${id} on its first attempt`);
+      }
+      if (entry.retries !== 0) {
+        fail(
+          `Windows desktop lifecycle pass ${pass} needed ${String(entry.retries)} retries for ${id}; zero retries are required`,
+        );
+      }
+      return [
+        id,
+        {
+          status: entry.status,
+          firstAttemptPassed: entry.firstAttemptPassed,
+          retries: entry.retries,
+        },
+      ];
+    }),
+  );
+}
+
 export function buildReadinessEvidence({
   workspaceRoot,
   candidateSha,
+  headSha,
   runId,
   attempt,
   needsJson,
@@ -172,11 +196,21 @@ export function buildReadinessEvidence({
 }) {
   const root = resolve(workspaceRoot);
   if (!/^[0-9a-f]{40}$/u.test(candidateSha ?? '')) fail('candidate SHA is invalid');
+  if (headSha !== candidateSha) {
+    fail(
+      `checked-out HEAD ${String(headSha)} does not match candidate SHA ${String(candidateSha)}`,
+    );
+  }
   if (!/^[0-9]+$/u.test(runId ?? '')) fail('workflow run id is invalid');
   if (!/^[1-9][0-9]*$/u.test(attempt ?? '')) fail('workflow attempt is invalid');
   const lanes = evaluateGateSummary(needsJson ?? '', RELEASE_LANES.join(','));
   if (!lanes.ok)
     fail(`required self-hosted CI lanes are not all green: ${lanes.reasons.join('; ')}`);
+  const needs = JSON.parse(needsJson);
+  const laneCommands = RELEASE_LANES.map((lane) => ({
+    name: `lane: ${lane}`,
+    exitCode: needs[lane].result === 'success' ? 0 : 1,
+  }));
 
   const summary = readJson(root, TWO_PASS_SUMMARY);
   if (
@@ -201,6 +235,7 @@ export function buildReadinessEvidence({
   const lifecycles = windowsEvidence.map((evidence, index) =>
     assertLifecycle(evidence, { candidateSha, runId, attempt, pass: index + 1 }),
   );
+  const outcomes = lifecycles.map((lifecycle, index) => measuredOutcomes(lifecycle, index + 1));
   const first = lifecycles[0];
   const second = lifecycles[1];
   const artifactKeys = REMOTE_ARTIFACTS.map(([, key]) => key);
@@ -257,20 +292,36 @@ export function buildReadinessEvidence({
   const redactedHashes = Object.fromEntries(
     redactedPaths.map((path) => [path, hashFile(root, path)]),
   );
-  const scenarioResults = [
-    ...WINDOWS_SCENARIOS.map((id) => ({
-      id,
-      status: 'passed',
-      retries: 0,
-      firstAttemptPassed: true,
-    })),
-    {
-      id: 'release.exact-candidate-two-pass',
-      status: 'passed',
-      retries: 0,
-      firstAttemptPassed: true,
-    },
+
+  // Scenario results are copied from the measured entries of the exact passes.
+  const scenarioResults = LIFECYCLE_SCENARIOS.map((id) => ({ id, ...outcomes[0].get(id) }));
+  const twoPassRequirements = [
+    ['every required lane succeeded in the workflow needs context', lanes.ok],
+    ['both exact Windows passes verified against this candidate and run', lifecycles.length === 2],
+    [
+      'every lifecycle scenario measured as passed on its first attempt in both passes',
+      outcomes.every((map) =>
+        LIFECYCLE_SCENARIOS.every((id) => {
+          const outcome = map.get(id);
+          return (
+            outcome?.status === 'passed' &&
+            outcome.firstAttemptPassed === true &&
+            outcome.retries === 0
+          );
+        }),
+      ),
+    ],
+    ['checked-out HEAD equals the candidate SHA', headSha === candidateSha],
   ];
+  const unmet = twoPassRequirements.filter(([, met]) => met !== true).map(([label]) => label);
+  if (unmet.length > 0) fail(`${TWO_PASS_SCENARIO} is not satisfied: ${unmet.join('; ')}`);
+  scenarioResults.push({
+    id: TWO_PASS_SCENARIO,
+    status: 'passed',
+    retries: 0,
+    firstAttemptPassed: true,
+  });
+
   const commands = [
     ...lifecycles.flatMap((lifecycle, index) =>
       lifecycle.commands.map((command) => ({
@@ -278,7 +329,7 @@ export function buildReadinessEvidence({
         exitCode: command.exitCode,
       })),
     ),
-    { name: 'all self-hosted release lanes green with four retained Linux passes', exitCode: 0 },
+    ...laneCommands,
   ];
   const startedAt = lifecycles
     .map((lifecycle) => Date.parse(lifecycle.startedAt))
@@ -303,10 +354,10 @@ export function buildReadinessEvidence({
     startUtc: new Date(startedAt).toISOString(),
     endUtc: new Date(Math.max(endedAt, now.getTime())).toISOString(),
     commands,
-    passCount: scenarioResults.length,
-    failCount: 0,
-    skipCount: 0,
-    retryCount: 0,
+    passCount: scenarioResults.filter((result) => result.status === 'passed').length,
+    failCount: scenarioResults.filter((result) => result.status === 'failed').length,
+    skipCount: scenarioResults.filter((result) => result.status === 'skipped').length,
+    retryCount: scenarioResults.reduce((total, result) => total + result.retries, 0),
     scenarioResults,
     installerArtifacts,
     redactedPaths,
@@ -319,14 +370,20 @@ export function buildReadinessEvidence({
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
+    const workspaceRoot = process.cwd();
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: workspaceRoot,
+      encoding: 'utf8',
+    }).trim();
     const evidence = buildReadinessEvidence({
-      workspaceRoot: process.cwd(),
+      workspaceRoot,
       candidateSha: process.env.CANDIDATE_SHA,
+      headSha,
       runId: process.env.GITHUB_RUN_ID,
       attempt: process.env.GITHUB_RUN_ATTEMPT,
       needsJson: process.env.NEEDS_JSON,
     });
-    const outputPath = join(process.cwd(), 'test-output/readiness/evidence.json');
+    const outputPath = join(workspaceRoot, 'test-output/readiness/evidence.json');
     mkdirSync(dirname(outputPath), { recursive: true });
     writeFileSync(outputPath, `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'wx' });
     process.stdout.write(

@@ -14,7 +14,8 @@
 /**
  * The required scenario IDs that every readiness evidence record must satisfy.
  * Each scenario must exist in `scenarioResults`, have passed on its first
- * attempt, and have zero retries.
+ * attempt, and have zero retries. This list is exactly the set of rows marked
+ * gate-required in docs/qa/READINESS-MATRIX.md.
  */
 export const REQUIRED_SCENARIOS: readonly string[] = [
   'cli.render.playable',
@@ -24,6 +25,7 @@ export const REQUIRED_SCENARIOS: readonly string[] = [
   'project.persistence.fresh-process',
   'desktop.app.restart-save-export',
   'desktop.windows.installed-lifecycle',
+  'desktop.export-media-semantics',
   'release.exact-candidate-two-pass',
 ];
 
