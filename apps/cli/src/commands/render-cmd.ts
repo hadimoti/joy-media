@@ -802,7 +802,14 @@ export function publishPreviewAtomically(
     rmSync(stagingPath, { force: true });
     return false;
   }
-  renameSync(stagingPath, artifactPath);
+  try {
+    renameSync(stagingPath, artifactPath);
+  } catch (error) {
+    // A destination another process holds keeps its bytes, and a failed publish leaves no staged preview.
+    // The caller reports the failure.
+    rmSync(stagingPath, { force: true });
+    throw error;
+  }
   return true;
 }
 
@@ -1199,16 +1206,26 @@ export async function runHeadlessRender(
         const outcome = await previewHandle.done;
         encodeSettled = true;
         if (!outcome.ok) return failure(outcome.code, outcome.message, totalFrames, totalClips);
-        if (
-          !existsSync(stagingPath) ||
-          !publishPreviewAtomically(
-            stagingPath,
-            artifactPath,
-            cancellation.signal,
-            titleWidth,
-            titleHeight,
-          )
-        )
+        let previewPublished = false;
+        if (existsSync(stagingPath)) {
+          try {
+            previewPublished = publishPreviewAtomically(
+              stagingPath,
+              artifactPath,
+              cancellation.signal,
+              titleWidth,
+              titleHeight,
+            );
+          } catch (error) {
+            return failure(
+              'output',
+              `Preview ${artifactPath} could not be published: ${error instanceof Error ? error.message : String(error)}`,
+              totalFrames,
+              totalClips,
+            );
+          }
+        }
+        if (!previewPublished)
           return failure(
             'encode-failed',
             cancellation.signal.aborted

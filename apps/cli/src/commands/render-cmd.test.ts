@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
@@ -1861,6 +1861,87 @@ describe('runHeadlessRender writes an honest, atomic, deterministic manifest', (
       expect(readFileSync(file, 'utf8')).toBe('keep me');
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// Controlled Windows acceptance for held-file publication. A separate PowerShell process opens the artifact
+// with FileShare.None, so this process can neither read nor replace it. The control case proves the same
+// staged preview publishes once nothing holds the file, so a failure below is about the hold.
+describe.skipIf(process.platform !== 'win32')('held preview publication on Windows', () => {
+  interface Holder {
+    readonly child: ChildProcess;
+    readonly exited: Promise<void>;
+  }
+
+  function holdExclusively(path: string): Promise<Holder> {
+    const literal = path.replace(/'/gu, "''");
+    const script = `$stream = [System.IO.File]::Open('${literal}', [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None); [Console]::Out.WriteLine('HELD'); [Console]::Out.Flush(); Start-Sleep -Seconds 120`;
+    return new Promise<Holder>((resolve, reject) => {
+      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+        windowsHide: true,
+      });
+      let output = '';
+      child.stdout?.on('data', (chunk: Buffer) => {
+        output += chunk.toString('utf8');
+        if (!output.includes('HELD')) return;
+        resolve({
+          child,
+          exited: new Promise<void>((done) => child.once('exit', () => done())),
+        });
+      });
+      child.once('error', reject);
+      child.once('exit', (code) =>
+        reject(new Error(`the holder exited before it held the file (code ${code})`)),
+      );
+    });
+  }
+
+  it('publishes the staged preview when nothing holds the artifact', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'held-preview-control-'));
+    const artifactPath = join(directory, 'preview-0.png');
+    const stagingPath = join(directory, '.preview-0-staging.png');
+    const png = encodeRgbaPng(1, 1, Uint8Array.from([1, 2, 3, 255]));
+    try {
+      writeFileSync(stagingPath, png);
+      expect(
+        publishPreviewAtomically(stagingPath, artifactPath, new AbortController().signal, 1, 1),
+      ).toBe(true);
+      expect(readFileSync(artifactPath).equals(png)).toBe(true);
+      expect(existsSync(stagingPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('fails a publish onto a held artifact, keeps its bytes, and leaves no staged preview', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'held-preview-'));
+    const artifactPath = join(directory, 'preview-0.png');
+    const stagingPath = join(directory, '.preview-0-staging.png');
+    const png = encodeRgbaPng(1, 1, Uint8Array.from([1, 2, 3, 255]));
+    let holder: Holder | undefined;
+    try {
+      writeFileSync(artifactPath, 'ORIGINAL-PREVIEW');
+      writeFileSync(stagingPath, png);
+      holder = await holdExclusively(artifactPath);
+      let thrown: unknown;
+      try {
+        publishPreviewAtomically(stagingPath, artifactPath, new AbortController().signal, 1, 1);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, 'a publish onto a held artifact must fail').toBeInstanceOf(Error);
+      expect((thrown as NodeJS.ErrnoException).code).toMatch(/^(EPERM|EBUSY|EACCES)$/u);
+      expect(existsSync(stagingPath), 'no staged preview is left behind').toBe(false);
+      holder.child.kill();
+      await holder.exited;
+      holder = undefined;
+      expect(readFileSync(artifactPath, 'utf8'), 'the held artifact keeps its bytes').toBe(
+        'ORIGINAL-PREVIEW',
+      );
+    } finally {
+      holder?.child.kill();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 });
