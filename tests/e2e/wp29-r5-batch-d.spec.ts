@@ -216,6 +216,53 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     });
   });
 
+  test('[R5 CASE-66 enqueue] queues Local Worker audio without external processing', async ({
+    page,
+  }, testInfo) => {
+    const title = `R5-66-enqueue-${testInfo.project.name}`;
+    await openDisposableWorkspace(page, title);
+    const audioName = `wp29-case66-enqueue-${testInfo.project.name}-${Date.now()}.wav`;
+    await importMediaFixture(page, 'audio.wav', audioName);
+    await page
+      .locator('.asset-card', { hasText: audioName })
+      .first()
+      .dragTo(
+        page
+          .locator('.timeline-track[data-track-family="audio"] .timeline-lane[data-track-id]')
+          .first(),
+        {
+          targetPosition: { x: 70, y: 20 },
+        },
+      );
+    await page.locator('.timeline-clip[data-clip-id]').first().click();
+    await offerAndPairWorker(page, ['audio.ml-denoise']);
+    await page.reload();
+    if (await page.getByRole('heading', { name: 'Projects' }).isVisible()) {
+      await page
+        .getByRole('button', { name: new RegExp(title) })
+        .first()
+        .click();
+    }
+    await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
+    // Selection is intentionally transient UI state; restore the audio target
+    // before routing an external Worker after the project reload.
+    await page.locator('.timeline-clip[data-clip-id]').first().click();
+    await openPanel(page, 'Audio');
+    await page.getByRole('tab', { name: 'Runtime' }).click();
+    await expect(page.locator('.audio-runtime-cell', { hasText: 'Local Worker' })).toContainText(
+      'Connected',
+    );
+    const localRun = page.locator('[data-audio-route="local-worker"]');
+    await expect(localRun).toBeEnabled();
+    await localRun.click();
+    await expect(page.locator('.jobs-panel')).toBeVisible();
+    await page.getByRole('tab', { name: 'Queue' }).click();
+    const queued = page.locator('.jobs-list > li[data-job-id]', { hasText: 'audio.ml-denoise' });
+    await expect(queued).toHaveCount(1);
+    // No external Worker is running to lease the job, so it stays queued.
+    await expect(queued).toHaveAttribute('data-job-state', 'queued');
+  });
+
   test('[R5 CASE-67] requires consent and applies one deterministic Cloud result', async ({
     page,
   }, testInfo) => {
