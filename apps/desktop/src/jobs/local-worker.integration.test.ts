@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFileRegistry } from '../main/file-registry.js';
 import { LocalDatabase } from '../store/local-database.js';
@@ -22,7 +23,9 @@ import { localWorkerEnv } from './worker-env.js';
  * stores the JPEG the Worker uploads.
  */
 
-const workerEntry = resolve('../worker/dist/index.js');
+// The Worker build sits beside this package, so it is located from this file, not from the cwd.
+const workerDir = fileURLToPath(new URL('../../../worker/', import.meta.url));
+const workerEntry = join(workerDir, 'dist', 'index.js');
 const LEASE_CAP_MS = 3_000;
 const FIRST_JOB_TIMEOUT_MS = 60_000;
 
@@ -90,7 +93,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
 
   function startWorker(): ChildProcess {
     const child = spawn(process.execPath, [workerEntry], {
-      cwd: resolve('../worker'),
+      cwd: workerDir,
       env: localWorkerEnv(process.env, { apiEnv: api.workerEnv, workerRoot: join(dir, 'worker') }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });

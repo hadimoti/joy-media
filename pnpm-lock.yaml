@@ -39,6 +39,9 @@ importers:
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0(supports-color@7.2.0)
+      pg-mem:
+        specifier: ^3.0.14
+        version: 3.0.14
       postject:
         specifier: 1.0.0-alpha.6
         version: 1.0.0-alpha.6
