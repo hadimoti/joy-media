@@ -377,6 +377,71 @@ describe('createReadinessEvidence', () => {
     );
   });
 
+  it('rejects a re-run workflow attempt, because a re-run cannot prove first-attempt success', () => {
+    const { workspaceRoot, needsJson } = prepareWorkspace();
+    expect(() =>
+      buildReadinessEvidence({
+        workspaceRoot,
+        candidateSha: CANDIDATE_SHA,
+        headSha: CANDIDATE_SHA,
+        runId: RUN_ID,
+        attempt: '2',
+        needsJson,
+      }),
+    ).toThrow(/first workflow attempt/u);
+  });
+
+  it('rejects a scenario that needed a retry even though its first attempt passed', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const secondPass = lifecycle(2);
+    const entry = secondPass.desktopLifecycle.scenarios.find(
+      (scenario) => scenario.id === 'cli.render.windows-entrypoints',
+    );
+    expect(entry).toBeDefined();
+    entry!.retries = 1;
+    writePass(write, 2, secondPass);
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /needed 1 retries for cli\.render\.windows-entrypoints/u,
+    );
+  });
+
+  it('rejects duplicate measured results for one scenario', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    const firstPass = lifecycle(1);
+    const original = firstPass.desktopLifecycle.scenarios.find(
+      (scenario) => scenario.id === 'cli.render.playable',
+    );
+    expect(original).toBeDefined();
+    firstPass.desktopLifecycle.scenarios.push({ ...original! });
+    writePass(write, 1, firstPass);
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /duplicate measured results for cli\.render\.playable/u,
+    );
+  });
+
+  it('rejects a two-pass summary that repeats one Linux pass', () => {
+    const { workspaceRoot, needsJson, write } = prepareWorkspace();
+    write(
+      'test-output/readiness/two-pass-evidence/manifest.json',
+      JSON.stringify({
+        schemaVersion: 1,
+        candidateSha: CANDIDATE_SHA,
+        runId: RUN_ID,
+        attempt: ATTEMPT,
+        sources: [
+          { lane: 'real-service', pass: 1 },
+          { lane: 'real-service', pass: 1 },
+          { lane: 'p3', pass: 1 },
+          { lane: 'p3', pass: 2 },
+        ],
+        windowsWorkerPasses: [{ pass: 1 }, { pass: 2 }],
+      }),
+    );
+    expect(() => build(workspaceRoot, needsJson)).toThrow(
+      /missing a required Linux acceptance pass/u,
+    );
+  });
+
   it('refuses to build evidence without a valid candidate SHA or run id', () => {
     const { workspaceRoot, needsJson } = prepareWorkspace();
     expect(() =>

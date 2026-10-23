@@ -158,7 +158,11 @@ function assertLifecycle(evidence, expected) {
 function measuredOutcomes(lifecycle, pass) {
   return new Map(
     LIFECYCLE_SCENARIOS.map((id) => {
-      const entry = lifecycle.scenarios?.find((candidate) => candidate?.id === id);
+      const matches = (lifecycle.scenarios ?? []).filter((candidate) => candidate?.id === id);
+      if (matches.length > 1) {
+        fail(`Windows desktop lifecycle pass ${pass} has duplicate measured results for ${id}`);
+      }
+      const entry = matches[0];
       if (entry === undefined) {
         fail(`Windows desktop lifecycle pass ${pass} has no measured result for ${id}`);
       }
@@ -203,6 +207,11 @@ export function buildReadinessEvidence({
   }
   if (!/^[0-9]+$/u.test(runId ?? '')) fail('workflow run id is invalid');
   if (!/^[1-9][0-9]*$/u.test(attempt ?? '')) fail('workflow attempt is invalid');
+  if (attempt !== '1') {
+    fail(
+      'readiness requires the first workflow attempt; a re-run cannot prove first-attempt success',
+    );
+  }
   const lanes = evaluateGateSummary(needsJson ?? '', RELEASE_LANES.join(','));
   if (!lanes.ok)
     fail(`required self-hosted CI lanes are not all green: ${lanes.reasons.join('; ')}`);
