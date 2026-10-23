@@ -1,0 +1,22 @@
+# Command-line driver for the accounting functions, used by accounting.test.mjs.
+# Exit codes: 0 pass, 1 scenario failed (a case was skipped, pending, failed, todo, unexpected or
+# flaky, or nothing ran), 2 the report is missing, malformed or lacks a required counter.
+param(
+    [Parameter(Mandatory = $true)][ValidateSet('vitest', 'playwright')][string]$Kind,
+    [Parameter(Mandatory = $true)][string]$Report
+)
+
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'accounting.ps1')
+
+try {
+    if ($Kind -eq 'vitest') {
+        $code = Get-VitestAccountingExitCode $Report
+    } else {
+        $code = Get-PlaywrightAccountingExitCode $Report
+    }
+    exit $code
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 2
+}

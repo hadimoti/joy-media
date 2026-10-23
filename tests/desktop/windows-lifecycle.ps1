@@ -40,21 +40,8 @@ $script:transitionOutcomes = [ordered]@{
     uninstall = 'not-run'
     userDataPreserved = 'not-run'
 }
-# Test accounting. An exit code alone cannot show that every case ran, because skipped cases
-# exit 0. Each step writes a machine-readable report, and a scenario counts as passed only when
-# the report shows at least one passing case and no failed, skipped, pending or todo case.
-function Get-VitestAccountingExitCode([string]$ReportPath) {
-    if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) { throw "Vitest accounting report is missing: $ReportPath" }
-    $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
-    $clean = ([int]$report.numPassedTests -gt 0) -and ([int]$report.numFailedTests -eq 0) -and ([int]$report.numPendingTests -eq 0) -and ([int]$report.numTodoTests -eq 0)
-    return $(if ($clean) { 0 } else { 1 })
-}
-function Get-PlaywrightAccountingExitCode([string]$ReportPath) {
-    if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) { throw "Playwright accounting report is missing: $ReportPath" }
-    $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
-    $clean = ([int]$report.stats.expected -gt 0) -and ([int]$report.stats.unexpected -eq 0) -and ([int]$report.stats.skipped -eq 0) -and ([int]$report.stats.flaky -eq 0)
-    return $(if ($clean) { 0 } else { 1 })
-}
+# Test accounting lives in accounting.ps1 so that it can be tested on its own.
+. (Join-Path $PSScriptRoot 'accounting.ps1')
 function Set-ScenarioOutcome([string]$Id, [int]$ExitCode) {
     # Every measured step here runs with --retries=0 or without a retry setting, so the first
     # attempt's exit code is the scenario's result.
@@ -440,14 +427,15 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     $script:transitionOutcomes['installPrevious'] = 'passed'
     $seedProof = Invoke-LifecycleFixture $devElectron 'seed'
     if ($seedProof.result -ne 'seeded' -or $seedProof.encryptionAvailable -ne $true) { throw 'v1.0.1 could not seed isolated settings, library, and DPAPI fixture data.' }
+    # --retry=0 keeps every Vitest case to its first attempt, matching the Playwright --retries=0 flag.
     $renderRealReport = Join-Path $workRoot 'render-real.vitest.json'
-    $null = Invoke-Pnpm 'CLI render-real source and bundle acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-real.e2e.test.ts', '--no-file-parallelism', '--reporter=json', "--outputFile=$renderRealReport")
+    $null = Invoke-Pnpm 'CLI render-real source and bundle acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-real.e2e.test.ts', '--no-file-parallelism', '--retry=0', '--reporter=json', "--outputFile=$renderRealReport")
     Set-ScenarioOutcome -Id 'cli.render.playable' -ExitCode (Get-VitestAccountingExitCode $renderRealReport)
     $renderParityReport = Join-Path $workRoot 'render-parity.vitest.json'
-    $null = Invoke-Pnpm 'CLI unsupported-feature acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-parity.e2e.test.ts', '--no-file-parallelism', '--reporter=json', "--outputFile=$renderParityReport")
+    $null = Invoke-Pnpm 'CLI unsupported-feature acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-parity.e2e.test.ts', '--no-file-parallelism', '--retry=0', '--reporter=json', "--outputFile=$renderParityReport") 900 @{ JOY_MEDIA_REQUIRE_CAPTION_FACE = '1' }
     Set-ScenarioOutcome -Id 'cli.render.unsupported-features' -ExitCode (Get-VitestAccountingExitCode $renderParityReport)
     $renderRecoveryReport = Join-Path $workRoot 'render-recovery.vitest.json'
-    $null = Invoke-Pnpm 'CLI render failure-recovery acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-recovery.e2e.test.ts', '--no-file-parallelism', '--reporter=json', "--outputFile=$renderRecoveryReport")
+    $null = Invoke-Pnpm 'CLI render failure-recovery acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-recovery.e2e.test.ts', '--no-file-parallelism', '--retry=0', '--reporter=json', "--outputFile=$renderRecoveryReport")
     Set-ScenarioOutcome -Id 'cli.render.failure-recovery' -ExitCode (Get-VitestAccountingExitCode $renderRecoveryReport)
     Invoke-VerifiedSetup $CandidateSetupPath $candidateSetup $candidateVersion | Out-Null
     Assert-UserIntegrations $candidateVersion
@@ -464,6 +452,16 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
         PLAYWRIGHT_JSON_OUTPUT_NAME = $editorReport
     }
     Set-ScenarioOutcome -Id 'desktop.app.restart-save-export' -ExitCode (Get-PlaywrightAccountingExitCode $editorReport)
+    # Export parity runs the packaged export spec for picture, sound and timing against the preview.
+    # A skipped case, such as the Persian caption when its font is missing, fails the scenario.
+    $exportReport = Join-Path $workRoot 'export-semantics.playwright.json'
+    $null = Invoke-Pnpm 'installed candidate export picture, sound and timing acceptance' @('exec', 'playwright', 'test', '--config', 'playwright.desktop.config.ts', 'tests/desktop/export-semantics.spec.ts', '--retries=0', '--reporter=json') 900 @{
+        JOY_MEDIA_TEST_EXECUTABLE = Join-Path $installRoot 'joy-media.exe'
+        JOY_MEDIA_TEST_WORKING_DIRECTORY = $installRoot
+        JOY_MEDIA_TEST_API_BASE_URL = 'http://127.0.0.1:4174'
+        PLAYWRIGHT_JSON_OUTPUT_NAME = $exportReport
+    }
+    Set-ScenarioOutcome -Id 'desktop.export-media-semantics' -ExitCode (Get-PlaywrightAccountingExitCode $exportReport)
     $candidateSeedVerification = Invoke-LifecycleFixture $devElectron 'verify'
     if ($candidateSeedVerification.result -ne 'verified' -or $candidateSeedVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256 -or $candidateSeedVerification.directCiphertextSha256 -ne $seedProof.directCiphertextSha256) {
         throw 'Settings, asset-library catalog, or DPAPI ciphertext did not survive the candidate update.'
