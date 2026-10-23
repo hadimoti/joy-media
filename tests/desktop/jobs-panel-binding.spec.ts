@@ -36,6 +36,7 @@ const requestLogPath =
   process.env.JOY_MEDIA_E2E_REQUEST_LOG ?? join(tmpdir(), 'joy-media-desktop-api-requests.jsonl');
 const E2E_OWNER = 'e2e-owner@example.test';
 const BINDINGS_KEY = 'joy-media.control-plane-project-bindings.v1';
+const PROJECT_CATALOG_KEY = 'joy-media.project-catalog.v1';
 
 const THUMBNAIL_BLOCKED = /No connected Worker advertises asset\.thumbnail/u;
 
@@ -122,6 +123,42 @@ async function boundProjectIds(page: Page): Promise<Set<string>> {
     .map((binding) => (binding as { controlPlaneProjectId?: unknown }).controlPlaneProjectId)
     .filter((id): id is string => typeof id === 'string' && id.length > 0);
   return new Set(ids);
+}
+
+/**
+ * The control-plane project that the packaged renderer bound to the project this test created. The
+ * catalog maps the editor project's id to its title, and the bindings map that id to the control-plane
+ * project, so the test can name the one project it expects the session to hold.
+ */
+async function createdControlPlaneProjectId(page: Page, title: string): Promise<string> {
+  const catalogRaw = await page.evaluate(
+    (key) =>
+      (window as DesktopWindow).joyDesktop?.projectStorage?.getItem(key) ??
+      window.localStorage.getItem(key),
+    PROJECT_CATALOG_KEY,
+  );
+  if (catalogRaw === null) throw new Error('the packaged renderer has no project catalog');
+  const catalog = JSON.parse(catalogRaw) as {
+    projects?: Record<string, { id?: unknown; title?: unknown }>;
+  };
+  const editorId = Object.values(catalog.projects ?? {}).find((entry) => entry.title === title)?.id;
+  if (typeof editorId !== 'string')
+    throw new Error(`the project catalog has no project titled "${title}"`);
+  const bindingsRaw = await page.evaluate(
+    (key) =>
+      (window as DesktopWindow).joyDesktop?.projectStorage?.getItem(key) ??
+      window.localStorage.getItem(key),
+    BINDINGS_KEY,
+  );
+  if (bindingsRaw === null) throw new Error('the packaged renderer has no control-plane bindings');
+  const bindings = JSON.parse(bindingsRaw) as {
+    bindingsByOwner?: Record<string, Record<string, { controlPlaneProjectId?: unknown }>>;
+  };
+  const controlPlaneProjectId =
+    bindings.bindingsByOwner?.[E2E_OWNER]?.[editorId]?.controlPlaneProjectId;
+  if (typeof controlPlaneProjectId !== 'string' || controlPlaneProjectId.length === 0)
+    throw new Error(`the session has no control-plane binding for "${title}"`);
+  return controlPlaneProjectId;
 }
 
 /** Selects the first timeline clip, which makes the Jobs panel's queue reason capability-specific. */
@@ -221,7 +258,10 @@ test.describe('desktop.jobs-panel-binding', () => {
       ).toEqual([]);
 
       const bound = await boundProjectIds(page);
-      expect(bound.size, 'the session bound exactly the project it created').toBe(1);
+      const created = await createdControlPlaneProjectId(page, title);
+      expect([...bound], 'the session bound exactly the project the test created').toEqual([
+        created,
+      ]);
 
       const ownRequests = projectRequests.filter((request) =>
         bound.has(projectIdOf(request.path) ?? ''),
