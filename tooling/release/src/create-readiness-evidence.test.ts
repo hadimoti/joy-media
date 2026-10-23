@@ -700,7 +700,8 @@ describe('createReadinessEvidence', () => {
       .filter((line) => line.includes("'project.persistence.fresh-process'"));
     expect(recordings).toHaveLength(1);
     expect(recordings[0]).toContain('Set-ScenarioOutcome');
-    expect(recordings[0]).toContain('Get-PlaywrightAccountingExitCode');
+    expect(recordings[0]).toContain('Get-PlaywrightAccountingExitCode $freshProcessReport');
+    expect(lifecycle).toContain('PLAYWRIGHT_JSON_OUTPUT_NAME = $freshProcessReport');
     expect(lifecycle).toContain('tests/desktop/fresh-process-persistence.spec.ts');
   });
 });
