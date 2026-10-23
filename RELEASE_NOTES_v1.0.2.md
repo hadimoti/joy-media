@@ -41,18 +41,18 @@ The full CLI suite was last run on the commit before these changes and was not r
 
 ### Readiness status (see `docs/qa/READINESS-MATRIX.md`)
 
-| Area                                                | Status                                                                                                        |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `desktop.worker-jobs`                               | **NOT SUPPORTED** for this release (dispatch and completion not implemented)                                  |
-| `desktop.update-and-rollback`                       | **NOT SUPPORTED** for public distribution; owner-approved manual install is the workaround                    |
-| `desktop.account-connection`                        | **LIMITED** (partial coverage; synthetic accounts only)                                                       |
-| `desktop.file-project-package`                      | Partial: packaged export and fresh-profile import pass; cross-device, relink and malformed-package cases open |
-| `desktop.menu-actions`                              | Partial: File and Edit menus, focus and axe scans pass; other menu actions open                               |
-| `desktop.timeline-and-panels`                       | Partial: panel tabs reachable with axe scan passing; timeline edit depth, effect and transition coverage open |
-| `desktop.export-media-semantics`                    | Passes its acceptance spec (picture, sound, timing, caption, Monitor/export parity); deeper parity still open |
-| `project.persistence.fresh-process` (packaged case) | Open: the gate-required packaged case needs the SQLite-backed open/save proof                                 |
-| `desktop.windows.installed-lifecycle`               | Open: unrun locally; runs in the release workflow's Windows Docker container lane                             |
-| `release.exact-candidate-two-pass`                  | Open: result pending from run `39644275784`                                                                   |
+| Area                                                | Status                                                                                                                       |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `desktop.worker-jobs`                               | **NOT SUPPORTED** for this release (dispatch and completion not implemented)                                                 |
+| `desktop.update-and-rollback`                       | **NOT SUPPORTED** for public distribution; owner-approved manual install is the workaround                                   |
+| `desktop.account-connection`                        | **LIMITED** (partial coverage; synthetic accounts only)                                                                      |
+| `desktop.file-project-package`                      | Partial: packaged export and fresh-profile import pass; cross-device, relink and malformed-package cases open                |
+| `desktop.menu-actions`                              | Partial: File and Edit menus, focus and axe scans pass; other menu actions open                                              |
+| `desktop.timeline-and-panels`                       | Partial: panel tabs reachable with axe scan passing; timeline edit depth, effect and transition coverage open                |
+| `desktop.export-media-semantics`                    | Not passing on this host: the packaged export failed on 2026-10-23 and its cause is not determined; deeper parity still open |
+| `project.persistence.fresh-process` (packaged case) | Open: the gate-required packaged case needs the SQLite-backed open/save proof                                                |
+| `desktop.windows.installed-lifecycle`               | Open: unrun locally; runs in the release workflow's Windows Docker container lane                                            |
+| `release.exact-candidate-two-pass`                  | Open: result pending from run `39644275784`                                                                                  |
 
 ### Path to full readiness (not yet done)
 
@@ -71,6 +71,12 @@ The full CLI suite was last run on the commit before these changes and was not r
 
 - The release gate now derives every readiness result from receipts and the needs context, and it requires `desktop.export-media-semantics` as well as the other eight gate-required scenarios. The Windows lifecycle script runs the export spec as a measured step, so the gate fails closed until an exact-candidate lifecycle receipt exists for it.
 - Caption acceptance step 10 refuses with SETUP_REQUIRED on this host. The owner accepted that refusal on 2026-10-20.
+- Physical volume exhaustion (a full disk) is an accepted limitation for this candidate, by owner decision on 2026-10-23. SQLite failure and recovery tests remain required and pass locally. This candidate does not claim full physical disk-exhaustion qualification.
+- Held-file publication (the CLI publishing into a file another process holds) remains open. Its controlled Windows acceptance test is not yet implemented.
+
+### Runtime contract (CLI)
+
+The shipped CLI runs only on Electron's bundled Node runtime. `joy-media.cmd` sets `ELECTRON_RUN_AS_NODE=1` and runs `joy-media.exe` with `resources\app\cli\joy-media-bundle.mjs`. On 2026-10-23, with no Node on PATH, `joy-media.cmd --version` printed `JOY Media CLI v1.0.2` and exited 0, and the same executable reported Electron 44.3.0 with Node 24.20.0. No CLI, desktop, or worker source spawns `node`, `npm`, `npx`, or `pnpm`, and the worker runs under `process.execPath`. Arbitrary system Node versions are outside this candidate's supported runtime.
 
 ---
 
