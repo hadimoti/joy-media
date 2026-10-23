@@ -1,7 +1,12 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { defineConfig } from '@playwright/test';
 
 const apiPort = process.env.JOY_MEDIA_E2E_API_PORT ?? '4174';
 const apiUrl = `http://127.0.0.1:${apiPort}`;
+// The API server records every request it serves here. The packaged jobs-panel spec reads the same file.
+const requestLogPath =
+  process.env.JOY_MEDIA_E2E_REQUEST_LOG ?? join(tmpdir(), 'joy-media-desktop-api-requests.jsonl');
 
 export default defineConfig({
   testDir: './tests/desktop',
@@ -17,6 +22,6 @@ export default defineConfig({
     url: `${apiUrl}/health`,
     reuseExistingServer: false,
     timeout: 120_000,
-    env: { JOY_MEDIA_E2E_API_PORT: apiPort },
+    env: { JOY_MEDIA_E2E_API_PORT: apiPort, JOY_MEDIA_E2E_REQUEST_LOG: requestLogPath },
   },
 });
