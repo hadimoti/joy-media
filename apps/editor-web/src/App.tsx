@@ -287,6 +287,8 @@ import {
 } from './control-plane-client.js';
 import { ProjectDocumentAutosync } from './project-document-autosync.js';
 import { importMediaFile } from './media-import.js';
+import { captureControlPlaneScope, type ControlPlaneScope } from './control-plane-scope.js';
+import { getStoredMediaToken } from './media-session.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
 import { FiltersPanel } from './FiltersPanel.js';
@@ -1641,6 +1643,28 @@ function EditorWorkspace({
   );
   // A bound project counts as ready only while a ready owner names it.
   const controlPlaneBindingReady = controlPlaneOwnerKey !== undefined && controlPlaneProjectReady;
+  // A long control-plane operation checks its scope before each project-scoped request. Its closure
+  // keeps the render that started it, so the check reads this ref and the stored token live.
+  const controlPlaneScopeRef = useRef<Omit<ControlPlaneScope, 'token'>>({
+    ownerKey: controlPlaneOwnerKey,
+    projectId: controlPlaneProject.controlPlaneProjectId,
+    generation: 0,
+  });
+  if (
+    controlPlaneScopeRef.current.ownerKey !== controlPlaneOwnerKey ||
+    controlPlaneScopeRef.current.projectId !== controlPlaneProject.controlPlaneProjectId
+  ) {
+    controlPlaneScopeRef.current = {
+      ownerKey: controlPlaneOwnerKey,
+      projectId: controlPlaneProject.controlPlaneProjectId,
+      generation: controlPlaneScopeRef.current.generation + 1,
+    };
+  }
+  const captureScope = (): (() => void) =>
+    captureControlPlaneScope(() => ({
+      ...controlPlaneScopeRef.current,
+      token: getStoredMediaToken(window.localStorage),
+    }));
   useEffect(() => {
     let cancelled = false;
     let retryTimer: number | undefined;
@@ -6118,6 +6142,7 @@ function EditorWorkspace({
           onRunLocalWorker={async (workflowId) => {
             if (selectedAudioClip === undefined)
               throw new Error('Place a video or audio clip before running Local Worker.');
+            const assertScope = captureScope();
             const operationId = workerAudioDenoiseOperationId(
               controlPlaneProject.controlPlaneProjectId,
               selectedAudioClip.assetId,
@@ -6144,6 +6169,7 @@ function EditorWorkspace({
                 controlPlaneProject.controlPlaneProjectId,
                 controlPlaneProject.title,
               );
+              assertScope();
               // A Worker fetches its source through the control plane, not from
               // this tab's OPFS cache. A browser reload can restore the visual
               // project before an ephemeral/dev catalog has restored its asset
@@ -6151,6 +6177,7 @@ function EditorWorkspace({
               const catalogAssets = await mediaControlPlaneClient.assets(
                 controlPlaneProject.controlPlaneProjectId,
               );
+              assertScope();
               const catalogAsset = catalogAssets.find(
                 (asset) => asset.id === selectedAudioClip.assetId,
               );
@@ -6169,6 +6196,7 @@ function EditorWorkspace({
                   original = await response.blob();
                 }
                 if (catalogAsset !== undefined) {
+                  assertScope();
                   await mediaControlPlaneClient.uploadAssetOriginal(
                     controlPlaneProject.controlPlaneProjectId,
                     catalogAsset,
@@ -6185,9 +6213,11 @@ function EditorWorkspace({
                     assetId: selectedAudioClip.assetId,
                     client: mediaControlPlaneClient,
                     originalAssetCache: originalAssetCachePromise,
+                    assertCurrentProject: assertScope,
                   });
                 }
               }
+              assertScope();
               if (existing?.status === 'failed' || existing?.status === 'cancelled')
                 await mediaControlPlaneClient.retry(
                   controlPlaneProject.controlPlaneProjectId,

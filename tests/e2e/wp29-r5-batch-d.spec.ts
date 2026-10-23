@@ -10,6 +10,7 @@ import {
   openReferenceWorkspace,
   recordEvidence,
 } from './wp29-r5-harness.js';
+import { assertBrowserAudit, setupBrowserAudit } from './helpers/browser-console-audit.js';
 
 interface CloudApplicationState {
   readonly outputAssetCount: number;
@@ -261,6 +262,90 @@ test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
     await expect(queued).toHaveCount(1);
     // No external Worker is running to lease the job, so it stays queued.
     await expect(queued).toHaveAttribute('data-job-state', 'queued');
+  });
+
+  test('[R5 CASE-66 scope] the Local Worker run sends no project request after the session leaves the project', async ({
+    page,
+  }, testInfo) => {
+    setupBrowserAudit(page);
+    const title = `R5-66-scope-${testInfo.project.name}`;
+    await openDisposableWorkspace(page, title);
+    const audioName = `wp29-case66-scope-${testInfo.project.name}-${Date.now()}.wav`;
+    await importMediaFixture(page, 'audio.wav', audioName);
+    await page
+      .locator('.asset-card', { hasText: audioName })
+      .first()
+      .dragTo(
+        page
+          .locator('.timeline-track[data-track-family="audio"] .timeline-lane[data-track-id]')
+          .first(),
+        {
+          targetPosition: { x: 70, y: 20 },
+        },
+      );
+    await page.locator('.timeline-clip[data-clip-id]').first().click();
+    await offerAndPairWorker(page, ['audio.ml-denoise']);
+    await page.reload();
+    if (await page.getByRole('heading', { name: 'Projects' }).isVisible()) {
+      await page
+        .getByRole('button', { name: new RegExp(title) })
+        .first()
+        .click();
+    }
+    await expect(page.getByRole('button', { name: 'File' })).toBeVisible();
+    // Selection is intentionally transient UI state; restore the audio target
+    // before routing an external Worker after the project reload.
+    await page.locator('.timeline-clip[data-clip-id]').first().click();
+    await openPanel(page, 'Audio');
+    await page.getByRole('tab', { name: 'Runtime' }).click();
+    await expect(page.locator('.audio-runtime-cell', { hasText: 'Local Worker' })).toContainText(
+      'Connected',
+    );
+    const localRun = page.locator('[data-audio-route="local-worker"]');
+    await expect(localRun).toBeEnabled();
+
+    // Hold the first ensure that the Local Worker run sends, so the session can leave the project
+    // while the run waits on it. The held request was sent under the valid session.
+    let releaseEnsure: () => void = () => undefined;
+    let holdFirstEnsure = true;
+    const ensureHeld = new Promise<void>((resolveHeld) => {
+      void page.route(/\/api\/v1\/projects\/ensure$/, async (route) => {
+        if (!holdFirstEnsure) {
+          await route.continue();
+          return;
+        }
+        holdFirstEnsure = false;
+        resolveHeld();
+        await new Promise<void>((release) => {
+          releaseEnsure = release;
+        });
+        await route.continue();
+      });
+    });
+
+    let sessionLeft = false;
+    const projectRequests: string[] = [];
+    page.on('request', (request) => {
+      const { pathname } = new URL(request.url());
+      if (sessionLeft && pathname.startsWith('/api/v1/projects'))
+        projectRequests.push(`${request.method()} ${pathname}`);
+    });
+
+    await localRun.click();
+    await ensureHeld;
+    // Another tab signs in with a different token. This tab does not hear about it: no session event
+    // fires and the editor keeps its owner until it probes again, so the run's next request would carry
+    // the new token for the project it started under.
+    await page.evaluate(() => {
+      window.localStorage.setItem('joy-media-session-token', 'joy-media-other-owner-token');
+    });
+    sessionLeft = true;
+    releaseEnsure();
+    // The run is still waiting on the released ensure. Give it time to send whatever it sends next.
+    await page.waitForTimeout(2_000);
+
+    expect(projectRequests, 'project requests sent after the session left the project').toEqual([]);
+    await assertBrowserAudit(page, testInfo);
   });
 
   test('[R5 CASE-67] requires consent and applies one deterministic Cloud result', async ({
