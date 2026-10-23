@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { BrowserJob, BrowserWorker } from './control-plane-client.js';
 import { BrowserControlPlaneClient } from './control-plane-client.js';
 import { BoundedPollingLoop } from './bounded-polling.js';
+import { scopeStillHeld, startProjectScopeCheck } from './control-plane-scope.js';
+import { EditorPanelContext } from './editor-panel-context.js';
 import {
   CloseIcon,
   MaskIcon,
@@ -136,6 +138,7 @@ export function MaskInspector({
   client: suppliedClient,
 }: MaskInspectorProps) {
   const client = useMemo(() => suppliedClient ?? new BrowserControlPlaneClient(), [suppliedClient]);
+  const captureProjectScope = useContext(EditorPanelContext)?.captureControlPlaneProjectScope;
   const [workers, setWorkers] = useState<readonly BrowserWorker[]>([]);
   const [runtimeError, setRuntimeError] = useState<string | undefined>(undefined);
   const [running, setRunning] = useState(false);
@@ -190,11 +193,16 @@ export function MaskInspector({
   useEffect(() => {
     const jobId = settings.lastJob?.id;
     if (jobId === undefined || settings.lastJob?.resultAssetId !== undefined) return;
+    // The job belongs to the project the session held when polling started. The read and the result write
+    // both run this check, so a session that has left the project stops here.
+    const assertScope = startProjectScopeCheck(captureProjectScope, projectId);
     let cancelled = false;
     const pollingRef: { current?: BoundedPollingLoop } = {};
     const poll = async () => {
       try {
-        const job = (await client.jobs(projectId)).find((candidate) => candidate.id === jobId);
+        const job = (await client.jobs(projectId, assertScope)).find(
+          (candidate) => candidate.id === jobId,
+        );
         if (cancelled || job === undefined) return;
         const current = settingsRef.current;
         const next: MaskSettings = {
@@ -220,6 +228,7 @@ export function MaskInspector({
           job.derivative !== undefined &&
           appliedJobRef.current !== job.id
         ) {
+          assertScope();
           appliedJobRef.current = job.id;
           const resultAssetId = await callbacksRef.current.onApplyResult(job, next);
           if (!cancelled)
@@ -231,6 +240,8 @@ export function MaskInspector({
         if (job.state !== 'queued' && job.state !== 'leased') pollingRef.current?.stop();
       } catch (error) {
         if (!cancelled) setRuntimeError(error instanceof Error ? error.message : String(error));
+        // A session that has left the project ends this poll instead of retrying a refused request.
+        if (!scopeStillHeld(assertScope)) pollingRef.current?.stop();
         throw error;
       }
     };
@@ -247,7 +258,13 @@ export function MaskInspector({
       document.removeEventListener('visibilitychange', syncVisibility);
       polling.stop();
     };
-  }, [client, projectId, settings.lastJob?.id, settings.lastJob?.resultAssetId]);
+  }, [
+    captureProjectScope,
+    client,
+    projectId,
+    settings.lastJob?.id,
+    settings.lastJob?.resultAssetId,
+  ]);
 
   const patch = (next: Partial<MaskSettings>) => onChange({ ...settings, ...next });
   const patchSelection = (next: Partial<MaskSettings['selection']>) =>
