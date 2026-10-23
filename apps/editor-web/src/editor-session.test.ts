@@ -335,6 +335,23 @@ describe('EditorSession', () => {
     ).toHaveLength(initialCount + 1);
   });
 
+  it('moves the project revision, but not the history cursor, for a synchronized document write', () => {
+    // A synchronized write adds no history entry, so a check that reads only the history cursor
+    // cannot see it. A long operation therefore compares the project revision.
+    const session = new EditorSession(
+      memoryStorage(),
+      buildReferenceSpikeProject(),
+      INITIAL_EDITOR_PROJECT,
+    );
+    const cursorBefore = session.historyCursorSequence;
+    const revisionBefore = session.projectRevisionId;
+
+    session.synchronizeVisualProject({ ...session.visualProject, exportPreset: 'youtube-1080' });
+
+    expect(session.historyCursorSequence).toBe(cursorBefore);
+    expect(session.projectRevisionId).not.toBe(revisionBefore);
+  });
+
   it('keeps the live document and revision unchanged when metadata persistence fails', () => {
     const values = new Map<string, string>();
     let rejectWrites = false;

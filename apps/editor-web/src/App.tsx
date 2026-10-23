@@ -290,8 +290,10 @@ import { importMediaFile } from './media-import.js';
 import {
   captureControlPlaneScope,
   type ControlPlaneScope,
+  scopeStillHeld,
   SESSION_LEFT_PROJECT_MESSAGE,
 } from './control-plane-scope.js';
+import { advanceActiveProjectScope, type ActiveProjectScope } from './active-project-scope.js';
 import { getStoredMediaToken } from './media-session.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
@@ -901,6 +903,13 @@ export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
     }
     return id;
   });
+  // The editor's own state is discarded when the project changes, so the scope that a long
+  // operation checks lives here, in the mount that persists across those changes.
+  const activeProjectScopeRef = useRef<ActiveProjectScope>({
+    projectId: activeProjectId,
+    generation: 0,
+  });
+  advanceActiveProjectScope(activeProjectScopeRef, activeProjectId);
 
   const openProject = useCallback(
     (entry: ProjectCatalogEntry) => {
@@ -1028,6 +1037,7 @@ export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
       onBackToLibrary={backToLibrary}
       onImportProjectFile={importProjectFromFile}
       projectPackageNotice={projectPackageNotice}
+      activeProjectScope={activeProjectScopeRef}
     />
   );
 }
@@ -1045,6 +1055,7 @@ function EditorWorkspace({
   onBackToLibrary,
   onImportProjectFile,
   projectPackageNotice,
+  activeProjectScope,
 }: {
   readonly projectId: string;
   readonly storage: GuardedBrowserStorage;
@@ -1052,6 +1063,8 @@ function EditorWorkspace({
   readonly onBackToLibrary: () => void;
   readonly onImportProjectFile: (file: File) => void | Promise<void>;
   readonly projectPackageNotice?: string | undefined;
+  /** The project the session holds, kept by the App that outlives this editor's mount. */
+  readonly activeProjectScope: { readonly current: ActiveProjectScope };
 }) {
   const joyAgentRunLifecycleRef = useRef<ProjectJoyAgentRunLifecycle | null>(null);
   let joyAgentRunLifecycle = joyAgentRunLifecycleRef.current;
@@ -1664,18 +1677,25 @@ function EditorWorkspace({
       generation: controlPlaneScopeRef.current.generation + 1,
     };
   }
-  const captureScope = useCallback(
-    (): (() => void) =>
-      captureControlPlaneScope(() => ({
-        ...controlPlaneScopeRef.current,
-        token: getStoredMediaToken(window.localStorage),
-      })),
-    [],
-  );
-  // For a caller that names the project it operates on. It refuses to start once the session holds another.
+  // Switching projects remounts this editor, and leaving to the library unmounts it. The active
+  // project is therefore read from the outer App's ref, which outlives this mount. A closure that
+  // belongs to an earlier mount then refuses to start, and a running one fails at its next check.
+  const captureScope = useCallback((): (() => void) => {
+    if (activeProjectScope.current.projectId !== projectId)
+      throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
+    return captureControlPlaneScope(() => ({
+      ownerKey: controlPlaneScopeRef.current.ownerKey,
+      projectId: controlPlaneScopeRef.current.projectId,
+      // Both counters only rise, so their sum rises whenever either one does.
+      generation: controlPlaneScopeRef.current.generation + activeProjectScope.current.generation,
+      token: getStoredMediaToken(window.localStorage),
+    }));
+  }, [activeProjectScope, projectId]);
+  // For a caller that names the control-plane project it operates on. It refuses to start for a
+  // project that this editor no longer holds, such as a closure from before a remount.
   const captureScopeFor = useCallback(
-    (projectId: string): (() => void) => {
-      if (controlPlaneScopeRef.current.projectId !== projectId)
+    (controlPlaneProjectId: string): (() => void) => {
+      if (controlPlaneScopeRef.current.projectId !== controlPlaneProjectId)
         throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
       return captureScope();
     },
@@ -3118,7 +3138,7 @@ function EditorWorkspace({
       // pipeline so the exact PNG is registered and uploaded before the
       // document points at it. Signed-out/offline sessions retain the local
       // integrity-checked cache path and can be backed up later from Media.
-      const assertScope = captureScope();
+      const assertScope = captureScopeFor(controlPlaneProject.controlPlaneProjectId);
       const mimeType = asset.blob.type || 'image/png';
       let persistedAsset:
         | Awaited<ReturnType<typeof importMediaFile>>
@@ -3177,7 +3197,7 @@ function EditorWorkspace({
     },
     [
       controlPlaneProject,
-      captureScope,
+      captureScopeFor,
       controlPlaneOwnerKey,
       session,
       showToast,
@@ -4008,7 +4028,7 @@ function EditorWorkspace({
   const handleExport = useCallback(
     async (retryEntry?: ProjectExportProcessEntry) => {
       if (exportInFlightRef.current) return;
-      const assertScope = captureScope();
+      const assertScope = captureScopeFor(controlPlaneProject.controlPlaneProjectId);
       const retryPreset = retryEntry?.presetId;
       if (
         retryPreset !== undefined &&
@@ -4095,6 +4115,7 @@ function EditorWorkspace({
           // Recover a staged asset left by a browser crash before starting a
           // fresh server attempt. Failure is best-effort because the asset may
           // already have been removed by the Worker/control-plane cleanup.
+          assertScope();
           await mediaControlPlaneClient
             .deleteAsset(controlPlaneProject.controlPlaneProjectId, retryEntry.stagedAssetId)
             .catch(() => undefined);
@@ -4752,6 +4773,8 @@ function EditorWorkspace({
           controlPlaneProject.controlPlaneProjectId,
           stagedAsset,
           browserExportResult.blob,
+          undefined,
+          assertScope,
         );
         abortController.signal.throwIfAborted();
         assertScope();
@@ -4927,9 +4950,13 @@ function EditorWorkspace({
         const previousExport = lastExportRef.current;
         lastExportRef.current = { entryId, url: pendingExportUrl };
         if (stagedExportAssetId !== undefined) {
-          await mediaControlPlaneClient
-            .deleteAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
-            .catch(() => undefined);
+          // A staged copy in a project the session has left stays there. Removing it would name
+          // that project in a request.
+          if (scopeStillHeld(assertScope)) {
+            await mediaControlPlaneClient
+              .deleteAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
+              .catch(() => undefined);
+          }
           stagedExportAssetId = undefined;
         }
         pendingExportUrl = undefined;
@@ -5039,10 +5066,13 @@ function EditorWorkspace({
           if (stagedExportAssetId !== undefined) {
             // Staged originals are private cloud objects.  Always remove the
             // temporary asset on failure/cancellation so retries cannot leave
-            // orphaned media or collide with a previous attempt.
-            await mediaControlPlaneClient
-              .deleteAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
-              .catch(() => undefined);
+            // orphaned media or collide with a previous attempt, unless the session
+            // has left the project it was staged in: that delete would name the project.
+            if (scopeStillHeld(assertScope)) {
+              await mediaControlPlaneClient
+                .deleteAsset(controlPlaneProject.controlPlaneProjectId, stagedExportAssetId)
+                .catch(() => undefined);
+            }
             stagedExportAssetId = undefined;
           }
           if (pendingExportUrl !== undefined) {
@@ -5064,7 +5094,7 @@ function EditorWorkspace({
     },
     [
       audioState,
-      captureScope,
+      captureScopeFor,
       controlPlaneProject.controlPlaneProjectId,
       exportPreset,
       loadProjectAssetBlob,
@@ -5372,7 +5402,9 @@ function EditorWorkspace({
     ): Promise<string> => {
       if (job.state !== 'completed' || job.derivative === undefined)
         throw new Error('Mask result is not complete.');
-      const assertScope = captureScope();
+      const assertScope = context.captureControlPlaneProjectScope(
+        controlPlaneProject.controlPlaneProjectId,
+      );
       const derivatives = await mediaControlPlaneClient.derivatives(
         controlPlaneProject.controlPlaneProjectId,
         target.assetId,
@@ -5393,7 +5425,7 @@ function EditorWorkspace({
       const file = new File([blob], `JOY Mask ${job.id.slice(-32)}.${extension}`, {
         type: derivative.descriptor.mimeType,
       });
-      const expectedRevision = context.session.historyCursorSequence;
+      const expectedProjectRevision = context.session.projectRevisionId;
       const imported = await importMediaFile({
         projectId: controlPlaneProject.controlPlaneProjectId,
         projectTitle: controlPlaneProject.title,
@@ -5402,7 +5434,7 @@ function EditorWorkspace({
         originalAssetCache: originalAssetCachePromise,
         assertCurrentProject: assertScope,
       });
-      if (context.session.historyCursorSequence !== expectedRevision)
+      if (context.session.projectRevisionId !== expectedProjectRevision)
         throw new Error('The project changed while the mask result was being prepared.');
       let next = projectWithImportedAsset(context.session.visualProject, imported);
       next = writeMaskSettings(next, target.targetId, {
@@ -5437,7 +5469,9 @@ function EditorWorkspace({
     ): Promise<string> => {
       if (job.state !== 'completed' || job.derivative === undefined)
         throw new Error('Upscale result is not complete.');
-      const assertScope = captureScope();
+      const assertScope = context.captureControlPlaneProjectScope(
+        controlPlaneProject.controlPlaneProjectId,
+      );
       const derivatives = await mediaControlPlaneClient.derivatives(
         controlPlaneProject.controlPlaneProjectId,
         target.assetId,
@@ -5466,7 +5500,7 @@ function EditorWorkspace({
       const file = new File([blob], `JOY Upscale ${job.id.slice(-32)}.${extension}`, {
         type: mimeType,
       });
-      const expectedRevision = context.session.historyCursorSequence;
+      const expectedProjectRevision = context.session.projectRevisionId;
       const imported = await importMediaFile({
         projectId: controlPlaneProject.controlPlaneProjectId,
         projectTitle: controlPlaneProject.title,
@@ -5475,7 +5509,7 @@ function EditorWorkspace({
         originalAssetCache: originalAssetCachePromise,
         assertCurrentProject: assertScope,
       });
-      if (context.session.historyCursorSequence !== expectedRevision)
+      if (context.session.projectRevisionId !== expectedProjectRevision)
         throw new Error('The project changed while the upscale result was being prepared.');
       const next = writeUpscaleSettings(
         projectWithImportedAsset(context.session.visualProject, imported),
@@ -5634,7 +5668,7 @@ function EditorWorkspace({
       const targetClipId = state.selectedIds[0];
       if (mode === 'replace' && targetClipId === undefined)
         throw new Error('Select a timeline clip before replacing audio');
-      const expectedRevision = context.session.historyCursorSequence;
+      const expectedProjectRevision = context.session.projectRevisionId;
       const generated = result.generatedAsset;
       const cache = await originalAssetCachePromise;
       await cache.put(
@@ -5646,7 +5680,7 @@ function EditorWorkspace({
         },
         result.blob,
       );
-      if (context.session.historyCursorSequence !== expectedRevision)
+      if (context.session.projectRevisionId !== expectedProjectRevision)
         throw new Error('The project changed while the Worker result was being prepared');
       const currentProject = context.session.visualProject;
       const currentAudio = loadAudioStateFromProject(storage, projectId, currentProject);
@@ -6174,7 +6208,9 @@ function EditorWorkspace({
           onRunLocalWorker={async (workflowId) => {
             if (selectedAudioClip === undefined)
               throw new Error('Place a video or audio clip before running Local Worker.');
-            const assertScope = captureScope();
+            const assertScope = context.captureControlPlaneProjectScope(
+              controlPlaneProject.controlPlaneProjectId,
+            );
             const operationId = workerAudioDenoiseOperationId(
               controlPlaneProject.controlPlaneProjectId,
               selectedAudioClip.assetId,
@@ -6233,6 +6269,8 @@ function EditorWorkspace({
                     controlPlaneProject.controlPlaneProjectId,
                     catalogAsset,
                     original,
+                    undefined,
+                    assertScope,
                   );
                 } else {
                   const file = new File([original], sourceAsset.displayName, {
@@ -6278,7 +6316,9 @@ function EditorWorkspace({
           onRunRemoteMediaJob={async (workflowId) => {
             if (selectedAudioClip === undefined)
               throw new Error('Place a video or audio clip before running a remote provider job.');
-            const assertScope = captureScope();
+            const assertScope = context.captureControlPlaneProjectScope(
+              controlPlaneProject.controlPlaneProjectId,
+            );
             const targetClipId = selectedAudioClip.id;
             const targetAssetId = selectedAudioClip.assetId;
             const sourceProjectRevisionId = context.session.projectRevisionId;
@@ -6656,7 +6696,9 @@ function EditorWorkspace({
               })}
           onOpenAssetLibrary={() => context.activatePanel('media')}
           onImportMedia={async (file) => {
-            const assertScope = captureScope();
+            const assertScope = context.captureControlPlaneProjectScope(
+              controlPlaneProject.controlPlaneProjectId,
+            );
             const asset = await importMediaFile({
               projectId: controlPlaneProject.controlPlaneProjectId,
               projectTitle: controlPlaneProject.title,
@@ -6672,7 +6714,9 @@ function EditorWorkspace({
             Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
           )}
           onImportFiles={(files) => {
-            const assertScope = captureScope();
+            const assertScope = context.captureControlPlaneProjectScope(
+              controlPlaneProject.controlPlaneProjectId,
+            );
             for (const file of files) {
               void importMediaFile({
                 projectId: controlPlaneProject.controlPlaneProjectId,
@@ -7681,6 +7725,7 @@ function EditorWorkspace({
               visualProject: session.visualProject,
               controlPlaneProject,
               controlPlaneReady: controlPlaneBindingReady,
+              captureControlPlaneProjectScope: captureScopeFor,
               loadProjectAssetBlob,
               playback: playbackDiagnostics.current.snapshot(),
               canUndo: session.canUndo,

@@ -70,6 +70,11 @@ export interface EditorPanelContextValue {
   readonly visualProject: JoyProjectV1;
   readonly controlPlaneProject: ControlPlaneProjectBinding;
   readonly controlPlaneReady: boolean;
+  /**
+   * Starts a control-plane operation for the named project. It throws while the session holds
+   * another project, and the returned check throws once the session leaves that project.
+   */
+  readonly captureControlPlaneProjectScope: (controlPlaneProjectId: string) => () => void;
   readonly loadProjectAssetBlob: (assetId: string) => Promise<Blob | undefined>;
   readonly playback: PlaybackDiagnosticsSnapshot;
   readonly canUndo: boolean;
