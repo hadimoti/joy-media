@@ -6817,7 +6817,7 @@ function EditorWorkspace({
             : { thumbnailAssetId: selectedThumbnailAssetId })}
           onApplyWorkerAudioResult={applyWorkerAudioResult}
           operationLedger={operationLedger}
-          operationRevision={session.historyCursorSequence}
+          operationRevision={context.session.historyCursorSequence}
         />
       );
     }

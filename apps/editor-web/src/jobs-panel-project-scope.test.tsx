@@ -288,4 +288,17 @@ describe('editor dock wiring', () => {
     expect(panelContent.includes('mediaResolver.resolve(')).toBe(false);
     expect(panelContent.includes('resyncTimelineMedia();')).toBe(false);
   });
+
+  it('reads the Jobs panel operation revision from the panel context, like the other panel reads', () => {
+    // The panel context carries the live session, which PanelContent reads through useContext. The
+    // bare `session` is the same mutable object, so both reads agree. This pins the Jobs panel to the
+    // context so that it does not depend on that object identity.
+    const jobsPanel = appSource.slice(
+      appSource.indexOf('<JobsPanel'),
+      appSource.indexOf('/>', appSource.indexOf('<JobsPanel')),
+    );
+
+    expect(jobsPanel).toContain('operationRevision={context.session.historyCursorSequence}');
+    expect(jobsPanel.includes('operationRevision={session.historyCursorSequence}')).toBe(false);
+  });
 });
