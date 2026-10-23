@@ -37,17 +37,24 @@ function Read-AccountingReport([string]$ReportPath) {
 
 # Vitest JSON reporter: exit 0 only when at least one case passed, no case failed, is pending
 # (skipped) or is todo, no suite failed or is pending, and the run reports success. Suite failures
-# and unhandled errors can leave every case passed, so they are checked separately.
+# and unhandled errors can leave every case passed, so they are checked separately. Every case and
+# every suite must also fall into one reported bucket, so a case or suite that no bucket counts
+# cannot pass alongside the others.
 function Get-VitestAccountingExitCode([string]$ReportPath) {
     $report = Read-AccountingReport $ReportPath
+    $total = Get-AccountingCounter $report 'numTotalTests' 'Vitest report'
     $passed = Get-AccountingCounter $report 'numPassedTests' 'Vitest report'
     $failed = Get-AccountingCounter $report 'numFailedTests' 'Vitest report'
     $pending = Get-AccountingCounter $report 'numPendingTests' 'Vitest report'
     $todo = Get-AccountingCounter $report 'numTodoTests' 'Vitest report'
+    $totalSuites = Get-AccountingCounter $report 'numTotalTestSuites' 'Vitest report'
+    $passedSuites = Get-AccountingCounter $report 'numPassedTestSuites' 'Vitest report'
     $failedSuites = Get-AccountingCounter $report 'numFailedTestSuites' 'Vitest report'
     $pendingSuites = Get-AccountingCounter $report 'numPendingTestSuites' 'Vitest report'
     $success = Get-AccountingFlag $report 'success' 'Vitest report'
-    if ($passed -gt 0 -and $failed -eq 0 -and $pending -eq 0 -and $todo -eq 0 -and $failedSuites -eq 0 -and $pendingSuites -eq 0 -and $success) {
+    $casesAccounted = $total -eq ($passed + $failed + $pending + $todo)
+    $suitesAccounted = $totalSuites -eq ($passedSuites + $failedSuites + $pendingSuites)
+    if ($passed -gt 0 -and $casesAccounted -and $failed -eq 0 -and $pending -eq 0 -and $todo -eq 0 -and $suitesAccounted -and $failedSuites -eq 0 -and $pendingSuites -eq 0 -and $success) {
         return 0
     }
     return 1

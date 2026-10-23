@@ -75,19 +75,19 @@ test('vitest: a clean report passes the scenario', { skip: skipReason }, () => {
 });
 
 test('vitest: a pending (skipped) case fails the scenario', { skip: skipReason }, () => {
-  assert.equal(accounting('vitest', vitest({ numPendingTests: 1 })), 1);
+  assert.equal(accounting('vitest', vitest({ numPassedTests: 4, numPendingTests: 1 })), 1);
 });
 
 test('vitest: a failed case fails the scenario', { skip: skipReason }, () => {
-  assert.equal(accounting('vitest', vitest({ numFailedTests: 1 })), 1);
+  assert.equal(accounting('vitest', vitest({ numPassedTests: 4, numFailedTests: 1 })), 1);
 });
 
 test('vitest: a todo case fails the scenario', { skip: skipReason }, () => {
-  assert.equal(accounting('vitest', vitest({ numTodoTests: 1 })), 1);
+  assert.equal(accounting('vitest', vitest({ numPassedTests: 4, numTodoTests: 1 })), 1);
 });
 
 test('vitest: a run with no passing case fails the scenario', { skip: skipReason }, () => {
-  assert.equal(accounting('vitest', vitest({ numPassedTests: 0 })), 1);
+  assert.equal(accounting('vitest', vitest({ numTotalTests: 0, numPassedTests: 0 })), 1);
 });
 
 test('vitest: a missing counter is an error, never a zero', { skip: skipReason }, () => {
@@ -129,8 +129,14 @@ test(
   'vitest: a failed or pending suite fails the scenario even when every case passed',
   { skip: skipReason },
   () => {
-    assert.equal(accounting('vitest', vitest({ numFailedTestSuites: 1 })), 1);
-    assert.equal(accounting('vitest', vitest({ numPendingTestSuites: 1 })), 1);
+    assert.equal(
+      accounting('vitest', vitest({ numPassedTestSuites: 0, numFailedTestSuites: 1 })),
+      1,
+    );
+    assert.equal(
+      accounting('vitest', vitest({ numPassedTestSuites: 0, numPendingTestSuites: 1 })),
+      1,
+    );
   },
 );
 
@@ -147,6 +153,20 @@ test(
     assert.equal(accounting('vitest', withField(vitest(), 'success', 'true')), 2);
   },
 );
+
+test('vitest: a case that no bucket counts fails the scenario', { skip: skipReason }, () => {
+  assert.equal(accounting('vitest', vitest({ numTotalTests: 6 })), 1);
+});
+
+test('vitest: a suite that no bucket counts fails the scenario', { skip: skipReason }, () => {
+  assert.equal(accounting('vitest', vitest({ numTotalTestSuites: 2 })), 1);
+});
+
+test('vitest: missing total counters are errors', { skip: skipReason }, () => {
+  assert.equal(accounting('vitest', withField(vitest(), 'numTotalTests')), 2);
+  assert.equal(accounting('vitest', withField(vitest(), 'numTotalTestSuites')), 2);
+  assert.equal(accounting('vitest', withField(vitest(), 'numPassedTestSuites')), 2);
+});
 
 test('playwright: a clean report passes the scenario', { skip: skipReason }, () => {
   assert.equal(accounting('playwright', playwright()), 0);
