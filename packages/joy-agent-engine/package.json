@@ -24,6 +24,6 @@
     "@joy-media/agent-tools": "workspace:*",
     "@ai-sdk/openai-compatible": "3.0.43",
     "ai": "7.0.92",
-    "zod": "4.1.8"
+    "zod": "4.6.7"
   }
 }
