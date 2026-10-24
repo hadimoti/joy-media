@@ -28,7 +28,7 @@ export interface GpuChildProcessGone {
 export interface GpuEncodeFallbackHost {
   readonly commandLine: { appendSwitch(name: string, value?: string): void };
   relaunch(options: { readonly args: string[] }): void;
-  exit(code: number): void;
+  quit(): void;
   onChildProcessGone(listener: (details: GpuChildProcessGone) => void): void;
   log(message: string): void;
 }
@@ -77,7 +77,10 @@ export function installGpuEncodeFallback(
     host.log(
       'GPU process fast-failed during media setup; relaunching once with the Media Foundation video encoder off.',
     );
+    // Quit rather than exit: app.exit skips before-quit, which stops the Worker and closes the local
+    // database. app.relaunch starts the new instance only after this one exits, so the
+    // single-instance lock is not contended.
     host.relaunch({ args: [...argv.slice(1), GPU_ENCODE_FALLBACK_ARGUMENT] });
-    host.exit(0);
+    host.quit();
   });
 }

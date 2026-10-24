@@ -23,12 +23,14 @@ function recordingHost(argv: readonly string[]) {
   const switches: { name: string; value?: string | undefined }[] = [];
   const relaunches: { args: string[] }[] = [];
   const logs: string[] = [];
-  const exits: number[] = [];
+  let quits = 0;
   let listener: ((details: GpuChildProcessGone) => void) | undefined;
   const host: GpuEncodeFallbackHost = {
     commandLine: { appendSwitch: (name, value) => switches.push({ name, value }) },
     relaunch: (options) => relaunches.push(options),
-    exit: (code) => exits.push(code),
+    quit: () => {
+      quits += 1;
+    },
     onChildProcessGone: (next) => {
       listener = next;
     },
@@ -39,7 +41,7 @@ function recordingHost(argv: readonly string[]) {
     switches,
     relaunches,
     logs,
-    exits: () => exits,
+    quits: () => quits,
     emit: (details: GpuChildProcessGone) => listener?.(details),
   };
 }
@@ -76,13 +78,13 @@ describe('GPU encode fallback', () => {
     expect(applyGpuEncodeFallback({ appendSwitch: () => undefined }, launchArgv)).toBe(false);
   });
 
-  it('relaunches with the fallback argument, then exits, after a first GPU fast-fail', () => {
+  it('relaunches with the fallback argument, then quits, after a first GPU fast-fail', () => {
     const session = recordingHost(launchArgv);
     session.emit(fastFail);
     expect(session.relaunches).toEqual([
       { args: [...launchArgv.slice(1), GPU_ENCODE_FALLBACK_ARGUMENT] },
     ]);
-    expect(session.exits()).toEqual([0]);
+    expect(session.quits()).toBe(1);
     expect(session.logs).toHaveLength(1);
   });
 
@@ -90,7 +92,7 @@ describe('GPU encode fallback', () => {
     const session = recordingHost(fallbackArgv);
     session.emit(fastFail);
     expect(session.relaunches).toEqual([]);
-    expect(session.exits()).toEqual([]);
+    expect(session.quits()).toBe(0);
     expect(session.logs.some((message) => message.includes('not relaunching again'))).toBe(true);
   });
 
@@ -99,7 +101,7 @@ describe('GPU encode fallback', () => {
     session.emit({ ...fastFail, type: 'Utility' });
     session.emit({ type: 'GPU', reason: 'clean-exit', exitCode: 0 });
     expect(session.relaunches).toEqual([]);
-    expect(session.exits()).toEqual([]);
+    expect(session.quits()).toBe(0);
     expect(session.logs).toEqual([]);
   });
 });

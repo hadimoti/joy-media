@@ -260,7 +260,7 @@ if (!app.requestSingleInstanceLock()) {
     {
       commandLine: app.commandLine,
       relaunch: (options) => app.relaunch(options),
-      exit: (code) => app.exit(code),
+      quit: () => app.quit(),
       onChildProcessGone: (listener) =>
         app.on('child-process-gone', (_event, details) => listener(details)),
       log: (message) => console.error(message),
