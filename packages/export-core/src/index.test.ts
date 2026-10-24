@@ -34,12 +34,19 @@ function decodeRedProbe(file: string, width: number, height: number): number[] {
     ],
     { maxBuffer: 1 << 26 },
   );
+  if (decoded.status !== 0) throw new Error(`ffmpeg could not decode ${file}: ${decoded.stderr}`);
   const frameBytes = width * height * 3;
   const offset = (18 * width + 32) * 3;
   const values: number[] = [];
   for (let start = 0; start + frameBytes <= decoded.stdout.length; start += frameBytes)
     values.push(decoded.stdout[start + offset]!);
   return values;
+}
+
+// Indices whose red value differs from the reference by more than one code value. Correct output
+// differs by 0, while a one-frame shift of the 5-per-frame code moves the value by 5.
+function misalignedFrames(reference: number[], actual: number[]): number[] {
+  return actual.flatMap((value, index) => (Math.abs(value - reference[index]!) > 1 ? [index] : []));
 }
 
 describe('deterministic export contract', () => {
@@ -397,13 +404,35 @@ describe('deterministic export contract', () => {
     const actual = decodeRedProbe(jitteredOutput, 64, 36);
     expect(reference).toHaveLength(180);
     expect(actual).toHaveLength(180);
-    const misaligned = actual.flatMap((value, index) =>
-      Math.abs(value - reference[index]!) > 3 ? [index] : [],
-    );
-    expect(misaligned).toEqual([]);
+    expect(misalignedFrames(reference, actual)).toEqual([]);
+    // Without a frame count the timeline is index-based too.
+    const freeReference = join(directory, 'constant-free.mp4');
+    const freeActual = join(directory, 'jittered-free.mp4');
+    remuxBrowserMp4(constant, freeReference, 30);
+    remuxBrowserMp4(jittered, freeActual, 30);
+    const unnormalizedReference = decodeRedProbe(freeReference, 64, 36);
+    const unnormalizedActual = decodeRedProbe(freeActual, 64, 36);
+    expect(unnormalizedActual).toHaveLength(180);
+    expect(misalignedFrames(unnormalizedReference, unnormalizedActual)).toEqual([]);
   });
 
-  it('rejects a fractional frame rate when the frame count is fixed', () => {
-    expect(() => remuxBrowserMp4('missing.mp4', 'out.mp4', 29.97, 180)).toThrow(RangeError);
+  it('keeps the authored frame count at a fractional frame rate', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-ntsc-'));
+    const capture = join(directory, 'capture.mp4');
+    const outputPath = join(directory, 'remuxed.mp4');
+    const frames = Array.from({ length: 180 }, (_, index) => {
+      const frame = new Uint8Array(manifest.width * manifest.height * 4);
+      for (let offset = 0; offset < frame.length; offset += 4) {
+        frame[offset] = (5 * index) % 256;
+        frame[offset + 3] = 255;
+      }
+      return frame;
+    });
+    renderRgbaFrames({ ...manifest, durationUs: 6_000_000 }, frames, capture);
+    const probe = remuxBrowserMp4(capture, outputPath, 29.97, 180);
+    expect(probe.frameRate).toBeCloseTo(29.97, 2);
+    expect(probe.durationUs).toBeGreaterThanOrEqual(5_990_000);
+    expect(probe.durationUs).toBeLessThanOrEqual(6_020_000);
+    expect(decodeRedProbe(outputPath, 64, 36)).toHaveLength(180);
   });
 });

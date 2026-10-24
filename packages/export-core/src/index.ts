@@ -263,10 +263,6 @@ export function remuxBrowserMp4(
     (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount / frameRate > 86_400)
   )
     throw new RangeError('browser remux frame count is invalid');
-  if (frameCount !== undefined && !Number.isInteger(frameRate))
-    throw new RangeError(
-      'browser remux frame rate must be a whole number when the frame count is fixed',
-    );
   const temporaryPath = join(
     dirname(outputPath),
     `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
@@ -278,6 +274,10 @@ export function remuxBrowserMp4(
     // players that honour the tag show the authored colours.
     const colourFilter =
       'scale=in_color_matrix=bt601:in_range=tv:out_color_matrix=bt709:out_range=tv';
+    // Frame N takes its authored time N / frameRate. setpts alone keeps the recorder's
+    // irregular per-frame durations, and the output-stage resample used those durations and
+    // duplicated a frame in captured runs. The fps filter gives every frame one slot.
+    const authoredTimeline = `${colourFilter},setpts=N/(${frameRate}*TB),fps=${frameRate}:round=near`;
     const normalizeTimeline =
       frameCount === undefined
         ? []
@@ -288,16 +288,7 @@ export function remuxBrowserMp4(
             // recorder is short, so the remuxed contract is exactly the
             // manifest's frame count rather than silently truncating it.
             '-vf',
-            // Frame N takes its authored slot N / frameRate. The in-graph fps filter gives
-            // every frame a full slot, so the recorder's jittered timestamps cannot duplicate
-            // a frame. An output-stage `-r` resample duplicated one frame in captured runs.
-            `${colourFilter},setpts=N/(${frameRate}*TB),fps=${frameRate}:round=near,tpad=stop_mode=clone:stop=-1`,
-            // Passthrough stops ffmpeg from resampling at the output stage. A track timescale
-            // equal to the whole frame rate keeps the declared rate exact for short clips too.
-            '-fps_mode',
-            'passthrough',
-            '-video_track_timescale',
-            String(frameRate),
+            `${authoredTimeline},tpad=stop_mode=clone:stop=-1`,
             '-af',
             'asetpts=PTS-STARTPTS,apad',
             '-frames:v',
@@ -311,7 +302,7 @@ export function remuxBrowserMp4(
         '-y',
         '-i',
         inputPath,
-        ...(frameCount === undefined ? ['-vf', colourFilter] : normalizeTimeline),
+        ...(frameCount === undefined ? ['-vf', authoredTimeline] : normalizeTimeline),
         '-colorspace',
         'bt709',
         '-color_primaries',
@@ -326,9 +317,8 @@ export function remuxBrowserMp4(
         'yuv420p',
         '-c:a',
         'aac',
-        // The normalized timeline carries the frame rate in its timestamps. A container
-        // rate here would resample them, so it applies only to the unnormalized path.
-        ...(frameCount === undefined ? ['-r', String(frameRate)] : []),
+        '-r',
+        String(frameRate),
         '-movflags',
         '+faststart',
         temporaryPath,
