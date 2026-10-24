@@ -4,6 +4,7 @@ Audit date: 2026-10-17. Source baseline: `c1fffd59d5078902e031e7684e69c27df40ce6
 Lockfile SHA-256: `2180545b95be0a1d7aec3dd223ec80853192f1e73d921722490ad5521519646f`.
 The Windows command baseline is recorded in [the evidence note](evidence/2026-10-17-windows-baseline.md).
 Current implementation-loop results are summarized in [the progress evidence](evidence/2026-10-17-readiness-loop-progress.md).
+Local GPU, export, persistence, and flake results from 2026-10-24 are in [the local evidence note](evidence/2026-10-24-local-gpu-and-release-evidence.md). The default packaged build still crashes on the test host, and the export-timing defect is open. Neither is a receipt.
 
 The 2026-10-17 implementation loop has fresh local Windows evidence: `pnpm verify:ci`
 passed with 625 test files, 5,551 passing tests, and 26 platform skips; packaged editor acceptance, CLI source/bundle
