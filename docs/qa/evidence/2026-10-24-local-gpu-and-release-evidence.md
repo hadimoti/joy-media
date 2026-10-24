@@ -64,7 +64,7 @@ Consequence: export timing is not fixed. GPU export is not reliably validated, a
 
 ## Artifact integrity and cross-runner requirements
 
-- Release tooling tests: 16 files and 295 tests passed (`tooling/release`), covering write-once retention, manifest checks, checksum listing, and fail-closed refusals.
+- Release tooling tests: 15 vitest files, 289 tests passed and 1 skipped (`tooling/release`), covering write-once retention, manifest checks, checksum listing, and fail-closed refusals. Re-run on the final tree.
 - Requirements the tooling enforces: the evidence root sits outside the checkout, `_work`, and `_temp`; each retention is write-once per candidate, run, and attempt; `SHA256SUMS.txt` must appear in the manifest; the retained manifest must match the staged manifest; and folders are flushed after copy. On Windows, directory flushes are no-ops, so file flushes are the durable step.
 - The synthetic cross-runner rehearsal ran for `b8ea8444`, before the retention changes in `46d6e3e2`. It has not been repeated on `db0cb85e`.
 
