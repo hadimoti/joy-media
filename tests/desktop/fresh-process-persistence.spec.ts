@@ -24,10 +24,70 @@ const unpackedPackage = resolve(desktopRoot, 'dist/joy-media-unpacked');
 const fixtureDirectory = resolve('packages/test-fixtures/media');
 const timelineLogKey = 'joy-media.timeline-project-log.v1';
 const catalogKey = 'joy-media.project-catalog.v1';
+const visualObjectLogKey = 'joy-media.visual-object-project-log.v1';
 const apiBaseUrl = `http://127.0.0.1:${process.env.JOY_MEDIA_E2E_API_PORT ?? '4174'}`;
 const desktopRequire = createRequire(resolve(desktopRoot, 'package.json'));
 const electronExecutable = desktopRequire('electron') as string;
 const installedExecutable = process.env.JOY_MEDIA_TEST_EXECUTABLE;
+
+interface StoredProjectDatabase {
+  readonly projects?: Record<
+    string,
+    { readonly snapshots?: readonly { readonly payload?: unknown }[] }
+  >;
+}
+
+// Each editor store value is a project database. The newest snapshot of each project is its current
+// document.
+function currentDocuments(serialized: string | undefined): Record<string, unknown>[] {
+  if (serialized === undefined) return [];
+  const database = JSON.parse(serialized) as StoredProjectDatabase;
+  return Object.values(database.projects ?? {}).flatMap((project) => {
+    const payload = project.snapshots?.at(-1)?.payload;
+    return payload !== null && typeof payload === 'object'
+      ? [payload as Record<string, unknown>]
+      : [];
+  });
+}
+
+// Asset ids of the video clips in the stored timelines.
+function storedClipAssetIds(serialized: string | undefined): string[] {
+  return currentDocuments(serialized).flatMap((document) => {
+    const compositions = Object.values(
+      (document.compositions ?? {}) as Record<
+        string,
+        {
+          readonly tracks?: readonly {
+            readonly clips?: readonly { readonly kind?: string; readonly assetId?: string }[];
+          }[];
+        }
+      >,
+    );
+    return compositions.flatMap((composition) =>
+      (composition.tracks ?? []).flatMap((track) =>
+        (track.clips ?? []).flatMap((clip) =>
+          clip.kind === 'video' && clip.assetId !== undefined ? [clip.assetId] : [],
+        ),
+      ),
+    );
+  });
+}
+
+// Display names of the stored visual-project assets, keyed by asset id.
+function storedAssetNames(serialized: string | undefined): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const document of currentDocuments(serialized)) {
+    const assets = (document.assets ?? {}) as Record<
+      string,
+      { readonly id?: string; readonly displayName?: string }
+    >;
+    for (const asset of Object.values(assets)) {
+      if (asset.id !== undefined && asset.displayName !== undefined)
+        names.set(asset.id, asset.displayName);
+    }
+  }
+  return names;
+}
 
 // Launch and helper code shared with fresh-profile.spec.ts and editor-acceptance.spec.ts. Importing
 // those specs would register their acceptance tests as well.
@@ -278,12 +338,21 @@ test('a packaged project saved in one process reopens from a fresh profile in a 
     app = undefined;
     const freshDatabase = new DatabaseSync(join(freshProfile, 'joy-media.sqlite3'));
     try {
-      const importedTimeline = freshDatabase
-        .prepare('SELECT value FROM editor_storage WHERE key = ?')
-        .get(timelineLogKey) as { readonly value: string } | undefined;
-      expect(importedTimeline?.value, 'the fresh profile stores the imported clip').toContain(
-        mediaName,
-      );
+      const storedValue = (key: string): string | undefined =>
+        (
+          freshDatabase.prepare('SELECT value FROM editor_storage WHERE key = ?').get(key) as
+            { readonly value: string } | undefined
+        )?.value;
+      // The stored timeline holds the clip by asset id, and the asset's display name is stored with
+      // the visual project. An imported project starts with an empty history, so the name is not in
+      // the timeline text. The clip is therefore checked through its asset reference.
+      const clipAssetIds = storedClipAssetIds(storedValue(timelineLogKey));
+      const assetNames = storedAssetNames(storedValue(visualObjectLogKey));
+      expect(clipAssetIds.length, 'the fresh profile stores the imported clip').toBeGreaterThan(0);
+      expect(
+        clipAssetIds.some((assetId) => assetNames.get(assetId) === mediaName),
+        'the fresh profile names the stored clip after the imported media',
+      ).toBe(true);
     } finally {
       freshDatabase.close();
     }
