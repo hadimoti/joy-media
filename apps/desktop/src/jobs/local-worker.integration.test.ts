@@ -255,6 +255,9 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
     const first = startWorker();
     await waitForWorker();
 
+    // Hold the source read open so the Worker is still mid-job when it is killed. Without the
+    // hold, a fast job can finish between two 100 ms polls and never be seen as running.
+    sourceDelayMs = 4_000;
     const interrupted = job.submit({
       jobType: 'asset.thumbnail',
       refId: refFor(videoPath),
@@ -267,6 +270,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       FIRST_JOB_TIMEOUT_MS,
       'the Worker to lease the job',
     );
+    expect(database.jobDispatch.get(interrupted.jobId)).toMatchObject({ status: 'running' });
     first.kill('SIGKILL');
 
     const afterCrash = await waitFor(
@@ -274,10 +278,10 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       FIRST_JOB_TIMEOUT_MS,
       'the orphaned job to reach a terminal state',
     );
-    // The kill may land after the upload had already completed; either way the job must not stay "running".
-    expect(['done', 'failed']).toContain(afterCrash.status);
-    if (afterCrash.status === 'failed') expect(afterCrash.error).toBe(EXPIRED_LEASE_ERROR);
+    // The Worker died while its source read was held, so the job can only end by lease expiry.
+    expect(afterCrash).toMatchObject({ status: 'failed', error: EXPIRED_LEASE_ERROR });
 
+    sourceDelayMs = 0;
     startWorker();
     await waitForWorker();
     const next = job.submit({
