@@ -67,7 +67,8 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(windowsJob).toContain(DOWNLOAD_ACTION);
     expect(bundleJob).toContain(EDITOR_WEB_ARTIFACT_NAME);
     expect(windowsJob).toContain(EDITOR_WEB_ARTIFACT_NAME);
-    expect(bundleJob).toContain('retention-days: 1');
+    // Matched as a whole line: a substring match would also accept `retention-days: 14`.
+    expect(bundleJob).toMatch(/\n\s+retention-days: 1\n/);
     expect(bundleJob).toContain('if-no-files-found: error');
     // The Windows job uploads once and downloads once (the renderer). The gate downloads once and never uploads.
     expect(windowsJob.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(1);
@@ -97,7 +98,7 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(upload).toContain(`uses: ${UPLOAD_ACTION}`);
     expect(upload).toContain(`name: ${WINDOWS_RELEASE_ARTIFACT_NAME}`);
     expect(upload).toContain('path: test-output/release-artifacts');
-    expect(upload).toContain('retention-days: 1');
+    expect(upload).toMatch(/\n\s+retention-days: 1\n/);
     expect(upload).toContain('if-no-files-found: error');
     expect(upload).not.toContain('overwrite:');
     expect(upload).not.toContain('include-hidden-files');
@@ -125,9 +126,60 @@ describe('v2 release-candidate artifact upload policy', () => {
       'github-token:',
       'pattern:',
       'merge-multiple',
+      'artifact-ids:',
     ]) {
       expect(download).not.toContain(forbidden);
     }
+  });
+
+  it('never makes an upload, download, retain, verify or restore step optional', () => {
+    const windowsJob = jobBlock(workflow, 'windows-worker-clean');
+    const gateJob = jobBlock(workflow, 'gate-summary');
+    const steps = [
+      stepBlock(
+        windowsJob,
+        'Upload the staged Windows release artifacts for the final gate (one day, this run only)',
+      ),
+      stepBlock(gateJob, 'Download the Windows release artifacts that this run uploaded'),
+      stepBlock(
+        gateJob,
+        'Retain the downloaded Windows release artifacts in the durable evidence store',
+      ),
+      stepBlock(gateJob, 'Verify the retained Windows release artifacts in the evidence store'),
+      stepBlock(
+        gateJob,
+        'Place the verified Windows release artifacts where the readiness builder reads them',
+      ),
+    ];
+    for (const step of steps) {
+      expect(step.length).toBeGreaterThan(0);
+      // A failed step must stop the job: no continue-on-error, and no condition that can skip it.
+      expect(step).not.toContain('continue-on-error');
+      expect(step).not.toMatch(/\n {8}if:/);
+      expect(step).not.toContain('timeout-minutes: 0');
+    }
+  });
+
+  it('stages exactly the seven release files, and only those, for the upload', () => {
+    const windowsJob = jobBlock(workflow, 'windows-worker-clean');
+    const stage = stepBlock(windowsJob, 'Stage Windows release artifacts with their manifest');
+    const sources = stage.slice(
+      stage.indexOf('$sources = [ordered]@{'),
+      stage.indexOf('}\n', stage.indexOf('$sources = [ordered]@{')),
+    );
+    const names = Array.from(
+      sources.matchAll(/^\s+(?:'([^']+)'|"([^"]+)") = /gm),
+      (match) => match[1] ?? match[2],
+    );
+    expect(names).toEqual([
+      'joy-media-setup.exe',
+      'joy-media-windows-x64-v$version.zip',
+      'joy-media-release-manifest.json',
+      'SHA256SUMS.txt',
+      'joy-media.exe',
+      'joy-media-bundle.mjs',
+      'joy-worker.exe',
+    ]);
   });
 
   it('retains, verifies and restores the downloaded Windows release files in order, from the store', () => {
@@ -174,8 +226,11 @@ describe('v2 release-candidate artifact upload policy', () => {
 
   it('keeps the workflow token read-only', () => {
     expect(workflow).toMatch(/\npermissions:\n {2}contents: read\n {2}actions: read[^\n]*\n/);
-    expect(workflow).not.toMatch(/\n\s+(?:id-token|packages|pull-requests|issues):/);
-    expect(workflow).not.toMatch(/\n\s+contents: write/);
+    // `[ \t]` rather than `\s`: `\s` would also match a blank line and so the top-level block itself.
+    expect(workflow).not.toMatch(/\n[ \t]+(?:id-token|packages|pull-requests|issues):/);
+    expect(workflow).not.toMatch(/\n[ \t]+contents: write/);
+    // No job widens the workflow token with a permissions block of its own.
+    expect(workflow).not.toMatch(/\n[ \t]+permissions:/);
   });
 
   it('records disabled receipts for both passes and the final gate', () => {

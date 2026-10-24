@@ -452,6 +452,40 @@ describe('retain-release-artifacts', () => {
       });
     });
 
+    it('refuses a store copy that holds a file the manifest does not list, and writes nothing', async () => {
+      await withWork(async (work) => {
+        const evidence = join(work, 'evidence');
+        await run([buildStaged(work), candidate, runId, attempt, evidence]);
+        writeFileSync(join(retainedDir(evidence), 'extra.bin'), 'not in the manifest');
+        const target = join(work, 'workspace');
+        await expect(restore(evidence, target)).rejects.toThrow(/does not hold exactly/u);
+        expect(existsSync(target)).toBe(false);
+      });
+    });
+
+    it('refuses a target inside the evidence store', async () => {
+      await withWork(async (work) => {
+        const evidence = join(work, 'evidence');
+        await run([buildStaged(work), candidate, runId, attempt, evidence]);
+        const target = join(evidence, 'workspace-copy');
+        await expect(restore(evidence, target)).rejects.toThrow(/outside the evidence store/u);
+        expect(existsSync(target)).toBe(false);
+      });
+    });
+
+    it.skipIf(!canSymlink)('refuses a target that is a symlink to a directory', async () => {
+      await withWork(async (work) => {
+        const evidence = join(work, 'evidence');
+        await run([buildStaged(work), candidate, runId, attempt, evidence]);
+        const real = join(work, 'real-empty');
+        mkdirSync(real);
+        const target = join(work, 'link');
+        symlinkSync(real, target, 'junction');
+        await expect(restore(evidence, target)).rejects.toThrow(/missing or an empty directory/u);
+        expect(existsSync(join(real, setupName))).toBe(false);
+      });
+    });
+
     it('fails closed, and writes nothing, when the retained copy was altered', async () => {
       await withWork(async (work) => {
         const evidence = join(work, 'evidence');

@@ -238,11 +238,19 @@ function copyTreeExclusive(source, target) {
 // Copies the manifest's files from a verified retained tree into a target that is missing or empty, then
 // verifies the target against the same manifest. Files are created exclusively, so nothing is overwritten.
 // A failure removes the target, which this call either created or found empty.
-async function restoreVerified(dest, entries, target) {
+async function restoreVerified(dest, entries, target, root) {
+  // A symlinked target is refused: lstat does not follow it, so it does not read as a directory.
   if (existsSync(target)) {
-    if (!statSync(target).isDirectory() || readdirSync(target).length > 0) {
+    if (!lstatSync(target).isDirectory() || readdirSync(target).length > 0) {
       throw new Error(`${target} must be missing or an empty directory`);
     }
+  }
+  const fromStore = relative(resolve(root), target);
+  if (
+    fromStore === '' ||
+    (fromStore !== '..' && !fromStore.startsWith(`..${sep}`) && !isAbsolute(fromStore))
+  ) {
+    throw new Error('the restore target must be outside the evidence store');
   }
   mkdirSync(target, { recursive: true });
   try {
@@ -287,7 +295,7 @@ export async function run(argv, env = process.env, options = {}) {
       throw new Error(`no retained release artifacts for this candidate and run at ${dest}`);
     const entries = parseManifest(JSON.parse(readFileSync(join(dest, MANIFEST), 'utf8')), identity);
     await verifyTree(dest, entries);
-    await restoreVerified(dest, entries, resolve(restoreTarget));
+    await restoreVerified(dest, entries, resolve(restoreTarget), root);
     return `restored ${entries.length} verified file(s) from ${dest} to ${resolve(restoreTarget)}`;
   }
   if (mode !== undefined) throw new Error(`unknown mode: ${mode}`);
