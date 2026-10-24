@@ -33,6 +33,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import { startLocalJobApi, type LocalJobApi } from '../jobs/local-job-api.js';
 import { createMediaStage } from './media-stage.js';
+import { installGpuEncodeFallback } from './gpu-encode-fallback.js';
 import { localWorkerEnv } from '../jobs/worker-env.js';
 import {
   createIpcHandlers,
@@ -252,6 +253,20 @@ if (!app.requestSingleInstanceLock()) {
       win.focus();
     }
   });
+
+  // Crash-triggered fallback for the Media Foundation video encoder (see gpu-encode-fallback.ts). It
+  // must be installed before the app is ready, because Chromium reads switches at startup.
+  installGpuEncodeFallback(
+    {
+      commandLine: app.commandLine,
+      relaunch: (options) => app.relaunch(options),
+      exit: (code) => app.exit(code),
+      onChildProcessGone: (listener) =>
+        app.on('child-process-gone', (_event, details) => listener(details)),
+      log: (message) => console.error(message),
+    },
+    process.argv,
+  );
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
