@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { IncomingMessage, Server } from 'node:http';
-import { once } from 'node:events';
+import { listenOnFetchablePort } from './test-fetchable-port.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ControlPlaneError,
@@ -1865,11 +1865,8 @@ async function start(
     ...(corsAllowedOrigins === undefined ? {} : { corsAllowedOrigins }),
   });
   servers.push(server);
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  if (address === null || typeof address === 'string') throw new Error('test API did not bind TCP');
-  return `http://127.0.0.1:${address.port}`;
+  const port = await listenOnFetchablePort(server);
+  return `http://127.0.0.1:${port}`;
 }
 
 // ============================================================================
