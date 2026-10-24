@@ -462,6 +462,7 @@ jobs:
           pnpm --filter @joy-media/desktop exec electron --version
           if ($LASTEXITCODE -ne 0) { throw "Electron runtime verification failed with exit code $LASTEXITCODE." }
       - name: Build frozen Windows desktop, CLI, and Worker candidate
+        timeout-minutes: 45
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -510,13 +511,19 @@ jobs:
             'joy-media-setup.exe' = '3f5fbe853de04a24aac22a46e28dd661cc1a80a2a6c5a1fa383fcd9ab3efde04'
             'joy-media-windows-x64-v1.0.1.zip' = '21be785e26c0d06cadba40929ada839cfd24345f17b828cdb735d4eff056a88c'
           }
+          $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+          if (-not (Test-Path -LiteralPath $curl -PathType Leaf)) { throw 'curl.exe is required for the pinned previous-release download' }
           for ($attempt = 1; $attempt -le 4; $attempt++) {
             try {
               foreach ($name in $pins.Keys) {
                 $path = Join-Path $previousRoot $name
-                if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
-                Invoke-WebRequest -UseBasicParsing -ErrorAction Stop -TimeoutSec 300 -Uri "https://github.com/hadimoti/joy-media/releases/download/v1.0.1/$name" -OutFile $path
-                if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pins[$name]) { throw "SHA256 mismatch: $name" }
+                if ((Test-Path -LiteralPath $path -PathType Leaf) -and ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -eq $pins[$name])) { continue }
+                & $curl --fail --location --silent --show-error --connect-timeout 60 --max-time 600 --continue-at - --output $path "https://github.com/hadimoti/joy-media/releases/download/v1.0.1/$name"
+                if ($LASTEXITCODE -ne 0) { throw "download failed for $name (curl exit $LASTEXITCODE)" }
+                if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pins[$name]) {
+                  Remove-Item -LiteralPath $path -Force
+                  throw "SHA256 mismatch: $name"
+                }
               }
               $sums = Get-Content -LiteralPath (Join-Path $previousRoot 'SHA256SUMS.txt') -Raw
               $actual = (Get-FileHash -LiteralPath (Join-Path $previousRoot $zip) -Algorithm SHA256).Hash.ToLowerInvariant()

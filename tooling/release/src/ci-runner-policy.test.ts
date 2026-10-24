@@ -332,6 +332,43 @@ function findJobBlock(workflowText: string, jobName: string): string {
   return lines.slice(start, end < 0 ? undefined : end).join('\n');
 }
 
+function assertReleaseCandidateWorkflowTriggers(workflowText: string): void {
+  const parsed: unknown = yamlParser.load(workflowText);
+  const triggers = isRecord(parsed) && isRecord(parsed.on) ? Object.keys(parsed.on) : [];
+  if (triggers.length !== 1 || triggers[0] !== 'workflow_dispatch') {
+    throw new Error('release-candidate-v2.yml must use workflow_dispatch as its only trigger');
+  }
+}
+
+function assertReleaseCandidateConcurrency(workflowText: string): void {
+  const lines = workflowText.split(/\r?\n/);
+  const concurrencyIndex = lines.findIndex((line) => line === 'concurrency:');
+  if (concurrencyIndex < 0) throw new Error('release-candidate-v2.yml must declare concurrency');
+
+  const blockLines: string[] = [];
+  for (let i = concurrencyIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line !== '' && !/^[ \t]/.test(line)) break;
+    blockLines.push(line);
+  }
+  const block = blockLines.join('\n');
+  const groups = [...block.matchAll(/^ {2}group:\s*(.*?)\s*$/gm)].map((match) => match[1]);
+  const cancellation = [...block.matchAll(/^ {2}cancel-in-progress:\s*(.*?)\s*$/gm)].map(
+    (match) => match[1],
+  );
+
+  if (
+    groups.length !== 1 ||
+    groups[0] !== 'release-candidate-v2-${{ inputs.candidate_sha }}' ||
+    cancellation.length !== 1 ||
+    cancellation[0] !== 'false'
+  ) {
+    throw new Error(
+      'release-candidate-v2 concurrency must use the candidate SHA group and cancel-in-progress: false',
+    );
+  }
+}
+
 function findWindowsDockerJobBlocks(workflowText: string): string[] {
   const lines = workflowText.split(/\r?\n/);
   const blocks: string[] = [];
@@ -653,5 +690,76 @@ describe('CI runner placement contract', () => {
         `docs declare self-hosted tuple ${JSON.stringify(tuple)} but it is not in the explicit allowlist`,
       ).toBe(true);
     }
+  });
+
+  it('release-candidate-v2 uses workflow_dispatch as its only trigger', () => {
+    const workflow = readFileSync(join(WORKFLOWS_DIR, 'release-candidate-v2.yml'), 'utf8');
+    expect(() => assertReleaseCandidateWorkflowTriggers(workflow)).not.toThrow();
+  });
+
+  it('release-candidate-v2 rejects extra triggers in temporary workflow copies', () => {
+    const extraTriggers = [
+      '  push:\n    branches: [main]\n',
+      '  push: { branches: [main] }\n',
+      '  push: # extra trigger\n',
+      '# column-0 comment\n  push:\n',
+    ];
+    for (const extraTrigger of extraTriggers) {
+      withMutatedWorkflowCopy(
+        'release-candidate-v2.yml',
+        (source) => {
+          const mutated = source.replace(
+            'on:\n  workflow_dispatch:\n',
+            `on:\n${extraTrigger}  workflow_dispatch:\n`,
+          );
+          if (mutated === source) throw new Error('trigger mutation target was not found');
+          return mutated;
+        },
+        (workflowsDir) => {
+          const workflow = readFileSync(join(workflowsDir, 'release-candidate-v2.yml'), 'utf8');
+          expect(() => assertReleaseCandidateWorkflowTriggers(workflow)).toThrow(
+            /workflow_dispatch as its only trigger/,
+          );
+        },
+      );
+    }
+  });
+
+  it('release-candidate-v2 concurrency is candidate-scoped and does not cancel in progress', () => {
+    const workflow = readFileSync(join(WORKFLOWS_DIR, 'release-candidate-v2.yml'), 'utf8');
+    expect(() => assertReleaseCandidateConcurrency(workflow)).not.toThrow();
+  });
+
+  it('release-candidate-v2 rejects cancel-in-progress true in a temporary workflow copy', () => {
+    withMutatedWorkflowCopy(
+      'release-candidate-v2.yml',
+      (source) => {
+        const mutated = source.replace('  cancel-in-progress: false', '  cancel-in-progress: true');
+        if (mutated === source) throw new Error('cancel-in-progress mutation target was not found');
+        return mutated;
+      },
+      (workflowsDir) => {
+        const workflow = readFileSync(join(workflowsDir, 'release-candidate-v2.yml'), 'utf8');
+        expect(() => assertReleaseCandidateConcurrency(workflow)).toThrow(
+          /cancel-in-progress: false/,
+        );
+      },
+    );
+  });
+
+  it('Windows release candidate build has a 30-to-60 minute timeout', () => {
+    const workflow = readFileSync(join(WORKFLOWS_DIR, 'release-candidate-v2.yml'), 'utf8');
+    const job = findJobBlock(workflow, 'windows-worker-clean');
+    const buildStep = findRunStepBlocks(job).find((step) =>
+      /^ {6}- name: Build frozen Windows desktop, CLI, and Worker candidate$/m.test(step),
+    );
+    expect(buildStep, 'the named Windows candidate build step must exist').toBeDefined();
+
+    const timeoutValues = [
+      ...(buildStep ?? '').matchAll(/^ {8}timeout-minutes:\s*(\d+)\s*$/gm),
+    ].map((match) => Number(match[1]));
+    expect(timeoutValues).toHaveLength(1);
+    expect(timeoutValues[0]).toBeGreaterThanOrEqual(30);
+    expect(timeoutValues[0]).toBeLessThanOrEqual(60);
   });
 });

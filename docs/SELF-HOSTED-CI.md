@@ -316,6 +316,38 @@ timed out on production exports. It depends on the same `self-hosted` runners (`
 (`JOY_MEDIA_CI_RELEASE_COMMAND`, `JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND`,
 `JOY_MEDIA_CI_EVIDENCE_ROOT`).
 
+### Release candidate lanes
+
+The `release-candidate-v2.yml` job graph is:
+
+| Job                        | Runner class                            | `needs`                                                                                                                                                                                                       |
+| -------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate-candidate`       | GitHub-hosted (`ubuntu-24.04`)          | —                                                                                                                                                                                                             |
+| `node-contracts`           | GitHub-hosted (`ubuntu-24.04`)          | `validate-candidate`                                                                                                                                                                                          |
+| `editor-web-bundle`        | GitHub-hosted (`ubuntu-24.04`)          | `validate-candidate`                                                                                                                                                                                          |
+| `linux-real-services`      | Self-hosted (`joy-media-ci`)            | `validate-candidate`                                                                                                                                                                                          |
+| `windows-p0-real-services` | Self-hosted (`joy-media-worker-docker`) | `validate-candidate`                                                                                                                                                                                          |
+| `windows-worker-clean`     | Self-hosted (`joy-media-worker-docker`) | `validate-candidate`, `editor-web-bundle`                                                                                                                                                                     |
+| `acceptance-primary`       | Self-hosted (`joy-media-acceptance`)    | `validate-candidate`, `linux-real-services`, `windows-worker-clean`                                                                                                                                           |
+| `acceptance-responsive`    | GitHub-hosted (`ubuntu-24.04`)          | `validate-candidate`, `linux-real-services`, `windows-worker-clean`                                                                                                                                           |
+| `prod-build-smoke`         | Self-hosted (`joy-media-acceptance`)    | `validate-candidate`                                                                                                                                                                                          |
+| `real-service-acceptance`  | Self-hosted (`joy-media-acceptance`)    | `validate-candidate`, `acceptance-primary`, `acceptance-responsive`, `windows-worker-clean`                                                                                                                   |
+| `p3-real-services`         | Self-hosted (`joy-media-acceptance`)    | `validate-candidate`                                                                                                                                                                                          |
+| `gate-summary`             | Self-hosted (`joy-media-acceptance`)    | `linux-real-services`, `windows-p0-real-services`, `node-contracts`, `windows-worker-clean`, `acceptance-primary`, `acceptance-responsive`, `prod-build-smoke`, `real-service-acceptance`, `p3-real-services` |
+
+The acceptance lanes `acceptance-primary`, `prod-build-smoke`, `real-service-acceptance`,
+`p3-real-services`, and `gate-summary` share one self-hosted runner and run one after another.
+Rerunning a candidate cannot turn a failed first attempt into a valid two-pass receipt. Whether
+a failed candidate needs a new candidate SHA is an owner decision.
+
+Known failure signatures and triage:
+
+- Windows previous-release download transport errors such as `unexpected EOF` or `timed out`
+  are meant to be absorbed by the resumable, hash-verified download. The download does not
+  prevent them.
+- A P0-4 cold-process `Test timed out in 300000ms` needs a runner-load check first. Any timeout
+  budget change is a candidate change.
+
 ### Durable evidence root
 
 Both the real-service and P3 lanes write redacted, checksum-verified evidence outside the
