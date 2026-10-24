@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import {
   createReadStream,
   closeSync,
-  cpSync,
+  copyFileSync,
   existsSync,
   fsyncSync,
   lstatSync,
@@ -203,6 +203,25 @@ export function syncTree(dir, entries, sync = { file: syncFile, directory: syncD
   }
 }
 
+// Copies a staged tree into a destination that the caller created with an exclusive mkdir. Each file is
+// created with COPYFILE_EXCL, so the copy can never overwrite. cpSync is not used: newer Node versions
+// refuse any existing destination, even an empty one, so the write-once gate above would always fail.
+function copyTreeExclusive(source, target) {
+  for (const name of readdirSync(source)) {
+    const from = join(source, name);
+    const to = join(target, name);
+    const info = lstatSync(from);
+    if (info.isDirectory()) {
+      mkdirSync(to);
+      copyTreeExclusive(from, to);
+    } else if (info.isFile()) {
+      copyFileSync(from, to, constants.COPYFILE_EXCL);
+    } else {
+      throw new Error(`refusing to retain ${from}: only regular files and directories are allowed`);
+    }
+  }
+}
+
 export async function run(argv, env = process.env, options = {}) {
   const [stagedArg, candidate, runId, attempt, root, mode] = argv;
   if (!/^[0-9a-f]{40}$/u.test(candidate ?? ''))
@@ -244,7 +263,7 @@ export async function run(argv, env = process.env, options = {}) {
     throw error;
   }
   try {
-    cpSync(stagedArg, dest, { recursive: true, errorOnExist: true, force: false });
+    copyTreeExclusive(stagedArg, dest);
     // The copy must reach stable storage before the retention is reported. The manifest is flushed too, since
     // verify mode reads it from the store.
     const sync = options.sync ?? { file: syncFile, directory: syncDirectory };
