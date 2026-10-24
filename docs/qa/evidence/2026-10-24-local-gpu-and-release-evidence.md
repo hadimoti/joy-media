@@ -10,7 +10,7 @@ The validated code commit is `db0cb85e`. Later commits in this note change docum
 - Typecheck (`tsc -b`): exit 0. ESLint and Prettier: clean on the changed files.
 - Reverse mutations on the fallback module: exit-code guard, loop guard, and dropped quit call are each detected by the module tests.
 - Seven-viewport audit: 875 passed, 7 skipped, 0 failed; exit 0. The 7 skips are CASE-66, which is blocked by design because it needs an external Worker running `audio.ml-denoise`.
-- Packaged fallback configuration (the switch the relaunch applies): export spec 2 of 2 in four runs (32.4 s, 33.6 s, 32.3 s, 33.6 s); editor acceptance 5 of 5; fresh-process render and stored-clip check 1 of 1. That is 4 of 4 export runs passing on this build. This is a small sample, not a reliability measurement.
+- Packaged fallback configuration (the switch the relaunch applies): export spec 2 of 2 in four runs (32.4 s, 33.6 s, 32.3 s, 33.6 s); editor acceptance 5 of 5; fresh-process render and stored-clip check 1 of 1. That is 4 of 4 export runs passing on `db0cb85e`. On `c64ad2fb`, the same spec then passed in 1 further chain run and in 10 consecutive repeats (32.2 s to 33.7 s, every run 2 of 2). Across the two final builds that is 15 of 15 export runs and 30 of 30 tests. Fifteen passes bound the failure rate only loosely (roughly 20 percent at 95 percent confidence, by the rule of three). Earlier configurations failed intermittently: the global switch failed parity in 2 of 7 runs, and the narrow feature failed the picture check once on an earlier build. The timing defect is therefore unfixed, and this is a measurement, not a guarantee.
 
 ## GPU crash on the shipped build (fallback shipped; root cause open)
 
@@ -59,7 +59,7 @@ Consequence: export timing is not fixed. GPU export is not reliably validated, a
 
 - `desktop.windows.installed-lifecycle`: externally blocked. `net session` exits 2, so this session is not an administrator. `Get-WindowsOptionalFeature` for `Containers-DisposableClientVM` and `Microsoft-Hyper-V-All` fails with "The requested operation requires elevation." The owner must run the lifecycle from an elevated session or approve a disposable account. Not run.
 - `release.exact-candidate-two-pass`: externally blocked. It needs a push and a CI dispatch, which were not authorized. Not run.
-- `desktop.export-media-semantics`: open. The shipped default build crashes; the fallback configuration passes in 4 of 4 runs, and the timing defect above is unfixed.
+- `desktop.export-media-semantics`: open. The shipped default build crashes; the fallback configuration passed 15 of 15 measured runs on the final builds, and the timing defect above is unfixed.
 - `desktop.app.restart-save-export`: open on the default build for the same reason.
 
 ## Artifact integrity and cross-runner requirements
