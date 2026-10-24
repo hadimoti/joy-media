@@ -273,6 +273,7 @@ export function MaskInspector({
     patch({ edge: { ...settings.edge, ...next } });
   const queue = async (output: 'matte' | 'cutout') => {
     if (runtimeState !== 'ready') return;
+    const assertScope = startProjectScopeCheck(captureProjectScope, projectId);
     if (!providerReady) {
       setRuntimeError(`${settings.provider} is not installed on the current Local Worker.`);
       return;
@@ -293,6 +294,7 @@ export function MaskInspector({
     setRuntimeError(undefined);
     try {
       await client.ensureProject(projectId, projectTitle);
+      assertScope();
       const id = maskJobId(target.targetId);
       const job = await client.enqueueMask(
         projectId,
@@ -321,6 +323,8 @@ export function MaskInspector({
     setCanceling(true);
     setRuntimeError(undefined);
     try {
+      const assertScope = startProjectScopeCheck(captureProjectScope, projectId);
+      assertScope();
       const canceled = await client.cancel(projectId, job.id);
       onChange({
         ...settings,

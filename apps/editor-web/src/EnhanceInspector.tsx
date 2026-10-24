@@ -195,10 +195,12 @@ export function EnhanceInspector({
   const patch = (next: Partial<UpscaleSettings>) => onChange({ ...settings, ...next });
   const queue = async (purpose: 'preview' | 'full') => {
     if (runtime.state !== 'ready') return;
+    const assertScope = startProjectScopeCheck(captureProjectScope, projectId);
     setRunning(true);
     setRuntimeError(undefined);
     try {
       await client.ensureProject(projectId, projectTitle);
+      assertScope();
       const job = await client.enqueueUpscale(
         projectId,
         `upscale-${target.targetId}-${purpose}-${Date.now()}`,
@@ -221,6 +223,8 @@ export function EnhanceInspector({
     if (settings.lastJob === undefined || !['queued', 'leased'].includes(settings.lastJob.state))
       return;
     try {
+      const assertScope = startProjectScopeCheck(captureProjectScope, projectId);
+      assertScope();
       const job = await client.cancel(projectId, settings.lastJob.id);
       onChange({
         ...settings,

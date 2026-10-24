@@ -2,7 +2,7 @@
 import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BrowserControlPlaneClient } from './control-plane-client.js';
+import type { BrowserControlPlaneClient, BrowserWorker } from './control-plane-client.js';
 import { SESSION_LEFT_PROJECT_MESSAGE } from './control-plane-scope.js';
 import { EditorPanelContext, type EditorPanelContextValue } from './editor-panel-context.js';
 import { MaskInspector } from './MaskInspector.js';
@@ -25,11 +25,30 @@ function editorContext(): EditorPanelContextValue {
 
 function fakeClient() {
   return {
-    workers: vi.fn(async () => []),
+    workers: vi.fn(async (): Promise<BrowserWorker[]> => []),
     jobs: vi.fn(async (): Promise<unknown[]> => []),
     ensureProject: vi.fn(async () => undefined),
     enqueueMask: vi.fn(),
     cancel: vi.fn(),
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function readyWorker(): BrowserWorker {
+  return {
+    id: 'worker-1',
+    paired: true,
+    revoked: false,
+    capabilities: ['mask.video'],
+    localAssetIds: [target.assetId],
+    lastSeenAt: Date.now(),
   };
 }
 
@@ -135,5 +154,53 @@ describe('MaskInspector session scope', () => {
     await render(mountInspector(client, onApplyResult));
 
     await vi.waitFor(() => expect(onApplyResult).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not enqueue when the session leaves while project setup is pending', async () => {
+    const client = fakeClient();
+    client.workers.mockResolvedValue([readyWorker()]);
+    const ensureProject = deferred<undefined>();
+    client.ensureProject.mockImplementationOnce(() => ensureProject.promise);
+    await render(
+      mountInspector(
+        client,
+        vi.fn(async () => 'mask-result'),
+      ),
+    );
+
+    const queueButton = Array.from(container!.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Create Mask',
+    );
+    expect(queueButton).toBeDefined();
+    await vi.waitFor(() => expect((queueButton as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => (queueButton as HTMLButtonElement).click());
+    expect(client.ensureProject).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      liveScope.held = false;
+      ensureProject.resolve(undefined);
+      await ensureProject.promise;
+    });
+
+    expect(client.enqueueMask).not.toHaveBeenCalled();
+  });
+
+  it('does not cancel when the session has left the project', async () => {
+    const client = fakeClient();
+    await render(
+      mountInspector(
+        client,
+        vi.fn(async () => 'mask-result'),
+      ),
+    );
+    const cancelButton = container!.querySelector<HTMLButtonElement>(
+      'button[aria-label="Cancel mask job"]',
+    );
+    expect(cancelButton).not.toBeNull();
+
+    liveScope.held = false;
+    await act(async () => cancelButton!.click());
+
+    expect(client.cancel).not.toHaveBeenCalled();
   });
 });
