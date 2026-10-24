@@ -68,12 +68,16 @@ export function installGpuEncodeFallback(
   argv: readonly string[],
 ): void {
   applyGpuEncodeFallback(host.commandLine, argv);
+  // A second fast-fail can arrive while the first quit is in progress. Relaunch at most once.
+  let relaunching = false;
   host.onChildProcessGone((details) => {
     if (!shouldRelaunchForGpuEncodeFallback(details, argv)) {
       if (isGpuFastFail(details) && isFallbackSession(argv))
         host.log('GPU fast-fail in the encode-fallback session; not relaunching again.');
       return;
     }
+    if (relaunching) return;
+    relaunching = true;
     host.log(
       'GPU process fast-failed during media setup; relaunching once with the Media Foundation video encoder off.',
     );

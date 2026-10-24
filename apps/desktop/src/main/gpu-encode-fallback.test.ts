@@ -88,6 +88,14 @@ describe('GPU encode fallback', () => {
     expect(session.logs).toHaveLength(1);
   });
 
+  it('relaunches once even when a second fast-fail arrives during the quit', () => {
+    const session = recordingHost(launchArgv);
+    session.emit(fastFail);
+    session.emit(fastFail);
+    expect(session.relaunches).toHaveLength(1);
+    expect(session.quits()).toBe(1);
+  });
+
   it('does not relaunch again when the fallback session also fast-fails', () => {
     const session = recordingHost(fallbackArgv);
     session.emit(fastFail);
