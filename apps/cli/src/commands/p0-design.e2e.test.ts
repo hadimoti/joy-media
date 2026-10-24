@@ -36,6 +36,12 @@ const CAPTION_BAND = Object.freeze({ x: 120, y: 560, width: 1040, height: 100 })
 const CAPTION_PIXEL_THRESHOLD = 12;
 const CAPTION_OUTSIDE_PIXEL_COUNT_TOLERANCE = 128;
 const RENDER_LIMIT_MS = 60_000;
+// How long a cancellation case waits for its render to reach the active phase it will interrupt. The
+// encoder-active phase starts only after the browser has captured every frame, and a whole cold title render
+// took 36,071 ms in run 40134385036 on the Windows P0 runner, so the old 30,000 ms window had almost no margin:
+// that run failed this wait while the host also ran the Linux lanes. Only the wait widens. The cancel itself
+// must still finish within 5 seconds, and cleanup is checked after it.
+const CANCEL_READY_TIMEOUT_MS = 120_000;
 const FRAME_RATE = 30;
 const RENDER_WIDTH = 1280;
 const RENDER_HEIGHT = 720;
@@ -1649,6 +1655,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         let stdout = '';
         let stderr = '';
         let pending = '';
+        const spawnedAt = Date.now();
         try {
           child = fork(
             BUNDLE,
@@ -1679,7 +1686,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
                     `${caseName}: active readiness was not emitted. ${stdout.trim()} ${stderr.trim()}`,
                   ),
                 ),
-              30_000,
+              CANCEL_READY_TIMEOUT_MS,
             );
             child!.once('close', () => {
               clearTimeout(timer);
@@ -1716,6 +1723,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
             });
           });
           const readyEvent = await ready;
+          console.info(`P0-4 ${caseName}: active after ${Date.now() - spawnedAt} ms`);
           const reportedPids = readyEvent.ownedPids as number[];
           expect(reportedPids.length, `${caseName}: owned process ids reported`).toBeGreaterThan(0);
           ownedPids.push(...reportedPids);
