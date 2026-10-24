@@ -2,7 +2,28 @@
 
 Scope: local work on `hadimoti/owner-binding-candidate`. Nothing was pushed, dispatched to CI, opened as a PR, frozen, released, or deployed. No driver, registry, or system setting was changed. Hardware encoding is unchanged for normal launches, and GPU sandboxing is never disabled.
 
-The validated code commit is `db0cb85e`. Later commits in this note change documentation only.
+Code commits in this note: `db0cb85e` (GPU fallback and security workstream, the basis of the validation below), `c64ad2fb` and `fb94c553` (documentation and test-count corrections), and `c449ef2d` (the export remux fix in the first section). Each validation result keeps the commit it was measured on.
+
+## Export remux fix (`c449ef2d`)
+
+Symptom: in some captured exports the decoded video is one frame late from frame 30 onward. In the two saved failing runs (`final-gates/failure-capture-loaded/run-3` and `run-5`), the red-to-blue hard cut lands at frame 31 instead of 30, the white flash at frames 91–92 instead of 90–91, and the dissolve at frame 127 instead of 128.
+
+Where it comes from: the recorder output was already correct. `browser-source.mp4`, the MediaRecorder output before the server remux, has red for frames 0–29, blue from 30, the flash at 90–91, and the dissolve from 120, as authored. The shift is introduced by the remux. Running the previous production remux command on the saved recorder output reproduces the shifted export exactly, with frame 29 duplicated at index 30.
+
+Cause: `remuxBrowserMp4` applied the output option `-r 30` after a `setpts` timeline. The output-stage frame-rate conversion duplicated one frame at a rounding boundary of the recorder's vsync-quantised timestamps (steps of about 50 ms and 17 ms alternate in the saved captures), and every later frame moved one slot. The exact arithmetic of that conversion was not traced further; the reproduction and the fix are what is verified.
+
+Withdrawn: the earlier capture-side explanations (a stale canvas capture, a WebGL read-back before commit, and a schedule that arrives "2 to 3 frames late") are not supported by the saved evidence. A CPU-backed staging canvas was built and tested (20 runs, all passing, which could not discriminate) and then reverted.
+
+Fix (`packages/export-core/src/index.ts`): frame N takes its authored slot with an in-graph `fps=<frameRate>:round=near` filter; the timeline is passed through with `-fps_mode passthrough`; the track timescale equals the frame rate, so short clips report the declared rate. The output-stage `-r` now applies only to the unnormalized path. Fractional frame rates are rejected when a frame count is fixed. The browser export sends a frame rate of 30 (`apps/editor-web/src/App.tsx`), so the rejection does not affect it.
+
+Verification:
+- Regression test `keeps every browser-capture frame at its authored index when capture timestamps jitter` (export-core): a 180-frame clip whose red channel encodes its index is retimed with vsync-quantised timestamps, and the remux output must match the constant-rate reference at every frame. On the previous remux, 162 of 180 frames are misaligned; on this one, 0.
+- Reverse mutations: restoring the previous remux fails the jitter test; removing the in-graph fps filter fails `normalizes slow browser-capture timestamps` (container duration 1.033 s instead of 0.067 s). The file was restored byte-for-byte after each run.
+- Saved failing captures through the fixed remux: `run-3` and `run-5` show red 0–29, blue 30–59, dark 60–89, white 90–91, dark 92–119; 180 frames at 30/1, duration 6.000 s.
+- Packaged build of the fix, fallback configuration (the switch the relaunch applies): export spec 4 of 4 runs, 2 of 2 tests each (8 of 8); fresh-process render 1 of 1. The packaged `export-core` bundle contains the fix (`video_track_timescale`).
+- Other suites: export-core 16 tests pass; worker 58 tests pass and 1 skipped; the API remux test passes; `tsc -b` exit 0; ESLint and Prettier clean on the changed files.
+
+Not verified: the failure did not reproduce in this session on the previous build. That build passed 10 of 10 loaded runs under four busy-loop processes and 6 of 6 under twenty-four, on a 32-core host. The packaged runs therefore show no regression, but they do not show that the failure rate fell. The earlier failure counts (2 of 5 loaded runs and 3 of 34 unloaded runs, in earlier sessions) are explained by the saved-capture reproduction, not measured against the fix.
 
 ## Final validation on `db0cb85e`
 
@@ -10,7 +31,8 @@ The validated code commit is `db0cb85e`. Later commits in this note change docum
 - Typecheck (`tsc -b`): exit 0. ESLint and Prettier: clean on the changed files.
 - Reverse mutations on the fallback module: exit-code guard, loop guard, and dropped quit call are each detected by the module tests.
 - Seven-viewport audit: 875 passed, 7 skipped, 0 failed; exit 0. The 7 skips are CASE-66, which is blocked by design because it needs an external Worker running `audio.ml-denoise`.
-- Packaged fallback configuration (the switch the relaunch applies): export spec 2 of 2 in four runs (32.4 s, 33.6 s, 32.3 s, 33.6 s); editor acceptance 5 of 5; fresh-process render and stored-clip check 1 of 1. That is 4 of 4 export runs passing on `db0cb85e`. On `c64ad2fb`, the same spec then passed in 1 further chain run and in 10 consecutive repeats (32.2 s to 33.7 s, every run 2 of 2). Across the two final builds that is 15 of 15 export runs and 30 of 30 tests. Fifteen passes bound the failure rate only loosely (roughly 20 percent at 95 percent confidence, by the rule of three). Earlier configurations failed intermittently: the global switch failed parity in 2 of 7 runs, and the narrow feature failed the picture check once on an earlier build. The timing defect is therefore unfixed, and this is a measurement, not a guarantee.
+- Packaged fallback configuration: export spec 2 of 2 in four runs (32.4 s, 33.6 s, 32.3 s, 33.6 s); editor acceptance 5 of 5; fresh-process render and stored-clip check 1 of 1. On `c64ad2fb`, the same spec then passed in 1 further chain run and in 10 consecutive repeats (32.2 s to 33.7 s, every run 2 of 2). Across the two builds that is 15 of 15 export runs and 30 of 30 tests. Fifteen passes bound the failure rate only loosely (roughly 20 percent at 95 percent confidence, by the rule of three). Earlier configurations failed intermittently: the global switch failed parity in 2 of 7 runs, and the narrow feature failed the picture check once on an earlier build. At that point the timing defect was unfixed; the remux fix above supersedes that statement.
+- Shipped default build, export spec: fails, as designed. The first instance crashes and the relaunch replaces its window.
 
 ## GPU crash on the shipped build (fallback shipped; root cause open)
 
@@ -18,13 +40,13 @@ Host: NVIDIA GeForce RTX 5070 Ti, driver 617.42, ANGLE D3D11. The default packag
 
 What was tested (each row is one run of `tests/desktop/export-semantics.spec.ts` on a scratch copy):
 
-| Configuration                                              | Result                                                                                                                               |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Default                                                    | Fails: GPU crash, WebGL lost                                                                                                         |
-| `MediaRecorder.isTypeSupported` stubbed to true            | Fails the same way: not the trigger                                                                                                  |
-| `--disable-accelerated-video-decode`                       | Fails the same way: not the trigger                                                                                                  |
+| Configuration | Result |
+| --- | --- |
+| Default | Fails: GPU crash, WebGL lost |
+| `MediaRecorder.isTypeSupported` stubbed to true | Fails the same way: not the trigger |
+| `--disable-accelerated-video-decode` | Fails the same way: not the trigger |
 | `--disable-features=MediaFoundationVideoEncodeAccelerator` | Export completes. Picture check fails at 4 s and Monitor parity at 3 s and 4 s on that earlier build. Sound and timing check passes. |
-| `--disable-accelerated-video-encode` (earlier series)      | Five of seven runs pass both checks; two fail Monitor parity at 1 s.                                                                 |
+| `--disable-accelerated-video-encode` (earlier series) | Five of seven runs pass both checks; two fail Monitor parity at 1 s. |
 
 The narrowest switch that avoids the crash is the Media Foundation video-encoder feature. The root cause is not established. The leading hypothesis (medium confidence) is that the encoder's NVIDIA component aborts inside the GPU sandbox while the media pipeline initializes GPU video services.
 
@@ -32,19 +54,7 @@ Shipped change (`apps/desktop/src/main/gpu-encode-fallback.ts`, wired in `electr
 
 Verified on the packaged build: when the first instance exited, exactly one `electron.exe` carrying `--joy-media-gpu-encode-fallback` appeared (06:48:26), stayed alive through the sample window (06:48:45), and was then stopped by PID. The shipped-configuration export test therefore fails, because its window belonged to the first instance. An earlier count of relaunched instances matched its own command line and was discarded; this observation replaces it.
 
-Consequences of the fallback that a user should know: the relaunch restarts the app, so the first session's in-flight work is lost (the GPU exit had already broken WebGL). Reliability beyond the 4 runs above is not established.
-
-## Export timing defect (open, documented as blocked)
-
-Measured on the packaged build: the first captured frame arrives about 82 ms after recording starts, and later frames follow about 33 ms apart. The offset never recovers. The cause is structural: each frame waits for one `requestAnimationFrame` tick before `requestFrame()`, and the schedule has no catch-up. The final MP4 is remuxed by frame index, so content lands about 2 to 3 frames late. Failing runs show red still on screen at 1 s, and the flash at 3.033 s instead of 3.000 s.
-
-Attempted and rejected:
-
-- `MediaStreamTrackGenerator` with authored `VideoFrame` timestamps, in a standalone page on the fallback configuration. The first attempt awaited the recorder's start event before writing frames and timed out after 90 s: `MediaRecorder` defers its start until its first frame arrives. The second attempt wrote frame 0 before start. The recording then kept only 12 of 90 frames (1,401 bytes) with wall-clock timestamps, so authored timestamps are not honored in this build.
-
-Not attempted: a WebCodecs `VideoEncoder` with its own MP4 muxer. That needs a new dependency and a different mux path. Painting frames ahead of `requestFrame()` is not viable, because the capture samples canvas content at the next composition.
-
-Consequence: export timing is not fixed. GPU export is not reliably validated, and this is documented as blocked on the encode and mux pipeline.
+Consequences of the fallback that a user should know: the relaunch restarts the app, so the first session's in-flight work is lost (the GPU exit had already broken WebGL). Reliability beyond the runs above is not established.
 
 ## Persistence after a fresh-profile import (verified)
 
@@ -59,8 +69,8 @@ Consequence: export timing is not fixed. GPU export is not reliably validated, a
 
 - `desktop.windows.installed-lifecycle`: externally blocked. `net session` exits 2, so this session is not an administrator. `Get-WindowsOptionalFeature` for `Containers-DisposableClientVM` and `Microsoft-Hyper-V-All` fails with "The requested operation requires elevation." The owner must run the lifecycle from an elevated session or approve a disposable account. Not run.
 - `release.exact-candidate-two-pass`: externally blocked. It needs a push and a CI dispatch, which were not authorized. Not run.
-- `desktop.export-media-semantics`: open. The shipped default build crashes; the fallback configuration passed 15 of 15 measured runs on the final builds, and the timing defect above is unfixed.
-- `desktop.app.restart-save-export`: open on the default build for the same reason.
+- `desktop.export-media-semantics`: the export timing defect is fixed in the remux (`c449ef2d`), and the packaged fallback export passed 4 of 4 runs on that build. The gate stays open for the shipped default build, which still crashes on first GPU use.
+- `desktop.app.restart-save-export`: open on the default build for the same GPU reason.
 
 ## Artifact integrity and cross-runner requirements
 
@@ -75,6 +85,7 @@ Consequence: export timing is not fixed. GPU export is not reliably validated, a
 
 ## Unverified or open
 
-- GPU root cause (unproven); export timing defect (blocked); reliability of the fallback beyond 4 runs.
-- Installed lifecycle (needs elevation). Exact-candidate two-pass receipts (needs push and CI, not authorized).
+- GPU root cause (unproven). The default build still crashes on first GPU use, and the fallback relaunch is the mitigation. Fallback reliability beyond the recorded runs is not established.
+- Export failure rate after the remux fix: not measured. The fix is verified by the saved-capture reproduction, the regression and mutation tests, and the packaged runs.
+- Installed lifecycle (needs elevation). Exact-candidate two-pass receipts (need push and CI, not authorized).
 - Cross-runner rehearsal on the final SHA.
