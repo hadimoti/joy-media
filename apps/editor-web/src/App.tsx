@@ -4812,7 +4812,10 @@ function EditorWorkspace({
         while (!abortController.signal.aborted) {
           assertScope();
           workerJob = (
-            await mediaControlPlaneClient.jobs(controlPlaneProject.controlPlaneProjectId)
+            await mediaControlPlaneClient.jobs(
+              controlPlaneProject.controlPlaneProjectId,
+              assertScope,
+            )
           ).find((candidate) => candidate.id === workerJobId);
           if (workerJob === undefined) throw new Error('Export Worker job disappeared');
           if (
@@ -6350,7 +6353,7 @@ function EditorWorkspace({
               context.showToast('This remote provider result is already applied.', 'info');
               return;
             }
-            const source = await mediaResolverRef.current.resolve(targetAssetId);
+            const source = await mediaResolverRef.current.resolve(targetAssetId, assertScope);
             assertScope();
             const response = await fetch(source.url);
             if (!response.ok)

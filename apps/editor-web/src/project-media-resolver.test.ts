@@ -557,4 +557,39 @@ describe('ProjectMediaResolver', () => {
     first.resolve(undefined);
     await unguarded.catch(() => undefined);
   });
+
+  it('does not let an unguarded resolve join a lookup started with a scope check', async () => {
+    const guardedRead = deferred<Blob | undefined>();
+    const unguardedRead = deferred<Blob | undefined>();
+    const get = vi
+      .fn()
+      .mockReturnValueOnce(guardedRead.promise)
+      .mockReturnValueOnce(unguardedRead.promise);
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:unguarded');
+    let inScope = true;
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      client: {
+        assets: vi.fn(async () => []),
+        originalBytes: vi.fn(),
+        sharedCloudOriginalBytes: vi.fn(),
+      },
+      originalCache: { get },
+    });
+
+    const guarded = resolver.resolve('media-1', () => {
+      if (!inScope) throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
+    });
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+    const unguarded = resolver.resolve('media-1');
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+
+    inScope = false;
+    guardedRead.resolve(undefined);
+    await expect(guarded).rejects.toThrow(SESSION_LEFT_PROJECT_MESSAGE);
+    unguardedRead.resolve(new Blob(['local'], { type: 'video/mp4' }));
+    await expect(unguarded).resolves.toMatchObject({ source: 'opfs', url: 'blob:unguarded' });
+    expect(create).toHaveBeenCalledTimes(1);
+    resolver.clear();
+  });
 });

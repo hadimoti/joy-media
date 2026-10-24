@@ -74,7 +74,7 @@ export class ProjectMediaResolver {
       if (this.#pending.get(assetId) === request) this.#pending.delete(assetId);
       this.#assertEpoch(epoch);
     });
-    this.#pending.set(assetId, request);
+    if (assertCurrent === undefined) this.#pending.set(assetId, request);
     return request;
   }
 

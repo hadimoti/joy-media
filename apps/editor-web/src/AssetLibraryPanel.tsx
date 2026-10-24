@@ -202,11 +202,13 @@ export function AssetLibraryPanel({
       openOpfsDerivativeCache().then(
         (cache) =>
           new AuthorizedDerivativeResolver(cache, {
-            fetch: ({ projectId: requestedProjectId, assetId, derivative }) =>
-              client.derivativeBytes(requestedProjectId, assetId, derivative.derivativeId),
+            fetch: ({ projectId: requestedProjectId, assetId, derivative }) => {
+              startProjectScopeCheck(captureProjectScope, requestedProjectId)();
+              return client.derivativeBytes(requestedProjectId, assetId, derivative.derivativeId);
+            },
           }),
       ),
-    [client],
+    [captureProjectScope, client],
   );
   const originalAssetCache = useMemo(() => openOpfsOriginalAssetCache(), []);
   const timelineAddRef = useRef<Set<string>>(new Set());

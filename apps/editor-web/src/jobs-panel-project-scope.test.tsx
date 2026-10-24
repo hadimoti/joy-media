@@ -607,7 +607,9 @@ describe('editor dock wiring', () => {
     expect(panelContent).toMatch(
       /assertScope\(\);\s*const source = await mediaResolverRef\.current\.resolve\(\s*selectedAudioClip\.assetId,\s*assertScope,?\s*\);/,
     );
-    expect(panelContent).toContain('mediaResolverRef.current.resolve(targetAssetId)');
+    expect(panelContent).toMatch(
+      /mediaResolverRef\.current\.resolve\(\s*targetAssetId,\s*assertScope,?\s*\)/,
+    );
     expect(panelContent).toContain('resyncTimelineMediaRef.current();');
     expect(panelContent.includes('mediaResolver.resolve(')).toBe(false);
     expect(panelContent.includes('resyncTimelineMedia();')).toBe(false);
