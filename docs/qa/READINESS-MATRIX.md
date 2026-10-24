@@ -42,7 +42,7 @@ Passed locally on `9a43a66e`: TypeScript and ESLint exit 0. Prettier failed on t
 
 Gate status: no gate-required row has an exact-candidate receipt. The dispatched CI run for `9a43a66e` (run `40074133129`) is blocked, because two self-hosted Linux runners are offline and the evidence store is not configured. It is not a receipt. The local results support the packaged fallback export, persistence, and acceptance. They do not close `desktop.export-media-semantics`, because the shipped default build still crashes on first GPU use. Verdict: NOT-READY.
 
-Decisions taken on 2026-10-25, under the owner's instruction to finish the plan without further questions (see the evidence note): the shipped GPU configuration is the automatic relaunch fallback, the one parity criterion is the spec's 0.2 normalized-RGB tolerance, `x-joy-frame-count` stays optional in this candidate, and the P0-4 time budget is 600,000 ms. Still outstanding: the shared evidence store and its runner changes, the unsigned-distribution gate, and the release approval itself.
+Decisions taken on 2026-10-25, under the owner's instruction to finish the plan without further questions (see the evidence note): the shipped GPU configuration is the automatic relaunch fallback, the one parity criterion is the spec's 0.2 normalized-RGB tolerance, `x-joy-frame-count` stays optional in this candidate, and the P0-4 time budget is 600,000 ms. The shared evidence store is settled as a one-day artifact hand-off of the Windows release files to the gate (see the store proposal's outcome section), and it has not run yet. Still outstanding: the exact-candidate two-pass receipt, the unsigned-distribution gate, and the release approval itself.
 
 ## Candidate evidence: `0e9d9cb8` (local, 2026-10-23)
 
