@@ -590,6 +590,12 @@ describe('JobsPanel project scope', () => {
 });
 
 describe('editor dock wiring', () => {
+  it('passes the scope check to the Local Worker job poll, so a session that left stops it', () => {
+    expect(appSource).toMatch(
+      /mediaControlPlaneClient\.jobs\(\s*controlPlaneProject\.controlPlaneProjectId,\s*assertScope,?\s*\)/u,
+    );
+  });
+
   it('reads the live media resolver and resync callback, not the first render', () => {
     // Dockview keeps the first render's PanelContent, so the panel reaches the
     // current resolver and resync callback through refs.
