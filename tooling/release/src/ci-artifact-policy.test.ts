@@ -21,6 +21,23 @@ const DISABLED_RECEIPT = [
 const EDITOR_WEB_ARTIFACT_NAME =
   'joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}';
 
+const WINDOWS_RELEASE_ARTIFACT_NAME =
+  'joy-media-windows-release-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}';
+
+const UPLOAD_ACTION = 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2';
+const DOWNLOAD_ACTION =
+  'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0';
+
+// One step of a job, from its `- name:` line to the next step or comment line at the same indent.
+function stepBlock(job: string, stepName: string): string {
+  const marker = `      - name: ${stepName}\n`;
+  const start = job.indexOf(marker);
+  if (start < 0) return '';
+  const rest = job.slice(start + marker.length);
+  const next = rest.match(/\n {6}(?:- |#)/);
+  return job.slice(start, next ? start + marker.length + next.index! : job.length);
+}
+
 function jobBlock(workflow: string, jobName: string): string {
   const marker = `\n  ${jobName}:\n`;
   const start = workflow.indexOf(marker);
@@ -38,32 +55,127 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(workflow).toContain('name: release-candidate-v2');
   });
 
-  it('uses one short-lived artifact pair only for the exact-candidate renderer handoff', () => {
+  it('uses two short-lived artifact pairs only: the renderer handoff and the Windows release files for the gate', () => {
     const bundleJob = jobBlock(workflow, 'editor-web-bundle');
     const windowsJob = jobBlock(workflow, 'windows-worker-clean');
-    expect(workflow.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(1);
-    expect(workflow.match(/uses:\s*actions\/download-artifact@/g) ?? []).toHaveLength(1);
-    expect(bundleJob).toContain(
-      'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2',
-    );
-    expect(windowsJob).toContain(
-      'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0',
-    );
+    const gateJob = jobBlock(workflow, 'gate-summary');
+    // Exactly two uploads and two downloads in the whole workflow. Each is named below, and no other job
+    // may take part.
+    expect(workflow.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(2);
+    expect(workflow.match(/uses:\s*actions\/download-artifact@/g) ?? []).toHaveLength(2);
+    expect(bundleJob).toContain(UPLOAD_ACTION);
+    expect(windowsJob).toContain(DOWNLOAD_ACTION);
     expect(bundleJob).toContain(EDITOR_WEB_ARTIFACT_NAME);
     expect(windowsJob).toContain(EDITOR_WEB_ARTIFACT_NAME);
     expect(bundleJob).toContain('retention-days: 1');
     expect(bundleJob).toContain('if-no-files-found: error');
+    // The Windows job uploads once and downloads once (the renderer). The gate downloads once and never uploads.
+    expect(windowsJob.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(1);
+    expect(windowsJob.match(/uses:\s*actions\/download-artifact@/g) ?? []).toHaveLength(1);
+    expect(gateJob.match(/uses:\s*actions\/download-artifact@/g) ?? []).toHaveLength(1);
+    expect(gateJob).not.toContain('actions/upload-artifact');
 
     for (const evidenceJob of [
       'linux-real-services',
       'real-service-acceptance',
       'p3-real-services',
-      'gate-summary',
     ]) {
       const block = jobBlock(workflow, evidenceJob);
       expect(block).not.toContain('actions/upload-artifact');
       expect(block).not.toContain('actions/download-artifact');
     }
+  });
+
+  it('hands the Windows release files to the gate as a one-day artifact of this run, bound to the candidate', () => {
+    const windowsJob = jobBlock(workflow, 'windows-worker-clean');
+    const gateJob = jobBlock(workflow, 'gate-summary');
+
+    const upload = stepBlock(
+      windowsJob,
+      'Upload the staged Windows release artifacts for the final gate (one day, this run only)',
+    );
+    expect(upload).toContain(`uses: ${UPLOAD_ACTION}`);
+    expect(upload).toContain(`name: ${WINDOWS_RELEASE_ARTIFACT_NAME}`);
+    expect(upload).toContain('path: test-output/release-artifacts');
+    expect(upload).toContain('retention-days: 1');
+    expect(upload).toContain('if-no-files-found: error');
+    expect(upload).not.toContain('overwrite:');
+    expect(upload).not.toContain('include-hidden-files');
+    // The upload takes the tree the staging step wrote, after it, and before any teardown.
+    expect(windowsJob.indexOf('Stage Windows release artifacts with their manifest')).toBeLessThan(
+      windowsJob.indexOf('Upload the staged Windows release artifacts'),
+    );
+    expect(windowsJob.indexOf('Upload the staged Windows release artifacts')).toBeLessThan(
+      windowsJob.indexOf('Verify clean Worker teardown'),
+    );
+    // Nothing of the old per-runner store remains in the Windows lane.
+    expect(workflow).not.toContain('JOY_MEDIA_WINDOWS_EVIDENCE_ROOT');
+
+    const download = stepBlock(
+      gateJob,
+      'Download the Windows release artifacts that this run uploaded',
+    );
+    expect(download).toContain(`uses: ${DOWNLOAD_ACTION}`);
+    expect(download).toContain(`name: ${WINDOWS_RELEASE_ARTIFACT_NAME}`);
+    expect(download).toContain('path: test-output/windows-release-incoming');
+    // Same run only: no cross-run, cross-repository or token-based download, and no name patterns.
+    for (const forbidden of [
+      'run-id:',
+      'repository:',
+      'github-token:',
+      'pattern:',
+      'merge-multiple',
+    ]) {
+      expect(download).not.toContain(forbidden);
+    }
+  });
+
+  it('retains, verifies and restores the downloaded Windows release files in order, from the store', () => {
+    const gateJob = jobBlock(workflow, 'gate-summary');
+    const idx = (name: string): number => gateJob.indexOf(`      - name: ${name}`);
+    const order = [
+      'Restore and bind both isolated evidence passes',
+      'Download the Windows release artifacts that this run uploaded',
+      'Retain the downloaded Windows release artifacts in the durable evidence store',
+      'Verify the retained Windows release artifacts in the evidence store',
+      'Place the verified Windows release artifacts where the readiness builder reads them',
+      'Build source-bound readiness evidence from all two-pass results',
+      'Evaluate source-bound release gate',
+    ].map(idx);
+    expect(order.every((position) => position >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+
+    const identity =
+      '"$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$JOY_MEDIA_CI_EVIDENCE_ROOT"';
+    const retain = stepBlock(
+      gateJob,
+      'Retain the downloaded Windows release artifacts in the durable evidence store',
+    );
+    expect(retain).toContain(
+      `node tooling/release/src/retain-release-artifacts.mjs test-output/windows-release-incoming ${identity}`,
+    );
+    expect(retain).not.toContain('--verify-only');
+    expect(retain).not.toContain('--restore-to');
+    const verify = stepBlock(
+      gateJob,
+      'Verify the retained Windows release artifacts in the evidence store',
+    );
+    expect(verify).toContain(`retain-release-artifacts.mjs - ${identity} --verify-only`);
+    // The builder reads a copy restored from the verified store, never the downloaded directory.
+    const place = stepBlock(
+      gateJob,
+      'Place the verified Windows release artifacts where the readiness builder reads them',
+    );
+    expect(place).toContain(
+      `retain-release-artifacts.mjs - ${identity} --restore-to test-output/readiness/artifacts`,
+    );
+    expect(place).not.toContain('windows-release-incoming');
+  });
+
+  it('keeps the workflow token read-only', () => {
+    expect(workflow).toMatch(/\npermissions:\n {2}contents: read\n {2}actions: read[^\n]*\n/);
+    expect(workflow).not.toMatch(/\n\s+(?:id-token|packages|pull-requests|issues):/);
+    expect(workflow).not.toMatch(/\n\s+contents: write/);
   });
 
   it('records disabled receipts for both passes and the final gate', () => {

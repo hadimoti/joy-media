@@ -408,4 +408,72 @@ describe('retain-release-artifacts', () => {
       await run(['-', candidate, runId, attempt, evidence, '--verify-only']);
     });
   });
+
+  describe('restore mode', () => {
+    const restore = (evidence: string, target: string | undefined) =>
+      run(['-', candidate, runId, attempt, evidence, '--restore-to', ...(target ? [target] : [])]);
+
+    it('restores the verified files byte for byte, nested paths included, and not the manifest', async () => {
+      await withWork(async (work) => {
+        const evidence = join(work, 'evidence');
+        await run([buildStaged(work), candidate, runId, attempt, evidence]);
+        const target = join(work, 'workspace', 'artifacts');
+        await restore(evidence, target);
+        expect(readFileSync(join(target, setupName), 'utf8')).toBe('setup-bytes');
+        expect(readFileSync(join(target, zipName), 'utf8')).toBe('zip-bytes');
+        expect(readFileSync(join(target, ...workerName.split('/')), 'utf8')).toBe('worker-bytes');
+        expect(existsSync(join(target, 'artifact-manifest.json'))).toBe(false);
+        // The store is untouched by a restore.
+        await run(['-', candidate, runId, attempt, evidence, '--verify-only']);
+      });
+    });
+
+    it('accepts an existing empty directory', async () => {
+      await withWork(async (work) => {
+        const evidence = join(work, 'evidence');
+        await run([buildStaged(work), candidate, runId, attempt, evidence]);
+        const target = join(work, 'empty');
+        mkdirSync(target);
+        await restore(evidence, target);
+        expect(readFileSync(join(target, setupName), 'utf8')).toBe('setup-bytes');
+      });
+    });
+
+    it('refuses a target that already holds anything, and leaves it as it was', async () => {
+      await withWork(async (work) => {
+        const evidence = join(work, 'evidence');
+        await run([buildStaged(work), candidate, runId, attempt, evidence]);
+        const target = join(work, 'occupied');
+        mkdirSync(target);
+        writeFileSync(join(target, 'keep.txt'), 'keep');
+        await expect(restore(evidence, target)).rejects.toThrow(/missing or an empty directory/u);
+        expect(readFileSync(join(target, 'keep.txt'), 'utf8')).toBe('keep');
+        expect(existsSync(join(target, setupName))).toBe(false);
+      });
+    });
+
+    it('fails closed, and writes nothing, when the retained copy was altered', async () => {
+      await withWork(async (work) => {
+        const evidence = join(work, 'evidence');
+        await run([buildStaged(work), candidate, runId, attempt, evidence]);
+        // Same length as the original, so the digest check is the one that fails.
+        writeFileSync(join(retainedDir(evidence), setupName), 'SETUP-BYTES');
+        const target = join(work, 'workspace');
+        await expect(restore(evidence, target)).rejects.toThrow(
+          /sha256 mismatch for joy-media-setup\.exe/u,
+        );
+        expect(existsSync(target)).toBe(false);
+      });
+    });
+
+    it('fails when nothing is retained for this run, or no destination is given', async () => {
+      await withWork(async (work) => {
+        const evidence = join(work, 'evidence');
+        await expect(restore(evidence, join(work, 'workspace'))).rejects.toThrow(
+          /no retained release artifacts/u,
+        );
+        await expect(restore(evidence, undefined)).rejects.toThrow(/needs a destination/u);
+      });
+    });
+  });
 });

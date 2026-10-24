@@ -659,15 +659,21 @@ jobs:
             files = @($files)
           }
           [IO.File]::WriteAllText((Join-Path $stage 'artifact-manifest.json'), ($manifest | ConvertTo-Json -Depth 6) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-      - name: Retain Windows release artifacts in the designated durable evidence store
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          # The store is designated by the runner operator, and the gate reads the same store. GitHub
-          # artifact upload is disabled by policy, so the bytes go to the store, not to Actions.
-          if ([string]::IsNullOrWhiteSpace($env:JOY_MEDIA_WINDOWS_EVIDENCE_ROOT)) { throw 'JOY_MEDIA_WINDOWS_EVIDENCE_ROOT must name the durable evidence store that the gate reads' }
-          node tooling/release/src/retain-release-artifacts.mjs test-output\release-artifacts $env:CANDIDATE_SHA $env:GITHUB_RUN_ID $env:GITHUB_RUN_ATTEMPT $env:JOY_MEDIA_WINDOWS_EVIDENCE_ROOT
-          if ($LASTEXITCODE -ne 0) { throw "Windows release artifact retention failed with exit code $LASTEXITCODE." }
+      # Transport only. The Windows container and the Linux gate share no storage, so the staged release
+      # files travel to the gate as a one-day artifact of THIS run. The gate downloads it from this run
+      # alone, retains it in its own durable store, and re-verifies every byte there. The artifact is not
+      # evidence and is never trusted as such: the manifest, SHA256SUMS.txt and both Windows receipts decide.
+      # The staged tree holds only the seven release files and artifact-manifest.json. The files are
+      # unsigned candidate binaries and are downloadable from the run page until the artifact expires.
+      - name: Upload the staged Windows release artifacts for the final gate (one day, this run only)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 30
+        with:
+          name: joy-media-windows-release-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/release-artifacts
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
       - name: Verify clean Worker teardown
         if: always()
         shell: powershell
@@ -1479,6 +1485,21 @@ jobs:
           set -euo pipefail
           node ops/self-hosted/linux-runner/restore-retained-evidence.mjs \
             "$JOY_MEDIA_CI_EVIDENCE_ROOT" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+      # Same run only: no run-id, repository or token is passed, so only this run's artifact can be fetched, and
+      # its name carries the run, the attempt and the exact candidate. A missing artifact fails the gate.
+      - name: Download the Windows release artifacts that this run uploaded
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joy-media-windows-release-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/windows-release-incoming
+      - name: Retain the downloaded Windows release artifacts in the durable evidence store
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Hashes every downloaded file here against artifact-manifest.json and SHA256SUMS.txt, checks the
+          # manifest names this candidate, run and attempt, then writes the files once into the store and
+          # re-verifies them there. A missing, extra, corrupted or mismatched file writes nothing.
+          node tooling/release/src/retain-release-artifacts.mjs test-output/windows-release-incoming "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$JOY_MEDIA_CI_EVIDENCE_ROOT"
       - name: Verify the retained Windows release artifacts in the evidence store
         shell: bash
         run: |
@@ -1486,6 +1507,13 @@ jobs:
           # Reads the bytes back from the store and re-hashes them against the manifest and SHA256SUMS.txt.
           # A missing or altered copy fails the gate.
           node tooling/release/src/retain-release-artifacts.mjs - "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$JOY_MEDIA_CI_EVIDENCE_ROOT" --verify-only
+      - name: Place the verified Windows release artifacts where the readiness builder reads them
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The builder hashes these bytes against SHA256SUMS.txt and the digests in both Windows receipts. They
+          # come from the store copy that was just verified, never from the downloaded directory.
+          node tooling/release/src/retain-release-artifacts.mjs - "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$JOY_MEDIA_CI_EVIDENCE_ROOT" --restore-to test-output/readiness/artifacts
       - name: Build source-bound readiness evidence from all two-pass results
         shell: bash
         env:

@@ -386,6 +386,18 @@ run, attempt, and candidate SHA. Its manifest records the candidate SHA, lockfil
 SHA-256, and every file's path, size, and SHA-256. The Windows Docker lane verifies
 the complete manifest before and after staging the renderer for packaging.
 
+The Windows Docker lane and the Linux gate share no storage, so the staged Windows release files
+(the seven release files plus `artifact-manifest.json`) take one more one-day handoff. The Windows
+lane uploads them as `joy-media-windows-release-<run>-<attempt>-<candidate SHA>`, and `gate-summary`
+downloads that artifact from the same run only: no run id, repository or token is passed. The artifact
+is transport, not evidence. The gate retains the downloaded files write-once in its own durable
+store, which hashes every file against `artifact-manifest.json` and `SHA256SUMS.txt`, and verifies
+that store copy. It then restores the verified copy to `test-output/readiness/artifacts`, where the
+readiness builder checks the bytes against `SHA256SUMS.txt` and the digests in both Windows
+lifecycle receipts. A missing, extra, corrupted or mismatched file fails the gate. The files are
+unsigned candidate binaries, and while the artifact lives (one day) they can be downloaded from the
+run page by anyone signed in to GitHub. The owner accepted that on 2026-10-25.
+
 This small build handoff is separate from acceptance evidence. The real-service
 and P3 passes still write `ARTIFACT-UPLOAD-STATUS.txt` receipts with
 `upload_outcome=disabled`, `source=durable-evidence-store`, and

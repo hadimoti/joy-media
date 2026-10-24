@@ -4,6 +4,7 @@
 //
 //   node retain-release-artifacts.mjs <staged-dir> <candidate-sha> <run-id> <attempt> <evidence-root>
 //   node retain-release-artifacts.mjs - <candidate-sha> <run-id> <attempt> <evidence-root> --verify-only
+//   node retain-release-artifacts.mjs - <candidate-sha> <run-id> <attempt> <evidence-root> --restore-to <dir>
 //
 // Retain mode: <staged-dir> holds artifact-manifest.json and exactly the files that manifest lists.
 // Every file is hashed here, not by the lane that wrote the manifest, and compared with the manifest.
@@ -14,6 +15,11 @@
 //
 // Verify mode: the retained copy must already exist. The same checks run against the bytes in the store,
 // and nothing is written.
+//
+// Restore mode (`--restore-to <dir>`): the retained copy is verified as in verify mode, then each manifest
+// file is copied into <dir>, which must be missing or empty, and the copy is verified again. The gate uses it
+// to place the files its readiness builder reads. The store stays the authority: nothing is read from the
+// workspace until it has been re-verified there, and a failure removes what the call created.
 //
 // Files are copied byte for byte. Release binaries never pass through the redaction that the JSON and
 // text evidence uses, because redaction rewrites bytes.
@@ -34,7 +40,7 @@ import {
   accessSync,
   constants,
 } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MANIFEST = 'artifact-manifest.json';
@@ -229,8 +235,36 @@ function copyTreeExclusive(source, target) {
   }
 }
 
+// Copies the manifest's files from a verified retained tree into a target that is missing or empty, then
+// verifies the target against the same manifest. Files are created exclusively, so nothing is overwritten.
+// A failure removes the target, which this call either created or found empty.
+async function restoreVerified(dest, entries, target) {
+  if (existsSync(target)) {
+    if (!statSync(target).isDirectory() || readdirSync(target).length > 0) {
+      throw new Error(`${target} must be missing or an empty directory`);
+    }
+  }
+  mkdirSync(target, { recursive: true });
+  try {
+    for (const entry of entries) {
+      const parts = entry.path.split('/');
+      const to = join(target, ...parts);
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(join(dest, ...parts), to, constants.COPYFILE_EXCL);
+    }
+    await verifyTree(target, entries);
+  } catch (error) {
+    try {
+      rmSync(target, { recursive: true, force: true });
+    } catch {
+      // The original failure is the one to report.
+    }
+    throw error;
+  }
+}
+
 export async function run(argv, env = process.env, options = {}) {
-  const [stagedArg, candidate, runId, attempt, root, mode] = argv;
+  const [stagedArg, candidate, runId, attempt, root, mode, restoreTarget] = argv;
   if (!/^[0-9a-f]{40}$/u.test(candidate ?? ''))
     throw new Error('candidate sha must be 40 lowercase hex characters');
   if (!/^[0-9]+$/u.test(runId ?? '') || !/^[0-9]+$/u.test(attempt ?? ''))
@@ -246,6 +280,15 @@ export async function run(argv, env = process.env, options = {}) {
     const entries = parseManifest(JSON.parse(readFileSync(join(dest, MANIFEST), 'utf8')), identity);
     await verifyTree(dest, entries);
     return `verified ${entries.length} retained file(s) at ${dest}`;
+  }
+  if (mode === '--restore-to') {
+    if (!restoreTarget) throw new Error('--restore-to needs a destination directory');
+    if (!existsSync(dest))
+      throw new Error(`no retained release artifacts for this candidate and run at ${dest}`);
+    const entries = parseManifest(JSON.parse(readFileSync(join(dest, MANIFEST), 'utf8')), identity);
+    await verifyTree(dest, entries);
+    await restoreVerified(dest, entries, resolve(restoreTarget));
+    return `restored ${entries.length} verified file(s) from ${dest} to ${resolve(restoreTarget)}`;
   }
   if (mode !== undefined) throw new Error(`unknown mode: ${mode}`);
 
