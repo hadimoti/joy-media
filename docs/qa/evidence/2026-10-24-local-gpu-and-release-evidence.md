@@ -245,3 +245,14 @@ Skips and retries. On Windows, the POSIX-only FIFO tests and the symlink test ar
 - `cli.render.playable`, `cli.render.unsupported-features`, `cli.render.failure-recovery`, `cli.render.windows-entrypoints`, and `project.persistence.fresh-process`: local evidence exists for earlier candidates, with no exact-candidate receipt.
 
 Owner decisions outstanding: approve the push and the CI dispatch; approve the shared evidence store; decide the shipped GPU configuration; decide one parity criterion; decide whether the remux route requires `x-joy-frame-count`; run the lifecycle elevated or approve a disposable account; and the owner gate on unsigned distribution, which the matrix records.
+
+## Decisions taken on 2026-10-25
+
+The owner told the orchestrator on 2026-10-25 to finish the v1.0.2 plan without further questions. These decisions follow from the evidence above and change no gate-required row by themselves.
+
+1. **Shipped GPU configuration.** Keep the automatic relaunch fallback (`gpu-encode-fallback.ts`). Normal launches keep hardware encoding, and the Media Foundation video-encoder feature is switched off only after a GPU fast-fail. The known limit stays in the release notes: on a host that fast-fails, the app restarts once and in-flight work from the first session is lost, and the root cause on the RTX 5070 Ti with driver 617.42 is not established. The gate's export spec runs against the default build in the Windows container lane; a failure there is a real gate failure and is not waived.
+2. **Parity criterion.** One criterion everywhere: normalized RGB mean absolute error of at most 0.2 between a Monitor sample and the matching decoded export frame, which is the criterion the spec already enforces.
+3. **`x-joy-frame-count`.** The header stays optional in this candidate, because no production path omits it and a stricter route would turn an undocumented client's request into a 400. Making it mandatory, with `REQUEST_INVALID` naming the header, is the first change for the next API revision.
+4. **P0-4 time budget.** The test budget in `p0-design.e2e.test.ts` goes from 300,000 ms to 600,000 ms. The same work took 296,040 ms in passing run 39644275784 and more than 300,000 ms in failing run 40094432303 on the Windows P0 runner, so the old budget had a 1.3 percent margin. No assertion changed.
+
+Still outstanding after these decisions: the shared evidence store (the Windows lane's retention step fails closed until `JOY_MEDIA_WINDOWS_EVIDENCE_ROOT` names a store that the Linux gate also reads, which needs runner changes), the unsigned-distribution gate, and the release approval. The exact-candidate two-pass receipt does not exist yet.

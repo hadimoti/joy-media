@@ -72,3 +72,19 @@ detects later edits. It does not prevent them.
 4. Approve the values of `JOY_MEDIA_WINDOWS_EVIDENCE_ROOT` and `JOY_MEDIA_CI_EVIDENCE_ROOT` in the runner environments.
 
 Until these decisions are made, the release gate stays closed and no candidate is frozen.
+
+## Addendum 2026-10-25: corrected facts and recommendation
+
+Read-only checks on 2026-10-25 change three statements above.
+
+- **Both engines run at once.** The Linux runner containers `joy-media-ci-linux` and `joy-media-ci-acceptance` run under a separate Docker engine inside the WSL Ubuntu distribution, next to the Windows-mode Docker Desktop engine that runs `joy-media-worker-docker`. The note that the two engines cannot run together does not hold on this PC. They still share no storage.
+- **Each Linux runner already has its own store.** Both set `JOY_MEDIA_CI_EVIDENCE_ROOT=/opt/joy-media-evidence`, backed by a named volume per container (`joy-media-ci-linux-evidence`, `joy-media-ci-acceptance-evidence`). `gate-summary`, `real-service-acceptance` and `p3-real-services` run on the acceptance runner, and `linux-real-services` runs on `joy-media-ci-linux`. The Windows container has no evidence variable and no evidence volume.
+- **Options A and B conflict with the runner contracts.** `ops/self-hosted/windows-runner/provision.ps1` rejects host bind mounts ("Volume must be a Docker named volume"), and the Linux runner README requires a named volume per container. A host folder shared by both engines would need an exception to both contracts and would expose a host path to workflow code.
+
+The gate cannot be satisfied by verifying on the Windows side. `create-readiness-evidence.mjs` reads the installer bytes from `test-output/readiness/artifacts` on the gate runner and checks them against `SHA256SUMS.txt` and the digests in the two Windows lifecycle receipts. The bytes have to reach the acceptance runner.
+
+Existing tests close the two simplest transports. `gate.test.ts` requires the Windows lane to contain no `actions/upload-artifact` or `actions/download-artifact`, and `ci-artifact-policy.test.ts` allows exactly one upload and one download in the whole workflow (the editor bundle). The policy came from the September 2026 quota incident, when the repository was private. It is public now, and the quota probe has passed since 2026-10-18.
+
+Recommendation: **Option D, narrowed.** Move only the staged Windows release artifacts (the seven files and `artifact-manifest.json`) from the Windows lane to the gate as a one-day artifact. The gate downloads it, runs the retention module in retain mode into its own store, and the existing verify-only step, receipt digests and `SHA256SUMS.txt` checks stay as they are. This needs no change to any runner, keeps the independent re-hash on the gate runner, and keeps the write-once store as the authority for everything after the hand-off. It requires the owner to relax the two tests deliberately: one more named upload and download pair, scoped to the Windows release artifacts, with the rest of the policy unchanged. The trade-off is that an unreleased, unsigned candidate installer is downloadable from the run page for one day by anyone signed in to GitHub.
+
+Option C (a write-only directory on the VPS over SSH) keeps the bytes private but writes to production infrastructure and adds a key to the runner. Options A and B need the contract exceptions above and a recreation of both containers.
