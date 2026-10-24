@@ -319,6 +319,10 @@ export function remuxBrowserMp4(
         'yuv420p',
         '-c:a',
         'aac',
+        // The recorder captures audio at the host's rate (44,100 Hz on a machine with no 48 kHz device,
+        // such as a container). The deliverable is always 48 kHz, as the silent-audio fallback already is.
+        '-ar',
+        '48000',
         '-r',
         String(frameRate),
         '-movflags',

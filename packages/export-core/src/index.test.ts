@@ -263,6 +263,73 @@ describe('deterministic export contract', () => {
     expect(probe.frameRate).toBe(30);
     expect(readdirSync(directory).some((name) => name.includes('.partial.'))).toBe(false);
   });
+  it.each([
+    ['without a frame count', undefined],
+    ['with a frame count', 30],
+  ])('exports 48 kHz stereo AAC whatever rate the recorder captured, %s', (_label, frameCount) => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-audio-rate-'));
+    const capturePath = join(directory, 'host-rate-capture.mp4');
+    const outputPath = join(directory, 'remuxed.mp4');
+    // A recorder on a host without a 48 kHz device captures at 44.1 kHz.
+    const made = spawnSync(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=c=blue:s=64x36:r=30',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=440:sample_rate=44100',
+        '-ac',
+        '2',
+        '-frames:v',
+        '30',
+        '-t',
+        '1',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        capturePath,
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(made.status, made.stderr).toBe(0);
+    const probeAudio = (file: string): { sample_rate: string; channels: number } => {
+      const probe = spawnSync(
+        'ffprobe',
+        [
+          '-v',
+          'error',
+          '-select_streams',
+          'a:0',
+          '-show_entries',
+          'stream=sample_rate,channels',
+          '-of',
+          'json',
+          file,
+        ],
+        { encoding: 'utf8' },
+      );
+      expect(probe.status, probe.stderr).toBe(0);
+      return JSON.parse(probe.stdout).streams[0];
+    };
+    expect(probeAudio(capturePath).sample_rate).toBe('44100');
+
+    const result = remuxBrowserMp4(capturePath, outputPath, 30, frameCount);
+    expect(probeAudio(outputPath)).toMatchObject({ sample_rate: '48000', channels: 2 });
+    // Resampling changes the rate, not the length of the deliverable.
+    expect(result.durationUs).toBeGreaterThanOrEqual(950_000);
+    expect(result.durationUs).toBeLessThanOrEqual(1_060_000);
+  });
+
   it('keeps pure blue exact after a browser capture is remuxed to a BT.709 export', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-colour-'));
     const capture = join(directory, 'capture.mp4');
