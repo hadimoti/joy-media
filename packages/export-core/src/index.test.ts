@@ -14,6 +14,34 @@ import {
   verifyExport,
   verifyExportAgainstManifest,
 } from './index.js';
+
+// Decodes one MP4 in passthrough order and returns the red value of the pixel the export spec samples.
+function decodeRedProbe(file: string, width: number, height: number): number[] {
+  const decoded = spawnSync(
+    'ffmpeg',
+    [
+      '-v',
+      'error',
+      '-i',
+      file,
+      '-fps_mode',
+      'passthrough',
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'rgb24',
+      'pipe:1',
+    ],
+    { maxBuffer: 1 << 26 },
+  );
+  const frameBytes = width * height * 3;
+  const offset = (18 * width + 32) * 3;
+  const values: number[] = [];
+  for (let start = 0; start + frameBytes <= decoded.stdout.length; start += frameBytes)
+    values.push(decoded.stdout[start + offset]!);
+  return values;
+}
+
 describe('deterministic export contract', () => {
   const manifest = {
     projectId: 'p',
@@ -301,5 +329,81 @@ describe('deterministic export contract', () => {
     expect(Number(countResult.stdout.trim())).toBe(30);
     expect(probe.durationUs).toBeGreaterThanOrEqual(950_000);
     expect(probe.durationUs).toBeLessThanOrEqual(1_050_000);
+  });
+
+  it('keeps every browser-capture frame at its authored index when capture timestamps jitter', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-jitter-'));
+    const constant = join(directory, 'constant.mp4');
+    const jittered = join(directory, 'jittered.mp4');
+    const constantOutput = join(directory, 'constant-remuxed.mp4');
+    const jitteredOutput = join(directory, 'jittered-remuxed.mp4');
+    // Each frame encodes its index in the red channel, so a dropped, duplicated or
+    // shifted frame changes the decoded value at that index.
+    const made = spawnSync(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=c=black:s=64x36:r=30:d=6,format=rgb24,geq=r=mod(5*N\\,256):g=0:b=0',
+        '-f',
+        'lavfi',
+        '-i',
+        'anullsrc=r=48000:cl=stereo',
+        '-t',
+        '6',
+        '-frames:v',
+        '180',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        constant,
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(made.status).toBe(0);
+    // Vsync-quantised capture timestamps step 50 ms and 17 ms alternately. The average
+    // is still 30 fps, but no frame lies on the constant output grid.
+    const retimed = spawnSync(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-y',
+        '-i',
+        constant,
+        '-vf',
+        "setpts='(67*floor(N/2)+50*mod(N,2))/1000/TB'",
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'copy',
+        jittered,
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(retimed.status).toBe(0);
+    remuxBrowserMp4(constant, constantOutput, 30, 180);
+    remuxBrowserMp4(jittered, jitteredOutput, 30, 180);
+    const reference = decodeRedProbe(constantOutput, 64, 36);
+    const actual = decodeRedProbe(jitteredOutput, 64, 36);
+    expect(reference).toHaveLength(180);
+    expect(actual).toHaveLength(180);
+    const misaligned = actual.flatMap((value, index) =>
+      Math.abs(value - reference[index]!) > 3 ? [index] : [],
+    );
+    expect(misaligned).toEqual([]);
+  });
+
+  it('rejects a fractional frame rate when the frame count is fixed', () => {
+    expect(() => remuxBrowserMp4('missing.mp4', 'out.mp4', 29.97, 180)).toThrow(RangeError);
   });
 });

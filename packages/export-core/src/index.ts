@@ -263,6 +263,10 @@ export function remuxBrowserMp4(
     (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount / frameRate > 86_400)
   )
     throw new RangeError('browser remux frame count is invalid');
+  if (frameCount !== undefined && !Number.isInteger(frameRate))
+    throw new RangeError(
+      'browser remux frame rate must be a whole number when the frame count is fixed',
+    );
   const temporaryPath = join(
     dirname(outputPath),
     `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
@@ -284,7 +288,16 @@ export function remuxBrowserMp4(
             // recorder is short, so the remuxed contract is exactly the
             // manifest's frame count rather than silently truncating it.
             '-vf',
-            `${colourFilter},setpts=N/(${frameRate}*TB),tpad=stop_mode=clone:stop=-1`,
+            // Frame N takes its authored slot N / frameRate. The in-graph fps filter gives
+            // every frame a full slot, so the recorder's jittered timestamps cannot duplicate
+            // a frame. An output-stage `-r` resample duplicated one frame in captured runs.
+            `${colourFilter},setpts=N/(${frameRate}*TB),fps=${frameRate}:round=near,tpad=stop_mode=clone:stop=-1`,
+            // Passthrough stops ffmpeg from resampling at the output stage. A track timescale
+            // equal to the whole frame rate keeps the declared rate exact for short clips too.
+            '-fps_mode',
+            'passthrough',
+            '-video_track_timescale',
+            String(frameRate),
             '-af',
             'asetpts=PTS-STARTPTS,apad',
             '-frames:v',
@@ -313,8 +326,9 @@ export function remuxBrowserMp4(
         'yuv420p',
         '-c:a',
         'aac',
-        '-r',
-        String(frameRate),
+        // The normalized timeline carries the frame rate in its timestamps. A container
+        // rate here would resample them, so it applies only to the unnormalized path.
+        ...(frameCount === undefined ? ['-r', String(frameRate)] : []),
         '-movflags',
         '+faststart',
         temporaryPath,
