@@ -375,9 +375,21 @@ export async function importMediaFixture(
     buffer: await readFile(join(MEDIA_FIXTURE_DIR, fileName)),
   });
   await expect(drawer.getByText(uploadedFileName, { exact: true })).toBeVisible();
+  // The card appears after the original upload is accepted and the editor polls it to completion.
+  // Arm the wait for that acceptance before Confirm, so a loaded run is measured against the upload
+  // itself. The fixed budget then covers only the work that follows acceptance.
+  const originalUploadAccepted = page.waitForResponse(
+    (response) =>
+      response.request().method() !== 'GET' &&
+      /\/assets\/[^/]+\/original(\/uploads\/[^/]+\/complete)?$/u.test(
+        new URL(response.url()).pathname,
+      ),
+    { timeout: 120_000 },
+  );
   await drawer.getByRole('button', { name: 'Confirm import' }).click();
+  expect((await originalUploadAccepted).ok(), 'the original upload is accepted').toBe(true);
   await expect(page.locator('.asset-card', { hasText: uploadedFileName }).first()).toBeVisible({
-    timeout: 15_000,
+    timeout: 60_000,
   });
 }
 
