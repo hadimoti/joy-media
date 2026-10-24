@@ -24,6 +24,8 @@ const apiBaseUrl = `http://127.0.0.1:${process.env.JOY_MEDIA_E2E_API_PORT ?? '41
 const desktopRequire = createRequire(resolve(desktopRoot, 'package.json'));
 const electronExecutable = desktopRequire('electron') as string;
 const installedExecutable = process.env.JOY_MEDIA_TEST_EXECUTABLE;
+// Extra arguments for the packaged app, such as the GPU fallback relaunch argument. Empty unless set.
+const extraAppArguments = (process.env.JOY_MEDIA_TEST_APP_ARGS ?? '').split(' ').filter(Boolean);
 
 async function launchPackagedEditor(
   userDataDirectory: string,
@@ -43,6 +45,7 @@ async function launchPackagedEditor(
         : [`--force-device-scale-factor=${deviceScaleFactor}`]),
       '--joy-media-test-mode',
       `--user-data-dir=${userDataDirectory}`,
+      ...extraAppArguments,
     ],
     env: {
       ...process.env,

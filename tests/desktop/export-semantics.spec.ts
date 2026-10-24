@@ -32,6 +32,8 @@ const fixtureDirectory = resolve('packages/test-fixtures/media');
 const unpackedPackage = resolve('apps/desktop/dist/joy-media-unpacked');
 const desktopRequire = createRequire(resolve('apps/desktop/package.json'));
 const installedExecutable = process.env.JOY_MEDIA_TEST_EXECUTABLE;
+// Extra arguments for the packaged app, such as the GPU fallback relaunch argument. Empty unless set.
+const extraAppArguments = (process.env.JOY_MEDIA_TEST_APP_ARGS ?? '').split(' ').filter(Boolean);
 const apiBaseUrl = `http://127.0.0.1:${process.env.JOY_MEDIA_E2E_API_PORT ?? '4174'}`;
 const width = 320;
 const height = 180;
@@ -93,6 +95,7 @@ async function launchPackagedEditor(profile: string): Promise<ElectronApplicatio
       ...(installedExecutable ? [] : ['.']),
       '--joy-media-test-mode',
       `--user-data-dir=${profile}`,
+      ...extraAppArguments,
     ],
     env: {
       ...process.env,
