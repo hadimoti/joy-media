@@ -75,7 +75,12 @@ export default defineConfig({
     // into false product failures; behavior tests use their own explicit limits.
     // Cap workers so a large host does not starve them of CPU: a worker that stops
     // answering vitest's task-update RPC fails the run even when every test passes.
-    maxWorkers: Math.max(1, Math.min(8, availableParallelism() - 1)),
+    // GitHub-hosted runners report four vCPUs; three workers there can starve the task-update
+    // RPC. Hosted lanes use two workers, and every other environment keeps the full cap.
+    maxWorkers:
+      process.env.RUNNER_ENVIRONMENT === 'github-hosted'
+        ? 2
+        : Math.max(1, Math.min(8, availableParallelism() - 1)),
     testTimeout: 30_000,
     hookTimeout: 30_000,
     include: [
