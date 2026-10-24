@@ -100,6 +100,27 @@ describe('retain-release-artifacts', () => {
     });
   });
 
+  it('refuses a retained manifest that differs from the staged one', async () => {
+    await withWork(async (work) => {
+      const staged = buildStaged(work);
+      const evidence = join(work, 'evidence');
+      const dest = retainedDir(evidence);
+      await expect(
+        run([staged, candidate, runId, attempt, evidence], process.env, {
+          sync: {
+            file: (path: string) => {
+              if (relative(dest, path).split(sep).join('/') === 'artifact-manifest.json') {
+                writeFileSync(path, 'different manifest bytes');
+              }
+            },
+            directory: () => undefined,
+          },
+        }),
+      ).rejects.toThrow(/manifest differs/u);
+      expect(existsSync(dest)).toBe(false);
+    });
+  });
+
   it('fails closed on a staged file that differs from its manifest digest, and retains nothing', async () => {
     await withWork(async (work) => {
       const staged = buildStaged(work);
@@ -277,9 +298,27 @@ describe('retain-release-artifacts', () => {
       expect(flushedFiles.sort()).toEqual(
         [setupName, zipName, workerName, sumsName, 'artifact-manifest.json'].sort(),
       );
-      // The retained folder itself flushes last, after the folders that hold files.
-      expect(flushedDirectories.at(-1)).toBe('');
+      // The retained folder flushes after folders below it, followed by its candidate and evidence roots.
+      expect(flushedDirectories.slice(-3)).toEqual(['', '..', '../..']);
       expect(flushedDirectories).toContain('standalone/resources/app/worker');
+    });
+  });
+
+  it('flushes the folders that hold the retention', async () => {
+    await withWork(async (work) => {
+      const staged = buildStaged(work);
+      const evidence = join(work, 'evidence');
+      const flushedDirectories: string[] = [];
+      await run([staged, candidate, runId, attempt, evidence], process.env, {
+        sync: {
+          file: () => undefined,
+          directory: (path: string) => {
+            flushedDirectories.push(path);
+          },
+        },
+      });
+      expect(flushedDirectories).toContain(join(evidence, candidate));
+      expect(flushedDirectories).toContain(evidence);
     });
   });
 

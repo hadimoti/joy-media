@@ -247,7 +247,15 @@ export async function run(argv, env = process.env, options = {}) {
     cpSync(stagedArg, dest, { recursive: true, errorOnExist: true, force: false });
     // The copy must reach stable storage before the retention is reported. The manifest is flushed too, since
     // verify mode reads it from the store.
-    syncTree(dest, [...entries, { path: MANIFEST }], options.sync);
+    const sync = options.sync ?? { file: syncFile, directory: syncDirectory };
+    syncTree(dest, [...entries, { path: MANIFEST }], sync);
+    const retainedManifest = readFileSync(join(dest, MANIFEST));
+    const stagedManifest = readFileSync(join(stagedArg, MANIFEST));
+    if (!retainedManifest.equals(stagedManifest)) {
+      throw new Error('retained manifest differs from the staged manifest');
+    }
+    sync.directory(join(root, candidate));
+    sync.directory(root);
     await verifyTree(dest, entries);
   } catch (error) {
     // This call created the folder, so a failed copy or check leaves no partial retention behind. A failed
