@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { run } from './retain-release-artifacts.mjs';
 
@@ -210,6 +211,20 @@ describe('retain-release-artifacts', () => {
           RUNNER_WORKSPACE: join(work, 'checkout'),
         }),
       ).resolves.toMatch(/retained and re-verified 4 file/u);
+    });
+  });
+
+  it('refuses an evidence root inside the repository when no runner workspace is set', async () => {
+    await withWork(async (work) => {
+      const staged = buildStaged(work);
+      const inside = join(
+        fileURLToPath(new URL('../../../', import.meta.url)),
+        'retain-store-probe',
+      );
+      await expect(run([staged, candidate, runId, attempt, inside], {})).rejects.toThrow(
+        /must be outside the checkout/u,
+      );
+      expect(existsSync(inside)).toBe(false);
     });
   });
 

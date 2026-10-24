@@ -156,9 +156,12 @@ function assertStoreLocation(root, env) {
     const rel = relative(normalize(anchor), target);
     return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
   };
+  // The checkout is the repository this module lives in, so the rule holds without a runner workspace.
+  const checkout = fileURLToPath(new URL('../../../', import.meta.url));
   const workspace = env.RUNNER_WORKSPACE ?? '';
   const segments = target.split(sep);
   if (
+    within(checkout) ||
     (workspace !== '' && within(workspace)) ||
     segments.includes('_work') ||
     segments.includes('_temp')
