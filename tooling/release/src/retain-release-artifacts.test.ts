@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -247,6 +248,34 @@ describe('retain-release-artifacts', () => {
       ).rejects.toThrow(/symlinks are not allowed/u);
     });
   });
+
+  // A FIFO is neither a file nor a directory. It must be refused, not skipped, in both modes.
+  it.skipIf(process.platform === 'win32')('refuses a staged FIFO and retains nothing', async () => {
+    await withWork(async (work) => {
+      const staged = buildStaged(work);
+      execFileSync('mkfifo', [join(staged, 'pipe')]);
+      const evidence = join(work, 'evidence');
+      await expect(run([staged, candidate, runId, attempt, evidence])).rejects.toThrow(
+        /only regular files and directories are allowed/u,
+      );
+      expect(existsSync(retainedDir(evidence))).toBe(false);
+    });
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses a FIFO planted in a retained copy in verify mode',
+    async () => {
+      await withWork(async (work) => {
+        const staged = buildStaged(work);
+        const evidence = join(work, 'evidence');
+        await run([staged, candidate, runId, attempt, evidence]);
+        execFileSync('mkfifo', [join(retainedDir(evidence), 'pipe')]);
+        await expect(
+          run(['-', candidate, runId, attempt, evidence, '--verify-only']),
+        ).rejects.toThrow(/only regular files and directories are allowed/u);
+      });
+    },
+  );
 
   it('verifies a retained copy without writing to the store', async () => {
     await withWork(async (work) => {

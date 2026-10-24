@@ -86,7 +86,8 @@ export function parseManifest(manifest, { candidate, runId, attempt }) {
   return manifest.files;
 }
 
-// Every file under dir, as a posix relative path. A symlink anywhere in the tree throws.
+// Every file under dir, as a posix relative path. A symlink, FIFO, socket or device anywhere in the
+// tree throws.
 export function listFiles(dir) {
   const found = [];
   const walk = (current) => {
@@ -96,6 +97,8 @@ export function listFiles(dir) {
       if (info.isSymbolicLink()) throw new Error(`symlinks are not allowed in ${dir}`);
       if (info.isDirectory()) walk(full);
       else if (info.isFile()) found.push(relative(dir, full).split(sep).join('/'));
+      else
+        throw new Error(`refusing to list ${full}: only regular files and directories are allowed`);
     }
   };
   walk(dir);
@@ -206,6 +209,7 @@ export function syncTree(dir, entries, sync = { file: syncFile, directory: syncD
 // Copies a staged tree into a destination that the caller created with an exclusive mkdir. Each file is
 // created with COPYFILE_EXCL, so the copy can never overwrite. cpSync is not used: newer Node versions
 // refuse any existing destination, even an empty one, so the write-once gate above would always fail.
+// Directories take the default mode, not the source's: the manifest and SHA256SUMS.txt check file bytes.
 function copyTreeExclusive(source, target) {
   for (const name of readdirSync(source)) {
     const from = join(source, name);
