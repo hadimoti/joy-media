@@ -797,6 +797,9 @@ async function runStep(
 }
 
 describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
+  // Time budget only; no assertion depends on it. On the Windows P0 runner the same work took
+  // 296,040 ms in a passing run (39644275784) and more than 300,000 ms in a failing one
+  // (40094432303), so the old 300,000 ms budget left no headroom. 600,000 ms gives about 2x.
   it('runs the P0 slice with independently checked font bytes and FFmpeg version plus reported Chromium', async () => {
     expect(
       existsSync(BUNDLE),
@@ -1865,7 +1868,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
     });
 
     if (failures.length) throw new Error([...failures, ...cancellationCaseResults].join('\n'));
-  }, 300_000);
+  }, 600_000);
 
   afterAll(() => {
     for (const directory of temporaryRoots) rmSync(directory, { recursive: true, force: true });
