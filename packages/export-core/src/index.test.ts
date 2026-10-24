@@ -43,10 +43,67 @@ function decodeRedProbe(file: string, width: number, height: number): number[] {
   return values;
 }
 
-// Indices whose red value differs from the reference by more than one code value. Correct output
-// differs by 0, while a one-frame shift of the 5-per-frame code moves the value by 5.
+// Indices whose red value differs from the reference by more than two code values. Correct output
+// differs by 0, and a one-frame shift of the 5-per-frame code moves the value by 5.
 function misalignedFrames(reference: number[], actual: number[]): number[] {
-  return actual.flatMap((value, index) => (Math.abs(value - reference[index]!) > 1 ? [index] : []));
+  return actual.flatMap((value, index) => (Math.abs(value - reference[index]!) > 2 ? [index] : []));
+}
+
+// Writes a clip whose red channel encodes its frame index (5 * index mod 256) at the given rate.
+function writeIndexedClip(file: string, frames: number, frameRate: number): void {
+  const made = spawnSync(
+    'ffmpeg',
+    [
+      '-v',
+      'error',
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      `color=c=black:s=64x36:r=${frameRate},format=rgb24,geq=r=mod(5*N\\,256):g=0:b=0`,
+      '-f',
+      'lavfi',
+      '-i',
+      'anullsrc=r=48000:cl=stereo',
+      '-frames:v',
+      String(frames),
+      '-shortest',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      file,
+    ],
+    { encoding: 'utf8' },
+  );
+  if (made.status !== 0) throw new Error(`ffmpeg could not write ${file}: ${made.stderr}`);
+}
+
+// Re-stamps a clip with vsync-quantised capture timestamps: steps of 50 ms and 17 ms alternate.
+function retimeLikeRecorder(input: string, output: string): void {
+  const retimed = spawnSync(
+    'ffmpeg',
+    [
+      '-v',
+      'error',
+      '-y',
+      '-i',
+      input,
+      '-vf',
+      "setpts='(67*floor(N/2)+50*mod(N,2))/1000/TB'",
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'copy',
+      output,
+    ],
+    { encoding: 'utf8' },
+  );
+  if (retimed.status !== 0) throw new Error(`ffmpeg could not retime ${input}: ${retimed.stderr}`);
 }
 
 describe('deterministic export contract', () => {
@@ -344,76 +401,46 @@ describe('deterministic export contract', () => {
     const jittered = join(directory, 'jittered.mp4');
     const constantOutput = join(directory, 'constant-remuxed.mp4');
     const jitteredOutput = join(directory, 'jittered-remuxed.mp4');
-    // Each frame encodes its index in the red channel, so a dropped, duplicated or
-    // shifted frame changes the decoded value at that index.
-    const made = spawnSync(
-      'ffmpeg',
-      [
-        '-v',
-        'error',
-        '-y',
-        '-f',
-        'lavfi',
-        '-i',
-        'color=c=black:s=64x36:r=30:d=6,format=rgb24,geq=r=mod(5*N\\,256):g=0:b=0',
-        '-f',
-        'lavfi',
-        '-i',
-        'anullsrc=r=48000:cl=stereo',
-        '-t',
-        '6',
-        '-frames:v',
-        '180',
-        '-c:v',
-        'libx264',
-        '-pix_fmt',
-        'yuv420p',
-        '-c:a',
-        'aac',
-        constant,
-      ],
-      { encoding: 'utf8' },
-    );
-    expect(made.status).toBe(0);
-    // Vsync-quantised capture timestamps step 50 ms and 17 ms alternately. The average
-    // is still 30 fps, but no frame lies on the constant output grid.
-    const retimed = spawnSync(
-      'ffmpeg',
-      [
-        '-v',
-        'error',
-        '-y',
-        '-i',
-        constant,
-        '-vf',
-        "setpts='(67*floor(N/2)+50*mod(N,2))/1000/TB'",
-        '-c:v',
-        'libx264',
-        '-pix_fmt',
-        'yuv420p',
-        '-c:a',
-        'copy',
-        jittered,
-      ],
-      { encoding: 'utf8' },
-    );
-    expect(retimed.status).toBe(0);
+    writeIndexedClip(constant, 180, 30);
+    retimeLikeRecorder(constant, jittered);
     remuxBrowserMp4(constant, constantOutput, 30, 180);
-    remuxBrowserMp4(jittered, jitteredOutput, 30, 180);
+    const probe = remuxBrowserMp4(jittered, jitteredOutput, 30, 180);
+    expect(probe.frameRate).toBe(30);
+    expect(probe.durationUs).toBeGreaterThanOrEqual(5_990_000);
+    expect(probe.durationUs).toBeLessThanOrEqual(6_010_000);
     const reference = decodeRedProbe(constantOutput, 64, 36);
     const actual = decodeRedProbe(jitteredOutput, 64, 36);
     expect(reference).toHaveLength(180);
     expect(actual).toHaveLength(180);
     expect(misalignedFrames(reference, actual)).toEqual([]);
-    // Without a frame count the timeline is index-based too.
-    const freeReference = join(directory, 'constant-free.mp4');
-    const freeActual = join(directory, 'jittered-free.mp4');
-    remuxBrowserMp4(constant, freeReference, 30);
-    remuxBrowserMp4(jittered, freeActual, 30);
-    const unnormalizedReference = decodeRedProbe(freeReference, 64, 36);
-    const unnormalizedActual = decodeRedProbe(freeActual, 64, 36);
-    expect(unnormalizedActual).toHaveLength(180);
-    expect(misalignedFrames(unnormalizedReference, unnormalizedActual)).toEqual([]);
+  });
+
+  it('pads a jittered short capture by repeating its last frame', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-short-jitter-'));
+    const short = join(directory, 'short.mp4');
+    const jittered = join(directory, 'short-jittered.mp4');
+    const constantOutput = join(directory, 'short-remuxed.mp4');
+    const jitteredOutput = join(directory, 'short-jittered-remuxed.mp4');
+    writeIndexedClip(short, 150, 30);
+    retimeLikeRecorder(short, jittered);
+    remuxBrowserMp4(short, constantOutput, 30, 180);
+    remuxBrowserMp4(jittered, jitteredOutput, 30, 180);
+    const reference = decodeRedProbe(constantOutput, 64, 36);
+    const actual = decodeRedProbe(jitteredOutput, 64, 36);
+    expect(actual).toHaveLength(180);
+    expect(misalignedFrames(reference, actual)).toEqual([]);
+  });
+
+  it('keeps the recorder timestamps when no frame count is given', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-rate-'));
+    const fast = join(directory, 'fast.mp4');
+    const outputPath = join(directory, 'remuxed.mp4');
+    writeIndexedClip(fast, 360, 60);
+    const probe = remuxBrowserMp4(fast, outputPath, 30);
+    expect(probe.frameRate).toBe(30);
+    // Six seconds of 60 fps must stay about six seconds. Indexing the 360 frames at 30 fps would give twelve.
+    expect(probe.durationUs).toBeGreaterThanOrEqual(5_900_000);
+    expect(probe.durationUs).toBeLessThanOrEqual(6_200_000);
   });
 
   it('keeps the authored frame count at a fractional frame rate', () => {

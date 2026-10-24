@@ -274,9 +274,9 @@ export function remuxBrowserMp4(
     // players that honour the tag show the authored colours.
     const colourFilter =
       'scale=in_color_matrix=bt601:in_range=tv:out_color_matrix=bt709:out_range=tv';
-    // Frame N takes its authored time N / frameRate. setpts alone keeps the recorder's
-    // irregular per-frame durations, and the output-stage resample used those durations and
-    // duplicated a frame in captured runs. The fps filter gives every frame one slot.
+    // On the normalized path frame N takes its authored time N / frameRate. setpts alone keeps
+    // the recorder's irregular per-frame durations, and the output-stage resample used those
+    // durations and duplicated a frame in captured runs. The fps filter gives every frame one slot.
     const authoredTimeline = `${colourFilter},setpts=N/(${frameRate}*TB),fps=${frameRate}:round=near`;
     const normalizeTimeline =
       frameCount === undefined
@@ -302,7 +302,9 @@ export function remuxBrowserMp4(
         '-y',
         '-i',
         inputPath,
-        ...(frameCount === undefined ? ['-vf', authoredTimeline] : normalizeTimeline),
+        // Without a frame count the recorder's timestamps are kept, so a source at another
+        // frame rate keeps its duration. A jittered capture can still duplicate a frame here.
+        ...(frameCount === undefined ? ['-vf', colourFilter] : normalizeTimeline),
         '-colorspace',
         'bt709',
         '-color_primaries',
