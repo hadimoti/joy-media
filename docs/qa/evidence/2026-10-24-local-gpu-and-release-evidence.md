@@ -16,11 +16,12 @@ Withdrawn: the earlier capture-side explanations (a stale canvas capture, a WebG
 
 Fix (`packages/export-core/src/index.ts`, `2cce72bc` and `219a8120`): on the normalized path (a frame count is given), frame N takes time N / frameRate. The chain is `colour,setpts=N/(rate*TB),fps=rate:round=near,tpad` with the frame limit and duration, and `-r` is unchanged. The path without a frame count keeps the original timestamp chain (colour filter and `-r`), so a source at another rate keeps its duration. The first version, `c449ef2d`, added `-fps_mode passthrough`, a track timescale, and a rejection of fractional frame rates. Mutation checks showed those were not needed, so `2cce72bc` removed them, and fractional rates work again.
 
-Known limit: the path without a frame count still duplicates a frame on a jittered capture, which is the original defect. No in-repo caller reaches it. The worker always sends a frame count, the app's client method has no callers, and only API requests that omit `x-joy-frame-count` take this path. Whether the route should require the count is a decision for the owner.
+Known limit: the path without a frame count still duplicates a frame on a jittered capture, which is the original defect. No production caller takes this path. The worker always sends a frame count, which its payload validator requires (`apps/worker/src/export-job.ts`). The editor client sends the header whenever a count is given, and its method has no production callers. The only caller that omits the count is a test, `packages/export-core/src/wp29-step03-proof.test.ts:110`. The API route takes this path only when a request omits `x-joy-frame-count`. Whether the route should require the count is a decision for the owner; the assessment is in the final candidate section.
 
 Review: two read-only Sonnet 5.5 reviews. The first found that the trigger is the recorder's per-frame durations rather than output rounding (corrected above), that fractional rates failed late (fixed by removing the rejection), and that the no-count path kept the original defect with a loose tolerance (both addressed). The second found that indexing the no-count path desynchronised audio for a source at another rate (reverted in `219a8120`), and that the 29.97 case reports 2997/100, not 30000/1001 (corrected above).
 
 Verification:
+
 - Regression test `keeps every browser-capture frame at its authored index when capture timestamps jitter` (export-core): a 180-frame clip whose red channel encodes its index is retimed with vsync-like timestamps, and the normalized remux output must match the constant-rate reference at every frame. The previous remux had 162 of 180 frames misaligned; the fix has 0. The tolerance is two code values: correct output differs by 0, and a one-frame shift moves the value by 5.
 - `pads a jittered short capture by repeating its last frame`: 150 jittered frames padded to 180 match the padded constant clip at every frame.
 - `keeps the recorder timestamps when no frame count is given`: 360 frames at 60 fps, remuxed at 30 without a count, stay within 5.9 to 6.2 s. Indexing them at 30 fps would give 12 s.
@@ -44,7 +45,7 @@ Not verified: the failure did not reproduce in this session on the previous buil
 - Packaged fallback configuration on `219a8120`: export spec 4 of 4 runs, 2 of 2 tests each (8 of 8); fresh-process render 1 of 1; editor acceptance 5 of 5.
 - Typecheck (`tsc -b`) on `219a8120`: exit 0.
 - Release tooling on `0082f6cc`: 15 files, 289 passed, 1 skipped (the symlink case, which this host cannot create).
-- The unit run on `219a8120` failed 10 retention tests. Node v24.22.1 refuses an existing destination for `cpSync`, and the write-once gate relied on it. `0082f6cc` copies one file at a time with exclusive creation, and the same tests pass.
+- The unit run that included `219a8120` failed 10 retention tests. That tree still copied with `cpSync`, which Node v24.22.1 refuses for an existing destination, and the write-once gate relied on it. `0082f6cc` copies one file at a time with exclusive creation, and the same tests pass.
 
 ## Final validation on `db0cb85e`
 
@@ -52,7 +53,7 @@ Not verified: the failure did not reproduce in this session on the previous buil
 - Typecheck (`tsc -b`): exit 0. ESLint and Prettier: clean on the changed files.
 - Reverse mutations on the fallback module: exit-code guard, loop guard, and dropped quit call are each detected by the module tests.
 - Seven-viewport audit: 875 passed, 7 skipped, 0 failed; exit 0. The 7 skips are CASE-66, which is blocked by design because it needs an external Worker running `audio.ml-denoise`.
-- Packaged fallback configuration: export spec 2 of 2 in four runs (32.4 s, 33.6 s, 32.3 s, 33.6 s); editor acceptance 5 of 5; fresh-process render and stored-clip check 1 of 1. On `c64ad2fb`, the same spec then passed in 1 further chain run and in 10 consecutive repeats (32.2 s to 33.7 s, every run 2 of 2). Across the two builds that is 15 of 15 export runs and 30 of 30 tests. Fifteen passes bound the failure rate only loosely (roughly 20 percent at 95 percent confidence, by the rule of three). Earlier configurations failed intermittently: the global switch failed parity in 2 of 7 runs, and the narrow feature failed the picture check once on an earlier build. At that point the timing defect was unfixed; the remux fix above supersedes that statement.
+- Packaged fallback configuration: export spec 2 of 2 in four runs (32.4 s, 33.6 s, 32.3 s, 33.6 s); editor acceptance 5 of 5; fresh-process render and stored-clip check 1 of 1. On `c64ad2fb`, the same spec then passed in 1 further chain run and in two batches of 10 consecutive repeats. The first batch passed 10 of 10 (32.2 s to 33.7 s). The second batch (`fallback-reliability-c64ad2fb-x10b.log`) passed 7 of 10. Runs 5, 8 and 9 each failed the one test that checks the hard cut and Monitor parity, with the defect's signature: the picture is still red at 1 s, where blue is authored, and parity misses at 1, 3 and 4 s. `c64ad2fb` predates the remux fix (`c449ef2d`), so these failures are the defect the remux fix addresses, not a fallback failure. Across the pre-fix builds that is 25 export runs with 22 passing, and all 3 failures are on `c64ad2fb`. The earlier total of 15 of 15 omitted the second batch. Earlier configurations failed intermittently: the global switch failed parity in 2 of 7 runs, and the narrow feature failed the picture check once on an earlier build. At that point the timing defect was unfixed; the remux fix above supersedes that statement.
 - Shipped default build, export spec: fails, as designed. The first instance crashes and the relaunch replaces its window.
 
 ## GPU crash on the shipped build (fallback shipped; root cause open)
@@ -61,13 +62,13 @@ Host: NVIDIA GeForce RTX 5070 Ti, driver 617.42, ANGLE D3D11. The default packag
 
 What was tested (each row is one run of `tests/desktop/export-semantics.spec.ts` on a scratch copy):
 
-| Configuration | Result |
-| --- | --- |
-| Default | Fails: GPU crash, WebGL lost |
-| `MediaRecorder.isTypeSupported` stubbed to true | Fails the same way: not the trigger |
-| `--disable-accelerated-video-decode` | Fails the same way: not the trigger |
+| Configuration                                              | Result                                                                                                                               |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Default                                                    | Fails: GPU crash, WebGL lost                                                                                                         |
+| `MediaRecorder.isTypeSupported` stubbed to true            | Fails the same way: not the trigger                                                                                                  |
+| `--disable-accelerated-video-decode`                       | Fails the same way: not the trigger                                                                                                  |
 | `--disable-features=MediaFoundationVideoEncodeAccelerator` | Export completes. Picture check fails at 4 s and Monitor parity at 3 s and 4 s on that earlier build. Sound and timing check passes. |
-| `--disable-accelerated-video-encode` (earlier series) | Five of seven runs pass both checks; two fail Monitor parity at 1 s. |
+| `--disable-accelerated-video-encode` (earlier series)      | Five of seven runs pass both checks; two fail Monitor parity at 1 s.                                                                 |
 
 The narrowest switch that avoids the crash is the Media Foundation video-encoder feature. The root cause is not established. The leading hypothesis (medium confidence) is that the encoder's NVIDIA component aborts inside the GPU sandbox while the media pipeline initializes GPU video services.
 
