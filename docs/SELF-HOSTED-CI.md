@@ -20,7 +20,7 @@ registration-token contracts remain locked down by
 - Self-hosted runner labels appear only in dispatch-only workflows or in workflows whose pushes are restricted to `main`.
 - No workflow uses `pull_request_target`, `workflow_run`, or `issue_comment`.
 - Runner names are public, so they stay generic and describe only the task or platform.
-- Hosted jobs check for required media tools and fail closed when a tool is unavailable. They do not download unpinned media binaries.
+- Hosted jobs install one SHA-256-pinned FFmpeg build (BtbN `n8.1.3-24-g92611900bb`, GPL v3, built with `--enable-gpl --enable-version3`). The download is checked against its digest, and the build version is asserted before use. The build is CI tooling only; the repository does not ship it. Hosted jobs fail closed when a required tool is missing.
 
 ## Workflow inventory
 
