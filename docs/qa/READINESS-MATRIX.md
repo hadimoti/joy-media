@@ -40,7 +40,7 @@ Code candidate: `9a43a66e` on `hadimoti/owner-binding-candidate`. The documentat
 
 Passed locally on `9a43a66e`: TypeScript and ESLint exit 0. Prettier failed on two QA docs from `a2325802`, and passes on `d010d27e`. The unit suite passed 692 files (5 skipped) and 6,290 tests (33 skipped), exit 0. The mutation harness detected 21 of 21 mutation runs and restored every file. The seven-viewport audit passed 875 tests with 7 skipped (CASE-66, approved), exit 0. The packaged fallback export passed 11 of 11 runs (22 of 22 tests), fresh-process persistence 1 of 1, and editor acceptance 5 of 5. The full table, the measurements, and the reliability record are in [the local evidence note](evidence/2026-10-24-local-gpu-and-release-evidence.md).
 
-Gate status: no gate-required row has an exact-candidate receipt. The local results support the packaged fallback export, persistence, and acceptance. They do not close `desktop.export-media-semantics`, because the shipped default build still crashes on first GPU use. Verdict: NOT-READY.
+Gate status: no gate-required row has an exact-candidate receipt. The dispatched CI run for `9a43a66e` (run `40074133129`) is blocked, because two self-hosted Linux runners are offline and the evidence store is not configured. It is not a receipt. The local results support the packaged fallback export, persistence, and acceptance. They do not close `desktop.export-media-semantics`, because the shipped default build still crashes on first GPU use. Verdict: NOT-READY.
 
 Owner decisions outstanding: approval for the push and the CI dispatch of the frozen-SHA gate; the shared evidence store; the shipped GPU configuration; one parity criterion; and whether the remux route requires `x-joy-frame-count`.
 

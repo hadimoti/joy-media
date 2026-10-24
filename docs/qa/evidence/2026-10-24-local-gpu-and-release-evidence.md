@@ -188,11 +188,43 @@ Consequences of the fallback that a user should know: the relaunch restarts the 
 - Cross-runner rehearsal on the final SHA. None has run on `9a43a66e`.
 - Not run on `9a43a66e`: the packaged smoke test, the installed CLI acceptance, the staging package checks, the installed lifecycle, the real-service acceptance, the Windows worker lane, and the cross-runner rehearsal.
 
+## Release-candidate CI for `9a43a66e` (dispatched 2026-10-24)
+
+The owner approved a non-force push of `hadimoti/owner-binding-candidate` and the dispatch of `release-candidate-v2.yml` for `9a43a66e`. That approval did not cover the evidence store, the GPU shipping decision, a release, a merge, or a change to the candidate.
+
+- Run `40074133129` (https://github.com/hadimoti/joy-media/actions/runs/40074133129), with `candidate_sha=9a43a66e9cef9a8e07fa008c6b621ae62dab796f`. The workflow ref is the branch tip, `444a3d9c`.
+- Retrievability: `9a43a66e` is retrievable from origin, and `validate-candidate` succeeded, including its `Validate immutable candidate input` step. The dispatch went out before that separate check was run.
+- Included: every commit up to and including `9a43a66e`, which is 89 commits since base `46b78e73` (86 files, +8,336 and −881).
+- Excluded: `d010d27e` and `007023ba` (documentation), `f274316d` (a test-only launch-argument hook in three desktop specs), and `444a3d9c` (the retention checkout-rule fix and its test). No file under `apps/` or `packages/` differs between `9a43a66e` and `444a3d9c`, so the packaged app code is the same.
+
+Job state when this section was written. These are not receipts.
+
+| Job                                                                                       | State                                                   |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| validate-candidate                                                                        | success                                                 |
+| editor-web-bundle                                                                         | success                                                 |
+| node-contracts (Node 22.17.0), node-contracts (Node 24)                                   | in progress                                             |
+| windows-p0-real-services                                                                  | in progress on `joy-media-worker-docker` (online, busy) |
+| windows-worker-clean (two exact passes)                                                   | queued                                                  |
+| prod-build-smoke, p3-real-services (passes 1 and 2), linux-real-services (passes 1 and 2) | queued                                                  |
+
+Blockers: the self-hosted runners `joy-media-ci-acceptance` (label `joy-media-acceptance`) and `joy-media-ci-linux` (label `joy-media-ci`) are offline, so the Linux jobs cannot start. The evidence store is not configured, so retention fails closed when it is reached. The gate is closed, and no receipt exists for `9a43a66e`.
+
+Local evidence on the candidate's app code. The build from `f274316d` has identical app code, and these are not receipts.
+
+- The packaged smoke test (`test:smoke-packaged`) passed.
+- With `--joy-media-gpu-encode-fallback` on the unmodified build: 10 of 10 export runs (20 of 20 tests), fresh-process 1 of 1, and editor acceptance 5 of 5. The ffprobe values matched the earlier candidate run. Click onset was 10 ms after the flash here and 0 ms in the earlier run, within one 33 ms frame.
+- Relaunch observed on the unmodified default build. The first main process was seen and then exited about two seconds later. The relaunched process carried the fallback argument. Its debug endpoint answered 129 ms after it appeared. WebGL was available and not lost on the NVIDIA GeForce RTX 5070 Ti (ANGLE, Direct3D11), and a cleared pixel read back as `[255,0,0,255]`. The default export spec failed in the same run.
+- Cross-runner stand-in rehearsal: two concurrent synthetic runners, one shared store, 15 cases. The candidate's tool passes 14 of 15. The one unexpected case is an evidence root inside the checkout with no `RUNNER_WORKSPACE`, which the candidate accepts. `444a3d9c` refuses it, and its tool passes 15 of 15.
+- Independent read-only review of the candidate's change (claude-sonnet-5-5, effort high): no blocker or major findings. One minor point: the retain-mode FIFO test would still pass if the new `listFiles` refusal were removed, because the copy step refuses the FIFO with the same message. The verify-mode FIFO test does guard that line. Not changed in the candidate.
+
+Skips and retries. On Windows, the POSIX-only FIFO tests and the symlink test are skipped, and the symlink test is also skipped wherever the host lacks the privilege. The two `win32`-only tests are skipped on Linux. The desktop Playwright configuration sets `retries: 0`. Retry behaviour in CI is not yet known.
+
 ## Decisions, external blocks and release verdict (2026-10-24)
 
 **`x-joy-frame-count` (assessment).** The header is optional on `POST /v1/projects/{id}/export/remux`. Without it the route keeps the recorder's timestamps, and a jittered capture can duplicate a frame. No production path omits it. The worker's payload validator requires `frameCount` (`apps/worker/src/export-job.ts`), and the editor client sends the header whenever a count is known; its method has no production callers. The route and header appear in no API reference, only in the WP-29 step-03 note and this note. Making the header mandatory would turn any undocumented client that omits it into a 400. Recommendation: make it mandatory in the next API revision, with `REQUEST_INVALID` naming the header. Do not change it in this candidate without owner approval.
 
-**Shared evidence store (owner approval).** The release workflow retains each pass under `JOY_MEDIA_CI_EVIDENCE_ROOT/<candidate>/<run>-<attempt>-p<pass>`. It fails closed unless the variable names a writable directory outside the checkout, `_work` and `_temp` (`.github/workflows/release-candidate-v2.yml`, around lines 1099–1104). The owner must decide the location on the self-hosted acceptance runner, that it persists across runs, who can read and write it, its retention and backup, and that it is not a production or deploy target. This checkout cannot read the store, so no retained receipt is verified for any SHA after `1482aa7b`.
+**Shared evidence store (owner approval; not provisioned).** The workflow has two retention points, and each reads its own variable. The Windows lane's retention step reads `JOY_MEDIA_WINDOWS_EVIDENCE_ROOT` (`.github/workflows/release-candidate-v2.yml`, line 661) and fails when it is empty. The Linux gate reads `JOY_MEDIA_CI_EVIDENCE_ROOT` (lines 1099–1104) and retains each pass under `JOY_MEDIA_CI_EVIDENCE_ROOT/<candidate>/<run>-<attempt>-p<pass>`. Both must name a writable directory outside the checkout, `_work` and `_temp`. The workflow sets `JOY_MEDIA_CI_EVIDENCE_ROOT` to an empty value (lines 772 and 955), and the 2026-10-23 proposal found the Windows container without `JOY_MEDIA_WINDOWS_EVIDENCE_ROOT`. Nothing was configured in this pass. The owner must decide the location, that it persists across runs, who can read and write it, its retention and backup, and that it is not a production or deploy target. This checkout cannot read the store, so no retained receipt is verified for any SHA after `1482aa7b`.
 
 **Frozen-SHA two-pass acceptance (not run; needs approval).**
 
