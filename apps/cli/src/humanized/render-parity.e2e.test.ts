@@ -478,9 +478,10 @@ describe('render parity and unsupported-feature contract', () => {
     });
     const planPath = sandbox.path(`${id}-plan.json`);
     const faceProbe = probeCanonicalCaptionFace();
-    // The release gate sets JOY_MEDIA_REQUIRE_CAPTION_FACE=1. There the refusal below is not an
-    // acceptable outcome, because it would pass without rendering a caption. Ordinary runs keep the
-    // refusal check.
+    // JOY_MEDIA_REQUIRE_CAPTION_FACE=1 makes the refusal below a failure, because it passes without
+    // rendering a caption. Set it only where the canonical face loads. The Windows release lifecycle does
+    // not set it: no available FFmpeg build can open the WOFF2 face, and the owner accepted that refusal
+    // on 2026-10-20. Without it the refusal below is asserted, never skipped.
     if (!faceProbe.usable && process.env['JOY_MEDIA_REQUIRE_CAPTION_FACE'] === '1') {
       throw new Error(
         'the canonical caption face is unavailable, so the release gate cannot accept a caption refusal in place of a rendered caption',

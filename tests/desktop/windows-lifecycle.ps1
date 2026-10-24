@@ -432,7 +432,13 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     $null = Invoke-Pnpm 'CLI render-real source and bundle acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-real.e2e.test.ts', '--no-file-parallelism', '--retry=0', '--reporter=json', "--outputFile=$renderRealReport")
     Set-ScenarioOutcome -Id 'cli.render.playable' -ExitCode (Get-VitestAccountingExitCode $renderRealReport)
     $renderParityReport = Join-Path $workRoot 'render-parity.vitest.json'
-    $null = Invoke-Pnpm 'CLI unsupported-feature acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-parity.e2e.test.ts', '--no-file-parallelism', '--retry=0', '--reporter=json', "--outputFile=$renderParityReport") 900 @{ JOY_MEDIA_REQUIRE_CAPTION_FACE = '1' }
+    # The canonical caption face is a WOFF2 file, and the FFmpeg builds available for Windows link a FreeType without
+    # brotli, so libass cannot open it. The CLI then refuses captions with SETUP_REQUIRED before it renders anything,
+    # and the case checks that exact refusal. The owner accepted that refusal on 2026-10-20 and asked for the caption
+    # render checks to run on hosts where the face loads. JOY_MEDIA_REQUIRE_CAPTION_FACE=1 would turn the accepted
+    # refusal into a failure that no available build can pass, so this step does not set it. The refusal stays an
+    # asserted outcome, not a skip, and the release notes list it as a known gap.
+    $null = Invoke-Pnpm 'CLI unsupported-feature acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-parity.e2e.test.ts', '--no-file-parallelism', '--retry=0', '--reporter=json', "--outputFile=$renderParityReport")
     Set-ScenarioOutcome -Id 'cli.render.unsupported-features' -ExitCode (Get-VitestAccountingExitCode $renderParityReport)
     $renderRecoveryReport = Join-Path $workRoot 'render-recovery.vitest.json'
     $null = Invoke-Pnpm 'CLI render failure-recovery acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-recovery.e2e.test.ts', '--no-file-parallelism', '--retry=0', '--reporter=json', "--outputFile=$renderRecoveryReport")
