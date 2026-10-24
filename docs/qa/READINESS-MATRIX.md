@@ -4,7 +4,7 @@ Audit date: 2026-10-17. Source baseline: `c1fffd59d5078902e031e7684e69c27df40ce6
 Lockfile SHA-256: `2180545b95be0a1d7aec3dd223ec80853192f1e73d921722490ad5521519646f`.
 The Windows command baseline is recorded in [the evidence note](evidence/2026-10-17-windows-baseline.md).
 Current implementation-loop results are summarized in [the progress evidence](evidence/2026-10-17-readiness-loop-progress.md).
-Local GPU, export, persistence, and flake results from 2026-10-24 are in [the local evidence note](evidence/2026-10-24-local-gpu-and-release-evidence.md). The default packaged build still crashes on the test host. The export-timing defect is fixed in the remux at `219a8120`, with its evidence in the same note. Neither is a receipt.
+Local GPU, export, persistence, and flake results from 2026-10-24 are in [the local evidence note](evidence/2026-10-24-local-gpu-and-release-evidence.md). The default packaged build still crashes on the test host. The export-timing defect is fixed in the remux at `219a8120`, with its evidence in the same note. Neither is a receipt. The final local candidate is `9a43a66e`, with its results in the candidate section below. That is local evidence, not a receipt, and the release verdict is NOT-READY.
 
 The 2026-10-17 implementation loop has fresh local Windows evidence: `pnpm verify:ci`
 passed with 625 test files, 5,551 passing tests, and 26 platform skips; packaged editor acceptance, CLI source/bundle
@@ -34,7 +34,19 @@ remain tracked gaps; when one becomes a supported release claim, add it to
 same change. Evidence for every required row must match the same candidate SHA and pass first try
 with zero retries.
 
+## Candidate evidence: `9a43a66e` (local, 2026-10-24)
+
+Code candidate: `9a43a66e` on `hadimoti/owner-binding-candidate`. The documentation commits after it are `d010d27e` and the commit that adds this section. Local evidence only: nothing was pushed, dispatched to CI, frozen, merged, or released.
+
+Passed locally on `9a43a66e`: TypeScript and ESLint exit 0. Prettier failed on two QA docs from `a2325802`, and passes on `d010d27e`. The unit suite passed 692 files (5 skipped) and 6,290 tests (33 skipped), exit 0. The mutation harness detected 21 of 21 mutation runs and restored every file. The seven-viewport audit passed 875 tests with 7 skipped (CASE-66, approved), exit 0. The packaged fallback export passed 11 of 11 runs (22 of 22 tests), fresh-process persistence 1 of 1, and editor acceptance 5 of 5. The full table, the measurements, and the reliability record are in [the local evidence note](evidence/2026-10-24-local-gpu-and-release-evidence.md).
+
+Gate status: no gate-required row has an exact-candidate receipt. The local results support the packaged fallback export, persistence, and acceptance. They do not close `desktop.export-media-semantics`, because the shipped default build still crashes on first GPU use. Verdict: NOT-READY.
+
+Owner decisions outstanding: approval for the push and the CI dispatch of the frozen-SHA gate; the shared evidence store; the shipped GPU configuration; one parity criterion; and whether the remux route requires `x-joy-frame-count`.
+
 ## Candidate evidence: `0e9d9cb8` (local, 2026-10-23)
+
+Superseded for local evidence by `9a43a66e` above. Its record is kept as it was.
 
 Code candidate verified: `0e9d9cb8` on the local branch `hadimoti/owner-binding-candidate`. It has five commits on base `46b78e73`: `6b4e5eb2` (owner binding under a ready session), `907bef16` (Worker build location and `pg-mem` dev dependency), `bf306f1a` (media registration reported after its project is ensured), `b6eb7b81` (owner-binding requests recorded from session start in the Stock Video audit), and `0e9d9cb8` (formatting of two files). The series changes 22 files, with 1,518 insertions and 170 deletions. It has not been pushed, dispatched to CI, frozen, merged or released.
 

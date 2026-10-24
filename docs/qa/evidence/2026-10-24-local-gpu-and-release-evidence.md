@@ -4,6 +4,81 @@ Scope: local work on `hadimoti/owner-binding-candidate`. Nothing was pushed, dis
 
 Code commits in this note: `db0cb85e` (GPU fallback and security workstream, the basis of the validation below), `c64ad2fb` and `fb94c553` (documentation and test-count corrections), and `c449ef2d` and `2cce72bc` (the export remux fix in the first section). Each validation result keeps the commit it was measured on.
 
+## Final candidate `9a43a66e` (local verification, 2026-10-24)
+
+Code candidate: `9a43a66e` on `hadimoti/owner-binding-candidate`. Documentation-only commits follow it: `d010d27e`, and the commit that adds this section. Each result names the SHA it ran on. Nothing was pushed, dispatched to CI, opened as a PR, frozen, or released. No driver, registry, or GPU setting was changed.
+
+Since `219a8120`, the only code change is `tooling/release/src/retain-release-artifacts.mjs` and its test (`0082f6cc`, `9a43a66e`). Nothing under `apps/` or `packages/` changed, so the packaged app is the same code on both SHAs. The `219a8120` results are kept separate below.
+
+| Check                                   | Command                                                 | Result on `9a43a66e`                                                                                                             |
+| --------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| TypeScript                              | `node node_modules/typescript/bin/tsc -b`               | exit 0                                                                                                                           |
+| ESLint                                  | `node node_modules/eslint/bin/eslint.js .`              | exit 0                                                                                                                           |
+| Prettier                                | `node node_modules/prettier/bin/prettier.cjs --check .` | exit 1: two QA docs from `a2325802` were unformatted. Formatted in `d010d27e`                                                    |
+| Unit suite                              | `node node_modules/vitest/vitest.mjs run`               | 692 files passed, 5 skipped (697); 6,290 tests passed, 33 skipped (6,323); exit 0. The 2 new skips are the POSIX-only FIFO cases |
+| Mutation harness                        | `mut-run-final.sh` on the clean tree                    | 21 of 21 runs detected; every file restored to HEAD                                                                              |
+| Seven-viewport audit                    | Playwright, `tests/e2e`, seven projects                 | 875 passed, 7 skipped (CASE-66, approved), 0 failed; exit 0; 17.2 min                                                            |
+| Packaged build                          | `package-release.mjs --unpacked`                        | exit 0                                                                                                                           |
+| Packaged export, fallback configuration | `export-semantics.spec.ts`                              | 11 runs, 22 of 22 tests (10 in the chain, and 1 more kept for its ffprobe evidence)                                              |
+| Packaged persistence                    | `fresh-process-persistence.spec.ts`                     | 1 of 1                                                                                                                           |
+| Packaged acceptance                     | `editor-acceptance.spec.ts`                             | 5 of 5                                                                                                                           |
+
+Mutation runs: 19 unit mutations (M1–M6, M8–M12, M14–M16, M18–M22) were each caught by their targeted test file. M7a and M7 were caught by Playwright, with 8 and 1 failing tests. M13 is not defined in the harness. The harness also defines M24–M42, which were not run on this candidate.
+
+Packaged measurements, from the kept run on `9a43a66e`:
+
+- Video: MP4 of 54,566 bytes. H.264 High, 320×180, yuv420p, BT.709 primaries, transfer and matrix, limited range. `avg_frame_rate` 30/1, `r_frame_rate` 30/1, `nb_read_frames` 180, duration 6.000000 s.
+- Audio: AAC, 2 channels, 48,000 Hz, 282 frames, duration 6.000000 s.
+- Hard cut: red at 0.5 s and 0.967 s, blue at 1.0 s and 1.5 s. The pre-fix build showed red at 1.0 s.
+- Sync: flashes at 3.000 s and 3.033 s, click onset at 3.000 s.
+- Channels: 440 Hz on the left and 880 Hz on the right, each at RMS 0.353.
+- Alpha and dissolve: alpha centre [121, 0, 122] against [127, 0, 127] expected; dissolve midpoint [121, 0, 120] against [127, 0, 127]. The spec asserts both, and it passed.
+- Preview against export (normalised RGB mean absolute error, tolerance 0.2): 0.004 to 0.047 over 11 samples. The largest is at 3.0 s.
+
+Fallback reliability, every packaged export run recorded in this note:
+
+| Build                                              | Remux fix | Runs | Tests | Result                                                                      |
+| -------------------------------------------------- | --------- | ---- | ----- | --------------------------------------------------------------------------- |
+| `db0cb85e`                                         | no        | 4    | 8     | 8 of 8 pass                                                                 |
+| `c64ad2fb`, first batch (chain run and 10 repeats) | no        | 11   | 22    | 22 of 22 pass                                                               |
+| `c64ad2fb`, second batch (`x10b`)                  | no        | 10   | 20    | 17 of 20 pass; runs 5, 8 and 9 each fail one test with the timing signature |
+| `219a8120`                                         | yes       | 4    | 8     | 8 of 8 pass                                                                 |
+| `9a43a66e`                                         | yes       | 11   | 22    | 22 of 22 pass                                                               |
+
+Before the remux fix, 22 of 25 runs passed both tests, and every failure is on `c64ad2fb` with the timing signature. Since the fix, 15 of 15 runs pass (30 of 30 tests) across two SHAs with identical app code. Fifteen passes bound the failure rate only loosely, at about 20 percent at 95 percent confidence by the rule of three. That is good evidence for the fallback export path, but the sample is small.
+
+GPU fallback: accepted for the fallback path on this host, and the hardware path is open.
+
+Accepted:
+
+- Automatic. After a GPU fast-fail with exit code −1073740791, the app relaunches once with `--joy-media-gpu-encode-fallback`. `installGpuEncodeFallback` runs before `app.whenReady` (`apps/desktop/src/main/electron-entry.ts`).
+- Observed once on the packaged default build, at 06:48. One fallback instance appeared at 06:48:26, stayed alive through 06:48:45, and was then stopped by PID.
+- Safe. `window.ts` keeps `sandbox: true`. The module adds one Chromium feature switch and nothing else, and no GPU-sandbox-disable flag appears in the desktop source.
+- Recoverable. One relaunch, never persisted. A fallback session that fails again is not relaunched, which the module tests cover. Saved projects survive, as the fresh-process test shows. Unsaved work in the crashed session is lost.
+
+Not accepted:
+
+- The default hardware path crashes on first GPU use on this host. Every default-configuration run recorded here failed.
+- The root cause is not established. The leading hypothesis, at medium confidence, is that the NVIDIA encoder component aborts inside the GPU sandbox while media services start.
+- The export spec cannot run against the shipped default, because the relaunch replaces its first window. The fallback runs use a scratch copy with the same switch added at startup. That tests the switch, not the relaunch path. The relaunch path has one observation and the decision-logic unit tests.
+- Reliability on the real relaunch path is not measured.
+
+What closes `desktop.export-media-semantics` (P0):
+
+1. An exact-candidate two-pass receipt for this scenario, with first-try passes and zero retries. This needs a push and a CI dispatch.
+2. An owner decision on the shipped configuration: accept the relaunch fallback and make the acceptance harness drive the relaunched session, or fix the default hardware path and rerun the default build.
+3. One parity criterion, used everywhere. The spec's only numeric criterion is the preview-export tolerance of 0.2, and the release notes must use the same one.
+
+Security closure: closed locally for the reviewed owner-binding findings. Each guard is in the code and has a test.
+
+- `EnhanceInspector.tsx`: queue checks scope before enqueue (line 203), and cancel checks before cancel (line 227). Tests: `EnhanceInspector.session.test.tsx`.
+- `MaskInspector.tsx`: queue (line 297) and cancel (line 327). Tests: `MaskInspector.session.test.tsx`.
+- `App.tsx`: resolve passes the scope check (line 6356), and the jobs call passes it (lines 4815–4818).
+- `AssetLibraryPanel.tsx`: the derivative fetch is checked before the call (line 207).
+- `project-media-resolver.ts`: an unguarded caller cannot join a guarded lookup (line 68), and guarded lookups are not stored for joining (line 77). Tests: `project-media-resolver.test.ts`.
+
+The unit suite and the audit pass on `9a43a66e`, and the mutation harness detects the removal of each guard it targets. The original security checklist was not reread in this pass, so the closure covers the reviewed findings, the guards, and their tests.
+
 ## Export remux fix (`c449ef2d`, refined in `2cce72bc` and `219a8120`)
 
 Symptom: in captured exports the decoded video is one frame late from frame 30 onward. In the two saved failing runs (`run-3` and `run-5`, in the local scratch directory and not committed), frames 0–29 match the authored timeline. From frame 30 onward, every frame whose picture changes matches the fixed output one frame earlier. A per-frame comparison of the decoded probe pixel gives 145 frames that match the fixed output at the same index, 35 that match only the frame before, and none that match neither.
@@ -110,4 +185,31 @@ Consequences of the fallback that a user should know: the relaunch restarts the 
 - GPU root cause (unproven). The default build still crashes on first GPU use, and the fallback relaunch is the mitigation. Fallback reliability beyond the recorded runs is not established.
 - Export failure rate after the remux fix: not measured. The fix is verified by the saved-capture reproduction, the regression and mutation tests, and the packaged runs.
 - Installed lifecycle (needs elevation). Exact-candidate two-pass receipts (need push and CI, not authorized).
-- Cross-runner rehearsal on the final SHA.
+- Cross-runner rehearsal on the final SHA. None has run on `9a43a66e`.
+- Not run on `9a43a66e`: the packaged smoke test, the installed CLI acceptance, the staging package checks, the installed lifecycle, the real-service acceptance, the Windows worker lane, and the cross-runner rehearsal.
+
+## Decisions, external blocks and release verdict (2026-10-24)
+
+**`x-joy-frame-count` (assessment).** The header is optional on `POST /v1/projects/{id}/export/remux`. Without it the route keeps the recorder's timestamps, and a jittered capture can duplicate a frame. No production path omits it. The worker's payload validator requires `frameCount` (`apps/worker/src/export-job.ts`), and the editor client sends the header whenever a count is known; its method has no production callers. The route and header appear in no API reference, only in the WP-29 step-03 note and this note. Making the header mandatory would turn any undocumented client that omits it into a 400. Recommendation: make it mandatory in the next API revision, with `REQUEST_INVALID` naming the header. Do not change it in this candidate without owner approval.
+
+**Shared evidence store (owner approval).** The release workflow retains each pass under `JOY_MEDIA_CI_EVIDENCE_ROOT/<candidate>/<run>-<attempt>-p<pass>`. It fails closed unless the variable names a writable directory outside the checkout, `_work` and `_temp` (`.github/workflows/release-candidate-v2.yml`, around lines 1099–1104). The owner must decide the location on the self-hosted acceptance runner, that it persists across runs, who can read and write it, its retention and backup, and that it is not a production or deploy target. This checkout cannot read the store, so no retained receipt is verified for any SHA after `1482aa7b`.
+
+**Frozen-SHA two-pass acceptance (not run; needs approval).**
+
+1. The owner approves the push of `hadimoti/owner-binding-candidate`, the CI dispatch, and the store path.
+2. Choose the frozen SHA. Recommended: `9a43a66e`, the verified code, since the documentation commits after it change no code.
+3. Push without force, then confirm `origin/hadimoti/owner-binding-candidate` equals the frozen SHA. The workflow's `validate-candidate` job rejects a SHA that origin cannot reach.
+4. Dispatch: `gh workflow run release-candidate-v2.yml --ref hadimoti/owner-binding-candidate -f candidate_sha=<40-character SHA>`.
+5. Require `windows-worker-clean (two exact passes)` to succeed in both passes, the acceptance jobs to succeed, and `gate-summary` to pass with no retries.
+6. Verify each pass's retained evidence in the store with the retention tool's verify mode, as the workflow does.
+7. Record the run ID and the per-scenario results in the matrix. If a gate-required row fails, do not edit the frozen candidate: commit a fix, then start again at step 2 with the new SHA.
+
+**Verdict: NOT-READY.** All nine gate-required rows are open:
+
+- `desktop.export-media-semantics`: the default build crashes on first GPU use, and there is no exact-candidate receipt.
+- `desktop.app.restart-save-export`: the default build, and the fresh-profile reopen is open.
+- `desktop.windows.installed-lifecycle`: not run. It needs an elevated session or an approved disposable account.
+- `release.exact-candidate-two-pass`: no receipt for any SHA after `1482aa7b`.
+- `cli.render.playable`, `cli.render.unsupported-features`, `cli.render.failure-recovery`, `cli.render.windows-entrypoints`, and `project.persistence.fresh-process`: local evidence exists for earlier candidates, with no exact-candidate receipt.
+
+Owner decisions outstanding: approve the push and the CI dispatch; approve the shared evidence store; decide the shipped GPU configuration; decide one parity criterion; decide whether the remux route requires `x-joy-frame-count`; run the lifecycle elevated or approve a disposable account; and the owner gate on unsigned distribution, which the matrix records.
