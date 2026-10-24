@@ -37,6 +37,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
   let workers: ChildProcess[];
   let videoPath: string;
   let sourceDelayMs = 0;
+  let stopApiReads: () => void;
 
   beforeEach(async () => {
     if (!existsSync(workerEntry))
@@ -57,7 +58,14 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       videoPath,
     ]);
     database = new LocalDatabase({ filePath: join(dir, 'jobs.sqlite') });
-    registry = createFileRegistry();
+    // Each API gets its own registry, so a source read that outlives its test cannot resolve
+    // against the next test's registry.
+    const apiRegistry = createFileRegistry();
+    registry = apiRegistry;
+    let apiStopped = false;
+    stopApiReads = () => {
+      apiStopped = true;
+    };
     api = await startLocalJobApi({
       orchestrator: createJobOrchestrator({
         store: database.jobDispatch,
@@ -65,13 +73,15 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       }),
       derivativeDirectory: join(dir, 'derivatives'),
       sourceSize: async (refId) =>
-        (await stat(registry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })))
+        (await stat(apiRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })))
           .size,
       readSource: async (refId) => {
         // Holds the source read open for a while so a test can cancel a job that is genuinely running.
         if (sourceDelayMs > 0) await new Promise((done) => setTimeout(done, sourceDelayMs));
+        // A read held past the end of its test belongs to a closed API and its removed files.
+        if (apiStopped) return new Uint8Array();
         return readFile(
-          registry.resolvePath({ kind: 'local-file', id: refId, displayName: refId }),
+          apiRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: refId }),
         );
       },
       onWarning: (message) => console.warn(message),
@@ -82,6 +92,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
 
   afterEach(async () => {
     for (const worker of workers) if (worker.exitCode === null) worker.kill('SIGKILL');
+    stopApiReads();
     await api.close();
     database.close();
     rmSync(dir, { recursive: true, force: true });
