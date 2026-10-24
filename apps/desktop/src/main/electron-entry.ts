@@ -29,6 +29,7 @@ import { parseProjectDeepLink } from '../deep-link.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
+import { installGpuEncodeFallback } from './gpu-encode-fallback.js';
 import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
 import { AgentRequestRegistry, cancelWhenPageGoes } from './agent-requests.js';
 import { registerJoyProtocol } from './protocol-registration.js';
@@ -249,6 +250,20 @@ if (!app.requestSingleInstanceLock()) {
   const resolveSourcePath = (refId: string): string =>
     localDatabase.localAssets.storedPath(refId) ??
     fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: '' });
+
+  // Crash-triggered fallback for the Media Foundation video encoder (see gpu-encode-fallback.ts). It
+  // must be installed before the app is ready, because Chromium reads switches at startup.
+  installGpuEncodeFallback(
+    {
+      commandLine: app.commandLine,
+      relaunch: (options) => app.relaunch(options),
+      exit: (code) => app.exit(code),
+      onChildProcessGone: (listener) =>
+        app.on('child-process-gone', (_event, details) => listener(details)),
+      log: (message) => console.error(message),
+    },
+    process.argv,
+  );
 
   app.whenReady().then(async () => {
     // Marks, but never deletes, any profile whose stored key cannot be read (PLAN-v4 §9c).
