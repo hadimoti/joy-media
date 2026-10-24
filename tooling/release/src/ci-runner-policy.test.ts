@@ -100,14 +100,9 @@ interface WorkflowJob {
   readonly 'runs-on'?: unknown;
 }
 
+// `js-yaml` is a declared root devDependency; it has no bundled types, so only `load` is typed.
 function loadYamlParser(): YamlParser {
-  const store = join(REPO_ROOT, 'node_modules', '.pnpm');
-  const packageEntry = readdirSync(store).find((entry) => entry.startsWith('js-yaml@'));
-  if (!packageEntry) throw new Error('js-yaml is not available in the installed node_modules');
-  const requireFromYaml = createRequire(
-    join(store, packageEntry, 'node_modules', 'js-yaml', 'package.json'),
-  );
-  return requireFromYaml('js-yaml') as YamlParser;
+  return createRequire(join(REPO_ROOT, 'package.json'))('js-yaml') as YamlParser;
 }
 
 const yamlParser = loadYamlParser();
