@@ -1,6 +1,6 @@
 # Master Implementation Plan: JOY Media Desktop Pivot, Web Retirement & Repo Polish
 
-This comprehensive plan addresses the owner's four core goals, integrating all verified facts from [BRIEF.md](file:///C:/Users/HadiMoti/joy-media/docs/BRIEF-2026-09-19.md), repository Git state, and live VPS control-plane telemetry.
+This comprehensive plan addresses the owner's four core goals, integrating all verified facts from [BRIEF.md](file:///<owner-profile>/joy-media/docs/BRIEF-2026-09-19.md), repository Git state, and live VPS control-plane telemetry.
 
 ---
 

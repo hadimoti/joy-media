@@ -135,7 +135,7 @@ Define it in one place and test it everywhere (flag, do not silently bend, anyth
 - Do not run the full monorepo vitest while a build is running; once saw `Timeout calling "onTaskUpdate"` under load.
 - **Never chain `git commit` after a pipeline that ends in `grep`** (it succeeds even when tests fail). Gate commits on the real exit code.
 - Agent-created git worktrees can appear at the wrong base briefly; check `git log -1` in each before trusting it.
-- Outbound network in the previous container went through a proxy (`HTTPS_PROXY`, CA at `/root/.ccr/ca-bundle.crt`); the harness passes proxy variables through, but tests must not need the internet.
+- Outbound network in the previous container went through a proxy (`HTTPS_PROXY`, CA at `<proxy-ca-bundle>`); the harness passes proxy variables through, but tests must not need the internet.
 - Provider keys for the external CLIs: **none needed** — they are logged in on the owner's PC (section 0). In the Claude cloud sandbox they were neither installed nor authenticated, which is why none were used there.
 - The CLI itself already has a Kilo provider preset (`https://api.kilo.ai/api/gateway/v1`, models like `minimax/minimax-m3`, `kilo-auto/efficient`) and honours `KILO_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
 - Commits so far carry Claude `Co-Authored-By` trailers; use whatever attribution your tool requires for new ones.

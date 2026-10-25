@@ -131,7 +131,7 @@ joy-media-index                                    [NEW - Index]
 ## Service Health
 
 - API: active (running) on 127.0.0.1:8790
-- GBrain: active (running) on 10.250.99.1:3131, version 0.42.59.0
+- GBrain: active (running) on <private-host>:3131, version 0.42.59.0
 
 ## Links
 

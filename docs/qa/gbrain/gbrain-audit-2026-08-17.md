@@ -14,15 +14,15 @@ GBrain HTTP service is **active and healthy** at version `0.42.59.0` with PGLite
 
 ## Service State
 
-| Field            | Value                                                               | Status           |
-| ---------------- | ------------------------------------------------------------------- | ---------------- |
-| Service          | `gbrain-http.service`                                               | Active (running) |
-| Command          | `/root/.bun/bin/gbrain serve --http --port 3131 --bind 10.250.99.1` | ✅               |
-| Listener         | `10.250.99.1:3131`                                                  | ✅               |
-| Health endpoint  | `http://10.250.99.1:3131/health`                                    | ✅               |
-| Health response  | `{"status":"ok","version":"0.42.59.0","engine":"pglite"}`           | ✅               |
-| Data engine      | PGLite at `/root/.gbrain/brain.pglite`                              | ✅               |
-| GBrain home size | ~363 MB                                                             | ✅               |
+| Field            | Value                                                                           | Status           |
+| ---------------- | ------------------------------------------------------------------------------- | ---------------- |
+| Service          | `gbrain-http.service`                                                           | Active (running) |
+| Command          | `<service-home>/.bun/bin/gbrain serve --http --port 3131 --bind <private-host>` | ✅               |
+| Listener         | `<private-host>:3131`                                                           | ✅               |
+| Health endpoint  | `http://<private-host>:3131/health`                                             | ✅               |
+| Health response  | `{"status":"ok","version":"0.42.59.0","engine":"pglite"}`                       | ✅               |
+| Data engine      | PGLite at `<service-home>/.gbrain/brain.pglite`                                 | ✅               |
+| GBrain home size | ~363 MB                                                                         | ✅               |
 
 ---
 
@@ -154,7 +154,7 @@ The following commands timed out waiting for PGLite lock (service is actively ru
 systemctl status gbrain-http --no-pager
 
 # Health check
-curl -fsS http://10.250.99.1:3131/health
+curl -fsS http://<private-host>:3131/health
 
 # Doctor report
 gbrain doctor --fast --json
