@@ -56,6 +56,39 @@ export function isSmokeRun(argv: readonly string[]): boolean {
 }
 
 /**
+ * Set by smoke-supervisor.mjs: the nonce that names this run's profile folder, so the supervisor knows which folder to
+ * clean up when the app has exited.
+ */
+export const SMOKE_NONCE_ENVIRONMENT = 'JOY_MEDIA_SMOKE_NONCE';
+
+/**
+ * Set to 1 by smoke-supervisor.mjs: an external process removes the profile once this process and the processes it
+ * started have exited. This process cannot wait for its own exit, so it must not try to delete the profile itself.
+ */
+export const SMOKE_SUPERVISED_ENVIRONMENT = 'JOY_MEDIA_SMOKE_SUPERVISED';
+
+/**
+ * The run's nonce: the one the supervisor passed in, or a fresh one. A value that is set but malformed refuses the
+ * run instead of choosing another folder without saying so.
+ */
+export function smokeNonceFromEnvironment(
+  env: Readonly<Record<string, string | undefined>>,
+  fresh: () => string,
+): string {
+  const supplied = env[SMOKE_NONCE_ENVIRONMENT];
+  if (supplied === undefined || supplied === '') return fresh();
+  if (!NONCE_PATTERN.test(supplied)) {
+    throw new SmokeIsolationError(`${SMOKE_NONCE_ENVIRONMENT} must be 32 lowercase hex characters`);
+  }
+  return supplied;
+}
+
+/** True when a supervisor removes this run's profile, so the app leaves it in place when it exits. */
+export function isSupervisedSmokeRun(env: Readonly<Record<string, string | undefined>>): boolean {
+  return env[SMOKE_SUPERVISED_ENVIRONMENT] === '1';
+}
+
+/**
  * Plans the profile for one run: a new folder directly under the temp root, named with the nonce.
  * Throws when the plan would touch a protected location, so a TEMP setting that points into the
  * user's data refuses the run instead of letting it write there.

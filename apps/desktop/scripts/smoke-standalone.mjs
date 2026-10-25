@@ -1,10 +1,7 @@
-import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { superviseSmoke } from './smoke-supervisor.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const standaloneExe = resolve(desktopRoot, 'dist', 'joy-media-win32-x64', 'joy-media.exe');
@@ -19,29 +16,23 @@ if (!existsSync(standaloneExe)) {
     `${standaloneExe} does not exist. Run 'pnpm --filter @joy-media/desktop package:installer' before test:smoke-standalone.`,
   );
 } else {
-  const tempUserData = mkdtempSync(join(tmpdir(), 'joy-media-smoke-'));
   console.log(
-    `[smoke-standalone] Launching standalone executable: ${standaloneExe} --smoke --user-data-dir=${tempUserData}`,
+    `[smoke-standalone] Launching standalone executable under the smoke supervisor: ${standaloneExe} --smoke`,
   );
-  const result = spawnSync(standaloneExe, ['--smoke', `--user-data-dir=${tempUserData}`], {
+  // The supervisor removes the run's profile after the app and its processes have exited.
+  const result = await superviseSmoke({
+    executable: standaloneExe,
+    args: ['--smoke'],
     cwd: resolve(desktopRoot, 'dist', 'joy-media-win32-x64'),
     env: { ...process.env, NODE_ENV: 'production' },
-    encoding: 'utf8',
-    timeout: 30000,
   });
-
-  try {
-    rmSync(tempUserData, { recursive: true, force: true });
-  } catch {
-    // Non-fatal cleanup
-  }
-
-  const stdout = result.stdout ?? '';
-  const stderr = result.stderr ?? '';
+  const stdout = result.stdout;
+  const stderr = result.stderr;
   process.stdout.write(stdout);
+  process.stdout.write(`[smoke-supervisor] ${JSON.stringify(result.summary)}\n`);
 
   const passed =
-    result.status === 0 &&
+    result.exitCode === 0 &&
     stdout.includes('[joy-desktop] packaged renderer smoke passed') &&
     !stderr.includes('[joy-desktop] packaged renderer smoke failed');
 
@@ -52,6 +43,6 @@ if (!existsSync(standaloneExe)) {
     process.exitCode = 0;
   } else {
     process.stderr.write(stderr);
-    fail(`[smoke-standalone] Standalone smoke test FAILED (status: ${result.status}).`);
+    fail(`[smoke-standalone] Standalone smoke test FAILED (status: ${result.exitCode}).`);
   }
 }

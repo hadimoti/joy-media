@@ -63,10 +63,12 @@ import {
 import {
   createSmokeProfile,
   isSmokeRun,
+  isSupervisedSmokeRun,
   planSmokeProfile,
   removeSmokeProfile,
   sameLocation,
   smokeEnvironment,
+  smokeNonceFromEnvironment,
   smokePathOverrides,
   type SmokeProfile,
 } from './smoke-isolation.js';
@@ -93,7 +95,7 @@ function startSmokeProfile(): SmokeStart {
   try {
     const profile = planSmokeProfile({
       tempRoot: tmpdir(),
-      nonce: randomBytes(16).toString('hex'),
+      nonce: smokeNonceFromEnvironment(process.env, () => randomBytes(16).toString('hex')),
       // The run is refused if the temp folder sits inside any of these, or the run folder overlaps one.
       protectedPaths: [
         app.getPath('appData'),
@@ -166,8 +168,10 @@ if (smokeStart?.ok === false) {
   // Anything still `queued`/`running` from a previous process is stale by definition: the
   // Worker that would have finished it is gone. Do this before any new job can be enqueued.
   localDatabase.recoverInterrupted();
-  // Ends a smoke run: release the database, delete the run folder, then exit with the verdict. A run
-  // whose folder cannot be deleted fails, so leftover data never passes unnoticed.
+  // Ends a smoke run: release the database, then exit with the verdict. A supervised run is cleaned up by
+  // the supervisor after this process and its children have exited, because a process cannot wait for its
+  // own exit. An unsupervised run deletes its own folder, and fails if it cannot, so leftover data never
+  // passes unnoticed.
   const finishSmokeRun = (exitCode: number): void => {
     try {
       localDatabase.close();
@@ -175,6 +179,11 @@ if (smokeStart?.ok === false) {
       // Already closed: nothing else holds the database file open.
     }
     if (smokeProfile === undefined) {
+      app.exit(exitCode);
+      return;
+    }
+    if (isSupervisedSmokeRun(process.env)) {
+      workerSupervisor.stop();
       app.exit(exitCode);
       return;
     }

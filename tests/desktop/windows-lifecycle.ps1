@@ -251,7 +251,10 @@ function Assert-FreshShellCli([string]$Version) {
 }
 
 function Invoke-AppSmoke([string]$Label) {
-    $result = Invoke-CapturedProcess -FilePath (Join-Path $installRoot 'joy-media.exe') -Arguments @('--smoke', "--user-data-dir=$userDataDirectory") -TimeoutSeconds 120 -WorkingDirectory $installRoot -Environment (Get-SafeEnvironment @{ NODE_ENV = 'production' })
+    # The smoke supervisor starts the app, waits for it and its processes to exit, and removes the profile it used.
+    $supervisor = Join-Path $repoRoot 'apps\desktop\scripts\smoke-supervisor.mjs'
+    $smokeArguments = @($supervisor, '--exe', (Join-Path $installRoot 'joy-media.exe'), '--cwd', $installRoot, '--', '--smoke')
+    $result = Invoke-CapturedProcess -FilePath $nodePath -Arguments $smokeArguments -TimeoutSeconds 240 -WorkingDirectory $installRoot -Environment (Get-SafeEnvironment @{ NODE_ENV = 'production' })
     $script:commands.Add([pscustomobject]@{ name = "desktop app smoke $Label"; exitCode = $result.ExitCode })
     if ($result.ExitCode -ne 0 -or $result.Stdout -notmatch '\[joy-desktop\] packaged renderer smoke passed' -or $result.Stderr -match '\[joy-desktop\] packaged renderer smoke failed') {
         throw "Installed desktop smoke failed at $Label. $(Get-CommandFailureSummary $result)"

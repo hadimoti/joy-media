@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { superviseSmoke } from './smoke-supervisor.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
@@ -79,33 +79,27 @@ if (!existsSync(compiledMainEntry)) {
     noticeValid = false;
   }
   if (noticeValid) {
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    const { mkdtempSync, rmSync } = await import('node:fs');
-    const tempUserData = mkdtempSync(join(tmpdir(), 'joy-media-smoke-pkg-'));
     const electronPath = /** @type {string} */ (require('electron'));
-    const result = spawnSync(electronPath, ['.', '--smoke', `--user-data-dir=${tempUserData}`], {
+    // The supervisor removes the run's profile after Electron and its processes have exited.
+    const result = await superviseSmoke({
+      executable: electronPath,
+      args: ['.', '--smoke'],
       cwd: desktopRoot,
       env: { ...process.env, NODE_ENV: 'production' },
-      encoding: 'utf8',
     });
-    try {
-      rmSync(tempUserData, { recursive: true, force: true });
-    } catch {
-      // Non-fatal cleanup
-    }
-    const stdout = result.stdout ?? '';
-    const stderr = result.stderr ?? '';
+    const stdout = result.stdout;
+    const stderr = result.stderr;
     process.stdout.write(stdout);
+    process.stdout.write(`[smoke-supervisor] ${JSON.stringify(result.summary)}\n`);
     const passed =
-      result.status === 0 &&
+      result.exitCode === 0 &&
       stdout.includes('[joy-desktop] packaged renderer smoke passed') &&
       !stderr.includes('[joy-desktop] packaged renderer smoke failed');
     if (passed) {
       process.stderr.write('test:smoke-packaged passed\n');
     } else {
       process.stderr.write(stderr);
-      fail(`test:smoke-packaged failed (electron exited ${String(result.status)}).`);
+      fail(`test:smoke-packaged failed (electron exited ${String(result.exitCode)}).`);
     }
   }
 }

@@ -180,6 +180,17 @@ export function stageRun({
     requireFile(join(repoRoot, 'tests', 'desktop', GATE_FILE), 'Disposable gate'),
     join(staging, GATE_FILE),
   );
+  // The guest runs the smoke supervisor with this Node runtime, because Windows PowerShell cannot wait for the app's
+  // processes the way the supervisor does. Node is copied from the one running this launcher.
+  copyFileSync(
+    requireFile(
+      join(repoRoot, 'apps', 'desktop', 'scripts', 'smoke-supervisor.mjs'),
+      'Smoke supervisor',
+    ),
+    join(staging, 'smoke-supervisor.mjs'),
+  );
+  mkdirSync(join(staging, 'node'), { recursive: true });
+  copyFileSync(requireFile(process.execPath, 'Node runtime'), join(staging, 'node', 'node.exe'));
   const candidateSetupCopy = join(staging, 'candidate', 'joy-media-setup.exe');
   const previousSetupCopy = join(staging, 'previous', 'joy-media-setup.exe');
   copyFileSync(requireFile(candidateSetup, 'Candidate setup'), candidateSetupCopy);
