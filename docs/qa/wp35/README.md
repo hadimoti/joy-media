@@ -46,9 +46,9 @@ Audio and verified normal-click replacement followed by Ctrl-click addition.
 
 - Product SHA: `5273e34aeafc8ed7fe30383b7f443cc00667302c`.
 - Editor release:
-  `/opt/joy-media/web-releases/editor-web-20260816T211800Z-5273e34-wp35-professional-timeline`.
+  `<vps-app-root>/joy-media/web-releases/editor-web-20260816T211800Z-5273e34-wp35-professional-timeline`.
 - Retained editor rollback:
-  `/opt/joy-media/web-releases/editor-web-20260816T201526Z-ffa9ea0-wp35-responsive`.
+  `<vps-app-root>/joy-media/web-releases/editor-web-20260816T201526Z-ffa9ea0-wp35-responsive`.
 - Release and public index SHA-256:
   `7d51d92022fbd0cf24b514bfc28b8ca92eb0510dcaac17828dc56b1ad4eda641`.
 - `nginx -t`, local API `/health`, and public index verification passed. No API
@@ -67,7 +67,7 @@ and left gutter now use the opaque panel surface rather than exposing the
 scrolling tracks grid. The 5/5 WP-35 desktop browser suite adds an explicit
 computed-style guard for that condition; typecheck, ESLint, Prettier, and the
 editor production build pass. Immutable editor release
-`/opt/joy-media/web-releases/editor-web-20260816T213059Z-1298c17-wp35-ruler-surface`
+`<vps-app-root>/joy-media/web-releases/editor-web-20260816T213059Z-1298c17-wp35-ruler-surface`
 and public `https://joyst.ir/?deploy=1298c17` index bytes both hash to
 `160337ce38a81ac387312edefe3923d4836032f514248a16013da598ddee4728`.
 The live browser verified `rgb(37, 37, 37)` on both ruler surfaces; `nginx -t`
@@ -81,7 +81,7 @@ origin (`0:00`) tick gets a dedicated 0.85rem label clearance; the live browser
 measured 13.6px between the rail and label content. The updated WP-35 browser
 suite passes 5/5, as do typecheck, ESLint, Prettier, and the editor production
 build. Immutable release
-`/opt/joy-media/web-releases/editor-web-20260816T214205Z-9013b1f-wp35-origin-label`
+`<vps-app-root>/joy-media/web-releases/editor-web-20260816T214205Z-9013b1f-wp35-origin-label`
 and public `https://joyst.ir/?deploy=9013b1f` index bytes both hash to
 `53436e57ae7928542fb8d3cf341f1a765619d1ffdea439398247ae394fa7e18b`.
 
@@ -92,7 +92,7 @@ parent as the single opaque ruler surface. Live browser verification reports
 gutter `rgba(0, 0, 0, 0)` and row `rgb(37, 37, 37)`. The focused WP-35 browser
 suite passed 5/5 alongside typecheck, ESLint, Prettier, and the editor
 production build. Immutable release
-`/opt/joy-media/web-releases/editor-web-20260816T221547Z-9996c0e-wp35-transparent-gutter`
+`<vps-app-root>/joy-media/web-releases/editor-web-20260816T221547Z-9996c0e-wp35-transparent-gutter`
 and public `https://joyst.ir/?deploy=9996c0e` index bytes both hash to
 `f9b6f36cd26c06530f669046774541983b89e414ddc1ca2e4c1aa20a52299161`.
 
@@ -102,7 +102,7 @@ Product `52e4619` removes the destructive trash button from all timeline track
 headers. The guarded empty-track removal remains in the track context menu.
 Focused WP-35 browser E2E passed 5/5, alongside typecheck, ESLint, Prettier,
 and the editor production build. Immutable release
-`/opt/joy-media/web-releases/editor-web-20260816T222152Z-52e4619-wp35-track-header`
+`<vps-app-root>/joy-media/web-releases/editor-web-20260816T222152Z-52e4619-wp35-track-header`
 and public `https://joyst.ir/?deploy=52e4619` index bytes both hash to
 `b34a05434faeb45f09c4e0d9de892b265f015ff405bc06a4749f713d17a854a1`.
 The live browser found zero track-header remove buttons.
@@ -212,13 +212,13 @@ planner.
 - Accepted responsive closeout SHA:
   `ffa9ea0212719175ec028514ac2f2c0698f62f29`.
 - Immutable API release:
-  `/opt/joy-media/releases/wp35-final-api-20260816T200008Z-07ecbe1`.
+  `<vps-app-root>/joy-media/releases/wp35-final-api-20260816T200008Z-07ecbe1`.
 - Immutable editor release:
-  `/opt/joy-media/web-releases/editor-web-20260816T201526Z-ffa9ea0-wp35-responsive`.
+  `<vps-app-root>/joy-media/web-releases/editor-web-20260816T201526Z-ffa9ea0-wp35-responsive`.
 - Previous editor release retained for rollback:
-  `/opt/joy-media/web-releases/editor-web-20260816T200008Z-07ecbe1-wp35-final`.
+  `<vps-app-root>/joy-media/web-releases/editor-web-20260816T200008Z-07ecbe1-wp35-final`.
 - Pre-deploy PostgreSQL backup:
-  `/opt/joy-media/data/backups/wp35-final-predeploy-20260816T195852Z-07ecbe1.sql.gz`,
+  `<vps-app-root>/joy-media/data/backups/wp35-final-predeploy-20260816T195852Z-07ecbe1.sql.gz`,
   SHA-256
   `a289700c2ca04a0b56fb455323445240ea53cc2813d3b72a0bb0aae158de4850`.
 - Public/editor index SHA-256:

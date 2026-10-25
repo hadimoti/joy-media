@@ -2,7 +2,7 @@
 
 **Status:** **FINISHED** — universal timeline, paired hardware GPU preview, placement rollback audit, authenticated browser evidence, and production closeout complete
 **Owner:** Luna  
-**Repository:** `/opt/joy-media/repo` (local checkout: `joy-media-fix`)  
+**Repository:** `<vps-app-root>/joy-media/repo` (local checkout: `joy-media-fix`)  
 **Plan date:** 2026-08-16  
 **Production domain:** `https://joyst.ir/`
 

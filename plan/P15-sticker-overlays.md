@@ -2,7 +2,7 @@
 
 **Executable plan** for CapCut-like sticker workflow on the existing visual-object / motion stack.
 
-Hermes / agent: work from `/opt/joy-media/repo`. Deploy web after STEPs that change UI.
+Hermes / agent: work from `<vps-app-root>/joy-media/repo`. Deploy web after STEPs that change UI.
 
 ## STEPs
 

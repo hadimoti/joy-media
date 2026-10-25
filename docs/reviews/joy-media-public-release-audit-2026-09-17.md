@@ -22,7 +22,7 @@
 | B2  | **The desktop app cannot reach the VPS at all.** Every API call in the renderer is the relative path `/api/...`. Under the packaged origin `joy-media-app://renderer` that resolves to `joy-media-app://renderer/api/...`, never to `joyst.ir`. | `apps/editor-web/src/media-session.ts:58`, `identity.ts:57,93,130`, `control-plane-client.ts:299`                                                                                    |
 | B3  | **The local Worker never runs a job.** It only enters its daemon loop when `JOY_MEDIA_API_URL` is set and it has paired with the _remote_ control plane. The desktop supervisor spawns it with no env and there is no local job channel.        | `apps/worker/src/index.ts:35-80`, `apps/desktop/src/main/worker-supervisor.ts:67`                                                                                                    |
 | B4  | **Subscription / entitlement / auto-update is dead code end-to-end.** `checkForDesktopUpdate` is exported and unit-tested but never called by any renderer code; there is no sign-in, account, or subscription UI in the desktop shell.         | `apps/editor-web/src/desktop-client.ts:109` — zero non-test callers                                                                                                                  |
-| B5  | **Production VPS host, root user and SSH key paths are committed in tracked Markdown.**                                                                                                                                                         | `STATE.md:188` (`82.115.8.224`, root, key path), `ORCHESTRATION.md:98` (`46.249.103.142`), `AGENTIC_EDITING_NEXT_AGENT.md:41`                                                        |
+| B5  | **Production VPS host, root user and SSH key paths are committed in tracked Markdown.**                                                                                                                                                         | `STATE.md:188` (`<host-ip>`, root, key path), `ORCHESTRATION.md:98` (`<host-ip>`), `AGENTIC_EDITING_NEXT_AGENT.md:41`                                                        |
 
 No plaintext credentials, `.env`, `.pem`, or API keys are tracked — verified via
 `git ls-files`. Every `apiKey`/`secret` literal found is a test fixture.
@@ -127,9 +127,9 @@ agent handoff notes, evidence ledgers, and worktree paths that no external contr
 
 ### S1 — Production infrastructure identifiers in tracked files · **critical**
 
-- `STATE.md:188` — `82.115.8.224`, user `root`, key `<owner-profile>\.ssh\Joy-Vps-New.pem`,
+- `STATE.md:188` — `<host-ip>`, user `root`, key `<owner-profile>\.ssh\<vps-key-file>`,
   plus the `ssh sweden` alias convention.
-- `ORCHESTRATION.md:98` — a _second_ IP, `46.249.103.142`, with CPU/RAM/disk inventory.
+- `ORCHESTRATION.md:98` — a _second_ IP, `<host-ip>`, with CPU/RAM/disk inventory.
 - `AGENTIC_EDITING_NEXT_AGENT.md:12,41,511` — checkout path and `.pem` path.
 - `docs/SELF-HOSTED-CI.md`, `ops/self-hosted/linux-runner/entrypoint.sh:12`,
   `ops/self-hosted/linux-runner/README.md:17` — `hadimoti/joy-media` and runner registration

@@ -5,9 +5,9 @@
 **Deployed product SHA:** `1b7e8abf27e41d132cda0714c890206400596c41`
 **Successful product CI:** [GitHub Actions run 31523239040](https://github.com/hadimoti/joy-media/actions/runs/31523239040)
 **Local repository:** `<owner-profile>/joy-vps/joy-media-fix`
-**VPS repository:** `/opt/joy-media/repo`
-**Production root:** `/opt/joy-media`
-**Do not use:** `/opt/joy-wg-bot`; it is unrelated to JOY Media deployment.
+**VPS repository:** `<vps-app-root>/joy-media/repo`
+**Production root:** `<vps-app-root>/joy-media`
+**Do not use:** `<vps-app-root>/joy-wg-bot`; it is unrelated to JOY Media deployment.
 
 ## Objective
 
@@ -35,13 +35,13 @@ unless a regression is observed:
   skips; typecheck, lint, format, build, audit, and repository policy checks
   passed.
 - Immutable API release:
-  `/opt/joy-media/releases/wp30-api-20260811T193115Z-1b7e8ab`.
+  `<vps-app-root>/joy-media/releases/wp30-api-20260811T193115Z-1b7e8ab`.
 - Immutable editor release:
-  `/opt/joy-media/releases/editor-web-20260811T193115Z-1b7e8ab-wp30-repair`.
+  `<vps-app-root>/joy-media/releases/editor-web-20260811T193115Z-1b7e8ab-wp30-repair`.
 - Current managed pointers:
-  `/opt/joy-media/releases/current-api` and `/opt/joy-media/web`.
+  `<vps-app-root>/joy-media/releases/current-api` and `<vps-app-root>/joy-media/web`.
 - PostgreSQL backup:
-  `/opt/joy-media/data/backups/joymedia-pre-wp30-repair-20260811T192911Z.sql.gz`.
+  `<vps-app-root>/joy-media/data/backups/joymedia-pre-wp30-repair-20260811T192911Z.sql.gz`.
 - Backup SHA-256:
   `a91693b86fefb9bb4eb2220c402b5eeea8f8b97ada82626cded1dd0219fbac05`.
 - Public editor byte parity:
@@ -465,7 +465,7 @@ docs: close WP-30 animated export verification
 
 - Push without rewriting history.
 - Wait for both GitHub jobs to complete successfully.
-- Fast-forward `/opt/joy-media/repo` to the documentation commit.
+- Fast-forward `<vps-app-root>/joy-media/repo` to the documentation commit.
 - Do not rebuild or switch API/editor releases for this documentation-only SHA.
 
 Record separately:

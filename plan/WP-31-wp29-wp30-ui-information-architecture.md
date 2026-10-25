@@ -3,8 +3,8 @@
 **Status:** Planned  
 **Priority:** P1  
 **Depends on:** WP-29 and WP-30 product behavior remaining intact  
-**Repository:** `/opt/joy-media/repo`  
-**Production root:** `/opt/joy-media`  
+**Repository:** `<vps-app-root>/joy-media/repo`  
+**Production root:** `<vps-app-root>/joy-media`  
 **Primary result:** The complete WP-29/WP-30 feature set is easier to find, better grouped, calmer at first glance, and still fully accessible at all three supported desktop sizes.
 
 ## Summary

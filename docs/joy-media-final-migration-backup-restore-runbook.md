@@ -14,7 +14,7 @@ Lead brief: **"Do not delete releases or databases."**
 
 Release rollback is already a mature, tested mechanism — see `deploy/README.md`,
 `deploy/joy-media-rollback.sh`, and `deploy/joy-media-rollback.test.sh`. It performs an atomic
-pair of symlink swaps (`current-api`, `/opt/joy-media/web`) back to a previously verified
+pair of symlink swaps (`current-api`, `<vps-app-root>/joy-media/web`) back to a previously verified
 immutable release, defaults to `--dry-run`, and rewrites only the `JOY_MEDIA_RELEASE_*` keys in
 `/etc/joy-media/api.env` before `systemctl restart joy-media@api`. **Use it as-is** for any
 release-level rollback during this migration's cutover; this runbook does not replace it.
@@ -31,8 +31,8 @@ database:
 
 ```bash
 # On the VPS, as a role with read access to the joymedia database:
-pg_dump --format=custom --file="/opt/joy-media/backups/joymedia-$(date -u +%Y%m%dT%H%M%SZ).dump" joymedia
-sha256sum "/opt/joy-media/backups/joymedia-"*.dump > "/opt/joy-media/backups/joymedia-$(date -u +%Y%m%dT%H%M%SZ).sha256"
+pg_dump --format=custom --file="<vps-app-root>/joy-media/backups/joymedia-$(date -u +%Y%m%dT%H%M%SZ).dump" joymedia
+sha256sum "<vps-app-root>/joy-media/backups/joymedia-"*.dump > "<vps-app-root>/joy-media/backups/joymedia-$(date -u +%Y%m%dT%H%M%SZ).sha256"
 ```
 
 - Use `--format=custom` (not plain SQL) so `pg_restore` can do a selective or parallel restore
@@ -54,7 +54,7 @@ without a fresh backup of its current state taken immediately beforehand (§2).*
 ```bash
 # Rehearsal, into a throwaway database:
 createdb joymedia_restore_check
-pg_restore --format=custom --dbname=joymedia_restore_check "/opt/joy-media/backups/joymedia-<timestamp>.dump"
+pg_restore --format=custom --dbname=joymedia_restore_check "<vps-app-root>/joy-media/backups/joymedia-<timestamp>.dump"
 # Spot-check row counts against what the backup's source deployment reported at backup time.
 dropdb joymedia_restore_check
 ```

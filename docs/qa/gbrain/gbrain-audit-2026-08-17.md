@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-GBrain HTTP service is **active and healthy** at version `0.42.59.0` with PGLite backend. Health score is **85/100** with three active warnings that require operational decisions. No mutations were performed during this audit.
+GBrain HTTP service is **active and healthy** at version `<host-ip>` with PGLite backend. Health score is **85/100** with three active warnings that require operational decisions. No mutations were performed during this audit.
 
 ---
 
@@ -20,7 +20,7 @@ GBrain HTTP service is **active and healthy** at version `0.42.59.0` with PGLite
 | Command          | `<service-home>/.bun/bin/gbrain serve --http --port 3131 --bind <private-host>` | ✅               |
 | Listener         | `<private-host>:3131`                                                           | ✅               |
 | Health endpoint  | `http://<private-host>:3131/health`                                             | ✅               |
-| Health response  | `{"status":"ok","version":"0.42.59.0","engine":"pglite"}`                       | ✅               |
+| Health response  | `{"status":"ok","version":"<host-ip>","engine":"pglite"}`                       | ✅               |
 | Data engine      | PGLite at `<service-home>/.gbrain/brain.pglite`                                 | ✅               |
 | GBrain home size | ~363 MB                                                                         | ✅               |
 
@@ -51,7 +51,7 @@ GBrain HTTP service is **active and healthy** at version `0.42.59.0` with PGLite
 | retrieval_reflex_health          | ⚠️ warn | skill    | No visible host path; policy skill not installed           |
 | skill_conformance                | ✅ ok   | skill    | 52/52 skills pass                                          |
 | skill_brain_first                | ✅ ok   | skill    | 52 skill(s) compliant or exempt                            |
-| upgrade_errors                   | ⚠️ warn | meta     | Post-upgrade failure on 2026-08-04 (0.42.67.0 → 0.42.72.1) |
+| upgrade_errors                   | ⚠️ warn | meta     | Post-upgrade failure on 2026-08-04 (<host-ip> → <host-ip>) |
 | nightly_quality_probe_health     | ✅ ok   | brain    | disabled (opt-in)                                          |
 | progressive_batch_audit_health   | ✅ ok   | ops      | No operations in last 7 days                               |
 | conversation_parser_probe_health | ✅ ok   | brain    | Skipped (opt-in)                                           |
@@ -101,7 +101,7 @@ The following commands timed out waiting for PGLite lock (service is actively ru
 
 | Issue                               | Severity | Decision               | Rationale                                                                                                                          |
 | ----------------------------------- | -------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Upgrade from 0.42.59.0 to 0.46.12.3 | Warning  | **Do not upgrade**     | Historical post-upgrade failure on 2026-08-04 requires snapshot, compatibility check, migration dry-run, and service rollback plan |
+| Upgrade from <host-ip> to <host-ip> | Warning  | **Do not upgrade**     | Historical post-upgrade failure on 2026-08-04 requires snapshot, compatibility check, migration dry-run, and service rollback plan |
 | Retrieval reflex                    | Warning  | **Do not install**     | No visible host path; affects shared VPS behavior; requires design/permission review                                               |
 | Oversized pages                     | Critical | **Split/index now**    | Safe, reversible, directly improves retrieval quality                                                                              |
 | Runtime project access              | Info     | **Keep out of GBrain** | Editor's persisted project and revision system remain authoritative                                                                |

@@ -25,7 +25,7 @@ this and export includes reversed audio.
 
 ## VPS backup and deployment
 
-- Backup: `/opt/joy-media/data/backups/joymedia-20260811-101137.sql.gz`
+- Backup: `<vps-app-root>/joy-media/data/backups/joymedia-20260811-101137.sql.gz`
 - Backup SHA-256: `91f4b4e5aba395638988bc4f9f361e22fcab7170b0afe72acd2af962a64978f5`
 - Backup readability: `gzip -t` PASS; rclone sync completed.
 - API release: `wp29-final-api-20260811T101245Z-8756325`

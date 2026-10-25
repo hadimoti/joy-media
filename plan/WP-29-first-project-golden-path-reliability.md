@@ -101,7 +101,7 @@ gates are superseded by the accepted 2026-08-11 checkpoint below.
   plus three complementary R2 CASE-66 instances, for 111/111 reconciled.
 
 Only R6 remains: commit the final reviewed SHA, build and switch immutable
-`/opt/joy-media` releases, verify signed-in production and cleanup, then update
+`<vps-app-root>/joy-media` releases, verify signed-in production and cleanup, then update
 and push GBrain. No final deployment is claimed by this checkpoint.
 
 ## Success metric

@@ -390,10 +390,10 @@ Required budgets:
 3. Push the candidate branch only after local evidence is green.
 4. Require GitHub CI on that exact SHA.
 5. Fast-forward canonical `main` from `e261252` to the accepted SHA.
-6. Build an immutable JOY Media staging release under the existing `/opt/joy-media` procedure.
+6. Build an immutable JOY Media staging release under the existing `<vps-app-root>/joy-media` procedure.
 7. Record source SHA, artifact hash, release labels, and previous rollback target.
 
-Do not deploy JOY Media through `/opt/joy-wg-bot`; that is a different runtime.
+Do not deploy JOY Media through `<vps-app-root>/joy-wg-bot`; that is a different runtime.
 
 ### WP34-54 — Signed-in acceptance
 

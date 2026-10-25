@@ -114,15 +114,15 @@ Proven pattern across `d149711e` / `b0402e21` (built-in engine, 2026-09-04),
 WP-36 `733f584`, WP-35 `5273e34`, WP-34 `630c8ad`, WP-32, WP-29 …:
 
 - **Source**: push to `github/main` **and** the VPS bare `main`
-  (`/opt/joy-media.git`). VPS working checkout is **`/opt/joy-media/repo`**
-  (remotes: `origin` → GitHub, `vps-local` → `/opt/joy-media.git`).
-- **Immutable API release**: `/opt/joy-media/releases/<slug>-api-<UTCstamp>-<short>`
+  (`<vps-app-root>/joy-media.git`). VPS working checkout is **`<vps-app-root>/joy-media/repo`**
+  (remotes: `origin` → GitHub, `vps-local` → `<vps-app-root>/joy-media.git`).
+- **Immutable API release**: `<vps-app-root>/joy-media/releases/<slug>-api-<UTCstamp>-<short>`
   (older form `joy-media-<fullsha>-api`), activated by the **`current-api`**
   symlink.
-- **Immutable web release**: `/opt/joy-media/web-releases/editor-web-<UTCstamp>-<short>-<slug>`,
+- **Immutable web release**: `<vps-app-root>/joy-media/web-releases/editor-web-<UTCstamp>-<short>-<slug>`,
   activated by the **`web`** symlink.
 - **DB backup before activation**: `pg_dump` → gzip →
-  `/opt/joy-media/data/backups/<slug>-predeploy-<UTCstamp>.sql.gz`; record its
+  `<vps-app-root>/joy-media/data/backups/<slug>-predeploy-<UTCstamp>.sql.gz`; record its
   SHA-256; verify the gzip.
 - **Prior API env retained**: copy `/etc/joy-media/api.env` →
   `/etc/joy-media/api.env.before-<slug>-<UTCstamp>.env`.
@@ -148,13 +148,13 @@ joy-media@api` + `nginx` reload + 45 s health poll; self-restores on error).
 ### VPS facts you will need
 
 - SSH: `ssh sweden` (alias in `~/.ssh/config` → `<JOY_VPS_IP>`, user `root`,
-  key `~/.ssh/Joy-Vps-New.pem`). Fallback: `ssh -i ~/.ssh/Joy-Vps-New.pem root@<JOY_VPS_IP>`.
+  key `~/.ssh/<vps-key-file>`). Fallback: `ssh -i ~/.ssh/<vps-key-file> <vps-user>@<JOY_VPS_IP>`.
 - **`pnpm` is NOT on `PATH` in a fresh non-interactive SSH** — shim at
   **`/usr/local/bin/pnpm`**. `node` is on PATH. `corepack` may be absent.
 - Build env: `CI=true npm_config_confirm_modules_purge=false pnpm install --frozen-lockfile`.
 - Active services: `nginx`, `joy-media@api`, `joy-wg-bot`, `gbrain-http`,
   `nutrized-hermes`. **Touch only `joy-media@api` + `nginx` reload.** Never the
-  `joy-vps` agent's services / `/opt/joy-vps` / `/opt/joy-wg-bot` / shared
+  `joy-vps` agent's services / `<vps-app-root>/joy-vps` / `<vps-app-root>/joy-wg-bot` / shared
   nginx includes.
 - Origin check that bypasses Cloudflare:
   `curl --noproxy '*' --resolve joyst.ir:443:127.0.0.1 https://joyst.ir/…`
@@ -173,33 +173,33 @@ C0–C6, each with a verify gate). Summary of the VPS sequence, run **in an
 
 ```bash
 # C0 — discover (read-only). Record current web + current-api targets for rollback.
-readlink -f /opt/joy-media/web
-readlink -f /opt/joy-media/releases/current-api
-ls -1dt /opt/joy-media/web-releases/*/ | head -5
-git -C /opt/joy-media/repo remote -v && git -C /opt/joy-media/repo status -sb
+readlink -f <vps-app-root>/joy-media/web
+readlink -f <vps-app-root>/joy-media/releases/current-api
+ls -1dt <vps-app-root>/joy-media/web-releases/*/ | head -5
+git -C <vps-app-root>/joy-media/repo remote -v && git -C <vps-app-root>/joy-media/repo status -sb
 node -v; /usr/local/bin/pnpm -v
-cat /opt/joy-media/web/release-identity.env 2>/dev/null || true
+cat <vps-app-root>/joy-media/web/release-identity.env 2>/dev/null || true
 
 # C1 — get the exact candidate (push it from the PC first: `git push vps 855734cf:refs/heads/... ` is NOT
 #       right — push the branch/commit to the bare repo `vps` remote, or fetch from origin on the VPS)
-cd /opt/joy-media/repo
+cd <vps-app-root>/joy-media/repo
 git fetch origin && git fetch vps-local || true
-git worktree add --detach /opt/joy-media/build-855734cf 855734cf0c875101a632426983db2638c2adddcd
-cd /opt/joy-media/build-855734cf
+git worktree add --detach <vps-app-root>/joy-media/build-855734cf 855734cf0c875101a632426983db2638c2adddcd
+cd <vps-app-root>/joy-media/build-855734cf
 git rev-parse HEAD                # == 855734cf0c875101a632426983db2638c2adddcd
 git rev-parse HEAD^{tree}         # == 54ccefce85daf174b25620b24b64b9d54c130dcc
 git show HEAD:pnpm-lock.yaml | sha256sum   # == 36426937…8427b0b3
 
 # C2 — DB backup (guarded procedure; no migration in this release)
-mkdir -p /opt/joy-media/data/backups
+mkdir -p <vps-app-root>/joy-media/data/backups
 ts=$(date -u +%Y%m%dT%H%M%SZ)
 DB=$(grep -oP '^JOY_MEDIA_DATABASE_URL=\K.*' /etc/joy-media/api.env)
-pg_dump --format=custom "$DB" | gzip > "/opt/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz"
-gzip -t "/opt/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz" && \
-  sha256sum "/opt/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz"
+pg_dump --format=custom "$DB" | gzip > "<vps-app-root>/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz"
+gzip -t "<vps-app-root>/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz" && \
+  sha256sum "<vps-app-root>/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz"
 
 # C3 — build from the lockfile
-cd /opt/joy-media/build-855734cf
+cd <vps-app-root>/joy-media/build-855734cf
 CI=true npm_config_confirm_modules_purge=false /usr/local/bin/pnpm install --frozen-lockfile
 sha256sum pnpm-lock.yaml          # still 36426937…
 /usr/local/bin/pnpm --filter @joy-media/editor-web run build
@@ -208,7 +208,7 @@ test -f apps/editor-web/dist/index.html && echo dist-OK
 
 # C4 — stage the immutable web release (no pointer moved yet)
 rel="editor-web-$(date -u +%Y%m%dT%H%M%SZ)-855734c-r1-live-director"
-dst="/opt/joy-media/web-releases/$rel"
+dst="<vps-app-root>/joy-media/web-releases/$rel"
 cp -a apps/editor-web/dist "$dst"
 bash deploy/joy-media-release-identity.sh write "$dst/release-identity.env" \
   855734cf0c875101a632426983db2638c2adddcd \
@@ -219,25 +219,25 @@ echo "WEB_RELEASE=$rel"
 
 # (Optional) C4b — immutable API archive for identity bookkeeping. server.js must be byte-identical:
 CI=true npm_config_confirm_modules_purge=false /usr/local/bin/pnpm deploy --legacy --prod \
-  /opt/joy-media/releases/r1-855734cf-api-$ts
+  <vps-app-root>/joy-media/releases/r1-855734cf-api-$ts
 bash deploy/joy-media-release-identity.sh write \
-  /opt/joy-media/releases/r1-855734cf-api-$ts/release-identity.env \
+  <vps-app-root>/joy-media/releases/r1-855734cf-api-$ts/release-identity.env \
   855734cf0c875101a632426983db2638c2adddcd 54ccefce85daf174b25620b24b64b9d54c130dcc \
   36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3 5
-diff -q /opt/joy-media/releases/r1-855734cf-api-$ts/dist/server.js \
-  "$(readlink -f /opt/joy-media/releases/current-api)/dist/server.js" && echo "server.js unchanged"
+diff -q <vps-app-root>/joy-media/releases/r1-855734cf-api-$ts/dist/server.js \
+  "$(readlink -f <vps-app-root>/joy-media/releases/current-api)/dist/server.js" && echo "server.js unchanged"
 
 # C5 — atomic switch (FIRST irreversible step)
 nginx -t
 cp -p /etc/joy-media/api.env /etc/joy-media/api.env.before-r1-855734cf-$ts.env
 # web pointer:
-ln -sfn "/opt/joy-media/web-releases/$rel" /opt/joy-media/.web.new
-mv -Tf /opt/joy-media/.web.new /opt/joy-media/web
+ln -sfn "<vps-app-root>/joy-media/web-releases/$rel" <vps-app-root>/joy-media/.web.new
+mv -Tf <vps-app-root>/joy-media/.web.new <vps-app-root>/joy-media/web
 # api pointer + identity merge ONLY if you did C4b:
 bash deploy/joy-media-release-identity.sh merge /etc/joy-media/api.env \
-  /opt/joy-media/releases/r1-855734cf-api-$ts/release-identity.env /etc/joy-media/.api.env.new
-ln -sfn /opt/joy-media/releases/r1-855734cf-api-$ts /opt/joy-media/releases/.current-api.new
-mv -Tf /opt/joy-media/releases/.current-api.new /opt/joy-media/releases/current-api
+  <vps-app-root>/joy-media/releases/r1-855734cf-api-$ts/release-identity.env /etc/joy-media/.api.env.new
+ln -sfn <vps-app-root>/joy-media/releases/r1-855734cf-api-$ts <vps-app-root>/joy-media/releases/.current-api.new
+mv -Tf <vps-app-root>/joy-media/releases/.current-api.new <vps-app-root>/joy-media/releases/current-api
 mv -Tf /etc/joy-media/.api.env.new /etc/joy-media/api.env
 systemctl restart joy-media@api
 ok=0
@@ -255,14 +255,14 @@ curl -fsS "https://joyst.ir/?deploy=855734c" | sha256sum      # == sha256 of $ds
 If the source does not reach the VPS via `origin`/`vps-local` fetch, from the
 **PC** worktree: `git push vps 855734cf:refs/heads/live-director-r1` (or push
 the branch), then fetch on the VPS. The `vps` remote →
-`sweden:/opt/joy-media.git`.
+`sweden:<vps-app-root>/joy-media.git`.
 
 ### On failure
 
 `bash deploy/joy-media-rollback.sh --dry-run <good-api> <good-web>` then
 `--apply`. `<good-*>` = the C0 pre-deploy `current-api` / `web` targets. If only
-the web pointer moved: `ln -sfn <good-web> /opt/joy-media/.web.rb && mv -Tf
-/opt/joy-media/.web.rb /opt/joy-media/web && systemctl reload nginx`. Keep the
+the web pointer moved: `ln -sfn <good-web> <vps-app-root>/joy-media/.web.rb && mv -Tf
+<vps-app-root>/joy-media/.web.rb <vps-app-root>/joy-media/web && systemctl reload nginx`. Keep the
 DB backup. Report honestly; never relabel a failed smoke as success.
 
 ---
@@ -313,7 +313,7 @@ In `<owner-profile>\joy-media\.claude\settings.local.json` (or via
 
 ```
 "Bash(ssh sweden:*)",
-"Bash(ssh -i ~/.ssh/Joy-Vps-New.pem root@<JOY_VPS_IP>:*)",
+"Bash(ssh -i ~/.ssh/<vps-key-file> <vps-user>@<JOY_VPS_IP>:*)",
 "mcp__gbrain__search", "mcp__gbrain__get_page", "mcp__gbrain__put_page",
 "mcp__gbrain__add_link", "mcp__gbrain__add_timeline_entry"
 ```
@@ -432,7 +432,7 @@ Astra's non-blocking R2 follow-ups (from the R1 review) to fold in early:
 
 Claude-only, no OpenAI/Codex. Keep the BYOK browser engine — no KiloCode /
 local model / rewrite. Fontiran redistribution gate stays **CLOSED**. Don't
-touch the parallel `joy-vps` work (`/opt/joy-vps`, `/opt/joy-wg-bot`, its
+touch the parallel `joy-vps` work (`<vps-app-root>/joy-vps`, `<vps-app-root>/joy-wg-bot`, its
 services, shared nginx). Never edit/push the pull-only Desktop `gbrain` mirror.
 No deploy / service restart / pipeline run without Astra approval **and** the
 owner's go-ahead. The implementer never self-approves.

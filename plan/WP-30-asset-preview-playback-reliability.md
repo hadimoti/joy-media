@@ -3,8 +3,8 @@
 **Status:** FINISHED — product, live Chrome, cleanup, and GBrain gates green; documentation-only CI pending
 **Priority:** P1  
 **Baseline:** `280a84575d79a2a6848cd4a25804f705afcc4c0a`  
-**Repository:** `/opt/joy-media/repo`  
-**Production root:** `/opt/joy-media`  
+**Repository:** `<vps-app-root>/joy-media/repo`  
+**Production root:** `<vps-app-root>/joy-media`  
 **Depends on:** WP-29 finished and deployed  
 **Primary result:** An uploaded image or animation is visible and usable in every authenticated JOY Media browser, and animated GIF/WebP media plays consistently in the Asset Library, Program Monitor, timeline, and export.
 
@@ -398,7 +398,7 @@ All functional and UI/accessibility cases pass at all viewports. Resource use st
 
 ## STEP 8 — Signed-In Live Acceptance and Cleanup
 
-After candidate CI is green, deploy immutable API/editor releases from the same SHA using the established `/opt/joy-media` backup, health-check, byte-verification, and automatic rollback procedure.
+After candidate CI is green, deploy immutable API/editor releases from the same SHA using the established `<vps-app-root>/joy-media` backup, health-check, byte-verification, and automatic rollback procedure.
 
 Create exactly one disposable project:
 
@@ -503,7 +503,7 @@ This is a routing guide, not permission for broad rewrites:
 - Use additive database/schema changes only.
 - Take and verify a database backup before any production migration.
 - Build API and editor from one approved SHA into immutable release directories.
-- Switch only `/opt/joy-media/releases/current-api` and `/opt/joy-media/web`.
+- Switch only `<vps-app-root>/joy-media/releases/current-api` and `<vps-app-root>/joy-media/web`.
 - If health, public-byte, signed-in preview, or owner-isolation checks fail, restore both previous pointers, restart the API, verify health/public bytes, record the failure, and stop.
 - Do not edit immutable release artifacts or the live target directly.
 

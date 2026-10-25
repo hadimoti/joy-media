@@ -200,11 +200,11 @@ The owner later explicitly authorized bounded implementation, exact-candidate CI
 
 ### Production attempt and recovery
 
-- A pre-deployment database dump was created at `/opt/joy-media/backups/joymedia-pre-83eef395-20260930T233443Z.dump`; SHA-256 `909c7edd7e64e9c61cb23bbe1f713db50f29c1ce579e00e72952a981f3033081`. Its checksum and `pg_restore --list` validation passed.
-- The guarded cutover staged `/opt/joy-media/releases/joy-media-api-83eef395dce2-20260930T233542Z` from the exact candidate. Local and public health endpoints returned HTTP 200 and `nginx -t` passed.
-- Candidate Gmail OTP requests returned HTTP 500. After rollback, the previous immutable API release `/opt/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z` accepted the Gmail request with HTTP 200 and the email appeared in the authenticated inbox. This isolates the failure to the candidate release path, but the exact SMTP exception is not known.
+- A pre-deployment database dump was created at `<vps-app-root>/joy-media/backups/joymedia-pre-83eef395-20260930T233443Z.dump`; SHA-256 `909c7edd7e64e9c61cb23bbe1f713db50f29c1ce579e00e72952a981f3033081`. Its checksum and `pg_restore --list` validation passed.
+- The guarded cutover staged `<vps-app-root>/joy-media/releases/joy-media-api-83eef395dce2-20260930T233542Z` from the exact candidate. Local and public health endpoints returned HTTP 200 and `nginx -t` passed.
+- Candidate Gmail OTP requests returned HTTP 500. After rollback, the previous immutable API release `<vps-app-root>/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z` accepted the Gmail request with HTTP 200 and the email appeared in the authenticated inbox. This isolates the failure to the candidate release path, but the exact SMTP exception is not known.
 - The connected Gmail tool masks one-time codes, so a code-level verify-OTP round trip could not be performed. The Telegram request returned HTTP 200, but its code-level round trip also remains unverified because no authenticated Telegram session was available.
-- The rehearsed rollback was applied. Current API pointer is `/opt/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z`; the account/login root and existing editor-web pointer were left in place. Post-rollback local and public health checks returned HTTP 200 and `nginx -t` passed.
+- The rehearsed rollback was applied. Current API pointer is `<vps-app-root>/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z`; the account/login root and existing editor-web pointer were left in place. Post-rollback local and public health checks returned HTTP 200 and `nginx -t` passed.
 
 ### Current release gates
 
@@ -230,10 +230,10 @@ The owner specified that the editor UI must remain off production. This update r
 
 ### Production API
 
-- The API-only `deploy/deploy-cutover.sh` activated `/opt/joy-media/releases/joy-media-api-0cafd135fb9f-20261001T032845Z` with matching release identity.
+- The API-only `deploy/deploy-cutover.sh` activated `<vps-app-root>/joy-media/releases/joy-media-api-0cafd135fb9f-20261001T032845Z` with matching release identity.
 - API service is active; `/live` and `/ready` return HTTP 200; direct-origin `joyst.ir/` returns HTTP 200; `nginx -t` passes.
-- The previous API release remains available at `/opt/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z` for rollback. The validated database backup remains `/opt/joy-media/backups/joymedia-pre-83eef395-20260930T233443Z.dump` (SHA-256 `909c7edd7e64e9c61cb23bbe1f713db50f29c1ce579e00e72952a981f3033081`).
-- The web pointer remains `/opt/joy-media/web-releases/joy-media-9fef910e714a4fd87dba0449ea5f103b5fdd81fa-web`; Nginx still serves `/opt/joy-media/account-web`. No editor route or web pointer change occurred.
+- The previous API release remains available at `<vps-app-root>/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z` for rollback. The validated database backup remains `<vps-app-root>/joy-media/backups/joymedia-pre-83eef395-20260930T233443Z.dump` (SHA-256 `909c7edd7e64e9c61cb23bbe1f713db50f29c1ce579e00e72952a981f3033081`).
+- The web pointer remains `<vps-app-root>/joy-media/web-releases/joy-media-9fef910e714a4fd87dba0449ea5f103b5fdd81fa-web`; Nginx still serves `<vps-app-root>/joy-media/account-web`. No editor route or web pointer change occurred.
 
 ### OTP smoke status
 
@@ -245,11 +245,11 @@ The owner specified that the editor UI must remain off production. This update r
 
 - **A — Public source:** CLEARED. Repository is prepared and ready for public open-source release. All path literals generalized to `os.homedir()` / `tmpdir()`; test scripts sanitized; operational disclosures and private key paths sanitized; author metadata and commit history approved by owner for public release; whole-artifact asset review confirmed (OFL-1.1 fonts, MPL-2.0 Mediabunny route, synthetic test media); MIT licensing verified throughout.
 - **B — Desktop binary:** remains pending on binary rights/MPL source-route review, signing, and release-note approval. No binary was distributed.
-- **C — Production:** active API release `/opt/joy-media/releases/joy-media-api-0cafd135fb9f-20261001T032845Z`. Intermittent first Gmail OTP 500 diagnosed from `/opt/joy-media/logs/api.error.log` as transient `{ code: 'ESOCKET', command: 'CONN' }` socket timeout. Telegram delivery and code verification passed. The editor UI stays off production per owner decision.
+- **C — Production:** active API release `<vps-app-root>/joy-media/releases/joy-media-api-0cafd135fb9f-20261001T032845Z`. Intermittent first Gmail OTP 500 diagnosed from `<vps-app-root>/joy-media/logs/api.error.log` as transient `{ code: 'ESOCKET', command: 'CONN' }` socket timeout. Telegram delivery and code verification passed. The editor UI stays off production per owner decision.
 
 ## Final Public Release Closeout & Gate A Clearance (2026-10-01)
 
-- **Intermittent Gmail OTP 500 Evidence:** Root cause definitively identified in `/opt/joy-media/logs/api.error.log` as `{ code: 'ESOCKET', command: 'CONN' }`. Initial TCP connection to the SMTP provider timed out; retry succeeded with HTTP 200.
+- **Intermittent Gmail OTP 500 Evidence:** Root cause definitively identified in `<vps-app-root>/joy-media/logs/api.error.log` as `{ code: 'ESOCKET', command: 'CONN' }`. Initial TCP connection to the SMTP provider timed out; retry succeeded with HTTP 200.
 - **Sanitization Complete:** Removed hardcoded user paths and session directories from test scripts (`tests/desktop/computer-use-debug.mjs`, `tests/desktop/verify-asset-library.mjs`); sanitized private key paths in `ORCHESTRATION.md` and `plan/X01-vps-control-plane.md`.
 - **Public Open-Source Metadata Aligned:** `README.md` status badge updated to `License: MIT`; repository status section updated to Open Source Status under MIT; `docs/OPEN_SOURCE_RELEASE.md` updated with Gate A clearance.
 - **Release Status:** Repository is clean, tested, documented, and fully ready for public release.

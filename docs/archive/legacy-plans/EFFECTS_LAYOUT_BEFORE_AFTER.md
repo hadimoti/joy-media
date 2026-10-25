@@ -544,7 +544,7 @@ if (node.effects && node.effects.length > 0) {
 # Server: <CONTROL_PLANE_IP> (joyteam.ir)
 # App: media.joyteam.ir → Cloudflare → nginx :80/443 → localhost:8790
 # Service: systemd joy-media@api
-# Repo: /opt/joy-media (cloned from GitHub)
+# Repo: <vps-app-root>/joy-media (cloned from GitHub)
 # Build: pnpm install --frozen-lockfile && pnpm build
 # Deploy: systemctl restart joy-media@api
 # Logs: journalctl -u joy-media@api -f
@@ -560,7 +560,7 @@ if (node.effects && node.effects.length > 0) {
 - pnpm typecheck
 - pnpm test
 - pnpm build
-- rsync dist/ to VPS:/opt/joy-media/apps/editor-web/dist
+- rsync dist/ to VPS:<vps-app-root>/joy-media/apps/editor-web/dist
 - systemctl reload nginx
 - systemctl restart joy-media@api
 ```

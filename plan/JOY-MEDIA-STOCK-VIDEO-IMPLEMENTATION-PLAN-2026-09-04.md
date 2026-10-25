@@ -70,7 +70,7 @@ deployment page and the SuperPlane page if advisory lanes are used. Canonical
 source is `<owner-profile>\joy-media`; the legacy `joy-vps/joy-media` path is
 out of scope. Baseline is commit `1e378372c8b9ca5da9b1d30911d7568f936a38be`
 (schema 4), with existing resumable originals and a persistent
-`/opt/joy-media/data/upload-staging` directory.
+`<vps-app-root>/joy-media/data/upload-staging` directory.
 
 Do not:
 

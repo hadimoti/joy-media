@@ -1,9 +1,9 @@
 # P14 — Pro Tools Hermes Runbook
 
 **Executable residual plan** for CapCut + Premiere + AE + DaVinci tooling after Phases 0–6 + icon polish.  
-Hermes copy: `/root/.hermes/plans/2026-07-24_055929-joy-media-pro-tools-hermes-runbook.md` (keep in sync when editing).
+Hermes copy: `<vps-home>/.hermes/plans/2026-07-24_055929-joy-media-pro-tools-hermes-runbook.md` (keep in sync when editing).
 
-Baseline tip when authored: **`937f388`**. Live web: `/opt/joy-media/web` → `web-releases/2d67808` (P14.6). P14.7 is docs-only after that tip.
+Baseline tip when authored: **`937f388`**. Live web: `<vps-app-root>/joy-media/web` → `web-releases/2d67808` (P14.6). P14.7 is docs-only after that tip.
 
 ---
 
@@ -17,7 +17,7 @@ Baseline tip when authored: **`937f388`**. Live web: `/opt/joy-media/web` → `w
 ### Git (every STEP)
 
 ```bash
-cd /opt/joy-media/repo
+cd <vps-app-root>/joy-media/repo
 git add <step paths>
 git commit -m "$(cat <<'EOF'
 joy-media(P14.<step>): <why>
@@ -42,9 +42,9 @@ EOF
 ```bash
 pnpm --filter @joy-media/editor-web build
 SHA=$(git rev-parse --short HEAD)
-mkdir -p /opt/joy-media/web-releases/$SHA
-cp -a apps/editor-web/dist/. /opt/joy-media/web-releases/$SHA/
-ln -sfn /opt/joy-media/web-releases/$SHA /opt/joy-media/web
+mkdir -p <vps-app-root>/joy-media/web-releases/$SHA
+cp -a apps/editor-web/dist/. <vps-app-root>/joy-media/web-releases/$SHA/
+ln -sfn <vps-app-root>/joy-media/web-releases/$SHA <vps-app-root>/joy-media/web
 systemctl restart joy-media@api
 curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8790/health
 ```

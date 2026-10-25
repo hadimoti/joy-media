@@ -5,7 +5,7 @@
 **Current deployed product SHA:** `1b7e8abf27e41d132cda0714c890206400596c41`
 **Current documentation SHA:** pending documentation-only closeout commit
 **Failed GitHub run:** [31519828019](https://github.com/hadimoti/joy-media/actions/runs/31519828019)  
-**Repository:** `/opt/joy-media/repo` on the VPS and `<owner-profile>/joy-vps/joy-media-fix` locally
+**Repository:** `<vps-app-root>/joy-media/repo` on the VPS and `<owner-profile>/joy-vps/joy-media-fix` locally
 
 ## Objective
 
@@ -272,7 +272,7 @@ browser evidence, and cleanup.
 
 ### Preflight
 
-- Fast-forward `/opt/joy-media/repo` to the exact green repair SHA.
+- Fast-forward `<vps-app-root>/joy-media/repo` to the exact green repair SHA.
 - Record current API/editor rollback pointers.
 - Create and verify a fresh PostgreSQL backup without printing credentials.
 - Run database connectivity, schema-only dump, disk/inode, service, socket,
@@ -285,8 +285,8 @@ browser evidence, and cleanup.
   SHA.
 - Validate staged API health and editor asset hashes.
 - Switch only:
-  - `/opt/joy-media/releases/current-api`;
-  - `/opt/joy-media/web`.
+  - `<vps-app-root>/joy-media/releases/current-api`;
+  - `<vps-app-root>/joy-media/web`.
 - Restart only `joy-media@api.service` unless nginx configuration changed.
 - Verify service state, port `8790`, direct/public health, public root, and public
   byte hashes.
@@ -396,7 +396,7 @@ Do not leave the current GBrain statement saying only that CI was still running.
 - Run Markdown formatting, privacy scan, and `git diff --check`.
 - Commit and push only documentation/state changes.
 - Require its GitHub `check` and `browser-e2e` jobs to pass.
-- Fast-forward `/opt/joy-media/repo` to the documentation SHA without redeploying
+- Fast-forward `<vps-app-root>/joy-media/repo` to the documentation SHA without redeploying
   product artifacts.
 
 Record separately:

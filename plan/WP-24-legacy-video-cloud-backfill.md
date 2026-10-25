@@ -59,7 +59,7 @@ this document, commits, terminal transcripts, or issue comments.
 
 ### 1. Preflight
 
-- [x] Confirm `/opt/joy-media/repo` is clean and `main`, `origin/main`, and
+- [x] Confirm `<vps-app-root>/joy-media/repo` is clean and `main`, `origin/main`, and
       `vps-local/main` agree.
 - [x] Confirm the deployed API and editor releases, public health, and service health.
 - [x] Create and verify a fresh compressed PostgreSQL backup, then sync it off-site.

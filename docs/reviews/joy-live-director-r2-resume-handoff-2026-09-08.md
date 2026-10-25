@@ -263,19 +263,19 @@ tip):
   runtime change (only a test-file poll-budget widen); **zero `pnpm-lock.yaml` /
   `package.json` delta** (R1 added `mediabunny`; R2 adds nothing); no `deploy/`
   change; no nginx change (joyst.ir served from the **shared**
-  `/etc/nginx/conf.d/joy-wg-bot.conf` `root /opt/joy-media/web` — do NOT edit,
+  `/etc/nginx/conf.d/joy-wg-bot.conf` `root <vps-app-root>/joy-media/web` — do NOT edit,
   the symlink swap is transparent).
-- VPS: repo `/opt/joy-media/repo`, build worktree base
-  `/opt/joy-media/builds/joy-media-<sha>`, web releases
-  `/opt/joy-media/web-releases/*` + `/opt/joy-media/web` symlink, API releases
-  `/opt/joy-media/releases/*` + `current-api`, env `/etc/joy-media/api.env`
+- VPS: repo `<vps-app-root>/joy-media/repo`, build worktree base
+  `<vps-app-root>/joy-media/builds/joy-media-<sha>`, web releases
+  `<vps-app-root>/joy-media/web-releases/*` + `<vps-app-root>/joy-media/web` symlink, API releases
+  `<vps-app-root>/joy-media/releases/*` + `current-api`, env `/etc/joy-media/api.env`
   (merge only `JOY_MEDIA_RELEASE_*` via
   `deploy/joy-media-release-identity.sh merge`), unit `joy-media@api`, API origin
   `http://127.0.0.1:8790` `/live` `/ready`, public `/api/health`. `pnpm` on PATH
   (11.15.0). Build = root `CI=true pnpm build`. DB dump =
   `sudo -u postgres pg_dump --format=custom joymedia` (app role lacks LOCK).
   Origin check: `curl -k --noproxy '*' --resolve joyst.ir:443:127.0.0.1 https://joyst.ir/...`.
-- The owner runs each VPS block in their `root@<JOY_VPS_IP>` session and pastes
+- The owner runs each VPS block in their `<vps-user>@<JOY_VPS_IP>` session and pastes
   output back; you verify every value against the candidate triple and call
   go/no-go at each checkpoint. Nothing is irreversible before C5 (the symlink
   switch). Rollback = `deploy/joy-media-rollback.sh --apply <good-api> <good-web>`
@@ -294,7 +294,7 @@ tip):
 
 - Write the redacted R2 release result to **live VPS Gbrain**
   (`ops/joy-media-live-director-r2-deploy-2026-09-XX`), read it back. Gbrain via
-  the HTTP MCP at `http://10.250.99.1:3131/mcp` (bearer in
+  the HTTP MCP at `http://<host-ip>:3131/mcp` (bearer in
   `/etc/joy-studio/gbrain-mcp.env` — SENSITIVE, never reproduce); the `gbrain`
   CLI's PGLite is locked by `gbrain serve`, so use the MCP. Tools: `put_page`
   (slug `ops/<topic>-YYYY-MM-DD`), `get_page`, `add_timeline_entry` (needs

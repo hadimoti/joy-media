@@ -1036,7 +1036,7 @@ This task changes live state. Execute only after the local gate, clean push, exa
 
 **VPS rules:**
 
-- JOY Media lives at /opt/joy-media/repo and its immutable release paths.
+- JOY Media lives at <vps-app-root>/joy-media/repo and its immutable release paths.
 - Do not use the joy-vps scripts/sync-to-live.sh; that deploys the bot/webapp sibling.
 - Never edit a live release directory.
 - Never read or print the Hermes .env key.

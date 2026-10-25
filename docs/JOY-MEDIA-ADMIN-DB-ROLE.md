@@ -21,7 +21,7 @@ creation via the idempotent `POSTGRES_SCHEMA` migration in
 will succeed.
 
 Put the resulting connection string in joy-vps's production env file
-(`/opt/joy-wg-bot/.env`) as `JOY_MEDIA_DATABASE_URL`, e.g.:
+(`<vps-app-root>/joy-wg-bot/.env`) as `JOY_MEDIA_DATABASE_URL`, e.g.:
 
 ```
 JOY_MEDIA_DATABASE_URL=postgresql://joyvps_media_admin:<password>@127.0.0.1:5432/<joy_media_db_name>

@@ -17,8 +17,8 @@ Worker-delivery evidence. The standalone `joy-media` repository is the only prod
 Deliver JOY Media as a secure, durable, honest, desktop-class editing product whose visible
 features work end to end. Close every confirmed P0-P2 defect below, add proof for every P3
 evidence gap, commit all work to `main`, push the same commit to the `github` remote
-(`https://github.com/hadimoti/joy-media.git`) and the `vps` remote (`sweden:/opt/joy-media.git`),
-deploy that commit through the standalone JOY Media checkout at `/opt/joy-media/repo`, verify
+(`https://github.com/hadimoti/joy-media.git`) and the `vps` remote (`sweden:<vps-app-root>/joy-media.git`),
+deploy that commit through the standalone JOY Media checkout at `<vps-app-root>/joy-media/repo`, verify
 production in the authenticated Codex browser, and record the non-secret release result in Gbrain.
 
 "Complete" means all of the following:
@@ -71,7 +71,7 @@ These decisions remove the need to stop for product clarification during executi
 What is already proven and should be preserved:
 
 - GitHub `main` on remote `github`, the standalone JOY Media bare VPS remote `vps`
-  (`/opt/joy-media.git`), the deployment checkout `/opt/joy-media/repo`, and the immutable
+  (`<vps-app-root>/joy-media.git`), the deployment checkout `<vps-app-root>/joy-media/repo`, and the immutable
   web/API release were aligned to `615c36a` before this audit. This is distinct from the
   `joy-vps` repository and its runtime paths.
 - The previous strict gates collected 3,606 tests (3,604 passed, 2 skipped), the editor production
@@ -405,7 +405,7 @@ Promotion is blocked unless all are true:
   behavior or a truthful unavailable state.
 - Two consecutive clean strict gates pass on the exact candidate commit.
 - Git worktree is clean; local `main`, remote `github`, remote `vps`, and deployment checkout
-  `/opt/joy-media/repo` share the exact commit/tree/lockfile/schema identity. None of these
+  `<vps-app-root>/joy-media/repo` share the exact commit/tree/lockfile/schema identity. None of these
   checks may be satisfied by `joy-vps` or any legacy JOY Media pointer path.
 - The self-hosted source/release checks and all three self-hosted CI lanes pass twice on the exact
   release candidate commit; teardown, redaction, hashes, signatures, SBOM, and provenance are

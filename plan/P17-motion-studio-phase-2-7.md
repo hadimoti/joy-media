@@ -211,7 +211,7 @@ per-layer property values`, pure and independent of React (so it's reusable
 
 - **This machine has a local clone** at `<owner-profile>\joy-media-work\repo`
   (Windows), separate from the stale `<owner-profile>\joy-media`. Clone fresh
-  with `git -c core.protectNTFS=false clone ssh://root@<vps-ip>/opt/joy-media.git`
+  with `git -c core.protectNTFS=false clone ssh://<vps-user>@<vps-ip><vps-app-root>/joy-media.git`
   if working from a different machine — the repo carries
   `apps/editor-web/public/transitions/preview/gl:*.png` (colon in the filename),
   which NTFS can't materialize; `protectNTFS=false` lets checkout skip them
@@ -227,9 +227,9 @@ per-layer property values`, pure and independent of React (so it's reusable
   it's built), then `pnpm --filter @joy-media/editor-web dev` → `localhost:5173`
   or next free port. Reach Motion Studio via the "Motion" dockview panel → "My
   Motions" tab → "Create new motion", or "Open" an existing card.
-- The VPS (`/opt/joy-media/repo`, origin at `/opt/joy-media.git`) has no pnpm/
+- The VPS (`<vps-app-root>/joy-media/repo`, origin at `<vps-app-root>/joy-media.git`) has no pnpm/
   node_modules as of this writing — build and verify locally, then
-  `git push origin main` + `ssh … "cd /opt/joy-media/repo && git pull"` to ship,
+  `git push origin main` + `ssh … "cd <vps-app-root>/joy-media/repo && git pull"` to ship,
   same as this session did for Phase 0/1.
 - `pnpm -w exec tsc -b apps/editor-web packages/motion-core` is noisy with
   **pre-existing, unrelated** errors (`@joy-media/visual-effects` module

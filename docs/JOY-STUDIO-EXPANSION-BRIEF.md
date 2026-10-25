@@ -1,7 +1,7 @@
 # JOY Studio — Product & Expansion Brief
 
 > **Audience:** local product/architecture AI + human implementers  
-> **Repo root:** `/opt/joy-media/repo`  
+> **Repo root:** `<vps-app-root>/joy-media/repo`  
 > **Live domain:** `https://joyst.ir`  
 > **Date of snapshot:** 2026-07-30  
 > **Scope of this document:** accurate **Today** architecture + forward **Proposed** specs for Templates (+ PSD), Joy Code 3D tab, fullscreen 3D Studio + MCP, PNG→3D  
@@ -68,7 +68,7 @@ flowchart LR
 | Layer                | Reality                                                                                               |
 | -------------------- | ----------------------------------------------------------------------------------------------------- |
 | Brand in UI          | **Joy Studio** / **JOY Studio** (login lockup, menubar, Joy Code logos)                               |
-| Repo / API / systemd | Still **joy-media** (`/opt/joy-media/repo`, `/etc/joy-media/api.env`)                                 |
+| Repo / API / systemd | Still **joy-media** (`<vps-app-root>/joy-media/repo`, `/etc/joy-media/api.env`)                                 |
 | Domain               | Canonical **`joyst.ir`** / `www.joyst.ir`; `media.joyteam.ir` → 301 to joyst.ir                       |
 | First paint          | Project library gate (`ProjectLibrary.tsx`) then CapCut-tile Dockview workspace                       |
 | Auth                 | Independent allow-list OTP (Gmail / Telegram / Token) — ADR-0017 login                                |
@@ -262,7 +262,7 @@ sequenceDiagram
 | API               | `apps/api/src/media-auth.ts`, mailer, Telegram bot                           |
 | UI                | `LoginGate.tsx` — editor mounted, blurred until OTP; title **Joy Studio**    |
 | Admin allow-list  | joy-vps admin → direct Postgres role (see `docs/JOY-MEDIA-ADMIN-DB-ROLE.md`) |
-| Nginx             | `deploy/joy-media.nginx.conf` → `/opt/joy-media/web`, API `:8790`            |
+| Nginx             | `deploy/joy-media.nginx.conf` → `<vps-app-root>/joy-media/web`, API `:8790`            |
 | Secrets           | `/etc/joy-media/api.env` (not in repo)                                       |
 | Agent host policy | ADR-0020 KiloCode sole editing host; credentials stay server-side            |
 
@@ -273,7 +273,7 @@ sequenceDiagram
 ### 3.1 Repo layout
 
 ```
-/opt/joy-media/repo
+<vps-app-root>/joy-media/repo
 ├── apps/
 │   ├── api/              # Control plane /v1 + OTP auth + Postgres
 │   ├── editor-web/       # React/Vite editor (primary product surface)
@@ -883,16 +883,16 @@ Mark which issues are blocked on ADR decisions.
 
 | Path                                                                          | Why                                        |
 | ----------------------------------------------------------------------------- | ------------------------------------------ |
-| `/opt/joy-media/repo/DESIGN.md`                                               | CapCut shell, panel contract, tokens       |
-| `/opt/joy-media/repo/STATE.md`                                                | Live residuals, domain, deploy notes       |
-| `/opt/joy-media/repo/docs/adr/0017-independent-media-login.md`                | Independent OTP login                      |
-| `/opt/joy-media/repo/docs/adr/0017-hybrid-opfs-private-object-storage.md`     | OPFS + cloud assets (**number collision**) |
-| `/opt/joy-media/repo/docs/adr/0018-local-gpu-worker.md`                       | Local GPU Worker                           |
-| `/opt/joy-media/repo/docs/adr/0019-agent-command-envelope-and-atomic-runs.md` | Atomic agent runs                          |
-| `/opt/joy-media/repo/docs/adr/0020-kilocode-as-sole-editing-agent-host.md`    | Sole agent host                            |
-| `/opt/joy-media/repo/docs/adr/0021-agent-generation-jobs-and-provenance.md`   | Generation provenance                      |
-| `/opt/joy-media/repo/docs/adr/0027-workflow-templates.md`                     | Templates as transactions                  |
-| `/opt/joy-media/repo/deploy/joy-media.nginx.conf`                             | joyst.ir routing                           |
+| `<vps-app-root>/joy-media/repo/DESIGN.md`                                               | CapCut shell, panel contract, tokens       |
+| `<vps-app-root>/joy-media/repo/STATE.md`                                                | Live residuals, domain, deploy notes       |
+| `<vps-app-root>/joy-media/repo/docs/adr/0017-independent-media-login.md`                | Independent OTP login                      |
+| `<vps-app-root>/joy-media/repo/docs/adr/0017-hybrid-opfs-private-object-storage.md`     | OPFS + cloud assets (**number collision**) |
+| `<vps-app-root>/joy-media/repo/docs/adr/0018-local-gpu-worker.md`                       | Local GPU Worker                           |
+| `<vps-app-root>/joy-media/repo/docs/adr/0019-agent-command-envelope-and-atomic-runs.md` | Atomic agent runs                          |
+| `<vps-app-root>/joy-media/repo/docs/adr/0020-kilocode-as-sole-editing-agent-host.md`    | Sole agent host                            |
+| `<vps-app-root>/joy-media/repo/docs/adr/0021-agent-generation-jobs-and-provenance.md`   | Generation provenance                      |
+| `<vps-app-root>/joy-media/repo/docs/adr/0027-workflow-templates.md`                     | Templates as transactions                  |
+| `<vps-app-root>/joy-media/repo/deploy/joy-media.nginx.conf`                             | joyst.ir routing                           |
 
 ### Editor shell / layouts
 
@@ -955,4 +955,4 @@ Mark which issues are blocked on ADR decisions.
 
 ---
 
-_End of brief. Generated for local AI expansion; grounded in repo snapshot 2026-07-30. Prefer forward-only implementation on the live tree at `/opt/joy-media/repo` — do not restore from backups unless explicitly requested._
+_End of brief. Generated for local AI expansion; grounded in repo snapshot 2026-07-30. Prefer forward-only implementation on the live tree at `<vps-app-root>/joy-media/repo` — do not restore from backups unless explicitly requested._
