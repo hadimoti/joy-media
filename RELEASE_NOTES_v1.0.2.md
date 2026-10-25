@@ -1,18 +1,18 @@
-# JOY Media v1.0.2 — Release notes (candidate; not released)
+# JOY Media v1.0.2
 
-**Status: not released.** Candidate `7f2b826ded19aa1cffc35b04ede3fc5159480a9d` passed the exact-candidate two-pass release gate on its first attempt: `release-candidate-v2` run `40148387453`, all 18 jobs, 17 of 17 gate checks. Merging, tagging, publishing and deploying need the owner's separate approval. Nothing here has been published.
+**Released 2026-10-25** from commit `7f2b826ded19aa1cffc35b04ede3fc5159480a9d` (tag `v1.0.2`), which passed the exact-candidate two-pass release gate on its first attempt: `release-candidate-v2` run `40148387453`, all 18 jobs, 17 of 17 gate checks. The files attached to this release are the build output of that exact commit. This release is not deployed to any production service.
 
 ---
 
 ### Important Notice for Windows Users (Unsigned Installer)
 
-The Windows installer and portable package are **unsigned**. SmartScreen will warn on first launch. Installing an unsigned candidate is an owner-approved manual step. There is no automatic update or rollback (see the known gaps).
+The Windows installer and portable package are **unsigned**. SmartScreen will warn on first launch. Installing this unsigned build is a manual step. There is no automatic update or rollback (see the known gaps).
 
 ---
 
 ### Changes since v1.0.1
 
-This candidate is 339 commits after v1.0.1. The user-visible changes are:
+This release is 339 commits after v1.0.1. The user-visible changes are:
 
 **Desktop**
 
@@ -38,7 +38,7 @@ This candidate is 339 commits after v1.0.1. The user-visible changes are:
 
 ---
 
-### Verification of this candidate
+### Verification
 
 - **Gate:** `release-candidate-v2` run `40148387453` on the exact SHA. All 18 jobs succeeded on attempt 1, with retries disabled. `gate-summary` reported 17 of 17 checks passed: `command-health`, `source-provenance`, `readiness-evidence`, `tests` (6,355 collected, 0 failed), `generated-artifacts`, `fixture-registries`, `deployment-manifests`, `builds`, `static-assets`, `font-assets`, `manifest`, `sbom`, `browser-journey`, `performance-evidence`, `operational-evidence`, `windows-acceptance` and `feature-status`.
 - **Windows:** the installed lifecycle ran in two exact passes in the Windows Docker container (install, update, repair, rollback, app and CLI checks, uninstall), together with the packaged editor, export, fresh-process persistence and CLI render acceptances.
@@ -64,7 +64,7 @@ The readiness matrix (`docs/qa/READINESS-MATRIX.md`) has the per-scenario detail
 
 ### Downloads & Assets
 
-Not published. The files below are the candidate's build output; their digests come from the gate-verified `SHA256SUMS.txt`:
+The files attached to this release are the build output of the tagged commit. Their digests are in `SHA256SUMS.txt`, which the release gate verified:
 
 | File                               | SHA-256                                                            |
 | ---------------------------------- | ------------------------------------------------------------------ |
