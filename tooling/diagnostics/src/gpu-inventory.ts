@@ -10,7 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { redactFields, type RedactionOptions } from './redact-gpu-report.ts';
 
 /** The only top-level fields a redacted inventory may contain. */
@@ -209,11 +209,29 @@ export function redactInventory(
   return redactFields(report, options, INVENTORY_FIELDS);
 }
 
-/** True when `target` is `repository` itself or sits under it. */
-export function isInsideRepository(target: string, repository: string): boolean {
-  const path = relative(repository, target);
-  const [first] = path.split(/[\\/]/);
-  return path === '' || (first !== '..' && !isAbsolute(path));
+/**
+ * The rules a path comparison follows. Windows and POSIX differ in their separators and in whether case matters, so
+ * a caller can choose either. The script itself uses the host's rules.
+ */
+interface PathRules {
+  readonly sep: string;
+  relative(from: string, to: string): string;
+  isAbsolute(path: string): boolean;
+}
+
+/**
+ * True when `target` is `repository` itself or sits under it. The comparison works on whole path segments, so a
+ * sibling whose name begins with the repository's name (`repo-other` beside `repo`) is outside.
+ */
+export function isInsideRepository(
+  target: string,
+  repository: string,
+  rules: PathRules = { relative, isAbsolute, sep },
+): boolean {
+  const path = rules.relative(repository, target);
+  if (path === '') return true;
+  if (rules.isAbsolute(path)) return false;
+  return path !== '..' && !path.startsWith(`..${rules.sep}`);
 }
 
 /** Runs one fixed query in Windows PowerShell and returns its standard output. */

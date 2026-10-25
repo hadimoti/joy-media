@@ -1,3 +1,4 @@
+import { posix, resolve, win32 } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   INVENTORY_FIELDS,
@@ -182,9 +183,49 @@ describe('redactInventory', () => {
 });
 
 describe('isInsideRepository', () => {
+  // Each case names the rules it follows, so the result does not depend on the host that runs the suite.
   it('treats the repository and anything under it as inside, and sibling folders as outside', () => {
-    expect(isInsideRepository('C:\\repo\\out\\inventory.json', 'C:\\repo')).toBe(true);
-    expect(isInsideRepository('C:\\repo-other\\inventory.json', 'C:\\repo')).toBe(false);
-    expect(isInsideRepository('D:\\inventory.json', 'C:\\repo')).toBe(false);
+    expect(isInsideRepository('C:\\repo\\out\\inventory.json', 'C:\\repo', win32)).toBe(true);
+    expect(isInsideRepository('C:\\repo-other\\inventory.json', 'C:\\repo', win32)).toBe(false);
+    expect(isInsideRepository('D:\\inventory.json', 'C:\\repo', win32)).toBe(false);
+  });
+
+  it('applies the same segment boundaries to POSIX paths', () => {
+    expect(isInsideRepository('/repo', '/repo', posix)).toBe(true);
+    expect(isInsideRepository('/repo/out/inventory.json', '/repo', posix)).toBe(true);
+    expect(isInsideRepository('/repo-other/inventory.json', '/repo', posix)).toBe(false);
+    expect(isInsideRepository('/inventory.json', '/repo', posix)).toBe(false);
+  });
+
+  it('resolves parent references before deciding, on both platforms', () => {
+    expect(isInsideRepository('/repo/../repo-other/x.json', '/repo', posix)).toBe(false);
+    expect(isInsideRepository('/repo/out/../x.json', '/repo', posix)).toBe(true);
+    expect(isInsideRepository('C:\\repo\\..\\x.json', 'C:\\repo', win32)).toBe(false);
+    expect(isInsideRepository('C:\\repo\\out\\..\\x.json', 'C:\\repo', win32)).toBe(true);
+  });
+
+  it('follows each platform for case: Windows folders ignore it, POSIX folders do not', () => {
+    expect(isInsideRepository('C:\\REPO\\out\\x.json', 'c:\\repo', win32)).toBe(true);
+    expect(isInsideRepository('/REPO/out/x.json', '/repo', posix)).toBe(false);
+  });
+
+  it('keeps names that only begin with two dots inside the repository', () => {
+    expect(isInsideRepository('/repo/..cache/x.json', '/repo', posix)).toBe(true);
+    expect(isInsideRepository('C:\\repo\\..cache\\x.json', 'C:\\repo', win32)).toBe(true);
+  });
+
+  it('treats a trailing separator on the repository as the same folder', () => {
+    expect(isInsideRepository('C:\\repo\\out\\x.json', 'C:\\repo\\', win32)).toBe(true);
+    expect(isInsideRepository('/repo/out/x.json', '/repo/', posix)).toBe(true);
+  });
+
+  it('compares relative paths against the same working folder', () => {
+    expect(isInsideRepository('repo/out/x.json', 'repo', posix)).toBe(true);
+    expect(isInsideRepository('out/x.json', 'repo', posix)).toBe(false);
+  });
+
+  it('uses the host rules when none are passed', () => {
+    expect(isInsideRepository(resolve('repo', 'x.json'), resolve('repo'))).toBe(true);
+    expect(isInsideRepository(resolve('repo-other', 'x.json'), resolve('repo'))).toBe(false);
   });
 });
