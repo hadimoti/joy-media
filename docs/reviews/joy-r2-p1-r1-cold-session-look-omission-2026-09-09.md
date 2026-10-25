@@ -33,12 +33,12 @@ R2 gate). Candidate lock is still `c9e147f8…`, not the frozen-CI `36426937…`
 | Implementer session id | `f5351c9e-5d07-49d8-8a5c-f2b53533707d` (Claude Code, `claude-sonnet-5`)                                                                                                                                              |
 | UTC interval           | ~2026-09-09T20:25Z – ~2026-09-09T20:50Z                                                                                                                                                                              |
 | Branch                 | `codex/joy-r2-p1-discovery-20260909T194904Z` (HEAD matched `070e254c`, clean — continued in place per the prompt)                                                                                                    |
-| Worktree               | `<owner-profile>\joy-r2-p1-20260909T194904Z`                                                                                                                                                                       |
+| Worktree               | `<owner-profile>\joy-r2-p1-20260909T194904Z`                                                                                                                                                                         |
 | Base                   | `070e254c840b54e11f28b9558be747e0eb9ba04a` / tree `599b1dafa10b061e3a8af9b9f4cc0b899318ea84`                                                                                                                         |
 | Result                 | _filled into the return report after commit_                                                                                                                                                                         |
 | `pnpm-lock.yaml`       | git blob `bcf36b0d24e24d55305898e783b4813723e22d90` · raw SHA-256 `c9e147f8f56265b5e53e64800c1f691d67675ac2618434bfc821f666176b88aa` — **unchanged** (no install performed; existing isolated `node_modules` reused) |
 | Push state             | **not pushed**                                                                                                                                                                                                       |
-| Evidence root          | `<owner-profile>\Desktop\joy-r2-p1-r1-evidence-20260909T202513Z\`                                                                                                                                                  |
+| Evidence root          | `<owner-profile>\Desktop\joy-r2-p1-r1-evidence-20260909T202513Z\`                                                                                                                                                    |
 
 Preserved untouched: `looks-encoded-sample-acceptance.test.ts` in the
 `joy-live-director` worktree; `…\joy-r2-p0-evidence-20260909T185139Z\`,

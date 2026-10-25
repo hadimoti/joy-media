@@ -46,7 +46,7 @@ live R2 status and may have moved past this doc.
 
 | Thing     | Value                                                                                                                                               |
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Worktree  | `<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director`                                                                       |
+| Worktree  | `<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director`                                                                         |
 | Branch    | `codex/joy-live-director` (remote `github` = `https://github.com/hadimoti/joy-media.git`)                                                           |
 | HEAD      | `ef9d540e` — `docs(r2): re-pin candidate to 93d1c082` (docs-only past the candidate)                                                                |
 | Candidate | `93d1c082` — the SHA everything reviews/deploys against                                                                                             |
@@ -417,7 +417,7 @@ coordinate before both of you drive the gate.
 | `docs/reviews/joy-live-director-r2-deploy-runbook-2026-09-08.md`                     | the guarded Sweden deploy procedure                                         |
 | `docs/reviews/joy-live-director-r1-*`                                                | R1 precedent (bundle / runbook / deploy record)                             |
 | `docs/superpowers/plans/2026-09-05-joy-live-director-r2-r3.md`                       | R2 + R3 plan                                                                |
-| `<owner-profile>\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`                | the master plan (the locked goal)                                           |
+| `<owner-profile>\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`                  | the master plan (the locked goal)                                           |
 | `packages/motion-core/src/looks/`                                                    | the pure L2/L3/L4 engine                                                    |
 | `apps/editor-web/src/joy-agent/{look-operations,look-run-host,look-audio-bridge}.ts` | editor adapters                                                             |
 | `apps/editor-web/src/LivingLooksPanel.tsx` + `AgentPanel.tsx` "Looks" capability     | the UI                                                                      |
