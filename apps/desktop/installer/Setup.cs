@@ -28,7 +28,15 @@ namespace JoyMedia.Setup
 
             if (silent)
             {
-                InstallerEngine.InstallSync();
+                try
+                {
+                    InstallerEngine.InstallSync();
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("JOY Media setup failed: " + ex.Message);
+                    Environment.ExitCode = 1;
+                }
                 return;
             }
 
@@ -50,8 +58,13 @@ namespace JoyMedia.Setup
             return Path.Combine(localAppData, "Programs", "JOY Media");
         }
 
+        /// <summary>Problems that did not stop the install, such as a shortcut that could not be created. The window
+        /// shows them, so a partial install is never reported as a clean one.</summary>
+        public static readonly System.Collections.Generic.List<string> Warnings = new System.Collections.Generic.List<string>();
+
         public static void InstallSync(Action<int, string> progressCallback = null)
         {
+            Warnings.Clear();
             string installPath = GetInstallPath();
 
             if (progressCallback != null) progressCallback(5, "Preparing installation directory...");
@@ -137,7 +150,11 @@ namespace JoyMedia.Setup
             {
                 string exePath = Path.Combine(installPath, "joy-media.exe");
                 Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-                if (shellType == null) return;
+                if (shellType == null)
+                {
+                    Warnings.Add("The shortcuts could not be created because WScript.Shell is unavailable.");
+                    return;
+                }
                 dynamic shell = Activator.CreateInstance(shellType);
 
                 string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
@@ -156,61 +173,60 @@ namespace JoyMedia.Setup
                 shortcut2.Description = "JOY Media Desktop Application";
                 shortcut2.Save();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Warnings.Add("The shortcuts could not be created: " + ex.Message);
+            }
         }
 
         private static void RegisterUserPath(string installPath)
         {
             // Only the bin folder goes on PATH: the install root holds joy-media.exe (the GUI), and Windows
             // tries .EXE before .CMD. An earlier install listed the root, so that entry is removed.
+            // A failure is not swallowed: without the entry the commands are not registered.
             string binPath = Path.Combine(installPath, "bin");
-            try
+            using (RegistryKey envKey = Registry.CurrentUser.OpenSubKey("Environment", true))
             {
-                using (RegistryKey envKey = Registry.CurrentUser.OpenSubKey("Environment", true))
+                if (envKey == null)
                 {
-                    if (envKey != null)
-                    {
-                        string path = envKey.GetValue("Path", "", RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
-                        string[] parts = path.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-                        System.Collections.Generic.List<string> updated = new System.Collections.Generic.List<string>();
-                        foreach (string p in parts)
-                        {
-                            if (!p.Trim().Equals(installPath, StringComparison.OrdinalIgnoreCase)) updated.Add(p);
-                        }
-                        bool hasBin = updated.Exists(p => p.Trim().Equals(binPath, StringComparison.OrdinalIgnoreCase));
-                        if (!hasBin) updated.Add(binPath);
-                        string newPath = string.Join(";", updated.ToArray());
-                        if (!newPath.Equals(string.Join(";", parts), StringComparison.Ordinal))
-                        {
-                            envKey.SetValue("Path", newPath, RegistryValueKind.ExpandString);
-                        }
-                    }
+                    throw new InvalidOperationException("The user PATH could not be opened, so the commands were not registered.");
+                }
+                string path = envKey.GetValue("Path", "", RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
+                string[] parts = path.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                System.Collections.Generic.List<string> updated = new System.Collections.Generic.List<string>();
+                foreach (string p in parts)
+                {
+                    if (!p.Trim().Equals(installPath, StringComparison.OrdinalIgnoreCase)) updated.Add(p);
+                }
+                bool hasBin = updated.Exists(p => p.Trim().Equals(binPath, StringComparison.OrdinalIgnoreCase));
+                if (!hasBin) updated.Add(binPath);
+                string newPath = string.Join(";", updated.ToArray());
+                if (!newPath.Equals(string.Join(";", parts), StringComparison.Ordinal))
+                {
+                    envKey.SetValue("Path", newPath, RegistryValueKind.ExpandString);
                 }
             }
-            catch { }
         }
 
         private static void RegisterUninstaller(string installPath)
         {
-            try
+            // Apps & features removes JOY Media through this key, so a failure to write it is not swallowed.
+            string keyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\JoyMedia";
+            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(keyPath))
             {
-                string keyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\JoyMedia";
-                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(keyPath))
+                if (key == null)
                 {
-                    if (key != null)
-                    {
-                        string exePath = Path.Combine(installPath, "joy-media.exe");
-                        string uninstallCmd = Path.Combine(installPath, "uninstall.cmd");
-                        key.SetValue("DisplayName", "JOY Media", RegistryValueKind.String);
-                        key.SetValue("DisplayVersion", InstallerEngine.ProductVersion, RegistryValueKind.String);
-                        key.SetValue("Publisher", "JOY Team", RegistryValueKind.String);
-                        key.SetValue("DisplayIcon", exePath, RegistryValueKind.String);
-                        key.SetValue("InstallLocation", installPath, RegistryValueKind.String);
-                        key.SetValue("UninstallString", "\"" + uninstallCmd + "\"", RegistryValueKind.String);
-                    }
+                    throw new InvalidOperationException("The uninstall registration could not be created.");
                 }
+                string exePath = Path.Combine(installPath, "joy-media.exe");
+                string uninstallCmd = Path.Combine(installPath, "uninstall.cmd");
+                key.SetValue("DisplayName", "JOY Media", RegistryValueKind.String);
+                key.SetValue("DisplayVersion", InstallerEngine.ProductVersion, RegistryValueKind.String);
+                key.SetValue("Publisher", "JOY Team", RegistryValueKind.String);
+                key.SetValue("DisplayIcon", exePath, RegistryValueKind.String);
+                key.SetValue("InstallLocation", installPath, RegistryValueKind.String);
+                key.SetValue("UninstallString", "\"" + uninstallCmd + "\"", RegistryValueKind.String);
             }
-            catch { }
         }
     }
 
@@ -226,7 +242,6 @@ namespace JoyMedia.Setup
         public InstallerForm()
         {
             InitializeComponent();
-            this.Load += InstallerForm_Load;
         }
 
         private void InitializeComponent()
@@ -259,11 +274,12 @@ namespace JoyMedia.Setup
 
             statusLabel = new Label
             {
-                Text = "Ready to install...",
+                Text = "Ready to install to " + InstallerEngine.GetInstallPath(),
                 Font = new Font("Segoe UI", 9f),
                 ForeColor = Color.FromArgb(220, 220, 230),
                 Location = new Point(26, 105),
-                Size = new Size(450, 22)
+                Size = new Size(450, 22),
+                AutoEllipsis = true
             };
 
             progressBar = new ProgressBar
@@ -305,11 +321,6 @@ namespace JoyMedia.Setup
             this.Controls.Add(progressBar);
             this.Controls.Add(launchCheckbox);
             this.Controls.Add(actionButton);
-        }
-
-        private async void InstallerForm_Load(object sender, EventArgs e)
-        {
-            await StartInstallAsync();
         }
 
         private async void ActionButton_Click(object sender, EventArgs e)
@@ -356,8 +367,18 @@ namespace JoyMedia.Setup
                 });
 
                 progressBar.Value = 100;
-                statusLabel.Text = "JOY Media installed successfully!";
-                statusLabel.ForeColor = Color.FromArgb(16, 185, 129);
+                if (InstallerEngine.Warnings.Count > 0)
+                {
+                    MessageBox.Show(this, string.Join(Environment.NewLine, InstallerEngine.Warnings.ToArray()),
+                        "JOY Media Setup", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    statusLabel.Text = "JOY Media installed, with warnings.";
+                    statusLabel.ForeColor = Color.FromArgb(245, 158, 11);
+                }
+                else
+                {
+                    statusLabel.Text = "JOY Media installed successfully!";
+                    statusLabel.ForeColor = Color.FromArgb(16, 185, 129);
+                }
                 launchCheckbox.Visible = true;
                 actionButton.Text = "Finish";
                 actionButton.Enabled = true;
