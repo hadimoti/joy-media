@@ -1,21 +1,25 @@
 /** Global editor keyboard shortcuts (WP-16 UI pass): pure key → action mapping. */
 
-export type ShortcutAction =
-  | 'playback.toggle'
-  | 'history.undo'
-  | 'history.redo'
-  | 'palette.toggle'
-  | 'palette.close'
-  | 'clip.split'
-  | 'clip.delete'
-  | 'clip.duplicate'
-  | 'playhead.back'
-  | 'playhead.forward'
-  | 'playhead.backFine'
-  | 'playhead.forwardFine'
-  | 'playhead.start'
-  | 'playhead.end'
-  | 'shortcuts.toggle';
+/** Every action a global editor shortcut can resolve to. The coverage ledger reads this list. */
+export const SHORTCUT_ACTIONS = [
+  'playback.toggle',
+  'history.undo',
+  'history.redo',
+  'palette.toggle',
+  'palette.close',
+  'clip.split',
+  'clip.delete',
+  'clip.duplicate',
+  'playhead.back',
+  'playhead.forward',
+  'playhead.backFine',
+  'playhead.forwardFine',
+  'playhead.start',
+  'playhead.end',
+  'shortcuts.toggle',
+] as const;
+
+export type ShortcutAction = (typeof SHORTCUT_ACTIONS)[number];
 
 export interface ShortcutKeyEvent {
   readonly key: string;

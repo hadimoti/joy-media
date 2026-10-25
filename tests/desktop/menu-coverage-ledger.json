@@ -1,0 +1,194 @@
+{
+  "$comment": "Packaged-test coverage for every menu item and keyboard shortcut (L6). Status: exercised = the packaged spec drives the action; reachable = the packaged spec shows the item; open = no packaged test yet. Every non-open entry names a spec under tests/desktop whose text must contain the evidence string. Strict release mode (JOY_MEDIA_L6_RELEASE=1) fails while any entry is open.",
+  "menu": [
+    {
+      "id": "file.account",
+      "status": "reachable",
+      "spec": "menu-panels.spec.ts",
+      "evidence": "Account & Workstation",
+      "note": "Shown in the packaged File menu; the sign-in flow has its own real-service evidence."
+    },
+    {
+      "id": "file.projects",
+      "status": "reachable",
+      "spec": "menu-panels.spec.ts",
+      "evidence": "Projects Library",
+      "note": "Shown in the packaged File menu."
+    },
+    {
+      "id": "file.projectImport",
+      "status": "exercised",
+      "spec": "project-package-integrity.spec.ts",
+      "evidence": "Import Editable Project",
+      "note": "Packaged round trip of an editable project."
+    },
+    {
+      "id": "file.projectExport",
+      "status": "exercised",
+      "spec": "project-package-integrity.spec.ts",
+      "evidence": "Export Editable Project",
+      "note": "Packaged round trip of an editable project."
+    },
+    {
+      "id": "file.export",
+      "status": "open",
+      "note": "No packaged spec opens the File menu Export item itself; export specs use their own UI path."
+    },
+    {
+      "id": "file.signOut",
+      "status": "reachable",
+      "spec": "menu-panels.spec.ts",
+      "evidence": "Sign Out",
+      "note": "Shown in the packaged File menu; sign-out is not yet exercised from the menu."
+    },
+    {
+      "id": "edit.undo",
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "Undo",
+      "note": "Menu action changes the editor."
+    },
+    {
+      "id": "edit.redo",
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "Redo",
+      "note": "Menu action changes the editor."
+    },
+    {
+      "id": "edit.delete",
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "Cut / Delete Clip",
+      "note": "Menu action changes the editor."
+    },
+    {
+      "id": "edit.duplicate",
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "Duplicate Clip",
+      "note": "Menu action changes the editor."
+    },
+    {
+      "id": "edit.commandPalette",
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "Command Palette",
+      "note": "Menu action opens the palette."
+    },
+    {
+      "id": "edit.assetLibrarySettings",
+      "status": "reachable",
+      "spec": "menu-panels.spec.ts",
+      "evidence": "Asset Library Folder",
+      "note": "Shown in the packaged Edit menu; the folder dialog is not exercised."
+    },
+    {
+      "id": "clip.split",
+      "status": "open",
+      "note": "The Split at Playhead item has no packaged test; the editor's Split tool button is covered instead."
+    },
+    {
+      "id": "agent.open",
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "Open Joy Code",
+      "note": "Menu action opens Joy Code."
+    },
+    {
+      "id": "agent.executionMode",
+      "status": "open",
+      "note": "No packaged test opens Execution Mode."
+    },
+    { "id": "agent.stop", "status": "open", "note": "No packaged test covers Pause / Stop." },
+    {
+      "id": "agent.settings",
+      "status": "open",
+      "note": "No packaged test opens Joy Code Settings from the menu."
+    },
+    {
+      "id": "view.commandPalette",
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "Command Palette",
+      "note": "Same action as edit.commandPalette, reached from the View menu."
+    },
+    {
+      "id": "view.fullscreen",
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "Toggle Full Screen",
+      "note": "Toggles the host window full screen on and off."
+    },
+    { "id": "window.minimize", "status": "open", "note": "No packaged test covers Minimize." },
+    {
+      "id": "window.maximize",
+      "status": "open",
+      "note": "No packaged test covers Zoom / Maximize."
+    },
+    { "id": "window.close", "status": "open", "note": "No packaged test covers Close Window." }
+  ],
+  "menuPrefixes": [
+    {
+      "prefix": "view.panel.",
+      "status": "reachable",
+      "spec": "menu-panels.spec.ts",
+      "evidence": "workspace panels are reachable",
+      "note": "Every workspace panel is reachable from the View menu."
+    },
+    {
+      "prefix": "window.panel.",
+      "status": "open",
+      "note": "Window menu panel items have no packaged test."
+    }
+  ],
+  "shortcut": [
+    { "action": "playback.toggle", "status": "open", "note": "Space has no packaged test." },
+    {
+      "action": "history.undo",
+      "status": "open",
+      "note": "Ctrl+Z has no packaged test; the menu item is covered."
+    },
+    {
+      "action": "history.redo",
+      "status": "open",
+      "note": "Ctrl+Y has no packaged test; the menu item is covered."
+    },
+    { "action": "palette.toggle", "status": "open", "note": "Ctrl+K has no packaged test." },
+    {
+      "action": "palette.close",
+      "status": "open",
+      "note": "Escape closes the palette; no packaged test asserts it."
+    },
+    { "action": "clip.split", "status": "open", "note": "S has no packaged test." },
+    {
+      "action": "clip.delete",
+      "status": "open",
+      "note": "Delete and Backspace have no packaged test."
+    },
+    {
+      "action": "clip.duplicate",
+      "status": "open",
+      "note": "Ctrl+D has no packaged test; the menu item is covered."
+    },
+    {
+      "action": "playhead.back",
+      "status": "open",
+      "note": "Left arrow has no packaged assertion."
+    },
+    {
+      "action": "playhead.forward",
+      "status": "open",
+      "note": "Right arrow has no packaged assertion."
+    },
+    { "action": "playhead.backFine", "status": "open", "note": "Shift+Left has no packaged test." },
+    {
+      "action": "playhead.forwardFine",
+      "status": "open",
+      "note": "Shift+Right has no packaged test."
+    },
+    { "action": "playhead.start", "status": "open", "note": "Home has no packaged assertion." },
+    { "action": "playhead.end", "status": "open", "note": "End has no packaged assertion." },
+    { "action": "shortcuts.toggle", "status": "open", "note": "? has no packaged test." }
+  ]
+}
