@@ -189,9 +189,9 @@ does not waive the independent Claude Code review or the owner's release decisio
 - Use isolated work based on the fetched candidate; do not reset this checkout.
 - Follow the existing PR #7 handoff: branch integration remains on
   `hadimoti/wonderful-ritchie-vfpgv7`; workers return patches, never push or merge.
-- Before any worker, read `C:\Users\HadiMoti\Desktop\agents-handoff.md` and
+- Before any worker, read `<owner-profile>\Desktop\agents-handoff.md` and
   verify billing, effective isolation, and sanitized configuration. For this task,
-  the owner approved `C:\Users\HadiMoti\Desktop\KILO-BYTEPLUS-RUNBOOK.md` as its
+  the owner approved `<owner-profile>\Desktop\KILO-BYTEPLUS-RUNBOOK.md` as its
   replacement because the handoff file is absent. Implementation route:
   `kilo/byteplus-coding/deepseek-v4-flash`; existing quota only. No retired
   routes, new purchases, paid fallback, production credentials, or Gbrain writes.

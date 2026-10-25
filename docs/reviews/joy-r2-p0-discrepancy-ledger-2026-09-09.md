@@ -14,7 +14,7 @@ from observations plus a stated assumption) · **UNVERIFIED** (asserted, no rece
 
 > **P0-R1 revision (2026-09-09, Claude session `7c5ec584`).** Fresh read-only
 > `ffprobe` observations over the preserved media are in
-> `C:\Users\HadiMoti\Desktop\joy-r2-p0-r1-evidence-20260909T192442Z\`
+> `<owner-profile>\Desktop\joy-r2-p0-r1-evidence-20260909T192442Z\`
 > (`per-sample.json`, `raw-command-index.json`, `raw/<tag>.*`). Script line
 > citations are corrected against the preserved copies (real line counts:
 > `render-look-samples.mjs` 249, `render-look-samples-intended.mjs` 245,

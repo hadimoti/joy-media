@@ -3,7 +3,7 @@
 - **Owner:** Luna
 - **Status:** **IMPLEMENTED, TESTED, AND DEPLOYED**
 - **Prepared:** 2026-08-17
-- **Local repository:** `C:\Users\HadiMoti\joy-vps\joy-media-fix`
+- **Local repository:** `<owner-profile>\joy-vps\joy-media-fix`
 - **VPS repository:** `/opt/joy-media/repo`
 - **Production root:** `/opt/joy-media`
 - **User-specified reference URL:** `https://joyst.ir/?deploy=9996c0e`

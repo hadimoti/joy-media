@@ -127,14 +127,14 @@ agent handoff notes, evidence ledgers, and worktree paths that no external contr
 
 ### S1 — Production infrastructure identifiers in tracked files · **critical**
 
-- `STATE.md:188` — `82.115.8.224`, user `root`, key `C:\Users\HadiMoti\.ssh\Joy-Vps-New.pem`,
+- `STATE.md:188` — `82.115.8.224`, user `root`, key `<owner-profile>\.ssh\Joy-Vps-New.pem`,
   plus the `ssh sweden` alias convention.
 - `ORCHESTRATION.md:98` — a _second_ IP, `46.249.103.142`, with CPU/RAM/disk inventory.
 - `AGENTIC_EDITING_NEXT_AGENT.md:12,41,511` — checkout path and `.pem` path.
 - `docs/SELF-HOSTED-CI.md`, `ops/self-hosted/linux-runner/entrypoint.sh:12`,
   `ops/self-hosted/linux-runner/README.md:17` — `hadimoti/joy-media` and runner registration
   procedure.
-- ~40 files under `docs/reviews/`, `docs/qa/`, `plan/` with `C:\Users\HadiMoti\...` paths.
+- ~40 files under `docs/reviews/`, `docs/qa/`, `plan/` with `<owner-profile>\...` paths.
 
 **Action:** treat the VPS IPs as compromised-on-publish — rotate the SSH key and restrict by
 source before the repo flips public. Then scrub. Because these are in _git history_, scrubbing

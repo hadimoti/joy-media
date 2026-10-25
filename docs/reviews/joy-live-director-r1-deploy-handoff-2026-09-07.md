@@ -19,7 +19,7 @@ then executed it.
 ## 0. TL;DR for the next session
 
 1. Start in an **interactive `claude` terminal** (not `-p`, not auto mode) from
-   `C:\Users\HadiMoti\joy-media` so you can approve `ssh sweden` at the prompt,
+   `<owner-profile>\joy-media` so you can approve `ssh sweden` at the prompt,
    or add the permission rule in §5.
 2. Confirm the gate is still green (§2), then run the guarded deploy (§4) of
    candidate **`855734cf0c875101a632426983db2638c2adddcd`**.
@@ -39,7 +39,7 @@ The auto-mode classifier in the finishing session denied, every time:
 
 - `ssh sweden '…'` and `ssh -o BatchMode=yes sweden …` — "Blocked by classifier"
 - `mcp__terminal__read_terminal` — same
-- `Write` of `C:\Users\HadiMoti\joy-media\.mcp.json` containing an `ssh`-command
+- `Write` of `<owner-profile>\joy-media\.mcp.json` containing an `ssh`-command
   MCP server — same (it is an indirect SSH-exec path)
 - `cmd //c mklink` for skill symlinks — "insufficient privilege" (unrelated;
   worked around by copying, see §5)
@@ -50,7 +50,7 @@ sweden` once at the permission prompt (or pre-authorize it, §5) and proceed.
 
 Everything that did **not** require the VPS is done and committed on
 `codex/joy-live-director` (worktree
-`C:\Users\HadiMoti\.config\superpowers\worktrees\joy-media\joy-live-director`).
+`<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director`).
 
 ---
 
@@ -282,7 +282,7 @@ paths; read it before touching the VPS.
 
 ### Gbrain MCP — NOT done (classifier blocked the `.mcp.json` write)
 
-Create `C:\Users\HadiMoti\joy-media\.mcp.json` (from `~/.codex/config.toml`
+Create `<owner-profile>\joy-media\.mcp.json` (from `~/.codex/config.toml`
 `[mcp_servers.gbrain]`):
 
 ```json
@@ -302,13 +302,13 @@ Then in an interactive `claude` session, approve the server when prompted (or
 `claude mcp add`). Tools: `search`, `get_page`, `put_page`, `add_link`,
 `add_timeline_entry`, `query`, `get_backlinks` (see `brain-ops` skill). Prior
 sessions sometimes hit `Transport closed` on this MCP — if it persists, the
-PC-side helpers still work: `C:\Users\HadiMoti\Desktop\gbrain-pc\scripts\`
+PC-side helpers still work: `<owner-profile>\Desktop\gbrain-pc\scripts\`
 (`Start-Agent-Process.ps1`, `Invoke-VpsGbrainExport.ps1`,
 `Publish-PcReceipt.ps1`, `Use-PcGbrain.ps1`).
 
 ### SSH permission — add so the deploy session isn't re-walled
 
-In `C:\Users\HadiMoti\joy-media\.claude\settings.local.json` (or via
+In `<owner-profile>\joy-media\.claude\settings.local.json` (or via
 `/permissions` in an interactive session), add to `permissions.allow`:
 
 ```
@@ -361,15 +361,15 @@ From `~/.codex/AGENTS.md` + `sweden-vps-ops` skill:
    rollback command, next open milestone = R2. **No secrets.** Add a
    `joy-media-state` / `add_timeline_entry` entry.
 2. **Read it back** to confirm it persisted.
-3. `& 'C:\Users\HadiMoti\Desktop\gbrain-pc\scripts\Invoke-VpsGbrainExport.ps1'`
+3. `& '<owner-profile>\Desktop\gbrain-pc\scripts\Invoke-VpsGbrainExport.ps1'`
    with **NO arguments**. Record the verified export SHA in a **redacted**
-   `C:\Users\HadiMoti\Desktop\gbrain-pc\receipts\` entry.
-4. `& 'C:\Users\HadiMoti\Desktop\gbrain-pc\scripts\Publish-PcReceipt.ps1'`.
-5. Fresh-read `C:\Users\HadiMoti\Desktop\VPS-AGENT-BRIEF.md`; **append** the
+   `<owner-profile>\Desktop\gbrain-pc\receipts\` entry.
+4. `& '<owner-profile>\Desktop\gbrain-pc\scripts\Publish-PcReceipt.ps1'`.
+5. Fresh-read `<owner-profile>\Desktop\VPS-AGENT-BRIEF.md`; **append** the
    validated R1 release facts (candidate/artifact identity, scope, tests,
    rollback, next milestone). Preserve the independent `joy-vps` agent's
    sections and any concurrent edits. No secrets.
-6. **Never** edit or push `C:\Users\HadiMoti\Desktop\gbrain` (pull-only mirror).
+6. **Never** edit or push `<owner-profile>\Desktop\gbrain` (pull-only mirror).
 7. Update `STATE.md` on `codex/joy-live-director` with an "R1 Live Director
    deployment" section in the house style (see §3 examples), commit
    `docs(release): record R1 Live Director deployment evidence`.
@@ -415,7 +415,7 @@ Astra's non-blocking R2 follow-ups (from the R1 review) to fold in early:
 | Master plan + release rules    | `docs/superpowers/plans/2026-09-05-joy-live-director-master.md`                                            |
 | R1 task list                   | `docs/superpowers/plans/2026-09-05-joy-live-director-r1.md`                                                |
 | R2/R3 task list                | `docs/superpowers/plans/2026-09-05-joy-live-director-r2-r3.md`                                             |
-| Original next-agent plan       | `C:\Users\HadiMoti\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`                                      |
+| Original next-agent plan       | `<owner-profile>\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`                                      |
 | Astra acceptance bundle        | `docs/reviews/joy-live-director-r1-acceptance-bundle-2026-09-07.md`                                        |
 | Deploy runbook (C0–C6)         | `docs/reviews/joy-live-director-r1-deploy-runbook-2026-09-07.md`                                           |
 | Coverage ledger + verifier     | `docs/reviews/joy-live-director-coverage.json`, `tooling/release/verify-agent-operation-coverage.mjs`      |
@@ -424,8 +424,8 @@ Astra's non-blocking R2 follow-ups (from the R1 review) to fold in early:
 | Historical deploy evidence     | `STATE.md` (built-in engine 2026-09-04; WP-34/35/36 closeouts)                                             |
 | VPS operational map            | `~/.claude/skills/sweden-vps-ops/references/operational-map.md`                                            |
 | Gbrain ritual                  | `~/.codex/AGENTS.md`, `~/.claude/skills/brain-ops/SKILL.md`                                                |
-| Memory (update each session)   | `C:\Users\HadiMoti\.claude\projects\C--Users-HadiMoti-joy-media\memory\joy-media-live-director-state.md`   |
-| Worktree (work happens here)   | `C:\Users\HadiMoti\.config\superpowers\worktrees\joy-media\joy-live-director` on `codex/joy-live-director` |
+| Memory (update each session)   | `<owner-profile>\.claude\projects\C--Users-HadiMoti-joy-media\memory\joy-media-live-director-state.md`   |
+| Worktree (work happens here)   | `<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director` on `codex/joy-live-director` |
 | WIP safety snapshot            | `stash@{0}` `e0eb6368`, tag `wip-snapshot-2026-09-06`, branch `codex/joy-live-director-wip` — never delete |
 
 ### Hard limits (unchanged)

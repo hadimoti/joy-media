@@ -10,11 +10,11 @@ planning or reporting task. Continue until every release gate in that plan is sa
 is committed to `main`, pushed to remote `github` (`https://github.com/hadimoti/joy-media.git`)
 and remote `vps` (`sweden:/opt/joy-media.git`), deployed through `/opt/joy-media/repo` as one
 immutable production release, tested live, and recorded in Gbrain. Work only in the standalone
-`C:\Users\HadiMoti\joy-media` repository and its JOY Media runtime; do not modify
-`C:\Users\HadiMoti\joy-vps`, `/opt/joy-vps`, or any legacy `joy-vps/joy-media` pointer path.
+`<owner-profile>\joy-media` repository and its JOY Media runtime; do not modify
+`<owner-profile>\joy-vps`, `/opt/joy-vps`, or any legacy `joy-vps/joy-media` pointer path.
 
 Start by reading `AGENTS.md`, `DESIGN.md`, this goal file, the closure plan, the current `STATE.md`,
-`C:\Users\HadiMoti\Desktop\VPS-AGENT-BRIEF.md`, and the authoritative Gbrain page
+`<owner-profile>\Desktop\VPS-AGENT-BRIEF.md`, and the authoritative Gbrain page
 `joy-vps-agent-brief` as the operational input map. Read existing JOY Media completion evidence
 from `ops/joy-media-worker-6a77940-2026-08-29` and write final release evidence back to that page
 or its explicitly linked successor—not to the input brief alone. Preserve existing work. Verify
@@ -100,7 +100,7 @@ Do not mark this goal complete while any P0-P2 item or P3 evidence gap in the cl
 At the end, align local `main`, remote `github`, remote `vps`, deployment checkout
 `/opt/joy-media/repo`, tree, lockfile, schema, web/API release, and signed Worker package; update
 `STATE.md`, plans/ADRs/docs, and the authoritative Gbrain operational page without secrets. Update
-`C:\Users\HadiMoti\Desktop\VPS-AGENT-BRIEF.md` if the non-secret operational map changed. Report
+`<owner-profile>\Desktop\VPS-AGENT-BRIEF.md` if the non-secret operational map changed. Report
 the exact commit/release/package identities, hosted and self-hosted CI results, test counts,
 browser evidence, canary, rollback target, Gbrain commit, and clean worktree.
 

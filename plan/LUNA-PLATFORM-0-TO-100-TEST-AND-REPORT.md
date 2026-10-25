@@ -3,8 +3,8 @@
 - Prepared: 2026-08-15
 - Owner/executor: Luna
 - Mode: evidence-first testing and reporting
-- Repository: `C:\Users\HadiMoti\joy-media-audio-enhance`
-- Local model root: `C:\Users\HadiMoti\JOY\models`
+- Repository: `<owner-profile>\joy-media-audio-enhance`
+- Local model root: `<owner-profile>\JOY\models`
 - Public editor: `https://joyst.ir/`
 - Media API: `https://media.joyteam.ir/api`
 - Admin/GBrain observation surface: `https://admin.joyteam.ir/brain`
@@ -197,7 +197,7 @@ location, retention policy, and redaction status.
 
 ### 6.1 Repository baseline
 
-From `C:\Users\HadiMoti\joy-media-audio-enhance`:
+From `<owner-profile>\joy-media-audio-enhance`:
 
 ```powershell
 git status --short
@@ -222,7 +222,7 @@ Acceptance:
 
 ### 6.2 Model baseline
 
-Inventory `C:\Users\HadiMoti\JOY\models` recursively. Record relative path,
+Inventory `<owner-profile>\JOY\models` recursively. Record relative path,
 byte size, modification time, SHA-256, readable status, and duplicate content.
 Do not add model binaries to Git.
 
@@ -357,7 +357,7 @@ the local package is incomplete or not connected to the expected cache.
 
 #### HTDemucs
 
-- Use `C:\Users\HadiMoti\.joy-media\audio-venv\Scripts\python.exe`.
+- Use `<owner-profile>\.joy-media\audio-venv\Scripts\python.exe`.
 - Load `htdemucs` with network disabled and prove the cache junction resolves.
 - Separate a deterministic mixed fixture into exactly `drums`, `bass`, `other`,
   and `vocals` at 44.1 kHz stereo.

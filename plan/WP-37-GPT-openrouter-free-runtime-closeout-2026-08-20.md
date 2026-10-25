@@ -67,7 +67,7 @@ Primary references:
 
 ## 2. Starting state and known gaps
 
-Start from canonical repository `C:/Users/HadiMoti/joy-vps/joy-media-fix`, branch `main`, commit `a00e011` or its reviewed descendant, with a clean worktree.
+Start from canonical repository `<owner-profile>/joy-vps/joy-media-fix`, branch `main`, commit `a00e011` or its reviewed descendant, with a clean worktree.
 
 Already complete:
 

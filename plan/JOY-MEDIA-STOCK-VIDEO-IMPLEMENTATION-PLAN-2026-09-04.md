@@ -36,17 +36,17 @@ advisory lanes because the owner explicitly approved them in this handoff:
 
 - Codex-spawned implementation or review agents: `gpt-5.6-luna` only.
 - SuperPlane and DSH through the local bundle under
-  `C:\Users\HadiMoti\Desktop\HadiPc-Agents` and
-  `C:\Users\HadiMoti\hadipc-agent`: advisory/review only.
+  `<owner-profile>\Desktop\HadiPc-Agents` and
+  `<owner-profile>\hadipc-agent`: advisory/review only.
 - Owner independent agents launched from
-  `C:\Users\HadiMoti\Desktop\HadiPc-Agents`: advisory/review only.
+  `<owner-profile>\Desktop\HadiPc-Agents`: advisory/review only.
 
 SuperPlane/DSH/independent agents may inspect only an OS-enforced read-only
 snapshot and a bounded redacted packet. They may not implement, edit, commit,
 push, deploy, restart a service, operate the signed-in browser, read provider
 credentials, or access production data. A process exit is not acceptance.
 If SuperPlane is used, first consult the professional advisory contract in
-`C:\Users\HadiMoti\Desktop\gbrain-pc\plans\superplane-professional-advisory-pipeline-2026-08-30.md`
+`<owner-profile>\Desktop\gbrain-pc\plans\superplane-professional-advisory-pipeline-2026-08-30.md`
 and VPS page `ops/superplane-professional-pipeline-2026-08-30`. Require S0–S5
 intake, bounded snapshot, structured redacted packets, evidence validation,
 and Luna adjudication before any primary-agent execution. The historical
@@ -63,11 +63,11 @@ tokens, prompts, raw provider responses, or unredacted logs.
 
 Start with the required Gbrain process gate:
 
-`C:\Users\HadiMoti\Desktop\gbrain-pc\scripts\Start-Agent-Process.ps1`
+`<owner-profile>\Desktop\gbrain-pc\scripts\Start-Agent-Process.ps1`
 
 Then query the authenticated VPS Gbrain MCP, including the current JOY Media
 deployment page and the SuperPlane page if advisory lanes are used. Canonical
-source is `C:\Users\HadiMoti\joy-media`; the legacy `joy-vps/joy-media` path is
+source is `<owner-profile>\joy-media`; the legacy `joy-vps/joy-media` path is
 out of scope. Baseline is commit `1e378372c8b9ca5da9b1d30911d7568f936a38be`
 (schema 4), with existing resumable originals and a persistent
 `/opt/joy-media/data/upload-staging` directory.

@@ -65,8 +65,8 @@ New pure modules live in their owning packages. Host orchestration lives under `
 
 ## Phase 0 — ownership, truth and evaluation fixtures
 
-- [ ] Run `& 'C:\Users\HadiMoti\Desktop\gbrain-pc\scripts\Start-Agent-Process.ps1'`, then query authenticated VPS Gbrain for `joy-vps-agent-brief` and newer JOY-specific release pages. A mirror is not the live source of truth.
-- [ ] Read `C:\Users\HadiMoti\Desktop\VPS-AGENT-BRIEF.md`. Record only redacted deployment facts. Preserve newer sections from the independent `joy-vps` agent.
+- [ ] Run `& '<owner-profile>\Desktop\gbrain-pc\scripts\Start-Agent-Process.ps1'`, then query authenticated VPS Gbrain for `joy-vps-agent-brief` and newer JOY-specific release pages. A mirror is not the live source of truth.
+- [ ] Read `<owner-profile>\Desktop\VPS-AGENT-BRIEF.md`. Record only redacted deployment facts. Preserve newer sections from the independent `joy-vps` agent.
 - [ ] Record branch/HEAD/tree/lock digest, working changes and current owner task boundaries in `docs/reviews/joy-live-director-baseline.md`. Discover active tasks read-only if necessary. Never reset, clean, stash, commit or deploy another agent's work.
 - [ ] Run focused existing agent/media/property/render tests and required full checks. Record real failures/skips rather than infer support from a plan checkbox.
 - [ ] Create `docs/reviews/joy-live-director-coverage.json` from source-linked UI/action/property/domain entries, with status `verified`, `unsupported`, `read-only`, `internal-inverse` or `legacy-disabled`. Include test IDs and rendered/audio evidence where relevant. A claimed creative capability cannot be `verified` from metadata alone.

@@ -32,7 +32,7 @@ from a fresh session.
 - **What is left** (steps 1–7 below): 2nd gate run ×2 → CodeRabbit round 3 → **owner taste verdicts on the 6 packs** → independent Opus "Astra" `APPROVE_FOR_DEPLOY` on `93d1c082` → **owner go-ahead** → guarded Sweden deploy → closeout.
 
 The locked `/goal` still governs: finish R1→R2→R3, Claude-only, per the plan at
-`C:\Users\HadiMoti\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`. **You never
+`<owner-profile>\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`. **You never
 self-approve. No OpenAI/Codex anywhere. Keep the BYOK browser engine. Fontiran
 gate stays CLOSED. Don't touch the parallel joy-vps work. Never edit the pull-only
 Desktop `gbrain` mirror.**
@@ -46,7 +46,7 @@ live R2 status and may have moved past this doc.
 
 | Thing     | Value                                                                                                                                               |
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Worktree  | `C:\Users\HadiMoti\.config\superpowers\worktrees\joy-media\joy-live-director`                                                                       |
+| Worktree  | `<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director`                                                                       |
 | Branch    | `codex/joy-live-director` (remote `github` = `https://github.com/hadimoti/joy-media.git`)                                                           |
 | HEAD      | `ef9d540e` — `docs(r2): re-pin candidate to 93d1c082` (docs-only past the candidate)                                                                |
 | Candidate | `93d1c082` — the SHA everything reviews/deploys against                                                                                             |
@@ -154,7 +154,7 @@ candidate**. Run 1 (`34168068793`) is green. Dispatch run 2 on the **same**
 candidate `93d1c082`:
 
 ```bash
-cd C:\Users\HadiMoti\.config\superpowers\worktrees\joy-media\joy-live-director
+cd <owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director
 git fetch github --prune
 # confirm candidate unchanged:
 git rev-parse 93d1c082                       # 93d1c082ef4f86e4caca00effef8a2082cfd5af0
@@ -300,7 +300,7 @@ tip):
   (slug `ops/<topic>-YYYY-MM-DD`), `get_page`, `add_timeline_entry` (needs
   `slug` + `date` YYYY-MM-DD + `summary`).
 - `Invoke-VpsGbrainExport.ps1` with **NO arguments**
-  (`C:\Users\HadiMoti\Desktop\gbrain-pc\scripts\`); record the verified export
+  (`<owner-profile>\Desktop\gbrain-pc\scripts\`); record the verified export
   SHA in a redacted `gbrain-pc` receipt; `Publish-PcReceipt.ps1 -ReceiptPath receipts/<name>.md`.
 - Fresh-read + append the validated R2 release + limitations to Desktop
   `VPS-AGENT-BRIEF.md` (candidate/artifact identity, scope, tests, rollback, the
@@ -417,7 +417,7 @@ coordinate before both of you drive the gate.
 | `docs/reviews/joy-live-director-r2-deploy-runbook-2026-09-08.md`                     | the guarded Sweden deploy procedure                                         |
 | `docs/reviews/joy-live-director-r1-*`                                                | R1 precedent (bundle / runbook / deploy record)                             |
 | `docs/superpowers/plans/2026-09-05-joy-live-director-r2-r3.md`                       | R2 + R3 plan                                                                |
-| `C:\Users\HadiMoti\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`                | the master plan (the locked goal)                                           |
+| `<owner-profile>\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`                | the master plan (the locked goal)                                           |
 | `packages/motion-core/src/looks/`                                                    | the pure L2/L3/L4 engine                                                    |
 | `apps/editor-web/src/joy-agent/{look-operations,look-run-host,look-audio-bridge}.ts` | editor adapters                                                             |
 | `apps/editor-web/src/LivingLooksPanel.tsx` + `AgentPanel.tsx` "Looks" capability     | the UI                                                                      |

@@ -209,8 +209,8 @@ per-layer property values`, pure and independent of React (so it's reusable
 
 ## Environment notes for whoever picks this up
 
-- **This machine has a local clone** at `C:\Users\HadiMoti\joy-media-work\repo`
-  (Windows), separate from the stale `C:\Users\HadiMoti\joy-media`. Clone fresh
+- **This machine has a local clone** at `<owner-profile>\joy-media-work\repo`
+  (Windows), separate from the stale `<owner-profile>\joy-media`. Clone fresh
   with `git -c core.protectNTFS=false clone ssh://root@<vps-ip>/opt/joy-media.git`
   if working from a different machine — the repo carries
   `apps/editor-web/public/transitions/preview/gl:*.png` (colon in the filename),

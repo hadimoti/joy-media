@@ -22,14 +22,14 @@ Successful preservation only means the evidence is now safe to review.
   `bcf36b0d24e24d55305898e783b4813723e22d90`, raw SHA-256
   `c9e147f8f56265b5e53e64800c1f691d67675ac2618434bfc821f666176b88aa` (133 132 B).
   The P0 and P0-R1 commits are **docs-only** and do not touch the lock.
-- Worktree: `C:\Users\HadiMoti\joy-r2-p0-20260909T185139Z`
+- Worktree: `<owner-profile>\joy-r2-p0-20260909T185139Z`
 - Branch: `codex/joy-r2-p0-provenance-20260909T185139Z`
 - No push authorized. No fetch/merge/pull performed. No originals modified.
 
 ## Evidence root 1 — original P0 preservation bundle (immutable)
 
 ```
-C:\Users\HadiMoti\Desktop\joy-r2-p0-evidence-20260909T185139Z\
+<owner-profile>\Desktop\joy-r2-p0-evidence-20260909T185139Z\
 ```
 
 - `MANIFEST.csv` — per-file: category, git status, bytes, mtime (UTC), match,
@@ -47,7 +47,7 @@ re-hash source. All three hashes equal for every item. Originals untouched.
 ## Evidence root 2 — P0-R1 fresh observations (append-only, new)
 
 ```
-C:\Users\HadiMoti\Desktop\joy-r2-p0-r1-evidence-20260909T192442Z\
+<owner-profile>\Desktop\joy-r2-p0-r1-evidence-20260909T192442Z\
 ```
 
 - `README.md` — scope, tooling, coverage.
@@ -104,7 +104,7 @@ both the collapsed count (9) and the file count (50).
 
 ## Raw process logs located (session `6672909d` scratchpad)
 
-Path: `C:\Users\HadiMoti\AppData\Local\Temp\claude\C--Users-HadiMoti-joy-media\6672909d-0c7d-4102-8056-8c6b34cf5bad\scratchpad\`
+Path: `<owner-profile>\AppData\Local\Temp\claude\C--Users-HadiMoti-joy-media\6672909d-0c7d-4102-8056-8c6b34cf5bad\scratchpad\`
 
 | Log                                                             | Role                         | Result (verbatim markers)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | --------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

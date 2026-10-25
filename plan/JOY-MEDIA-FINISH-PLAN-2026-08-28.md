@@ -36,7 +36,7 @@ mocked browser run.
 ## Non-negotiable operating rules
 
 - Use the local Gbrain page `joy-vps-agent-brief` and the redacted
-  `C:\Users\HadiMoti\Desktop\VPS-AGENT-BRIEF.md` before infrastructure work. Never copy secrets,
+  `<owner-profile>\Desktop\VPS-AGENT-BRIEF.md` before infrastructure work. Never copy secrets,
   cookies, OTPs, tokens, private object references, or customer data into Git or reports.
 - For any completed VPS change, write the confirmed non-secret operational result back to Gbrain.
   Treat an origin request made with `curl --noproxy '*' --resolve ...` as the authoritative routing

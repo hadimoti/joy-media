@@ -694,7 +694,7 @@ In lights-out mode, “return to GPT” never means “ask the user.” GPT appl
 
 ### 10.7 Unattended Vibe invocation
 
-Vibe is installed at `C:\Users\HadiMoti\.local\bin\vibe.exe` and supports programmatic mode, isolated worktrees, auto-approval, turn/token/price limits, resumable sessions, and JSON output.
+Vibe is installed at `<owner-profile>\.local\bin\vibe.exe` and supports programmatic mode, isolated worktrees, auto-approval, turn/token/price limits, resumable sessions, and JSON output.
 
 GPT materializes the worker packet into a prompt string and invokes the equivalent of:
 
@@ -702,7 +702,7 @@ GPT materializes the worker packet into a prompt string and invokes the equivale
 vibe -p $packetPrompt `
   --agent auto-approve `
   --trust `
-  --workdir C:\Users\HadiMoti\joy-vps\joy-media-fix `
+  --workdir <owner-profile>\joy-vps\joy-media-fix `
   --worktree "wp34-XX-slug" `
   --max-turns $packetTurns `
   --max-price $packetPrice `

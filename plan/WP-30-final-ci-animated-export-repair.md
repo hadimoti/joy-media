@@ -5,7 +5,7 @@
 **Current deployed product SHA:** `1b7e8abf27e41d132cda0714c890206400596c41`
 **Current documentation SHA:** pending documentation-only closeout commit
 **Failed GitHub run:** [31519828019](https://github.com/hadimoti/joy-media/actions/runs/31519828019)  
-**Repository:** `/opt/joy-media/repo` on the VPS and `C:/Users/HadiMoti/joy-vps/joy-media-fix` locally
+**Repository:** `/opt/joy-media/repo` on the VPS and `<owner-profile>/joy-vps/joy-media-fix` locally
 
 ## Objective
 

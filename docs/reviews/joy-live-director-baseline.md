@@ -4,7 +4,7 @@ Recorded: 2026-09-05
 
 ## Candidate ownership
 
-- Worktree: `C:\Users\HadiMoti\.config\superpowers\worktrees\joy-media\joy-live-director`
+- Worktree: `<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director`
 - Branch: `codex/joy-live-director`
 - Implementation base commit: `37a33034dbc078751fdb7cf5c0b706eaaad9d858`
 - Base tree: `0517945fca8d12ffe1a569e357f80ee192946c47`

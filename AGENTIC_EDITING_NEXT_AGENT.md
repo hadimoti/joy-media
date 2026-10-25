@@ -9,7 +9,7 @@
 
 Date: 2026-07-27
 Local machine: Hadi's Windows PC
-Authoritative local checkout: `C:\Users\HadiMoti\joy-media`
+Authoritative local checkout: `<owner-profile>\joy-media`
 Branch: `ui/adobe-polish` tracking `vps/fix/final-ui-polish`
 Required starting commit: `b3d7787` or newer on the tracked branch
 
@@ -38,7 +38,7 @@ Host sweden sweden-vps
 Windows key path:
 
 ```text
-C:\Users\HadiMoti\.ssh\Joy-Vps-New.pem
+<owner-profile>\.ssh\Joy-Vps-New.pem
 ```
 
 Normal connection:
@@ -508,7 +508,7 @@ Implemented in `901c9e1` and deployed with the loopback API hardening in
 ## Local workflow
 
 ```powershell
-Set-Location C:\Users\HadiMoti\joy-media
+Set-Location <owner-profile>\joy-media
 git status --short --branch
 git log -1 --oneline
 pnpm typecheck

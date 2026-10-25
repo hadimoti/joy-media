@@ -2,7 +2,7 @@
 
 - Status: **NO-GO — implementation required**
 - Effective date: 2026-08-29
-- Repository: `C:\Users\HadiMoti\joy-media` only
+- Repository: `<owner-profile>\joy-media` only
 - Production: `https://joyst.ir/` and `https://www.joyst.ir/`
 - Audited source baseline: `615c36ad7dadb3fadf502944022d6c442e8f5abb`
 
@@ -457,7 +457,7 @@ At completion, update:
   changed paths, test counts, browser evidence, release identities, canary, rollback target, and
   remaining non-blocking future work. Store no credentials, pairing codes, tokens, object maps,
   customer data, or secret-bearing paths.
-- `C:\Users\HadiMoti\Desktop\VPS-AGENT-BRIEF.md` only if the non-secret JOY Media operational map
+- `<owner-profile>\Desktop\VPS-AGENT-BRIEF.md` only if the non-secret JOY Media operational map
   changed. Do not edit the `joy-vps` product repository.
 
 The final handoff must state the exact commit, release identity, Windows package version/signature,

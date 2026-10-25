@@ -4,7 +4,7 @@
 **Date:** 2026-08-11
 **Deployed product SHA:** `1b7e8abf27e41d132cda0714c890206400596c41`
 **Successful product CI:** [GitHub Actions run 31523239040](https://github.com/hadimoti/joy-media/actions/runs/31523239040)
-**Local repository:** `C:/Users/HadiMoti/joy-vps/joy-media-fix`
+**Local repository:** `<owner-profile>/joy-vps/joy-media-fix`
 **VPS repository:** `/opt/joy-media/repo`
 **Production root:** `/opt/joy-media`
 **Do not use:** `/opt/joy-wg-bot`; it is unrelated to JOY Media deployment.
