@@ -4,6 +4,7 @@ import type { TextNode } from '@joy-media/render-ir';
 import { validateRenderFrameIR } from '@joy-media/render-ir';
 import {
   breakCaptionLines,
+  CAPTION_FONT_FAMILY,
   DEFAULT_CAPTION_TEMPLATE_ID,
   JOY_CAPTION_TEMPLATES,
   layoutTemplatedCaptionNodes,
@@ -60,6 +61,15 @@ describe('line breaking', () => {
 });
 
 describe('templated layout', () => {
+  it('draws every template and node in the one caption face, never the platform default', () => {
+    for (const template of JOY_CAPTION_TEMPLATES) {
+      expect(template.fontFamily, template.id).toBe(CAPTION_FONT_FAMILY);
+    }
+    const nodes = layoutTemplatedCaptionNodes([cue()], viewport) as readonly TextNode[];
+    expect(nodes.length).toBeGreaterThan(0);
+    for (const node of nodes) expect(node.fontFamily).toBe(CAPTION_FONT_FAMILY);
+  });
+
   it('emits safe-area-bounded, plated, sized lines that validate as Render IR', () => {
     const nodes = layoutTemplatedCaptionNodes([cue()], viewport) as readonly TextNode[];
     expect(nodes.length).toBeGreaterThan(0);

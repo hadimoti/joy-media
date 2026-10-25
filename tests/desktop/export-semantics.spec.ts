@@ -25,6 +25,7 @@ import type {
   SpikeProject,
   VideoClip,
 } from '../../packages/project-schema/src/index.js';
+import { CAPTION_FONT_FAMILY } from '../../packages/captions-core/src/index.js';
 import { READINESS_TOLERANCES as tolerance } from '../../packages/test-fixtures/src/readiness/tolerances.js';
 import { authenticate, E2E_TOKEN } from '../e2e/wp29-r5-harness.js';
 
@@ -48,8 +49,15 @@ const captionText = readFileSync(join(fixtureDirectory, 'captions-fa.vtt'), 'utf
   .trim()
   .split(/\r?\n/u)
   .at(-1)!;
-// Caption nodes omit fontFamily; Pixi's shipped TextStyle default is Arial.
-const captionFont = 'Arial';
+// Captions draw in the bundled caption face that the editor registers under CAPTION_FONT_FAMILY. Two
+// controls prove the selection: a family nobody registers, and Arial, the platform face that Pixi used
+// before the caption face existed. The export must match the caption face and must not match Arial.
+const captionFont = CAPTION_FONT_FAMILY;
+const missingControlFont = 'JOY Missing Caption Family';
+const arialControlFont = 'Arial';
+// Same threshold as the CLI pixel probe (MINIMUM_DIFFERING_PIXELS in caption-face-pixels.ts): fewer
+// differing pixels is not a drawn glyph.
+const captionProbeMinimum = 64;
 const captionFontSize = height * 0.045 * 2.5;
 const sampleTimes = [0.5, 0.9, 1, 1.5, 2.9, 3, 3.1, 4, 4.5, 5.1, 5.5] as const;
 type Rgb = readonly [number, number, number];
@@ -70,9 +78,12 @@ type Probe = {
 };
 type FontResult = {
   available: boolean;
-  reason?: string;
-  referencePng?: string;
-  wrongOrderReferencePng?: string;
+  reason?: string | undefined;
+  referencePng?: string | undefined;
+  wrongOrderReferencePng?: string | undefined;
+  arialReferencePng?: string | undefined;
+  // Differing pixels between the caption face and each control, drawn in the packaged renderer.
+  probe?: { canonicalVsMissing: number; canonicalVsArial: number } | undefined;
 };
 
 function run(tool: string, args: readonly string[], input?: Buffer): Buffer {
@@ -616,40 +627,71 @@ function frequency(samples: readonly number[]): number {
 
 async function captionReference(page: Page): Promise<FontResult> {
   return page.evaluate(
-    async ({ text, family, size }) => {
-      try {
-        // FontFace local() rejects absent fonts; document.fonts.check alone can
-        // incorrectly succeed via fallback when the named family is missing.
-        await new FontFace('JOY caption availability probe', `local("${family}")`).load();
+    async ({ text, family, size, missing, arial }) => {
+      const fontOf = (name: string) => `${size}px "${name}"`;
+      // The editor registers the caption face at startup, asynchronously. load() resolves no face for a
+      // family nobody registered, so wait briefly for the registration instead of accepting a fallback.
+      let registered: FontFace[] = [];
+      for (let attempt = 0; attempt < 150 && registered.length === 0; attempt += 1) {
+        registered = await document.fonts.load(fontOf(family), text);
+        if (registered.length === 0) await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const familyOf = (face: FontFace) => face.family.replace(/["']/gu, '');
+      if (
+        registered.length === 0 ||
+        registered.some((face) => familyOf(face) !== family || face.status !== 'loaded')
+      )
+        return {
+          available: false,
+          reason: `Caption face "${family}" is not registered and loaded in the editor page`,
+        };
+      const paint = (name: string, content: string): HTMLCanvasElement => {
         const canvas = document.createElement('canvas');
         canvas.width = 320;
         canvas.height = 80;
         const context = canvas.getContext('2d')!;
         context.fillStyle = '#000';
         context.fillRect(0, 0, 320, 80);
-        context.font = `${size}px "${family}"`;
+        context.font = fontOf(name);
         context.direction = 'rtl';
         context.textAlign = 'center';
         context.fillStyle = '#fff';
-        context.fillText(text, 160, 45);
-        const referencePng = canvas.toDataURL('image/png').split(',')[1];
-        context.fillStyle = '#000';
-        context.fillRect(0, 0, 320, 80);
-        context.fillStyle = '#fff';
-        context.fillText(text.split(/\s+/u).reverse().join(' '), 160, 45);
-        return {
-          available: true,
-          referencePng,
-          wrongOrderReferencePng: canvas.toDataURL('image/png').split(',')[1],
-        };
-      } catch (error) {
-        return {
-          available: false,
-          reason: `Caption font "${family}" is unavailable: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`,
-        };
-      }
+        context.fillText(content, 160, 45);
+        return canvas;
+      };
+      const pixels = (canvas: HTMLCanvasElement) =>
+        canvas.getContext('2d')!.getImageData(0, 0, 320, 80).data;
+      const differing = (first: Uint8ClampedArray, second: Uint8ClampedArray) => {
+        let count = 0;
+        for (let offset = 0; offset < first.length; offset += 4)
+          if (
+            first[offset] !== second[offset] ||
+            first[offset + 1] !== second[offset + 1] ||
+            first[offset + 2] !== second[offset + 2]
+          )
+            count += 1;
+        return count;
+      };
+      const png = (canvas: HTMLCanvasElement) => canvas.toDataURL('image/png').split(',')[1];
+      const canonical = paint(family, text);
+      return {
+        available: true,
+        referencePng: png(canonical),
+        wrongOrderReferencePng: png(paint(family, text.split(/\s+/u).reverse().join(' '))),
+        arialReferencePng: png(paint(arial, text)),
+        probe: {
+          canonicalVsMissing: differing(pixels(canonical), pixels(paint(missing, text))),
+          canonicalVsArial: differing(pixels(canonical), pixels(paint(arial, text))),
+        },
+      };
     },
-    { text: captionText, family: captionFont, size: captionFontSize },
+    {
+      text: captionText,
+      family: captionFont,
+      size: captionFontSize,
+      missing: missingControlFont,
+      arial: arialControlFont,
+    },
   );
 }
 
@@ -792,7 +834,12 @@ test.describe('desktop.export-media-semantics', () => {
       writeFileSync(
         join(evidence, 'caption-font.json'),
         JSON.stringify(
-          { ...font, referencePng: undefined, wrongOrderReferencePng: undefined },
+          {
+            ...font,
+            referencePng: undefined,
+            wrongOrderReferencePng: undefined,
+            arialReferencePng: undefined,
+          },
           null,
           2,
         ),
@@ -806,6 +853,11 @@ test.describe('desktop.export-media-semantics', () => {
         writeFileSync(
           join(evidence, 'caption-wrong-order.png'),
           Buffer.from(font.wrongOrderReferencePng, 'base64'),
+        );
+      if (font.arialReferencePng)
+        writeFileSync(
+          join(evidence, 'caption-arial-control.png'),
+          Buffer.from(font.arialReferencePng, 'base64'),
         );
       const canvas = page.locator('.monitor-canvas canvas').first();
       for (const seconds of sampleTimes) {
@@ -1101,7 +1153,7 @@ test.describe('desktop.export-media-semantics', () => {
     }
   });
 
-  test('burns in the expected shaped Persian caption when its font is available', async () => {
+  test('burns in the shaped Persian caption in the bundled caption face', async () => {
     if (!font.available) {
       if (process.env.JOY_MEDIA_REQUIRE_CAPTION_FONT === '1')
         throw new Error(
@@ -1110,6 +1162,17 @@ test.describe('desktop.export-media-semantics', () => {
       test.info().annotations.push({ type: 'SETUP_REQUIRED', description: font.reason! });
       test.skip(true, `SETUP_REQUIRED: ${font.reason}`);
     }
+    // Pixel probe, drawn in the packaged renderer: the caption face must draw glyphs that neither a
+    // fallback (a family nobody registered) nor Arial draws. A face that failed to load draws exactly
+    // the fallback, so a zero count here means the caption would have been exported in the wrong face.
+    expect(
+      font.probe!.canonicalVsMissing,
+      'the caption face must draw, not fall back to the platform face',
+    ).toBeGreaterThanOrEqual(captionProbeMinimum);
+    expect(
+      font.probe!.canonicalVsArial,
+      'the caption face must draw differently from Arial',
+    ).toBeGreaterThanOrEqual(captionProbeMinimum);
     // Independent Canvas2D reference, never the editor's caption layout/render
     // helper. Tight glyph bounds ignore baseline differences between rasterizers.
     const reference = run('ffmpeg', [
@@ -1146,6 +1209,23 @@ test.describe('desktop.export-media-semantics', () => {
       80,
     );
     const wrongOrderMismatch = glyphMismatch(actual, wrongOrder);
+    // Arial control: the same line in Arial. The export must not look like it.
+    const arial = inkMask(
+      run('ffmpeg', [
+        '-v',
+        'error',
+        '-i',
+        join(evidence, 'caption-arial-control.png'),
+        '-pix_fmt',
+        'rgb24',
+        '-f',
+        'rawvideo',
+        'pipe:1',
+      ]),
+      width,
+      80,
+    );
+    const arialMismatch = glyphMismatch(actual, arial);
     writeFileSync(
       join(evidence, 'caption-measurements.json'),
       JSON.stringify(
@@ -1156,11 +1236,16 @@ test.describe('desktop.export-media-semantics', () => {
           actual: { width: actual.width, height: actual.height },
           glyphMismatch: best,
           wrongOrderMismatch,
+          arialControlMismatch: arialMismatch,
+          probe: font.probe,
           tolerance: previewExportTolerance,
         },
         null,
         2,
       ),
+    );
+    expect(arialMismatch, 'export must not match the Arial control face').toBeGreaterThan(
+      previewExportTolerance,
     );
     expect(
       best,

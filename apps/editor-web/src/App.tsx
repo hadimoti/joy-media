@@ -264,7 +264,8 @@ import {
   importProjectPackage,
   parseProjectPackage,
 } from './project-package.js';
-import { withCaptionBurnInNodes } from './caption-burn-in.js';
+import { readCaptionBurnIn, withCaptionBurnInNodes } from './caption-burn-in.js';
+import { registerCaptionFont } from './caption-font.js';
 import { CaptionsPanel } from './CaptionsPanel.js';
 import { TextPanel } from './TextPanel.js';
 import { InspectorPanel, type InspectorSpeedChange } from './InspectorPanel.js';
@@ -4557,6 +4558,9 @@ function EditorWorkspace({
         // unbounded browser memory. `captureFull` returns only the current
         // frame and is released before the next frame is painted.
         exportSceneCache = hasHtmlScenes ? new HtmlSceneSurfaceCache() : undefined;
+        // Burned-in captions draw in the bundled caption face. Export waits for it and fails when it is missing,
+        // so no caption is encoded in a fallback face.
+        if (readCaptionBurnIn(exportVisualProject)) await registerCaptionFont();
         await audioContext.resume();
         setExportStatus(`Encoding ${totalFrames} preview-equivalent H.264/AAC frames…`);
         const browserExportResult: BrowserExportResult = await downloadBrowserMp4({

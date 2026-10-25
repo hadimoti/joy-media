@@ -15,9 +15,13 @@ import '@fontsource/noto-naskh-arabic/latin-700.css';
 import '@fontsource/noto-naskh-arabic/latin-ext-400.css';
 import '@fontsource/noto-naskh-arabic/latin-ext-700.css';
 import { App } from './App.js';
+import { registerCaptionFont } from './caption-font.js';
 import { EditorErrorBoundary } from './error-boundary.js';
 import { LoginGate } from './LoginGate.js';
 import { ProjectWriterGate } from './project-writer-gate.js';
+
+// Export waits for this registration and fails if it did not succeed, so the failure is not swallowed here.
+void registerCaptionFont().catch(() => undefined);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

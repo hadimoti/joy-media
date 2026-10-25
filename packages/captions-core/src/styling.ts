@@ -21,6 +21,8 @@ export interface CaptionTemplate {
   /** Bumped on breaking visual changes; recorded for future migrations. */
   readonly version: 1;
   readonly description: string;
+  /** The caption face every node draws with; see CAPTION_FONT_FAMILY. */
+  readonly fontFamily: string;
   /** Font size as a fraction of viewport height. */
   readonly fontSizePct: number;
   readonly lineHeightFactor: number;
@@ -41,6 +43,13 @@ export interface CaptionTemplate {
   readonly karaoke: boolean;
 }
 
+/**
+ * The family name captions draw with. The editor registers the bundled, SHA-256-checked Noto Sans
+ * Arabic 400 face under this name only, so captions cannot fall back to the platform face without
+ * the check noticing. The CLI draws the same face through libass.
+ */
+export const CAPTION_FONT_FAMILY = 'JOY Caption Face';
+
 /** Original JOY caption templates (§20.5: descriptive presets, no trademarks). */
 export const JOY_CAPTION_TEMPLATES: readonly CaptionTemplate[] = [
   {
@@ -48,6 +57,7 @@ export const JOY_CAPTION_TEMPLATES: readonly CaptionTemplate[] = [
     name: 'JOY Clean',
     version: 1,
     description: 'Centered broadcast-clean white text on a soft dark plate.',
+    fontFamily: CAPTION_FONT_FAMILY,
     fontSizePct: 0.045,
     lineHeightFactor: 1.3,
     textColor: { r: 255, g: 255, b: 255, a: 255 },
@@ -64,6 +74,7 @@ export const JOY_CAPTION_TEMPLATES: readonly CaptionTemplate[] = [
     name: 'JOY Karaoke Pop',
     version: 1,
     description: 'Bold centered captions; the spoken word pops in JOY amber.',
+    fontFamily: CAPTION_FONT_FAMILY,
     fontSizePct: 0.055,
     lineHeightFactor: 1.25,
     textColor: { r: 255, g: 255, b: 255, a: 255 },
@@ -80,6 +91,7 @@ export const JOY_CAPTION_TEMPLATES: readonly CaptionTemplate[] = [
     name: 'JOY RTL Classic',
     version: 1,
     description: 'Right-aligned Persian-first captions with a warm tone.',
+    fontFamily: CAPTION_FONT_FAMILY,
     fontSizePct: 0.042,
     lineHeightFactor: 1.45,
     textColor: { r: 250, g: 240, b: 220, a: 255 },
@@ -246,6 +258,7 @@ export function layoutTemplatedCaptionNodes(
         direction,
         align,
         maxWidth: usableWidth,
+        fontFamily: template.fontFamily,
         fontSizePx,
         ...(clipStyle?.tracking === undefined ? {} : { tracking: clipStyle.tracking }),
         ...(template.plateColor === undefined ? {} : { background: template.plateColor }),

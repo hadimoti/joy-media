@@ -488,11 +488,21 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     Set-ScenarioOutcome -Id 'desktop.app.restart-save-export' -ExitCode (Get-PlaywrightAccountingExitCode $editorReport)
     # Export parity runs the packaged export spec for picture, sound and timing against the preview.
     # A skipped case, such as the Persian caption when its font is missing, fails the scenario.
-    # The Persian caption renders in the font the editor uses by default, Windows' Arial. That file ships
-    # with Windows, so the runner needs no extra font. The gate refuses to run without it, and the caption
-    # case may not skip: JOY_MEDIA_REQUIRE_CAPTION_FONT turns a missing font into a failure.
-    $captionFontPath = Join-Path $env:WINDIR 'Fonts\arial.ttf'
-    if (-not (Test-Path -LiteralPath $captionFontPath -PathType Leaf)) { throw "Persian caption acceptance font is missing on this runner: $captionFontPath" }
+    # The Persian caption renders in the bundled caption face, Noto Sans Arabic (OFL), not a system font. The installed
+    # copy must carry the exact face files its pinned manifests name: the WOFF2 the editor registers, and the TrueType
+    # the CLI's libass draws with. The export case then renders in that face, and its pixel probe checks the drawn glyphs.
+    # The case may not skip: JOY_MEDIA_REQUIRE_CAPTION_FONT turns a missing face into a failure.
+    $captionFaceChecks = @(
+        @{ Manifest = 'resources\app\renderer\packages\html-scene-runtime\assets\fonts\noto-sans-arabic\manifest.json'; Folder = 'resources\app\renderer\packages\html-scene-runtime\assets\fonts\noto-sans-arabic' },
+        @{ Manifest = 'resources\app\cli\fonts\noto-sans-arabic\libass\manifest.json'; Folder = 'resources\app\cli\fonts\noto-sans-arabic\libass\fonts' }
+    )
+    foreach ($captionFaceCheck in $captionFaceChecks) {
+        $captionManifest = Get-Content -LiteralPath (Join-Path $installRoot $captionFaceCheck.Manifest) -Raw | ConvertFrom-Json
+        $captionFace = @($captionManifest.files | Where-Object { $_.family -eq 'Noto Sans Arabic' -and $_.weight -eq 400 -and $_.subset -eq 'arabic' })
+        if ($captionFace.Count -ne 1) { throw "Caption face entry is missing from $($captionFaceCheck.Manifest)" }
+        $captionFaceExpected = ([string]$captionFace[0].sha256) -replace '^sha256:', ''
+        $null = Assert-Sha256 (Join-Path $installRoot (Join-Path $captionFaceCheck.Folder $captionFace[0].file)) $captionFaceExpected "Installed caption face $($captionFace[0].file)"
+    }
     $exportReport = Join-Path $workRoot 'export-semantics.playwright.json'
     $null = Invoke-Pnpm 'installed candidate export picture, sound and timing acceptance' @('exec', 'playwright', 'test', '--config', 'playwright.desktop.config.ts', 'tests/desktop/export-semantics.spec.ts', '--retries=0', '--reporter=json') 900 @{
         JOY_MEDIA_TEST_EXECUTABLE = Join-Path $installRoot 'joy-media.exe'
