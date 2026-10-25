@@ -1,9 +1,14 @@
 /* global process */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { loadNotoSansArabicFaces } from '@joy-media/html-scene-runtime';
+import { loadNotoSansArabicLibassFaces } from '@joy-media/html-scene-runtime';
+import {
+  CAPTION_FACE_UNUSABLE_REASON,
+  judgeCaptionProbe,
+  prepareCaptionProbe,
+} from '../services/caption-face-pixels.js';
 import { ffmpegBinary, ffprobeBinary } from '../utils/media-probe.js';
 
 // ---------------------------------------------------------------------------
@@ -258,17 +263,29 @@ export interface CanonicalCaptionFaceProbe {
   readonly versionSource?: 'canonical-caption-face-ass-probe';
 }
 
+/**
+ * The libass build named in the FFmpeg log. Some builds print a version number, others only a
+ * meson source commit or the API version. The first form that matches is kept verbatim.
+ */
+function libassVersionFromLog(log: string): string | undefined {
+  const numbered =
+    /\blibass\s+(?:source|version)\s*:\s*([0-9][\w.-]*)/i.exec(log)?.[1] ??
+    /\blibass\s+([0-9]+(?:\.[0-9]+)+)\b/i.exec(log)?.[1];
+  if (numbered !== undefined) return numbered;
+  const meson = /\blibass\s+source\s*:\s*meson,\s*commit\s*:\s*([0-9a-f]{7,40})\b/i.exec(log)?.[1];
+  if (meson !== undefined) return `meson commit ${meson}`;
+  const api = /\blibass\s+API\s+version\s*:\s*(0x[0-9a-f]+)/i.exec(log)?.[1];
+  return api === undefined ? undefined : `API ${api}`;
+}
+
 export function captionEngineVersionsFromAssProbe(log: string): {
   readonly libassVersion: string;
   readonly shaperVersion: string;
   readonly versionSource: 'canonical-caption-face-ass-probe';
 } {
-  const libassVersion =
-    /\blibass\s+(?:source|version)\s*:\s*([0-9][\w.-]*)/i.exec(log)?.[1] ??
-    /\blibass\s+([0-9]+(?:\.[0-9]+)+)\b/i.exec(log)?.[1];
-  const shaperVersion = /\bHarfBuzz(?:\s+version)?\s*[: ]+\s*v?([0-9]+(?:\.[0-9]+)+)\b/i.exec(
-    log,
-  )?.[1];
+  const libassVersion = libassVersionFromLog(log);
+  const shaperVersion =
+    /\bHarfBuzz(?:-ng)?(?:\s+version)?\s*[: ]+\s*v?([0-9]+(?:\.[0-9]+)+)\b/i.exec(log)?.[1];
   return {
     libassVersion: libassVersion ?? 'unavailable',
     shaperVersion: shaperVersion ?? 'unavailable',
@@ -284,105 +301,49 @@ export function probeCanonicalCaptionFace(
 ): CanonicalCaptionFaceProbe {
   const cached = canonicalCaptionProbeCache.get(executablePath);
   if (cached) return cached;
-  let face: ReturnType<typeof loadNotoSansArabicFaces>[number] | undefined;
+  const unavailable = (reason: string): CanonicalCaptionFaceProbe => {
+    const result: CanonicalCaptionFaceProbe = {
+      usable: false,
+      executablePath,
+      canonicalFace: 'Noto Sans Arabic Arabic 400',
+      reason,
+      log: '',
+      ...captionEngineVersionsFromAssProbe(''),
+    };
+    canonicalCaptionProbeCache.set(executablePath, result);
+    return result;
+  };
+  let face: ReturnType<typeof loadNotoSansArabicLibassFaces>[number] | undefined;
   try {
-    face = loadNotoSansArabicFaces().find(
+    face = loadNotoSansArabicLibassFaces().find(
       (item) => item.subset === 'arabic' && item.weight === 400,
     );
   } catch (error) {
-    const unavailable: CanonicalCaptionFaceProbe = {
-      usable: false,
-      executablePath,
-      canonicalFace: 'Noto Sans Arabic Arabic 400',
-      reason: `Canonical Noto Sans Arabic Arabic 400 face could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
-      log: '',
-      ...captionEngineVersionsFromAssProbe(''),
-    };
-    canonicalCaptionProbeCache.set(executablePath, unavailable);
-    return unavailable;
+    return unavailable(
+      `Canonical Noto Sans Arabic Arabic 400 face could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
-  if (!face) {
-    const unavailable: CanonicalCaptionFaceProbe = {
-      usable: false,
-      executablePath,
-      canonicalFace: 'Noto Sans Arabic Arabic 400',
-      reason: 'The canonical Noto Sans Arabic Arabic 400 face is missing.',
-      log: '',
-      ...captionEngineVersionsFromAssProbe(''),
-    };
-    canonicalCaptionProbeCache.set(executablePath, unavailable);
-    return unavailable;
-  }
+  if (!face) return unavailable('The canonical Noto Sans Arabic Arabic 400 face is missing.');
+  const fontFile = 'noto-sans-arabic-arabic-400-normal.ttf';
   const directory = mkdtempSync(join(tmpdir(), 'joy-caption-canonical-'));
-  const fontsDirectory = join(directory, 'fonts');
-  let log = '';
   try {
-    mkdirSync(fontsDirectory);
-    const fontFile = 'noto-sans-arabic-arabic-400-normal.woff2';
-    const fontPath = join(fontsDirectory, fontFile);
-    const assPath = join(directory, 'probe.ass');
-    const outputPath = 'probe.png';
-    writeFileSync(fontPath, face.bytes);
-    writeFileSync(
-      assPath,
-      [
-        '[Script Info]',
-        'ScriptType: v4.00+',
-        'PlayResX: 320',
-        'PlayResY: 180',
-        '',
-        '[V4+ Styles]',
-        'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        'Style: Caption,Noto Sans Arabic,28,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,10,10,20,1',
-        '',
-        '[Events]',
-        'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-        'Dialogue: 0,0:00:00.00,0:00:01.00,Caption,,0,0,0,,مرحبا',
-        '',
-      ].join('\n'),
-    );
-    const result = spawnSync(
-      executablePath,
-      [
-        '-hide_banner',
-        '-loglevel',
-        'debug',
-        '-f',
-        'lavfi',
-        '-i',
-        'color=c=black:s=320x180:d=1',
-        '-vf',
-        'ass=filename=probe.ass:fontsdir=fonts',
-        '-frames:v',
-        '1',
-        '-y',
-        outputPath,
-      ],
-      { encoding: 'utf8', timeout: 15000, cwd: directory },
-    );
-    log = `${result.stdout}\n${result.stderr}`;
-    const fontSelectLines = log
-      .split(/\r?\n/)
-      .filter((line) => /fontselect:.*\(Noto Sans Arabic,/i.test(line));
-    const openedError = log
-      .split(/\r?\n/)
-      .some((line) => /Error opening/i.test(line) && line.includes(fontFile));
-    const selectedCanonical =
-      fontSelectLines.length > 0 &&
-      fontSelectLines.every((line) => /->\s*Noto Sans Arabic(?:,|\s|$)/i.test(line));
-    const usable = result.status === 0 && !openedError && selectedCanonical;
+    const commands = prepareCaptionProbe(directory, fontFile, face.bytes);
+    const runOptions = { cwd: directory, encoding: 'utf8', timeout: 15000 } as const;
+    const canonical = spawnSync(executablePath, [...commands.canonical], runOptions);
+    const missing = spawnSync(executablePath, [...commands.missing], runOptions);
+    const judged = judgeCaptionProbe({
+      directory,
+      fontFile,
+      canonical: { status: canonical.status, log: `${canonical.stdout}\n${canonical.stderr}` },
+      missing: { status: missing.status },
+    });
     const probe: CanonicalCaptionFaceProbe = {
-      usable,
+      usable: judged.usable,
       executablePath,
       canonicalFace: 'Noto Sans Arabic Arabic 400',
-      ...(!usable
-        ? {
-            reason:
-              'FFmpeg libass cannot load or select the canonical Noto Sans Arabic Arabic 400 WOFF2 face; captions require this face and will fail closed.',
-          }
-        : {}),
-      log,
-      ...captionEngineVersionsFromAssProbe(log),
+      ...(!judged.usable ? { reason: CAPTION_FACE_UNUSABLE_REASON } : {}),
+      log: judged.log,
+      ...captionEngineVersionsFromAssProbe(judged.log),
     };
     canonicalCaptionProbeCache.set(executablePath, probe);
     return probe;

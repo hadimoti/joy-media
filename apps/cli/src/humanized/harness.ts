@@ -25,6 +25,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findChromiumExecutable } from '@joy-media/html-scene-runtime';
 import { readBuildLockToken, tryAcquireBuildLock, waitForBuildComplete } from './build-lock.js';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -286,6 +287,10 @@ export class Sandbox {
       const value = process.env[key];
       if (value !== undefined) env[key] = value;
     }
+    // The sandbox does not copy the install locations that Chromium discovery reads, so a child
+    // could not find the browser its parent can. Pass on the browser the parent resolves.
+    const chromium = process.env['JOY_CHROMIUM_PATH']?.trim() || findChromiumExecutable();
+    if (chromium) env.JOY_CHROMIUM_PATH = chromium;
     env.HOME = this.home;
     env.USERPROFILE = this.home;
     env.APPDATA = join(this.home, 'AppData', 'Roaming');

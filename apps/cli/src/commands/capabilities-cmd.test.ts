@@ -718,11 +718,37 @@ describe('capability probe status', () => {
       assets: {},
     };
     const fallback = { width: 640, height: 360, fps: 30 };
-    const result = planMedia(value, { manifestOnly: false, libassAvailable: false }, fallback);
-    expect(result.mode).toBe('error');
-    if (result.mode === 'error') {
-      expect(result.code).toBe('SETUP_REQUIRED');
-      expect(result.reason?.canonicalFace).toBe('Noto Sans Arabic Arabic 400');
+    // The face probe is injected so the outcome does not depend on the FFmpeg build of the host.
+    const usableFace = {
+      usable: true as const,
+      executablePath: 'ffmpeg',
+      canonicalFace: 'Noto Sans Arabic Arabic 400' as const,
+      log: '',
+      libassVersion: 'meson commit 3087d2b2ffda76602a17f9b09d25cb8addc8d313',
+      shaperVersion: '14.3.0',
+      versionSource: 'canonical-caption-face-ass-probe' as const,
+    };
+    const unusableFace = {
+      ...usableFace,
+      usable: false as const,
+      reason: 'FFmpeg libass did not draw the canonical face.',
+    };
+    const withoutLibass = planMedia(
+      value,
+      { manifestOnly: false, libassAvailable: false, canonicalFaceProbe: usableFace },
+      fallback,
+    );
+    expect(withoutLibass.mode).toBe('error');
+    if (withoutLibass.mode === 'error') expect(withoutLibass.code).toBe('unsupported-feature');
+    const unusable = planMedia(
+      value,
+      { manifestOnly: false, libassAvailable: false, canonicalFaceProbe: unusableFace },
+      fallback,
+    );
+    expect(unusable.mode).toBe('error');
+    if (unusable.mode === 'error') {
+      expect(unusable.code).toBe('SETUP_REQUIRED');
+      expect(unusable.reason?.canonicalFace).toBe('Noto Sans Arabic Arabic 400');
     }
   });
 });

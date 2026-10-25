@@ -45,14 +45,23 @@ function errorCode(r: RunResult): string {
   return (r.json() as { code: string }).code;
 }
 
+/** `plan apply` supports file projects only, so a usable caption setup works on a file copy. */
+async function exportProjectFile(sandbox: Sandbox, projectId: string): Promise<string> {
+  const file = sandbox.path(`${projectId}.project.json`);
+  const exported = await sandbox.run(['project', 'export', projectId, '--output', file, '--json']);
+  expect(exported.code, describeRun(exported)).toBe(0);
+  return file;
+}
+
 async function expectCaptionOutcome(
   faceProbe: ReturnType<typeof probeCanonicalCaptionFace>,
   sandbox: Sandbox,
   projectId: string,
-  render: () => Promise<RunResult>,
+  render: (projectRef: string) => Promise<RunResult>,
   outputDirectory: string,
   usableOutcome: (result: RunResult) => void | Promise<void>,
 ): Promise<void> {
+  const projectRef = faceProbe.usable ? await exportProjectFile(sandbox, projectId) : projectId;
   const operationsPath = sandbox.path(`${projectId}-caption-prepare.operations.json`);
   const planPath = sandbox.path(`${projectId}-caption-prepare.plan.json`);
   writeFileSync(operationsPath, JSON.stringify({ schemaVersion: 1, operations: [] }));
@@ -61,7 +70,7 @@ async function expectCaptionOutcome(
     'prepare',
     operationsPath,
     '--project',
-    projectId,
+    projectRef,
     '--output',
     planPath,
     '--json',
@@ -74,7 +83,7 @@ async function expectCaptionOutcome(
       kind: 'canonical-caption-face-unavailable',
     });
     expect(existsSync(planPath), 'unusable caption setup must not write a plan').toBe(false);
-    const unpreparedRender = await render();
+    const unpreparedRender = await render(projectId);
     expect(unpreparedRender.code, describeRun(unpreparedRender)).toBe(1);
     expect(errorCode(unpreparedRender)).toBe('RENDER_PREPARATION_REQUIRED');
     expect(
@@ -91,7 +100,7 @@ async function expectCaptionOutcome(
     'apply',
     planPath,
     '--project',
-    projectId,
+    projectRef,
     '--expected-revision',
     String(preparedPlan.baseRevision),
     '--idempotency-key',
@@ -99,7 +108,7 @@ async function expectCaptionOutcome(
     '--json',
   ]);
   expect(applied.code, describeRun(applied)).toBe(0);
-  await usableOutcome(await render());
+  await usableOutcome(await render(projectRef));
 }
 
 describe('captions are drawn over the picture while they are on screen', () => {
@@ -197,7 +206,7 @@ describe('captions are drawn over the picture while they are on screen', () => {
       fontProbe,
       sb,
       id,
-      () => sb.run(['render', '--project', id, '--out', out, '--json']),
+      (ref) => sb.run(['render', '--project', ref, '--out', out, '--json']),
       out,
       (r) => {
         expect(r.code, describeRun(r)).toBe(0);
@@ -234,7 +243,7 @@ describe('captions are drawn over the picture while they are on screen', () => {
       fontProbe,
       sb,
       id,
-      () => sb.run(['render', '--project', id, '--out', out, '--json']),
+      (ref) => sb.run(['render', '--project', ref, '--out', out, '--json']),
       out,
       (r) => {
         expect(r.code, describeRun(r)).toBe(0);
@@ -289,8 +298,8 @@ describe('captions are drawn over the picture while they are on screen', () => {
       fontProbe,
       sb,
       id,
-      () =>
-        sb.run(['render', '--project', id, '--out', out, '--json'], {
+      (ref) =>
+        sb.run(['render', '--project', ref, '--out', out, '--json'], {
           env: { JOY_MEDIA_CAPTION_FONT: sb.path('missing-font.ttf') },
         }),
       out,
@@ -324,7 +333,7 @@ describe('captions are drawn over the picture while they are on screen', () => {
       fontProbe,
       sb,
       id,
-      () => sb.run(['render', '--project', id, '--out', out, '--json']),
+      (ref) => sb.run(['render', '--project', ref, '--out', out, '--json']),
       out,
       (r) => {
         expect(r.code, describeRun(r)).toBe(0);
@@ -406,7 +415,7 @@ describe('captions are drawn over the picture while they are on screen', () => {
       '--duration',
       '1',
       '--text',
-      'Later',
+      'HELLO WORLD',
     ]);
     expect(added.code, describeRun(added)).toBe(0);
     const out = sb.path('out-after-video');
@@ -415,7 +424,7 @@ describe('captions are drawn over the picture while they are on screen', () => {
       fontProbe,
       sb,
       id,
-      () => sb.run(['render', '--project', id, '--out', out, '--json']),
+      (ref) => sb.run(['render', '--project', ref, '--out', out, '--json']),
       out,
       (r) => {
         expect(r.code, describeRun(r)).toBe(0);

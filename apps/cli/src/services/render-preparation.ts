@@ -1,21 +1,18 @@
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { canonicalJson, sha256Identity } from './prepared-edit.js';
 import {
+  CAPTION_FACE_UNUSABLE_REASON,
+  judgeCaptionProbe,
+  prepareCaptionProbe,
+} from './caption-face-pixels.js';
+import {
   loadNotoSansArabicFaces,
+  loadNotoSansArabicLibassFaces,
   missingCanonicalFontCodePoints,
   type NotoSansArabicFace,
 } from '@joy-media/html-scene-runtime';
@@ -803,9 +800,9 @@ async function canonicalCaptionFaceProbe(
     log: '',
     ...captionEngineVersionsFromAssProbe(''),
   });
-  let face: NotoSansArabicFace | undefined;
+  let face: ReturnType<typeof loadNotoSansArabicLibassFaces>[number] | undefined;
   try {
-    face = loadNotoSansArabicFaces().find(
+    face = loadNotoSansArabicLibassFaces().find(
       (item) => item.subset === 'arabic' && item.weight === 400,
     );
   } catch (error) {
@@ -815,51 +812,20 @@ async function canonicalCaptionFaceProbe(
   }
   if (!face) return unavailable('The canonical Noto Sans Arabic Arabic 400 face is missing.');
   signal?.throwIfAborted();
+  const fontFile = 'noto-sans-arabic-arabic-400-normal.ttf';
   const directory = mkdtempSync(join(tmpdir(), 'joy-caption-canonical-'));
-  const fontsDirectory = join(directory, 'fonts');
-  const fontFile = 'noto-sans-arabic-arabic-400-normal.woff2';
   try {
-    mkdirSync(fontsDirectory);
-    writeFileSync(join(fontsDirectory, fontFile), face.bytes);
-    writeFileSync(
-      join(directory, 'probe.ass'),
-      [
-        '[Script Info]',
-        'ScriptType: v4.00+',
-        'PlayResX: 320',
-        'PlayResY: 180',
-        '',
-        '[V4+ Styles]',
-        'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        'Style: Caption,Noto Sans Arabic,28,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,10,10,20,1',
-        '',
-        '[Events]',
-        'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-        'Dialogue: 0,0:00:00.00,0:00:01.00,Caption,,0,0,0,,مرحبا',
-        '',
-      ].join('\n'),
-    );
-    let result: PreparationCommandResult;
+    const commands = prepareCaptionProbe(directory, fontFile, face.bytes);
+    const runOptions = {
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: 15_000,
+      cwd: directory,
+    };
+    let canonical: PreparationCommandResult;
+    let missing: PreparationCommandResult;
     try {
-      result = await preparationCommandRunner(
-        executablePath,
-        [
-          '-hide_banner',
-          '-loglevel',
-          'debug',
-          '-f',
-          'lavfi',
-          '-i',
-          'color=c=black:s=320x180:d=1',
-          '-vf',
-          'ass=filename=probe.ass:fontsdir=fonts',
-          '-frames:v',
-          '1',
-          '-y',
-          'probe.png',
-        ],
-        { ...(signal === undefined ? {} : { signal }), timeoutMs: 15_000, cwd: directory },
-      );
+      canonical = await preparationCommandRunner(executablePath, commands.canonical, runOptions);
+      missing = await preparationCommandRunner(executablePath, commands.missing, runOptions);
     } catch (error) {
       signal?.throwIfAborted();
       return unavailable(
@@ -867,28 +833,19 @@ async function canonicalCaptionFaceProbe(
       );
     }
     signal?.throwIfAborted();
-    const fontSelectLines = result.output
-      .split(/\r?\n/)
-      .filter((line) => /fontselect:.*\(Noto Sans Arabic,/i.test(line));
-    const openedError = result.output
-      .split(/\r?\n/)
-      .some((line) => /Error opening/i.test(line) && line.includes(fontFile));
-    const selectedCanonical =
-      fontSelectLines.length > 0 &&
-      fontSelectLines.every((line) => /->\s*Noto Sans Arabic(?:,|\s|$)/i.test(line));
-    const usable = result.status === 0 && !openedError && selectedCanonical;
+    const judged = judgeCaptionProbe({
+      directory,
+      fontFile,
+      canonical: { status: canonical.status, log: canonical.output },
+      missing: { status: missing.status },
+    });
     return {
-      usable,
+      usable: judged.usable,
       executablePath,
       canonicalFace: 'Noto Sans Arabic Arabic 400',
-      ...(!usable
-        ? {
-            reason:
-              'FFmpeg libass cannot load or select the canonical Noto Sans Arabic Arabic 400 WOFF2 face; captions require this face and will fail closed.',
-          }
-        : {}),
-      log: result.output,
-      ...captionEngineVersionsFromAssProbe(result.output),
+      ...(!judged.usable ? { reason: CAPTION_FACE_UNUSABLE_REASON } : {}),
+      log: judged.log,
+      ...captionEngineVersionsFromAssProbe(judged.log),
     };
   } finally {
     rmSync(directory, { recursive: true, force: true });

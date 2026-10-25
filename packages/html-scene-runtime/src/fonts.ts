@@ -96,15 +96,87 @@ export function loadNotoSansArabicFaces(): NotoSansArabicFace[] {
 }
 
 /** Returns the integrity-checked bundled Arabic 400 WOFF2 path for external renderers. */
-export function notoSansArabicArabic400Path(): string {
-  const faces = loadNotoSansArabicFaces();
-  const face = faces.find((item) => item.subset === 'arabic' && item.weight === 400);
-  if (!face) throw new Error('Canonical Noto Sans Arabic Arabic 400 face is missing');
+/**
+ * A TrueType face for FFmpeg's libass. libass cannot open the WOFF2 faces above, and a Windows
+ * build cannot read them either, so captions draw from these files.
+ */
+export interface NotoSansArabicLibassFace {
+  readonly family: string;
+  readonly weight: number;
+  readonly subset: string;
+  readonly file: string;
+  readonly sha256: `sha256:${string}`;
+  readonly bytes: Buffer;
+}
+
+interface LibassFontManifest {
+  readonly license: string;
+  readonly files: readonly {
+    readonly family: string;
+    readonly weight: number;
+    readonly subset: string;
+    readonly file: string;
+    readonly byteLength: number;
+    readonly sha256: `sha256:${string}`;
+  }[];
+}
+
+const LIBASS_FONT_FILES = [
+  'noto-sans-arabic-arabic-400-normal.ttf',
+  'noto-sans-arabic-arabic-700-normal.ttf',
+] as const;
+
+/** The folder libass scans: it holds the TrueType files and nothing else. */
+function libassFontDirectory(): string {
   const directory = fontDirectories().find((candidate) =>
-    existsSync(join(candidate, 'manifest.json')),
+    existsSync(join(candidate, 'libass', 'manifest.json')),
   );
-  if (!directory) throw new Error('Canonical Noto Sans Arabic font directory is missing');
-  return join(directory, EXPECTED_FONT_FILES[0]!);
+  if (!directory) throw new Error('Noto Sans Arabic libass font directory is missing');
+  return join(directory, 'libass', 'fonts');
+}
+
+/** Verified TrueType faces for libass. Each file must match its pinned length and digest. */
+export function loadNotoSansArabicLibassFaces(): NotoSansArabicLibassFace[] {
+  const fontDirectory = libassFontDirectory();
+  const manifest = JSON.parse(
+    readFileSync(join(fontDirectory, '..', 'manifest.json'), 'utf8'),
+  ) as LibassFontManifest;
+  if (manifest.license !== 'OFL-1.1') {
+    throw new Error('Noto Sans Arabic libass font license is invalid');
+  }
+  if (
+    manifest.files.length !== LIBASS_FONT_FILES.length ||
+    LIBASS_FONT_FILES.some((file) => !manifest.files.some((entry) => entry.file === file))
+  ) {
+    throw new Error('Noto Sans Arabic libass manifest must list the two bundled TrueType files');
+  }
+  return manifest.files.map((entry) => {
+    const bytes = readFileSync(join(fontDirectory, entry.file));
+    const sha256 = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    if (bytes.byteLength !== entry.byteLength || sha256 !== entry.sha256) {
+      throw new Error(`${entry.file} does not match its pinned length and digest`);
+    }
+    if (bytes.subarray(0, 4).toString('hex') !== '00010000') {
+      throw new Error(`${entry.file} is not a TrueType font`);
+    }
+    return {
+      family: entry.family,
+      weight: entry.weight,
+      subset: entry.subset,
+      file: entry.file,
+      sha256,
+      bytes,
+    };
+  });
+}
+
+/** The TrueType file the caption renderer hands to libass. */
+export function notoSansArabicArabic400Path(): string {
+  const face = loadNotoSansArabicLibassFaces().find(
+    (item) => item.subset === 'arabic' && item.weight === 400,
+  );
+  if (!face) throw new Error('Canonical Noto Sans Arabic Arabic 400 libass face is missing');
+  return join(libassFontDirectory(), face.file);
 }
 
 /** Makes byte-identical data URLs for isolated document @font-face rules. */

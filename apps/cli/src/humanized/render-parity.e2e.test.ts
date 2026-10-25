@@ -511,7 +511,8 @@ describe('render parity and unsupported-feature contract', () => {
     }
 
     expect(preparation.code, describeRun(preparation)).toBe(0);
-    expect(expectNdjsonContract(preparation, ['complete']).at(-1)?.['type']).toBe('complete');
+    expect(existsSync(planPath)).toBe(true);
+    expect(preparation.json()).toMatchObject({ schemaVersion: 1, projectId: id });
     const preparedPlan = JSON.parse(readFileSync(planPath, 'utf8')) as {
       baseRevision: number;
     };
@@ -528,7 +529,13 @@ describe('render parity and unsupported-feature contract', () => {
       '--json',
     ]);
     expect(applied.code, describeRun(applied)).toBe(0);
-    expect(expectNdjsonContract(applied, ['complete']).at(-1)?.['type']).toBe('complete');
+    expect(applied.json()).toMatchObject({
+      schemaVersion: 1,
+      idempotencyKey: `${id}-apply`,
+      baseRevision: preparedPlan.baseRevision,
+      revision: preparedPlan.baseRevision + 1,
+      replayed: false,
+    });
     const result = await sandbox.run([
       'render',
       '--project',

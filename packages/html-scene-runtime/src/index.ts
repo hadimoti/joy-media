@@ -79,12 +79,13 @@ export type {
   ScenePaintRectV1,
 } from '@joy-media/project-schema';
 
-export type { NotoSansArabicFace } from './fonts.js';
+export type { NotoSansArabicFace, NotoSansArabicLibassFace } from './fonts.js';
 export {
   loadNotoSansArabicFaces,
   loadNotoSansArabicPreviewFontFaces,
   notoSansArabicFontCss,
   notoSansArabicArabic400Path,
+  loadNotoSansArabicLibassFaces,
 } from './fonts.js';
 export { missingCanonicalFontCodePoints } from './font-coverage.js';
 

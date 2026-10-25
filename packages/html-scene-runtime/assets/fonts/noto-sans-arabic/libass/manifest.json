@@ -1,0 +1,25 @@
+{
+  "source": "@fontsource/noto-sans-arabic@5.2.6 (WOFF2 files, decompressed losslessly to TrueType)",
+  "decompressor": "wawoff2@2.0.1 (MIT)",
+  "license": "OFL-1.1",
+  "licenseFile": "../LICENSE-OFL.txt",
+  "purpose": "FFmpeg libass caption faces; the WOFF2 faces in the parent folder stay for browsers",
+  "files": [
+    {
+      "family": "Noto Sans Arabic",
+      "weight": 400,
+      "subset": "arabic",
+      "file": "noto-sans-arabic-arabic-400-normal.ttf",
+      "byteLength": 151388,
+      "sha256": "sha256:65046a85464c7583d47ea9107486da964770e996fa93899a1c3d31067de29693"
+    },
+    {
+      "family": "Noto Sans Arabic",
+      "weight": 700,
+      "subset": "arabic",
+      "file": "noto-sans-arabic-arabic-700-normal.ttf",
+      "byteLength": 151512,
+      "sha256": "sha256:ace3b202eb09d4cd08237fe950b9dfd65350654b016e6a3a44abd5a7a7be06c0"
+    }
+  ]
+}
