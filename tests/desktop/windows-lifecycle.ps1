@@ -40,7 +40,10 @@ $script:transitionOutcomes = [ordered]@{
     installPrevious = 'not-run'
     upgradeCandidate = 'not-run'
     repairCandidate = 'not-run'
-    rollbackPrevious = 'not-run'
+    rollbackToKeptPrevious = 'not-run'
+    updateRefusedWhileFileHeld = 'not-run'
+    tamperedUpdateRefused = 'not-run'
+    wrongKeyManifestRefused = 'not-run'
     uninstall = 'not-run'
     userDataPreserved = 'not-run'
 }
@@ -546,7 +549,13 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     Invoke-AppSmoke "v$candidateVersion repair"
     $script:transitionOutcomes['repairCandidate'] = 'passed'
 
-    Invoke-VerifiedSetup $PreviousSetupPath $PreviousSetupSha256 $PreviousVersion | Out-Null
+    # The candidate setup kept v1.0.1 beside the install when it replaced it. Rolling back is that setup's own /rollback,
+    # which swaps the kept folder back. Running the older setup over the install would be a downgrade, not a rollback.
+    $keptFolder = Join-Path (Split-Path -Parent $installRoot) ((Split-Path -Leaf $installRoot) + '.previous')
+    if (-not (Test-Path -LiteralPath (Join-Path $keptFolder 'joy-media.exe') -PathType Leaf)) { throw 'The candidate setup did not keep v1.0.1 beside the install.' }
+    $rollbackRun = Invoke-CapturedProcess -FilePath $CandidateSetupPath -Arguments @('/rollback') -TimeoutSeconds 900 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment)
+    if ($rollbackRun.ExitCode -ne 0) { throw "Candidate setup /rollback failed with exit code $($rollbackRun.ExitCode)." }
+    Assert-RegisteredVersion $PreviousVersion
     Assert-UserIntegrations $PreviousVersion 'root'
     if ((Get-InstalledFileHash 'joy-media.exe') -ne $previousDesktopExeSha -or (Get-InstalledFileHash 'resources\app\cli\joy-media-bundle.mjs') -ne $previousCliBundleSha) {
         throw 'Rollback did not restore the exact v1.0.1 app and CLI files.'
@@ -556,7 +565,51 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     if ($rollbackVerification.result -ne 'verified' -or $rollbackVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256 -or $rollbackVerification.directCiphertextSha256 -ne $seedProof.directCiphertextSha256) {
         throw 'Settings, Persian asset-library catalog, or DPAPI ciphertext did not survive rollback.'
     }
-    $script:transitionOutcomes['rollbackPrevious'] = 'passed'
+    $script:transitionOutcomes['rollbackToKeptPrevious'] = 'passed'
+
+    # Upgrade again, hold a file of the installed candidate open, and run the candidate setup. The update must be refused
+    # with the in-use message, and neither the installed candidate nor the kept previous version may change.
+    Invoke-VerifiedSetup $CandidateSetupPath $candidateSetup $candidateVersion | Out-Null
+    Assert-UserIntegrations $candidateVersion 'bin'
+    $heldFile = Join-Path $installRoot 'resources\app\cli\joy-media-bundle.mjs'
+    $heldLock = [System.IO.File]::Open($heldFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+    try {
+        $refusedRun = Invoke-CapturedProcess -FilePath $CandidateSetupPath -Arguments @('/s') -TimeoutSeconds 900 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment)
+    } finally {
+        $heldLock.Dispose()
+    }
+    if ($refusedRun.ExitCode -eq 0) { throw 'The candidate setup succeeded although a file of the installed version was held open.' }
+    if ((([string]$refusedRun.Stdout) + ([string]$refusedRun.Stderr)) -notmatch 'in use') { throw 'The refused update did not say that the installation was in use.' }
+    Assert-RegisteredVersion $candidateVersion
+    if ((Get-InstalledFileHash 'joy-media.exe') -ne $candidateDesktopExeSha -or (Get-InstalledFileHash 'resources\app\cli\joy-media-bundle.mjs') -ne $candidateCliBundleSha) {
+        throw 'The refused update changed the installed candidate files.'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $keptFolder 'joy-media.exe') -PathType Leaf)) { throw 'The refused update lost the kept previous version.' }
+    Invoke-AppSmoke "v$candidateVersion after the refused update"
+    $script:transitionOutcomes['updateRefusedWhileFileHeld'] = 'passed'
+
+    # The shipped CLI must refuse a manifest changed after signing, and a manifest whose signature no pinned key made.
+    # This build pins no release key, so both are refused as release-key-unconfigured. The owner-key pass expects
+    # signature-invalid for each (plan section 3.1). Neither case can pass without a signature from a trusted key.
+    $verifyRoot = Join-Path $runnerTemp 'update-verify'
+    New-Item -ItemType Directory -Force -Path $verifyRoot | Out-Null
+    $releaseFile = Join-Path $verifyRoot 'joy-media-setup.exe'
+    [System.IO.File]::WriteAllBytes($releaseFile, [byte[]](1..64))
+    $releaseSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $releaseFile).Hash.ToLowerInvariant()
+    $manifestText = '{"channel":"stable","version":"9.9.9","issuedAt":"2026-10-26T00:00:00Z","files":[{"name":"joy-media-setup.exe","size":64,"sha256":"' + $releaseSha + '"}]}'
+    $cliCommand = Join-Path $installRoot 'bin\joy-media.cmd'
+    $verifyCases = @(
+        @{ Label = 'tampered'; Manifest = ($manifestText -replace '9.9.9', '9.9.8'); Signature = ('A' * 86) },
+        @{ Label = 'wrong-key'; Manifest = $manifestText; Signature = ('B' * 86) }
+    )
+    foreach ($case in $verifyCases) {
+        [System.IO.File]::WriteAllText((Join-Path $verifyRoot 'release-manifest.json'), $case.Manifest)
+        [System.IO.File]::WriteAllText((Join-Path $verifyRoot 'release-manifest.json.sig'), $case.Signature + "`n")
+        $verifyRun = Invoke-CapturedProcess -FilePath (Join-Path $env:SystemRoot 'System32\cmd.exe') -RawArguments ('/d /s /c ""' + $cliCommand + '" update verify "' + $releaseFile + '""') -TimeoutSeconds 300 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment)
+        if ($verifyRun.ExitCode -eq 0) { throw "The shipped CLI accepted a $($case.Label) manifest." }
+        if (([string]$verifyRun.Stdout) -notmatch 'release-key-unconfigured|signature-invalid') { throw "The shipped CLI did not refuse the $($case.Label) manifest with a key or signature reason." }
+        $script:transitionOutcomes[$(if ($case.Label -eq 'tampered') { 'tamperedUpdateRefused' } else { 'wrongKeyManifestRefused' })] = 'passed'
+    }
 
     $uninstaller = Join-Path $installRoot 'uninstall.cmd'
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'Installed uninstaller is missing.' }

@@ -156,7 +156,10 @@ function assertLifecycle(evidence, expected) {
     'installPrevious',
     'upgradeCandidate',
     'repairCandidate',
-    'rollbackPrevious',
+    'rollbackToKeptPrevious',
+    'updateRefusedWhileFileHeld',
+    'tamperedUpdateRefused',
+    'wrongKeyManifestRefused',
     'uninstall',
     'userDataPreserved',
   ];

@@ -41,6 +41,17 @@ describe('installer source contract (F2 and L1)', () => {
     expect(setupSource).toContain('RollbackSync(restoreData)');
   });
 
+  it('lists the folder the restored version uses on PATH, so a rollback to an older layout keeps its commands', () => {
+    // A version from before the bin layout has no bin folder. Rolling back to it without moving the PATH entry would
+    // leave the commands pointing at a folder that does not exist.
+    expect(setupSource).toContain(
+      'SetUserPathLayout(installPath, Directory.Exists(Path.Combine(installPath, "bin")))',
+    );
+    expect(setupSource).toMatch(
+      /private static void SetUserPathLayout\(string installPath, bool binLayout\)/,
+    );
+  });
+
   it('refuses to replace an install whose files are held, and says the installed version was kept', () => {
     expect(setupSource).toContain('The installed version was not changed.');
   });

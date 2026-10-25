@@ -491,7 +491,10 @@ function validateDesktopLifecycle(evidence, expectedPass) {
       'installPrevious',
       'upgradeCandidate',
       'repairCandidate',
-      'rollbackPrevious',
+      'rollbackToKeptPrevious',
+      'updateRefusedWhileFileHeld',
+      'tamperedUpdateRefused',
+      'wrongKeyManifestRefused',
       'uninstall',
       'userDataPreserved',
     ].some((step) => lifecycle.transitions[step] !== 'passed')

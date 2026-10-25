@@ -208,6 +208,19 @@ namespace JoyMedia.Setup
                 throw new InvalidOperationException("The kept version could not be placed, so the current version was kept. " + failure.Message, failure);
             }
 
+            // The restored version decides the PATH entry. A version from before the bin layout has no bin folder, and
+            // its commands are listed under the install root, so the entry must follow the folder that is now in place.
+            try
+            {
+                SetUserPathLayout(installPath, Directory.Exists(Path.Combine(installPath, "bin")));
+            }
+            catch (Exception failure)
+            {
+                Directory.Move(installPath, previousPath);
+                Directory.Move(tempPath, installPath);
+                throw new InvalidOperationException("The command path could not be updated, so the rollback was undone. " + failure.Message, failure);
+            }
+
             WriteRegisteredVersions(restoredVersion, currentVersion);
             try
             {
@@ -571,6 +584,38 @@ namespace JoyMedia.Setup
             shortcut.WorkingDirectory = workingDirectory;
             shortcut.Description = ShortcutDescription;
             shortcut.Save();
+        }
+
+        /// <summary>Lists the folder the restored version uses on the user PATH, and removes the other one. The root
+        /// layout lists the install root; the bin layout lists the bin folder.</summary>
+        private static void SetUserPathLayout(string installPath, bool binLayout)
+        {
+            string wanted = binLayout ? Path.Combine(installPath, "bin") : installPath;
+            string other = binLayout ? installPath : Path.Combine(installPath, "bin");
+            using (RegistryKey envKey = Registry.CurrentUser.OpenSubKey("Environment", true))
+            {
+                if (envKey == null)
+                {
+                    throw new InvalidOperationException("The user PATH could not be opened, so the restored commands were not registered.");
+                }
+                string path = envKey.GetValue("Path", "", RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
+                string[] parts = path.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                List<string> updated = new List<string>();
+                bool hasWanted = false;
+                foreach (string p in parts)
+                {
+                    string trimmed = p.Trim();
+                    if (trimmed.Equals(other, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (trimmed.Equals(wanted, StringComparison.OrdinalIgnoreCase)) hasWanted = true;
+                    updated.Add(p);
+                }
+                if (!hasWanted) updated.Add(wanted);
+                string newPath = string.Join(";", updated.ToArray());
+                if (!newPath.Equals(string.Join(";", parts), StringComparison.Ordinal))
+                {
+                    envKey.SetValue("Path", newPath, RegistryValueKind.ExpandString);
+                }
+            }
         }
 
         private static void RegisterUserPath(string installPath)
