@@ -15,6 +15,7 @@ import {
 const repoRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const installerCheck = resolve(repoRoot, 'tests/desktop/installer-package-check.mjs');
 const windowsLifecycle = resolve(repoRoot, 'tests/desktop/windows-lifecycle.ps1');
+const disposableGate = resolve(repoRoot, 'tests/desktop/disposable-environment.ps1');
 
 const containerId = '0123456789ab';
 const runnerEnv = {
@@ -188,6 +189,9 @@ test('probeHostFacts keeps the hostname and marker from a valid answer', () => {
     manufacturer: 'Microsoft Corporation',
     model: 'Virtual Machine',
     marker,
+    userName: null,
+    profile: null,
+    sandboxSession: null,
   });
 });
 
@@ -232,8 +236,8 @@ test('installer-package-check runs the sandboxed uninstaller by absolute path un
 
 test('the lifecycle harness decides before its first write and refuses pre-existing host integrations', () => {
   const source = readFileSync(windowsLifecycle, 'utf8');
-  const gate = source.indexOf('Test-DisposableEnvironment -Facts');
-  assert.ok(gate > 0, 'the lifecycle harness must call Test-DisposableEnvironment');
+  const gate = source.indexOf('Assert-DisposableEnvironment');
+  assert.ok(gate > 0, 'the lifecycle harness must call Assert-DisposableEnvironment');
   for (const write of [
     'New-Item -ItemType Directory -Path $workRoot',
     'Invoke-VerifiedSetup $testTamperedArtifact',
@@ -244,12 +248,39 @@ test('the lifecycle harness decides before its first write and refuses pre-exist
     source,
     /Refusing to start: a JOY Media shortcut or uninstall registry key already exists/u,
   );
-  assert.ok(source.includes("'joy-media-disposable-test-environment'"));
+  // The gate itself lives in the shared file, which the lifecycle and the Windows Sandbox runner both load.
+  assert.ok(
+    source.includes('disposable-environment.ps1'),
+    'the lifecycle harness must load the shared gate',
+  );
+  assert.ok(
+    readFileSync(disposableGate, 'utf8').includes("'joy-media-disposable-test-environment'"),
+  );
 });
 
 // The PowerShell gate must decide exactly as the JavaScript gate does. Both run against the same cases.
+const sandboxParityNonce = '0123456789abcdef0123456789abcdef';
+const sandboxParityFacts = {
+  hostname: 'a1b2c3d4e5f6',
+  manufacturer: 'Microsoft Corporation',
+  model: 'Virtual Machine',
+  marker: null,
+  userName: 'WDAGUtilityAccount',
+  profile: 'C:\\Users\\WDAGUtilityAccount',
+  sandboxSession: { purpose: 'joy-media-windows-sandbox', nonce: sandboxParityNonce },
+};
 const parityCases = [
   { name: 'ci container', env: runnerEnv, facts: containerFacts },
+  {
+    name: 'windows sandbox',
+    env: { JOY_MEDIA_SANDBOX_NONCE: sandboxParityNonce },
+    facts: sandboxParityFacts,
+  },
+  {
+    name: 'windows sandbox with a stale nonce',
+    env: { JOY_MEDIA_SANDBOX_NONCE: 'fedcba9876543210fedcba9876543210' },
+    facts: sandboxParityFacts,
+  },
   { name: 'owner pc with runner variables', env: runnerEnv, facts: ownerPcFacts },
   { name: 'hyper-v guest with marker', env: {}, facts: hyperVFacts },
   { name: 'hyper-v guest without marker', env: {}, facts: { ...hyperVFacts, marker: null } },
@@ -276,13 +307,12 @@ const POWERSHELL_GATE_PARITY = [
   '$errors = $null',
   '$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:JOY_GATE_HARNESS, [ref]$null, [ref]$errors)',
   'if ($errors.Count -gt 0) { throw ($errors | Out-String) }',
-  "$definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-DisposableEnvironment' }, $true)",
-  'if ($null -eq $definition) { throw "Test-DisposableEnvironment is missing" }',
-  '. ([ScriptBlock]::Create($definition.Extent.Text))',
+  // The shared gate file has no side effects: it only defines the rules and their constants.
+  '. $env:JOY_GATE_HARNESS',
   '$cases = $env:JOY_GATE_CASES | ConvertFrom-Json',
   '$results = foreach ($case in $cases) {',
   '  $facts = $null',
-  '  if ($null -ne $case.facts) { $facts = [pscustomobject]@{ Hostname = $case.facts.hostname; Manufacturer = $case.facts.manufacturer; Model = $case.facts.model; Marker = $case.facts.marker } }',
+  '  if ($null -ne $case.facts) { $facts = [pscustomobject]@{ Hostname = $case.facts.hostname; Manufacturer = $case.facts.manufacturer; Model = $case.facts.model; Marker = $case.facts.marker; UserName = $case.facts.userName; Profile = $case.facts.profile; SandboxSession = $case.facts.sandboxSession } }',
   '  $environment = @{}',
   '  foreach ($property in $case.environment.PSObject.Properties) { $environment[$property.Name] = [string]$property.Value }',
   '  $verdict = Test-DisposableEnvironment -Facts $facts -Environment $environment',
@@ -309,7 +339,7 @@ test(
         windowsHide: true,
         env: {
           ...process.env,
-          JOY_GATE_HARNESS: windowsLifecycle,
+          JOY_GATE_HARNESS: disposableGate,
           JOY_GATE_CASES: JSON.stringify(
             parityCases.map(({ name, env, facts }) => ({ name, environment: env, facts })),
           ),

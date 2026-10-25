@@ -6,10 +6,15 @@
 import { spawnSync } from 'node:child_process';
 
 export const LIFECYCLE_MARKER_PURPOSE = 'joy-media-disposable-test-environment';
+// A Windows Sandbox session. The host launcher writes this session file into the read-only staging folder, and
+// passes the same nonce to the sandbox's logon command. Windows Sandbox runs its built-in account, WDAGUtilityAccount.
+export const SANDBOX_SESSION_PURPOSE = 'joy-media-windows-sandbox';
+export const SANDBOX_USER = 'WDAGUtilityAccount';
 
 const CONTAINER_ID_PATTERN = /^[0-9a-f]{12,64}$/u;
+const SANDBOX_NONCE_PATTERN = /^[0-9a-f]{32}$/u;
 const NOT_IDENTIFIED =
-  'no CI container runner or Hyper-V disposable guest was positively identified';
+  'no CI container runner, Hyper-V disposable guest or Windows Sandbox session was positively identified';
 
 // Read-only. Each optional fact is null when its query fails; the hostname is required for the container path.
 const PROBE_SCRIPT = [
@@ -20,7 +25,10 @@ const PROBE_SCRIPT = [
   "$markerPath = Join-Path $env:SystemDrive 'JoyMediaLifecycle\\disposable-environment.json'",
   '$marker = $null',
   'try { if (Test-Path -LiteralPath $markerPath -PathType Leaf) { $marker = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json } } catch { $marker = $null }',
-  '[pscustomobject]@{ hostname = (hostname).Trim().ToLowerInvariant(); manufacturer = $manufacturer; model = $model; marker = $marker } | ConvertTo-Json -Depth 4 -Compress',
+  "$sessionPath = Join-Path $env:USERPROFILE 'Desktop\\JOY-Staging\\session.json'",
+  '$session = $null',
+  'try { if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { $session = Get-Content -LiteralPath $sessionPath -Raw | ConvertFrom-Json } } catch { $session = $null }',
+  '[pscustomobject]@{ hostname = (hostname).Trim().ToLowerInvariant(); manufacturer = $manufacturer; model = $model; marker = $marker; userName = [string]$env:USERNAME; profile = [string]$env:USERPROFILE; sandboxSession = $session } | ConvertTo-Json -Depth 4 -Compress',
 ].join('\n');
 
 export class DisposableHostRefusal extends Error {
@@ -52,6 +60,23 @@ function isHyperVGuest(facts) {
   );
 }
 
+// A Windows Sandbox session. The owner's PC is never a virtual machine, runs no sandbox account, and has no
+// session file for a nonce that its own launch issued. All of these must hold, so no one fact is enough.
+function isWindowsSandbox(env, facts) {
+  const session = facts.sandboxSession;
+  const nonce = env.JOY_MEDIA_SANDBOX_NONCE ?? '';
+  return (
+    facts.manufacturer === 'Microsoft Corporation' &&
+    facts.model === 'Virtual Machine' &&
+    facts.userName === SANDBOX_USER &&
+    typeof facts.profile === 'string' &&
+    facts.profile.toLowerCase().endsWith(`\\users\\${SANDBOX_USER.toLowerCase()}`) &&
+    session?.purpose === SANDBOX_SESSION_PURPOSE &&
+    SANDBOX_NONCE_PATTERN.test(nonce) &&
+    session.nonce === nonce
+  );
+}
+
 /**
  * Decides from positive evidence only. Returns the environment name when the host is identified, otherwise
  * the reasons it is not. Pure: it reads nothing but its arguments.
@@ -69,6 +94,8 @@ export function decideDisposableEnvironment({ platform, env, facts }) {
   }
   if (isCiContainer(env, facts)) return { allowed: true, environment: 'ci-container', reasons: [] };
   if (isHyperVGuest(facts)) return { allowed: true, environment: 'hyperv-vm', reasons: [] };
+  if (isWindowsSandbox(env, facts))
+    return { allowed: true, environment: 'windows-sandbox', reasons: [] };
   return { allowed: false, environment: null, reasons: [NOT_IDENTIFIED] };
 }
 
@@ -97,6 +124,9 @@ export function probeHostFacts({ run = spawnSync } = {}) {
     manufacturer: typeof parsed.manufacturer === 'string' ? parsed.manufacturer : null,
     model: typeof parsed.model === 'string' ? parsed.model : null,
     marker: parsed.marker ?? null,
+    userName: typeof parsed.userName === 'string' ? parsed.userName : null,
+    profile: typeof parsed.profile === 'string' ? parsed.profile : null,
+    sandboxSession: parsed.sandboxSession ?? null,
   };
 }
 

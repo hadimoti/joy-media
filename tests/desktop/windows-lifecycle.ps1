@@ -24,68 +24,9 @@ trap {
 }
 . (Join-Path $PSScriptRoot 'windows-release-checksum.ps1')
 
-# Disposable-environment gate. The harness installs, upgrades, repairs, uninstalls, and removes the Desktop and Start
-# Menu shortcuts and the HKCU uninstall key, so it runs only where the host is positively identified: a CI container
-# runner whose container id equals its hostname, or a Hyper-V guest with the lifecycle marker. The rules match
-# tests/desktop/disposable-host.mjs. A probe that cannot answer refuses before anything is changed.
-function Get-DisposableEnvironmentFacts {
-    $manufacturer = $null
-    $model = $null
-    try {
-        $system = Get-CimInstance -ClassName Win32_ComputerSystem
-        $manufacturer = [string]$system.Manufacturer
-        $model = [string]$system.Model
-    } catch { }
-    $marker = $null
-    $markerPath = Join-Path $env:SystemDrive 'JoyMediaLifecycle\disposable-environment.json'
-    try {
-        if (Test-Path -LiteralPath $markerPath -PathType Leaf) { $marker = Get-Content -LiteralPath $markerPath -Raw | ConvertFrom-Json }
-    } catch { $marker = $null }
-    return [pscustomobject]@{
-        Hostname = (hostname).Trim().ToLowerInvariant()
-        Manufacturer = $manufacturer
-        Model = $model
-        Marker = $marker
-    }
-}
-
-function Test-DisposableEnvironment {
-    param(
-        [AllowNull()]$Facts,
-        [Parameter(Mandatory = $true)][hashtable]$Environment
-    )
-    if ($null -eq $Facts -or $null -eq $Facts.Hostname) {
-        return [pscustomobject]@{ Allowed = $false; Environment = ''; Reasons = @('the environment probe did not answer') }
-    }
-    $containerId = [string]$Environment['JOY_MEDIA_WINDOWS_CONTAINER_ID']
-    $containerIdentified = ([string]$Environment['GITHUB_ACTIONS'] -ceq 'true') -and
-        ([string]$Environment['RUNNER_ENVIRONMENT'] -ceq 'self-hosted') -and
-        ($containerId -cmatch '^[0-9a-f]{12,64}$') -and
-        ([string]$Facts.Hostname -ceq $containerId)
-    if ($containerIdentified) {
-        return [pscustomobject]@{ Allowed = $true; Environment = 'ci-container'; Reasons = @() }
-    }
-    $hyperVIdentified = ([string]$Facts.Manufacturer -ceq 'Microsoft Corporation') -and
-        ([string]$Facts.Model -ceq 'Virtual Machine') -and
-        ($null -ne $Facts.Marker) -and
-        ([string]$Facts.Marker.purpose -ceq 'joy-media-disposable-test-environment') -and
-        ([string]$Facts.Marker.kind -ceq 'hyperv-vm')
-    if ($hyperVIdentified) {
-        return [pscustomobject]@{ Allowed = $true; Environment = 'hyperv-vm'; Reasons = @() }
-    }
-    return [pscustomobject]@{ Allowed = $false; Environment = ''; Reasons = @('no CI container runner or Hyper-V disposable guest was positively identified') }
-}
-
-$disposableFacts = $null
-try { $disposableFacts = Get-DisposableEnvironmentFacts } catch { $disposableFacts = $null }
-$disposableVerdict = Test-DisposableEnvironment -Facts $disposableFacts -Environment @{
-    GITHUB_ACTIONS = $env:GITHUB_ACTIONS
-    RUNNER_ENVIRONMENT = $env:RUNNER_ENVIRONMENT
-    JOY_MEDIA_WINDOWS_CONTAINER_ID = $env:JOY_MEDIA_WINDOWS_CONTAINER_ID
-}
-if (-not $disposableVerdict.Allowed) {
-    throw ('Refusing to run the destructive Windows lifecycle harness on this host: ' + ($disposableVerdict.Reasons -join '; '))
-}
+# The disposable-environment gate is shared with the Windows Sandbox guest runner (see disposable-environment.ps1).
+. (Join-Path $PSScriptRoot 'disposable-environment.ps1')
+$disposableEnvironment = Assert-DisposableEnvironment 'Refusing to run the destructive Windows lifecycle harness on this host'
 $PreviousVersion = '1.0.1'
 $PreviousSetupSha256 = '3f5fbe853de04a24aac22a46e28dd661cc1a80a2a6c5a1fa383fcd9ab3efde04'
 $PreviousChecksumsSha256 = 'a7b933f44ec82edd2f166dcde0bb013e1febd0ebbd19aa42dd49ac8e05adfe32'
