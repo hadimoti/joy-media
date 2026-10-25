@@ -415,7 +415,7 @@ Astra's non-blocking R2 follow-ups (from the R1 review) to fold in early:
 | Master plan + release rules    | `docs/superpowers/plans/2026-09-05-joy-live-director-master.md`                                            |
 | R1 task list                   | `docs/superpowers/plans/2026-09-05-joy-live-director-r1.md`                                                |
 | R2/R3 task list                | `docs/superpowers/plans/2026-09-05-joy-live-director-r2-r3.md`                                             |
-| Original next-agent plan       | `<owner-profile>\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`                                      |
+| Original next-agent plan       | `<owner-profile>\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`                                        |
 | Astra acceptance bundle        | `docs/reviews/joy-live-director-r1-acceptance-bundle-2026-09-07.md`                                        |
 | Deploy runbook (C0–C6)         | `docs/reviews/joy-live-director-r1-deploy-runbook-2026-09-07.md`                                           |
 | Coverage ledger + verifier     | `docs/reviews/joy-live-director-coverage.json`, `tooling/release/verify-agent-operation-coverage.mjs`      |
@@ -424,8 +424,8 @@ Astra's non-blocking R2 follow-ups (from the R1 review) to fold in early:
 | Historical deploy evidence     | `STATE.md` (built-in engine 2026-09-04; WP-34/35/36 closeouts)                                             |
 | VPS operational map            | `~/.claude/skills/sweden-vps-ops/references/operational-map.md`                                            |
 | Gbrain ritual                  | `~/.codex/AGENTS.md`, `~/.claude/skills/brain-ops/SKILL.md`                                                |
-| Memory (update each session)   | `<owner-profile>\.claude\projects\C--Users-HadiMoti-joy-media\memory\joy-media-live-director-state.md`   |
-| Worktree (work happens here)   | `<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director` on `codex/joy-live-director` |
+| Memory (update each session)   | `<owner-profile>\.claude\projects\C--owner-profile-joy-media\memory\joy-media-live-director-state.md`      |
+| Worktree (work happens here)   | `<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director` on `codex/joy-live-director`   |
 | WIP safety snapshot            | `stash@{0}` `e0eb6368`, tag `wip-snapshot-2026-09-06`, branch `codex/joy-live-director-wip` — never delete |
 
 ### Hard limits (unchanged)
