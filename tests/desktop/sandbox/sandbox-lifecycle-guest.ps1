@@ -1,7 +1,7 @@
-# Runs one installer lifecycle sequence inside Windows Sandbox. The host launcher (run-windows-sandbox-lifecycle.mjs)
-# stages this folder read-only, writes session.json with the launch nonce, and starts this script from the sandbox
-# logon command with JOY_MEDIA_SANDBOX_NONCE set. The sandbox discards its state when it closes, so each sequence
-# runs to its end in one session, and every step is written to the writable evidence folder as it finishes.
+# Runs one installer lifecycle sequence inside Windows Sandbox. The host launcher (sandbox-run.mjs) stages this folder
+# read-only, writes session.json with the launch nonce, and starts this script from the sandbox logon command with
+# JOY_MEDIA_SANDBOX_NONCE set. The sandbox discards its state when it closes, so each sequence runs to its end in one
+# session, and every step is written to the writable evidence folder as it finishes.
 param(
     [Parameter(Mandatory = $true)][ValidateSet('previous-upgrade-rollback', 'fresh-candidate')][string]$Sequence,
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-f]{32}$')][string]$SessionNonce
@@ -25,6 +25,17 @@ $desktopShortcut = Join-Path $env:USERPROFILE 'Desktop\JOY Media.lnk'
 $startMenuShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\JOY Media.lnk'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JoyMedia'
 $steps = [System.Collections.Generic.List[object]]::new()
+# Windows PowerShell 5.1 writes "utf8" with a byte order mark, and the host's JSON reader rejects that mark. The
+# evidence is therefore written as UTF-8 without a mark.
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+
+function Write-Evidence([string]$Name, [string]$Text) {
+    [System.IO.File]::WriteAllText((Join-Path $evidenceDirectory $Name), $Text, $utf8NoBom)
+}
+
+function Add-EvidenceLine([string]$Name, [string]$Line) {
+    [System.IO.File]::AppendAllText((Join-Path $evidenceDirectory $Name), $Line + "`n", $utf8NoBom)
+}
 
 function Add-Step([string]$Name, [bool]$Passed, [string]$Detail) {
     $record = [pscustomobject]@{
@@ -34,7 +45,7 @@ function Add-Step([string]$Name, [bool]$Passed, [string]$Detail) {
         utcTime = [DateTime]::UtcNow.ToString('o')
     }
     $steps.Add($record)
-    Add-Content -LiteralPath (Join-Path $evidenceDirectory 'steps.jsonl') -Value ($record | ConvertTo-Json -Compress) -Encoding utf8
+    Add-EvidenceLine 'steps.jsonl' ($record | ConvertTo-Json -Compress)
 }
 
 function Get-Sha256Lower([string]$Path) {
@@ -42,24 +53,44 @@ function Get-Sha256Lower([string]$Path) {
 }
 
 # Runs a program with captured output and a time limit. The argument line is passed raw, because cmd.exe needs its
-# own quoting. A program that outlives the limit is stopped.
+# own quoting. A program that outlives the limit is stopped. The process is started directly, not with Start-Process,
+# because Windows PowerShell 5.1 returns a null ExitCode from Start-Process when output is redirected. A child that
+# keeps an output pipe open cannot hold the run, because each read is bounded.
 function Invoke-Program([string]$FilePath, [string]$ArgumentLine, [int]$TimeoutSeconds) {
-    $stdoutPath = [System.IO.Path]::GetTempFileName()
-    $stderrPath = [System.IO.Path]::GetTempFileName()
-    try {
-        $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentLine -WorkingDirectory $stagingRoot -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            try { $process.Kill() } catch { }
-            return [pscustomobject]@{ ExitCode = -1; Stdout = ''; Stderr = 'timed out' }
-        }
-        return [pscustomobject]@{
-            ExitCode = $process.ExitCode
-            Stdout = [string](Get-Content -LiteralPath $stdoutPath -Raw)
-            Stderr = [string](Get-Content -LiteralPath $stderrPath -Raw)
-        }
-    } finally {
-        Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $FilePath
+    $start.Arguments = $ArgumentLine
+    $start.WorkingDirectory = $stagingRoot
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    if (-not $process.Start()) { throw "Could not start $FilePath" }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        try { $process.Kill() } catch { }
+        return [pscustomobject]@{ ExitCode = -1; Stdout = ''; Stderr = 'timed out' }
     }
+    [void]$process.WaitForExit()
+    $stdout = if ($stdoutTask.Wait(20000)) { $stdoutTask.Result } else { '' }
+    $stderr = if ($stderrTask.Wait(20000)) { $stderrTask.Result } else { '' }
+    return [pscustomobject]@{ ExitCode = $process.ExitCode; Stdout = [string]$stdout; Stderr = [string]$stderr }
+}
+
+# Keeps what a program printed, with its exit code, in the evidence folder, so a failed step can be read later.
+function Save-ProgramOutput([string]$Label, $Run) {
+    $fileName = 'output-' + (($Label -replace '[^A-Za-z0-9]+', '-').Trim('-')) + '.txt'
+    Write-Evidence $fileName ("exit code: $($Run.ExitCode)`r`n--- stdout ---`r`n$($Run.Stdout)`r`n--- stderr ---`r`n$($Run.Stderr)`r`n")
+}
+
+# The end of a program's output on one line, for a step's detail.
+function Get-OutputTail($Run) {
+    $text = (([string]$Run.Stderr) + ' ' + ([string]$Run.Stdout)) -replace '\s+', ' '
+    if ($text.Length -gt 400) { $text = $text.Substring($text.Length - 400) }
+    return $text.Trim()
 }
 
 function Test-UserPathEntry([string]$Entry) {
@@ -93,8 +124,9 @@ function Install-Version([string]$Name, $Build) {
         return $false
     }
     $run = Invoke-Program $setupPath '/s' 900
+    Save-ProgramOutput $Name $run
     if ($run.ExitCode -ne 0) {
-        Add-Step $Name $false "setup exited with $($run.ExitCode)"
+        Add-Step $Name $false "setup exited with $($run.ExitCode): $(Get-OutputTail $run)"
         return $false
     }
     $problems = @()
@@ -118,8 +150,9 @@ function Test-Assertion([string]$Name, [bool]$Passed, [string]$Detail) {
 function Test-AppStart([string]$Name, [string]$Version) {
     $smokeProfile = Join-Path $env:TEMP "joy-smoke-$Sequence-$Name"
     $run = Invoke-Program (Join-Path $installRoot 'joy-media.exe') ('--smoke --user-data-dir="' + $smokeProfile + '"') 180
+    Save-ProgramOutput "smoke $Name" $run
     $passed = ($run.ExitCode -eq 0) -and ($run.Stdout -match '\[joy-desktop\] packaged renderer smoke passed') -and ($run.Stderr -notmatch '\[joy-desktop\] packaged renderer smoke failed')
-    $detail = if ($passed) { "the application starts and passes its renderer smoke ($Version)" } else { "smoke exit $($run.ExitCode) for $Version" }
+    $detail = if ($passed) { "the application starts and passes its renderer smoke ($Version)" } else { "smoke exit $($run.ExitCode) for ${Version}: $(Get-OutputTail $run)" }
     Add-Step "application starts: $Name" $passed $detail
     return $passed
 }
@@ -133,8 +166,9 @@ function Test-FreshShellCli([string]$Version) {
     } finally {
         $env:Path = $savedPath
     }
+    Save-ProgramOutput "fresh shell cli $Version" $run
     $passed = ($run.ExitCode -eq 0) -and ($run.Stdout -match [regex]::Escape($Version))
-    $detail = if ($passed) { "a fresh shell ran joy-media --version and reported $Version" } else { "fresh-shell exit $($run.ExitCode); output did not report $Version" }
+    $detail = if ($passed) { "a fresh shell ran joy-media --version and reported $Version" } else { "fresh-shell exit $($run.ExitCode); output did not report ${Version}: $(Get-OutputTail $run)" }
     Add-Step 'fresh shell runs joy-media --version' $passed $detail
 }
 
@@ -145,11 +179,12 @@ function Invoke-Uninstall([string]$Name) {
         return
     }
     $run = Invoke-Program (Join-Path $env:SystemRoot 'System32\cmd.exe') ('/d /s /c ""' + $uninstaller + '""') 120
+    Save-ProgramOutput $Name $run
     # The uninstaller deletes the install folder in the background after it returns, so wait for that.
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
     while ((Test-Path -LiteralPath $installRoot) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
     $problems = @()
-    if ($run.ExitCode -ne 0) { $problems += "uninstall.cmd exited with $($run.ExitCode)" }
+    if ($run.ExitCode -ne 0) { $problems += "uninstall.cmd exited with $($run.ExitCode): $(Get-OutputTail $run)" }
     if (Test-Path -LiteralPath $installRoot) { $problems += 'the install folder remained' }
     if (Test-Path -LiteralPath $uninstallKey) { $problems += 'the uninstall key remained' }
     if ((Test-Path -LiteralPath $desktopShortcut) -or (Test-Path -LiteralPath $startMenuShortcut)) { $problems += 'a shortcut remained' }
@@ -192,16 +227,20 @@ try {
 } catch {
     Add-Step 'sequence error' $false $_.Exception.Message
 } finally {
-    $passedCount = @($steps | Where-Object { $_.status -eq 'passed' }).Count
-    $summary = [pscustomobject]@{
-        sequence = $Sequence
-        environment = 'windows-sandbox'
-        passed = $passedCount
-        failed = $steps.Count - $passedCount
-        steps = $steps
-        completedUtc = [DateTime]::UtcNow.ToString('o')
+    try {
+        $passedCount = @($steps | Where-Object { $_.status -eq 'passed' }).Count
+        $summary = [pscustomobject]@{
+            sequence = $Sequence
+            environment = 'windows-sandbox'
+            passed = $passedCount
+            failed = $steps.Count - $passedCount
+            steps = $steps
+            completedUtc = [DateTime]::UtcNow.ToString('o')
+        }
+        Write-Evidence 'summary.json' (($summary | ConvertTo-Json -Depth 6) + "`n")
+    } finally {
+        # done.json is written last, so the host reads the summary only once it is complete.
+        Write-Evidence 'done.json' (([pscustomobject]@{ status = 'completed'; sequence = $Sequence } | ConvertTo-Json -Compress) + "`n")
+        try { Stop-Transcript | Out-Null } catch { }
     }
-    $summary | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidenceDirectory 'summary.json') -Encoding utf8
-    [pscustomobject]@{ status = 'completed'; sequence = $Sequence } | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $evidenceDirectory 'done.json') -Encoding utf8
-    try { Stop-Transcript | Out-Null } catch { }
 }

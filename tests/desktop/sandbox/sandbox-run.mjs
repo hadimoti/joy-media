@@ -254,6 +254,31 @@ async function waitForFile(path, timeoutMs) {
   return true;
 }
 
+/** Windows PowerShell 5.1 writes UTF-8 with a byte order mark, which JSON.parse rejects, so the mark is removed first. */
+export function readJsonFile(path) {
+  return JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/u, ''));
+}
+
+function failedSequence(sequence, step, detail) {
+  return { sequence, passed: 0, failed: 1, steps: [{ step, status: 'failed', detail }] };
+}
+
+/**
+ * The result of one sequence. A sandbox that never finished, or whose summary cannot be read, counts as a failed
+ * sequence, so the other sequence still runs and the run summary is still written.
+ */
+export function readSequenceResult(sequenceEvidence, sequence, done) {
+  if (!done) return failedSequence(sequence, 'sequence', 'the sandbox did not finish in time');
+  const summaryPath = join(sequenceEvidence, 'summary.json');
+  if (!existsSync(summaryPath))
+    return failedSequence(sequence, 'sequence', 'the sandbox finished without a summary');
+  try {
+    return readJsonFile(summaryPath);
+  } catch (error) {
+    return failedSequence(sequence, 'summary', `the summary could not be read: ${error.message}`);
+  }
+}
+
 function parseArgs(argv) {
   const options = {};
   for (let index = 0; index < argv.length; index += 2) {
@@ -329,19 +354,7 @@ export async function main(argv) {
     launchSandbox(configPath);
     const done = await waitForFile(join(evidence, sequence, 'done.json'), 60 * 60 * 1000);
     closeSandbox();
-    const summaryPath = join(evidence, sequence, 'summary.json');
-    results.push(
-      done && existsSync(summaryPath)
-        ? JSON.parse(readFileSync(summaryPath, 'utf8'))
-        : {
-            sequence,
-            passed: 0,
-            failed: 1,
-            steps: [
-              { step: 'sequence', status: 'failed', detail: 'the sandbox did not finish in time' },
-            ],
-          },
-    );
+    results.push(readSequenceResult(join(evidence, sequence), sequence, done));
     // Sandbox allows one instance at a time, so the next sequence starts after the previous window has closed.
     await new Promise((done2) => setTimeout(done2, 10000));
   }

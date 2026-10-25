@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -12,7 +13,9 @@ import {
   buildSandboxConfig,
   checkSandboxConfig,
   makeSandboxNonce,
+  readJsonFile,
   readPinnedHashes,
+  readSequenceResult,
   stageRun,
 } from './sandbox-run.mjs';
 
@@ -136,3 +139,86 @@ test('the guest runner checks the disposable gate with the launch nonce before i
   assert.ok(guest.indexOf('Invoke-Program') > gateAt, 'nothing runs before the gate');
   assert.ok(guest.includes('JOY-Evidence'), 'the guest writes to the evidence folder');
 });
+
+test('reads a summary that Windows PowerShell 5.1 wrote with a byte order mark (negative control: JSON.parse alone fails)', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'joy-sandbox-bom-'));
+  try {
+    const path = join(folder, 'summary.json');
+    writeFileSync(path, '\uFEFF{"sequence":"fresh-candidate","failed":0}\n', 'utf8');
+    assert.throws(() => JSON.parse(readFileSync(path, 'utf8')), SyntaxError);
+    assert.deepEqual(readJsonFile(path), { sequence: 'fresh-candidate', failed: 0 });
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('a summary that cannot be read fails its own sequence, and an unfinished sandbox fails too', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'joy-sandbox-summary-'));
+  try {
+    writeFileSync(join(folder, 'summary.json'), '{not json', 'utf8');
+    const unreadable = readSequenceResult(folder, 'fresh-candidate', true);
+    assert.equal(unreadable.failed, 1);
+    assert.equal(unreadable.steps[0].step, 'summary');
+    const unfinished = readSequenceResult(folder, 'fresh-candidate', false);
+    assert.equal(unfinished.failed, 1);
+    assert.equal(unfinished.steps[0].detail, 'the sandbox did not finish in time');
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test('the guest runner writes evidence without a byte order mark and runs programs without Start-Process', () => {
+  const guest = readFileSync(
+    join(repoRoot, 'tests', 'desktop', 'sandbox', 'sandbox-lifecycle-guest.ps1'),
+    'utf8',
+  );
+  // Comments may name the cmdlets they avoid, so only the code lines are checked.
+  const code = guest
+    .split(/\r?\n/u)
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('\n');
+  assert.ok(
+    code.includes('UTF8Encoding]::new($false)'),
+    'evidence is written without a byte order mark',
+  );
+  assert.ok(
+    !/\b(?:Set-Content|Add-Content)\b/u.test(code),
+    'evidence must not go through Set-Content or Add-Content',
+  );
+  assert.ok(
+    !code.includes('Start-Process'),
+    'Start-Process gives a null ExitCode for redirected output',
+  );
+  assert.ok(
+    code.includes('[System.Diagnostics.Process]'),
+    'programs run through System.Diagnostics.Process',
+  );
+});
+
+test(
+  'the guest runner parses as Windows PowerShell',
+  { skip: process.platform !== 'win32' && 'Windows only' },
+  () => {
+    const parse =
+      '$errors = $null; [System.Management.Automation.Language.Parser]::ParseFile($env:JOY_GUEST_RUNNER, [ref]$null, [ref]$errors) | Out-Null; ' +
+      'if ($errors.Count -gt 0) { $errors | ForEach-Object { $_.Message }; exit 1 }';
+    const result = spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', parse],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          JOY_GUEST_RUNNER: join(
+            repoRoot,
+            'tests',
+            'desktop',
+            'sandbox',
+            'sandbox-lifecycle-guest.ps1',
+          ),
+        },
+      },
+    );
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  },
+);
