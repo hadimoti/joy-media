@@ -29,7 +29,7 @@
 
 ## Version state
 
-The manifest, the artifact names, `apps/desktop/package.json`, `apps/cli/package.json` and `apps/desktop/installer/Setup.cs` (`ProductVersion`) all say `1.0.2`. This branch is v1.0.3. The artifacts are development builds and must not be called release-ready v1.0.3 artifacts. Nothing was released, tagged or overwritten, and the published v1.0.2 assets were not touched.
+The source version is 1.0.3 from commit `a328b956`: `apps/desktop/package.json`, `apps/cli/package.json`, `apps/desktop/installer/Setup.cs` (`ProductVersion`), the CLI constant and banner, and the lifecycle smoke labels. The 1.0.2 development artifacts recorded above (built from `a8bc28be`) remain as evidence only. The 1.0.3 development candidate is described in the section below. Nothing was released, tagged or overwritten, and the published v1.0.2 assets were not touched.
 
 Coordinated update plan, to run before the future candidate freeze:
 
@@ -188,6 +188,21 @@ The earlier version of this note said the test stopped at Step 10, so later step
 - Checked 2026-10-25, still BLOCKED: (1) Hyper-V is enabled and its services run. This session is not elevated, `Get-VM` is denied, and the account is not a member of Hyper-V Administrators, so VM creation and checkpoints need an elevated session or that membership. (2) No Windows 11 x64 install media was found on the drives or profile folders searched to depth 2. (3) The harness `tests/desktop/windows-lifecycle.ps1` needs the 1.0.1 setup, ZIP and checksums, pinned by SHA-256. None are on this PC, so its upgrade, repair and rollback steps cannot run. (4) The release directory holds version 1.0.2 at `a8bc28be`. Its four digests match `SHA256SUMS.txt` (see Commits and provenance), but a v1.0.3 candidate needs the version update first (see Version state).
 - Owner installation check, after the test runs in this round: 557 files, none newer than the post-render snapshot. The Desktop and Start Menu shortcuts still date from 2 October, and the per-user environment key was last written on 24 October. The uninstall entry was not touched.
 - Finding, not fixed: the installer and uninstaller are not scoped to their own install. They can overwrite or remove shortcuts and registry entries they did not create.
+
+## Candidate and track status (2026-10-25, later)
+
+- **Development candidate from `a328b956`** (`apps/desktop/dist/releases`; the manifest's `targetCommit` matches). Digests, recomputed:
+  - setup `joy-media-setup.exe`: `ddbacc6d220fd7e18ca251ec2f7b7388d2946ea7d978990f9e84ca509ec2eb4c`
+  - ZIP `joy-media-windows-x64-v1.0.3.zip`: `deeee9b3552259a398d9f1366e5443eb8c79109facad141ae99574c26c637848`
+  - `joy-media.exe`: `e048632e03fabc96de5e10afbebc0aa31f4e1674155ea3d270597fe7523f9d80`
+  - `joy-media-bundle.mjs`: `fa2a38f19642c92092e43a8366648520bf75d8b6f39f9fe764eda4de54c969dd`
+  - `joy-worker.exe`: `9c8dd143bdb6ae4f2d9f810ba9ff0f19312f326ea2cb939b317cd16be8d43eb2`
+  - It is not frozen. HEAD has moved on through test-only commits, and any formal candidate needs a clean rebuild from its own SHA. The installer integrity check did not complete for this candidate.
+- **Incident, 2026-10-25.** Running the installer integrity check on this PC during the candidate build left the owner's per-user install folder missing. The Desktop and Start Menu shortcuts and the uninstall entry still point to it. The folder was removed while the check ran, but the exact operation was not identified. The owner's rule is to leave the installation, shortcuts, PATH and uninstall entry untouched, so restoring the folder needs the owner's approval. The check now refuses to run on any host with a JOY Media install (commit `3f1d190c`).
+- **Track status.**
+  - L9: done locally. One fixture-only control-port helper refuses real-service runs. Specs that reach the port through imports are detected transitively. Three reverse mutations are caught (commits `82c50441` and `02988e7a`).
+  - L3: the caption probe already compares rendered frames, not logs. Still open: a committed reference frame, the WOFF2-to-TTF tool with its same-bytes test, and the desktop canonical-face case. The lifecycle gate `JOY_MEDIA_REQUIRE_CAPTION_FACE=1` is already set for the caption case.
+  - Installer lifecycle: BLOCKED. Hyper-V is available, and the VM-creation script passed a read-only dry run. It is waiting for approval. The install media is identified: Microsoft's English 64-bit multi-edition Windows 11 ISO (2026 Update, version 26H2), SHA-256 `BD4307DF32BC8AF33B39CCECB1174AEB345386630F89A2B86C7A4E36B55EA650`, not downloaded. The v1.0.1 setup, ZIP and checksums were retrieved and match the pinned harness values.
 
 ## Remaining uncertainties
 
