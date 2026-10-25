@@ -1,29 +1,46 @@
 # v1.0.3 Persian caption validation (2026-10-25)
 
-**Status: partial.** Right-to-left caption lines lay out correctly in the packaged CLI (Persian is the sample verified here), captions wrap automatically, and typed line breaks are honoured. The Latin companion face is adopted, and the Noto caption faces draw at the Arial-equivalent size (owner option B, commit `a8bc28be`). The installer embeds the release ZIP, and the installed copy renders both samples. Not done: the real installer and uninstaller, which are blocked on this PC. P0-4 Step 10 fails on this build. Its root cause is measured below, and the proposed assertion change is waiting for owner approval.
+**Status: partial.** Right-to-left caption lines lay out correctly in the packaged CLI (Persian is the verified sample). Captions wrap automatically and honour typed line breaks. The Noto caption faces draw at the Arial-equivalent size (owner option B, commit `a8bc28be`). P0-4 Step 10 now checks production timing and encoded-output fidelity, and its assertions pass. Not complete: the real installer lifecycle is BLOCKED on this PC, the lifecycle caption gate and the desktop canonical-face case are not started, and the P0 design test process still exits with a Vitest worker RPC timeout after its assertions pass (see Verification).
 
-## Build and artifacts
+## Results by requested item
 
-- Branch `v1.0.3/no-owner-tracks`. Pushed up to `2a2c0c35`. Local and not pushed: `b701332d` (Latin companion faces), `b480c3f5` (caption ink threshold 200 to 100, owner-approved), `a8bc28be` (Arial-equivalent metrics for the Noto caption faces), and the commit that adds this note.
-- No push, pull request, CI dispatch, tag, release or deploy. The published v1.0.2 assets were not touched.
-- Release manifest: `targetCommit` `a8bc28beb21f92715cbd6de9b7e8ac6a663106d8`, built `2026-10-25T14:46:49Z`. The artifact names and the manifest say version `1.0.2`. This branch is v1.0.3. The version change is a release decision and was not made here.
+| Item                       | Result  | Evidence                                                                                                                                                                                                           |
+| -------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Font metrics and integrity | PASS    | Four TrueType faces match the libass manifest by length and SHA-256. OS/2 `usWinAscent` 905 and `usWinDescent` 212 on all four. `libass-fonts.test.ts` and `copy-cli-fonts.test.mjs`: 10 of 10 pass.               |
+| Packaged asset integrity   | PASS    | `verify-release`: 13 of 13 on a fresh extraction of the ZIP. `verify-package` on the installed copy: 21 of 21. The installed fonts are byte-identical to the repository assets.                                    |
+| Persian caption rendering  | PASS    | Isolated installed-file copy, not the installer. MP4 `13332bc2…`, `Captions: ass.`, no warnings.                                                                                                                   |
+| English caption regression | PASS    | Isolated installed-file copy. MP4 `e7ed77bb…`, same message and no warnings.                                                                                                                                       |
+| Correct caption timing     | PASS    | Production pre-encoding composite: no caption before frame 45, caption ink on every frame 45 to 74, no caption from frame 75, and no difference outside the caption band. P0 Step 10 and the dedicated test agree. |
+| Encoded-output quality     | PASS    | Every decoded frame reaches at least 40 dB luma PSNR against its own composite. The P0 minimum is 44.222 dB (frame 51). Active frames show the caption, and caption-free frames carry no residual.                 |
+| Real installer lifecycle   | BLOCKED | No approved clean environment on this PC. See "Installer lifecycle".                                                                                                                                               |
 
-| Artifact                                               | SHA-256                                                            |
-| ------------------------------------------------------ | ------------------------------------------------------------------ |
-| `joy-media-windows-x64-v1.0.2.zip` (167,652,781 bytes) | `c052cac474f9b0dc7a20128ac60447f6ab5c5c1d7db707553cc22affb85a9040` |
-| `joy-media-setup.exe` (167,669,248 bytes)              | `d61e0e1fecf5a0acb2e0c5f127fb7d1ce320aabb21281a0ea43d72c9e0e5c6bf` |
-| `joy-media.exe`                                        | `e048632e03fabc96de5e10afbebc0aa31f4e1674155ea3d270597fe7523f9d80` |
-| `joy-media-bundle.mjs`                                 | `1c5a241fd0f6542f1815598e0f272c491e498708b8de807b08e064749ffa150b` |
+## Commits and provenance
 
-## Installer payload (PASS)
+- Release source: `a8bc28beb21f92715cbd6de9b7e8ac6a663106d8` (manifest `targetCommit`, built `2026-10-25T14:46:49Z`).
+- Later commits on `v1.0.3/no-owner-tracks`: `7031080c` (earlier evidence note), `836569e1` (P0-4 Step 10 replacement, code and tests), `55b9d0e2` (scoped documentation scrub), and the commit that adds this note.
+- Production source is unchanged since `a8bc28be`. `git diff a8bc28be HEAD -- apps/cli/src/services apps/cli/src/commands/render-media.ts apps/cli/src/commands/render-cmd.ts` is empty.
+- The CLI bundle rebuilt from HEAD (`node scripts/bundle.mjs` in `apps/cli`) has SHA-256 `1c5a241fd0f6542f1815598e0f272c491e498708b8de807b08e064749ffa150b`, the same as the release bundle. It was rebuilt after each reverse mutation and matched again after each restore.
+- Release digests (`apps/desktop/dist/releases/SHA256SUMS.txt`, recomputed today):
+  - ZIP `joy-media-windows-x64-v1.0.2.zip`: `c052cac474f9b0dc7a20128ac60447f6ab5c5c1d7db707553cc22affb85a9040`
+  - setup `joy-media-setup.exe`: `d61e0e1fecf5a0acb2e0c5f127fb7d1ce320aabb21281a0ea43d72c9e0e5c6bf`
+  - `joy-media.exe`: `e048632e03fabc96de5e10afbebc0aa31f4e1674155ea3d270597fe7523f9d80`
+  - bundle `joy-media-bundle.mjs`: `1c5a241fd0f6542f1815598e0f272c491e498708b8de807b08e064749ffa150b`
+- The setup contains the ZIP once, byte for byte (`verify-release`).
 
-- The four digests above match `SHA256SUMS.txt` and the release manifest. They were recomputed on 2026-10-25.
-- `verify-release` ran against a fresh extraction of the ZIP and the source commit `a8bc28be`: 13 checks pass, 0 fail. The setup contains the ZIP exactly once, byte for byte, and the SHA-256 of the embedded payload equals the ZIP's.
-- The installer itself was not run. See "Installer and uninstall".
+## Version state
 
-## Font manifest (PASS)
+The manifest, the artifact names, `apps/desktop/package.json`, `apps/cli/package.json` and `apps/desktop/installer/Setup.cs` (`ProductVersion`) all say `1.0.2`. This branch is v1.0.3. The artifacts are development builds and must not be called release-ready v1.0.3 artifacts. Nothing was released, tagged or overwritten, and the published v1.0.2 assets were not touched.
 
-The libass folder `packages/html-scene-runtime/assets/fonts/noto-sans-arabic/libass/fonts/` holds four TrueType faces under OFL-1.1. Their lengths and digests were recomputed today and match the libass manifest:
+Coordinated update plan, to run before the future candidate freeze:
+
+1. Set the version in `apps/desktop/package.json` and `apps/cli/package.json`, and `ProductVersion` in `apps/desktop/installer/Setup.cs`.
+2. Pass the same version to `build-installer.ps1` and `package-installer.mjs`, so the artifact names and the release manifest follow it.
+3. Update the lifecycle's previous-version pins (`tests/desktop/windows-lifecycle.ps1` and the release-candidate workflows) and the readiness evidence generator (`tooling/release/src/create-readiness-evidence.mjs`).
+4. Rebuild, then re-run the release checks (`verify-release`, `verify-package`) on the new source commit.
+
+## Font manifest
+
+The libass folder holds four TrueType faces under OFL-1.1. Each was recomputed today and matches the manifest:
 
 | File                                     | Bytes   | SHA-256                                                            |
 | ---------------------------------------- | ------- | ------------------------------------------------------------------ |
@@ -32,13 +49,9 @@ The libass folder `packages/html-scene-runtime/assets/fonts/noto-sans-arabic/lib
 | `noto-sans-arabic-latin-400-normal.ttf`  | 21,452  | `26568b66dd3e100ae68400967587ab58d7b6db3f74ee3a11c7670c4f57da60ae` |
 | `noto-sans-arabic-latin-700-normal.ttf`  | 21,436  | `890a4ebc26118188be87f022db33adb79636353c02996eca7f8100c992ac5508` |
 
-- Commit `a8bc28be` sets `usWinAscent` to 905 and `usWinDescent` to 212 on all four faces. They were 1431 and 738. The byte lengths are unchanged, the table and file checksums were recomputed, and the `hhea` and typo metrics are unchanged.
-- `libass-fonts.test.ts` pins the Windows metrics. `copy-cli-fonts.test.mjs` lists the four faces.
-- `verify-package` on the installed copy: 21 checks pass, 0 fail. The installed fonts are byte-identical to the repository assets.
+Commit `a8bc28be` sets `usWinAscent` to 905 and `usWinDescent` to 212 on all four faces (they were 1431 and 738). The byte lengths are unchanged, the table and file checksums were recomputed, and the `hhea` and typo metrics are unchanged.
 
-## Drawn size (owner decision: option B)
-
-libass draws a face at the requested size multiplied by unitsPerEm and divided by (usWinAscent + usWinDescent). Measured at 640 × 360 with a requested size of 20 px, drawing `HELLO WORLD`:
+libass draws a face at the requested size multiplied by unitsPerEm and divided by (usWinAscent + usWinDescent). Measured at 640 × 360, with a requested size of 20 px, drawing `HELLO WORLD`:
 
 | Face and metrics                               | usWinAscent + usWinDescent | Drawn width × height | Drawn em       |
 | ---------------------------------------------- | -------------------------- | -------------------- | -------------- |
@@ -47,29 +60,17 @@ libass draws a face at the requested size multiplied by unitsPerEm and divided b
 | Noto, Arial-equivalent metrics (chosen)        | 1117 per 1000 em           | 123 × 13             | 17.9 px (0.89) |
 | Noto, nominal metrics                          | 1000 per 1000 em           | 137 × 15             | 20 px (1.00)   |
 
-The Arabic alef behaves the same way: 6 px tall at the shipped metrics and 13 px with Arial-equivalent metrics, against 14.3 px nominal.
+The owner reviewed the before and after frames and chose option B. English keeps the size it had on the Arial fallback. The Persian frames approved before this decision were drawn at 0.46 of the planned size, and the Arial-equivalent metrics draw them about 1.9 times larger.
 
-The owner reviewed the before and after frames and chose option B. English keeps the size it had on the Arial fallback. The Persian frames approved before this decision were drawn at 0.46 of the planned size. Arial-equivalent metrics draw them about 1.9 times larger, so the option-B frames replace them.
-
-## Right-to-left lines (from the earlier round, unchanged)
+## Right-to-left lines (earlier round, unchanged)
 
 - `compileCaptionAss` passed caption lines to libass without bidi embedding. libass lays out a paragraph left to right unless it is embedded, so Persian sentences came out with their word order and punctuation reversed.
 - The cue `direction` reached the compiler but was never read.
-- Fix: each right-to-left line is wrapped in U+202B and U+202C. Direction comes from the cue when it is `ltr` or `rtl`. For `auto` it comes from the first letter of each line. Digits are neutral. Left-to-right lines are written exactly as before.
+- Fix: each right-to-left line is wrapped in U+202B and U+202C. Direction comes from the cue for `ltr` and `rtl`. For `auto` it comes from the first letter of each line. Digits are neutral. Left-to-right lines are unchanged.
 
-## Closed items
+## Installed-copy renders (isolated file set)
 
-| Item                                 | Change                                                                                                                                                                                                                       | Evidence                                                                                                                                                                        |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hard breaks from the CLI             | `add-caption` treats each line of `--text` as a hard break. The lines are stored as the segment text override, and the words keep their timing.                                                                              | End-to-end test `a line break in the caption text starts a new line…` passes. The English sample's cue 2 renders on two lines.                                                  |
-| Automatic word wrap                  | The planner breaks an over-wide line at spaces, greedily, using the measured width. A single word wider than the frame is still refused with `CAPTION_LAYOUT_OVERFLOW`. The frozen layout keeps the words and source breaks. | Six preparation tests. The Persian long cue prepares as two lines of 549.8 px and 172.2 px (limit 560 px). The English long cue prepares as two lines of 540.2 px and 338.3 px. |
-| Plans from before the caption change | A layout made by another caption compiler is refused with a message to prepare again, instead of a generic inconsistency.                                                                                                    | Unit test `asks for a new preparation when the frozen layout came from another caption compiler`.                                                                               |
-| Accurately named capability key      | `canonicalCaptionFace` reports the canonical TrueType face. `woff2Font` stays as a deprecated alias with the same value.                                                                                                     | Capability and probe tests pass.                                                                                                                                                |
-| Automated direction test             | Renders the Persian and Latin words with libass, embedded right to left and left to right, and compares the drawn ink at each end with each word drawn alone.                                                                | Two tests pass. A mutant that compiles the line left to right fails the first assertion (agreement 0.69 against the 0.85 threshold).                                            |
-
-## Installed-copy renders (PASS for the isolated file set)
-
-Each sample was built with the packaged CLI from an isolated copy of the release files, not from the owner's installation. The steps were: project create (640 × 360), add a caption track, add a 6 s blue picture clip, add three caption cues, export the project, prepare the plan, apply it, and render to MP4. The isolated copy's `joy-media.exe` and CLI bundle match the manifest.
+Each sample was built with the packaged CLI from an isolated copy of the release files, not from the owner's installation: project create (640 × 360), caption track, a 6 s blue picture clip, three caption cues, export, plan prepare, plan apply and render to MP4. The isolated copy's `joy-media.exe` and CLI bundle match the manifest.
 
 | Sample  | MP4 SHA-256                                                        | Bytes  |
 | ------- | ------------------------------------------------------------------ | ------ |
@@ -78,83 +79,117 @@ Each sample was built with the packaged CLI from an isolated copy of the release
 
 - Cues. Persian: `سلام، دنیا!` at 0.2 s; `سلام Hello 123 ۴۵۶ ؟` at 2.0 s; a long Persian sentence at 3.9 s. English: `HELLO WORLD` at 0.2 s; `Second caption` and `123` on two lines from a typed break at 2.0 s; a long English sentence at 3.9 s.
 - Plan prepare reports no changed entities and no warnings. The planner wrapped the long cues.
-- Render reports `Captions: ass.` with no warnings. ffprobe: H.264, 640 × 360, yuv420p, 30 fps, 180 frames, 6.000 s, with an AAC audio stream. The render events show `totalFrames` 336, which is the sum of clip frames: 180 picture frames, then 48, 48 and 60 caption frames.
+- Render reports `Captions: ass.` with no warnings. ffprobe: H.264, 640 × 360, yuv420p, 30 fps, 180 frames, 6.000 s, with an AAC audio stream. The render events show `totalFrames` 336, the sum of clip frames: 180 picture frames, then 48, 48 and 60 caption frames.
 - A second render from an earlier extraction of the same build gave the same MP4 bytes and the same CLI bundle digest.
-- Frames at 0.1, 1.0, 3.0 and 5.0 s were extracted from both MP4s and reviewed as a grid. The frame images are kept outside the repository.
-- The Arial-fallback digests in the earlier version of this note are superseded.
 
-## Negative tests (installed copy, final build)
+Negative cases on the installed copy (final build):
 
-| Case                                                       | Plan prepare                                                                                | Render                                                                                                 |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Libass folder removed                                      | `SETUP_REQUIRED`, `canonical-caption-face-unavailable` ("libass font directory is missing") | `RENDER_PREPARATION_REQUIRED`; no media                                                                |
-| One-bit tamper, same length, before preparation            | `SETUP_REQUIRED` ("does not match its pinned length and digest")                            | `RENDER_PREPARATION_REQUIRED`; no media                                                                |
-| One-bit tamper, same length, after a good plan was applied | Prepare and apply succeed                                                                   | `RENDER_ENVIRONMENT_DRIFT` ("Canonical caption face probe facts changed after preparation."); no media |
+| Case                                            | Plan prepare                                           | Render                                  |
+| ----------------------------------------------- | ------------------------------------------------------ | --------------------------------------- |
+| Libass folder removed                           | `SETUP_REQUIRED`, `canonical-caption-face-unavailable` | `RENDER_PREPARATION_REQUIRED`, no media |
+| One-bit tamper, same length, before preparation | `SETUP_REQUIRED` (pinned length and digest)            | `RENDER_PREPARATION_REQUIRED`, no media |
+| One-bit tamper, same length, after a good plan  | Prepare and apply succeed                              | `RENDER_ENVIRONMENT_DRIFT`, no media    |
 
-Each refusal ended with an error event and no completion event.
+## P0-4 Step 10
 
-## Installer and uninstall (BLOCKED on this PC)
+### Original failing measurement
 
-- The real installer and uninstaller were not run. The release was exercised as an isolated copy instead.
-- Why: the installer and uninstaller use fixed names. The installer writes a fixed install folder, a Desktop shortcut and a Start Menu shortcut with fixed names, appends to the user PATH, and writes a per-user uninstall entry with a fixed name. `uninstall.cmd` removes those shortcuts and that entry by name. On this PC, running either would overwrite or remove the owner's existing files.
-- Owner installation, checked before and after the test runs: no file or folder entry in it changed. Its shortcuts, its per-user uninstall entry and the per-user environment were not modified during these runs.
-- To close this item, run the installer and uninstaller in a clean Windows account or a virtual machine.
-- Finding, not fixed: the installer and uninstaller are not scoped to their own install. They can overwrite or remove shortcuts and registry entries that they did not create.
+Step 10 of `apps/cli/src/commands/p0-design.e2e.test.ts` failed with `expected 5639 to be less than or equal to 128`. It compared frame 75 of two independently encoded MP4s, one with the caption and one without, over the band x 120 to 1159, y 560 to 659. A pixel counted when its largest RGB channel difference was above 12. The value reproduced exactly in the lab and in the test.
 
-## P0-4 Step 10: FAIL on this build
+### Verified H.264 root cause
 
-- Test: `runs the P0 slice with independently checked font bytes and FFmpeg version plus reported Chromium`, Step 10. Result: `expected 5639 to be less than or equal to 128`. The test stops at that expectation, so Steps 11 onward did not run in this run.
-- Metric, as the test computes it: frame 75 (75/30 s) of the decoded MP4 with the caption, compared with the decoded MP4 without it. The band is x 120 to 1159 and y 560 to 659. A pixel counts when its largest RGB channel difference is above 12.
-- The caption timing is correct. The composed picture before encoding has caption ink in the band on every frame from 45 to 74 (between 11,507 and 11,515 luma pixels per frame) and none on frame 75 (0 in the band and in the full frame).
+- The lab's encoder reproduction decodes to the same pictures as the CLI's MP4s: the decoded 150-frame files have identical SHA-256 digests for both clips. The H.264 byte streams differ, and that difference was not traced.
+- The caption clip has one keyframe (frame 0), 61 P-frames and 88 B-frames.
+- Before the caption appears, the decoded clips already differ: 947 luma pixels in the band at frame 44 with the CLI settings.
+- A change far from the caption (a 160 × 90 luma block at frame 10) gives 5,222 RGB pixels at frame 75 with the same settings. The 128-pixel bound cannot separate caption timing from encoder history.
+- MB-tree off: 3,891 RGB pixels at frame 75, still above 128. A keyframe at frame 75: 0 at frame 75, and the caption is still present at frame 74 (18,290 RGB pixels).
 
-Root cause, as measured:
+The data fit MB-tree (lookahead-based quantizer decisions) with B-frame and temporal prediction carrying differences forward. The x264 decisions themselves were not traced.
 
-1. The two clips are encoded separately, and the difference is not limited to the caption band or to the caption's frames. Before the caption appears, the decoded clips already differ in the band: 947 luma pixels at frame 44 with the CLI settings.
-2. The same kind of difference appears for any change to the clip. A non-caption block change (160 × 90 luma pixels in frame 10) gives 5,222 RGB pixels in the band at frame 75 with the same settings.
-3. The data are consistent with MB-tree (lookahead-based quantizer decisions) together with B-frame and temporal prediction carrying the difference forward. The stream has one keyframe, at frame 0, and 88 B-frames. Turning MB-tree off reduces the difference. A keyframe at frame 75 removes it at that frame. The x264 decisions were not traced further.
+### Replacement methodology
 
-| Variant (decoded pictures, band count at frame 75) | RGB   | Luma |
-| -------------------------------------------------- | ----- | ---- |
-| CLI settings (the test's clips)                    | 5,639 | 593  |
-| MB-tree off (`mbtree=0`)                           | 3,891 | 95   |
-| Keyframe at frame 75 (2.5 s)                       | 0     | 0    |
-| Control: non-caption change at frame 10            | 5,222 | 532  |
+Two responsibilities, kept apart. Both are implemented in `apps/cli/src/commands/caption-frame-evidence.ts` and used by the P0 Step 10 and by `apps/cli/src/commands/caption-frame-evidence.e2e.test.ts`.
 
-With the keyframe the caption is still present at frame 74 (18,290 RGB pixels), so the removal at frame 75 is not a missing caption.
+- **Timing (pre-encoding).** The composite is captured through the CLI's own render (`runHeadlessRender`). The FFmpeg argument list is the production one, taken from the render itself. Only the output sink changes, to raw yuv420p frames, and the audio chain is discarded. The caption band is cropped to rgb24 for the pixel count. The caller passes the same environment as the CLI calls that prepared the project: the isolated profile and the same Chromium. Checks: frames 0 to 44 and 75 to 149 are identical to the no-caption composite, frames 45 to 74 show caption ink in the band, and no sample outside the band differs on any frame. The threshold of 12 and the band geometry are unchanged.
+- **Encoded output.** The MP4 from the CLI is decoded and compared with its own composite. Checks: decodable; 150 frames; 1280 × 720; yuv420p; presentation times n/30. Luma PSNR of at least 40 dB on every frame (the approved floor). On active frames the band must differ from the no-caption composite by at least 5,000 luma pixels (half of the lowest measured count). On caption-free frames the band must not differ from its own input by more than 24 in more than 200 pixels (about four times the measured maximum of 49). FFmpeg and libx264 build identities are recorded.
 
-Method notes:
+### Exact pre-encoding timing results
 
-- The reproduced encodes use the same composed input and the same libx264 settings. They decode to the same pictures as the CLI's MP4s: the decoded 150-frame files have identical SHA-256 digests for both clips. Their H.264 byte streams differ, which was not investigated, so the variant rows use the reproduction.
-- An earlier variant run passed the keyframe interval in seconds as if it were a frame number. Its results are not used.
-- MB-tree off does not meet the 128-pixel bound (3,891 RGB pixels). A keyframe at the caption end does (0). The keyframe is a product encoder change with a size cost, so it is not recommended without a size and quality check.
+| Run                | Frames 45 to 74: band RGB pixels | Frames 0 to 44 and 75 to 149 | Outside-band differing samples |
+| ------------------ | -------------------------------- | ---------------------------- | ------------------------------ |
+| P0 Step 10 (final) | 12,196 to 12,224 per frame       | 0                            | 0 on every frame               |
+| Dedicated test     | 12,183 to 12,222 per frame       | 0                            | 0 on every frame               |
 
-Proposed assertion change (not applied; needs owner approval):
+Filter graph (production `-filter_complex`, dedicated test): `sha256:70bc09bf0024b06c951dad510669250175445b1b7cebd19ced8b16946215924e`.
 
-1. An exact check on composed frames: the caption band differs from the no-caption frame on every frame from 45 to 74, and is identical on frame 75. Measured: 11,507 to 11,515 luma pixels on frames 45 to 74, and 0 on frame 75.
-2. A fidelity check: each decoded luma frame matches its composed frame at 40 dB PSNR or better. Measured: 44.22 to 48.8 dB over all 150 frames of both clips.
+### Per-frame fidelity results
 
-This proposal removes the 128-pixel bound on the encoded frame, so it needs owner approval. The test would need the composed frames from the CLI's filter graph, which is an implementation choice. The band and the threshold of 12 stay as they are. The caption-minus-baseline count on the encoded frame stays as a diagnostic.
+| Run                | Minimum luma PSNR    | Average luma PSNR | Lowest active-frame count | Largest caption-free residual |
+| ------------------ | -------------------- | ----------------- | ------------------------- | ----------------------------- |
+| P0 Step 10 (final) | 44.222 dB (frame 51) | 45.495 dB         | 10,826 pixels             | 49 pixels                     |
+| Dedicated test     | 44.322 dB (frame 71) | 45.887 dB         | 10,830 pixels             | 39 pixels                     |
 
-## Tests (this round)
+Encoder identities on both runs: `ffmpeg version n8.1.3-20260922` and `x264 - core 165`. Every per-frame PSNR value is in `docs/qa/evidence/2026-10-25-v103-caption-measurements.json`.
 
-| Suite                                                          | Result                                                   |
-| -------------------------------------------------------------- | -------------------------------------------------------- |
-| P0 design test (`apps/cli/src/commands/p0-design.e2e.test.ts`) | 1 failed: Step 10 (above)                                |
-| CLI, all of `apps/cli/src`                                     | 53 files passed, 2 skipped; 804 tests passed, 25 skipped |
-| `packages/html-scene-runtime` and `apps/desktop/scripts`       | 15 files passed, 1 skipped; 82 tests passed, 1 skipped   |
-| Font metric and copy-fonts tests                               | 2 files, 10 tests passed                                 |
-| Prettier, changed files                                        | pass                                                     |
-| ESLint, changed test files                                     | pass                                                     |
+### Reverse mutations (production code restored after each run)
 
-## Findings and remaining risks
+Each row is one temporary edit to production code, followed by the dedicated test, then a restore from a saved copy and a rebuild that matched the release bundle digest.
 
-1. **P0-4 Step 10 fails.** A decision is needed on the assertion change above. This branch keeps the 128-pixel bound and the threshold of 12.
-2. **Installer and uninstaller not run** (blocked on this PC). They are not scoped to their own install (see above).
-3. **Desktop editor not exercised.** The packaged editor's Persian export was not run.
-4. **Version metadata.** The packages and the manifest say 1.0.2. This branch is v1.0.3.
-5. **Earlier right-to-left plans are refused.** A plan with right-to-left captions that was prepared before the caption change fails with `RENDER_PREPARATION_INVALID`, with a message to prepare again. English-only plans are unaffected.
-6. **Encoder drift.** Any test that compares two separately encoded clips sees a similar drift. The byte-level difference between the reproduction's H.264 stream and the CLI's stream is not explained.
+| Mutation                                                                   | Timing test                                             | Encoded-output test                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------- |
+| Caption ends one frame late (end time + 33 ms, which compiles to frame 76) | FAIL: 17,747 samples outside the cue differ on frame 75 | PASS, as designed: the encoded output matches its own composite |
+| Caption begins one frame late (start time + 33 ms, frame 46)               | FAIL: no caption ink on frame 45                        | FAIL: 402 band pixels on frame 45, below 5,000                  |
+| Caption rendering disabled (ASS filter skipped)                            | FAIL: 30 active frames without ink                      | FAIL: 30 active frames below 5,000 pixels                       |
+| Encoded output degraded (libx264 CRF 20 to 40)                             | PASS, as designed: the composite is unaffected          | FAIL: 270 frame violations; minimum 32.02 dB at frame 51        |
 
-## WOFF2
+The one-frame shift is 33 ms rather than 33.334 ms, because the compiler refuses a boundary that cannot be represented at centisecond precision without changing a visible frame. The shorter shift is still exactly one frame at 30 fps.
 
-The canonical WOFF2 files cannot be opened by this libass build (`Error opening memory font`). Captions draw from the TrueType companion faces, which are OFL-1.1, have pinned lengths and digests, and fail closed when a file is missing or altered. The WOFF2 files remain for browsers.
+Test-level controls, run in the same file on every run:
+
+- An intentional visual defect (a 200 × 80 light block drawn into composite frames 100 to 109, then encoded): the checker reports 10 frames below 40 dB, the worst at 21.82 dB. The test expects this and passes.
+- Corrupted bytes (8 KiB zeroed in the middle of the faststart MP4): the checker reports 81 violations. The test expects this and passes.
+
+### Verification and regression results
+
+| Check                                                           | Result                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0 design test (`vitest.p0.config.ts`, `p0-design.e2e.test.ts`) | The one test passes, and all of its steps pass. Vitest then reports `[vitest-worker]: Timeout calling "onTaskUpdate"` and exits 1. This happened in every run after the Step 10 change. It is the host-load symptom listed in `docs/qa/handoff/HANDOFF.md`. It is not resolved here, and the lane configuration was not changed. |
+| Dedicated caption test (`caption-frame-evidence.e2e.test.ts`)   | 4 of 4 pass                                                                                                                                                                                                                                                                                                                      |
+| Full CLI suite (`apps/cli/src`)                                 | 54 files passed, 2 skipped; 808 tests passed, 25 skipped; exit 0                                                                                                                                                                                                                                                                 |
+| Caption-related CLI files inside that run                       | `timeline-captions` 12 of 12, `render-parity` 19 of 19, `render-recovery` 8 of 8                                                                                                                                                                                                                                                 |
+| Release-harness tests (`tooling/release`)                       | 16 files, 318 tests passed, 4 skipped                                                                                                                                                                                                                                                                                            |
+| Desktop packaging scripts (`apps/desktop/scripts`)              | 2 files, 11 tests passed                                                                                                                                                                                                                                                                                                         |
+| Desktop node tests (`tests/desktop/*.test.mjs`)                 | 30 tests passed (checksum 6, CLI environment 2, user data 1, accounting 21)                                                                                                                                                                                                                                                      |
+| Font and runtime package (`packages/html-scene-runtime`)        | 13 files passed, 1 skipped; 71 tests passed, 1 skipped                                                                                                                                                                                                                                                                           |
+| TypeScript, CLI (`tsc -p apps/cli/tsconfig.json --noEmit`)      | exit 0                                                                                                                                                                                                                                                                                                                           |
+| ESLint and Prettier on changed files                            | pass                                                                                                                                                                                                                                                                                                                             |
+
+### Correction to the earlier note
+
+The earlier version of this note said the test stopped at Step 10, so later steps did not run. That was wrong. `runStep` continues after a failure, and the only recorded failure was Step 10.
+
+## Track status (master plan, this round)
+
+| Track | Item                      | Status                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A     | L4 frame-count contract   | VERIFIED on this branch. The API requires `x-joy-frame-count` and `x-joy-frame-rate`. Missing, malformed, zero, fractional or oversized values return `REQUEST_INVALID` naming the header (9 of 9 API cases pass). The library requires the frame count, and `remuxBrowserMp4` refuses a missing count (export-core: 20 of 20 pass).                                                                                                    |
+| A     | L9 test strengthening     | PARTIAL. The 48 kHz duration test asserts audio and video duration within one AAC frame (1024/48000 s). Reverse mutation: removing the `apad` filter fails that test (audio 0.187 s short against a 0.0213 s tolerance), and the file was restored by hash. NOT STARTED: the control-port helper and the transitive import check.                                                                                                       |
+| B     | L3 Persian captions       | PARTIAL. Done: font metrics, the companion faces, the caption timing and encoded-output tests, the isolated installed-copy renders, and the negative refusals. NOT STARTED: the reproducible WOFF2-to-TTF tool with a same-bytes test, the pixel probe that replaces the log-based one, the desktop canonical-face export case, and the lifecycle caption gate `JOY_MEDIA_REQUIRE_CAPTION_FACE`.                                        |
+| C     | L5a held-file publication | VERIFIED on this Windows host. The case `keeps the last good output and stages nothing when another program holds the media open` passes. The lifecycle runs the file and counts a skipped case as a failure. The lifecycle receipt is pending.                                                                                                                                                                                         |
+| I     | F3 privacy scrub          | PARTIAL. Scrubbed in this round: owner-profile paths, private addresses, a host folder and a container home directory in 10 documents (commit `55b9d0e2`). Still present in the current tree: about 50 files with owner-profile paths or UNC examples in plans, reviews and operational scripts, and one owner-profile guard in `.github/workflows/release-candidate-v2.yml`. Changing the guard is a CI policy decision for the owner. |
+| I     | F4 readiness matrix       | PARTIAL. The held-file statements in `docs/qa/READINESS-MATRIX.md` are updated. The other inconsistencies listed in the master plan were already resolved on 2026-10-25 in the matrix.                                                                                                                                                                                                                                                  |
+
+## Installer lifecycle (BLOCKED)
+
+- Not run here: the real installer and `uninstall.cmd`. The isolated copy above is packaging and runtime evidence only.
+- Why: the installer and uninstaller use fixed names. They write a fixed install folder, a Desktop shortcut and a Start Menu shortcut, a per-user uninstall entry, and the user PATH. Running them on this PC would overwrite or remove the owner's existing installation.
+- Required environment: a clean Windows 11 x64 user profile or virtual machine, with no JOY Media installed and no shortcuts, PATH entries or uninstall entries from it. A Hyper-V snapshot is the proposed route in `docs/qa/TEST-AND-FIXTURE-PLAN.md`, section S2 and L6. That plan lists whether a Windows VM may be used as an open owner question, so it needs the owner's approval first.
+- Owner installation check, after the test runs in this round: 557 files, none newer than the post-render snapshot. The Desktop and Start Menu shortcuts still date from 2 October, and the per-user environment key was last written on 24 October. The uninstall entry was not touched.
+- Finding, not fixed: the installer and uninstaller are not scoped to their own install. They can overwrite or remove shortcuts and registry entries they did not create.
+
+## Remaining uncertainties
+
+- The P0 design test process exits 1 after its assertions pass, with a Vitest RPC timeout. The cause is host load, as documented in the handoff. The lane configuration was not changed.
+- The byte-level difference between the lab's H.264 stream and the CLI's stream was not explained. The decoded pictures are identical.
+- The desktop editor's Persian export was not run.
+- The version metadata still says 1.0.2 (see Version state).
