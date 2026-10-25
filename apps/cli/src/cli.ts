@@ -220,7 +220,7 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
         '--left <clipId> --right <clipId>',
         'add-transition: the clip before and the clip after the junction',
       ],
-      ['--text <words>', 'add-caption: the caption text'],
+      ['--text <words>', 'add-caption: the caption text; each line of it is a hard break'],
       ['--language <tag>', 'add-caption: language tag, e.g. en or fa-IR (default en)'],
       ['--direction <ltr|auto>', 'add-caption: text direction (default auto)'],
       ['--gain <n>', 'set-audio: clip gain, 0 to 4 (1 is unchanged)'],

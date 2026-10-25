@@ -184,6 +184,35 @@ describe('captions are drawn over the picture while they are on screen', () => {
     expect(r.code, describeRun(r)).toBe(2);
   });
 
+  it('a line break in the caption text starts a new line, and the words keep their timing', async () => {
+    const id = await project('Hard break');
+    await add(id, ['add-track', '--family', 'caption']);
+    const added = await add(id, [
+      'add-caption',
+      '--track',
+      'track-c1',
+      '--start',
+      '0',
+      '--duration',
+      '2',
+      '--text',
+      'first line\nsecond line',
+    ]);
+    expect(added.code, describeRun(added)).toBe(0);
+    const exported = JSON.parse(readFileSync(await exportProjectFile(sb, id), 'utf8')) as {
+      source: {
+        captionDocuments: Record<
+          string,
+          { words: Record<string, unknown>; segments: { textOverride?: string }[] }
+        >;
+      };
+    };
+    const documents = Object.values(exported.source.captionDocuments);
+    expect(documents).toHaveLength(1);
+    expect(documents[0]!.segments[0]!.textOverride).toBe('first line\nsecond line');
+    expect(Object.keys(documents[0]!.words)).toHaveLength(4);
+  });
+
   it('a caption is drawn over the picture between its start and end, and not before', async () => {
     const id = await project('Decoded caption');
     await addClip(sb, id, { track: 'track-v1', duration: 2, asset: blue });

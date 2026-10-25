@@ -859,7 +859,7 @@ function setClipAudio(tracks: TimelineTrack[], flags: CliFlags, project: Timelin
   };
 }
 
-/** Add a caption: its text is spread evenly over the clip, word by word, as one segment. */
+/** Add a caption: its words are spread evenly over the clip as one segment; each line is a hard break. */
 function addCaption(tracks: TimelineTrack[], flags: CliFlags, project: TimelineProject): Outcome {
   const track = requireTrack(tracks, flags.track!);
   if (track.kind !== 'caption') {
@@ -868,10 +868,12 @@ function addCaption(tracks: TimelineTrack[], flags: CliFlags, project: TimelineP
       `Captions go on a caption track, and "${trackLabel(track)}" is not one. Add one with add-track --family caption.`,
     );
   }
-  const words = (flags.text ?? '')
-    .trim()
-    .split(/\s+/)
-    .filter((word) => word !== '');
+  // Each line of the text is a hard break. The words, in reading order, carry the timing.
+  const lines = (flags.text ?? '')
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  const words = lines.flatMap((line) => line.split(/\s+/));
   if (words.length === 0) throw usageFailure('The caption text is empty.');
   const direction = flags.direction ?? 'auto';
   if (direction !== 'ltr' && direction !== 'rtl' && direction !== 'auto') {
@@ -911,7 +913,16 @@ function addCaption(tracks: TimelineTrack[], flags: CliFlags, project: TimelineP
     direction,
     speakers: [],
     words: wordTable,
-    segments: [{ id: 's1', startUs: 0, endUs: durationUs, wordIds }],
+    segments: [
+      {
+        id: 's1',
+        startUs: 0,
+        endUs: durationUs,
+        wordIds,
+        // The displayed text keeps the typed lines; the word table keeps the timing.
+        ...(lines.length > 1 ? { textOverride: lines.join('\n') } : {}),
+      },
+    ],
   };
 
   const clip = {
