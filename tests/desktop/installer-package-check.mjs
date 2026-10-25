@@ -4,19 +4,39 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert';
+import { assertDisposableHost, DisposableHostRefusal } from './disposable-host.mjs';
 
 console.log('=== JOY Media Installer & Package Verification Suite ===');
 
-// Steps below run the generated setup and uninstall scripts. Their host cleanup is not fully sandboxed:
-// the registry, the Desktop and Start Menu shortcuts (Known Folders), the user PATH, and the Programs folder
-// are host state. Refuse to run on a machine that already has a JOY Media install, before any step changes
-// anything. Only a disposable VM or container, which has no install, may set JOY_MEDIA_DISPOSABLE_HOST=1.
+// The steps below run packaged installer and uninstaller code. Their host side effects are not contained: the
+// registry, the Desktop and Start Menu shortcuts (Known Folders), the user PATH, and the Programs folder are host
+// state, and an uninstaller that resolves through PATH runs against a real install. The suite therefore runs only
+// where assertDisposableHost() positively identifies a CI container or a Hyper-V guest, before any step. Every other
+// host refuses here. An existing install also refuses, as a second layer. No environment flag overrides either check.
+try {
+  assertDisposableHost();
+} catch (error) {
+  if (!(error instanceof DisposableHostRefusal)) throw error;
+  console.error(error.message);
+  console.error(
+    'Run the installer check only in a CI container runner or a disposable Hyper-V guest.',
+  );
+  process.exit(2);
+}
+
 // The registry is read through PowerShell: Git Bash's reg.exe does not see every per-user key the same way.
 // Any probe that cannot answer counts as an install (fail closed).
 const ownerInstallDirectory = join(process.env.LOCALAPPDATA ?? '', 'Programs', 'JOY Media');
 const hostShortcuts = [
   join(process.env.USERPROFILE ?? '', 'Desktop', 'JOY Media.lnk'),
-  join(process.env.APPDATA ?? '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'JOY Media.lnk'),
+  join(
+    process.env.APPDATA ?? '',
+    'Microsoft',
+    'Windows',
+    'Start Menu',
+    'Programs',
+    'JOY Media.lnk',
+  ),
 ];
 const registrationProbe = spawnSync(
   'powershell.exe',
@@ -29,17 +49,17 @@ const registrationProbe = spawnSync(
   { encoding: 'utf8', windowsHide: true },
 );
 const registrationUnknown =
-  registrationProbe.error !== undefined || (registrationProbe.status !== 0 && registrationProbe.status !== 1);
+  registrationProbe.error !== undefined ||
+  (registrationProbe.status !== 0 && registrationProbe.status !== 1);
 const hostHasInstall =
   existsSync(ownerInstallDirectory) ||
   hostShortcuts.some((path) => existsSync(path)) ||
   registrationUnknown ||
   registrationProbe.status === 0;
-if (hostHasInstall && process.env.JOY_MEDIA_DISPOSABLE_HOST !== '1') {
+if (hostHasInstall) {
   console.error(
     'Refusing to run: this host already has a JOY Media install (Programs folder or HKCU uninstall entry).',
   );
-  console.error('Run the installer check only in a disposable VM or container, with JOY_MEDIA_DISPOSABLE_HOST=1.');
   process.exit(2);
 }
 
@@ -226,21 +246,44 @@ assert.match(hostIntegrationBlock, /powershell\.exe/i, 'User PATH operation was 
 
 // The test copy preserves the generated file-cleanup logic while removing all
 // commands that could modify the host profile, registry, shortcuts, or PATH.
-const sandboxUninstaller = [
-  ...uninstallLines.slice(0, integrationStartIndex),
-  'rem Host integration is intentionally disabled by this isolated test.',
-  ...uninstallLines.slice(cleanupBannerIndex),
-].join('\r\n');
-assert.doesNotMatch(sandboxUninstaller, /\breg(?:\.exe)?\s+(?:delete|add)\b/i);
-assert.doesNotMatch(sandboxUninstaller, /Environment\]::(?:Get|Set)EnvironmentVariable/i);
-assert.doesNotMatch(sandboxUninstaller, /%APPDATA%|%USERPROFILE%/i);
-
+// It runs by absolute path under a system-only PATH. A bare name would be resolved through the user PATH, which can
+// list a real install: this environment sets NoDefaultCurrentDirectoryInExePath, so the working directory is not
+// searched. An earlier run executed the owner's installed uninstaller that way.
+assert.strictEqual(
+  uninstallLines[0],
+  '@echo off',
+  'Generated uninstaller must start with @echo off.',
+);
+const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows';
+const systemPath = [
+  join(systemRoot, 'System32'),
+  systemRoot,
+  join(systemRoot, 'System32', 'Wbem'),
+  join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0'),
+].join(';');
 const uninstallSandboxRoot = mkdtempSync(join(tmpdir(), 'joy-uninstall-sandbox-'));
 try {
   const sandboxLocalAppData = join(uninstallSandboxRoot, 'LocalAppData');
   const sandboxAppData = join(uninstallSandboxRoot, 'AppData');
   const sandboxUserProfile = join(uninstallSandboxRoot, 'UserProfile');
   const sandboxInstallDir = join(sandboxLocalAppData, 'Programs', 'JOY Media');
+  // The guard writes this directory into a batch file, so the path may hold no cmd metacharacters.
+  assert.match(
+    sandboxInstallDir,
+    /^[A-Za-z0-9 ._\\:-]+$/u,
+    'Sandbox path has characters unsafe in a batch guard.',
+  );
+  // The guard exits before any step unless the copy runs from its own sandbox directory.
+  const sandboxUninstaller = [
+    uninstallLines[0],
+    `if /I not "%~dp0"=="${sandboxInstallDir}\\" exit /b 9`,
+    ...uninstallLines.slice(1, integrationStartIndex),
+    'rem Host integration is intentionally disabled by this isolated test.',
+    ...uninstallLines.slice(cleanupBannerIndex),
+  ].join('\r\n');
+  assert.doesNotMatch(sandboxUninstaller, /\breg(?:\.exe)?\s+(?:delete|add)\b/i);
+  assert.doesNotMatch(sandboxUninstaller, /Environment\]::(?:Get|Set)EnvironmentVariable/i);
+  assert.doesNotMatch(sandboxUninstaller, /%APPDATA%|%USERPROFILE%/i);
   mkdirSync(sandboxInstallDir, { recursive: true });
   mkdirSync(sandboxAppData, { recursive: true });
   mkdirSync(sandboxUserProfile, { recursive: true });
@@ -249,20 +292,31 @@ try {
   writeFileSync(join(sandboxInstallDir, 'joy-media.exe'), 'sandbox-only');
 
   const originalPath = process.env.PATH;
-  const uninstallResult = spawnSync('cmd.exe', ['/d', '/c', 'uninstall.cmd'], {
-    cwd: sandboxInstallDir,
-    env: {
-      ...process.env,
-      LOCALAPPDATA: sandboxLocalAppData,
-      APPDATA: sandboxAppData,
-      USERPROFILE: sandboxUserProfile,
-      TEMP: tmpdir(),
-      TMP: tmpdir(),
+  // Drop every spelling of PATH from the inherited environment, so the system-only PATH is the only one the child sees.
+  const inheritedEnv = { ...process.env };
+  for (const key of Object.keys(inheritedEnv)) {
+    if (key.toUpperCase() === 'PATH') delete inheritedEnv[key];
+  }
+  const uninstallResult = spawnSync(
+    process.env.ComSpec ?? join(systemRoot, 'System32', 'cmd.exe'),
+    ['/d', '/s', '/c', `""${join(sandboxInstallDir, 'uninstall.cmd')}""`],
+    {
+      cwd: sandboxInstallDir,
+      env: {
+        ...inheritedEnv,
+        PATH: systemPath,
+        LOCALAPPDATA: sandboxLocalAppData,
+        APPDATA: sandboxAppData,
+        USERPROFILE: sandboxUserProfile,
+        TEMP: tmpdir(),
+        TMP: tmpdir(),
+      },
+      encoding: 'utf8',
+      timeout: 30000,
+      windowsHide: true,
+      windowsVerbatimArguments: true,
     },
-    encoding: 'utf8',
-    timeout: 30000,
-    windowsHide: true,
-  });
+  );
   assert.strictEqual(
     uninstallResult.status,
     0,
