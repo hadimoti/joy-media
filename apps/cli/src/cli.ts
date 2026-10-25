@@ -8,6 +8,7 @@ import { handleProjectCommand } from './commands/project-cmd.js';
 import { handleQueryCommand } from './commands/query-cmd.js';
 import { handleRenderCommand } from './commands/render-cmd.js';
 import { handleTimelineCommand } from './commands/timeline-cmd.js';
+import { handleUpdateCommand } from './commands/update-cmd.js';
 import { handleWorkerCommand } from './commands/worker-cmd.js';
 import { trackLongRunning } from './long-running.js';
 import {
@@ -326,6 +327,27 @@ export const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       'JOY_MODELS_DIR overrides the model weights directory.',
     ],
   },
+  update: {
+    summary: 'Release check, file verification and rollback',
+    usage:
+      'joy-media update check | verify <file> [--manifest <path>] [--signature <path>] | rollback [--json]',
+    options: [
+      ['--json', 'One JSON document: { ok, status, message, ... }'],
+      [
+        '--manifest <path>',
+        'For verify: the signed manifest (default: release-manifest.json beside the file)',
+      ],
+      [
+        '--signature <path>',
+        'For verify: its signature (default: release-manifest.json.sig beside the file)',
+      ],
+    ],
+    notes: [
+      'check fetches the latest GitHub release manifest. It never downloads or installs a release.',
+      'verify checks the file against the signed manifest. rollback shows the kept previous version and the installer command.',
+      'Exit code 0 when the check or verification passes, 1 when refused, 2 for a usage error.',
+    ],
+  },
   help: {
     summary: 'Show help for the CLI or one command',
     usage: 'joy-media help [command]',
@@ -361,6 +383,9 @@ export function printHelp(): void {
   );
   console.log(
     `    ${c('doctor', 'cyan')} [--json]                            System health check & diagnostics`,
+  );
+  console.log(
+    `    ${c('update', 'cyan')} check|verify|rollback [--json]      Release check, file verification and rollback`,
   );
   console.log(
     `    ${c('help', 'cyan')} [command]                             Show this help guide or a command's help\n`,
@@ -624,6 +649,8 @@ async function dispatch(argv: string[]): Promise<number> {
         return await handleCapabilitiesCommand(subArgs, flags);
       case 'doctor':
         return await handleDoctorCommand(subArgs, flags);
+      case 'update':
+        return await handleUpdateCommand(subArgs, flags);
       case 'help': {
         const target = subArgs[0];
         if (flags.json) {

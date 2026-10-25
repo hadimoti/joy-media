@@ -34,9 +34,10 @@ function deps() {
   }));
   const secretStore = createMemorySecretStore();
   const probeProvider = vi.fn(async () => ({ ok: true, modelId: 'gpt-4o-mini' }));
-  const checkForUpdate = vi.fn((): { status: 'current'; reason: 'not-newer' } => ({
-    status: 'current',
-    reason: 'not-newer',
+  const checkForUpdate = vi.fn(async () => ({
+    status: 'current' as const,
+    reason: 'not-newer' as const,
+    latestVersion: '1.0.3',
   }));
   let idCount = 0;
   return {
@@ -532,28 +533,21 @@ describe('IPC dispatch', () => {
     }
   });
 
-  it('check-for-update forwards a well-shaped request to the injected policy check', async () => {
+  it('check-for-update runs the injected check, which takes no renderer-supplied trust material', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
-    const manifest = {
-      payload: {
-        channel: 'stable' as const,
-        version: '1.2.0',
-        downloadUrl: 'https://joyst.ir/downloads/joy-media-1.2.0.exe',
-        sha256: 'a'.repeat(64),
-      },
-      signature: 'sig',
-    };
     const result = await dispatchIpcRequest(handlers, {
       origin: 'https://joyst.ir',
       channel: 'desktop.check-for-update',
-      payload: { manifest, subscriptionActive: true },
     });
-    expect(result).toEqual({ ok: true, data: { status: 'current', reason: 'not-newer' } });
-    expect(d.checkForUpdate).toHaveBeenCalledWith({ manifest, subscriptionActive: true });
+    expect(result).toEqual({
+      ok: true,
+      data: { status: 'current', reason: 'not-newer', latestVersion: '1.0.3' },
+    });
+    expect(d.checkForUpdate).toHaveBeenCalledWith();
   });
 
-  it('check-for-update rejects a malformed request without calling the injected policy check', async () => {
+  it('check-for-update refuses a request that carries a payload, without calling the injected check', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
     const result = await dispatchIpcRequest(handlers, {

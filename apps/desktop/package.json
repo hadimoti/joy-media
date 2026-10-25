@@ -20,7 +20,8 @@
   },
   "dependencies": {
     "@joy-media/project-persistence": "workspace:*",
-    "@joy-media/provider-sdk": "workspace:*"
+    "@joy-media/provider-sdk": "workspace:*",
+    "@joy-media/release-trust": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.16.0",

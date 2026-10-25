@@ -8,6 +8,7 @@
   "references": [
     { "path": "../../packages/joy-agent-engine" },
     { "path": "../../packages/project-schema" },
+    { "path": "../../packages/release-trust" },
     { "path": "../../packages/project-persistence" },
     { "path": "../../packages/commands" },
     { "path": "../../packages/agent-tools" },

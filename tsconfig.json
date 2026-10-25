@@ -32,6 +32,7 @@
     { "path": "packages/audio-core" },
     { "path": "packages/project-persistence" },
     { "path": "packages/job-protocol" },
+    { "path": "packages/release-trust" },
     { "path": "packages/workflow-engine" },
     { "path": "packages/plugin-sdk" },
     { "path": "packages/collaboration-core" },

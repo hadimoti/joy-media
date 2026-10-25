@@ -23,6 +23,7 @@
     "@joy-media/motion-core": "workspace:*",
     "@joy-media/project-persistence": "workspace:*",
     "@joy-media/project-schema": "workspace:*",
+    "@joy-media/release-trust": "workspace:*",
     "ai": "7.0.92"
   },
   "devDependencies": {

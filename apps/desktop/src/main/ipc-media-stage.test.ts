@@ -38,7 +38,11 @@ describe('IPC media staging and audio presence', () => {
       probeMedia: vi.fn(async () => ({ checksum: 'x', byteSize: 1, kind: 'video' as const })),
       secretStore: createMemorySecretStore(),
       probeProvider: vi.fn(async () => ({ ok: true, modelId: 'm' })),
-      checkForUpdate: vi.fn(() => ({ status: 'current' as const, reason: 'not-newer' as const })),
+      checkForUpdate: vi.fn(async () => ({
+        status: 'current' as const,
+        reason: 'not-newer' as const,
+        latestVersion: '1.0.3',
+      })),
       now: () => 'T0',
       newId: () => 'id-1',
       ...(withStage

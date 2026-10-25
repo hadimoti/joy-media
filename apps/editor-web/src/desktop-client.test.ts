@@ -16,7 +16,6 @@ import {
   resetDesktopAssetLibraryDirectory,
   getDesktopAssetLibraryCatalog,
   resolveDesktopAssetUrl,
-  type DesktopUpdateCheckRequest,
   type SaveDesktopProviderProfileRequest,
   type DesktopProviderProfile,
 } from './desktop-client.js';
@@ -80,32 +79,21 @@ describe('selectDesktopFile', () => {
 });
 
 describe('checkForDesktopUpdate', () => {
-  const request: DesktopUpdateCheckRequest = {
-    manifest: {
-      payload: {
-        channel: 'stable',
-        version: '1.2.3',
-        downloadUrl: 'https://joyst.ir/releases/1.2.3.exe',
-        sha256: 'a'.repeat(64),
-      },
-      signature: 'sig',
-    },
-    subscriptionActive: true,
-  };
-
   it('rejects outside the desktop host', async () => {
-    await expect(checkForDesktopUpdate(request)).rejects.toThrow(
-      'unavailable outside the desktop host',
-    );
+    await expect(checkForDesktopUpdate()).rejects.toThrow('unavailable outside the desktop host');
   });
 
-  it('forwards the manifest and subscription flag to desktop.check-for-update', async () => {
-    const decision = { status: 'current' as const, reason: 'not-newer' as const };
+  it('asks the main process to check, sending no renderer-supplied trust material', async () => {
+    const decision = {
+      status: 'current' as const,
+      reason: 'not-newer' as const,
+      latestVersion: '1.0.3',
+    };
     const invoke = vi.fn().mockResolvedValue(decision);
     window.joyDesktop = { channels: ['desktop.check-for-update'], invoke };
 
-    await expect(checkForDesktopUpdate(request)).resolves.toEqual(decision);
-    expect(invoke).toHaveBeenCalledWith('desktop.check-for-update', request);
+    await expect(checkForDesktopUpdate()).resolves.toEqual(decision);
+    expect(invoke).toHaveBeenCalledWith('desktop.check-for-update');
   });
 });
 

@@ -156,6 +156,7 @@ describe('capabilities command', () => {
       'help',
       'plan',
       'query',
+      'update',
     ]);
     for (const key of Object.keys(COMMAND_HELP)) {
       expect(knownHandled.has(key)).toBe(true);

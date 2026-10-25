@@ -56,6 +56,7 @@ export default defineConfig({
       '@joy-media/expression-core': pkg('./packages/expression-core/src/index.ts'),
       '@joy-media/golden-render': pkg('./tooling/golden-render/src/index.ts'),
       '@joy-media/job-protocol': pkg('./packages/job-protocol/src/index.ts'),
+      '@joy-media/release-trust': pkg('./packages/release-trust/src/index.ts'),
       '@joy-media/motion-core': pkg('./packages/motion-core/src/index.ts'),
       '@joy-media/playback-engine': pkg('./packages/playback-engine/src/index.ts'),
       '@joy-media/plugin-sdk/browser': pkg('./packages/plugin-sdk/src/browser.ts'),

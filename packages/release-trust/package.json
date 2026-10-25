@@ -1,0 +1,22 @@
+{
+  "name": "@joy-media/release-trust",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Signed release manifests: pinned keys, raw-byte Ed25519 verification, manifest schema and update policy, shared by the desktop app and the CLI",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.0"
+  }
+}

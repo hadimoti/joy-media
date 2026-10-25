@@ -1,111 +1,119 @@
-import { createPublicKey, generateKeyPairSync, sign } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
-import { evaluateAutoUpdate } from './auto-update-policy.js';
+import { generateKeyPairSync, sign } from 'node:crypto';
+import type { KeyObject } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
+import { checkForReleaseUpdate } from './auto-update-policy.js';
 
-function release() {
-  const { privateKey } = generateKeyPairSync('ed25519');
-  const publicKeyPem = createPublicKey(privateKey)
-    .export({ type: 'spki', format: 'pem' })
-    .toString();
-  const payload = {
-    channel: 'stable',
-    version: '1.2.0',
-    downloadUrl: 'https://joyst.ir/downloads/joy-media-1.2.0.exe',
-    sha256: 'a'.repeat(64),
-    minSupportedVersion: '1.0.0',
-  } as const;
-  const manifest = {
-    payload,
-    signature: sign(null, Buffer.from(JSON.stringify(payload), 'utf8'), privateKey).toString(
-      'base64url',
-    ),
-  };
-  // The policy's canonical payload has the same stable field order as this fixture.
-  return { manifest, publicKeyPem };
+const SETUP_SHA = 'a'.repeat(64);
+
+function keyPair(): { privateKey: KeyObject; publicPem: string } {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  return { privateKey, publicPem: publicKey.export({ type: 'spki', format: 'pem' }).toString() };
 }
 
-describe('evaluateAutoUpdate', () => {
-  it('accepts a newer verified release but leaves downloading opt-in', () => {
-    const { manifest, publicKeyPem } = release();
-    expect(
-      evaluateAutoUpdate({
-        manifest,
-        currentVersion: '1.1.0',
-        subscriptionActive: true,
-        pinnedPublicKeyPem: publicKeyPem,
-      }),
-    ).toMatchObject({ status: 'update', forced: false, autoDownload: false });
+function manifestBytes(version: string): Uint8Array {
+  return new TextEncoder().encode(
+    JSON.stringify({
+      channel: 'stable',
+      version,
+      issuedAt: '2026-10-26T00:00:00Z',
+      files: [{ name: 'joy-media-setup.exe', size: 202988544, sha256: SETUP_SHA }],
+    }),
+  );
+}
+
+/** Serves the named release files; each response reports the GitHub URL it was requested from. */
+function serve(files: Record<string, Uint8Array>): typeof fetch {
+  return (async (input: string | URL | Request) => {
+    const url = String(input);
+    const body = files[url.slice(url.lastIndexOf('/') + 1)];
+    if (body === undefined)
+      return { ok: false, status: 404, url, headers: new Headers() } as Response;
+    return {
+      ok: true,
+      status: 200,
+      url,
+      headers: new Headers(),
+      arrayBuffer: async () => body.slice().buffer,
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+}
+
+function signatureText(manifest: Uint8Array, key: KeyObject): string {
+  return `${sign(null, manifest, key).toString('base64url')}\n`;
+}
+
+describe('checkForReleaseUpdate', () => {
+  it('makes no request at all when no key is trusted', async () => {
+    const fetchFn = vi.fn(serve({}));
+    const result = await checkForReleaseUpdate({
+      currentVersion: '1.0.2',
+      publicKeysPem: [],
+      fetch: fetchFn,
+    });
+    expect(result).toEqual({ status: 'blocked', reason: 'release-key-unconfigured' });
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 
-  it('requires an active subscription and a pinned key', () => {
-    const { manifest, publicKeyPem } = release();
-    expect(
-      evaluateAutoUpdate({
-        manifest,
-        currentVersion: '1.1.0',
-        subscriptionActive: false,
-        pinnedPublicKeyPem: publicKeyPem,
+  it('reports a newer signed release as a notice that links to its release page', async () => {
+    const key = keyPair();
+    const manifest = manifestBytes('1.0.3');
+    const result = await checkForReleaseUpdate({
+      currentVersion: '1.0.2',
+      publicKeysPem: [key.publicPem],
+      fetch: serve({
+        'release-manifest.json': manifest,
+        'release-manifest.json.sig': new TextEncoder().encode(
+          signatureText(manifest, key.privateKey),
+        ),
       }),
-    ).toEqual({ status: 'blocked', reason: 'subscription-required' });
-    expect(
-      evaluateAutoUpdate({ manifest, currentVersion: '1.1.0', subscriptionActive: true }),
-    ).toEqual({ status: 'blocked', reason: 'release-key-unconfigured' });
+    });
+    expect(result).toEqual({
+      status: 'update',
+      latestVersion: '1.0.3',
+      forced: false,
+      releaseUrl: 'https://github.com/hadimoti/joy-media/releases/tag/v1.0.3',
+    });
   });
 
-  it('rejects a bad signature, unsafe URL, malformed hash, and downgrade', () => {
-    const { manifest, publicKeyPem } = release();
-    expect(
-      evaluateAutoUpdate({
-        manifest: {
-          ...manifest,
-          signature: `${manifest.signature[0] === 'A' ? 'B' : 'A'}${manifest.signature.slice(1)}`,
-        },
-        currentVersion: '1.1.0',
-        subscriptionActive: true,
-        pinnedPublicKeyPem: publicKeyPem,
+  it('reports the installed version as current when the signed release is not newer', async () => {
+    const key = keyPair();
+    const manifest = manifestBytes('1.0.3');
+    const result = await checkForReleaseUpdate({
+      currentVersion: '1.0.3',
+      publicKeysPem: [key.publicPem],
+      fetch: serve({
+        'release-manifest.json': manifest,
+        'release-manifest.json.sig': new TextEncoder().encode(
+          signatureText(manifest, key.privateKey),
+        ),
       }),
-    ).toEqual({ status: 'blocked', reason: 'signature-invalid' });
-    const unsafe = {
-      ...manifest,
-      payload: { ...manifest.payload, downloadUrl: 'http://joyst.ir/file.exe' },
-    };
-    expect(
-      evaluateAutoUpdate({
-        manifest: unsafe,
-        currentVersion: '1.1.0',
-        subscriptionActive: true,
-        pinnedPublicKeyPem: publicKeyPem,
-      }),
-    ).toEqual({ status: 'blocked', reason: 'manifest-invalid' });
-    const malformedHash = { ...manifest, payload: { ...manifest.payload, sha256: 'bad' } };
-    expect(
-      evaluateAutoUpdate({
-        manifest: malformedHash,
-        currentVersion: '1.1.0',
-        subscriptionActive: true,
-        pinnedPublicKeyPem: publicKeyPem,
-      }),
-    ).toEqual({ status: 'blocked', reason: 'manifest-invalid' });
-    expect(
-      evaluateAutoUpdate({
-        manifest,
-        currentVersion: '2.0.0',
-        subscriptionActive: true,
-        pinnedPublicKeyPem: publicKeyPem,
-      }),
-    ).toEqual({ status: 'current', reason: 'not-newer' });
+    });
+    expect(result).toEqual({ status: 'current', reason: 'not-newer', latestVersion: '1.0.3' });
   });
 
-  it('marks a release forced when the current version is below its minimum', () => {
-    const { manifest, publicKeyPem } = release();
-    expect(
-      evaluateAutoUpdate({
-        manifest,
-        currentVersion: '0.9.0',
-        subscriptionActive: true,
-        pinnedPublicKeyPem: publicKeyPem,
-        allowAutomaticDownload: true,
+  it('blocks a manifest that changed after it was signed', async () => {
+    const key = keyPair();
+    const signed = manifestBytes('1.0.3');
+    const result = await checkForReleaseUpdate({
+      currentVersion: '1.0.2',
+      publicKeysPem: [key.publicPem],
+      fetch: serve({
+        'release-manifest.json': manifestBytes('9.9.9'),
+        'release-manifest.json.sig': new TextEncoder().encode(
+          signatureText(signed, key.privateKey),
+        ),
       }),
-    ).toMatchObject({ status: 'update', forced: true, autoDownload: true });
+    });
+    expect(result).toEqual({ status: 'blocked', reason: 'signature-invalid' });
+  });
+
+  it('reports a failed download as a block, never as an update', async () => {
+    const key = keyPair();
+    const result = await checkForReleaseUpdate({
+      currentVersion: '1.0.2',
+      publicKeysPem: [key.publicPem],
+      fetch: serve({}),
+    });
+    expect(result).toEqual({ status: 'blocked', reason: 'network-unavailable' });
   });
 });

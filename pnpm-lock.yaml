@@ -154,6 +154,9 @@ importers:
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../../packages/project-schema
+      '@joy-media/release-trust':
+        specifier: workspace:*
+        version: link:../../packages/release-trust
       ai:
         specifier: 7.0.92
         version: 7.0.92(zod@4.6.7)
@@ -182,6 +185,9 @@ importers:
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../../packages/provider-sdk
+      '@joy-media/release-trust':
+        specifier: workspace:*
+        version: link:../../packages/release-trust
     devDependencies:
       '@types/node':
         specifier: ^22.16.0
@@ -562,6 +568,12 @@ importers:
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../project-schema
+
+  packages/release-trust:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.16.0
+        version: 22.20.1
 
   packages/render-ir: {}
 

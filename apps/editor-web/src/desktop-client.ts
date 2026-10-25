@@ -51,45 +51,25 @@ export interface DesktopFileSelection {
   readonly displayName: string;
 }
 
-/** Mirrors apps/desktop/src/main/auto-update-policy.ts's `ReleaseManifestPayload`. */
-export interface DesktopReleaseManifestPayload {
-  readonly channel: 'stable' | 'beta';
-  readonly version: string;
-  readonly downloadUrl: string;
-  readonly sha256: string;
-  readonly minSupportedVersion?: string;
-}
-
-/** Mirrors apps/desktop/src/main/auto-update-policy.ts's `SignedReleaseManifest`. The renderer
- * is the one that fetches this from the existing public `GET /v1/releases/:channel` route;
- * this helper only forwards it to the main process for verification. */
-export interface DesktopSignedReleaseManifest {
-  readonly payload: DesktopReleaseManifestPayload;
-  readonly signature: string;
-}
-
-export interface DesktopUpdateCheckRequest {
-  readonly manifest: DesktopSignedReleaseManifest;
-  readonly subscriptionActive: boolean;
-}
-
+/** Mirrors the main process's update check result (apps/desktop/src/main/auto-update-policy.ts). The check runs in
+ * the main process and takes no renderer-supplied trust material. An update is only a notice that links to its release
+ * page: the app never downloads or installs a release. */
 export type DesktopUpdateBlockReason =
-  | 'subscription-required'
   | 'release-key-unconfigured'
-  | 'manifest-invalid'
+  | 'installed-version-invalid'
   | 'signature-invalid'
-  | 'download-url-invalid'
-  | 'not-newer';
+  | 'manifest-invalid'
+  | 'channel-mismatch'
+  | 'network-unavailable';
 
-/** Mirrors apps/desktop/src/main/auto-update-policy.ts's `AutoUpdateDecision`. */
 export type DesktopUpdateDecision =
   | { readonly status: 'blocked'; readonly reason: DesktopUpdateBlockReason }
-  | { readonly status: 'current'; readonly reason: 'not-newer' }
+  | { readonly status: 'current'; readonly reason: 'not-newer'; readonly latestVersion: string }
   | {
       readonly status: 'update';
-      readonly manifest: DesktopSignedReleaseManifest;
+      readonly latestVersion: string;
       readonly forced: boolean;
-      readonly autoDownload: boolean;
+      readonly releaseUrl: string;
     };
 
 export const DEFAULT_JOY_REMOTE_API_BASE = 'https://joyst.ir/api';
@@ -122,16 +102,12 @@ function requireBridge(): DesktopJoyBridge {
 }
 
 /**
- * Forwards a manifest the caller already fetched from `GET /v1/releases/:channel`, plus the
- * caller's own `GET /v1/account/subscription` result, to the main process's
- * `desktop.check-for-update` handler. The main process alone supplies the pinned
- * release-signing public key and the running app version, so a compromised renderer can never
- * inject either — this call cannot download or install anything by itself.
+ * Asks the main process to check the latest release for a newer signed version. The check is opt-in: the user asks for
+ * it, and the main process fetches and verifies the manifest itself. The renderer sends nothing, so it cannot supply
+ * trust material, and the check cannot download or install anything.
  */
-export async function checkForDesktopUpdate(
-  request: DesktopUpdateCheckRequest,
-): Promise<DesktopUpdateDecision> {
-  const data = await requireBridge().invoke('desktop.check-for-update', request);
+export async function checkForDesktopUpdate(): Promise<DesktopUpdateDecision> {
+  const data = await requireBridge().invoke('desktop.check-for-update');
   return data as DesktopUpdateDecision;
 }
 
