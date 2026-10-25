@@ -282,14 +282,31 @@ function Get-InstalledFileHash([string]$RelativePath) {
     return Get-Sha256 (Join-Path $installRoot $RelativePath)
 }
 
-function Assert-UserIntegrations([string]$Version) {
+function Assert-UserIntegrations([string]$Version, [ValidateSet('root', 'bin')][string]$PathLayout) {
     Assert-RegisteredVersion $Version
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if (-not (Test-UserPathEntry -UserPath $userPath -InstallPath $installRoot)) {
+    # v1.0.1 and v1.0.2 registered the install root. From v1.0.3 only the bin folder is registered, and the root must be gone (F1).
+    if ($PathLayout -eq 'bin') {
+        if (-not (Test-UserPathEntry -UserPath $userPath -InstallPath (Join-Path $installRoot 'bin'))) {
+            throw 'Installer did not register the bin folder on the user PATH.'
+        }
+        if (Test-UserPathEntry -UserPath $userPath -InstallPath $installRoot) {
+            throw 'Installer left the install root on the user PATH. Only the bin folder belongs there.'
+        }
+    } elseif (-not (Test-UserPathEntry -UserPath $userPath -InstallPath $installRoot)) {
         throw 'Installer did not register the isolated install path for the current test user.'
     }
     if (-not (Test-Path -LiteralPath $desktopShortcut -PathType Leaf)) { throw 'Desktop shortcut was not created.' }
     if (-not (Test-Path -LiteralPath $startMenuShortcut -PathType Leaf)) { throw 'Start Menu shortcut was not created.' }
+}
+
+function Assert-FreshShellCli([string]$Version) {
+    # A new shell builds its PATH from the registry, so this sees only what the installer registered (L8, F1).
+    $freshPath = (@([Environment]::GetEnvironmentVariable('Path', 'User'), [Environment]::GetEnvironmentVariable('Path', 'Machine')) | Where-Object { $_ }) -join ';'
+    $result = Invoke-CapturedProcess -FilePath (Join-Path $env:SystemRoot 'System32\cmd.exe') -RawArguments '/d /s /c "joy-media --version"' -TimeoutSeconds 120 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment @{ PATH = $freshPath })
+    $script:commands.Add([pscustomobject]@{ name = 'fresh shell joy-media --version'; exitCode = $result.ExitCode })
+    if ($result.ExitCode -ne 0) { throw "A fresh shell could not run joy-media --version: $(Get-CommandFailureSummary $result)" }
+    if ($result.Stdout -notmatch [regex]::Escape($Version)) { throw "A fresh shell's joy-media --version did not report $Version." }
 }
 
 function Invoke-AppSmoke([string]$Label) {
@@ -489,7 +506,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
 
     $script:ownedInstall = $true
     Invoke-VerifiedSetup $PreviousSetupPath $PreviousSetupSha256 $PreviousVersion | Out-Null
-    Assert-UserIntegrations $PreviousVersion
+    Assert-UserIntegrations $PreviousVersion 'root'
     $previousExeSha = Assert-Sha256 (Join-Path $installRoot 'joy-media.exe') $previousDesktopExeSha 'Installed v1.0.1 app executable'
     $previousInstalledCliSha = Assert-Sha256 (Join-Path $installRoot 'resources\app\cli\joy-media-bundle.mjs') $previousCliBundleSha 'Installed v1.0.1 CLI bundle'
     Invoke-AppSmoke 'v1.0.1 initial install'
@@ -510,7 +527,8 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     $null = Invoke-Pnpm 'CLI render failure-recovery acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-recovery.e2e.test.ts', '--no-file-parallelism', '--retry=0', '--reporter=json', "--outputFile=$renderRecoveryReport")
     Set-ScenarioOutcome -Id 'cli.render.failure-recovery' -ExitCode (Get-VitestAccountingExitCode $renderRecoveryReport)
     Invoke-VerifiedSetup $CandidateSetupPath $candidateSetup $candidateVersion | Out-Null
-    Assert-UserIntegrations $candidateVersion
+    Assert-UserIntegrations $candidateVersion 'bin'
+    Assert-FreshShellCli $candidateVersion
     if ((Get-InstalledFileHash 'joy-media.exe') -ne $candidateDesktopExeSha -or (Get-InstalledFileHash 'resources\app\cli\joy-media-bundle.mjs') -ne $candidateCliBundleSha -or (Get-InstalledFileHash 'resources\app\worker\joy-worker.exe') -ne $candidateWorkerSha) {
         throw 'Candidate upgrade did not install the exact frozen app, CLI, and Worker files.'
     }
@@ -575,7 +593,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     $script:transitionOutcomes['repairCandidate'] = 'passed'
 
     Invoke-VerifiedSetup $PreviousSetupPath $PreviousSetupSha256 $PreviousVersion | Out-Null
-    Assert-UserIntegrations $PreviousVersion
+    Assert-UserIntegrations $PreviousVersion 'root'
     if ((Get-InstalledFileHash 'joy-media.exe') -ne $previousDesktopExeSha -or (Get-InstalledFileHash 'resources\app\cli\joy-media-bundle.mjs') -ne $previousCliBundleSha) {
         throw 'Rollback did not restore the exact v1.0.1 app and CLI files.'
     }
@@ -599,6 +617,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     if (Test-Path -LiteralPath $startMenuShortcut) { throw 'Uninstaller left the Start Menu shortcut behind.' }
     $remainingUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if (Test-UserPathEntry -UserPath $remainingUserPath -InstallPath $installRoot) { throw 'Uninstaller left its path registration behind.' }
+    if (Test-UserPathEntry -UserPath $remainingUserPath -InstallPath (Join-Path $installRoot 'bin')) { throw 'Uninstaller left the bin folder on the user PATH.' }
     $script:ownedInstall = $false
     if (-not (Test-Path -LiteralPath $userDataDirectory -PathType Container) -or -not (Test-Path -LiteralPath (Join-Path $userDataDirectory 'safe-storage-lifecycle-fixture.bin') -PathType Leaf)) {
         throw 'Uninstall removed user data that must remain available for recovery.'

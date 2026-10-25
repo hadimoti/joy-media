@@ -230,7 +230,8 @@ del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\JOY Media.lnk" 2>nul
 del "%USERPROFILE%\\Desktop\\JOY Media.lnk" 2>nul
 reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\JoyMedia" /f 2>nul
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); $target = $env:JOY_MEDIA_INSTALL_DIR.TrimEnd('\\'); if ($p) { $np = ($p -split ';' | Where-Object { $_ -ne '' -and $_.TrimEnd('\\') -ine $target }) -join ';'; [Environment]::SetEnvironmentVariable('Path', $np, 'User') }" 2>nul
+rem Remove the install root (an earlier install listed it) and its bin folder, the entry added since F1, from User PATH.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); $target = $env:JOY_MEDIA_INSTALL_DIR.TrimEnd('\\'); $bin = $target + '\\bin'; if ($p) { $np = ($p -split ';' | Where-Object { $_ -ne '' -and $_.TrimEnd('\\') -ine $target -and $_.TrimEnd('\\') -ine $bin }) -join ';'; [Environment]::SetEnvironmentVariable('Path', $np, 'User') }" 2>nul
 
 echo Cleaning application files...
 

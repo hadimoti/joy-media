@@ -87,6 +87,7 @@ export default defineConfig({
     include: [
       '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
       'apps/desktop/scripts/cli-launcher-layout.test.mjs',
+      'apps/desktop/scripts/installer-uninstall.test.mjs',
       'apps/desktop/scripts/copy-cli-fonts.test.mjs',
       'apps/desktop/scripts/install-electron-windows.test.mjs',
       'tests/e2e/helpers/browser-console-audit.unit.ts',
