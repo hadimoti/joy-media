@@ -171,14 +171,16 @@ function Test-FreshShellCli([string]$Version) {
     try {
         # A new shell builds its PATH from the registry, so this sees only what the installer registered.
         $env:Path = (@([Environment]::GetEnvironmentVariable('Path', 'User'), [Environment]::GetEnvironmentVariable('Path', 'Machine')) | Where-Object { $_ }) -join ';'
-        $run = Invoke-Program (Join-Path $env:SystemRoot 'System32\cmd.exe') '/d /s /c "joy-media --version"' 120
+        foreach ($launcher in @('joy-media', 'joy')) {
+            $run = Invoke-Program (Join-Path $env:SystemRoot 'System32\cmd.exe') ('/d /s /c "' + $launcher + ' --version"') 120
+            Save-ProgramOutput "fresh shell $launcher $Version" $run
+            $passed = ($run.ExitCode -eq 0) -and ($run.Stdout -match [regex]::Escape($Version))
+            $detail = if ($passed) { "a fresh shell ran $launcher --version and reported $Version" } else { "fresh-shell exit $($run.ExitCode); output did not report ${Version}: $(Get-OutputTail $run)" }
+            Add-Step "fresh shell runs $launcher --version" $passed $detail
+        }
     } finally {
         $env:Path = $savedPath
     }
-    Save-ProgramOutput "fresh shell cli $Version" $run
-    $passed = ($run.ExitCode -eq 0) -and ($run.Stdout -match [regex]::Escape($Version))
-    $detail = if ($passed) { "a fresh shell ran joy-media --version and reported $Version" } else { "fresh-shell exit $($run.ExitCode); output did not report ${Version}: $(Get-OutputTail $run)" }
-    Add-Step 'fresh shell runs joy-media --version' $passed $detail
 }
 
 function Invoke-Uninstall([string]$Name) {
