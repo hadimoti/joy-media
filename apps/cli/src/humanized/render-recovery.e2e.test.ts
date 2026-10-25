@@ -1,4 +1,5 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { type ChildProcess, execFileSync, spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import {
   chmodSync,
   existsSync,
@@ -25,6 +26,27 @@ function absentProcessId(): number {
     }
   }
   throw new Error('could not find an absent process id for the stale-lock fixture');
+}
+
+function waitForLine(child: ChildProcess, line: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolveLine, rejectLine) => {
+    let seen = '';
+    const timer = setTimeout(
+      () => rejectLine(new Error(`no "${line}" from the holding process`)),
+      timeoutMs,
+    );
+    child.stdout?.on('data', (chunk: Buffer) => {
+      seen += chunk.toString('utf8');
+      if (seen.includes(line)) {
+        clearTimeout(timer);
+        resolveLine();
+      }
+    });
+    child.once('exit', () => {
+      clearTimeout(timer);
+      rejectLine(new Error('the holding process exited before it took the file'));
+    });
+  });
 }
 
 describe.skipIf(!hasFfmpeg())('real render output recovery', () => {
@@ -387,6 +409,78 @@ describe.skipIf(!hasFfmpeg())('real render output recovery', () => {
     expect(readdirSync(outDir).sort()).toEqual(['blocked-sidecar-race.mp4.manifest.json']);
     expect(readFileSync(join(sidecarDirectory, 'keep.txt'), 'utf8')).toBe('keep');
   }, 120_000);
+
+  it.runIf(process.platform === 'win32')(
+    'keeps the last good output and stages nothing when another program holds the media open',
+    async () => {
+      if (!sandbox) throw new Error('render recovery sandbox was not created');
+      const project = writeSandboxFile(
+        sandbox,
+        'held-destination.json',
+        projectDoc({
+          id: 'held-destination',
+          title: 'Held destination',
+          durationUs: 1_000_000,
+          tracks: [
+            {
+              id: 'video-1',
+              clips: [{ id: 'hard-cut', assetId: hardCut, durationUs: 1_000_000 }],
+            },
+          ],
+        }),
+      );
+      const outDir = sandbox.path('held-destination');
+      const published = ['held-destination.mp4', 'held-destination.mp4.manifest.json'];
+      const first = await sandbox.run(['render', '--project', project, '--out', outDir, '--json']);
+      expect(first.code, describeRun(first)).toBe(0);
+      expect(readdirSync(outDir).sort()).toEqual(published);
+      const mediaPath = join(outDir, published[0]!);
+      const manifestPath = join(outDir, published[1]!);
+      const publishedMedia = readFileSync(mediaPath);
+      const publishedManifest = readFileSync(manifestPath);
+
+      // Another program holds the published media open without sharing it.
+      const holder = spawn(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `$held = [System.IO.File]::Open('${mediaPath}', 'Open', 'ReadWrite', 'None'); [Console]::Out.WriteLine('held'); [Console]::Out.Flush(); Start-Sleep -Seconds 600`,
+        ],
+        { stdio: ['ignore', 'pipe', 'ignore'] },
+      );
+      try {
+        await waitForLine(holder, 'held', 60_000);
+        const blocked = await sandbox.run([
+          'render',
+          '--project',
+          project,
+          '--out',
+          outDir,
+          '--json',
+        ]);
+        expect(blocked.code, describeRun(blocked)).toBe(1);
+        const events = expectNdjsonContract(blocked, ['error']);
+        expect(events.at(-1)).toMatchObject({ type: 'error', code: 'output' });
+        expect(events.some((event) => event.type === 'complete')).toBe(false);
+      } finally {
+        holder.kill();
+        await once(holder, 'exit');
+      }
+
+      // Once the holder has exited, nothing from the failed render remains and the published pair is intact.
+      expect(readdirSync(outDir).sort()).toEqual(published);
+      expect(readFileSync(mediaPath).equals(publishedMedia)).toBe(true);
+      expect(readFileSync(manifestPath).equals(publishedManifest)).toBe(true);
+
+      const retry = await sandbox.run(['render', '--project', project, '--out', outDir, '--json']);
+      expect(retry.code, describeRun(retry)).toBe(0);
+      expectNdjsonContract(retry);
+      expect(readdirSync(outDir).sort()).toEqual(published);
+    },
+    240_000,
+  );
 
   it('rejects a concurrent render to the same output instead of cross-publishing media and metadata', async () => {
     if (!sandbox) throw new Error('render recovery sandbox was not created');
