@@ -835,13 +835,23 @@ async function runDesktopMatrix(baseUrl, apiBaseUrl) {
   // (runP3ExportMatrix) loads that exact spec separately. Listing every other
   // top-level spec positionally keeps Playwright's loader out of the excluded
   // module entirely while preserving every other test.
-  const EXCLUDED_DESKTOP_PRIMARY_SPEC = 'r2-p3-shipping-export-acceptance.spec.ts';
+  //
+  // synthetic-account-session.spec.ts is also left out. It tests the synthetic account harness: it reads
+  // one-time codes and expires sessions through a control port that tooling/e2e-server.ts opens, and that
+  // server runs only in the fixture-only browser lane, where Playwright starts it. This lane drives real
+  // services, so nothing listens on the control port and the spec can only fail with ECONNREFUSED. The
+  // fixture-only lane (acceptance-primary, desktop-primary, both passes) runs it, and it is the only spec
+  // that needs JOY_MEDIA_E2E_CONTROL_TOKEN.
+  const EXCLUDED_DESKTOP_PRIMARY_SPECS = new Set([
+    'r2-p3-shipping-export-acceptance.spec.ts',
+    'synthetic-account-session.spec.ts',
+  ]);
   const desktopPrimarySpecs = (await readdir(join(root, 'tests/e2e'), { withFileTypes: true }))
     .filter(
       (entry) =>
         entry.isFile() &&
         entry.name.endsWith('.spec.ts') &&
-        entry.name !== EXCLUDED_DESKTOP_PRIMARY_SPEC,
+        !EXCLUDED_DESKTOP_PRIMARY_SPECS.has(entry.name),
     )
     .map((entry) => `tests/e2e/${entry.name}`)
     .sort();
