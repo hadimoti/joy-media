@@ -18,13 +18,13 @@
 
 ## Closed in this round
 
-| Item | Change | Evidence |
-| --- | --- | --- |
-| Hard breaks from the CLI | `add-caption` treats each line of `--text` as a hard break. The lines are stored as the segment text override, and the words keep their timing. | End-to-end test `a line break in the caption text starts a new line…` passes. The English sample's cue 2 renders on two lines. |
-| Automatic word wrap | The planner breaks an over-wide line at spaces, greedily, using the measured width. A single word wider than the frame is still refused with `CAPTION_LAYOUT_OVERFLOW`. The frozen layout keeps the words and source breaks. | Six new preparation tests. The Persian long cue prepared as two lines of 549.8 px and 172.2 px (limit 560 px). The English long cue prepared as two lines of 540.2 px and 338.3 px. |
-| Plans from before the caption change | A layout made by another caption compiler is refused with a message to prepare again, instead of a generic inconsistency. | Unit test `asks for a new preparation when the frozen layout came from another caption compiler`. |
-| Accurately named capability key | `canonicalCaptionFace` reports the canonical TrueType face. `woff2Font` stays as a deprecated alias with the same value. The Markdown line and the committed support document say what the key measures. | Capability and probe tests pass. |
-| Automated direction test | Renders the Persian and Latin words with libass, embedded right to left and left to right, and compares the drawn ink at each end with each word drawn alone. | Two tests pass. A mutant that compiles the line left to right fails the first assertion (agreement 0.69 against the 0.85 threshold). |
+| Item                                 | Change                                                                                                                                                                                                                       | Evidence                                                                                                                                                                            |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hard breaks from the CLI             | `add-caption` treats each line of `--text` as a hard break. The lines are stored as the segment text override, and the words keep their timing.                                                                              | End-to-end test `a line break in the caption text starts a new line…` passes. The English sample's cue 2 renders on two lines.                                                      |
+| Automatic word wrap                  | The planner breaks an over-wide line at spaces, greedily, using the measured width. A single word wider than the frame is still refused with `CAPTION_LAYOUT_OVERFLOW`. The frozen layout keeps the words and source breaks. | Six new preparation tests. The Persian long cue prepared as two lines of 549.8 px and 172.2 px (limit 560 px). The English long cue prepared as two lines of 540.2 px and 338.3 px. |
+| Plans from before the caption change | A layout made by another caption compiler is refused with a message to prepare again, instead of a generic inconsistency.                                                                                                    | Unit test `asks for a new preparation when the frozen layout came from another caption compiler`.                                                                                   |
+| Accurately named capability key      | `canonicalCaptionFace` reports the canonical TrueType face. `woff2Font` stays as a deprecated alias with the same value. The Markdown line and the committed support document say what the key measures.                     | Capability and probe tests pass.                                                                                                                                                    |
+| Automated direction test             | Renders the Persian and Latin words with libass, embedded right to left and left to right, and compares the drawn ink at each end with each word drawn alone.                                                                | Two tests pass. A mutant that compiles the line left to right fails the first assertion (agreement 0.69 against the 0.85 threshold).                                                |
 
 ## Open: the Latin companion face (decision needed)
 
@@ -47,11 +47,11 @@ Both samples render from the rebuilt package, with no override. Each sample is a
 
 ## Negative tests (installed copy, same package)
 
-| Case | Plan prepare | Render | Output written |
-| --- | --- | --- | --- |
-| Libass face folder removed | `SETUP_REQUIRED`: canonical-caption-face-unavailable, "libass font directory is missing" | `RENDER_PREPARATION_REQUIRED` | no |
-| Same-length tamper (one bit, length unchanged) before preparation | `SETUP_REQUIRED`: "does not match its pinned length and digest" | `RENDER_PREPARATION_REQUIRED` | no |
-| Same-length tamper after a good plan was applied | prepare and apply succeed | `RENDER_ENVIRONMENT_DRIFT`: "Canonical caption face probe facts changed after preparation." | no |
+| Case                                                              | Plan prepare                                                                             | Render                                                                                      | Output written |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------- |
+| Libass face folder removed                                        | `SETUP_REQUIRED`: canonical-caption-face-unavailable, "libass font directory is missing" | `RENDER_PREPARATION_REQUIRED`                                                               | no             |
+| Same-length tamper (one bit, length unchanged) before preparation | `SETUP_REQUIRED`: "does not match its pinned length and digest"                          | `RENDER_PREPARATION_REQUIRED`                                                               | no             |
+| Same-length tamper after a good plan was applied                  | prepare and apply succeed                                                                | `RENDER_ENVIRONMENT_DRIFT`: "Canonical caption face probe facts changed after preparation." | no             |
 
 ## Font integrity and libass
 
