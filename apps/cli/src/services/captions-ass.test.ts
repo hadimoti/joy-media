@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { compileCaptionAss } from './captions-ass.js';
 
 const base = { width: 1920, height: 1080, fontFamily: 'Arial' };
+const RLE = String.fromCodePoint(0x202b);
+const PDF = String.fromCodePoint(0x202c);
 
 function failureCode(run: () => unknown): unknown {
   try {
@@ -40,8 +42,62 @@ describe('compileCaptionAss', () => {
       ...base,
       cues: [{ text: arabic, startUs: 0, endUs: 1_000_000, direction: 'rtl' }],
     });
-    expect(ass).toContain(`,,${arabic}\n`);
+    expect(ass).toContain(`,,${RLE}${arabic}${PDF}\n`);
     expect(ass).not.toContain([...arabic].reverse().join(''));
+  });
+
+  it('embeds a right-to-left line so libass lays the sentence out from the right', () => {
+    const ass = compileCaptionAss({
+      ...base,
+      cues: [{ text: 'سلام، دنیا!', startUs: 0, endUs: 1_000_000, direction: 'auto' }],
+    });
+    expect(ass).toContain(`,,${RLE}سلام، دنیا!${PDF}\n`);
+  });
+
+  it('embeds each right-to-left line of a multi-line cue on its own', () => {
+    const ass = compileCaptionAss({
+      ...base,
+      cues: [
+        {
+          text: 'یک دو',
+          lines: ['یک', 'دو'],
+          startUs: 0,
+          endUs: 1_000_000,
+          direction: 'rtl',
+        },
+      ],
+    });
+    expect(ass).toContain(`,,${RLE}یک${PDF}\\N${RLE}دو${PDF}\n`);
+  });
+
+  it('takes the direction from the first letter, not from leading digits', () => {
+    const ass = compileCaptionAss({
+      ...base,
+      cues: [{ text: '۴۵۶ سلام', startUs: 0, endUs: 1_000_000 }],
+    });
+    expect(ass).toContain(`,,${RLE}۴۵۶ سلام${PDF}\n`);
+  });
+
+  it('leaves left-to-right, digit-only, and explicit ltr lines unembedded', () => {
+    const ass = compileCaptionAss({
+      ...base,
+      cues: [
+        { text: 'Hello 123', startUs: 0, endUs: 1_000_000 },
+        { text: '۴۵۶ Hello', startUs: 1_000_000, endUs: 2_000_000 },
+        { text: '۱۲۳', startUs: 2_000_000, endUs: 3_000_000 },
+        { text: 'سلام', startUs: 3_000_000, endUs: 4_000_000, direction: 'ltr' },
+      ],
+    });
+    expect(ass).not.toContain(RLE);
+    expect(ass).toContain(',,سلام\n');
+  });
+
+  it('escapes ASS braces and backslashes inside an embedded line', () => {
+    const ass = compileCaptionAss({
+      ...base,
+      cues: [{ text: 'سلام{x}\\y', startUs: 0, endUs: 1_000_000, direction: 'rtl' }],
+    });
+    expect(ass).toContain(`,,${RLE}سلام\\{x\\}\\\\y${PDF}\n`);
   });
 
   it('rounds cue boundaries to frame-equivalent centiseconds', () => {

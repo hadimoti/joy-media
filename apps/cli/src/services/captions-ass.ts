@@ -68,6 +68,22 @@ function escapeAssText(text: string): string {
   return text.replace(/[{}\\]/g, (character) => `\\${character}`).replace(/\r\n|\r|\n/g, '\\N');
 }
 
+/** libass lays a line out left to right unless the line is embedded right to left. */
+const RIGHT_TO_LEFT_EMBEDDING = String.fromCodePoint(0x202b);
+const POP_DIRECTIONAL_FORMATTING = String.fromCodePoint(0x202c);
+/** Letters of right-to-left scripts. Digits are neutral, so Arabic-Indic digits do not count. */
+const RIGHT_TO_LEFT_SCRIPT =
+  /\p{Script=Arabic}|\p{Script=Hebrew}|\p{Script=Syriac}|\p{Script=Thaana}|\p{Script=Nko}|\p{Script=Samaritan}|\p{Script=Mandaic}/u;
+
+/** The first letter sets a line's direction (UAX #9 rules P2 and P3); digits and punctuation do not. */
+function lineDirection(line: string, direction: AssCaptionCue['direction']): 'ltr' | 'rtl' {
+  if (direction === 'ltr' || direction === 'rtl') return direction;
+  for (const character of line) {
+    if (/\p{L}/u.test(character)) return RIGHT_TO_LEFT_SCRIPT.test(character) ? 'rtl' : 'ltr';
+  }
+  return 'ltr';
+}
+
 /** Compile basic caption cues to ASS; libass performs bidirectional shaping. */
 export function compileCaptionAss(options: AssCaptionOptions): string {
   const { width, height, fontFamily } = options;
@@ -95,8 +111,16 @@ export function compileCaptionAss(options: AssCaptionOptions): string {
       );
     if (endCs <= startCs)
       return unsupported('Caption end must be after start at centisecond precision.');
-    const hardBreaks = cue.lines?.join('\n') ?? cue.text;
-    return `Dialogue: 0,${start},${end},Caption,,0,0,0,,${escapeAssText(hardBreaks)}`;
+    const lines = cue.lines ?? cue.text.split(/\r\n|\r|\n/);
+    const text = lines
+      .map((line) => {
+        const escaped = escapeAssText(line);
+        return lineDirection(line, cue.direction) === 'rtl'
+          ? `${RIGHT_TO_LEFT_EMBEDDING}${escaped}${POP_DIRECTIONAL_FORMATTING}`
+          : escaped;
+      })
+      .join('\\N');
+    return `Dialogue: 0,${start},${end},Caption,,0,0,0,,${text}`;
   });
 
   return [
