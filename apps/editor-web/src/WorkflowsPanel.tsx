@@ -484,7 +484,7 @@ export function WorkflowsPanel({
     >
       {parkedRuns.length > 0 && (
         <section aria-label="Saved workflow approvals">
-          <h4>Pending approvals in this project</h4>
+          <h3>Pending approvals in this project</h3>
           <p>Saved in this browser. Review each request before continuing.</p>
           <ul className="workflow-list">
             {parkedRuns.map((run) => (
@@ -520,7 +520,7 @@ export function WorkflowsPanel({
       )}
       {runModal !== undefined && (
         <div className="workflow-run-modal" role="dialog" aria-label="Run workflow inputs">
-          <h4>Run: {runModal.workflowId}</h4>
+          <h2>Run: {runModal.workflowId}</h2>
           {runModal.parameters.map((parameter) => (
             <label key={parameter.name}>
               {parameter.description}
@@ -557,7 +557,7 @@ export function WorkflowsPanel({
 
       {approval !== undefined && (
         <div className="workflow-run-modal" role="dialog" aria-label="Workflow approval">
-          <h4>{approval.request.prompt}</h4>
+          <h2>{approval.request.prompt}</h2>
           {approvalIsStale && (
             <p role="alert">
               Project changed since this approval was prepared. Discard the saved run and start it
@@ -624,7 +624,7 @@ export function WorkflowsPanel({
       {tab === 'system' && (
         <>
           <div className="workflow-section-header">
-            <h4>Bundled with JOY Media</h4>
+            <h3>Bundled with JOY Media</h3>
             <span className="system-version-badge" title="FIRST_PARTY_WORKFLOWS_VERSION">
               v{systemWorkflowVersion}
             </span>

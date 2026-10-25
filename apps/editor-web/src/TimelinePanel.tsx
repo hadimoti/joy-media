@@ -307,10 +307,10 @@ function TimelineClip({
 
   return (
     <div
-      role="button"
+      role="group"
       tabIndex={0}
       className={`timeline-clip ${kindClass} ${laneClass}${dragPx !== undefined || trimPreview !== undefined ? ' dragging' : ''}${isDragOver ? ' is-drag-over' : ''}`}
-      aria-pressed={selected}
+      aria-current={selected ? 'true' : 'false'}
       aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}, clip ${clip.id}`}
       aria-roledescription="timeline clip"
       data-clip-id={clip.id}
@@ -2584,11 +2584,11 @@ export function TimelinePanel({
                     {track.family === 'audio' && (
                       <div
                         className="timeline-audio-dsp-pills"
-                        title="Real-time Audio DSP: DeepFilterNet & Normalization"
+                        title="Real-time audio DSP: normalization; DeepFilterNet is experimental and needs model setup"
                       >
                         <span
-                          className={`audio-dsp-pill dsp-dfn ${source.clips.length > 0 ? 'is-active' : 'is-ready'}`}
-                          title="DeepFilterNet (DFN) Active"
+                          className="audio-dsp-pill dsp-dfn is-ready"
+                          title="DeepFilterNet (DFN): experimental, needs model setup"
                         >
                           DFN
                         </span>
@@ -2686,13 +2686,14 @@ export function TimelinePanel({
                 <span
                   className="timeline-lane"
                   data-track-id={track.id}
-                  role="button"
+                  role="group"
                   tabIndex={0}
-                  aria-label={`Insert media on ${track.id} track`}
+                  aria-label={`Track ${track.id} timeline lane. Enter or Space opens the media library.`}
                   aria-keyshortcuts="Enter Space"
-                  title={`Insert media on ${track.id} track (Enter or Space)`}
+                  title="Click to seek; Enter or Space opens the media library"
                   style={{ minWidth: `${laneWidthPx}px` }}
                   onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
                     if (event.key !== 'Enter' && event.key !== ' ') return;
                     event.preventDefault();
                     handleAddFromLibrary();

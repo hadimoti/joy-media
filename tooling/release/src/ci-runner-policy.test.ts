@@ -1,28 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import {
+  cpSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
 const WORKFLOWS_DIR = join(REPO_ROOT, '.github', 'workflows');
 
 /**
- * Self-hosted-only CI architecture contract.
+ * Explicit CI runner placement contract.
  *
- * JOY Media's GitHub-hosted Actions minutes/billing are unavailable from Iran,
- * so every workflow job in `.github/workflows/` MUST run on an owner-controlled
- * self-hosted runner. This test enforces that contract offline:
+ * Hosted jobs are permitted only for explicitly listed workflow/job pairs.
+ * Every other job must use an allowlisted self-hosted label tuple. This test
+ * enforces the exact split offline:
  *
- *   1. No job in any workflow may use `ubuntu-latest`, `windows-latest`,
- *      `macos-latest`, or any other GitHub-hosted label.
- *   2. Every job must list an `allowed` self-hosted label tuple, where the
- *      allowed set is exactly the PC Docker self-hosted runner labels the
- *      repository actually provisions (see ops/self-hosted/linux-runner,
- *      ops/self-hosted/windows-runner, docs/SELF-HOSTED-CI.md).
- *   3. The runner contract lives entirely under `ops/self-hosted/`. Re-adding
- *      a hosted label, or pointing a job at a label without an entry in
- *      `ops/self-hosted/`, fails this test before a CI minute is consumed.
+ *   1. Only explicitly listed jobs may use `ubuntu-24.04` or `windows-2025`;
+ *      all other hosted labels are forbidden.
+ *   2. Every other job must list an `allowed` self-hosted label tuple, where the
+ *      allowed set is exactly the tuples declared by the repository's runner
+ *      contracts.
+ *   3. Re-adding a hosted label elsewhere, or pointing a job at a label without
+ *      an entry in `ops/self-hosted/`, fails this test.
  *
  * The label allowlist is read directly from the README files in each
  * `ops/self-hosted/<runner>/` directory, so a runner added later is honored
@@ -45,6 +53,7 @@ const HOSTED_LABEL_TOKENS = new Set([
   'ubuntu-24.04',
   'ubuntu-20.04',
   'windows-latest',
+  'windows-2025',
   'windows-2022',
   'windows-2019',
   'macos-latest',
@@ -52,6 +61,152 @@ const HOSTED_LABEL_TOKENS = new Set([
   'macos-14',
   'macos-15',
 ]);
+
+const APPROVED_HOSTED_RUNNERS: ReadonlyMap<
+  string,
+  ReadonlyMap<string, readonly string[]>
+> = new Map([
+  [
+    join(WORKFLOWS_DIR, 'release-candidate-v2.yml'),
+    new Map([
+      ['validate-candidate', ['ubuntu-24.04']],
+      ['node-contracts', ['ubuntu-24.04']],
+      ['editor-web-bundle', ['ubuntu-24.04']],
+      ['acceptance-responsive', ['ubuntu-24.04']],
+    ]),
+  ],
+  [
+    join(WORKFLOWS_DIR, 'ci-dev.yml'),
+    new Map([
+      ['static-and-unit', ['ubuntu-24.04']],
+      ['worker-package', ['windows-2025']],
+      ['browser', ['ubuntu-24.04']],
+      ['development-verification-summary', ['ubuntu-24.04']],
+    ]),
+  ],
+]);
+
+interface ParsedWorkflow {
+  readonly on?: unknown;
+  readonly jobs?: unknown;
+  readonly permissions?: unknown;
+}
+
+interface YamlParser {
+  load(source: string): unknown;
+}
+
+interface WorkflowJob {
+  readonly 'runs-on'?: unknown;
+}
+
+// `js-yaml` is a declared root devDependency; it has no bundled types, so only `load` is typed.
+function loadYamlParser(): YamlParser {
+  return createRequire(join(REPO_ROOT, 'package.json'))('js-yaml') as YamlParser;
+}
+
+const yamlParser = loadYamlParser();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseWorkflow(workflowPath: string): ParsedWorkflow {
+  const parsed = yamlParser.load(readFileSync(workflowPath, 'utf8'));
+  if (!isRecord(parsed)) throw new Error(`${workflowPath} must parse to a YAML mapping`);
+  return parsed as ParsedWorkflow;
+}
+
+function workflowTriggers(workflow: ParsedWorkflow, workflowPath: string): Record<string, unknown> {
+  if (!isRecord(workflow.on)) throw new Error(`${workflowPath} must declare workflow triggers`);
+  return workflow.on;
+}
+
+function isMainOnlyPush(value: unknown): boolean {
+  if (!isRecord(value) || !Array.isArray(value.branches)) return false;
+  return (
+    value.branches.length === 1 &&
+    value.branches[0] === 'main' &&
+    value['branches-ignore'] === undefined &&
+    value.tags === undefined &&
+    value['tags-ignore'] === undefined
+  );
+}
+
+function hasSelfHostedRunner(job: WorkflowJob): boolean {
+  if (typeof job['runs-on'] === 'string') return job['runs-on'] === 'self-hosted';
+  return Array.isArray(job['runs-on']) && job['runs-on'].includes('self-hosted');
+}
+
+function assertCiDevTrustPolicy(workflowsDir: string): void {
+  const workflowPath = join(workflowsDir, 'ci-dev.yml');
+  const source = readFileSync(workflowPath, 'utf8');
+  const workflow = parseWorkflow(workflowPath);
+  if (/self-hosted/i.test(source)) throw new Error('ci-dev.yml must not mention self-hosted');
+  if (/\bsecrets\./i.test(source)) throw new Error('ci-dev.yml must not reference secrets');
+  if (!isRecord(workflow.permissions) || workflow.permissions.contents !== 'read') {
+    throw new Error('ci-dev.yml must set top-level permissions contents: read');
+  }
+}
+
+function assertWorkflowTrustInvariants(workflowsDir: string): void {
+  assertCiDevTrustPolicy(workflowsDir);
+  const allowedSelfHostedTriggers = new Set(['workflow_dispatch', 'push']);
+  const forbiddenTriggers = new Set(['pull_request_target', 'workflow_run', 'issue_comment']);
+
+  for (const fileName of readdirSync(workflowsDir)
+    .filter((file) => file.endsWith('.yml') || file.endsWith('.yaml'))
+    .sort()) {
+    const workflowPath = join(workflowsDir, fileName);
+    const workflow = parseWorkflow(workflowPath);
+    const triggers = workflowTriggers(workflow, workflowPath);
+    const triggerNames = Object.keys(triggers);
+
+    for (const trigger of forbiddenTriggers) {
+      if (triggerNames.includes(trigger)) {
+        throw new Error(`${fileName} uses forbidden workflow trigger ${trigger}`);
+      }
+    }
+    if (Object.hasOwn(triggers, 'push') && !isMainOnlyPush(triggers.push)) {
+      throw new Error(`${fileName} push trigger must be restricted to main`);
+    }
+
+    if (!isRecord(workflow.jobs)) continue;
+    for (const [jobName, jobValue] of Object.entries(workflow.jobs)) {
+      if (!isRecord(jobValue) || !hasSelfHostedRunner(jobValue as WorkflowJob)) continue;
+      const unsupportedTriggers = triggerNames.filter(
+        (trigger) => !allowedSelfHostedTriggers.has(trigger),
+      );
+      if (unsupportedTriggers.length > 0) {
+        throw new Error(
+          `${fileName} job ${jobName} uses self-hosted runners with unsupported triggers: ` +
+            unsupportedTriggers.join(', '),
+        );
+      }
+    }
+  }
+}
+
+function withMutatedWorkflowCopy(
+  workflowFile: string,
+  mutate: (source: string) => string,
+  check: (workflowsDir: string) => void,
+): void {
+  const tempBase = resolve(tmpdir());
+  const tempRoot = resolve(mkdtempSync(join(tempBase, 'ci-runner-policy-')));
+  if (!tempRoot.startsWith(`${tempBase}${sep}`)) {
+    throw new Error('temporary workflow copy must stay inside the system temp directory');
+  }
+  const workflowsDir = join(tempRoot, 'workflows');
+  try {
+    cpSync(WORKFLOWS_DIR, workflowsDir, { recursive: true });
+    const workflowPath = join(workflowsDir, workflowFile);
+    writeFileSync(workflowPath, mutate(readFileSync(workflowPath, 'utf8')));
+    check(workflowsDir);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
 
 // Allowed self-hosted label tuples. Order matters: this is the canonical
 // declaration of which label tuples the repository's `ops/self-hosted/` Docker
@@ -95,8 +250,14 @@ interface RunsOnEntry {
 function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
   const lines = workflowText.split(/\r?\n/);
   const entries: RunsOnEntry[] = [];
+  let currentJobContext = '(workflow-level)';
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
+    const jobHeader = line.match(/^ {2}([a-z0-9-]+):\s*$/);
+    if (jobHeader) {
+      currentJobContext = jobHeader[1];
+      continue;
+    }
     // Detect `runs-on:` on its own line. The value can be a string, a list
     // continuation on the next lines, or an inline list `[a, b, c]`.
     const inline = line.match(/^\s*([A-Za-z0-9 _-]+:)?\s*runs-on:\s*(.+?)\s*$/);
@@ -108,7 +269,7 @@ function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
     if (remainder && !remainder.startsWith('[')) {
       entries.push({
         lineNo: i + 1,
-        jobContext: jobKey || '(workflow-level)',
+        jobContext: jobKey || currentJobContext,
         raw: remainder,
         tuple: [remainder.replace(/^['"]|['"]$/g, '')],
         isList: false,
@@ -123,7 +284,7 @@ function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
       const inner = remainder.slice(1, closingIdx);
       entries.push({
         lineNo: i + 1,
-        jobContext: jobKey || '(workflow-level)',
+        jobContext: jobKey || currentJobContext,
         raw: remainder,
         tuple: inner
           .split(',')
@@ -147,7 +308,7 @@ function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
     if (collected.length > 0) {
       entries.push({
         lineNo: i + 1,
-        jobContext: jobKey || '(workflow-level)',
+        jobContext: jobKey || currentJobContext,
         raw: collected.join(','),
         tuple: collected,
         isList: true,
@@ -156,6 +317,51 @@ function findRunsOnEntries(workflowText: string): RunsOnEntry[] {
     }
   }
   return entries;
+}
+
+function findJobBlock(workflowText: string, jobName: string): string {
+  const lines = workflowText.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === `  ${jobName}:`);
+  if (start < 0) return '';
+  const end = lines.findIndex((line, index) => index > start && /^ {2}[a-z0-9-]+:\s*$/.test(line));
+  return lines.slice(start, end < 0 ? undefined : end).join('\n');
+}
+
+function assertReleaseCandidateWorkflowTriggers(workflowText: string): void {
+  const parsed: unknown = yamlParser.load(workflowText);
+  const triggers = isRecord(parsed) && isRecord(parsed.on) ? Object.keys(parsed.on) : [];
+  if (triggers.length !== 1 || triggers[0] !== 'workflow_dispatch') {
+    throw new Error('release-candidate-v2.yml must use workflow_dispatch as its only trigger');
+  }
+}
+
+function assertReleaseCandidateConcurrency(workflowText: string): void {
+  const lines = workflowText.split(/\r?\n/);
+  const concurrencyIndex = lines.findIndex((line) => line === 'concurrency:');
+  if (concurrencyIndex < 0) throw new Error('release-candidate-v2.yml must declare concurrency');
+
+  const blockLines: string[] = [];
+  for (let i = concurrencyIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line !== '' && !/^[ \t]/.test(line)) break;
+    blockLines.push(line);
+  }
+  const block = blockLines.join('\n');
+  const groups = [...block.matchAll(/^ {2}group:\s*(.*?)\s*$/gm)].map((match) => match[1]);
+  const cancellation = [...block.matchAll(/^ {2}cancel-in-progress:\s*(.*?)\s*$/gm)].map(
+    (match) => match[1],
+  );
+
+  if (
+    groups.length !== 1 ||
+    groups[0] !== 'release-candidate-v2-${{ inputs.candidate_sha }}' ||
+    cancellation.length !== 1 ||
+    cancellation[0] !== 'false'
+  ) {
+    throw new Error(
+      'release-candidate-v2 concurrency must use the candidate SHA group and cancel-in-progress: false',
+    );
+  }
 }
 
 function findWindowsDockerJobBlocks(workflowText: string): string[] {
@@ -243,7 +449,7 @@ function listWorkflowFiles(): string[] {
     .sort();
 }
 
-describe('self-hosted-only CI architecture contract', () => {
+describe('CI runner placement contract', () => {
   const workflows = listWorkflowFiles();
   expect(workflows.length).toBeGreaterThan(0);
 
@@ -255,12 +461,96 @@ describe('self-hosted-only CI architecture contract', () => {
   for (const tuple of ALLOWED_LABEL_TUPLES) allowed.add(tuple.join('|'));
   for (const tuple of declaredLabels) allowed.add(tuple.join('|'));
 
+  describe('workflow trust invariants', () => {
+    it('accepts the unmodified workflow set', () => {
+      expect(() => assertWorkflowTrustInvariants(WORKFLOWS_DIR)).not.toThrow();
+    });
+
+    it('rejects pull_request on a self-hosted workflow', () => {
+      withMutatedWorkflowCopy(
+        'ci.yml',
+        (source) =>
+          source.replace('  workflow_dispatch:\n', '  workflow_dispatch:\n  pull_request:\n'),
+        (workflowsDir) => {
+          expect(() => assertWorkflowTrustInvariants(workflowsDir)).toThrow(
+            /self-hosted runners with unsupported triggers/,
+          );
+        },
+      );
+    });
+
+    it('rejects a self-hosted label in ci-dev.yml', () => {
+      withMutatedWorkflowCopy(
+        'ci-dev.yml',
+        (source) =>
+          source.replace(
+            'runs-on: ubuntu-24.04',
+            'runs-on: [self-hosted, linux, x64, joy-media-ci]',
+          ),
+        (workflowsDir) => {
+          expect(() => assertWorkflowTrustInvariants(workflowsDir)).toThrow(
+            /ci-dev.yml must not mention self-hosted/,
+          );
+        },
+      );
+    });
+
+    it('rejects pull_request_target in any workflow', () => {
+      withMutatedWorkflowCopy(
+        'ci-dev.yml',
+        (source) =>
+          source.replace(
+            '  workflow_dispatch:\n',
+            '  pull_request_target:\n  workflow_dispatch:\n',
+          ),
+        (workflowsDir) => {
+          expect(() => assertWorkflowTrustInvariants(workflowsDir)).toThrow(
+            /uses forbidden workflow trigger pull_request_target/,
+          );
+        },
+      );
+    });
+  });
+
   it('declares at least one self-hosted runner contract under ops/self-hosted/', () => {
     expect(declaredLabels.length).toBeGreaterThan(0);
   });
 
+  it('runs media-export browser jobs on the isolated fixture-only acceptance runner', () => {
+    const workflowPath = join(WORKFLOWS_DIR, 'release-candidate-v2.yml');
+    const workflow = readFileSync(workflowPath, 'utf8');
+
+    const runnerLocalSettings = [
+      'JOY_MEDIA_CI_ACCEPTANCE_WORKER',
+      'JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND',
+      'JOY_MEDIA_CI_EVIDENCE_ROOT',
+      'JOY_MEDIA_CI_DATABASE_URL',
+      'JOY_MEDIA_CI_S3_ENDPOINT',
+      'JOY_MEDIA_CI_S3_ACCESS_KEY',
+      'JOY_MEDIA_CI_S3_SECRET_KEY',
+      'JOY_MEDIA_CI_S3_SECRET_ACCESS_KEY',
+      'JOY_MEDIA_CI_S3_HEALTHCHECK_URL',
+      'JOY_MEDIA_OPENCLI_PROFILE',
+    ];
+
+    for (const jobName of ['acceptance-primary', 'prod-build-smoke']) {
+      const job = findJobBlock(workflow, jobName);
+      expect(job, `${jobName} must exist in the release workflow`).not.toBe('');
+      expect(job).toContain('runs-on: [self-hosted, linux, x64, joy-media-acceptance]');
+      expect(job).toContain('JOY_MEDIA_CI_ACCEPTANCE_PROFILE: fixture-only');
+      expect(job).toContain('pnpm exec playwright install chromium');
+      expect(job).not.toContain('pnpm exec playwright install --with-deps chromium');
+      for (const setting of runnerLocalSettings) {
+        expect(job, `${jobName} must clear runner-local ${setting}`).toMatch(
+          new RegExp(`^\\s+${setting}: ''$`, 'm'),
+        );
+      }
+    }
+  });
+
   it.each(workflows)('forbids hosted runner labels in %s', (workflowPath) => {
     const text = readFileSync(workflowPath, 'utf8');
+    const entriesByLine = new Map(findRunsOnEntries(text).map((entry) => [entry.lineNo, entry]));
     // Pre-filter obvious comments — GitHub Actions does not honor commented
     // `runs-on:` lines, so we ignore them in the forbidden-label scan but
     // still enforce the allowlist on them (so a stale comment does not hide
@@ -271,6 +561,14 @@ describe('self-hosted-only CI architecture contract', () => {
       if (/^\s*#/.test(line)) continue;
       const m = line.match(/^\s*(?:-\s*)?runs-on:\s*(.+?)\s*$/);
       if (!m) continue;
+      const entry = entriesByLine.get(i + 1);
+      const approvedTuple = entry
+        ? APPROVED_HOSTED_RUNNERS.get(workflowPath)?.get(entry.jobContext)
+        : undefined;
+      if (approvedTuple) {
+        expect(entry?.tuple).toEqual(approvedTuple);
+        continue;
+      }
       const value = m[1].trim();
       // Strip inline list brackets.
       const tokens = value
@@ -292,6 +590,21 @@ describe('self-hosted-only CI architecture contract', () => {
     }
   });
 
+  for (const [workflowPath, hostedJobs] of APPROVED_HOSTED_RUNNERS) {
+    it.each([...hostedJobs.keys()])(
+      `${workflowPath}: hosted job %s enables Corepack before pnpm use`,
+      (jobName) => {
+        const text = readFileSync(workflowPath, 'utf8');
+        const job = findJobBlock(text, jobName);
+        expect(job, `hosted job ${jobName} must exist in ${workflowPath}`).not.toBe('');
+        if (!/\bpnpm\s/.test(job)) return;
+        expect(job, `hosted job ${jobName} must enable the pinned pnpm executable`).toContain(
+          'corepack enable pnpm',
+        );
+      },
+    );
+  }
+
   it.each(workflows)(
     'every job in %s targets an allowed self-hosted Docker label',
     (workflowPath) => {
@@ -300,6 +613,13 @@ describe('self-hosted-only CI architecture contract', () => {
       expect(entries.length).toBeGreaterThan(0);
 
       for (const entry of entries) {
+        const approvedHostedTuple = APPROVED_HOSTED_RUNNERS.get(workflowPath)?.get(
+          entry.jobContext,
+        );
+        if (approvedHostedTuple) {
+          expect(entry.tuple).toEqual(approvedHostedTuple);
+          continue;
+        }
         const sorted = normalizeTuple(entry.tuple);
         const key = sorted.join('|');
         expect(
@@ -307,7 +627,7 @@ describe('self-hosted-only CI architecture contract', () => {
           [
             `runs-on tuple ${JSON.stringify(entry.tuple)} on line ${entry.lineNo}`,
             `(${entry.jobContext}) in ${workflowPath}`,
-            `is not in the allowed self-hosted Docker label set.`,
+            `is not in the allowed self-hosted Docker label set or the exact hosted-job allowlist.`,
             `Allowed: ${[...allowed].join(' ; ')}.`,
             `Declare the runner contract under ops/self-hosted/<runner>/ and add the`,
             `label tuple to tooling/release/src/ci-runner-policy.test.ts if this is intentional.`,
@@ -319,9 +639,14 @@ describe('self-hosted-only CI architecture contract', () => {
         // membership check.
         expect(
           entry.tuple[0],
-          `runs-on tuple on line ${entry.lineNo} (${entry.jobContext}) in ${workflowPath} must begin with "self-hosted"; got ${JSON.stringify(entry.tuple)}`,
+          `runs-on tuple on line ${entry.lineNo} (${entry.jobContext}) in ${workflowPath} must begin with "self-hosted" unless it matches the exact hosted-job allowlist; got ${JSON.stringify(entry.tuple)}`,
         ).toBe('self-hosted');
       }
+      const observedHostedJobs = entries
+        .filter((entry) => !entry.tuple.includes('self-hosted'))
+        .map((entry) => [entry.jobContext, entry.tuple]);
+      const expectedHostedJobs = [...(APPROVED_HOSTED_RUNNERS.get(workflowPath)?.entries() ?? [])];
+      expect(observedHostedJobs).toEqual(expectedHostedJobs);
     },
   );
 
@@ -360,5 +685,76 @@ describe('self-hosted-only CI architecture contract', () => {
         `docs declare self-hosted tuple ${JSON.stringify(tuple)} but it is not in the explicit allowlist`,
       ).toBe(true);
     }
+  });
+
+  it('release-candidate-v2 uses workflow_dispatch as its only trigger', () => {
+    const workflow = readFileSync(join(WORKFLOWS_DIR, 'release-candidate-v2.yml'), 'utf8');
+    expect(() => assertReleaseCandidateWorkflowTriggers(workflow)).not.toThrow();
+  });
+
+  it('release-candidate-v2 rejects extra triggers in temporary workflow copies', () => {
+    const extraTriggers = [
+      '  push:\n    branches: [main]\n',
+      '  push: { branches: [main] }\n',
+      '  push: # extra trigger\n',
+      '# column-0 comment\n  push:\n',
+    ];
+    for (const extraTrigger of extraTriggers) {
+      withMutatedWorkflowCopy(
+        'release-candidate-v2.yml',
+        (source) => {
+          const mutated = source.replace(
+            'on:\n  workflow_dispatch:\n',
+            `on:\n${extraTrigger}  workflow_dispatch:\n`,
+          );
+          if (mutated === source) throw new Error('trigger mutation target was not found');
+          return mutated;
+        },
+        (workflowsDir) => {
+          const workflow = readFileSync(join(workflowsDir, 'release-candidate-v2.yml'), 'utf8');
+          expect(() => assertReleaseCandidateWorkflowTriggers(workflow)).toThrow(
+            /workflow_dispatch as its only trigger/,
+          );
+        },
+      );
+    }
+  });
+
+  it('release-candidate-v2 concurrency is candidate-scoped and does not cancel in progress', () => {
+    const workflow = readFileSync(join(WORKFLOWS_DIR, 'release-candidate-v2.yml'), 'utf8');
+    expect(() => assertReleaseCandidateConcurrency(workflow)).not.toThrow();
+  });
+
+  it('release-candidate-v2 rejects cancel-in-progress true in a temporary workflow copy', () => {
+    withMutatedWorkflowCopy(
+      'release-candidate-v2.yml',
+      (source) => {
+        const mutated = source.replace('  cancel-in-progress: false', '  cancel-in-progress: true');
+        if (mutated === source) throw new Error('cancel-in-progress mutation target was not found');
+        return mutated;
+      },
+      (workflowsDir) => {
+        const workflow = readFileSync(join(workflowsDir, 'release-candidate-v2.yml'), 'utf8');
+        expect(() => assertReleaseCandidateConcurrency(workflow)).toThrow(
+          /cancel-in-progress: false/,
+        );
+      },
+    );
+  });
+
+  it('Windows release candidate build has a 30-to-60 minute timeout', () => {
+    const workflow = readFileSync(join(WORKFLOWS_DIR, 'release-candidate-v2.yml'), 'utf8');
+    const job = findJobBlock(workflow, 'windows-worker-clean');
+    const buildStep = findRunStepBlocks(job).find((step) =>
+      /^ {6}- name: Build frozen Windows desktop, CLI, and Worker candidate$/m.test(step),
+    );
+    expect(buildStep, 'the named Windows candidate build step must exist').toBeDefined();
+
+    const timeoutValues = [
+      ...(buildStep ?? '').matchAll(/^ {8}timeout-minutes:\s*(\d+)\s*$/gm),
+    ].map((match) => Number(match[1]));
+    expect(timeoutValues).toHaveLength(1);
+    expect(timeoutValues[0]).toBeGreaterThanOrEqual(30);
+    expect(timeoutValues[0]).toBeLessThanOrEqual(60);
   });
 });

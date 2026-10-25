@@ -8,6 +8,7 @@ import {
 } from './project-document-autosync.js';
 import {
   getControlPlaneProjectBinding,
+  upsertControlPlaneProjectBinding,
   type ControlPlaneProjectBinding,
 } from './project-control-plane.js';
 import type { SyncProjectDocument } from './project-document-sync.js';
@@ -29,6 +30,10 @@ const binding: ControlPlaneProjectBinding = {
 
 function document(title = 'Campaign cut'): JoyProjectV1 {
   return { ...INITIAL_EDITOR_PROJECT, id: binding.editorProjectId, title };
+}
+
+function localRevision(documentRevision: number): ProjectRevisionId {
+  return `local-revision:v1:${binding.editorProjectId}:timeline=0:document=${documentRevision}:graph=0:artifacts=0:looks=0` as ProjectRevisionId;
 }
 
 function sessionFor(
@@ -130,6 +135,9 @@ describe('ordinary project document autosync', () => {
 
       const reloaded = new ProjectDocumentAutosync({ storage, syncProjectDocument: sync });
       const reloadSession = sessionFor(local);
+      // A real EditorSession recovers the revision id written by the successful
+      // autosync. Keep the fake session aligned with that durable revision.
+      reloadSession.revision = 'local-save-1';
       await expect(
         reloaded.bootstrap(
           reloadSession,
@@ -150,45 +158,130 @@ describe('ordinary project document autosync', () => {
     }
   });
 
-  it('uses the observed remote head as the CAS base when a local edit wins a slow hydration', async () => {
+  it('keeps a local edit but refuses an automatic save when the remote head is unknown', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = memoryStorage();
+      const outcomes: string[] = [];
+      const sync = syncTransport();
+      const autosync = new ProjectDocumentAutosync({
+        storage,
+        syncProjectDocument: sync,
+        onResult: (outcome) => outcomes.push(outcome.kind),
+      });
+      const local = document('Local recovery');
+      const session = sessionFor(local);
+
+      const result = await autosync.bootstrap(
+        session,
+        binding,
+        async () => {
+          session.revision = 'local-recovery-2';
+          return {
+            projectId: binding.controlPlaneProjectId,
+            revisionId: 'remote-head-1',
+            document: document('Remote head'),
+          };
+        },
+        'owner-1',
+      );
+
+      autosync.schedule(binding, local, session.projectRevisionId, 'owner-1');
+      await vi.advanceTimersByTimeAsync(DOCUMENT_AUTOSYNC_DEBOUNCE_MS);
+
+      expect(sync).not.toHaveBeenCalled();
+      expect(result).toEqual({ kind: 'conflict', revisionId: 'remote-head-1' });
+      expect(outcomes).toEqual(['conflict']);
+      expect(
+        getControlPlaneProjectBinding(storage, binding.editorProjectId, 'owner-1'),
+      ).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not rebase a durable local edit over a newer remote head', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = memoryStorage();
+      const outcomes: string[] = [];
+      const sync = syncTransport();
+      const autosync = new ProjectDocumentAutosync({
+        storage,
+        syncProjectDocument: sync,
+        onResult: (outcome) => outcomes.push(outcome.kind),
+      });
+      const local = document('Local edit pending before restart');
+      const session = sessionFor(local);
+      const lastSyncedRevision = localRevision(1);
+      session.revision = localRevision(2);
+      const knownBinding = { ...binding, documentRevisionId: lastSyncedRevision };
+      upsertControlPlaneProjectBinding(storage, knownBinding, 'owner-1');
+
+      const result = await autosync.bootstrap(
+        session,
+        knownBinding,
+        async () => ({
+          projectId: binding.controlPlaneProjectId,
+          revisionId: 'remote-head-2',
+          document: document('Newer edit from another device'),
+        }),
+        'owner-1',
+      );
+
+      autosync.schedule(knownBinding, local, session.projectRevisionId, 'owner-1');
+      await vi.advanceTimersByTimeAsync(DOCUMENT_AUTOSYNC_DEBOUNCE_MS);
+
+      expect(sync).not.toHaveBeenCalled();
+      expect(result).toEqual({ kind: 'conflict', revisionId: 'remote-head-2' });
+      expect(outcomes).toEqual(['conflict']);
+      // Keep the prior synced baseline so a later restart cannot mistake this
+      // local copy for the newly observed cloud revision.
+      expect(
+        getControlPlaneProjectBinding(storage, binding.editorProjectId, 'owner-1'),
+      ).toMatchObject({ documentRevisionId: lastSyncedRevision });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reconciles a durable local edit made after the last successful sync', async () => {
     vi.useFakeTimers();
     try {
       const storage = memoryStorage();
       const sync = syncTransport();
       const autosync = new ProjectDocumentAutosync({ storage, syncProjectDocument: sync });
-      const local = document('Local recovery');
+      const local = document('Local edit pending before restart');
       const session = sessionFor(local);
+      const currentLocalRevision = localRevision(2);
+      const lastSyncedRevision = localRevision(1);
+      session.revision = currentLocalRevision;
+      const knownBinding = { ...binding, documentRevisionId: lastSyncedRevision };
 
       await expect(
         autosync.bootstrap(
           session,
-          binding,
-          async () => {
-            session.revision = 'local-recovery-2';
-            return {
-              projectId: binding.controlPlaneProjectId,
-              revisionId: 'remote-head-1',
-              document: document('Remote head'),
-            };
-          },
+          knownBinding,
+          async () => ({
+            projectId: binding.controlPlaneProjectId,
+            revisionId: lastSyncedRevision,
+            document: document('Last remote snapshot'),
+          }),
           'owner-1',
         ),
-      ).resolves.toEqual({ kind: 'local-changed', revisionId: 'remote-head-1' });
+      ).resolves.toEqual({ kind: 'local-changed', revisionId: lastSyncedRevision });
 
-      autosync.schedule(binding, local, session.projectRevisionId, 'owner-1');
+      autosync.schedule(knownBinding, local, session.projectRevisionId, 'owner-1');
       await vi.advanceTimersByTimeAsync(DOCUMENT_AUTOSYNC_DEBOUNCE_MS);
 
       expect(sync).toHaveBeenCalledWith(
         binding.controlPlaneProjectId,
         expect.objectContaining({
-          baseRevisionId: 'remote-head-1',
-          revisionId: 'local-recovery-2',
+          baseRevisionId: lastSyncedRevision,
+          revisionId: currentLocalRevision,
           document: local,
         }),
       );
-      expect(
-        getControlPlaneProjectBinding(storage, binding.editorProjectId, 'owner-1'),
-      ).toMatchObject({ documentRevisionId: 'local-recovery-2' });
     } finally {
       vi.useRealTimers();
     }

@@ -7,6 +7,7 @@ import type {
   UniversalTimelineSource,
   VisualObjectV1,
 } from '@joy-media/project-schema';
+import { createTimelineElementBindingPlacement } from '@joy-media/motion-core';
 import { bindClipToObject } from './sticker-bindings.js';
 import { upsertUniversalTimelineBinding } from './universal-placement.js';
 
@@ -149,14 +150,60 @@ export function buildTimelineElementDocument(
           clipId,
           visualObject.id,
         );
-  return upsertUniversalTimelineBinding(withObject, {
-    id: clipId,
-    compositionId: planned.compositionId,
-    trackId: planned.trackId,
-    elementKind: request.elementKind,
-    startUs: planned.clip.startUs,
-    durationUs: planned.clip.durationUs,
-    source: request.source,
-    ...(request.sourceInUs === undefined ? {} : { sourceInUs: request.sourceInUs }),
-  });
+  return upsertUniversalTimelineBinding(
+    withObject,
+    createTimelineElementBindingPlacement({
+      clipId,
+      compositionId: planned.compositionId,
+      trackId: planned.trackId,
+      elementKind: request.elementKind,
+      startUs: planned.clip.startUs,
+      durationUs: planned.clip.durationUs,
+      source: request.source,
+      ...(request.sourceInUs === undefined ? {} : { sourceInUs: request.sourceInUs }),
+    }),
+  );
+}
+
+/**
+ * The universal timeline resolves a placement's track through the visual project's composition. A
+ * track that exists only on the timeline leaves the placement dangling and inactive, so the visual
+ * project mirrors the track. An existing visual track is left as it is.
+ */
+export function withVisualTrackMirror(
+  project: JoyProjectV1,
+  placement: {
+    readonly compositionId: string;
+    readonly trackId: string;
+    readonly name: string;
+    readonly order: number;
+  },
+): JoyProjectV1 {
+  const composition = project.compositions[placement.compositionId];
+  if (
+    composition === undefined ||
+    composition.tracks.some((track) => track.id === placement.trackId)
+  )
+    return project;
+  return {
+    ...project,
+    compositions: {
+      ...project.compositions,
+      [placement.compositionId]: {
+        ...composition,
+        tracks: [
+          ...composition.tracks,
+          {
+            id: placement.trackId,
+            kind: 'video',
+            name: placement.name,
+            order: placement.order,
+            enabled: true,
+            locked: false,
+            clips: [],
+          },
+        ],
+      },
+    },
+  };
 }

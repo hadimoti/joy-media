@@ -226,6 +226,7 @@ export function PanelShell({
         effectivePanelId !== undefined && panelPresence.active ? panelPresence.phase : undefined
       }
     >
+      <h2 className="sr-only">{title}</h2>
       {!hideHeader && (tabsInHeader || hasHeaderActions) && (
         <div className="joy-panel-header">
           {leadingActions !== undefined && (
@@ -239,8 +240,6 @@ export function PanelShell({
             >
               {tabButtons}
             </div>
-          ) : !tabsInHeader ? (
-            <span className="sr-only">{title}</span>
           ) : null}
           <div className="joy-panel-actions">
             {actions}

@@ -32,7 +32,10 @@ export interface ProjectDocumentAutosyncOptions {
   readonly onResult?: (result: ProjectDocumentAutosyncOutcome) => void;
 }
 
-export type ProjectDocumentBootstrapResult = ProjectHydrationResult | { readonly kind: 'missing' };
+export type ProjectDocumentBootstrapResult =
+  | ProjectHydrationResult
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'conflict'; readonly revisionId: ProjectRevisionId };
 
 export type ProjectDocumentAutosyncOutcome =
   | {
@@ -109,6 +112,23 @@ export class ProjectDocumentAutosync {
     entry.queued = undefined;
     entry.failures = 0;
     entry.conflicted = false;
+    if (result.kind === 'local-changed' && binding.documentRevisionId !== result.revisionId) {
+      // A dirty local snapshot can be written only when the cloud head is the
+      // same revision this device last synchronized. Otherwise rebasing the
+      // whole local pair would silently replace the other device's document.
+      // Keep the old binding baseline so another restart cannot mark these
+      // local edits as synchronized, and require an explicit reload/recovery.
+      entry.binding = binding;
+      entry.conflicted = true;
+      delete entry.confirmedRevisionId;
+      this.options.onResult?.({
+        kind: 'conflict',
+        ownerKey,
+        controlPlaneProjectId: binding.controlPlaneProjectId,
+        message: 'The cloud head advanced since this device last synchronized.',
+      });
+      return { kind: 'conflict', revisionId: result.revisionId };
+    }
     entry.binding = { ...binding, documentRevisionId: result.revisionId };
     upsertControlPlaneProjectBinding(this.options.storage, entry.binding, ownerKey);
     if (result.kind === 'local-changed') {

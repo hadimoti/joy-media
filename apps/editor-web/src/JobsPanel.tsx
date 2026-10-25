@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BrowserControlPlaneClient,
   invalidateWorkerReadCache,
   type BrowserJob,
   type BrowserWorker,
 } from './control-plane-client.js';
+import { scopeStillHeld, startProjectScopeCheck } from './control-plane-scope.js';
+import { EditorPanelContext } from './editor-panel-context.js';
 import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
 import { BoundedPollingLoop } from './bounded-polling.js';
 import { CloseIcon, ImageIcon, PlusIcon, RefreshIcon } from './icons.js';
@@ -19,6 +21,8 @@ import {
 } from './media-object-url.js';
 
 const PRESENCE_ORDER = { connected: 0, disconnected: 1, revoked: 2 } as const;
+
+const NO_JOBS: readonly BrowserJob[] = [];
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'workers', label: 'Workers' },
@@ -75,7 +79,6 @@ export function queueWorkerReadiness(
 export function JobsPanel({
   projectId,
   projectTitle,
-  controlPlaneReady = true,
   audioAssetId,
   thumbnailAssetId,
   onApplyWorkerAudioResult,
@@ -84,7 +87,6 @@ export function JobsPanel({
 }: {
   projectId: string;
   projectTitle: string;
-  readonly controlPlaneReady?: boolean;
   readonly audioAssetId?: string;
   /** Selected visual asset that can be rendered by the Worker thumbnail path. */
   readonly thumbnailAssetId?: string;
@@ -95,6 +97,12 @@ export function JobsPanel({
   readonly operationLedger?: Pick<ProjectOperationLedger, 'begin' | 'finish' | 'get'>;
   readonly operationRevision?: number;
 }) {
+  // Readiness comes from the panel context on every render. The dock creates its
+  // panel closures once, so a value captured there would stay stale. A missing
+  // context fails closed: no project-scoped request and no Initialize action.
+  const editorContext = useContext(EditorPanelContext);
+  const controlPlaneReady = editorContext?.controlPlaneReady ?? false;
+  const captureControlPlaneProjectScope = editorContext?.captureControlPlaneProjectScope;
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
   const [workers, setWorkers] = useState<readonly BrowserWorker[]>([]);
   const [jobs, setJobs] = useState<readonly BrowserJob[]>([]);
@@ -127,6 +135,12 @@ export function JobsPanel({
   const refreshSeqRef = useRef(0);
   const pollingRef = useRef<BoundedPollingLoop | undefined>(undefined);
   const projectInitialized = initializedProjectId === projectId;
+  // Run and Queue also need a ready session, so a session that leaves its project
+  // loses them at once, before the next refresh runs.
+  const projectReady = controlPlaneReady && projectInitialized;
+  // The scope as of the latest render. A load compares against it after each await.
+  const latestScopeRef = useRef({ controlPlaneReady, projectId });
+  latestScopeRef.current = { controlPlaneReady, projectId };
 
   useEffect(() => {
     let cancelled = false;
@@ -145,11 +159,47 @@ export function JobsPanel({
 
   const load = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
+    // Project-scoped requests wait for a ready session. The id prefix alone
+    // does not show that the session owns this project.
+    const projectScopeReady =
+      controlPlaneReady && (projectInitialized || projectId.startsWith('project-'));
+    // A load may send project-scoped requests only while it is the latest load and its scope is
+    // unchanged, including the session's owner, token and project. Every await below can end
+    // after the session has moved on.
+    const projectScopeCheck = projectScopeReady
+      ? startProjectScopeCheck(captureControlPlaneProjectScope, projectId)
+      : undefined;
+    const stillInScope = () => {
+      const latestScope = latestScopeRef.current;
+      return (
+        requestId === refreshSeqRef.current &&
+        latestScope.controlPlaneReady === controlPlaneReady &&
+        latestScope.projectId === projectId &&
+        (projectScopeCheck === undefined || scopeStillHeld(projectScopeCheck))
+      );
+    };
+    const leaveScope = () => {
+      if (requestId === refreshSeqRef.current) {
+        setJobs(NO_JOBS);
+        setInitializedProjectId(undefined);
+      }
+    };
+    if (!projectScopeReady) {
+      // Rows from an earlier project or owner must not stay actionable. Their
+      // actions address the current project id, which the session cannot vouch for.
+      setJobs(NO_JOBS);
+      // The next binding, even of the same id, must run its own bootstrap.
+      setInitializedProjectId(undefined);
+    }
     try {
       const nextWorkers = await client.workers();
+      // Readiness can drop while the Worker list is in flight. A load that started in an
+      // earlier scope must not send a project-scoped request for that scope.
+      if (!stillInScope()) {
+        leaveScope();
+        return;
+      }
       let nextJobs: readonly BrowserJob[] = [];
-      const projectScopeReady =
-        controlPlaneReady || projectInitialized || projectId.startsWith('project-');
       let projectMissing = !projectScopeReady;
       if (projectScopeReady) {
         try {
@@ -158,14 +208,26 @@ export function JobsPanel({
           // avoidable API/PostgreSQL load. Switching projects makes
           // projectInitialized false again, so the new binding is never
           // assumed from the old project's successful bootstrap.
-          if (!projectInitialized) await client.ensureProject(projectId, projectTitle);
-          nextJobs = await client.jobs(projectId);
+          if (!projectInitialized) {
+            await client.ensureProject(projectId, projectTitle);
+            // Ensure can outlast the scope. The jobs read names the same project, so it
+            // must not follow a scope that has already changed.
+            if (!stillInScope()) {
+              leaveScope();
+              return;
+            }
+          }
+          nextJobs = await client.jobs(projectId, projectScopeCheck);
         } catch (error) {
           if (!message(error).includes('PROJECT_NOT_FOUND')) throw error;
           projectMissing = true;
         }
       }
       if (requestId !== refreshSeqRef.current) return;
+      if (!stillInScope()) {
+        leaveScope();
+        return;
+      }
       setWorkers(nextWorkers);
       if (projectScopeReady) {
         setJobs(nextJobs);
@@ -174,10 +236,18 @@ export function JobsPanel({
       }
     } catch (error) {
       if (requestId !== refreshSeqRef.current) return;
+      if (!stillInScope()) leaveScope();
       setConnectionStatus(`Not connected or not signed in: ${message(error)}`);
       throw error;
     }
-  }, [client, controlPlaneReady, projectId, projectInitialized, projectTitle]);
+  }, [
+    captureControlPlaneProjectScope,
+    client,
+    controlPlaneReady,
+    projectId,
+    projectInitialized,
+    projectTitle,
+  ]);
 
   const refresh = useCallback(() => {
     // Pair/hello is also used directly by the protocol acceptance journeys;
@@ -233,12 +303,14 @@ export function JobsPanel({
   );
   const queueUnavailableReason =
     queueReadiness.kind === 'ready' ? undefined : queueReadiness.reason;
-  // A ready authenticated session initializes its opaque project binding during
-  // refresh. Do not briefly mount an action that that same refresh immediately
-  // removes; it produces a real UI flicker and can detach a user's click.
+  // A ready session initializes its opaque project binding during refresh. Show
+  // Initialize only when that refresh failed, so the action never flashes in
+  // before it has run. Signed-out and settling sessions get no project action.
   const showInitialize =
+    controlPlaneReady &&
     !projectInitialized &&
-    (!controlPlaneReady || connectionStatus.startsWith('Not connected or not signed in:'));
+    projectId.startsWith('project-') &&
+    connectionStatus.startsWith('Not connected or not signed in:');
 
   useEffect(() => {
     if (pendingPairWorkerId === undefined) return;
@@ -269,8 +341,13 @@ export function JobsPanel({
   };
 
   const initialize = async () => {
+    // Only a bound project under a ready session may be created on the server.
+    if (!controlPlaneReady || !projectId.startsWith('project-')) return;
     try {
+      const assertScope = startProjectScopeCheck(captureControlPlaneProjectScope, projectId);
+      assertScope();
       await client.ensureProject(projectId, projectTitle);
+      assertScope();
       setInitializedProjectId(projectId);
       setStatus('Project is ready. Pair a Worker, then queue a job.');
       await refresh();
@@ -280,7 +357,7 @@ export function JobsPanel({
   };
 
   const submit = async () => {
-    if (!projectInitialized) {
+    if (!projectReady) {
       setStatus('Initialize this project before queueing a derivative job.');
       return;
     }
@@ -290,6 +367,15 @@ export function JobsPanel({
     }
     let operationId: string | undefined;
     let operationStarted = false;
+    // The session can leave this project while an asset is associated. Each follow-up
+    // request then has to stop, rather than name a project the session no longer holds.
+    const scope = latestScopeRef.current;
+    const leftProjectMessage = 'The session left this project before the job was queued.';
+    const projectScopeCheck = startProjectScopeCheck(captureControlPlaneProjectScope, projectId);
+    const stillInScope = () =>
+      latestScopeRef.current.controlPlaneReady === scope.controlPlaneReady &&
+      latestScopeRef.current.projectId === scope.projectId &&
+      scopeStillHeld(projectScopeCheck);
     try {
       setSubmitting(true);
       if (audioAssetId !== undefined) {
@@ -315,13 +401,17 @@ export function JobsPanel({
           revision: operationRevision,
         });
         operationStarted = true;
+        if (!stillInScope()) throw new Error(leftProjectMessage);
         await client.associateAsset(projectId, audioAssetId);
+        if (!stillInScope()) throw new Error(leftProjectMessage);
         await client.enqueueWorkerGeneration(projectId, jobId, 'audio.ml-denoise', audioAssetId);
         setStatus(
           'Audio denoise job queued. The Worker result will require review before insertion.',
         );
       } else if (thumbnailAssetId !== undefined) {
+        if (!stillInScope()) throw new Error(leftProjectMessage);
         await client.associateAsset(projectId, thumbnailAssetId);
+        if (!stillInScope()) throw new Error(leftProjectMessage);
         await client.enqueueAssetThumbnail(
           projectId,
           `asset-thumbnail-${crypto.randomUUID()}`,
@@ -357,13 +447,17 @@ export function JobsPanel({
     reviewBusyRef.current = true;
     try {
       setReviewBusy(true);
+      const assertProjectScope = startProjectScopeCheck(captureControlPlaneProjectScope, projectId);
+      assertProjectScope();
       const derivatives = await client.derivatives(projectId, job.assetId);
       const derivative = derivatives.find(
         (candidate) => candidate.kind === 'audio' && candidate.sha256 === job.derivative?.sha256,
       );
       if (derivative === undefined) throw new Error('Verified audio derivative is unavailable');
+      assertProjectScope();
       const blob = await client.derivativeBytes(projectId, job.assetId, derivative.id);
-      const sourceAsset = (await client.assets(projectId)).find(
+      assertProjectScope();
+      const sourceAsset = (await client.assets(projectId, assertProjectScope)).find(
         (asset) => asset.id === job.assetId,
       );
       if (sourceAsset === undefined)
@@ -480,7 +574,7 @@ export function JobsPanel({
               (audioAssetId === undefined ? 'Queue thumbnail derivative' : 'Run audio denoise')
             }
             data-guide={audioAssetId === undefined ? 'Queue thumbnail' : 'Run audio denoise'}
-            disabled={!projectInitialized || submitting || queueUnavailableReason !== undefined}
+            disabled={!projectReady || submitting || queueUnavailableReason !== undefined}
             onClick={() => void submit()}
           >
             <ImageIcon />
@@ -666,7 +760,11 @@ export function JobsPanel({
                           data-guide="Cancel"
                           onClick={() => {
                             if (!window.confirm(`Cancel job ${job.id}?`)) return;
-                            void client.cancel(projectId, job.id).then(refresh).catch(report);
+                            void (async () => {
+                              startProjectScopeCheck(captureControlPlaneProjectScope, projectId)();
+                              await client.cancel(projectId, job.id);
+                              await refresh();
+                            })().catch(report);
                           }}
                         >
                           <CloseIcon />
@@ -685,9 +783,16 @@ export function JobsPanel({
                             aria-label={`Retry job ${job.id}`}
                             title="Retry"
                             data-guide="Retry"
-                            onClick={() =>
-                              void client.retry(projectId, job.id).then(refresh).catch(report)
-                            }
+                            onClick={() => {
+                              void (async () => {
+                                startProjectScopeCheck(
+                                  captureControlPlaneProjectScope,
+                                  projectId,
+                                )();
+                                await client.retry(projectId, job.id);
+                                await refresh();
+                              })().catch(report);
+                            }}
                           >
                             <RefreshIcon />
                           </button>

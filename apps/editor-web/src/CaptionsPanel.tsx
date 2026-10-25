@@ -676,7 +676,7 @@ function CaptionStyleTab({
   return (
     <div className="caption-style-tab">
       <section className="caption-style-section" aria-labelledby="caption-template-heading">
-        <h4 id="caption-template-heading">Template</h4>
+        <h3 id="caption-template-heading">Template</h3>
         <div className="captions-template-cards" role="group" aria-label="Caption template">
           {JOY_CAPTION_TEMPLATES.map((template) => {
             const meta = TEMPLATE_ICONS[template.id];
@@ -698,7 +698,7 @@ function CaptionStyleTab({
         </div>
       </section>
       <section className="caption-style-section" aria-labelledby="caption-type-heading">
-        <h4 id="caption-type-heading">Type</h4>
+        <h3 id="caption-type-heading">Type</h3>
         {numeric('fontSize', 'Font size', 0.5, 2, 0.01)}
         {numeric('tracking', 'Tracking', -0.2, 0.5, 0.01)}
         {numeric('lineHeight', 'Line height', 0.8, 2, 0.01)}
@@ -721,7 +721,7 @@ function CaptionStyleTab({
         </label>
       </section>
       <section className="caption-style-section" aria-labelledby="caption-placement-heading">
-        <h4 id="caption-placement-heading">Placement</h4>
+        <h3 id="caption-placement-heading">Placement</h3>
         {numeric('positionX', 'Position X', -0.4, 0.4, 0.01)}
         {numeric('positionY', 'Position Y', -0.4, 0.4, 0.01)}
         <PropertyRow
@@ -766,7 +766,7 @@ function CaptionStyleTab({
         </PropertyRow>
       </section>
       <section className="caption-style-section" aria-labelledby="caption-colors-heading">
-        <h4 id="caption-colors-heading">Colors</h4>
+        <h3 id="caption-colors-heading">Colors</h3>
         <label className="caption-color-row">
           <span>Text</span>
           <input

@@ -1,4 +1,6 @@
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -22,6 +24,74 @@ const editorDependency = (name: string): string =>
   fileURLToPath(new URL(`./node_modules/${name}`, import.meta.url));
 
 const CHUNK_BUDGET_KIB = 640;
+const FONT_ASSET_URL = '/packages/html-scene-runtime/assets/fonts/';
+const FONT_ASSET_ROOT = fileURLToPath(
+  new URL('../../packages/html-scene-runtime/assets/fonts/', import.meta.url),
+);
+const FONT_ASSET_FILES = [
+  'noto-sans-arabic/noto-sans-arabic-arabic-400-normal.woff2',
+  'noto-sans-arabic/noto-sans-arabic-arabic-700-normal.woff2',
+  'noto-sans-arabic/noto-sans-arabic-latin-400-normal.woff2',
+  'noto-sans-arabic/noto-sans-arabic-latin-700-normal.woff2',
+  'noto-sans-arabic/manifest.json',
+  'noto-sans-arabic/LICENSE-OFL.txt',
+];
+
+function p0FontAssets(): Plugin {
+  const fontFileForRequest = (url: string | undefined): string | undefined => {
+    if (!url?.startsWith(FONT_ASSET_URL)) return undefined;
+    const assetName = url.slice(FONT_ASSET_URL.length).split('?')[0];
+    return FONT_ASSET_FILES.includes(assetName) ? resolve(FONT_ASSET_ROOT, assetName) : undefined;
+  };
+  const serveFont = (
+    request: { url?: string },
+    response: {
+      statusCode: number;
+      setHeader(name: string, value: string): void;
+      end(data?: Uint8Array | string): void;
+    },
+    next: () => void,
+  ): void => {
+    const path = fontFileForRequest(request.url);
+    if (!path) {
+      next();
+      return;
+    }
+    try {
+      const bytes = readFileSync(path);
+      response.statusCode = 200;
+      response.setHeader(
+        'Content-Type',
+        path.endsWith('.woff2')
+          ? 'font/woff2'
+          : path.endsWith('.json')
+            ? 'application/json; charset=utf-8'
+            : 'text/plain; charset=utf-8',
+      );
+      response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      response.end(bytes);
+    } catch {
+      response.statusCode = 404;
+      response.end('Not found');
+    }
+  };
+
+  return {
+    name: 'joy-p0-font-assets',
+    configureServer(server) {
+      server.middlewares.use(serveFont);
+    },
+    generateBundle() {
+      for (const assetName of FONT_ASSET_FILES) {
+        this.emitFile({
+          type: 'asset',
+          fileName: `packages/html-scene-runtime/assets/fonts/${assetName}`,
+          source: readFileSync(resolve(FONT_ASSET_ROOT, assetName)),
+        });
+      }
+    },
+  };
+}
 
 function editorChunk(id: string): string | undefined {
   const moduleId = id.replaceAll('\\', '/');
@@ -152,7 +222,7 @@ const apiProxy = {
 };
 
 export default defineConfig({
-  plugins: [react(), bundlePolicy()],
+  plugins: [react(), bundlePolicy(), p0FontAssets()],
   server: { proxy: apiProxy },
   // `vite preview` serves the production `dist/` for the prod-build smoke lane;
   // it needs the same `/api` proxy the dev server has so the shipped bundle can

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { authenticate, openDisposableWorkspace, openPanel } from './wp29-r5-harness.js';
@@ -22,6 +23,9 @@ const STOCK_CATEGORIES = [
 const FIXTURE_MEDIA_DIR = join(process.cwd(), 'packages/test-fixtures/media');
 const POSTER_BYTES = readFileSync(join(FIXTURE_MEDIA_DIR, 'image.png'));
 const PREVIEW_BYTES = readFileSync(join(FIXTURE_MEDIA_DIR, 'video.mp4'));
+// The descriptor of the imported asset describes the bytes the fixture serves. ffprobe reports the
+// video as 320x180 and 3.0 s, and the card's own metadata is checked against those values below.
+const PREVIEW_SHA256 = createHash('sha256').update(PREVIEW_BYTES).digest('hex');
 
 function stockFixtureId(category: (typeof STOCK_CATEGORIES)[number], suffix: string): string {
   return `${category}-${suffix}`;
@@ -98,6 +102,40 @@ test.describe('native stock video library', () => {
       }
     });
 
+    // Until the disposable project is active, the catalog answers empty. Otherwise the shared
+    // server's assets from other tests join the allowlist below, and the audit would accept project
+    // requests for projects this test never bound. The catalog route further down takes over once
+    // the active project is known.
+    await page.route('**/api/v1/library/my-assets**', async (route) => {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [] }) });
+    });
+
+    // Started before the session, so the audit also covers the requests a session makes while it
+    // initializes, including any that name a project before the owner's binding exists.
+    const projectRequestIds: string[] = [];
+    page.on('request', (request) => {
+      const pathname = new URL(request.url()).pathname;
+      // A create or ensure request names its project in its body. Project-root and project-scoped
+      // routes name it in the path, with or without a trailing segment.
+      if (pathname === '/api/v1/projects' || pathname === '/api/v1/projects/ensure') {
+        let body: { id?: unknown } | null = null;
+        try {
+          body = request.postDataJSON() as { id?: unknown } | null;
+        } catch {
+          body = null;
+        }
+        // A create or ensure request whose project cannot be read from its body fails the audit.
+        projectRequestIds.push(
+          typeof body?.id === 'string' ? body.id : '<unidentified project request>',
+        );
+        return;
+      }
+      const match = pathname.match(/^\/api\/v1\/projects\/([^/]+)(?:\/|$)/);
+      if (match === null) return;
+      const projectId = decodeURIComponent(match[1]!);
+      projectRequestIds.push(projectId);
+    });
+
     await authenticate(page);
     await openDisposableWorkspace(page, `Stock UI ${Date.now()}`);
 
@@ -115,6 +153,32 @@ test.describe('native stock video library', () => {
         throw new Error('malformed active project binding');
       return (value as { projectId: string }).projectId;
     });
+    // The owner's binding for the active project is written only once the session is ready.
+    // Wait for that readiness condition, bounded, instead of reading the bindings at a fixed point.
+    await page
+      .waitForFunction(
+        (activeEditorProjectId) => {
+          const raw = window.localStorage.getItem('joy-media.control-plane-project-bindings.v1');
+          if (raw === null) return false;
+          try {
+            const value = JSON.parse(raw) as {
+              bindingsByOwner?: Record<string, Record<string, { controlPlaneProjectId?: unknown }>>;
+            };
+            const binding =
+              value.bindingsByOwner?.['e2e-owner@example.test']?.[activeEditorProjectId];
+            return typeof binding?.controlPlaneProjectId === 'string';
+          } catch {
+            return false;
+          }
+        },
+        activeProject,
+        { timeout: 15_000 },
+      )
+      .catch((error: unknown) => {
+        throw new Error(
+          `The e2e owner's binding for the active project was not written within 15 s. The session did not become ready. ${String(error)}`,
+        );
+      });
     const { activeControlPlaneProjectIds } = await page.evaluate((activeEditorProjectId) => {
       const raw = window.localStorage.getItem('joy-media.control-plane-project-bindings.v1');
       if (raw === null) throw new Error('missing control-plane project bindings');
@@ -151,15 +215,7 @@ test.describe('native stock video library', () => {
         activeControlPlaneProjectIds: [...new Set(activeProjectIds)],
       };
     }, activeProject);
-    const projectRequestIds: string[] = [];
     const stockRequestErrors: string[] = [];
-    page.on('request', (request) => {
-      const pathname = new URL(request.url()).pathname;
-      const match = pathname.match(/^\/api\/v1\/projects\/([^/]+)\//);
-      if (match === null) return;
-      const projectId = decodeURIComponent(match[1]!);
-      projectRequestIds.push(projectId);
-    });
     page.on('request', (request) => {
       const pathname = new URL(request.url()).pathname;
       if (!pathname.includes('/api/v1/library/stock-videos')) return;
@@ -182,13 +238,15 @@ test.describe('native stock video library', () => {
     let _holdImportStart: (() => void) | undefined;
     let importHoldPromise: Promise<void> | undefined;
     let resolveImportHold: (() => void) | undefined;
+    // Once the import completes, the owner's unfiltered library lists the imported asset.
+    let importedAssetCompleted = false;
     const completedAsset = {
       id: 'imported-stock-1',
       kind: 'video',
       displayName: 'Imported stock fixture.mp4',
-      sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-      bytes: 1024,
-      descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 640, height: 360 },
+      sha256: PREVIEW_SHA256,
+      bytes: PREVIEW_BYTES.byteLength,
+      descriptor: { mimeType: 'video/mp4', durationUs: 3_000_000, width: 320, height: 180 },
       createdAt: 1_700_000_000_000,
       cloudBacked: true,
     };
@@ -203,9 +261,13 @@ test.describe('native stock video library', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           data:
-            projectId === null || !activeControlPlaneProjectIds.includes(projectId)
-              ? []
-              : [{ ...completedAsset, projectId }],
+            projectId === null
+              ? importedAssetCompleted && activeControlPlaneProjectIds.length > 0
+                ? [{ ...completedAsset, projectId: activeControlPlaneProjectIds[0] }]
+                : []
+              : !activeControlPlaneProjectIds.includes(projectId)
+                ? []
+                : [{ ...completedAsset, projectId }],
         }),
       });
     });
@@ -324,6 +386,20 @@ test.describe('native stock video library', () => {
     );
     await expect(page.locator('.stock-video-poster')).toHaveCount(6);
     await page.getByRole('button', { name: 'Search Assets' }).click();
+    // The imported asset is cloud-backed with no local copy, so its card fetches the original from the
+    // project route. Serve real bytes there, so the card can show its own media.
+    await page.route('**/api/v1/projects/*/assets/imported-stock-1/original', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'video/mp4', body: PREVIEW_BYTES });
+    });
+    // The fixture never registers the imported asset with the server, so it has no derivatives. An empty
+    // list lets the card fall back to the original above, instead of a server miss.
+    await page.route('**/api/v1/projects/*/assets/imported-stock-1/derivatives', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: [] }),
+      });
+    });
     await page.getByPlaceholder('Search media…').fill('fixture');
     await expect(page.locator('.stock-video-card[data-orientation="portrait"]')).toHaveCount(2);
 
@@ -686,6 +762,7 @@ test.describe('native stock video library', () => {
     await expect(
       page.getByRole('button', { name: /Importing Landscape fixture to My media/ }),
     ).toBeVisible();
+    importedAssetCompleted = true;
     resolveImportHold?.();
     importHoldPromise = undefined;
     await expect(page.getByText('Imported stock fixture.mp4 imported to My media.')).toBeVisible({
@@ -694,8 +771,30 @@ test.describe('native stock video library', () => {
     await Promise.all(myAssetResponsePromises);
     const projectRequestErrors = projectRequestIds
       .filter((id) => !activeControlPlaneProjectIds.includes(id) && !myAssetProjectIds.includes(id))
-      .map(() => '/api/v1/projects/:projectId');
+      .map((id) => `/api/v1/projects/${id}`);
     expect(projectRequestErrors).toEqual([]);
     expect(stockRequestErrors).toEqual([]);
+    // The import has to show up as media, not only as a notice: the imported card's video must resolve
+    // its own blob source and load the metadata of the fixture it was given.
+    const importedCard = page.locator('.asset-card[data-asset-id="imported-stock-1"]');
+    await importedCard.scrollIntoViewIfNeeded();
+    const importedVideo = importedCard.locator('.asset-card-media video');
+    await expect(importedVideo).toHaveAttribute('src', /^blob:/, { timeout: 15_000 });
+    await expect
+      .poll(() => importedVideo.evaluate((video: HTMLVideoElement) => video.readyState), {
+        timeout: 15_000,
+      })
+      .toBeGreaterThanOrEqual(1);
+    // The bytes came from the fixture's original route, which is the only cloud source this test serves.
+    await expect(importedCard.locator('.asset-card-media')).toHaveAttribute('data-source', 'cloud');
+    // The decoded metadata is the fixture's own, so the card shows that media and not a placeholder.
+    const decoded = await importedVideo.evaluate((video: HTMLVideoElement) => ({
+      width: video.videoWidth,
+      height: video.videoHeight,
+      duration: video.duration,
+    }));
+    expect(decoded.width).toBe(320);
+    expect(decoded.height).toBe(180);
+    expect(decoded.duration).toBeCloseTo(3, 0);
   });
 });

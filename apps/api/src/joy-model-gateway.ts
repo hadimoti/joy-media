@@ -187,6 +187,8 @@ export class JoyModelGateway {
       return;
     }
 
+    // Billing policy: unsuccessful upstream responses are not charged to the user. If the
+    // provider incurs a cost before returning an error, that cost remains the service's loss.
     if (!upstreamRes.ok) {
       const errText = await upstreamRes.text();
       res.writeHead(upstreamRes.status, { 'content-type': 'application/json' });

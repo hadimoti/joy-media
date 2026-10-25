@@ -36,6 +36,11 @@ export interface MediaImportOptions {
     mimeType: string,
   ) => Promise<BrowserMediaDescriptor>;
   readonly createAssetId?: () => string;
+  /**
+   * Runs before each project-scoped request. A throw stops the import before that request, so a
+   * session that has left the project cannot be followed by a request that names it.
+   */
+  readonly assertCurrentProject?: () => void;
 }
 
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
@@ -73,6 +78,7 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
   const client = options.client ?? new BrowserControlPlaneClient();
   const cache = await (options.originalAssetCache ?? openOpfsOriginalAssetCache());
   const { file } = options;
+  const assertCurrent = options.assertCurrentProject ?? (() => undefined);
   if (file.size < 1) throw new Error('selected media file is empty');
   if (file.name.length < 1 || file.name.length > 255 || /[\\/]/.test(file.name)) {
     throw new Error('selected media file name is invalid');
@@ -126,11 +132,14 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
     file,
   );
 
-  report(options, 0.82, `Registering ${file.name}...`);
+  assertCurrent();
   await client.ensureProject(options.projectId, options.projectTitle);
-  const registered = await registerOrResume(client, options.projectId, registration);
+  assertCurrent();
+  report(options, 0.82, `Registering ${file.name}...`);
+  const registered = await registerOrResume(client, options.projectId, registration, assertCurrent);
 
   report(options, 0.9, `Uploading ${file.name} to private cloud storage...`);
+  assertCurrent();
   const uploaded = await client.uploadAssetOriginal(
     options.projectId,
     registered,
@@ -138,6 +147,7 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
     (ratio) => {
       report(options, 0.9 + 0.1 * ratio, `Uploading ${file.name} to private cloud storage...`);
     },
+    assertCurrent,
   );
   report(options, 1, `${file.name} backed up to private cloud storage.`);
   if (explicitAssetId === undefined) {
@@ -175,12 +185,16 @@ async function registerOrResume(
   client: Pick<BrowserControlPlaneClient, 'registerAsset' | 'assets'>,
   projectId: string,
   registration: BrowserAssetRegistration,
+  assertCurrent: () => void,
 ): Promise<BrowserAsset> {
   try {
     return await client.registerAsset(projectId, registration);
   } catch (error) {
     if (!message(error).includes('ASSET_EXISTS')) throw error;
-    const existing = (await client.assets(projectId)).find((asset) => asset.id === registration.id);
+    assertCurrent();
+    const existing = (await client.assets(projectId, assertCurrent)).find(
+      (asset) => asset.id === registration.id,
+    );
     if (
       existing === undefined ||
       existing.sha256 !== registration.sha256 ||

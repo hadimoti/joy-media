@@ -358,6 +358,7 @@ jobs:
         shell: bash
         env:
           JOY_RELEASE_OUTPUT: ${{ runner.temp }}/joy-media-release-gate-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          JOY_RELEASE_SCOPE: pass
           JOY_RELEASE_WORKFLOW_RUN_ID: ${{ github.run_id }}
           JOY_RELEASE_WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
           JOY_RELEASE_CANDIDATE_SHA: ${{ env.CANDIDATE_SHA }}

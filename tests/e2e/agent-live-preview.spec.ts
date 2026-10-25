@@ -55,7 +55,7 @@ test.describe('built-in JOY Agent live visual preview', () => {
     await requestPreview(page);
     const clip = page.locator('.timeline-clip[data-clip-id]').first();
     await clip.click();
-    await expect(clip).toHaveAttribute('aria-pressed', 'true');
+    await expect(clip).toHaveAttribute('aria-current', 'true');
     await page.locator('.app-menu-trigger').filter({ hasText: 'Edit' }).click();
     await page.getByRole('menuitem', { name: /Duplicate Clip/ }).click();
     await expect(page.locator('[data-agent-preview="true"]')).toHaveCount(0);

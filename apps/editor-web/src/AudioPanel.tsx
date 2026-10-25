@@ -535,11 +535,11 @@ export function AudioPanel({
             </span>
             <div
               className="timeline-audio-dsp-pills"
-              title="Real-time Audio DSP: DeepFilterNet & Normalization"
+              title="Real-time audio DSP: normalization; DeepFilterNet is experimental and needs model setup"
             >
               <span
-                className={`audio-dsp-pill dsp-dfn ${!noClips ? 'is-active' : 'is-ready'}`}
-                title="DeepFilterNet (DFN) Real-Time Noise Reduction"
+                className="audio-dsp-pill dsp-dfn is-ready"
+                title="DeepFilterNet (DFN): experimental, needs model setup"
               >
                 DFN
               </span>
@@ -957,11 +957,11 @@ export function AudioPanel({
             <span className="audio-mix-header-title">Mixer Tracks</span>
             <div
               className="timeline-audio-dsp-pills"
-              title="Real-time Audio DSP: DeepFilterNet & Normalization"
+              title="Real-time audio DSP: normalization; DeepFilterNet is experimental and needs model setup"
             >
               <span
-                className={`audio-dsp-pill dsp-dfn ${!noClips ? 'is-active' : 'is-ready'}`}
-                title="DeepFilterNet (DFN) Real-Time Noise Reduction"
+                className="audio-dsp-pill dsp-dfn is-ready"
+                title="DeepFilterNet (DFN): experimental, needs model setup"
               >
                 DFN
               </span>

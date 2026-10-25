@@ -497,9 +497,10 @@ export async function createBrowserPixiRenderer(
     const seenTransitionIds = new Set<string>();
     for (const { node } of transitionNodes) {
       seenTransitionIds.add(node.id);
-      const existing = transitionLayer.getChildByName(`transition:${node.id}`) as
-        TransitionLayerContainer | undefined;
-      if (existing === undefined) {
+      const existing = transitionLayer.getChildByName(
+        `transition:${node.id}`,
+      ) as TransitionLayerContainer | null;
+      if (existing === null) {
         const container = createTransitionLayer(node, videoBitmaps);
         transitionLayer.addChild(container);
       } else {

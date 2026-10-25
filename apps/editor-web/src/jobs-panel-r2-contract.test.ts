@@ -40,8 +40,10 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
     expect(panelSource).toMatch(/if \(projectScopeReady\) \{\s+setJobs\(nextJobs\);/);
     expect(panelSource).toContain("projectId.startsWith('project-')");
     expect(panelSource).toContain('const projectInitialized = initializedProjectId === projectId;');
-    expect(panelSource).toContain(
-      'if (!projectInitialized) await client.ensureProject(projectId, projectTitle);',
+    // The bootstrap runs only for an uninitialized project, and the jobs read after it must pass the
+    // scope check that follows the ensure. The scope check has to sit between the two.
+    expect(panelSource).toMatch(
+      /if \(!projectInitialized\) \{\s*await client\.ensureProject\(projectId, projectTitle\);[\s\S]*?if \(!stillInScope\(\)\) \{\s*leaveScope\(\);\s*return;\s*\}\s*\}\s*nextJobs = await client\.jobs\(projectId, projectScopeCheck\);/u,
     );
     expect(panelSource).toContain(
       'setInitializedProjectId(projectMissing ? undefined : projectId);',

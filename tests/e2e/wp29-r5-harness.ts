@@ -259,7 +259,7 @@ async function activateTimeline(page: Page): Promise<void> {
   const panel = page.locator('.timeline-panel');
   if (await panel.isVisible()) return;
   await expect(async () => {
-    await page.locator('.panel-tab[aria-label="Timeline"]').first().click();
+    await page.locator('.dv-tab[role="tab"][aria-label="Timeline"]').first().click();
     await expect(panel).toBeVisible();
   }).toPass({ timeout: 10_000 });
 }
@@ -303,7 +303,7 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
   const route = panelId === undefined ? undefined : featureActivationRoute(panelId);
   if (route !== undefined) {
     const hubLabel = route.hub === 'create' ? 'Create' : 'Enhance';
-    const dockTab = page.locator(`.panel-tab[aria-label="${hubLabel}"]`).first();
+    const dockTab = page.locator(`.dv-tab[role="tab"][aria-label="${hubLabel}"]`).first();
     await expect(dockTab).toBeVisible();
     await dockTab.click();
 
@@ -323,13 +323,13 @@ export async function openPanel(page: Page, label: string): Promise<Locator> {
   }
 
   const liveLabel = label;
-  let tab = page.locator(`.panel-tab[aria-label="${liveLabel}"]`).first();
+  let tab = page.locator(`.dv-tab[role="tab"][aria-label="${liveLabel}"]`).first();
   if (!(await tab.isVisible())) {
     await page.getByRole('button', { name: 'View', exact: true }).click();
     const menuItem = page.getByRole('menuitem', { name: liveLabel, exact: true });
     await expect(menuItem).toBeVisible();
     await menuItem.click();
-    tab = page.locator(`.panel-tab[aria-label="${liveLabel}"]`).first();
+    tab = page.locator(`.dv-tab[role="tab"][aria-label="${liveLabel}"]`).first();
   }
   await expect(tab).toBeVisible();
   await tab.click();
@@ -349,7 +349,7 @@ export async function selectFirstTimelineClip(page: Page): Promise<void> {
   const clip = page.locator('.timeline-clip[data-clip-id]').first();
   await expect(clip).toBeVisible();
   await clip.click();
-  await expect(clip).toHaveAttribute('aria-pressed', 'true');
+  await expect(clip).toHaveAttribute('aria-current', 'true');
 }
 
 const fixtureMimeTypes: Readonly<Record<string, string>> = {
@@ -375,9 +375,21 @@ export async function importMediaFixture(
     buffer: await readFile(join(MEDIA_FIXTURE_DIR, fileName)),
   });
   await expect(drawer.getByText(uploadedFileName, { exact: true })).toBeVisible();
+  // The card appears after the original upload is accepted and the editor polls it to completion.
+  // Arm the wait for that acceptance before Confirm, so a loaded run is measured against the upload
+  // itself. The fixed budget then covers only the work that follows acceptance.
+  const originalUploadAccepted = page.waitForResponse(
+    (response) =>
+      response.request().method() !== 'GET' &&
+      /\/assets\/[^/]+\/original(\/uploads\/[^/]+\/complete)?$/u.test(
+        new URL(response.url()).pathname,
+      ),
+    { timeout: 120_000 },
+  );
   await drawer.getByRole('button', { name: 'Confirm import' }).click();
+  expect((await originalUploadAccepted).ok(), 'the original upload is accepted').toBe(true);
   await expect(page.locator('.asset-card', { hasText: uploadedFileName }).first()).toBeVisible({
-    timeout: 15_000,
+    timeout: 60_000,
   });
 }
 

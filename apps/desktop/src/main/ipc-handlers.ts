@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { Buffer } from 'node:buffer';
 import { isAllowedIpcRequest } from '../ipc.js';
+import { SYNCHRONOUS_IPC_CHANNELS } from '../ipc.js';
 import type { IpcChannel, IpcRequest } from '../ipc.js';
 import type { DerivativeKind, OpaqueFileRef } from '../file-boundary.js';
 import { normalizeStartupPreference } from '../worker-status.js';
@@ -13,7 +15,18 @@ import type {
   MediaKind,
   ProviderProfile,
 } from '../store/local-database.js';
+import type { DispatchJob } from '../jobs/job-dispatch.js';
+import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
+import type { MediaStage, StageBeginRequest } from './media-stage.js';
+import { probeAudioPresence, type AudioPresence } from './media-presence.js';
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
+import {
+  isEditorProjectStorageKey,
+  MAX_EDITOR_PROJECT_STORAGE_KEY_LENGTH,
+  MAX_EDITOR_PROJECT_STORAGE_VALUE_BYTES,
+} from '@joy-media/project-persistence/editor-storage';
 import type { DirectProviderProbeReport, SecretStore } from '@joy-media/provider-sdk';
 import type { AutoUpdateDecision, SignedReleaseManifest } from './auto-update-policy.js';
 
@@ -63,11 +76,18 @@ export interface IpcHandlerDeps {
   readonly probeProvider: ProbeProvider;
   readonly checkForUpdate: CheckForUpdate;
   readonly handleWindowControl?: (
-    action: 'minimize' | 'maximize' | 'close' | 'is-maximized',
+    action: 'minimize' | 'maximize' | 'close' | 'is-maximized' | 'toggle-fullscreen',
   ) => Promise<boolean | void> | boolean | void;
   readonly now?: () => string;
   readonly newId?: () => string;
+  /** Verified copies of editor-imported originals; absent when the staging root is unavailable. */
+  readonly mediaStage?: MediaStage;
+  /** ffprobe-backed audio check; injected so unit tests never spawn a process. */
+  readonly probeAudio?: (path: string) => Promise<AudioPresence>;
 }
+
+/** Largest derivative the renderer may read back (thumbnails are far smaller). */
+export const MAX_DERIVATIVE_READ_BYTES = 16 * 1024 * 1024;
 
 export interface IpcResult {
   readonly ok: boolean;
@@ -78,9 +98,36 @@ export interface IpcResult {
 export type IpcHandler = (payload: unknown) => Promise<IpcResult> | IpcResult;
 
 /** Builds the channel -> handler dispatch table. Never exposed directly to the renderer. */
+/** Maps a renderer-visible derivative kind onto the Worker job type that produces it. */
+function derivativeJobType(kind: DerivativeKind): string {
+  return kind === 'thumbnail' ? 'asset.thumbnail' : 'render.export';
+}
+
+/** Renderer-safe view of a dispatched job: never the lease token or a local derivative path. */
+function publicJob(job: DispatchJob): Record<string, unknown> {
+  return {
+    id: job.id,
+    kind: job.kind,
+    jobType: job.jobType,
+    refId: job.refId,
+    status: job.status,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    progress: job.progress,
+    attempts: job.attempts,
+    cancelRequested: job.cancelRequested,
+    ...(job.error === undefined ? {} : { error: job.error }),
+  };
+}
+
 export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcHandler> {
   const now = deps.now ?? (() => new Date().toISOString());
   const newId = deps.newId ?? (() => crypto.randomUUID());
+  const jobs = createJobOrchestrator({
+    store: deps.localDatabase.jobDispatch,
+    now,
+    newId: () => deps.localDatabase.nextJobId(),
+  });
 
   return {
     'desktop.select-file': async () => {
@@ -111,8 +158,13 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (request === undefined) return { ok: false, error: 'Invalid derivative request' };
       try {
         const approval = deps.fileRegistry.requestDerivative(request.ref, request.kind);
-        const job = deps.localDatabase.enqueueJob(`derivative:${request.kind}`, request.ref.id);
-        return { ok: true, data: { ...approval, jobId: job.id } };
+        const submitted = jobs.submit({
+          jobType: derivativeJobType(request.kind),
+          refId: request.ref.id,
+          kind: `derivative:${request.kind}`,
+        });
+        if (!submitted.ok) return { ok: false, error: `${submitted.code}: ${submitted.message}` };
+        return { ok: true, data: { ...approval, jobId: submitted.jobId } };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : 'Unknown error' };
       }
@@ -126,6 +178,8 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.job-status': (payload): IpcResult => {
       const jobId = asJobId(payload);
       if (jobId === undefined) return { ok: false, error: 'Invalid job id' };
+      const dispatched = jobs.get(jobId);
+      if (dispatched !== undefined) return { ok: true, data: publicJob(dispatched) };
       const job = deps.localDatabase.getJob(jobId);
       if (job === undefined) return { ok: false, error: 'Unknown job id' };
       return { ok: true, data: job };
@@ -133,6 +187,13 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.cancel-job': (payload): IpcResult => {
       const jobId = asJobId(payload);
       if (jobId === undefined) return { ok: false, error: 'Invalid job id' };
+      if (jobs.get(jobId) !== undefined) {
+        // Worker-dispatched jobs are cancelled through the orchestrator: a running job is flagged
+        // and the Worker stops it on its next heartbeat, so the status never claims more than it did.
+        const cancelled = jobs.requestCancel(jobId);
+        if (!cancelled.ok) return { ok: false, error: cancelled.error };
+        return { ok: true, data: publicJob(cancelled.job) };
+      }
       const job = deps.localDatabase.getJob(jobId);
       if (job === undefined) return { ok: false, error: 'Unknown job id' };
       if (job.status !== 'queued' && job.status !== 'running') {
@@ -144,6 +205,69 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         'cancelled by user',
       );
       return { ok: true, data: updated };
+    },
+    'desktop.job-derivative.read': async (payload): Promise<IpcResult> => {
+      const jobId = asJobId(payload);
+      if (jobId === undefined) return { ok: false, error: 'Invalid job id' };
+      const derivative = deps.localDatabase.jobDispatch.get(jobId)?.derivative;
+      if (derivative === undefined) return { ok: false, error: 'This job has no derivative yet' };
+      if (derivative.bytes > MAX_DERIVATIVE_READ_BYTES)
+        return { ok: false, error: 'Derivative is too large to show here' };
+      return guarded(async () => {
+        const bytes = await readFile(derivative.path);
+        // The file is re-hashed before it reaches the renderer, so the derivative the editor shows
+        // is the exact one the Worker verified and stored.
+        if (createHash('sha256').update(bytes).digest('hex') !== derivative.sha256)
+          throw new Error('Derivative failed integrity verification');
+        return { mimeType: derivative.mimeType, bytes: new Uint8Array(bytes) };
+      });
+    },
+    'desktop.media-stage.begin': (payload): Promise<IpcResult> => {
+      const stage = deps.mediaStage;
+      if (stage === undefined) return Promise.resolve(STAGE_UNAVAILABLE);
+      const request = asStageBeginRequest(payload);
+      if (request === undefined)
+        return Promise.resolve({ ok: false, error: 'Invalid media stage request' });
+      return guarded(() => stage.begin(request));
+    },
+    'desktop.media-stage.chunk': (payload): Promise<IpcResult> => {
+      const stage = deps.mediaStage;
+      if (stage === undefined) return Promise.resolve(STAGE_UNAVAILABLE);
+      const request = asStageChunkRequest(payload);
+      if (request === undefined)
+        return Promise.resolve({ ok: false, error: 'Invalid media chunk' });
+      return guarded(() => stage.chunk(request));
+    },
+    'desktop.media-stage.finish': (payload): Promise<IpcResult> => {
+      const stage = deps.mediaStage;
+      if (stage === undefined) return Promise.resolve(STAGE_UNAVAILABLE);
+      const uploadId = asUploadId(payload);
+      if (uploadId === undefined)
+        return Promise.resolve({ ok: false, error: 'Invalid media upload' });
+      return guarded(() => stage.finish({ uploadId }));
+    },
+    'desktop.media-stage.abort': (payload): Promise<IpcResult> => {
+      const stage = deps.mediaStage;
+      if (stage === undefined) return Promise.resolve(STAGE_UNAVAILABLE);
+      const uploadId = asUploadId(payload);
+      if (uploadId === undefined)
+        return Promise.resolve({ ok: false, error: 'Invalid media upload' });
+      return guarded(async () => {
+        await stage.abort({ uploadId });
+        return undefined;
+      });
+    },
+    'desktop.media-audio-presence': (payload): Promise<IpcResult> => {
+      const stage = deps.mediaStage;
+      if (stage === undefined) return Promise.resolve(STAGE_UNAVAILABLE);
+      const request = asAudioPresenceRequest(payload);
+      if (request === undefined) return Promise.resolve({ ok: false, error: 'Invalid media hash' });
+      return guarded(async (): Promise<AudioPresence> => {
+        const path = await stage.cachedPath(request.sha256, request.bytes);
+        // Only a verified staged copy can be probed; anything else is reported as unknown.
+        if (path === undefined) return { status: 'unknown', reason: 'not-staged' };
+        return (deps.probeAudio ?? ((file: string) => probeAudioPresence(file)))(path);
+      });
     },
     'desktop.provider-profile.save': async (payload): Promise<IpcResult> => {
       const request = asSaveProviderProfileRequest(payload);
@@ -312,6 +436,10 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       await deps.handleWindowControl?.('close');
       return { ok: true, data: undefined };
     },
+    'desktop.window-toggle-fullscreen': async () => {
+      const isFull = await deps.handleWindowControl?.('toggle-fullscreen');
+      return { ok: true, data: Boolean(isFull) };
+    },
     'desktop.window-is-maximized': async () => {
       const isMax = await deps.handleWindowControl?.('is-maximized');
       return { ok: true, data: Boolean(isMax) };
@@ -369,6 +497,28 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         };
       }
     },
+    'desktop.project-storage.get': (payload): IpcResult => {
+      const key = asEditorStorageKey(payload);
+      if (key === undefined) return { ok: false, error: 'Invalid editor project storage key' };
+      return { ok: true, data: deps.localDatabase.getEditorStorageItem(key) };
+    },
+    'desktop.project-storage.set': (payload): IpcResult => {
+      const request = asEditorStorageWrite(payload);
+      if (request === undefined)
+        return { ok: false, error: 'Invalid editor project storage value' };
+      deps.localDatabase.setEditorStorageItem(request.key, request.value);
+      return { ok: true };
+    },
+    'desktop.project-storage.remove': (payload): IpcResult => {
+      const key = asEditorStorageKey(payload);
+      if (key === undefined) return { ok: false, error: 'Invalid editor project storage key' };
+      deps.localDatabase.deleteEditorStorageItem(key);
+      return { ok: true };
+    },
+    'desktop.project-storage.keys': (): IpcResult => ({
+      ok: true,
+      data: deps.localDatabase.listEditorStorageKeys().filter(isEditorProjectStorageKey),
+    }),
   };
 }
 
@@ -399,6 +549,61 @@ export async function dispatchIpcRequest(
   return handlers[request.channel](request.payload);
 }
 
+/** Dispatches only synchronous project-storage handlers for Electron's sendSync bridge. */
+export function dispatchSynchronousIpcRequest(
+  handlers: Record<IpcChannel, IpcHandler>,
+  request: IpcRequest,
+): IpcResult {
+  if (typeof request !== 'object' || request === null || !safeIsAllowedIpcRequest(request)) {
+    const channel =
+      typeof request === 'object' && request !== null && typeof request.channel === 'string'
+        ? request.channel
+        : 'unknown';
+    return { ok: false, error: `Blocked IPC request: ${channel}` };
+  }
+  if (!(SYNCHRONOUS_IPC_CHANNELS as readonly string[]).includes(request.channel)) {
+    return { ok: false, error: `Blocked synchronous IPC request: ${request.channel}` };
+  }
+  try {
+    const result = handlers[request.channel](request.payload);
+    if (isPromiseLike(result))
+      return { ok: false, error: 'Synchronous IPC handler returned a promise' };
+    return result;
+  } catch {
+    return { ok: false, error: 'Synchronous IPC request failed' };
+  }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<IpcResult> {
+  if ((typeof value !== 'object' || value === null) && typeof value !== 'function') return false;
+  return typeof (value as { then?: unknown }).then === 'function';
+}
+
+function asEditorStorageKey(payload: unknown): string | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  const key = (payload as { key?: unknown }).key;
+  return typeof key === 'string' &&
+    key.length <= MAX_EDITOR_PROJECT_STORAGE_KEY_LENGTH &&
+    isEditorProjectStorageKey(key)
+    ? key
+    : undefined;
+}
+
+function asEditorStorageWrite(
+  payload: unknown,
+): { readonly key: string; readonly value: string } | undefined {
+  const key = asEditorStorageKey(payload);
+  if (key === undefined || typeof payload !== 'object' || payload === null) return undefined;
+  const value = (payload as { value?: unknown }).value;
+  if (
+    typeof value !== 'string' ||
+    Buffer.byteLength(value, 'utf8') > MAX_EDITOR_PROJECT_STORAGE_VALUE_BYTES
+  ) {
+    return undefined;
+  }
+  return { key, value };
+}
+
 function asOpaqueFileRef(value: unknown): OpaqueFileRef | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Partial<OpaqueFileRef>;
@@ -427,6 +632,52 @@ function asJobId(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = (value as { jobId?: unknown }).jobId;
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
+}
+
+const STAGE_UNAVAILABLE: IpcResult = { ok: false, error: 'Media staging is unavailable' };
+
+/** Runs a staging or read operation and turns a thrown error into a refusal the renderer can show. */
+async function guarded(run: () => Promise<unknown>): Promise<IpcResult> {
+  try {
+    return { ok: true, data: await run() };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
+function asUploadId(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = (value as { uploadId?: unknown }).uploadId;
+  return typeof candidate === 'string' && /^[0-9a-f-]{36}$/.test(candidate) ? candidate : undefined;
+}
+
+function asStageBeginRequest(value: unknown): StageBeginRequest | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Partial<Record<keyof StageBeginRequest, unknown>>;
+  if (typeof candidate.sha256 !== 'string' || typeof candidate.displayName !== 'string')
+    return undefined;
+  if (typeof candidate.bytes !== 'number') return undefined;
+  return { sha256: candidate.sha256, bytes: candidate.bytes, displayName: candidate.displayName };
+}
+
+function asStageChunkRequest(
+  value: unknown,
+): { readonly uploadId: string; readonly offset: number; readonly data: Uint8Array } | undefined {
+  const uploadId = asUploadId(value);
+  if (uploadId === undefined) return undefined;
+  const candidate = value as { offset?: unknown; data?: unknown };
+  if (typeof candidate.offset !== 'number' || !(candidate.data instanceof Uint8Array))
+    return undefined;
+  return { uploadId, offset: candidate.offset, data: candidate.data };
+}
+
+function asAudioPresenceRequest(
+  value: unknown,
+): { readonly sha256: string; readonly bytes: number } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as { sha256?: unknown; bytes?: unknown };
+  if (typeof candidate.sha256 !== 'string' || typeof candidate.bytes !== 'number') return undefined;
+  return { sha256: candidate.sha256, bytes: candidate.bytes };
 }
 
 function asProfileId(value: unknown): string | undefined {

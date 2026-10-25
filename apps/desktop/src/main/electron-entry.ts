@@ -25,10 +25,21 @@ import path, { dirname, join } from 'node:path';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseProjectDeepLink } from '../deep-link.js';
+import { editorOriginFromFrameUrl } from '../origin-policy.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
-import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
+import { readFile, stat } from 'node:fs/promises';
+import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
+import { startLocalJobApi, type LocalJobApi } from '../jobs/local-job-api.js';
+import { createMediaStage } from './media-stage.js';
+import { installGpuEncodeFallback } from './gpu-encode-fallback.js';
+import { localWorkerEnv } from '../jobs/worker-env.js';
+import {
+  createIpcHandlers,
+  dispatchIpcRequest,
+  dispatchSynchronousIpcRequest,
+} from './ipc-handlers.js';
 import type { IpcRequest } from '../ipc.js';
 import {
   PACKAGED_RENDERER_SCHEME,
@@ -42,6 +53,11 @@ import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { probeOpenAiCompatibleProvider } from '@joy-media/provider-sdk';
 import { evaluateAutoUpdate } from './auto-update-policy.js';
+import {
+  DESKTOP_TEST_API_BASE_ARGUMENT,
+  resolveTestApiBaseUrl,
+  resolveTestDownloadDirectory,
+} from './test-api-override.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
@@ -51,6 +67,17 @@ const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
 // docs/joy-media-final-migration-progress.md (no prior session ever opened a real Electron
 // window). Never shows a window and never touches production data.
 const isSmokeMode = process.argv.includes('--smoke');
+const testApiBaseUrl = resolveTestApiBaseUrl({ argv: process.argv, env: process.env });
+const testSelectFile = process.argv.includes('--joy-media-test-mode')
+  ? process.env['JOY_MEDIA_TEST_SELECT_FILE']
+  : undefined;
+const testDownloadDirectory = process.argv.includes('--joy-media-test-mode')
+  ? resolveTestDownloadDirectory({
+      argv: process.argv,
+      env: process.env,
+      userDataDirectory: app.getPath('userData'),
+    })
+  : undefined;
 
 // Privileged so the packaged renderer behaves like https:// (fetch, CSP, secure context)
 // instead of the restricted "file://"-style origin Electron gives unregistered schemes.
@@ -83,22 +110,63 @@ if (!app.requestSingleInstanceLock()) {
   localDatabase.recoverInterrupted();
 
   const fileRegistry = createFileRegistry();
+  // The local Worker talks only to this app's loopback job API, which binds 127.0.0.1 on a random
+  // port with a per-run token. The supervisor refuses to spawn the Worker until that API is ready.
+  const localWorkerRoot = join(paths.mediaRoot, 'worker');
+  mkdirSync(localWorkerRoot, { recursive: true });
+  let localJobApi: LocalJobApi | undefined;
+  void startLocalJobApi({
+    orchestrator: createJobOrchestrator({ store: localDatabase.jobDispatch }),
+    derivativeDirectory: join(paths.mediaRoot, 'job-derivatives'),
+    sourceSize: async (refId) =>
+      (await stat(fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })))
+        .size,
+    readSource: (refId) =>
+      readFile(fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })),
+    onWarning: (message) => console.warn(message),
+  })
+    .then((api) => {
+      localJobApi = api;
+    })
+    .catch((error: unknown) => {
+      console.error(
+        `local job API failed to start: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    });
   const workerEntry = resolveWorkerEntry({ mainDirname: __dirname, execPath: process.execPath });
   const workerSupervisor = createWorkerSupervisor({
     spawn: (command, args, options) => spawn(command, args, options),
     command: workerEntry.command,
     args: workerEntry.args,
+    env: () => {
+      if (localJobApi === undefined) throw new Error('local job API is not ready');
+      return localWorkerEnv(process.env, {
+        apiEnv: localJobApi.workerEnv,
+        workerRoot: localWorkerRoot,
+      });
+    },
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
+  // Verified copies of editor-imported originals, keyed by their SHA-256, so the Worker can read
+  // media the browser imported without the user locating the file again.
+  const mediaStage = createMediaStage({
+    directory: join(paths.mediaRoot, 'staged'),
+    registry: fileRegistry,
+    localDatabase,
+    now: () => new Date().toISOString(),
+  });
   const ipcHandlers = createIpcHandlers({
     fileRegistry,
     workerSupervisor,
     localDatabase,
+    mediaStage,
     probeMedia: async (path) => {
       const probe = await checksumFile(path);
       return { ...probe, kind: classifyMediaKind(path) };
     },
     showOpenDialog: async () => {
+      // Test mode only: a packaged test cannot drive the native dialog, so it names the file here.
+      if (testSelectFile !== undefined) return { canceled: false, path: testSelectFile };
       const win =
         BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
       const result = win
@@ -147,6 +215,9 @@ if (!app.requestSingleInstanceLock()) {
           return true;
         case 'is-maximized':
           return win.isMaximized();
+        case 'toggle-fullscreen':
+          win.setFullScreen(!win.isFullScreen());
+          return win.isFullScreen();
       }
     },
   });
@@ -154,6 +225,20 @@ if (!app.requestSingleInstanceLock()) {
   ipcMain.handle('joy-desktop-ipc', (_event, request: IpcRequest) =>
     dispatchIpcRequest(ipcHandlers, request),
   );
+  ipcMain.on('joy-desktop-project-storage', (event, request: IpcRequest) => {
+    let senderOrigin = '';
+    senderOrigin = editorOriginFromFrameUrl(event.senderFrame?.url ?? '') ?? '';
+    if (typeof request !== 'object' || request === null) {
+      event.returnValue = { ok: false, error: 'Blocked IPC request: malformed request' };
+      return;
+    }
+    // Trust the actual frame URL, never an origin supplied by renderer JavaScript.
+    event.returnValue = dispatchSynchronousIpcRequest(ipcHandlers, {
+      origin: senderOrigin,
+      channel: request.channel,
+      payload: request.payload,
+    });
+  });
 
   app.on('second-instance', (_event, argv) => {
     const link = argv.find((arg) => arg.startsWith('joy://'));
@@ -169,9 +254,40 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
+  // Crash-triggered fallback for the Media Foundation video encoder (see gpu-encode-fallback.ts). It
+  // must be installed before the app is ready, because Chromium reads switches at startup.
+  installGpuEncodeFallback(
+    {
+      commandLine: app.commandLine,
+      relaunch: (options) => app.relaunch(options),
+      quit: () => app.quit(),
+      onChildProcessGone: (listener) =>
+        app.on('child-process-gone', (_event, details) => listener(details)),
+      log: (message) => console.error(message),
+    },
+    process.argv,
+  );
+
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
     app.setAsDefaultProtocolClient('joy');
+
+    session.defaultSession.on('will-download', (_event, item) => {
+      const filename = path.basename(item.getFilename());
+      if (testDownloadDirectory !== undefined) {
+        item.setSavePath(join(testDownloadDirectory, filename));
+        return;
+      }
+
+      const extension = path.extname(filename).slice(1).toLowerCase();
+      item.setSaveDialogOptions({
+        title: 'Save JOY Media export',
+        defaultPath: join(app.getPath('downloads'), filename),
+        ...(extension.length === 0
+          ? {}
+          : { filters: [{ name: 'Media file', extensions: [extension] }] }),
+      });
+    });
 
     if (!isDev) {
       protocol.handle(PACKAGED_RENDERER_SCHEME, (request) => {
@@ -239,8 +355,11 @@ if (!app.requestSingleInstanceLock()) {
 
     // Deny any permission the desktop shell has no product reason to grant (camera/mic
     // access, if ever needed for capture, is a deliberate future decision, not a default).
-    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
-      callback(false);
+    // Element fullscreen is the one exception: Electron routes a renderer requestFullscreen()
+    // through this permission check, and a blanket denial leaves the request pending forever
+    // instead of rejecting it, so the Program Monitor's Fullscreen control silently did nothing.
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+      callback(permission === 'fullscreen');
     });
 
     const win = new BrowserWindow({
@@ -249,7 +368,12 @@ if (!app.requestSingleInstanceLock()) {
       show: !isSmokeMode,
       frame: false,
       titleBarStyle: 'hidden',
-      webPreferences: buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
+      webPreferences: {
+        ...buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
+        ...(testApiBaseUrl === undefined
+          ? {}
+          : { additionalArguments: [`${DESKTOP_TEST_API_BASE_ARGUMENT}${testApiBaseUrl}`] }),
+      },
     });
     mainWindow = win;
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -314,7 +438,10 @@ if (!app.requestSingleInstanceLock()) {
         else app.on('window-all-closed', listener);
       },
       onProcessSignal: (signalName, listener) => process.on(signalName, listener),
-      stopWorker: () => workerSupervisor.stop(),
+      stopWorker: () => {
+        workerSupervisor.stop();
+        void localJobApi?.close().catch(() => undefined);
+      },
       flush: () => {
         // SqliteProjectStore (packages/project-persistence's desktop subpath) is not yet
         // wired here: no IPC channel opens/saves a project through it yet (see

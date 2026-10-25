@@ -262,7 +262,7 @@ try {
         Copy-Item -Destination $runtimeDist -Recurse -Force
     $runtimePackages = Join-Path $runtimeDist 'node_modules\@joy-media'
     New-Item -ItemType Directory -Path $runtimePackages -Force | Out-Null
-    foreach ($packageName in @('job-protocol', 'render-ir', 'export-core')) {
+    foreach ($packageName in @('job-protocol', 'render-ir', 'export-core', 'project-schema')) {
         $packageDirectory = Join-Path $PWD (Join-Path 'packages' $packageName)
         if (-not (Test-Path -LiteralPath $packageDirectory -PathType Container)) {
             throw "Required Worker runtime package is missing: $packageDirectory"
@@ -342,6 +342,7 @@ try {
         candidateSha = $CandidateSha
         workflowRunId = $RunId
         attempt = [int]$Attempt
+        pass = [int]$Pass
         runner = 'self-hosted,windows,x64,joy-media-worker-docker'
         execution = 'windows-docker-container'
         containerIdentity = [ordered]@{ containerId = $containerId; imageDigest = $imageDigest }

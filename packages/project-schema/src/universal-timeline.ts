@@ -434,7 +434,7 @@ function visualObjectElementKind(object: VisualObjectV1): TimelineElementKind {
 }
 
 function readClipObjectMap(project: JoyProjectV1): Readonly<Record<string, string>> {
-  const raw = project.pluginData['joy.clipObjects'];
+  const raw = project.pluginData?.['joy.clipObjects'];
   if (!isRecord(raw)) return {};
   const output: Record<string, string> = {};
   for (const [clipId, objectId] of Object.entries(raw)) {

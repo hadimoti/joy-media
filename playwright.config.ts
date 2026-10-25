@@ -1,4 +1,9 @@
+import { randomBytes } from 'node:crypto';
 import { defineConfig, devices } from '@playwright/test';
+
+// Synthetic-account control routes on the E2E server run only with this token. It is generated per
+// run unless one is supplied, and the webServer and the specs both read it from the environment.
+process.env.JOY_MEDIA_E2E_CONTROL_TOKEN ??= randomBytes(32).toString('base64url');
 
 const e2eApiPort = process.env.JOY_MEDIA_E2E_API_PORT ?? '4174';
 const e2eWebPort = process.env.JOY_MEDIA_E2E_WEB_PORT ?? '4173';
@@ -101,13 +106,16 @@ export default defineConfig({
           {
             command: 'pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts',
             url: `${e2eApiUrl}/health`,
-            reuseExistingServer: !process.env.CI,
+            // Never reuse a running server: stale in-memory state and an outdated control token
+            // from an earlier run would leak into this one.
+            reuseExistingServer: false,
             timeout: 120_000,
           },
           {
             command: `pnpm --filter @joy-media/editor-web dev --host 127.0.0.1 --port ${e2eWebPort}`,
             url: e2eBaseUrl,
-            reuseExistingServer: !process.env.CI,
+            // Never reuse a running server, for the same reason as the API server above.
+            reuseExistingServer: false,
             timeout: 120_000,
           },
         ]

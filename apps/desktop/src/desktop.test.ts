@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { createFileBoundary } from './file-boundary.js';
 import { parseProjectDeepLink } from './deep-link.js';
-import { isAllowedEditorOrigin } from './origin-policy.js';
+import { editorOriginFromFrameUrl, isAllowedEditorOrigin } from './origin-policy.js';
 import { isAllowedIpcRequest } from './ipc.js';
 import { canSubmitWorkerJob, normalizeStartupPreference } from './worker-status.js';
 describe('desktop shell boundaries', () => {
+  it('recovers Electron custom-scheme origins from frame URLs', () => {
+    expect(editorOriginFromFrameUrl('joy-media-app://renderer/index.html')).toBe(
+      'joy-media-app://renderer',
+    );
+    expect(editorOriginFromFrameUrl('https://joyst.ir/editor')).toBe('https://joyst.ir');
+    expect(editorOriginFromFrameUrl('invalid url')).toBeUndefined();
+  });
+
   it('allows only explicit editor origins and IPC channels', () => {
     expect(isAllowedEditorOrigin('https://joyst.ir')).toBe(true);
     expect(isAllowedEditorOrigin('https://evil.example')).toBe(false);

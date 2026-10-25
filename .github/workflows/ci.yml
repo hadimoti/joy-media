@@ -1,33 +1,10 @@
 name: ci
 
-# DEVELOPMENT VERIFICATION (push-only legacy lane) — superseded by ci-dev.yml
-# for the developer feedback loop. Kept here for the legacy `push to main`
-# trigger. All jobs run on owner-controlled self-hosted runners, NOT on
-# GitHub-hosted minutes: GitHub-hosted Actions minutes/billing are
-# unavailable from Iran, so every job in this repository targets an
-# allowed PC Docker self-hosted runner label. See:
-#   - tooling/release/src/ci-runner-policy.test.ts (offline enforcement)
-#   - ops/self-hosted/linux-runner/ (Linux Docker runner contract)
-#   - ops/self-hosted/windows-runner/ (Windows Worker runner contract)
-#   - docs/SELF-HOSTED-CI.md (the full policy + Windows-platform caveat)
-#
-# Lane split:
-#   - check / browser-e2e (no Windows-only binary required): the
-#     joy-media-ci Linux Docker container — `self-hosted,linux,x64,joy-media-ci`.
-#   - worker-package (builds a Windows .exe via Node SEA + postject, requires
-#     Windows PowerShell + Win32 process APIs): the dedicated Windows worker
-#     Docker runner — `self-hosted,windows,x64,joy-media-worker-docker`.
-#     self-hosted label, NOT `windows-latest`, and never consumes
-#     GitHub-hosted minutes. The Windows-platform evidence caveat in
-#     docs/SELF-HOSTED-CI.md applies here: this lane is the only Windows
-#     acceptance signal in the repo and it is run on the owner's PC, not in
-#     a GitHub-hosted Windows VM.
+# This workflow runs only when dispatched by the owner.
+# Pull requests and pushes are handled by ci-dev.yml.
 
 on:
   workflow_dispatch:
-  pull_request:
-  push:
-    branches: [main]
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -53,6 +30,14 @@ jobs:
           ffmpeg -version
           ffprobe -version
       - run: pnpm install --frozen-lockfile
+      - name: Install locked Playwright Chromium before the gates that need it
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec playwright install chromium
+          chromium_path="$(node -e "process.stdout.write(require('@playwright/test').chromium.executablePath())")"
+          test -x "$chromium_path" || { echo 'Locked Playwright Chromium executable is missing' >&2; exit 1; }
+          echo "JOY_CHROMIUM_PATH=$chromium_path" >> "$GITHUB_ENV"
       - run: pnpm run verify:ci
   worker-package:
     needs: check

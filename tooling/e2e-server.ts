@@ -1,8 +1,8 @@
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { IncomingMessage } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { newDb } from 'pg-mem';
 import type { Pool } from 'pg';
 import { executeLeasedExport, type ExportJobPayload } from '../apps/worker/src/export-job.js';
@@ -10,6 +10,11 @@ import { executeLeasedExport, type ExportJobPayload } from '../apps/worker/src/e
 // exercise stale or missing generated package output on a clean runner.
 import { verifyExport } from '../packages/export-core/src/index.ts';
 import { createControlPlaneHttpServer, LocalControlPlane } from '../apps/api/src/index.js';
+import {
+  createSyntheticAccountHarness,
+  startSyntheticControlServer,
+  syntheticControlToken,
+} from './e2e-synthetic-accounts.js';
 import type { ApiAuthentication } from '../apps/api/src/http-server.js';
 import type { MediaAuthApi, MediaAuthMethod } from '../apps/api/src/media-auth.js';
 import { AccountService } from '../apps/api/src/account-service.js';
@@ -138,11 +143,25 @@ controlPlane.helloWorker(E2E_WORKER_ID, ['render.export']);
 // bleeds into journey tests' http-error telemetry. Resolve a tiny pg-mem-backed
 // AccountService first so the route is reachable before the server is built
 // (see createE2EAccountService for the schema bootstrap).
-createE2EAccountService().then((account) => {
+createE2EAccountService().then(async (defaultAccount) => {
+  // Synthetic accounts are opt-in: without a control token the server behaves exactly as before.
+  const controlToken = syntheticControlToken(process.env);
+  const synthetic =
+    controlToken === undefined
+      ? undefined
+      : await createSyntheticAccountHarness({ fallback: new TestMediaAuth() });
+  const account = synthetic?.account ?? defaultAccount;
+  if (synthetic !== undefined && controlToken !== undefined) {
+    await startSyntheticControlServer(synthetic, {
+      token: controlToken,
+      port: Number(process.env.JOY_MEDIA_E2E_CONTROL_PORT ?? 4175),
+    });
+    process.stdout.write('JOY_MEDIA_E2E_SYNTHETIC_CONTROL_READY\n');
+  }
   const server = createControlPlaneHttpServer({
     controlPlane,
     authentication,
-    mediaAuth: new TestMediaAuth(),
+    mediaAuth: synthetic?.mediaAuth ?? new TestMediaAuth(),
     privateObjectStore: objectStore,
     // The browser suite intentionally exercises dozens of flows with one
     // disposable owner/IP. Abuse protection is covered by the API transport
@@ -150,8 +169,34 @@ createE2EAccountService().then((account) => {
     // cascade of unrelated 429s.
     rateLimit: { maxRequests: 100_000 },
     queryObservability: true,
+    corsAllowedOrigins: ['joy-media-app://renderer'],
     account,
   });
+
+  // Opt-in request log for the packaged desktop acceptance. It records every request this server
+  // serves, whichever process of the packaged app sends it. The file starts empty for each server
+  // run; readers keep their own byte offset.
+  const requestLogPath = process.env.JOY_MEDIA_E2E_REQUEST_LOG;
+  if (requestLogPath !== undefined) {
+    writeFileSync(requestLogPath, '');
+    server.on('request', (request: IncomingMessage, response: ServerResponse) => {
+      // The path and query are logged as the router reads them, so a dot segment cannot hide a project id
+      // from the audit. A response the client abandons never finishes: 'close' logs it with a null status,
+      // which the audit neither counts as a success nor as a refusal. Each request is logged once.
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+      let logged = false;
+      const log = (status: number | null): void => {
+        if (logged) return;
+        logged = true;
+        appendFileSync(
+          requestLogPath,
+          `${JSON.stringify({ method: request.method, path: url.pathname, query: url.search, status })}\n`,
+        );
+      };
+      response.once('finish', () => log(response.statusCode));
+      response.once('close', () => log(response.writableFinished ? response.statusCode : null));
+    });
+  }
 
   const e2eWorkerPromise = runE2eRenderWorker();
 

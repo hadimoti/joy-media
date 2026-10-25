@@ -9,7 +9,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 - **Product Reality**: JOY Media transitioned on 2026-09-14/15 to an **offline-first Windows Electron desktop NLE** (`@joy-media/desktop`).
   - Desktop executable installed at `%LOCALAPPDATA%\Programs\JOY Media\joy-media.exe`.
   - Local database is SQLite with WAL at `%APPDATA%\@joy-media\desktop\joy-media.sqlite3`.
-  - Local media worker (`joy-worker.exe`) embeds Real-ESRGAN, DeepFilterNet, and BiRefNet.
+  - Local media worker (`joy-worker.exe`) hosts experimental Real-ESRGAN, DeepFilterNet, and BiRefNet features that need a separate model setup; they are not qualified in this release.
   - Local asset catalog at `H:\VPS-DATA\joy-media-assets` accessed via `joy-asset://` protocol.
   - The Sweden VPS (`joyst.ir`) is reduced to a lean control plane (OTP auth, subscriptions, installer downloads, release metadata, and the Joy Model AI Gateway).
 - **Authentication**: "Gmail login" in the JOY system is **email OTP verification** (`apps/api/src/media-auth.ts`, `media-mailer.ts`), not Google OAuth. The `LoginGate.tsx` component already exists and implements Gmail/Telegram OTP input.
@@ -83,7 +83,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
   1. Header: Joy Studio logo, feature anchors, "Download" button, "Sign In" button.
   2. Hero: Dark glassmorphic design (`#0d0f12`, cyan/purple accents). Tagline: "The Offline-First Windows NLE Powered by Local AI Intelligence."
   3. Primary CTA: Direct download for Windows installer (`v1.0.0`). Secondary CTA: Sign in with Gmail OTP.
-  4. Features Grid: Zero cloud latency (SQLite WAL + `joy-asset://`), Dual-Lens timeline, On-device AI worker (Real-ESRGAN, DeepFilterNet, BiRefNet), Living Looks, Dual AI Agent (Joy Model + BYOK).
+  4. Features Grid: Zero cloud latency (SQLite WAL + `joy-asset://`), Dual-Lens timeline, On-device AI worker (experimental: Real-ESRGAN, DeepFilterNet, BiRefNet; model setup required), Living Looks, Dual AI Agent (Joy Model + BYOK).
   5. System Requirements: Windows 10/11 64-bit, 16 GB RAM, NVIDIA RTX recommended.
 - **Verification**: `pnpm --filter @joy-media/account-web build`
 
@@ -182,7 +182,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
   3. Feature sections:
      - _Zero-Cloud Latency_: Local SQLite storage, instant playback from local disk via `joy-asset://`.
      - _Dual-Lens Timeline_: Professional track hierarchy (V1–V10 visual, A1–A4 audio) with magnetic snapping.
-     - _On-Device AI Engine_: Real-ESRGAN upscaler, DeepFilterNet audio denoiser, BiRefNet background matting.
+     - _On-Device AI Engine_ (experimental; model setup required): Real-ESRGAN upscaler, DeepFilterNet audio denoiser, BiRefNet background matting.
      - _Living Looks_: 6 cinematic motion & typography packs.
      - _Dual AI Agent_: Curated Joy Model gateway or BYOK OpenRouter with DPAPI encryption.
      - _Studio Deliver_: Social H.264, Reels 1080x1920, Shorts, YouTube 4K with cryptographic checksum verification.

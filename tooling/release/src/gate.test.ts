@@ -9,6 +9,7 @@ import {
   findProductionFixtureRegistrations,
   findTrackedArtifactViolations,
   RELEASE_COMMANDS,
+  readReadinessEvidenceFromWorkspace,
   releaseChildEnv,
   REQUIRED_BUILD_IDS,
   REQUIRED_EFFECT_MOTION_PREVIEW_COUNT,
@@ -23,12 +24,43 @@ import {
   type ReleaseSourceProvenance,
   type ReleaseWindowsAcceptance,
 } from './gate.js';
+import { REQUIRED_SCENARIOS, type ReadinessEvidence } from './readiness-evidence.js';
 
 const sourceProvenance = (commit = 'a'.repeat(40)): ReleaseSourceProvenance => ({
   commitSha: commit,
   treeHash: 'b'.repeat(40),
   lockfileSha256: 'c'.repeat(64),
   worktreeClean: true,
+});
+
+const readinessEvidenceFor = (candidateSha: string): ReadinessEvidence => ({
+  schemaVersion: 1,
+  candidateSha,
+  lockfileSha256: 'c'.repeat(64),
+  toolchainVersions: { node: '20.0.0' },
+  fixtureManifestSha256: 'd'.repeat(64),
+  startUtc: '2026-10-17T00:00:00Z',
+  endUtc: '2026-10-17T01:00:00Z',
+  commands: [{ name: 'run-tests', exitCode: 0 }],
+  passCount: REQUIRED_SCENARIOS.length,
+  failCount: 0,
+  skipCount: 0,
+  retryCount: 0,
+  scenarioResults: REQUIRED_SCENARIOS.map((id) => ({
+    id,
+    status: 'passed' as const,
+    retries: 0,
+    firstAttemptPassed: true,
+  })),
+  installerArtifacts: [
+    {
+      path: 'dist/installer.exe',
+      expectedSha256: 'e'.repeat(64),
+      observedSha256: 'e'.repeat(64),
+    },
+  ],
+  redactedPaths: [],
+  redactedHashes: {},
 });
 
 const windowsAcceptance = (
@@ -864,6 +896,7 @@ describe('JOY Studio 1.0 release gate', () => {
         {
           ...passingInput(),
           sourceProvenance: current,
+          readinessEvidence: readinessEvidenceFor(current.commitSha),
           browserJourneys: [journey],
           windowsAcceptance: currentWindows,
         },
@@ -1143,7 +1176,17 @@ describe('JOY Studio 1.0 release gate', () => {
 
     const fixtureHandlers = findProductionFixtureRegistrations(root);
     expect(fixtureHandlers).toEqual([]);
-    expect(evaluateReleaseGate({ ...passingInput(), fixtureHandlers }).passed).toBe(true);
+    // This test evaluates at the real clock. passingInput() carries a fixed audit date that
+    // ages out of the 45-day freshness window, so pin the audit to today here instead of
+    // letting the test turn red as the calendar moves.
+    const input = passingInput();
+    expect(
+      evaluateReleaseGate({
+        ...input,
+        fixtureHandlers,
+        featureStatus: { ...input.featureStatus, auditedOn: new Date().toISOString().slice(0, 10) },
+      }).passed,
+    ).toBe(true);
   });
 
   it('requires every build plus the manifest and SBOM', () => {
@@ -1768,6 +1811,7 @@ describe('JOY Studio 1.0 release gate', () => {
     const evidence = {
       ...passingInput(),
       sourceProvenance: dirtySource,
+      readinessEvidence: readinessEvidenceFor(dirtySource.commitSha),
       browserJourneys: [
         {
           ...passingInput().browserJourneys[0]!,
@@ -1795,5 +1839,268 @@ describe('JOY Studio 1.0 release gate', () => {
     );
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'source-provenance')?.status).toBe('failed');
+    expect(result.checks.find((check) => check.id === 'readiness-evidence')).toMatchObject({
+      status: 'failed',
+      critical: true,
+    });
+  });
+
+  describe('readiness-evidence contract', () => {
+    const writeWorkspaceEvidence = (root: string, candidateSha: string): ReadinessEvidence => {
+      const installerPath = join(root, 'dist/installer.exe');
+      const fixtureManifestPath = join(root, 'packages/test-fixtures/media/manifest.json');
+      mkdirSync(join(root, 'dist'), { recursive: true });
+      mkdirSync(join(root, 'packages/test-fixtures/media'), { recursive: true });
+      mkdirSync(join(root, 'test-output/readiness'), { recursive: true });
+      writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfile fixture');
+      writeFileSync(fixtureManifestPath, '{"fixture":"manifest"}');
+      writeFileSync(installerPath, 'installer fixture');
+      const installerSha256 = sha256File(installerPath);
+      const evidence: ReadinessEvidence = {
+        ...readinessEvidenceFor(candidateSha),
+        lockfileSha256: sha256File(join(root, 'pnpm-lock.yaml')),
+        fixtureManifestSha256: sha256File(fixtureManifestPath),
+        installerArtifacts: [
+          {
+            path: 'dist/installer.exe',
+            expectedSha256: installerSha256,
+            observedSha256: installerSha256,
+          },
+        ],
+        redactedPaths: ['dist/installer.exe'],
+        redactedHashes: { 'dist/installer.exe': installerSha256 },
+      };
+      writeFileSync(join(root, 'test-output/readiness/evidence.json'), JSON.stringify(evidence));
+      return evidence;
+    };
+
+    it('fails closed when readinessEvidence is null', () => {
+      const result = evaluateReleaseGate({
+        ...passingInput(),
+        readinessEvidence: null,
+      } as unknown as ReleaseGateInput);
+      expect(result.checks.find((c) => c.id === 'readiness-evidence')).toMatchObject({
+        status: 'failed',
+        critical: true,
+      });
+      expect(result.passed).toBe(false);
+    });
+
+    it('per-pass scope evaluates one pass without the aggregate readiness record', () => {
+      const input = { ...passingInput(), readinessEvidence: null } as unknown as ReleaseGateInput;
+      const failedIds = (result: ReturnType<typeof evaluateReleaseGate>) =>
+        result.checks.filter((c) => c.status === 'failed').map((c) => c.id);
+
+      const release = evaluateReleaseGate(input);
+      const pass = evaluateReleaseGate({ ...input, scope: 'pass' });
+
+      expect(failedIds(release)).toContain('readiness-evidence');
+      expect(pass.checks.some((c) => c.id === 'readiness-evidence')).toBe(false);
+      expect(failedIds(pass)).toEqual(
+        failedIds(release).filter((id) => id !== 'readiness-evidence'),
+      );
+    });
+
+    it('fails closed when a source-bound release omits readiness evidence', () => {
+      const result = evaluateReleaseGate({
+        ...passingInput(),
+        sourceProvenance: sourceProvenance('a'.repeat(40)),
+      } as unknown as ReleaseGateInput);
+      expect(result.checks.find((c) => c.id === 'readiness-evidence')).toMatchObject({
+        status: 'failed',
+        critical: true,
+      });
+    });
+
+    it('passes a complete well-formed record bound to sourceProvenance.commitSha', () => {
+      const commitSha = 'a'.repeat(40);
+      const result = evaluateReleaseGate({
+        ...passingInput(),
+        sourceProvenance: sourceProvenance(commitSha),
+        readinessEvidence: readinessEvidenceFor(commitSha),
+      } as unknown as ReleaseGateInput);
+      expect(result.checks.find((c) => c.id === 'readiness-evidence')).toMatchObject({
+        status: 'passed',
+        critical: true,
+      });
+    });
+
+    it('fails when readinessEvidence candidateSha differs from sourceProvenance.commitSha', () => {
+      const result = evaluateReleaseGate({
+        ...passingInput(),
+        sourceProvenance: sourceProvenance('a'.repeat(40)),
+        readinessEvidence: readinessEvidenceFor('b'.repeat(40)),
+      } as unknown as ReleaseGateInput);
+      expect(result.checks.find((c) => c.id === 'readiness-evidence')).toMatchObject({
+        status: 'failed',
+        critical: true,
+      });
+      expect(result.passed).toBe(false);
+    });
+
+    it('fails when a required scenario is missing from the record', () => {
+      const commitSha = 'a'.repeat(40);
+      const scenarioResults = readinessEvidenceFor(commitSha).scenarioResults.slice(1);
+      const record: ReadinessEvidence = {
+        ...readinessEvidenceFor(commitSha),
+        scenarioResults,
+        passCount: scenarioResults.length,
+      };
+      const result = evaluateReleaseGate({
+        ...passingInput(),
+        sourceProvenance: sourceProvenance(commitSha),
+        readinessEvidence: record,
+      } as unknown as ReleaseGateInput);
+      expect(result.checks.find((c) => c.id === 'readiness-evidence')).toMatchObject({
+        status: 'failed',
+        critical: true,
+      });
+      expect(result.passed).toBe(false);
+    });
+
+    it('fails when an installer artifact hash does not match', () => {
+      const commitSha = 'a'.repeat(40);
+      const record: ReadinessEvidence = {
+        ...readinessEvidenceFor(commitSha),
+        installerArtifacts: [
+          {
+            path: 'dist/installer.exe',
+            expectedSha256: 'e'.repeat(64),
+            observedSha256: 'f'.repeat(64),
+          },
+        ],
+      };
+      const result = evaluateReleaseGate({
+        ...passingInput(),
+        sourceProvenance: sourceProvenance(commitSha),
+        readinessEvidence: record,
+      } as unknown as ReleaseGateInput);
+      expect(result.checks.find((c) => c.id === 'readiness-evidence')).toMatchObject({
+        status: 'failed',
+        critical: true,
+      });
+      expect(result.passed).toBe(false);
+    });
+
+    it('loads workspace evidence only when lockfile, fixture manifest, and installer hashes match', () => {
+      const root = mkdtempSync(join(tmpdir(), 'joy-readiness-workspace-'));
+      const evidence = writeWorkspaceEvidence(root, 'a'.repeat(40));
+      expect(readReadinessEvidenceFromWorkspace(root, 'a'.repeat(40))).toEqual({
+        evidence,
+        blockers: [],
+      });
+    });
+
+    it('rejects workspace evidence when an installer changes after capture', () => {
+      const root = mkdtempSync(join(tmpdir(), 'joy-readiness-workspace-'));
+      writeWorkspaceEvidence(root, 'a'.repeat(40));
+      writeFileSync(join(root, 'dist/installer.exe'), 'changed installer');
+      const loaded = readReadinessEvidenceFromWorkspace(root, 'a'.repeat(40));
+      expect(loaded.evidence).toBeNull();
+      expect(loaded.blockers).toContain(
+        'installer artifact workspace hash mismatch for "dist/installer.exe"',
+      );
+    });
+
+    it('verifies a Windows installer hash from the captured runner receipt', () => {
+      const root = mkdtempSync(join(tmpdir(), 'joy-readiness-remote-installer-'));
+      const evidence = writeWorkspaceEvidence(root, 'a'.repeat(40));
+      const sourcePath = 'test-output/readiness/windows-pass-1.json';
+      const sourceHash = 'f'.repeat(64);
+      const source = {
+        desktopLifecycle: {
+          artifacts: { candidateSetupSha256: sourceHash },
+        },
+      };
+      mkdirSync(join(root, 'test-output/readiness'), { recursive: true });
+      writeFileSync(join(root, sourcePath), JSON.stringify(source));
+      const sourceEvidenceSha256 = sha256File(join(root, sourcePath));
+      const remoteEvidence: ReadinessEvidence = {
+        ...evidence,
+        installerArtifacts: [
+          {
+            path: 'remote/windows/joy-media-setup.exe',
+            expectedSha256: sourceHash,
+            observedSha256: sourceHash,
+            sourceEvidencePath: sourcePath,
+            sourceEvidenceKey: 'desktopLifecycle.artifacts.candidateSetupSha256',
+          },
+        ],
+        redactedPaths: [...evidence.redactedPaths, sourcePath],
+        redactedHashes: {
+          ...evidence.redactedHashes,
+          [sourcePath]: sourceEvidenceSha256,
+        },
+      };
+      writeFileSync(
+        join(root, 'test-output/readiness/evidence.json'),
+        JSON.stringify(remoteEvidence),
+      );
+      expect(readReadinessEvidenceFromWorkspace(root, 'a'.repeat(40))).toMatchObject({
+        evidence: remoteEvidence,
+        blockers: [],
+      });
+
+      source.desktopLifecycle.artifacts.candidateSetupSha256 = '9'.repeat(64);
+      writeFileSync(join(root, sourcePath), JSON.stringify(source));
+      const tampered = readReadinessEvidenceFromWorkspace(root, 'a'.repeat(40));
+      expect(tampered.evidence).toBeNull();
+      expect(tampered.blockers.join(' ')).toMatch(
+        /remote installer artifact hash|redacted artifact hash/i,
+      );
+    });
+
+    it('rejects workspace evidence when lockfile or fixture hashes are stale', () => {
+      const root = mkdtempSync(join(tmpdir(), 'joy-readiness-workspace-'));
+      writeWorkspaceEvidence(root, 'a'.repeat(40));
+      writeFileSync(join(root, 'pnpm-lock.yaml'), 'changed lockfile');
+      writeFileSync(
+        join(root, 'packages/test-fixtures/media/manifest.json'),
+        '{"fixture":"changed"}',
+      );
+      const loaded = readReadinessEvidenceFromWorkspace(root, 'a'.repeat(40));
+      expect(loaded.evidence).toBeNull();
+      expect(loaded.blockers).toContain(
+        'readiness evidence lockfile SHA-256 does not match the current workspace',
+      );
+      expect(loaded.blockers).toContain(
+        'readiness evidence fixture manifest SHA-256 does not match the current workspace',
+      );
+    });
+
+    it('rejects workspace artifact paths that attempt repository traversal', () => {
+      const root = mkdtempSync(join(tmpdir(), 'joy-readiness-workspace-'));
+      const evidence = writeWorkspaceEvidence(root, 'a'.repeat(40));
+      const hash = evidence.installerArtifacts[0]!.observedSha256;
+      const unsafeEvidence: ReadinessEvidence = {
+        ...evidence,
+        installerArtifacts: [
+          {
+            path: '../outside-installer.exe',
+            expectedSha256: hash,
+            observedSha256: hash,
+          },
+        ],
+        redactedPaths: ['../outside-installer.exe'],
+        redactedHashes: { '../outside-installer.exe': hash },
+      };
+      writeFileSync(
+        join(root, 'test-output/readiness/evidence.json'),
+        JSON.stringify(unsafeEvidence),
+      );
+      const loaded = readReadinessEvidenceFromWorkspace(root, 'a'.repeat(40));
+      expect(loaded.evidence).toBeNull();
+      expect(loaded.blockers.some((blocker) => /repository-relative path/i.test(blocker))).toBe(
+        true,
+      );
+      expect(loaded.blockers.join(' ')).not.toContain('../outside-installer.exe');
+    });
+
+    it('rejects missing workspace readiness evidence', () => {
+      const root = mkdtempSync(join(tmpdir(), 'joy-readiness-workspace-'));
+      const loaded = readReadinessEvidenceFromWorkspace(root, 'a'.repeat(40));
+      expect(loaded.evidence).toBeNull();
+      expect(loaded.blockers).toContain('test-output/readiness/evidence.json is missing');
+    });
   });
 });

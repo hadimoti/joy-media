@@ -1,4 +1,4 @@
-import { once } from 'node:events';
+import { listenOnFetchablePort } from './test-fetchable-port.js';
 import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LocalControlPlane } from './control-plane.js';
@@ -50,11 +50,8 @@ describe('built-in JOY Agent route retirement', () => {
       mediaAuth: new DisabledMediaAuth(),
     });
     servers.push(server);
-    server.listen(0, '127.0.0.1');
-    await once(server, 'listening');
-    const address = server.address();
-    if (address === null || typeof address === 'string') throw new Error('not listening');
-    const response = await fetch(`http://127.0.0.1:${address.port}/v1/projects/p/joy-code/plans`, {
+    const port = await listenOnFetchablePort(server);
+    const response = await fetch(`http://127.0.0.1:${port}/v1/projects/p/joy-code/plans`, {
       method: 'POST',
       headers: { authorization: 'Bearer owner', 'content-type': 'application/json' },
       body: JSON.stringify({ prompt: 'ignored' }),

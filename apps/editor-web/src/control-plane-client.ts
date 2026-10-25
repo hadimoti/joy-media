@@ -1,6 +1,8 @@
 import { DerivativeAuthorityRevokedError } from './asset-resolver.js';
 import { getStoredMediaToken } from './media-session.js';
+import { SESSION_LEFT_PROJECT_MESSAGE, SESSION_REQUIRED_MESSAGE } from './control-plane-scope.js';
 import { getRemoteApiBaseUrl } from './desktop-client.js';
+import { isUnboundControlPlaneProjectId } from './project-control-plane.js';
 import type { GpuPreviewFrameRequest } from '@joy-media/job-protocol';
 import type {
   JoyProjectV1,
@@ -9,6 +11,25 @@ import type {
 } from '@joy-media/project-schema';
 
 const browserProjections = import('./browser-projections.js');
+
+/** Shown to the user when a cloud operation names an editor project that no signed-in owner has bound. */
+export const UNBOUND_PROJECT_MESSAGE =
+  'This project is not connected to a signed-in account yet. Sign in, then try again.';
+
+/**
+ * Refuses an editor project that no ready owner has bound. Every project-scoped request checks
+ * this before it builds its URL or body, so an unbound id never reaches the server, where it
+ * could create or read a project.
+ */
+function boundProjectId(projectId: string): string {
+  if (isUnboundControlPlaneProjectId(projectId)) throw new Error(UNBOUND_PROJECT_MESSAGE);
+  return projectId;
+}
+
+/** The path prefix of one bound project. */
+function projectPath(projectId: string): string {
+  return `/v1/projects/${encodeURIComponent(boundProjectId(projectId))}`;
+}
 
 export interface BrowserWorker {
   readonly id: string;
@@ -307,9 +328,10 @@ export class BrowserControlPlaneClient {
     return this.coalescedGet('/v1/workers', WORKER_READ_CACHE_TTL_MS);
   }
   async openGpuPreviewSession(projectId: string): Promise<BrowserGpuPreviewSession> {
-    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/preview-sessions`, {});
+    return this.post(`${projectPath(projectId)}/preview-sessions`, {});
   }
   async submitGpuPreviewFrame(request: GpuPreviewFrameRequest): Promise<void> {
+    boundProjectId(request.projectId);
     await this.post(
       `/v1/preview-sessions/${encodeURIComponent(request.sessionId)}/frames`,
       request,
@@ -361,17 +383,20 @@ export class BrowserControlPlaneClient {
       method: 'DELETE',
     });
   }
-  async jobs(projectId: string): Promise<readonly BrowserJob[]> {
+  /** `assertCurrent` runs after the projections load, right before the request is sent. */
+  async jobs(projectId: string, assertCurrent?: () => void): Promise<readonly BrowserJob[]> {
+    const storedToken = this.tokenProvider();
     const { browserJobList } = await browserProjections;
-    return browserJobList(
-      await this.coalescedGet<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/jobs`),
-    );
+    this.assertTokenUnchanged(storedToken);
+    assertCurrent?.();
+    return browserJobList(await this.coalescedGet<unknown>(`${projectPath(projectId)}/jobs`));
   }
-  async assets(projectId: string): Promise<readonly BrowserAsset[]> {
+  async assets(projectId: string, assertCurrent?: () => void): Promise<readonly BrowserAsset[]> {
+    const storedToken = this.tokenProvider();
     const { browserAssetList } = await browserProjections;
-    return browserAssetList(
-      await this.get<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/assets`),
-    );
+    this.assertTokenUnchanged(storedToken);
+    assertCurrent?.();
+    return browserAssetList(await this.get<unknown>(`${projectPath(projectId)}/assets`));
   }
   /** Curated service-published cloud library visible to entitled Joy users. */
   async sharedCloudAssets(): Promise<readonly BrowserAsset[]> {
@@ -401,10 +426,14 @@ export class BrowserControlPlaneClient {
   async startStockVideoImport(
     projectId: string,
     catalogId: string,
+    assertCurrent?: () => void,
   ): Promise<BrowserStockVideoImport> {
+    const storedToken = this.tokenProvider();
     const { browserStockVideoImport } = await browserProjections;
+    this.assertTokenUnchanged(storedToken);
+    assertCurrent?.();
     return browserStockVideoImport(
-      await this.post<unknown>(`/v1/projects/${encodeURIComponent(projectId)}/stock-video-import`, {
+      await this.post<unknown>(`${projectPath(projectId)}/stock-video-import`, {
         catalogId,
       }),
     );
@@ -412,11 +441,15 @@ export class BrowserControlPlaneClient {
   async stockVideoImportStatus(
     projectId: string,
     importId: string,
+    assertCurrent?: () => void,
   ): Promise<BrowserStockVideoImport> {
+    const storedToken = this.tokenProvider();
     const { browserStockVideoImport } = await browserProjections;
+    this.assertTokenUnchanged(storedToken);
+    assertCurrent?.();
     return browserStockVideoImport(
       await this.get<unknown>(
-        `/v1/projects/${encodeURIComponent(projectId)}/stock-video-imports/${encodeURIComponent(importId)}`,
+        `${projectPath(projectId)}/stock-video-imports/${encodeURIComponent(importId)}`,
       ),
     );
   }
@@ -425,9 +458,13 @@ export class BrowserControlPlaneClient {
    * workspace focused on its own media while the unscoped catalog remains
    * available to cross-project library consumers.
    */
-  async myAssets(projectId?: string): Promise<readonly BrowserAsset[]> {
-    const query = projectId === undefined ? '' : `?projectId=${encodeURIComponent(projectId)}`;
+  async myAssets(projectId?: string, assertCurrent?: () => void): Promise<readonly BrowserAsset[]> {
+    const storedToken = this.tokenProvider();
+    const query =
+      projectId === undefined ? '' : `?projectId=${encodeURIComponent(boundProjectId(projectId))}`;
     const { browserAssetList } = await browserProjections;
+    this.assertTokenUnchanged(storedToken);
+    assertCurrent?.();
     return browserAssetList(await this.get<unknown>(`/v1/library/my-assets${query}`));
   }
   /** Safe catalog only: model IDs and lifecycle state, never secret references or values. */
@@ -439,7 +476,7 @@ export class BrowserControlPlaneClient {
   }
   /** Fetch a curated original or a cloud-backed original owned by this identity. */
   async sharedCloudOriginalBytes(assetId: string): Promise<Blob> {
-    const token = await this.assertion();
+    const token = this.assertion();
     const response = await fetch(
       `${this.apiUrl.replace(/\/$/, '')}/v1/library/cloud-assets/${encodeURIComponent(assetId)}/content`,
       { method: 'GET', headers: { authorization: `Bearer ${token}` } },
@@ -469,11 +506,7 @@ export class BrowserControlPlaneClient {
     signal?: AbortSignal,
   ): Promise<Blob> {
     const token = await this.assertion();
-    const endpoint =
-      this.apiUrl.replace(/\/$/, '') +
-      '/v1/projects/' +
-      encodeURIComponent(projectId) +
-      '/export/remux';
+    const endpoint = this.apiUrl.replace(/\/$/, '') + projectPath(projectId) + '/export/remux';
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -493,20 +526,19 @@ export class BrowserControlPlaneClient {
   }
 
   async ensureProject(id: string, title: string): Promise<void> {
-    await this.post('/v1/projects/ensure', { id, title });
+    // The server creates the project for the calling session, so an unbound id must not reach it.
+    await this.post('/v1/projects/ensure', { id: boundProjectId(id), title });
   }
   async derivatives(projectId: string, assetId: string): Promise<readonly BrowserDerivative[]> {
-    return this.get(
-      `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives`,
-    );
+    return this.get(`${projectPath(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives`);
   }
   async registerAsset(projectId: string, asset: BrowserAssetRegistration): Promise<BrowserAsset> {
-    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/assets`, asset);
+    return this.post(`${projectPath(projectId)}/assets`, asset);
   }
   /** Associate a durable library asset with the active project while keeping its stable ID. */
   async associateAsset(projectId: string, assetId: string): Promise<BrowserAsset> {
     return this.post(
-      `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/associate`,
+      `${projectPath(projectId)}/assets/${encodeURIComponent(assetId)}/associate`,
       {},
     );
   }
@@ -519,12 +551,9 @@ export class BrowserControlPlaneClient {
     readonly cloudObjectsPurged: number;
     readonly cloudObjectPurgeFailures: number;
   }> {
-    return this.request(
-      `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
-      {
-        method: 'DELETE',
-      },
-    );
+    return this.request(`${projectPath(projectId)}/assets/${encodeURIComponent(assetId)}`, {
+      method: 'DELETE',
+    });
   }
   /** Upload original media bytes to private cloud (ParsPack) and apply agent tags. */
   async uploadAssetOriginal(
@@ -532,17 +561,30 @@ export class BrowserControlPlaneClient {
     asset: Pick<BrowserAsset, 'id' | 'sha256' | 'bytes' | 'descriptor'>,
     file: Blob,
     onProgress?: (ratio: number) => void,
+    // Runs before each request this upload sends. A session that leaves the project mid-upload
+    // stops at its next request, rather than sending the rest of the file for that project.
+    assertCurrent: () => void = () => undefined,
   ): Promise<BrowserAsset> {
+    // Refuse an unbound project before any progress is reported or any byte is sent.
+    const route = projectPath(projectId);
     const token = this.assertion();
     if (file.size !== asset.bytes) {
       throw new Error('selected media bytes no longer match the registered asset');
     }
     if (file.size > RESUMABLE_ORIGINAL_UPLOAD_THRESHOLD_BYTES) {
-      return this.uploadAssetOriginalInParts(projectId, asset, file, token, onProgress);
+      return this.uploadAssetOriginalInParts(
+        projectId,
+        asset,
+        file,
+        token,
+        onProgress,
+        assertCurrent,
+      );
     }
     onProgress?.(0.05);
+    assertCurrent();
     const response = await fetch(
-      `${this.apiUrl.replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.id)}/original`,
+      `${this.apiUrl.replace(/\/$/, '')}${route}/assets/${encodeURIComponent(asset.id)}/original`,
       {
         method: 'POST',
         headers: {
@@ -568,8 +610,9 @@ export class BrowserControlPlaneClient {
     file: Blob,
     token: string,
     onProgress?: (ratio: number) => void,
+    assertCurrent: () => void = () => undefined,
   ): Promise<BrowserAsset> {
-    const baseUrl = `${this.apiUrl.replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.id)}/original/uploads`;
+    const baseUrl = `${this.apiUrl.replace(/\/$/, '')}${projectPath(projectId)}/assets/${encodeURIComponent(asset.id)}/original/uploads`;
     const identityHeaders = {
       authorization: `Bearer ${token}`,
       'x-joy-sha256': asset.sha256,
@@ -577,6 +620,7 @@ export class BrowserControlPlaneClient {
       'x-joy-mime-type': asset.descriptor.mimeType,
     };
     onProgress?.(0.02);
+    assertCurrent();
     let upload = await originalUploadStatus(
       await fetch(baseUrl, { method: 'POST', headers: identityHeaders }),
       'create',
@@ -593,6 +637,7 @@ export class BrowserControlPlaneClient {
             asset.descriptor.mimeType,
           );
           const partSha256 = await sha256Hex(part);
+          assertCurrent();
           upload = await originalUploadStatus(
             await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}/parts/${partIndex}`, {
               method: 'PUT',
@@ -611,6 +656,7 @@ export class BrowserControlPlaneClient {
         onProgress?.(0.05 + (0.8 * (partIndex + 1)) / upload.partCount);
       }
     }
+    assertCurrent();
     upload = await originalUploadStatus(
       await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}/complete`, {
         method: 'POST',
@@ -623,6 +669,7 @@ export class BrowserControlPlaneClient {
     assertOriginalUploadSession(upload, sessionId);
     onProgress?.(0.9);
     for (let poll = 0; poll < RESUMABLE_ORIGINAL_UPLOAD_POLL_LIMIT; poll += 1) {
+      assertCurrent();
       const response = await fetch(`${baseUrl}/${encodeURIComponent(sessionId)}`, {
         method: 'GET',
         headers: identityHeaders,
@@ -659,9 +706,9 @@ export class BrowserControlPlaneClient {
   }
   /** Fetches an owner-authorized original from private object storage. */
   async originalBytes(projectId: string, assetId: string): Promise<Blob> {
-    const token = await this.assertion();
+    const token = this.assertion();
     const response = await fetch(
-      `${this.apiUrl.replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/original`,
+      `${this.apiUrl.replace(/\/$/, '')}${projectPath(projectId)}/assets/${encodeURIComponent(assetId)}/original`,
       { method: 'GET', headers: { authorization: `Bearer ${token}` } },
     );
     if (response.status === 401 || response.status === 403)
@@ -670,29 +717,26 @@ export class BrowserControlPlaneClient {
     return response.blob();
   }
   async retagAsset(projectId: string, assetId: string): Promise<BrowserAsset> {
-    return this.post(
-      `/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/retag`,
-      {},
-    );
+    return this.post(`${projectPath(projectId)}/assets/${encodeURIComponent(assetId)}/retag`, {});
   }
   async setAssetSync(
     projectId: string,
     enabled: boolean,
   ): Promise<{ readonly assetSyncEnabled: boolean }> {
-    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/asset-sync`, { enabled });
+    return this.post(`${projectPath(projectId)}/asset-sync`, { enabled });
   }
   async createProject(id: string, title: string): Promise<void> {
-    await this.post('/v1/projects', { id, title });
+    await this.post('/v1/projects', { id: boundProjectId(id), title });
   }
   async project(id: string): Promise<BrowserProjectMetadata> {
-    return this.get(`/v1/projects/${encodeURIComponent(id)}`);
+    return this.get(projectPath(id));
   }
   async renameProject(
     id: string,
     title: string,
     baseRevision: number,
   ): Promise<BrowserProjectMetadata> {
-    return this.request(`/v1/projects/${encodeURIComponent(id)}`, {
+    return this.request(projectPath(id), {
       method: 'PATCH',
       body: JSON.stringify({ title, baseRevision }),
       headers: { 'content-type': 'application/json' },
@@ -704,24 +748,24 @@ export class BrowserControlPlaneClient {
     title: string,
     baseRevision: number,
   ): Promise<BrowserProjectDuplicateResult> {
-    return this.post(`/v1/projects/${encodeURIComponent(sourceId)}/duplicate`, {
-      id,
+    return this.post(`${projectPath(sourceId)}/duplicate`, {
+      id: boundProjectId(id),
       title,
       baseRevision,
     });
   }
   async trashProject(id: string, baseRevision: number): Promise<BrowserProjectMetadata> {
-    return this.post(`/v1/projects/${encodeURIComponent(id)}/trash`, { baseRevision });
+    return this.post(`${projectPath(id)}/trash`, { baseRevision });
   }
   async restoreProject(id: string, baseRevision: number): Promise<BrowserProjectMetadata> {
-    return this.post(`/v1/projects/${encodeURIComponent(id)}/restore`, { baseRevision });
+    return this.post(`${projectPath(id)}/restore`, { baseRevision });
   }
   async deleteProject(id: string): Promise<{
     readonly id: string;
     readonly cloudObjectsPurged: number;
     readonly cloudObjectPurgeFailures: number;
   }> {
-    return this.request(`/v1/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return this.request(projectPath(id), { method: 'DELETE' });
   }
   async syncProjectDocument(
     projectId: string,
@@ -737,7 +781,7 @@ export class BrowserControlPlaneClient {
       readonly lookInstances?: LookInstancesDocument;
     },
   ): Promise<{ readonly projectId: string; readonly revisionId: ProjectRevisionId }> {
-    return this.request(`/v1/projects/${encodeURIComponent(projectId)}/document`, {
+    return this.request(`${projectPath(projectId)}/document`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(params),
@@ -752,12 +796,12 @@ export class BrowserControlPlaneClient {
         ? '?allowMissing=true'
         : `?revisionId=${encodeURIComponent(revisionId)}`;
     const document = await this.get<BrowserProjectDocument | null>(
-      `/v1/projects/${encodeURIComponent(projectId)}/document${query}`,
+      `${projectPath(projectId)}/document${query}`,
     );
     return document ?? undefined;
   }
   async enqueueAssetThumbnail(projectId: string, id: string, assetId: string): Promise<BrowserJob> {
-    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
+    return this.post(`${projectPath(projectId)}/jobs`, {
       id,
       type: 'asset.thumbnail',
       assetId,
@@ -784,7 +828,7 @@ export class BrowserControlPlaneClient {
     assetId: string,
     payload?: Readonly<Record<string, unknown>>,
   ): Promise<BrowserJob> {
-    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
+    return this.post(`${projectPath(projectId)}/jobs`, {
       id,
       type,
       assetId,
@@ -797,7 +841,7 @@ export class BrowserControlPlaneClient {
     assetId: string,
     payload: Readonly<Record<string, unknown>>,
   ): Promise<BrowserJob> {
-    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
+    return this.post(`${projectPath(projectId)}/jobs`, {
       id,
       type: 'render.export',
       assetId,
@@ -839,7 +883,7 @@ export class BrowserControlPlaneClient {
       readonly params?: Record<string, unknown>;
     },
   ): Promise<BrowserJob> {
-    return this.post(`/v1/projects/${encodeURIComponent(projectId)}/jobs`, {
+    return this.post(`${projectPath(projectId)}/jobs`, {
       id,
       type,
       prompt,
@@ -855,22 +899,16 @@ export class BrowserControlPlaneClient {
     return this.post(`/v1/workers/${encodeURIComponent(workerId)}/revoke`, {});
   }
   async cancel(projectId: string, jobId: string): Promise<BrowserJob> {
-    return this.post(
-      `/v1/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(jobId)}/cancel`,
-      {},
-    );
+    return this.post(`${projectPath(projectId)}/jobs/${encodeURIComponent(jobId)}/cancel`, {});
   }
   async retry(projectId: string, jobId: string): Promise<BrowserJob> {
-    return this.post(
-      `/v1/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(jobId)}/retry`,
-      {},
-    );
+    return this.post(`${projectPath(projectId)}/jobs/${encodeURIComponent(jobId)}/retry`, {});
   }
   /** Fetches private derivative bytes only from the authenticated Media API. */
   async derivativeBytes(projectId: string, assetId: string, derivativeId: string): Promise<Blob> {
-    const token = await this.assertion();
+    const token = this.assertion();
     const response = await fetch(
-      `${this.apiUrl.replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives/${encodeURIComponent(derivativeId)}/content`,
+      `${this.apiUrl.replace(/\/$/, '')}${projectPath(projectId)}/assets/${encodeURIComponent(assetId)}/derivatives/${encodeURIComponent(derivativeId)}/content`,
       { method: 'GET', headers: { authorization: `Bearer ${token}` } },
     );
     if (response.status === 401 || response.status === 403)
@@ -975,7 +1013,7 @@ export class BrowserControlPlaneClient {
     readonly strength?: number;
   }): Promise<BrowserSpectralDenoiseResult> {
     return this.post('/v1/providers/audio/denoise', {
-      projectId: input.projectId,
+      projectId: boundProjectId(input.projectId),
       operationId: input.operationId,
       assetId: input.assetId,
       mediaBase64: await blobToBase64(input.media),
@@ -989,7 +1027,7 @@ export class BrowserControlPlaneClient {
     projectId: string,
     operationId: string,
   ): Promise<BrowserSpectralDenoiseOperation | undefined> {
-    const query = new URLSearchParams({ projectId, operationId });
+    const query = new URLSearchParams({ projectId: boundProjectId(projectId), operationId });
     try {
       return await this.get(`/v1/providers/audio/denoise?${query.toString()}`);
     } catch (error) {
@@ -1056,8 +1094,13 @@ export class BrowserControlPlaneClient {
   }
   private assertion(): string {
     const token = this.tokenProvider();
-    if (token === undefined) throw new Error('JOY Media session required');
+    if (token === undefined) throw new Error(SESSION_REQUIRED_MESSAGE);
     return token;
+  }
+  // A project read captures the stored token before the projections module loads. If the token changed
+  // while it loaded, the request would use a token the editor did not check, so refuse it.
+  private assertTokenUnchanged(token: string | undefined): void {
+    if (this.tokenProvider() !== token) throw new Error(SESSION_LEFT_PROJECT_MESSAGE);
   }
 }
 

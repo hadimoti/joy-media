@@ -12,6 +12,9 @@
 
 export const PACKAGE_NAME = '@joy-media/motion-core' as const;
 
+export { buildTitleSceneFrame } from './content-templates/scene-frame.js';
+export type { TitleSceneFrame, TitleSceneFrameInput } from './content-templates/scene-frame.js';
+
 export type {
   AnimatablePropertyV1,
   AnimationCurveV1,
@@ -43,6 +46,25 @@ export {
 } from './curve.js';
 
 export { sampleSpatialPath } from './spatial.js';
+export { P0_PAINT_POLICY } from './content-templates/catalog.js';
+
+export {
+  P0_TEMPLATES,
+  serializeTemplate,
+  templateSha256,
+  compileTitleInstance,
+  sampleTitleMotion,
+  createTimelineElementBindingPlacement,
+} from './content-templates/index.js';
+export type {
+  P0TemplateDefinition,
+  TextMeasure,
+  TitleCompileErrorCode,
+  TitleCompileRequest,
+  TitleCompileResult,
+  SampledTitleMotion,
+  TimelineElementBindingPlacement,
+} from './content-templates/index.js';
 
 export type { SampledAnimationValueV2 } from './property-sampling.js';
 export {

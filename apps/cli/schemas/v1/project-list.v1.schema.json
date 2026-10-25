@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.joy.media/cli/v1/project-list.schema.json",
+  "title": "JOY Media CLI project list v1",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "title",
+      "revision",
+      "updatedAt",
+      "clipCount",
+      "trackCount",
+      "durationSeconds"
+    ],
+    "properties": {
+      "id": { "type": "string", "minLength": 1 },
+      "title": { "type": "string" },
+      "revision": { "type": "integer", "minimum": 1 },
+      "updatedAt": { "type": "string", "format": "date-time" },
+      "clipCount": { "type": "integer", "minimum": 0 },
+      "trackCount": { "type": "integer", "minimum": 0 },
+      "durationSeconds": { "type": "integer", "minimum": 0 }
+    },
+    "additionalProperties": false
+  }
+}

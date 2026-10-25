@@ -1,5 +1,6 @@
+import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 const pkg = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
 
@@ -29,6 +30,9 @@ export default defineConfig({
       '@joy-media/audio-core': pkg('./packages/audio-core/src/index.ts'),
       '@joy-media/project-persistence/desktop': pkg(
         './packages/project-persistence/src/desktop.ts',
+      ),
+      '@joy-media/project-persistence/editor-storage': pkg(
+        './packages/project-persistence/src/editor-storage.ts',
       ),
       '@joy-media/project-persistence/browser': pkg(
         './packages/project-persistence/src/browser.ts',
@@ -61,12 +65,39 @@ export default defineConfig({
       '@joy-media/workflow-engine': pkg('./packages/workflow-engine/src/index.ts'),
       '@joy-media/worker': pkg('./apps/worker/src/index.ts'),
       '@joy-media/adapter-openrouter': pkg('./packages/adapter-openrouter/src/index.ts'),
+      '@joy-media/adapter-mistral': pkg('./packages/adapter-mistral/src/index.ts'),
+      '@joy-media/transition-shaders': pkg('./packages/transition-shaders/src/index.ts'),
     },
   },
   test: {
+    // The full suite runs process-level CLI tests alongside CPU-heavy render
+    // acceptance tests. Keep finite hang protection without turning load spikes
+    // into false product failures; behavior tests use their own explicit limits.
+    // Cap workers so a large host does not starve them of CPU: a worker that stops
+    // answering vitest's task-update RPC fails the run even when every test passes.
+    // GitHub-hosted runners report four vCPUs. Two workers there still timed out the task-update
+    // RPC on a run where every test passed, so hosted lanes use one worker. Every other
+    // environment keeps the full cap.
+    maxWorkers:
+      process.env.RUNNER_ENVIRONMENT === 'github-hosted'
+        ? 1
+        : Math.max(1, Math.min(8, availableParallelism() - 1)),
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     include: [
       '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
+      'apps/desktop/scripts/install-electron-windows.test.mjs',
       'tests/e2e/helpers/browser-console-audit.unit.ts',
+      'tests/desktop/project-request-audit.unit.ts',
+    ],
+    exclude: [
+      ...configDefaults.exclude,
+      // Chromium pixel goldens run in the P0 lane, one worker at a time, where their capture
+      // budgets are not starved by parallel workers.
+      'tooling/golden-render/src/first-party-scenes.test.ts',
+      'packages/html-scene-runtime/src/**/*.e2e.test.ts',
+      'apps/editor-web/src/p0-desktop-handoff.test.ts',
+      'apps/cli/src/commands/p0-design.e2e.test.ts',
     ],
     environment: 'node',
   },

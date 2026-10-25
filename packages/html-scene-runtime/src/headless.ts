@@ -9,6 +9,8 @@ import { createHash } from 'node:crypto';
 import type { Rational, TimeUs } from '@joy-media/project-schema';
 import type { SandboxedReactScene } from './runtime.js';
 import type { SceneResolvers } from './resolver.js';
+import type { ScenePaintLine } from './preview-protocol.js';
+import type { ScenePaintFrameV1 } from '@joy-media/project-schema';
 
 export interface HeadlessCaptureRequest {
   readonly markup: string;
@@ -19,15 +21,28 @@ export interface HeadlessCaptureRequest {
   readonly frameRate: Rational;
   readonly locale: string;
   readonly seed: string;
+  /** Explicit shaped text lines forwarded to the shared preview painter. */
+  readonly lines?: readonly ScenePaintLine[];
+  readonly paint?: ScenePaintFrameV1;
 }
 
 export interface HeadlessSurface {
   readonly rgba: Uint8Array;
+  readonly loadedFonts?: readonly string[];
 }
 
 /** Implemented by the pinned Chromium/runtime process in WP-04.4 consumers. */
 export interface HeadlessSceneDriver {
   capture(request: HeadlessCaptureRequest): HeadlessSurface;
+  captureAsync?(request: HeadlessCaptureRequest, signal?: AbortSignal): Promise<HeadlessSurface>;
+  measureTextWidths?(
+    requests: readonly { text: string; fontSizePx: number; weight: 400 | 700 }[],
+  ): number[];
+  close?(): void;
+  closeAsync?(deadlineAt?: number): Promise<void>;
+  readonly browserVersion?: string | undefined;
+  readonly browserProcessId?: number | undefined;
+  readonly profileDirectory?: string | undefined;
 }
 
 export interface SceneCaptureRequest<TVariables> {
@@ -39,6 +54,9 @@ export interface SceneCaptureRequest<TVariables> {
   readonly resolvers?: SceneResolvers;
   /** Immutable asset/font revision, required when resolver handles are supplied. */
   readonly resolverKey?: string;
+  /** Optional explicit text-line boxes painted identically by desktop and headless. */
+  readonly lines?: readonly ScenePaintLine[];
+  readonly paint?: ScenePaintFrameV1;
 }
 
 export interface CapturedSceneSurface {
@@ -121,6 +139,37 @@ export function captureSceneSurface<TVariables>(
   if (request.resolvers !== undefined && request.resolverKey === undefined) {
     throw new RangeError('scene capture with resolvers requires an immutable resolverKey');
   }
+  const surface = driver.capture(sceneCaptureRequest(scene, request));
+  return recordSceneSurface(scene, request, key, surface, cache);
+}
+
+/**
+ * Same result as captureSceneSurface, but the browser runs asynchronously. Use it where the calling
+ * thread must stay responsive while Chromium starts, such as a test runner's worker.
+ */
+export async function captureSceneSurfaceAsync<TVariables>(
+  scene: SandboxedReactScene<TVariables>,
+  driver: HeadlessSceneDriver,
+  request: SceneCaptureRequest<TVariables>,
+  cache = new SceneCaptureCache(),
+): Promise<CapturedSceneSurface> {
+  const key = frameKey(scene, request);
+  const cached = cache.getFrame(key);
+  if (cached !== undefined) return cached;
+  if (request.resolvers !== undefined && request.resolverKey === undefined) {
+    throw new RangeError('scene capture with resolvers requires an immutable resolverKey');
+  }
+  if (driver.captureAsync === undefined) {
+    throw new RangeError('scene capture driver does not support asynchronous capture');
+  }
+  const surface = await driver.captureAsync(sceneCaptureRequest(scene, request));
+  return recordSceneSurface(scene, request, key, surface, cache);
+}
+
+function sceneCaptureRequest<TVariables>(
+  scene: SandboxedReactScene<TVariables>,
+  request: SceneCaptureRequest<TVariables>,
+): HeadlessCaptureRequest {
   const frame = scene.render({
     timeUs: request.timeUs,
     frameRate: request.frameRate,
@@ -130,7 +179,7 @@ export function captureSceneSurface<TVariables>(
     ...(request.resolvers === undefined ? {} : { resolvers: request.resolvers }),
   });
   const { width, height } = scene.manifest.viewport;
-  const surface = driver.capture({
+  return {
     markup: frame.markup,
     width,
     height,
@@ -139,7 +188,19 @@ export function captureSceneSurface<TVariables>(
     frameRate: request.frameRate,
     locale: request.locale,
     seed: request.seed,
-  });
+    ...(request.lines === undefined ? {} : { lines: request.lines }),
+    ...(request.paint === undefined ? {} : { paint: request.paint }),
+  };
+}
+
+function recordSceneSurface<TVariables>(
+  scene: SandboxedReactScene<TVariables>,
+  request: SceneCaptureRequest<TVariables>,
+  key: string,
+  surface: HeadlessSurface,
+  cache: SceneCaptureCache,
+): CapturedSceneSurface {
+  const { width, height } = scene.manifest.viewport;
   const expectedLength = width * height * 4;
   if (surface.rgba.length !== expectedLength)
     throw new RangeError(`headless capture must return ${expectedLength} RGBA bytes`);
@@ -238,6 +299,8 @@ function frameKey<TVariables>(
       locale: request.locale,
       variables: request.variables,
       resolverKey: request.resolverKey ?? '',
+      lines: request.lines ?? [],
+      paint: request.paint ?? null,
     }),
   );
 }

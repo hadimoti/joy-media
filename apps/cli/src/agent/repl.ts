@@ -1,14 +1,13 @@
 /* global console, process */
 import * as readline from 'node:readline/promises';
-import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { compileLook, editorialClean } from '@joy-media/motion-core';
 import { c, logInfo, logSuccess, logWarn, printBanner, printTable } from '../utils/logger.js';
-import { saveProject } from '../utils/project-loader.js';
-import { runJoyAgent } from './joy-agent.js';
+import { saveProject, type CliProjectDocument } from '../utils/project-loader.js';
+import { describeOperation, runJoyAgent } from './joy-agent.js';
 import type { ResolveProviderOptions } from './provider.js';
 
 export interface ReplOptions {
-  project: JoyProjectV1;
+  project: CliProjectDocument;
   revision: number;
   source: 'sqlite' | 'file';
   path: string;
@@ -50,17 +49,62 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
     `  ${c('Type', 'dim')} ${c('/help', 'bold')} ${c('for commands, or ask Joy Agent in natural language.', 'dim')}\n`,
   );
 
+  // Piped (non-TTY) stdin is a first-class input for AI callers: read it as a
+  // stream of lines. `rl.question()` dropped every line that arrived while no
+  // question was pending (so only the first piped command ran) and never
+  // settled on EOF.
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
+    terminal: interactive,
   });
-
+  let interfaceClosed = false;
+  const queuedLines: string[] = [];
+  let resolveNextLine: ((line: string | undefined) => void) | undefined;
+  rl.on('line', (line: string) => {
+    if (resolveNextLine) {
+      const resolve = resolveNextLine;
+      resolveNextLine = undefined;
+      resolve(line);
+    } else {
+      queuedLines.push(line);
+    }
+  });
+  rl.on('close', () => {
+    interfaceClosed = true;
+    resolveNextLine?.(undefined);
+    resolveNextLine = undefined;
+  });
+  const nextLine = (): Promise<string | undefined> => {
+    const queued = queuedLines.shift();
+    if (queued !== undefined) return Promise.resolve(queued);
+    if (interfaceClosed) return Promise.resolve(undefined);
+    return new Promise((resolve) => {
+      resolveNextLine = resolve;
+    });
+  };
+  const ask = async (prompt: string): Promise<string | undefined> => {
+    rl.setPrompt(prompt);
+    const pendingLine = nextLine();
+    if (interactive) rl.prompt();
+    const line = await pendingLine;
+    if (line === undefined) {
+      console.log();
+      return undefined;
+    }
+    return line;
+  };
   let currentProject = options.project;
   let currentRev = options.revision;
 
   try {
     while (true) {
-      const input = await rl.question(`${c('joy-agent', 'magenta')}> `);
+      const input = await ask(`${c('joy-agent', 'magenta')}> `);
+      if (input === undefined) {
+        console.log(c('Goodbye!', 'dim'));
+        break;
+      }
       const trimmed = input.trim();
 
       if (!trimmed) continue;
@@ -162,41 +206,37 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
 
         if (totalStaged > 0) {
           console.log(`\n  ${c('Proposed Modifications:', 'bold')}`);
-          for (const op of result.staged.timelineOps) {
-            console.log(
-              `    ${c('+', 'green')} Timeline: ${c(op.kind, 'bold')} on track ${op.kind === 'insert' || op.kind === 'move' ? (op as { trackId: string }).trackId : 'current'}`,
-            );
-          }
-          for (const op of result.staged.documentOps) {
-            console.log(
-              `    ${c('+', 'green')} Document: ${c(op.kind, 'bold')} object ${(op as { objectId: string }).objectId}`,
-            );
+          for (const op of [...result.staged.timelineOps, ...result.staged.documentOps]) {
+            console.log(`    ${c('+', 'green')} ${describeOperation(op)}`);
           }
 
-          const answer = await rl.question(
-            `\n  ${c('Apply these changes to project? [y/N]:', 'yellow')} `,
-          );
+          const answer =
+            (await ask(`\n  ${c('Apply these changes to project? [y/N]:', 'yellow')} `)) ?? '';
           if (answer.trim().toLowerCase() === 'y' || answer.trim().toLowerCase() === 'yes') {
-            const applied = await runJoyAgent({
-              project: currentProject,
-              revision: currentRev,
-              prompt: trimmed,
-              apply: true,
-              providerOptions: options.providerOptions,
-            });
-            currentProject = applied.updatedProject;
-            currentRev = saveProject(currentProject, {
-              source: options.source,
-              path: options.path,
-              revision: currentRev,
-            });
-            logSuccess(`Saved updated project revision ${currentRev}.`);
+            // Apply exactly what the user approved. (Re-running the model here
+            // used to apply a fresh, possibly different, proposal.)
+            const applied = result.applyStaged();
+            if (!applied.applied) {
+              logWarn(
+                `Nothing was changed: ${applied.errors.length} proposed operation(s) are invalid:`,
+              );
+              for (const message of applied.errors)
+                console.log(`    ${c('!', 'yellow')} ${message}`);
+            } else {
+              currentProject = applied.updatedProject;
+              currentRev = saveProject(currentProject, {
+                source: options.source,
+                path: options.path,
+                revision: currentRev,
+              });
+              logSuccess(`Saved updated project revision ${currentRev}.`);
+            }
           } else {
             logInfo('Changes discarded.');
           }
         }
       } catch (err) {
-        logWarn(`Joy Agent run error: ${String(err)}`);
+        logWarn(`Joy Agent run error: ${err instanceof Error ? err.message : String(err)}`);
       }
       console.log();
     }
@@ -220,7 +260,7 @@ function printReplHelp(): void {
   );
 }
 
-function printProjectSummary(project: JoyProjectV1, revision: number): void {
+function printProjectSummary(project: CliProjectDocument, revision: number): void {
   const root = project.compositions[project.rootCompositionId];
   console.log(`\n  ${c('Title:', 'bold')} ${project.title} | ${c('Rev:', 'bold')} ${revision}`);
   console.log(`  ${c('Tracks:', 'bold')} ${root?.tracks.length ?? 0}`);
@@ -232,7 +272,7 @@ function printProjectSummary(project: JoyProjectV1, revision: number): void {
   console.log();
 }
 
-function printTimeline(project: JoyProjectV1): void {
+function printTimeline(project: CliProjectDocument): void {
   const root = project.compositions[project.rootCompositionId];
   if (!root) {
     console.log(`\n  ${c('Timeline:', 'bold')} (empty — no root composition)\n`);
@@ -265,12 +305,12 @@ function printTimeline(project: JoyProjectV1): void {
 
 interface ApplyLookResult {
   readonly ok: boolean;
-  readonly project?: JoyProjectV1;
+  readonly project?: CliProjectDocument;
   readonly operationCount?: number;
   readonly message?: string;
 }
 
-function applyLivingLook(project: JoyProjectV1, pack: string): ApplyLookResult {
+function applyLivingLook(project: CliProjectDocument, pack: string): ApplyLookResult {
   // The REPL compiles any named pack through the L2 compiler; built-ins ship
   // real definitions (e.g. editorialClean), and arbitrary named packs are
   // pinned to editorialClean so the pipeline still validates end-to-end.
@@ -298,11 +338,11 @@ function applyLivingLook(project: JoyProjectV1, pack: string): ApplyLookResult {
 }
 
 function splitClipInProject(
-  project: JoyProjectV1,
+  project: CliProjectDocument,
   clipId: string,
   atSec: number,
-): JoyProjectV1 | null {
-  const cloned: JoyProjectV1 = structuredClone(project);
+): CliProjectDocument | null {
+  const cloned: CliProjectDocument = structuredClone(project);
   const root = cloned.compositions[cloned.rootCompositionId];
   if (!root) return null;
 

@@ -2,12 +2,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
+import {
+  createIpcHandlers,
+  dispatchIpcRequest,
+  dispatchSynchronousIpcRequest,
+} from './ipc-handlers.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import type { SupervisedChild } from './worker-supervisor.js';
 import { LocalDatabase } from '../store/local-database.js';
 import { createMemorySecretStore } from '@joy-media/provider-sdk';
+import { MAX_EDITOR_PROJECT_STORAGE_VALUE_BYTES } from '@joy-media/project-persistence/editor-storage';
 
 function deps() {
   const fileRegistry = createFileRegistry(() => 'ref-1');
@@ -49,6 +54,65 @@ function deps() {
 }
 
 describe('IPC dispatch', () => {
+  it('synchronously persists allow-listed editor project data in the local database', () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const write = dispatchSynchronousIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.project-storage.set',
+      payload: { key: 'joy-media.timeline-project-log.v1', value: '{"projects":{}}' },
+    });
+    const read = dispatchSynchronousIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.project-storage.get',
+      payload: { key: 'joy-media.timeline-project-log.v1' },
+    });
+    const keys = dispatchSynchronousIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.project-storage.keys',
+    });
+
+    expect(write).toEqual({ ok: true });
+    expect(read).toEqual({ ok: true, data: '{"projects":{}}' });
+    expect(keys).toEqual({ ok: true, data: ['joy-media.timeline-project-log.v1'] });
+    expect(d.localDatabase.getEditorStorageItem('joy-media.timeline-project-log.v1')).toBe(
+      '{"projects":{}}',
+    );
+  });
+
+  it('rejects arbitrary keys and asynchronous handlers on the synchronous storage endpoint', () => {
+    const handlers = createIpcHandlers(deps());
+    const invalidKey = dispatchSynchronousIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.project-storage.set',
+      payload: { key: 'auth_token', value: 'secret' },
+    });
+    const asyncChannel = dispatchSynchronousIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {},
+    });
+
+    expect(invalidKey.ok).toBe(false);
+    expect(asyncChannel.ok).toBe(false);
+  });
+
+  it('rejects project values above the synchronous IPC size bound', () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const oversized = dispatchSynchronousIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.project-storage.set',
+      payload: {
+        key: 'joy-media.timeline-project-log.v1',
+        value: 'x'.repeat(MAX_EDITOR_PROJECT_STORAGE_VALUE_BYTES + 1),
+      },
+    });
+
+    expect(oversized.ok).toBe(false);
+    expect(d.localDatabase.getEditorStorageItem('joy-media.timeline-project-log.v1')).toBeNull();
+  });
+
   it('rejects requests from an origin outside the allow-list before any handler runs', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
@@ -505,6 +569,7 @@ describe('IPC dispatch', () => {
     const handleWindowControl = vi.fn(async (action: string) => {
       if (action === 'maximize') return true;
       if (action === 'is-maximized') return false;
+      if (action === 'toggle-fullscreen') return true;
       return undefined;
     });
     const d = { ...deps(), handleWindowControl };
@@ -537,6 +602,13 @@ describe('IPC dispatch', () => {
     });
     expect(isMaxRes).toEqual({ ok: true, data: false });
     expect(handleWindowControl).toHaveBeenCalledWith('is-maximized');
+
+    const fullRes = await dispatchIpcRequest(handlers, {
+      origin: 'https://joyst.ir',
+      channel: 'desktop.window-toggle-fullscreen',
+    });
+    expect(fullRes).toEqual({ ok: true, data: true });
+    expect(handleWindowControl).toHaveBeenCalledWith('toggle-fullscreen');
   });
 
   it('handles asset library settings, directory selection, and catalog reading', async () => {

@@ -328,6 +328,7 @@ jobs:
       - name: Evaluate source-bound release gate
         env:
           JOY_RELEASE_OUTPUT: ${{ runner.temp }}/joy-media-release-gate-${{ matrix.pass }}
+          JOY_RELEASE_SCOPE: pass
         run: pnpm run release:gate
       - name: Verify real-service acceptance teardown
         if: always()

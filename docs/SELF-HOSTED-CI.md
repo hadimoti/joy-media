@@ -1,14 +1,50 @@
-# JOY Media self-hosted CI
+# JOY Media CI runner policy
 
-JOY Media's GitHub-hosted Actions minutes are exhausted and cannot be
-purchased from Iran, so the repository CI runs entirely on owner-
-controlled self-hosted runners. Every workflow job in `.github/workflows/`
-must target a self-hosted label tuple; no job may use `ubuntu-latest`,
-`windows-latest`, `macos-latest`, or any other GitHub-hosted label. The
-contract is enforced offline by
-`tooling/release/src/ci-runner-policy.test.ts` and the runner Dockerfile
-/ entrypoint / registration-token handling is locked down by
+The v2 release-candidate workflow uses standard GitHub-hosted
+`ubuntu-24.04` runners for candidate validation, `editor-web-bundle`, and
+responsive-only browser checks. The repository is public, so standard hosted
+runner minutes are free; artifact storage remains quota-limited. The repository's
+one-file artifact probe passed on 2026-10-18 (run `39084850937`), enabling this
+one-day renderer handoff. Media-export browser acceptance and shipped-bundle
+smoke use the dedicated Linux acceptance runner after hosted-runner export
+timeouts. The policy is enforced offline by
+`tooling/release/src/ci-runner-policy.test.ts`; runner image, entrypoint, and
+registration-token contracts remain locked down by
 `tooling/release/src/ci-runner-contract.test.ts`.
+
+## Public repository trust model
+
+- The submitted workflows send `pull_request` events only to GitHub-hosted runners (`ci-dev.yml`), with read-only permissions and no secrets.
+- GitHub runs a pull request's workflow files from that pull request's merge commit. Repository tests check only the submitted files; they cannot stop a fork from changing `runs-on` in its own copy.
+- The boundary therefore depends on repository settings. Fork pull request workflows must require approval for all outside collaborators, and administrators must keep that setting. Self-hosted runners register at repository level, so any workflow in this repository can target their labels.
+- Self-hosted runner labels appear only in dispatch-only workflows or in workflows whose pushes are restricted to `main`.
+- No workflow uses `pull_request_target`, `workflow_run`, or `issue_comment`.
+- Runner names are public, so they stay generic and describe only the task or platform.
+- Hosted jobs install one SHA-256-pinned FFmpeg build (BtbN `n8.1.3-24-g92611900bb`, GPL v3, built with `--enable-gpl --enable-version3`). The download is checked against its digest, and the build version is asserted before use. The build is CI tooling only; the repository does not ship it. Hosted jobs fail closed when a required tool is missing.
+
+## Workflow inventory
+
+| Workflow                   | Triggers                                                              | Role                                                                                                                                  |
+| -------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci-dev.yml`               | Pull requests targeting `main`, pushes to `main`, and manual dispatch | Canonical hosted developer gate. Runs static and unit checks, browser coverage, the portable Worker package self-test, and a summary. |
+| `ci.yml`                   | Manual dispatch only                                                  | Legacy owner-dispatched lane. Its job IDs and runner assignments are unchanged.                                                       |
+| `release-candidate-v2.yml` | Manual dispatch                                                       | Candidate release verification for an exact SHA, run as two passes.                                                                   |
+| `release-candidate.yml`    | Manual dispatch                                                       | Legacy candidate release workflow.                                                                                                    |
+| `r2-candidate.yml`         | Manual dispatch                                                       | Legacy R2 candidate workflow.                                                                                                         |
+| `artifact-quota-check.yml` | Manual dispatch                                                       | One-shot artifact service probe.                                                                                                      |
+
+## Required checks
+
+Each job's `name:` is its check-run name. The owner updates the required check names on `main` in branch protection; this change does not modify branch protection. The current check-run names are:
+
+- `static + unit/integration (development verification)`
+- `Worker package build + self-test (development verification)`
+- `browser suite (development verification) — desktop-primary full`
+- `browser suite (development verification) — desktop-compact responsive`
+- `browser suite (development verification) — desktop-minimum responsive`
+- `development verification summary (NOT release approval)`
+
+The hosted developer gate is verification only. A passing run does not approve a release or authorize deployment.
 
 ## Self-hosted runner inventory
 
@@ -47,20 +83,27 @@ a long-running container — both `entrypoint.sh` (Linux) and
   binaries are hash-verified.
 - Windows Docker runner (`joy-media-worker-docker`): the
   `ops/self-hosted/windows-runner/Dockerfile.windows` contract. It is the
-  only Windows label permitted in workflows and uses the container-local
+  only self-hosted Windows label permitted in workflows and uses the container-local
   `worker-acceptance-container.ps1` harness.
 
 ## Workflow policy
 
 The runner policy is enforced by two offline test suites:
 
-- `tooling/release/src/ci-runner-policy.test.ts` scans every file under
-  `.github/workflows/` and asserts (a) no job uses `ubuntu-latest`,
-  `windows-latest`, `macos-latest`, or any other hosted label, and (b)
-  every job targets exactly one of the self-hosted Docker labels in the
-  table above. Adding a hosted label, or pointing a job at a label that
-  is not declared under `ops/self-hosted/`, fails this test before any
-  CI minute is consumed.
+- `tooling/release/src/ci-runner-policy.test.ts` scans every workflow and allows
+  only the hosted jobs on its allowlist: four `release-candidate-v2.yml` jobs
+  (`validate-candidate`, `node-contracts`, `editor-web-bundle`,
+  `acceptance-responsive`) on `ubuntu-24.04`, and four `ci-dev.yml` jobs
+  (`static-and-unit`, `browser`, and `development-verification-summary` on
+  `ubuntu-24.04`; `worker-package` on `windows-2025`). Every other job must
+  target a declared self-hosted Docker label. Adding any other hosted runner or
+  unknown self-hosted tuple fails the test. A companion trust-invariant suite
+  rejects `pull_request_target`, `workflow_run`, and `issue_comment`, and allows
+  self-hosted jobs only under `workflow_dispatch` or a `push` restricted to `main`.
+- `tooling/release/src/ci-artifact-policy.test.ts` permits exactly one
+  one-day upload/download pair for the source-bound editor bundle. The durable
+  real-service, P3, and final readiness evidence continues to use the
+  checksum-verified self-hosted evidence store.
 - `tooling/release/src/ci-runner-contract.test.ts` locks down the
   Dockerfile / entrypoint / registration-token handling for both the
   Linux (`ops/self-hosted/linux-runner/`) and the Windows-container
@@ -70,9 +113,10 @@ The runner policy is enforced by two offline test suites:
   persist `RUNNER_TOKEN`, and the explicit
   `--configure-only` / long-running `run.sh` split.
 
-`.github/workflows/ci.yml` runs on explicit `workflow_dispatch` (and is
-superseded by `ci-dev.yml` for the developer feedback loop). Neither
-runs untrusted pull-request code on the self-hosted runners.
+`.github/workflows/ci.yml` runs only on explicit `workflow_dispatch`. Pull
+requests and pushes are handled by `ci-dev.yml`, which runs only on GitHub-hosted
+runners and grants no secrets, so no pull-request code runs on the self-hosted
+runners.
 
 ```powershell
 pnpm install --frozen-lockfile
@@ -86,7 +130,7 @@ Run `pnpm run release:gate` locally only when the orchestrator has already recor
 source-bound browser evidence for that exact revision; a clean checkout cannot manufacture that
 authenticated evidence.
 
-The push workflow currently has three jobs:
+The legacy `ci.yml` lane (manual dispatch only) has three jobs:
 
 1. `check` runs typecheck, lint, tests, builds, and the production dependency audit.
 2. `worker-package` builds `@joy-media/worker`, packages a temporary `joy-worker.exe`, and runs
@@ -97,13 +141,13 @@ The push workflow currently has three jobs:
 
 The source-bound `pnpm run release:gate` is intentionally run by the orchestrator only after
 authenticated live-browser evidence has been recorded for the exact candidate revision. It is not
-run by the basic push jobs, because a clean CI checkout cannot legitimately claim an authenticated
+run by the basic `ci.yml` or `ci-dev.yml` jobs, because a clean CI checkout cannot legitimately claim an authenticated
 production journey. These jobs are green source/browser checks, not final release proof. The
 disposable E2E API harness uses a high request ceiling so a long single-owner browser run does not
 cascade into unrelated `429` failures; transport rate-limit behavior remains covered by the API
 security tests. Secrets must never be written to logs or artifacts.
 
-The trusted push workflow also serializes superseded `main` runs with a GitHub Actions
+The `ci.yml` lane also serializes superseded runs with a GitHub Actions
 `concurrency` group and gives each browser matrix job its own API port, editor port, HTML report
 directory, and Playwright output directory derived from the GitHub run identity. This keeps reruns
 and parallel trusted runners from reusing stale ports or overwriting another matrix leg's traces.
@@ -111,7 +155,7 @@ and parallel trusted runners from reusing stale ports or overwriting another mat
 ## Linux real-services runner (owner-controlled WSL2 Docker Engine)
 
 The Linux lane is provisioned on the owner-controlled Ubuntu-24.04 WSL2 Docker
-Engine; it is not installed on the Sweden production VPS. The repository-scoped
+Engine; it is not installed on any production host. The repository-scoped
 runner `joy-media-ci-linux` is registered with labels `self-hosted`, `linux`, `x64`,
 `joy-media-ci`, runs as uid `1001` (`joyci`), and uses the digest-pinned image
 `sha256:4012f99f4599e7bac1214da9c8c00ef6e04cb02ca673618884334d35ac4a5d53`.
@@ -132,7 +176,7 @@ run. These are local-only WSL host services (not Internet-published ports):
 
 The current PC uses synthetic CI-only database/S3 credentials from runner-local
 environment files; they are not production credentials and are not copied to
-logs, artifacts, or Gbrain. The workflows must consume these values from the
+logs, artifacts, or external indexes. The workflows must consume these values from the
 runner environment rather than embedding defaults in the repository. The
 legacy `r2-candidate.yml` path now follows that rule as well.
 `JOY_MEDIA_CI_RELEASE_COMMAND` points at the checked-out
@@ -155,6 +199,15 @@ observation, not a durable state guarantee. WSL2 may stop an idle distribution,
 so the operator must verify `wsl -l -v`, the Docker daemon, and the GitHub
 runner inventory immediately before dispatching a gate.
 
+In `release-candidate-v2.yml`, `acceptance-primary` and `prod-build-smoke` also
+use this runner because their media-export browser paths exceeded GitHub-hosted
+download timeouts. They set `JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only` and
+clear the runner-local database, S3, Worker, evidence, real-acceptance command,
+and OpenCLI settings. They use the container's preinstalled Chromium system
+libraries and install only the Playwright browser binary. These jobs remain
+deterministic fixture runs; only the real-service jobs may use disposable
+runner-local service credentials.
+
 ## Release-candidate lanes
 
 The closure plan requires a separate, manually dispatched release workflow before promotion. It
@@ -170,10 +223,10 @@ must run twice on the exact candidate SHA and use repository-scoped runners with
   process table; the fixture is explicitly test-only.
 - An isolated acceptance runner: disposable API/editor services plus a disposable Worker identity.
   Any automated browser uses fixture credentials only and never receives the owner's cookies or
-  OpenCLI profile `cefd9k77`.
+  OpenCLI profile.
 
 The current PC inventory has the two Linux Docker runners and the Windows Docker
-runner described above. There is no host-direct fallback and no VPS runner
+runner described above. There is no host-direct fallback and no remote runner
 fallback; if either local daemon or its labeled container is unavailable, the
 workflow queues/fails rather than consuming a different runner.
 
@@ -224,8 +277,10 @@ table access as proof.
 
 - The release-candidate / r2-candidate `windows-worker-clean` /
   `worker-package` jobs target `self-hosted,windows,x64,joy-media-worker-docker`,
-  which is an owner-controlled Docker Windows container. It is NEVER
-  `windows-latest` and never consumes a GitHub-hosted Windows VM minute.
+  which is an owner-controlled Docker Windows container. It never uses a
+  GitHub-hosted Windows VM because the accepted lifecycle evidence requires
+  the real container ID, immutable image digest, and container-local process
+  observations.
 - The `windows-worker-clean` evidence record the gate binds from
   (`test-output/windows/acceptance.json`) is tagged in-source with
   `runner: "self-hosted,windows,x64,joy-media-worker-docker"` and
@@ -238,6 +293,10 @@ table access as proof.
   registration and evidence contract. The old host-direct
   `worker-acceptance.ps1` path is retained only as historical source and is
   not referenced by any workflow.
+- `ci-dev.yml` `worker-package` builds the Worker package and runs its self-test on a
+  GitHub-hosted `windows-2025` image. That is portable package evidence only. It is
+  not Docker lifecycle or container-boundary evidence, and it never satisfies the
+  release gate.
 
 In short: the JOY-Media release gate's only Windows acceptance signal
 comes from the owner-controlled Windows Docker runner. There is no
@@ -249,10 +308,45 @@ Linux-container or host-direct evidence ever presented as Windows acceptance.
 dispatched manually with a full 40-character candidate SHA. It runs the same lane inventory
 described above, but encodes the clean-state repeat explicitly as two in-workflow passes per
 matrix lane and restructures the browser viewport matrix so each pass stays inside its lane's
-timeout budget. It depends on the same `self-hosted` runners (`joy-media-ci`,
+timeout budget. Candidate validation, editor bundling, and responsive-only
+browser checks use GitHub-hosted Ubuntu. Media-export primary browser acceptance
+and shipped-bundle smoke use `joy-media-acceptance` because the hosted runner
+timed out on production exports. It depends on the same `self-hosted` runners (`joy-media-ci`,
 `joy-media-worker-docker`, `joy-media-acceptance`) and on the same runner-local env vars
 (`JOY_MEDIA_CI_RELEASE_COMMAND`, `JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND`,
 `JOY_MEDIA_CI_EVIDENCE_ROOT`).
+
+### Release candidate lanes
+
+The `release-candidate-v2.yml` job graph is:
+
+| Job                        | Runner class                            | `needs`                                                                                                                                                                                                       |
+| -------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate-candidate`       | GitHub-hosted (`ubuntu-24.04`)          | —                                                                                                                                                                                                             |
+| `node-contracts`           | GitHub-hosted (`ubuntu-24.04`)          | `validate-candidate`                                                                                                                                                                                          |
+| `editor-web-bundle`        | GitHub-hosted (`ubuntu-24.04`)          | `validate-candidate`                                                                                                                                                                                          |
+| `linux-real-services`      | Self-hosted (`joy-media-ci`)            | `validate-candidate`                                                                                                                                                                                          |
+| `windows-p0-real-services` | Self-hosted (`joy-media-worker-docker`) | `validate-candidate`                                                                                                                                                                                          |
+| `windows-worker-clean`     | Self-hosted (`joy-media-worker-docker`) | `validate-candidate`, `editor-web-bundle`                                                                                                                                                                     |
+| `acceptance-primary`       | Self-hosted (`joy-media-acceptance`)    | `validate-candidate`, `linux-real-services`, `windows-worker-clean`                                                                                                                                           |
+| `acceptance-responsive`    | GitHub-hosted (`ubuntu-24.04`)          | `validate-candidate`, `linux-real-services`, `windows-worker-clean`                                                                                                                                           |
+| `prod-build-smoke`         | Self-hosted (`joy-media-acceptance`)    | `validate-candidate`                                                                                                                                                                                          |
+| `real-service-acceptance`  | Self-hosted (`joy-media-acceptance`)    | `validate-candidate`, `acceptance-primary`, `acceptance-responsive`, `windows-worker-clean`                                                                                                                   |
+| `p3-real-services`         | Self-hosted (`joy-media-acceptance`)    | `validate-candidate`                                                                                                                                                                                          |
+| `gate-summary`             | Self-hosted (`joy-media-acceptance`)    | `linux-real-services`, `windows-p0-real-services`, `node-contracts`, `windows-worker-clean`, `acceptance-primary`, `acceptance-responsive`, `prod-build-smoke`, `real-service-acceptance`, `p3-real-services` |
+
+The acceptance lanes `acceptance-primary`, `prod-build-smoke`, `real-service-acceptance`,
+`p3-real-services`, and `gate-summary` share one self-hosted runner and run one after another.
+Rerunning a candidate cannot turn a failed first attempt into a valid two-pass receipt. Whether
+a failed candidate needs a new candidate SHA is an owner decision.
+
+Known failure signatures and triage:
+
+- Windows previous-release download transport errors such as `unexpected EOF` or `timed out`
+  are meant to be absorbed by the resumable, hash-verified download. The download does not
+  prevent them.
+- A P0-4 cold-process `Test timed out in 300000ms` needs a runner-load check first. Any timeout
+  budget change is a candidate change.
 
 ### Durable evidence root
 
@@ -268,34 +362,48 @@ re-verifies every file against the manifest, and is required to satisfy the
 `Verify retained evidence` step in addition to any teardown check. The durable store is
 authoritative evidence regardless of platform artifact state.
 
-### Local preservation at `H:\VPS-DATA`
+### Local preservation mirror
 
-The v2 evidence directory is mirrored to a local Windows host at `H:\VPS-DATA` (the operator's
-preservation path on the same Windows host the runner sits on). `H:\VPS-DATA` holds the
+The v2 evidence directory is mirrored to a local preservation path on the same
+Windows host the runner sits on (the operator's copy). That mirror holds the
 durable evidence across runs so the operator can inspect, hand off, or rotate evidence
 without leaving the Windows host. The mirror is a copy, not a substitute for the runner's
 authoritative `JOY_MEDIA_CI_EVIDENCE_ROOT`.
 
-### VPS Gbrain metadata
+### External metadata index
 
-A subset of Gbrain metadata (run identity, candidate SHA, pass, evidence root layout,
-upload-policy receipt, and the names of the retained evidence files) is also retained on
-the production Sweden VPS so Gbrain can correlate the v2 run with the corresponding
-orchestrator run history. The VPS Gbrain metadata is index-only; it never owns the
-authoritative evidence bytes. Operator-only buckets apply; never assume the public
-gh-pages index now reflects v2 runs.
+A subset of run metadata (run identity, candidate SHA, pass, evidence root layout,
+upload-policy receipt, and the names of the retained evidence files) is also kept in an
+external index so the v2 run can be correlated with orchestrator run history. The index
+is metadata only; it never owns the authoritative evidence bytes. Operator-only buckets
+apply; never assume the public gh-pages index now reflects v2 runs.
 
-### v2 artifact upload policy
+### v2 artifact handoff and evidence policy
 
-v2 does not call `actions/upload-artifact` or `actions/download-artifact`. Both the
-real-service and the P3 pass instead write an `ARTIFACT-UPLOAD-STATUS.txt` receipt into
-their durable evidence directory with the fields `candidate_sha`, `run_id`, `attempt`,
-`pass`, `upload_outcome=disabled`, `source=durable-evidence-store`, and
-`reason=github-artifact-upload-disabled-by-policy`. The upload-policy unit test in
-`tooling/release/src/ci-artifact-policy.test.ts` asserts that contract directly against
-`release-candidate-v2.yml`. GitHub-hosted Actions minutes/quota is still exhausted on the
-GHA side; v2 keeps running entirely on the self-hosted runner set and does not depend on
-GitHub artifact quota being repaired.
+The `editor-web-bundle` job builds `apps/editor-web/dist` from the exact candidate
+on standard `ubuntu-24.04` and uploads a one-day artifact named with the workflow
+run, attempt, and candidate SHA. Its manifest records the candidate SHA, lockfile
+SHA-256, and every file's path, size, and SHA-256. The Windows Docker lane verifies
+the complete manifest before and after staging the renderer for packaging.
+
+The Windows Docker lane and the Linux gate share no storage, so the staged Windows release files
+(the seven release files plus `artifact-manifest.json`) take one more one-day handoff. The Windows
+lane uploads them as `joy-media-windows-release-<run>-<attempt>-<candidate SHA>`, and `gate-summary`
+downloads that artifact from the same run only: no run id, repository or token is passed. The artifact
+is transport, not evidence. The gate retains the downloaded files write-once in its own durable
+store, which hashes every file against `artifact-manifest.json` and `SHA256SUMS.txt`, and verifies
+that store copy. It then restores the verified copy to `test-output/readiness/artifacts`, where the
+readiness builder checks the bytes against `SHA256SUMS.txt` and the digests in both Windows
+lifecycle receipts. A missing, extra, corrupted or mismatched file fails the gate. The files are
+unsigned candidate binaries, and while the artifact lives (one day) they can be downloaded from the
+run page by anyone signed in to GitHub. The owner accepted that on 2026-10-25.
+
+This small build handoff is separate from acceptance evidence. The real-service
+and P3 passes still write `ARTIFACT-UPLOAD-STATUS.txt` receipts with
+`upload_outcome=disabled`, `source=durable-evidence-store`, and
+`reason=github-artifact-upload-disabled-by-policy`; their redacted, checksummed
+evidence remains in the self-hosted store. The final readiness gate continues to
+bind those durable records and the actual Windows release-package hashes.
 
 ## Re-registering a runner
 
@@ -314,7 +422,7 @@ gh api repos/hadimoti/joy-media/actions/runners --jq '.runners[] | {name,os,stat
 docker ps --filter name=joy-media-worker-docker
 ```
 
-The runner must be `online` before pushing a release commit. If it is offline, repair the runner or run the checks locally; do not switch CI to the production VPS.
+The runner must be `online` before pushing a release commit. If it is offline, repair the runner or run the checks locally; do not switch CI to a production host.
 
 ## Latest verified runs
 

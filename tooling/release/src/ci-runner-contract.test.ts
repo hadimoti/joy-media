@@ -307,7 +307,7 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       expect(containerAcceptance).toContain('launchObserved = $true');
     });
 
-    it('fails immediately when either candidate Windows Worker build command fails', () => {
+    it('fails immediately on Windows candidate build errors and reuses one frozen Worker artifact in v2', () => {
       for (const workflow of [RELEASE_WORKFLOW, RELEASE_WORKFLOW_V1]) {
         const normalizedWorkflow = workflow.replace(/\r\n/g, '\n');
         for (const command of [
@@ -322,10 +322,15 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
         expect(workflow).toMatch(
           /pnpm --filter @joy-media\/worker build\r?\n\s+if \(\$LASTEXITCODE -ne 0\) \{ throw "Worker package build failed/m,
         );
-        expect(workflow).toMatch(
-          /powershell -NoProfile -ExecutionPolicy Bypass -File scripts\/build-worker-exe\.ps1 -OutputPath \$output\r?\n\s+if \(\$LASTEXITCODE -ne 0\) \{ throw "Worker executable build failed/m,
-        );
       }
+      expect(RELEASE_WORKFLOW).toMatch(
+        /scripts\/build-worker-exe\.ps1 -OutputPath \$workerExe -BuildMarker \$buildMarker\r?\n\s+if \(\$LASTEXITCODE -ne 0\) \{ throw "Worker executable build failed/m,
+      );
+      expect(RELEASE_WORKFLOW).toContain('-ExecutablePath $candidateWorker');
+      expect(RELEASE_WORKFLOW).not.toContain('scripts/build-worker-exe.ps1 -OutputPath $output');
+      expect(RELEASE_WORKFLOW_V1).toMatch(
+        /powershell -NoProfile -ExecutionPolicy Bypass -File scripts\/build-worker-exe\.ps1 -OutputPath \$output\r?\n\s+if \(\$LASTEXITCODE -ne 0\) \{ throw "Worker executable build failed/m,
+      );
     });
 
     it('windows-runner-entrypoint.ps1 requires the same Docker-only label the producer emits', () => {
@@ -348,6 +353,8 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       );
       expect(provision).toContain('[ValidateRange(0,1500)]');
       expect(provision).toContain('[int]$MtuBytes = 1240');
+      expect(provision).toContain('[ValidateRange(1,32)][int]$Cpus = 8');
+      expect(provision).toContain("'--cpus'");
       expect(provision).toContain('MtuBytes -gt 0 -and $MtuBytes -lt 576');
       expect(provision).toContain('--labels self-hosted,windows,x64,joy-media-worker-docker');
     });

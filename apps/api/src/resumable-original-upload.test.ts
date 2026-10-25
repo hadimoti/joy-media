@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import type { Server } from 'node:http';
-import { once } from 'node:events';
+import { listenOnFetchablePort } from './test-fetchable-port.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -75,11 +75,8 @@ describe('resumable original upload HTTP protocol', () => {
       resumableOriginalUploads: coordinator,
     });
     servers.push(server);
-    server.listen(0, '127.0.0.1');
-    await once(server, 'listening');
-    const address = server.address();
-    if (address === null || typeof address === 'string') throw new Error('test server unavailable');
-    const baseUrl = `http://127.0.0.1:${address.port}/v1/projects/project-1/assets/asset-1/original/uploads`;
+    const port = await listenOnFetchablePort(server);
+    const baseUrl = `http://127.0.0.1:${port}/v1/projects/project-1/assets/asset-1/original/uploads`;
     const identityHeaders = {
       authorization: 'Bearer test-token',
       'x-joy-sha256': sha256,

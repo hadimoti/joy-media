@@ -96,6 +96,15 @@ ALLOW=(
   test-output/operations/teardown.json
   test-output/ci-janitor/inventory.json
   test-output/windows/acceptance.json
+  test-output/windows/acceptance-passes/pass-1.json
+  test-output/windows/acceptance-passes/pass-2.json
+  test-output/readiness/two-pass-evidence/manifest.json
+  test-output/release-gate/report.json
+  test-output/release-gate/manifest.json
+  test-output/release-gate/sbom.json
+  test-output/release-gate/artifact-hashes.json
+  test-output/release-gate/static-assets.json
+  test-output/release-gate/release-manifest.sha256
 )
 
 rm -rf -- "$staging"

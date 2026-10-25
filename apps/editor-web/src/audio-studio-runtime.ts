@@ -242,7 +242,7 @@ export const AUDIO_MODEL_CATALOG: readonly AudioModelSpec[] = [
     vramGb: 2,
     gpu: 'optional',
     quantization: 'fp32',
-    installState: 'installed',
+    installState: 'setup-required',
     localPath: `${DEFAULT_MODEL_CACHE_PATH}\\deepfilternet`,
     capabilities: ['audio.denoise'],
   },

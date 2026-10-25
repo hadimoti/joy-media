@@ -1,4 +1,4 @@
-import { once } from 'node:events';
+import { listenOnFetchablePort } from './test-fetchable-port.js';
 import type { Server } from 'node:http';
 import { generateKeyPairSync } from 'node:crypto';
 import type { Pool } from 'pg';
@@ -72,11 +72,8 @@ async function start(usdcCheckout?: UsdcCheckoutApi, account?: AccountApi): Prom
     ...(account === undefined ? {} : { account }),
   });
   servers.push(server);
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  if (address === null || typeof address === 'string') throw new Error('test API did not bind TCP');
-  return `http://127.0.0.1:${address.port}`;
+  const port = await listenOnFetchablePort(server);
+  return `http://127.0.0.1:${port}`;
 }
 
 async function request(

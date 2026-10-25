@@ -9,8 +9,17 @@ import {
   createSandboxedIframeDescriptor,
   ScenePreviewSession,
   validateScenePreviewEvent,
+  isScenePaintFrame,
 } from './preview-protocol.js';
-import type { ScenePreviewMessage, ScenePreviewSurface } from './preview-protocol.js';
+import type {
+  ScenePaintLine,
+  ScenePreviewFontFace,
+  ScenePreviewMessage,
+  ScenePreviewSurface,
+} from './preview-protocol.js';
+import type { ScenePaintFrameV1 } from '@joy-media/project-schema';
+export type { ScenePaintLine, ScenePreviewFontFace } from './preview-protocol.js';
+export type { ScenePaintFrameV1 } from '@joy-media/project-schema';
 import { resolveSceneVariables } from './variables.js';
 
 export interface SceneSurfaceBitmap {
@@ -25,7 +34,14 @@ export interface ScenePreviewHost {
   readonly session: ScenePreviewSession;
   readonly ready: Promise<void>;
   update(timeUs: number, variables: Readonly<Record<string, string | number | boolean>>): boolean;
-  capture(width: number, height: number, timeoutMs?: number): Promise<SceneSurfaceBitmap>;
+  capture(
+    width: number,
+    height: number,
+    timeoutMs?: number,
+    lines?: readonly ScenePaintLine[],
+    rejectImages?: boolean,
+    paint?: ScenePaintFrameV1,
+  ): Promise<SceneSurfaceBitmap>;
   destroy(): void;
 }
 
@@ -113,9 +129,14 @@ export function createScenePreviewHost(options: {
   readonly parent?: HTMLElement;
   /** `inline` = visible in parent (catalog thumbs); default offscreen for capture. */
   readonly placement?: 'offscreen' | 'inline';
+  readonly fontFaces?: readonly ScenePreviewFontFace[];
 }): ScenePreviewHost {
   const bundleUrl = createFirstPartySceneBundleUrl(options.scene);
-  const descriptor = createSandboxedIframeDescriptor(options.scene.manifest, bundleUrl);
+  const descriptor = createSandboxedIframeDescriptor(
+    options.scene.manifest,
+    bundleUrl,
+    options.fontFaces ?? [],
+  );
   const iframe = document.createElement('iframe');
   iframe.setAttribute('sandbox', descriptor.sandbox);
   iframe.srcdoc = descriptor.srcDoc;
@@ -214,8 +235,10 @@ export function createScenePreviewHost(options: {
       if (destroyed) return false;
       return session.update(timeUs, variables);
     },
-    async capture(width, height, timeoutMs = 2_500) {
+    async capture(width, height, timeoutMs = 2_500, lines, rejectImages = false, paint) {
       if (destroyed) throw new Error('scene preview host destroyed');
+      if (paint !== undefined && !isScenePaintFrame(paint))
+        throw new RangeError('scene paint frame is invalid');
       await ready;
       if (destroyed) throw new Error('scene preview host destroyed');
       const requestId = `cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -225,7 +248,7 @@ export function createScenePreviewHost(options: {
           reject(new Error('scene capture timed out'));
         }, timeoutMs);
         pending.set(requestId, { resolve, reject, timer });
-        if (!session.capture(requestId, width, height)) {
+        if (!session.capture(requestId, width, height, lines, rejectImages, paint)) {
           clearTimeout(timer);
           pending.delete(requestId);
           reject(new Error('scene capture suppressed while suspended'));

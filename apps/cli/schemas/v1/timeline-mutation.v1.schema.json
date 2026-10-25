@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.joy.media/cli/v1/timeline-mutation.schema.json",
+  "title": "JOY Media CLI timeline mutation v1",
+  "type": "object",
+  "required": ["projectId", "revision", "changed", "trackId"],
+  "properties": {
+    "projectId": { "type": "string", "minLength": 1 },
+    "revision": { "type": "integer", "minimum": 1 },
+    "changed": { "type": "boolean" },
+    "trackId": { "type": "string", "minLength": 1 },
+    "atUs": { "type": "integer", "minimum": 1 },
+    "clip": { "$ref": "#/definitions/clip" },
+    "clips": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/clip" },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "removed": { "$ref": "#/definitions/clip" }
+  },
+  "oneOf": [
+    { "required": ["clip"] },
+    { "required": ["atUs", "clips"] },
+    { "required": ["removed"] }
+  ],
+  "definitions": {
+    "clip": {
+      "type": "object",
+      "required": ["id", "assetId", "startUs", "durationUs", "endUs", "sourceInUs"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "assetId": { "type": ["string", "null"] },
+        "startUs": { "type": "integer", "minimum": 0 },
+        "durationUs": { "type": "integer", "minimum": 1 },
+        "endUs": { "type": "integer", "minimum": 1 },
+        "sourceInUs": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

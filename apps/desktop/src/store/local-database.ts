@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { SqliteJobDispatchStore } from '../jobs/job-dispatch.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -98,6 +99,8 @@ interface ProviderProfileRow {
  */
 export class LocalDatabase {
   private readonly db: DatabaseSync;
+  /** Worker dispatch state (leases, progress, derivatives) that shares this database's `jobs` table. */
+  readonly jobDispatch: SqliteJobDispatchStore;
   private readonly now: () => string;
   private readonly idFactory: () => string;
 
@@ -126,6 +129,7 @@ export class LocalDatabase {
          error TEXT
        )`,
     );
+    this.jobDispatch = new SqliteJobDispatchStore(this.db);
     // Ciphertext only — encryption/decryption happens in main/secrets/electron-secret-store.ts
     // via Electron's `safeStorage` (OS-level DPAPI/Keychain/libsecret). This table never sees
     // a plaintext value.
@@ -165,6 +169,13 @@ export class LocalDatabase {
          updated_at TEXT NOT NULL
        )`,
     );
+    this.db.exec(
+      `CREATE TABLE IF NOT EXISTS editor_storage (
+         key TEXT PRIMARY KEY,
+         value TEXT NOT NULL,
+         updated_at TEXT NOT NULL
+       )`,
+    );
   }
 
   recordMedia(entry: MediaManifestEntry): void {
@@ -190,6 +201,11 @@ export class LocalDatabase {
 
   removeMedia(refId: string): void {
     this.db.prepare('DELETE FROM media_manifest WHERE ref_id = ?').run(refId);
+  }
+
+  /** The id source every job in this database uses, so legacy and Worker-dispatched jobs share one format. */
+  nextJobId(): string {
+    return this.idFactory();
   }
 
   enqueueJob(kind: string, refId: string): JobRecord {
@@ -312,6 +328,29 @@ export class LocalDatabase {
 
   deleteSetting(key: string): void {
     this.db.prepare('DELETE FROM app_settings WHERE key = ?').run(key);
+  }
+
+  getEditorStorageItem(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM editor_storage WHERE key = ?').get(key) as
+      { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  listEditorStorageKeys(): readonly string[] {
+    const rows = this.db
+      .prepare('SELECT key FROM editor_storage ORDER BY key ASC')
+      .all() as unknown as readonly { key: string }[];
+    return rows.map((row) => row.key);
+  }
+
+  setEditorStorageItem(key: string, value: string): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO editor_storage (key, value, updated_at) VALUES (?, ?, ?)')
+      .run(key, value, this.now());
+  }
+
+  deleteEditorStorageItem(key: string): void {
+    this.db.prepare('DELETE FROM editor_storage WHERE key = ?').run(key);
   }
 
   getDefaultAssetLibraryDirectory(): string {

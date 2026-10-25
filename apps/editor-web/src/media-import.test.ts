@@ -9,6 +9,80 @@ import {
 } from './media-import.js';
 
 describe('importMediaFile', () => {
+  it('stops before registering or uploading once the project scope has changed', async () => {
+    const calls: string[] = [];
+    let scopeLeft = false;
+    const client = {
+      ensureProject: vi.fn(async () => {
+        calls.push('ensure');
+        scopeLeft = true;
+      }),
+      registerAsset: vi.fn(async () => {
+        calls.push('register');
+        throw new Error('must not register');
+      }),
+      assets: vi.fn(async () => []),
+      uploadAssetOriginal: vi.fn(async () => {
+        calls.push('upload');
+        throw new Error('must not upload');
+      }),
+    } satisfies NonNullable<MediaImportOptions['client']>;
+
+    await expect(
+      importMediaFile({
+        projectId: 'project-1',
+        projectTitle: 'Project',
+        file: new File(['scope bytes'], 'clip.mp4', { type: 'video/mp4' }),
+        assetId: 'clip-1',
+        client,
+        originalAssetCache: { put: vi.fn(async () => undefined) },
+        describeMedia: async () => ({ mimeType: 'video/mp4', durationUs: 2_500_000 }),
+        assertCurrentProject: () => {
+          if (scopeLeft) throw new Error('the session left this project');
+        },
+      }),
+    ).rejects.toThrow('the session left this project');
+
+    expect(calls).toEqual(['ensure']);
+    expect(client.registerAsset).not.toHaveBeenCalled();
+    expect(client.uploadAssetOriginal).not.toHaveBeenCalled();
+  });
+
+  it('passes the scope check into the cloud upload, so a session that leaves mid-upload stops it', async () => {
+    let scopeLeft = false;
+    let registration: BrowserAssetRegistration | undefined;
+    const client = {
+      ensureProject: vi.fn(async () => undefined),
+      registerAsset: vi.fn(async (_projectId: string, next: BrowserAssetRegistration) => {
+        registration = next;
+        return browserAsset(next);
+      }),
+      assets: vi.fn(async () => []),
+      uploadAssetOriginal: vi.fn(async (_projectId, asset, _file, _onProgress, assertCurrent) => {
+        scopeLeft = true;
+        assertCurrent?.();
+        return { ...browserAsset(registration!), ...asset };
+      }),
+    } satisfies NonNullable<MediaImportOptions['client']>;
+
+    await expect(
+      importMediaFile({
+        projectId: 'project-1',
+        projectTitle: 'Project',
+        file: new File(['mid-upload bytes'], 'clip.mp4', { type: 'video/mp4' }),
+        assetId: 'clip-1',
+        client,
+        originalAssetCache: { put: vi.fn(async () => undefined) },
+        describeMedia: async () => ({ mimeType: 'video/mp4', durationUs: 2_500_000 }),
+        assertCurrentProject: () => {
+          if (scopeLeft) throw new Error('the session left this project');
+        },
+      }),
+    ).rejects.toThrow('the session left this project');
+
+    expect(client.uploadAssetOriginal).toHaveBeenCalledTimes(1);
+  });
+
   it('verifies, registers, caches, and cloud-uploads the same original', async () => {
     const calls: string[] = [];
     let registration: BrowserAssetRegistration | undefined;
@@ -59,6 +133,73 @@ describe('importMediaFile', () => {
     });
     expect(result.id).toBe('clip-1');
     expect(progress.at(-1)).toBe(1);
+  });
+
+  it('reports registration progress only after the project is ensured', async () => {
+    const calls: string[] = [];
+    let registration: BrowserAssetRegistration | undefined;
+    const client = {
+      ensureProject: vi.fn(async () => {
+        calls.push('ensure');
+      }),
+      registerAsset: vi.fn(async (_projectId: string, next: BrowserAssetRegistration) => {
+        registration = next;
+        return browserAsset(next);
+      }),
+      assets: vi.fn(async () => []),
+      uploadAssetOriginal: vi.fn(async (_projectId, asset, _file, onProgress) => {
+        onProgress?.(1);
+        return { ...browserAsset(registration!), ...asset };
+      }),
+    } satisfies NonNullable<MediaImportOptions['client']>;
+    const input = new File(['ordered bytes'], 'clip.mp4', { type: 'video/mp4' });
+
+    await importMediaFile({
+      projectId: 'project-1',
+      projectTitle: 'Project',
+      file: input,
+      assetId: 'clip-1',
+      client,
+      originalAssetCache: { put: vi.fn(async () => undefined) },
+      describeMedia: async () => ({ mimeType: 'video/mp4', durationUs: 2_500_000 }),
+      onProgress: ({ message }) => calls.push(`progress:${message}`),
+    });
+
+    const ensured = calls.indexOf('ensure');
+    const registering = calls.indexOf('progress:Registering clip.mp4...');
+    expect(ensured).toBeGreaterThanOrEqual(0);
+    expect(registering).toBeGreaterThan(ensured);
+  });
+
+  it('shows no registration progress when the project cannot be ensured', async () => {
+    const input = new File(['rejected bytes'], 'clip.mp4', { type: 'video/mp4' });
+    const messages: string[] = [];
+    const client = {
+      ensureProject: vi.fn(async () => {
+        throw new Error('PROJECT_NOT_FOUND');
+      }),
+      registerAsset: vi.fn(async () => {
+        throw new Error('registration must not run');
+      }),
+      assets: vi.fn(async () => []),
+      uploadAssetOriginal: vi.fn(async () => {
+        throw new Error('upload must not run');
+      }),
+    } satisfies NonNullable<MediaImportOptions['client']>;
+
+    await expect(
+      importMediaFile({
+        projectId: 'project-1',
+        projectTitle: 'Project',
+        file: input,
+        assetId: 'clip-1',
+        client,
+        originalAssetCache: { put: vi.fn(async () => undefined) },
+        describeMedia: async () => ({ mimeType: 'video/mp4', durationUs: 2_500_000 }),
+        onProgress: ({ message }) => messages.push(message),
+      }),
+    ).rejects.toThrow('PROJECT_NOT_FOUND');
+    expect(messages.some((message) => message.startsWith('Registering'))).toBe(false);
   });
 
   it('resumes a failed cloud upload when the prior registration matches', async () => {
@@ -284,10 +425,10 @@ describe('describeMedia (timed-media blob lifecycle)', () => {
     const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
     const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
     const fakeDocument: DocumentLike = {
-      createElement(tag: string): HTMLElement {
+      createElement: ((tag: string): HTMLElement => {
         if (tag === 'video') return fakeVideo as unknown as HTMLElement;
         throw new Error(`describeMedia test stub does not implement createElement("${tag}")`);
-      },
+      }) as DocumentLike['createElement'],
     };
     // describeTimedMedia uses `window.setTimeout` / `window.clearTimeout`
     // for the metadata-read timeout; provide thin shims that delegate to

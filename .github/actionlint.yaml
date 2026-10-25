@@ -1,0 +1,8 @@
+# Configuration for actionlint. It is picked up automatically when actionlint runs from the
+# repository root. It declares the custom labels of the self-hosted runners that the workflows
+# target, so they are not reported as unknown runner labels.
+self-hosted-runner:
+  labels:
+    - joy-media-ci
+    - joy-media-worker-docker
+    - joy-media-acceptance

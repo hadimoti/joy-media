@@ -2,10 +2,15 @@ import { expect, test, type Page } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
 import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
 import {
-  allowExpectedAssetFixtureMisses,
+  allowReferenceFixtureMisses,
   assertBrowserAudit,
+  expectBoundProjectOnly,
   setupBrowserAudit,
+  type CountRange,
 } from './helpers/browser-console-audit.js';
+
+/** Reference assets of the reference workspace that have no uploaded bytes on the E2E server. */
+const REFERENCE_FIXTURE_MISSING_ASSET_IDS = ['product-still', 'asset-b-roll-a'] as const;
 
 const INVALID_CANONICAL_PROPOSAL = {
   summary: 'Apply a caption style to a missing clip',
@@ -50,18 +55,42 @@ async function requestPreview(page: Page, prompt: string): Promise<void> {
 }
 
 test.describe('JOY Live Director runtime boundary', () => {
-  const DIRECTOR_ASSET_MISS_MAP: Record<string, number> = {
-    'cancellation rejects a delayed provider reply before it can stage a preview': 2,
-    'proves the provider handshake, repairs only through the canonical host, and requires approval': 9,
-    'invalidates a real Worker preview when its revision becomes stale': 5,
-    'clearing a model connection terminalizes an in-flight run without reviving a preview': 2,
-    'reports a provider adapter failure without suggesting an edit was applied': 2,
+  type AssetMissBounds = {
+    original: number | CountRange;
+    cloud?: number | CountRange;
+  };
+  const DIRECTOR_ASSET_MISS_MAP: Record<string, AssetMissBounds> = {
+    // Each declared-missing reference asset is read by the project route and the cloud route. The
+    // counts below were measured on all seven viewports across repeated parallel and single-worker
+    // runs, and each is exact, so a change that adds or drops a read fails here.
+    'cancellation rejects a delayed provider reply before it can stage a preview': { original: 2 },
+    'proves the provider handshake, repairs only through the canonical host, and requires approval':
+      {
+        original: 9,
+      },
+    'invalidates a real Worker preview when its revision becomes stale': {
+      original: 5,
+      cloud: 5,
+    },
+    'clearing a model connection terminalizes an in-flight run without reviving a preview': {
+      original: 2,
+    },
+    'reports a provider adapter failure without suggesting an edit was applied': { original: 2 },
   };
 
   test.beforeEach(({ page }, testInfo) => {
     setupBrowserAudit(page);
-    const count = DIRECTOR_ASSET_MISS_MAP[testInfo.title];
-    if (count != null) allowExpectedAssetFixtureMisses(page, count);
+    const bounds = DIRECTOR_ASSET_MISS_MAP[testInfo.title];
+    // Only the fixture's two declared-missing reference assets may miss. Any other asset ID fails.
+    if (bounds != null) {
+      allowReferenceFixtureMisses(
+        page,
+        REFERENCE_FIXTURE_MISSING_ASSET_IDS,
+        bounds.original,
+        bounds.cloud,
+      );
+      expectBoundProjectOnly(page);
+    }
   });
 
   test.afterEach(async ({ page }, testInfo) => {

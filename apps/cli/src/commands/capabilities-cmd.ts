@@ -1,0 +1,301 @@
+/* global console */
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { CLI_VERSION, COMMAND_HELP, printCommandHelp } from '../cli.js';
+import { c, printJson } from '../utils/logger.js';
+import {
+  baseFeatureList,
+  buildFeatureList,
+  buildTitleWorkflow,
+  captionFontFile,
+  probeLibass,
+  probeChromium,
+  probeBundledWoff2,
+  type FeatureEntry,
+  type FeatureProbes,
+  type WorkflowEntry,
+} from './render-features.js';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface CommandEntry {
+  readonly name: string;
+  readonly summary: string;
+  readonly usage: string;
+  readonly subcommands: readonly string[];
+  readonly status: 'available';
+}
+
+export interface CapabilitiesDocument {
+  readonly schemaVersion: string;
+  readonly probes: {
+    readonly libass: boolean | 'unavailable';
+    readonly captionFont: boolean | 'unavailable';
+    readonly woff2Font: 'loadable' | 'unavailable' | 'unknown';
+    readonly chromium: boolean | 'unavailable';
+  };
+  readonly workflows: readonly WorkflowEntry[];
+  readonly cli: { readonly name: string; readonly version: string };
+  readonly commands: readonly CommandEntry[];
+  readonly features: readonly FeatureEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// Build capabilities
+// ---------------------------------------------------------------------------
+
+/** Load the version from package.json. */
+function readPackageVersion(): string {
+  try {
+    // Resolve the caller's package.json (apps/cli/package.json)
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const pkgPath = resolve(dir, '../../package.json');
+    const raw = readFileSync(pkgPath, 'utf8');
+    const pkg = JSON.parse(raw) as { version?: string };
+    return pkg.version ?? CLI_VERSION;
+  } catch {
+    return CLI_VERSION;
+  }
+}
+
+function buildCommands(): CommandEntry[] {
+  const keys = Object.keys(COMMAND_HELP);
+  return keys.map((name) => {
+    const help = COMMAND_HELP[name]!;
+    return {
+      name,
+      summary: help.summary,
+      usage: help.usage,
+      subcommands: (help.subcommands ?? []).map(([sub]) => sub),
+      status: 'available' as const,
+    };
+  });
+}
+
+/**
+ * The catalog for this machine (probes ffmpeg, ffprobe, libass, fonts and Chromium), or the static
+ * product catalog when `probes` is false. Markdown uses the static form so the committed doc
+ * does not depend on the machine that generated it.
+ */
+export async function buildCapabilities(
+  options: { probes?: boolean } = {},
+): Promise<CapabilitiesDocument> {
+  const probing = options.probes !== false;
+  const libass = probing ? probeLibass() : false;
+  const [chromium, woff2Font] = await Promise.all([
+    probing ? probeChromium() : Promise.resolve(false),
+    probing ? probeBundledWoff2(libass) : Promise.resolve('unknown' as const),
+  ]);
+  const fontFound = probing && captionFontFile() !== null;
+  const features = probing
+    ? await buildFeatureList({
+        libass,
+        chromium,
+        woff2Font,
+        captionFont: fontFound,
+        titleFont: fontFound,
+      })
+    : baseFeatureList();
+  const workflowProbes: FeatureProbes = {
+    ffmpeg: probing,
+    ffprobe: probing,
+    captionFont: fontFound,
+    libass,
+    woff2Font,
+    chromium,
+    titleFont: fontFound,
+  };
+  return {
+    schemaVersion: '2',
+    probes: {
+      libass: probing ? libass : 'unavailable',
+      captionFont: probing ? fontFound : 'unavailable',
+      woff2Font,
+      chromium: probing ? chromium : 'unavailable',
+    },
+    workflows: [buildTitleWorkflow(workflowProbes)],
+    cli: { name: 'joy-media', version: readPackageVersion() },
+    commands: buildCommands(),
+    features,
+  };
+}
+
+/** Render the capability catalog as deterministic Markdown. */
+export function renderSupportMarkdown(document: CapabilitiesDocument): string {
+  const areas = [...new Set(document.features.map((feature) => feature.area))];
+  const lines = [
+    '# CLI render support boundary',
+    '',
+    '`joy-media render` produces real MP4, WebM, and ProRes/MOV media when project clips resolve to',
+    'local files. A successful real render is probed before publication; the CLI reports completion',
+    'only when the output contains playable video and audio streams at the planned size, frame rate,',
+    'and duration. The sidecar manifest describes the same timeline. `--manifest-only` always plans',
+    'without encoding, and label-only projects remain manifest-only.',
+    '',
+    'The current real-media path supports ordinary video, non-alpha still images, and audio clips on',
+    'enabled tracks. It places clips at their timeline times, trims `sourceInUs`, draws later video',
+    'tracks over earlier ones, and creates a silent audio stream when the sources contain no audio.',
+    'Audio placement and stereo channels are preserved. A render targeting a path already in use by',
+    'another JOY Media process returns an `output` error. Failed encoding, blocked sidecars, and',
+    'interrupted media/manifest replacement leave the last complete output pair intact or recover it',
+    'on the next render.',
+    '',
+    'The CLI returns a machine-readable `unsupported-feature` error before starting output when a',
+    'project asks for a feature the current renderer does not implement. The catalog below lists the',
+    'exact refusal fragments emitted by the renderer and current setup requirements.',
+    '',
+    'Generated by `joy-media capabilities --markdown`',
+    '',
+    '## Workflows',
+    '',
+    '| id | status | reason | renderer | templates | units |',
+    '| --- | --- | --- | --- | --- | --- |',
+    ...document.workflows.map(
+      (workflow) =>
+        `| ${workflow.id} | ${workflow.status} | ${workflow.reason} | ${workflow.renderer} | ${workflow.templates.join(', ')} | time ${workflow.units.time}; position ${workflow.units.position} |`,
+    ),
+    '',
+    `Bundled Arabic WOFF2 loadability: ${document.probes.woff2Font}.`,
+    '',
+  ];
+  for (const area of areas) {
+    lines.push(
+      `## ${area}`,
+      '',
+      '| id | status | reason | refusal text |',
+      '| --- | --- | --- | --- |',
+    );
+    for (const feature of document.features.filter((item) => item.area === area)) {
+      // An unescaped pipe would end the table cell, even inside a code span.
+      const refusal = feature.refusal.length > 0 ? `\`${feature.refusal.join(' \\| ')}\`` : 'none';
+      lines.push(`| \`${feature.id}\` | ${feature.status} | ${feature.reason} | ${refusal} |`);
+    }
+    lines.push('');
+  }
+  lines.push(
+    'An unresolved real asset is an error. Only projects that contain labels and no real media files',
+    'fall back to the plan manifest. This keeps planning useful without presenting a manifest as a',
+    'playable export.',
+    '',
+    '## Timeline editing the CLI supports',
+    '',
+    'Every editing command is checked against the decoded output in tests, not only in the project file.',
+    '',
+    '- `timeline add-clip` checks the media before writing: a file-like `--asset` that is not on disk',
+    '  is `MEDIA_NOT_FOUND`; audio-only media on a visual track, or media with picture on an audio',
+    '  track, is `TRACK_KIND_MISMATCH`; a clip longer than its source is `CLIP_EXCEEDS_SOURCE` unless',
+    '  `--allow-extend` is given. Still images are exempt from the source length.',
+    '- `timeline add-track --family visual|audio [--name]` adds an empty track on top of the stack.',
+    '  Its clips render with the same rules as the default tracks.',
+    '- `timeline move --clip <id> [--start <s>] [--track <id>]` moves a clip in time, or to another',
+    '  track of the same family. The source, length and overlap checks still apply.',
+    '- `timeline split`, `trim` and `remove-clip` are unchanged.',
+    '',
+    'The CLI supports dissolve transitions, captions, audio gain/fades/mute via `timeline set-audio`.',
+    'Not supported: pan, solo, effects, bus routing, playback-rate changes, reverse and time remapping,',
+    'visual objects, property animations, color grading, alpha media, and non-dissolve transitions.',
+    'Add these in the desktop editor and export there.',
+    '',
+    'A real render of a project with no clips fails with `nothing-to-render` (exit 1). Only',
+    '`--manifest-only` may succeed without media. Every `--json` failure has the same envelope:',
+    '`{"type":"error","code":...,"message":...}`.',
+    '',
+    'Projects may use NTSC rates (23.976, 29.97, 59.94) or an exact fraction (`--fps 30000/1001`).',
+    'A real render encodes at that exact rate. A plan-only (`--manifest-only`) render still counts',
+    'frames at the preset rate, and says so in its warnings.',
+  );
+  return lines.join('\n').trimEnd() + '\n';
+}
+
+// ---------------------------------------------------------------------------
+// Human output
+// ---------------------------------------------------------------------------
+
+function padEnd(s: string, len: number): string {
+  return s + ' '.repeat(Math.max(0, len - s.length));
+}
+
+function printHumanTable(doc: CapabilitiesDocument): void {
+  console.log(`${c('JOY Media CLI', 'bold')} v${doc.cli.version}\n`);
+
+  // Commands table
+  console.log(`${c('Commands:', 'bold')}`);
+  const cmdNameW = Math.max(...doc.commands.map((c) => c.name.length)) + 2;
+  const cmdSummaryW = Math.max(...doc.commands.map((c) => c.summary.length)) + 2;
+  console.log(`  ${padEnd('Name', cmdNameW)} ${padEnd('Summary', cmdSummaryW)} Status`);
+  console.log(`  ${'-'.repeat(cmdNameW - 2)} ${'-'.repeat(cmdSummaryW - 2)} ------`);
+  for (const cmd of doc.commands) {
+    console.log(
+      `  ${padEnd(cmd.name, cmdNameW)} ${padEnd(cmd.summary, cmdSummaryW)} ${c('available', 'green')}`,
+    );
+  }
+  console.log();
+
+  // Features table
+  console.log(`${c('Features:', 'bold')}`);
+  const featIdW = Math.max(...doc.features.map((f) => f.id.length)) + 2;
+  const featAreaW = Math.max(...doc.features.map((f) => f.area.length)) + 2;
+  console.log(
+    `  ${padEnd('ID', featIdW)} ${padEnd('Area', featAreaW)} Status${' '.repeat(14)} Reason`,
+  );
+  console.log(
+    `  ${'-'.repeat(featIdW - 2)} ${'-'.repeat(featAreaW - 2)} ${'-'.repeat(14)} ${'-'.repeat(40)}`,
+  );
+  for (const feat of doc.features) {
+    const statusColor =
+      feat.status === 'available' ? 'green' : feat.status === 'setup-required' ? 'yellow' : 'red';
+    console.log(
+      `  ${padEnd(feat.id, featIdW)} ${padEnd(feat.area, featAreaW)} ${padEnd(c(feat.status, statusColor), 14)} ${feat.reason}`,
+    );
+  }
+  console.log();
+}
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
+
+export async function handleCapabilitiesCommand(
+  args: string[],
+  flags: { json: boolean; markdown?: boolean },
+): Promise<number> {
+  // `--markdown` is a switch, but after a `--` terminator it arrives as a positional.
+  const markdownArg = args[0] === '--markdown';
+  const rest = markdownArg ? args.slice(1) : args;
+  const usage = (message: string): number => {
+    if (flags.json) console.log(JSON.stringify({ type: 'error', code: 'usage_error', message }));
+    else console.error(message);
+    return 2;
+  };
+  const wantsMarkdown = flags.markdown === true || markdownArg;
+  if (wantsMarkdown && flags.json) {
+    return usage(
+      '--json and --markdown cannot be used together. Usage: joy-media capabilities [--json|--markdown]',
+    );
+  }
+  const [sub] = rest;
+  if (sub !== undefined) {
+    if (sub === '--help' || sub === '-h') {
+      printCommandHelp('capabilities');
+      return 0;
+    }
+    return usage(`Unexpected argument "${sub}". Usage: joy-media capabilities [--json|--markdown]`);
+  }
+  if (wantsMarkdown) {
+    console.log(renderSupportMarkdown(await buildCapabilities({ probes: false })));
+    return 0;
+  }
+
+  const doc = await buildCapabilities();
+
+  if (flags.json) {
+    printJson(doc);
+  } else {
+    printHumanTable(doc);
+  }
+
+  return 0;
+}

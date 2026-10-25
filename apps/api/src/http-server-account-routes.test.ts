@@ -1,5 +1,4 @@
 import { generateKeyPairSync } from 'node:crypto';
-import { once } from 'node:events';
 import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { newDb } from 'pg-mem';
@@ -13,6 +12,7 @@ import { ReleaseMetadataService } from './release-metadata-service.js';
 import { createEd25519EntitlementSigner, verifyEntitlement } from './entitlement-signing.js';
 import type { SignedEntitlement } from './entitlement-signing.js';
 import type { HostedRouteRetirementFlags } from './hosted-route-retirement.js';
+import { listenOnFetchablePort } from './test-fetchable-port.js';
 
 /**
  * Wave 4 routes (devices, account/subscription, entitlements, releases, hosted-route
@@ -121,11 +121,8 @@ async function start(
     ...rest,
   });
   servers.push(server);
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  if (address === null || typeof address === 'string') throw new Error('test API did not bind TCP');
-  return `http://127.0.0.1:${address.port}`;
+  const port = await listenOnFetchablePort(server);
+  return `http://127.0.0.1:${port}`;
 }
 
 async function request(

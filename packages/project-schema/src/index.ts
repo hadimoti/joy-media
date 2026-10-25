@@ -184,6 +184,30 @@ export {
   audioEffectPropertyBinding,
 } from './audio.js';
 export { validateJoyProjectV1, validateAnimationCurve, ANIMATABLE_PROPERTIES } from './v1.js';
+export {
+  DesktopProjectionError,
+  projectV3ToDesktopVisual,
+  projectV3ToDesktopDocuments,
+} from './desktop-projection.js';
+export type { DesktopTimelineSchema0 } from './desktop-projection.js';
+export type {
+  P0TemplateId,
+  FontChoice,
+  TitlePlacement,
+  TitleMotion,
+  TitleLayout,
+  TitleInstanceV1,
+  ContentInstancesV1,
+} from './content-templates.js';
+export type {
+  FontFaceDescriptorV1,
+  ScenePaintFaceRefV1,
+  ScenePaintFrameV1,
+  ScenePaintLineV1,
+  ScenePaintRectV1,
+} from './scene-paint.js';
+export { CONTENT_TEMPLATES_PLUGIN_KEY, validateContentInstances } from './content-templates.js';
+export { dimensionsForExportPreset } from './export-preset.js';
 export type {
   PropertyOwnerKindV2,
   AnimationTimeDomainV2,

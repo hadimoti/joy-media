@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.joy.media/cli/v1/agent-run-result.schema.json",
+  "title": "JOY Media CLI agent run result v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "ok",
+        "dryRun",
+        "applied",
+        "revision",
+        "project",
+        "provider",
+        "model",
+        "baseRevision",
+        "text",
+        "steps",
+        "operations"
+      ],
+      "properties": {
+        "ok": { "const": true },
+        "dryRun": { "type": "boolean" },
+        "applied": { "type": "boolean" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "project": {
+          "type": "object",
+          "required": ["id", "title"],
+          "properties": { "id": { "type": "string" }, "title": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "provider": { "type": "string" },
+        "model": { "type": "string" },
+        "baseRevision": { "type": "integer", "minimum": 1 },
+        "text": { "type": "string" },
+        "steps": { "type": "integer", "minimum": 0 },
+        "operations": {
+          "type": "object",
+          "required": ["timeline", "document"],
+          "properties": { "timeline": { "type": "array" }, "document": { "type": "array" } },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "required": ["ok", "error"],
+      "properties": {
+        "ok": { "const": false },
+        "error": {
+          "type": "object",
+          "required": ["message"],
+          "properties": {
+            "code": { "type": "string" },
+            "message": { "type": "string" },
+            "httpStatus": { "type": "integer" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  ]
+}

@@ -2,8 +2,7 @@
  * Pixi v8 Filter adapter for curated gl-transitions shaders.
  */
 
-import type { Texture } from 'pixi.js';
-import { Filter, GlProgram } from 'pixi.js';
+import { Filter, GlProgram, Texture } from 'pixi.js';
 import {
   buildPixiTransitionFragment,
   getTransitionShader,
@@ -88,6 +87,9 @@ export function createGlTransitionFilter(
     }),
     resources: {
       transitionUniforms: floatUniforms,
+      // Register the sampler before Pixi builds its resource accessors. Adding
+      // a new resources property later does not bind it to the shader.
+      uTextureTo: Texture.EMPTY.source,
     },
   });
 

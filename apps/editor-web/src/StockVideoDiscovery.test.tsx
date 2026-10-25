@@ -8,7 +8,7 @@ import {
   type BrowserStockVideoCategory,
   type BrowserStockVideo,
 } from './control-plane-client.js';
-import { StockVideoDiscovery } from './StockVideoDiscovery.js';
+import { StockVideoDiscovery, waitForStockVideoImport } from './StockVideoDiscovery.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -273,5 +273,33 @@ describe('StockVideoDiscovery object URL lifecycle', () => {
     expect(revoked).toEqual(
       expect.arrayContaining(['blob:preview-modal-1', 'blob:preview-modal-2']),
     );
+  });
+});
+
+describe('waitForStockVideoImport', () => {
+  it('sends no status request once the session has left the project during the wait', async () => {
+    let held = true;
+    const stockVideoImportStatus = vi.fn(async () => ({ importId: 'import-1', state: 'queued' }));
+    const client = { stockVideoImportStatus } as unknown as Pick<
+      BrowserControlPlaneClient,
+      'stockVideoImportStatus'
+    >;
+    // The wait is where the session leaves the project. The next status request must not be sent.
+    const wait = vi.fn(async () => {
+      held = false;
+    });
+
+    await expect(
+      waitForStockVideoImport(
+        client,
+        'project-1',
+        'import-1',
+        () => {
+          if (!held) throw new Error('The session left this project.');
+        },
+        wait,
+      ),
+    ).rejects.toThrow('The session left this project.');
+    expect(stockVideoImportStatus).toHaveBeenCalledTimes(1);
   });
 });

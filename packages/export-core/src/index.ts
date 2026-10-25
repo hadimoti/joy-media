@@ -2,8 +2,9 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, renameSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-export type ExportPresetId =
-  'social-h264-aac' | 'reels-1080' | 'shorts-1080' | 'youtube-1080' | 'high-bitrate';
+import { dimensionsForExportPreset } from '@joy-media/project-schema';
+import type { ExportPresetId } from '@joy-media/project-schema';
+export type { ExportPresetId } from '@joy-media/project-schema';
 
 export interface RenderManifest {
   readonly projectId: string;
@@ -19,17 +20,7 @@ export function dimensionsForPreset(
   preset: ExportPresetId,
   fallback: { readonly width: number; readonly height: number },
 ): { readonly width: number; readonly height: number } {
-  switch (preset) {
-    case 'reels-1080':
-    case 'shorts-1080':
-      return { width: 1080, height: 1920 };
-    case 'youtube-1080':
-      return { width: 1920, height: 1080 };
-    case 'high-bitrate':
-      return { width: Math.max(fallback.width, 1920), height: Math.max(fallback.height, 1080) };
-    default:
-      return fallback;
-  }
+  return dimensionsForExportPreset(preset, fallback);
 }
 export function freezeManifest(manifest: RenderManifest): RenderManifest {
   if (
@@ -133,6 +124,19 @@ export function renderRgbaFrames(
         'anullsrc=r=48000:cl=stereo',
         '-frames:v',
         String(frames.length),
+        // RGB-to-YUV must use the matrix the stream is tagged with. Without this
+        // FFmpeg converts with BT.601 while players decode BT.709 tags, so pure
+        // blue exported as (0,14,255) instead of (0,0,255).
+        '-vf',
+        'scale=out_color_matrix=bt709:out_range=tv',
+        '-colorspace',
+        'bt709',
+        '-color_primaries',
+        'bt709',
+        '-color_trc',
+        'bt709',
+        '-color_range',
+        'tv',
         '-c:v',
         'libx264',
         '-pix_fmt',
@@ -264,17 +268,27 @@ export function remuxBrowserMp4(
     `.${basename(outputPath)}.${randomUUID()}.partial.mp4`,
   );
   try {
+    // Chromium's MediaRecorder converts canvas RGB to YUV with BT.601 coefficients
+    // but tags the stream BT.709. Decode with the BT.601 matrix that the content
+    // was made with, then encode with an explicit BT.709 matrix and tags, so
+    // players that honour the tag show the authored colours.
+    const colourFilter =
+      'scale=in_color_matrix=bt601:in_range=tv:out_color_matrix=bt709:out_range=tv';
+    // On the normalized path frame N takes its authored time N / frameRate. setpts alone keeps
+    // the recorder's irregular per-frame durations, and the output-stage resample used those
+    // durations and duplicated a frame in captured runs. The fps filter gives every frame one slot.
+    const authoredTimeline = `${colourFilter},setpts=N/(${frameRate}*TB),fps=${frameRate}:round=near`;
     const normalizeTimeline =
       frameCount === undefined
         ? []
         : [
-            '-vf',
             // CanvasCaptureMediaStreamTrack is realtime and may deliver one
             // fewer frame on a cold/software Chromium encoder. Keep the
             // authored cadence and clone the terminal decoded frame when the
             // recorder is short, so the remuxed contract is exactly the
             // manifest's frame count rather than silently truncating it.
-            `setpts=N/(${frameRate}*TB),tpad=stop_mode=clone:stop=-1`,
+            '-vf',
+            `${authoredTimeline},tpad=stop_mode=clone:stop=-1`,
             '-af',
             'asetpts=PTS-STARTPTS,apad',
             '-frames:v',
@@ -288,13 +302,27 @@ export function remuxBrowserMp4(
         '-y',
         '-i',
         inputPath,
-        ...normalizeTimeline,
+        // Without a frame count the recorder's timestamps are kept, so a source at another
+        // frame rate keeps its duration. A jittered capture can still duplicate a frame here.
+        ...(frameCount === undefined ? ['-vf', colourFilter] : normalizeTimeline),
+        '-colorspace',
+        'bt709',
+        '-color_primaries',
+        'bt709',
+        '-color_trc',
+        'bt709',
+        '-color_range',
+        'tv',
         '-c:v',
         'libx264',
         '-pix_fmt',
         'yuv420p',
         '-c:a',
         'aac',
+        // The recorder captures audio at the host's rate (44,100 Hz on a machine with no 48 kHz device,
+        // such as a container). The deliverable is always 48 kHz, as the silent-audio fallback already is.
+        '-ar',
+        '48000',
         '-r',
         String(frameRate),
         '-movflags',
