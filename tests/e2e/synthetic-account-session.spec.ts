@@ -1,21 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
+import { controlPortConfig, controlRequest } from './helpers/control-port.js';
 
 // Account persistence in the browser, against the real login gate and the real /v1/auth endpoints.
 // The E2E server runs synthetic accounts only (see tooling/e2e-synthetic-accounts.ts). The control
 // port reads the one-time code and seeds or expires state; it never touches the editor itself.
 
 const TOKEN_KEY = 'joy-media-session-token';
-const CONTROL_TOKEN = process.env.JOY_MEDIA_E2E_CONTROL_TOKEN ?? '';
-const CONTROL = `http://127.0.0.1:${process.env.JOY_MEDIA_E2E_CONTROL_PORT ?? '4175'}`;
 
 async function control<T>(path: string, body?: unknown): Promise<{ status: number; data: T }> {
-  const response = await fetch(`${CONTROL}${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers: { 'x-joy-e2e-control': CONTROL_TOKEN, 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const parsed = (await response.json()) as { data?: T };
-  return { status: response.status, data: parsed.data as T };
+  return controlRequest<T>(path, body);
 }
 
 function uniqueContact(): string {
@@ -66,9 +59,9 @@ async function subscriptionStatus(page: Page): Promise<string> {
   }, TOKEN_KEY);
 }
 
-test.describe('account persistence on the synthetic E2E server', () => {
+test.describe('account persistence on the synthetic E2E server', { tag: '@fixture-only' }, () => {
   test.beforeAll(() => {
-    if (CONTROL_TOKEN.length === 0)
+    if (controlPortConfig().token.length === 0)
       throw new Error('JOY_MEDIA_E2E_CONTROL_TOKEN is required for synthetic account tests.');
   });
 
