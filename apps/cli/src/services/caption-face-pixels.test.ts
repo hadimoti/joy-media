@@ -34,7 +34,7 @@ function digestOf(path: string): string {
 
 function ffmpegVersionLine(): string {
   const result = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8' });
-  return (result.stdout ?? '').split('\n')[0].trim();
+  return ((result.stdout ?? '').split('\n')[0] ?? '').trim();
 }
 
 function bundledFace(): Buffer {
