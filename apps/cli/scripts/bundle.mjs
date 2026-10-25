@@ -88,8 +88,8 @@ const require = __createRequire(import.meta.url);
   const libassSource = resolve(fontSource, 'libass');
   const libassOutput = resolve(fontOutput, 'libass');
   const libassManifest = JSON.parse(readFileSync(resolve(libassSource, 'manifest.json'), 'utf8'));
-  if (libassManifest.license !== 'OFL-1.1' || libassManifest.files.length !== 2) {
-    throw new Error('Libass font manifest must list the two bundled TrueType files');
+  if (libassManifest.license !== 'OFL-1.1' || libassManifest.files.length !== 4) {
+    throw new Error('Libass font manifest must list the four bundled TrueType files');
   }
   mkdirSync(resolve(libassOutput, 'fonts'), { recursive: true });
   for (const entry of libassManifest.files) {

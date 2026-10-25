@@ -1,9 +1,10 @@
 {
   "source": "@fontsource/noto-sans-arabic@5.2.6 (WOFF2 files, decompressed losslessly to TrueType)",
   "decompressor": "wawoff2@2.0.1 (MIT)",
+  "modifications": "Latin subset faces only: the PostScript name is replaced by a unique name of the same length (NotoSansLatinX-Regular, NotoSansLatinX-Bold), so libass does not confuse them with the Arabic faces. Noto Sans Arabic declares no Reserved Font Name. Table and file checksums are recomputed.",
   "license": "OFL-1.1",
   "licenseFile": "../LICENSE-OFL.txt",
-  "purpose": "FFmpeg libass caption faces; the WOFF2 faces in the parent folder stay for browsers",
+  "purpose": "FFmpeg libass caption faces for the Arabic and Latin subsets; the WOFF2 faces in the parent folder stay for browsers",
   "files": [
     {
       "family": "Noto Sans Arabic",
@@ -20,6 +21,22 @@
       "file": "noto-sans-arabic-arabic-700-normal.ttf",
       "byteLength": 151512,
       "sha256": "sha256:ace3b202eb09d4cd08237fe950b9dfd65350654b016e6a3a44abd5a7a7be06c0"
+    },
+    {
+      "family": "Noto Sans Arabic",
+      "weight": 400,
+      "subset": "latin",
+      "file": "noto-sans-arabic-latin-400-normal.ttf",
+      "byteLength": 21452,
+      "sha256": "sha256:b77904bc500957af861819b701e92b38fdc6f7640dca5580224619ac722026c3"
+    },
+    {
+      "family": "Noto Sans Arabic",
+      "weight": 700,
+      "subset": "latin",
+      "file": "noto-sans-arabic-latin-700-normal.ttf",
+      "byteLength": 21436,
+      "sha256": "sha256:85ea9f83c1241908c257df8e46607e792712ec16f969e605c54710f533374609"
     }
   ]
 }

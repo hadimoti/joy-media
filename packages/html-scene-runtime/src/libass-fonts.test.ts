@@ -8,6 +8,8 @@ describe('Noto Sans Arabic libass faces', () => {
     expect(faces.map(({ weight, subset }) => `${subset}-${weight}`)).toEqual([
       'arabic-400',
       'arabic-700',
+      'latin-400',
+      'latin-700',
     ]);
     for (const face of faces) {
       expect(face.bytes.subarray(0, 4).toString('hex')).toBe('00010000');

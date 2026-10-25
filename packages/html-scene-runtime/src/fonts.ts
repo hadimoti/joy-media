@@ -124,6 +124,8 @@ interface LibassFontManifest {
 const LIBASS_FONT_FILES = [
   'noto-sans-arabic-arabic-400-normal.ttf',
   'noto-sans-arabic-arabic-700-normal.ttf',
+  'noto-sans-arabic-latin-400-normal.ttf',
+  'noto-sans-arabic-latin-700-normal.ttf',
 ] as const;
 
 /** The folder libass scans: it holds the TrueType files and nothing else. */
@@ -148,7 +150,7 @@ export function loadNotoSansArabicLibassFaces(): NotoSansArabicLibassFace[] {
     manifest.files.length !== LIBASS_FONT_FILES.length ||
     LIBASS_FONT_FILES.some((file) => !manifest.files.some((entry) => entry.file === file))
   ) {
-    throw new Error('Noto Sans Arabic libass manifest must list the two bundled TrueType files');
+    throw new Error('Noto Sans Arabic libass manifest must list the four bundled TrueType files');
   }
   return manifest.files.map((entry) => {
     const bytes = readFileSync(join(fontDirectory, entry.file));
