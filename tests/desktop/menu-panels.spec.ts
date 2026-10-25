@@ -121,7 +121,7 @@ function appMenuBar(page: Page): Locator {
   return page.getByRole('navigation', { name: 'Application menu' });
 }
 
-async function openMenu(page: Page, name: 'File' | 'Edit'): Promise<Locator> {
+async function openMenu(page: Page, name: 'File' | 'Edit' | 'Window'): Promise<Locator> {
   const trigger = appMenuBar(page).getByRole('button', { name, exact: true });
   await expect(trigger).toBeVisible();
   await trigger.click();
@@ -163,6 +163,43 @@ async function openDockTab(page: Page, label: string, content: Locator): Promise
   await tab.click();
   await expect(content).toBeVisible();
 }
+
+// Window > Focus items, in the order the menu lists them. Each is checked by the dock tab it activates.
+const WINDOW_FOCUS_ITEMS = [
+  { menu: 'Focus Program Monitor', tab: 'Program Monitor' },
+  { menu: 'Focus Timeline', tab: 'Timeline' },
+  { menu: 'Focus Inspector', tab: 'Inspector' },
+  { menu: 'Focus Create', tab: 'Create' },
+] as const;
+
+test('window menu focuses each workspace panel and makes its tab the active one', async () => {
+  test.setTimeout(360_000);
+  const profile = mkdtempSync(join(tmpdir(), 'joy-media-menu-focus-'));
+  let app: ElectronApplication | undefined;
+
+  try {
+    app = await launchPackagedEditor(profile);
+    const page = await openEditorPage(app);
+    await page.getByRole('button', { name: 'New project' }).click();
+    await page.getByPlaceholder('Project name').fill(`Menu focus ${Date.now()}`);
+    await page.getByRole('button', { name: 'Create project' }).click();
+    await expect(page.getByRole('button', { name: 'File', exact: true })).toBeVisible();
+
+    // Dockview keeps one active tab per group, and panels can sit in several groups. So the check is that
+    // the focused group (`.dv-active-group`) shows the requested panel as its active tab.
+    for (const item of WINDOW_FOCUS_ITEMS) {
+      const menu = await openMenu(page, 'Window');
+      await menuItem(menu, item.menu).click();
+      await expect(
+        page.locator(`.dv-active-group .dv-tab.dv-active-tab[aria-label="${item.tab}"]`),
+        `${item.menu} must focus the group that shows the ${item.tab} tab`,
+      ).toBeVisible();
+    }
+  } finally {
+    await app?.close().catch(() => undefined);
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
 
 test('packaged File and Edit menus and workspace panels are reachable', async () => {
   test.setTimeout(360_000);

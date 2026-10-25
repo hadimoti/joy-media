@@ -1,5 +1,5 @@
 {
-  "$comment": "Packaged-test coverage for every menu item and keyboard shortcut (L6). Status: exercised = the packaged spec drives the action; reachable = the packaged spec shows the item; open = no packaged test yet. Every non-open entry names a spec under tests/desktop whose text must contain the evidence string. Strict release mode (JOY_MEDIA_L6_RELEASE=1) fails while any entry is open.",
+  "$comment": "Packaged-test coverage for every menu item and keyboard shortcut (L6). Status: exercised = the packaged spec performs the action and asserts its effect; reachable = the packaged spec shows the item; open = no packaged test yet. Every non-open entry names a spec under tests/desktop whose text must contain the evidence string. Strict release mode (JOY_MEDIA_L6_RELEASE=1) fails while any entry is open.",
   "menu": [
     {
       "id": "file.account",
@@ -31,8 +31,10 @@
     },
     {
       "id": "file.export",
-      "status": "open",
-      "note": "No packaged spec opens the File menu Export item itself; export specs use their own UI path."
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "file export from the File menu renders an MP4",
+      "note": "Renders the timeline through the packaged export and probes the downloaded MP4 with ffprobe."
     },
     {
       "id": "file.signOut",
@@ -85,8 +87,10 @@
     },
     {
       "id": "clip.split",
-      "status": "open",
-      "note": "The Split at Playhead item has no packaged test; the editor's Split tool button is covered instead."
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "clip split from the Clip menu",
+      "note": "Clip > Split at Playhead cuts the selected clip at the playhead; the two halves are checked by their timeline labels."
     },
     {
       "id": "agent.open",
@@ -97,14 +101,24 @@
     },
     {
       "id": "agent.executionMode",
-      "status": "open",
-      "note": "No packaged test opens Execution Mode."
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "Joy Code menu opens the execution policy",
+      "note": "Opens the Joy Code Settings dialog on the Execution & Safety tab, not the models tab."
     },
-    { "id": "agent.stop", "status": "open", "note": "No packaged test covers Pause / Stop." },
+    {
+      "id": "agent.stop",
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "Joy Code menu stops a staged run",
+      "note": "Stops a run that is waiting with a staged proposal: the proposal is withdrawn and the composer reports cancelled."
+    },
     {
       "id": "agent.settings",
-      "status": "open",
-      "note": "No packaged test opens Joy Code Settings from the menu."
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "Joy Code menu opens the execution policy and the model settings",
+      "note": "Opens the Joy Code Settings dialog on the models tab."
     },
     {
       "id": "view.commandPalette",
@@ -120,13 +134,27 @@
       "evidence": "Toggle Full Screen",
       "note": "Toggles the host window full screen on and off."
     },
-    { "id": "window.minimize", "status": "open", "note": "No packaged test covers Minimize." },
+    {
+      "id": "window.minimize",
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "window menu minimizes the host window",
+      "note": "Minimizes the host window and restores it; the window state is read from the main process."
+    },
     {
       "id": "window.maximize",
-      "status": "open",
-      "note": "No packaged test covers Zoom / Maximize."
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "then zooms it on and off",
+      "note": "Zoom / Maximize toggles the maximized state on and off."
     },
-    { "id": "window.close", "status": "open", "note": "No packaged test covers Close Window." }
+    {
+      "id": "window.close",
+      "status": "exercised",
+      "spec": "menu-actions.spec.ts",
+      "evidence": "window menu close closes the host window",
+      "note": "Close Window closes the only host window; the test checks that no window remains."
+    }
   ],
   "menuPrefixes": [
     {
@@ -138,57 +166,117 @@
     },
     {
       "prefix": "window.panel.",
-      "status": "open",
-      "note": "Window menu panel items have no packaged test."
+      "status": "exercised",
+      "spec": "menu-panels.spec.ts",
+      "evidence": "window menu focuses each workspace panel",
+      "note": "Each Window > Focus item activates its panel in the focused dock group."
     }
   ],
   "shortcut": [
-    { "action": "playback.toggle", "status": "open", "note": "Space has no packaged test." },
+    {
+      "action": "playback.toggle",
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "playback.toggle",
+      "note": "Space starts playback and a second Space stops it; the timecode stops advancing."
+    },
     {
       "action": "history.undo",
-      "status": "open",
-      "note": "Ctrl+Z has no packaged test; the menu item is covered."
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "history.undo",
+      "note": "Ctrl+Z restores a deleted clip."
     },
     {
       "action": "history.redo",
-      "status": "open",
-      "note": "Ctrl+Y has no packaged test; the menu item is covered."
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "history.redo",
+      "note": "Ctrl+Y deletes the clip again."
     },
-    { "action": "palette.toggle", "status": "open", "note": "Ctrl+K has no packaged test." },
+    {
+      "action": "palette.toggle",
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "palette.toggle",
+      "note": "Ctrl+K opens the command palette with its search field focused."
+    },
     {
       "action": "palette.close",
-      "status": "open",
-      "note": "Escape closes the palette; no packaged test asserts it."
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "palette.close",
+      "note": "Escape closes the palette while its search field has focus."
     },
-    { "action": "clip.split", "status": "open", "note": "S has no packaged test." },
+    {
+      "action": "clip.split",
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "clip.split",
+      "note": "S splits the selected clip at the playhead."
+    },
     {
       "action": "clip.delete",
-      "status": "open",
-      "note": "Delete and Backspace have no packaged test."
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "clip.delete",
+      "note": "Delete and Backspace each remove the selected clip."
     },
     {
       "action": "clip.duplicate",
-      "status": "open",
-      "note": "Ctrl+D has no packaged test; the menu item is covered."
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "clip.duplicate",
+      "note": "Ctrl+D adds a copy of the selected clip."
     },
     {
       "action": "playhead.back",
-      "status": "open",
-      "note": "Left arrow has no packaged assertion."
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "playhead.back",
+      "note": "Left arrow moves the playhead back one second."
     },
     {
       "action": "playhead.forward",
-      "status": "open",
-      "note": "Right arrow has no packaged assertion."
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "playhead.forward",
+      "note": "Right arrow moves the playhead forward one second."
     },
-    { "action": "playhead.backFine", "status": "open", "note": "Shift+Left has no packaged test." },
+    {
+      "action": "playhead.backFine",
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "playhead.backFine",
+      "note": "Shift+Left moves the playhead back 0.1 s."
+    },
     {
       "action": "playhead.forwardFine",
-      "status": "open",
-      "note": "Shift+Right has no packaged test."
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "playhead.forwardFine",
+      "note": "Shift+Right moves the playhead forward 0.1 s."
     },
-    { "action": "playhead.start", "status": "open", "note": "Home has no packaged assertion." },
-    { "action": "playhead.end", "status": "open", "note": "End has no packaged assertion." },
-    { "action": "shortcuts.toggle", "status": "open", "note": "? has no packaged test." }
+    {
+      "action": "playhead.start",
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "playhead.start",
+      "note": "Home moves the playhead to zero."
+    },
+    {
+      "action": "playhead.end",
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "playhead.end",
+      "note": "End moves the playhead to the end of the timeline."
+    },
+    {
+      "action": "shortcuts.toggle",
+      "status": "exercised",
+      "spec": "keyboard-shortcuts.spec.ts",
+      "evidence": "shortcuts.toggle",
+      "note": "? opens the keyboard shortcut sheet and a second ? closes it."
+    }
   ]
 }

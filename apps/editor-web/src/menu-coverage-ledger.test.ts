@@ -88,11 +88,12 @@ describe('menu and keyboard coverage ledger (L6)', () => {
   });
 
   it('names a packaged spec that contains the evidence for every exercised or reachable item', () => {
-    const claims = [...ledger.menu, ...ledger.menuPrefixes].filter(
+    const claims = [...ledger.menu, ...ledger.menuPrefixes, ...ledger.shortcut].filter(
       (entry) => entry.status !== 'open',
     );
     for (const claim of claims) {
-      const label = 'id' in claim ? claim.id : claim.prefix;
+      const label =
+        'id' in claim ? claim.id : 'prefix' in claim ? claim.prefix : `shortcut ${claim.action}`;
       expect(claim.spec, `${label} names no spec`).toBeDefined();
       expect(claim.evidence, `${label} has no evidence`).toBeDefined();
       const specPath = new URL(claim.spec as string, packagedSpecs);
