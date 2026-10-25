@@ -240,7 +240,7 @@ describe('capabilities command', () => {
     expect(stdout.trim()).toBe(expected.trim());
     for (const id of FEATURE_IDS) expect(stdout).toContain(id);
     expect(expected).toContain('design.title-video.v1');
-    expect(expected).toContain('Bundled Arabic WOFF2 loadability: unknown.');
+    expect(expected).toContain('Canonical caption face (TrueType companion): unknown.');
     expect(expected).toContain('`color grading \\| clip color grades`');
   });
 });
@@ -586,7 +586,7 @@ describe('capability probe status', () => {
       ffprobe: true,
       captionFont: true,
       libass: true,
-      woff2Font: 'unavailable',
+      canonicalCaptionFace: 'unavailable',
       chromium: true,
       titleFont: true,
     });
@@ -601,7 +601,7 @@ describe('capability probe status', () => {
       ffprobe: true,
       captionFont: true,
       libass: false,
-      woff2Font: 'unavailable',
+      canonicalCaptionFace: 'unavailable',
       chromium: true,
       titleFont: true,
     });
@@ -610,7 +610,7 @@ describe('capability probe status', () => {
       ffprobe: true,
       captionFont: true,
       libass: true,
-      woff2Font: 'loadable',
+      canonicalCaptionFace: 'loadable',
       chromium: true,
       titleFont: true,
     });
@@ -623,7 +623,7 @@ describe('capability probe status', () => {
       ffprobe: true,
       captionFont: true,
       libass: true,
-      woff2Font: 'unavailable',
+      canonicalCaptionFace: 'unavailable',
       chromium: true,
       titleFont: true,
     });
@@ -660,7 +660,7 @@ describe('capability probe status', () => {
       captionFont: true,
       titleFont: true,
       libass: false,
-      woff2Font: 'unavailable',
+      canonicalCaptionFace: 'unavailable',
       chromium: true,
     });
     expect(missingLibass).toMatchObject({
@@ -678,7 +678,7 @@ describe('capability probe status', () => {
         captionFont: true,
         titleFont: true,
         libass: true,
-        woff2Font: 'unavailable',
+        canonicalCaptionFace: 'unavailable',
         chromium: true,
       }),
     ).toMatchObject({ status: 'available', reason: 'All required probes passed' });

@@ -11,7 +11,7 @@ import {
   captionFontFile,
   probeLibass,
   probeChromium,
-  probeBundledWoff2,
+  probeCanonicalCaptionFaceStatus,
   type FeatureEntry,
   type FeatureProbes,
   type WorkflowEntry,
@@ -34,6 +34,8 @@ export interface CapabilitiesDocument {
   readonly probes: {
     readonly libass: boolean | 'unavailable';
     readonly captionFont: boolean | 'unavailable';
+    readonly canonicalCaptionFace: 'loadable' | 'unavailable' | 'unknown';
+    /** Deprecated alias of canonicalCaptionFace. It names the TrueType caption face, not WOFF2. */
     readonly woff2Font: 'loadable' | 'unavailable' | 'unknown';
     readonly chromium: boolean | 'unavailable';
   };
@@ -85,16 +87,16 @@ export async function buildCapabilities(
 ): Promise<CapabilitiesDocument> {
   const probing = options.probes !== false;
   const libass = probing ? probeLibass() : false;
-  const [chromium, woff2Font] = await Promise.all([
+  const [chromium, canonicalCaptionFace] = await Promise.all([
     probing ? probeChromium() : Promise.resolve(false),
-    probing ? probeBundledWoff2(libass) : Promise.resolve('unknown' as const),
+    probing ? probeCanonicalCaptionFaceStatus(libass) : Promise.resolve('unknown' as const),
   ]);
   const fontFound = probing && captionFontFile() !== null;
   const features = probing
     ? await buildFeatureList({
         libass,
         chromium,
-        woff2Font,
+        canonicalCaptionFace,
         captionFont: fontFound,
         titleFont: fontFound,
       })
@@ -104,7 +106,7 @@ export async function buildCapabilities(
     ffprobe: probing,
     captionFont: fontFound,
     libass,
-    woff2Font,
+    canonicalCaptionFace,
     chromium,
     titleFont: fontFound,
   };
@@ -113,7 +115,8 @@ export async function buildCapabilities(
     probes: {
       libass: probing ? libass : 'unavailable',
       captionFont: probing ? fontFound : 'unavailable',
-      woff2Font,
+      canonicalCaptionFace,
+      woff2Font: canonicalCaptionFace,
       chromium: probing ? chromium : 'unavailable',
     },
     workflows: [buildTitleWorkflow(workflowProbes)],
@@ -158,7 +161,7 @@ export function renderSupportMarkdown(document: CapabilitiesDocument): string {
         `| ${workflow.id} | ${workflow.status} | ${workflow.reason} | ${workflow.renderer} | ${workflow.templates.join(', ')} | time ${workflow.units.time}; position ${workflow.units.position} |`,
     ),
     '',
-    `Bundled Arabic WOFF2 loadability: ${document.probes.woff2Font}.`,
+    `Canonical caption face (TrueType companion): ${document.probes.canonicalCaptionFace}.`,
     '',
   ];
   for (const area of areas) {

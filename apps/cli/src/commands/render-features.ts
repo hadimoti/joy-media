@@ -105,7 +105,7 @@ export interface FeatureProbes {
   readonly ffprobe: boolean;
   readonly captionFont: boolean;
   readonly libass?: boolean;
-  readonly woff2Font?: 'loadable' | 'unavailable' | 'unknown';
+  readonly canonicalCaptionFace?: 'loadable' | 'unavailable' | 'unknown';
   readonly chromium?: boolean;
   readonly chromiumReason?: string;
   readonly titleFont?: boolean;
@@ -244,8 +244,11 @@ export function hasUsableChromium(
   });
 }
 
-/** Checks whether this FFmpeg/libass build can load the bundled WOFF2 face. */
-export async function probeBundledWoff2(
+/**
+ * Checks whether this FFmpeg/libass build draws the canonical caption face. That is the bundled
+ * TrueType companion: libass cannot open the WOFF2 file, so the WOFF2 is not what is checked.
+ */
+export async function probeCanonicalCaptionFaceStatus(
   libassAvailable = probeLibass(),
 ): Promise<'loadable' | 'unavailable' | 'unknown'> {
   if (!libassAvailable) return 'unknown';
@@ -586,7 +589,7 @@ export function applyProbes(
     }
     if (
       feature.id === 'captions.ass-basic' &&
-      (probes.libass === false || probes.woff2Font !== 'loadable')
+      (probes.libass === false || probes.canonicalCaptionFace !== 'loadable')
     ) {
       const prerequisiteReason =
         probes.libass === false
@@ -598,7 +601,7 @@ export function applyProbes(
     }
     if (
       feature.id === 'captions.rtl' &&
-      (probes.libass === false || probes.woff2Font !== 'loadable')
+      (probes.libass === false || probes.canonicalCaptionFace !== 'loadable')
     ) {
       return {
         ...feature,
@@ -628,23 +631,23 @@ export async function buildFeatureList(
   overrides?: Partial<FeatureProbes>,
 ): Promise<FeatureEntry[]> {
   const libass = overrides?.libass ?? probeLibass();
-  const [chromiumStatus, woff2Font] = await Promise.all([
+  const [chromiumStatus, canonicalCaptionFace] = await Promise.all([
     overrides?.chromium === undefined
       ? probeChromiumStatus()
       : Promise.resolve({
           launchable: overrides.chromium,
           reason: overrides.chromiumReason ?? lastChromiumProbeReason,
         }),
-    overrides?.woff2Font === undefined
-      ? probeBundledWoff2(libass)
-      : Promise.resolve(overrides.woff2Font),
+    overrides?.canonicalCaptionFace === undefined
+      ? probeCanonicalCaptionFaceStatus(libass)
+      : Promise.resolve(overrides.canonicalCaptionFace),
   ]);
   return applyProbes(baseFeatureList(), {
     ffmpeg: binaryAvailable(ffmpegBinary()),
     ffprobe: binaryAvailable(ffprobeBinary()),
     captionFont: captionFontFile() !== null,
     libass,
-    woff2Font,
+    canonicalCaptionFace,
     chromium: chromiumStatus.launchable,
     ...(chromiumStatus.reason === undefined ? {} : { chromiumReason: chromiumStatus.reason }),
     titleFont: captionFontFile() !== null,
