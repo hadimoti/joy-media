@@ -3,6 +3,7 @@ import { existsSync, createReadStream } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { stageNotoSansArabicFonts } from './copy-cli-fonts.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const repoRoot = resolve(desktopRoot, '..', '..');
@@ -98,6 +99,16 @@ await mkdir(cliDestDir, { recursive: true });
 const bundledCliPath = resolve(cliDestDir, 'joy-media-bundle.mjs');
 await cp(resolve(cliRoot, 'dist', 'joy-media-bundle.mjs'), bundledCliPath);
 console.log('Embedded bundled CLI into resources/app/cli/joy-media-bundle.mjs');
+
+// The CLI reads its Noto Sans Arabic faces from fonts/noto-sans-arabic beside the bundle, so the
+// installed layout must match the bundle's dist folder. Each pinned file is verified on the way.
+const stagedFonts = stageNotoSansArabicFonts({
+  sourceDirectory: resolve(cliRoot, 'dist', 'fonts', 'noto-sans-arabic'),
+  destinationDirectory: resolve(cliDestDir, 'fonts', 'noto-sans-arabic'),
+});
+console.log(
+  `Embedded ${stagedFonts.length} verified Noto Sans Arabic font files into resources/app/cli/fonts/`,
+);
 
 // Create Windows CLI wrappers in standalone distribution root
 const cliCmdContent = `@echo off
