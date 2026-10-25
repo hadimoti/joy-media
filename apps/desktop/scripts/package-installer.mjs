@@ -4,6 +4,11 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { stageNotoSansArabicFonts } from './copy-cli-fonts.mjs';
+import {
+  CLI_LAUNCHER_DIRECTORY,
+  CLI_LAUNCHER_NAMES,
+  cliLauncherContent,
+} from './cli-launcher-layout.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const repoRoot = resolve(desktopRoot, '..', '..');
@@ -110,15 +115,14 @@ console.log(
   `Embedded ${stagedFonts.length} verified Noto Sans Arabic font files into resources/app/cli/fonts/`,
 );
 
-// Create Windows CLI wrappers in standalone distribution root
-const cliCmdContent = `@echo off
-setlocal
-set "ELECTRON_RUN_AS_NODE=1"
-"%~dp0joy-media.exe" "%~dp0resources\\app\\cli\\joy-media-bundle.mjs" %*
-`;
-await writeFile(resolve(standaloneDir, 'joy.cmd'), cliCmdContent, 'utf8');
-await writeFile(resolve(standaloneDir, 'joy-media.cmd'), cliCmdContent, 'utf8');
-console.log('Generated joy.cmd and joy-media.cmd launchers in distribution root');
+// Create the CLI launchers in their own folder, the only one on the user PATH (see
+// cli-launcher-layout.mjs for why they are not in the install root).
+const launcherDirectory = resolve(standaloneDir, CLI_LAUNCHER_DIRECTORY);
+await mkdir(launcherDirectory, { recursive: true });
+for (const name of CLI_LAUNCHER_NAMES) {
+  await writeFile(resolve(launcherDirectory, name), cliLauncherContent(), 'utf8');
+}
+console.log(`Generated ${CLI_LAUNCHER_NAMES.join(' and ')} launchers in ${CLI_LAUNCHER_DIRECTORY}`);
 
 // 3. Generate Windows installer setup script and uninstaller
 console.log('3. Generating Windows installer setup script...');
@@ -166,14 +170,17 @@ $smShortcut.WorkingDirectory = $InstallPath
 $smShortcut.Description = "JOY Media Desktop Application"
 $smShortcut.Save()
 
-# Register InstallPath in User PATH environment variable
+# Register the bin folder in User PATH. Only bin goes there, because the install root holds joy-media.exe
+# (the GUI). An earlier install listed the root, so that entry is removed.
+$binPath = Join-Path $InstallPath "bin"
 $userPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
 $pathParts = if ($userPath) { $userPath -split ';' | Where-Object { $_ -ne '' } } else { @() }
-if ($pathParts -notcontains $InstallPath) {
-    $newPath = ($pathParts + $InstallPath) -join ';'
-    [Environment]::SetEnvironmentVariable("Path", $newPath, [EnvironmentVariableTarget]::User)
-    $env:Path = "$env:Path;$InstallPath"
-    Write-Host "Added $InstallPath to User PATH ('joy' and 'joy-media' commands registered globally)." -ForegroundColor Green
+$updatedParts = @($pathParts | Where-Object { $_ -ne $InstallPath })
+if ($updatedParts -notcontains $binPath) { $updatedParts += $binPath }
+if (($updatedParts -join ';') -ne ($pathParts -join ';')) {
+    [Environment]::SetEnvironmentVariable("Path", ($updatedParts -join ';'), [EnvironmentVariableTarget]::User)
+    $env:Path = "$env:Path;$binPath"
+    Write-Host "Added $binPath to User PATH ('joy' and 'joy-media' commands registered globally)." -ForegroundColor Green
 }
 
 # Register Uninstaller in Windows Registry
@@ -325,14 +332,10 @@ const releaseManifest = {
       type: 'standalone-cli-bundle',
       sha256: cliSha256,
     },
-    {
-      fileName: 'joy.cmd',
+    ...CLI_LAUNCHER_NAMES.map((name) => ({
+      fileName: `${CLI_LAUNCHER_DIRECTORY}/${name}`,
       type: 'cli-launcher',
-    },
-    {
-      fileName: 'joy-media.cmd',
-      type: 'cli-launcher',
-    },
+    })),
   ],
   installer: {
     script: 'Setup-JoyMedia.ps1',

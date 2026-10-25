@@ -308,7 +308,8 @@ function Invoke-LifecycleFixture([string]$ElectronPath, [string]$Mode) {
 }
 
 function Invoke-InstalledCliAcceptance([string]$LauncherName, [string]$StateSuffix) {
-    $launcher = Join-Path $installRoot $LauncherName
+    # The launchers live in bin, the only folder on the user PATH (see apps/desktop/scripts/cli-launcher-layout.mjs).
+    $launcher = Join-Path (Join-Path $installRoot 'bin') $LauncherName
     $stateName = "joy-media-installed-cli-$RunId-$Attempt-p$Pass-$StateSuffix"
     $stateDirectory = Join-Path $env:TEMP $stateName
     if ((Split-Path -Parent $stateDirectory).TrimEnd('\') -ine $env:TEMP.TrimEnd('\')) { throw 'Installed CLI test state escaped the OS temp directory.' }

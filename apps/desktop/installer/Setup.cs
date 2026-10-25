@@ -161,6 +161,9 @@ namespace JoyMedia.Setup
 
         private static void RegisterUserPath(string installPath)
         {
+            // Only the bin folder goes on PATH: the install root holds joy-media.exe (the GUI), and Windows
+            // tries .EXE before .CMD. An earlier install listed the root, so that entry is removed.
+            string binPath = Path.Combine(installPath, "bin");
             try
             {
                 using (RegistryKey envKey = Registry.CurrentUser.OpenSubKey("Environment", true))
@@ -169,18 +172,16 @@ namespace JoyMedia.Setup
                     {
                         string path = envKey.GetValue("Path", "", RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
                         string[] parts = path.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-                        bool exists = false;
+                        System.Collections.Generic.List<string> updated = new System.Collections.Generic.List<string>();
                         foreach (string p in parts)
                         {
-                            if (p.Trim().Equals(installPath, StringComparison.OrdinalIgnoreCase))
-                            {
-                                exists = true;
-                                break;
-                            }
+                            if (!p.Trim().Equals(installPath, StringComparison.OrdinalIgnoreCase)) updated.Add(p);
                         }
-                        if (!exists)
+                        bool hasBin = updated.Exists(p => p.Trim().Equals(binPath, StringComparison.OrdinalIgnoreCase));
+                        if (!hasBin) updated.Add(binPath);
+                        string newPath = string.Join(";", updated.ToArray());
+                        if (!newPath.Equals(string.Join(";", parts), StringComparison.Ordinal))
                         {
-                            string newPath = string.IsNullOrEmpty(path) ? installPath : path + ";" + installPath;
                             envKey.SetValue("Path", newPath, RegistryValueKind.ExpandString);
                         }
                     }
