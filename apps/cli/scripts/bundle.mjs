@@ -84,6 +84,31 @@ const require = __createRequire(import.meta.url);
   }
   for (const file of ['manifest.json', 'LICENSE-OFL.txt']) copyVerified(file);
 
+  // The TrueType faces that libass draws captions with. The WOFF2 faces above stay for browsers.
+  const libassSource = resolve(fontSource, 'libass');
+  const libassOutput = resolve(fontOutput, 'libass');
+  const libassManifest = JSON.parse(readFileSync(resolve(libassSource, 'manifest.json'), 'utf8'));
+  if (libassManifest.license !== 'OFL-1.1' || libassManifest.files.length !== 2) {
+    throw new Error('Libass font manifest must list the two bundled TrueType files');
+  }
+  mkdirSync(resolve(libassOutput, 'fonts'), { recursive: true });
+  for (const entry of libassManifest.files) {
+    const source = resolve(libassSource, 'fonts', entry.file);
+    const sourceBytes = readFileSync(source);
+    if (
+      sourceBytes.byteLength !== entry.byteLength ||
+      `sha256:${hash(sourceBytes)}` !== entry.sha256
+    ) {
+      throw new Error(`Source libass font failed manifest verification: ${entry.file}`);
+    }
+    const destination = resolve(libassOutput, 'fonts', entry.file);
+    copyFileSync(source, destination);
+    if (`sha256:${hash(readFileSync(destination))}` !== entry.sha256) {
+      throw new Error(`Bundled libass font copy failed SHA-256 verification: ${entry.file}`);
+    }
+  }
+  copyFileSync(resolve(libassSource, 'manifest.json'), resolve(libassOutput, 'manifest.json'));
+
   renameSync(bundleTemporaryOutput, bundleOutput);
   console.log('Successfully bundled @joy-media/cli and verified its Noto Sans Arabic fonts');
 } catch (error) {
