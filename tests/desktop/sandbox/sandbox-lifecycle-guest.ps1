@@ -147,10 +147,60 @@ function Test-Assertion([string]$Name, [bool]$Passed, [string]$Detail) {
     return $Passed
 }
 
+# When the app could not delete its smoke profile, record what is left and whether a short wait frees it, so the
+# cause can be read from the evidence later.
+function Save-SmokeLeftovers([string]$Name) {
+    $leftovers = @(Get-ChildItem -LiteralPath $env:TEMP -Directory -Filter 'joy-media-smoke-*' -ErrorAction SilentlyContinue)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("leftover profiles: $($leftovers.Count)")
+    foreach ($dir in $leftovers) {
+        $lines.Add("profile $($dir.Name):")
+        Get-ChildItem -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            $lines.Add(('  {0}  {1} bytes  {2:HH:mm:ss}' -f $_.FullName.Substring($dir.FullName.Length), $_.Length, $_.LastWriteTime))
+        }
+    }
+    # Processes that may still hold files in the profile, with their command lines (Crashpad keeps its database there).
+    $lines.Add('processes that may hold profile files (name, id, command line):')
+    $suspects = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'joy|crashpad|worker|WerFault' -or ([string]$_.CommandLine) -match 'joy-media-smoke' })
+    foreach ($proc in $suspects) { $lines.Add("  $($proc.Name) $($proc.ProcessId): $($proc.CommandLine)") }
+    Start-Sleep -Seconds 10
+    foreach ($dir in $leftovers) {
+        try {
+            Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction Stop
+            $lines.Add("after 10 seconds: removed $($dir.Name)")
+        } catch {
+            $lines.Add("after 10 seconds: still failing for $($dir.Name): $($_.Exception.Message)")
+        }
+    }
+    # Stopping the processes that may still hold the folder shows whether they are the cause.
+    $suspects = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'joy|crashpad|worker|WerFault' -or ([string]$_.CommandLine) -match 'joy-media-smoke' })
+    foreach ($proc in $suspects) {
+        try {
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+            $lines.Add("stopped $($proc.Name) $($proc.ProcessId)")
+        } catch {
+            $lines.Add("could not stop $($proc.Name) $($proc.ProcessId): $($_.Exception.Message)")
+        }
+    }
+    Start-Sleep -Seconds 3
+    foreach ($dir in $leftovers) {
+        try {
+            Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction Stop
+            $lines.Add("after stopping those processes: removed $($dir.Name)")
+        } catch {
+            $lines.Add("after stopping those processes: still failing for $($dir.Name): $($_.Exception.Message)")
+        }
+    }
+    Write-Evidence "smoke-leftovers-$Name.txt" (($lines -join "`r`n") + "`r`n")
+}
+
 function Test-AppStart([string]$Name, [string]$Version) {
     $smokeProfile = Join-Path $env:TEMP "joy-smoke-$Sequence-$Name"
     $run = Invoke-Program (Join-Path $installRoot 'joy-media.exe') ('--smoke --user-data-dir="' + $smokeProfile + '"') 180
     Save-ProgramOutput "smoke $Name" $run
+    if ($run.Stderr -match 'smoke profile not removed') {
+        try { Save-SmokeLeftovers $Name } catch { Add-Step "smoke leftovers: $Name" $false "could not record them: $($_.Exception.Message)" }
+    }
     $passed = ($run.ExitCode -eq 0) -and ($run.Stdout -match '\[joy-desktop\] packaged renderer smoke passed') -and ($run.Stderr -notmatch '\[joy-desktop\] packaged renderer smoke failed')
     $detail = if ($passed) { "the application starts and passes its renderer smoke ($Version)" } else { "smoke exit $($run.ExitCode) for ${Version}: $(Get-OutputTail $run)" }
     Add-Step "application starts: $Name" $passed $detail
