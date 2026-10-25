@@ -15,6 +15,11 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { templateSha256 } from '@joy-media/motion-core';
+import {
+  captureProductionComposite,
+  checkCaptionTiming,
+  checkEncodedFidelity,
+} from './caption-frame-evidence.js';
 
 const BUNDLE = resolve('apps/cli/dist/joy-media-bundle.mjs');
 const ROI = Object.freeze({ x: 40, y: 250, width: 1120, height: 300 });
@@ -32,9 +37,6 @@ const AUDIO_GAIN_TOLERANCE = 0.06;
 const AUDIO_STEREO_MIX_FACTOR = 1 / Math.sqrt(2);
 const AUDIO_FADE_ENVELOPE_MAX_RATIO = 0.3;
 const MUTED_RMS_MAX = 0;
-const CAPTION_BAND = Object.freeze({ x: 120, y: 560, width: 1040, height: 100 });
-const CAPTION_PIXEL_THRESHOLD = 12;
-const CAPTION_OUTSIDE_PIXEL_COUNT_TOLERANCE = 128;
 const RENDER_LIMIT_MS = 60_000;
 // How long a cancellation case waits for its render to reach the active phase it will interrupt. The
 // encoder-active phase starts only after the browser has captured every frame, and a whole cold title render
@@ -43,6 +45,7 @@ const RENDER_LIMIT_MS = 60_000;
 // must still finish within 5 seconds, and cleanup is checked after it.
 const CANCEL_READY_TIMEOUT_MS = 120_000;
 const FRAME_RATE = 30;
+const CAPTION_CUE = Object.freeze({ firstFrame: FRAME_RATE * 1.5, endFrame: FRAME_RATE * 2.5 });
 const RENDER_WIDTH = 1280;
 const RENDER_HEIGHT = 720;
 const RGBA_BYTES_PER_PIXEL = 4;
@@ -1338,7 +1341,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       ).toBeLessThanOrEqual(MUTED_RMS_MAX);
     });
 
-    await runStep(10, 'caption boundary and ASS renderer evidence', () => {
+    await runStep(10, 'caption boundary and ASS renderer evidence', async () => {
       if (!primary || !noCaption) throw new Error('Caption test project setup did not complete.');
       const captionProject = createProject(
         'P0 English caption boundary proof',
@@ -1426,75 +1429,55 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(captionRenderEvent.type).toBe('complete');
       const captionRenderPath = captionRenderEvent.mediaPath as string;
       expect(existsSync(captionRenderPath)).toBe(true);
-      const firstVisibleFrame = FRAME_RATE * 1.5;
-      const lastVisibleFrame = FRAME_RATE * 2.5 - 1;
-      const firstAfterEndFrame = FRAME_RATE * 2.5;
-      const firstVisible = decodeRgbaFrame(
-        captionRenderPath,
-        firstVisibleFrame,
-        'decode first visible caption frame 45 at 45/30s',
-      );
-      const firstVisibleBaseline = decodeRgbaFrame(
-        noCaptionPath,
-        firstVisibleFrame,
-        'decode first visible caption baseline frame 45 at 45/30s',
-      );
-      const visibleCaptionPixels = changedPixels(
-        firstVisible,
-        firstVisibleBaseline,
-        RENDER_WIDTH,
-        CAPTION_BAND,
-        CAPTION_PIXEL_THRESHOLD,
-        RGBA_BYTES_PER_PIXEL,
-      );
-      expect(
-        visibleCaptionPixels,
-        'caption must first appear on frame 45 at 45/30s',
-      ).toBeGreaterThan(0);
-      const lastVisible = decodeRgbaFrame(
-        captionRenderPath,
-        lastVisibleFrame,
-        'decode last visible caption frame 74 at 74/30s',
-      );
-      const lastVisibleBaseline = decodeRgbaFrame(
-        noCaptionPath,
-        lastVisibleFrame,
-        'decode last visible caption baseline frame 74 at 74/30s',
-      );
-      const lastVisibleCaptionPixels = changedPixels(
-        lastVisible,
-        lastVisibleBaseline,
-        RENDER_WIDTH,
-        CAPTION_BAND,
-        CAPTION_PIXEL_THRESHOLD,
-        RGBA_BYTES_PER_PIXEL,
-      );
-      expect(
-        lastVisibleCaptionPixels,
-        'caption must remain visible on frame 74 at 74/30s',
-      ).toBeGreaterThan(0);
-      const outside = decodeRgbaFrame(
-        captionRenderPath,
-        firstAfterEndFrame,
-        'decode first frame after caption end, frame 75 at 75/30s',
-      );
-      const noCaptionOutside = decodeRgbaFrame(
-        noCaptionPath,
-        firstAfterEndFrame,
-        'decode baseline first frame after caption end, frame 75 at 75/30s',
-      );
-      const outsideCaptionPixels = changedPixels(
-        outside,
-        noCaptionOutside,
-        RENDER_WIDTH,
-        CAPTION_BAND,
-        CAPTION_PIXEL_THRESHOLD,
-        RGBA_BYTES_PER_PIXEL,
-      );
-      expect(
-        outsideCaptionPixels,
-        `Step 10 first frame after caption end is 75/30s; ${outsideCaptionPixels} caption-band pixels differed from the no-caption baseline, bound ${CAPTION_OUTSIDE_PIXEL_COUNT_TOLERANCE}`,
-      ).toBeLessThanOrEqual(CAPTION_OUTSIDE_PIXEL_COUNT_TOLERANCE);
+      // Replaces the 128-pixel check. That check compared two independently encoded MP4s, so it measured codec
+      // history rather than caption timing (owner decision, 2026-10-25, Option 1). Timing is checked on the production
+      // pre-encoding composite, captured from the CLI's own filter graph. The encoded output is then checked against
+      // the composite it was encoded from.
+      const captionComposite = await captureProductionComposite({
+        projectFile: captionProject.file,
+        environment: baseEnv,
+        workDir: join(root, 'composite-caption'),
+      });
+      const baselineComposite = await captureProductionComposite({
+        projectFile: noCaption.file,
+        environment: baseEnv,
+        workDir: join(root, 'composite-baseline'),
+      });
+      const timing = await checkCaptionTiming(captionComposite, baselineComposite, CAPTION_CUE);
+      if (process.env.JOY_CAPTION_EVIDENCE_DIR) {
+        mkdirSync(process.env.JOY_CAPTION_EVIDENCE_DIR, { recursive: true });
+        writeFileSync(
+          join(process.env.JOY_CAPTION_EVIDENCE_DIR, 'p0-step10-timing.json'),
+          JSON.stringify(timing, null, 2),
+        );
+      }
+      expect(timing.violations, 'Step 10 pre-encoding caption timing').toEqual([]);
+      const fidelity = await checkEncodedFidelity({
+        mp4Path: captionRenderPath,
+        workDir: join(root, 'composite-fidelity'),
+        caption: captionComposite,
+        baseline: baselineComposite,
+        cue: CAPTION_CUE,
+      });
+      if (process.env.JOY_CAPTION_EVIDENCE_DIR) {
+        mkdirSync(process.env.JOY_CAPTION_EVIDENCE_DIR, { recursive: true });
+        writeFileSync(
+          join(process.env.JOY_CAPTION_EVIDENCE_DIR, 'p0-step10-fidelity.json'),
+          JSON.stringify(fidelity, null, 2),
+        );
+      }
+      expect(fidelity.violations, 'Step 10 encoded caption output').toEqual([]);
+      // The composites and the decoded copy are about 0.7 GB together. Remove them now, so the synchronous
+      // teardown at the end of the file does not stall the test worker past its RPC timeout.
+      for (const file of [
+        captionComposite.yuvPath,
+        captionComposite.bandRgbPath,
+        baselineComposite.yuvPath,
+        baselineComposite.bandRgbPath,
+        join(root, 'composite-fidelity', 'decoded.yuv'),
+      ]) {
+        rmSync(file, { force: true });
+      }
       expect(captionRenderEvent.message).toContain('Captions: ass.');
       const captionManifest = JSON.parse(
         readFileSync(captionRenderEvent.manifestPath as string, 'utf8'),
