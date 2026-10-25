@@ -109,6 +109,7 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
               type: leased.jobType,
               assetId: leased.refId,
               leaseToken: leased.leaseToken,
+              ...(leased.payload === undefined ? {} : { payload: leased.payload }),
             },
       );
       return;

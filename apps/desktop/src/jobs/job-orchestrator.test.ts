@@ -103,7 +103,7 @@ describe('job orchestrator', () => {
       expect(result.message).toContain('FFmpeg');
     });
 
-    it('refuses an upscale job even when the capability is advertised, because the desktop does not submit it yet', () => {
+    it('refuses an upscale job without its payload, even when the Worker advertises the model', () => {
       const orchestrator = orchestratorFor(database);
       orchestrator.hello(WORKER, ['upscale.image']);
       const result = orchestrator.submit({
@@ -113,9 +113,57 @@ describe('job orchestrator', () => {
       });
       expect(result).toMatchObject({
         ok: false,
-        code: 'UNSUPPORTED_JOB',
+        code: 'PAYLOAD_INVALID',
         jobType: 'upscale.image',
       });
+    });
+
+    it('hands an upscale job and its payload to the Worker with the lease', () => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, ['upscale.image']);
+      const payload = { mediaKind: 'image', modelSha256: 'a'.repeat(64), sourcePath: 'in.png' };
+      expect(
+        orchestrator.submit({
+          jobType: 'upscale.image',
+          refId: 'ref-1',
+          kind: 'derivative:upscale',
+          payload,
+        }),
+      ).toMatchObject({ ok: true });
+      expect(orchestrator.lease(WORKER)).toMatchObject({
+        jobType: 'upscale.image',
+        refId: 'ref-1',
+        payload,
+      });
+    });
+
+    it('queues a render export only with a JSON object payload within the size cap', () => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, ['render.export']);
+      const base = { jobType: 'render.export', refId: 'project-1', kind: 'render' };
+      expect(orchestrator.submit({ ...base, payload: ['not', 'an', 'object'] })).toMatchObject({
+        ok: false,
+        code: 'PAYLOAD_INVALID',
+      });
+      expect(orchestrator.submit({ ...base, payload: { blob: 'x'.repeat(70_000) } })).toMatchObject(
+        {
+          ok: false,
+          code: 'PAYLOAD_INVALID',
+        },
+      );
+      expect(orchestrator.submit({ ...base, payload: { schemaVersion: 1 } })).toMatchObject({
+        ok: true,
+      });
+    });
+
+    it('refuses a payload on a job type that does not take one', () => {
+      const result = orchestratorFor(database).submit({
+        jobType: 'asset.thumbnail',
+        refId: 'ref-1',
+        kind: 'derivative:thumbnail',
+        payload: { unexpected: true },
+      });
+      expect(result).toMatchObject({ ok: false, code: 'PAYLOAD_INVALID' });
     });
   });
 

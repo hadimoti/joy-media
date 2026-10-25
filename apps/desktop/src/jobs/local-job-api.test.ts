@@ -126,6 +126,38 @@ describe('local job API', () => {
     expect(await response.json()).toEqual({ data: null });
   });
 
+  it('sends a queued render export its payload with the lease', async () => {
+    await postJson(`/v1/workers/${WORKER}/hello`, {
+      capabilities: ['render.export'],
+      assetIds: [],
+    });
+    database.jobDispatch.insert({
+      id: 'job-export',
+      kind: 'render',
+      jobType: 'render.export',
+      refId: 'project-1',
+      status: 'queued',
+      createdAt: '2026-10-21T00:00:00.000Z',
+      updatedAt: '2026-10-21T00:00:00.000Z',
+      error: undefined,
+      progress: 0,
+      attempts: 0,
+      workerId: undefined,
+      leaseToken: undefined,
+      leaseExpiresAt: undefined,
+      cancelRequested: false,
+      derivative: undefined,
+      resultJson: undefined,
+      payloadJson: JSON.stringify({ schemaVersion: 1, frameCount: 3 }),
+    });
+    const response = await postJson(`/v1/workers/${WORKER}/leases`, { durationMs: 30_000 });
+    const body = (await response.json()) as { data: { type: string; payload: unknown } };
+    expect(body.data).toMatchObject({
+      type: 'render.export',
+      payload: { schemaVersion: 1, frameCount: 3 },
+    });
+  });
+
   it('serves the source bytes only to the Worker holding the lease', async () => {
     const leased = await queueThumbnailAndLease();
     const owner = await call(`/v1/workers/${WORKER}/jobs/job-http/source`, {

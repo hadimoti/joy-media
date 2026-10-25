@@ -27,6 +27,8 @@ export interface DispatchJob {
   readonly cancelRequested: boolean;
   readonly derivative: DerivativeReceipt | undefined;
   readonly resultJson: string | undefined;
+  /** The payload a Worker needs for render.export or upscale.image, stored as JSON at submit and sent with the lease. */
+  readonly payloadJson?: string | undefined;
 }
 
 export interface WorkerPresence {
@@ -71,12 +73,13 @@ interface DispatchRow {
   readonly derivative_mime: string | null;
   readonly derivative_path: string | null;
   readonly result_json: string | null;
+  readonly payload_json: string | null;
 }
 
 const SELECT_DISPATCH = `SELECT j.id, j.kind, j.ref_id, j.status, j.created_at, j.updated_at, j.error,
   d.job_type, d.progress, d.attempts, d.worker_id, d.lease_token, d.lease_expires_at,
   d.cancel_requested, d.derivative_sha256, d.derivative_bytes, d.derivative_mime,
-  d.derivative_path, d.result_json
+  d.derivative_path, d.result_json, d.payload_json
 FROM jobs j JOIN job_dispatch d ON d.job_id = j.id`;
 
 /**
@@ -100,9 +103,11 @@ export class SqliteJobDispatchStore implements JobDispatchStore {
          derivative_bytes INTEGER,
          derivative_mime TEXT,
          derivative_path TEXT,
-         result_json TEXT
+         result_json TEXT,
+         payload_json TEXT
        )`,
     );
+    addColumnIfMissing(db, 'job_dispatch', 'payload_json', 'TEXT');
     db.exec(
       `CREATE TABLE IF NOT EXISTS worker_presence (
          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -132,8 +137,8 @@ export class SqliteJobDispatchStore implements JobDispatchStore {
       )
       .run(job.id, job.kind, job.refId, job.createdAt, job.createdAt);
     this.db
-      .prepare('INSERT INTO job_dispatch (job_id, job_type) VALUES (?, ?)')
-      .run(job.id, job.jobType);
+      .prepare('INSERT INTO job_dispatch (job_id, job_type, payload_json) VALUES (?, ?, ?)')
+      .run(job.id, job.jobType, job.payloadJson ?? null);
     this.save({ ...job, status: 'queued', error: undefined });
   }
 
@@ -261,5 +266,16 @@ function fromRow(row: DispatchRow): DispatchJob {
             path: row.derivative_path,
           },
     resultJson: row.result_json ?? undefined,
+    payloadJson: row.payload_json ?? undefined,
   };
+}
+
+/** Adds a column that an earlier build's table lacks. Rows already in the table keep their values. */
+function addColumnIfMissing(db: DatabaseSync, table: string, column: string, type: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as readonly {
+    readonly name: string;
+  }[];
+  if (!columns.some((existing) => existing.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
 }

@@ -43,14 +43,43 @@ const JOB_REQUIREMENTS: Readonly<Record<string, JobRequirement>> = {
   'upscale.video': { capability: 'upscale.video', missing: 'the installed upscaling model' },
 };
 
-/** Job types the desktop currently submits and the Worker can lease. */
-const DISPATCHABLE_JOB_TYPES = ['asset.thumbnail'] as const;
+/** Job types the desktop submits and the Worker can lease. */
+const DISPATCHABLE_JOB_TYPES = ['asset.thumbnail', 'render.export', 'upscale.image'] as const;
+/** Job types whose Worker needs a payload. The desktop stores it at submit and sends it with the lease. */
+const PAYLOAD_JOB_TYPES: ReadonlySet<string> = new Set(['render.export', 'upscale.image']);
+/** A payload is stored as JSON in the local database and handed to the Worker whole, so it is capped. */
+const MAX_PAYLOAD_BYTES = 64 * 1024;
+
+/**
+ * Encodes the payload a job type takes, or refuses it. A payload-carrying type needs a JSON object within the size cap;
+ * every other type refuses a payload, so no job is queued with data its Worker would ignore.
+ */
+function encodePayload(
+  jobType: string,
+  payload: unknown,
+):
+  | { readonly ok: true; readonly json: string | undefined }
+  | { readonly ok: false; readonly message: string } {
+  if (!PAYLOAD_JOB_TYPES.has(jobType)) {
+    return payload === undefined
+      ? { ok: true, json: undefined }
+      : { ok: false, message: `${jobType} does not take a payload` };
+  }
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return { ok: false, message: `${jobType} needs a JSON object payload` };
+  }
+  const json = JSON.stringify(payload);
+  if (Buffer.byteLength(json, 'utf8') > MAX_PAYLOAD_BYTES) {
+    return { ok: false, message: `${jobType} payload is larger than ${MAX_PAYLOAD_BYTES} bytes` };
+  }
+  return { ok: true, json };
+}
 
 export type SubmitResult =
   | { readonly ok: true; readonly jobId: string }
   | {
       readonly ok: false;
-      readonly code: 'SETUP_REQUIRED' | 'UNSUPPORTED_JOB';
+      readonly code: 'SETUP_REQUIRED' | 'UNSUPPORTED_JOB' | 'PAYLOAD_INVALID';
       readonly jobType: string;
       readonly message: string;
     };
@@ -60,6 +89,7 @@ export interface LeasedWorkerJob {
   readonly jobType: string;
   readonly refId: string;
   readonly leaseToken: string;
+  readonly payload?: Readonly<Record<string, unknown>>;
 }
 
 export type CancelResult =
@@ -79,6 +109,7 @@ export interface JobOrchestrator {
     readonly jobType: string;
     readonly refId: string;
     readonly kind: string;
+    readonly payload?: unknown;
   }): SubmitResult;
   hello(workerId: string, capabilities: readonly string[]): void;
   lease(workerId: string, durationMs?: number): LeasedWorkerJob | undefined;
@@ -170,7 +201,7 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
   }
 
   return {
-    submit({ jobType, refId, kind }) {
+    submit({ jobType, refId, kind, payload }) {
       const requirement = JOB_REQUIREMENTS[jobType];
       if (requirement === undefined) {
         return {
@@ -208,6 +239,10 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
           message: `the desktop does not submit ${jobType} jobs yet`,
         };
       }
+      const payloadResult = encodePayload(jobType, payload);
+      if (!payloadResult.ok) {
+        return { ok: false, code: 'PAYLOAD_INVALID', jobType, message: payloadResult.message };
+      }
       const timestamp = now();
       const job: DispatchJob = {
         id: newId(),
@@ -226,6 +261,7 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
         cancelRequested: false,
         derivative: undefined,
         resultJson: undefined,
+        payloadJson: payloadResult.json,
       };
       store.transaction(() => store.insert(job));
       return { ok: true, jobId: job.id };
@@ -265,7 +301,15 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
           progress: 0,
         };
         store.save(running);
-        return { id: running.id, jobType: running.jobType, refId: running.refId, leaseToken };
+        return {
+          id: running.id,
+          jobType: running.jobType,
+          refId: running.refId,
+          leaseToken,
+          ...(running.payloadJson === undefined
+            ? {}
+            : { payload: JSON.parse(running.payloadJson) as Record<string, unknown> }),
+        };
       });
     },
 
