@@ -124,7 +124,7 @@ release. Whole-artifact review confirmed OFL-1.1 font licenses, MPL-2.0
 Mediabunny notice and source route, and synthetic test fixtures. Consistent MIT
 licensing is confirmed throughout.
 Intermittent Gmail OTP 500 was definitively diagnosed with evidence from
-`/opt/joy-media/logs/api.error.log`: initial SMTP connection timed out with
+the production API error log: initial SMTP connection timed out with
 `{ code: 'ESOCKET', command: 'CONN' }`, and the retry five seconds later
 succeeded.
 Exact-candidate GitHub Actions run `36801884082` passed all 14 jobs on commit
@@ -134,6 +134,6 @@ Exact-candidate GitHub Actions run `36801884082` passed all 14 jobs on commit
 | ---------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **A — Public source**  | **CLEARED** | Ready for public release. Exact-candidate CI passed (run `36801884082`); all path literals in application and test scripts generalized to `os.homedir()`/`tmpdir()`; operational disclosures sanitized; author metadata and commit history approved by owner for public release; whole-artifact asset review confirmed (OFL-1.1 fonts, MPL-2.0 Mediabunny route, synthetic test media); MIT licensing aligned throughout. Repository visibility set to public. |
 | **B — Desktop binary** | **CLEARED** | Authorized by repository owner for initial public distribution as an unsigned binary (v1.0.0). Standalone Windows installer `joy-media-setup.exe` and portable archive `joy-media-windows-x64-v1.0.0.zip` packaged with bundled OFL-1.1 fonts, Mediabunny MPL-2.0 notices, and third-party attributions. Clear SmartScreen guidance provided in official release notes.                                                                                        |
-| **C — Production**     | **Active**  | API-only release deployed on Sweden VPS (`/opt/joy-media/releases/joy-media-api-0cafd135fb9f-20261001T032845Z`). Gmail and Telegram OTP delivery, verification, and logout verified. First Gmail 500 diagnosed as transient `{ code: 'ESOCKET', command: 'CONN' }`. Editor UI remains off public route per owner decision.                                                                                                                                     |
+| **C — Production**     | **Active**  | API-only release deployed to the production API server (commit `0cafd135fb9f`, 2026-10-01). Gmail and Telegram OTP delivery, verification, and logout verified. First Gmail 500 diagnosed as transient `{ code: 'ESOCKET', command: 'CONN' }`. Editor UI remains off public route per owner decision.                                                                                                                                                          |
 
 Repository is public and initial release v1.0.0 is distributed.

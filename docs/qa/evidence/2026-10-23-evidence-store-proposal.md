@@ -16,7 +16,7 @@ The owner must choose an option before any runner or workflow configuration chan
 - The Docker Desktop engine is in Windows-container mode (`OSType=windows`). Linux containers and their volumes are
   not visible from this engine. The volume `joy-media-ci-evidence` named in
   `docs/reviews/joy-media-ci-evidence-store-2026-09-08.md` is not listed by `docker volume ls` here.
-- The SMB share `JoyShared` exposes `E:\`. No container mounts it, and no Linux client is known to mount it.
+- A Windows network share on the build PC exposes the Windows lane's data folder. No container mounts it, and no Linux client is known to mount it.
 - The renderer bundle already moves between runners through `actions/upload-artifact` (workflow line 198) and
   `actions/download-artifact` (line 377). The evidence upload outcome is recorded as
   `reason=github-artifact-upload-disabled-by-policy`, and the design note says GitHub storage can be unavailable for
@@ -78,7 +78,7 @@ Until these decisions are made, the release gate stays closed and no candidate i
 Read-only checks on 2026-10-25 change three statements above.
 
 - **Both engines run at once.** The Linux runner containers `joy-media-ci-linux` and `joy-media-ci-acceptance` run under a separate Docker engine inside the WSL Ubuntu distribution, next to the Windows-mode Docker Desktop engine that runs `joy-media-worker-docker`. The note that the two engines cannot run together does not hold on this PC. They still share no storage.
-- **Each Linux runner already has its own store.** Both set `JOY_MEDIA_CI_EVIDENCE_ROOT=/opt/joy-media-evidence`, backed by a named volume per container (`joy-media-ci-linux-evidence`, `joy-media-ci-acceptance-evidence`). `gate-summary`, `real-service-acceptance` and `p3-real-services` run on the acceptance runner, and `linux-real-services` runs on `joy-media-ci-linux`. The Windows container has no evidence variable and no evidence volume.
+- **Each Linux runner already has its own store.** Both set `JOY_MEDIA_CI_EVIDENCE_ROOT` to their evidence root, backed by a named volume per container (`joy-media-ci-linux-evidence`, `joy-media-ci-acceptance-evidence`). `gate-summary`, `real-service-acceptance` and `p3-real-services` run on the acceptance runner, and `linux-real-services` runs on `joy-media-ci-linux`. The Windows container has no evidence variable and no evidence volume.
 - **Options A and B conflict with the runner contracts.** `ops/self-hosted/windows-runner/provision.ps1` rejects host bind mounts ("Volume must be a Docker named volume"), and the Linux runner README requires a named volume per container. A host folder shared by both engines would need an exception to both contracts and would expose a host path to workflow code.
 
 The gate cannot be satisfied by verifying on the Windows side. `create-readiness-evidence.mjs` reads the installer bytes from `test-output/readiness/artifacts` on the gate runner and checks them against `SHA256SUMS.txt` and the digests in the two Windows lifecycle receipts. The bytes have to reach the acceptance runner.
