@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { stageNotoSansArabicFonts } from './copy-cli-fonts.mjs';
+import { buildPayloadManifest, PAYLOAD_MANIFEST_NAME } from './installer-payload-manifest.mjs';
 import {
   CLI_LAUNCHER_DIRECTORY,
   CLI_LAUNCHER_NAMES,
@@ -235,7 +236,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = [Environment]::
 
 echo Cleaning application files...
 
-start /b "" powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$target = $env:JOY_MEDIA_INSTALL_DIR; if ([string]::IsNullOrWhiteSpace($target)) { exit 0 }; try { $full = [System.IO.Path]::GetFullPath($target); $root = [System.IO.Path]::GetPathRoot($full); if ($target -match '^[a-zA-Z]:$' -or $full.TrimEnd('\\') -ieq $root.TrimEnd('\\') -or ($env:SystemRoot -and $full.TrimEnd('\\') -ieq [System.IO.Path]::GetFullPath($env:SystemRoot).TrimEnd('\\')) -or -not (Test-Path -LiteralPath (Join-Path $full 'joy-media.exe') -PathType Leaf)) { exit 0 } } catch { exit 0 }; Start-Sleep -Seconds 2; $end = [datetime]::UtcNow.AddSeconds(30); while ([datetime]::UtcNow -lt $end -and (Test-Path -LiteralPath $full)) { try { Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction Stop; break } catch { Start-Sleep -Milliseconds 500 } }" 2>nul
+start /b "" powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$target = $env:JOY_MEDIA_INSTALL_DIR; if ([string]::IsNullOrWhiteSpace($target)) { exit 0 }; try { $full = [System.IO.Path]::GetFullPath($target); $root = [System.IO.Path]::GetPathRoot($full); if ($target -match '^[a-zA-Z]:$' -or $full.TrimEnd('\\') -ieq $root.TrimEnd('\\') -or ($env:SystemRoot -and $full.TrimEnd('\\') -ieq [System.IO.Path]::GetFullPath($env:SystemRoot).TrimEnd('\\')) -or -not (Test-Path -LiteralPath (Join-Path $full 'joy-media.exe') -PathType Leaf)) { exit 0 } } catch { exit 0 }; Start-Sleep -Seconds 2; $end = [datetime]::UtcNow.AddSeconds(30); while ([datetime]::UtcNow -lt $end -and (Test-Path -LiteralPath $full)) { try { Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction Stop; break } catch { Start-Sleep -Milliseconds 500 } }; $parent = Split-Path -Parent $full; $leaf = Split-Path -Leaf $full; $kept = Join-Path $parent ($leaf + '.previous'); if (Test-Path -LiteralPath (Join-Path $kept 'joy-media.exe') -PathType Leaf) { Remove-Item -LiteralPath $kept -Recurse -Force -ErrorAction SilentlyContinue }; Get-ChildItem -LiteralPath $parent -Directory -Filter ($leaf + '.staging-*') | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem -LiteralPath $parent -Directory -Filter ($leaf + '.rollback-tmp') | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem -LiteralPath $parent -Directory -Filter ($leaf + '.replaced') | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem -LiteralPath $parent -Directory -Filter ($leaf + '.previous-retired') | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue" 2>nul
 
 echo JOY Media has been uninstalled.
 `;
@@ -247,6 +248,14 @@ await writeFile(resolve(standaloneDir, 'uninstall.cmd'), uninstallCmd, 'utf8');
 // 4. Create Distributable Releases Directory and Package
 console.log('4. Creating distributable zip release...');
 await mkdir(releasesDir, { recursive: true });
+// The setup embeds this manifest and checks every extracted file against it before it replaces an installed
+// version. It sits beside the release archive, so the archive and its checksums do not change.
+await writeFile(
+  resolve(releasesDir, PAYLOAD_MANIFEST_NAME),
+  await buildPayloadManifest(standaloneDir),
+  'utf8',
+);
+console.log(`Wrote the installer payload manifest (${PAYLOAD_MANIFEST_NAME}).`);
 
 const releaseZipName = `joy-media-windows-x64-v${version}.zip`;
 const releaseZipPath = resolve(releasesDir, releaseZipName);

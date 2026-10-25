@@ -43,10 +43,15 @@ if (-not $csc -or -not (Test-Path $csc)) {
     throw "csc.exe compiler not found."
 }
 
-Write-Host "Compiling $outExe with payload $zipPath..."
+$manifestPath = Join-Path $distReleases "payload-manifest.txt"
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw "payload-manifest.txt not found at $manifestPath. Run desktop packager first."
+}
+
+Write-Host "Compiling $outExe with payload $zipPath and manifest $manifestPath..."
 & $csc /target:winexe /optimize+ /platform:x64 `
     /reference:System.dll,System.Core.dll,Microsoft.CSharp.dll,System.Drawing.dll,System.Windows.Forms.dll,System.IO.Compression.dll,System.IO.Compression.FileSystem.dll `
-    "/resource:$zipPath,payload.zip" "/out:$outExe" $srcCs
+    "/resource:$zipPath,payload.zip" "/resource:$manifestPath,payload-manifest.txt" "/out:$outExe" $srcCs
 
 if ($LASTEXITCODE -ne 0) {
     throw "Compilation failed with code $LASTEXITCODE"

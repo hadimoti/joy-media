@@ -21,6 +21,8 @@ Start-Transcript -Path (Join-Path $evidenceDirectory 'transcript.txt') -Force | 
 $manifest = Get-Content -LiteralPath (Join-Path $stagingRoot 'manifest.json') -Raw | ConvertFrom-Json
 $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\JOY Media'
 $binDirectory = Join-Path $installRoot 'bin'
+# The version an update keeps beside the installed one, which a kept-previous rollback puts back.
+$keptFolder = Join-Path (Split-Path -Parent $installRoot) 'JOY Media.previous'
 $desktopShortcut = Join-Path $env:USERPROFILE 'Desktop\JOY Media.lnk'
 $startMenuShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\JOY Media.lnk'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JoyMedia'
@@ -142,6 +144,58 @@ function Install-Version([string]$Name, $Build) {
     return $passed
 }
 
+# Rolls back with the candidate setup itself: the kept previous version is put back, and the candidate it replaces is kept
+# beside it. Nothing is removed and reinstalled, so the user's PATH entries and shortcuts stay as the candidate left them.
+function Invoke-KeptRollback([string]$Name) {
+    $build = $manifest.candidate
+    $setupPath = Join-Path $stagingRoot $build.setup
+    if ((Get-Sha256Lower $setupPath) -ne $build.setupSha256) {
+        Add-Step $Name $false 'the setup file does not match the manifest hash'
+        return $false
+    }
+    $run = Invoke-Program $setupPath '/rollback' 900
+    Save-ProgramOutput $Name $run
+    if ($run.ExitCode -ne 0) {
+        Add-Step $Name $false "rollback exited with $($run.ExitCode): $(Get-OutputTail $run)"
+        return $false
+    }
+    $problems = @()
+    $registered = Get-RegisteredVersion
+    if ($registered -ne $manifest.previous.version) { $problems += "registered version is '$registered', not $($manifest.previous.version)" }
+    $problems += Get-InstalledFileProblems $manifest.previous.installed
+    if (-not (Test-Path -LiteralPath (Join-Path $keptFolder 'joy-media.exe') -PathType Leaf)) { $problems += 'the replaced version was not kept beside the restored one' }
+    $passed = $problems.Count -eq 0
+    $detail = if ($passed) { "rolled back to $($manifest.previous.version) and kept $($manifest.candidate.version) beside it" } else { $problems -join '; ' }
+    Add-Step $Name $passed $detail
+    return $passed
+}
+
+# Holds one installed file open without sharing, as a running program does, and runs the candidate setup. The update
+# must be refused, say the installation is in use, and leave both the installed version and the kept previous version.
+function Test-HeldFileRefusal([string]$Name) {
+    $build = $manifest.candidate
+    $setupPath = Join-Path $stagingRoot $build.setup
+    $heldPath = Join-Path $installRoot 'resources\app\cli\joy-media-bundle.mjs'
+    $lock = [System.IO.File]::Open($heldPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+    try {
+        $run = Invoke-Program $setupPath '/s' 900
+    } finally {
+        $lock.Dispose()
+    }
+    Save-ProgramOutput $Name $run
+    $problems = @()
+    if ($run.ExitCode -eq 0) { $problems += 'the setup succeeded although a file was held' }
+    if ($run.Stderr -notmatch 'in use') { $problems += 'the setup did not say that the installation was in use' }
+    $registered = Get-RegisteredVersion
+    if ($registered -ne $build.version) { $problems += "registered version changed to '$registered'" }
+    $problems += Get-InstalledFileProblems $build.installed
+    if (-not (Test-Path -LiteralPath (Join-Path $keptFolder 'joy-media.exe') -PathType Leaf)) { $problems += 'the kept previous version was lost' }
+    $passed = $problems.Count -eq 0
+    $detail = if ($passed) { 'the update was refused while a file was held; the installed and kept versions are unchanged' } else { $problems -join '; ' }
+    Add-Step $Name $passed $detail
+    return $passed
+}
+
 function Test-Assertion([string]$Name, [bool]$Passed, [string]$Detail) {
     Add-Step $Name $Passed $Detail
     return $Passed
@@ -193,7 +247,7 @@ function Invoke-Uninstall([string]$Name) {
     Save-ProgramOutput $Name $run
     # The uninstaller deletes the install folder in the background after it returns, so wait for that.
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
-    while ((Test-Path -LiteralPath $installRoot) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    while (((Test-Path -LiteralPath $installRoot) -or (Test-Path -LiteralPath $keptFolder)) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
     $problems = @()
     if ($run.ExitCode -ne 0) { $problems += "uninstall.cmd exited with $($run.ExitCode): $(Get-OutputTail $run)" }
     if (Test-Path -LiteralPath $installRoot) { $problems += 'the install folder remained' }
@@ -201,6 +255,10 @@ function Invoke-Uninstall([string]$Name) {
     if ((Test-Path -LiteralPath $desktopShortcut) -or (Test-Path -LiteralPath $startMenuShortcut)) { $problems += 'a shortcut remained' }
     if (Test-UserPathEntry $installRoot) { $problems += 'the install root remained on the user PATH' }
     if (Test-UserPathEntry $binDirectory) { $problems += 'the bin folder remained on the user PATH' }
+    # The uninstaller must leave no kept or staging folder beside the install folder.
+    if (Test-Path -LiteralPath $keptFolder) { $problems += 'the kept previous folder remained' }
+    $siblings = @(Get-ChildItem -LiteralPath (Split-Path -Parent $installRoot) -Directory -Filter 'JOY Media*' -ErrorAction SilentlyContinue)
+    if ($siblings.Count -gt 0) { $problems += 'a JOY Media folder remained beside the install: ' + (($siblings | ForEach-Object { $_.Name }) -join ', ') }
     $passed = $problems.Count -eq 0
     $detail = if ($passed) { 'the folder, key, shortcuts and both PATH entries are gone' } else { $problems -join '; ' }
     Add-Step $Name $passed $detail
@@ -220,11 +278,14 @@ try {
                 # Repair: remove an installed file, then run the candidate setup again, which must restore it.
                 Remove-Item -LiteralPath (Join-Path $installRoot 'resources\app\cli\joy-media-bundle.mjs') -Force
                 if (Install-Version 'repair restores a removed CLI bundle' $manifest.candidate) {
-                    # Rollback: the candidate removes its own integrations first, including its PATH entries, and keeps the
-                    # user's data. Then the previous setup installs. A previous setup cannot remove entries it does not know.
-                    if (Invoke-Uninstall 'remove candidate integrations before rollback') {
-                        if (Install-Version 'roll back to previous version' $manifest.previous) {
-                            Test-AppStart 'previous after rollback' $manifest.previous.version | Out-Null
+                    # Kept-previous rollback (L1): the candidate setup puts back the version its last update kept, and keeps
+                    # the candidate beside it. Then the previous version starts, and the candidate is installed again so the
+                    # held-file refusal and the final uninstall run against the candidate.
+                    if (Invoke-KeptRollback 'roll back to the kept previous version') {
+                        Test-AppStart 'previous after kept rollback' $manifest.previous.version | Out-Null
+                        if (Install-Version 'upgrade again after rollback' $manifest.candidate) {
+                            Test-HeldFileRefusal 'update refused while a file is held'
+                            Test-AppStart 'candidate after the refused update' $manifest.candidate.version | Out-Null
                         }
                     }
                 }
