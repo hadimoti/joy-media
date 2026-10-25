@@ -63,7 +63,7 @@ test('refuses a session that is not the sandbox account or profile', () => {
     decide(sandboxEnv, { ...sandboxFacts, profile: 'C:\\Users\\HadiMoti' }).allowed,
     false,
   );
-  assert.equal(decide(sandboxEnv, { ...sandboxFacts, userName: 'HadiMoti' }).allowed, false);
+  assert.equal(decide(sandboxEnv, { ...sandboxFacts, userName: 'example-user' }).allowed, false);
 });
 
 test('the PowerShell gate carries the same sandbox rule as the Node gate', () => {
