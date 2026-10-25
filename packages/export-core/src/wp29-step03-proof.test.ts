@@ -107,7 +107,12 @@ describe('WP-29 STEP-03 retained export duration and audio proof', () => {
         const browserPath = join(directory, `${id}-browser.mp4`);
         const exportPath = join(directory, `${id}-export.mp4`);
         renderBrowserRecorderFixture(browserPath, gain);
-        remuxBrowserMp4(browserPath, exportPath, manifest.frameRate);
+        remuxBrowserMp4(
+          browserPath,
+          exportPath,
+          manifest.frameRate,
+          (manifest.durationUs / 1_000_000) * manifest.frameRate,
+        );
         const probe = verifyExportAgainstManifest(exportPath, manifest);
         return {
           id,

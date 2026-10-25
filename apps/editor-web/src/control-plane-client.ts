@@ -498,11 +498,12 @@ export class BrowserControlPlaneClient {
     }
     return response.blob();
   }
+  /** The server rebuilds the timeline from the declared frame rate and frame count, so both are required. */
   async remuxBrowserMp4(
     projectId: string,
     file: Blob,
-    frameRate = 30,
-    frameCount?: number,
+    frameRate: number,
+    frameCount: number,
     signal?: AbortSignal,
   ): Promise<Blob> {
     const token = await this.assertion();
@@ -513,7 +514,7 @@ export class BrowserControlPlaneClient {
         authorization: 'Bearer ' + token,
         'content-type': 'video/mp4',
         'x-joy-frame-rate': String(frameRate),
-        ...(frameCount === undefined ? {} : { 'x-joy-frame-count': String(frameCount) }),
+        'x-joy-frame-count': String(frameCount),
       },
       body: file,
       ...(signal === undefined ? {} : { signal }),

@@ -28,7 +28,7 @@ import {
 } from './mistral-provider.js';
 import type { PrivateObjectStore } from './private-object-store.js';
 import type { JoyModelGateway } from './joy-model-gateway.js';
-import { remuxBrowserMp4Bytes } from './export-remux.js';
+import { assertRemuxTiming, remuxBrowserMp4Bytes } from './export-remux.js';
 import { MAX_DENOISE_JSON_BYTES } from './spectral-denoise.js';
 import {
   MemorySpectralDenoiseInvocationLedger,
@@ -952,14 +952,22 @@ async function route(
     const contentType = request.headers['content-type'] ?? '';
     if (!contentType.toLowerCase().startsWith('video/mp4'))
       throw new ControlPlaneError('REQUEST_INVALID', 'browser export must be video/mp4');
+    // The declared timeline is checked before the body is read, so a request with no
+    // usable frame count never reaches FFmpeg.
+    const frameRate = requiredRemuxNumber(request, 'x-joy-frame-rate', false);
+    const frameCount = requiredRemuxNumber(request, 'x-joy-frame-count', true);
+    try {
+      assertRemuxTiming(frameRate, frameCount);
+    } catch {
+      throw new ControlPlaneError(
+        'REQUEST_INVALID',
+        'x-joy-frame-rate and x-joy-frame-count describe a timeline that is out of range',
+      );
+    }
     const bytes = await readBytes(request, 512 * 1024 * 1024);
-    const requestedFrameRate = Number(request.headers['x-joy-frame-rate'] ?? 30);
-    const requestedFrameCountHeader = request.headers['x-joy-frame-count'];
-    const requestedFrameCount =
-      requestedFrameCountHeader === undefined ? undefined : Number(requestedFrameCountHeader);
     let result: ReturnType<typeof remuxBrowserMp4Bytes>;
     try {
-      result = remuxBrowserMp4Bytes(bytes, requestedFrameRate, requestedFrameCount);
+      result = remuxBrowserMp4Bytes(bytes, frameRate, frameCount);
     } catch {
       throw new ControlPlaneError('PROVIDER_FAILED', 'browser export remux failed');
     }
@@ -2577,6 +2585,17 @@ function requiredHeader(request: IncomingMessage, name: string): string {
   if (typeof value !== 'string' || value.length === 0)
     throw new ControlPlaneError('REQUEST_INVALID', `${name} header is required`);
   return value;
+}
+
+function requiredRemuxNumber(request: IncomingMessage, name: string, integer: boolean): number {
+  const value = requiredHeader(request, name);
+  const pattern = integer ? /^[1-9][0-9]*$/ : /^[0-9]+(\.[0-9]+)?$/;
+  if (!pattern.test(value))
+    throw new ControlPlaneError(
+      'REQUEST_INVALID',
+      `${name} header must be ${integer ? 'a positive integer' : 'a number'}`,
+    );
+  return Number(value);
 }
 
 function isReceiptHashAndBytes(

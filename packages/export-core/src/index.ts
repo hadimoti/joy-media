@@ -250,18 +250,19 @@ function parseFrameRate(value: string | undefined): number {
   return numerator / denominator;
 }
 
+/**
+ * Remux a browser capture to the verified H.264/AAC export. The caller declares the frame rate
+ * and the frame count, and the timeline is rebuilt from them. No recorder timestamp is trusted.
+ */
 export function remuxBrowserMp4(
   inputPath: string,
   outputPath: string,
-  frameRate = 30,
-  frameCount?: number,
+  frameRate: number,
+  frameCount: number,
 ): ExportProbe {
   if (!Number.isFinite(frameRate) || frameRate <= 0 || frameRate > 120)
     throw new RangeError('browser remux frame rate is invalid');
-  if (
-    frameCount !== undefined &&
-    (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount / frameRate > 86_400)
-  )
+  if (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount / frameRate > 86_400)
     throw new RangeError('browser remux frame count is invalid');
   const temporaryPath = join(
     dirname(outputPath),
@@ -278,33 +279,28 @@ export function remuxBrowserMp4(
     // the recorder's irregular per-frame durations, and the output-stage resample used those
     // durations and duplicated a frame in captured runs. The fps filter gives every frame one slot.
     const authoredTimeline = `${colourFilter},setpts=N/(${frameRate}*TB),fps=${frameRate}:round=near`;
-    const normalizeTimeline =
-      frameCount === undefined
-        ? []
-        : [
-            // CanvasCaptureMediaStreamTrack is realtime and may deliver one
-            // fewer frame on a cold/software Chromium encoder. Keep the
-            // authored cadence and clone the terminal decoded frame when the
-            // recorder is short, so the remuxed contract is exactly the
-            // manifest's frame count rather than silently truncating it.
-            '-vf',
-            `${authoredTimeline},tpad=stop_mode=clone:stop=-1`,
-            '-af',
-            'asetpts=PTS-STARTPTS,apad',
-            '-frames:v',
-            String(frameCount),
-            '-t',
-            (frameCount / frameRate).toFixed(6),
-          ];
+    // CanvasCaptureMediaStreamTrack is realtime and may deliver one fewer frame on a
+    // cold/software Chromium encoder. Keep the authored cadence and clone the terminal
+    // decoded frame when the recorder is short, so the remuxed contract is exactly the
+    // declared frame count rather than silently truncating it. The audio is padded to the
+    // same length, so the audio and video streams both last the declared duration.
+    const normalizeTimeline = [
+      '-vf',
+      `${authoredTimeline},tpad=stop_mode=clone:stop=-1`,
+      '-af',
+      'asetpts=PTS-STARTPTS,apad',
+      '-frames:v',
+      String(frameCount),
+      '-t',
+      (frameCount / frameRate).toFixed(6),
+    ];
     const result = spawnSync(
       'ffmpeg',
       [
         '-y',
         '-i',
         inputPath,
-        // Without a frame count the recorder's timestamps are kept, so a source at another
-        // frame rate keeps its duration. A jittered capture can still duplicate a frame here.
-        ...(frameCount === undefined ? ['-vf', colourFilter] : normalizeTimeline),
+        ...normalizeTimeline,
         '-colorspace',
         'bt709',
         '-color_primaries',

@@ -8,6 +8,14 @@ export interface BrowserRemuxResult {
   readonly probe: ExportProbe;
 }
 
+/** Throws a RangeError unless the declared timeline is one the remux accepts. */
+export function assertRemuxTiming(frameRate: number, frameCount: number): void {
+  if (!Number.isFinite(frameRate) || frameRate <= 0 || frameRate > 120)
+    throw new RangeError('browser export frame rate is invalid');
+  if (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount / frameRate > 86_400)
+    throw new RangeError('browser export frame count is invalid');
+}
+
 /**
  * Convert a browser-produced MP4 into the server's verified H.264/AAC
  * interchange format. Temporary files are private to this request and are
@@ -15,17 +23,11 @@ export interface BrowserRemuxResult {
  */
 export function remuxBrowserMp4Bytes(
   bytes: Uint8Array,
-  frameRate = 30,
-  frameCount?: number,
+  frameRate: number,
+  frameCount: number,
 ): BrowserRemuxResult {
   if (bytes.byteLength === 0) throw new Error('browser export is empty');
-  if (!Number.isFinite(frameRate) || frameRate <= 0 || frameRate > 120)
-    throw new Error('browser export frame rate is invalid');
-  if (
-    frameCount !== undefined &&
-    (!Number.isSafeInteger(frameCount) || frameCount < 1 || frameCount / frameRate > 86_400)
-  )
-    throw new Error('browser export frame count is invalid');
+  assertRemuxTiming(frameRate, frameCount);
   const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-'));
   const inputPath = join(directory, 'browser-input.mp4');
   const outputPath = join(directory, 'joy-export.mp4');

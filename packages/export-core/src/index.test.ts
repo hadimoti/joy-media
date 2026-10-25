@@ -255,7 +255,7 @@ describe('deterministic export contract', () => {
     const fixturePath = join(directory, 'browser.mp4');
     const outputPath = join(directory, 'remuxed.mp4');
     renderFixture(manifest, fixturePath);
-    const probe = remuxBrowserMp4(fixturePath, outputPath);
+    const probe = remuxBrowserMp4(fixturePath, outputPath, 30, 3);
     expect(probe.videoCodec).toBe('h264');
     expect(probe.audioCodec).toBe('aac');
     expect(probe.videoStreamCount).toBe(1);
@@ -263,14 +263,12 @@ describe('deterministic export contract', () => {
     expect(probe.frameRate).toBe(30);
     expect(readdirSync(directory).some((name) => name.includes('.partial.'))).toBe(false);
   });
-  it.each([
-    ['without a frame count', undefined],
-    ['with a frame count', 30],
-  ])('exports 48 kHz stereo AAC whatever rate the recorder captured, %s', (_label, frameCount) => {
+  it('exports 48 kHz stereo AAC whose audio and video both last the declared duration', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-audio-rate-'));
     const capturePath = join(directory, 'host-rate-capture.mp4');
     const outputPath = join(directory, 'remuxed.mp4');
-    // A recorder on a host without a 48 kHz device captures at 44.1 kHz.
+    // A recorder on a host without a 48 kHz device captures at 44.1 kHz, and its audio can
+    // end before the picture does. The export must carry the audio to the declared length.
     const made = spawnSync(
       'ffmpeg',
       [
@@ -284,7 +282,7 @@ describe('deterministic export contract', () => {
         '-f',
         'lavfi',
         '-i',
-        'sine=frequency=440:sample_rate=44100',
+        'sine=frequency=440:sample_rate=44100:duration=0.8',
         '-ac',
         '2',
         '-frames:v',
@@ -323,11 +321,38 @@ describe('deterministic export contract', () => {
     };
     expect(probeAudio(capturePath).sample_rate).toBe('44100');
 
-    const result = remuxBrowserMp4(capturePath, outputPath, 30, frameCount);
+    remuxBrowserMp4(capturePath, outputPath, 30, 30);
     expect(probeAudio(outputPath)).toMatchObject({ sample_rate: '48000', channels: 2 });
-    // Resampling changes the rate, not the length of the deliverable.
-    expect(result.durationUs).toBeGreaterThanOrEqual(950_000);
-    expect(result.durationUs).toBeLessThanOrEqual(1_060_000);
+    const probeStreams = (
+      file: string,
+    ): Array<{ codec_type: string; duration: string; nb_read_frames: string }> => {
+      const probe = spawnSync(
+        'ffprobe',
+        [
+          '-v',
+          'error',
+          '-count_frames',
+          '-show_entries',
+          'stream=codec_type,duration,nb_read_frames',
+          '-of',
+          'json',
+          file,
+        ],
+        { encoding: 'utf8' },
+      );
+      expect(probe.status, probe.stderr).toBe(0);
+      return JSON.parse(probe.stdout).streams;
+    };
+    const streams = probeStreams(outputPath);
+    const video = streams.find((stream) => stream.codec_type === 'video');
+    const audio = streams.find((stream) => stream.codec_type === 'audio');
+    // The container duration is the longer track, so a short audio track passes a container-only check.
+    expect(Number(video?.duration)).toBeCloseTo(1, 1);
+    expect(video?.nb_read_frames).toBe('30');
+    // One AAC frame is 1024 samples at 48 kHz, about 21 ms.
+    expect(Math.abs(Number(audio?.duration) - Number(video?.duration))).toBeLessThanOrEqual(
+      1024 / 48_000,
+    );
   });
 
   it('keeps pure blue exact after a browser capture is remuxed to a BT.709 export', () => {
@@ -498,14 +523,24 @@ describe('deterministic export contract', () => {
     expect(misalignedFrames(reference, actual)).toEqual([]);
   });
 
-  it('keeps the recorder timestamps when no frame count is given', () => {
+  it('refuses a remux without a declared frame count', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-count-'));
+    const fast = join(directory, 'fast.mp4');
+    const outputPath = join(directory, 'remuxed.mp4');
+    writeIndexedClip(fast, 360, 60);
+    // @ts-expect-error the frame count is part of the contract and has no default
+    expect(() => remuxBrowserMp4(fast, outputPath, 30)).toThrow(RangeError);
+    expect(existsSync(outputPath)).toBe(false);
+  });
+
+  it('keeps six seconds of 60 fps when the declared frame rate and count say so', () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-media-remux-rate-'));
     const fast = join(directory, 'fast.mp4');
     const outputPath = join(directory, 'remuxed.mp4');
     writeIndexedClip(fast, 360, 60);
-    const probe = remuxBrowserMp4(fast, outputPath, 30);
-    expect(probe.frameRate).toBe(30);
-    // Six seconds of 60 fps must stay about six seconds. Indexing the 360 frames at 30 fps would give twelve.
+    const probe = remuxBrowserMp4(fast, outputPath, 60, 360);
+    expect(probe.frameRate).toBe(60);
+    // Six seconds of 60 fps must stay about six seconds. Declaring 30 fps would give twelve.
     expect(probe.durationUs).toBeGreaterThanOrEqual(5_900_000);
     expect(probe.durationUs).toBeLessThanOrEqual(6_200_000);
   });

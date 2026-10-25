@@ -1613,6 +1613,58 @@ describe('control-plane HTTP transport', () => {
     }
   });
 
+  it.each([
+    ['a missing frame count', { 'x-joy-frame-rate': '30' }, 'x-joy-frame-count'],
+    [
+      'a malformed frame count',
+      { 'x-joy-frame-rate': '30', 'x-joy-frame-count': 'abc' },
+      'x-joy-frame-count',
+    ],
+    [
+      'a zero frame count',
+      { 'x-joy-frame-rate': '30', 'x-joy-frame-count': '0' },
+      'x-joy-frame-count',
+    ],
+    [
+      'a fractional frame count',
+      { 'x-joy-frame-rate': '30', 'x-joy-frame-count': '2.5' },
+      'x-joy-frame-count',
+    ],
+    [
+      'a frame count beyond one day',
+      { 'x-joy-frame-rate': '30', 'x-joy-frame-count': '3000000000' },
+      'x-joy-frame-count',
+    ],
+    ['a missing frame rate', { 'x-joy-frame-count': '3' }, 'x-joy-frame-rate'],
+    [
+      'a malformed frame rate',
+      { 'x-joy-frame-rate': 'fast', 'x-joy-frame-count': '3' },
+      'x-joy-frame-rate',
+    ],
+    [
+      'a frame rate above 120',
+      { 'x-joy-frame-rate': '240', 'x-joy-frame-count': '3' },
+      'x-joy-frame-rate',
+    ],
+  ])('rejects a browser remux with %s', async (_label, headers, header) => {
+    const origin = await start({ authenticate: () => ({ id: 'owner' }) });
+    expect(
+      await request(origin, 'POST', '/v1/projects', {
+        id: 'remux-project',
+        title: 'Remux project',
+      }),
+    ).toMatchObject({ status: 201 });
+    const response = await fetch(origin + '/v1/projects/remux-project/export/remux', {
+      method: 'POST',
+      headers: { authorization: 'Bearer owner', 'content-type': 'video/mp4', ...headers },
+      body: new Uint8Array([0, 0, 0, 8]),
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('REQUEST_INVALID');
+    expect(body.error.message).toContain(header);
+  });
+
   it('streams a render export source only to its active lease holder', async () => {
     const controlPlane = new LocalControlPlane();
     const owner = { id: 'owner' };
