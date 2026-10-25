@@ -17,7 +17,14 @@ function ffmpeg(args: string[]): void {
   if (r.status !== 0) throw new Error(`ffmpeg ${args.join(' ')} failed: ${r.stderr}`);
 }
 
-/** How many near-white pixels are in the lower fifth of the frame at `seconds`. */
+/**
+ * Caption ink in the lower fifth of the frame at `seconds`. The blue background measures 29 and the
+ * lowest caption peak measured for these texts is 176. The bundled Latin outlines are not hinted, so at
+ * this size their strokes peak near 200, where the earlier Arial fallback reached 255. A threshold of
+ * 100 sits between the two and keeps the caption pixel counts above 40 with margin.
+ */
+const CAPTION_INK_THRESHOLD = 100;
+
 function brightPixelsInCaptionBand(file: string, seconds: number): number {
   const r = spawnSync(
     'ffmpeg',
@@ -38,7 +45,7 @@ function brightPixelsInCaptionBand(file: string, seconds: number): number {
     ],
     { maxBuffer: 1 << 24 },
   );
-  return [...r.stdout].filter((value) => value > 200).length;
+  return [...r.stdout].filter((value) => value > CAPTION_INK_THRESHOLD).length;
 }
 
 function errorCode(r: RunResult): string {
