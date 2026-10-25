@@ -1,7 +1,7 @@
 {
   "source": "@fontsource/noto-sans-arabic@5.2.6 (WOFF2 files, decompressed losslessly to TrueType)",
   "decompressor": "wawoff2@2.0.1 (MIT)",
-  "modifications": "Latin subset faces only: the PostScript name is replaced by a unique name of the same length (NotoSansLatinX-Regular, NotoSansLatinX-Bold), so libass does not confuse them with the Arabic faces. Noto Sans Arabic declares no Reserved Font Name. Table and file checksums are recomputed.",
+  "modifications": "Latin subset faces only: the PostScript name is replaced by a unique name of the same length (NotoSansLatinX-Regular, NotoSansLatinX-Bold), so libass does not confuse them with the Arabic faces. Noto Sans Arabic declares no Reserved Font Name. All four faces: usWinAscent and usWinDescent are set to 905 and 212 (sum 1117, the Arial proportion). libass sizes a face from these two values, so captions draw at the requested size, as they do with Arial; the hhea and typo metrics are unchanged. Table and file checksums are recomputed.",
   "license": "OFL-1.1",
   "licenseFile": "../LICENSE-OFL.txt",
   "purpose": "FFmpeg libass caption faces for the Arabic and Latin subsets; the WOFF2 faces in the parent folder stay for browsers",
@@ -12,7 +12,7 @@
       "subset": "arabic",
       "file": "noto-sans-arabic-arabic-400-normal.ttf",
       "byteLength": 151388,
-      "sha256": "sha256:65046a85464c7583d47ea9107486da964770e996fa93899a1c3d31067de29693"
+      "sha256": "sha256:b14cc971b62d127a0659904262f5a4f604aa7fe7bff3e86976598eb3739e27e5"
     },
     {
       "family": "Noto Sans Arabic",
@@ -20,7 +20,7 @@
       "subset": "arabic",
       "file": "noto-sans-arabic-arabic-700-normal.ttf",
       "byteLength": 151512,
-      "sha256": "sha256:ace3b202eb09d4cd08237fe950b9dfd65350654b016e6a3a44abd5a7a7be06c0"
+      "sha256": "sha256:40bc2694cfea3c5b4f00d8b38837723b4573d70c0b8271e22dbf395897cdf715"
     },
     {
       "family": "Noto Sans Arabic",
@@ -28,7 +28,7 @@
       "subset": "latin",
       "file": "noto-sans-arabic-latin-400-normal.ttf",
       "byteLength": 21452,
-      "sha256": "sha256:b77904bc500957af861819b701e92b38fdc6f7640dca5580224619ac722026c3"
+      "sha256": "sha256:26568b66dd3e100ae68400967587ab58d7b6db3f74ee3a11c7670c4f57da60ae"
     },
     {
       "family": "Noto Sans Arabic",
@@ -36,7 +36,7 @@
       "subset": "latin",
       "file": "noto-sans-arabic-latin-700-normal.ttf",
       "byteLength": 21436,
-      "sha256": "sha256:85ea9f83c1241908c257df8e46607e792712ec16f969e605c54710f533374609"
+      "sha256": "sha256:890a4ebc26118188be87f022db33adb79636353c02996eca7f8100c992ac5508"
     }
   ]
 }

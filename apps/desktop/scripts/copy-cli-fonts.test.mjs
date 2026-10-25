@@ -15,13 +15,14 @@ const WOFF2 = [
   ['noto-sans-arabic-latin-700-normal.woff2', 700, 'latin'],
 ];
 const TTF = [
-  ['noto-sans-arabic-arabic-400-normal.ttf', 400],
-  ['noto-sans-arabic-arabic-700-normal.ttf', 700],
+  ['noto-sans-arabic-arabic-400-normal.ttf', 400, 'arabic'],
+  ['noto-sans-arabic-arabic-700-normal.ttf', 700, 'arabic'],
+  ['noto-sans-arabic-latin-400-normal.ttf', 400, 'latin'],
+  ['noto-sans-arabic-latin-700-normal.ttf', 700, 'latin'],
 ];
 const EXPECTED = [
   'LICENSE-OFL.txt',
-  'libass/fonts/noto-sans-arabic-arabic-400-normal.ttf',
-  'libass/fonts/noto-sans-arabic-arabic-700-normal.ttf',
+  ...TTF.map(([file]) => `libass/fonts/${file}`),
   'libass/manifest.json',
   'manifest.json',
   ...WOFF2.map(([file]) => file),
@@ -62,7 +63,7 @@ function writeFontFolder(root, options = {}) {
     join(root, 'libass', 'manifest.json'),
     JSON.stringify({
       license: 'OFL-1.1',
-      files: TTF.map(([file, weight]) => pinned(file, ttf.get(file), { weight, subset: 'arabic' })),
+      files: TTF.map(([file, weight, subset]) => pinned(file, ttf.get(file), { weight, subset })),
     }),
   );
   for (const [file, weight] of TTF) {
