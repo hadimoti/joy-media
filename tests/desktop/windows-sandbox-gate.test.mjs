@@ -60,7 +60,7 @@ test('refuses the sandbox account name on a physical machine (negative control)'
 
 test('refuses a session that is not the sandbox account or profile', () => {
   assert.equal(
-    decide(sandboxEnv, { ...sandboxFacts, profile: 'C:\\Users\\HadiMoti' }).allowed,
+    decide(sandboxEnv, { ...sandboxFacts, profile: 'C:\\Users\\example-user' }).allowed,
     false,
   );
   assert.equal(decide(sandboxEnv, { ...sandboxFacts, userName: 'example-user' }).allowed, false);
