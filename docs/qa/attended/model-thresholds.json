@@ -1,0 +1,23 @@
+{
+  "$comment": "Pre-registered thresholds for the attended model qualification (plan section 3.3). The owner fixes each value before the session, and the receipt records this file's SHA-256. A null value means the threshold is not registered yet, and no receipt may be accepted while one is null. These values were not chosen by the engineering track.",
+  "schemaVersion": 1,
+  "status": "not-registered",
+  "upscale": {
+    "scaleFactor": 4,
+    "ssimMarginOverBicubic": null
+  },
+  "denoise": {
+    "sampleRateMustMatch": true,
+    "lengthMustMatch": true,
+    "clippingAllowed": false,
+    "snrImprovementDbMin": null
+  },
+  "sessions": {
+    "G2": {
+      "defaultLaunches": 30,
+      "maxGpuProcessExits": 0,
+      "maxFallbackRelaunches": 0,
+      "minEncoderSessionsDuringExport": 1
+    }
+  }
+}
