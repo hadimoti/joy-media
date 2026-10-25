@@ -62,7 +62,7 @@ async function subscriptionStatus(page: Page): Promise<string> {
 test.describe('account persistence on the synthetic E2E server', { tag: '@fixture-only' }, () => {
   test.beforeAll(() => {
     if (controlPortConfig().token.length === 0)
-      throw new Error('JOY_MEDIA_E2E_CONTROL_TOKEN is required for synthetic account tests.');
+      throw new Error('The synthetic E2E control token is required for synthetic account tests.');
   });
 
   test('sign-in persists across reloads, subscription states read back, sign-out ends the session, and an expired session is refused', async ({
