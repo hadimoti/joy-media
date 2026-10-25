@@ -291,6 +291,84 @@ function parseArgs(argv) {
   return options;
 }
 
+const SANDBOX_IMAGES = [
+  'WindowsSandboxClient.exe',
+  'WindowsSandboxRemoteSession.exe',
+  'WindowsSandbox.exe',
+];
+const LAUNCH_ATTEMPTS = 3;
+const GUEST_START_TIMEOUT_MS = 5 * 60 * 1000;
+const GUEST_RUN_TIMEOUT_MS = 60 * 60 * 1000;
+const RELEASE_TIMEOUT_MS = 2 * 60 * 1000;
+const RELEASE_SETTLE_MS = 20 * 1000;
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** True when a `tasklist /FO CSV /NH` listing names a Sandbox process. */
+export function listsSandboxProcess(listing) {
+  const lower = listing.toLowerCase();
+  return SANDBOX_IMAGES.some((image) => lower.includes(`"${image.toLowerCase()}"`));
+}
+
+function sandboxRunning() {
+  const listing = spawnSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8' }).stdout ?? '';
+  return listsSandboxProcess(listing);
+}
+
+/**
+ * Waits until no Sandbox process is left, then a settle period. In the first run, a sandbox started straight after
+ * the previous window closed failed to initialize, so the next one waits for the previous one to be gone.
+ */
+async function waitForSandboxRelease() {
+  const deadline = Date.now() + RELEASE_TIMEOUT_MS;
+  while (sandboxRunning() && Date.now() < deadline) await delay(2000);
+  await delay(RELEASE_SETTLE_MS);
+}
+
+/**
+ * Runs one sequence in its own sandbox. The guest has started once its transcript appears in the evidence folder. A
+ * sandbox that never starts the guest is closed and started again, up to LAUNCH_ATTEMPTS times. The sequence fails
+ * if every attempt fails, rather than waiting an hour for a guest that never runs.
+ */
+async function runSequence({ sequence, runFolder, staging, evidence }) {
+  for (let attempt = 1; attempt <= LAUNCH_ATTEMPTS; attempt += 1) {
+    const nonce = makeSandboxNonce();
+    writeFileSync(
+      join(staging, 'session.json'),
+      `${JSON.stringify({ purpose: 'joy-media-windows-sandbox', nonce, sequence })}\n`,
+      'utf8',
+    );
+    const configPath = join(runFolder, `${sequence}-attempt-${attempt}.wsb`);
+    writeFileSync(
+      configPath,
+      buildSandboxConfig({ stagingHost: staging, evidenceHost: evidence, nonce, sequence }),
+      'utf8',
+    );
+    const problems = checkSandboxConfig(readFileSync(configPath, 'utf8'));
+    if (problems.length > 0)
+      throw new Error(`The sandbox configuration is not acceptable: ${problems.join('; ')}`);
+    launchSandbox(configPath);
+    const started = await waitForFile(
+      join(evidence, sequence, 'transcript.txt'),
+      GUEST_START_TIMEOUT_MS,
+    );
+    if (started) {
+      const done = await waitForFile(join(evidence, sequence, 'done.json'), GUEST_RUN_TIMEOUT_MS);
+      closeSandbox();
+      await waitForSandboxRelease();
+      return readSequenceResult(join(evidence, sequence), sequence, done);
+    }
+    closeSandbox();
+    await waitForSandboxRelease();
+    process.stdout.write(`${sequence}: attempt ${attempt} did not start the guest\n`);
+  }
+  return failedSequence(
+    sequence,
+    'launch',
+    `the sandbox did not start the guest in ${LAUNCH_ATTEMPTS} attempts`,
+  );
+}
+
 export async function main(argv) {
   if (process.platform !== 'win32')
     throw new Error('The Windows Sandbox run works only on Windows.');
@@ -336,27 +414,7 @@ export async function main(argv) {
   const evidence = join(runFolder, 'evidence');
   const results = [];
   for (const sequence of SEQUENCES) {
-    const nonce = makeSandboxNonce();
-    writeFileSync(
-      join(staging, 'session.json'),
-      `${JSON.stringify({ purpose: 'joy-media-windows-sandbox', nonce, sequence })}\n`,
-      'utf8',
-    );
-    const configPath = join(runFolder, `${sequence}.wsb`);
-    writeFileSync(
-      configPath,
-      buildSandboxConfig({ stagingHost: staging, evidenceHost: evidence, nonce, sequence }),
-      'utf8',
-    );
-    const problems = checkSandboxConfig(readFileSync(configPath, 'utf8'));
-    if (problems.length > 0)
-      throw new Error(`The sandbox configuration is not acceptable: ${problems.join('; ')}`);
-    launchSandbox(configPath);
-    const done = await waitForFile(join(evidence, sequence, 'done.json'), 60 * 60 * 1000);
-    closeSandbox();
-    results.push(readSequenceResult(join(evidence, sequence), sequence, done));
-    // Sandbox allows one instance at a time, so the next sequence starts after the previous window has closed.
-    await new Promise((done2) => setTimeout(done2, 10000));
+    results.push(await runSequence({ sequence, runFolder, staging, evidence }));
   }
 
   const failed = results.reduce((sum, result) => sum + result.failed, 0);

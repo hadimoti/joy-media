@@ -12,6 +12,7 @@ import {
   buildManifest,
   buildSandboxConfig,
   checkSandboxConfig,
+  listsSandboxProcess,
   makeSandboxNonce,
   readJsonFile,
   readPinnedHashes,
@@ -222,3 +223,16 @@ test(
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
   },
 );
+
+test('recognizes a Sandbox process in a tasklist listing, and nothing else', () => {
+  assert.equal(
+    listsSandboxProcess('"WindowsSandboxRemoteSession.exe","33076","Console","1","45,000 K"\r\n'),
+    true,
+  );
+  assert.equal(listsSandboxProcess('"WindowsSandboxClient.exe","9","Console","1","1,000 K"'), true);
+  assert.equal(
+    listsSandboxProcess('INFO: No tasks are running which match the specified criteria.'),
+    false,
+  );
+  assert.equal(listsSandboxProcess('"NotWindowsSandboxClient.exe","9","Console","1","1 K"'), false);
+});

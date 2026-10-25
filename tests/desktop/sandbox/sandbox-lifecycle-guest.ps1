@@ -154,6 +154,9 @@ function Test-AppStart([string]$Name, [string]$Version) {
     $passed = ($run.ExitCode -eq 0) -and ($run.Stdout -match '\[joy-desktop\] packaged renderer smoke passed') -and ($run.Stderr -notmatch '\[joy-desktop\] packaged renderer smoke failed')
     $detail = if ($passed) { "the application starts and passes its renderer smoke ($Version)" } else { "smoke exit $($run.ExitCode) for ${Version}: $(Get-OutputTail $run)" }
     Add-Step "application starts: $Name" $passed $detail
+    # A smoke run should leave no worker behind. A worker that outlives the app can also hold files in the profile.
+    $workers = @(Get-Process -Name 'joy-worker' -ErrorAction SilentlyContinue).Count
+    Add-Step "no worker outlives the smoke run: $Name" ($workers -eq 0) "$workers joy-worker process(es) still running after the app exited"
     return $passed
 }
 
