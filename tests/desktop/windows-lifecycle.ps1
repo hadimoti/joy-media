@@ -445,7 +445,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     if ((Get-InstalledFileHash 'joy-media.exe') -ne $candidateDesktopExeSha -or (Get-InstalledFileHash 'resources\app\cli\joy-media-bundle.mjs') -ne $candidateCliBundleSha -or (Get-InstalledFileHash 'resources\app\worker\joy-worker.exe') -ne $candidateWorkerSha) {
         throw 'Candidate upgrade did not install the exact frozen app, CLI, and Worker files.'
     }
-    Invoke-AppSmoke 'v1.0.2 upgrade'
+    Invoke-AppSmoke "v$candidateVersion upgrade"
     $script:transitionOutcomes['upgradeCandidate'] = 'passed'
     $editorReport = Join-Path $workRoot 'editor-acceptance.playwright.json'
     $null = Invoke-Pnpm 'installed candidate editor restart-save-export acceptance' @('exec', 'playwright', 'test', '--config', 'playwright.desktop.config.ts', 'tests/desktop/editor-acceptance.spec.ts', '--retries=0', '--reporter=json') 900 @{
@@ -502,7 +502,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     $repairVerification = Invoke-LifecycleFixture $devElectron 'verify'
     if ($repairVerification.result -ne 'verified' -or $repairVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256) { throw 'Repair changed or lost user data.' }
     $script:commands.Add([pscustomobject]@{ name = 'installer repair restores removed renderer and preserves user data'; exitCode = 0 })
-    Invoke-AppSmoke 'v1.0.2 repair'
+    Invoke-AppSmoke "v$candidateVersion repair"
     $script:transitionOutcomes['repairCandidate'] = 'passed'
 
     Invoke-VerifiedSetup $PreviousSetupPath $PreviousSetupSha256 $PreviousVersion | Out-Null

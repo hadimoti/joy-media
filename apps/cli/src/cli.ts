@@ -23,7 +23,7 @@ import {
 } from './utils/flags.js';
 import { c, logError, printBanner, printJson, setMachineOutput } from './utils/logger.js';
 
-export const CLI_VERSION = '1.0.2';
+export const CLI_VERSION = '1.0.3';
 
 export interface CliFlags {
   project: string | undefined;

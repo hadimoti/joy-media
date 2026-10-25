@@ -42,7 +42,7 @@ namespace JoyMedia.Setup
     {
         /// <summary>Single source of truth for the installer's product version. Keep in sync with
         /// the payload archive name passed to build-installer.ps1 (-Version).</summary>
-        public const string ProductVersion = "1.0.2";
+        public const string ProductVersion = "1.0.3";
 
         public static string GetInstallPath()
         {
