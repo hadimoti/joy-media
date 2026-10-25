@@ -945,6 +945,60 @@ export function projectHasTitles(project: unknown): boolean {
   );
 }
 
+/**
+ * Breaks a source line at spaces, greedily, when it is wider than the available width. A word that
+ * is too wide on its own cannot be broken, so it is refused. Only breaks are added, so the wrapped
+ * lines still read as the source line.
+ */
+function wrapMeasuredCaptionLine(
+  line: string,
+  measure: (text: string) => number,
+  maxWidthPx: number,
+): string[] {
+  if (measure(line) <= maxWidthPx) return [line];
+  const words = line.split(/\s+/).filter((word) => word !== '');
+  if (words.length === 0) return [line];
+  const wrapped: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current === '' ? word : `${current} ${word}`;
+    if (measure(candidate) <= maxWidthPx) {
+      current = candidate;
+      continue;
+    }
+    if (measure(word) > maxWidthPx)
+      throw new CommandFailure(
+        'CAPTION_LAYOUT_OVERFLOW',
+        'A caption word is wider than the available width; use a smaller text size or a shorter word.',
+      );
+    wrapped.push(current);
+    current = word;
+  }
+  wrapped.push(current);
+  return wrapped;
+}
+
+/**
+ * True when the frozen lines are the source lines with extra breaks only: the same words in the
+ * same order, every source line kept whole, and no empty line inside a source line.
+ */
+function frozenLinesWrapSource(frozen: readonly string[], source: readonly string[]): boolean {
+  let next = 0;
+  for (const sourceLine of source) {
+    const wanted = sourceLine.split(/\s+/).filter((word) => word !== '');
+    const have: string[] = [];
+    do {
+      if (next >= frozen.length) return false;
+      const piece = frozen[next++]!.split(/\s+/).filter((word) => word !== '');
+      if (piece.length === 0 && wanted.length > 0) return false;
+      have.push(...piece);
+    } while (have.length < wanted.length);
+    if (have.length !== wanted.length || have.some((word, index) => word !== wanted[index]))
+      return false;
+  }
+  return next === frozen.length;
+}
+
 function captionCues(
   project: Record<string, unknown>,
   measureText?: (text: string, fontSizePx: number, weight: 400 | 700) => number,
@@ -1009,8 +1063,17 @@ function captionCues(
                 .filter(Boolean)
                 .join(' ');
         if (!text.trim()) continue;
-        const lines = text.split(/\r?\n/);
         const maxWidthPx = Number(composition['width'] ?? 1920) - 80;
+        const sourceLines = text.split(/\r?\n/);
+        const lines = measureText
+          ? sourceLines.flatMap((line) =>
+              wrapMeasuredCaptionLine(
+                line,
+                (candidate) => measureText(candidate, fontSizePx, 400),
+                maxWidthPx,
+              ),
+            )
+          : sourceLines;
         const measuredWidthsPx = measureText
           ? lines.map((line) => measureText(line, fontSizePx, 400))
           : [];
@@ -1030,7 +1093,7 @@ function captionCues(
         if (measuredWidthsPx.some((width) => width > maxWidthPx))
           throw new CommandFailure(
             'CAPTION_LAYOUT_OVERFLOW',
-            'Measured caption line exceeds the available width; add an explicit hard break and prepare again.',
+            'Measured caption line exceeds the available width after wrapping.',
           );
         cues.push({
           lines,
@@ -1266,6 +1329,12 @@ export function freezeRenderPreparation(
       'SETUP_REQUIRED',
       'SETUP_REQUIRED: {"kind":"caption-text-measurer-unavailable"}',
     );
+  // The source digest covers the typed lines; the frozen layout adds the measured breaks.
+  const sourceCues = captionCues(
+    project as unknown as Record<string, unknown>,
+    undefined,
+    fontSizePx,
+  );
   const cues = captionCues(
     project as unknown as Record<string, unknown>,
     facts.measureText,
@@ -1289,7 +1358,7 @@ export function freezeRenderPreparation(
     assDigest: null as string | null,
   };
   captionsRecord.sourceDigest = captionSourceDigest(
-    cues,
+    sourceCues,
     captionsRecord.fontSizePx,
     captionsRecord.placement,
     captionsRecord.direction,
@@ -1463,28 +1532,27 @@ export async function validateRenderPreparation(
       const frozenCue = record.captions.cues[index];
       return (
         frozenCue !== undefined &&
+        frozenLinesWrapSource(frozenCue.lines, sourceCue.lines) &&
         canonicalJson({
-          lines: frozenCue.lines,
           startUs: frozenCue.startUs,
           endUs: frozenCue.endUs,
           direction: frozenCue.direction,
           maxWidthPx: frozenCue.maxWidthPx,
         }) ===
           canonicalJson({
-            lines: sourceCue.lines,
             startUs: sourceCue.startUs,
             endUs: sourceCue.endUs,
             direction: sourceCue.direction,
             maxWidthPx: sourceCue.maxWidthPx,
           }) &&
         Array.isArray(frozenCue.measuredWidthsPx) &&
-        frozenCue.measuredWidthsPx.length === sourceCue.lines.length &&
+        frozenCue.measuredWidthsPx.length === frozenCue.lines.length &&
         frozenCue.measuredWidthsPx.every(
           (width) => Number.isFinite(width) && width >= 0 && width <= sourceCue.maxWidthPx,
         )
       );
     });
-  const text = textOf(project as unknown as Record<string, unknown>, sourceCues);
+  const text = textOf(project as unknown as Record<string, unknown>, record.captions.cues);
   const composition = compositionFacts(project as unknown as Record<string, unknown>);
   const expectedPlacement = {
     alignment: 'bottom-center' as const,
@@ -1519,12 +1587,16 @@ export async function validateRenderPreparation(
     record.captions.direction !== expectedDirection ||
     record.captions.wrapping !== 'measured-hard-breaks' ||
     record.coverage.checkedTextDigest !== hashBytes(Buffer.from(text)) ||
-    record.coverage.checkedTextLength !== text.length ||
-    record.captions.assDigest !== (ass === null ? null : hashBytes(Buffer.from(ass)))
+    record.coverage.checkedTextLength !== text.length
   )
     throw new CommandFailure(
       'RENDER_PREPARATION_INVALID',
       'Frozen composition, caption, or coverage facts are inconsistent with the project.',
+    );
+  if (record.captions.assDigest !== (ass === null ? null : hashBytes(Buffer.from(ass))))
+    throw new CommandFailure(
+      'RENDER_PREPARATION_INVALID',
+      'The prepared caption layout was made by a different caption compiler. Run plan prepare again.',
     );
   const { renderInputsDigest: ignoredDigest, ...recordWithoutDigest } = record;
   void ignoredDigest;

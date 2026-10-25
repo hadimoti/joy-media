@@ -938,6 +938,114 @@ describe('RenderPreparationV1', () => {
     });
   });
 
+  it('wraps a source line wider than the frame at word boundaries, greedily', () => {
+    const captionProject = makeCaptionProject();
+    (captionProject.captionDocuments as any)['caption-doc'].segments[0].textOverride =
+      'alpha beta gamma delta epsilon zeta eta theta';
+    const measuredFacts = { ...facts, measureText: (text: string) => text.length * 100 };
+    const preparation = freezeRenderPreparation(
+      captionProject,
+      [{ op: 'addCaption' }],
+      measuredFacts,
+    );
+    expect(preparation.captions.cues[0]).toMatchObject({
+      lines: ['alpha beta gamma', 'delta epsilon zeta', 'eta theta'],
+      measuredWidthsPx: [1600, 1800, 900],
+    });
+  });
+
+  it('keeps a typed hard break and wraps each typed line on its own', () => {
+    const captionProject = makeCaptionProject();
+    (captionProject.captionDocuments as any)['caption-doc'].segments[0].textOverride =
+      'alpha beta gamma delta epsilon zeta\nshort';
+    const measuredFacts = { ...facts, measureText: (text: string) => text.length * 100 };
+    const preparation = freezeRenderPreparation(
+      captionProject,
+      [{ op: 'addCaption' }],
+      measuredFacts,
+    );
+    expect(preparation.captions.cues[0]).toMatchObject({
+      lines: ['alpha beta gamma', 'delta epsilon zeta', 'short'],
+    });
+  });
+
+  it('refuses a single word wider than the frame, because a break cannot shorten it', () => {
+    const captionProject = makeCaptionProject();
+    (captionProject.captionDocuments as any)['caption-doc'].segments[0].textOverride =
+      'supercalifragilisticexpialidocious';
+    const measuredFacts = { ...facts, measureText: (text: string) => text.length * 100 };
+    let thrown: unknown;
+    try {
+      freezeRenderPreparation(captionProject, [{ op: 'addCaption' }], measuredFacts);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: 'CAPTION_LAYOUT_OVERFLOW' });
+  });
+
+  it('validates a wrapped caption record against the unchanged source', async () => {
+    const captionProject = makeCaptionProject();
+    (captionProject.captionDocuments as any)['caption-doc'].segments[0].textOverride =
+      'alpha beta gamma delta epsilon zeta eta theta';
+    const measuredFacts = { ...facts, measureText: (text: string) => text.length * 100 };
+    const preparation = freezeRenderPreparation(
+      captionProject,
+      [{ op: 'addCaption' }],
+      measuredFacts,
+    );
+    const saved = {
+      ...captionProject,
+      pluginData: { ...captionProject.pluginData, 'joy.renderPreparation': preparation },
+    } as unknown as CliProjectDocument;
+    setRenderPreparationFactsProviderForTests(async () => ({ ...measuredFacts }));
+    try {
+      await expect(validateRenderPreparation(saved)).resolves.toEqual(preparation);
+    } finally {
+      setRenderPreparationFactsProviderForTests(undefined);
+    }
+  });
+
+  it('refuses a frozen wrap whose words differ from the source', async () => {
+    const captionProject = makeCaptionProject();
+    (captionProject.captionDocuments as any)['caption-doc'].segments[0].textOverride =
+      'alpha beta gamma delta epsilon zeta eta theta';
+    const measuredFacts = { ...facts, measureText: (text: string) => text.length * 100 };
+    const preparation = freezeRenderPreparation(
+      captionProject,
+      [{ op: 'addCaption' }],
+      measuredFacts,
+    );
+    const saved = structuredClone({
+      ...captionProject,
+      pluginData: { ...captionProject.pluginData, 'joy.renderPreparation': preparation },
+    }) as unknown as CliProjectDocument;
+    const record = saved.pluginData['joy.renderPreparation'] as any;
+    record.captions.cues[0].lines[0] = 'alpha bets gamma';
+    await expect(validateRenderPreparation(saved, facts)).rejects.toMatchObject({
+      code: 'RENDER_PREPARATION_INVALID',
+    });
+  });
+
+  it('asks for a new preparation when the frozen layout came from another caption compiler', async () => {
+    const captionProject = makeCaptionProject();
+    const measuredFacts = { ...facts, measureText: (_text: string, size: number) => size * 3 };
+    const preparation = freezeRenderPreparation(
+      captionProject,
+      [{ op: 'addCaption' }],
+      measuredFacts,
+    );
+    const saved = structuredClone({
+      ...captionProject,
+      pluginData: { ...captionProject.pluginData, 'joy.renderPreparation': preparation },
+    }) as unknown as CliProjectDocument;
+    const record = saved.pluginData['joy.renderPreparation'] as any;
+    record.captions.assDigest = `sha256:${'0'.repeat(64)}`;
+    await expect(validateRenderPreparation(saved, facts)).rejects.toMatchObject({
+      code: 'RENDER_PREPARATION_INVALID',
+      message: expect.stringContaining('Run plan prepare again'),
+    });
+  });
+
   it('refuses a changed Chromium file before invoking its probe', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'joy-render-chromium-before-probe-'));
     const executablePath = join(directory, 'chrome.exe');
