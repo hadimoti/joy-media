@@ -102,6 +102,6 @@ The owner approved Option D on 2026-10-25, strictly as a cross-runner transport,
 - **Known limits that remain.**
   - The consumer accepts any file set that is consistent with its own manifest. The seven-name rule is enforced at the producer and by the builder, which reads only the names it needs.
   - The artifact expires after a day. If the gate starts more than 24 hours after the Windows upload, the download fails closed and the run must be redone.
-  - No run has downloaded an artifact on the Linux acceptance runner yet. The quota probe that uploads from the Linux CI runner passes, so the service is reachable from the PC, but the first real run is the proof.
+  - The acceptance runner downloaded the artifact for the first time in run 40148387453 and the whole gate passed, so the service is reachable from it.
   - The cleanup branch of `--restore-to` after a mid-copy failure has no test, because the failure cannot be injected without a hook.
 - **Replay on a real artifact (2026-10-25).** The Windows lane of run 40141431891 uploaded a 735,077,183-byte artifact, which holds exactly the seven release files and `artifact-manifest.json`. Downloaded locally, the module's retain, verify-only and restore-to steps passed on it with that run id, attempt 1 and candidate `99eba2d4`. The seven restored files are byte-identical to the download, all five digests in the shipped `SHA256SUMS.txt` verify on them, a second retain is refused as write-once, and attempt 2 finds nothing. The readiness builder step still needs a run in which every lane is green.

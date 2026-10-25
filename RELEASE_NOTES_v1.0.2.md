@@ -1,85 +1,75 @@
-# JOY Media v1.0.2 — Release Candidate Notes (DRAFT, not released)
+# JOY Media v1.0.2 — Release notes (candidate; not released)
 
-**Status: not released.** This draft records what the local candidate has verified and what is still open. It is not a release, it has no checksums, and no CI or release-candidate receipt is attached. Release, deploy and publish remain owner-gated.
+**Status: not released.** Candidate `7f2b826ded19aa1cffc35b04ede3fc5159480a9d` passed the exact-candidate two-pass release gate on its first attempt: `release-candidate-v2` run `40148387453`, all 18 jobs, 17 of 17 gate checks. Merging, tagging, publishing and deploying need the owner's separate approval. Nothing here has been published.
 
 ---
 
 ### Important Notice for Windows Users (Unsigned Installer)
 
-The Windows installer and portable package are **unsigned**. SmartScreen will warn on first launch. Installing an unsigned candidate is an owner-approved manual step; no automatic update or rollback is claimed (see below).
+The Windows installer and portable package are **unsigned**. SmartScreen will warn on first launch. Installing an unsigned candidate is an owner-approved manual step. There is no automatic update or rollback (see the known gaps).
 
 ---
 
-### Changes on this candidate
+### Changes since v1.0.1
 
-- **Export colour is self-consistent.** Chromium's MediaRecorder converts canvas RGB with BT.601 coefficients but tags the MP4 BT.709. The remux (`packages/export-core`) now decodes with the BT.601 content matrix and encodes with explicit BT.709 matrix and tags. The RGBA export path converts with BT.709 explicitly. Before this change, pure blue exported as (0,14,255) on players that honour the tag.
-- **CLI exit codes for usage errors.** Unknown commands, worker sub-commands, agent sub-commands, agent model actions and agent provider actions exit 2 in text and `--json` modes. Runtime failures keep exit 1. `--json` usage errors use `{type, code, message}`.
-- **Renderer transition layer.** A missing transition layer is treated as `null` (Pixi returns `null` from `getChildByName`), and the `uTextureTo` sampler is registered before Pixi builds resource accessors. Regression tests cover both.
-- **Desktop export-semantics acceptance.** A packaged spec checks decoded picture, stereo tones, timing, the alpha centre, the dissolve midpoint, the Persian caption glyph bounds, and Monitor-to-export parity.
+This candidate is 339 commits after v1.0.1. The user-visible changes are:
 
-### Verification on this candidate (local, Windows)
+**Desktop**
 
-- `export-semantics.spec.ts`: 2/2 passed, first attempt, zero retries.
-- `editor-acceptance.spec.ts` (packaged editor import, play, save, restart, export; cancellation; all presets; 150% scaling; Monitor-to-export samples): 5/5 passed, first attempt.
-- Consumer suites (`packages/export-core`, `apps/api`, `apps/worker`, `tooling/golden-render`): 682 passed, 4 skipped, 0 failed.
-- `packages/export-core` and `packages/renderer-pixi`: 40 passed.
-- Prettier and ESLint clean on the changed files.
+- **Local Windows Worker route.** The desktop starts a local Worker over a loopback job API, with an editor-to-Worker media bridge. Jobs can be dispatched, observed, cancelled and recovered after a crash or restart (status: Limited, see below).
+- **Missing Media.** A new section lists media the project cannot find. It verifies replacement media before relinking, relinks single files or batches by content, and supports an override with undo.
+- **GPU fallback.** If the GPU process fast-fails on first use, the app relaunches once with the Media Foundation video encoder turned off. Normal launches keep hardware encoding.
+- **Export.**
+  - Colours are self-consistent under the BT.709 tags. Chromium's recorder converts with BT.601 but tags BT.709, so the remux now decodes with BT.601 and encodes with an explicit BT.709 matrix. Pure blue no longer exports as (0,14,255).
+  - Captured frames keep their authored index. Irregular recorder timestamps used to shift every frame from frame 30 onward by one.
+  - The audio track is always 48 kHz AAC. Before, it followed the recording machine's audio device (44.1 kHz on a machine with no 48 kHz device).
+  - A silent video exports, and a video with audio keeps its sound.
+- **Editor.** A Joy Code tab close control. The View menu toggles full screen, and the Program Monitor full-screen control works.
+- **Security hardening.** The editor checks the owner's project scope before each project-bound request, including long operations, the Asset Library, the Jobs panel and uploads, and it uses only the token it was probed with.
+- Local AI model features are labelled experimental for this release.
 
-The full CLI suite was last run on the commit before these changes and was not re-run on this tree (no CLI source changed after it).
+**CLI**
+
+- Usage errors (unknown commands, sub-commands and actions) exit 2 in text and `--json` modes, with `{type, code, message}` under `--json`. Runtime failures exit 1. Help and unknown-command errors are machine-readable under `--json`.
+- A failed preview publish is a structured error and leaves no staged file.
+- A Windows configuration directory that its ACL hides from `stat` is repaired.
+
+**Dependencies**: advisories in zod, undici and nodemailer are patched.
 
 ---
 
-### Candidate and approvals
+### Verification of this candidate
 
-- **Candidate commit:** `1482aa7b13afde7b5d35b661b1029ba42454404e`, pushed to the branch `hadimoti/joy-v102-rc`. No PR is open.
-- **Candidate CI run:** `release-candidate-v2` run `39644275784` on that commit. Verified 2026-10-23 through the GitHub API: the run concluded `success` with all 18 jobs successful. It covers only `1482aa7b`, not the later commits.
-  - All 18 jobs succeeded, including `windows-worker-clean (two exact passes)`, `real-service-acceptance (pass 1)` and `(pass 2)`, the desktop-primary and responsive acceptance passes, and `gate-summary`.
-  - `windows-worker-clean` succeeded, and its job includes the installed desktop lifecycle steps. No receipt from that run is verified in this checkout, and the gate's receipt is kept in the isolated evidence store.
-  - No exact-candidate receipt for `1482aa7b` was checked in this checkout, and none exists for `0e9d9cb8` or any later commit.
-- **CLI readiness:** the owner approved the CLI as ready for the v1.0.2 candidate. Desktop rows are reported as the matrix shows them.
-- **Release:** none. This candidate is documented only. Release, deploy and publish need a separate owner approval.
+- **Gate:** `release-candidate-v2` run `40148387453` on the exact SHA. All 18 jobs succeeded on attempt 1, with retries disabled. `gate-summary` reported 17 of 17 checks passed: `command-health`, `source-provenance`, `readiness-evidence`, `tests` (6,355 collected, 0 failed), `generated-artifacts`, `fixture-registries`, `deployment-manifests`, `builds`, `static-assets`, `font-assets`, `manifest`, `sbom`, `browser-journey`, `performance-evidence`, `operational-evidence`, `windows-acceptance` and `feature-status`.
+- **Windows:** the installed lifecycle ran in two exact passes in the Windows Docker container (install, update, repair, rollback, app and CLI checks, uninstall), together with the packaged editor, export, fresh-process persistence and CLI render acceptances.
+- **Release files:** the gate re-hashed the Windows release files against `SHA256SUMS.txt`, the manifest and both Windows receipts, and the readiness builder checked their bytes.
+- **Independent review:** claude-sonnet-5-5 at high effort, read-only. No blocker and no code-level major finding.
+- **Where the receipts live:** the readiness evidence and gate report are in the acceptance runner's durable evidence store. The Windows release files travelled to the gate as a one-day CI artifact, so the unsigned candidate binaries were downloadable from the run page for one day. The owner accepted that.
 
-### Readiness status (see `docs/qa/READINESS-MATRIX.md`)
+The readiness matrix (`docs/qa/READINESS-MATRIX.md`) has the per-scenario detail and the evidence trail.
 
-| Area                                                | Status                                                                                                                       |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `desktop.worker-jobs`                               | **NOT SUPPORTED** for this release (dispatch and completion not implemented)                                                 |
-| `desktop.update-and-rollback`                       | **NOT SUPPORTED** for public distribution; owner-approved manual install is the workaround                                   |
-| `desktop.account-connection`                        | **LIMITED** (partial coverage; synthetic accounts only)                                                                      |
-| `desktop.file-project-package`                      | Partial: packaged export and fresh-profile import pass; cross-device, relink and malformed-package cases open                |
-| `desktop.menu-actions`                              | Partial: File and Edit menus, focus and axe scans pass; other menu actions open                                              |
-| `desktop.timeline-and-panels`                       | Partial: panel tabs reachable with axe scan passing; timeline edit depth, effect and transition coverage open                |
-| `desktop.export-media-semantics`                    | Not passing on this host: the packaged export failed on 2026-10-23 and its cause is not determined; deeper parity still open |
-| `project.persistence.fresh-process` (packaged case) | Open: the gate-required packaged case needs the SQLite-backed open/save proof                                                |
-| `desktop.windows.installed-lifecycle`               | Open: unrun locally; runs in the release workflow's Windows Docker container lane                                            |
-| `release.exact-candidate-two-pass`                  | Open: result pending from run `39644275784`                                                                                  |
+---
 
-### Path to full readiness (not yet done)
+### Known gaps and limits
 
-- **Gate:** the `windows-worker-clean` lane must finish with two passes on the frozen head. The gate result and the installed-lifecycle result must both pass with zero retries. Any failure must be diagnosed from its job log first.
-- **Installed lifecycle:** the generated setup still writes the user PATH, uninstall registry key and shortcuts even when given a temporary install path. The test needs a disposable Windows user or VM run, and the setup must be made clean for it.
-- **Release-gate evidence:** `tooling/release/src/readiness-evidence.ts` and `create-readiness-evidence.mjs` must derive scenario results from the real run artifacts, not mark them passed. Only then can the desktop rows be made required. This change needs owner approval.
-- **File-project package:** verified locally: cross-device round trip, collision, malformed-package rejection, and the Missing media relink flow (exact relink with restart persistence, mismatch refusal, Use different file with undo, cancellation). Still open: batch relink end-to-end, render or export after relink and override, and persistence of an override across a restart.
-- **Menu actions:** File (account, projects, media export, sign out), Edit (undo, redo, delete, duplicate, command palette, asset folder), clip split, Joy Code, view and fullscreen, and window controls each need a packaged test.
-- **Timeline and panels:** timeline edit depth, each panel's function (not only reachability), effects and transitions, and keyboard coverage need packaged tests.
-- **Project persistence (fresh process):** the packaged case needs a scenario result that the gate can require.
-- **Export parity:** deeper preview-to-export parity beyond the sampled frames, and the Persian caption canonical-face check (currently SETUP_REQUIRED on this host).
-- **NOT SUPPORTED:** worker jobs need dispatch and completion implemented and tested. Update and rollback needs signed distribution, which is owner-gated.
-- **LIMITED:** account connection needs the real-service acceptance harness with a synthetic account.
-
-### Known gaps in this candidate
-
-- The release gate now derives every readiness result from receipts and the needs context, and it requires `desktop.export-media-semantics` as well as the other eight gate-required scenarios. The Windows lifecycle script runs the export spec as a measured step, so the gate fails closed until an exact-candidate lifecycle receipt exists for it.
-- Caption acceptance step 10 refuses with SETUP_REQUIRED on this host. The owner accepted that refusal on 2026-10-20.
-- Physical volume exhaustion (a full disk) is an accepted limitation for this candidate, by owner decision on 2026-10-23. SQLite failure and recovery tests remain required and pass locally. This candidate does not claim full physical disk-exhaustion qualification.
-- Held-file publication (the CLI publishing into a file another process holds) remains open. Its controlled Windows acceptance test is not yet implemented.
-
-### Runtime contract (CLI)
-
-The shipped CLI runs only on Electron's bundled Node runtime. `joy-media.cmd` sets `ELECTRON_RUN_AS_NODE=1` and runs `joy-media.exe` with `resources\app\cli\joy-media-bundle.mjs`. On 2026-10-23, with no Node on PATH, `joy-media.cmd --version` printed `JOY Media CLI v1.0.2` and exited 0, and the same executable reported Electron 44.3.0 with Node 24.20.0. No CLI, desktop, or worker source spawns `node`, `npm`, `npx`, or `pnpm`, and the worker runs under `process.execPath`. Arbitrary system Node versions are outside this candidate's supported runtime.
+- **Unsigned; no update path.** `desktop.update-and-rollback` is NOT SUPPORTED. The workaround is an owner-approved manual install of a newer unsigned package.
+- **GPU fallback.** On a machine whose GPU process fast-fails (seen on an NVIDIA GeForce RTX 5070 Ti with driver 617.42), the app restarts once, and work in progress in the first session is lost. The root cause is not established, and the hardware-encode path is not qualified on that machine.
+- **Persian captions through the canonical font.** The canonical Noto Sans Arabic face is a WOFF2 file, and no Windows FFmpeg build tested can open it. The CLI refuses captions that need it with `SETUP_REQUIRED` instead of rendering them wrongly. The release gate accepts that refusal and asserts it exactly. The owner accepted the refusal on 2026-10-20 for the P0 caption step, and this candidate applies the same acceptance to the lifecycle case. The packaged desktop export is checked with Windows Arial, not the canonical face.
+- **Optional frame count.** The export remux route takes an optional `x-joy-frame-count` header. Without it the recorder's timestamps are kept, and a jittered capture can duplicate a frame. No production path omits the header. Making it mandatory is planned for the next API revision.
+- **Disk exhaustion.** Physical full-disk behaviour is not qualified (owner decision, 2026-10-23). SQLite failure and recovery tests pass. Publishing into a file another process holds is not covered by a controlled Windows test yet.
+- **Partial desktop coverage.** Menu actions, timeline edit depth, effects and transitions, broad keyboard coverage and batch-relink follow-ups are Partial in the matrix. Account connection is Limited and was verified with synthetic accounts only. Worker jobs are Limited, and `cli.worker` is excluded from this release as experimental because real model output is not qualified.
+- **Runtime contract (CLI).** The shipped CLI runs only on Electron's bundled Node runtime. `joy-media.cmd` sets `ELECTRON_RUN_AS_NODE=1` and runs `joy-media.exe` with `resources\app\cli\joy-media-bundle.mjs`. With no Node on PATH, `joy-media.cmd --version` prints `JOY Media CLI v1.0.2` and exits 0. Arbitrary system Node versions are outside the supported runtime.
 
 ---
 
 ### Downloads & Assets
 
-None yet. Checksums and CI receipts will be added only after a frozen candidate passes the two-pass gate and the owner approves release.
+Not published. The files below are the candidate's build output; their digests come from the gate-verified `SHA256SUMS.txt`:
+
+| File                               | SHA-256                                                            |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| `joy-media-setup.exe`              | `6d8089467afaecc1d78d272f5c029d6c186a81f7aac90a7cd584045e847bdabe` |
+| `joy-media-windows-x64-v1.0.2.zip` | `e59ee15f2f881cd6620ad59e9f1d9fdc4f9b82efaf221f4e6041c079978d59ca` |
+| `joy-media.exe`                    | `e048632e03fabc96de5e10afbebc0aa31f4e1674155ea3d270597fe7523f9d80` |
+| `joy-media-bundle.mjs`             | `7dad525c6764601634918bc6a60e7f390b644b9f76912ef4c9c2e4aa9548fb3e` |
+| `joy-worker.exe`                   | `ddefa4075a4e3403f3e093630da2ec9df310459706eb8ea09cc16033ab2ab0f7` |
