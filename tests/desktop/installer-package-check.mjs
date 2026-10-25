@@ -7,6 +7,42 @@ import assert from 'node:assert';
 
 console.log('=== JOY Media Installer & Package Verification Suite ===');
 
+// Steps below run the generated setup and uninstall scripts. Their host cleanup is not fully sandboxed:
+// the registry, the Desktop and Start Menu shortcuts (Known Folders), the user PATH, and the Programs folder
+// are host state. Refuse to run on a machine that already has a JOY Media install, before any step changes
+// anything. Only a disposable VM or container, which has no install, may set JOY_MEDIA_DISPOSABLE_HOST=1.
+// The registry is read through PowerShell: Git Bash's reg.exe does not see every per-user key the same way.
+// Any probe that cannot answer counts as an install (fail closed).
+const ownerInstallDirectory = join(process.env.LOCALAPPDATA ?? '', 'Programs', 'JOY Media');
+const hostShortcuts = [
+  join(process.env.USERPROFILE ?? '', 'Desktop', 'JOY Media.lnk'),
+  join(process.env.APPDATA ?? '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'JOY Media.lnk'),
+];
+const registrationProbe = spawnSync(
+  'powershell.exe',
+  [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    "if (Test-Path -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\JoyMedia') { exit 0 } else { exit 1 }",
+  ],
+  { encoding: 'utf8', windowsHide: true },
+);
+const registrationUnknown =
+  registrationProbe.error !== undefined || (registrationProbe.status !== 0 && registrationProbe.status !== 1);
+const hostHasInstall =
+  existsSync(ownerInstallDirectory) ||
+  hostShortcuts.some((path) => existsSync(path)) ||
+  registrationUnknown ||
+  registrationProbe.status === 0;
+if (hostHasInstall && process.env.JOY_MEDIA_DISPOSABLE_HOST !== '1') {
+  console.error(
+    'Refusing to run: this host already has a JOY Media install (Programs folder or HKCU uninstall entry).',
+  );
+  console.error('Run the installer check only in a disposable VM or container, with JOY_MEDIA_DISPOSABLE_HOST=1.');
+  process.exit(2);
+}
+
 const desktopDistDir = resolve('apps/desktop/dist');
 const standaloneDir = resolve(desktopDistDir, 'joy-media-win32-x64');
 const releasesDir = resolve(desktopDistDir, 'releases');
