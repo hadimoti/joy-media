@@ -80,8 +80,17 @@ export function redactGpuReport(
   report: Readonly<Record<string, unknown>>,
   options: RedactionOptions,
 ): Partial<Record<GpuReportField, unknown>> {
-  const redacted: Partial<Record<GpuReportField, unknown>> = {};
-  for (const field of GPU_REPORT_FIELDS) {
+  return redactFields(report, options, GPU_REPORT_FIELDS);
+}
+
+/** Keeps only the named `fields` of `report`, scrubbing each kept value. Every report kind uses this rule. */
+export function redactFields<Field extends string>(
+  report: Readonly<Record<string, unknown>>,
+  options: RedactionOptions,
+  fields: readonly Field[],
+): Partial<Record<Field, unknown>> {
+  const redacted: Partial<Record<Field, unknown>> = {};
+  for (const field of fields) {
     if (Object.prototype.hasOwnProperty.call(report, field)) {
       redacted[field] = scrubValue(report[field], options);
     }
