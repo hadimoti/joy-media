@@ -15,10 +15,10 @@ folder is outside the repository. Raw logs are not committed.
 
 ## Results
 
-| Sequence | Steps | Passed | Failed |
-| --- | --- | --- | --- |
-| A: previous install, upgrade, repair, kept-previous rollback, held-file refusal, uninstall | 23 | 23 | 0 |
-| B: fresh candidate install, smoke, uninstall | 8 | 8 | 0 |
+| Sequence                                                                                   | Steps | Passed | Failed |
+| ------------------------------------------------------------------------------------------ | ----- | ------ | ------ |
+| A: previous install, upgrade, repair, kept-previous rollback, held-file refusal, uninstall | 23    | 23     | 0      |
+| B: fresh candidate install, smoke, uninstall                                               | 8     | 8      | 0      |
 
 The launcher reported `failedSteps: 0`.
 

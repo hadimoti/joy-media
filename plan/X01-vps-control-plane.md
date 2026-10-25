@@ -19,7 +19,7 @@
 | Docker                     | containerd present                                                                                                                                               |
 | Ports in use               | 22, 53, 80, 443, 5355, 8008, 8080–8083, 8766–8767, 9090, 9222, 10001–10005, 19825                                                                                |
 | **Reserved for JOY Media** | **8790** API+WS · **8791** object gateway (optional). Re-verify free before first bind.                                                                          |
-| Skeleton                   | `<vps-app-root>/joy-media/` created 2026-07-19 — contains this plan; nothing runs                                                                                          |
+| Skeleton                   | `<vps-app-root>/joy-media/` created 2026-07-19 — contains this plan; nothing runs                                                                                |
 
 Resource budget (DECIDED Q2, ADR-0001): **≤3 GB RAM, ≤2 CPU cores** — set as systemd `MemoryMax=3G` / `CPUQuota=200%` and kept adjustable; owner re-evaluates (VPS upgrade vs stay) after real usage. Disk working default ~10 GB. No GPU/model/render workloads ever (§2.11).
 

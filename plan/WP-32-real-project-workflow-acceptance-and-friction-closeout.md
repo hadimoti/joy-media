@@ -58,8 +58,8 @@ not steps to repeat or claims to broaden.
 | Git commit          | `e6b0addd3fede4647cae6166c3fa2ddea4df0e1f`                                                                              |
 | Branch              | `main` tracking `origin/main`                                                                                           |
 | GitHub CI           | Run `31582746204`, completed successfully                                                                               |
-| Live API            | `<vps-app-root>/joy-media/releases/wp31-api-20260812T100237Z-e6b0add`                                                             |
-| Live editor         | `<vps-app-root>/joy-media/web-releases/editor-web-20260812T100237Z-e6b0add-wp31-ia`                                               |
+| Live API            | `<vps-app-root>/joy-media/releases/wp31-api-20260812T100237Z-e6b0add`                                                   |
+| Live editor         | `<vps-app-root>/joy-media/web-releases/editor-web-20260812T100237Z-e6b0add-wp31-ia`                                     |
 | Services            | `nginx` and `joy-media@api` active                                                                                      |
 | API health          | `{"ok":true,"service":"joy-media-api","controlPlane":true}`                                                             |
 | Public entry point  | `https://joyst.ir/`                                                                                                     |

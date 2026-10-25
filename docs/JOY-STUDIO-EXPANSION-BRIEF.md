@@ -68,7 +68,7 @@ flowchart LR
 | Layer                | Reality                                                                                               |
 | -------------------- | ----------------------------------------------------------------------------------------------------- |
 | Brand in UI          | **Joy Studio** / **JOY Studio** (login lockup, menubar, Joy Code logos)                               |
-| Repo / API / systemd | Still **joy-media** (`<vps-app-root>/joy-media/repo`, `/etc/joy-media/api.env`)                                 |
+| Repo / API / systemd | Still **joy-media** (`<vps-app-root>/joy-media/repo`, `/etc/joy-media/api.env`)                       |
 | Domain               | Canonical **`joyst.ir`** / `www.joyst.ir`; `media.joyteam.ir` → 301 to joyst.ir                       |
 | First paint          | Project library gate (`ProjectLibrary.tsx`) then CapCut-tile Dockview workspace                       |
 | Auth                 | Independent allow-list OTP (Gmail / Telegram / Token) — ADR-0017 login                                |
@@ -262,7 +262,7 @@ sequenceDiagram
 | API               | `apps/api/src/media-auth.ts`, mailer, Telegram bot                           |
 | UI                | `LoginGate.tsx` — editor mounted, blurred until OTP; title **Joy Studio**    |
 | Admin allow-list  | joy-vps admin → direct Postgres role (see `docs/JOY-MEDIA-ADMIN-DB-ROLE.md`) |
-| Nginx             | `deploy/joy-media.nginx.conf` → `<vps-app-root>/joy-media/web`, API `:8790`            |
+| Nginx             | `deploy/joy-media.nginx.conf` → `<vps-app-root>/joy-media/web`, API `:8790`  |
 | Secrets           | `/etc/joy-media/api.env` (not in repo)                                       |
 | Agent host policy | ADR-0020 KiloCode sole editing host; credentials stay server-side            |
 
@@ -881,8 +881,8 @@ Mark which issues are blocked on ADR decisions.
 
 ### Product / docs
 
-| Path                                                                          | Why                                        |
-| ----------------------------------------------------------------------------- | ------------------------------------------ |
+| Path                                                                                    | Why                                        |
+| --------------------------------------------------------------------------------------- | ------------------------------------------ |
 | `<vps-app-root>/joy-media/repo/DESIGN.md`                                               | CapCut shell, panel contract, tokens       |
 | `<vps-app-root>/joy-media/repo/STATE.md`                                                | Live residuals, domain, deploy notes       |
 | `<vps-app-root>/joy-media/repo/docs/adr/0017-independent-media-login.md`                | Independent OTP login                      |
