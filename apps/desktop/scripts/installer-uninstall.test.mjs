@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -32,4 +33,67 @@ describe('uninstaller PATH cleanup (F1)', () => {
     expect(validation).toBeGreaterThan(-1);
     expect(generator.indexOf(uninstallPathCleanupLine())).toBeGreaterThan(validation);
   });
+});
+
+/**
+ * The uninstaller's PowerShell command, as cmd.exe will pass it: the JavaScript template escapes are undone, and
+ * the two calls that touch the real User PATH are replaced by a fixture and an output line.
+ */
+function uninstallPathCommand() {
+  const generated = uninstallPathCleanupLine().replace(/\\\\/g, '\\');
+  const match = /-Command "(.*)" 2>nul/.exec(generated);
+  if (!match) throw new Error('The uninstaller PowerShell command could not be read.');
+  return match[1]
+    .replace("[Environment]::GetEnvironmentVariable('Path', 'User')", '$env:TEST_USER_PATH')
+    .replace("[Environment]::SetEnvironmentVariable('Path', $np, 'User')", 'Write-Output $np');
+}
+
+describe('uninstaller PATH cleanup behaviour (F1)', () => {
+  // The cleanup is PowerShell, so it runs where PowerShell does. The User PATH is a fixture, so the real one is untouched.
+  it.skipIf(process.platform !== 'win32')(
+    'removes exactly the install root and its bin entries, and keeps every other value',
+    () => {
+      const install = 'C:\\Users\\example-user\\AppData\\Local\\Programs\\JOY Media';
+      const kept = [
+        'C:\\Windows\\System32',
+        'C:\\Tools\\bin',
+        `${install} Tools`,
+        `${install}\\bin-old`,
+        'D:\\Projects\\JOY Media Notes',
+      ];
+      const owned = [
+        install,
+        `${install}\\bin`,
+        `${install}\\bin\\`,
+        install.toUpperCase(),
+        `${install}\\`,
+      ];
+      const fixture = [
+        kept[0],
+        owned[0],
+        kept[1],
+        owned[1],
+        kept[2],
+        owned[2],
+        owned[3],
+        kept[3],
+        kept[4],
+        owned[4],
+      ];
+      const result = spawnSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', uninstallPathCommand()],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            JOY_MEDIA_INSTALL_DIR: install,
+            TEST_USER_PATH: fixture.join(';'),
+          },
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe(kept.join(';'));
+    },
+  );
 });
