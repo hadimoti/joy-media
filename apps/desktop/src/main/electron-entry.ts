@@ -24,6 +24,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import path, { dirname, join } from 'node:path';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { homedir, tmpdir } from 'node:os';
 import { parseProjectDeepLink } from '../deep-link.js';
 import { editorOriginFromFrameUrl } from '../origin-policy.js';
 import { createFileRegistry } from './file-registry.js';
@@ -58,6 +60,16 @@ import {
   resolveTestApiBaseUrl,
   resolveTestDownloadDirectory,
 } from './test-api-override.js';
+import {
+  createSmokeProfile,
+  isSmokeRun,
+  planSmokeProfile,
+  removeSmokeProfile,
+  sameLocation,
+  smokeEnvironment,
+  smokePathOverrides,
+  type SmokeProfile,
+} from './smoke-isolation.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
@@ -66,7 +78,44 @@ const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
 // actually happen in this runtime, then exits on its own — closing the wave 1 gap documented in
 // docs/joy-media-final-migration-progress.md (no prior session ever opened a real Electron
 // window). Never shows a window and never touches production data.
-const isSmokeMode = process.argv.includes('--smoke');
+const isSmokeMode = isSmokeRun(process.argv);
+// A smoke run gets its own profile before any data path is read, so nothing it writes lands in the
+// real JOY Media profile (see smoke-isolation.ts). A refused run exits before it opens anything.
+const smokeStart = isSmokeMode ? startSmokeProfile() : undefined;
+const smokeProfile = smokeStart?.ok ? smokeStart.profile : undefined;
+
+type SmokeStart =
+  | { readonly ok: true; readonly profile: SmokeProfile }
+  | { readonly ok: false; readonly reason: string };
+
+function startSmokeProfile(): SmokeStart {
+  let createdProfile: SmokeProfile | undefined;
+  try {
+    const profile = planSmokeProfile({
+      tempRoot: tmpdir(),
+      nonce: randomBytes(16).toString('hex'),
+      // The run is refused if the temp folder sits inside any of these, or the run folder overlaps one.
+      protectedPaths: [
+        app.getPath('appData'),
+        app.getPath('userData'),
+        dirname(app.getPath('exe')),
+        join(homedir(), 'joy-media-assets'),
+      ],
+    });
+    createSmokeProfile(profile);
+    createdProfile = profile;
+    Object.assign(process.env, smokeEnvironment(profile));
+    for (const [name, folder] of smokePathOverrides(profile)) app.setPath(name, folder);
+    if (!sameLocation(app.getPath('userData'), profile.userData)) {
+      throw new Error('Electron did not adopt the smoke user-data folder');
+    }
+    console.log(`[joy-desktop] smoke profile: ${profile.root}`);
+    return { ok: true, profile };
+  } catch (error) {
+    if (createdProfile !== undefined) removeSmokeProfile(createdProfile);
+    return { ok: false, reason: error instanceof Error ? error.message : 'unknown error' };
+  }
+}
 const testApiBaseUrl = resolveTestApiBaseUrl({ argv: process.argv, env: process.env });
 const testSelectFile = process.argv.includes('--joy-media-test-mode')
   ? process.env['JOY_MEDIA_TEST_SELECT_FILE']
@@ -98,16 +147,42 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-if (!app.requestSingleInstanceLock()) {
+if (smokeStart?.ok === false) {
+  // Refused before any data path was read: exit without opening the database, the lock or a window.
+  console.error(`[joy-desktop] smoke run refused: ${smokeStart.reason}`);
+  app.exit(3);
+} else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   let mainWindow: BrowserWindow | undefined;
   const paths = resolveDesktopPaths(app.getPath('userData'));
   mkdirSync(paths.mediaRoot, { recursive: true });
-  const localDatabase = new LocalDatabase({ filePath: paths.databaseFile });
+  const localDatabase = new LocalDatabase({
+    filePath: paths.databaseFile,
+    ...(smokeProfile === undefined
+      ? {}
+      : { defaultAssetLibraryDirectory: smokeProfile.assetLibrary }),
+  });
   // Anything still `queued`/`running` from a previous process is stale by definition: the
   // Worker that would have finished it is gone. Do this before any new job can be enqueued.
   localDatabase.recoverInterrupted();
+  // Ends a smoke run: release the database, delete the run folder, then exit with the verdict. A run
+  // whose folder cannot be deleted fails, so leftover data never passes unnoticed.
+  const finishSmokeRun = (exitCode: number): void => {
+    try {
+      localDatabase.close();
+    } catch {
+      // Already closed: nothing else holds the database file open.
+    }
+    if (smokeProfile === undefined) {
+      app.exit(exitCode);
+      return;
+    }
+    const cleanup = removeSmokeProfile(smokeProfile);
+    if (!cleanup.removed)
+      console.error(`[joy-desktop] smoke profile not removed: ${cleanup.reason}`);
+    app.exit(exitCode === 0 && !cleanup.removed ? 2 : exitCode);
+  };
 
   const fileRegistry = createFileRegistry();
   // The local Worker talks only to this app's loopback job API, which binds 127.0.0.1 on a random
@@ -270,7 +345,8 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
-    app.setAsDefaultProtocolClient('joy');
+    // A smoke run never registers the protocol: that writes HKCU\Software\Classes\joy.
+    if (!isSmokeMode) app.setAsDefaultProtocolClient('joy');
 
     session.defaultSession.on('will-download', (_event, item) => {
       const filename = path.basename(item.getFilename());
@@ -388,7 +464,7 @@ if (!app.requestSingleInstanceLock()) {
         '[joy-desktop] electron runtime smoke passed: app ready, window initialized, IPC wired',
       );
       setTimeout(() => {
-        app.quit();
+        finishSmokeRun(0);
       }, 300);
     } else if (isSmokeMode) {
       // Packaged smoke (`test:smoke-packaged`): unlike the dev-mode branch above, this waits
@@ -410,12 +486,12 @@ if (!app.requestSingleInstanceLock()) {
         setTimeout(() => {
           if (failureReason) {
             console.error(`[joy-desktop] packaged renderer smoke failed: ${failureReason}`);
-            app.exit(1);
+            finishSmokeRun(1);
           } else {
             console.log(
               `[joy-desktop] packaged renderer smoke passed: loaded ${resolveRendererTarget(isDev)} cleanly`,
             );
-            app.exit(0);
+            finishSmokeRun(0);
           }
         }, 300);
       };

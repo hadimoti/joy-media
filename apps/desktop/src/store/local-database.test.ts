@@ -275,6 +275,14 @@ describe('LocalDatabase provider profiles', () => {
     expect(info.isDefault).toBe(false);
   });
 
+  it('uses an injected default asset library, so a smoke run never reads the real one', () => {
+    const injected = path.join('smoke-profile', 'home', 'joy-media-assets');
+    const db = new LocalDatabase({ filePath: ':memory:', defaultAssetLibraryDirectory: injected });
+    expect(db.getDefaultAssetLibraryDirectory()).toBe(injected);
+    expect(db.getAssetLibraryDirectory()).toBe(injected);
+    expect(db.getAssetLibraryInfo().isDefault).toBe(true);
+  });
+
   it('resets a custom asset library directory by clearing the override, returning the runtime default', () => {
     const db = testDb();
     const defaultDir = db.getDefaultAssetLibraryDirectory();

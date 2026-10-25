@@ -58,6 +58,8 @@ export interface LocalDatabaseOptions {
   readonly filePath: string;
   readonly now?: () => string;
   readonly idFactory?: () => string;
+  /** Overrides the default asset library folder. A smoke run points it inside its own profile. */
+  readonly defaultAssetLibraryDirectory?: string;
 }
 
 interface MediaRow {
@@ -103,10 +105,12 @@ export class LocalDatabase {
   readonly jobDispatch: SqliteJobDispatchStore;
   private readonly now: () => string;
   private readonly idFactory: () => string;
+  private readonly defaultAssetLibrary: string | undefined;
 
   constructor(options: LocalDatabaseOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
     this.idFactory = options.idFactory ?? (() => crypto.randomUUID());
+    this.defaultAssetLibrary = options.defaultAssetLibraryDirectory;
     this.db = new DatabaseSync(options.filePath);
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec(
@@ -354,7 +358,7 @@ export class LocalDatabase {
   }
 
   getDefaultAssetLibraryDirectory(): string {
-    return path.join(os.homedir(), 'joy-media-assets');
+    return this.defaultAssetLibrary ?? path.join(os.homedir(), 'joy-media-assets');
   }
 
   getAssetLibraryDirectory(): string {
