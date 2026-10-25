@@ -1,15 +1,15 @@
 import { createHash } from 'node:crypto';
-import { fork, spawn, spawnSync } from 'node:child_process';
+import { fork, spawn } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -100,8 +100,110 @@ function temporaryDirectory(prefix: string): string {
   return directory;
 }
 
-function binaryWorks(binary: string, args: string[]): boolean {
-  const result = spawnSync(binary, args, { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+type ProcessOptions = {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  encoding?: 'buffer' | 'utf8';
+  maxBuffer?: number;
+  timeout?: number;
+  windowsHide?: boolean;
+};
+
+interface ProcessRun<Output extends string | Buffer> {
+  readonly status: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly error?: NodeJS.ErrnoException | undefined;
+  readonly stdout: Output;
+  readonly stderr: Output;
+}
+
+// Runs a child process without blocking the test worker's event loop. A synchronous wait stops the worker from
+// answering vitest's task-update RPC, and birpc fails that call after 60 seconds, which exits the run with code 1
+// even when every assertion passed. Options and results follow spawnSync, so each call site keeps its shape.
+function runProcess(
+  command: string,
+  args: readonly string[],
+  options: ProcessOptions & { encoding: 'utf8' },
+): Promise<ProcessRun<string>>;
+function runProcess(
+  command: string,
+  args: readonly string[],
+  options?: ProcessOptions & { encoding?: 'buffer' },
+): Promise<ProcessRun<Buffer>>;
+function runProcess(
+  command: string,
+  args: readonly string[],
+  options: ProcessOptions = {},
+): Promise<ProcessRun<string> | ProcessRun<Buffer>> {
+  const maxBuffer = options.maxBuffer ?? 1024 * 1024;
+  return new Promise((resolvePromise) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: options.windowsHide,
+    });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let error: NodeJS.ErrnoException | undefined;
+    let settled = false;
+    const stop = (code: string, message: string): void => {
+      if (!error) error = Object.assign(new Error(message), { code });
+      child.kill();
+    };
+    const timer =
+      options.timeout === undefined
+        ? undefined
+        : setTimeout(
+            () => stop('ETIMEDOUT', `${command} did not finish within ${options.timeout} ms`),
+            options.timeout,
+          );
+    const settle = (status: number | null, signal: NodeJS.Signals | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const stdout = Buffer.concat(stdoutChunks);
+      const stderr = Buffer.concat(stderrChunks);
+      resolvePromise(
+        options.encoding === 'utf8'
+          ? {
+              status,
+              signal,
+              error,
+              stdout: stdout.toString('utf8'),
+              stderr: stderr.toString('utf8'),
+            }
+          : { status, signal, error, stdout, stderr },
+      );
+    };
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > maxBuffer)
+        stop('ENOBUFS', `${command} wrote more than ${maxBuffer} bytes to stdout`);
+      stdoutChunks.push(chunk);
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderrBytes += chunk.length;
+      if (stderrBytes > maxBuffer)
+        stop('ENOBUFS', `${command} wrote more than ${maxBuffer} bytes to stderr`);
+      stderrChunks.push(chunk);
+    });
+    child.on('error', (spawnError) => {
+      error = spawnError;
+      settle(null, null);
+    });
+    child.on('close', (status, signal) => settle(status, signal));
+  });
+}
+
+async function binaryWorks(binary: string, args: string[]): Promise<boolean> {
+  const result = await runProcess(binary, args, {
+    encoding: 'utf8',
+    timeout: 10_000,
+    windowsHide: true,
+  });
   return result.status === 0 && !result.error;
 }
 
@@ -161,8 +263,8 @@ function parseJsonLines(stdout: string, context: string): JsonRecord[] {
 
 // Runs the bundled CLI and returns its result, including a non-zero exit. Use runCli when a non-zero
 // exit is a failure, and this when the exit itself is part of what the step checks.
-function runCliAllowingExit(args: string[], context: string): CliResult {
-  const result = spawnSync(process.execPath, [BUNDLE, ...args], {
+async function runCliAllowingExit(args: string[], context: string): Promise<CliResult> {
+  const result = await runProcess(process.execPath, [BUNDLE, ...args], {
     cwd: process.cwd(),
     env: baseEnv,
     encoding: 'utf8',
@@ -181,8 +283,8 @@ function runCliAllowingExit(args: string[], context: string): CliResult {
   };
 }
 
-function runCli(args: string[], context: string): CliResult {
-  const result = runCliAllowingExit(args, context);
+async function runCli(args: string[], context: string): Promise<CliResult> {
+  const result = await runCliAllowingExit(args, context);
   if (result.code !== 0) {
     const event = result.events.at(-1);
     throw new Error(
@@ -209,8 +311,8 @@ function lastEvent(result: CliResult, context: string): JsonRecord {
   return event;
 }
 
-function checkedCli(args: string[], context: string): JsonRecord {
-  const result = runCli(args, context);
+async function checkedCli(args: string[], context: string): Promise<JsonRecord> {
+  const result = await runCli(args, context);
   expect(result.code, `${context} exit status`).toBe(0);
   return lastEvent(result, context);
 }
@@ -244,11 +346,15 @@ function setFixtureDuration(project: ProjectFixture, durationUs: number): void {
   );
 }
 
-function createProject(title: string, directory: string, includeCaption = true): ProjectFixture {
+async function createProject(
+  title: string,
+  directory: string,
+  includeCaption = true,
+): Promise<ProjectFixture> {
   mkdirSync(directory, { recursive: true });
   const db = join(directory, 'project.sqlite');
   const file = join(directory, 'project.json');
-  const created = checkedCli(
+  const created = await checkedCli(
     [
       'project',
       'create',
@@ -267,7 +373,7 @@ function createProject(title: string, directory: string, includeCaption = true):
   );
   expect(created.title).toBe(title);
   expect(created.id).toEqual(expect.any(String));
-  const exported = checkedCli(
+  const exported = await checkedCli(
     ['project', 'export', created.id, '--sqlite-path', db, '--output', file, '--json'],
     `${title}: project export`,
   );
@@ -275,7 +381,7 @@ function createProject(title: string, directory: string, includeCaption = true):
   const envelope = JSON.parse(readFileSync(file, 'utf8')) as JsonRecord;
   expect(envelope).toMatchObject({ format: 'joy-media-project', schemaVersion: 1 });
   expect(envelope.source).toMatchObject({ id: created.id, title });
-  const video = checkedCli(
+  const video = await checkedCli(
     [
       'timeline',
       'add-clip',
@@ -295,16 +401,16 @@ function createProject(title: string, directory: string, includeCaption = true):
   );
   expect(video.trackId).toBe('track-v1');
   const videoClipId = video.clip.id as string;
-  checkedCli(
+  await checkedCli(
     ['timeline', 'set-audio', '--project', file, '--clip', videoClipId, '--mute', '--json'],
     `${title}: mute muxed source audio`,
   );
-  const audioTrack = checkedCli(
+  const audioTrack = await checkedCli(
     ['timeline', 'add-track', '--project', file, '--family', 'audio', '--json'],
     `${title}: add audio track`,
   );
   const audioTrackId = audioTrack.trackId as string;
-  const segment1 = checkedCli(
+  const segment1 = await checkedCli(
     [
       'timeline',
       'add-clip',
@@ -322,7 +428,7 @@ function createProject(title: string, directory: string, includeCaption = true):
     ],
     `${title}: add first audio segment`,
   );
-  const muted = checkedCli(
+  const muted = await checkedCli(
     [
       'timeline',
       'add-clip',
@@ -340,7 +446,7 @@ function createProject(title: string, directory: string, includeCaption = true):
     ],
     `${title}: add muted audio segment`,
   );
-  const segment3 = checkedCli(
+  const segment3 = await checkedCli(
     [
       'timeline',
       'add-clip',
@@ -358,7 +464,7 @@ function createProject(title: string, directory: string, includeCaption = true):
     ],
     `${title}: add final audio segment`,
   );
-  checkedCli(
+  await checkedCli(
     [
       'timeline',
       'set-audio',
@@ -374,11 +480,11 @@ function createProject(title: string, directory: string, includeCaption = true):
     ],
     `${title}: set first segment gain and fade-in`,
   );
-  checkedCli(
+  await checkedCli(
     ['timeline', 'set-audio', '--project', file, '--clip', muted.clip.id, '--mute', '--json'],
     `${title}: mute the middle audio range`,
   );
-  checkedCli(
+  await checkedCli(
     [
       'timeline',
       'set-audio',
@@ -396,12 +502,12 @@ function createProject(title: string, directory: string, includeCaption = true):
   );
   let captionTrackId = '';
   if (includeCaption) {
-    const captionTrack = checkedCli(
+    const captionTrack = await checkedCli(
       ['timeline', 'add-track', '--project', file, '--family', 'caption', '--json'],
       `${title}: add caption track`,
     );
     captionTrackId = captionTrack.trackId as string;
-    checkedCli(
+    await checkedCli(
       [
         'timeline',
         'add-caption',
@@ -444,26 +550,29 @@ function titleOperation(lines: { primary: string; secondary: string }) {
   };
 }
 
-function preparePlan(
+async function preparePlan(
   project: ProjectFixture,
   operations: unknown[],
   suffix: string,
   expectedRevision: number,
   key: string,
-): JsonRecord {
+): Promise<JsonRecord> {
   const directory = join(root, 'plans');
   const operationsPath = join(directory, `${suffix}.operations.json`);
   const planPath = join(directory, `${suffix}.plan.json`);
   writeFileSync(operationsPath, JSON.stringify({ schemaVersion: 1, operations }, null, 2));
-  const prepared = checkedCli(
+  const prepared = await checkedCli(
     ['plan', 'prepare', operationsPath, '--project', project.file, '--output', planPath, '--json'],
     `${suffix}: plan prepare`,
   );
   expect(prepared.schemaVersion).toBe(1);
   expect(prepared.path).toBe(planPath);
-  const inspected = checkedCli(['plan', 'inspect', planPath, '--json'], `${suffix}: plan inspect`);
+  const inspected = await checkedCli(
+    ['plan', 'inspect', planPath, '--json'],
+    `${suffix}: plan inspect`,
+  );
   expect(inspected.planId).toBe(prepared.planId);
-  const applied = checkedCli(
+  const applied = await checkedCli(
     [
       'plan',
       'apply',
@@ -483,14 +592,14 @@ function preparePlan(
   return applied;
 }
 
-function renderPreview(
+async function renderPreview(
   project: ProjectFixture,
   atUs: number,
   filename: string,
   context: string,
-): string {
+): Promise<string> {
   const out = join(root, `preview-${filename}`);
-  const event = checkedCli(
+  const event = await checkedCli(
     [
       'render',
       '--project',
@@ -520,15 +629,15 @@ function pngDimensions(path: string): { width: number; height: number } {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
-function decodeRgb(
+async function decodeRgb(
   path: string,
   width: number,
   height: number,
   context: string,
   timeSeconds?: number,
-): Buffer {
+): Promise<Buffer> {
   const seek = timeSeconds === undefined ? [] : ['-ss', String(timeSeconds)];
-  const result = spawnSync(
+  const result = await runProcess(
     ffmpeg,
     [
       '-v',
@@ -563,8 +672,8 @@ function decodeRgb(
   return data;
 }
 
-function decodeRgbaFrame(path: string, frameIndex: number, context: string): Buffer {
-  const result = spawnSync(
+async function decodeRgbaFrame(path: string, frameIndex: number, context: string): Promise<Buffer> {
+  const result = await runProcess(
     ffmpeg,
     [
       '-v',
@@ -690,8 +799,8 @@ function compareOutsideCodecBlockRoi(
   return { changedPixels, maxChannelDifference };
 }
 
-function decodeAudio(path: string, context: string): Int16Array {
-  const result = spawnSync(
+async function decodeAudio(path: string, context: string): Promise<Int16Array> {
+  const result = await runProcess(
     ffmpeg,
     ['-v', 'error', '-i', path, '-vn', '-ac', '2', '-ar', '48000', '-f', 's16le', 'pipe:1'],
     {
@@ -724,8 +833,8 @@ function audioRms(
   return Math.sqrt(sum / (to - from));
 }
 
-function ffprobeJson(path: string): JsonRecord {
-  const result = spawnSync(
+async function ffprobeJson(path: string): Promise<JsonRecord> {
+  const result = await runProcess(
     ffprobe,
     ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path],
     {
@@ -753,7 +862,7 @@ async function processSnapshot(): Promise<Array<{ pid: number; ppid: number; nam
   if (process.platform === 'win32') {
     const script =
       'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress';
-    const result = spawnSync(
+    const result = await runProcess(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-Command', script],
       { encoding: 'utf8', timeout: 10_000, windowsHide: true },
@@ -771,7 +880,7 @@ async function processSnapshot(): Promise<Array<{ pid: number; ppid: number; nam
       name: p.Name.toLowerCase(),
     }));
   }
-  const result = spawnSync('ps', ['-eo', 'pid=,ppid=,comm='], {
+  const result = await runProcess('ps', ['-eo', 'pid=,ppid=,comm='], {
     encoding: 'utf8',
     timeout: 10_000,
   });
@@ -831,11 +940,11 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
 
     await runStep(1, 'tool discovery', async () => {
       expect(
-        binaryWorks(ffmpeg, ['-version']),
+        await binaryWorks(ffmpeg, ['-version']),
         `ffmpeg missing; put it on PATH or set JOY_MEDIA_FFMPEG to its executable path (currently ${ffmpeg}).`,
       ).toBe(true);
       expect(
-        binaryWorks(ffprobe, ['-version']),
+        await binaryWorks(ffprobe, ['-version']),
         `ffprobe missing; put it on PATH or set JOY_MEDIA_FFPROBE to its executable path (currently ${ffprobe}).`,
       ).toBe(true);
       const runtime = await import('@joy-media/html-scene-runtime');
@@ -855,10 +964,10 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       ).toBe(true);
     });
 
-    await runStep(2, 'static video fixture', () => {
+    await runStep(2, 'static video fixture', async () => {
       sourceVideo = join(mediaDir, 'static-testsrc-sine.mkv');
       audioWav = join(mediaDir, 'sine.wav');
-      const generated = spawnSync(
+      const generated = await runProcess(
         ffmpeg,
         [
           '-hide_banner',
@@ -897,7 +1006,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         throw new Error(
           `ffmpeg failed to create the 5-second 1280x720 30 fps testsrc+sine media: ${generated.error?.message ?? generated.stderr}`,
         );
-      const wav = spawnSync(
+      const wav = await runProcess(
         ffmpeg,
         [
           '-hide_banner',
@@ -918,7 +1027,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         throw new Error(
           `ffmpeg failed to create the segmented sine fixture: ${wav.error?.message ?? wav.stderr}`,
         );
-      const probe = ffprobeJson(sourceVideo);
+      const probe = await ffprobeJson(sourceVideo);
       expect(
         probe.streams.filter((stream: JsonRecord) => stream.codec_type === 'video'),
       ).toHaveLength(1);
@@ -928,20 +1037,24 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(statSync(sourceVideo).size).toBeGreaterThan(0);
     });
 
-    await runStep(3, 'create, export and populate project', () => {
-      primary = createProject('P0 cold process title render', join(root, 'primary'), false);
+    await runStep(3, 'create, export and populate project', async () => {
+      primary = await createProject('P0 cold process title render', join(root, 'primary'), false);
       setFixtureDuration(primary, 5_000_000);
-      const track = checkedCli(
+      const track = await checkedCli(
         ['timeline', 'add-track', '--project', primary.file, '--family', 'visual', '--json'],
         'title track setup',
       );
       titleTrackId = track.trackId as string;
-      noTitle = createProject('P0 no-title baseline', join(root, 'baseline-title'), false);
+      noTitle = await createProject('P0 no-title baseline', join(root, 'baseline-title'), false);
       setFixtureDuration(noTitle, 5_000_000);
-      noCaption = createProject('P0 no-caption baseline', join(root, 'baseline-caption'), false);
+      noCaption = await createProject(
+        'P0 no-caption baseline',
+        join(root, 'baseline-caption'),
+        false,
+      );
       setFixtureDuration(noCaption, 5_000_000);
       for (const project of [noTitle, noCaption]) {
-        checkedCli(
+        await checkedCli(
           [
             'timeline',
             'set-audio',
@@ -966,11 +1079,11 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(basename(sourceVideo)).toBe('static-testsrc-sine.mkv');
     });
 
-    await runStep(4, 'prepare and apply first title plan', () => {
+    await runStep(4, 'prepare and apply first title plan', async () => {
       if (!primary) throw new Error('Project setup from step 3 did not complete.');
       const projectRevision = (JSON.parse(readFileSync(primary.file, 'utf8')) as JsonRecord)
         .revision as number;
-      const summary = preparePlan(
+      const summary = await preparePlan(
         primary,
         [titleOperation({ primary: 'Mina Farzan', secondary: 'Field Producer' })],
         'first-title',
@@ -993,7 +1106,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(persisted.project).toBeDefined();
       expect(summary.projectId).toBe(primary.id);
       const ordinaryExport = join(root, 'ordinary-export.json');
-      const exported = checkedCli(
+      const exported = await checkedCli(
         ['project', 'export', primary.file, '--output', ordinaryExport, '--json'],
         'verify ordinary project export body contract',
       );
@@ -1004,9 +1117,9 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       );
     });
 
-    await runStep(5, 'exact-frame PNG preview', () => {
+    await runStep(5, 'exact-frame PNG preview', async () => {
       if (!primary) throw new Error('Project setup from step 3 did not complete.');
-      previewTitle = renderPreview(
+      previewTitle = await renderPreview(
         primary,
         2_000_000,
         'title.png',
@@ -1015,11 +1128,11 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(pngDimensions(previewTitle)).toEqual({ width: 1280, height: 720 });
     });
 
-    await runStep(6, 'MP4 render, manifest and ffprobe validation', () => {
+    await runStep(6, 'MP4 render, manifest and ffprobe validation', async () => {
       if (!primary) throw new Error('Project setup from step 3 did not complete.');
       const started = Date.now();
       const out = join(outputDir, 'primary');
-      const result = runCli(
+      const result = await runCli(
         ['render', '--project', primary.file, '--preset', 'mp4', '--out', out, '--json'],
         '5-second title MP4 render',
       );
@@ -1102,7 +1215,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       // (b) ffmpegVersionLine: must equal the first line printed by running the same ffmpeg
       // binary the render uses, with -version.
       const ffmpegBinaryPath = process.env.JOY_MEDIA_FFMPEG?.trim() || ffmpeg || 'ffmpeg';
-      const ffmpegProbe = spawnSync(ffmpegBinaryPath, ['-version'], {
+      const ffmpegProbe = await runProcess(ffmpegBinaryPath, ['-version'], {
         encoding: 'utf8',
         timeout: 10_000,
         windowsHide: true,
@@ -1136,7 +1249,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         )
         .digest('hex');
       expect(renderManifest.renderer.fingerprint).toBe(expectedRendererFingerprint);
-      const probed = ffprobeJson(renderPath);
+      const probed = await ffprobeJson(renderPath);
       const video = probed.streams.filter((stream: JsonRecord) => stream.codec_type === 'video');
       const audio = probed.streams.filter((stream: JsonRecord) => stream.codec_type === 'audio');
       expect(video).toHaveLength(1);
@@ -1147,16 +1260,16 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(Number(renderManifest.media.durationUs)).toBe(5_000_000);
     });
 
-    await runStep(7, 'title region and no-title baseline comparison', () => {
+    await runStep(7, 'title region and no-title baseline comparison', async () => {
       if (!primary || !noTitle)
         throw new Error('Title or baseline project setup did not complete.');
-      previewNoTitle = renderPreview(
+      previewNoTitle = await renderPreview(
         noTitle,
         2_000_000,
         'no-title.png',
         'no-title baseline preview',
       );
-      const baselineRender = runCli(
+      const baselineRender = await runCli(
         [
           'render',
           '--project',
@@ -1174,15 +1287,19 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(baselineEvent.type).toBe('complete');
       const baselineMp4Path = baselineEvent.mediaPath as string;
       expect(existsSync(baselineMp4Path)).toBe(true);
-      const titled = decodeRgb(previewTitle, 1280, 720, 'decode title preview');
-      const baseline = decodeRgb(previewNoTitle, 1280, 720, 'decode no-title preview');
+      const titled = await decodeRgb(previewTitle, 1280, 720, 'decode title preview');
+      const baseline = await decodeRgb(previewNoTitle, 1280, 720, 'decode no-title preview');
       expect(
         changedPixels(titled, baseline, 1280, ROI),
         'title ROI must contain visible title pixels',
       ).toBeGreaterThan(0);
       expectEqualOutsideRoi(titled, baseline, 1280, 720, 'same-time title/no-title frame');
-      const titleMp4Frame = decodeRgbaFrame(renderPath, 60, 'decode title MP4 frame 60 at 60/30s');
-      const baselineMp4Frame = decodeRgbaFrame(
+      const titleMp4Frame = await decodeRgbaFrame(
+        renderPath,
+        60,
+        'decode title MP4 frame 60 at 60/30s',
+      );
+      const baselineMp4Frame = await decodeRgbaFrame(
         baselineMp4Path,
         60,
         'decode static MP4 frame 60 at 60/30s',
@@ -1202,8 +1319,8 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         changedPixels(titleMp4Frame, baselineMp4Frame, RENDER_WIDTH, ROI, 0, RGBA_BYTES_PER_PIXEL),
         'decoded MP4 title region must change between the static frame and the title frame',
       ).toBeGreaterThan(0);
-      const outsideWindow = decodeRgb(
-        renderPreview(
+      const outsideWindow = await decodeRgb(
+        await renderPreview(
           primary,
           500_000,
           'title-outside.png',
@@ -1213,8 +1330,8 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         720,
         'decode title-outside frame',
       );
-      const baselineOutsideWindow = decodeRgb(
-        renderPreview(
+      const baselineOutsideWindow = await decodeRgb(
+        await renderPreview(
           noTitle,
           500_000,
           'baseline-outside.png',
@@ -1227,7 +1344,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(outsideWindow).toEqual(baselineOutsideWindow);
     });
 
-    await runStep(8, 'second title plan and pixel stability', () => {
+    await runStep(8, 'second title plan and pixel stability', async () => {
       if (!primary) throw new Error('Project setup from step 3 did not complete.');
       const prior = fileProject(primary.file);
       const priorInstance = prior.pluginData['joy.contentTemplates'].instances[titleId];
@@ -1241,7 +1358,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         lines: { primary: 'Roya Naderi', secondary: 'Live Correspondent' },
       };
       const current = JSON.parse(readFileSync(primary.file, 'utf8')) as JsonRecord;
-      preparePlan(primary, [update], 'second-title', current.revision, 'p0-title-update');
+      await preparePlan(primary, [update], 'second-title', current.revision, 'p0-title-update');
       const after = fileProject(primary.file);
       const afterInstance = after.pluginData['joy.contentTemplates'].instances[titleId];
       const afterClip = after.compositions.root.tracks
@@ -1255,21 +1372,21 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         startUs: priorClip.startUs,
         durationUs: priorClip.durationUs,
       });
-      previewUpdated = renderPreview(
+      previewUpdated = await renderPreview(
         primary,
         2_000_000,
         'updated-title.png',
         'updated title preview',
       );
-      const oldPixels = decodeRgb(previewTitle, 1280, 720, 'decode first title frame');
-      const newPixels = decodeRgb(previewUpdated, 1280, 720, 'decode updated title frame');
+      const oldPixels = await decodeRgb(previewTitle, 1280, 720, 'decode first title frame');
+      const newPixels = await decodeRgb(previewUpdated, 1280, 720, 'decode updated title frame');
       expect(
         changedPixels(oldPixels, newPixels, 1280, ROI),
         'second title text must change pixels in title ROI',
       ).toBeGreaterThan(0);
       expectEqualOutsideRoi(oldPixels, newPixels, 1280, 720, 'first/second title text frames');
 
-      const secondRender = runCli(
+      const secondRender = await runCli(
         [
           'render',
           '--project',
@@ -1287,8 +1404,12 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(secondRenderEvent).toMatchObject({ type: 'complete', mediaProduced: true });
       const secondRenderPath = String(secondRenderEvent.mediaPath);
       expect(existsSync(secondRenderPath)).toBe(true);
-      const firstMp4Frame = decodeRgbaFrame(renderPath, 60, 'decode first title MP4 frame 60');
-      const secondMp4Frame = decodeRgbaFrame(
+      const firstMp4Frame = await decodeRgbaFrame(
+        renderPath,
+        60,
+        'decode first title MP4 frame 60',
+      );
+      const secondMp4Frame = await decodeRgbaFrame(
         secondRenderPath,
         60,
         'decode second title MP4 frame 60',
@@ -1306,10 +1427,10 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       );
     });
 
-    await runStep(9, 'decoded audio gain, fade and mute envelope', () => {
+    await runStep(9, 'decoded audio gain, fade and mute envelope', async () => {
       if (!renderPath) throw new Error('MP4 output from step 6 is unavailable.');
-      const audio = decodeAudio(renderPath, 'decode AAC output to s16le');
-      const source = spawnSync(
+      const audio = await decodeAudio(renderPath, 'decode AAC output to s16le');
+      const source = await runProcess(
         ffmpeg,
         ['-v', 'error', '-i', audioWav, '-ac', '1', '-ar', '48000', '-f', 's16le', 'pipe:1'],
         { encoding: 'buffer', maxBuffer: 2 * 1024 * 1024, timeout: 20_000, windowsHide: true },
@@ -1343,12 +1464,12 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
 
     await runStep(10, 'caption boundary and ASS renderer evidence', async () => {
       if (!primary || !noCaption) throw new Error('Caption test project setup did not complete.');
-      const captionProject = createProject(
+      const captionProject = await createProject(
         'P0 English caption boundary proof',
         join(root, 'caption-boundary'),
         true,
       );
-      const baseline = runCli(
+      const baseline = await runCli(
         [
           'render',
           '--project',
@@ -1369,7 +1490,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       const operationsPath = join(root, 'caption-plan.operations.json');
       const planPath = join(root, 'caption-plan.json');
       writeFileSync(operationsPath, JSON.stringify({ schemaVersion: 1, operations: [] }, null, 2));
-      const prepared = runCliAllowingExit(
+      const prepared = await runCliAllowingExit(
         [
           'plan',
           'prepare',
@@ -1396,7 +1517,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
           `caption ASS preparation: exit ${String(prepared.code)}: ${event?.message ?? prepared.stderr.trim()}`,
         );
       }
-      checkedCli(
+      await checkedCli(
         [
           'plan',
           'apply',
@@ -1411,7 +1532,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         ],
         'caption ASS plan apply',
       );
-      const captionRender = runCli(
+      const captionRender = await runCli(
         [
           'render',
           '--project',
@@ -1467,8 +1588,8 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         );
       }
       expect(fidelity.violations, 'Step 10 encoded caption output').toEqual([]);
-      // The composites and the decoded copy are about 0.7 GB together. Remove them now, so the synchronous
-      // teardown at the end of the file does not stall the test worker past its RPC timeout.
+      // The composites and the decoded copy are about 0.7 GB together. Remove them here, so the teardown at
+      // the end of the file has less to delete.
       for (const file of [
         captionComposite.yuvPath,
         captionComposite.bandRgbPath,
@@ -1476,7 +1597,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
         baselineComposite.bandRgbPath,
         join(root, 'composite-fidelity', 'decoded.yuv'),
       ]) {
-        rmSync(file, { force: true });
+        await rm(file, { force: true });
       }
       expect(captionRenderEvent.message).toContain('Captions: ass.');
       const captionManifest = JSON.parse(
@@ -1485,11 +1606,11 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       expect(captionManifest.captions).toEqual({ mode: 'ass' });
     });
 
-    await runStep(11, 'portable desktop export and artifact refusal', () => {
+    await runStep(11, 'portable desktop export and artifact refusal', async () => {
       if (!primary) throw new Error('Project setup from step 3 did not complete.');
       const desktopPath = join(root, 'desktop-project.json');
       try {
-        const exported = checkedCli(
+        const exported = await checkedCli(
           ['project', 'export', primary.file, '--desktop', '--output', desktopPath, '--json'],
           'portable desktop project export',
         );
@@ -1553,7 +1674,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       writeFileSync(primary.file, JSON.stringify(body));
       const refusalPath = join(root, 'artifact-refusal.json');
       try {
-        const refusal = spawnSync(
+        const refusal = await runProcess(
           process.execPath,
           [
             BUNDLE,
@@ -1617,7 +1738,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
       // Keep FFmpeg active long enough for the parent to observe its progress PID. 60 s is the
       // longest composition a title operation accepts.
       setFixtureDuration(cancellationFixture, 60_000_000);
-      preparePlan(
+      await preparePlan(
         cancellationFixture,
         [titleOperation({ primary: 'Cancel fixture', secondary: 'No captions' })],
         'cancel-no-captions',
@@ -1806,7 +1927,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
           const forceCleanupDeadline = Date.now() + 2_000;
           if (child?.pid && child.exitCode === null) {
             if (process.platform === 'win32') {
-              spawnSync('taskkill.exe', ['/T', '/F', '/PID', String(child.pid)], {
+              await runProcess('taskkill.exe', ['/T', '/F', '/PID', String(child.pid)], {
                 encoding: 'utf8',
                 timeout: Math.max(1, forceCleanupDeadline - Date.now()),
                 windowsHide: true,
@@ -1823,7 +1944,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
           for (const pid of ownedPids) {
             if (!current.some((process) => process.pid === pid)) continue;
             if (process.platform === 'win32') {
-              spawnSync('taskkill.exe', ['/T', '/F', '/PID', String(pid)], {
+              await runProcess('taskkill.exe', ['/T', '/F', '/PID', String(pid)], {
                 encoding: 'utf8',
                 timeout: Math.max(1, forceCleanupDeadline - Date.now()),
                 windowsHide: true,
@@ -1838,8 +1959,8 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
             current = await processSnapshot();
           }
           if (profilePath) ownedPaths.add(profilePath);
-          for (const path of ownedPaths) rmSync(path, { recursive: true, force: true });
-          rmSync(cancellationOut, { recursive: true, force: true });
+          for (const path of ownedPaths) await rm(path, { recursive: true, force: true });
+          await rm(cancellationOut, { recursive: true, force: true });
           for (let attempt = 0; attempt < 100; attempt++) {
             const current = await processSnapshot();
             if (ownedPids.every((pid) => !current.some((process) => process.pid === pid))) break;
@@ -1861,7 +1982,7 @@ describe('JOY Media P0-4 cold-process end-to-end acceptance', () => {
     if (failures.length) throw new Error([...failures, ...cancellationCaseResults].join('\n'));
   }, 600_000);
 
-  afterAll(() => {
-    for (const directory of temporaryRoots) rmSync(directory, { recursive: true, force: true });
+  afterAll(async () => {
+    for (const directory of temporaryRoots) await rm(directory, { recursive: true, force: true });
   });
 });
