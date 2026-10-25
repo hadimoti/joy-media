@@ -187,7 +187,7 @@ importers:
         specifier: ^22.16.0
         version: 22.20.1
       electron:
-        specifier: ^44.3.0
+        specifier: 44.3.0
         version: 44.3.0(supports-color@7.2.0)
 
   apps/editor-web:
