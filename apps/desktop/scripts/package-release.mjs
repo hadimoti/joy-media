@@ -1,6 +1,7 @@
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { internalPackageDirectories } from './workspace-packages.mjs';
 
 /**
  * Release-plan gate for signed public releases (unchanged — see the `else` branch below). The
@@ -135,16 +136,10 @@ async function assembleUnpacked() {
   // cleanly without relying on repository-root node_modules symlinks.
   const unpackedNodeModules = resolve(unpackedDir, 'node_modules', '@joy-media');
   await mkdir(unpackedNodeModules, { recursive: true });
-  // The worker's runtime closure: export-core and job-protocol import project-schema and render-ir.
-  // Without them the staged Worker fails at import with ERR_MODULE_NOT_FOUND and never says hello.
-  for (const pkgName of [
-    'provider-sdk',
-    'project-schema',
-    'project-persistence',
-    'export-core',
-    'job-protocol',
-    'render-ir',
-  ]) {
+  // Every internal dependency of the desktop app is staged, including release-trust, which the main process imports.
+  // Without one, the packaged main process fails at import with ERR_MODULE_NOT_FOUND and never gets to its window.
+  const desktopManifest = JSON.parse(await readFile(resolve(desktopRoot, 'package.json'), 'utf8'));
+  for (const pkgName of internalPackageDirectories(desktopManifest)) {
     const pkgRoot = resolve(repoRoot, 'packages', pkgName);
     const dest = resolve(unpackedNodeModules, pkgName);
     await rm(dest, { recursive: true, force: true });
