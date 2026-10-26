@@ -378,6 +378,25 @@ describe('Chromium scene driver ownership', () => {
     expect(startupDeadlineMs).toBe(15_000);
     expect(probe).toHaveProperty('reason');
   });
+
+  it('retries a probe whose first browser start runs past its deadline', async () => {
+    const workers: FakeWorker[] = [];
+    const probe = await probeChromium({
+      executablePath: process.execPath,
+      probeTimeoutMs: 200,
+      workerFactory: () => {
+        // A worker that never answers its capture is a start that runs past its deadline.
+        const fake: FakeWorker = new FakeWorker((message) => {
+          if (workers.length === 2 && message.type === 'capture')
+            fake.emit('message', { type: 'complete', requestId: message.requestId });
+        });
+        workers.push(fake);
+        return fake;
+      },
+    });
+    expect(workers).toHaveLength(2);
+    expect(probe).toHaveProperty('reason');
+  });
 });
 
 const chromiumAvailable = findChromiumExecutable() !== undefined;

@@ -1069,18 +1069,47 @@ function assertCaptureRequest(request: HeadlessCaptureRequest): void {
 
 export type ChromiumProbeResult = { readonly version: string } | { readonly reason: string };
 
-/** Starts a short-lived isolated headless session and reads its version over CDP. */
+/** Options for one version probe: the driver options, the signal, and the probe's own startup deadline. */
+type ChromiumProbeOptions = ChromiumSceneDriverOptions & {
+  readonly signal?: AbortSignal;
+  /** Startup and capture deadline for each attempt; defaults to 15 seconds. */
+  readonly probeTimeoutMs?: number;
+};
+
+const STARTUP_TIMEOUT = /RENDER_CAPTURE_TIMEOUT|startup timed out/u;
+
+/**
+ * Starts a short-lived isolated headless session and reads its version over CDP.
+ *
+ * On Windows the first start of Chromium in a new profile root can run past one deadline, while the next start in that root
+ * is quick. Measured on the host: the first of six fresh roots timed out, and the second attempt in each succeeded. One retry
+ * covers that. A browser that never answers fails both attempts and is recorded as unlaunchable.
+ */
 export async function probeChromium(
-  options: ChromiumSceneDriverOptions & { readonly signal?: AbortSignal } = {},
+  options: ChromiumProbeOptions = {},
 ): Promise<ChromiumProbeResult> {
   const executablePath = options.executablePath ?? findChromiumExecutable();
   if (!executablePath) return { reason: 'Chromium executable was not found.' };
+  const first = await probeAttempt(executablePath, options);
+  if (!('reason' in first) || !STARTUP_TIMEOUT.test(first.reason) || options.signal?.aborted)
+    return first;
+  return probeAttempt(executablePath, options);
+}
+
+async function probeAttempt(
+  executablePath: string,
+  options: ChromiumProbeOptions,
+): Promise<ChromiumProbeResult> {
   let driver: HeadlessSceneDriver | undefined;
   try {
     // The probe takes the same startup deadline as a capture. On the Windows host a cold Chromium start
     // under the CLI's restricted environment took 3.8 to 5.8 s, so a 3 s probe recorded the browser as
     // unlaunchable at preparation, and the render-time probe then refused the frozen record as drift.
-    driver = createChromiumSceneDriver({ ...options, executablePath, timeoutMs: 15_000 });
+    driver = createChromiumSceneDriver({
+      ...options,
+      executablePath,
+      timeoutMs: options.probeTimeoutMs ?? 15_000,
+    });
     await driver.captureAsync!(
       {
         markup: '',

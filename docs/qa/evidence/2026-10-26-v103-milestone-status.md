@@ -72,10 +72,11 @@ claimed as passing.
   matches the manifest, and export fails when it is missing.
 - Packaged export spec `tests/desktop/export-semantics.spec.ts`: 2 of 2 passed on the unpacked build. CLI pinned pixel probe:
   16 of 16 passed.
-- Open: the caption case of `render-parity.e2e.test.ts` does not pass on this host with the lifecycle's variable set. The
-  version probe's 3-second deadline is fixed in this change, with a regression test in `chromium-driver.test.ts`. The remaining
-  failure is a cold Chromium start over 15 seconds, which leaves the preparation record `launchable: false`; the render then
-  refuses as drift. See `docs/qa/evidence/2026-10-26-caption-face-windows-host.md`. The default-face change needs the owner's
+- The caption case of `render-parity.e2e.test.ts` passes on this host with the lifecycle's variable set (`JOY_MEDIA_REQUIRE_CAPTION_FACE=1`,
+  `--retry=0`): 2 of 2 runs, about 25 seconds each, after the probe deadline fix and a bounded retry of a timed-out first Chromium
+  start. The first start in each new profile root timed out in six of six fresh roots and succeeded on the second attempt. The
+  lifecycle receipt on the release gate is still pending, and the gate runs on a CI Windows runner. The cause of the slow first
+  start is not verified. See `docs/qa/evidence/2026-10-26-caption-face-windows-host.md`. The default-face change needs the owner's
   confirmation (D14).
 
 ## Export semantics (L4, L9)
@@ -165,7 +166,7 @@ claimed as passing.
 - The Electron variant builds for the bisect. These need network downloads and belong with G1.
 - The lifecycle receipts for L1, L3, L5a and F2. `windows-lifecycle.ps1` needs the CI toolchain, and its receipt belongs to the
   owner-gated release gate. The Sandbox run on candidate `a369df53` is supporting evidence: 25 of 25 and 8 of 8, including both
-  shipped-CLI refusals and the held-file refusal. L3's caption case is not passing on this host (see the L3 section).
+  shipped-CLI refusals and the held-file refusal. L3's caption case passes on this host (see the L3 section); its release-gate receipt is pending.
 - Survives flake: root cause not confirmed. The timeout message now names the job state, so the next occurrence settles it.
 - A packaged-startup check in CI, so a packaged app that cannot import its main module fails the build. It needs a runner and a
   policy decision (owner).
