@@ -6,6 +6,7 @@ import { validateJoyProjectV1 } from '@joy-media/project-schema';
 import { runCli } from '../cli.js';
 import { setTitleTextMeasurer } from '../services/prepared-title.js';
 import { preparedPlanId } from '../services/prepared-edit.js';
+import { probeCanonicalCaptionFace } from './render-features.js';
 import { findChromiumExecutable } from '@joy-media/html-scene-runtime';
 import { loadNotoSansArabicFaces } from '@joy-media/html-scene-runtime';
 import {
@@ -253,6 +254,29 @@ describe('prepared title plan flow', () => {
     const f = await fixture();
     const { result, output } = await prepare(f.path, [
       { id: 'caption-preflight', op: 'addCaption' },
+    ]);
+    expect(result.code).not.toBe(0);
+    expect(JSON.parse(result.output)).toMatchObject({ code: 'SETUP_REQUIRED' });
+    expect(result.output).toContain('canonical-caption-face-unavailable');
+    expect(existsSync(output)).toBe(false);
+  });
+
+  it('refuses a caption plan when the real libass probe judges a corrupted canonical face unusable', async () => {
+    // Negative control: the same real probe passes the bundled canonical face, so the refusal below is caused by the bytes.
+    expect(probeCanonicalCaptionFace().usable).toBe(true);
+    const corrupted = probeCanonicalCaptionFace(
+      undefined,
+      new TextEncoder().encode('not a font file'),
+    );
+    expect(corrupted.usable).toBe(false);
+
+    setRenderPreparationFactsProviderForTests(async () => ({
+      ...usableFacts,
+      libassProbe: corrupted,
+    }));
+    const f = await fixture();
+    const { result, output } = await prepare(f.path, [
+      { id: 'caption-corrupt-face', op: 'addCaption' },
     ]);
     expect(result.code).not.toBe(0);
     expect(JSON.parse(result.output)).toMatchObject({ code: 'SETUP_REQUIRED' });
