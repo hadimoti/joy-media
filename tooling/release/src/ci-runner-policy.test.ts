@@ -84,6 +84,11 @@ const APPROVED_HOSTED_RUNNERS: ReadonlyMap<
       ['development-verification-summary', ['ubuntu-24.04']],
     ]),
   ],
+  [
+    // The weekly, non-blocking repeat signal (decision D21). It is not a release gate and it never publishes.
+    join(WORKFLOWS_DIR, 'ci-repeat.yml'),
+    new Map([['vitest-under-load', ['ubuntu-24.04']]]),
+  ],
 ]);
 
 interface ParsedWorkflow {
