@@ -108,6 +108,7 @@ export default tseslint.config(
       'scripts/*.cjs',
       'apps/*/scripts/*.mjs',
       'tests/**/*.mjs',
+      'tests/desktop/gpu-probe/*.cjs',
     ],
     languageOptions: {
       globals: {
