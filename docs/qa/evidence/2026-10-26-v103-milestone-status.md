@@ -1,89 +1,142 @@
 # JOY Media v1.0.3: milestone status, 2026-10-26
 
-Not a release receipt. Nothing here merges into `main`, changes the release gate, deploys, or publishes a
-release. Development CI runs on the feature branch only.
+Status snapshot, not a release receipt. Nothing here merges into `main`, changes the release gate, deploys, or publishes
+a release. Development CI runs on the feature branch only: `ci-dev.yml` triggers on `workflow_dispatch`, and its `push`
+trigger is `main` only.
 
-## Development CI
+**Verdict: NOT READY for release.** The owner-dependent items below are open. Release-critical engineering that does not
+need the owner is listed under "Remaining engineering". Each row names its evidence, and an item without a receipt is not
+claimed as passing.
 
-- Final head of the sandbox-lifecycle round: `64531d2e`, run `40238451437`
-  (https://github.com/hadimoti/joy-media/actions/runs/40238451437): **success**, 6 of 6 jobs:
-  static and unit/integration, browser desktop-compact, browser desktop-minimum, browser desktop-primary
-  full, the Worker package build and self-test, and the development verification summary.
-- The earlier run `40238191399` at `0420ced4` was cancelled by the concurrency group when `64531d2e` was
-  pushed. It was not a failure.
+## Branch and development CI
 
-## Installer milestone (Windows Sandbox, candidate built from `98505dfa` with the guest from `0420ced4`)
+- Branch `v1.0.3/no-owner-tracks`. Commits in this checkpoint, on top of `a93f819c`, `c94efe62`, `54a33fdf` and `58943380`:
+  - `6ae9be64`: GPU diagnostic-mode switch, stage list and local-only crash settings. Inert, not wired into the app.
+  - `de392213`: attended G2 repeat harness. Preflight verified; the run loop has not run.
+  - `5de135f1`: attended G1 stage probe. S0 and S1 ran locally; S2 to S6 wait for G1.
+- Dev CI on `6ae9be64`: run `40248976254`, still in progress at the time of writing. The result is recorded in the next
+  update of this file.
+- Earlier dev CI on `64531d2e`: run `40238451437`, success, 6 of 6 jobs. Kept as history.
 
-Evidence: [2026-10-26-windows-sandbox-lifecycle.md](2026-10-26-windows-sandbox-lifecycle.md).
+## Installer, rollback and updates (L1, F1, F2)
 
-- **Verified:** installation and upgrade from v1.0.1 to the candidate (installed-file SHA-256 match, shortcuts,
-  registry, both CLI launchers in a fresh shell, PATH holds only `bin`). Sequence A 19 of 19, Sequence B 8 of 8.
-- **Verified:** repair (a deleted renderer file is restored from the candidate) and uninstall (install folder,
-  uninstall key, shortcuts and PATH entries removed).
-- **Verified:** rollback to v1.0.1 as candidate uninstall followed by the previous setup. The previous setup
-  cannot remove the `bin` PATH entry it does not know, so the candidate uninstall removes it first.
-- **Not yet built (L1):** a true kept-previous rollback, which keeps the previous version on disk and swaps
-  folders, and protected user-data restoration from a pre-update snapshot.
-- **Scope of the Sandbox evidence:** the candidate that was tested does not include the app changes listed
-  below. A new candidate needs a new Sandbox run before any release claim.
+- Implemented in `apps/desktop/installer/Setup.cs`: install stages into `JOY Media.staging-<version>`, verifies every staged
+  file against the embedded manifest, snapshots the local database into `backups\pre-update-<version>`, and swaps folders
+  so the replaced version is kept as `JOY Media.previous`. The install starts from a button click. Shortcut, PATH and
+  uninstaller errors are hard failures. `/rollback` restores the kept version, and `/restore-data` restores the snapshot.
+- PATH follows the restored layout (`SetUserPathLayout`, commit `58943380`). Only the `bin` folder goes on PATH (F1).
+- Windows Sandbox on candidate setup `be7a636a` (see `2026-10-26-rollback-path-layout.md`): kept-previous rollback
+  23 of 23 steps, fresh install with `joy-media --version` and `joy --version` from a fresh shell 8 of 8, zero failed steps.
+- CLI: `joy-media update check | verify <file> | rollback`. The verifier checks an Ed25519 signature over the exact manifest
+  bytes and fails closed with no pinned key (`4b0d72e3`). The app's update check uses the same verifier and no longer
+  needs a subscription.
+- **Not done:** the pinned release key list is empty until the owner's key ceremony (D2), so no signed update can
+  verify yet. The lifecycle transitions `updateRefusedWhileFileHeld`, `tamperedUpdateRefused` and
+  `wrongKeyManifestRefused` are in `tests/desktop/windows-lifecycle.ps1`, which is parse-checked only. They need a Windows
+  lifecycle run. The positive path needs the owner's real key.
 
-## L3: Persian captions in the canonical face
+## GPU (L2, sessions G1 and G2)
 
-- Commit `69633e07`. Desktop captions now draw in the bundled Noto Sans Arabic face. The editor registers the
-  WOFF2 only after its SHA-256 matches the manifest, under the family `JOY Caption Face`. Export waits for the
-  registration and fails when it is missing.
-- Packaged export spec (`tests/desktop/export-semantics.spec.ts`), unpacked build: **2 of 2 passed**. The caption
-  case measured the caption face against two controls, drawn in the renderer:
-  - differing pixels, caption face against a family nobody registers: 1370 (threshold 64);
-  - differing pixels, caption face against Arial: 1378 (threshold 64);
-  - glyph mismatch of the export against the caption-face reference: 0 (tolerance 0.2);
-  - glyph mismatch against the Arial control: 0.54 (must exceed 0.2);
-  - reversed word order: 0.46 (must exceed 0.2).
-- CLI pinned pixel probe (`caption-face-pixels.reference.json`, FFmpeg `n8.1.3-20260922`): 16 of 16 tests pass.
-- The lifecycle (`tests/desktop/windows-lifecycle.ps1`) no longer requires `arial.ttf`. It checks the installed
-  WOFF2 and the libass TTF against their pinned manifests. The same logic ran against the standalone build:
-  both faces match, and a wrong digest is refused. **The full Windows lifecycle has not run with this check.**
+- Built: `apps/desktop/src/main/gpu-diagnostics.ts`, an inert diagnostic module (not wired into `electron-entry.ts`);
+  `tooling/diagnostics/src/redact-gpu-report.ts` with its tests; the stage probe in `tests/desktop/gpu-probe/`;
+  and the repeat harness `tooling/diagnostics/run-default-export-repeat.ps1`.
+- Stage probe, run locally on the `apps/desktop` Electron 44.3.0 build: S0 ok; S1 ok, WebGL 2 on ANGLE D3D11 with the
+  RTX 5070 Ti and no child-process events. S2 to S6 exercise the encoder path under study, so they run only in G1.
+- Repeat harness: `-PreflightOnly` passed with a stub install and a pnpm stub, and refused without pnpm. The run loop
+  has not run. It needs pnpm on PATH, because the Playwright config's API server starts with pnpm, and it needs an installed
+  build and the attended session.
+- Electron is pinned exactly at `44.3.0` in `apps/desktop/package.json`.
+- Not built: the minimal Media Foundation probe (`tooling/diagnostics/mf-probe/`) and the Electron variant builds for the
+  bisect. The diagnostic switch is not wired, because its crash-reporter options and Chromium switches need G1 confirmation.
+- The shipped default build still crashes on this host (note of 2026-10-24). Owner sessions G1 (diagnosis) and G2
+  (30-run proof on the exact candidate) have not run.
 
-## L6: menu and keyboard coverage
+## Captions (L3)
 
-- Commit `b42a284f`. The ledger's 24 open entries are all exercised by packaged tests that perform the action and
-  check its effect. The ledger test in strict mode (`JOY_MEDIA_L6_RELEASE=1`) passes with 0 open items (8 of 8).
-- `tests/desktop/keyboard-shortcuts.spec.ts`: all 15 shortcut actions, 1 test, 16 steps, passed.
-- `tests/desktop/menu-actions.spec.ts`: File > Export (rendered MP4, ffprobe accepted), Clip > Split at Playhead,
-  Joy Code > Execution Mode and Settings, Joy Code > Pause / Stop (withdraws a staged proposal), Window >
-  Minimize, Zoom / Maximize and Close Window. 8 tests, all passed.
-- `tests/desktop/menu-panels.spec.ts`: Window > Focus items activate their panel in the focused dock group.
-- **No application defect was reproduced by these tests.** One UX gap is recorded for a decision: Joy Code >
-  Pause / Stop is always enabled, and with no run in progress it does nothing and shows nothing.
+- `69633e07`: desktop captions draw in the bundled Noto Sans Arabic face. The WOFF2 is registered only after its SHA-256
+  matches the manifest, and export fails when it is missing.
+- Packaged export spec `tests/desktop/export-semantics.spec.ts`: 2 of 2 passed on the unpacked build. CLI pinned pixel probe:
+  16 of 16 passed.
+- Open: the full Windows lifecycle has not run with the caption check. The default-face change needs the owner's confirmation
+  (D14).
 
-## L7b: Worker capabilities
+## Export semantics (L4, L9)
 
-- Commit `2500fe3c`. The image upscaling model is ready only when its file's SHA-256 equals
-  `JOY_MEDIA_REAL_ESRGAN_MODEL_SHA256`. A missing, malformed or wrong pin, and a file swapped after pinning, are
-  refused. Tests: 3 of 3 in `apps/worker/src/local-upscaling.test.ts`.
-- **Not done:** dispatch of `render.export` and `upscale.image` through the desktop orchestrator. Both need a job
-  payload that the submit path does not carry, so enabling them now would queue jobs that always fail. This needs
-  a design decision on payload storage before it is built.
+- L4: the export remux route requires `x-joy-frame-count`. The HTTP suite passed 55 of 55 (matrix, 2026-10-26).
+- L9: the reverse mutations in the export and spec-selection tests fail as required (matrix). Not re-run in this checkpoint.
 
-## L1: signed release manifests (development keys)
+## Held file (L5a) and full disk (L5b)
 
-- Commit `4b0d72e3`. The verifier checks an Ed25519 signature over the manifest's exact bytes, accepts several
-  pinned keys for rotation, and fails closed with no pinned key. Tests: 7 of 7. The signing tool signs and verifies
-  with a key named at run time and embeds none. Tests: 4 of 4.
-- **Not done:** nothing in the app calls the verifier yet, the release key is not compiled in, and the `update`
-  commands and installer changes are not built. The owner's production key was not generated or read.
+- L5a: the held-file case passes locally in `render-recovery.e2e.test.ts`. The Sandbox also refuses the update while a file is
+  held. The Windows lifecycle receipt is pending.
+- L5b: accepted limit (D16).
 
-## GPU diagnosis (L2, session G1 and G2)
+## Menus, keyboard and file package (L6)
 
-- Read-only inventory (`tooling/diagnostics/src/gpu-inventory.ts`) and redactor (`redact-gpu-report.ts`) exist from
-  earlier work.
-- The launch-loop harness for the 30-launch receipt is **not built**. The plan makes G2 an attended session on the
-  RTX 5070 Ti, so it was not run unattended. The default GPU path crashes on this host, per the 2026-10-24 note.
+- `b42a284f`: the coverage ledger's 24 open entries are each exercised by a packaged test that performs the action and checks
+  its effect. Strict mode (`JOY_MEDIA_L6_RELEASE=1`) passes with 0 open items (8 of 8).
+- `keyboard-shortcuts.spec.ts`: all 15 shortcut actions in 1 test, 16 steps, passed. `menu-actions.spec.ts`: 8 tests passed.
+- Batch relink and override-after-restart are verified packaged in `tests/desktop/missing-media.spec.ts` (matrix note,
+  2026-10-25).
+- Open UX gap, for decision: Joy Code > Pause / Stop is always enabled and does nothing when no run is in progress.
 
-## Remaining tracks
+## Worker capabilities (L7a, L7b, L7c)
 
-- L1: wire the verifier into the update check, compile in the pinned release key, build the kept-previous rollback
-  and protected-data restoration, then Sandbox-verify the new installer.
-- L7b: payload plumbing for export and upscale dispatch.
-- L2: the attended GPU session and the launch-loop harness.
-- L10: the single fast pipeline, which needs the owner's approvals D17 to D23.
+- L7b, implemented: `render.export` and `upscale.image` are dispatched by the desktop orchestrator. The payload is stored at
+  submit and returned in the lease, and the lease and Worker payload tests passed 25 of 25.
+- L7b, model pin (`2500fe3c`): an upscaling model is ready only while its file's SHA-256 equals
+  `JOY_MEDIA_REAL_ESRGAN_MODEL_SHA256`. A missing or malformed pin, and a file swapped after pinning, are refused
+  (`local-upscaling.test.ts`, 3 of 3). The pin comes from configuration, not from source, until the owner approves the
+  licensed weights (D12).
+- L7a: the attended preparation is done (leak scan, receipt, checklists, synthetic dry run). Session A1 has not run.
+- L7b quality receipt and L7c model-quality receipt: owner session A1, not run.
+
+## CLI runtime contract (L8, F1)
+
+- The launchers sit in `bin`, the only folder on PATH. The Sandbox evidence is listed under "Installer, rollback and updates".
+  The Windows lifecycle receipt is pending.
+
+## CI and flakes (L10)
+
+- P0 timing baseline committed: `6d7657bf`.
+- The "survives" flake (`local-worker.integration.test.ts`, Worker killed mid-job) was not reproduced in 31 loaded local runs:
+  6 full-file runs and 25 survives-only runs under CPU stress, all exit 0. Diagnostics (`c94efe62`) report the Worker's state
+  when the lease wait times out. The root cause is not confirmed.
+- The Vitest `onTaskUpdate` RPC timeout was not reproduced. Pool concurrency has not been capped.
+- CI v3: design only, `docs/plans/2026-10-26-ci-v3-design.md`. Implementation waits for D17.
+- Scheduled `ci-repeat.yml`: not built. A GitHub `schedule` runs only from the default branch, so it needs D21 and a merge to
+  `main`, which the owner has not authorized.
+- Legacy workflow deletion (D22) and the branch-protection Worker check (D23): owner decisions, not done.
+
+## Docs (F3, F4)
+
+- `75da669e`: infrastructure detail scrubbed from the docs and plan, a scan added to enforce it, and matrix rows corrected.
+  The scan was not re-run in this checkpoint.
+
+## Plan phases
+
+| Phase | Status                                | Why                                                                                                                 |
+| ----- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| P0    | Mostly done                           | Timing baseline committed. Per-job durations for run `40148387453` are not measured. Owner decisions not collected. |
+| P1    | Implemented locally, receipts pending | Tracks A, C, D, E, F, H, I. Track G partial (see GPU). Lifecycle and release-gate receipts pending.                 |
+| P2    | Blocked                               | CI v3 needs approvals D17 to D23.                                                                                   |
+| P3    | Blocked                               | Attended G1 (owner).                                                                                                |
+| P4    | Blocked                               | Needs P2 and P3.                                                                                                    |
+| P5    | Blocked                               | Attended G2 and A1 on the frozen artifact, then a release decision.                                                 |
+
+## Owner items (open)
+
+- D2: signing-key ceremony. The pinned key list stays empty until then.
+- D17 to D23: CI v3 approvals and policy changes (D22, D23 included).
+- G1 and G2: attended GPU sessions, with decisions D6 to D8 (diagnostics, driver changes, mitigations).
+- A1: attended account and model sessions, with D9 to D12.
+- D14 (default caption face), D16 (full disk), D25 and D26 (menu and keyboard scope; worker dispatch exposure).
+- Release authorization: none requested, and `release-candidate-v2` has not been dispatched.
+
+## Remaining engineering, not owner-gated
+
+- The Media Foundation probe (C#). Compile-only checks are possible here; running it touches the encoder, so it waits for G1.
+- The Electron variant builds for the bisect. These need network downloads and belong with G1.
+- The Windows lifecycle run for the tampered and wrong-key transitions, in the Sandbox or the release gate.
+- Root cause for the survives flake, and reproduction of the RPC timeout under synthetic load.
+- Refresh the readiness matrix rows once the receipts exist. Each row keeps its evidence source.
