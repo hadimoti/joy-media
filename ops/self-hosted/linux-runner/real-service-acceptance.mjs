@@ -33,6 +33,7 @@ import { isAlive, removeDirWithRetry, terminateProcessTree } from './real-servic
 import { validateP3Matrix } from './p3-case-registry.mjs';
 import { createP3ExecutionBudget, runOwnedP3Process } from './p3-execution-budget.mjs';
 import { parseLaneMode } from './p3-lane-mode.mjs';
+import { windowsEvidenceRequired } from './windows-evidence-mode.mjs';
 
 const requireFromApi = createRequire(new URL('../../../apps/api/package.json', import.meta.url));
 const { Pool } = requireFromApi('pg');
@@ -2243,10 +2244,13 @@ async function recordOperationalEvidence(
     `${JSON.stringify({ ...common, delivery: deliveryEvidence }, null, 2)}\n`,
   );
   const windowsEvidencePath = join(output, 'windows/acceptance.json');
-  try {
-    await readFile(windowsEvidencePath);
-  } catch {
-    throw new Error('Windows Worker acceptance evidence was not downloaded for this pass');
+  // Strict by default (v2). release-candidate-v3 defers this check to the final gate, which binds the Windows evidence itself.
+  if (windowsEvidenceRequired(process.env)) {
+    try {
+      await readFile(windowsEvidencePath);
+    } catch {
+      throw new Error('Windows Worker acceptance evidence was not downloaded for this pass');
+    }
   }
   await writeFile(
     join(output, 'operations/restore.json'),

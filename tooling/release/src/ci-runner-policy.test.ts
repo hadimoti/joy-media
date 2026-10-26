@@ -84,6 +84,20 @@ const APPROVED_HOSTED_RUNNERS: ReadonlyMap<
       ['development-verification-summary', ['ubuntu-24.04']],
     ]),
   ],
+  [
+    // The single-pass gate, branch implementation (decision D17). Its hosted jobs are v2's, plus the two hosted-verify jobs that
+    // run the Vitest shards and their merge on hosted Ubuntu (plan section 3.4).
+    join(WORKFLOWS_DIR, 'release-candidate-v3.yml'),
+    new Map([
+      ['validate-candidate', ['ubuntu-24.04']],
+      ['hosted-verify-shard', ['ubuntu-24.04']],
+      ['hosted-prepare', ['ubuntu-24.04']],
+      ['hosted-verify', ['ubuntu-24.04']],
+      ['node-contracts', ['ubuntu-24.04']],
+      ['editor-web-bundle', ['ubuntu-24.04']],
+      ['acceptance-responsive', ['ubuntu-24.04']],
+    ]),
+  ],
 ]);
 
 interface ParsedWorkflow {
