@@ -83,7 +83,7 @@ test('reads the previous release pins from the lifecycle harness, so both harnes
     'utf8',
   );
   const pins = readPinnedHashes(lifecycle);
-  assert.equal(pins.PreviousVersion, '1.0.1');
+  assert.equal(pins.PreviousVersion, '1.0.2');
   assert.match(pins.PreviousSetupSha256, /^[0-9a-f]{64}$/u);
   assert.match(pins.PreviousArchiveSha256, /^[0-9a-f]{64}$/u);
   assert.throws(() => readPinnedHashes('no pins here'), /does not pin PreviousVersion/u);

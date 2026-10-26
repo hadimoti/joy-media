@@ -10,7 +10,7 @@ import { bindWindowsWorkerPasses, restoreRetainedEvidence } from './restore-reta
 const CANDIDATE_SHA = 'a'.repeat(40);
 const RUN_ID = '444';
 const ATTEMPT = '1';
-const PREVIOUS_SETUP_SHA256 = '3f5fbe853de04a24aac22a46e28dd661cc1a80a2a6c5a1fa383fcd9ab3efde04';
+const PREVIOUS_SETUP_SHA256 = '6d8089467afaecc1d78d272f5c029d6c186a81f7aac90a7cd584045e847bdabe';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 function desktopLifecycleEvidence(pass, containerId) {
@@ -32,7 +32,7 @@ function desktopLifecycleEvidence(pass, containerId) {
     pass,
     sourceProvenance: { commitSha: CANDIDATE_SHA, worktreeClean: true },
     containerIdentity: { containerId, imageDigest: `sha256:${'b'.repeat(64)}` },
-    versions: { previous: '1.0.1', candidate: '1.0.2' },
+    versions: { previous: '1.0.2', candidate: '1.0.2' },
     artifacts: {
       candidateSetupSha256: 'c'.repeat(64),
       candidatePortableArchiveSha256: 'd'.repeat(64),
@@ -40,8 +40,8 @@ function desktopLifecycleEvidence(pass, containerId) {
       candidateCliBundleSha256: 'f'.repeat(64),
       candidateWorkerExecutableSha256: 'a'.repeat(64),
       previousSetupSha256: PREVIOUS_SETUP_SHA256,
-      previousArchiveSha256: '21be785e26c0d06cadba40929ada839cfd24345f17b828cdb735d4eff056a88c',
-      previousChecksumsSha256: 'a7b933f44ec82edd2f166dcde0bb013e1febd0ebbd19aa42dd49ac8e05adfe32',
+      previousArchiveSha256: 'e59ee15f2f881cd6620ad59e9f1d9fdc4f9b82efaf221f4e6041c079978d59ca',
+      previousChecksumsSha256: '9e15f9b45307293a33414b1f89461859c7c5fcdcdf69f7b3f03e491cae55a8eb',
       previousDesktopExecutableSha256: '3'.repeat(64),
       previousCliBundleSha256: '4'.repeat(64),
     },

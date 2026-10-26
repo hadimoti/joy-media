@@ -349,7 +349,7 @@ function Invoke-Uninstall([string]$Name) {
 try {
     if ($Sequence -eq 'previous-upgrade-rollback') {
         if (Install-Version 'install previous version' $manifest.previous) {
-            Test-Assertion 'previous layout registers the install root (v1.0.1 behaviour)' (Test-UserPathEntry $installRoot) 'the previous installer adds the install root to the user PATH' | Out-Null
+            Test-Assertion 'previous layout registers the install root (v1.0.1 and v1.0.2 behaviour)' (Test-UserPathEntry $installRoot) 'the previous installer adds the install root to the user PATH' | Out-Null
             Test-AppStart 'previous' $manifest.previous.version | Out-Null
             if (Install-Version 'upgrade to candidate' $manifest.candidate) {
                 $pathDetail = 'bin is on the user PATH and the install root is not'

@@ -50,10 +50,10 @@ const RELEASE_EVIDENCE_UPLOAD_STATUS = [
   'reason=github-artifact-upload-disabled-by-policy',
 ];
 const PREVIOUS_RELEASE = {
-  version: '1.0.1',
-  setupSha256: '3f5fbe853de04a24aac22a46e28dd661cc1a80a2a6c5a1fa383fcd9ab3efde04',
-  archiveSha256: '21be785e26c0d06cadba40929ada839cfd24345f17b828cdb735d4eff056a88c',
-  checksumsSha256: 'a7b933f44ec82edd2f166dcde0bb013e1febd0ebbd19aa42dd49ac8e05adfe32',
+  version: '1.0.2',
+  setupSha256: '6d8089467afaecc1d78d272f5c029d6c186a81f7aac90a7cd584045e847bdabe',
+  archiveSha256: 'e59ee15f2f881cd6620ad59e9f1d9fdc4f9b82efaf221f4e6041c079978d59ca',
+  checksumsSha256: '9e15f9b45307293a33414b1f89461859c7c5fcdcdf69f7b3f03e491cae55a8eb',
 };
 const REQUIRED_WINDOWS_SCENARIOS = [
   'cli.render.playable',

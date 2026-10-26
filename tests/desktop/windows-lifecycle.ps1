@@ -27,10 +27,10 @@ trap {
 # The disposable-environment gate is shared with the Windows Sandbox guest runner (see disposable-environment.ps1).
 . (Join-Path $PSScriptRoot 'disposable-environment.ps1')
 $disposableEnvironment = Assert-DisposableEnvironment 'Refusing to run the destructive Windows lifecycle harness on this host'
-$PreviousVersion = '1.0.1'
-$PreviousSetupSha256 = '3f5fbe853de04a24aac22a46e28dd661cc1a80a2a6c5a1fa383fcd9ab3efde04'
-$PreviousChecksumsSha256 = 'a7b933f44ec82edd2f166dcde0bb013e1febd0ebbd19aa42dd49ac8e05adfe32'
-$PreviousArchiveSha256 = '21be785e26c0d06cadba40929ada839cfd24345f17b828cdb735d4eff056a88c'
+$PreviousVersion = '1.0.2'
+$PreviousSetupSha256 = '6d8089467afaecc1d78d272f5c029d6c186a81f7aac90a7cd584045e847bdabe'
+$PreviousChecksumsSha256 = '9e15f9b45307293a33414b1f89461859c7c5fcdcdf69f7b3f03e491cae55a8eb'
+$PreviousArchiveSha256 = 'e59ee15f2f881cd6620ad59e9f1d9fdc4f9b82efaf221f4e6041c079978d59ca'
 $script:ownedInstall = $false
 $script:commands = [System.Collections.Generic.List[object]]::new()
 # Outcomes are recorded only after the measured step that produces them has returned. A
@@ -378,9 +378,9 @@ if ((Test-Path -LiteralPath $desktopShortcut) -or (Test-Path -LiteralPath $start
 $startedAt = [DateTime]::UtcNow.ToString('o')
 $candidateArchive = Get-Sha256 $CandidateArchivePath
 $candidateSetup = Get-Sha256 $CandidateSetupPath
-$previousSetup = Assert-Sha256 $PreviousSetupPath $PreviousSetupSha256 'Pinned v1.0.1 setup'
-$previousArchive = Assert-Sha256 $PreviousArchivePath $PreviousArchiveSha256 'Pinned v1.0.1 portable archive'
-$previousChecksums = Assert-Sha256 $PreviousChecksumsPath $PreviousChecksumsSha256 'Pinned v1.0.1 SHA256SUMS'
+$previousSetup = Assert-Sha256 $PreviousSetupPath $PreviousSetupSha256 "Pinned v$PreviousVersion setup"
+$previousArchive = Assert-Sha256 $PreviousArchivePath $PreviousArchiveSha256 "Pinned v$PreviousVersion portable archive"
+$previousChecksums = Assert-Sha256 $PreviousChecksumsPath $PreviousChecksumsSha256 "Pinned v$PreviousVersion SHA256SUMS"
 $candidateArchiveArtifact = @($candidateManifest.artifacts | Where-Object { $_.type -eq 'portable-archive' })
 if ($candidateArchiveArtifact.Count -ne 1 -or [IO.Path]::GetFullPath($CandidateArchivePath) -ine [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $CandidateSetupPath) $candidateArchiveArtifact[0].fileName))) {
     throw 'Candidate portable archive does not match the release manifest.'
@@ -401,7 +401,7 @@ if ((Get-ChecksummedFile $candidateChecksumsText 'joy-media.exe') -ne $candidate
 }
 if ($candidateSetup.Length -ne 64) { throw 'Candidate setup hash is malformed.' }
 $previousChecksumsText = Get-Content -LiteralPath $PreviousChecksumsPath -Raw
-if ((Get-ChecksummedFile $previousChecksumsText 'joy-media-windows-x64-v1.0.1.zip') -ne $previousArchive) { throw 'Pinned v1.0.1 portable archive hash does not match the downloaded archive.' }
+if ((Get-ChecksummedFile $previousChecksumsText "joy-media-windows-x64-v$PreviousVersion.zip") -ne $previousArchive) { throw "Pinned v$PreviousVersion portable archive hash does not match the downloaded archive." }
 $previousDesktopExeSha = Get-ChecksummedArchiveEntryHash -ChecksumsText $previousChecksumsText -FileName 'joy-media.exe' -ArchivePath $PreviousArchivePath -ArchiveEntryName 'joy-media-win32-x64/joy-media.exe'
 $previousCliBundleSha = Get-ChecksummedArchiveEntryHash -ChecksumsText $previousChecksumsText -FileName 'joy-media-bundle.mjs' -ArchivePath $PreviousArchivePath -ArchiveEntryName 'joy-media-win32-x64/resources/app/cli/joy-media-bundle.mjs'
 $nodeVersionResult = Invoke-CapturedProcess -FilePath $nodePath -Arguments @('--version') -TimeoutSeconds 30 -WorkingDirectory $repoRoot -Environment (Get-SafeEnvironment)
@@ -454,12 +454,12 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     $script:ownedInstall = $true
     Invoke-VerifiedSetup $PreviousSetupPath $PreviousSetupSha256 $PreviousVersion | Out-Null
     Assert-UserIntegrations $PreviousVersion 'root'
-    $previousExeSha = Assert-Sha256 (Join-Path $installRoot 'joy-media.exe') $previousDesktopExeSha 'Installed v1.0.1 app executable'
-    $previousInstalledCliSha = Assert-Sha256 (Join-Path $installRoot 'resources\app\cli\joy-media-bundle.mjs') $previousCliBundleSha 'Installed v1.0.1 CLI bundle'
-    Invoke-AppSmoke 'v1.0.1 initial install'
+    $previousExeSha = Assert-Sha256 (Join-Path $installRoot 'joy-media.exe') $previousDesktopExeSha "Installed v$PreviousVersion app executable"
+    $previousInstalledCliSha = Assert-Sha256 (Join-Path $installRoot 'resources\app\cli\joy-media-bundle.mjs') $previousCliBundleSha "Installed v$PreviousVersion CLI bundle"
+    Invoke-AppSmoke "v$PreviousVersion initial install"
     $script:transitionOutcomes['installPrevious'] = 'passed'
     $seedProof = Invoke-LifecycleFixture $devElectron 'seed'
-    if ($seedProof.result -ne 'seeded' -or $seedProof.encryptionAvailable -ne $true) { throw 'v1.0.1 could not seed isolated settings, library, and DPAPI fixture data.' }
+    if ($seedProof.result -ne 'seeded' -or $seedProof.encryptionAvailable -ne $true) { throw "v$PreviousVersion could not seed isolated settings, library, and DPAPI fixture data." }
     # --retry=0 keeps every Vitest case to its first attempt, matching the Playwright --retries=0 flag.
     $renderRealReport = Join-Path $workRoot 'render-real.vitest.json'
     $null = Invoke-Pnpm 'CLI render-real source and bundle acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-real.e2e.test.ts', '--no-file-parallelism', '--retry=0', '--reporter=json', "--outputFile=$renderRealReport")
@@ -549,18 +549,18 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     Invoke-AppSmoke "v$candidateVersion repair"
     $script:transitionOutcomes['repairCandidate'] = 'passed'
 
-    # The candidate setup kept v1.0.1 beside the install when it replaced it. Rolling back is that setup's own /rollback,
+    # The candidate setup kept the previous version beside the install when it replaced it. Rolling back is that setup's own /rollback,
     # which swaps the kept folder back. Running the older setup over the install would be a downgrade, not a rollback.
     $keptFolder = Join-Path (Split-Path -Parent $installRoot) ((Split-Path -Leaf $installRoot) + '.previous')
-    if (-not (Test-Path -LiteralPath (Join-Path $keptFolder 'joy-media.exe') -PathType Leaf)) { throw 'The candidate setup did not keep v1.0.1 beside the install.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $keptFolder 'joy-media.exe') -PathType Leaf)) { throw "The candidate setup did not keep v$PreviousVersion beside the install." }
     $rollbackRun = Invoke-CapturedProcess -FilePath $CandidateSetupPath -Arguments @('/rollback') -TimeoutSeconds 900 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment)
     if ($rollbackRun.ExitCode -ne 0) { throw "Candidate setup /rollback failed with exit code $($rollbackRun.ExitCode)." }
     Assert-RegisteredVersion $PreviousVersion
     Assert-UserIntegrations $PreviousVersion 'root'
     if ((Get-InstalledFileHash 'joy-media.exe') -ne $previousDesktopExeSha -or (Get-InstalledFileHash 'resources\app\cli\joy-media-bundle.mjs') -ne $previousCliBundleSha) {
-        throw 'Rollback did not restore the exact v1.0.1 app and CLI files.'
+        throw "Rollback did not restore the exact v$PreviousVersion app and CLI files."
     }
-    Invoke-AppSmoke 'v1.0.1 rollback'
+    Invoke-AppSmoke "v$PreviousVersion rollback"
     $rollbackVerification = Invoke-LifecycleFixture $devElectron 'verify'
     if ($rollbackVerification.result -ne 'verified' -or $rollbackVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256 -or $rollbackVerification.directCiphertextSha256 -ne $seedProof.directCiphertextSha256) {
         throw 'Settings, Persian asset-library catalog, or DPAPI ciphertext did not survive rollback.'
