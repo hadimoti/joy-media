@@ -15,8 +15,9 @@ claimed as passing.
   - `de392213`: attended G2 repeat harness. Preflight verified; the run loop has not run.
   - `5de135f1`: attended G1 stage probe. S0 and S1 ran locally; S2 to S6 wait for G1.
 - Dev CI on `6ae9be64` (run `40248976254`), `41f8431d` (run `40252020545`) and `5103c444` (run `40258394170`): each success,
-  6 of 6 jobs. The packager fix `0da4e880` (run `40262979132`) was in progress at the time of writing. The final head is
-  dispatched after that run, and its result is recorded in the next update of this file.
+  6 of 6 jobs. The packager fix `0da4e880` (run `40262979132`) was cancelled, superseded by the push of `2b01e8f4`.
+- Final head `2b01e8f4`: run `40263566162`, success, 6 of 6 jobs (static verification, Worker package, three browser suites,
+  summary). This is development CI, not release approval. Later commits on the branch are recorded in the gbrain checkpoint.
 - Earlier dev CI on `64531d2e`: run `40238451437`, success, 6 of 6 jobs. Kept as history.
 
 ## Installer, rollback and updates (L1, F1, F2)
@@ -71,8 +72,11 @@ claimed as passing.
   matches the manifest, and export fails when it is missing.
 - Packaged export spec `tests/desktop/export-semantics.spec.ts`: 2 of 2 passed on the unpacked build. CLI pinned pixel probe:
   16 of 16 passed.
-- Open: the full Windows lifecycle has not run with the caption check. The default-face change needs the owner's confirmation
-  (D14).
+- Open: the caption case of `render-parity.e2e.test.ts` does not pass on this host with the lifecycle's variable set. The
+  version probe's 3-second deadline is fixed in this change, with a regression test in `chromium-driver.test.ts`. The remaining
+  failure is a cold Chromium start over 15 seconds, which leaves the preparation record `launchable: false`; the render then
+  refuses as drift. See `docs/qa/evidence/2026-10-26-caption-face-windows-host.md`. The default-face change needs the owner's
+  confirmation (D14).
 
 ## Export semantics (L4, L9)
 
@@ -112,11 +116,18 @@ claimed as passing.
 
 ## CI and flakes (L10)
 
-- P0 timing baseline committed: `6d7657bf`.
-- The "survives" flake (`local-worker.integration.test.ts`, Worker killed mid-job) was not reproduced in 31 loaded local runs:
-  6 full-file runs and 25 survives-only runs under CPU stress, all exit 0. Diagnostics (`c94efe62`) report the Worker's state
-  when the lease wait times out. The root cause is not confirmed.
-- The Vitest `onTaskUpdate` RPC timeout was not reproduced. Pool concurrency has not been capped.
+- P0 timing baseline committed: `6d7657bf`. Per-job durations for run `40148387453` (release-candidate-v2 reference, 2026-10-24):
+  the longest job is `windows-p0-real-services`, 2,924 s; `windows-worker-clean` 1,299 s; the Linux real-service passes 539 s
+  and 566 s; `node-contracts` 676 s and 698 s. The critical path is the Windows P0 job, so the 75-minute target depends on it.
+- The "survives" flake (`local-worker.integration.test.ts`, Worker killed mid-job): the one failure on record is run `40118338118`
+  (commit `5d08272c`). That commit had no source hold; `a165d51a` added one, and the three ci-dev runs since (`6ae9be64`,
+  `41f8431d`, `5103c444`) and the final head all passed. On WSL Ubuntu 24.04 the job stays `running` for about 540 ms, and six
+  runs without the hold all passed, five of them under two-core load. The root cause is not confirmed. This change adds the job's
+  state to the timeout message. See `docs/qa/evidence/2026-10-26-survives-flake-analysis.md`.
+- The Vitest `onTaskUpdate` RPC timeout was not reproduced. A full run of the repository suite (726 files) on WSL, pinned to two
+  cores with CPU burners, had 0 `onTaskUpdate` timeouts. Its 3 failing files (4 tests) are specific to the WSL image: the 2
+  export-core jitter tests, the plugin scaffold test and the observer test all pass on the Windows host. Pool concurrency has
+  not been capped.
 - CI v3: design only, `docs/plans/2026-10-26-ci-v3-design.md`. Implementation waits for D17.
 - Scheduled `ci-repeat.yml`: not built. A GitHub `schedule` runs only from the default branch, so it needs D21 and a merge to
   `main`, which the owner has not authorized.
@@ -129,14 +140,14 @@ claimed as passing.
 
 ## Plan phases
 
-| Phase | Status                                | Why                                                                                                                 |
-| ----- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| P0    | Mostly done                           | Timing baseline committed. Per-job durations for run `40148387453` are not measured. Owner decisions not collected. |
-| P1    | Implemented locally, receipts pending | Tracks A, C, D, E, F, H, I. Track G partial (see GPU). Lifecycle and release-gate receipts pending.                 |
-| P2    | Blocked                               | CI v3 needs approvals D17 to D23.                                                                                   |
-| P3    | Blocked                               | Attended G1 (owner).                                                                                                |
-| P4    | Blocked                               | Needs P2 and P3.                                                                                                    |
-| P5    | Blocked                               | Attended G2 and A1 on the frozen artifact, then a release decision.                                                 |
+| Phase | Status                                | Why                                                                                                                                 |
+| ----- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| P0    | Mostly done                           | Timing baseline committed. Per-job durations for run `40148387453` are measured (see CI and flakes). Owner decisions not collected. |
+| P1    | Implemented locally, receipts pending | Tracks A, C, D, E, F, H, I. Track G partial (see GPU). Lifecycle and release-gate receipts pending.                                 |
+| P2    | Blocked                               | CI v3 needs approvals D17 to D23.                                                                                                   |
+| P3    | Blocked                               | Attended G1 (owner).                                                                                                                |
+| P4    | Blocked                               | Needs P2 and P3.                                                                                                                    |
+| P5    | Blocked                               | Attended G2 and A1 on the frozen artifact, then a release decision.                                                                 |
 
 ## Owner items (open)
 
@@ -149,11 +160,14 @@ claimed as passing.
 
 ## Remaining engineering, not owner-gated
 
-- The Media Foundation probe (C#). Compile-only checks are possible here; running it touches the encoder, so it waits for G1.
+- The Media Foundation probe (C#, `tooling/diagnostics/mf-probe/`): not built. This PC has no Windows SDK headers, so the Media
+  Foundation constants and interop signatures cannot be checked against source here. The probe belongs with G1.
 - The Electron variant builds for the bisect. These need network downloads and belong with G1.
-- The Windows lifecycle run for the tampered and wrong-key transitions, in the Sandbox or the release gate.
-- Root cause for the survives flake, and reproduction of the RPC timeout under synthetic load.
+- The lifecycle receipts for L1, L3, L5a and F2. `windows-lifecycle.ps1` needs the CI toolchain, and its receipt belongs to the
+  owner-gated release gate. The Sandbox run on candidate `a369df53` is supporting evidence: 25 of 25 and 8 of 8, including both
+  shipped-CLI refusals and the held-file refusal. L3's caption case is not passing on this host (see the L3 section).
+- Survives flake: root cause not confirmed. The timeout message now names the job state, so the next occurrence settles it.
 - A packaged-startup check in CI, so a packaged app that cannot import its main module fails the build. It needs a runner and a
   policy decision (owner).
-- Final-head CI for the newest commit on the branch, after the fix run finishes.
-- Refresh the readiness matrix rows once the receipts exist. Each row keeps its evidence source.
+- Refresh the readiness matrix rows once the receipts exist. Each row keeps its evidence source. The rows are unchanged in this
+  checkpoint, because no gate receipt exists for them.
