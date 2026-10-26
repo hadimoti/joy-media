@@ -8,6 +8,7 @@ import {
   createChromiumSceneDriver,
   findChromiumExecutable,
   killChromiumTree,
+  probeChromium,
 } from './chromium-driver.js';
 import { captureSceneSurface } from './headless.js';
 import { createSandboxedReactScene } from './runtime.js';
@@ -357,6 +358,25 @@ describe('Chromium scene driver ownership', () => {
       'Render cancelled before title capture.',
     );
     expect(fake.posted).toEqual([]);
+  });
+
+  it('gives the version probe the capture startup deadline, so a slow cold start is not recorded as unlaunchable', async () => {
+    let startupDeadlineMs: number | undefined;
+    const probe = await probeChromium({
+      executablePath: process.execPath,
+      workerFactory: (_source, options) => {
+        startupDeadlineMs = (options.workerData as { readonly timeoutMs?: number } | undefined)
+          ?.timeoutMs;
+        let fake!: FakeWorker;
+        fake = new FakeWorker((message) => {
+          if (message.type === 'capture')
+            fake.emit('message', { type: 'complete', requestId: message.requestId });
+        });
+        return fake;
+      },
+    });
+    expect(startupDeadlineMs).toBe(15_000);
+    expect(probe).toHaveProperty('reason');
   });
 });
 

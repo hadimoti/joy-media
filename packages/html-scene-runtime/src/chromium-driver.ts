@@ -1077,7 +1077,10 @@ export async function probeChromium(
   if (!executablePath) return { reason: 'Chromium executable was not found.' };
   let driver: HeadlessSceneDriver | undefined;
   try {
-    driver = createChromiumSceneDriver({ ...options, executablePath, timeoutMs: 3_000 });
+    // The probe takes the same startup deadline as a capture. On the Windows host a cold Chromium start
+    // under the CLI's restricted environment took 3.8 to 5.8 s, so a 3 s probe recorded the browser as
+    // unlaunchable at preparation, and the render-time probe then refused the frozen record as drift.
+    driver = createChromiumSceneDriver({ ...options, executablePath, timeoutMs: 15_000 });
     await driver.captureAsync!(
       {
         markup: '',
