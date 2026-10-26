@@ -113,8 +113,11 @@ claimed as passing.
   (`caption-face-probe.test.ts`, which now takes a face argument), and an unusable probe gives `SETUP_REQUIRED`
   (`capabilities-cmd.test.ts`). This round adds the chain in one test, `plan-title.test.ts`: the real FFmpeg/libass probe judges
   corrupted bytes unusable, the production caption planning refuses with `SETUP_REQUIRED` and writes no plan, and the bundled face
-  passes the same probe (negative control). It does not drive the packaged CLI on a corrupted installed font, so the Windows
-  end-to-end refusal is still open. See `docs/qa/evidence/2026-10-26-caption-face-windows-host.md`. The default-face change
+  passes the same probe (negative control). The packaged CLI (standalone folder, hard-linked work copy) prepares the Persian caption
+  plan from the healthy face (exit 0). With the Arabic 400 libass face corrupted, it refuses with `SETUP_REQUIRED` (kind
+  `canonical-caption-face-unavailable`), exits 1, and writes no plan (`tooling/fonts/packaged-caption-refusal.mjs`, and
+  `docs/qa/evidence/2026-10-26-packaged-caption-refusal.md`). The Windows lifecycle copy of the same case is the gate's. See
+  `docs/qa/evidence/2026-10-26-caption-face-windows-host.md`. The default-face change
   needs the owner's confirmation (D14).
 
 ## Export semantics (L4, L9)
@@ -183,11 +186,15 @@ claimed as passing.
   take a topology; the two-pass values and their 39 + 6 existing tests are unchanged. The single-pass builder tests (15) and restore
   tests (6) pass. `release-candidate-v3.test.ts` (19 tests, with mutated copies that must be refused) pins the policy. The runner
   allowlist lists the same four hosted jobs as v2.
-- Not done for v3: (1) the job merges (hosted-verify, windows-candidate, fixture-acceptance) and the Vitest sharding of plan 3.4 are
-  not implemented on the branch. We deferred them to the shadow measurement because each one changes the critical path. That
-  departs from the plan's design, and the owner should decide whether to implement them before the shadow run; (2) a run-summary writer and its artifact for the shadow
-  comparison (`tooling/release/src/ci-v3-shadow-compare.mjs`, 12 negative controls); (3) the shadow dispatches (D18). A dispatch needs
-  the file on the default branch, and that merge needs owner approval. `docs/release/ci-v3-shadow-runbook.md` has the exact steps.
+- Built for the shadow measurement (plan 3.4), not yet wired into the v3 graph: (1) the Vitest shard merge,
+  `tooling/release/src/vitest-shard-merge.mjs` (8 tests). It checks shard reports against `vitest list --json`: every listed test runs
+  once, nothing unlisted runs, and none fails. On this branch the three shard listings cover the 6,710 listed tests once each (merge
+  ok). (2) The shadow run-summary writer, `tooling/release/src/ci-v3-run-summary.mjs`. It refuses incomplete inputs, and its output
+  passes the comparison; a dropped test or a red lane is refused (`ci-v3-run-summary.test.ts`, 5 tests). Not done: (3) the job merges
+  (hosted-verify, windows-candidate, fixture-acceptance) and the sharding in the v3 graph. They change the lane model and the gate
+  checks that the policy tests and the nine-lane comparison pin, so they wait for the shadow run and the owner's decision. (4) The
+  shadow dispatches (D18). A dispatch needs the file on the default branch, and that merge needs owner approval.
+  `docs/release/ci-v3-shadow-runbook.md` has the exact steps.
 - Equivalence of executed tests: `ci-v3-equivalence.ts` (7 tests) and the shadow comparison share the rule that v3 may add tests but
   may not drop one.
 - Weekly repeat (D21, prep): `.github/workflows/ci-repeat.yml` runs `vitest-load-repeat.mjs` (Vitest passes under synthetic CPU
@@ -236,9 +243,9 @@ claimed as passing.
 
 - The Media Foundation probe's activation and one-frame encode (`tooling/diagnostics/mf-probe/`): not built. The enumeration is
   built (`de99320c`), and its constants were checked at run time. The encode belongs with G1.
-- A packaged CLI refusal of a corrupted installed caption face on Windows (the end-to-end part of L3): not built. The refusal is
-  tested in pieces, and the chain test covers the production caption planning.
-- The job merges and sharding of plan 3.4 (L10): not built (see CI and flakes).
+- The packaged CLI caption refusal is built and run locally (see Captions). The Windows lifecycle copy of the case is the gate's.
+- The job merges and sharding of plan 3.4 in the v3 graph (L10): not wired. The shard merge and the summary writer are built (see
+  CI and flakes).
 - A positive signed-update check with the owner's key (L1): owner-gated; the key is not generated.
 - The Electron variant builds for the bisect. These need network downloads and belong with G1.
 - The lifecycle receipts for L1, L3, L5a and F2. `windows-lifecycle.ps1` needs the CI toolchain, and its receipt belongs to the
