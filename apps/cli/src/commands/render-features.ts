@@ -298,11 +298,16 @@ export function captionEngineVersionsFromAssProbe(log: string): {
 
 const canonicalCaptionProbeCache = new Map<string, CanonicalCaptionFaceProbe>();
 
-/** Proves that FFmpeg/libass selects the bundled canonical Arabic 400 face. */
+/**
+ * Proves that FFmpeg/libass selects the bundled canonical Arabic 400 face. `faceBytes` replaces the bundled face for one
+ * probe, so a test can show that a corrupted face is judged unusable. Such a probe is not cached.
+ */
 export function probeCanonicalCaptionFace(
   executablePath = ffmpegBinary(),
+  faceBytes?: Uint8Array,
 ): CanonicalCaptionFaceProbe {
-  const cached = canonicalCaptionProbeCache.get(executablePath);
+  const cached =
+    faceBytes === undefined ? canonicalCaptionProbeCache.get(executablePath) : undefined;
   if (cached) return cached;
   const unavailable = (reason: string): CanonicalCaptionFaceProbe => {
     const result: CanonicalCaptionFaceProbe = {
@@ -316,21 +321,25 @@ export function probeCanonicalCaptionFace(
     canonicalCaptionProbeCache.set(executablePath, result);
     return result;
   };
-  let face: ReturnType<typeof loadNotoSansArabicLibassFaces>[number] | undefined;
-  try {
-    face = loadNotoSansArabicLibassFaces().find(
-      (item) => item.subset === 'arabic' && item.weight === 400,
-    );
-  } catch (error) {
-    return unavailable(
-      `Canonical Noto Sans Arabic Arabic 400 face could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
-    );
+  let bytes = faceBytes;
+  if (bytes === undefined) {
+    let face: ReturnType<typeof loadNotoSansArabicLibassFaces>[number] | undefined;
+    try {
+      face = loadNotoSansArabicLibassFaces().find(
+        (item) => item.subset === 'arabic' && item.weight === 400,
+      );
+    } catch (error) {
+      return unavailable(
+        `Canonical Noto Sans Arabic Arabic 400 face could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (!face) return unavailable('The canonical Noto Sans Arabic Arabic 400 face is missing.');
+    bytes = face.bytes;
   }
-  if (!face) return unavailable('The canonical Noto Sans Arabic Arabic 400 face is missing.');
   const fontFile = 'noto-sans-arabic-arabic-400-normal.ttf';
   const directory = mkdtempSync(join(tmpdir(), 'joy-caption-canonical-'));
   try {
-    const commands = prepareCaptionProbe(directory, fontFile, face.bytes);
+    const commands = prepareCaptionProbe(directory, fontFile, bytes);
     const runOptions = { cwd: directory, encoding: 'utf8', timeout: 15000 } as const;
     const canonical = spawnSync(executablePath, [...commands.canonical], runOptions);
     const missing = spawnSync(executablePath, [...commands.missing], runOptions);
@@ -348,7 +357,7 @@ export function probeCanonicalCaptionFace(
       log: judged.log,
       ...captionEngineVersionsFromAssProbe(judged.log),
     };
-    canonicalCaptionProbeCache.set(executablePath, probe);
+    if (faceBytes === undefined) canonicalCaptionProbeCache.set(executablePath, probe);
     return probe;
   } finally {
     rmSync(directory, { recursive: true, force: true });

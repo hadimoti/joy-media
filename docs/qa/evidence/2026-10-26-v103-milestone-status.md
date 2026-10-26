@@ -76,8 +76,10 @@ claimed as passing.
   `--retry=0`): 2 of 2 runs, about 25 seconds each, after the probe deadline fix and a bounded retry of a timed-out first Chromium
   start. The first start in each new profile root timed out in six of six fresh roots and succeeded on the second attempt. The
   lifecycle receipt on the release gate is still pending, and the gate runs on a CI Windows runner. The cause of the slow first
-  start is not verified. See `docs/qa/evidence/2026-10-26-caption-face-windows-host.md`. The default-face change needs the owner's
-  confirmation (D14).
+  start is not verified. The corrupted-face refusal is covered in two halves: a corrupted face is judged unusable
+  (`caption-face-probe.test.ts`, which now takes a face argument), and an unusable probe gives `SETUP_REQUIRED`
+  (`capabilities-cmd.test.ts`). No single test runs the two together. See
+  `docs/qa/evidence/2026-10-26-caption-face-windows-host.md`. The default-face change needs the owner's confirmation (D14).
 
 ## Export semantics (L4, L9)
 

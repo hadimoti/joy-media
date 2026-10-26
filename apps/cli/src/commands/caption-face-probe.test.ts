@@ -24,4 +24,10 @@ describe.skipIf(!hasFfmpeg)('canonical caption face probe', () => {
     expect(probe.reason).toBeUndefined();
     expect(probe.usable).toBe(true);
   });
+
+  it('judges a corrupted canonical face unusable, so the caption setup refuses', () => {
+    const probe = probeCanonicalCaptionFace(undefined, new TextEncoder().encode('not a font file'));
+    expect(probe.usable).toBe(false);
+    expect(probe.reason).toBeDefined();
+  });
 });

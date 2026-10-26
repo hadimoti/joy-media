@@ -50,6 +50,16 @@ Retry the start once, and keep the drift check blocking. The owner may choose a 
 a longer first-start budget, or an antivirus exclusion for the probe profile folder. The exclusion is a system setting, and it
 was not changed.
 
+## Corrupted face (L3 acceptance)
+
+- The probe judges a corrupted face unusable. `caption-face-probe.test.ts` passes corrupted bytes to
+  `probeCanonicalCaptionFace`, through a new optional `faceBytes` argument, and asserts `usable: false` (81 ms). With the
+  argument ignored, the test fails with `expected true to be false`.
+- An unusable probe becomes `SETUP_REQUIRED` with kind `canonical-caption-face-unavailable`. The existing test in
+  `capabilities-cmd.test.ts` covers that mapping, through `planMedia` with an unusable injected probe.
+- Not covered in one test: real corrupted bytes flowing through the probe into `planMedia`. The two halves are covered
+  separately.
+
 ## Not claimed
 
 - The lifecycle receipt for L3 is not produced.
