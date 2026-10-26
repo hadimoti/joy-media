@@ -8,6 +8,21 @@ trigger is `main` only.
 need the owner is listed under "Remaining engineering". Each row names its evidence, and an item without a receipt is not
 claimed as passing.
 
+## Latest verified results (autonomous pass, 2026-10-26)
+
+- Windows Sandbox lifecycle on candidate `fb49a0e8` (setup SHA-256 `02fefb7d…`): previous-upgrade-rollback 25 of 25 and
+  fresh-candidate 8 of 8, 0 failed. It covers the kept rollback with the database restored, the held-file refusal, the shipped-CLI
+  refusals of a changed manifest and of a manifest signed by a key that is not pinned, and `joy-media --version` from a fresh shell.
+  Record: `docs/qa/evidence/2026-10-26-sandbox-fb49a0e8-lifecycle.md`. The positive signed update still needs the owner's key.
+- L9, reverse mutation: with `apad` and `-t` removed from the remux, the test "exports 48 kHz stereo AAC whose audio and video both
+  last the declared duration" fails (audio and video differ by 0.187 s; the limit is one AAC frame, 0.0213 s). The file was restored.
+- L5a: `render-recovery.e2e.test.ts` passes 8 of 8 on the Windows host, including the held-file case.
+- P0: per-job durations for run `40148387453` are in the runbook's resources section and the timing baseline `6d7657bf`. The critical
+  path is the real-service chain (about 44 minutes per pass) and the Windows lane (about 70 minutes).
+- The "survives" flake is `local-worker.integration.test.ts`, "survives a Worker killed mid-job" (see the v3 design doc, section 1).
+- Dev CI on `fb49a0e8`: run `40356464953`, success, workflow_dispatch.
+- PR 13 (the v3 merge to `main`): head `1ead07cf`, required check in progress.
+
 ## Branch and development CI
 
 - Commits since `cad3445e` (the Sandbox note): `e983842b` (packaged click-through of File > Settings and its manual update check,
