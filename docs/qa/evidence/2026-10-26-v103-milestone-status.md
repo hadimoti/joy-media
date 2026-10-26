@@ -170,9 +170,11 @@ claimed as passing.
 - The Vitest `onTaskUpdate` RPC timeout was not reproduced. A full run of the repository suite (726 files) on WSL, pinned to two
   cores with CPU burners, had 0 `onTaskUpdate` timeouts. Its 3 failing files (4 tests) are specific to the WSL image: the 2
   export-core jitter tests, the plugin scaffold test and the observer test all pass on the Windows host. Pool concurrency is capped
-  in `vitest.config.ts`: one worker on GitHub-hosted runners, otherwise the lower of 8 and the cores minus one. Not done: a serial
-  project for the roughly 55 test files that spawn processes. It changes test discovery, so it needs a listing comparison of the
-  whole suite before it lands.
+  in `vitest.config.ts`: one worker on GitHub-hosted runners, otherwise the lower of 8 and the cores minus one. The 47 test files
+  that spawn processes run in their own project, `serial-process`, one file at a time (`fileParallelism: false`); the list is
+  `vitest.serial-process.json`. `tooling/release/src/vitest-serial-project.test.ts` (3 of 3) fails when the list and the discovered
+  files disagree. The split leaves the test list unchanged: 6,699 entries before and after, none missing, and none added except
+  the three entries of the new policy test.
 - CI v3 (D17, branch implementation): `.github/workflows/release-candidate-v3.yml` is written, dispatch-only, and is **not** the
   production gate. It is derived from v2 by a scripted transform whose every replacement is asserted, so the diff against v2 is the
   change: one pass per lane (no pass matrix), one Windows evidence output, the single-pass topology in the readiness record and in
@@ -236,7 +238,7 @@ claimed as passing.
   built (`de99320c`), and its constants were checked at run time. The encode belongs with G1.
 - A packaged CLI refusal of a corrupted installed caption face on Windows (the end-to-end part of L3): not built. The refusal is
   tested in pieces, and the chain test covers the production caption planning.
-- A serial project for process-spawning tests, and the job merges and sharding of plan 3.4 (L10): not built (see CI and flakes).
+- The job merges and sharding of plan 3.4 (L10): not built (see CI and flakes).
 - A positive signed-update check with the owner's key (L1): owner-gated; the key is not generated.
 - The Electron variant builds for the bisect. These need network downloads and belong with G1.
 - The lifecycle receipts for L1, L3, L5a and F2. `windows-lifecycle.ps1` needs the CI toolchain, and its receipt belongs to the

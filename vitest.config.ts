@@ -1,8 +1,39 @@
+import { createRequire } from 'node:module';
 import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 const pkg = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
+
+// Test files that spawn processes. They share ports, temporary folders and CPU with the other files, so they run in their own
+// project, one file at a time. tooling/release/src/vitest-serial-project.test.ts fails when this list and the discovered test
+// files disagree, so a new process-spawning test cannot silently stay in the parallel project.
+const serialProcessFiles: readonly string[] = createRequire(import.meta.url)(
+  './vitest.serial-process.json',
+);
+
+const includedTests = [
+  '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
+  'apps/desktop/scripts/cli-launcher-layout.test.mjs',
+  'apps/desktop/scripts/installer-uninstall.test.mjs',
+  'apps/desktop/scripts/installer-payload-manifest.test.mjs',
+  'apps/desktop/scripts/installer-setup-contract.test.mjs',
+  'apps/desktop/scripts/copy-cli-fonts.test.mjs',
+  'apps/desktop/scripts/install-electron-windows.test.mjs',
+  'tests/e2e/helpers/browser-console-audit.unit.ts',
+  'tests/e2e/helpers/control-port.unit.ts',
+  'tests/desktop/project-request-audit.unit.ts',
+];
+
+const excludedTests = [
+  ...configDefaults.exclude,
+  // Chromium pixel goldens run in the P0 lane, one worker at a time, where their capture
+  // budgets are not starved by parallel workers.
+  'tooling/golden-render/src/first-party-scenes.test.ts',
+  'packages/html-scene-runtime/src/**/*.e2e.test.ts',
+  'apps/editor-web/src/p0-desktop-handoff.test.ts',
+  'apps/cli/src/commands/p0-design.e2e.test.ts',
+];
 
 export default defineConfig({
   resolve: {
@@ -85,27 +116,26 @@ export default defineConfig({
         : Math.max(1, Math.min(8, availableParallelism() - 1)),
     testTimeout: 30_000,
     hookTimeout: 30_000,
-    include: [
-      '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
-      'apps/desktop/scripts/cli-launcher-layout.test.mjs',
-      'apps/desktop/scripts/installer-uninstall.test.mjs',
-      'apps/desktop/scripts/installer-payload-manifest.test.mjs',
-      'apps/desktop/scripts/installer-setup-contract.test.mjs',
-      'apps/desktop/scripts/copy-cli-fonts.test.mjs',
-      'apps/desktop/scripts/install-electron-windows.test.mjs',
-      'tests/e2e/helpers/browser-console-audit.unit.ts',
-      'tests/e2e/helpers/control-port.unit.ts',
-      'tests/desktop/project-request-audit.unit.ts',
-    ],
-    exclude: [
-      ...configDefaults.exclude,
-      // Chromium pixel goldens run in the P0 lane, one worker at a time, where their capture
-      // budgets are not starved by parallel workers.
-      'tooling/golden-render/src/first-party-scenes.test.ts',
-      'packages/html-scene-runtime/src/**/*.e2e.test.ts',
-      'apps/editor-web/src/p0-desktop-handoff.test.ts',
-      'apps/cli/src/commands/p0-design.e2e.test.ts',
-    ],
     environment: 'node',
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'parallel',
+          include: includedTests,
+          exclude: [...excludedTests, ...serialProcessFiles],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'serial-process',
+          include: [...serialProcessFiles],
+          exclude: excludedTests,
+          // Process-spawning files run one at a time. This is the flake mitigation of plan section 3.4 (serial project).
+          fileParallelism: false,
+        },
+      },
+    ],
   },
 });
