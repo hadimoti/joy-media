@@ -10,10 +10,10 @@
     },
     {
       "id": "file.settings",
-      "status": "reachable",
-      "spec": "menu-panels.spec.ts",
-      "evidence": "Settings…",
-      "note": "Shown in the packaged File menu. It opens the Settings dialog, whose Updates check (manual, opt-in, verify-only) is unit-tested in AppSettingsDialog.test.tsx; no packaged click-through yet."
+      "status": "exercised",
+      "spec": "settings-dialog.spec.ts",
+      "evidence": "Check for Updates",
+      "note": "Packaged click-through: File > Settings… opens the dialog, and its manual Updates check reports a result. This build pins no release key, so the check is refused before any request. The verify-only path is unit-tested in AppSettingsDialog.test.tsx."
     },
     {
       "id": "file.projects",
