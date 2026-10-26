@@ -53,6 +53,19 @@ describe('pre-emptive encoder policy', () => {
     ).toEqual({ mode: 'hardware' });
   });
 
+  it('does not match an adapter whose driver version is not dotted numbers, so it keeps the hardware path', () => {
+    for (const driverVersion of ['617.42-beta', 'unknown', '', '617..42']) {
+      expect(
+        decideEncoderPolicy({
+          adapter: { ...ADAPTER, driverVersion },
+          electronMajor: 44,
+          now: NOW,
+          ranges: [RANGE],
+        }),
+      ).toEqual({ mode: 'hardware' });
+    }
+  });
+
   it('stops applying after the entry expires, so a stale entry cannot pin a device', () => {
     expect(
       decideEncoderPolicy({
@@ -71,5 +84,10 @@ describe('driver version order', () => {
     expect(compareDriverVersions('617.100', '617.99')).toBeGreaterThan(0);
     expect(compareDriverVersions('617.42', '617.42')).toBe(0);
     expect(compareDriverVersions('617.42.1', '617.42')).toBeGreaterThan(0);
+  });
+
+  it('refuses to order a version that is not dotted numbers', () => {
+    expect(() => compareDriverVersions('617.42-beta', '617.42')).toThrow(RangeError);
+    expect(() => compareDriverVersions('617.42', 'unknown')).toThrow(RangeError);
   });
 });

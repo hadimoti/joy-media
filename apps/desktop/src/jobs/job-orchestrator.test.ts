@@ -156,6 +156,24 @@ describe('job orchestrator', () => {
       });
     });
 
+    it('refuses a payload that is not a plain JSON object, without throwing', () => {
+      const orchestrator = orchestratorFor(database);
+      orchestrator.hello(WORKER, ['render.export']);
+      const base = { jobType: 'render.export', refId: 'project-1', kind: 'render' };
+      expect(orchestrator.submit({ ...base, payload: new Date() })).toMatchObject({
+        ok: false,
+        code: 'PAYLOAD_INVALID',
+      });
+      expect(orchestrator.submit({ ...base, payload: { toJSON: () => undefined } })).toMatchObject({
+        ok: false,
+        code: 'PAYLOAD_INVALID',
+      });
+      expect(orchestrator.submit({ ...base, payload: { toJSON: () => 'text' } })).toMatchObject({
+        ok: false,
+        code: 'PAYLOAD_INVALID',
+      });
+    });
+
     it('refuses a payload on a job type that does not take one', () => {
       const result = orchestratorFor(database).submit({
         jobType: 'asset.thumbnail',

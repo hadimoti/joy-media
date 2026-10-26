@@ -65,14 +65,25 @@ function encodePayload(
       ? { ok: true, json: undefined }
       : { ok: false, message: `${jobType} does not take a payload` };
   }
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+  if (!isPlainObject(payload)) {
     return { ok: false, message: `${jobType} needs a JSON object payload` };
   }
+  // A plain object can still serialise to something else through a toJSON hook, so the encoded text is checked too.
   const json = JSON.stringify(payload);
+  if (json === undefined || !isPlainObject(JSON.parse(json))) {
+    return { ok: false, message: `${jobType} needs a JSON object payload` };
+  }
   if (Buffer.byteLength(json, 'utf8') > MAX_PAYLOAD_BYTES) {
     return { ok: false, message: `${jobType} payload is larger than ${MAX_PAYLOAD_BYTES} bytes` };
   }
   return { ok: true, json };
+}
+
+/** True for an object literal or a null-prototype object: not an array, a date, a class instance or a primitive. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 export type SubmitResult =

@@ -320,6 +320,41 @@ describe('update decision', () => {
     });
   });
 
+  it('orders numeric prerelease identifiers as numbers, so rc.10 is newer than rc.9', () => {
+    expect(decide(manifestJson({ version: '1.0.3-rc.9' }), '1.0.3-rc.10')).toMatchObject({
+      status: 'current',
+      reason: 'not-newer',
+    });
+    expect(decide(manifestJson({ version: '1.0.3-rc.10' }), '1.0.3-rc.9')).toMatchObject({
+      status: 'update',
+    });
+  });
+
+  it('follows the SemVer order of prerelease identifiers', () => {
+    // SemVer 11.4 order: alpha < alpha.1 < alpha.beta < beta < beta.2 < beta.11 < rc.1 < the release.
+    const chain = [
+      '1.0.0-alpha',
+      '1.0.0-alpha.1',
+      '1.0.0-alpha.beta',
+      '1.0.0-beta',
+      '1.0.0-beta.2',
+      '1.0.0-beta.11',
+      '1.0.0-rc.1',
+      '1.0.0',
+    ];
+    for (let low = 0; low < chain.length; low += 1) {
+      for (let high = low + 1; high < chain.length; high += 1) {
+        expect(decide(manifestJson({ version: chain[high]! }), chain[low]!)).toMatchObject({
+          status: 'update',
+        });
+        expect(decide(manifestJson({ version: chain[low]! }), chain[high]!)).toMatchObject({
+          status: 'current',
+          reason: 'not-newer',
+        });
+      }
+    }
+  });
+
   it('blocks when the installed version is not a plain semantic version', () => {
     expect(decide(manifestJson(), 'v1.0.2')).toEqual({
       status: 'blocked',

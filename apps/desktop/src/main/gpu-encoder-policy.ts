@@ -42,6 +42,8 @@ export function decideEncoderPolicy(options: {
       range.deviceIds.includes(options.adapter.deviceId) &&
       range.electronMajor === options.electronMajor &&
       Date.parse(options.now) < Date.parse(range.expires) &&
+      isDriverVersion(options.adapter.driverVersion) &&
+      isDriverVersion(range.lastBadDriver) &&
       compareDriverVersions(options.adapter.driverVersion, range.lastBadDriver) <= 0,
   );
   return match === undefined ? { mode: 'hardware' } : { mode: 'software-mf-off', reason: match.id };
@@ -49,6 +51,9 @@ export function decideEncoderPolicy(options: {
 
 /** Negative when `a` is older than `b`. Each dotted part compares as a number; missing parts count as zero. */
 export function compareDriverVersions(a: string, b: string): number {
+  if (!isDriverVersion(a) || !isDriverVersion(b)) {
+    throw new RangeError('driver versions must be dotted numbers');
+  }
   const left = a.split('.').map(Number);
   const right = b.split('.').map(Number);
   const length = Math.max(left.length, right.length);
@@ -57,4 +62,9 @@ export function compareDriverVersions(a: string, b: string): number {
     if (delta !== 0) return delta > 0 ? 1 : -1;
   }
   return 0;
+}
+
+/** A driver version the policy can order: dotted numbers only. Anything else, such as "617.42-beta", never matches. */
+function isDriverVersion(value: string): boolean {
+  return /^\d+(\.\d+)*$/u.test(value);
 }

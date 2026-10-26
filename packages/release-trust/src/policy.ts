@@ -73,5 +73,33 @@ export function compareVersions(a: string, b: string): number {
   if (leftPre === rightPre) return 0;
   if (leftPre === undefined) return 1;
   if (rightPre === undefined) return -1;
-  return leftPre > rightPre ? 1 : -1;
+  return comparePrerelease(leftPre, rightPre);
+}
+
+/**
+ * Orders two prerelease strings by SemVer 11.4: dot-separated identifiers compare one by one. Numeric identifiers
+ * compare as numbers and sort below alphanumeric ones. When every shared identifier is equal, the longer list is newer.
+ */
+function comparePrerelease(a: string, b: string): number {
+  const left = a.split('.');
+  const right = b.split('.');
+  const shared = Math.min(left.length, right.length);
+  for (let index = 0; index < shared; index += 1) {
+    const delta = comparePrereleaseIdentifier(left[index] ?? '', right[index] ?? '');
+    if (delta !== 0) return delta;
+  }
+  if (left.length === right.length) return 0;
+  return left.length > right.length ? 1 : -1;
+}
+
+function comparePrereleaseIdentifier(a: string, b: string): number {
+  const aNumeric = /^\d+$/u.test(a);
+  const bNumeric = /^\d+$/u.test(b);
+  if (aNumeric && bNumeric) {
+    // SemVer numeric identifiers have no leading zeros, so the longer one is the larger number.
+    if (a.length !== b.length) return a.length > b.length ? 1 : -1;
+  } else if (aNumeric !== bNumeric) {
+    return aNumeric ? -1 : 1;
+  }
+  return a === b ? 0 : a > b ? 1 : -1;
 }
