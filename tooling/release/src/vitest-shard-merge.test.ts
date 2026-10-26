@@ -34,7 +34,7 @@ const shardOne = report('C:\\repo\\apps\\a\\src\\a.test.ts', [
 ]);
 const shardTwo = report('C:/repo/packages/b/src/b.test.ts', [
   { ancestors: [], title: 'standalone passes', status: 'passed' },
-  { ancestors: [], title: 'waits for later', status: 'skipped' },
+  { ancestors: [], title: 'waits for later', status: 'passed' },
 ]);
 
 describe('vitest shard merge', () => {
@@ -63,12 +63,17 @@ describe('vitest shard merge', () => {
     });
   });
 
-  it('counts a skipped test as collected, because it was executed as a skip', () => {
-    const merged = mergeShardReports(list, [shardOne, shardTwo]);
-    expect(merged.ok).toBe(true);
-    expect(
-      executedKeys(shardTwo).find((entry) => entry.key.endsWith('waits for later'))?.status,
-    ).toBe('skipped');
+  it('refuses a listed test that was skipped at run time, even though every listed test was reported', () => {
+    const skippedWaits = report('C:/repo/packages/b/src/b.test.ts', [
+      { ancestors: [], title: 'standalone passes', status: 'passed' },
+      { ancestors: [], title: 'waits for later', status: 'skipped' },
+    ]);
+    const merged = mergeShardReports(list, [shardOne, skippedWaits]);
+    expect(merged.ok).toBe(false);
+    expect(merged.skippedListed).toEqual([
+      testKey('C:/repo/packages/b/src/b.test.ts', ['waits for later']),
+    ]);
+    expect(merged.missing).toEqual([]);
   });
 
   it('fails when a listed test no shard ran', () => {

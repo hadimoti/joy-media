@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { buildRunSummary, GATE_CHECKS, RELEASE_LANES } from './ci-v3-run-summary.mjs';
+import { SHAPES } from './create-readiness-evidence.mjs';
+import {
+  buildRunSummary,
+  GATE_CHECKS,
+  LANES_BY_TOPOLOGY,
+  SINGLE_PASS_LANES,
+  TWO_PASS_LANES,
+} from './ci-v3-run-summary.mjs';
 import {
   compareShadowRuns,
   GATE_CHECKS as COMPARE_GATE_CHECKS,
-  RELEASE_LANES as COMPARE_RELEASE_LANES,
+  LANES_BY_TOPOLOGY as COMPARE_LANES_BY_TOPOLOGY,
   SINGLE_PASS_VERDICT,
   TWO_PASS_VERDICT,
 } from './ci-v3-shadow-compare.mjs';
@@ -25,7 +32,7 @@ function runInputs(topology: 'two-pass' | 'single-pass') {
       [verdict]: { status: 'passed', firstAttemptPassed: true, retries: 0 },
     },
     lifecycleTransitions: { installPrevious: 'passed', rollbackToKeptPrevious: 'passed' },
-    lanes: Object.fromEntries(RELEASE_LANES.map((lane) => [lane, 'success'])),
+    lanes: Object.fromEntries(LANES_BY_TOPOLOGY[topology].map((lane) => [lane, 'success'])),
     vitest: { executed: ['suite > one', 'suite > two', 'suite > three'], failed: [] },
   };
 }
@@ -41,7 +48,10 @@ function asComparable(summary: ReturnType<typeof buildRunSummary>) {
 describe('shadow run summary', () => {
   it('keeps the gate-check and lane lists the comparison uses', () => {
     expect(GATE_CHECKS).toEqual(COMPARE_GATE_CHECKS);
-    expect(RELEASE_LANES).toEqual(COMPARE_RELEASE_LANES);
+    expect(LANES_BY_TOPOLOGY).toEqual(COMPARE_LANES_BY_TOPOLOGY);
+    // Each topology's lanes are the gate's own lanes, so the summary and the gate cannot drift apart.
+    expect(TWO_PASS_LANES).toEqual(SHAPES['two-pass'].lanes);
+    expect(SINGLE_PASS_LANES).toEqual(SHAPES['single-pass'].lanes);
   });
 
   it('writes two summaries that the comparison accepts when the two runs agree', () => {

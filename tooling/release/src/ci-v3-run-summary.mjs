@@ -27,7 +27,9 @@ export const GATE_CHECKS = [
   'windows-acceptance',
   'feature-status',
 ];
-export const RELEASE_LANES = [
+// The lanes of each topology, as the gate's needs list names them. The two-pass lanes are release-candidate-v2's nine lanes; the
+// single-pass lanes are release-candidate-v3's eight (plan section 3.4). ci-v3-run-summary.test.ts pins both against the gate.
+export const TWO_PASS_LANES = [
   'linux-real-services',
   'windows-p0-real-services',
   'node-contracts',
@@ -38,7 +40,18 @@ export const RELEASE_LANES = [
   'real-service-acceptance',
   'p3-real-services',
 ];
-const TOPOLOGIES = ['single-pass', 'two-pass'];
+export const SINGLE_PASS_LANES = [
+  'hosted-verify',
+  'node-contracts',
+  'linux-real-services',
+  'windows-candidate',
+  'real-service-acceptance',
+  'fixture-acceptance',
+  'acceptance-responsive',
+  'p3-real-services',
+];
+export const LANES_BY_TOPOLOGY = { 'two-pass': TWO_PASS_LANES, 'single-pass': SINGLE_PASS_LANES };
+const TOPOLOGIES = Object.keys(LANES_BY_TOPOLOGY);
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 
 /** Checks the run's inputs and returns the summary. Throws, naming every problem, when any input is missing or malformed. */
@@ -70,7 +83,8 @@ export function buildRunSummary(input) {
   if (typeof input.lifecycleTransitions !== 'object' || input.lifecycleTransitions === null) {
     problems.push('lifecycle transitions are missing');
   }
-  for (const lane of RELEASE_LANES) {
+  const lanes = LANES_BY_TOPOLOGY[input.topology] ?? [];
+  for (const lane of lanes) {
     if (typeof input.lanes?.[lane] !== 'string') problems.push(`lane ${lane} is missing`);
   }
   if (
@@ -95,7 +109,7 @@ export function buildRunSummary(input) {
     gateChecks: Object.fromEntries(GATE_CHECKS.map((check) => [check, input.gateChecks[check]])),
     scenarios: input.scenarios,
     lifecycleTransitions: input.lifecycleTransitions,
-    lanes: Object.fromEntries(RELEASE_LANES.map((lane) => [lane, input.lanes[lane]])),
+    lanes: Object.fromEntries(lanes.map((lane) => [lane, input.lanes[lane]])),
     vitest: {
       executed: [...new Set(input.vitest.executed)].sort(),
       failed: [...new Set(input.vitest.failed)].sort(),

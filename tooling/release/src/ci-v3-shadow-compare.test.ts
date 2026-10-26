@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareShadowRuns, GATE_CHECKS, RELEASE_LANES } from './ci-v3-shadow-compare.mjs';
+import { compareShadowRuns, GATE_CHECKS, LANES_BY_TOPOLOGY } from './ci-v3-shadow-compare.mjs';
 
 // A shadow pair that agrees everywhere. Each negative control changes exactly one fact of the v3 run.
 const SHA = 'a'.repeat(40);
@@ -33,7 +33,9 @@ const TRANSITIONS = Object.fromEntries(
   ].map((name) => [name, 'passed']),
 );
 const CHECKS = Object.fromEntries(GATE_CHECKS.map((check) => [check, 'passed']));
-const LANES = Object.fromEntries(RELEASE_LANES.map((lane) => [lane, 'success']));
+// Each run is green on the lanes of its own topology: nine for v2, eight for v3.
+const lanesFor = (topology: 'two-pass' | 'single-pass') =>
+  Object.fromEntries(LANES_BY_TOPOLOGY[topology].map((lane: string) => [lane, 'success']));
 
 function baseline(topology: 'two-pass' | 'single-pass') {
   const verdict =
@@ -46,7 +48,7 @@ function baseline(topology: 'two-pass' | 'single-pass') {
     gateChecks: { ...CHECKS },
     scenarios: scenarios(verdict),
     lifecycleTransitions: { ...TRANSITIONS },
-    lanes: { ...LANES },
+    lanes: lanesFor(topology),
     vitest: { executed: new Set(['a::1', 'a::2', 'b::1']), failed: new Set<string>() },
   };
 }
@@ -140,7 +142,10 @@ describe('v2 and v3 shadow comparison (D18)', () => {
     expect(pair((v3) => (v3.lanes['p3-real-services'] = 'failure')).reasons.join(';')).toMatch(
       /v3 lane p3-real-services is not green/u,
     );
-    const v2Failing = { ...baseline('two-pass'), lanes: { ...LANES, 'node-contracts': 'failure' } };
+    const v2Failing = {
+      ...baseline('two-pass'),
+      lanes: { ...lanesFor('two-pass'), 'node-contracts': 'failure' },
+    };
     const result = compareShadowRuns(v2Failing as never, baseline('single-pass') as never);
     expect(result.reasons.join(';')).toMatch(/v2 lane node-contracts is not green/u);
   });

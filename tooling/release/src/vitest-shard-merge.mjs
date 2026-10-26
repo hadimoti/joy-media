@@ -45,10 +45,15 @@ export function mergeShardReports(list, reports) {
   // A name can appear more than once in one file. Each listed occurrence must run once, so the comparison counts per name.
   const expected = countKeys(listedKeys(list));
   const ran = new Map();
+  // The entries that ran to a verdict, per key. A skipped entry is reported with status "skipped" but did not run.
+  const verdictCounts = new Map();
   const failed = [];
   for (const report of reports) {
     for (const { key, status } of executedKeys(report)) {
       ran.set(key, (ran.get(key) ?? 0) + 1);
+      if (status === 'passed' || status === 'failed') {
+        verdictCounts.set(key, (verdictCounts.get(key) ?? 0) + 1);
+      }
       if (status === 'failed') failed.push(key);
     }
   }
@@ -59,19 +64,32 @@ export function mergeShardReports(list, reports) {
     if (executedCount < count) missing.push(key);
     if (executedCount > count) duplicated.push(key);
   }
-  const unexpected = [...ran.keys()].filter((key) => !expected.has(key));
+  // A listed test must run to a verdict. A listed entry that was skipped at run time (for example `context.skip()`) is
+  // reported as skipped by Vitest and would otherwise count as coverage, so it fails the merge.
+  const skippedListed = [...expected.keys()].filter(
+    (key) => (ran.get(key) ?? 0) > 0 && (verdictCounts.get(key) ?? 0) < (ran.get(key) ?? 0),
+  );
+  // A test the collection does not list is unexpected only if it ran. Vitest lists no test skipped by a platform condition
+  // (`it.skipIf`), but its JSON report records that test as skipped. Such a test is recorded, and it is not counted as run.
+  const unexpected = [...verdictCounts.keys()].filter((key) => !expected.has(key));
+  const skippedUnlisted = [...ran.keys()].filter(
+    (key) => !expected.has(key) && !verdictCounts.has(key),
+  );
   const executed = [...expected.keys()].reduce((sum, key) => sum + (ran.get(key) ?? 0), 0);
   return {
     ok:
       missing.length === 0 &&
       duplicated.length === 0 &&
       unexpected.length === 0 &&
+      skippedListed.length === 0 &&
       failed.length === 0,
     listed: list.length,
     executed,
     missing,
     duplicated,
     unexpected,
+    skippedListed,
+    skippedUnlisted,
     failed,
   };
 }

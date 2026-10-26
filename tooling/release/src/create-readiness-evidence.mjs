@@ -103,8 +103,19 @@ const SINGLE_PASS_SUMMARY = 'test-output/readiness/single-pass-evidence/manifest
 const SINGLE_PASS_WINDOWS_PATHS = [
   'test-output/readiness/single-pass-evidence/windows/pass-1/acceptance.json',
 ];
-// The single-pass gate runs the same nine lanes as v2, each once. Its job graph is pinned by release-candidate-v3.test.ts.
-const SINGLE_PASS_LANES = RELEASE_LANES;
+// The single-pass gate's lanes (plan section 3.4, release-candidate-v3). Its jobs merge the v2 lanes: hosted-verify replaces
+// the Linux verify:ci run, windows-candidate replaces windows-p0-real-services and windows-worker-clean, and fixture-acceptance
+// replaces acceptance-primary and prod-build-smoke. The gate's `needs` list must equal this list (release-candidate-v3.test.ts).
+export const SINGLE_PASS_LANES = [
+  'hosted-verify',
+  'node-contracts',
+  'linux-real-services',
+  'windows-candidate',
+  'real-service-acceptance',
+  'fixture-acceptance',
+  'acceptance-responsive',
+  'p3-real-services',
+];
 // `messages` keeps the two-pass wording exactly as the existing tests assert it.
 export const SHAPES = {
   'two-pass': {

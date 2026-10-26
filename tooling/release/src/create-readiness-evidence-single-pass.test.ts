@@ -18,14 +18,13 @@ const CANDIDATE_SHA = 'a'.repeat(40);
 const RUN_ID = '555';
 const ATTEMPT = '1';
 const SINGLE_LANES = [
-  'linux-real-services',
-  'windows-p0-real-services',
+  'hosted-verify',
   'node-contracts',
-  'windows-worker-clean',
-  'acceptance-primary',
-  'acceptance-responsive',
-  'prod-build-smoke',
+  'linux-real-services',
+  'windows-candidate',
   'real-service-acceptance',
+  'fixture-acceptance',
+  'acceptance-responsive',
   'p3-real-services',
 ];
 const IMAGE_DIGEST = `sha256:${'b'.repeat(64)}`;
@@ -406,8 +405,10 @@ describe('single-pass readiness evidence (release-candidate-v3)', () => {
   it('builds the single-pass lane list and the two-pass lane list from separate shapes', async () => {
     const { SHAPES } = await import('./create-readiness-evidence.mjs');
     expect(SHAPES['single-pass'].lanes).toEqual(SINGLE_LANES);
-    // Each topology runs the same nine lanes. Only the number of passes differs.
-    expect(SHAPES['single-pass'].lanes).toEqual(SHAPES['two-pass'].lanes);
+    // The single-pass job graph merges v2's Windows, fixture and Linux verification lanes (plan section 3.4), so its lanes
+    // differ from the two-pass lanes. The two-pass lanes stay the nine v2 lanes.
+    expect(SHAPES['two-pass'].lanes).toHaveLength(9);
+    expect(SHAPES['single-pass'].lanes).not.toEqual(SHAPES['two-pass'].lanes);
     expect(SHAPES['single-pass'].sourceCount).toBe(2);
     expect(SHAPES['two-pass'].sourceCount).toBe(4);
   });

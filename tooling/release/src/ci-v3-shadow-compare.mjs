@@ -10,6 +10,7 @@
 // lifecycle scenario, the same lifecycle transitions, the nine lanes green in both, the first attempt in both, and every
 // test v2 executed still executed in v3 (compareV2WithV3). A v3 run may execute extra tests. It may not drop one.
 import { compareV2WithV3 } from './ci-v3-equivalence.ts';
+import { LANES_BY_TOPOLOGY } from './ci-v3-run-summary.mjs';
 
 export const GATE_CHECKS = [
   'command-health',
@@ -32,17 +33,8 @@ export const GATE_CHECKS = [
 ];
 export const TWO_PASS_VERDICT = 'release.exact-candidate-two-pass';
 export const SINGLE_PASS_VERDICT = 'release.exact-candidate';
-export const RELEASE_LANES = [
-  'linux-real-services',
-  'windows-p0-real-services',
-  'node-contracts',
-  'windows-worker-clean',
-  'acceptance-primary',
-  'acceptance-responsive',
-  'prod-build-smoke',
-  'real-service-acceptance',
-  'p3-real-services',
-];
+// Each run is judged on the lanes of its own topology: nine for v2, eight for v3 (ci-v3-run-summary.mjs holds both lists).
+export { LANES_BY_TOPOLOGY };
 
 /** Compares the two shadow runs. Returns { ok, reasons }; every reason names one rule that failed. */
 export function compareShadowRuns(v2, v3) {
@@ -100,9 +92,13 @@ export function compareShadowRuns(v2, v3) {
   const transitionsRight = JSON.stringify(Object.entries(v3.lifecycleTransitions ?? {}).sort());
   if (transitionsLeft !== transitionsRight) reasons.push('the lifecycle transitions differ');
 
-  for (const lane of RELEASE_LANES) {
-    if (v2.lanes?.[lane] !== 'success') reasons.push(`v2 lane ${lane} is not green`);
-    if (v3.lanes?.[lane] !== 'success') reasons.push(`v3 lane ${lane} is not green`);
+  for (const [label, run] of [
+    ['v2', v2],
+    ['v3', v3],
+  ]) {
+    for (const lane of LANES_BY_TOPOLOGY[run.topology ?? 'two-pass'] ?? []) {
+      if (run.lanes?.[lane] !== 'success') reasons.push(`${label} lane ${lane} is not green`);
+    }
   }
 
   const tests = compareV2WithV3(v2.vitest, v3.vitest);

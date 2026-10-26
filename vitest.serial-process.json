@@ -43,6 +43,7 @@
   "packages/workflow-engine/src/headless.test.ts",
   "tooling/e2e-synthetic/src/synthetic-accounts.test.ts",
   "tooling/release/src/editor-web-artifact.test.ts",
+  "tooling/release/src/hosted-verify.test.ts",
   "tooling/release/src/retain-release-artifacts.test.ts",
   "tooling/release/src/sign-release-keygen.test.ts",
   "tooling/release/src/sign-release-manifest.test.ts"

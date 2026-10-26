@@ -178,22 +178,38 @@ claimed as passing.
   `vitest.serial-process.json`. `tooling/release/src/vitest-serial-project.test.ts` (3 of 3) fails when the list and the discovered
   files disagree. The split leaves the test list unchanged: 6,699 entries before and after, none missing, and none added except
   the three entries of the new policy test.
-- CI v3 (D17, branch implementation): `.github/workflows/release-candidate-v3.yml` is written, dispatch-only, and is **not** the
-  production gate. It is derived from v2 by a scripted transform whose every replacement is asserted, so the diff against v2 is the
-  change: one pass per lane (no pass matrix), one Windows evidence output, the single-pass topology in the readiness record and in
-  the evidence restore, P3 chained behind the real-service lane, an attempt guard on the first job, and `--retry=0` and
-  `--retries=0` on all eight test invocations. The nine lanes and the 17 checks are unchanged. The readiness builder and the restore
-  take a topology; the two-pass values and their 39 + 6 existing tests are unchanged. The single-pass builder tests (15) and restore
-  tests (6) pass. `release-candidate-v3.test.ts` (19 tests, with mutated copies that must be refused) pins the policy. The runner
-  allowlist lists the same four hosted jobs as v2.
-- Built for the shadow measurement (plan 3.4), not yet wired into the v3 graph: (1) the Vitest shard merge,
-  `tooling/release/src/vitest-shard-merge.mjs` (8 tests). It checks shard reports against `vitest list --json`: every listed test runs
-  once, nothing unlisted runs, and none fails. On this branch the three shard listings cover the 6,710 listed tests once each (merge
-  ok). (2) The shadow run-summary writer, `tooling/release/src/ci-v3-run-summary.mjs`. It refuses incomplete inputs, and its output
-  passes the comparison; a dropped test or a red lane is refused (`ci-v3-run-summary.test.ts`, 5 tests). Not done: (3) the job merges
-  (hosted-verify, windows-candidate, fixture-acceptance) and the sharding in the v3 graph. They change the lane model and the gate
-  checks that the policy tests and the nine-lane comparison pin, so they wait for the shadow run and the owner's decision. (4) The
-  shadow dispatches (D18). A dispatch needs the file on the default branch, and that merge needs owner approval.
+- CI v3 (D17, branch implementation, approved 2026-10-26; reviewed 2026-10-26, see the design, section 2.2). `release-candidate-v3.yml`
+  is dispatch-only and is **not** the production gate. Its job graph (design, section 2.1): `hosted-verify-shard` ×3 runs the Vitest
+  suite in three shards with `--retry=0`; `hosted-prepare` collects `vitest list --json` in the shards' PostgreSQL environment and runs
+  the static commands and the production audit; `hosted-verify` merges the shards against the collection (exact coverage) with no
+  dependency install, and publishes the verified report's digest as its job output. `windows-candidate` merges the Windows P0 lane, the
+  CLI suite (once), the artifact staging, one build, the pinned v1.0.2 download and one lifecycle pass (output `evidence1`).
+  `real-service-acceptance` runs once with the Windows check deferred to the gate (`JOY_MEDIA_CI_WINDOWS_EVIDENCE=deferred`); its needs are
+  validation only. `fixture-acceptance` and `p3-real-services` run after upstream failures (`always`), so one run reports every failure. The
+  final gate has eight lanes, and its 17 checks are unchanged (`gate.ts`). It reads the verified hosted report, and checks its digest. The
+  v3 coverage receipts are kept beside the final evidence, with checksums. `release-candidate-v2.yml` is unchanged; its SHA-256 is pinned.
+- Review findings, verified against the code before any change (Codex gpt-6.1-sol, read-only): a blocker, the collection running without
+  the database environment the shards had (fixed: `hosted-prepare`); a listed test that skipped counted as executed (fixed: the merge
+  refuses it); the P0 config inheriting the default suite's projects (fixed for v3 with `vitest.p0-v3.config.ts`; v2 is an owner
+  decision); real-service not starting first (fixed with the v3-only deferral, the final gate still binds Windows); the acceptance chain
+  not running after an upstream failure, the summary step not failing, the P3 janitor without a token, the Windows teardown suppressing
+  inspection errors, and the v3 receipts not kept (all fixed). Details and the deliberately unchanged items are in the design, section 2.2.
+- Local rehearsal on this PC (32 logical cores, 8 workers per shard, one run after the last code change; NOT hosted runners):
+  collection `vitest list --json` 32 s, 6,819 tests in 738 files; shards exit 0 at 48 s, 346 s and 137 s; merge ok, 6,819 of 6,819
+  executed, 0 missing, 0 duplicated, 0 unexpected, 0 skipped-listed, 0 failed, 34 platform-skipped tests recorded and not counted; static
+  commands exit 0 (typecheck 0.9 s, lint 14 s, format 25 s, goldens 2 s); the report verifies (1.34 MB). Hosted timings are not measured.
+  The estimate for a hosted shard is the review's proxy only (vitest.config.ts runs one worker per hosted job), and it stays a proxy until a
+  shadow dispatch measures it.
+- Two earlier local runs were discarded. The first ran while test files were being edited, so it mixed two versions. The second passed the
+  test file as the output path of `vitest list --json` and overwrote it; the file was restored from the last version written and reformatted,
+  and every test in it passes. The measurements above come from a run on a frozen tree.
+- Built and tested, now used by the v3 graph: the Vitest shard merge (`vitest-shard-merge.mjs`, `vitest-skip-semantics.test.ts`), the hosted
+  report (`hosted-verify.mjs`, 26 tests), the gate's reader (`gate-hosted-verify.test.ts`, 9 tests), the run inputs (`ci-v3-run-inputs.mjs`,
+  16 tests), the run summary (`ci-v3-run-summary.mjs`), and the policy (`release-candidate-v3.test.ts`, 59 tests with a negative control per
+  refused property). The deferred-mode and P0-config tests are `windows-evidence-mode.test.ts` and `p0-v3-config.test.ts`.
+- Not done, and owner-gated: the shadow dispatches (D18). GitHub dispatches v3 only from the default branch, so the file needs a merge
+  to `main`; C0 needs a decision (the runbook, section 2); and the v2 shadow summary needs a v2 record that the unchanged v2 gate does
+  not retain (runbook, "The v2 summary"). The cutover (D19), legacy deletion (D22) and branch protection (D23) stay with the owner.
   `docs/release/ci-v3-shadow-runbook.md` has the exact steps.
 - Equivalence of executed tests: `ci-v3-equivalence.ts` (7 tests) and the shadow comparison share the rule that v3 may add tests but
   may not drop one.
@@ -215,14 +231,14 @@ claimed as passing.
 
 ## Plan phases
 
-| Phase | Status                                | Why                                                                                                                                 |
-| ----- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| P0    | Mostly done                           | Timing baseline committed. Per-job durations for run `40148387453` are measured (see CI and flakes). Owner decisions not collected. |
-| P1    | Implemented locally, receipts pending | Tracks A, C, D, E, F, H, I. Track G partial (see GPU). Lifecycle and release-gate receipts pending.                                 |
-| P2    | Implemented on the branch, not run    | CI v3 is written and policy-tested (dispatch-only). Shadow runs need the merge to main; design merges deferred (see CI and flakes). |
-| P3    | Blocked                               | Attended G1 (owner).                                                                                                                |
-| P4    | Blocked                               | Needs P2 and P3.                                                                                                                    |
-| P5    | Blocked                               | Attended G2 and A1 on the frozen artifact, then a release decision.                                                                 |
+| Phase | Status                                | Why                                                                                                                                                 |
+| ----- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0    | Mostly done                           | Timing baseline committed. Per-job durations for run `40148387453` are measured (see CI and flakes). Owner decisions not collected.                 |
+| P1    | Implemented locally, receipts pending | Tracks A, C, D, E, F, H, I. Track G partial (see GPU). Lifecycle and release-gate receipts pending.                                                 |
+| P2    | Implemented on the branch, not run    | CI v3 with the job merges is written and policy-tested (dispatch-only). Shadow runs need the merge to main and the C0 decision (see CI and flakes). |
+| P3    | Blocked                               | Attended G1 (owner).                                                                                                                                |
+| P4    | Blocked                               | Needs P2 and P3.                                                                                                                                    |
+| P5    | Blocked                               | Attended G2 and A1 on the frozen artifact, then a release decision.                                                                                 |
 
 ## Owner items (open)
 
@@ -244,8 +260,8 @@ claimed as passing.
 - The Media Foundation probe's activation and one-frame encode (`tooling/diagnostics/mf-probe/`): not built. The enumeration is
   built (`de99320c`), and its constants were checked at run time. The encode belongs with G1.
 - The packaged CLI caption refusal is built and run locally (see Captions). The Windows lifecycle copy of the case is the gate's.
-- The job merges and sharding of plan 3.4 in the v3 graph (L10): not wired. The shard merge and the summary writer are built (see
-  CI and flakes).
+- The job merges and sharding of plan 3.4 are implemented on the branch (L10, see CI and flakes). Their hosted and acceptance results
+  are not measured until a shadow dispatch runs them.
 - A positive signed-update check with the owner's key (L1): owner-gated; the key is not generated.
 - The Electron variant builds for the bisect. These need network downloads and belong with G1.
 - The lifecycle receipts for L1, L3, L5a and F2. `windows-lifecycle.ps1` needs the CI toolchain, and its receipt belongs to the
