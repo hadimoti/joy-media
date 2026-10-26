@@ -139,13 +139,22 @@ jobs:
           fi
           ffmpeg -version
       - name: Run full CLI contract suite on the supported Node version
-        run: pnpm exec vitest run apps/cli/src --no-file-parallelism
+        run: pnpm exec vitest run apps/cli/src --no-file-parallelism --reporter=default --reporter=json --outputFile.json=test-output/shadow-v2/node-contracts-cli.json
       - name: Run PostgreSQL migration and concurrent invoice acceptance
         shell: bash
         run: |
           set -euo pipefail
           test -n "$JOY_TEST_DATABASE_URL"
-          pnpm exec vitest run apps/api/src/usdc-invoice-ledger.pg.test.ts --no-file-parallelism
+          pnpm exec vitest run apps/api/src/usdc-invoice-ledger.pg.test.ts --no-file-parallelism --reporter=default --reporter=json --outputFile.json=test-output/shadow-v2/node-contracts-pg.json
+      - name: Upload the Vitest reports of the node-contracts lane (one day, shadow evidence)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-v2-vitest-node-contracts-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/shadow-v2
+          retention-days: 1
+          if-no-files-found: warn
 
   editor-web-bundle:
     name: editor-web-bundle (standard hosted Linux)
@@ -271,7 +280,16 @@ jobs:
           export JOY_CHROMIUM_PATH="$chromium_path"
           node node_modules/typescript/bin/tsc -b apps/cli
           (cd apps/cli && node scripts/bundle.mjs)
-          node node_modules/vitest/vitest.mjs run --config vitest.p0.config.ts
+          node node_modules/vitest/vitest.mjs run --config vitest.p0.config.ts --reporter=default --reporter=json --outputFile.json=test-output/shadow-v2/linux-p0.json
+      - name: Upload the Vitest reports of the Linux P0 lane (one day, shadow evidence)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-v2-vitest-linux-p0-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/shadow-v2
+          retention-days: 1
+          if-no-files-found: warn
       - name: Verify no untracked teardown residue
         if: always()
         shell: bash
@@ -341,15 +359,24 @@ jobs:
           } finally {
             Pop-Location
           }
-          node node_modules/vitest/vitest.mjs run --config vitest.p0.config.ts
+          node node_modules/vitest/vitest.mjs run --config vitest.p0.config.ts --reporter=default --reporter=json --outputFile.json=test-output/shadow-v2/windows-p0.json
           if ($LASTEXITCODE -ne 0) { throw "P0 integration tests failed with exit code $LASTEXITCODE." }
       - name: Run full CLI contract suite on Windows
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $env:JOY_REQUIRE_CHROMIUM = '1'
-          node node_modules/vitest/vitest.mjs run apps/cli/src --no-file-parallelism
+          node node_modules/vitest/vitest.mjs run apps/cli/src --no-file-parallelism --reporter=default --reporter=json --outputFile.json=test-output/shadow-v2/windows-cli.json
           if ($LASTEXITCODE -ne 0) { throw "Windows CLI contract suite failed with exit code $LASTEXITCODE." }
+      - name: Upload the Vitest reports of the Windows P0 lane (one day, shadow evidence)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-v2-vitest-windows-p0-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/shadow-v2
+          retention-days: 1
+          if-no-files-found: warn
       - name: Check for untracked residue
         if: always()
         shell: powershell
@@ -1588,6 +1615,24 @@ jobs:
             printf 'source=durable-evidence-store\n'
             printf 'reason=github-artifact-upload-disabled-by-policy\n'
           } > "$root/ARTIFACT-UPLOAD-STATUS.txt"
+      - name: Write the v2 shadow inputs to the durable evidence store (development measurement, D18)
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -uo pipefail
+          # Development evidence only. It never gates the release and cannot change the verdict above. The copies carry checksums,
+          # so the shadow comparison checks the bytes that the gate read.
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pgate"
+          test -d "$root" || { echo "durable final-gate evidence directory is missing: $root" >&2; exit 1; }
+          mkdir -p "$root/v2-shadow"
+          printf '%s' "$NEEDS_JSON" > "$root/v2-shadow/needs.json"
+          cp test-output/readiness/evidence.json "$root/v2-shadow/readiness-evidence.json" || echo 'readiness evidence is missing' >&2
+          cp test-output/release-gate/report.json "$root/v2-shadow/gate-report.json" || echo 'gate report is missing' >&2
+          cp test-output/windows/acceptance.json "$root/v2-shadow/windows-acceptance.json" || echo 'Windows acceptance is missing' >&2
+          (cd "$root" && sha256sum v2-shadow/* > v2-shadow.sha256 && sha256sum -c v2-shadow.sha256)
       - name: Verify final-gate teardown
         if: always()
         shell: bash

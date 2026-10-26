@@ -59,9 +59,10 @@ describe('v2 release-candidate artifact upload policy', () => {
     const bundleJob = jobBlock(workflow, 'editor-web-bundle');
     const windowsJob = jobBlock(workflow, 'windows-worker-clean');
     const gateJob = jobBlock(workflow, 'gate-summary');
-    // Exactly two uploads and two downloads in the whole workflow. Each is named below, and no other job
-    // may take part.
-    expect(workflow.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(2);
+    // Two artifact pairs carry release files: the renderer handoff and the Windows release files. The Vitest reports of the
+    // v2 test lanes add three one-day uploads (development evidence, checked in the shadow test below). Only the two gate
+    // downloads exist, and each is named below. No other job may take part.
+    expect(workflow.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(5);
     expect(workflow.match(/uses:\s*actions\/download-artifact@/g) ?? []).toHaveLength(2);
     expect(bundleJob).toContain(UPLOAD_ACTION);
     expect(windowsJob).toContain(DOWNLOAD_ACTION);
@@ -76,15 +77,54 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(gateJob.match(/uses:\s*actions\/download-artifact@/g) ?? []).toHaveLength(1);
     expect(gateJob).not.toContain('actions/upload-artifact');
 
-    for (const evidenceJob of [
-      'linux-real-services',
-      'real-service-acceptance',
-      'p3-real-services',
-    ]) {
+    // The release-evidence jobs stay free of artifacts. linux-real-services uploads only its Vitest report (checked in the shadow test).
+    for (const evidenceJob of ['real-service-acceptance', 'p3-real-services']) {
       const block = jobBlock(workflow, evidenceJob);
       expect(block).not.toContain('actions/upload-artifact');
       expect(block).not.toContain('actions/download-artifact');
     }
+  });
+
+  it('uploads the Vitest report of each v2 test lane for one day, and the gate uploads nothing', () => {
+    const lanes: Array<[string, string, string]> = [
+      [
+        'node-contracts',
+        'Upload the Vitest reports of the node-contracts lane (one day, shadow evidence)',
+        'joy-media-v2-vitest-node-contracts-',
+      ],
+      [
+        'linux-real-services',
+        'Upload the Vitest reports of the Linux P0 lane (one day, shadow evidence)',
+        'joy-media-v2-vitest-linux-p0-',
+      ],
+      [
+        'windows-p0-real-services',
+        'Upload the Vitest reports of the Windows P0 lane (one day, shadow evidence)',
+        'joy-media-v2-vitest-windows-p0-',
+      ],
+    ];
+    for (const [job, stepName, namePrefix] of lanes) {
+      const block = jobBlock(workflow, job);
+      const upload = stepBlock(block, stepName);
+      expect(upload).toContain(`uses: ${UPLOAD_ACTION}`);
+      expect(upload).toContain(`name: ${namePrefix}`);
+      expect(upload).toContain('path: test-output/shadow-v2');
+      expect(upload).toMatch(/\n\s+retention-days: 1\n/);
+      expect(upload).toContain('if-no-files-found: warn');
+      expect(upload).toContain('if: always()');
+      expect(block.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(1);
+      expect(block).not.toContain('actions/download-artifact');
+    }
+    const gateJob = jobBlock(workflow, 'gate-summary');
+    expect(gateJob).not.toContain('actions/upload-artifact');
+    // The gate's shadow inputs go to the durable store with checksums, as the v3 receipts do, and never to GitHub artifacts.
+    const store = stepBlock(
+      gateJob,
+      'Write the v2 shadow inputs to the durable evidence store (development measurement, D18)',
+    );
+    expect(store).toContain('$root/v2-shadow');
+    expect(store).toContain('sha256sum -c v2-shadow.sha256');
+    expect(store).toContain('continue-on-error: true');
   });
 
   it('hands the Windows release files to the gate as a one-day artifact of this run, bound to the candidate', () => {

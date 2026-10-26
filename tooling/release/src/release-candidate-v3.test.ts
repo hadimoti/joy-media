@@ -14,9 +14,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS = join(resolve(HERE, '../../..'), '.github', 'workflows');
 const V2_PATH = join(WORKFLOWS, 'release-candidate-v2.yml');
 const V3_PATH = join(WORKFLOWS, 'release-candidate-v3.yml');
-// The sha256 of release-candidate-v2.yml at the head of the v1.0.3 development branch. v2 is the fallback gate, so any change
-// to it must be deliberate and must update this pin with the owner's approval.
-const V2_SHA256 = '7f4b8c738cc0799d115a5f2dea2bb062f9b49dbef7baf3aeb51a748f932119fb';
+// The sha256 of release-candidate-v2.yml at the head of proposal/v2-p0-scope. v2 is the fallback gate, so any change to it must be
+// deliberate and must update this pin with the owner's approval. The approved change adds the shadow evidence steps (D18, 2026-10-27).
+const V2_SHA256 = '658b5080b7a92f460be48795c4cc10bee468c182498aa8693f02d6ad7028ab6c';
 const yaml = createRequire(join(resolve(HERE, '../../..'), 'package.json'))('js-yaml') as {
   load(source: string): unknown;
 };
@@ -437,6 +437,11 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
       line
         .replace(/\$\{\{ matrix\.pass \}\}/gu, '1')
         .replace(/ --retr(?:y|ies)=0/gu, '')
+        // The v2 shadow evidence flags (D18) only write each lane's Vitest report. They do not change which tests run.
+        .replace(
+          / --reporter=default --reporter=json --outputFile\.json=test-output\/shadow-v2\/[\w.-]+\.json/gu,
+          '',
+        )
         .replace(/\s+/gu, ' ')
         .trim();
     const testCommands = (workflow: Workflow): Set<string> =>
