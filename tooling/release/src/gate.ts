@@ -1694,6 +1694,8 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     'test-output/windows',
     'test-output/operations',
     'test-output/readiness/two-pass-evidence',
+    // The single-pass folder exists only in release-candidate-v3 runs. A missing folder is skipped, so v2 is unchanged.
+    'test-output/readiness/single-pass-evidence',
   ];
   const buildSuccess = Object.fromEntries(
     REQUIRED_BUILD_IDS.map((id) => {

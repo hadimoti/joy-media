@@ -85,6 +85,16 @@ const APPROVED_HOSTED_RUNNERS: ReadonlyMap<
     ]),
   ],
   [
+    // The single-pass gate, branch implementation (decision D17). Its hosted jobs are v2's, unchanged.
+    join(WORKFLOWS_DIR, 'release-candidate-v3.yml'),
+    new Map([
+      ['validate-candidate', ['ubuntu-24.04']],
+      ['node-contracts', ['ubuntu-24.04']],
+      ['editor-web-bundle', ['ubuntu-24.04']],
+      ['acceptance-responsive', ['ubuntu-24.04']],
+    ]),
+  ],
+  [
     // The weekly, non-blocking repeat signal (decision D21). It is not a release gate and it never publishes.
     join(WORKFLOWS_DIR, 'ci-repeat.yml'),
     new Map([['vitest-under-load', ['ubuntu-24.04']]]),

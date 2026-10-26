@@ -18,12 +18,13 @@ const CANDIDATE_SHA = 'a'.repeat(40);
 const RUN_ID = '555';
 const ATTEMPT = '1';
 const SINGLE_LANES = [
-  'hosted-verify',
   'linux-real-services',
-  'windows-candidate',
+  'windows-p0-real-services',
   'node-contracts',
-  'fixture-acceptance',
+  'windows-worker-clean',
+  'acceptance-primary',
   'acceptance-responsive',
+  'prod-build-smoke',
   'real-service-acceptance',
   'p3-real-services',
 ];
@@ -312,13 +313,13 @@ describe('single-pass readiness evidence (release-candidate-v3)', () => {
     ).toThrow(/unknown gate topology: four-pass/u);
   });
 
-  it('fails when any single-pass lane is not green, or a lane of the two-pass gate is the only one present', () => {
-    expect(() => build(needsJson({ 'hosted-verify': { result: 'failure' } }))).toThrow(
+  it('fails when any single-pass lane is not green, or a lane is absent from the needs context', () => {
+    expect(() => build(needsJson({ 'p3-real-services': { result: 'failure' } }))).toThrow(
       /not all green/u,
     );
-    const twoPassOnly = JSON.parse(needsJson()) as Record<string, unknown>;
-    delete twoPassOnly['hosted-verify'];
-    expect(() => build(JSON.stringify(twoPassOnly))).toThrow(/not all green/u);
+    const absent = JSON.parse(needsJson()) as Record<string, unknown>;
+    delete absent['p3-real-services'];
+    expect(() => build(JSON.stringify(absent))).toThrow(/not all green/u);
   });
 
   it('refuses a rerun: only the first workflow attempt can prove first-attempt success', () => {
@@ -405,7 +406,9 @@ describe('single-pass readiness evidence (release-candidate-v3)', () => {
   it('builds the single-pass lane list and the two-pass lane list from separate shapes', async () => {
     const { SHAPES } = await import('./create-readiness-evidence.mjs');
     expect(SHAPES['single-pass'].lanes).toEqual(SINGLE_LANES);
-    expect(SHAPES['single-pass'].lanes).not.toContain('windows-p0-real-services');
-    expect(SHAPES['two-pass'].lanes).toContain('windows-p0-real-services');
+    // Each topology runs the same nine lanes. Only the number of passes differs.
+    expect(SHAPES['single-pass'].lanes).toEqual(SHAPES['two-pass'].lanes);
+    expect(SHAPES['single-pass'].sourceCount).toBe(2);
+    expect(SHAPES['two-pass'].sourceCount).toBe(4);
   });
 });
