@@ -49,6 +49,9 @@ receipts, and L2 and L7 need attended owner sessions.
 
 ## Latest verified results (autonomous pass, 2026-10-26)
 
+- PR #13 was squash-merged to `main` as `b0e2bf4f`, after its required check (run `40361864277`, head `1ead07cf`) succeeded.
+  The push-triggered CI on `main` is run `40366623833`. Local `verify:ci` on `c1b0f61b` passed: 738 test files, 6,821 tests,
+  34 skipped. The `main` workflow `release-candidate-v3.yml` is dispatch-only, and `release-candidate-v2.yml` is unchanged.
 - Windows Sandbox lifecycle on candidate `fb49a0e8` (setup SHA-256 `02fefb7d…`): previous-upgrade-rollback 25 of 25 and
   fresh-candidate 8 of 8, 0 failed. It covers the kept rollback with the database restored, the held-file refusal, the shipped-CLI
   refusals of a changed manifest and of a manifest signed by a key that is not pinned, and `joy-media --version` from a fresh shell.
