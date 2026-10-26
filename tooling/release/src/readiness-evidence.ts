@@ -29,6 +29,24 @@ export const REQUIRED_SCENARIOS: readonly string[] = [
   'release.exact-candidate-two-pass',
 ];
 
+/** The verdict of the two-pass gate (release-candidate-v2). Its rename is the cutover, decision D19. */
+export const TWO_PASS_VERDICT_SCENARIO = 'release.exact-candidate-two-pass';
+/** The verdict of the single-pass gate (release-candidate-v3, plan §3.4). It is written only into v3 evidence. */
+export const SINGLE_PASS_VERDICT_SCENARIO = 'release.exact-candidate';
+
+/** The evidence topologies. A record without `topology` is a two-pass record, so the v2 evidence stays valid. */
+export const EVIDENCE_TOPOLOGIES = ['two-pass', 'single-pass'];
+
+/** The required scenarios of the single-pass topology: the same inventory with only the verdict renamed. */
+export const REQUIRED_SCENARIOS_SINGLE_PASS: readonly string[] = REQUIRED_SCENARIOS.map((id) =>
+  id === TWO_PASS_VERDICT_SCENARIO ? SINGLE_PASS_VERDICT_SCENARIO : id,
+);
+
+/** The required scenario inventory for a topology. An unknown topology gets the two-pass list. */
+export function requiredScenariosFor(topology: string | undefined): readonly string[] {
+  return topology === 'single-pass' ? REQUIRED_SCENARIOS_SINGLE_PASS : REQUIRED_SCENARIOS;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -63,6 +81,8 @@ export interface InstallerArtifact {
 export interface ReadinessEvidence {
   /** Schema version. Must be 1 for this validator. */
   readonly schemaVersion: 1;
+  /** `two-pass` when absent. `single-pass` marks evidence from release-candidate-v3. */
+  readonly topology?: 'two-pass' | 'single-pass';
   /** Full commit SHA of the candidate under test. */
   readonly candidateSha: string;
   /** SHA-256 of the lockfile at evidence time. */
@@ -224,6 +244,12 @@ export function validateReadinessEvidence(
   // -- Schema version -------------------------------------------------------
   if (evidence.schemaVersion !== 1) {
     blockers.push(`unsupported schema version: ${String(evidence.schemaVersion)}; expected 1`);
+  }
+
+  // -- Topology: an absent value is two-pass; anything else must be a known topology -----
+  const topology: unknown = evidence.topology ?? 'two-pass';
+  if (typeof topology !== 'string' || !EVIDENCE_TOPOLOGIES.includes(topology)) {
+    blockers.push(`unsupported evidence topology: ${String(topology)}`);
   }
 
   // -- Expected candidate SHA validation ------------------------------------
@@ -414,7 +440,9 @@ export function validateReadinessEvidence(
         .map((r) => [r.id, r] as [string, NonNullable<typeof r>]),
     );
 
-    for (const requiredId of REQUIRED_SCENARIOS) {
+    for (const requiredId of requiredScenariosFor(
+      typeof topology === 'string' ? topology : undefined,
+    )) {
       const result = resultById.get(requiredId);
       if (result === undefined) {
         blockers.push(`missing required scenario: ${requiredId}`);

@@ -44,16 +44,44 @@ const FINAL_GATE_VIEW = [
 ];
 
 const SUMMARY_RELATIVE_PATH = 'test-output/readiness/two-pass-evidence/manifest.json';
+// The two gate topologies (plan §3.4). Two-pass is the production gate and its values are unchanged. Single-pass is the
+// release-candidate-v3 shape: one real-service pass, one P3 pass and one Windows pass, each under its own folder. The
+// shapes are fixed here, so a caller cannot choose a folder or a pass that is not listed.
+const TOPOLOGY_SHAPES = {
+  'two-pass': {
+    label: 'two-pass evidence',
+    dir: 'two-pass-evidence',
+    summary: SUMMARY_RELATIVE_PATH,
+    passes: [1, 2],
+    windowsPasses: [1, 2],
+    gateViewPass: 2,
+  },
+  'single-pass': {
+    label: 'single-pass evidence',
+    dir: 'single-pass-evidence',
+    summary: 'test-output/readiness/single-pass-evidence/manifest.json',
+    passes: [1],
+    windowsPasses: [1],
+    gateViewPass: 1,
+  },
+};
+
+function topologyShape(topology) {
+  const shape = TOPOLOGY_SHAPES[topology];
+  if (shape === undefined) throw new Error(`unknown gate topology: ${String(topology)}`);
+  return shape;
+}
+
 const RELEASE_EVIDENCE_UPLOAD_STATUS = [
   'upload_outcome=disabled',
   'source=durable-evidence-store',
   'reason=github-artifact-upload-disabled-by-policy',
 ];
 const PREVIOUS_RELEASE = {
-  version: '1.0.1',
-  setupSha256: '3f5fbe853de04a24aac22a46e28dd661cc1a80a2a6c5a1fa383fcd9ab3efde04',
-  archiveSha256: '21be785e26c0d06cadba40929ada839cfd24345f17b828cdb735d4eff056a88c',
-  checksumsSha256: 'a7b933f44ec82edd2f166dcde0bb013e1febd0ebbd19aa42dd49ac8e05adfe32',
+  version: '1.0.2',
+  setupSha256: '6d8089467afaecc1d78d272f5c029d6c186a81f7aac90a7cd584045e847bdabe',
+  archiveSha256: 'e59ee15f2f881cd6620ad59e9f1d9fdc4f9b82efaf221f4e6041c079978d59ca',
+  checksumsSha256: '9e15f9b45307293a33414b1f89461859c7c5fcdcdf69f7b3f03e491cae55a8eb',
 };
 const REQUIRED_WINDOWS_SCENARIOS = [
   'cli.render.playable',
@@ -324,26 +352,25 @@ export async function restoreRetainedEvidence({
   candidateSha,
   runId,
   attempt,
+  topology = 'two-pass',
 }) {
+  const shape = topologyShape(topology);
   if (!/^[0-9a-f]{40}$/u.test(candidateSha ?? '')) throw new Error('candidate SHA is invalid');
   if (!/^[0-9]+$/u.test(runId ?? '')) throw new Error('workflow run ID is invalid');
   if (!/^[1-9][0-9]*$/u.test(attempt ?? '')) throw new Error('workflow attempt is invalid');
-  const summaryPath = resolve(workspaceRoot, ...SUMMARY_RELATIVE_PATH.split('/'));
+  const alreadyExists = `${shape.label} summary already exists in the workspace`;
+  const summaryPath = resolve(workspaceRoot, ...shape.summary.split('/'));
   try {
     await lstat(summaryPath);
-    throw new Error('two-pass evidence summary already exists in the workspace');
+    throw new Error(alreadyExists);
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message === 'two-pass evidence summary already exists in the workspace'
-    )
-      throw error;
+    if (error instanceof Error && error.message === alreadyExists) throw error;
   }
 
   const sources = [];
   const verified = new Map();
   for (const lane of ['real-service', 'p3']) {
-    for (const pass of [1, 2]) {
+    for (const pass of shape.passes) {
       const root = resolve(
         evidenceRoot,
         ...(lane === 'p3' ? ['p3'] : []),
@@ -369,17 +396,19 @@ export async function restoreRetainedEvidence({
         if (!file.path.startsWith('test-output/')) continue;
         if (file.path.startsWith('test-output/browser/p3-export-gallery/')) continue;
         const relativeEvidencePath = file.path.slice('test-output/'.length);
-        const destination = `test-output/readiness/two-pass-evidence/${lane}/pass-${pass}/${relativeEvidencePath}`;
+        const destination = `test-output/readiness/${shape.dir}/${lane}/pass-${pass}/${relativeEvidencePath}`;
         await copyToWorkspace(file.absolutePath, workspaceRoot, destination);
       }
     }
   }
 
-  const pass2Files = verified.get('real-service:2');
-  if (pass2Files === undefined) throw new Error('real-service pass 2 evidence is missing');
+  const gateViewFiles = verified.get(`real-service:${shape.gateViewPass}`);
+  if (gateViewFiles === undefined) {
+    throw new Error(`real-service pass ${shape.gateViewPass} evidence is missing`);
+  }
   const gateView = [];
   for (const path of FINAL_GATE_VIEW) {
-    const file = findFile(pass2Files, path);
+    const file = findFile(gateViewFiles, path);
     await copyToWorkspace(file.absolutePath, workspaceRoot, path);
     gateView.push({ path, sha256: file.sha256 });
   }
@@ -394,11 +423,7 @@ export async function restoreRetainedEvidence({
     gateView,
     windowsWorkerPasses: [],
   };
-  await writeWorkspaceFile(
-    workspaceRoot,
-    SUMMARY_RELATIVE_PATH,
-    `${JSON.stringify(summary, null, 2)}\n`,
-  );
+  await writeWorkspaceFile(workspaceRoot, shape.summary, `${JSON.stringify(summary, null, 2)}\n`);
   return summary;
 }
 
@@ -491,7 +516,10 @@ function validateDesktopLifecycle(evidence, expectedPass) {
       'installPrevious',
       'upgradeCandidate',
       'repairCandidate',
-      'rollbackPrevious',
+      'rollbackToKeptPrevious',
+      'updateRefusedWhileFileHeld',
+      'tamperedUpdateRefused',
+      'wrongKeyManifestRefused',
       'uninstall',
       'userDataPreserved',
     ].some((step) => lifecycle.transitions[step] !== 'passed')
@@ -599,22 +627,26 @@ export async function bindWindowsWorkerPasses({
   attempt,
   pass1B64,
   pass2B64,
+  topology = 'two-pass',
 }) {
-  const summaryPath = resolve(workspaceRoot, ...SUMMARY_RELATIVE_PATH.split('/'));
+  const shape = topologyShape(topology);
+  const summaryPath = resolve(workspaceRoot, ...shape.summary.split('/'));
   let summary;
   try {
     summary = JSON.parse(await readFile(summaryPath, 'utf8'));
   } catch {
-    throw new Error('two-pass evidence summary is missing before Windows evidence binding');
+    throw new Error(`${shape.label} summary is missing before Windows evidence binding`);
   }
   if (
     summary.candidateSha !== candidateSha ||
     summary.runId !== runId ||
     summary.attempt !== attempt
   ) {
-    throw new Error('two-pass evidence summary has mismatched candidate or workflow provenance');
+    throw new Error(`${shape.label} summary has mismatched candidate or workflow provenance`);
   }
-  const passes = [decodeWindowsPass(pass1B64, 1), decodeWindowsPass(pass2B64, 2)];
+  const passes = shape.windowsPasses.map((pass) =>
+    decodeWindowsPass(pass === 1 ? pass1B64 : pass2B64, pass),
+  );
   for (const [index, evidence] of passes.entries()) {
     const expectedPass = index + 1;
     if (
@@ -630,19 +662,21 @@ export async function bindWindowsWorkerPasses({
     }
   }
   const firstLifecycle = passes[0].desktopLifecycle;
-  const secondLifecycle = passes[1].desktopLifecycle;
+  // Each further pass must match the first one exactly. A single pass has nothing to match.
+  const otherLifecycles = passes.slice(1).map((evidence) => evidence.desktopLifecycle);
   const desktopPackage = JSON.parse(
     await readFile(resolve(workspaceRoot, 'apps/desktop/package.json'), 'utf8'),
   );
   if (
-    firstLifecycle.containerIdentity.containerId !==
-      secondLifecycle.containerIdentity.containerId ||
-    firstLifecycle.containerIdentity.imageDigest !==
-      secondLifecycle.containerIdentity.imageDigest ||
-    firstLifecycle.versions.candidate !== secondLifecycle.versions.candidate ||
     firstLifecycle.versions.candidate !== desktopPackage.version ||
-    CANDIDATE_ARTIFACT_HASH_FIELDS.some(
-      (field) => firstLifecycle.artifacts[field] !== secondLifecycle.artifacts[field],
+    otherLifecycles.some(
+      (other) =>
+        firstLifecycle.containerIdentity.containerId !== other.containerIdentity.containerId ||
+        firstLifecycle.containerIdentity.imageDigest !== other.containerIdentity.imageDigest ||
+        firstLifecycle.versions.candidate !== other.versions.candidate ||
+        CANDIDATE_ARTIFACT_HASH_FIELDS.some(
+          (field) => firstLifecycle.artifacts[field] !== other.artifacts[field],
+        ),
     )
   ) {
     throw new Error(
@@ -653,7 +687,7 @@ export async function bindWindowsWorkerPasses({
   for (const [index, evidence] of passes.entries()) {
     const pass = index + 1;
     const bytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`);
-    const relativePath = `test-output/readiness/two-pass-evidence/windows/pass-${pass}/acceptance.json`;
+    const relativePath = `test-output/readiness/${shape.dir}/windows/pass-${pass}/acceptance.json`;
     await writeWorkspaceFile(workspaceRoot, relativePath, bytes);
     const absolutePath = resolve(workspaceRoot, ...relativePath.split('/'));
     windowsWorkerPasses.push({
@@ -666,26 +700,22 @@ export async function bindWindowsWorkerPasses({
       desktopLifecycle: evidence.desktopLifecycle,
       sha256: sha256(bytes),
     });
-    if (pass === 2) {
+    // The gate reads the Windows acceptance file of the pass the gate view names (pass 2 for two-pass, pass 1 for
+    // single-pass). Every pass also keeps its own copy under acceptance-passes.
+    if (pass === shape.gateViewPass) {
       await copyToWorkspace(absolutePath, workspaceRoot, 'test-output/windows/acceptance.json');
-      await copyToWorkspace(
-        absolutePath,
-        workspaceRoot,
-        'test-output/windows/acceptance-passes/pass-2.json',
-      );
-    } else {
-      await copyToWorkspace(
-        absolutePath,
-        workspaceRoot,
-        'test-output/windows/acceptance-passes/pass-1.json',
-      );
     }
+    await copyToWorkspace(
+      absolutePath,
+      workspaceRoot,
+      `test-output/windows/acceptance-passes/pass-${pass}.json`,
+    );
   }
 
   summary.windowsWorkerPasses = windowsWorkerPasses;
   await writeWorkspaceFile(
     workspaceRoot,
-    SUMMARY_RELATIVE_PATH,
+    shape.summary,
     `${JSON.stringify(summary, null, 2)}\n`,
     true,
   );
@@ -694,6 +724,7 @@ export async function bindWindowsWorkerPasses({
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [evidenceRoot, candidateSha, runId, attempt] = process.argv.slice(2);
+  const topology = process.env.EVIDENCE_TOPOLOGY ?? 'two-pass';
   try {
     const summary = await restoreRetainedEvidence({
       evidenceRoot,
@@ -701,6 +732,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
       candidateSha,
       runId,
       attempt,
+      topology,
     });
     await bindWindowsWorkerPasses({
       workspaceRoot: process.cwd(),
@@ -709,9 +741,12 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
       attempt,
       pass1B64: process.env.WINDOWS_EVIDENCE_1_B64,
       pass2B64: process.env.WINDOWS_EVIDENCE_2_B64,
+      topology,
     });
+    const windowsWorker =
+      topology === 'single-pass' ? 'the Windows Worker pass' : 'both Windows Worker passes';
     process.stdout.write(
-      `restored and bound ${summary.sources.length} retained Linux evidence passes plus both Windows Worker passes\n`,
+      `restored and bound ${summary.sources.length} retained Linux evidence passes plus ${windowsWorker}\n`,
     );
   } catch (error) {
     process.stderr.write(
