@@ -93,4 +93,48 @@ describe('createWorkerSupervisor', () => {
     supervisor.stop();
     expect(supervisor.status().connection).toBe('offline');
   });
+
+  it('does not respawn a Worker whose restart was still pending when the app stopped it', () => {
+    let spawnCount = 0;
+    let currentTrigger: (() => void) | undefined;
+    const pendingRestarts: Array<() => void> = [];
+    const supervisor = createWorkerSupervisor({
+      spawn: () => {
+        spawnCount += 1;
+        const { child, triggerExit } = fakeChild();
+        currentTrigger = triggerExit;
+        return child;
+      },
+      command: 'node',
+      scheduleRestart: (run) => pendingRestarts.push(run),
+    });
+
+    supervisor.start();
+    currentTrigger?.(); // the Worker crashes, and its restart waits for the delay
+    supervisor.stop(); // the app quits during that delay
+    pendingRestarts.shift()?.();
+
+    expect(spawnCount).toBe(1);
+    expect(supervisor.status().connection).toBe('offline');
+  });
+
+  it('starts again after a stop when asked to', () => {
+    let spawnCount = 0;
+    const first = fakeChild();
+    const supervisor = createWorkerSupervisor({
+      spawn: () => {
+        spawnCount += 1;
+        return spawnCount === 1 ? first.child : fakeChild().child;
+      },
+      command: 'node',
+    });
+
+    supervisor.start();
+    supervisor.stop();
+    first.triggerExit();
+    supervisor.start();
+
+    expect(spawnCount).toBe(2);
+    expect(supervisor.status().connection).toBe('online');
+  });
 });

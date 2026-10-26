@@ -95,7 +95,18 @@ async function openEditorPage(app: ElectronApplication): Promise<Page> {
   ).toBe(apiBaseUrl);
   await authenticate(page);
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
+  // On failure, the window list shows whether another editor window existed, which would explain a busy writer lock.
+  await expect(page.getByRole('heading', { name: 'Projects', exact: true }))
+    .toBeVisible()
+    .catch(async (error: unknown) => {
+      console.error(
+        `Projects heading not visible; app windows: ${app
+          .windows()
+          .map((window) => window.url())
+          .join(' | ')}`,
+      );
+      throw error;
+    });
   return page;
 }
 

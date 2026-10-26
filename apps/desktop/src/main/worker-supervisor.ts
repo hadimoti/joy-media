@@ -64,7 +64,6 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
   let stopRequested = false;
 
   function spawnChild(): void {
-    stopRequested = false;
     connection = 'starting';
     currentWorkerId = workerId();
     const proc = spawn(command, args, {
@@ -94,12 +93,17 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     }
     restarts += 1;
     connection = 'starting';
-    scheduleRestart(() => spawnChild(), restartDelayMs);
+    scheduleRestart(() => {
+      // A stop, or a start that already spawned a child, while this restart waited must win.
+      if (stopRequested || child !== undefined) return;
+      spawnChild();
+    }, restartDelayMs);
   }
 
   return {
     start() {
       if (child !== undefined) return;
+      stopRequested = false;
       restarts = 0;
       spawnChild();
     },

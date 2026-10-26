@@ -170,6 +170,22 @@ claimed as passing.
   `41f8431d`, `5103c444`) and the final head all passed. On WSL Ubuntu 24.04 the job stays `running` for about 540 ms, and six
   runs without the hold all passed, five of them under two-core load. The root cause is not confirmed. This change adds the job's
   state to the timeout message. See `docs/qa/evidence/2026-10-26-survives-flake-analysis.md`.
+- Desktop packaged flakes (2026-10-26, head `c6e679b2`). In the first full `tests/desktop` run (42 tests), two tests failed.
+  `menu-actions` "clip split from the Clip menu" timed out on the writer gate's busy state ("Editor access is unavailable")
+  after `page.reload()`. `missing-media` "wrong hash or wrong size" failed in cleanup: EPERM removing its fresh profile after
+  the app had closed. Each test has since passed five times out of five: the rerun of the two files (19 of 19), three repeats
+  of those files (57 of 57), and a full run on the final build (42 of 42). That is one failure in six executions of each test,
+  and both occurred in the same full run. Reproduction on demand failed: 200 same-tab reloads in plain Chromium and 240 in the
+  packaged editor, with `navigator.locks` instrumented, gave no busy result. The root cause is not confirmed. No locking
+  change was made. A bounded busy-retry was tried on a hypothesis and reverted. The failure path now logs the app's window list
+  (busy case) and the live Joy Media and Chromium processes (profile removal), so the next occurrence can be classified.
+- Shutdown defect found while tracing the EPERM: `createWorkerSupervisor` cleared its stop flag when a restart scheduled before
+  `stop()` fired, so the Worker could start again after the app had asked it to stop. Fixed in `worker-supervisor.ts`, with two
+  regression tests; the restart test fails on the old code. It is not shown to be the cause of the EPERM.
+- CI v3 verification (2026-10-26, branch): the release tooling and ops suites pass, 35 files and 547 tests, 4 skipped. v2 is
+  unchanged from `c49bcc93`, and its SHA-256 is pinned in `release-candidate-v3.test.ts`. The shadow prerequisites, resources,
+  costs and boundaries are in `docs/release/ci-v3-shadow-runbook.md`. No v3 job has run on GitHub, so the critical path and the
+  hosted minutes are estimates, not measurements.
 - The Vitest `onTaskUpdate` RPC timeout was not reproduced. A full run of the repository suite (726 files) on WSL, pinned to two
   cores with CPU burners, had 0 `onTaskUpdate` timeouts. Its 3 failing files (4 tests) are specific to the WSL image: the 2
   export-core jitter tests, the plugin scaffold test and the observer test all pass on the Windows host. Pool concurrency is capped

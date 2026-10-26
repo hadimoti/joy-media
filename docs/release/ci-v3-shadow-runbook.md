@@ -81,6 +81,36 @@ Each step is safe to repeat.
    - a re-run of attempt 2: the attempt guard and the readiness builder refuse it (`release-candidate-v3.test.ts`, `hosted-verify.test.ts`).
 6. Measure the critical path from the run timestamps of the v3 run (`gh run view <run-id> --json jobs`), and record the Windows lane and the acceptance chain separately. The design's 75-minute target depends on it. It is a result to report, not an assumption to pass on.
 
+## Resources, cost, evidence and boundaries of one shadow pair
+
+The v2 figures are measured on run `40148387453` (candidate `7f2b826d`, see [the design](../plans/2026-10-26-ci-v3-design.md), section 1). Every v3 figure is an estimate or unmeasured: no v3 job has run on GitHub.
+
+| Runner (label)                                                 | Jobs in v3 (timeout cap, min)                                                                                                                                    | v2, measured (min)                                                                                        | v3                                                                                |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| GitHub-hosted `ubuntu-24.04`                                   | validate 5; hosted-verify-shard ×3 at 90 each; hosted-prepare 60; hosted-verify 30; node-contracts ×2 at 45 each; editor-web-bundle 30; acceptance-responsive 20 | node-contracts 11.3 and 11.6; editor-web 0.8; responsive 4.3 and 4.1; validate 0.1 (total 32.2)           | shards, prepare and verify unmeasured on hosted runners (the rehearsal was local) |
+| Self-hosted `joy-media-ci` (Linux)                             | linux-real-services, 90                                                                                                                                          | 9.4 and 9.0 (two passes)                                                                                  | one pass, unmeasured                                                              |
+| Self-hosted `joy-media-worker-docker` (Windows)                | windows-candidate, 240                                                                                                                                           | 70.7 for the equivalent Windows work                                                                      | unmeasured for v3                                                                 |
+| Self-hosted `joy-media-acceptance` (Linux, one runner, serial) | real-service-acceptance 120; fixture-acceptance 60; p3-real-services 360; gate-summary 240                                                                       | real-service 44.6 and 44.4; acceptance-primary 5.5 each; p3 7.1 and 7.0; prod smoke 1.2; gate-summary 9.0 | one pass each, unmeasured                                                         |
+
+**Cost.**
+
+- GitHub-hosted Linux minutes: v2 used about 32 minutes per run (measured). v3 is estimated at 70 to 115 minutes. The shard and prepare jobs install dependencies on a hosted runner, and the rehearsal did not measure that. Check the account's included minutes before any dispatch.
+- Runner occupancy: v2 holds the acceptance and Windows runners for about 3 hours (measured, 180.3 minutes). The v3 critical path is estimated at about 70 to 75 minutes, which is the Windows lane (about 70 minutes, v2's equivalent) or the acceptance chain (about 65 to 70 minutes), whichever is longer, plus the gate. It is not a measured result. The 75-minute target is reported only after a shadow run measures it.
+- Run v2 and v3 one after the other on the shared runners. Check that each runner is idle before the dispatch. Together the pair takes about 4 to 4.5 hours of runner time.
+
+**Evidence.**
+
+- v3 keeps the gate report, the readiness evidence, the hosted-verify report and the run summary (the step summary "Shadow run summary"). The hosted-verify report is a one-day artifact. `gate-summary` copies it, with the readiness record and the run summary, into the durable store as `v3-receipts/`, with checksums. The Windows acceptance and lifecycle receipts are kept there as well.
+- v2 keeps the gate report and the Windows acceptance file. It keeps no readiness record and no per-test report, so its summary is the open requirement in "The v2 summary".
+
+**Boundaries.**
+
+- Both workflows are `workflow_dispatch` only. Neither runs on push or on a schedule.
+- v3 publishes nothing: no release, tag, release upload, push or deploy. The grep in step 2 checks this.
+- Both workflows take the same `candidate_sha`, and the attempt must be 1. A re-run is refused by design, and a re-run is never evidence.
+- Negative runs use throwaway SHAs only, never a candidate.
+- Branch protection, secrets and environments are not changed. v2 stays the release gate. A passing comparison is development evidence, not a release receipt.
+
 ## What the shadow run does not decide
 
 The cutover (D19), the deletion of the legacy workflows (D22), the branch-protection change (D23) and any release authorization stay with the owner. A passing shadow comparison is development evidence, not a release receipt.

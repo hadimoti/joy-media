@@ -320,6 +320,35 @@ function flippedFirstByte(bytes: Buffer): Buffer {
   return copy;
 }
 
+/**
+ * Removes a profile directory with the same retries as before. If removal still fails, the live Joy Media and Chromium
+ * processes are logged first, so the holder of the file can be named. The error is rethrown unchanged.
+ */
+function removeProfile(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+  } catch (error) {
+    console.error(`profile removal failed for ${dir}; live processes:\n${liveProcessSnapshot()}`);
+    throw error;
+  }
+}
+
+function liveProcessSnapshot(): string {
+  try {
+    return execFileSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-Command',
+        "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'joy|electron|crashpad|chrome|worker' } | ForEach-Object { '{0} {1} {2}' -f $_.ProcessId, $_.Name, $_.ExecutablePath }",
+      ],
+      { encoding: 'utf8' },
+    );
+  } catch (error) {
+    return `(process snapshot unavailable: ${error instanceof Error ? error.message : String(error)})`;
+  }
+}
+
 test.describe('desktop.missing-media relink', () => {
   test('exact relink restores the media, and the restored media persists across a restart', async () => {
     test.setTimeout(420_000);
@@ -360,8 +389,7 @@ test.describe('desktop.missing-media relink', () => {
       await expect(restarted.locator(`.timeline-clip[aria-label^="${mediaName},"]`)).toHaveCount(1);
     } finally {
       await app?.close().catch(() => undefined);
-      for (const dir of Object.values(profiles))
-        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+      for (const dir of Object.values(profiles)) removeProfile(dir);
     }
   });
 
@@ -408,8 +436,7 @@ test.describe('desktop.missing-media relink', () => {
       await expect(page.locator('[data-missing-asset-id]', { hasText: mediaName })).toHaveCount(1);
     } finally {
       await app?.close().catch(() => undefined);
-      for (const dir of Object.values(profiles))
-        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+      for (const dir of Object.values(profiles)) removeProfile(dir);
     }
   });
 
@@ -458,8 +485,7 @@ test.describe('desktop.missing-media relink', () => {
       await expect(page.locator('[data-missing-asset-id]', { hasText: mediaName })).toHaveCount(1);
     } finally {
       await app?.close().catch(() => undefined);
-      for (const dir of Object.values(profiles))
-        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+      for (const dir of Object.values(profiles)) removeProfile(dir);
     }
   });
 
@@ -491,8 +517,7 @@ test.describe('desktop.missing-media relink', () => {
       ).toHaveCount(0);
     } finally {
       await app?.close().catch(() => undefined);
-      for (const dir of Object.values(profiles))
-        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+      for (const dir of Object.values(profiles)) removeProfile(dir);
     }
   });
 
@@ -543,8 +568,7 @@ test.describe('desktop.missing-media relink', () => {
       expect(probeDurationSeconds(rendered)).toBeGreaterThan(0);
     } finally {
       await app?.close().catch(() => undefined);
-      for (const dir of [...Object.values(profiles), work])
-        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+      for (const dir of [...Object.values(profiles), work]) removeProfile(dir);
     }
   });
 
@@ -601,8 +625,7 @@ test.describe('desktop.missing-media relink', () => {
       expect(probeDurationSeconds(rendered)).toBeGreaterThan(0);
     } finally {
       await app?.close().catch(() => undefined);
-      for (const dir of [...Object.values(profiles), work])
-        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+      for (const dir of [...Object.values(profiles), work]) removeProfile(dir);
     }
   });
 });
@@ -699,8 +722,7 @@ test.describe('desktop.silent-video-export', () => {
       expect(probeDurationSeconds(rendered)).toBeGreaterThan(0);
     } finally {
       await app?.close().catch(() => undefined);
-      for (const dir of Object.values(profiles))
-        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+      for (const dir of Object.values(profiles)) removeProfile(dir);
     }
   });
 });
