@@ -32,6 +32,9 @@ claimed as passing.
 - Current-source candidate `a369df53…` (built after the packager fix `0da4e880`): both sequences exit 0, previous-upgrade-rollback
   25 of 25 and fresh-candidate 8 of 8. The renderer smoke passes after upgrade, after the refused update, and on fresh install,
   and both shipped-CLI refusals pass. See `2026-10-26-rollback-path-layout.md`.
+- Previous release v1.0.2, the plan's previous version (its setup and archive SHA-256 match the published `SHA256SUMS.txt`): the
+  same candidate passes previous-upgrade-rollback 25 of 25 and fresh-candidate 8 of 8, with 0 failed steps. The scratch harness
+  pins were set to v1.0.2; the committed scripts still pin v1.0.1. See `2026-10-26-sandbox-v102-previous.md`.
 - CLI: `joy-media update check | verify <file> | rollback`. The verifier checks an Ed25519 signature over the exact manifest
   bytes and fails closed with no pinned key (`4b0d72e3`). The app's update check uses the same verifier and no longer
   needs a subscription.
@@ -168,7 +171,9 @@ claimed as passing.
 - The Electron variant builds for the bisect. These need network downloads and belong with G1.
 - The lifecycle receipts for L1, L3, L5a and F2. `windows-lifecycle.ps1` needs the CI toolchain, and its receipt belongs to the
   owner-gated release gate. The Sandbox run on candidate `a369df53` is supporting evidence: 25 of 25 and 8 of 8, including both
-  shipped-CLI refusals and the held-file refusal. L3's caption case passes on this host (see the L3 section); its release-gate receipt is pending.
+  shipped-CLI refusals and the held-file refusal. The gate's lifecycle still pins v1.0.1 as the previous release, where the plan
+  calls for v1.0.2; moving the pins is a release-gate change for the owner to approve. L3's caption case passes on this host
+  (see the L3 section); its release-gate receipt is pending.
 - Survives flake: root cause not confirmed. The timeout message now names the job state, so the next occurrence settles it.
 - A packaged-startup check in CI, so a packaged app that cannot import its main module fails the build. It needs a runner and a
   policy decision (owner).
