@@ -85,17 +85,26 @@ describe('v2 release-candidate artifact upload policy', () => {
     }
   });
 
+  it('gives each matrix instance of a lane its own Vitest artifact name, so no two instances share one', () => {
+    // An artifact name is unique per run. Two matrix instances that share one make the second upload fail, and continue-on-error
+    // hides that failure: run 40401999522 kept one Linux P0 report of its two passes.
+    expect(jobBlock(workflow, 'node-contracts')).toMatch(/\n\s+node: \['22\.17\.0', 24\]\n/);
+    expect(jobBlock(workflow, 'linux-real-services')).toMatch(/\n\s+pass: \[1, 2\]\n/);
+    expect(workflow).toContain('name: joy-media-v2-vitest-node-contracts-node-${{ matrix.node }}-');
+    expect(workflow).toContain('name: joy-media-v2-vitest-linux-p0-pass-${{ matrix.pass }}-');
+  });
+
   it('uploads the Vitest report of each v2 test lane for one day, and the gate uploads nothing', () => {
     const lanes: Array<[string, string, string]> = [
       [
         'node-contracts',
         'Upload the Vitest reports of the node-contracts lane (one day, shadow evidence)',
-        'joy-media-v2-vitest-node-contracts-',
+        'joy-media-v2-vitest-node-contracts-node-${{ matrix.node }}-',
       ],
       [
         'linux-real-services',
         'Upload the Vitest reports of the Linux P0 lane (one day, shadow evidence)',
-        'joy-media-v2-vitest-linux-p0-',
+        'joy-media-v2-vitest-linux-p0-pass-${{ matrix.pass }}-',
       ],
       [
         'windows-p0-real-services',

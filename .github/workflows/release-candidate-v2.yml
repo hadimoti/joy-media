@@ -151,7 +151,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: joy-media-v2-vitest-node-contracts-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          name: joy-media-v2-vitest-node-contracts-node-${{ matrix.node }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
           path: test-output/shadow-v2
           retention-days: 1
           if-no-files-found: warn
@@ -286,7 +286,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: joy-media-v2-vitest-linux-p0-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          name: joy-media-v2-vitest-linux-p0-pass-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
           path: test-output/shadow-v2
           retention-days: 1
           if-no-files-found: warn
