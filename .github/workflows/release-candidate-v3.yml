@@ -17,7 +17,7 @@ name: release-candidate-v3
 #   - The 17 gate checks are unchanged (tooling/release/src/gate.ts). Their inputs come from one pass and the hosted report.
 #
 # A re-run cannot become evidence: validate-candidate refuses any attempt other than 1, and the readiness builder and the
-# hosted-verify report refuse it again. GitHub dispatches this file only from the default branch (see
+# hosted-verify report refuse it again. GitHub lists this file for dispatch only from the default branch (see
 # docs/release/ci-v3-shadow-runbook.md).
 #
 # Runner placement is unchanged from v2 (ci-runner-policy.test.ts pins it):

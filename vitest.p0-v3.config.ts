@@ -1,7 +1,7 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 import baseConfig from './vitest.config.js';
 
-// The release-candidate-v3 P0 lanes (plan section 3.4). vitest.p0.config.ts spreads the default suite's `test` options, including its
+// The release-candidate-v3 P0 lanes (plan section 3.4). vitest.p0.config.ts spreads the default suite's `test` options, including any
 // `projects`, and Vitest then runs those projects instead of this include list. Measured on the development branch,
 // vitest.p0.config.ts collects 6,839 entries of the default suite and none of the P0 files. This config keeps the P0 include list
 // and clears the inherited projects. vitest.p0.config.ts itself is left unchanged, because release-candidate-v2 uses it.

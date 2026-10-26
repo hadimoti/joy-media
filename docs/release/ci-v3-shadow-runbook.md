@@ -1,12 +1,12 @@
 # CI v3 shadow comparison: runbook (decisions D17 and D18)
 
-Status: the branch implementation is complete (D17, approved 2026-10-26; see [the design](../plans/2026-10-26-ci-v3-design.md)). No shadow run has been dispatched. Dispatching needs the owner's go (D18), and two things must be settled first (below).
+Status: the branch implementation is complete (D17, approved 2026-10-26; see [the design](../plans/2026-10-26-ci-v3-design.md)). The v3 file is on `main` through PR #13. It is dispatch-only and changes no release path. No shadow run has been dispatched. Dispatching needs the owner's go (D18), and the decisions below must be settled first.
 
 Nothing in this runbook publishes, tags, deploys, merges, changes branch protection, or cuts over. The cutover (D19), the deletion of the legacy workflows (D22) and the branch-protection change (D23) stay with the owner.
 
 ## What blocks a shadow run
 
-1. **The v3 file must be on the default branch.** GitHub dispatches a workflow only when its file exists on the default branch (`main`). `gh workflow run release-candidate-v3.yml` from the feature branch returns HTTP 404, as the repeat workflow did. Putting `release-candidate-v3.yml` on `main` is a merge, so it needs the owner's approval. It changes no release path, because v2 stays the production gate and v3 is dispatch-only.
+1. **Resolved: the v3 file is on the default branch.** GitHub registers a workflow only when its file exists on the default branch (`main`). A dispatch of a workflow that `main` lacks returned HTTP 404, as the repeat workflow did. PR #13 put `release-candidate-v3.yml` on `main`, with the tooling, policy tests and runbook its jobs use. v2 stays the production gate, and v3 is dispatch-only.
 2. **C0 needs an owner decision.** The plan defines C0 as "v1.0.2 product code plus the CI changes". The repository has the `v1.0.2` tag, but the v1.0.3 tests and gate expect the v1.0.3 product, so a v1.0.2 product tree would fail them. The two options are:
    - (a) the literal plan baseline: a v1.0.2 product tree with the CI tree, built and checked on its own. The v1.0.3 tests would not be part of it.
    - (b) the feature-branch head after this change. This checks the mechanics of the two gates on one SHA, but it is not the plan's baseline.
@@ -16,8 +16,9 @@ Nothing in this runbook publishes, tags, deploys, merges, changes branch protect
 3. **v2 keeps no record the comparison needs.** `release-candidate-v2.yml` is unchanged, so it still writes no run summary and no per-test report, and its readiness record is not in the durable store. The v2 summary therefore cannot be built from the v2 run as it stands. The open requirement is in "The v2 summary" below.
 
 4. **Two decisions from the review of the graph (see [the design](../plans/2026-10-26-ci-v3-design.md), section 2.2).**
-   - (a) `vitest.p0.config.ts`, the config that v2's P0 lanes use, inherits the default suite's `projects`. Vitest then runs the default suite, and none of the P0 files. v3 uses `vitest.p0-v3.config.ts` instead. v2 keeps its config. Correcting v2 would change what its production gate runs, so that is an owner decision.
-   - (b) The v3-only Windows deferral (`JOY_MEDIA_CI_WINDOWS_EVIDENCE=deferred`) changes the shared real-service harness. The default stays strict, and the final gate still requires and binds the Windows receipt. Its approval is an owner decision.
+   - (a) On the v1.0.3 branch, the default suite declares `projects` (a serial-process project). `vitest.p0.config.ts`, the config that v2's P0 lanes use, would inherit them, so Vitest would run the default suite and none of the P0 files. `main`'s default suite declares no `projects`, so v2's P0 lanes are correct on `main` today. v3 uses `vitest.p0-v3.config.ts`, which clears any inherited projects. Merging the branch's default-suite config to `main` without first correcting v2 would change what the production gate runs, so that merge is an owner decision.
+   - (b) The v3-only Windows deferral (`JOY_MEDIA_CI_WINDOWS_EVIDENCE=deferred`) is in the shared real-service harness, which PR #13 put on `main`. The default stays strict, and the final gate still requires and binds the Windows receipt. Its approval is an owner decision.
+5. **The v2 pin differs between `main` and the branch.** `release-candidate-v2.yml` on `main` pins the v1.0.1 release. The branch's file pins v1.0.2, as the v3 file does. A pair that dispatches v2 from `main` would run v1.0.1 pins beside v3's v1.0.2 pins, so the two runs would not be comparable. Step 3 dispatches both from the branch. That is unverified until the first dispatch.
 
 ## The v3 summary (automatic)
 
@@ -59,11 +60,11 @@ Each step is safe to repeat.
 3. Dispatch v2, then v3, one after the other, so the runner is not shared. v2 takes about three hours on the shared PC.
 
    ```bash
-   gh workflow run release-candidate-v2.yml -R hadimoti/joy-media -f candidate_sha=<C0>
-   gh workflow run release-candidate-v3.yml -R hadimoti/joy-media -f candidate_sha=<C0>
+   gh workflow run release-candidate-v2.yml -R hadimoti/joy-media --ref v1.0.3/no-owner-tracks -f candidate_sha=<C0>
+   gh workflow run release-candidate-v3.yml -R hadimoti/joy-media --ref v1.0.3/no-owner-tracks -f candidate_sha=<C0>
    ```
 
-   Record both run IDs.
+   Both take the branch's file through `--ref`, so the pair runs the same pins (item 5 above). Record both run IDs.
 
 4. Build the two summaries (above), then compare them:
 
