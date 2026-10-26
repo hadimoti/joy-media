@@ -608,3 +608,212 @@ test('rejects P3 PPM gallery files outside the generated sample-frame names', as
     /unapproved file: test-output\/browser\/p3-export-gallery\/fixture\/unexpected\.ppm/i,
   );
 });
+
+// Single-pass topology (release-candidate-v3): one real-service pass, one P3 pass and one Windows pass.
+async function pathExists(path) {
+  const { stat } = await import('node:fs/promises');
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test('single-pass: restores one real-service pass and one P3 pass into the single-pass folder only', async () => {
+  const evidenceRoot = await mkdtemp(join(tmpdir(), 'jm-single-retained-'));
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'jm-single-workspace-'));
+  for (const lane of ['real-service', 'p3']) {
+    await writeRetainedPass(evidenceRoot, lane, 1);
+    // A second pass is in the store, but the single-pass topology must not restore it.
+    await writeRetainedPass(evidenceRoot, lane, 2);
+  }
+
+  const result = await restoreRetainedEvidence({
+    evidenceRoot,
+    workspaceRoot,
+    candidateSha: CANDIDATE_SHA,
+    runId: RUN_ID,
+    attempt: ATTEMPT,
+    topology: 'single-pass',
+  });
+
+  assert.equal(result.sources.length, 2);
+  assert.deepEqual(result.sources.map((source) => `${source.lane}:${source.pass}`).sort(), [
+    'p3:1',
+    'real-service:1',
+  ]);
+  assert.ok(
+    await pathExists(
+      join(
+        workspaceRoot,
+        'test-output/readiness/single-pass-evidence/real-service/pass-1/browser/journeys.json',
+      ),
+    ),
+  );
+  assert.equal(
+    await pathExists(
+      join(workspaceRoot, 'test-output/readiness/single-pass-evidence/real-service/pass-2'),
+    ),
+    false,
+  );
+  assert.equal(
+    await pathExists(join(workspaceRoot, 'test-output/readiness/two-pass-evidence')),
+    false,
+  );
+  const summary = JSON.parse(
+    await readFile(
+      join(workspaceRoot, 'test-output/readiness/single-pass-evidence/manifest.json'),
+      'utf8',
+    ),
+  );
+  assert.equal(summary.sources.length, 2);
+  assert.deepEqual(summary.windowsWorkerPasses, []);
+});
+
+test('single-pass: refuses a single-pass summary that already exists in the workspace', async () => {
+  const evidenceRoot = await mkdtemp(join(tmpdir(), 'jm-single-existing-'));
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'jm-single-existing-workspace-'));
+  await mkdir(join(workspaceRoot, 'test-output/readiness/single-pass-evidence'), {
+    recursive: true,
+  });
+  await writeFile(
+    join(workspaceRoot, 'test-output/readiness/single-pass-evidence/manifest.json'),
+    '{}',
+  );
+
+  await assert.rejects(
+    restoreRetainedEvidence({
+      evidenceRoot,
+      workspaceRoot,
+      candidateSha: CANDIDATE_SHA,
+      runId: RUN_ID,
+      attempt: ATTEMPT,
+      topology: 'single-pass',
+    }),
+    /single-pass evidence summary already exists in the workspace/u,
+  );
+});
+
+test('single-pass: binds the one Windows Worker pass, ignores any second receipt, and keeps the gate file', async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'jm-single-windows-'));
+  await writeDesktopPackageManifest(workspaceRoot);
+  await mkdir(join(workspaceRoot, 'test-output/readiness/single-pass-evidence'), {
+    recursive: true,
+  });
+  await writeFile(
+    join(workspaceRoot, 'test-output/readiness/single-pass-evidence/manifest.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      candidateSha: CANDIDATE_SHA,
+      runId: RUN_ID,
+      attempt: ATTEMPT,
+      sources: [],
+    }),
+  );
+
+  const summary = await bindWindowsWorkerPasses({
+    workspaceRoot,
+    candidateSha: CANDIDATE_SHA,
+    runId: RUN_ID,
+    attempt: ATTEMPT,
+    pass1B64: Buffer.from(JSON.stringify(windowsEvidence(1, '1'.repeat(12)))).toString('base64'),
+    pass2B64: Buffer.from('not base64 receipt with a second pass').toString('base64'),
+    topology: 'single-pass',
+  });
+
+  assert.equal(summary.windowsWorkerPasses.length, 1);
+  assert.equal(summary.windowsWorkerPasses[0].pass, 1);
+  const selected = JSON.parse(
+    await readFile(join(workspaceRoot, 'test-output/windows/acceptance.json'), 'utf8'),
+  );
+  assert.equal(selected.pass, 1);
+  assert.ok(
+    await pathExists(
+      join(
+        workspaceRoot,
+        'test-output/readiness/single-pass-evidence/windows/pass-1/acceptance.json',
+      ),
+    ),
+  );
+  assert.equal(
+    await pathExists(
+      join(workspaceRoot, 'test-output/readiness/single-pass-evidence/windows/pass-2'),
+    ),
+    false,
+  );
+});
+
+test('single-pass: refuses a Windows receipt whose embedded pass number is not 1', async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'jm-single-swapped-'));
+  await writeDesktopPackageManifest(workspaceRoot);
+  await mkdir(join(workspaceRoot, 'test-output/readiness/single-pass-evidence'), {
+    recursive: true,
+  });
+  await writeFile(
+    join(workspaceRoot, 'test-output/readiness/single-pass-evidence/manifest.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      candidateSha: CANDIDATE_SHA,
+      runId: RUN_ID,
+      attempt: ATTEMPT,
+      sources: [],
+    }),
+  );
+
+  await assert.rejects(
+    bindWindowsWorkerPasses({
+      workspaceRoot,
+      candidateSha: CANDIDATE_SHA,
+      runId: RUN_ID,
+      attempt: ATTEMPT,
+      pass1B64: Buffer.from(JSON.stringify(windowsEvidence(2, '1'.repeat(12)))).toString('base64'),
+      topology: 'single-pass',
+    }),
+  );
+});
+
+test('single-pass: refuses a summary that names another candidate, run or attempt', async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'jm-single-provenance-'));
+  await mkdir(join(workspaceRoot, 'test-output/readiness/single-pass-evidence'), {
+    recursive: true,
+  });
+  await writeFile(
+    join(workspaceRoot, 'test-output/readiness/single-pass-evidence/manifest.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      candidateSha: 'c'.repeat(40),
+      runId: RUN_ID,
+      attempt: ATTEMPT,
+      sources: [],
+    }),
+  );
+
+  await assert.rejects(
+    bindWindowsWorkerPasses({
+      workspaceRoot,
+      candidateSha: CANDIDATE_SHA,
+      runId: RUN_ID,
+      attempt: ATTEMPT,
+      pass1B64: Buffer.from(JSON.stringify(windowsEvidence(1, '1'.repeat(12)))).toString('base64'),
+      topology: 'single-pass',
+    }),
+    /single-pass evidence summary has mismatched candidate or workflow provenance/u,
+  );
+});
+
+test('an unknown topology is refused before any evidence is read', async () => {
+  const evidenceRoot = await mkdtemp(join(tmpdir(), 'jm-unknown-topology-'));
+  const workspaceRoot = await mkdtemp(join(tmpdir(), 'jm-unknown-topology-workspace-'));
+  await assert.rejects(
+    restoreRetainedEvidence({
+      evidenceRoot,
+      workspaceRoot,
+      candidateSha: CANDIDATE_SHA,
+      runId: RUN_ID,
+      attempt: ATTEMPT,
+      topology: 'four-pass',
+    }),
+    /unknown gate topology: four-pass/u,
+  );
+});

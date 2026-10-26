@@ -5,7 +5,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateGateSummary } from './ci-gate-summary.ts';
-import { REQUIRED_SCENARIOS, validateReadinessEvidence } from './readiness-evidence.ts';
+import {
+  REQUIRED_SCENARIOS,
+  requiredScenariosFor,
+  validateReadinessEvidence,
+} from './readiness-evidence.ts';
 import { parseChecksumFile, verifyArtifacts } from './artifact-integrity.mjs';
 
 // Every value in the emitted record is derived from authenticated execution evidence:
@@ -29,6 +33,11 @@ const TWO_PASS_SCENARIO = 'release.exact-candidate-two-pass';
 // installed-lifecycle receipt of each exact pass. Deriving the list from the validator's
 // inventory keeps the producer and the gate from drifting apart.
 const LIFECYCLE_SCENARIOS = REQUIRED_SCENARIOS.filter((id) => id !== TWO_PASS_SCENARIO);
+// The lifecycle scenarios of a topology: its required inventory without its own verdict scenario.
+function lifecycleScenariosFor(topology) {
+  const verdict = shapeFor(topology).verdict;
+  return requiredScenariosFor(topology).filter((id) => id !== verdict);
+}
 // The release artifacts the gate verifies, under the names the packager and the installer build
 // write to apps/desktop/dist/releases. The portable archive carries the candidate version, and the
 // setup line is appended to SHA256SUMS.txt by build-installer.ps1 after the packager has run.
@@ -84,6 +93,83 @@ const REDACTED_INPUT_PATHS = [
   'test-output/operations/teardown.json',
   'test-output/ci-janitor/inventory.json',
 ];
+
+// The two gate topologies (plan §3.4). The two-pass shape is the production gate (release-candidate-v2), and its values
+// above are unchanged. The single-pass shape is for release-candidate-v3: one Windows pass, one real-service pass and one P3
+// pass, each written under its own folder. Each topology's values are fixed here, so no caller can choose a shape that is
+// not listed.
+const SINGLE_PASS_VERDICT = 'release.exact-candidate';
+const SINGLE_PASS_SUMMARY = 'test-output/readiness/single-pass-evidence/manifest.json';
+const SINGLE_PASS_WINDOWS_PATHS = [
+  'test-output/readiness/single-pass-evidence/windows/pass-1/acceptance.json',
+];
+const SINGLE_PASS_LANES = [
+  'hosted-verify',
+  'linux-real-services',
+  'windows-candidate',
+  'node-contracts',
+  'fixture-acceptance',
+  'acceptance-responsive',
+  'real-service-acceptance',
+  'p3-real-services',
+];
+// `messages` keeps the two-pass wording exactly as the existing tests assert it.
+export const SHAPES = {
+  'two-pass': {
+    lanes: RELEASE_LANES,
+    verdict: TWO_PASS_SCENARIO,
+    summaryPath: TWO_PASS_SUMMARY,
+    windowsPaths: WINDOWS_PASS_PATHS,
+    sourceKeys: 'p3:1,p3:2,real-service:1,real-service:2',
+    sourceCount: 4,
+    windowsPassNumbers: '1,2',
+    redactedInputPaths: REDACTED_INPUT_PATHS,
+    evidenceLabel: 'two-pass evidence',
+    messages: {
+      sourceCount:
+        'two-pass summary does not bind four real-service/P3 passes to this candidate and run',
+      sourceKeys: 'two-pass summary is missing a required Linux acceptance pass',
+      windowsCount: 'two-pass summary does not contain both Windows acceptance passes',
+      windowsNumbers: 'two-pass summary does not list Windows passes 1 and 2 exactly once',
+      windowsDigest: (pass) =>
+        `Windows pass ${pass} receipt does not match the digest recorded in the two-pass summary`,
+    },
+  },
+  'single-pass': {
+    lanes: SINGLE_PASS_LANES,
+    verdict: SINGLE_PASS_VERDICT,
+    summaryPath: SINGLE_PASS_SUMMARY,
+    windowsPaths: SINGLE_PASS_WINDOWS_PATHS,
+    sourceKeys: 'p3:1,real-service:1',
+    sourceCount: 2,
+    windowsPassNumbers: '1',
+    redactedInputPaths: [
+      ...REDACTED_INPUT_PATHS.filter(
+        (path) =>
+          !path.includes('two-pass-evidence') && !path.endsWith('acceptance-passes/pass-2.json'),
+      ),
+      SINGLE_PASS_SUMMARY,
+      ...SINGLE_PASS_WINDOWS_PATHS,
+    ],
+    evidenceLabel: 'single-pass evidence',
+    messages: {
+      sourceCount:
+        'single-pass summary does not bind two Linux acceptance passes to this candidate and run',
+      sourceKeys: 'single-pass summary is missing a required Linux acceptance pass',
+      windowsCount: 'single-pass summary does not contain the Windows acceptance pass',
+      windowsNumbers: 'single-pass summary does not list Windows pass 1 exactly once',
+      windowsDigest: (pass) =>
+        `Windows pass ${pass} receipt does not match the digest recorded in the single-pass summary`,
+    },
+  },
+};
+
+/** The shape of one topology. Anything other than the two listed names is refused. */
+function shapeFor(topology) {
+  const shape = SHAPES[topology];
+  if (shape === undefined) throw new Error(`unknown gate topology: ${String(topology)}`);
+  return shape;
+}
 
 function fail(message) {
   throw new Error(message);
@@ -207,9 +293,9 @@ function assertLifecycle(evidence, expected) {
 // Each exact pass must report its own measured result for every lifecycle scenario. A
 // scenario counts only when the pass reports it as passed, on its first attempt, with
 // zero retries. A missing entry fails closed.
-function measuredOutcomes(lifecycle, pass) {
+function measuredOutcomes(lifecycle, pass, scenarios = LIFECYCLE_SCENARIOS) {
   return new Map(
-    LIFECYCLE_SCENARIOS.map((id) => {
+    scenarios.map((id) => {
       const matches = (lifecycle.scenarios ?? []).filter((candidate) => candidate?.id === id);
       if (matches.length > 1) {
         fail(`Windows desktop lifecycle pass ${pass} has duplicate measured results for ${id}`);
@@ -249,7 +335,10 @@ export function buildReadinessEvidence({
   attempt,
   needsJson,
   now = new Date(),
+  topology = 'two-pass',
 }) {
+  const shape = shapeFor(topology);
+  const lifecycleScenarios = lifecycleScenariosFor(topology);
   const root = resolve(workspaceRoot);
   if (!/^[0-9a-f]{40}$/u.test(candidateSha ?? '')) fail('candidate SHA is invalid');
   if (headSha !== candidateSha) {
@@ -264,64 +353,72 @@ export function buildReadinessEvidence({
       'readiness requires the first workflow attempt; a re-run cannot prove first-attempt success',
     );
   }
-  const lanes = evaluateGateSummary(needsJson ?? '', RELEASE_LANES.join(','));
+  const lanes = evaluateGateSummary(needsJson ?? '', shape.lanes.join(','));
   if (!lanes.ok)
     fail(`required self-hosted CI lanes are not all green: ${lanes.reasons.join('; ')}`);
   const needs = JSON.parse(needsJson);
-  const laneCommands = RELEASE_LANES.map((lane) => ({
+  const laneCommands = shape.lanes.map((lane) => ({
     name: `lane: ${lane}`,
     exitCode: needs[lane].result === 'success' ? 0 : 1,
   }));
 
   const desktopPackage = readJson(root, 'apps/desktop/package.json');
   const releaseFiles = releaseArtifacts(desktopPackage.version);
-  const summary = readJson(root, TWO_PASS_SUMMARY);
+  const summary = readJson(root, shape.summaryPath);
   if (
     summary.schemaVersion !== 1 ||
     summary.candidateSha !== candidateSha ||
     summary.runId !== runId ||
     summary.attempt !== attempt ||
     !Array.isArray(summary.sources) ||
-    summary.sources.length !== 4
+    summary.sources.length !== shape.sourceCount
   ) {
-    fail('two-pass summary does not bind four real-service/P3 passes to this candidate and run');
+    fail(shape.messages.sourceCount);
   }
   const sourceKeys = summary.sources.map((source) => `${source.lane}:${source.pass}`).sort();
-  if (sourceKeys.join(',') !== 'p3:1,p3:2,real-service:1,real-service:2') {
-    fail('two-pass summary is missing a required Linux acceptance pass');
+  if (sourceKeys.join(',') !== shape.sourceKeys) {
+    fail(shape.messages.sourceKeys);
   }
-  if (!Array.isArray(summary.windowsWorkerPasses) || summary.windowsWorkerPasses.length !== 2) {
-    fail('two-pass summary does not contain both Windows acceptance passes');
+  const windowsCount = shape.windowsPassNumbers.split(',').length;
+  if (
+    !Array.isArray(summary.windowsWorkerPasses) ||
+    summary.windowsWorkerPasses.length !== windowsCount
+  ) {
+    fail(shape.messages.windowsCount);
   }
 
-  // The two-pass summary records a digest of each Windows receipt. Every receipt must match its
-  // recorded digest byte for byte, and passes 1 and 2 must each appear exactly once.
+  // The summary records a digest of each Windows receipt. Every receipt must match its recorded digest byte for
+  // byte, and each pass of this topology must appear exactly once.
   const summaryPassNumbers = summary.windowsWorkerPasses.map((entry) => entry?.pass).sort();
-  if (summaryPassNumbers.join(',') !== '1,2') {
-    fail('two-pass summary does not list Windows passes 1 and 2 exactly once');
+  if (summaryPassNumbers.join(',') !== shape.windowsPassNumbers) {
+    fail(shape.messages.windowsNumbers);
   }
-  const receipts = WINDOWS_PASS_PATHS.map((path) => readReceipt(root, path));
+  const receipts = shape.windowsPaths.map((path) => readReceipt(root, path));
   receipts.forEach((receipt, index) => {
     const entry = summary.windowsWorkerPasses.find((candidate) => candidate?.pass === index + 1);
     if (entry?.sha256 !== receipt.sha256) {
-      fail(
-        `Windows pass ${index + 1} receipt does not match the digest recorded in the two-pass summary`,
-      );
+      fail(shape.messages.windowsDigest(index + 1));
     }
   });
   const windowsEvidence = receipts.map((receipt) => receipt.evidence);
   const lifecycles = windowsEvidence.map((evidence, index) =>
     assertLifecycle(evidence, { candidateSha, runId, attempt, pass: index + 1 }),
   );
-  const outcomes = lifecycles.map((lifecycle, index) => measuredOutcomes(lifecycle, index + 1));
+  const outcomes = lifecycles.map((lifecycle, index) =>
+    measuredOutcomes(lifecycle, index + 1, lifecycleScenarios),
+  );
   const first = lifecycles[0];
-  const second = lifecycles[1];
+  // A second pass, when the topology has one, must match the first pass exactly. A single pass has nothing to match.
+  const others = lifecycles.slice(1);
   const artifactKeys = releaseFiles.map(([, key]) => key);
   if (
-    first.versions.candidate !== second.versions.candidate ||
-    first.containerIdentity.containerId !== second.containerIdentity.containerId ||
-    first.containerIdentity.imageDigest !== second.containerIdentity.imageDigest ||
-    artifactKeys.some((key) => first.artifacts[key] !== second.artifacts[key])
+    others.some(
+      (other) =>
+        first.versions.candidate !== other.versions.candidate ||
+        first.containerIdentity.containerId !== other.containerIdentity.containerId ||
+        first.containerIdentity.imageDigest !== other.containerIdentity.imageDigest ||
+        artifactKeys.some((key) => first.artifacts[key] !== other.artifacts[key]),
+    )
   ) {
     fail(
       'Windows acceptance passes do not use the same exact candidate artifacts and runner container',
@@ -342,8 +439,10 @@ export function buildReadinessEvidence({
     fail('Windows lifecycle toolchain versions are incomplete');
   }
   if (
-    ['node', 'pnpm', 'electron', 'ffmpeg', 'ffprobe', 'windows'].some(
-      (name) => first.toolchain[name] !== second.toolchain[name],
+    others.some((other) =>
+      ['node', 'pnpm', 'electron', 'ffmpeg', 'ffprobe', 'windows'].some(
+        (name) => first.toolchain[name] !== other.toolchain[name],
+      ),
     )
   ) {
     fail('Windows lifecycle toolchain changed between its two acceptance passes');
@@ -351,7 +450,7 @@ export function buildReadinessEvidence({
 
   const lockfileSha256 = hashFile(root, 'pnpm-lock.yaml');
   const fixtureManifestSha256 = hashFile(root, 'packages/test-fixtures/media/manifest.json');
-  const sourceEvidencePath = WINDOWS_PASS_PATHS[0];
+  const sourceEvidencePath = shape.windowsPaths[0];
   // Expected digests come from the independent checksum file, and the release manifest must agree
   // with it. Observed digests come from hashing the artifact bytes. The Windows receipts are only
   // cross-checked against the checksum file, and a receipt never supplies the expected value.
@@ -388,20 +487,28 @@ export function buildReadinessEvidence({
     sourceEvidenceKey: `desktopLifecycle.artifacts.${releaseFiles[index][1]}`,
   }));
 
-  const redactedPaths = [...new Set(REDACTED_INPUT_PATHS)].sort();
+  const redactedPaths = [...new Set(shape.redactedInputPaths)].sort();
   const redactedHashes = Object.fromEntries(
     redactedPaths.map((path) => [path, hashFile(root, path)]),
   );
 
   // Scenario results are copied from the measured entries of the exact passes.
-  const scenarioResults = LIFECYCLE_SCENARIOS.map((id) => ({ id, ...outcomes[0].get(id) }));
+  const scenarioResults = lifecycleScenarios.map((id) => ({ id, ...outcomes[0].get(id) }));
+  const everyPass = shape.windowsPassNumbers.includes(',');
   const twoPassRequirements = [
     ['every required lane succeeded in the workflow needs context', lanes.ok],
-    ['both exact Windows passes verified against this candidate and run', lifecycles.length === 2],
     [
-      'every lifecycle scenario measured as passed on its first attempt in both passes',
+      everyPass
+        ? 'both exact Windows passes verified against this candidate and run'
+        : 'the exact Windows pass verified against this candidate and run',
+      lifecycles.length === windowsCount,
+    ],
+    [
+      everyPass
+        ? 'every lifecycle scenario measured as passed on its first attempt in both passes'
+        : 'every lifecycle scenario measured as passed on its first attempt in the pass',
       outcomes.every((map) =>
-        LIFECYCLE_SCENARIOS.every((id) => {
+        lifecycleScenarios.every((id) => {
           const outcome = map.get(id);
           return (
             outcome?.status === 'passed' &&
@@ -414,9 +521,9 @@ export function buildReadinessEvidence({
     ['checked-out HEAD equals the candidate SHA', headSha === candidateSha],
   ];
   const unmet = twoPassRequirements.filter(([, met]) => met !== true).map(([label]) => label);
-  if (unmet.length > 0) fail(`${TWO_PASS_SCENARIO} is not satisfied: ${unmet.join('; ')}`);
+  if (unmet.length > 0) fail(`${shape.verdict} is not satisfied: ${unmet.join('; ')}`);
   scenarioResults.push({
-    id: TWO_PASS_SCENARIO,
+    id: shape.verdict,
     status: 'passed',
     retries: 0,
     firstAttemptPassed: true,
@@ -439,6 +546,8 @@ export function buildReadinessEvidence({
     .sort((a, b) => b - a)[0];
   const evidence = {
     schemaVersion: 1,
+    // Only single-pass evidence names its topology; a two-pass record keeps its existing shape.
+    ...(topology === 'single-pass' ? { topology } : {}),
     candidateSha,
     lockfileSha256,
     toolchainVersions: {
@@ -475,6 +584,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
       cwd: workspaceRoot,
       encoding: 'utf8',
     }).trim();
+    const topology = process.env.READINESS_TOPOLOGY ?? 'two-pass';
     const evidence = buildReadinessEvidence({
       workspaceRoot,
       candidateSha: process.env.CANDIDATE_SHA,
@@ -482,12 +592,14 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
       runId: process.env.GITHUB_RUN_ID,
       attempt: process.env.GITHUB_RUN_ATTEMPT,
       needsJson: process.env.NEEDS_JSON,
+      topology,
     });
     const outputPath = join(workspaceRoot, 'test-output/readiness/evidence.json');
     mkdirSync(dirname(outputPath), { recursive: true });
     writeFileSync(outputPath, `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'wx' });
+    const passes = topology === 'single-pass' ? 'one pass' : 'two passes';
     process.stdout.write(
-      `Readiness evidence verified for ${evidence.passCount} exact-candidate scenarios across two passes.\n`,
+      `Readiness evidence verified for ${evidence.passCount} exact-candidate scenarios across ${passes}.\n`,
     );
   } catch (error) {
     process.stderr.write(
