@@ -156,12 +156,20 @@ claimed as passing.
   cores with CPU burners, had 0 `onTaskUpdate` timeouts. Its 3 failing files (4 tests) are specific to the WSL image: the 2
   export-core jitter tests, the plugin scaffold test and the observer test all pass on the Windows host. Pool concurrency has
   not been capped.
-- CI v3: design only, `docs/plans/2026-10-26-ci-v3-design.md`. `release-candidate-v3.yml` is **not** written. Its one-pass gate
-  needs the readiness builder (`tooling/release/src/create-readiness-evidence.mjs`), the evidence restore and the gate to accept one
-  Windows pass and one real-service/P3 pass instead of two. That is a change to the gate's own tooling, and its 39 readiness tests
-  assume two passes. Doing it without a shadow run would be unverified, so it stays open. The equivalence check
-  (`tooling/release/src/ci-v3-equivalence.ts`, 7 tests) exists and is not wired into a workflow. The throwaway-SHA negative runs
-  (D18) have not been dispatched.
+- CI v3 (D17, branch implementation): `.github/workflows/release-candidate-v3.yml` is written, dispatch-only, and is **not** the
+  production gate. It is derived from v2 by a scripted transform whose every replacement is asserted, so the diff against v2 is the
+  change: one pass per lane (no pass matrix), one Windows evidence output, the single-pass topology in the readiness record and in
+  the evidence restore, P3 chained behind the real-service lane, an attempt guard on the first job, and `--retry=0` and
+  `--retries=0` on all eight test invocations. The nine lanes and the 17 checks are unchanged. The readiness builder and the restore
+  take a topology; the two-pass values and their 39 + 6 existing tests are unchanged. The single-pass builder tests (15) and restore
+  tests (6) pass. `release-candidate-v3.test.ts` (19 tests, with mutated copies that must be refused) pins the policy. The runner
+  allowlist lists the same four hosted jobs as v2.
+- Not done for v3: (1) the design's job merges (hosted-verify, windows-candidate, fixture-acceptance) and the Vitest sharding, deferred
+  to the shadow measurement, since each one changes the critical path; (2) a run-summary writer and its artifact for the shadow
+  comparison (`tooling/release/src/ci-v3-shadow-compare.mjs`, 12 negative controls); (3) the shadow dispatches (D18). A dispatch needs
+  the file on the default branch, and that merge needs owner approval. `docs/release/ci-v3-shadow-runbook.md` has the exact steps.
+- Equivalence of executed tests: `ci-v3-equivalence.ts` (7 tests) and the shadow comparison share the rule that v3 may add tests but
+  may not drop one.
 - Weekly repeat (D21, prep): `.github/workflows/ci-repeat.yml` runs `vitest-load-repeat.mjs` (Vitest passes under synthetic CPU
   load, `--retry=0`, flake receipt `flake-counts.json`) on a hosted runner. It is inert until merged to `main`. Its tests are in
   `ci-repeat.test.ts` (9 of 9), including mutated copies that publish, merge, go self-hosted or widen the token. The Windows
@@ -184,7 +192,7 @@ claimed as passing.
 | ----- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | P0    | Mostly done                           | Timing baseline committed. Per-job durations for run `40148387453` are measured (see CI and flakes). Owner decisions not collected. |
 | P1    | Implemented locally, receipts pending | Tracks A, C, D, E, F, H, I. Track G partial (see GPU). Lifecycle and release-gate receipts pending.                                 |
-| P2    | Blocked                               | CI v3 workflow not written: the one-pass gate tooling is the blocker (see CI and flakes). Approvals D18 to D23 still open.          |
+| P2    | Implemented on the branch, not run    | CI v3 is written and policy-tested (dispatch-only). Shadow runs need the merge to main; design merges deferred (see CI and flakes). |
 | P3    | Blocked                               | Attended G1 (owner).                                                                                                                |
 | P4    | Blocked                               | Needs P2 and P3.                                                                                                                    |
 | P5    | Blocked                               | Attended G2 and A1 on the frozen artifact, then a release decision.                                                                 |
