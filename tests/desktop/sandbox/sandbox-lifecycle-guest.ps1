@@ -164,8 +164,17 @@ function Invoke-KeptRollback([string]$Name) {
     if ($registered -ne $manifest.previous.version) { $problems += "registered version is '$registered', not $($manifest.previous.version)" }
     $problems += Get-InstalledFileProblems $manifest.previous.installed
     if (-not (Test-Path -LiteralPath (Join-Path $keptFolder 'joy-media.exe') -PathType Leaf)) { $problems += 'the replaced version was not kept beside the restored one' }
+    # The restored layout decides the user PATH entry: the bin folder for the bin layout, the install root before it.
+    # A version without a bin folder must be listed under the root, and the bin entry must be gone.
+    $pathEntries = @(([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    $binFolder = Join-Path $installRoot 'bin'
+    $restoredHasBin = Test-Path -LiteralPath $binFolder -PathType Container
+    $expectedEntry = if ($restoredHasBin) { $binFolder } else { $installRoot }
+    $otherEntry = if ($restoredHasBin) { $installRoot } else { $binFolder }
+    if (-not ($pathEntries | Where-Object { $_ -ieq $expectedEntry })) { $problems += "the user PATH does not list $expectedEntry for the restored version" }
+    if ($pathEntries | Where-Object { $_ -ieq $otherEntry }) { $problems += "the user PATH still lists $otherEntry" }
     $passed = $problems.Count -eq 0
-    $detail = if ($passed) { "rolled back to $($manifest.previous.version) and kept $($manifest.candidate.version) beside it" } else { $problems -join '; ' }
+    $detail = if ($passed) { "rolled back to $($manifest.previous.version) and kept $($manifest.candidate.version) beside it; PATH follows the restored layout" } else { $problems -join '; ' }
     Add-Step $Name $passed $detail
     return $passed
 }

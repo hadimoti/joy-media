@@ -102,22 +102,47 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
     return createJobOrchestrator({ store: database.jobDispatch, maxLeaseMs: LEASE_CAP_MS });
   }
 
+  // The last output of each Worker, so a timeout can say what the Worker printed before it went quiet.
+  const workerTails = new Map<ChildProcess, { text: string }>();
+
   function startWorker(): ChildProcess {
     const child = spawn(process.execPath, [workerEntry], {
       cwd: workerDir,
       env: localWorkerEnv(process.env, { apiEnv: api.workerEnv, workerRoot: join(dir, 'worker') }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    child.stdout?.on('data', (chunk: Buffer) => process.stdout.write(`[worker] ${chunk}`));
-    child.stderr?.on('data', (chunk: Buffer) => process.stderr.write(`[worker] ${chunk}`));
+    const tail = { text: '' };
+    const keep = (chunk: Buffer): void => {
+      tail.text = `${tail.text}${chunk}`.slice(-1_500);
+    };
+    child.stdout?.on('data', (chunk: Buffer) => {
+      keep(chunk);
+      process.stdout.write(`[worker] ${chunk}`);
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      keep(chunk);
+      process.stderr.write(`[worker] ${chunk}`);
+    });
+    workerTails.set(child, tail);
     workers.push(child);
     return child;
+  }
+
+  function workerDiagnostics(child: ChildProcess): string {
+    const output = workerTails.get(child)?.text.trim() ?? '';
+    const presence = database.jobDispatch.presence();
+    return (
+      `Worker exit=${child.exitCode ?? 'running'} signal=${child.signalCode ?? 'none'}; ` +
+      `presence=${presence === undefined ? 'none' : presence.workerId}; ` +
+      `last output: ${output.length === 0 ? '(none)' : output}`
+    );
   }
 
   async function waitFor<T>(
     read: () => T | undefined,
     timeoutMs: number,
     label: string,
+    context?: () => string,
   ): Promise<T> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -125,7 +150,9 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       if (value !== undefined) return value;
       await new Promise((done) => setTimeout(done, 100));
     }
-    throw new Error(`timed out waiting for ${label}`);
+    throw new Error(
+      `timed out waiting for ${label}${context === undefined ? '' : `; ${context()}`}`,
+    );
   }
 
   const terminal = (job: DispatchJob | undefined): DispatchJob | undefined =>
@@ -280,6 +307,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       () => (database.jobDispatch.get(interrupted.jobId)?.status === 'running' ? true : undefined),
       FIRST_JOB_TIMEOUT_MS,
       'the Worker to lease the job',
+      () => workerDiagnostics(first),
     );
     expect(database.jobDispatch.get(interrupted.jobId)).toMatchObject({ status: 'running' });
     first.kill('SIGKILL');
