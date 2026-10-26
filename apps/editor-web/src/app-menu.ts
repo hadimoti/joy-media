@@ -82,12 +82,12 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
     label: 'File',
     items: [
       { id: 'file.account', label: 'Account & Workstation…' },
-      { id: 'file.settings', label: 'Settings…', separatorAfter: true },
       { id: 'file.projects', label: 'Projects Library…', separatorAfter: true },
       { id: 'file.projectImport', label: 'Import Editable Project…' },
       { id: 'file.projectExport', label: 'Export Editable Project…', separatorAfter: true },
       { id: 'file.export', label: 'Export', separatorAfter: true },
       { id: 'file.signOut', label: 'Sign Out', requiresSignedIn: true },
+      { id: 'file.settings', label: 'Settings…' },
     ],
   },
   {

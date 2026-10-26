@@ -22,12 +22,12 @@ const installedExecutable = process.env.JOY_MEDIA_TEST_EXECUTABLE;
 
 const fileMenuItems = [
   'Account & Workstation…',
-  'Settings…',
   'Projects Library…',
   'Import Editable Project…',
   'Export Editable Project…',
   'Export',
   'Sign Out',
+  'Settings…',
 ] as const;
 
 const editMenuItems = [
