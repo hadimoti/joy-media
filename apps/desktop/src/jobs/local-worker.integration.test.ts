@@ -128,12 +128,19 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
     return child;
   }
 
-  function workerDiagnostics(child: ChildProcess): string {
+  // attempts >= 1 means a Worker leased the job; a job still queued with attempts 0 was never leased.
+  function workerDiagnostics(child: ChildProcess, jobId: string): string {
     const output = workerTails.get(child)?.text.trim() ?? '';
     const presence = database.jobDispatch.presence();
+    const job = database.jobDispatch.get(jobId);
+    const state =
+      job === undefined
+        ? 'missing'
+        : `${job.status} attempts=${job.attempts} error=${job.error ?? 'none'}`;
     return (
       `Worker exit=${child.exitCode ?? 'running'} signal=${child.signalCode ?? 'none'}; ` +
       `presence=${presence === undefined ? 'none' : presence.workerId}; ` +
+      `job=${state}; ` +
       `last output: ${output.length === 0 ? '(none)' : output}`
     );
   }
@@ -307,7 +314,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       () => (database.jobDispatch.get(interrupted.jobId)?.status === 'running' ? true : undefined),
       FIRST_JOB_TIMEOUT_MS,
       'the Worker to lease the job',
-      () => workerDiagnostics(first),
+      () => workerDiagnostics(first, interrupted.jobId),
     );
     expect(database.jobDispatch.get(interrupted.jobId)).toMatchObject({ status: 'running' });
     first.kill('SIGKILL');
