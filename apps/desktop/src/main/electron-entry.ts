@@ -12,6 +12,7 @@
 import {
   app,
   BrowserWindow,
+  crashReporter,
   dialog,
   ipcMain,
   Menu,
@@ -22,7 +23,7 @@ import {
 } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path, { dirname, join } from 'node:path';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
@@ -35,6 +36,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import { startLocalJobApi, type LocalJobApi } from '../jobs/local-job-api.js';
 import { createMediaStage } from './media-stage.js';
+import { installGpuDiagnostics } from './gpu-diagnostics.js';
 import { installGpuEncodeFallback } from './gpu-encode-fallback.js';
 import { localWorkerEnv } from '../jobs/worker-env.js';
 import {
@@ -344,6 +346,33 @@ if (smokeStart?.ok === false) {
       onChildProcessGone: (listener) =>
         app.on('child-process-gone', (_event, details) => listener(details)),
       log: (message) => console.error(message),
+    },
+    process.argv,
+  );
+
+  // Diagnostic mode for the GPU investigation (plan section 3.2). It does nothing unless the app starts with
+  // --joy-media-gpu-diagnostics, so a normal launch is unchanged. Its lines go to a local file in the user-data folder.
+  const appendGpuDiagnosticLine = (line: string): void => {
+    try {
+      const folder = app.getPath('userData');
+      mkdirSync(folder, { recursive: true });
+      appendFileSync(join(folder, 'gpu-diagnostics.jsonl'), `${line}\n`);
+    } catch {
+      // Diagnostics must never stop the app from starting.
+    }
+  };
+  installGpuDiagnostics(
+    {
+      commandLine: app.commandLine,
+      crashReporter,
+      onChildProcessGone: (listener) =>
+        app.on('child-process-gone', (_event, details) => listener(details)),
+      onReady: (callback) => void app.whenReady().then(callback),
+      gpuState: async () => ({
+        info: await app.getGPUInfo('complete'),
+        features: app.getGPUFeatureStatus(),
+      }),
+      log: appendGpuDiagnosticLine,
     },
     process.argv,
   );

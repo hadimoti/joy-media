@@ -226,6 +226,27 @@ function Get-InstalledFileHash([string]$RelativePath) {
     return Get-Sha256 (Join-Path $installRoot $RelativePath)
 }
 
+# A hash of the whole install tree: every file's relative path and SHA-256, sorted. A rollback is checked against it, so a
+# stray file left by the candidate, or a file the previous version has and the rollback lost, fails the lifecycle.
+function Get-InstallTreeHash([string]$Root) {
+    $base = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $entries = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Force | ForEach-Object {
+        $relative = [IO.Path]::GetFullPath($_.FullName).Substring($base.Length).ToLowerInvariant()
+        "$relative $(Get-Sha256 $_.FullName)"
+    } | Sort-Object)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes(($entries -join "`n"))
+    $digest = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+    return ([BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant()
+}
+
+# The data folder the installed app uses: its product name under the roaming AppData folder, as the installer computes it.
+function Get-InstalledUserDataDirectory {
+    $package = Get-Content -LiteralPath (Join-Path $installRoot 'resources\app\package.json') -Raw | ConvertFrom-Json
+    $name = if ($package.productName) { [string]$package.productName } else { [string]$package.name }
+    if ([string]::IsNullOrWhiteSpace($name)) { throw 'The installed app does not name its data folder.' }
+    return Join-Path $applicationData ($name -replace '/', '\')
+}
+
 function Assert-UserIntegrations([string]$Version, [ValidateSet('root', 'bin')][string]$PathLayout) {
     Assert-RegisteredVersion $Version
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -473,6 +494,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     $renderRecoveryReport = Join-Path $workRoot 'render-recovery.vitest.json'
     $null = Invoke-Pnpm 'CLI render failure-recovery acceptance' @('exec', 'vitest', 'run', 'apps/cli/src/humanized/render-recovery.e2e.test.ts', '--no-file-parallelism', '--retry=0', '--reporter=json', "--outputFile=$renderRecoveryReport")
     Set-ScenarioOutcome -Id 'cli.render.failure-recovery' -ExitCode (Get-VitestAccountingExitCode $renderRecoveryReport)
+    $previousInstallTreeHash = Get-InstallTreeHash $installRoot
     Invoke-VerifiedSetup $CandidateSetupPath $candidateSetup $candidateVersion | Out-Null
     Assert-UserIntegrations $candidateVersion 'bin'
     Assert-FreshShellCli $candidateVersion
@@ -553,13 +575,23 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     # which swaps the kept folder back. Running the older setup over the install would be a downgrade, not a rollback.
     $keptFolder = Join-Path (Split-Path -Parent $installRoot) ((Split-Path -Leaf $installRoot) + '.previous')
     if (-not (Test-Path -LiteralPath (Join-Path $keptFolder 'joy-media.exe') -PathType Leaf)) { throw "The candidate setup did not keep v$PreviousVersion beside the install." }
-    $rollbackRun = Invoke-CapturedProcess -FilePath $CandidateSetupPath -Arguments @('/rollback') -TimeoutSeconds 900 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment)
+    # The upgrade snapshotted the database that v$PreviousVersion wrote. The rollback also restores that snapshot (/restore-data),
+    # so the database the candidate migrated or wrote is replaced, and the restored file must match the snapshot byte for byte.
+    $userDataDirectory = Get-InstalledUserDataDirectory
+    $snapshotDatabase = Join-Path $userDataDirectory "backups\pre-update-$PreviousVersion\joy-media.sqlite3"
+    if (-not (Test-Path -LiteralPath $snapshotDatabase -PathType Leaf)) { throw "The upgrade did not snapshot the v$PreviousVersion database." }
+    $snapshotDatabaseSha = Get-Sha256 $snapshotDatabase
+    $rollbackRun = Invoke-CapturedProcess -FilePath $CandidateSetupPath -Arguments @('/rollback', '/restore-data') -TimeoutSeconds 900 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment)
     if ($rollbackRun.ExitCode -ne 0) { throw "Candidate setup /rollback failed with exit code $($rollbackRun.ExitCode)." }
+    if ((Get-Sha256 (Join-Path $userDataDirectory 'joy-media.sqlite3')) -ne $snapshotDatabaseSha) { throw "Rollback with /restore-data did not restore the v$PreviousVersion database snapshot." }
     Assert-RegisteredVersion $PreviousVersion
     Assert-UserIntegrations $PreviousVersion 'root'
     if ((Get-InstalledFileHash 'joy-media.exe') -ne $previousDesktopExeSha -or (Get-InstalledFileHash 'resources\app\cli\joy-media-bundle.mjs') -ne $previousCliBundleSha) {
         throw "Rollback did not restore the exact v$PreviousVersion app and CLI files."
     }
+    # The whole install tree is the v$PreviousVersion tree again: no stray file from the candidate, and no file missing.
+    if ((Get-InstallTreeHash $installRoot) -ne $previousInstallTreeHash) { throw "Rollback left the install tree different from v$PreviousVersion (a stray or missing file)." }
+    $script:commands.Add([pscustomobject]@{ name = 'rollback restores the exact install tree and the pre-update database snapshot'; exitCode = 0 })
     Invoke-AppSmoke "v$PreviousVersion rollback"
     $rollbackVerification = Invoke-LifecycleFixture $devElectron 'verify'
     if ($rollbackVerification.result -ne 'verified' -or $rollbackVerification.ciphertextSha256 -ne $seedProof.ciphertextSha256 -or $rollbackVerification.directCiphertextSha256 -ne $seedProof.directCiphertextSha256) {
