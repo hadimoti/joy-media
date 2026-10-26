@@ -1,0 +1,85 @@
+/* Settings > Updates. The dialog reuses the agent settings shell; only the section list and the status signal are new. */
+
+.app-settings-dialog {
+  width: min(680px, calc(100vw - 32px));
+}
+
+.app-settings-layout {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  min-height: 220px;
+}
+
+.app-settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-right: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.25));
+}
+
+.app-settings-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.app-settings-nav-item.is-active {
+  background: var(--surface-raised, rgba(127, 127, 127, 0.14));
+  font-weight: 600;
+}
+
+/* Quiet by design: a small dot on the entry, never a pop-up or a banner. */
+.app-settings-update-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent, #4f8cff);
+  flex: none;
+}
+
+.app-settings-body {
+  padding: 16px;
+}
+
+.app-settings-check-button {
+  padding: 6px 14px;
+  border: 1px solid var(--border-strong, rgba(127, 127, 127, 0.5));
+  border-radius: 6px;
+  background: var(--surface-raised, rgba(127, 127, 127, 0.14));
+  color: inherit;
+  cursor: pointer;
+}
+
+.app-settings-check-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.app-settings-status p {
+  margin: 10px 0 0;
+}
+
+.app-settings-release-link code {
+  word-break: break-all;
+}
+
+@media (max-width: 560px) {
+  .app-settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-settings-nav {
+    flex-direction: row;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.25));
+  }
+}

@@ -9,6 +9,13 @@
       "note": "Shown in the packaged File menu; the sign-in flow has its own real-service evidence."
     },
     {
+      "id": "file.settings",
+      "status": "reachable",
+      "spec": "menu-panels.spec.ts",
+      "evidence": "Settings…",
+      "note": "Shown in the packaged File menu. It opens the Settings dialog, whose Updates check (manual, opt-in, verify-only) is unit-tested in AppSettingsDialog.test.tsx; no packaged click-through yet."
+    },
+    {
       "id": "file.projects",
       "status": "reachable",
       "spec": "menu-panels.spec.ts",

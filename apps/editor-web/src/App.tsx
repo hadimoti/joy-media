@@ -346,6 +346,7 @@ import { Scene3DPanel } from './Scene3DPanel.js';
 import { JoyAgentSettingsDialog, type JoyAgentSettingsTab } from './JoyAgentSettingsDialog.js';
 import { ModelDrawer } from './ModelDrawer.js';
 import { AssetLibrarySettingsDialog } from './AssetLibrarySettingsDialog.js';
+import { AppSettingsDialog, type UpdateCheckState } from './AppSettingsDialog.js';
 import {
   isDesktopHost,
   listDesktopProviderProfiles,
@@ -1161,6 +1162,8 @@ function EditorWorkspace({
   const [agentSettingsTab, setAgentSettingsTab] = useState<JoyAgentSettingsTab>('models');
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [assetLibrarySettingsOpen, setAssetLibrarySettingsOpen] = useState(false);
+  const [appSettingsOpen, setAppSettingsOpen] = useState(false);
+  const [updateCheckState, setUpdateCheckState] = useState<UpdateCheckState>({ status: 'idle' });
   const [isMaximized, setIsMaximized] = useState(false);
   useEffect(() => {
     if (!isDesktopHost()) return;
@@ -5186,6 +5189,9 @@ function EditorWorkspace({
         case 'edit.assetLibrarySettings':
           setAssetLibrarySettingsOpen(true);
           break;
+        case 'file.settings':
+          setAppSettingsOpen(true);
+          break;
         case 'agent.executionMode':
           setAgentSettingsTab('execution');
           setAgentSettingsOpen(true);
@@ -7938,6 +7944,14 @@ function EditorWorkspace({
             <AssetLibrarySettingsDialog
               open={assetLibrarySettingsOpen}
               onClose={() => setAssetLibrarySettingsOpen(false)}
+            />
+          )}
+          {appSettingsOpen && (
+            <AppSettingsDialog
+              open={appSettingsOpen}
+              onClose={() => setAppSettingsOpen(false)}
+              updateState={updateCheckState}
+              onUpdateStateChange={setUpdateCheckState}
             />
           )}
           {toasts.length > 0 && (
