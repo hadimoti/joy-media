@@ -14,8 +14,9 @@ claimed as passing.
   - `6ae9be64`: GPU diagnostic-mode switch, stage list and local-only crash settings. Inert, not wired into the app.
   - `de392213`: attended G2 repeat harness. Preflight verified; the run loop has not run.
   - `5de135f1`: attended G1 stage probe. S0 and S1 ran locally; S2 to S6 wait for G1.
-- Dev CI on `6ae9be64`: run `40248976254`, still in progress at the time of writing. The result is recorded in the next
-  update of this file.
+- Dev CI on `6ae9be64` (run `40248976254`), `41f8431d` (run `40252020545`) and `5103c444` (run `40258394170`): each success,
+  6 of 6 jobs. The packager fix `0da4e880` (run `40262979132`) was in progress at the time of writing. The final head is
+  dispatched after that run, and its result is recorded in the next update of this file.
 - Earlier dev CI on `64531d2e`: run `40238451437`, success, 6 of 6 jobs. Kept as history.
 
 ## Installer, rollback and updates (L1, F1, F2)
@@ -27,6 +28,9 @@ claimed as passing.
 - PATH follows the restored layout (`SetUserPathLayout`, commit `58943380`). Only the `bin` folder goes on PATH (F1).
 - Windows Sandbox on candidate setup `be7a636a` (see `2026-10-26-rollback-path-layout.md`): kept-previous rollback
   23 of 23 steps, fresh install with `joy-media --version` and `joy --version` from a fresh shell 8 of 8, zero failed steps.
+- Current-source candidate `a369df53…` (built after the packager fix `0da4e880`): both sequences exit 0, previous-upgrade-rollback
+  25 of 25 and fresh-candidate 8 of 8. The renderer smoke passes after upgrade, after the refused update, and on fresh install,
+  and both shipped-CLI refusals pass. See `2026-10-26-rollback-path-layout.md`.
 - CLI: `joy-media update check | verify <file> | rollback`. The verifier checks an Ed25519 signature over the exact manifest
   bytes and fails closed with no pinned key (`4b0d72e3`). The app's update check uses the same verifier and no longer
   needs a subscription.
@@ -50,6 +54,16 @@ claimed as passing.
   bisect. The diagnostic switch is not wired, because its crash-reporter options and Chromium switches need G1 confirmation.
 - The shipped default build still crashes on this host (note of 2026-10-24). Owner sessions G1 (diagnosis) and G2
   (30-run proof on the exact candidate) have not run.
+
+## Packaged app (2026-10-26)
+
+- Defect: the packaged main process imports `@joy-media/release-trust`, which the packager did not stage. A packaged app
+  outside the repository failed at import with `ERR_MODULE_NOT_FOUND` before its window, so it never started. Local runs
+  passed because the standalone build sits inside the repository, so the earlier local smoke results do not show it.
+- Fix `0da4e880`: the packager derives the staged packages from the desktop manifest (`apps/desktop/scripts/workspace-packages.mjs`).
+  `workspace-packages.test.mjs` checks that every declared internal dependency is staged, and that every `@joy-media` import in
+  the desktop main process is a declared dependency. Both run in the harness list.
+- Dev CI did not catch the defect: it has no packaged startup check. Adding one needs a runner and a policy decision (owner).
 
 ## Captions (L3)
 
@@ -139,4 +153,7 @@ claimed as passing.
 - The Electron variant builds for the bisect. These need network downloads and belong with G1.
 - The Windows lifecycle run for the tampered and wrong-key transitions, in the Sandbox or the release gate.
 - Root cause for the survives flake, and reproduction of the RPC timeout under synthetic load.
+- A packaged-startup check in CI, so a packaged app that cannot import its main module fails the build. It needs a runner and a
+  policy decision (owner).
+- Final-head CI for the newest commit on the branch, after the fix run finishes.
 - Refresh the readiness matrix rows once the receipts exist. Each row keeps its evidence source.
