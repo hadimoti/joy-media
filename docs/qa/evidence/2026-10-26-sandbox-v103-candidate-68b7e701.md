@@ -22,10 +22,10 @@ harness and lifecycle script unchanged. Their previous-release pins now name v1.
 
 ## Result
 
-| Sequence | Passed | Failed |
-| --- | ---: | ---: |
-| previous-upgrade-rollback: install 1.0.2, PATH check, smoke, upgrade to 1.0.3, fresh shells, repair, kept rollback to 1.0.2, upgrade again, held-file refusal, two shipped-CLI refusals, uninstall | 25 | 0 |
-| fresh-candidate: fresh install, PATH check, fresh shells, smoke, uninstall | 8 | 0 |
+| Sequence                                                                                                                                                                                           | Passed | Failed |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -----: | -----: |
+| previous-upgrade-rollback: install 1.0.2, PATH check, smoke, upgrade to 1.0.3, fresh shells, repair, kept rollback to 1.0.2, upgrade again, held-file refusal, two shipped-CLI refusals, uninstall |     25 |      0 |
+| fresh-candidate: fresh install, PATH check, fresh shells, smoke, uninstall                                                                                                                         |      8 |      0 |
 
 `failedSteps` is 0. The renderer smoke passed on 1.0.2, on 1.0.3 after the upgrade, after the kept rollback, after the refused update,
 and on the fresh install. `joy-media --version` and `joy --version` report 1.0.3 from a fresh shell. The run summary is kept outside
