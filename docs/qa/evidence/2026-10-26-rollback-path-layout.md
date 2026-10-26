@@ -20,7 +20,9 @@ found from a new shell.
 
 ## Windows Sandbox evidence, candidate `be7a636a`
 
-The setup was rebuilt from the current source with `build-installer.ps1` from the payload of the 2026-10-26 candidate:
+The setup was built with `build-installer.ps1` from a payload packaged earlier the same day. The installer code was current, but
+that payload's CLI bundle predates the `update` command, so this candidate's shipped CLI has no `update` command. This
+candidate is therefore not a build from current source. See "Candidate correction" below:
 `joy-media-setup.exe`, 202,989,056 bytes, SHA-256 `be7a636aa8e1e7f576cec04424c7839ed07f95c6236428375a482bf51a095d32`.
 The payload archive is `joy-media-windows-x64-v1.0.3.zip`, SHA-256 `07feb241dc263f42ef996ac0ffe9d7dbac5cc26f6ff249d5da4e45becacb4e03`.
 The previous release was taken from a local verification folder and matched its pins before the run: setup
@@ -69,3 +71,41 @@ node tests/desktop/sandbox/sandbox-run.mjs --out <run folder outside the reposit
 ```
 
 A pass means both sequences report `failed: 0` in `run-summary.json`.
+
+## Candidate correction (2026-10-26)
+
+The two refusal checks added to the guest (the shipped CLI refuses a manifest changed after signing, and a manifest signed
+by no pinned key) failed on `be7a636a` with `Unknown command "update"`. The payload's CLI bundle predated the `update`
+command. The rollback and fresh-install steps above still hold for the installer on `be7a636a`. They do not show the update
+commands, and the section above should not be read as a build from current source.
+
+A current-source candidate was then built from the working tree (commit `41f8431d` for the product code): the worker,
+editor, desktop and CLI were built, `package-installer.mjs` packaged the payload, and `build-installer.ps1 -Version 1.0.3`
+built the setup. The shipped bundle carries the update markers.
+
+## Current-source candidate results
+
+Setup `00266d301c68a52c8f4d3defea9fa1160613b28a24d6e7b04057491bbe7f91d0` (202,472,960 bytes), built from `41f8431d`. Three
+Sandbox runs of both sequences have completed, and a fourth is in progress.
+
+- Installer steps pass in every run: install, upgrade, PATH layout, fresh shell (`joy-media` and `joy` report 1.0.3), repair,
+  kept rollback, upgrade again, file-held refusal, uninstall, and the fresh install.
+- Both shipped-CLI refusals pass from the second run on, after the check accepts the CLI's wording: a manifest changed after
+  signing, and a manifest signed by no pinned key. Both print "This build trusts no release key, so the manifest cannot be
+  verified."
+- Open: the candidate's renderer smoke times out after 5 minutes in every sequence (after upgrade, after the refused update,
+  and on fresh install). The previous version's smoke passes in the same run.
+
+What the guest's watch files show, sampled every 10 seconds for the five minutes:
+
+- The app process is alive, with about 0.1 seconds of CPU for the whole run.
+- No smoke profile folder is created, so the stall happens before the app's smoke setup.
+- Its 18 threads stay in system waits (user-request and event-pair waits).
+- Windows records no hang or crash event for the process.
+- Local runs of the same build finish in about 1 second, both with the network refused by proxy and with the GPU disabled. The
+  stall has not been reproduced outside the Sandbox.
+
+A fourth run wrote Chromium's startup log for each smoke launch. Every candidate log is empty, while the previous version's log
+has its first browser-startup lines. A stock Electron 44.3.0 probe, with no JOY Media code and the same Sandbox configuration,
+reached ready within six seconds and logged normally. So the stall is specific to the candidate's launch, not to Electron in the
+Sandbox. The next probe runs the candidate's standalone build from a mapped folder, to separate the build from its installation.

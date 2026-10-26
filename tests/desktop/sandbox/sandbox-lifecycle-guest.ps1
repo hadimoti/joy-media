@@ -205,6 +205,37 @@ function Test-HeldFileRefusal([string]$Name) {
     return $passed
 }
 
+# The shipped CLI must refuse a manifest changed after signing, and a manifest whose signature no pinned key made. This
+# build pins no release key, so both are refused as release-key-unconfigured. The owner-key pass expects signature-invalid
+# (plan section 3.1). These are the same two cases as the CI lifecycle in tests/desktop/windows-lifecycle.ps1.
+function Test-ShippedCliRefusals {
+    $verifyRoot = Join-Path $env:TEMP 'joy-media-update-verify'
+    New-Item -ItemType Directory -Path $verifyRoot -Force | Out-Null
+    $releaseFile = Join-Path $verifyRoot 'joy-media-setup.exe'
+    [System.IO.File]::WriteAllBytes($releaseFile, [byte[]](1..64))
+    $releaseSha = Get-Sha256Lower $releaseFile
+    $manifestText = '{"channel":"stable","version":"9.9.9","issuedAt":"2026-10-26T00:00:00Z","files":[{"name":"joy-media-setup.exe","size":64,"sha256":"' + $releaseSha + '"}]}'
+    $cliCommand = Join-Path $binDirectory 'joy-media.cmd'
+    $cases = @(
+        @{ Name = 'shipped CLI refuses a manifest changed after signing'; Manifest = ($manifestText -replace '9\.9\.9', '9.9.8'); Signature = ('A' * 86) },
+        @{ Name = 'shipped CLI refuses a manifest signed by no pinned key'; Manifest = $manifestText; Signature = ('B' * 86) }
+    )
+    foreach ($case in $cases) {
+        if (-not (Test-Path -LiteralPath $cliCommand -PathType Leaf)) {
+            Add-Step $case.Name $false 'bin\joy-media.cmd is missing from the install folder'
+            continue
+        }
+        [System.IO.File]::WriteAllText((Join-Path $verifyRoot 'release-manifest.json'), $case.Manifest, $utf8NoBom)
+        [System.IO.File]::WriteAllText((Join-Path $verifyRoot 'release-manifest.json.sig'), $case.Signature + "`n", $utf8NoBom)
+        $run = Invoke-Program (Join-Path $env:SystemRoot 'System32\cmd.exe') ('/d /s /c ""' + $cliCommand + '" update verify "' + $releaseFile + '""') 300
+        Save-ProgramOutput $case.Name $run
+        $output = ([string]$run.Stdout) + ' ' + ([string]$run.Stderr)
+        $passed = ($run.ExitCode -ne 0) -and ($output -match 'release-key-unconfigured|signature-invalid|trusts no release key')
+        $detail = if ($passed) { 'refused with a key or signature reason' } else { "exit $($run.ExitCode): $(Get-OutputTail $run)" }
+        Add-Step $case.Name $passed $detail
+    }
+}
+
 function Test-Assertion([string]$Name, [bool]$Passed, [string]$Detail) {
     Add-Step $Name $Passed $Detail
     return $Passed
@@ -214,8 +245,49 @@ function Test-AppStart([string]$Name, [string]$Version) {
     # The supervisor starts the app, waits for the app and its processes to exit, and removes the profile it used.
     $nodeExe = Join-Path $stagingRoot 'node\node.exe'
     $supervisor = Join-Path $stagingRoot 'smoke-supervisor.mjs'
-    $supervisorArguments = '"' + $supervisor + '" --exe "' + (Join-Path $installRoot 'joy-media.exe') + '" --cwd "' + $installRoot + '" -- --smoke'
-    $run = Invoke-Program $nodeExe $supervisorArguments 300
+    # Chromium writes its startup log to the evidence folder, so a run that stalls shows how far startup got.
+    $chromiumLog = Join-Path $evidenceDirectory ('chromium-' + (($Name -replace '[^A-Za-z0-9]+', '-').Trim('-')) + '.log')
+    $supervisorArguments = '"' + $supervisor + '" --exe "' + (Join-Path $installRoot 'joy-media.exe') + '" --cwd "' + $installRoot + '" -- --smoke --enable-logging=file --log-file="' + $chromiumLog + '"'
+    $smokeStarted = Get-Date
+    # Diagnostics for a smoke run that does not finish: every 10 seconds, the smoke processes and the smoke profile folders
+    # are recorded, so a run that stalls shows whether the app ever started and whether it is busy or idle.
+    $watchName = 'smoke-watch-' + (($Name -replace '[^A-Za-z0-9]+', '-').Trim('-')) + '.txt'
+    $watch = $null
+    try {
+        $watch = Start-Job -ScriptBlock {
+            param($file, $tempFolder)
+            for ($tick = 0; $tick -lt 36; $tick++) {
+                $processes = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(node|joy-media|joy-worker|powershell)$' } | ForEach-Object { '{0}#{1} cpu={2:N1}s' -f $_.ProcessName, $_.Id, $_.TotalProcessorTime.TotalSeconds })
+                $profiles = @(Get-ChildItem -LiteralPath $tempFolder -Directory -Filter 'joy-media-smoke-*' -ErrorAction SilentlyContinue).Count
+                $threadLines = @(Get-Process -Name 'joy-media' -ErrorAction SilentlyContinue | ForEach-Object { $proc = $_; $states = @($proc.Threads | ForEach-Object { if ($_.ThreadState -eq 'Wait') { 'Wait/' + $_.WaitReason } else { [string]$_.ThreadState } }); 'joy-media#' + $proc.Id + ' ' + (($states | Group-Object | ForEach-Object { $_.Name + 'x' + $_.Count }) -join ',') })
+                if ($tick -eq 1) {
+                    $moduleNames = @(Get-Process -Name 'joy-media' -ErrorAction SilentlyContinue | ForEach-Object { $_.Modules | ForEach-Object { $_.FileName } })
+                    [System.IO.File]::WriteAllText(($file + '.modules.txt'), (($moduleNames -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
+                }
+                $encoding = [System.Text.UTF8Encoding]::new($false)
+                [System.IO.File]::AppendAllText($file, ((Get-Date).ToUniversalTime().ToString('o') + ' profiles=' + $profiles + ' ' + ($processes -join ' | ') + ' threads: ' + ($threadLines -join ' | ')) + "`n", $encoding)
+                Start-Sleep -Seconds 10
+            }
+        } -ArgumentList (Join-Path $evidenceDirectory $watchName), $env:TEMP
+    } catch {
+        $watch = $null
+    }
+    try {
+        $run = Invoke-Program $nodeExe $supervisorArguments 300
+    } finally {
+        if ($null -ne $watch) {
+            Stop-Job -Job $watch -ErrorAction SilentlyContinue
+            Remove-Job -Job $watch -Force -ErrorAction SilentlyContinue
+        }
+    }
+    # Windows' own records of a hang or crash of the app in the same window of time.
+    try {
+        $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $smokeStarted; Id = 1000, 1001, 1002 } -ErrorAction SilentlyContinue | Select-Object -First 30)
+        $eventLines = @($events | ForEach-Object { $_.TimeCreated.ToUniversalTime().ToString('o') + ' id=' + $_.Id + ' provider=' + $_.ProviderName + ' ' + (([string]$_.Message) -split "`r?`n" | Select-Object -First 1) })
+        [System.IO.File]::WriteAllText((Join-Path $evidenceDirectory ('app-events-' + (($Name -replace '[^A-Za-z0-9]+', '-').Trim('-')) + '.txt')), (($eventLines -join "`n") + "`n"), $utf8NoBom)
+    } catch {
+        # The event log is diagnostics only; a failure here must not change the smoke result.
+    }
     Save-ProgramOutput "smoke $Name" $run
     $passed = ($run.ExitCode -eq 0) -and ($run.Stdout -match '\[joy-desktop\] packaged renderer smoke passed') -and ($run.Stderr -notmatch '\[joy-desktop\] packaged renderer smoke failed')
     $detail = if ($passed) { "the application starts and passes its renderer smoke ($Version)" } else { "smoke exit $($run.ExitCode) for ${Version}: $(Get-OutputTail $run)" }
@@ -295,6 +367,7 @@ try {
                         if (Install-Version 'upgrade again after rollback' $manifest.candidate) {
                             Test-HeldFileRefusal 'update refused while a file is held'
                             Test-AppStart 'candidate after the refused update' $manifest.candidate.version | Out-Null
+                            Test-ShippedCliRefusals
                         }
                     }
                 }

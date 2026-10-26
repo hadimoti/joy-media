@@ -607,7 +607,7 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
         [System.IO.File]::WriteAllText((Join-Path $verifyRoot 'release-manifest.json.sig'), $case.Signature + "`n")
         $verifyRun = Invoke-CapturedProcess -FilePath (Join-Path $env:SystemRoot 'System32\cmd.exe') -RawArguments ('/d /s /c ""' + $cliCommand + '" update verify "' + $releaseFile + '""') -TimeoutSeconds 300 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment)
         if ($verifyRun.ExitCode -eq 0) { throw "The shipped CLI accepted a $($case.Label) manifest." }
-        if (([string]$verifyRun.Stdout) -notmatch 'release-key-unconfigured|signature-invalid') { throw "The shipped CLI did not refuse the $($case.Label) manifest with a key or signature reason." }
+        if (([string]$verifyRun.Stdout) -notmatch 'release-key-unconfigured|signature-invalid|trusts no release key') { throw "The shipped CLI did not refuse the $($case.Label) manifest with a key or signature reason." }
         $script:transitionOutcomes[$(if ($case.Label -eq 'tampered') { 'tamperedUpdateRefused' } else { 'wrongKeyManifestRefused' })] = 'passed'
     }
 
