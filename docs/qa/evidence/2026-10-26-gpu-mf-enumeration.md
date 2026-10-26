@@ -21,14 +21,15 @@ The vtable slot for `GetAllocatedString` was confirmed by the call returning a m
 
 ## Result (this PC, run once, enumeration only)
 
-| Encoder friendly name | Count |
-|---|---|
-| `AMDh264Encoder` | 2 |
-| `NVIDIA H.264 Encoder MFT` | 1 |
+| Encoder friendly name      | Count |
+| -------------------------- | ----- |
+| `AMDh264Encoder`           | 2     |
+| `NVIDIA H.264 Encoder MFT` | 1     |
 
 All three names read back as printable text (`unreadable: 0`), and the probe exits 0.
 
 What this does and does not show:
+
 - It shows that Media Foundation offers an NVIDIA hardware H.264 encoder, which is the encoder the crash involves.
 - It also offers two AMD hardware H.264 encoders. That is a question for the G1 inventory (plan step 1): whether this PC has a
   second adapter that is active, or only stale encoder registrations. This run does not establish which.

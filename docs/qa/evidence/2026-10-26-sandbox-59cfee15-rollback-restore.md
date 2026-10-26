@@ -26,10 +26,10 @@ gate runs `tests/desktop/windows-lifecycle.ps1` on the CI toolchain. This run us
 
 ## Result (the fourth run, which is the one reported here)
 
-| Sequence | Passed | Failed |
-| --- | ---: | ---: |
-| previous-upgrade-rollback | 25 | 0 |
-| fresh-candidate | 8 | 0 |
+| Sequence                  | Passed | Failed |
+| ------------------------- | -----: | -----: |
+| previous-upgrade-rollback |     25 |      0 |
+| fresh-candidate           |      8 |      0 |
 
 `failedSteps` is 0. The rollback step reports: "the database is the pre-update snapshot and the install tree matches v1.0.2; the
 database differed from the snapshot before the rollback: yes". The fresh-candidate sequence passes 8 of 8, including the fresh shell
