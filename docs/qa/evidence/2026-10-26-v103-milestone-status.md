@@ -33,15 +33,31 @@ claimed as passing.
   25 of 25 and fresh-candidate 8 of 8. The renderer smoke passes after upgrade, after the refused update, and on fresh install,
   and both shipped-CLI refusals pass. See `2026-10-26-rollback-path-layout.md`.
 - Previous release v1.0.2, the plan's previous version (its setup and archive SHA-256 match the published `SHA256SUMS.txt`): the
-  same candidate passes previous-upgrade-rollback 25 of 25 and fresh-candidate 8 of 8, with 0 failed steps. The scratch harness
-  pins were set to v1.0.2; the committed scripts still pin v1.0.1. See `2026-10-26-sandbox-v102-previous.md`.
+  same candidate passes previous-upgrade-rollback 25 of 25 and fresh-candidate 8 of 8, with 0 failed steps. See
+  `2026-10-26-sandbox-v102-previous.md`.
+- Previous-release pins moved from v1.0.1 to v1.0.2 (owner approval, this round) in `tests/desktop/windows-lifecycle.ps1`, in the
+  gate's pinned download in `.github/workflows/release-candidate-v2.yml`, and in the evidence-restore check
+  (`ops/self-hosted/linux-runner/restore-retained-evidence.mjs`). The three hashes were checked against the local v1.0.2 release
+  folder and its published `SHA256SUMS.txt` (setup `6d8089…`, checksums `9e15f9…`, archive `e59ee1…`). The acceptance steps are
+  unchanged. Gate receipts still need a CI run, and the gate's cutover (D19) is still owner-gated.
+- Settings > Updates (this round): `File > Settings…` opens a dialog whose Updates section has a manual "Check for Updates" button.
+  The check runs only on a click, calls `desktop.check-for-update`, and never downloads or installs. The result is described in
+  plain words, a newer release shows a small dot on the Updates entry, and nothing pops up. Unit tests in
+  `apps/editor-web/src/AppSettingsDialog.test.tsx` (9 of 9). Not yet exercised in the packaged app.
 - CLI: `joy-media update check | verify <file> | rollback`. The verifier checks an Ed25519 signature over the exact manifest
   bytes and fails closed with no pinned key (`4b0d72e3`). The app's update check uses the same verifier and no longer
   needs a subscription.
-- **Not done:** the pinned release key list is empty until the owner's key ceremony (D2), so no signed update can
-  verify yet. The lifecycle transitions `updateRefusedWhileFileHeld`, `tamperedUpdateRefused` and
-  `wrongKeyManifestRefused` are in `tests/desktop/windows-lifecycle.ps1`, which is parse-checked only. They need a Windows
-  lifecycle run. The positive path needs the owner's real key.
+- Signing (D2, development side complete this round): `tooling/release/src/sign-release-manifest.mjs` adds `keygen` (release keys
+  are encrypted with a passphrase read from a file, and development keys are labelled `development-…` and `notForRelease`),
+  `fingerprint`, and a `sign` that never overwrites. Keys are refused inside the checkout or a runner workspace. Tests:
+  `sign-release-keygen.test.ts` (12 of 12) and `sign-release-manifest.test.ts` (4 of 4). `packages/release-trust/src/policy.test.ts`
+  adds 16 positive and negative cases for the verifier (rotation, forced update, tampering, wrong key, non-Ed25519 key,
+  malformed signature text, malformed manifest, channel mismatch, downgrade refusal). The custody procedure is
+  `docs/release/offline-signing-key-ceremony.md`.
+- **Not done:** the pinned release key list (`PINNED_RELEASE_PUBLIC_KEYS_PEM`) is still empty, so no signed update can
+  verify in a shipped build until the owner runs the ceremony and approves the pin change. The lifecycle transitions
+  `updateRefusedWhileFileHeld`, `tamperedUpdateRefused` and `wrongKeyManifestRefused` are in `tests/desktop/windows-lifecycle.ps1`,
+  which is parse-checked only. They need a Windows lifecycle run. The positive path needs the owner's real key.
 
 ## GPU (L2, sessions G1 and G2)
 
@@ -81,8 +97,11 @@ claimed as passing.
   lifecycle receipt on the release gate is still pending, and the gate runs on a CI Windows runner. The cause of the slow first
   start is not verified. The corrupted-face refusal is covered in two halves: a corrupted face is judged unusable
   (`caption-face-probe.test.ts`, which now takes a face argument), and an unusable probe gives `SETUP_REQUIRED`
-  (`capabilities-cmd.test.ts`). No single test runs the two together. See
-  `docs/qa/evidence/2026-10-26-caption-face-windows-host.md`. The default-face change needs the owner's confirmation (D14).
+  (`capabilities-cmd.test.ts`). This round adds the chain in one test, `plan-title.test.ts`: the real FFmpeg/libass probe judges
+  corrupted bytes unusable, the production caption planning refuses with `SETUP_REQUIRED` and writes no plan, and the bundled face
+  passes the same probe (negative control). It does not drive the packaged CLI on a corrupted installed font, so the Windows
+  end-to-end refusal is still open. See `docs/qa/evidence/2026-10-26-caption-face-windows-host.md`. The default-face change
+  needs the owner's confirmation (D14).
 
 ## Export semantics (L4, L9)
 
@@ -102,6 +121,9 @@ claimed as passing.
 - `keyboard-shortcuts.spec.ts`: all 15 shortcut actions in 1 test, 16 steps, passed. `menu-actions.spec.ts`: 8 tests passed.
 - Batch relink and override-after-restart are verified packaged in `tests/desktop/missing-media.spec.ts` (matrix note,
   2026-10-25).
+- This round: `File > Settings…` is a new menu item, recorded as `reachable` in the ledger (`file.settings`), with its label asserted
+  in `menu-panels.spec.ts`. No packaged click-through of the dialog exists yet, so it does not count as `exercised`. The Updates
+  check itself is covered by unit tests only.
 - Open UX gap, for decision: Joy Code > Pause / Stop is always enabled and does nothing when no run is in progress.
 
 ## Worker capabilities (L7a, L7b, L7c)
@@ -134,9 +156,21 @@ claimed as passing.
   cores with CPU burners, had 0 `onTaskUpdate` timeouts. Its 3 failing files (4 tests) are specific to the WSL image: the 2
   export-core jitter tests, the plugin scaffold test and the observer test all pass on the Windows host. Pool concurrency has
   not been capped.
-- CI v3: design only, `docs/plans/2026-10-26-ci-v3-design.md`. Implementation waits for D17.
-- Scheduled `ci-repeat.yml`: not built. A GitHub `schedule` runs only from the default branch, so it needs D21 and a merge to
-  `main`, which the owner has not authorized.
+- CI v3: design only, `docs/plans/2026-10-26-ci-v3-design.md`. `release-candidate-v3.yml` is **not** written. Its one-pass gate
+  needs the readiness builder (`tooling/release/src/create-readiness-evidence.mjs`), the evidence restore and the gate to accept one
+  Windows pass and one real-service/P3 pass instead of two. That is a change to the gate's own tooling, and its 39 readiness tests
+  assume two passes. Doing it without a shadow run would be unverified, so it stays open. The equivalence check
+  (`tooling/release/src/ci-v3-equivalence.ts`, 7 tests) exists and is not wired into a workflow. The throwaway-SHA negative runs
+  (D18) have not been dispatched.
+- Weekly repeat (D21, prep): `.github/workflows/ci-repeat.yml` runs `vitest-load-repeat.mjs` (Vitest passes under synthetic CPU
+  load, `--retry=0`, flake receipt `flake-counts.json`) on a hosted runner. It is inert until merged to `main`. Its tests are in
+  `ci-repeat.test.ts` (9 of 9), including mutated copies that publish, merge, go self-hosted or widen the token. The Windows
+  lifecycle and real-service repeats from the plan are not in it yet; they depend on the v3 jobs. The runner policy test names this
+  job as the only hosted job added (`ci-runner-policy.test.ts`).
+- Evidence store (D20, prep): `tooling/release/src/prune-evidence.mjs` is dry-run by default and needs an owner marker file. It keeps
+  released candidates forever, prunes unreleased runs older than 30 days only with `--apply`, refuses symlinks and refuses roots
+  inside the checkout. `prune-evidence.test.ts` has 10 cases, and a policy test fails any workflow that names it (the gate never
+  deletes).
 - Legacy workflow deletion (D22) and the branch-protection Worker check (D23): owner decisions, not done.
 
 ## Docs (F3, F4)
@@ -150,15 +184,21 @@ claimed as passing.
 | ----- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | P0    | Mostly done                           | Timing baseline committed. Per-job durations for run `40148387453` are measured (see CI and flakes). Owner decisions not collected. |
 | P1    | Implemented locally, receipts pending | Tracks A, C, D, E, F, H, I. Track G partial (see GPU). Lifecycle and release-gate receipts pending.                                 |
-| P2    | Blocked                               | CI v3 needs approvals D17 to D23.                                                                                                   |
+| P2    | Blocked                               | CI v3 workflow not written: the one-pass gate tooling is the blocker (see CI and flakes). Approvals D18 to D23 still open.          |
 | P3    | Blocked                               | Attended G1 (owner).                                                                                                                |
 | P4    | Blocked                               | Needs P2 and P3.                                                                                                                    |
 | P5    | Blocked                               | Attended G2 and A1 on the frozen artifact, then a release decision.                                                                 |
 
 ## Owner items (open)
 
-- D2: signing-key ceremony. The pinned key list stays empty until then.
-- D17 to D23: CI v3 approvals and policy changes (D22, D23 included).
+- D2: signing-key ceremony. The development tooling and its tests are done (see Installer). The owner runs the ceremony in
+  `docs/release/offline-signing-key-ceremony.md`, and the pinned key list stays empty until the owner approves the pin change.
+- Owner approvals received on 2026-10-26 for development work: D17 (branch implementation of the v3 design, still to be written),
+  D18 (equivalence harness and negative controls; shadow dispatches only after the no-publish check), D20 (receipts-only store,
+  dry-run prune utility), D21 (weekly repeat file, inert until merged), the v1.0.2 pins, the Settings > Updates check, and the
+  caption probe design. Still reserved: D19 (cutover), D22 (legacy deletion), D23 (branch protection) and final release
+  authorization.
+- D17 to D23 remaining: D19, D22 and D23 stay with the owner. D18 shadow dispatches and the D21 merge to `main` need their own go.
 - G1 and G2: attended GPU sessions, with decisions D6 to D8 (diagnostics, driver changes, mitigations).
 - A1: attended account and model sessions, with D9 to D12.
 - D14 (default caption face), D16 (full disk), D25 and D26 (menu and keyboard scope; worker dispatch exposure).
@@ -171,9 +211,9 @@ claimed as passing.
 - The Electron variant builds for the bisect. These need network downloads and belong with G1.
 - The lifecycle receipts for L1, L3, L5a and F2. `windows-lifecycle.ps1` needs the CI toolchain, and its receipt belongs to the
   owner-gated release gate. The Sandbox run on candidate `a369df53` is supporting evidence: 25 of 25 and 8 of 8, including both
-  shipped-CLI refusals and the held-file refusal. The gate's lifecycle still pins v1.0.1 as the previous release, where the plan
-  calls for v1.0.2; moving the pins is a release-gate change for the owner to approve. L3's caption case passes on this host
-  (see the L3 section); its release-gate receipt is pending.
+  shipped-CLI refusals and the held-file refusal. The gate's lifecycle and its previous-release pins now name v1.0.2 (approved this
+  round), so a gate run will verify them. Its receipt is still pending. L3's caption case passes on this host (see the L3 section);
+  its release-gate receipt is pending.
 - Survives flake: root cause not confirmed. The timeout message now names the job state, so the next occurrence settles it.
 - A packaged-startup check in CI, so a packaged app that cannot import its main module fails the build. It needs a runner and a
   policy decision (owner).
