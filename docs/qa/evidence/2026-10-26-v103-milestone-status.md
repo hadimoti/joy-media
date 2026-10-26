@@ -10,6 +10,10 @@ claimed as passing.
 
 ## Branch and development CI
 
+- Commits since `cad3445e` (the Sandbox note): `e983842b` (packaged click-through of File > Settings and its manual update check,
+  L6; dev CI run `40292255809`, success, 6 of 6), `59cfee15` (GPU diagnostic mode wired behind its flag; rollback checks for the
+  exact install tree and the database snapshot, with the Sandbox guest carrying the same checks; L1 and L2 prep), and `de99320c`
+  (Media Foundation enumeration probe, L2 prep).
 - Branch `v1.0.3/no-owner-tracks`. Commits in this checkpoint, on top of `a93f819c`, `c94efe62`, `54a33fdf` and `58943380`:
   - `6ae9be64`: GPU diagnostic-mode switch, stage list and local-only crash settings. Inert, not wired into the app.
   - `de392213`: attended G2 repeat harness. Preflight verified; the run loop has not run.
@@ -43,7 +47,13 @@ claimed as passing.
 - Settings > Updates (this round): `File > Settings…` opens a dialog whose Updates section has a manual "Check for Updates" button.
   The check runs only on a click, calls `desktop.check-for-update`, and never downloads or installs. The result is described in
   plain words, a newer release shows a small dot on the Updates entry, and nothing pops up. Unit tests in
-  `apps/editor-web/src/AppSettingsDialog.test.tsx` (9 of 9). Not yet exercised in the packaged app.
+  `apps/editor-web/src/AppSettingsDialog.test.tsx` (9 of 9). A packaged click-through (`e983842b`, `tests/desktop/settings-dialog.spec.ts`,
+  1 of 1) opens the dialog and runs the manual check on the packaged build.
+- Rollback checks (`59cfee15`): the rollback runs with `/restore-data`. The restored database must equal the snapshot the upgrade took,
+  byte for byte, and the install tree must equal the v1.0.2 tree from before the upgrade. Sandbox evidence on candidate `59cfee15`
+  (setup SHA-256 `3dc8beb9…`): previous-upgrade-rollback 25 of 25 and fresh-candidate 8 of 8, 0 failed steps, with the database changed
+  before the rollback and restored to the snapshot. See `2026-10-26-sandbox-59cfee15-rollback-restore.md`. The same checks in
+  `tests/desktop/windows-lifecycle.ps1` are parse-checked only, because the owner-gated CI lifecycle runs that script.
 - CLI: `joy-media update check | verify <file> | rollback`. The verifier checks an Ed25519 signature over the exact manifest
   bytes and fails closed with no pinned key (`4b0d72e3`). The app's update check uses the same verifier and no longer
   needs a subscription.
@@ -61,7 +71,8 @@ claimed as passing.
 
 ## GPU (L2, sessions G1 and G2)
 
-- Built: `apps/desktop/src/main/gpu-diagnostics.ts`, an inert diagnostic module (not wired into `electron-entry.ts`);
+- Built: `apps/desktop/src/main/gpu-diagnostics.ts`, the diagnostic mode. It is wired into `electron-entry.ts` behind
+  `--joy-media-gpu-diagnostics` (`59cfee15`), so a normal launch does nothing new. Nine unit tests use fakes;
   `tooling/diagnostics/src/redact-gpu-report.ts` with its tests; the stage probe in `tests/desktop/gpu-probe/`;
   and the repeat harness `tooling/diagnostics/run-default-export-repeat.ps1`.
 - Stage probe, run locally on the `apps/desktop` Electron 44.3.0 build: S0 ok; S1 ok, WebGL 2 on ANGLE D3D11 with the
@@ -70,8 +81,11 @@ claimed as passing.
   has not run. It needs pnpm on PATH, because the Playwright config's API server starts with pnpm, and it needs an installed
   build and the attended session.
 - Electron is pinned exactly at `44.3.0` in `apps/desktop/package.json`.
-- Not built: the minimal Media Foundation probe (`tooling/diagnostics/mf-probe/`) and the Electron variant builds for the
-  bisect. The diagnostic switch is not wired, because its crash-reporter options and Chromium switches need G1 confirmation.
+- Media Foundation probe (`tooling/diagnostics/mf-probe/`, `de99320c`): it lists the hardware H.264 encoders from outside Chromium.
+  On this PC it finds the NVIDIA H.264 Encoder MFT and two AMD H.264 encoder MFTs, all names readable
+  (`2026-10-26-gpu-mf-enumeration.md`). Its activation and one-frame encode are not built; they belong with G1.
+- Not built: the Electron variant builds for the bisect. They need large downloads, which the session constraints limit, and they
+  belong with G1.
 - The shipped default build still crashes on this host (note of 2026-10-24). Owner sessions G1 (diagnosis) and G2
   (30-run proof on the exact candidate) have not run.
 
@@ -121,9 +135,10 @@ claimed as passing.
 - `keyboard-shortcuts.spec.ts`: all 15 shortcut actions in 1 test, 16 steps, passed. `menu-actions.spec.ts`: 8 tests passed.
 - Batch relink and override-after-restart are verified packaged in `tests/desktop/missing-media.spec.ts` (matrix note,
   2026-10-25).
-- This round: `File > Settings…` is a new menu item, recorded as `reachable` in the ledger (`file.settings`), with its label asserted
-  in `menu-panels.spec.ts`. No packaged click-through of the dialog exists yet, so it does not count as `exercised`. The Updates
-  check itself is covered by unit tests only.
+- Packaged Settings click-through (`e983842b`): `tests/desktop/settings-dialog.spec.ts` opens File > Settings…, runs the manual
+  Updates check and closes the dialog (1 of 1). The ledger marks `file.settings` as `exercised`. Packaged suites on the unpacked build
+  from `cad3445e` (the same app code as `e983842b`): menu-panels 2 of 2, keyboard-shortcuts 1 of 1, menu-actions 8 of 8,
+  settings-dialog 1 of 1, 12 of 12 with 0 failed. The ledger validator passes 8 of 8, also in strict mode.
 - Open UX gap, for decision: Joy Code > Pause / Stop is always enabled and does nothing when no run is in progress.
 
 ## Worker capabilities (L7a, L7b, L7c)
@@ -154,8 +169,10 @@ claimed as passing.
   state to the timeout message. See `docs/qa/evidence/2026-10-26-survives-flake-analysis.md`.
 - The Vitest `onTaskUpdate` RPC timeout was not reproduced. A full run of the repository suite (726 files) on WSL, pinned to two
   cores with CPU burners, had 0 `onTaskUpdate` timeouts. Its 3 failing files (4 tests) are specific to the WSL image: the 2
-  export-core jitter tests, the plugin scaffold test and the observer test all pass on the Windows host. Pool concurrency has
-  not been capped.
+  export-core jitter tests, the plugin scaffold test and the observer test all pass on the Windows host. Pool concurrency is capped
+  in `vitest.config.ts`: one worker on GitHub-hosted runners, otherwise the lower of 8 and the cores minus one. Not done: a serial
+  project for the roughly 55 test files that spawn processes. It changes test discovery, so it needs a listing comparison of the
+  whole suite before it lands.
 - CI v3 (D17, branch implementation): `.github/workflows/release-candidate-v3.yml` is written, dispatch-only, and is **not** the
   production gate. It is derived from v2 by a scripted transform whose every replacement is asserted, so the diff against v2 is the
   change: one pass per lane (no pass matrix), one Windows evidence output, the single-pass topology in the readiness record and in
@@ -164,8 +181,9 @@ claimed as passing.
   take a topology; the two-pass values and their 39 + 6 existing tests are unchanged. The single-pass builder tests (15) and restore
   tests (6) pass. `release-candidate-v3.test.ts` (19 tests, with mutated copies that must be refused) pins the policy. The runner
   allowlist lists the same four hosted jobs as v2.
-- Not done for v3: (1) the design's job merges (hosted-verify, windows-candidate, fixture-acceptance) and the Vitest sharding, deferred
-  to the shadow measurement, since each one changes the critical path; (2) a run-summary writer and its artifact for the shadow
+- Not done for v3: (1) the job merges (hosted-verify, windows-candidate, fixture-acceptance) and the Vitest sharding of plan 3.4 are
+  not implemented on the branch. We deferred them to the shadow measurement because each one changes the critical path. That
+  departs from the plan's design, and the owner should decide whether to implement them before the shadow run; (2) a run-summary writer and its artifact for the shadow
   comparison (`tooling/release/src/ci-v3-shadow-compare.mjs`, 12 negative controls); (3) the shadow dispatches (D18). A dispatch needs
   the file on the default branch, and that merge needs owner approval. `docs/release/ci-v3-shadow-runbook.md` has the exact steps.
 - Equivalence of executed tests: `ci-v3-equivalence.ts` (7 tests) and the shadow comparison share the rule that v3 may add tests but
@@ -184,7 +202,7 @@ claimed as passing.
 ## Docs (F3, F4)
 
 - `75da669e`: infrastructure detail scrubbed from the docs and plan, a scan added to enforce it, and matrix rows corrected.
-  The scan was not re-run in this checkpoint.
+  The privacy scan (`tooling/release/src/privacy-scan.test.ts`) was re-run on the current tree and passes 2 of 2.
 
 ## Plan phases
 
@@ -214,8 +232,12 @@ claimed as passing.
 
 ## Remaining engineering, not owner-gated
 
-- The Media Foundation probe (C#, `tooling/diagnostics/mf-probe/`): not built. This PC has no Windows SDK headers, so the Media
-  Foundation constants and interop signatures cannot be checked against source here. The probe belongs with G1.
+- The Media Foundation probe's activation and one-frame encode (`tooling/diagnostics/mf-probe/`): not built. The enumeration is
+  built (`de99320c`), and its constants were checked at run time. The encode belongs with G1.
+- A packaged CLI refusal of a corrupted installed caption face on Windows (the end-to-end part of L3): not built. The refusal is
+  tested in pieces, and the chain test covers the production caption planning.
+- A serial project for process-spawning tests, and the job merges and sharding of plan 3.4 (L10): not built (see CI and flakes).
+- A positive signed-update check with the owner's key (L1): owner-gated; the key is not generated.
 - The Electron variant builds for the bisect. These need network downloads and belong with G1.
 - The lifecycle receipts for L1, L3, L5a and F2. `windows-lifecycle.ps1` needs the CI toolchain, and its receipt belongs to the
   owner-gated release gate. The Sandbox run on candidate `a369df53` is supporting evidence: 25 of 25 and 8 of 8, including both

@@ -54,6 +54,26 @@ function Get-Sha256Lower([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
 }
 
+# A hash of the whole install tree: every file's relative path and SHA-256, sorted. A rollback is checked against the tree the
+# previous version had before the upgrade, so a stray candidate file, or a file the previous version has and the rollback lost,
+# fails the step.
+function Get-InstallTreeHash([string]$Root) {
+    $base = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $entries = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Force | ForEach-Object {
+        $relative = [IO.Path]::GetFullPath($_.FullName).Substring($base.Length).ToLowerInvariant()
+        "$relative $(Get-Sha256Lower $_.FullName)"
+    } | Sort-Object)
+    $digest = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes(($entries -join "`n")))
+    return ([BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant()
+}
+
+# The data folder the installed app uses, as the installer computes it: its product name under the roaming AppData folder.
+function Get-UserDataDirectory {
+    $package = Get-Content -LiteralPath (Join-Path $installRoot 'resources\app\package.json') -Raw | ConvertFrom-Json
+    $name = if ($package.productName) { [string]$package.productName } else { [string]$package.name }
+    return Join-Path $env:APPDATA $name
+}
+
 # Runs a program with captured output and a time limit. The argument line is passed raw, because cmd.exe needs its
 # own quoting. A program that outlives the limit is stopped. The process is started directly, not with Start-Process,
 # because Windows PowerShell 5.1 returns a null ExitCode from Start-Process when output is redirected. A child that
@@ -153,7 +173,18 @@ function Invoke-KeptRollback([string]$Name) {
         Add-Step $Name $false 'the setup file does not match the manifest hash'
         return $false
     }
-    $run = Invoke-Program $setupPath '/rollback' 900
+    # The database as the candidate left it, before the rollback. A restore only proves something if this differs from the snapshot.
+    $userDataDirectory = Get-UserDataDirectory
+    $restoredDatabase = Join-Path $userDataDirectory 'joy-media.sqlite3'
+    # The newer version's writes, simulated: a fixed block of bytes is appended while the application is closed, so the database
+    # differs from the snapshot, and the rollback must put the snapshot back. The check below fails if no difference was made.
+    if (Test-Path -LiteralPath $restoredDatabase -PathType Leaf) {
+        $writeMarker = [System.Text.Encoding]::ASCII.GetBytes('joy-media-sandbox-write-' * 256)
+        $writeStream = [System.IO.File]::Open($restoredDatabase, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write)
+        try { $writeStream.Write($writeMarker, 0, $writeMarker.Length) } finally { $writeStream.Close() }
+    }
+    $databaseBeforeRollback = if (Test-Path -LiteralPath $restoredDatabase -PathType Leaf) { Get-Sha256Lower $restoredDatabase } else { '' }
+    $run = Invoke-Program $setupPath '/rollback /restore-data' 900
     Save-ProgramOutput $Name $run
     if ($run.ExitCode -ne 0) {
         Add-Step $Name $false "rollback exited with $($run.ExitCode): $(Get-OutputTail $run)"
@@ -164,6 +195,17 @@ function Invoke-KeptRollback([string]$Name) {
     if ($registered -ne $manifest.previous.version) { $problems += "registered version is '$registered', not $($manifest.previous.version)" }
     $problems += Get-InstalledFileProblems $manifest.previous.installed
     if (-not (Test-Path -LiteralPath (Join-Path $keptFolder 'joy-media.exe') -PathType Leaf)) { $problems += 'the replaced version was not kept beside the restored one' }
+    # /restore-data puts back the database snapshot the upgrade took, so the database must be that snapshot byte for byte. The
+    # whole install tree must be the previous version's tree as it was before the upgrade.
+    $snapshotDatabase = Join-Path $userDataDirectory "backups\pre-update-$($manifest.previous.version)\joy-media.sqlite3"
+    if (-not (Test-Path -LiteralPath $snapshotDatabase -PathType Leaf)) { $problems += 'the upgrade did not snapshot the previous database' }
+    elseif (-not (Test-Path -LiteralPath $restoredDatabase -PathType Leaf)) { $problems += 'the database is missing after the rollback' }
+    elseif ((Get-Sha256Lower $restoredDatabase) -ne (Get-Sha256Lower $snapshotDatabase)) { $problems += 'the restored database is not the pre-update snapshot' }
+    if ((Test-Path -LiteralPath $snapshotDatabase -PathType Leaf) -and $databaseBeforeRollback -eq (Get-Sha256Lower $snapshotDatabase)) {
+        $problems += 'the database did not differ from the snapshot before the rollback, so the restore was not exercised'
+    }
+    if ($null -eq $script:previousTreeHash) { $problems += 'the previous install tree was not recorded before the upgrade' }
+    elseif ((Get-InstallTreeHash $installRoot) -ne $script:previousTreeHash) { $problems += "the install tree differs from v$($manifest.previous.version) (a stray or missing file)" }
     # The restored layout decides the user PATH entry: the bin folder for the bin layout, the install root before it.
     # A version without a bin folder must be listed under the root, and the bin entry must be gone.
     $pathEntries = @(([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
@@ -174,7 +216,7 @@ function Invoke-KeptRollback([string]$Name) {
     if (-not ($pathEntries | Where-Object { $_ -ieq $expectedEntry })) { $problems += "the user PATH does not list $expectedEntry for the restored version" }
     if ($pathEntries | Where-Object { $_ -ieq $otherEntry }) { $problems += "the user PATH still lists $otherEntry" }
     $passed = $problems.Count -eq 0
-    $detail = if ($passed) { "rolled back to $($manifest.previous.version) and kept $($manifest.candidate.version) beside it; PATH follows the restored layout" } else { $problems -join '; ' }
+    $detail = if ($passed) { "rolled back to $($manifest.previous.version) and kept $($manifest.candidate.version) beside it; PATH follows the restored layout; the database is the pre-update snapshot and the install tree matches v$($manifest.previous.version); the database differed from the snapshot before the rollback: $(if ($databaseBeforeRollback -ne (Get-Sha256Lower $snapshotDatabase)) { 'yes' } else { 'no' })" } else { $problems -join '; ' }
     Add-Step $Name $passed $detail
     return $passed
 }
@@ -351,6 +393,8 @@ try {
         if (Install-Version 'install previous version' $manifest.previous) {
             Test-Assertion 'previous layout registers the install root (v1.0.1 and v1.0.2 behaviour)' (Test-UserPathEntry $installRoot) 'the previous installer adds the install root to the user PATH' | Out-Null
             Test-AppStart 'previous' $manifest.previous.version | Out-Null
+            # The install tree of the previous version as the upgrade finds it. The rollback must return exactly this tree.
+            $script:previousTreeHash = Get-InstallTreeHash $installRoot
             if (Install-Version 'upgrade to candidate' $manifest.candidate) {
                 $pathDetail = 'bin is on the user PATH and the install root is not'
                 Test-Assertion 'candidate PATH holds only bin' ((Test-UserPathEntry $binDirectory) -and -not (Test-UserPathEntry $installRoot)) $pathDetail | Out-Null
