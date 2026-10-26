@@ -130,14 +130,33 @@ jobs:
           test "$(pnpm --version)" = '11.15.0'
           pnpm install --frozen-lockfile
       - name: Ensure media codec tool is available
+        timeout-minutes: 20
         shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
         run: |
           set -euo pipefail
-          if ! command -v ffmpeg >/dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y ffmpeg
+          # Bounded provisioning. Run 40401999522 stalled here for 38 minutes on Node 24, while Node 22 took 22 seconds. Each apt call has a
+          # timeout, the install retries a bounded number of times, and the step fails unless ffmpeg and ffprobe both run.
+          apt_options=(-o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          media_ready() {
+            command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1
+          }
+          install_media_tools() {
+            sudo timeout -k 15 120 apt-get "${apt_options[@]}" update &&
+              sudo timeout -k 15 240 apt-get "${apt_options[@]}" install -y ffmpeg
+          }
+          if ! media_ready; then
+            for attempt in 1 2 3; do
+              if install_media_tools; then break; fi
+              echo "::warning::FFmpeg provisioning attempt ${attempt} of 3 failed"
+              if [ "$attempt" -lt 3 ]; then sleep 15; fi
+            done
           fi
+          media_ready || { echo 'ffmpeg and ffprobe are not available after 3 bounded attempts' >&2; exit 1; }
           ffmpeg -version
+          ffprobe -version
       - name: Run full CLI contract suite on the supported Node version
         run: pnpm exec vitest run apps/cli/src --no-file-parallelism --reporter=default --reporter=json --outputFile.json=test-output/shadow-v2/node-contracts-cli.json
       - name: Run PostgreSQL migration and concurrent invoice acceptance
@@ -146,7 +165,20 @@ jobs:
           set -euo pipefail
           test -n "$JOY_TEST_DATABASE_URL"
           pnpm exec vitest run apps/api/src/usdc-invoice-ledger.pg.test.ts --no-file-parallelism --reporter=default --reporter=json --outputFile.json=test-output/shadow-v2/node-contracts-pg.json
+      - name: Record the checksums of the Vitest reports (shadow evidence)
+        if: always()
+        shell: bash
+        run: |
+          # Development evidence. A lane that wrote no report records no checksum, and the shadow-evidence job then reports the gap. This
+          # step never fails the lane, because the lane's result feeds the release gate.
+          shopt -s nullglob
+          reports=(test-output/shadow-v2/*.json)
+          if [ ${#reports[@]} -gt 0 ]; then
+            (cd test-output/shadow-v2 && sha256sum -- *.json > shadow-sha256.txt) || echo 'The checksums of the Vitest reports could not be written.'
+          fi
+          exit 0
       - name: Upload the Vitest reports of the node-contracts lane (one day, shadow evidence)
+        id: vitest-upload-1
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -154,7 +186,55 @@ jobs:
           name: joy-media-v2-vitest-node-contracts-node-${{ matrix.node }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
           path: test-output/shadow-v2
           retention-days: 1
-          if-no-files-found: warn
+          if-no-files-found: error
+      - name: Wait before the second upload attempt (shadow evidence)
+        if: always() && steps.vitest-upload-1.outcome == 'failure'
+        shell: bash
+        run: sleep 20
+      - name: Retry the upload of the Vitest reports, second attempt (shadow evidence)
+        id: vitest-upload-2
+        if: always() && steps.vitest-upload-1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-v2-vitest-node-contracts-node-${{ matrix.node }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/shadow-v2
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
+      - name: Wait before the third upload attempt (shadow evidence)
+        if: always() && steps.vitest-upload-1.outcome == 'failure' && steps.vitest-upload-2.outcome == 'failure'
+        shell: bash
+        run: sleep 20
+      - name: Retry the upload of the Vitest reports, third attempt (shadow evidence)
+        id: vitest-upload-3
+        if: always() && steps.vitest-upload-1.outcome == 'failure' && steps.vitest-upload-2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-v2-vitest-node-contracts-node-${{ matrix.node }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/shadow-v2
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
+      - name: Record the outcome of the Vitest report upload (shadow evidence)
+        if: always()
+        shell: bash
+        env:
+          UPLOAD_1: ${{ steps.vitest-upload-1.outcome }}
+          UPLOAD_2: ${{ steps.vitest-upload-2.outcome }}
+          UPLOAD_3: ${{ steps.vitest-upload-3.outcome }}
+          DIGEST: ${{ steps.vitest-upload-1.outputs.artifact-digest }}${{ steps.vitest-upload-2.outputs.artifact-digest }}${{ steps.vitest-upload-3.outputs.artifact-digest }}
+        run: |
+          # Development evidence. The lane stays green either way, because its result feeds the release gate. A failed upload on every
+          # attempt is an error annotation here, and the shadow-evidence job then fails for the missing instance.
+          attempts="$UPLOAD_1, $UPLOAD_2, $UPLOAD_3"
+          if [[ "$attempts" == *success* ]]; then
+            echo "Vitest report uploaded (attempts: ${attempts}; artifact digest ${DIGEST:-none})."
+          else
+            echo "::error::Vitest report upload failed on every attempt (attempts: ${attempts}). The shadow-evidence job reports this instance as missing."
+          fi
+          exit 0
 
   editor-web-bundle:
     name: editor-web-bundle (standard hosted Linux)
@@ -281,7 +361,20 @@ jobs:
           node node_modules/typescript/bin/tsc -b apps/cli
           (cd apps/cli && node scripts/bundle.mjs)
           node node_modules/vitest/vitest.mjs run --config vitest.p0.config.ts --reporter=default --reporter=json --outputFile.json=test-output/shadow-v2/linux-p0.json
+      - name: Record the checksums of the Vitest reports (shadow evidence)
+        if: always()
+        shell: bash
+        run: |
+          # Development evidence. A lane that wrote no report records no checksum, and the shadow-evidence job then reports the gap. This
+          # step never fails the lane, because the lane's result feeds the release gate.
+          shopt -s nullglob
+          reports=(test-output/shadow-v2/*.json)
+          if [ ${#reports[@]} -gt 0 ]; then
+            (cd test-output/shadow-v2 && sha256sum -- *.json > shadow-sha256.txt) || echo 'The checksums of the Vitest reports could not be written.'
+          fi
+          exit 0
       - name: Upload the Vitest reports of the Linux P0 lane (one day, shadow evidence)
+        id: vitest-upload-1
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -289,7 +382,55 @@ jobs:
           name: joy-media-v2-vitest-linux-p0-pass-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
           path: test-output/shadow-v2
           retention-days: 1
-          if-no-files-found: warn
+          if-no-files-found: error
+      - name: Wait before the second upload attempt (shadow evidence)
+        if: always() && steps.vitest-upload-1.outcome == 'failure'
+        shell: bash
+        run: sleep 20
+      - name: Retry the upload of the Vitest reports, second attempt (shadow evidence)
+        id: vitest-upload-2
+        if: always() && steps.vitest-upload-1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-v2-vitest-linux-p0-pass-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/shadow-v2
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
+      - name: Wait before the third upload attempt (shadow evidence)
+        if: always() && steps.vitest-upload-1.outcome == 'failure' && steps.vitest-upload-2.outcome == 'failure'
+        shell: bash
+        run: sleep 20
+      - name: Retry the upload of the Vitest reports, third attempt (shadow evidence)
+        id: vitest-upload-3
+        if: always() && steps.vitest-upload-1.outcome == 'failure' && steps.vitest-upload-2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-v2-vitest-linux-p0-pass-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/shadow-v2
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
+      - name: Record the outcome of the Vitest report upload (shadow evidence)
+        if: always()
+        shell: bash
+        env:
+          UPLOAD_1: ${{ steps.vitest-upload-1.outcome }}
+          UPLOAD_2: ${{ steps.vitest-upload-2.outcome }}
+          UPLOAD_3: ${{ steps.vitest-upload-3.outcome }}
+          DIGEST: ${{ steps.vitest-upload-1.outputs.artifact-digest }}${{ steps.vitest-upload-2.outputs.artifact-digest }}${{ steps.vitest-upload-3.outputs.artifact-digest }}
+        run: |
+          # Development evidence. The lane stays green either way, because its result feeds the release gate. A failed upload on every
+          # attempt is an error annotation here, and the shadow-evidence job then fails for the missing instance.
+          attempts="$UPLOAD_1, $UPLOAD_2, $UPLOAD_3"
+          if [[ "$attempts" == *success* ]]; then
+            echo "Vitest report uploaded (attempts: ${attempts}; artifact digest ${DIGEST:-none})."
+          else
+            echo "::error::Vitest report upload failed on every attempt (attempts: ${attempts}). The shadow-evidence job reports this instance as missing."
+          fi
+          exit 0
       - name: Verify no untracked teardown residue
         if: always()
         shell: bash
@@ -368,7 +509,22 @@ jobs:
           $env:JOY_REQUIRE_CHROMIUM = '1'
           node node_modules/vitest/vitest.mjs run apps/cli/src --no-file-parallelism --reporter=default --reporter=json --outputFile.json=test-output/shadow-v2/windows-cli.json
           if ($LASTEXITCODE -ne 0) { throw "Windows CLI contract suite failed with exit code $LASTEXITCODE." }
+      - name: Record the checksums of the Vitest reports (shadow evidence)
+        if: always()
+        shell: powershell
+        run: |
+          # Development evidence. A lane that wrote no report records no checksum, and the shadow-evidence job then reports the gap. This
+          # step never fails the lane, because the lane's result feeds the release gate.
+          $reports = @(Get-ChildItem -LiteralPath 'test-output/shadow-v2' -Filter '*.json' -ErrorAction SilentlyContinue)
+          if ($reports.Count -gt 0) {
+            $lines = $reports | Sort-Object Name | ForEach-Object {
+              '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+            }
+            Set-Content -LiteralPath 'test-output/shadow-v2/shadow-sha256.txt' -Value $lines -Encoding ascii
+          }
+          exit 0
       - name: Upload the Vitest reports of the Windows P0 lane (one day, shadow evidence)
+        id: vitest-upload-1
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -376,7 +532,56 @@ jobs:
           name: joy-media-v2-vitest-windows-p0-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
           path: test-output/shadow-v2
           retention-days: 1
-          if-no-files-found: warn
+          if-no-files-found: error
+      - name: Wait before the second upload attempt (shadow evidence)
+        if: always() && steps.vitest-upload-1.outcome == 'failure'
+        shell: powershell
+        run: Start-Sleep -Seconds 20
+      - name: Retry the upload of the Vitest reports, second attempt (shadow evidence)
+        id: vitest-upload-2
+        if: always() && steps.vitest-upload-1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-v2-vitest-windows-p0-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/shadow-v2
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
+      - name: Wait before the third upload attempt (shadow evidence)
+        if: always() && steps.vitest-upload-1.outcome == 'failure' && steps.vitest-upload-2.outcome == 'failure'
+        shell: powershell
+        run: Start-Sleep -Seconds 20
+      - name: Retry the upload of the Vitest reports, third attempt (shadow evidence)
+        id: vitest-upload-3
+        if: always() && steps.vitest-upload-1.outcome == 'failure' && steps.vitest-upload-2.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-v2-vitest-windows-p0-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/shadow-v2
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: true
+      - name: Record the outcome of the Vitest report upload (shadow evidence)
+        if: always()
+        shell: powershell
+        env:
+          UPLOAD_1: ${{ steps.vitest-upload-1.outcome }}
+          UPLOAD_2: ${{ steps.vitest-upload-2.outcome }}
+          UPLOAD_3: ${{ steps.vitest-upload-3.outcome }}
+          DIGEST: ${{ steps.vitest-upload-1.outputs.artifact-digest }}${{ steps.vitest-upload-2.outputs.artifact-digest }}${{ steps.vitest-upload-3.outputs.artifact-digest }}
+        run: |
+          # Development evidence. The lane stays green either way, because its result feeds the release gate. A failed upload on every
+          # attempt is an error annotation here, and the shadow-evidence job then fails for the missing instance.
+          $attempts = "$env:UPLOAD_1, $env:UPLOAD_2, $env:UPLOAD_3"
+          $digest = if ($env:DIGEST) { $env:DIGEST } else { 'none' }
+          if ($attempts -match 'success') {
+            Write-Output "Vitest report uploaded (attempts: $attempts; artifact digest $digest)."
+          } else {
+            Write-Output "::error::Vitest report upload failed on every attempt (attempts: $attempts). The shadow-evidence job reports this instance as missing."
+          }
+          exit 0
       - name: Check for untracked residue
         if: always()
         shell: powershell
@@ -1447,6 +1652,31 @@ jobs:
           test -z "$(git status --porcelain)"
           test -s test-output/operations/teardown.json
           node -e 'const r=require("./test-output/operations/teardown.json"); if(r.clean!==true) process.exit(1)'
+
+  shadow-evidence:
+    # Shadow evidence only. The release gate below does not need this job, so its result cannot change the gate's verdict. It fails when
+    # any required matrix instance lacks a complete, readable Vitest report, and the shadow comparison refuses such a pair.
+    name: shadow evidence (every required Vitest report of the matrix)
+    runs-on: [self-hosted, linux, x64, joy-media-acceptance]
+    needs: [node-contracts, linux-real-services, windows-p0-real-services]
+    if: always()
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Download the Vitest reports of this run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: joy-media-v2-vitest-*-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: shadow-evidence
+      - name: Require a complete, readable report from every required matrix instance
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The verifier comes from this workflow's ref, not from the candidate tree, and it only reads the reports and their checksums.
+          node tooling/release/src/vitest-shadow-evidence.mjs verify --root shadow-evidence --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --candidate-sha "$CANDIDATE_SHA"
 
   gate-summary:
     name: gate-summary

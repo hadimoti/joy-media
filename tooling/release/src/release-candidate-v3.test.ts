@@ -14,9 +14,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS = join(resolve(HERE, '../../..'), '.github', 'workflows');
 const V2_PATH = join(WORKFLOWS, 'release-candidate-v2.yml');
 const V3_PATH = join(WORKFLOWS, 'release-candidate-v3.yml');
-// The sha256 of release-candidate-v2.yml at the head of proposal/v2-p0-scope. v2 is the fallback gate, so any change to it must be
-// deliberate and must update this pin with the owner's approval. The approved change adds the shadow evidence steps (D18, 2026-10-27).
-const V2_SHA256 = '658b5080b7a92f460be48795c4cc10bee468c182498aa8693f02d6ad7028ab6c';
+// The sha256 of release-candidate-v2.yml on proposal/d18-shadow-pair-2. v2 is the fallback gate, so any change to it must be deliberate
+// and must update this pin with the owner's approval. The approved D18 infrastructure change (2026-10-27) edits the shadow evidence steps,
+// the FFmpeg provisioning of node-contracts, and adds the shadow-evidence job. ci-artifact-policy.test.ts pins each release-deciding job
+// byte for byte, so the release gate itself did not change.
+const V2_SHA256 = 'a871e8b3fcc19d214158d6270d19992377df2b3787cc9ff05b54d0d289c7a116';
 const yaml = createRequire(join(resolve(HERE, '../../..'), 'package.json'))('js-yaml') as {
   load(source: string): unknown;
 };

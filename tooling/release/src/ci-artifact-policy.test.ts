@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { REQUIRED_INSTANCES } from './vitest-shadow-evidence.mjs';
 
 const WORKFLOW_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -60,10 +62,10 @@ describe('v2 release-candidate artifact upload policy', () => {
     const windowsJob = jobBlock(workflow, 'windows-worker-clean');
     const gateJob = jobBlock(workflow, 'gate-summary');
     // Two artifact pairs carry release files: the renderer handoff and the Windows release files. The Vitest reports of the
-    // v2 test lanes add three one-day uploads (development evidence, checked in the shadow test below). Only the two gate
-    // downloads exist, and each is named below. No other job may take part.
-    expect(workflow.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(5);
-    expect(workflow.match(/uses:\s*actions\/download-artifact@/g) ?? []).toHaveLength(2);
+    // v2 test lanes add nine one-day upload attempts, three per lane (development evidence, checked in the shadow test below).
+    // The downloads are the two gate inputs and the shadow-evidence job's report download. No other job may take part.
+    expect(workflow.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(11);
+    expect(workflow.match(/uses:\s*actions\/download-artifact@/g) ?? []).toHaveLength(3);
     expect(bundleJob).toContain(UPLOAD_ACTION);
     expect(windowsJob).toContain(DOWNLOAD_ACTION);
     expect(bundleJob).toContain(EDITOR_WEB_ARTIFACT_NAME);
@@ -119,9 +121,13 @@ describe('v2 release-candidate artifact upload policy', () => {
       expect(upload).toContain(`name: ${namePrefix}`);
       expect(upload).toContain('path: test-output/shadow-v2');
       expect(upload).toMatch(/\n\s+retention-days: 1\n/);
-      expect(upload).toContain('if-no-files-found: warn');
+      // A missing report is an error, so an empty upload never passes as evidence.
+      expect(upload).toContain('if-no-files-found: error');
       expect(upload).toContain('if: always()');
-      expect(block.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(1);
+      // Three attempts at most: the upload, then a retry after a short wait, then a last retry. Each retry runs only after the
+      // attempt before it failed, and none of them is gating (see the continue-on-error test below).
+      expect(block.match(/uses:\s*actions\/upload-artifact@/g) ?? []).toHaveLength(3);
+      expect(block.match(/\n\s+overwrite: true\n/g) ?? []).toHaveLength(2);
       expect(block).not.toContain('actions/download-artifact');
     }
     const gateJob = jobBlock(workflow, 'gate-summary');
@@ -442,7 +448,7 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(windowsJob).toContain('Installed JOY Media files remained after lifecycle cleanup');
   });
 
-  it('declares 18 job instances across both passes and runtime versions', () => {
+  it('declares 19 job instances across both passes and runtime versions', () => {
     const jobKeys = Array.from(workflow.matchAll(/^\s{2}([a-z0-9-]+):$/gm), (m) => m[1]);
     const uniqueKeys = [...new Set(jobKeys)];
     expect(uniqueKeys).toEqual([
@@ -457,6 +463,7 @@ describe('v2 release-candidate artifact upload policy', () => {
       'prod-build-smoke',
       'real-service-acceptance',
       'p3-real-services',
+      'shadow-evidence',
       'gate-summary',
     ]);
     // 5 matrix lanes (linux-real-services, acceptance-primary,
@@ -465,11 +472,12 @@ describe('v2 release-candidate artifact upload policy', () => {
     const matrixPasses = workflow.match(/pass:\s*\[1,\s*2\]/g) ?? [];
     expect(matrixPasses.length).toBe(5);
     expect(matrixPasses.length * 2).toBe(10);
-    // 6 single-instance jobs (validate-candidate, editor-web-bundle,
+    // 7 single-instance jobs (validate-candidate, editor-web-bundle,
     // windows-p0-real-services, windows-worker-clean, prod-build-smoke,
-    // gate-summary), plus the 2-version node-contracts matrix. 10 + 6 + 2 = 18.
+    // shadow-evidence, gate-summary), plus the 2-version node-contracts
+    // matrix. 10 + 7 + 2 = 19.
     expect(workflow).toMatch(/node:\s*\['22\.17\.0',\s*24\]/);
-    expect(matrixPasses.length * 2 + 6 + 2).toBe(18);
+    expect(matrixPasses.length * 2 + 7 + 2).toBe(19);
   });
 
   it('runs both passes for every matrix lane', () => {
@@ -485,5 +493,98 @@ describe('v2 release-candidate artifact upload policy', () => {
       const slice = workflow.slice(laneIdx);
       expect(slice).toMatch(/pass:\s*\[1,\s*2\]/);
     }
+  });
+
+  it('continues on error only for the Vitest upload attempts and the gate durable store write', () => {
+    // Each step starts with a `- ` item at six spaces of indentation. A step that continues on error is one whose block says so.
+    const steps = workflow.split(/\n(?= {6}- )/u);
+    const continued = steps.filter((step) => /\n\s+continue-on-error: true\n/u.test(step));
+    const uploads = continued.filter((step) => step.includes('uses: actions/upload-artifact@'));
+    expect(uploads).toHaveLength(9);
+    expect(continued).toHaveLength(10);
+    expect(
+      continued.some((step) =>
+        step.includes(
+          'Write the v2 shadow inputs to the durable evidence store (development measurement, D18)',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('bounds the Node 24 FFmpeg provisioning, verifies it, and keeps the Node 24 suite as it was', () => {
+    const nodeJob = jobBlock(workflow, 'node-contracts');
+    const step = stepBlock(nodeJob, 'Ensure media codec tool is available');
+    expect(step).toMatch(/\n {8}timeout-minutes: 20\n/);
+    expect(step).toContain('timeout -k 15 120 apt-get');
+    expect(step).toContain('timeout -k 15 240 apt-get');
+    expect(step).toContain('for attempt in 1 2 3; do');
+    // The step fails unless both tools run, so a skipped or empty install never passes as provisioned.
+    expect(step).toContain('media_ready || {');
+    expect(step).toContain('ffprobe -version');
+    expect(step).not.toContain('continue-on-error');
+    expect(nodeJob).toContain("node: ['22.17.0', 24]");
+    expect(nodeJob).toContain('Run full CLI contract suite on the supported Node version');
+  });
+
+  it('verifies the shadow reports in a job outside the release gate, and the gate keeps its needs', () => {
+    const shadow = jobBlock(workflow, 'shadow-evidence');
+    expect(shadow).toContain(
+      'needs: [node-contracts, linux-real-services, windows-p0-real-services]',
+    );
+    expect(shadow).toContain('if: always()');
+    expect(shadow).toContain(
+      'pattern: joy-media-v2-vitest-*-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}',
+    );
+    expect(shadow).toContain('node tooling/release/src/vitest-shadow-evidence.mjs verify');
+    expect(shadow).not.toContain('actions/upload-artifact');
+    // The gate's inputs are the nine lanes it had before, in the same order, and the shadow job is not one of them.
+    const gate = jobBlock(workflow, 'gate-summary');
+    expect(gate).not.toContain('shadow-evidence');
+    const needsStart = gate.indexOf('needs:') + 'needs:'.length;
+    const needsText = gate.slice(needsStart, gate.indexOf(']', needsStart));
+    expect([...needsText.matchAll(/([a-z0-9-]+),?/gu)].map((match) => match[1])).toEqual([
+      'linux-real-services',
+      'windows-p0-real-services',
+      'node-contracts',
+      'windows-worker-clean',
+      'acceptance-primary',
+      'acceptance-responsive',
+      'prod-build-smoke',
+      'real-service-acceptance',
+      'p3-real-services',
+    ]);
+  });
+
+  it('keeps every job that decides the release byte-identical to the reviewed v2 workflow', () => {
+    // sha256 of each job block as jobBlock() returns it, taken from release-candidate-v2.yml at 4e47d193 (the workflow the first D18
+    // pair ran). The shadow change touches only the three test lanes, which upload shadow reports, and adds the shadow-evidence job.
+    const reviewed: Record<string, string> = {
+      'validate-candidate': '3b2c13e506870cc827a39491f288fd082b4e46ac6ab0d9bcf60534b23611dee1',
+      'editor-web-bundle': 'c4502cab3bec6863803464c5a36a4b7a65dc0f377e1f9c5c8bf0906c5acceaab',
+      'windows-worker-clean': '1215fcaae662b6b10700bcc16b718202614d455a4331818703d28620abdb6f6f',
+      'acceptance-primary': '9d008013635b485bd942a8b65224a3b9952e6e44441c5ce7163d9243572ee508',
+      'acceptance-responsive': '73792ff8b1060bcfe29bc66dd399efef682ea0bf33229d4bce1f3380bc71fea7',
+      'prod-build-smoke': '29ee23ed3dab9fd7b1e56821e3b1ee877b0779bd4e538fc02c728659dc667802',
+      'real-service-acceptance': '9f8935b15e4fb4240c8613cbe90c6e24b3f1284ed621124a1efcf15fd6538aa9',
+      'p3-real-services': 'cf87de169e1c1db2b43c8044a50412864f992e0c3153487e27422b864cb4e8e9',
+      'gate-summary': '62451731ec0be2a919491bd87d1a871334146f0095dcba40e2b44bfb8bae60c6',
+    };
+    for (const [job, digest] of Object.entries(reviewed)) {
+      expect(createHash('sha256').update(jobBlock(workflow, job)).digest('hex'), job).toBe(digest);
+    }
+  });
+
+  it('names each required matrix instance the way the shadow verifier expects it', () => {
+    expect(REQUIRED_INSTANCES.map((instance: { base: string }) => instance.base)).toEqual([
+      'joy-media-v2-vitest-node-contracts-node-22.17.0',
+      'joy-media-v2-vitest-node-contracts-node-24',
+      'joy-media-v2-vitest-linux-p0-pass-1',
+      'joy-media-v2-vitest-linux-p0-pass-2',
+      'joy-media-v2-vitest-windows-p0',
+    ]);
+    // The workflow names the matrix instances with their matrix values, so each base is the workflow's template with that value.
+    expect(workflow).toContain('name: joy-media-v2-vitest-node-contracts-node-${{ matrix.node }}-');
+    expect(workflow).toContain('name: joy-media-v2-vitest-linux-p0-pass-${{ matrix.pass }}-');
+    expect(workflow).toContain('name: joy-media-v2-vitest-windows-p0-${{ github.run_id }}-');
   });
 });
