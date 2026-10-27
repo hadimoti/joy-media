@@ -50,7 +50,7 @@ for that run and its candidate only. It is not a release receipt, and it is not 
 ## Decisions for you
 
 1. **Minimum supported version.** None, or a version. A version forces older installs to update. Default: none.
-2. **Key ceremony timing.** Before the next candidate is frozen (recommended), so the pin is in that candidate. See
+2. **Key ceremony timing.** Decided 2026-10-28: before the next candidate is frozen, so the pin is in that candidate. See
    `signing-d2.md`.
 3. **Server-side release key.** Remove it, or document why it stays. See `signing-d2.md`, "Open before you start".
 4. **GPU shipped configuration.** Option A: keep the relaunch fallback, and make the acceptance harness drive the relaunched

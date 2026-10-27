@@ -14,11 +14,12 @@ checks, and what has already been verified.
 2. Whether a minimum supported version is set (`--min-supported`). Setting one forces older installs to update. The default
    is no minimum.
 
-## Decide before the candidate is frozen
+## Decided by the owner (2026-10-28): the ceremony runs before the candidate is frozen
 
 The public key is compiled into every build, and a build verifies only the updates signed by the keys it pins. So the pin
 belongs to the release candidate itself. The current candidate (`6a307ea9…`, run 40580654500) has no pin, so no shipped build of
-it can verify a signed update. Recommended: run steps 2 to 4 before the next candidate is frozen.
+it can verify a signed update. Order: the owner runs steps 2 and 3 offline; engineering opens the pin change (step 4); the next
+candidate is frozen only after that change is in its tree. This decision freezes, dispatches and publishes nothing.
 
 ## Already verified (2026-10-28)
 
@@ -60,8 +61,9 @@ The report lists the manifest's SHA-256. Record it. Copy `release-manifest.json`
 ### 2. Prepare the offline machine (owner)
 
 - Use Node 24. Turn Wi-Fi and Ethernet off, and stop any sync client.
-- Copy `tooling/release/src/sign-release-manifest.mjs` onto the machine. Check its SHA-256 against the value engineering gives
-  you for the signed commit:
+- Copy `tooling/release/src/sign-release-manifest.mjs` onto the machine. Its SHA-256 must be
+  `9f7e9c0e1adcfe1b1dfde2fda52bf839c1f26689a6358efaee08a5b6947606ac`, the value for that file at commit `2784db83`. The file has
+  not changed since commit `83a847cb`. If engineering later gives you another value, check against that value instead:
 
 ```powershell
 Get-FileHash .\sign-release-manifest.mjs -Algorithm SHA256
@@ -90,8 +92,13 @@ node .\sign-release-manifest.mjs fingerprint --pub E:\joy-release-key\<keyId>.pu
 The two values must be equal. Record the key id and the fingerprint. Never record the passphrase or any part of the private
 key. Keep the two backups the ceremony document describes, in two places.
 
-If the tool refuses the key folder with "must be outside this checkout", stop and tell engineering. Do not change the path to
-get around the check.
+Keep the script on the offline machine's own drive, in a folder such as `C:\joy-sign\`, and the key folder on the USB stick. The
+tool refuses a key folder inside the folder three levels above the script's folder. At the drive root, that means the whole
+drive. If the tool refuses the key folder with "must be outside this checkout", stop and tell engineering. Do not change the path
+to get around the check.
+
+Send engineering the public PEM text, the key id and the fingerprint. Send nothing else from the key folder. Never send the private
+PEM, the passphrase, or a file that contains either.
 
 ### 4. Pin the public key (engineering edits, you approve)
 
