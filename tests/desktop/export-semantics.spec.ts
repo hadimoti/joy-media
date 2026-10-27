@@ -1139,6 +1139,13 @@ test.describe('desktop.export-media-semantics', () => {
             normalizedRgbMae: normalizedDifference(previews.get(time)!, frameAt(time)),
           }));
         measurements.previewExport = { tolerance: previewExportTolerance, samples: differences };
+        // Keep the 4.5 s export frame beside the Monitor frame (preview-4.5.png), so a failed comparison can be inspected.
+        // Raw rgb24 bytes at the authored width and height; the sidecar records the layout.
+        writeFileSync(join(evidence, 'export-4.5.rgb'), frameAt(4.5));
+        writeFileSync(
+          join(evidence, 'export-4.5.json'),
+          JSON.stringify({ seconds: 4.5, width, height, format: 'rgb24' }, null, 2),
+        );
         for (const sample of differences)
           expect
             .soft(sample.normalizedRgbMae, `Monitor/export parity at ${sample.time}s`)

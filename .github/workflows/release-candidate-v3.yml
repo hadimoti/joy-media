@@ -871,6 +871,20 @@ jobs:
           $outputs = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-outputs-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".json")
           if (Test-Path -LiteralPath $outputs) { throw "Windows Worker acceptance outputs already exist for this run: $outputs" }
           Set-Content -LiteralPath $outputs -Value ($results | ConvertTo-Json) -Encoding utf8
+      # Keep the 4.5 s parity evidence whether the lifecycle passed or failed. Run 40512248731 failed there and kept no frames.
+      - name: Upload the 4.5 s parity evidence (Monitor frame, export frame, measurements)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-export-parity-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: |
+            test-results/desktop-acceptance/export-semantics-desktop-*/evidence/preview-4.5.png
+            test-results/desktop-acceptance/export-semantics-desktop-*/evidence/export-4.5.rgb
+            test-results/desktop-acceptance/export-semantics-desktop-*/evidence/export-4.5.json
+            test-results/desktop-acceptance/export-semantics-desktop-*/evidence/presentation-times.json
+            test-results/desktop-acceptance/export-semantics-desktop-*/evidence/measurements.json
+          retention-days: 1
+          if-no-files-found: ignore
       - name: Show failed desktop acceptance page state
         if: failure()
         shell: powershell
