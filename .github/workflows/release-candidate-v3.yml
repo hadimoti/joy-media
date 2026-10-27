@@ -1609,6 +1609,14 @@ jobs:
           corepack enable pnpm
           pnpm --version
           pnpm install --frozen-lockfile
+      # The gate reuses the typecheck result that hosted-verify already holds, so it does not run tsc -b itself. The editor build
+      # imports the workspace packages through their emitted dist (run 40499747192: vite could not load plugin-sdk/dist/browser.js,
+      # so editor-build failed and the builds and static-assets checks failed). Emit the project references here, as v2 did.
+      - name: Emit the project references the gate's builds import
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm typecheck
       - name: Verify final-gate evidence-store isolation
         shell: bash
         run: |

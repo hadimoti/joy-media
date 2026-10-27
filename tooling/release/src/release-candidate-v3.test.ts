@@ -89,6 +89,17 @@ function bundleOrderFindings(steps: Step[]): string[] {
   return findings;
 }
 
+/** The final gate reuses hosted-verify's typecheck result, so it emits the project references itself before the release gate builds. */
+function gateEmitFindings(steps: Step[]): string[] {
+  const emit = steps.findIndex((step) => step.run?.split('\n').includes('pnpm typecheck'));
+  const gate = steps.findIndex((step) => step.run?.split('\n').includes('pnpm run release:gate'));
+  const findings: string[] = [];
+  if (gate < 0) findings.push('the job does not run the release gate');
+  if (emit < 0 || (gate >= 0 && emit > gate))
+    findings.push('the project references are not emitted before the release gate');
+  return findings;
+}
+
 /** Every rule the v3 workflow must keep. Returns the violations; an empty list means the workflow is clean. */
 function v3Violations(source: string): string[] {
   const workflow = yaml.load(source) as Workflow;
@@ -372,6 +383,20 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
     expect(bundleOrderFindings(withoutBundle)).toEqual([
       'the CLI bundle does not follow typecheck',
       'Vitest does not follow the CLI bundle',
+    ]);
+  });
+
+  it('the final gate emits the project references before it runs the release gate', () => {
+    expect(gateEmitFindings(v3.jobs['gate-summary'].steps ?? [])).toEqual([]);
+  });
+
+  it('positive control: a final gate that evaluates without the typecheck emit is flagged', () => {
+    const defective: Step[] = [
+      { run: 'pnpm install --frozen-lockfile' },
+      { run: 'set -euo pipefail\npnpm run release:gate' },
+    ];
+    expect(gateEmitFindings(defective)).toEqual([
+      'the project references are not emitted before the release gate',
     ]);
   });
 
