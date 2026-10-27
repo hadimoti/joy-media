@@ -1,0 +1,76 @@
+name: ops-clear-joy-media-residue
+
+# One-off operator job for the Windows Docker runner joy-media-worker-docker. Run 40466771005 was cancelled during its installed
+# lifecycle step, which skipped the cleanup and left a JOY Media install on the runner. Every later Windows lane refuses to run
+# while that install exists. This job removes only the paths that the installer guard and the v3 teardown check read. It runs
+# only where the disposable-host guard positively identifies the CI container. It deploys nothing and changes no candidate.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clear-residue:
+    name: clear JOY Media install residue on the Windows runner
+    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Confirm the disposable CI container (the installer checks' guard)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:USERPROFILE -match '(?i)HadiMoti') { throw 'This job must never touch the owner profile.' }
+          node -e "import('./tests/desktop/disposable-host.mjs').then((m) => { console.log('environment: ' + m.assertDisposableHost()); })"
+          if ($LASTEXITCODE -ne 0) { throw 'The disposable-host guard refused this runner. Nothing was removed.' }
+      - name: Remove the install residue that the installer guard and the teardown check read
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installPath = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'Programs\JOY Media'
+          $binPath = Join-Path $installPath 'bin'
+          $uninstallKey = 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\JoyMedia'
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'JOY Media.lnk'
+          $startMenuShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\JOY Media.lnk'
+          foreach ($process in Get-Process -ErrorAction SilentlyContinue) {
+            try { $processPath = $process.Path } catch { $processPath = $null }
+            if ($processPath -and $processPath.StartsWith($installPath + '\', [StringComparison]::OrdinalIgnoreCase)) {
+              Write-Host "stopping $($process.ProcessName) ($($process.Id)) from the install folder"
+              Stop-Process -Id $process.Id -Force
+            }
+          }
+          if (Test-Path -LiteralPath $installPath) { Remove-Item -LiteralPath $installPath -Recurse -Force; Write-Host 'removed the install folder' }
+          if (Test-Path -LiteralPath $uninstallKey) { Remove-Item -LiteralPath $uninstallKey -Recurse -Force; Write-Host 'removed the uninstall key' }
+          foreach ($shortcut in @($desktopShortcut, $startMenuShortcut)) {
+            if (Test-Path -LiteralPath $shortcut) { Remove-Item -LiteralPath $shortcut -Force; Write-Host "removed $shortcut" }
+          }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($userPath) {
+            $entries = @($userPath -split ';' | Where-Object { $_ })
+            $kept = @($entries | Where-Object { $_.TrimEnd('\') -ine $installPath.TrimEnd('\') -and $_.TrimEnd('\') -ine $binPath.TrimEnd('\') })
+            if ($kept.Count -ne $entries.Count) {
+              [Environment]::SetEnvironmentVariable('Path', ($kept -join ';'), 'User')
+              Write-Host 'removed the JOY Media entries from the user PATH'
+            }
+          }
+      - name: Verify the runner is clean
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installPath = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'Programs\JOY Media'
+          $binPath = Join-Path $installPath 'bin'
+          $leftover = @()
+          if (Test-Path -LiteralPath $installPath) { $leftover += 'install folder' }
+          if (Test-Path -LiteralPath 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\JoyMedia') { $leftover += 'uninstall key' }
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'JOY Media.lnk'
+          $startMenuShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\JOY Media.lnk'
+          if ((Test-Path -LiteralPath $desktopShortcut) -or (Test-Path -LiteralPath $startMenuShortcut)) { $leftover += 'shortcut' }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($userPath -and ($userPath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $installPath.TrimEnd('\') -or $_.TrimEnd('\') -ieq $binPath.TrimEnd('\') })) { $leftover += 'user PATH entry' }
+          if ($leftover.Count -gt 0) { throw ('residue remains: ' + ($leftover -join ', ')) }
+          Write-Host 'runner is clean: no install folder, uninstall key, shortcut or PATH entry'
