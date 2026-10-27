@@ -5,6 +5,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert';
 import { assertDisposableHost, DisposableHostRefusal } from './disposable-host.mjs';
+// The launcher folder and names come from the product's layout module, so the check follows the packaged layout (7e31f4af).
+import {
+  CLI_LAUNCHER_DIRECTORY,
+  CLI_LAUNCHER_NAMES,
+} from '../../apps/desktop/scripts/cli-launcher-layout.mjs';
 
 console.log('=== JOY Media Installer & Package Verification Suite ===');
 
@@ -92,8 +97,7 @@ assert.ok(
 console.log('1. Verifying distribution files in joy-media-win32-x64...');
 const requiredFiles = [
   'joy-media.exe',
-  'joy.cmd',
-  'joy-media.cmd',
+  ...CLI_LAUNCHER_NAMES.map((name) => `${CLI_LAUNCHER_DIRECTORY}/${name}`),
   'Setup-JoyMedia.ps1',
   'install.cmd',
   'uninstall.cmd',
@@ -109,10 +113,18 @@ for (const relPath of requiredFiles) {
   assert.ok(existsSync(fullPath), `Required distribution file missing: ${relPath}`);
 }
 console.log('✔ All required distribution files present.');
+// The launchers live in their own folder only. A copy in the install root would let a bare `joy-media` resolve to the GUI
+// through .EXE before .CMD, which is why cli-launcher-layout.mjs moves them out of the root.
+for (const name of CLI_LAUNCHER_NAMES) {
+  assert.ok(
+    !existsSync(resolve(standaloneDir, name)),
+    `Launcher ${name} must not sit in the install root; it belongs in ${CLI_LAUNCHER_DIRECTORY}.`,
+  );
+}
 
 // 2. Test Packaged CLI Execution via joy.cmd
 console.log('2. Testing packaged CLI execution (joy.cmd doctor) in a disposable profile...');
-const joyCmdPath = resolve(standaloneDir, 'joy.cmd');
+const joyCmdPath = resolve(standaloneDir, CLI_LAUNCHER_DIRECTORY, 'joy.cmd');
 const cliSandboxRoot = mkdtempSync(join(tmpdir(), 'joy-cli-package-check-'));
 const cliHome = join(cliSandboxRoot, 'profile');
 const cliTemp = join(cliSandboxRoot, 'temp');
@@ -386,7 +398,7 @@ try {
   mkdirSync(fixtureSourceDir, { recursive: true });
   const fixtureFiles = [
     'joy-media.exe',
-    'joy.cmd',
+    `${CLI_LAUNCHER_DIRECTORY}/joy.cmd`,
     'resources/app/cli/joy-media-bundle.mjs',
     'resources/app/worker/joy-worker.exe',
   ];
