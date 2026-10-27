@@ -1,9 +1,11 @@
 // Assembles the inputs ci-v3-run-summary.mjs needs from one shadow run's own outputs (plan section 3.4, D18). The shadow job calls it
 // after the gate, so the comparison reads the run's real results and invents nothing. The same builder serves both topologies:
-// v3 names its Vitest results in the hosted-verify report, and v2 names them in a Vitest JSON report of the same commit.
+// v3 names its Vitest results in the hosted-verify report and in the Vitest JSON reports of its Windows and P0 lanes. v2 names them
+// in a Vitest JSON report of the same commit.
 //
 //   node tooling/release/src/ci-v3-run-inputs.mjs --topology single-pass --needs <needs.json> --gate <report.json> \
 //     --readiness <evidence.json> --windows <acceptance.json> --hosted <hosted-verify-report.json> \
+//     --lane-vitest <lane-report.json> [--lane-vitest <lane-report.json> ...] \
 //     --candidate-sha <sha> --run-attempt <n> --out <run-inputs.json>
 //   node tooling/release/src/ci-v3-run-inputs.mjs --topology two-pass --needs <needs.json> --gate <report.json> \
 //     --readiness <evidence.json> --windows <acceptance.json> --vitest-json <reference-vitest.json> \
@@ -136,6 +138,31 @@ export function vitestFromReferenceReport(report) {
   return vitestFromTests(executedTests(report));
 }
 
+/**
+ * Reads the Vitest results one lane of a single-pass run recorded. The hosted shards do not run the Windows and P0 suites, so each
+ * such lane writes its own Vitest JSON report. A lane that ran no test is refused. A failed test is recorded as failed, not hidden.
+ */
+export function vitestFromLaneReport(report) {
+  if (report === null || typeof report !== 'object' || !Array.isArray(report.testResults)) {
+    throw new Error('the lane Vitest report has no test results');
+  }
+  if (!(report.numPassedTests + report.numFailedTests > 0)) {
+    throw new Error('the lane Vitest report ran no test');
+  }
+  return vitestFromTests(executedTests(report));
+}
+
+/**
+ * Reads the Vitest results of a single-pass run: the tests the hosted shards executed, and the tests each lane executed. A test that
+ * more than one source names counts once, so the run names every test the equivalence tool compares.
+ */
+export function vitestFromSinglePass(hosted, laneReports) {
+  if (laneReports.length === 0) throw new Error('the single-pass run names no lane Vitest report');
+  const sources = [vitestFromHostedReport(hosted), ...laneReports.map(vitestFromLaneReport)];
+  const union = (key) => [...new Set(sources.flatMap((source) => source[key]))].sort();
+  return { executed: union('executed'), failed: union('failed') };
+}
+
 function parseArgs(argv) {
   const options = {};
   for (let index = 0; index < argv.length; index += 2) {
@@ -143,7 +170,9 @@ function parseArgs(argv) {
     const value = argv[index + 1];
     if (!key?.startsWith('--') || value === undefined)
       throw new Error(`Expected --name value pairs, got: ${key}`);
-    options[key.slice(2)] = value;
+    const name = key.slice(2);
+    // --lane-vitest repeats, once for each lane report. Every other option names exactly one value.
+    options[name] = name === 'lane-vitest' ? [...(options[name] ?? []), value] : value;
   }
   for (const name of [
     'topology',
@@ -158,6 +187,8 @@ function parseArgs(argv) {
     if (!options[name]) throw new Error(`Missing --${name}`);
   }
   if (options.topology === 'single-pass' && !options.hosted) throw new Error('Missing --hosted');
+  if (options.topology === 'single-pass' && (options['lane-vitest'] ?? []).length === 0)
+    throw new Error('Missing --lane-vitest');
   if (options.topology === 'two-pass' && !options['vitest-json'])
     throw new Error('Missing --vitest-json');
   return options;
@@ -171,7 +202,7 @@ function main(argv) {
   const options = parseArgs(argv);
   const vitest =
     options.topology === 'single-pass'
-      ? vitestFromHostedReport(readJson(options.hosted))
+      ? vitestFromSinglePass(readJson(options.hosted), options['lane-vitest'].map(readJson))
       : vitestFromReferenceReport(readJson(options['vitest-json']));
   const inputs = buildRunInputs({
     topology: options.topology,

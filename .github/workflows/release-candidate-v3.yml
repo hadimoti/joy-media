@@ -570,7 +570,16 @@ jobs:
           export JOY_CHROMIUM_PATH="$chromium_path"
           node node_modules/typescript/bin/tsc -b apps/cli
           (cd apps/cli && node scripts/bundle.mjs)
-          node node_modules/vitest/vitest.mjs run --retry=0 --config vitest.p0-v3.config.ts
+          mkdir -p test-output/vitest-lanes/linux
+          node node_modules/vitest/vitest.mjs run --retry=0 --config vitest.p0-v3.config.ts --reporter=default --reporter=json --outputFile.json=test-output/vitest-lanes/linux/linux-p0.json
+      - name: Upload the Linux P0 Vitest test IDs for the shadow summary (one day, this run only)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-linux-p0-vitest-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/vitest-lanes/linux
+          retention-days: 1
+          if-no-files-found: error
       - name: Verify no untracked teardown residue
         if: always()
         shell: bash
@@ -642,15 +651,24 @@ jobs:
           } finally {
             Pop-Location
           }
-          node node_modules/vitest/vitest.mjs run --retry=0 --config vitest.p0-v3.config.ts
+          New-Item -ItemType Directory -Force -Path test-output/vitest-lanes/windows | Out-Null
+          node node_modules/vitest/vitest.mjs run --retry=0 --config vitest.p0-v3.config.ts --reporter=default --reporter=json --outputFile.json=test-output/vitest-lanes/windows/windows-p0.json
           if ($LASTEXITCODE -ne 0) { throw "P0 integration tests failed with exit code $LASTEXITCODE." }
       - name: Run full CLI contract suite on Windows (once in this job)
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $env:JOY_REQUIRE_CHROMIUM = '1'
-          node node_modules/vitest/vitest.mjs run --retry=0 apps/cli/src --no-file-parallelism
+          node node_modules/vitest/vitest.mjs run --retry=0 apps/cli/src --no-file-parallelism --reporter=default --reporter=json --outputFile.json=test-output/vitest-lanes/windows/windows-cli.json
           if ($LASTEXITCODE -ne 0) { throw "Windows CLI contract suite failed with exit code $LASTEXITCODE." }
+      - name: Upload the Windows Vitest test IDs for the shadow summary (one day, this run only)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-windows-vitest-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/vitest-lanes/windows
+          retention-days: 1
+          if-no-files-found: error
       - name: Check for untracked residue after the P0 lane
         if: always()
         shell: powershell
@@ -1778,6 +1796,16 @@ jobs:
         run: |
           set -euo pipefail
           pnpm run release:gate
+      - name: Download the Windows Vitest test IDs that this run uploaded
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joy-media-windows-vitest-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/vitest-lanes/windows
+      - name: Download the Linux P0 Vitest test IDs that this run uploaded
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joy-media-linux-p0-vitest-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/vitest-lanes/linux
       # The shadow summary builder must run the code this workflow commit defines. The job otherwise checks out the candidate, whose
       # builder predates the nested-report reader (run 40525636510 failed on "the gate report has no check list").
       # The summary runs after a failed gate too, so these two steps run then as well. Run 40544064450 skipped them after a cancelled
@@ -1813,6 +1841,9 @@ jobs:
             --readiness test-output/readiness/evidence.json \
             --windows test-output/readiness/single-pass-evidence/windows/pass-1/acceptance.json \
             --hosted test-output/hosted-verify/report.json \
+            --lane-vitest test-output/vitest-lanes/windows/windows-p0.json \
+            --lane-vitest test-output/vitest-lanes/windows/windows-cli.json \
+            --lane-vitest test-output/vitest-lanes/linux/linux-p0.json \
             --candidate-sha "$CANDIDATE_SHA" \
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --out test-output/ci-v3/run-inputs.json

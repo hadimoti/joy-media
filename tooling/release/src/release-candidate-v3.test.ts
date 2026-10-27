@@ -310,6 +310,44 @@ function v3Violations(source: string): string[] {
     if (!String(placing?.if ?? '').includes('always()'))
       violations.push(`${stepName} must run after a failed gate`);
   }
+  // The hosted shards do not run the Windows and P0 suites, so each of those lanes writes its Vitest JSON report and uploads it,
+  // and the gate passes the three reports to the run-inputs builder. Otherwise the summary would miss tests that v2 ran.
+  for (const job of ['linux-real-services', 'windows-candidate']) {
+    const steps = workflow.jobs[job]?.steps ?? [];
+    for (const step of steps) {
+      for (const line of (step.run ?? '').split('\n')) {
+        if (
+          /vitest\.mjs run\b/u.test(line) &&
+          !line.includes('--outputFile.json=test-output/vitest-lanes/')
+        )
+          violations.push(
+            `${job}: a Vitest run must write its JSON report under test-output/vitest-lanes`,
+          );
+      }
+    }
+    const uploads = steps.filter(
+      (step) =>
+        step.uses?.startsWith('actions/upload-artifact@') === true &&
+        String(step.with?.path ?? '').startsWith('test-output/vitest-lanes/'),
+    );
+    if (uploads.length !== 1 || uploads[0]?.if !== 'always()')
+      violations.push(`${job}: uploads its Vitest test IDs once, and even after a failure`);
+  }
+  for (const lane of [
+    'test-output/vitest-lanes/windows/windows-p0.json',
+    'test-output/vitest-lanes/windows/windows-cli.json',
+    'test-output/vitest-lanes/linux/linux-p0.json',
+  ]) {
+    if (!String(summaryStep?.run ?? '').includes(`--lane-vitest ${lane}`))
+      violations.push(`the shadow summary must read the lane Vitest report ${lane}`);
+  }
+  for (const path of ['test-output/vitest-lanes/windows', 'test-output/vitest-lanes/linux']) {
+    const downloaded = gateSteps.some(
+      (step) =>
+        step.uses?.startsWith('actions/download-artifact@') === true && step.with?.path === path,
+    );
+    if (!downloaded) violations.push(`the gate must download the Vitest test IDs into ${path}`);
+  }
   for (const job of ['linux-real-services', 'windows-candidate']) {
     const runs = (workflow.jobs[job]?.steps ?? []).map((step) => step.run ?? '').join('\n');
     if (!runs.includes('vitest.p0-v3.config.ts') || runs.includes('--config vitest.p0.config.ts'))
@@ -541,9 +579,10 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
       line
         .replace(/\$\{\{ matrix\.pass \}\}/gu, '1')
         .replace(/ --retr(?:y|ies)=0/gu, '')
-        // The v2 shadow evidence flags (D18) only write each lane's Vitest report. They do not change which tests run.
+        // The shadow evidence flags (D18) in v2, and the lane reports in v3, only write each lane's Vitest report. They do not
+        // change which tests run.
         .replace(
-          / --reporter=default --reporter=json --outputFile\.json=test-output\/shadow-v2\/[\w.-]+\.json/gu,
+          / --reporter=default --reporter=json --outputFile\.json=test-output\/(?:shadow-v2|vitest-lanes)\/[\w./-]+\.json/gu,
           '',
         )
         .replace(/\s+/gu, ' ')
@@ -764,6 +803,37 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
         '      - name: Check out the workflow commit for the shadow summary builder\n',
       );
       expect(v3Violations(skipped).join(';')).toMatch(/must run after a failed gate/u);
+    });
+
+    it('records the Windows and P0 Vitest test IDs in the shadow summary, from reports both lanes upload', () => {
+      const noCliReport = mutate(
+        ' --outputFile.json=test-output/vitest-lanes/windows/windows-cli.json',
+        '',
+      );
+      expect(v3Violations(noCliReport).join(';')).toMatch(
+        /must write its JSON report under test-output\/vitest-lanes/u,
+      );
+      const noLinuxInput = mutate(
+        ' --lane-vitest test-output/vitest-lanes/linux/linux-p0.json',
+        '',
+      );
+      expect(v3Violations(noLinuxInput).join(';')).toMatch(
+        /must read the lane Vitest report test-output\/vitest-lanes\/linux\/linux-p0\.json/u,
+      );
+      const uploadNotAlways = mutate(
+        '        if: always()\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: joy-media-linux-p0-vitest-',
+        '        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: joy-media-linux-p0-vitest-',
+      );
+      expect(v3Violations(uploadNotAlways).join(';')).toMatch(
+        /uploads its Vitest test IDs once, and even after a failure/u,
+      );
+      const notDownloaded = mutate(
+        '          path: test-output/vitest-lanes/linux\n      # The shadow summary builder must run',
+        '          path: test-output/vitest-lanes/elsewhere\n      # The shadow summary builder must run',
+      );
+      expect(v3Violations(notDownloaded).join(';')).toMatch(
+        /must download the Vitest test IDs into test-output\/vitest-lanes\/linux/u,
+      );
     });
 
     it("refuses a P0 lane that runs the config v2 uses, which inherits the default suite's projects", () => {

@@ -7,7 +7,9 @@ import {
   buildRunInputs,
   GATE_CHECK_IDS,
   vitestFromHostedReport,
+  vitestFromLaneReport,
   vitestFromReferenceReport,
+  vitestFromSinglePass,
 } from './ci-v3-run-inputs.mjs';
 
 const SHA = 'a'.repeat(40);
@@ -207,5 +209,119 @@ describe('where the Vitest results come from', () => {
       vitestFromReferenceReport({ numFailedTests: 0, numPassedTests: 0, testResults: [] }),
     ).toThrow(/did not pass every test/u);
     expect(() => vitestFromReferenceReport({})).toThrow(/has no test results/u);
+  });
+});
+
+describe('the lanes of a single-pass run', () => {
+  const hosted = {
+    merge: { ok: true },
+    executed: [{ id: 'apps/a/src/a.test.ts::shared', status: 'passed' }],
+  };
+  // A lane's Vitest JSON report, as the Windows runner writes it: absolute Windows paths, which the builder makes repo-relative.
+  const windowsLane = {
+    numPassedTests: 1,
+    numFailedTests: 0,
+    testResults: [
+      {
+        name: 'C:\\actions-runner\\_work\\joy-media\\joy-media\\apps\\cli\\src\\commands\\render-cmd.test.ts',
+        assertionResults: [
+          {
+            ancestorTitles: ['held preview'],
+            title: 'publishes',
+            fullName: 'held preview publishes',
+            status: 'passed',
+          },
+          { ancestorTitles: [], title: 'posix only', fullName: 'posix only', status: 'skipped' },
+        ],
+      },
+    ],
+  };
+
+  it('names a Windows lane test by its repo-relative ID, and leaves out the tests the lane skipped', () => {
+    expect(vitestFromLaneReport(windowsLane)).toEqual({
+      executed: ['apps/cli/src/commands/render-cmd.test.ts::held preview publishes'],
+      failed: [],
+    });
+  });
+
+  it('names a P0 test that only a lane ran, which the hosted shards never see', () => {
+    const p0Lane = {
+      numPassedTests: 1,
+      numFailedTests: 0,
+      testResults: [
+        {
+          name: '/repo/tooling/golden-render/src/first-party-scenes.test.ts',
+          assertionResults: [
+            {
+              ancestorTitles: ['first-party scenes'],
+              title: 'pins the title',
+              fullName: 'first-party scenes pins the title',
+              status: 'passed',
+            },
+          ],
+        },
+      ],
+    };
+    const id =
+      'tooling/golden-render/src/first-party-scenes.test.ts::first-party scenes pins the title';
+    expect(vitestFromHostedReport(hosted).executed).not.toContain(id);
+    expect(vitestFromSinglePass(hosted, [p0Lane]).executed).toContain(id);
+  });
+
+  it('counts a test that the hosted shards and a lane both ran once, and sorts the merged list', () => {
+    const sharedLane = {
+      numPassedTests: 1,
+      numFailedTests: 0,
+      testResults: [
+        {
+          name: '/repo/apps/a/src/a.test.ts',
+          assertionResults: [
+            { ancestorTitles: [], title: 'shared', fullName: 'shared', status: 'passed' },
+          ],
+        },
+      ],
+    };
+    expect(vitestFromSinglePass(hosted, [windowsLane, sharedLane])).toEqual({
+      executed: [
+        'apps/a/src/a.test.ts::shared',
+        'apps/cli/src/commands/render-cmd.test.ts::held preview publishes',
+      ],
+      failed: [],
+    });
+  });
+
+  it('records a failed lane test as failed, so the summary never hides it', () => {
+    const failingLane = {
+      numPassedTests: 0,
+      numFailedTests: 1,
+      testResults: [
+        {
+          name: '/repo/apps/cli/src/x.test.ts',
+          assertionResults: [
+            { ancestorTitles: [], title: 'breaks', fullName: 'breaks', status: 'failed' },
+          ],
+        },
+      ],
+    };
+    expect(vitestFromSinglePass(hosted, [failingLane])).toEqual({
+      executed: ['apps/a/src/a.test.ts::shared', 'apps/cli/src/x.test.ts::breaks'],
+      failed: ['apps/cli/src/x.test.ts::breaks'],
+    });
+  });
+
+  it('refuses a lane report with no test results, or one that ran no test', () => {
+    expect(() => vitestFromLaneReport({ numPassedTests: 1, numFailedTests: 0 })).toThrow(
+      /has no test results/u,
+    );
+    expect(() =>
+      vitestFromLaneReport({ numPassedTests: 0, numFailedTests: 0, testResults: [] }),
+    ).toThrow(/ran no test/u);
+  });
+
+  it('refuses a single-pass run with no lane report, and one whose hosted merge did not pass', () => {
+    expect(() => vitestFromSinglePass(hosted, [])).toThrow(/names no lane Vitest report/u);
+    expect(() =>
+      vitestFromSinglePass({ merge: { ok: false }, executed: [] }, [windowsLane]),
+    ).toThrow(/no verified test list/u);
   });
 });
