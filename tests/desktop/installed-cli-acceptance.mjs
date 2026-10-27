@@ -5,10 +5,11 @@ import { createReadStream } from 'node:fs';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { safeInstalledCliEnvironment } from './installed-cli-environment.mjs';
+import { CLI_LAUNCHER_DIRECTORY } from '../../apps/desktop/scripts/cli-launcher-layout.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const fixturePath = resolve(repoRoot, 'packages/test-fixtures/media/video.mp4');
@@ -285,12 +286,16 @@ assert.ok(
   ['joy.cmd', 'joy-media.cmd'].includes(launcherPath.split(/[\\/]/).at(-1)?.toLowerCase() ?? ''),
   'Launcher must be the packaged joy.cmd or joy-media.cmd entry point.',
 );
-assert.ok(
-  existsSync(join(dirname(launcherPath), 'joy-media.exe')),
-  'Packaged joy-media.exe is missing.',
+// The launchers live in bin, and the packaged files sit in the install root one level up (cli-launcher-layout.mjs).
+assert.equal(
+  basename(dirname(launcherPath)).toLowerCase(),
+  CLI_LAUNCHER_DIRECTORY,
+  'Launcher must sit in the bin folder of the install root.',
 );
-const bundlePath = join(dirname(launcherPath), 'resources', 'app', 'cli', 'joy-media-bundle.mjs');
-const workerPath = join(dirname(launcherPath), 'resources', 'app', 'worker', 'joy-worker.exe');
+const installRoot = dirname(dirname(launcherPath));
+assert.ok(existsSync(join(installRoot, 'joy-media.exe')), 'Packaged joy-media.exe is missing.');
+const bundlePath = join(installRoot, 'resources', 'app', 'cli', 'joy-media-bundle.mjs');
+const workerPath = join(installRoot, 'resources', 'app', 'worker', 'joy-worker.exe');
 assert.ok(existsSync(bundlePath), 'Packaged CLI bundle is missing.');
 assert.ok(existsSync(workerPath), 'Packaged JOY Worker executable is missing.');
 assert.ok(existsSync(fixturePath), `Video fixture is missing: ${fixturePath}`);
@@ -535,7 +540,7 @@ const evidence = {
   sourceHead: gitHead,
   launcherPath,
   launcherSha256: await sha256(launcherPath),
-  desktopExecutableSha256: await sha256(join(dirname(launcherPath), 'joy-media.exe')),
+  desktopExecutableSha256: await sha256(join(installRoot, 'joy-media.exe')),
   cliBundleSha256: await sha256(bundlePath),
   workerExecutableSha256: await sha256(workerPath),
   lockfileSha256: await sha256(lockPath),
