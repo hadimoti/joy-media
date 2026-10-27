@@ -511,16 +511,23 @@ describe('v2 release-candidate artifact upload policy', () => {
     ).toBe(true);
   });
 
-  it('bounds the Node 24 FFmpeg provisioning, verifies it, and keeps the Node 24 suite as it was', () => {
+  it('provisions the pinned, checksum-verified FFmpeg build with a bounded download, and keeps the Node 24 suite as it was', () => {
     const nodeJob = jobBlock(workflow, 'node-contracts');
     const step = stepBlock(nodeJob, 'Ensure media codec tool is available');
     expect(step).toMatch(/\n {8}timeout-minutes: 20\n/);
-    expect(step).toContain('timeout -k 15 120 apt-get');
-    expect(step).toContain('timeout -k 15 240 apt-get');
+    // The same build and digest as the development verification (ci-dev.yml static job).
+    expect(step).toContain(
+      'FFMPEG_SHA256: d0eb612b8994407f78413e2929cb4b073bc699c8ab79e198b31624736fdc2f93',
+    );
+    expect(step).toContain('--connect-timeout 20 --max-time 300');
     expect(step).toContain('for attempt in 1 2 3; do');
-    // The step fails unless both tools run, so a skipped or empty install never passes as provisioned.
-    expect(step).toContain('media_ready || {');
-    expect(step).toContain('ffprobe -version');
+    // The download and the digest are both required, and the build's identity is checked before it is used.
+    expect(step).toContain('test "$downloaded" -eq 1 ||');
+    expect(step).toContain('sha256sum --check --strict');
+    expect(step).toContain('pinned FFmpeg build identity not found');
+    expect(step).toContain('"$bin_dir/ffprobe" -version');
+    expect(step).toContain('echo "$bin_dir" >> "$GITHUB_PATH"');
+    expect(step).not.toContain('apt-get');
     expect(step).not.toContain('continue-on-error');
     expect(nodeJob).toContain("node: ['22.17.0', 24]");
     expect(nodeJob).toContain('Run full CLI contract suite on the supported Node version');

@@ -18,7 +18,7 @@ const V3_PATH = join(WORKFLOWS, 'release-candidate-v3.yml');
 // and must update this pin with the owner's approval. The approved D18 infrastructure change (2026-10-27) edits the shadow evidence steps,
 // the FFmpeg provisioning of node-contracts, and adds the shadow-evidence job. ci-artifact-policy.test.ts pins each release-deciding job
 // byte for byte, so the release gate itself did not change.
-const V2_SHA256 = 'a871e8b3fcc19d214158d6270d19992377df2b3787cc9ff05b54d0d289c7a116';
+const V2_SHA256 = 'ad683d7eefdc7aa5ad745ec3f634eabb8ee67b58a62167e7dfb0b2149ffe3c8f';
 const yaml = createRequire(join(resolve(HERE, '../../..'), 'package.json'))('js-yaml') as {
   load(source: string): unknown;
 };
