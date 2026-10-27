@@ -829,60 +829,98 @@ jobs:
           # line would fail a healthy self-test. Report the exit code and output when it fails.
           $workerSelfTest = (& $candidateWorker --joy-worker-self-test | Out-String)
           if ($LASTEXITCODE -ne 0 -or $workerSelfTest -notmatch '"ok"\s*:\s*true') { throw "Frozen Worker executable failed its self-test before the acceptance pass (exit $LASTEXITCODE): $workerSelfTest" }
-          # One exact pass (plan section 3.4): the single pass is pass 1, and its evidence is the only evidence output.
+          # Playwright empties its output folder when a run starts. The lifecycle starts the fresh-process spec right after the
+          # export spec, in that same folder, so the 4.5 s frames are gone before a step after the lifecycle can upload them. This
+          # watcher copies the candidate's own evidence files as each one is written. It runs no test and changes no assertion.
+          $parityCapture = Join-Path $env:RUNNER_TEMP 'joy-media-export-parity-capture'
+          $parityStop = Join-Path $env:RUNNER_TEMP 'joy-media-export-parity-capture.stop'
+          if (Test-Path -LiteralPath $parityCapture) { throw "Export parity capture already exists for this run: $parityCapture" }
+          New-Item -ItemType Directory -Path $parityCapture | Out-Null
+          $parityWatcher = Start-Job -ArgumentList $PWD.Path, $parityCapture, $parityStop -ScriptBlock {
+            param($root, $capture, $stop)
+            $names = @('preview-4.5.png', 'export.mp4', 'ffprobe.json', 'presentation-times.json', 'measurements.json')
+            $copied = @{}
+            function Copy-Evidence {
+              $outputRoot = Join-Path $root 'test-results\desktop-acceptance'
+              if (-not (Test-Path -LiteralPath $outputRoot)) { return }
+              $files = @(Get-ChildItem -LiteralPath $outputRoot -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Directory.Name -eq 'evidence' -and $names -contains $_.Name })
+              foreach ($file in $files) {
+                $stamp = "$($file.Length)|$($file.LastWriteTimeUtc.Ticks)"
+                if ($copied[$file.FullName] -eq $stamp) { continue }
+                $target = Join-Path (Join-Path $capture $file.Directory.Parent.Name) $file.Name
+                New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+                try {
+                  Copy-Item -LiteralPath $file.FullName -Destination $target -Force -ErrorAction Stop
+                  $copied[$file.FullName] = $stamp
+                } catch {
+                  # Still being written: the next pass copies it.
+                }
+              }
+            }
+            while (-not (Test-Path -LiteralPath $stop)) { Copy-Evidence; Start-Sleep -Milliseconds 100 }
+            Copy-Evidence
+          }
           $results = @{}
-          foreach ($pass in @('1')) {
-            $result = (& $candidateWorker --joy-worker-self-test | Out-String)
-            if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw "Worker executable self-test failed for pass $pass (exit $LASTEXITCODE): $result" }
-            $evidence = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".json")
-            if (Test-Path -LiteralPath $evidence) { throw "Windows Worker acceptance output already exists for this run/pass: $evidence" }
-            & powershell -NoProfile -ExecutionPolicy Bypass -File ops/self-hosted/windows-runner/worker-acceptance-container.ps1 `
-              -CandidateSha $env:CANDIDATE_SHA `
-              -RunId $env:GITHUB_RUN_ID `
-              -Attempt $env:GITHUB_RUN_ATTEMPT `
-              -Pass $pass `
-              -ExecutablePath $candidateWorker `
-              -OutputPath $evidence
-            if ($LASTEXITCODE -ne 0) { throw "Windows Worker acceptance harness failed for pass $pass with exit code $LASTEXITCODE." }
-            if (-not (Test-Path -LiteralPath $evidence -PathType Leaf)) { throw "Windows Worker acceptance evidence was not produced for pass $pass." }
-            $lifecycle = Join-Path $env:RUNNER_TEMP ("joy-media-windows-lifecycle-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".json")
-            if (Test-Path -LiteralPath $lifecycle) { throw "Windows installed lifecycle evidence already exists for pass $pass." }
-            powershell -NoProfile -ExecutionPolicy Bypass -File tests/desktop/windows-lifecycle.ps1 `
-              -CandidateSha $env:CANDIDATE_SHA `
-              -RunId $env:GITHUB_RUN_ID `
-              -Attempt $env:GITHUB_RUN_ATTEMPT `
-              -Pass $pass `
-              -CandidateSetupPath $candidateSetup `
-              -CandidateArchivePath $candidateArchive `
-              -CandidateStandalonePath $candidateStandalone `
-              -PreviousSetupPath $previousSetup `
-              -PreviousArchivePath $previousArchive `
-              -PreviousChecksumsPath $previousChecksums `
-              -OutputPath $lifecycle
-            if ($LASTEXITCODE -ne 0) { throw "Windows installed desktop/CLI lifecycle failed for pass $pass with exit code $LASTEXITCODE." }
-            if (-not (Test-Path -LiteralPath $lifecycle -PathType Leaf)) { throw "Installed desktop lifecycle evidence was not produced for pass $pass." }
-            $workerReceipt = Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json
-            $lifecycleReceipt = Get-Content -LiteralPath $lifecycle -Raw | ConvertFrom-Json
-            if ($lifecycleReceipt.candidateSha -ne $env:CANDIDATE_SHA -or $lifecycleReceipt.pass -ne [int]$pass) { throw "Installed desktop lifecycle receipt does not bind pass $pass to the candidate." }
-            $workerReceipt | Add-Member -NotePropertyName desktopLifecycle -NotePropertyValue $lifecycleReceipt -Force
-            [IO.File]::WriteAllText($evidence, ($workerReceipt | ConvertTo-Json -Depth 16) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-            $results[$pass] = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content -LiteralPath $evidence -Raw)))
+          try {
+            # One exact pass (plan section 3.4): the single pass is pass 1, and its evidence is the only evidence output.
+            foreach ($pass in @('1')) {
+              $result = (& $candidateWorker --joy-worker-self-test | Out-String)
+              if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw "Worker executable self-test failed for pass $pass (exit $LASTEXITCODE): $result" }
+              $evidence = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".json")
+              if (Test-Path -LiteralPath $evidence) { throw "Windows Worker acceptance output already exists for this run/pass: $evidence" }
+              & powershell -NoProfile -ExecutionPolicy Bypass -File ops/self-hosted/windows-runner/worker-acceptance-container.ps1 `
+                -CandidateSha $env:CANDIDATE_SHA `
+                -RunId $env:GITHUB_RUN_ID `
+                -Attempt $env:GITHUB_RUN_ATTEMPT `
+                -Pass $pass `
+                -ExecutablePath $candidateWorker `
+                -OutputPath $evidence
+              if ($LASTEXITCODE -ne 0) { throw "Windows Worker acceptance harness failed for pass $pass with exit code $LASTEXITCODE." }
+              if (-not (Test-Path -LiteralPath $evidence -PathType Leaf)) { throw "Windows Worker acceptance evidence was not produced for pass $pass." }
+              $lifecycle = Join-Path $env:RUNNER_TEMP ("joy-media-windows-lifecycle-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".json")
+              if (Test-Path -LiteralPath $lifecycle) { throw "Windows installed lifecycle evidence already exists for pass $pass." }
+              powershell -NoProfile -ExecutionPolicy Bypass -File tests/desktop/windows-lifecycle.ps1 `
+                -CandidateSha $env:CANDIDATE_SHA `
+                -RunId $env:GITHUB_RUN_ID `
+                -Attempt $env:GITHUB_RUN_ATTEMPT `
+                -Pass $pass `
+                -CandidateSetupPath $candidateSetup `
+                -CandidateArchivePath $candidateArchive `
+                -CandidateStandalonePath $candidateStandalone `
+                -PreviousSetupPath $previousSetup `
+                -PreviousArchivePath $previousArchive `
+                -PreviousChecksumsPath $previousChecksums `
+                -OutputPath $lifecycle
+              if ($LASTEXITCODE -ne 0) { throw "Windows installed desktop/CLI lifecycle failed for pass $pass with exit code $LASTEXITCODE." }
+              if (-not (Test-Path -LiteralPath $lifecycle -PathType Leaf)) { throw "Installed desktop lifecycle evidence was not produced for pass $pass." }
+              $workerReceipt = Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json
+              $lifecycleReceipt = Get-Content -LiteralPath $lifecycle -Raw | ConvertFrom-Json
+              if ($lifecycleReceipt.candidateSha -ne $env:CANDIDATE_SHA -or $lifecycleReceipt.pass -ne [int]$pass) { throw "Installed desktop lifecycle receipt does not bind pass $pass to the candidate." }
+              $workerReceipt | Add-Member -NotePropertyName desktopLifecycle -NotePropertyValue $lifecycleReceipt -Force
+              [IO.File]::WriteAllText($evidence, ($workerReceipt | ConvertTo-Json -Depth 16) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+              $results[$pass] = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content -LiteralPath $evidence -Raw)))
+            }
+          } finally {
+            New-Item -ItemType File -Path $parityStop -Force | Out-Null
+            Wait-Job -Job $parityWatcher -Timeout 120 | Out-Null
+            Receive-Job -Job $parityWatcher -ErrorAction SilentlyContinue | Out-Null
+            Remove-Job -Job $parityWatcher -Force -ErrorAction SilentlyContinue
+            $captured = @(Get-ChildItem -LiteralPath $parityCapture -Recurse -File -ErrorAction SilentlyContinue)
+            Write-Host "Captured $($captured.Count) export parity evidence file(s) for the 4.5 s upload:"
+            foreach ($item in $captured) { Write-Host ('  ' + $item.FullName.Substring($parityCapture.Length + 1)) }
           }
           $outputs = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-outputs-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".json")
           if (Test-Path -LiteralPath $outputs) { throw "Windows Worker acceptance outputs already exist for this run: $outputs" }
           Set-Content -LiteralPath $outputs -Value ($results | ConvertTo-Json) -Encoding utf8
-      # Keep the 4.5 s parity evidence whether the lifecycle passed or failed. Run 40512248731 failed there and kept no frames.
-      - name: Upload the 4.5 s parity evidence (Monitor frame, export frame, measurements)
+      # The lifecycle step copies the 4.5 s parity evidence into this folder while it runs, so the frames survive the next
+      # Playwright run. The folder is uploaded whether the lifecycle passed or failed.
+      - name: Upload the 4.5 s parity evidence (Monitor frame, export file, presentation times, measurements)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: joy-media-export-parity-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
-          path: |
-            test-results/desktop-acceptance/**/evidence/preview-4.5.png
-            test-results/desktop-acceptance/**/evidence/export-4.5.rgb
-            test-results/desktop-acceptance/**/evidence/export-4.5.json
-            test-results/desktop-acceptance/**/evidence/presentation-times.json
-            test-results/desktop-acceptance/**/evidence/measurements.json
+          path: ${{ runner.temp }}/joy-media-export-parity-capture
           retention-days: 1
           if-no-files-found: warn
       - name: Show failed desktop acceptance page state
@@ -945,13 +983,16 @@ jobs:
             files = @($files)
           }
           [IO.File]::WriteAllText((Join-Path $stage 'artifact-manifest.json'), ($manifest | ConvertTo-Json -Depth 6) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+          $totalBytes = ($files | ForEach-Object { [int64]$_.bytes } | Measure-Object -Sum).Sum
+          Write-Host ("Staged {0} release files, {1} bytes in total." -f $files.Count, $totalBytes)
       # Transport only. The Windows container and the Linux gate share no storage, so the staged release files travel to the
       # gate as a one-day artifact of THIS run. The gate downloads it from this run alone, retains it in its own durable store,
       # and re-verifies every byte there. The artifact is not evidence and is never trusted as such: the manifest,
       # SHA256SUMS.txt and the Windows receipt decide. The staged tree holds only the seven release files and artifact-manifest.json.
+      # Run 40544064450 was still uploading at 730 MB after 17 minutes, so the 30-minute cap is too tight for a release set this size.
       - name: Upload the staged Windows release artifacts for the final gate (one day, this run only)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        timeout-minutes: 30
+        timeout-minutes: 60
         with:
           name: joy-media-windows-release-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
           path: test-output/release-artifacts
@@ -1739,7 +1780,10 @@ jobs:
           pnpm run release:gate
       # The shadow summary builder must run the code this workflow commit defines. The job otherwise checks out the candidate, whose
       # builder predates the nested-report reader (run 40525636510 failed on "the gate report has no check list").
+      # The summary runs after a failed gate too, so these two steps run then as well. Run 40544064450 skipped them after a cancelled
+      # lane, and the summary had no builder to run.
       - name: Check out the workflow commit for the shadow summary builder
+        if: always()
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
@@ -1747,6 +1791,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - name: Move the workflow-commit builder out of the candidate workspace
+        if: always()
         shell: bash
         run: |
           set -euo pipefail

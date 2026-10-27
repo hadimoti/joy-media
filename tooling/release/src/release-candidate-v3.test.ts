@@ -25,6 +25,7 @@ const yaml = createRequire(join(resolve(HERE, '../../..'), 'package.json'))('js-
 
 type Step = {
   name?: string;
+  if?: string;
   uses?: string;
   run?: string;
   with?: Record<string, unknown>;
@@ -279,6 +280,36 @@ function v3Violations(source: string): string[] {
   );
   if (!String(summaryStep?.run ?? '').startsWith('set -euo pipefail'))
     violations.push('the shadow run summary must fail when a builder fails');
+  // Playwright empties its output folder when a run starts, so the 4.5 s evidence is copied while the lifecycle runs.
+  const windowsSteps = workflow.jobs['windows-candidate']?.steps ?? [];
+  const lifecycleRun = String(
+    windowsSteps.find((step) =>
+      String(step.name ?? '').startsWith('Exercise Worker and installed desktop lifecycle'),
+    )?.run ?? '',
+  );
+  const parityUpload = windowsSteps.find((step) =>
+    String(step.name ?? '').startsWith('Upload the 4.5 s parity evidence'),
+  );
+  if (
+    !lifecycleRun.includes('joy-media-export-parity-capture') ||
+    !lifecycleRun.includes('} finally {')
+  )
+    violations.push(
+      'the 4.5 s parity evidence must be copied while the lifecycle runs, and the copy must stop in a finally block',
+    );
+  if (parityUpload?.with?.path !== '${{ runner.temp }}/joy-media-export-parity-capture')
+    violations.push(
+      'the 4.5 s parity evidence must be uploaded from the copy, not from test-results',
+    );
+  // The shadow summary runs after a failed gate, so the steps that place its builder must run then too.
+  for (const stepName of [
+    'Check out the workflow commit for the shadow summary builder',
+    'Move the workflow-commit builder out of the candidate workspace',
+  ]) {
+    const placing = gateSteps.find((step) => step.name === stepName);
+    if (!String(placing?.if ?? '').includes('always()'))
+      violations.push(`${stepName} must run after a failed gate`);
+  }
   for (const job of ['linux-real-services', 'windows-candidate']) {
     const runs = (workflow.jobs[job]?.steps ?? []).map((step) => step.run ?? '').join('\n');
     if (!runs.includes('vitest.p0-v3.config.ts') || runs.includes('--config vitest.p0.config.ts'))
@@ -712,6 +743,27 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
         'set -uo pipefail\n          mkdir -p test-output/ci-v3',
       );
       expect(v3Violations(mutated).join(';')).toMatch(/must fail when a builder fails/u);
+    });
+
+    it('copies the 4.5 s parity evidence while the lifecycle runs, and uploads it from that copy', () => {
+      const unstopped = mutate(
+        '          } finally {\n            New-Item -ItemType File -Path $parityStop',
+        '          } catch {\n            New-Item -ItemType File -Path $parityStop',
+      );
+      expect(v3Violations(unstopped).join(';')).toMatch(/stop in a finally block/u);
+      const fromTestResults = mutate(
+        '          path: ${{ runner.temp }}/joy-media-export-parity-capture',
+        '          path: test-results/desktop-acceptance/**/evidence/preview-4.5.png',
+      );
+      expect(v3Violations(fromTestResults).join(';')).toMatch(/uploaded from the copy/u);
+    });
+
+    it('runs the shadow summary builder even after a failed gate', () => {
+      const skipped = mutate(
+        '      - name: Check out the workflow commit for the shadow summary builder\n        if: always()\n',
+        '      - name: Check out the workflow commit for the shadow summary builder\n',
+      );
+      expect(v3Violations(skipped).join(';')).toMatch(/must run after a failed gate/u);
     });
 
     it("refuses a P0 lane that runs the config v2 uses, which inherits the default suite's projects", () => {
