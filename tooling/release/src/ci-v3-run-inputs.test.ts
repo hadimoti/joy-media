@@ -24,9 +24,13 @@ function fixture(topology: Topology, overrides: Record<string, unknown> = {}) {
   const needs = Object.fromEntries(
     LANES_BY_TOPOLOGY[topology].map((lane) => [lane, { result: 'success', outputs: {} }]),
   );
+  // The shape release:gate writes to test-output/release-gate/report.json: the verdict and the checks sit under `result`.
   const gate = {
-    passed: true,
-    checks: GATE_CHECK_IDS.map((id) => ({ id, status: 'passed', message: 'ok' })),
+    result: {
+      passed: true,
+      checks: GATE_CHECK_IDS.map((id) => ({ id, status: 'passed', message: 'ok', critical: true })),
+    },
+    evidence: {},
   };
   const readiness = {
     scenarioResults: [
@@ -98,15 +102,31 @@ describe('run inputs for the shadow comparison', () => {
   });
 
   it('refuses a gate report that lacks one of the 17 checks', () => {
-    const gate = fixture('single-pass').gate as { checks: { id: string }[] };
-    const checks = gate.checks.filter((check) => check.id !== 'sbom');
+    const gate = fixture('single-pass').gate as { result: { checks: { id: string }[] } };
+    const checks = gate.result.checks.filter((check) => check.id !== 'sbom');
     expect(() =>
-      buildRunInputs(fixture('single-pass', { gate: { passed: true, checks } })),
+      buildRunInputs(fixture('single-pass', { gate: { result: { passed: true, checks } } })),
     ).toThrow(/no sbom check/u);
   });
 
   it('refuses a gate report with no check list at all', () => {
-    expect(() => buildRunInputs(fixture('single-pass', { gate: { passed: true } }))).toThrow(
+    expect(() =>
+      buildRunInputs(fixture('single-pass', { gate: { result: { passed: true } } })),
+    ).toThrow(/no check list/u);
+  });
+
+  it('reads the verdict and the 17 checks from the release gate result that release:gate writes', () => {
+    const inputs = buildRunInputs(fixture('single-pass'));
+    expect(inputs.verdict).toBe('passed');
+    expect(Object.keys(inputs.gateChecks)).toHaveLength(17);
+  });
+
+  it('positive control: a gate report with its checks at the top level, not under result, is refused', () => {
+    const flattened = {
+      passed: true,
+      checks: GATE_CHECK_IDS.map((id) => ({ id, status: 'passed' })),
+    };
+    expect(() => buildRunInputs(fixture('single-pass', { gate: flattened }))).toThrow(
       /no check list/u,
     );
   });
@@ -130,7 +150,7 @@ describe('run inputs for the shadow comparison', () => {
   });
 
   it('records a failed gate as a failed verdict, so a failed run never reads as passed', () => {
-    const gate = { passed: false, checks: fixture('single-pass').gate.checks };
+    const gate = { result: { passed: false, checks: fixture('single-pass').gate.result.checks } };
     expect(buildRunInputs(fixture('single-pass', { gate })).verdict).toBe('failed');
   });
 });

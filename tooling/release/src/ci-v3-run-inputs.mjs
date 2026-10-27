@@ -69,9 +69,11 @@ export function buildRunInputs({
     }),
   );
 
-  if (!Array.isArray(gate?.checks)) throw new Error('the gate report has no check list');
+  // release:gate writes { result: { passed, checks }, evidence }, so the verdict and the 17 checks sit under `result`.
+  const releaseResult = gate?.result;
+  if (!Array.isArray(releaseResult?.checks)) throw new Error('the gate report has no check list');
   const gateChecks = Object.fromEntries(
-    gate.checks
+    releaseResult.checks
       .filter((check) => typeof check?.id === 'string')
       .map((check) => [check.id, check.status]),
   );
@@ -106,7 +108,7 @@ export function buildRunInputs({
     topology,
     attempt: Number(attempt),
     candidateSha,
-    verdict: gate.passed === true ? 'passed' : 'failed',
+    verdict: releaseResult.passed === true ? 'passed' : 'failed',
     gateChecks,
     scenarios,
     lifecycleTransitions: transitions,
