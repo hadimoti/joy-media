@@ -75,6 +75,20 @@ function stepsOf(workflow: Workflow): Array<{ job: string; step: Step }> {
   );
 }
 
+/** A job builds the CLI after typecheck and before Vitest, so a build-gated test is collected and run against the same files. */
+function bundleOrderFindings(steps: Step[]): string[] {
+  const typecheck = steps.findIndex((step) => step.run?.includes('pnpm typecheck'));
+  const bundle = steps.findIndex((step) =>
+    step.run?.split('\n').includes('node apps/cli/scripts/bundle.mjs'),
+  );
+  const vitest = steps.findIndex((step) => step.run?.includes('vitest/vitest.mjs'));
+  const findings: string[] = [];
+  if (typecheck < 0 || bundle < typecheck)
+    findings.push('the CLI bundle does not follow typecheck');
+  if (bundle < 0 || vitest < bundle) findings.push('Vitest does not follow the CLI bundle');
+  return findings;
+}
+
 /** Every rule the v3 workflow must keep. Returns the violations; an empty list means the workflow is clean. */
 function v3Violations(source: string): string[] {
   const workflow = yaml.load(source) as Workflow;
@@ -335,6 +349,30 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
     expect(merge?.run).toContain('--list test-output/hosted-verify/prep/list.json');
     const prepare = v3.jobs['hosted-prepare'].steps ?? [];
     expect(prepare.some((step) => step.run?.includes('vitest/vitest.mjs list --json'))).toBe(true);
+  });
+
+  it.each(['hosted-prepare', 'hosted-verify-shard'])(
+    '%s builds the CLI fonts before Vitest can collect a build-gated test',
+    (job) => {
+      expect(bundleOrderFindings(v3.jobs[job].steps ?? [])).toEqual([]);
+    },
+  );
+
+  it('positive control: a job that collects before the CLI bundle, or without one, is flagged', () => {
+    const collectsFirst: Step[] = [
+      { run: 'pnpm typecheck' },
+      { run: 'node node_modules/vitest/vitest.mjs list --json' },
+      { run: 'set -euo pipefail\nnode apps/cli/scripts/bundle.mjs' },
+    ];
+    expect(bundleOrderFindings(collectsFirst)).toEqual(['Vitest does not follow the CLI bundle']);
+    const withoutBundle: Step[] = [
+      { run: 'pnpm typecheck' },
+      { run: 'node node_modules/vitest/vitest.mjs list --json' },
+    ];
+    expect(bundleOrderFindings(withoutBundle)).toEqual([
+      'the CLI bundle does not follow typecheck',
+      'Vitest does not follow the CLI bundle',
+    ]);
   });
 
   it('runs the static gates the final gate used to rerun once here, and keeps the production audit', () => {

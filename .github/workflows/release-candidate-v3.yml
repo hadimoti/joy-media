@@ -127,6 +127,13 @@ jobs:
         run: |
           set -euo pipefail
           pnpm typecheck
+      # CLI process tests can build this bundle at runtime. Stage its fonts before collection so the desktop font test cannot
+      # change from skipped to runnable depending on which test file executes first.
+      - name: Bundle the CLI and its verified fonts before Vitest collection
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/cli/scripts/bundle.mjs
       # The same media and browser toolchain as the development verification (ci-dev.yml static job). The full suite needs ffmpeg and
       # Chromium: without them the shards failed in run 40424941725 before any test could pass.
       - name: Install pinned FFmpeg (BtbN n8.1.3-24-g92611900bb, SHA-256 verified)
@@ -231,6 +238,12 @@ jobs:
         run: |
           set -euo pipefail
           pnpm typecheck
+      # Match the shards' explicit bundle step, including the font manifest used by the desktop test's collection-time gate.
+      - name: Bundle the CLI and its verified fonts before Vitest collection
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/cli/scripts/bundle.mjs
       - name: Install pinned FFmpeg (BtbN n8.1.3-24-g92611900bb, SHA-256 verified)
         shell: bash
         env:
