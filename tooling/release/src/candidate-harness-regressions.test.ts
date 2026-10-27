@@ -122,6 +122,38 @@ describe('installed CLI acceptance: the packaged files are read from the install
   });
 });
 
+/** The v3 shard job runs `pnpm typecheck` (tsc -b) before its Vitest shard, as the development verification's check does. */
+export function shardPrerequisiteFindings(source: string): string[] {
+  const shardStart = source.indexOf('  hosted-verify-shard:');
+  const shardRun = source.indexOf('--shard=', shardStart);
+  const typecheck = source.indexOf('pnpm typecheck', shardStart);
+  const findings: string[] = [];
+  if (shardStart < 0 || shardRun < 0) {
+    findings.push('the shard job or its Vitest shard step is missing');
+  } else if (typecheck < 0 || typecheck > shardRun) {
+    findings.push('the shard job does not run pnpm typecheck before the Vitest shard');
+  }
+  return findings;
+}
+
+describe('v3 shard job: the project references are emitted before the shard runs', () => {
+  it('the shard job runs pnpm typecheck before its Vitest shard', () => {
+    expect(shardPrerequisiteFindings(read('.github/workflows/release-candidate-v3.yml'))).toEqual(
+      [],
+    );
+  });
+
+  it('positive control: a shard job without the typecheck step is flagged', () => {
+    const defective = [
+      '  hosted-verify-shard:',
+      '    steps:',
+      '      - run: pnpm install --frozen-lockfile',
+      '      - run: node node_modules/vitest/vitest.mjs run --retry=0 --shard=1/3',
+    ].join('\n');
+    expect(shardPrerequisiteFindings(defective).length).toBeGreaterThan(0);
+  });
+});
+
 describe('shadow workflows: FFmpeg comes from the pinned, digest-checked build', () => {
   it('the v2 and v3 workflows contain no unbounded apt install of FFmpeg', () => {
     expect(provisioningFindings(read('.github/workflows/release-candidate-v2.yml'))).toEqual([]);
