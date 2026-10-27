@@ -10,6 +10,9 @@ legacy workflows.
 2026-10-28 added engineering evidence for the signing chain, for the attended receipts, and for the survives flake. It added no
 release receipt and changed no gate.
 
+The approved v3 run on candidate `6a307ea9…` (run 40580654500, dispatched 2026-10-27) completed with success. That is evidence
+for that run and its candidate only. It is not a release receipt, and it is not the production gate (`RELEASE-RULES.md`, rule 6).
+
 ## What the release still needs
 
 | Item                          | What is still needed                                                                                                                    | Who                   | Status                |
