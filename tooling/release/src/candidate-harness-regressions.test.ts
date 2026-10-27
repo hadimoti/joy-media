@@ -154,6 +154,52 @@ describe('v3 shard job: the project references are emitted before the shard runs
   });
 });
 
+/** The collection runs after the media and browser toolchain the shards install, so a suite gated on them registers the same way. */
+export function collectionPrerequisiteFindings(source: string): string[] {
+  const jobStart = source.indexOf('  hosted-prepare:');
+  if (jobStart < 0) return ['the hosted-prepare job is missing'];
+  const jobEnd = source.indexOf('\n  hosted-verify:', jobStart);
+  const job = source.slice(jobStart, jobEnd > jobStart ? jobEnd : undefined);
+  const collection = job.indexOf('vitest.mjs list --json');
+  if (collection < 0) return ['the hosted-prepare job has no collection step'];
+  const findings: string[] = [];
+  const prerequisites = [
+    ['pnpm typecheck', 'the project references are not emitted'],
+    [
+      'FFMPEG_SHA256: d0eb612b8994407f78413e2929cb4b073bc699c8ab79e198b31624736fdc2f93',
+      'the pinned FFmpeg is not installed',
+    ],
+    ['pnpm exec playwright install --with-deps chromium', 'Chromium is not installed'],
+  ] as const;
+  for (const [needle, reason] of prerequisites) {
+    const at = job.indexOf(needle);
+    if (at < 0 || at > collection) findings.push(`the collection runs before ${reason}`);
+  }
+  return findings;
+}
+
+describe('collection: the hosted-prepare job lists the tests in the toolchain the shards run', () => {
+  it('the collection runs after typecheck, the pinned FFmpeg and Chromium are in place', () => {
+    expect(
+      collectionPrerequisiteFindings(read('.github/workflows/release-candidate-v3.yml')),
+    ).toEqual([]);
+  });
+
+  it('positive control: a collection that runs before the toolchain is flagged', () => {
+    const defective = [
+      '  hosted-prepare:',
+      '    steps:',
+      '      - run: pnpm install --frozen-lockfile',
+      '      - run: node node_modules/vitest/vitest.mjs list --json > test-output/hosted-verify/prep/list.json',
+      '      - run: pnpm typecheck',
+      '      - env:',
+      '          FFMPEG_SHA256: d0eb612b8994407f78413e2929cb4b073bc699c8ab79e198b31624736fdc2f93',
+      '        run: pnpm exec playwright install --with-deps chromium',
+    ].join('\n');
+    expect(collectionPrerequisiteFindings(defective)).toHaveLength(3);
+  });
+});
+
 describe('shadow workflows: FFmpeg comes from the pinned, digest-checked build', () => {
   it('the v2 and v3 workflows contain no unbounded apt install of FFmpeg', () => {
     expect(provisioningFindings(read('.github/workflows/release-candidate-v2.yml'))).toEqual([]);
