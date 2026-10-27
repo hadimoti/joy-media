@@ -465,7 +465,7 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
       expect(fromV3.has(command) || fromV3.has(renamed), command).toBe(true);
     }
     const shardNormalized = normalize(
-      'node node_modules/vitest/vitest.mjs run --retry=0 --shard=${{ matrix.shard }}/3 --reporter=json --outputFile=test-output/hosted-verify/shard-${{ matrix.shard }}.json',
+      'node node_modules/vitest/vitest.mjs run --retry=0 --shard=${{ matrix.shard }}/3 --reporter=default --reporter=json --outputFile.json=test-output/hosted-verify/shard-${{ matrix.shard }}.json',
     );
     expect(fromV3.has(shardNormalized)).toBe(true);
     expect(fromV3.size).toBeGreaterThan(fromV2.size);
@@ -665,7 +665,7 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
 
     it('refuses a Vitest shard run that is not a shard of 3', () => {
       const mutated = mutate(
-        'run --retry=0 --shard=${{ matrix.shard }}/3 --reporter=json',
+        'run --retry=0 --shard=${{ matrix.shard }}/3 --reporter=default --reporter=json',
         'run --retry=0 --reporter=json',
       );
       expect(v3Violations(mutated).join(';')).toMatch(/must run its own Vitest shard of 3/u);

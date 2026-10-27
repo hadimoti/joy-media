@@ -167,7 +167,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p test-output/hosted-verify
-          node node_modules/vitest/vitest.mjs run --retry=0 --shard=${{ matrix.shard }}/3 --reporter=json --outputFile=test-output/hosted-verify/shard-${{ matrix.shard }}.json
+          node node_modules/vitest/vitest.mjs run --retry=0 --shard=${{ matrix.shard }}/3 --reporter=default --reporter=json --outputFile.json=test-output/hosted-verify/shard-${{ matrix.shard }}.json
           test -s test-output/hosted-verify/shard-${{ matrix.shard }}.json
       # Transport only: the merge job reads the report from this run alone. The merge decides whether the shards are complete.
       - name: Upload the shard report (one day, this run only)
