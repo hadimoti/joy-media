@@ -102,11 +102,18 @@ export function compareShadowRuns(v2, v3) {
   }
 
   const tests = compareV2WithV3(v2.vitest, v3.vitest);
+  // Two different facts. A test v2 ran that v3's summary does not name is a recording gap, not a failure. A test v3 names as failed
+  // is an actual failure. The receipt reports the two counts separately.
+  const notRecordedInV3 = tests.missingInV3.length;
+  const failedInV3 = v3.vitest.failed.size;
   if (!tests.verdictMatches) reasons.push('the Vitest verdicts differ');
-  if (tests.missingInV3.length > 0)
-    reasons.push(`v3 dropped ${tests.missingInV3.length} test(s) that v2 executed`);
+  if (failedInV3 > 0) reasons.push(`v3 recorded ${failedInV3} failed test(s)`);
+  if (notRecordedInV3 > 0)
+    reasons.push(
+      `v3 did not record ${notRecordedInV3} test(s) that v2 executed (a recording gap, not a failure)`,
+    );
 
-  return { ok: reasons.length === 0, reasons };
+  return { ok: reasons.length === 0, reasons, classification: { notRecordedInV3, failedInV3 } };
 }
 
 function toSummary(run) {

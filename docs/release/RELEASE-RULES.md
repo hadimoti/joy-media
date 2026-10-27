@@ -29,3 +29,20 @@ approval.
 - Whether the shadow comparison needs a fresh v2/v3 pair after the lane-recording fix, or whether offline replay plus one completed
   v3 run is enough.
 - How Windows-only tests count in the equivalence rule. Today a Windows-only test counts only when a lane records it.
+
+## Offline replay (verify a change without a CI run)
+
+Use this before any dispatch. It rebuilds the readiness record, the run inputs, the run summary and the v2/v3 comparison from one
+retained run, and compares each with what that run recorded. It starts no CI run.
+
+1. Copy the run's folders from the durable store on the runner container (read-only), into `<store>/<candidate-sha>/` and
+   `<store>/p3/<candidate-sha>/`: `<run>-1-pgate`, `<run>-1-p1`, `<run>-1-release-artifacts`, and `p3/<candidate-sha>/<run>-1-p1`.
+2. Create two detached worktrees: one at the candidate SHA, and one at the run's workflow commit.
+3. Run the replay with the run's gate log (the log the gate step printed), the two worktrees, and the v2 summary to compare with:
+
+   `node tooling/release/src/ci-v3-offline-replay.mjs --store <store> --candidate-sha <sha> --run <run> --gate-log <gate.log> --candidate-tree <candidate-worktree> --workflow-tree <workflow-worktree> --v2 <v2-summary.json> --out-dir <dir>`
+
+   Add `--lane-vitest <file>` three times when the run uploaded its Windows and P0 Vitest test IDs.
+
+The replay ignores only the build time and the single-pass manifest's restore time, because both change on every restore. Any other
+difference is reported in the output.

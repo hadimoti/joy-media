@@ -62,7 +62,11 @@ function pair(change: (v3: ReturnType<typeof baseline>) => void = () => undefine
 
 describe('v2 and v3 shadow comparison (D18)', () => {
   it('accepts a pair that agrees on every fact the design names', () => {
-    expect(pair()).toEqual({ ok: true, reasons: [] });
+    expect(pair()).toEqual({
+      ok: true,
+      reasons: [],
+      classification: { notRecordedInV3: 0, failedInV3: 0 },
+    });
   });
 
   it('accepts extra tests in v3, which the design allows, and refuses a dropped one', () => {
@@ -79,7 +83,25 @@ describe('v2 and v3 shadow comparison (D18)', () => {
       (v3) => (v3.vitest = { executed: new Set(['a::1', 'a::2']), failed: new Set() }),
     );
     expect(dropped.ok).toBe(false);
-    expect(dropped.reasons.join(';')).toMatch(/v3 dropped 1 test\(s\) that v2 executed/u);
+    expect(dropped.reasons.join(';')).toMatch(
+      /v3 did not record 1 test\(s\) that v2 executed \(a recording gap, not a failure\)/u,
+    );
+  });
+
+  it('reports a test v3 ran and failed as a failure, and a test it never recorded as a gap, never as one another', () => {
+    const failed = pair(
+      (v3) =>
+        (v3.vitest = { executed: new Set(['a::1', 'a::2', 'b::1']), failed: new Set(['b::1']) }),
+    );
+    expect(failed.ok).toBe(false);
+    expect(failed.classification).toEqual({ notRecordedInV3: 0, failedInV3: 1 });
+    expect(failed.reasons.join(';')).toMatch(/v3 recorded 1 failed test\(s\)/u);
+    expect(failed.reasons.join(';')).not.toMatch(/did not record/u);
+    const gap = pair(
+      (v3) => (v3.vitest = { executed: new Set(['a::1', 'a::2']), failed: new Set() }),
+    );
+    expect(gap.classification).toEqual({ notRecordedInV3: 1, failedInV3: 0 });
+    expect(gap.reasons.join(';')).not.toMatch(/failed test/u);
   });
 
   it('refuses a different verdict', () => {
