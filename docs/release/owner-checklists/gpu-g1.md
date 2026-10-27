@@ -41,11 +41,11 @@ Expected: an NVIDIA GeForce RTX 5070 Ti. A different driver version is recorded,
 ## Step 1: copy the candidate's portable build and check it
 
 The candidate is `6a307ea9be8b012a26cb2793e07da42a6a9e1e04`, from run 40580654500. Copy the portable zip and its checksum
-file from the durable store on the runner container. This is a read-only copy.
+file from the durable evidence store. Replace `<store-root>` in the commands with the store path that engineering gives you for this session. The path is not kept in the repository. This is a read-only copy.
 
 ```powershell
-wsl.exe -d Ubuntu-24.04 -e docker cp "joy-media-ci-acceptance:/opt/joy-media-evidence/6a307ea9be8b012a26cb2793e07da42a6a9e1e04/40580654500-1-release-artifacts/joy-media-windows-x64-v1.0.3.zip" /mnt/c/JoyMediaG1/
-wsl.exe -d Ubuntu-24.04 -e docker cp "joy-media-ci-acceptance:/opt/joy-media-evidence/6a307ea9be8b012a26cb2793e07da42a6a9e1e04/40580654500-1-release-artifacts/SHA256SUMS.txt" /mnt/c/JoyMediaG1/
+wsl.exe -d Ubuntu-24.04 -e docker cp "joy-media-ci-acceptance:<store-root>/6a307ea9be8b012a26cb2793e07da42a6a9e1e04/40580654500-1-release-artifacts/joy-media-windows-x64-v1.0.3.zip" /mnt/c/JoyMediaG1/
+wsl.exe -d Ubuntu-24.04 -e docker cp "joy-media-ci-acceptance:<store-root>/6a307ea9be8b012a26cb2793e07da42a6a9e1e04/40580654500-1-release-artifacts/SHA256SUMS.txt" /mnt/c/JoyMediaG1/
 Get-FileHash C:\JoyMediaG1\joy-media-windows-x64-v1.0.3.zip -Algorithm SHA256
 Select-String -Path C:\JoyMediaG1\SHA256SUMS.txt -Pattern 'joy-media-windows-x64-v1.0.3.zip'
 Expand-Archive -Path C:\JoyMediaG1\joy-media-windows-x64-v1.0.3.zip -DestinationPath C:\JoyMediaG1\app

@@ -26,7 +26,9 @@ import { localWorkerEnv } from './worker-env.js';
 // The Worker build sits beside this package, so it is located from this file, not from the cwd.
 const workerDir = fileURLToPath(new URL('../../../worker/', import.meta.url));
 const workerEntry = join(workerDir, 'dist', 'index.js');
-const LEASE_CAP_MS = 3_000;
+// Above the Worker's 10 s heartbeat interval (apps/worker/src/worker-daemon.ts). At 3 s, a job that is slow under load can
+// expire before its first heartbeat. That is the lease rule working as designed, and it was the survives flake (2026-10-28).
+const LEASE_CAP_MS = 20_000;
 const FIRST_JOB_TIMEOUT_MS = 60_000;
 
 describe('local Worker route (real worker process, real FFmpeg)', () => {
@@ -341,6 +343,9 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       FIRST_JOB_TIMEOUT_MS,
       'the post-restart thumbnail job to finish',
     );
-    expect(recovered.status).toBe('done');
+    // Same condition as before. A failure now says which error the job recorded.
+    expect(recovered.status, `post-restart job: ${recovered.error ?? 'no error recorded'}`).toBe(
+      'done',
+    );
   }, 180_000);
 });

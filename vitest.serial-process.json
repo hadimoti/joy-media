@@ -41,9 +41,12 @@
   "packages/plugin-sdk/src/cli.test.ts",
   "packages/test-fixtures/src/readiness/media-semantics.test.ts",
   "packages/workflow-engine/src/headless.test.ts",
+  "tooling/attended/src/write-receipt.test.ts",
   "tooling/e2e-synthetic/src/synthetic-accounts.test.ts",
+  "tooling/release/src/build-release-manifest.test.ts",
   "tooling/release/src/editor-web-artifact.test.ts",
   "tooling/release/src/hosted-verify.test.ts",
+  "tooling/release/src/release-manifest-ceremony.test.ts",
   "tooling/release/src/retain-release-artifacts.test.ts",
   "tooling/release/src/sign-release-keygen.test.ts",
   "tooling/release/src/sign-release-manifest.test.ts"
