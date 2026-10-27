@@ -25,7 +25,7 @@ jobs:
   hosted-verify-shard:
     name: hosted-verify shard ${{ matrix.shard }} of 3
     runs-on: ubuntu-24.04
-    needs: [validate-candidate]
+    # validate-candidate is not part of this diagnostic; the shard step below verifies the exact candidate SHA itself.
     strategy:
       fail-fast: false
       matrix:
