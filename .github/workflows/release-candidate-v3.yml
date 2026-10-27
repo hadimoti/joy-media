@@ -878,13 +878,13 @@ jobs:
         with:
           name: joy-media-export-parity-evidence-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
           path: |
-            test-results/desktop-acceptance/export-semantics-desktop-*/evidence/preview-4.5.png
-            test-results/desktop-acceptance/export-semantics-desktop-*/evidence/export-4.5.rgb
-            test-results/desktop-acceptance/export-semantics-desktop-*/evidence/export-4.5.json
-            test-results/desktop-acceptance/export-semantics-desktop-*/evidence/presentation-times.json
-            test-results/desktop-acceptance/export-semantics-desktop-*/evidence/measurements.json
+            test-results/desktop-acceptance/**/evidence/preview-4.5.png
+            test-results/desktop-acceptance/**/evidence/export-4.5.rgb
+            test-results/desktop-acceptance/**/evidence/export-4.5.json
+            test-results/desktop-acceptance/**/evidence/presentation-times.json
+            test-results/desktop-acceptance/**/evidence/measurements.json
           retention-days: 1
-          if-no-files-found: ignore
+          if-no-files-found: warn
       - name: Show failed desktop acceptance page state
         if: failure()
         shell: powershell
@@ -1737,6 +1737,21 @@ jobs:
         run: |
           set -euo pipefail
           pnpm run release:gate
+      # The shadow summary builder must run the code this workflow commit defines. The job otherwise checks out the candidate, whose
+      # builder predates the nested-report reader (run 40525636510 failed on "the gate report has no check list").
+      - name: Check out the workflow commit for the shadow summary builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: workflow-tree
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Move the workflow-commit builder out of the candidate workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/joy-media-workflow-tree"
+          mv workflow-tree "$RUNNER_TEMP/joy-media-workflow-tree"
       - name: Write the shadow run summary for this run (development measurement, D18)
         if: always()
         shell: bash
@@ -1746,7 +1761,7 @@ jobs:
           set -euo pipefail
           mkdir -p test-output/ci-v3
           printf '%s' "$NEEDS_JSON" > test-output/ci-v3/needs.json
-          node tooling/release/src/ci-v3-run-inputs.mjs \
+          node "$RUNNER_TEMP/joy-media-workflow-tree/tooling/release/src/ci-v3-run-inputs.mjs" \
             --topology single-pass \
             --needs test-output/ci-v3/needs.json \
             --gate test-output/release-gate/report.json \
@@ -1756,7 +1771,7 @@ jobs:
             --candidate-sha "$CANDIDATE_SHA" \
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --out test-output/ci-v3/run-inputs.json
-          node tooling/release/src/ci-v3-run-summary.mjs --input test-output/ci-v3/run-inputs.json --out test-output/ci-v3/run-summary.json
+          node "$RUNNER_TEMP/joy-media-workflow-tree/tooling/release/src/ci-v3-run-summary.mjs" --input test-output/ci-v3/run-inputs.json --out test-output/ci-v3/run-summary.json
           {
             echo '### Shadow run summary (release-candidate-v3, single pass)'
             echo '```json'

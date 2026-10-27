@@ -120,9 +120,17 @@ function v3Violations(source: string): string[] {
     violations.push('concurrency must not cancel an in-progress gate');
 
   for (const { job, step } of stepsOf(workflow)) {
+    // The shadow summary builder reads its JSON through the workflow commit, so this one checkout may name that commit.
+    // Every other checkout must pin the candidate, so the release decision still runs on the candidate.
+    const summaryBuilderCheckout =
+      job === 'gate-summary' &&
+      step.name === 'Check out the workflow commit for the shadow summary builder' &&
+      step.with?.ref === '${{ github.sha }}' &&
+      step.with?.path === 'workflow-tree';
     if (
       step.uses?.startsWith('actions/checkout@') &&
-      step.with?.ref !== '${{ env.CANDIDATE_SHA }}'
+      step.with?.ref !== '${{ env.CANDIDATE_SHA }}' &&
+      !summaryBuilderCheckout
     ) {
       violations.push(`${job}: checkout must pin the exact candidate SHA`);
     }
@@ -768,6 +776,11 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
         '          ref: ${{ env.CANDIDATE_SHA }}\n          fetch-depth: 1\n          persist-credentials: false\n      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0\n        with:\n          node-version: 22\n      - name: Validate immutable candidate input',
         '          ref: main\n          fetch-depth: 1\n          persist-credentials: false\n      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0\n        with:\n          node-version: 22\n      - name: Validate immutable candidate input',
       );
+      expect(v3Violations(mutated).join(';')).toMatch(/pin the exact candidate SHA/u);
+    });
+
+    it('refuses the workflow-commit checkout unless it is the shadow summary builder', () => {
+      const mutated = mutate('          path: workflow-tree\n', '          path: elsewhere\n');
       expect(v3Violations(mutated).join(';')).toMatch(/pin the exact candidate SHA/u);
     });
 
