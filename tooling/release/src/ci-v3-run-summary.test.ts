@@ -60,6 +60,7 @@ describe('shadow run summary', () => {
     expect(compareShadowRuns(asComparable(v2), asComparable(v3))).toEqual({
       ok: true,
       reasons: [],
+      classification: { notRecordedInV3: 0, failedInV3: 0 },
     });
   });
 
@@ -94,7 +95,7 @@ describe('shadow run summary', () => {
     const v3 = buildRunSummary(dropped);
     const result = compareShadowRuns(asComparable(v2), asComparable(v3));
     expect(result.ok).toBe(false);
-    expect(result.reasons.join(' ')).toMatch(/v3 dropped 1 test/u);
+    expect(result.reasons.join(' ')).toMatch(/v3 did not record 1 test\(s\) that v2 executed/u);
   });
 
   it('is refused by the comparison when a release lane is not green in v3', () => {
