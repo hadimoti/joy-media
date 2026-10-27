@@ -577,13 +577,15 @@ if (Test-UserPathEntry -UserPath $oldUserPathValue -InstallPath $installRoot) {
     if (-not (Test-Path -LiteralPath (Join-Path $keptFolder 'joy-media.exe') -PathType Leaf)) { throw "The candidate setup did not keep v$PreviousVersion beside the install." }
     # The upgrade snapshotted the database that v$PreviousVersion wrote. The rollback also restores that snapshot (/restore-data),
     # so the database the candidate migrated or wrote is replaced, and the restored file must match the snapshot byte for byte.
-    $userDataDirectory = Get-InstalledUserDataDirectory
-    $snapshotDatabase = Join-Path $userDataDirectory "backups\pre-update-$PreviousVersion\joy-media.sqlite3"
+    # The installed app's own database lives in its data folder. $userDataDirectory stays the DPAPI fixture's folder, which the seed,
+    # the update, the rollback and the uninstall checks all read, so the installed folder gets its own name here.
+    $installedUserDataDirectory = Get-InstalledUserDataDirectory
+    $snapshotDatabase = Join-Path $installedUserDataDirectory "backups\pre-update-$PreviousVersion\joy-media.sqlite3"
     if (-not (Test-Path -LiteralPath $snapshotDatabase -PathType Leaf)) { throw "The upgrade did not snapshot the v$PreviousVersion database." }
     $snapshotDatabaseSha = Get-Sha256 $snapshotDatabase
     $rollbackRun = Invoke-CapturedProcess -FilePath $CandidateSetupPath -Arguments @('/rollback', '/restore-data') -TimeoutSeconds 900 -WorkingDirectory $runnerTemp -Environment (Get-SafeEnvironment)
     if ($rollbackRun.ExitCode -ne 0) { throw "Candidate setup /rollback failed with exit code $($rollbackRun.ExitCode)." }
-    if ((Get-Sha256 (Join-Path $userDataDirectory 'joy-media.sqlite3')) -ne $snapshotDatabaseSha) { throw "Rollback with /restore-data did not restore the v$PreviousVersion database snapshot." }
+    if ((Get-Sha256 (Join-Path $installedUserDataDirectory 'joy-media.sqlite3')) -ne $snapshotDatabaseSha) { throw "Rollback with /restore-data did not restore the v$PreviousVersion database snapshot." }
     Assert-RegisteredVersion $PreviousVersion
     Assert-UserIntegrations $PreviousVersion 'root'
     if ((Get-InstalledFileHash 'joy-media.exe') -ne $previousDesktopExeSha -or (Get-InstalledFileHash 'resources\app\cli\joy-media-bundle.mjs') -ne $previousCliBundleSha) {
