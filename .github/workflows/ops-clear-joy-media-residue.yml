@@ -5,8 +5,10 @@ name: ops-clear-joy-media-residue
 # while that install exists. This job removes only the paths that the installer guard and the v3 teardown check read. It runs
 # only where the disposable-host guard positively identifies the CI container. It deploys nothing and changes no candidate.
 
+# GitHub dispatches only workflows that exist on the default branch, so this job starts on a push to its own branch.
 on:
-  workflow_dispatch:
+  push:
+    branches: [proposal/d18-runner-residue-clean]
 
 permissions:
   contents: read
