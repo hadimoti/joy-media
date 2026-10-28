@@ -37,7 +37,7 @@ committed (OA1), and this session only diagnoses.
 - Install nothing, and do not run any setup executable.
 - Change nothing in the driver, the PATH, the services, or the Windows settings.
 - The shipped build registers the `joy://` protocol at every launch, which writes `HKCU\Software\Classes\joy`. Steps 2 and 3 can
-  change that key. Step 0 exports it, and step 10 restores it when it differs. That restore is the only registry change allowed.
+  change that key. Step 0 records whether the key is present, and exports it when it is. Step 10 restores it. That restore is the only registry change allowed.
 - Work only in `C:\JoyMediaG1`. Delete it at the end, after the logs are handed over.
 - If a Windows administrator prompt appears, cancel it and tell engineering.
 - Keep every log file as it is. Do not edit a log.
@@ -246,15 +246,15 @@ Then send the logs to engineering. Delete `C:\JoyMediaG1` after they confirm tha
 Each item needs your approval for that item, given in the session (GD2). Each one is reversed, and the reversal is verified,
 before the session ends (F81). Engineering does not run a Part 2 item on its own.
 
-| Item                                                                                                               | Reversal                                              | Verified by                                                          |
-| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- | -------------------------------------------------------------------- |
-| Launch with `--disable-gpu-sandbox` (one session; the instrumented build, test user data; export with the sampler) | Close the app. No persistent state                    | The process list shows no flagged process                            |
-| Exploit-protection override for `joy-media.exe`                                                                    | `Set-ProcessMitigation` back to the recorded defaults | `Get-ProcessMitigation -Name joy-media.exe` equals the step-0 record |
-| Debugging-tools install (for example WinDbg)                                                                       | Uninstall                                             | The installed-apps list equals step 0                                |
-| Driver change (with a restore point)                                                                               | Reinstall the step-0 driver                           | The `nvidia-smi` driver equals step 0                                |
-| Disable a stale adapter or MFT registration                                                                        | Re-enable                                             | The inventory equals step 0                                          |
-| Electron variant download and launch (GD3)                                                                         | Delete the folder                                     | The folder is absent                                                 |
-| Installing Node (only if step 0 found none)                                                                        | Uninstall                                             | The installed-apps list equals step 0                                |
+| Item                                                                                                                                                 | Reversal                                              | Verified by                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------- |
+| Launch with `--disable-gpu-sandbox` (one session; the instrumented build, test user data; export with the sampler, saved to `C:\JoyMediaG1\exports`) | Close the app. No persistent state                    | The process list shows no flagged process                            |
+| Exploit-protection override for `joy-media.exe`                                                                                                      | `Set-ProcessMitigation` back to the recorded defaults | `Get-ProcessMitigation -Name joy-media.exe` equals the step-0 record |
+| Debugging-tools install (for example WinDbg)                                                                                                         | Uninstall                                             | The installed-apps list equals step 0                                |
+| Driver change (with a restore point)                                                                                                                 | Reinstall the step-0 driver                           | The `nvidia-smi` driver equals step 0                                |
+| Disable a stale adapter or MFT registration                                                                                                          | Re-enable                                             | The inventory equals step 0                                          |
+| Electron variant download and launch (GD3)                                                                                                           | Delete the folder                                     | The folder is absent                                                 |
+| Installing Node (only if step 0 found none)                                                                                                          | Uninstall                                             | The installed-apps list equals step 0                                |
 
 The v1.0.3 plan's D7 approved these classes in principle (plan section 12e). It does not replace the per-item approval.
 

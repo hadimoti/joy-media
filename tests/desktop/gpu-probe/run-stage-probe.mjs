@@ -27,7 +27,7 @@ function option(name, fallback) {
 const outOption = option('out', '');
 if (!outOption) {
   throw new Error(
-    'usage: run-stage-probe.mjs --out <folder outside the repository> [--stages S0,S1] [--timeout-seconds 120] [--electron <electron.exe>] [--fake-stage-page]',
+    'usage: run-stage-probe.mjs --out <folder outside the repository> [--stages S0,S1] [--timeout-seconds 120] [--electron <electron.exe>] [--user-data <folder>] [--fake-stage-page]',
   );
 }
 const outDir = resolve(outOption);
@@ -48,7 +48,8 @@ for (const stage of stages) {
 const timeoutMs = Number(option('timeout-seconds', '120')) * 1000;
 const fakeStagePage = process.argv.includes('--fake-stage-page');
 // The user-data root for the stages. The G1 checklist names a folder outside the logs, so the handover does not carry profiles.
-const userDataRoot = resolve(option('user-data', join(outDir, 'userdata')));
+const userDataOption = option('user-data', '') ?? '';
+const userDataRoot = resolve(userDataOption === '' ? join(outDir, 'userdata') : userDataOption);
 
 // The Electron executable: the copy named by --electron (G1 uses a copied runtime), or the one apps/desktop installs.
 const electronOption = option('electron', '') ?? '';

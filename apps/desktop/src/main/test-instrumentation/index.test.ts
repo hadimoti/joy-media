@@ -23,7 +23,9 @@ vi.mock('electron', () => electron);
 import { installTestInstrumentation } from './index.js';
 
 describe('installTestInstrumentation', () => {
-  it('stops the joy:// registration before the app can make it', () => {
+  // This shows that installTestInstrumentation stubs the registration. It does not show that electron-entry calls it first;
+  // the G1 key comparison checks that in practice.
+  it('stops the joy:// registration once the instrumentation is installed', () => {
     expect(electron.app.setAsDefaultProtocolClient('joy')).toBe(true);
     installTestInstrumentation([]);
     expect(electron.app.setAsDefaultProtocolClient('joy', 'C:/app/joy-media.exe', [])).toBe(false);

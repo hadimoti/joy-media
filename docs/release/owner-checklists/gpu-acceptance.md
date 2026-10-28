@@ -15,7 +15,9 @@ approved that candidate's commit (GD5). Nothing in it runs unattended.
 - Before step 1, create `C:\JoyMediaG1\acceptance` and record the `joy://` key there with
   `reg.exe export "HKCU\Software\Classes\joy" C:\JoyMediaG1\acceptance\joy-key-before.reg /y`, or note that it is absent.
   The candidate is the shipped build. Its installer and every launch register `joy://` to the installed folder, as the shipped
-  app does. After step 3, record whether the key changed.
+  app does. After step 3, record whether the key changed. The installed candidate is expected to stay, so the key keeps
+  pointing at it. If the candidate is removed later, restore the key from the record in `C:\JoyMediaG1\acceptance`, as step 10
+  of `gpu-g1.md` describes.
 
 ## Step 1: install the candidate with its own installer
 
