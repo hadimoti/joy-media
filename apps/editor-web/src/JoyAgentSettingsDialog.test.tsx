@@ -1360,6 +1360,73 @@ describe('JOY Agent Settings saved profile connect', () => {
     expect(rendered.textContent).toContain('could not be read back');
   });
 
+  it('does not carry a typed key onto another profile when the chosen profile leaves the list without its own delete', async () => {
+    const profile = (id: string, name: string, provider: string, baseUrl: string) => ({
+      id,
+      name,
+      provider,
+      baseUrl,
+      modelId: 'grok-model',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    });
+    const alpha = profile('prof-alpha', 'Alpha', 'grok', 'https://api.x.ai/v1');
+    const bravo = profile('prof-bravo', 'Bravo', 'grok', 'https://api.x.ai/v1');
+    const charlie = profile('prof-charlie', 'Charlie', 'custom', 'http://127.0.0.1:9999/v1');
+    let reads = 0;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // Alpha has left the store without its own delete. The read after Charlie's deletion lists only Bravo.
+        return reads === 1 ? [alpha, bravo, charlie] : [bravo];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: [
+        'desktop.provider-profile.list',
+        'desktop.provider-profile.save',
+        'desktop.provider-profile.delete',
+      ],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    const cardButton = (name: string, text: string): HTMLButtonElement => {
+      const card = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent?.trim() === name,
+      );
+      const button = [...(card?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (candidate) => candidate.textContent?.trim() === text,
+      );
+      if (button === undefined) throw new Error(`Expected ${text} on ${name}`);
+      return button;
+    };
+    const press = async (button: HTMLButtonElement): Promise<void> => {
+      await act(async () => {
+        button.click();
+      });
+      await settle();
+    };
+
+    // Alpha is chosen, so the form describes its endpoint, and a key is typed there.
+    await press(cardButton('Alpha', 'Use'));
+    const configuredForAlpha = vi.mocked(engineClient.configure).mock.calls.length;
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-replacement');
+    });
+
+    await press(cardButton('Charlie', '✕'));
+    await press(buttonByText(rendered, 'Connect model'));
+
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(vi.mocked(engineClient.configure).mock.calls).toHaveLength(configuredForAlpha);
+  });
+
   it('does not carry a typed key onto another profile on the same endpoint when the chosen profile is deleted', async () => {
     const profile = (id: string, name: string) => ({
       id,

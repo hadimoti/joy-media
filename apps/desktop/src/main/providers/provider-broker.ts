@@ -678,10 +678,10 @@ function prepareCompletion(
   history: readonly string[],
   maxBytes: number,
 ): PreparedCall {
-  // The state a call carries back is counted as it is attached. In a conversation the engine continues as it was, all of
-  // it is sent, and the sent body is at most the limit, so state above twice the limit could never be sent. That bound
-  // keeps the work done before the exact check on the sent body (run) finite, and it never refuses a request that the
-  // exact check would accept.
+  // The state a call carries back is counted as it is attached. When the engine continues a conversation as it was, every
+  // counted state is sent, and the sent body is at most the limit, so state above twice the limit could never be sent.
+  // That bound keeps the work done before the exact check on the sent body (run) finite. The exact check still decides
+  // what is sent.
   let attached = 0;
   // The state of a call comes only from the same call in the conversation this request continues.
   const stateFor = (call: unknown, messageIndex: number): unknown => {

@@ -330,7 +330,16 @@ export function JoyAgentSettingsDialog({
       if (chosenId !== undefined) {
         const chosen = list.find((p) => p.id === chosenId);
         setSavedProfile(chosen);
-        if (chosen === undefined) selectedProfileIdRef.current = undefined;
+        if (chosen === undefined) {
+          // However the chosen profile left the list, the form that described it is cleared too. Only refs and setters
+          // are used here, so this function depends on stable values only.
+          selectedProfileIdRef.current = undefined;
+          if (keyRef.current) keyRef.current.value = '';
+          keyScopeRef.current = undefined;
+          setBaseUrl('');
+          setModelId('');
+          setConnectionName('');
+        }
         return list;
       }
       // Shown by default only when it is the one OpenRouter profile. With several on the same endpoint, the user
@@ -781,14 +790,6 @@ export function JoyAgentSettingsDialog({
     if (!isDesktopHost()) return;
     try {
       await deleteDesktopProviderProfile(profId);
-      // The form and the typed key belong to the chosen profile. When that profile is deleted, both are cleared, so a key
-      // typed next cannot update another saved profile on the same endpoint.
-      if (selectedProfileIdRef.current === profId) {
-        clearTypedKey();
-        setBaseUrl('');
-        setModelId('');
-        setConnectionName('');
-      }
       await loadProfiles();
       // Only a selection that is still this profile is cleared; a profile chosen while this read was pending stays.
       if (selectedProfileIdRef.current === profId) selectProfile(undefined);
