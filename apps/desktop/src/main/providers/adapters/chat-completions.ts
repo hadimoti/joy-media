@@ -16,8 +16,8 @@ export function prepareChatCompletion(input: {
   readonly body: CompletionBody;
   /** The name the completion limit is sent under. Only OpenAI's newer models differ. */
   readonly tokenLimitKey?: 'max_tokens' | 'max_completion_tokens';
-  /** The provider state a tool call carries back unchanged, by call id (see ContinuationState). */
-  readonly extraContentFor?: (callId: string) => unknown;
+  /** The provider state a tool call carries back unchanged, by call id and message index (see ContinuationState). */
+  readonly extraContentFor?: (callId: string, messageIndex: number) => unknown;
 }): PreparedCall {
   const { max_tokens: maxTokens, messages, ...rest } = input.body;
   const limitKey = input.tokenLimitKey ?? 'max_tokens';
@@ -25,7 +25,11 @@ export function prepareChatCompletion(input: {
   const payload = {
     ...rest,
     messages:
-      carry === undefined ? messages : messages.map((message) => withExtraContent(message, carry)),
+      carry === undefined
+        ? messages
+        : messages.map((message, index) =>
+            withExtraContent(message, (callId) => carry(callId, index)),
+          ),
     ...(maxTokens === undefined ? {} : { [limitKey]: maxTokens }),
     model: input.modelId,
     stream: false,

@@ -1062,6 +1062,174 @@ describe('JOY Agent Settings saved profile connect', () => {
     expect((saves[0]?.[1] as { id?: unknown }).id).toBeUndefined();
   });
 
+  /** Lets pending reads and the state they set settle, as the dialog's own reads do. */
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  /** Fills the form for a local OpenAI-compatible endpoint with a typed key, and the consent the endpoint needs. */
+  async function fillLocalEndpoint(rendered: HTMLElement): Promise<void> {
+    await selectCustomPreset(rendered);
+    const select = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find((candidate) =>
+      [...candidate.options].some((option) => option.value === 'openai-compatible'),
+    );
+    if (select === undefined) throw new Error('Expected the provider select');
+    await act(async () => {
+      select.value = 'openai-compatible';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    const model = rendered.querySelector<HTMLInputElement>('input[placeholder="provider/model"]');
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!baseUrl || !model || !key || !consent)
+      throw new Error('Expected the custom endpoint fields');
+    await act(async () => {
+      setInputValue(baseUrl, 'http://127.0.0.1:1234/v1');
+      setInputValue(model, 'llama3');
+      setInputValue(key, 'local-key');
+      consent.click();
+    });
+  }
+
+  it('does not connect when the saved profile cannot be read back after it is saved', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    let reads = 0;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        if (reads === 1) return [];
+        throw new Error('profile store unavailable');
+      }
+      if (channel === 'desktop.provider-profile.save') return savedLocal;
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    await fillLocalEndpoint(rendered);
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('could not be read back');
+  });
+
+  it('ignores a saved-profile read that finishes after a newer read started', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    const old = {
+      id: 'prof-old',
+      provider: 'custom',
+      baseUrl: 'http://10.0.0.5:8080/v1',
+      modelId: 'old-model',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    let reads = 0;
+    let releaseRemovalRead: ((list: readonly unknown[]) => void) | undefined;
+    let finishSave: ((profile: unknown) => void) | undefined;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // The read at mount lists the old profile. The read the removal starts is held until the test releases it,
+        // so it finishes after the read the save starts. The reads after that list the saved profile.
+        if (reads === 1) return [old];
+        if (reads === 2) {
+          return new Promise<readonly unknown[]>((resolve) => {
+            releaseRemovalRead = resolve;
+          });
+        }
+        return [savedLocal];
+      }
+      if (channel === 'desktop.provider-profile.save') {
+        return new Promise((resolve) => {
+          finishSave = resolve;
+        });
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: [
+        'desktop.provider-profile.list',
+        'desktop.provider-profile.save',
+        'desktop.provider-profile.delete',
+      ],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    await fillLocalEndpoint(rendered);
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+    const removeOld = [...rendered.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === '✕',
+    );
+    if (removeOld === undefined) throw new Error('Expected the remove button of the old profile');
+    await act(async () => {
+      removeOld.click();
+    });
+    await settle();
+    await act(async () => {
+      finishSave?.(savedLocal);
+    });
+    await settle();
+    await act(async () => {
+      releaseRemovalRead?.([old]);
+    });
+    await settle();
+
+    // The saved profile is still the chosen one, so connecting again with the key field empty uses it. Its
+    // acknowledgement is given again: the checkbox is unticked and ticked, which records it for the saved profile.
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (consent === null) throw new Error('Expected the custom-provider acknowledgement');
+    await act(async () => {
+      consent.click();
+    });
+    await act(async () => {
+      consent.click();
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+
+    const connected = vi
+      .mocked(engineClient.configure)
+      .mock.calls.map(([config]) => (config as { profileId?: unknown }).profileId);
+    expect(connected).toEqual(['prof-local', 'prof-local']);
+  });
+
   it('refuses to connect a typed key while the saved profiles are still loading', async () => {
     const invoke = vi.fn().mockImplementation(async (channel: string) => {
       if (channel === 'desktop.provider-profile.list') return new Promise(() => undefined);

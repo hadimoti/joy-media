@@ -27,7 +27,7 @@ import {
 import { AdapterRequestError, type ModelEntry, type PreparedCall } from './adapters/types.js';
 import { isRecord, parseCompletionBody, type CompletionBody } from './request-body.js';
 import { endpointBindingDigest } from '../../store/profile-binding.js';
-import { ContinuationState } from './continuation-state.js';
+import { ContinuationState, historyDigests } from './continuation-state.js';
 
 export { endpointBindingDigest };
 
@@ -220,30 +220,21 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     endpoint: Endpoint,
     body: CompletionBody,
     timeoutMs: number,
+    maxBytes: number,
     signal?: AbortSignal,
   ): Promise<string> {
-    const call = prepareCompletion(endpoint, body, continuation);
+    const history = historyDigests(body.messages);
+    const call = prepareCompletion(endpoint, body, continuation, history, maxBytes);
+    // The state a call carries back is part of the body, so the limit holds for the body that is sent.
+    if (Buffer.byteLength(call.body ?? '') > maxBytes) throw requestTooLarge(maxBytes);
     const reply = assertNoCredential(
       await send(deps.fetch, call, timeoutMs, endpoint.apiKey, signal),
       endpoint,
     );
-    rememberContinuation(continuation, endpoint, reply);
-    if (endpoint.api === 'anthropic-messages') {
-      if (stopReasonOf(reply) === 'pause_turn') {
-        throw new BrokerError(
-          'PROVIDER_INCOMPATIBLE',
-          'The model paused its turn. This build cannot continue it.',
-        );
-      }
-      let converted: string;
-      try {
-        converted = anthropicReplyToChatCompletion(reply, endpoint.modelId);
-      } catch {
-        throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not understood.');
-      }
-      return checkedReply(completionEnvelope(converted), endpoint);
-    }
-    return checkedReply(completionEnvelope(reply), endpoint);
+    const text = checkedReply(completionText(reply, endpoint, requestedToolNames(body)), endpoint);
+    // Kept only once the reply is accepted, so a refused reply leaves nothing behind for a later request.
+    rememberContinuation(continuation, endpoint, history.at(-1) ?? '', reply);
+    return text;
   }
 
   return {
@@ -252,18 +243,13 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         const parsed = parseCompletionBody(request.body);
         if (!parsed.ok) throw new BrokerError('REQUEST_INVALID', parsed.message);
         const limit = request.maxRequestBytes ?? MAX_AGENT_REQUEST_BYTES;
-        if (Buffer.byteLength(JSON.stringify(parsed.body)) > limit) {
-          throw new BrokerError(
-            'REQUEST_TOO_LARGE',
-            `The request is larger than ${limit / (1024 * 1024)} MiB.`,
-          );
-        }
+        if (Buffer.byteLength(JSON.stringify(parsed.body)) > limit) throw requestTooLarge(limit);
         const resolved = await resolveProfile(request.profileId, request.baseUrl);
         const endpoint =
           request.modelId === undefined
             ? resolved
             : { ...resolved, modelId: safeModelId(request.modelId) };
-        const text = await run(endpoint, parsed.body, completeMs, request.signal);
+        const text = await run(endpoint, parsed.body, completeMs, limit, request.signal);
         return { ok: true, data: { text } };
       } catch (error) {
         return failureOf(error);
@@ -278,6 +264,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
           endpoint,
           { messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 },
           controlMs,
+          MAX_AGENT_REQUEST_BYTES,
         );
         return { ok: true, modelId };
       } catch (error) {
@@ -403,19 +390,45 @@ function notUnderstood(): never {
  * underscores, and some add dots and colons (Kimi writes `functions.name:0`). A slash is never part of an id.
  */
 const TOOL_CALL_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
-/** A tool name, as the capability check reads it. A URL or a path in that field is refused. */
-const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_.-]*$/;
-/** A finish reason is a lowercase word, such as `stop` or `tool_calls`. A URL in that field is refused. */
-const FINISH_REASON = /^[a-z_]{1,32}$/;
+/**
+ * The finish reasons a provider sends for a turn. The engine does not read the finish reason; the broker reads only
+ * `content_filter`, for a refusal. Any other value is dropped, so no provider text reaches the Worker in that field.
+ */
+const FINISH_REASONS: ReadonlySet<string> = new Set([
+  'stop',
+  'length',
+  'tool_calls',
+  'function_call',
+  'content_filter',
+]);
+
+/** The completion the engine reads, for a reply of either provider shape. */
+function completionText(reply: string, endpoint: Endpoint, requested: ReadonlySet<string>): string {
+  if (endpoint.api !== 'anthropic-messages') return completionEnvelope(reply, requested);
+  if (stopReasonOf(reply) === 'pause_turn') {
+    throw new BrokerError(
+      'PROVIDER_INCOMPATIBLE',
+      'The model paused its turn. This build cannot continue it.',
+    );
+  }
+  let converted: string;
+  try {
+    converted = anthropicReplyToChatCompletion(reply, endpoint.modelId);
+  } catch {
+    throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not understood.');
+  }
+  return completionEnvelope(converted, requested);
+}
 
 /**
  * The completion the engine reads, rebuilt from the fields it needs and nothing else. The engine reads
  * `choices[0].message` and the tool calls in it, so the provider's envelope (`id`, `object`, `created`, `model`
- * and `usage`) is dropped, and none of its metadata reaches the Worker. Each field the engine or the checks read
- * is type-checked: a wrong type is refused, not dropped. Model-authored strings are kept exactly as written
- * (PLAN-v4 §6b). Both paths pass through here; the Anthropic reply is converted to this shape first.
+ * and `usage`) is dropped, and none of its metadata reaches the Worker. A tool call may name only a tool the request
+ * offered. Each field the engine or the checks read is type-checked: a wrong type is refused, not dropped.
+ * Model-authored strings are kept exactly as written (PLAN-v4 §6b). Both paths pass through here; the Anthropic
+ * reply is converted to this shape first.
  */
-function completionEnvelope(reply: string): string {
+function completionEnvelope(reply: string, requested: ReadonlySet<string>): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(reply);
@@ -423,25 +436,31 @@ function completionEnvelope(reply: string): string {
     throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not valid JSON.');
   }
   if (!isRecord(parsed) || !Array.isArray(parsed.choices)) notUnderstood();
-  return JSON.stringify({ choices: parsed.choices.map(completionChoice) });
+  return JSON.stringify({
+    choices: parsed.choices.map((choice) => completionChoice(choice, requested)),
+  });
 }
 
-function completionChoice(choice: unknown): Record<string, unknown> {
+function completionChoice(
+  choice: unknown,
+  requested: ReadonlySet<string>,
+): Record<string, unknown> {
   if (!isRecord(choice)) notUnderstood();
   const out: Record<string, unknown> = {};
-  if (
-    choice.finish_reason === null ||
-    (typeof choice.finish_reason === 'string' && FINISH_REASON.test(choice.finish_reason))
-  ) {
-    out.finish_reason = choice.finish_reason;
+  if (choice.finish_reason === null) {
+    out.finish_reason = null;
   } else if (choice.finish_reason !== undefined) {
-    notUnderstood();
+    if (typeof choice.finish_reason !== 'string') notUnderstood();
+    if (FINISH_REASONS.has(choice.finish_reason)) out.finish_reason = choice.finish_reason;
   }
-  if (choice.message !== undefined) out.message = completionMessage(choice.message);
+  if (choice.message !== undefined) out.message = completionMessage(choice.message, requested);
   return out;
 }
 
-function completionMessage(message: unknown): Record<string, unknown> {
+function completionMessage(
+  message: unknown,
+  requested: ReadonlySet<string>,
+): Record<string, unknown> {
   if (!isRecord(message)) notUnderstood();
   const out: Record<string, unknown> = {};
   // The engine reads a present role as the assistant's. Any other value, null included, is refused.
@@ -462,73 +481,98 @@ function completionMessage(message: unknown): Record<string, unknown> {
   // Some servers send `tool_calls: null` on a text answer. That is the same as no tool calls.
   if (message.tool_calls !== undefined && message.tool_calls !== null) {
     if (!Array.isArray(message.tool_calls)) notUnderstood();
-    out.tool_calls = message.tool_calls.map(completionToolCall);
+    out.tool_calls = message.tool_calls.map((call) => completionToolCall(call, requested));
   }
   return out;
 }
 
-function completionToolCall(call: unknown): Record<string, unknown> {
+function completionToolCall(
+  call: unknown,
+  requested: ReadonlySet<string>,
+): Record<string, unknown> {
   if (!isRecord(call) || !isRecord(call.function)) notUnderstood();
   const fn = call.function;
   if (typeof call.id !== 'string' || !TOOL_CALL_ID.test(call.id)) notUnderstood();
   if (call.type !== undefined && call.type !== 'function') notUnderstood();
-  if (typeof fn.name !== 'string' || !TOOL_NAME.test(fn.name)) notUnderstood();
+  // The engine offers only the tools the request named, so a reply may call only those. The name of any other
+  // tool is never passed on, and the reply is refused.
+  if (typeof fn.name !== 'string' || !requested.has(fn.name)) {
+    throw new BrokerError(
+      'PROVIDER_INCOMPATIBLE',
+      'The provider called a tool that was not offered.',
+    );
+  }
   if (typeof fn.arguments !== 'string') notUnderstood();
   // Written back as 'function': a provider requires that type when the call is sent again.
   return { id: call.id, type: 'function', function: { name: fn.name, arguments: fn.arguments } };
 }
 
 /**
- * Keeps the state each tool call of a reply must carry back: a Chat Completions call's `extra_content`, or the
- * Claude thinking blocks that a tool use follows. The reply itself does not carry it onward (ContinuationState).
+ * Keeps the state the calls of an accepted reply must carry back (ContinuationState): a Chat Completions call's
+ * `extra_content`, or, for Claude, the turn its tool uses came in. Only the first choice is kept, since it is the one
+ * the engine reads. The reply itself does not carry the state onward. `history` is the digest of the request's
+ * messages, so the state returns only to the conversation that produced it.
  */
-function rememberContinuation(state: ContinuationState, endpoint: Endpoint, reply: string): void {
+function rememberContinuation(
+  state: ContinuationState,
+  endpoint: Endpoint,
+  history: string,
+  reply: string,
+): void {
   if (endpoint.profileId === '') return;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(reply);
-  } catch {
-    return; // Not JSON: the completion check refuses it, so there is nothing to keep.
-  }
-  if (!isRecord(parsed)) return;
+  const parsed = parseObject(reply);
+  if (parsed === undefined) return;
   if (endpoint.api === 'anthropic-messages') {
-    rememberThinking(state, endpoint.profileId, parsed);
+    rememberTurn(state, endpoint.profileId, history, parsed);
     return;
   }
-  if (!Array.isArray(parsed.choices)) return;
-  for (const choice of parsed.choices) {
-    if (
-      !isRecord(choice) ||
-      !isRecord(choice.message) ||
-      !Array.isArray(choice.message.tool_calls)
-    ) {
-      continue;
-    }
-    for (const call of choice.message.tool_calls) {
-      if (isRecord(call) && typeof call.id === 'string' && call.extra_content !== undefined) {
-        state.remember(endpoint.profileId, call.id, call.extra_content);
-      }
+  const first: unknown = Array.isArray(parsed.choices) ? parsed.choices[0] : undefined;
+  if (!isRecord(first) || !isRecord(first.message) || !Array.isArray(first.message.tool_calls)) {
+    return;
+  }
+  for (const call of first.message.tool_calls) {
+    if (isRecord(call) && typeof call.id === 'string' && call.extra_content !== undefined) {
+      state.remember(endpoint.profileId, call.id, history, call.extra_content);
     }
   }
 }
 
-/** Claude's thinking blocks come before a tool use, and the tool use needs them on its next request. */
-function rememberThinking(
+/**
+ * A Claude turn is kept whole, as the provider sent it, under each of its tool uses. Its thinking and text come back
+ * with the tool uses, in the order they came, so nothing is reordered or rebuilt.
+ */
+function rememberTurn(
   state: ContinuationState,
   profileId: string,
+  history: string,
   reply: Record<string, unknown>,
 ): void {
-  if (!Array.isArray(reply.content)) return;
-  const thinking = reply.content.filter(
-    (block): block is Record<string, unknown> =>
-      isRecord(block) && (block.type === 'thinking' || block.type === 'redacted_thinking'),
-  );
-  if (thinking.length === 0) return;
-  for (const block of reply.content) {
+  const blocks: unknown = reply.content;
+  if (!Array.isArray(blocks)) return;
+  if (!blocks.every((block) => isRecord(block) && typeof block.type === 'string')) return;
+  for (const block of blocks) {
     if (isRecord(block) && block.type === 'tool_use' && typeof block.id === 'string') {
-      state.remember(profileId, block.id, thinking);
+      state.remember(profileId, block.id, history, blocks);
     }
   }
+}
+
+/** The tool names a request offered. A reply may call only these. */
+function requestedToolNames(body: CompletionBody): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const tool of body.tools ?? []) {
+    if (isRecord(tool.function) && typeof tool.function.name === 'string') {
+      names.add(tool.function.name);
+    }
+  }
+  return names;
+}
+
+function requestTooLarge(limit: number): BrokerError {
+  return new BrokerError(
+    'REQUEST_TOO_LARGE',
+    `The request is larger than ${limit / (1024 * 1024)} MiB.`,
+  );
 }
 
 /** The reply that leaves the broker holds no credential, and a refusal is not passed off as an answer. */
@@ -594,8 +638,19 @@ function prepareCompletion(
   endpoint: Endpoint,
   body: CompletionBody,
   continuation: ContinuationState,
+  history: readonly string[],
+  maxBytes: number,
 ): PreparedCall {
-  const stateFor = (callId: string): unknown => continuation.recall(endpoint.profileId, callId);
+  let attached = 0;
+  // The state a call carries back comes from the conversation this request continues. Its size counts toward the
+  // limit as it is attached, so a body that would grow past the limit is refused before it is built.
+  const stateFor = (callId: string, messageIndex: number): unknown => {
+    const kept = continuation.recall(endpoint.profileId, callId, history[messageIndex] ?? '');
+    if (kept === undefined) return undefined;
+    attached += kept.bytes;
+    if (attached > maxBytes) throw requestTooLarge(maxBytes);
+    return kept.value;
+  };
   try {
     if (endpoint.api === 'anthropic-messages') {
       return prepareAnthropicMessages({
@@ -603,7 +658,7 @@ function prepareCompletion(
         apiKey: requireKey(endpoint),
         modelId: endpoint.modelId,
         body,
-        thinkingBefore: stateFor,
+        turnFor: stateFor,
       });
     }
     return prepareChatCompletion({

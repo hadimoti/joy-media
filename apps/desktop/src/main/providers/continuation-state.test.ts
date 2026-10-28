@@ -1,35 +1,96 @@
 import { describe, expect, it } from 'vitest';
-import { ContinuationState } from './continuation-state.js';
+import { ContinuationState, historyDigests } from './continuation-state.js';
 
 const HOUR_MS = 60 * 60 * 1000;
+const MIB = 1024 * 1024;
 
 describe('ContinuationState', () => {
   it('keeps the state of a call for its own profile only', () => {
     const state = new ContinuationState();
 
-    state.remember('p1', 'call-1', { sig: 'a' });
+    state.remember('p1', 'call-1', 'h', { sig: 'a' });
 
-    expect(state.recall('p1', 'call-1')).toEqual({ sig: 'a' });
-    expect(state.recall('p2', 'call-1')).toBeUndefined();
+    expect(state.recall('p1', 'call-1', 'h')?.value).toEqual({ sig: 'a' });
+    expect(state.recall('p2', 'call-1', 'h')).toBeUndefined();
+  });
+
+  it('keeps the state of a call for its own conversation only', () => {
+    const state = new ContinuationState();
+
+    state.remember('p1', 'call-1', 'conversation-a', 'a');
+    state.remember('p1', 'call-1', 'conversation-b', 'b');
+
+    expect(state.recall('p1', 'call-1', 'conversation-a')?.value).toBe('a');
+    expect(state.recall('p1', 'call-1', 'conversation-b')?.value).toBe('b');
+    expect(state.recall('p1', 'call-1', 'conversation-c')).toBeUndefined();
+  });
+
+  it('replaces the state of a call when the same call in the same conversation is remembered again', () => {
+    const state = new ContinuationState();
+
+    state.remember('p1', 'call-1', 'h', 'first');
+    state.remember('p1', 'call-1', 'h', 'second');
+
+    expect(state.recall('p1', 'call-1', 'h')?.value).toBe('second');
   });
 
   it('forgets a call once its lifetime has passed', () => {
     let now = 0;
     const state = new ContinuationState(() => now);
-    state.remember('p1', 'call-1', 'kept');
+    state.remember('p1', 'call-1', 'h', 'kept');
 
     now = HOUR_MS - 1;
-    expect(state.recall('p1', 'call-1')).toBe('kept');
+    expect(state.recall('p1', 'call-1', 'h')?.value).toBe('kept');
 
     now = HOUR_MS + 1;
-    expect(state.recall('p1', 'call-1')).toBeUndefined();
+    expect(state.recall('p1', 'call-1', 'h')).toBeUndefined();
   });
 
   it('drops the oldest call when more than 512 are kept', () => {
     const state = new ContinuationState();
-    for (let index = 0; index <= 512; index += 1) state.remember('p1', `call-${index}`, index);
+    for (let index = 0; index <= 512; index += 1) state.remember('p1', `call-${index}`, 'h', index);
 
-    expect(state.recall('p1', 'call-0')).toBeUndefined();
-    expect(state.recall('p1', 'call-512')).toBe(512);
+    expect(state.recall('p1', 'call-0', 'h')).toBeUndefined();
+    expect(state.recall('p1', 'call-512', 'h')?.value).toBe(512);
+  });
+
+  it('drops the oldest state once the kept bytes pass the budget, however few calls it is', () => {
+    const state = new ContinuationState();
+    const large = 'x'.repeat(MIB);
+    // Forty MiB of state, against a budget of 32 MiB: the oldest entries go first.
+    for (let index = 0; index < 40; index += 1) state.remember('p1', `call-${index}`, 'h', large);
+
+    expect(state.recall('p1', 'call-0', 'h')).toBeUndefined();
+    expect(state.recall('p1', 'call-39', 'h')?.value).toBe(large);
+  });
+
+  it('reports the bytes a kept call takes when it is sent back', () => {
+    const state = new ContinuationState();
+
+    state.remember('p1', 'call-1', 'h', { sig: 'é' });
+
+    expect(state.recall('p1', 'call-1', 'h')?.bytes).toBe(Buffer.byteLength('{"sig":"é"}'));
+  });
+});
+
+describe('historyDigests', () => {
+  it('gives a prefix of a conversation the digest it has on its own', () => {
+    const short = [{ role: 'user', content: 'read it' }];
+    const long = [...short, { role: 'assistant', content: null }, { role: 'tool', content: 'ok' }];
+
+    expect(historyDigests(long)[1]).toBe(historyDigests(short)[1]);
+  });
+
+  it('changes when a message before the call changes', () => {
+    const first = historyDigests([{ role: 'user', content: 'a' }, { role: 'assistant' }]);
+    const other = historyDigests([{ role: 'user', content: 'b' }, { role: 'assistant' }]);
+
+    expect(first[1]).not.toBe(other[1]);
+    expect(first[2]).not.toBe(other[2]);
+  });
+
+  it('gives the empty conversation a digest, and one digest per prefix', () => {
+    expect(historyDigests([])).toHaveLength(1);
+    expect(historyDigests([{ role: 'user', content: 'a' }])).toHaveLength(2);
   });
 });

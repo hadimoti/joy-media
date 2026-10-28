@@ -213,6 +213,14 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
     );
   }
 
+  /** Stops a Worker process and waits until it has exited, so the reads it made are all in its log. */
+  async function stopWorker(child: ChildProcess): Promise<void> {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    child.kill('SIGKILL');
+    await exited;
+  }
+
   it('renders a real thumbnail through the Worker and stores the verified JPEG', async () => {
     const job = orchestrator();
     startWorker();
@@ -254,15 +262,31 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
         },
       }),
     );
-    const readLog = join(dir, 'provider-reads.log');
-    startWorker({ HOME: home, USERPROFILE: home, JOY_TEST_READ_LOG: readLog });
+    const localLog = join(dir, 'provider-reads-local.log');
+    const local = startWorker({ HOME: home, USERPROFILE: home, JOY_TEST_READ_LOG: localLog });
     await waitForWorker();
-
     expect(database.jobDispatch.presence()?.capabilities).not.toContain('text.lm-studio');
-    // The process itself is observed, so a read whose result is discarded still shows up here.
-    expect(providerFileReads(readLog)).toEqual([]);
 
-    // Control: a Worker with no local token reads the same file. Without this, the empty log proves nothing.
+    // A job the Worker really runs, so the reads it makes on the way to a result are observed too.
+    const job = orchestrator();
+    const submitted = job.submit({
+      jobType: 'asset.thumbnail',
+      refId: refFor(videoPath),
+      kind: 'derivative:thumbnail',
+    });
+    if (!submitted.ok) throw new Error(`submit refused: ${submitted.message}`);
+    await waitFor(
+      () => terminal(database.jobDispatch.get(submitted.jobId)),
+      FIRST_JOB_TIMEOUT_MS,
+      'the thumbnail job to finish',
+    );
+
+    // Checked after the Worker has stopped: the log then holds every read the process made in its life.
+    await stopWorker(local);
+    expect(providerFileReads(localLog)).toEqual([]);
+
+    // Control: a Worker with no local token reads the same file. Its own log, so the local run cannot satisfy it.
+    const standaloneLog = join(dir, 'provider-reads-standalone.log');
     const standalone = spawn(process.execPath, [workerEntry], {
       cwd: workerDir,
       env: {
@@ -270,18 +294,18 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
         ...observedEnv(),
         HOME: home,
         USERPROFILE: home,
-        JOY_TEST_READ_LOG: readLog,
+        JOY_TEST_READ_LOG: standaloneLog,
       },
       stdio: 'ignore',
     });
     try {
       await waitFor(
-        () => (providerFileReads(readLog).length > 0 ? true : undefined),
+        () => (providerFileReads(standaloneLog).length > 0 ? true : undefined),
         FIRST_JOB_TIMEOUT_MS,
         'the standalone Worker to read its provider file',
       );
     } finally {
-      standalone.kill();
+      await stopWorker(standalone);
     }
   }, 150_000);
 

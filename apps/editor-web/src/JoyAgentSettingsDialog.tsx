@@ -211,6 +211,8 @@ export function JoyAgentSettingsDialog({
   const selectedProfileIdRef = useRef<string | undefined>(undefined);
   const mountedRef = useRef(true);
   const mediaProbeEpochRef = useRef(0);
+  // The number of the latest read of the saved profiles. Only that read may change the list, the selection or readiness.
+  const profileReadRef = useRef(0);
 
   const [activeTab, setActiveTab] = useState<JoyAgentSettingsTab>(initialTab);
 
@@ -304,8 +306,11 @@ export function JoyAgentSettingsDialog({
     };
   }, []);
 
-  const loadProfiles = async () => {
-    if (!isDesktopHost()) return;
+  /** Reads the saved profiles. Resolves true when this read is the latest and has succeeded. */
+  const loadProfiles = async (): Promise<boolean> => {
+    if (!isDesktopHost()) return true;
+    // A read that started earlier and finishes later must not put back a list that is out of date.
+    const read = ++profileReadRef.current;
     // Each read starts from unknown: no saved profile is used until this read has succeeded.
     setProfilesReady(false);
     try {
@@ -313,7 +318,7 @@ export function JoyAgentSettingsDialog({
         listDesktopProviderProfiles(),
         PROFILE_LIST_TIMEOUT_MS,
       )) as readonly DesktopProviderProfileState[];
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || read !== profileReadRef.current) return false;
       setProfiles(list);
       setProfilesReady(true);
       setProfilesUnreadable(false);
@@ -323,7 +328,7 @@ export function JoyAgentSettingsDialog({
         const chosen = list.find((p) => p.id === chosenId);
         setSavedProfile(chosen);
         if (chosen === undefined) selectedProfileIdRef.current = undefined;
-        return;
+        return true;
       }
       // Shown by default only when it is the one OpenRouter profile. With several on the same endpoint, the user
       // chooses one (the form refuses to connect until then), so no profile is picked for them.
@@ -340,8 +345,11 @@ export function JoyAgentSettingsDialog({
         setProvider('openrouter');
         setCustomDisclosure(false);
       }
+      return true;
     } catch {
-      setProfilesUnreadable(true);
+      // A failed read that is no longer the latest says nothing about the list the user now sees.
+      if (read === profileReadRef.current) setProfilesUnreadable(true);
+      return false;
     }
   };
 
@@ -681,7 +689,10 @@ export function JoyAgentSettingsDialog({
         if (saved) {
           profileId = saved.id;
           selectProfile(saved);
-          await loadProfiles();
+          // The connection waits for a list that shows the saved profile. When it cannot be read, nothing connects.
+          if (!(await loadProfiles())) {
+            throw new Error('The saved profile could not be read back. Try connecting again.');
+          }
         }
       }
 

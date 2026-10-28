@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { AgentRequestRegistry, cancelWhenPageGoes } from './agent-requests.js';
 
@@ -75,13 +76,44 @@ describe('AgentRequestRegistry', () => {
 
 describe('the desktop entry point', () => {
   it('ends the calls in progress when the main window goes', () => {
-    // electron-entry.ts loads Electron, so it cannot be imported here. Its source must make the wiring call.
-    const entry = readFileSync(
-      fileURLToPath(new URL('./electron-entry.ts', import.meta.url)),
-      'utf8',
+    // electron-entry.ts loads Electron, so it cannot be imported here. Its syntax tree must hold the wiring call as a
+    // statement: a comment that names the call, or a block comment that holds it, is not one.
+    const entry = ts.createSourceFile(
+      'electron-entry.ts',
+      readFileSync(fileURLToPath(new URL('./electron-entry.ts', import.meta.url)), 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    expect(hasWiringCall(entry)).toBe(true);
+  });
+
+  it('does not take a commented-out call for the wiring', () => {
+    const commented = ts.createSourceFile(
+      'sample.ts',
+      '/* cancelWhenPageGoes(agentRequests, win); */\n// cancelWhenPageGoes(agentRequests, win);\n',
+      ts.ScriptTarget.Latest,
+      true,
     );
 
-    // A line that is the call itself, not a comment that mentions it.
-    expect(entry).toMatch(/^\s*cancelWhenPageGoes\(agentRequests, win\);\s*$/m);
+    expect(hasWiringCall(commented)).toBe(false);
   });
 });
+
+/** True when a statement in the tree is the call cancelWhenPageGoes(agentRequests, win). Comments are not nodes. */
+function hasWiringCall(node: ts.Node): boolean {
+  return isWiringCall(node) || ts.forEachChild(node, hasWiringCall) === true;
+}
+
+function isWiringCall(node: ts.Node): boolean {
+  if (!ts.isExpressionStatement(node) || !ts.isCallExpression(node.expression)) return false;
+  const call = node.expression;
+  const names = ['agentRequests', 'win'];
+  return (
+    ts.isIdentifier(call.expression) &&
+    call.expression.text === 'cancelWhenPageGoes' &&
+    call.arguments.length === names.length &&
+    call.arguments.every(
+      (argument, index) => ts.isIdentifier(argument) && argument.text === names[index],
+    )
+  );
+}

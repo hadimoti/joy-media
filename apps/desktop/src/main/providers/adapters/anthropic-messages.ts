@@ -28,10 +28,10 @@ export function prepareAnthropicMessages(input: {
   readonly apiKey: string;
   readonly modelId: string;
   readonly body: CompletionBody;
-  /** The thinking blocks a tool use came after, by call id (see ContinuationState). */
-  readonly thinkingBefore?: (callId: string) => unknown;
+  /** The content of the turn a tool use came in, by call id and message index (see ContinuationState). */
+  readonly turnFor?: (callId: string, messageIndex: number) => unknown;
 }): PreparedCall {
-  const { system, messages } = toAnthropicMessages(input.body.messages, input.thinkingBefore);
+  const { system, messages } = toAnthropicMessages(input.body.messages, input.turnFor);
   const tools = (input.body.tools ?? []).map(toAnthropicTool);
   const payload: Record<string, unknown> = {
     model: input.modelId,
@@ -129,21 +129,21 @@ function headersFor(apiKey: string): Readonly<Record<string, string>> {
 
 function toAnthropicMessages(
   messages: readonly Record<string, unknown>[],
-  thinkingBefore?: (callId: string) => unknown,
+  turnFor?: (callId: string, messageIndex: number) => unknown,
 ): {
   readonly system?: string;
   readonly messages: AnthropicMessage[];
 } {
   const systemParts: string[] = [];
   const out: AnthropicMessage[] = [];
-  for (const message of messages) {
+  for (const [index, message] of messages.entries()) {
     const { role } = message;
     if (role === 'system' || role === 'developer') {
       systemParts.push(textOf(message.content));
     } else if (role === 'user') {
       append(out, 'user', userBlocks(message.content));
     } else if (role === 'assistant') {
-      append(out, 'assistant', assistantBlocks(message, thinkingBefore));
+      append(out, 'assistant', assistantBlocks(message, index, turnFor));
     } else if (role === 'tool') {
       append(out, 'user', [
         {
@@ -187,7 +187,8 @@ function userBlocks(content: unknown): Block[] {
 
 function assistantBlocks(
   message: Record<string, unknown>,
-  thinkingBefore?: (callId: string) => unknown,
+  messageIndex: number,
+  turnFor?: (callId: string, messageIndex: number) => unknown,
 ): Block[] {
   const text = textBlocks(textOf(message.content));
   if (!Array.isArray(message.tool_calls)) return text;
@@ -203,27 +204,35 @@ function assistantBlocks(
       input: parseArguments(call.function.arguments),
     });
   }
-  // The thinking a tool use came after goes first, exactly as the provider sent it.
-  return [...thinkingFor(message.tool_calls, thinkingBefore), ...text, ...toolUses];
+  return keptTurn(message.tool_calls, messageIndex, turnFor) ?? [...text, ...toolUses];
 }
 
-/** The thinking blocks kept for this assistant turn, found through any of its tool calls. */
-function thinkingFor(
+/**
+ * The content of the turn these tool calls came in, exactly as the provider sent it, when the broker kept it. It is
+ * used only when its tool uses are these calls, in this order; otherwise the turn is rebuilt from the message.
+ */
+function keptTurn(
   calls: readonly unknown[],
-  thinkingBefore?: (callId: string) => unknown,
-): Block[] {
-  if (thinkingBefore === undefined) return [];
-  for (const call of calls) {
-    if (!isRecord(call) || typeof call.id !== 'string') continue;
-    const kept = thinkingBefore(call.id);
-    if (
-      Array.isArray(kept) &&
-      kept.every((block) => isRecord(block) && typeof block.type === 'string')
-    ) {
-      return kept as Block[];
-    }
+  messageIndex: number,
+  turnFor?: (callId: string, messageIndex: number) => unknown,
+): Block[] | undefined {
+  const ids = calls.map((call) =>
+    isRecord(call) && typeof call.id === 'string' ? call.id : undefined,
+  );
+  const first = ids[0];
+  if (turnFor === undefined || first === undefined) return undefined;
+  const kept: unknown = turnFor(first, messageIndex);
+  if (!Array.isArray(kept)) return undefined;
+  const blocks: unknown[] = kept;
+  if (!blocks.every((block) => isRecord(block) && typeof block.type === 'string')) return undefined;
+  const keptIds = blocks.flatMap((block) =>
+    isRecord(block) && block.type === 'tool_use' && typeof block.id === 'string' ? [block.id] : [],
+  );
+  if (keptIds.length !== ids.length || keptIds.some((id, index) => id !== ids[index])) {
+    return undefined;
   }
-  return [];
+  // A copy: blocks added to the message later must never change what was kept.
+  return [...(blocks as Block[])];
 }
 
 function textBlocks(text: string): Block[] {
