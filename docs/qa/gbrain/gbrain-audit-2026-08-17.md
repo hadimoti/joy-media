@@ -140,7 +140,7 @@ The following commands timed out waiting for PGLite lock (service is actively ru
 
 ## Evidence Files
 
-- Service logs: `/var/log/syslog` and `journalctl -u gbrain-http` on VPS
+- Service logs: `<server-path>/syslog` and `journalctl -u gbrain-http` on VPS
 - This file: `docs/qa/gbrain/gbrain-audit-2026-08-17.md`
 - Related: `HANDOFF-JOY-MEDIA-AI-CREATIVE-OS-2026-08-17.md`
 - Related: `plan/WP-37-ai-creative-os-foundation.md`

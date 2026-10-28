@@ -104,7 +104,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 - **File**: `deploy/joy-media-account-web.nginx.conf` [NEW]
 - **Context**: Fail-closed retirement of legacy editor endpoints and edge narrowing on `joyst.ir`.
 - **Action**:
-  1. Set retirement env vars in `/etc/joy-media/api.env`:
+  1. Set retirement env vars in `<server-path>/joy-media/api.env`:
      ```bash
      JOY_MEDIA_RETIRE_PROJECT_ROUTES=true
      JOY_MEDIA_RETIRE_MEDIA_LIBRARY_ROUTES=true

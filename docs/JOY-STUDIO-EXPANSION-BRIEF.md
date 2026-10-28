@@ -68,7 +68,7 @@ flowchart LR
 | Layer                | Reality                                                                                               |
 | -------------------- | ----------------------------------------------------------------------------------------------------- |
 | Brand in UI          | **Joy Studio** / **JOY Studio** (login lockup, menubar, Joy Code logos)                               |
-| Repo / API / systemd | Still **joy-media** (`<server-path>/joy-media/repo`, `/etc/joy-media/api.env`)                        |
+| Repo / API / systemd | Still **joy-media** (`<server-path>/joy-media/repo`, `<server-path>/joy-media/api.env`)               |
 | Domain               | Canonical **`joyst.ir`** / `www.joyst.ir`; `media.joyteam.ir` → 301 to joyst.ir                       |
 | First paint          | Project library gate (`ProjectLibrary.tsx`) then CapCut-tile Dockview workspace                       |
 | Auth                 | Independent allow-list OTP (Gmail / Telegram / Token) — ADR-0017 login                                |
@@ -263,7 +263,7 @@ sequenceDiagram
 | UI                | `LoginGate.tsx` — editor mounted, blurred until OTP; title **Joy Studio**    |
 | Admin allow-list  | joy-vps admin → direct Postgres role (see `docs/JOY-MEDIA-ADMIN-DB-ROLE.md`) |
 | Nginx             | `deploy/joy-media.nginx.conf` → `<server-path>/joy-media/web`, API `:8790`   |
-| Secrets           | `/etc/joy-media/api.env` (not in repo)                                       |
+| Secrets           | `<server-path>/joy-media/api.env` (not in repo)                              |
 | Agent host policy | ADR-0020 KiloCode sole editing host; credentials stay server-side            |
 
 ---

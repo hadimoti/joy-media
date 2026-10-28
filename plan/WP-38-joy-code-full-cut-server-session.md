@@ -1040,8 +1040,8 @@ This task changes live state. Execute only after the local gate, clean push, exa
 - Do not use the joy-vps scripts/sync-to-live.sh; that deploys the bot/webapp sibling.
 - Never edit a live release directory.
 - Never read or print the Hermes .env key.
-- Reuse /etc/credstore.encrypted/openrouter-api-key and the existing systemd credential mount.
-- Add only non-secret JOY_MEDIA_JOY_CODE_RUNTIME_* values to /etc/joy-media/api.env, mode 0600.
+- Reuse <server-path>/credstore.encrypted/openrouter-api-key and the existing systemd credential mount.
+- Add only non-secret JOY_MEDIA_JOY_CODE_RUNTIME_* values to <server-path>/joy-media/api.env, mode 0600.
 
 **Preflight:**
 

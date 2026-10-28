@@ -92,7 +92,7 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
   bundle (`verify:joy-agent-worker` gate) — deploys with the web release.
 - `.github/workflows/r2-candidate.yml` is CI config only; it does not ship.
 - `nginx`: no change. joyst.ir is served from the **shared**
-  `/etc/nginx/conf.d/joy-wg-bot.conf` `root <server-path>/joy-media/web` — do NOT edit it;
+  `<server-path>/nginx/conf.d/joy-wg-bot.conf` `root <server-path>/joy-media/web` — do NOT edit it;
   the symlink swap is transparent. `nginx -t` + reload only.
 
 ## Pre-flight (local)
@@ -123,8 +123,8 @@ Paths: repo `<server-path>/joy-media/repo` (remotes `origin`→GitHub, `vps-loca
 build worktree base `<server-path>/joy-media/builds/joy-media-<sha>`; web releases
 `<server-path>/joy-media/web-releases/*`, current link `<server-path>/joy-media/web`; API releases
 `<server-path>/joy-media/releases/*`, current link `…/releases/current-api`; env
-`/etc/joy-media/api.env`; API origin `http://127.0.0.1:8790` (`/live`, `/ready`);
-unit `joy-media@api`. `pnpm` is on PATH (11.15.0) + shim `/usr/local/bin/pnpm`.
+`<server-path>/joy-media/api.env`; API origin `http://127.0.0.1:8790` (`/live`, `/ready`);
+unit `joy-media@api`. `pnpm` is on PATH (11.15.0) + shim `<server-path>/bin/pnpm`.
 
 ### C0 — discover (read-only)
 
@@ -255,12 +255,12 @@ release; `server.js` is unchanged so this is identity-only — merge **only**
 ```bash
 set -e
 API=<server-path>/joy-media/releases/joy-media-$CAND-api   # if archived in C3/C4
-cp -p /etc/joy-media/api.env /etc/joy-media/api.env.before-r2-$CAND-$(date -u +%Y%m%dT%H%M%SZ).env
+cp -p <server-path>/joy-media/api.env <server-path>/joy-media/api.env.before-r2-$CAND-$(date -u +%Y%m%dT%H%M%SZ).env
 bash deploy/joy-media-release-identity.sh merge \
-  /etc/joy-media/api.env "$API/release-identity.env" /etc/joy-media/.api.env.new
+  <server-path>/joy-media/api.env "$API/release-identity.env" <server-path>/joy-media/.api.env.new
 ln -sfn "$API" <server-path>/joy-media/releases/.current-api.new
 mv -Tf <server-path>/joy-media/releases/.current-api.new <server-path>/joy-media/releases/current-api
-mv -Tf /etc/joy-media/.api.env.new /etc/joy-media/api.env
+mv -Tf <server-path>/joy-media/.api.env.new <server-path>/joy-media/api.env
 systemctl restart joy-media@api
 ok=0
 for i in $(seq 1 45); do

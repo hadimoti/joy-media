@@ -288,7 +288,7 @@ After focused checks and independent Luna review pass:
 2. Create/verify persistent VPS directories for stock staging/cache with
    service ownership and mode 0700. Attach only the two existing encrypted
    systemd credentials through a reviewed drop-in; never put values in
-   `/etc/joy-media/api.env`, Git, or command arguments.
+   `<server-path>/joy-media/api.env`, Git, or command arguments.
 3. Run additive migration 005 with a root-owned database backup. Build API and
    editor, create immutable release directories, write release identity,
    validate `nginx -t`, atomically switch API/web symlinks, and restart only

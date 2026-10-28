@@ -124,12 +124,12 @@ WP-36 `733f584`, WP-35 `5273e34`, WP-34 `630c8ad`, WP-32, WP-29 …:
 - **DB backup before activation**: `pg_dump` → gzip →
   `<server-path>/joy-media/data/backups/<slug>-predeploy-<UTCstamp>.sql.gz`; record its
   SHA-256; verify the gzip.
-- **Prior API env retained**: copy `/etc/joy-media/api.env` →
-  `/etc/joy-media/api.env.before-<slug>-<UTCstamp>.env`.
+- **Prior API env retained**: copy `<server-path>/joy-media/api.env` →
+  `<server-path>/joy-media/api.env.before-<slug>-<UTCstamp>.env`.
 - **Release identity**: `deploy/joy-media-release-identity.sh write <path>
 <commit> <tree> <lock-sha256> <schema>` into each immutable release
   (`release-identity.env`). Only the four `JOY_MEDIA_RELEASE_*` keys are then
-  merged into `/etc/joy-media/api.env` (`… release-identity.sh merge`).
+  merged into `<server-path>/joy-media/api.env` (`… release-identity.sh merge`).
 - **Validate → activate → verify**:
   - `nginx -t` before any reload
   - local `curl 127.0.0.1:8790/live` + `/ready`
@@ -150,7 +150,7 @@ joy-media@api` + `nginx` reload + 45 s health poll; self-restores on error).
 - SSH: `ssh sweden` (alias in `~/.ssh/config` → `<JOY_VPS_IP>`, user `<server-user>`,
   key `~/.ssh/<vps-key-file>`). Fallback: `ssh -i ~/.ssh/<vps-key-file> <server-user>@<JOY_VPS_IP>`.
 - **`pnpm` is NOT on `PATH` in a fresh non-interactive SSH** — shim at
-  **`/usr/local/bin/pnpm`**. `node` is on PATH. `corepack` may be absent.
+  **`<server-path>/bin/pnpm`**. `node` is on PATH. `corepack` may be absent.
 - Build env: `CI=true npm_config_confirm_modules_purge=false pnpm install --frozen-lockfile`.
 - Active services: `nginx`, `joy-media@api`, `joy-wg-bot`, `gbrain-http`,
   `nutrized-hermes`. **Touch only `joy-media@api` + `nginx` reload.** Never the
@@ -158,7 +158,7 @@ joy-media@api` + `nginx` reload + 45 s health poll; self-restores on error).
   nginx includes.
 - Origin check that bypasses Cloudflare:
   `curl --noproxy '*' --resolve joyst.ir:443:127.0.0.1 https://joyst.ir/…`
-- Secrets: `/etc/joy-media/api.env` mode 0600 — **never** print, copy, commit,
+- Secrets: `<server-path>/joy-media/api.env` mode 0600 — **never** print, copy, commit,
   or paste it. The deploy only writes the four non-secret `JOY_MEDIA_RELEASE_*`
   keys via the `release-identity.sh merge` helper.
 
@@ -177,7 +177,7 @@ readlink -f <server-path>/joy-media/web
 readlink -f <server-path>/joy-media/releases/current-api
 ls -1dt <server-path>/joy-media/web-releases/*/ | head -5
 git -C <server-path>/joy-media/repo remote -v && git -C <server-path>/joy-media/repo status -sb
-node -v; /usr/local/bin/pnpm -v
+node -v; <server-path>/bin/pnpm -v
 cat <server-path>/joy-media/web/release-identity.env 2>/dev/null || true
 
 # C1 — get the exact candidate (push it from the PC first: `git push vps 855734cf:refs/heads/... ` is NOT
@@ -193,16 +193,16 @@ git show HEAD:pnpm-lock.yaml | sha256sum   # == 36426937…8427b0b3
 # C2 — DB backup (guarded procedure; no migration in this release)
 mkdir -p <server-path>/joy-media/data/backups
 ts=$(date -u +%Y%m%dT%H%M%SZ)
-DB=$(grep -oP '^JOY_MEDIA_DATABASE_URL=\K.*' /etc/joy-media/api.env)
+DB=$(grep -oP '^JOY_MEDIA_DATABASE_URL=\K.*' <server-path>/joy-media/api.env)
 pg_dump --format=custom "$DB" | gzip > "<server-path>/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz"
 gzip -t "<server-path>/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz" && \
   sha256sum "<server-path>/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz"
 
 # C3 — build from the lockfile
 cd <server-path>/joy-media/build-855734cf
-CI=true npm_config_confirm_modules_purge=false /usr/local/bin/pnpm install --frozen-lockfile
+CI=true npm_config_confirm_modules_purge=false <server-path>/bin/pnpm install --frozen-lockfile
 sha256sum pnpm-lock.yaml          # still 36426937…
-/usr/local/bin/pnpm --filter @joy-media/editor-web run build
+<server-path>/bin/pnpm --filter @joy-media/editor-web run build
 node tooling/release/verify-agent-operation-coverage.mjs
 test -f apps/editor-web/dist/index.html && echo dist-OK
 
@@ -218,7 +218,7 @@ sha256sum "$dst/index.html"       # record; must match the public probe in C6
 echo "WEB_RELEASE=$rel"
 
 # (Optional) C4b — immutable API archive for identity bookkeeping. server.js must be byte-identical:
-CI=true npm_config_confirm_modules_purge=false /usr/local/bin/pnpm deploy --legacy --prod \
+CI=true npm_config_confirm_modules_purge=false <server-path>/bin/pnpm deploy --legacy --prod \
   <server-path>/joy-media/releases/r1-855734cf-api-$ts
 bash deploy/joy-media-release-identity.sh write \
   <server-path>/joy-media/releases/r1-855734cf-api-$ts/release-identity.env \
@@ -229,16 +229,16 @@ diff -q <server-path>/joy-media/releases/r1-855734cf-api-$ts/dist/server.js \
 
 # C5 — atomic switch (FIRST irreversible step)
 nginx -t
-cp -p /etc/joy-media/api.env /etc/joy-media/api.env.before-r1-855734cf-$ts.env
+cp -p <server-path>/joy-media/api.env <server-path>/joy-media/api.env.before-r1-855734cf-$ts.env
 # web pointer:
 ln -sfn "<server-path>/joy-media/web-releases/$rel" <server-path>/joy-media/.web.new
 mv -Tf <server-path>/joy-media/.web.new <server-path>/joy-media/web
 # api pointer + identity merge ONLY if you did C4b:
-bash deploy/joy-media-release-identity.sh merge /etc/joy-media/api.env \
-  <server-path>/joy-media/releases/r1-855734cf-api-$ts/release-identity.env /etc/joy-media/.api.env.new
+bash deploy/joy-media-release-identity.sh merge <server-path>/joy-media/api.env \
+  <server-path>/joy-media/releases/r1-855734cf-api-$ts/release-identity.env <server-path>/joy-media/.api.env.new
 ln -sfn <server-path>/joy-media/releases/r1-855734cf-api-$ts <server-path>/joy-media/releases/.current-api.new
 mv -Tf <server-path>/joy-media/releases/.current-api.new <server-path>/joy-media/releases/current-api
-mv -Tf /etc/joy-media/.api.env.new /etc/joy-media/api.env
+mv -Tf <server-path>/joy-media/.api.env.new <server-path>/joy-media/api.env
 systemctl restart joy-media@api
 ok=0
 for i in $(seq 1 45); do curl -fsS --max-time 3 http://127.0.0.1:8790/live >/dev/null \
@@ -291,7 +291,7 @@ Create `<owner-profile>\joy-media\.mcp.json` (from `~/.codex/config.toml`
     "gbrain": {
       "type": "stdio",
       "command": "ssh",
-      "args": ["sweden", "/usr/local/bin/joy-gbrain-memory-mcp"],
+      "args": ["sweden", "<server-path>/bin/joy-gbrain-memory-mcp"],
       "env": {}
     }
   }

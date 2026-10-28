@@ -285,7 +285,7 @@ Based on code inspection, the following are **never** exposed through canonical 
 
 4. **API keys/tokens**
    - Never in project, browser, or GBrain
-   - Server-side only in `/etc/joy-media/api.env`
+   - Server-side only in `<server-path>/joy-media/api.env`
 
 5. **Private user data**
    - User identity stored separately from project

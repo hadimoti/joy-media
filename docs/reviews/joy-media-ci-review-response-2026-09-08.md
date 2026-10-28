@@ -109,7 +109,7 @@ exec` prints its own preamble ("Scope: … / Lockfile passes … / Done in Nms")
 **Owner-side prerequisites — DONE:**
 
 - **`JOY_MEDIA_CI_EVIDENCE_ROOT`** — provisioned as a dedicated named volume
-  `joy-media-ci-evidence → /opt/ci-evidence` on `joy-media-ci-acceptance`
+  `joy-media-ci-evidence → <server-path>/ci-evidence` on `joy-media-ci-acceptance`
   (Docker Desktop, so a named volume over a VM bind path). Runner reconnected
   without re-registration; persistence proven across `docker restart` + full
   container replacement + a fresh unrelated container; existing mounts and the

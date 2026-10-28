@@ -16,7 +16,7 @@ Release rollback is already a mature, tested mechanism — see `deploy/README.md
 `deploy/joy-media-rollback.sh`, and `deploy/joy-media-rollback.test.sh`. It performs an atomic
 pair of symlink swaps (`current-api`, `<server-path>/joy-media/web`) back to a previously verified
 immutable release, defaults to `--dry-run`, and rewrites only the `JOY_MEDIA_RELEASE_*` keys in
-`/etc/joy-media/api.env` before `systemctl restart joy-media@api`. **Use it as-is** for any
+`<server-path>/joy-media/api.env` before `systemctl restart joy-media@api`. **Use it as-is** for any
 release-level rollback during this migration's cutover; this runbook does not replace it.
 
 What did **not** already exist before this wave: a documented database backup/restore

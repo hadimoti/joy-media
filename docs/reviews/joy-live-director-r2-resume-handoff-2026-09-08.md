@@ -263,12 +263,12 @@ tip):
   runtime change (only a test-file poll-budget widen); **zero `pnpm-lock.yaml` /
   `package.json` delta** (R1 added `mediabunny`; R2 adds nothing); no `deploy/`
   change; no nginx change (joyst.ir served from the **shared**
-  `/etc/nginx/conf.d/joy-wg-bot.conf` `root <server-path>/joy-media/web` — do NOT edit,
+  `<server-path>/nginx/conf.d/joy-wg-bot.conf` `root <server-path>/joy-media/web` — do NOT edit,
   the symlink swap is transparent).
 - VPS: repo `<server-path>/joy-media/repo`, build worktree base
   `<server-path>/joy-media/builds/joy-media-<sha>`, web releases
   `<server-path>/joy-media/web-releases/*` + `<server-path>/joy-media/web` symlink, API releases
-  `<server-path>/joy-media/releases/*` + `current-api`, env `/etc/joy-media/api.env`
+  `<server-path>/joy-media/releases/*` + `current-api`, env `<server-path>/joy-media/api.env`
   (merge only `JOY_MEDIA_RELEASE_*` via
   `deploy/joy-media-release-identity.sh merge`), unit `joy-media@api`, API origin
   `http://127.0.0.1:8790` `/live` `/ready`, public `/api/health`. `pnpm` on PATH
@@ -295,7 +295,7 @@ tip):
 - Write the redacted R2 release result to **live VPS Gbrain**
   (`ops/joy-media-live-director-r2-deploy-2026-09-XX`), read it back. Gbrain via
   the HTTP MCP at `http://<host-ip>:3131/mcp` (bearer in
-  `/etc/joy-studio/gbrain-mcp.env` — SENSITIVE, never reproduce); the `gbrain`
+  `<server-path>/joy-studio/gbrain-mcp.env` — SENSITIVE, never reproduce); the `gbrain`
   CLI's PGLite is locked by `gbrain serve`, so use the MCP. Tools: `put_page`
   (slug `ops/<topic>-YYYY-MM-DD`), `get_page`, `add_timeline_entry` (needs
   `slug` + `date` YYYY-MM-DD + `summary`).

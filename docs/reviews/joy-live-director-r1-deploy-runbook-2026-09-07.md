@@ -90,7 +90,7 @@ Therefore:
 > Paths from `deploy/README.md` + `deploy/joy-media-rollback.sh`: API releases
 > `<server-path>/joy-media/releases/*`, current link `…/releases/current-api`; web
 > releases `<server-path>/joy-media/web-releases/*`, current link `<server-path>/joy-media/web`;
-> env `/etc/joy-media/api.env`; API origin `http://127.0.0.1:8790` (`/live`,
+> env `<server-path>/joy-media/api.env`; API origin `http://127.0.0.1:8790` (`/live`,
 > `/ready`); unit `joy-media@api`.
 
 ### C0 — discover (read-only, safe)
@@ -215,12 +215,12 @@ If C0 showed the VPS also re-archives the API per release, do the API pointer +
 ```bash
 set -e
 API=<server-path>/joy-media/releases/r1-855734cf-api
-cp -p /etc/joy-media/api.env /etc/joy-media/.api.env.pre-r1
+cp -p <server-path>/joy-media/api.env <server-path>/joy-media/.api.env.pre-r1
 bash deploy/joy-media-release-identity.sh merge \
-  /etc/joy-media/api.env "$API/release-identity.env" /etc/joy-media/.api.env.new
+  <server-path>/joy-media/api.env "$API/release-identity.env" <server-path>/joy-media/.api.env.new
 ln -sfn "$API" <server-path>/joy-media/releases/.current-api.new
 mv -Tf <server-path>/joy-media/releases/.current-api.new <server-path>/joy-media/releases/current-api
-mv -Tf /etc/joy-media/.api.env.new /etc/joy-media/api.env
+mv -Tf <server-path>/joy-media/.api.env.new <server-path>/joy-media/api.env
 systemctl restart joy-media@api
 for i in $(seq 1 45); do
   curl -fsS --max-time 3 http://127.0.0.1:8790/live >/dev/null &&
