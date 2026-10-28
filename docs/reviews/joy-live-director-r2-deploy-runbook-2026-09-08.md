@@ -11,7 +11,7 @@
 Recorded: 2026-09-08. Shape follows `deploy/README.md` "Release order" and the
 proven R1 runbook (`joy-live-director-r1-deploy-runbook-2026-09-07.md`), with the
 two path corrections R1 execution found baked in: VPS repo is
-`/opt/joy-media/repo` (build worktree base `/opt/joy-media/builds/joy-media-<sha>`),
+`<server-path>/joy-media/repo` (build worktree base `<server-path>/joy-media/builds/joy-media-<sha>`),
 build is root `pnpm build` (`pnpm -r --if-present build`), DB dump needs
 `sudo -u postgres pg_dump joymedia`.
 
@@ -92,7 +92,7 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
   bundle (`verify:joy-agent-worker` gate) — deploys with the web release.
 - `.github/workflows/r2-candidate.yml` is CI config only; it does not ship.
 - `nginx`: no change. joyst.ir is served from the **shared**
-  `/etc/nginx/conf.d/joy-wg-bot.conf` `root /opt/joy-media/web` — do NOT edit it;
+  `/etc/nginx/conf.d/joy-wg-bot.conf` `root <server-path>/joy-media/web` — do NOT edit it;
   the symlink swap is transparent. `nginx -t` + reload only.
 
 ## Pre-flight (local)
@@ -119,10 +119,10 @@ look_instances jsonb`. Additive + **nullable**; never `NOT NULL`, never a
 
 ## VPS steps (guarded; owner runs each block in their root session, pastes output back; Claude verifies against the candidate and calls go/no-go)
 
-Paths: repo `/opt/joy-media/repo` (remotes `origin`→GitHub, `vps-local`→`/opt/joy-media.git`);
-build worktree base `/opt/joy-media/builds/joy-media-<sha>`; web releases
-`/opt/joy-media/web-releases/*`, current link `/opt/joy-media/web`; API releases
-`/opt/joy-media/releases/*`, current link `…/releases/current-api`; env
+Paths: repo `<server-path>/joy-media/repo` (remotes `origin`→GitHub, `vps-local`→`<server-path>/joy-media.git`);
+build worktree base `<server-path>/joy-media/builds/joy-media-<sha>`; web releases
+`<server-path>/joy-media/web-releases/*`, current link `<server-path>/joy-media/web`; API releases
+`<server-path>/joy-media/releases/*`, current link `…/releases/current-api`; env
 `/etc/joy-media/api.env`; API origin `http://127.0.0.1:8790` (`/live`, `/ready`);
 unit `joy-media@api`. `pnpm` is on PATH (11.15.0) + shim `/usr/local/bin/pnpm`.
 
@@ -131,14 +131,14 @@ unit `joy-media@api`. `pnpm` is on PATH (11.15.0) + shim `/usr/local/bin/pnpm`.
 ```bash
 set -e
 hostname; date -u
-readlink -f /opt/joy-media/web
-readlink -f /opt/joy-media/releases/current-api
-ls -1dt /opt/joy-media/web-releases/*/ | head -5
-git -C /opt/joy-media/repo remote -v
-git -C /opt/joy-media/repo log --oneline -1
+readlink -f <server-path>/joy-media/web
+readlink -f <server-path>/joy-media/releases/current-api
+ls -1dt <server-path>/joy-media/web-releases/*/ | head -5
+git -C <server-path>/joy-media/repo remote -v
+git -C <server-path>/joy-media/repo log --oneline -1
 node -v; pnpm -v; sudo -u postgres pg_dump --version | head -1
-grep -o 'assets/[A-Za-z0-9_-]*\.js' /opt/joy-media/web/index.html | head -3
-cat /opt/joy-media/web/release-identity.env 2>/dev/null || true
+grep -o 'assets/[A-Za-z0-9_-]*\.js' <server-path>/joy-media/web/index.html | head -3
+cat <server-path>/joy-media/web/release-identity.env 2>/dev/null || true
 ```
 
 **Checkpoint C0:** record current web + api release dirs (rollback targets),
@@ -148,11 +148,11 @@ confirm repo remote + toolchain.
 
 ```bash
 set -e
-cd /opt/joy-media/repo
+cd <server-path>/joy-media/repo
 git fetch origin --prune --tags
 CAND=<candidate-sha>
-git worktree add --detach /opt/joy-media/builds/joy-media-$CAND $CAND
-cd /opt/joy-media/builds/joy-media-$CAND
+git worktree add --detach <server-path>/joy-media/builds/joy-media-$CAND $CAND
+cd <server-path>/joy-media/builds/joy-media-$CAND
 echo "HEAD  $(git rev-parse HEAD)"
 echo "tree  $(git rev-parse HEAD^{tree})"
 git show HEAD:pnpm-lock.yaml | sha256sum
@@ -166,12 +166,12 @@ Any mismatch → `git worktree remove` and re-cut.
 
 ```bash
 set -e
-mkdir -p /opt/joy-media/data/backups
+mkdir -p <server-path>/joy-media/data/backups
 ts=$(date -u +%Y%m%dT%H%M%SZ)
 sudo -u postgres pg_dump --format=custom joymedia \
-  > /opt/joy-media/data/backups/joymedia-r2-$CAND-predeploy-$ts.dump
-ls -lh /opt/joy-media/data/backups/joymedia-r2-$CAND-predeploy-$ts.dump
-sha256sum /opt/joy-media/data/backups/joymedia-r2-$CAND-predeploy-$ts.dump
+  > <server-path>/joy-media/data/backups/joymedia-r2-$CAND-predeploy-$ts.dump
+ls -lh <server-path>/joy-media/data/backups/joymedia-r2-$CAND-predeploy-$ts.dump
+sha256sum <server-path>/joy-media/data/backups/joymedia-r2-$CAND-predeploy-$ts.dump
 ```
 
 **Checkpoint C2:** dump exists, non-trivial size. Keep until the deploy gate is
@@ -185,7 +185,7 @@ ever chosen as a deliberate later step.
 
 ```bash
 set -e
-cd /opt/joy-media/builds/joy-media-$CAND
+cd <server-path>/joy-media/builds/joy-media-$CAND
 CI=true pnpm install --frozen-lockfile
 sha256sum pnpm-lock.yaml
 CI=true pnpm build
@@ -202,14 +202,14 @@ adds none), Worker size gate passes, `dist/index.html` present.
 
 ```bash
 set -e
-cd /opt/joy-media/builds/joy-media-$CAND
+cd <server-path>/joy-media/builds/joy-media-$CAND
 rel="joy-media-$CAND-web"
-dst="/opt/joy-media/web-releases/$rel"
+dst="<server-path>/joy-media/web-releases/$rel"
 # Never copy into or over a pre-existing release dir. A retry gets a fresh,
 # candidate-prefixed name and that exact name is carried into C5.
 if [ -e "$dst" ]; then
   rel="${rel}-$(date -u +%Y%m%dT%H%M%SZ)"
-  dst="/opt/joy-media/web-releases/$rel"
+  dst="<server-path>/joy-media/web-releases/$rel"
   test ! -e "$dst"
 fi
 cp -a apps/editor-web/dist "$dst"
@@ -220,7 +220,7 @@ test -f "$dst/index.html" && test -f "$dst/release-identity.env" && echo "staged
 # or a same-length swap changes the digest.
 ( cd "$dst" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum )
 sha256sum "$dst/index.html"
-printf '%s\n' "$rel" > "/opt/joy-media/.joy-media-$CAND-web-release-name"
+printf '%s\n' "$rel" > "<server-path>/joy-media/.joy-media-$CAND-web-release-name"
 ```
 
 **Checkpoint C4:** record `rel` (the exact directory name — carry it into C5),
@@ -233,18 +233,18 @@ fully reversible.
 ```bash
 set -e
 nginx -t
-REL_FILE="/opt/joy-media/.joy-media-$CAND-web-release-name"
+REL_FILE="<server-path>/joy-media/.joy-media-$CAND-web-release-name"
 test -s "$REL_FILE"
 rel="$(cat "$REL_FILE")"
 case "$rel" in
   "joy-media-$CAND"-web|"joy-media-$CAND"-web-*) ;;
   *) echo "staged release name does not belong to candidate: $rel" >&2; exit 1 ;;
 esac
-NEW="/opt/joy-media/web-releases/$rel"
+NEW="<server-path>/joy-media/web-releases/$rel"
 test -f "$NEW/index.html"
-ln -sfn "$NEW" /opt/joy-media/.web.new
-mv -Tf /opt/joy-media/.web.new /opt/joy-media/web
-readlink -f /opt/joy-media/web
+ln -sfn "$NEW" <server-path>/joy-media/.web.new
+mv -Tf <server-path>/joy-media/.web.new <server-path>/joy-media/web
+readlink -f <server-path>/joy-media/web
 systemctl reload nginx
 ```
 
@@ -254,12 +254,12 @@ release; `server.js` is unchanged so this is identity-only — merge **only**
 
 ```bash
 set -e
-API=/opt/joy-media/releases/joy-media-$CAND-api   # if archived in C3/C4
+API=<server-path>/joy-media/releases/joy-media-$CAND-api   # if archived in C3/C4
 cp -p /etc/joy-media/api.env /etc/joy-media/api.env.before-r2-$CAND-$(date -u +%Y%m%dT%H%M%SZ).env
 bash deploy/joy-media-release-identity.sh merge \
   /etc/joy-media/api.env "$API/release-identity.env" /etc/joy-media/.api.env.new
-ln -sfn "$API" /opt/joy-media/releases/.current-api.new
-mv -Tf /opt/joy-media/releases/.current-api.new /opt/joy-media/releases/current-api
+ln -sfn "$API" <server-path>/joy-media/releases/.current-api.new
+mv -Tf <server-path>/joy-media/releases/.current-api.new <server-path>/joy-media/releases/current-api
 mv -Tf /etc/joy-media/.api.env.new /etc/joy-media/api.env
 systemctl restart joy-media@api
 ok=0
@@ -339,14 +339,14 @@ dropped).
 ## On failure
 
 ```bash
-cd /opt/joy-media/builds/joy-media-$CAND   # or any checkout with deploy/
+cd <server-path>/joy-media/builds/joy-media-$CAND   # or any checkout with deploy/
 bash deploy/joy-media-rollback.sh --dry-run <good-api-release> <good-web-release>
 bash deploy/joy-media-rollback.sh --apply   <good-api-release> <good-web-release>
 ```
 
 `<good-*-release>` = the C0-recorded pre-deploy targets. If only the web pointer
 moved (the expected R2 case — API untouched), a one-liner is enough:
-`ln -sfn <good-web-release> /opt/joy-media/.web.rb && mv -Tf /opt/joy-media/.web.rb /opt/joy-media/web && systemctl reload nginx`.
+`ln -sfn <good-web-release> <server-path>/joy-media/.web.rb && mv -Tf <server-path>/joy-media/.web.rb <server-path>/joy-media/web && systemctl reload nginx`.
 Keep the DB backup. Report the failure honestly; never relabel a failed smoke as
 a successful deploy.
 

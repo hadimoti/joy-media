@@ -28,7 +28,7 @@ Implemented and live on 2026-08-09.
 - Responsive checks: `1024×768` and `1366×768` passed; browser console empty.
 - Focused lifecycle/catalog/API tests, typecheck, lint, and API/editor builds
   passed. The full suite retains the pre-existing RNNoise model fixture failure
-  (`RNNoise model missing: /opt/joy-media/data/rnnoise/cb.rnnn`).
+  (`RNNoise model missing: <server-path>/joy-media/data/rnnoise/cb.rnnn`).
 
 ## Rollback and cleanup
 

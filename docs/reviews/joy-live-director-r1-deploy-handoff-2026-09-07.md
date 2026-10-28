@@ -19,7 +19,7 @@ then executed it.
 ## 0. TL;DR for the next session
 
 1. Start in an **interactive `claude` terminal** (not `-p`, not auto mode) from
-   `C:\Users\HadiMoti\joy-media` so you can approve `ssh sweden` at the prompt,
+   `<owner-profile>\joy-media` so you can approve `ssh sweden` at the prompt,
    or add the permission rule in §5.
 2. Confirm the gate is still green (§2), then run the guarded deploy (§4) of
    candidate **`855734cf0c875101a632426983db2638c2adddcd`**.
@@ -39,7 +39,7 @@ The auto-mode classifier in the finishing session denied, every time:
 
 - `ssh sweden '…'` and `ssh -o BatchMode=yes sweden …` — "Blocked by classifier"
 - `mcp__terminal__read_terminal` — same
-- `Write` of `C:\Users\HadiMoti\joy-media\.mcp.json` containing an `ssh`-command
+- `Write` of `<owner-profile>\joy-media\.mcp.json` containing an `ssh`-command
   MCP server — same (it is an indirect SSH-exec path)
 - `cmd //c mklink` for skill symlinks — "insufficient privilege" (unrelated;
   worked around by copying, see §5)
@@ -50,7 +50,7 @@ sweden` once at the permission prompt (or pre-authorize it, §5) and proceed.
 
 Everything that did **not** require the VPS is done and committed on
 `codex/joy-live-director` (worktree
-`C:\Users\HadiMoti\.config\superpowers\worktrees\joy-media\joy-live-director`).
+`<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director`).
 
 ---
 
@@ -114,15 +114,15 @@ Proven pattern across `d149711e` / `b0402e21` (built-in engine, 2026-09-04),
 WP-36 `733f584`, WP-35 `5273e34`, WP-34 `630c8ad`, WP-32, WP-29 …:
 
 - **Source**: push to `github/main` **and** the VPS bare `main`
-  (`/opt/joy-media.git`). VPS working checkout is **`/opt/joy-media/repo`**
-  (remotes: `origin` → GitHub, `vps-local` → `/opt/joy-media.git`).
-- **Immutable API release**: `/opt/joy-media/releases/<slug>-api-<UTCstamp>-<short>`
+  (`<server-path>/joy-media.git`). VPS working checkout is **`<server-path>/joy-media/repo`**
+  (remotes: `origin` → GitHub, `vps-local` → `<server-path>/joy-media.git`).
+- **Immutable API release**: `<server-path>/joy-media/releases/<slug>-api-<UTCstamp>-<short>`
   (older form `joy-media-<fullsha>-api`), activated by the **`current-api`**
   symlink.
-- **Immutable web release**: `/opt/joy-media/web-releases/editor-web-<UTCstamp>-<short>-<slug>`,
+- **Immutable web release**: `<server-path>/joy-media/web-releases/editor-web-<UTCstamp>-<short>-<slug>`,
   activated by the **`web`** symlink.
 - **DB backup before activation**: `pg_dump` → gzip →
-  `/opt/joy-media/data/backups/<slug>-predeploy-<UTCstamp>.sql.gz`; record its
+  `<server-path>/joy-media/data/backups/<slug>-predeploy-<UTCstamp>.sql.gz`; record its
   SHA-256; verify the gzip.
 - **Prior API env retained**: copy `/etc/joy-media/api.env` →
   `/etc/joy-media/api.env.before-<slug>-<UTCstamp>.env`.
@@ -147,14 +147,14 @@ joy-media@api` + `nginx` reload + 45 s health poll; self-restores on error).
 
 ### VPS facts you will need
 
-- SSH: `ssh sweden` (alias in `~/.ssh/config` → `<JOY_VPS_IP>`, user `root`,
-  key `~/.ssh/Joy-Vps-New.pem`). Fallback: `ssh -i ~/.ssh/Joy-Vps-New.pem root@<JOY_VPS_IP>`.
+- SSH: `ssh sweden` (alias in `~/.ssh/config` → `<JOY_VPS_IP>`, user `<server-user>`,
+  key `~/.ssh/<vps-key-file>`). Fallback: `ssh -i ~/.ssh/<vps-key-file> <server-user>@<JOY_VPS_IP>`.
 - **`pnpm` is NOT on `PATH` in a fresh non-interactive SSH** — shim at
   **`/usr/local/bin/pnpm`**. `node` is on PATH. `corepack` may be absent.
 - Build env: `CI=true npm_config_confirm_modules_purge=false pnpm install --frozen-lockfile`.
 - Active services: `nginx`, `joy-media@api`, `joy-wg-bot`, `gbrain-http`,
   `nutrized-hermes`. **Touch only `joy-media@api` + `nginx` reload.** Never the
-  `joy-vps` agent's services / `/opt/joy-vps` / `/opt/joy-wg-bot` / shared
+  `joy-vps` agent's services / `<server-path>/joy-vps` / `<server-path>/joy-wg-bot` / shared
   nginx includes.
 - Origin check that bypasses Cloudflare:
   `curl --noproxy '*' --resolve joyst.ir:443:127.0.0.1 https://joyst.ir/…`
@@ -173,33 +173,33 @@ C0–C6, each with a verify gate). Summary of the VPS sequence, run **in an
 
 ```bash
 # C0 — discover (read-only). Record current web + current-api targets for rollback.
-readlink -f /opt/joy-media/web
-readlink -f /opt/joy-media/releases/current-api
-ls -1dt /opt/joy-media/web-releases/*/ | head -5
-git -C /opt/joy-media/repo remote -v && git -C /opt/joy-media/repo status -sb
+readlink -f <server-path>/joy-media/web
+readlink -f <server-path>/joy-media/releases/current-api
+ls -1dt <server-path>/joy-media/web-releases/*/ | head -5
+git -C <server-path>/joy-media/repo remote -v && git -C <server-path>/joy-media/repo status -sb
 node -v; /usr/local/bin/pnpm -v
-cat /opt/joy-media/web/release-identity.env 2>/dev/null || true
+cat <server-path>/joy-media/web/release-identity.env 2>/dev/null || true
 
 # C1 — get the exact candidate (push it from the PC first: `git push vps 855734cf:refs/heads/... ` is NOT
 #       right — push the branch/commit to the bare repo `vps` remote, or fetch from origin on the VPS)
-cd /opt/joy-media/repo
+cd <server-path>/joy-media/repo
 git fetch origin && git fetch vps-local || true
-git worktree add --detach /opt/joy-media/build-855734cf 855734cf0c875101a632426983db2638c2adddcd
-cd /opt/joy-media/build-855734cf
+git worktree add --detach <server-path>/joy-media/build-855734cf 855734cf0c875101a632426983db2638c2adddcd
+cd <server-path>/joy-media/build-855734cf
 git rev-parse HEAD                # == 855734cf0c875101a632426983db2638c2adddcd
 git rev-parse HEAD^{tree}         # == 54ccefce85daf174b25620b24b64b9d54c130dcc
 git show HEAD:pnpm-lock.yaml | sha256sum   # == 36426937…8427b0b3
 
 # C2 — DB backup (guarded procedure; no migration in this release)
-mkdir -p /opt/joy-media/data/backups
+mkdir -p <server-path>/joy-media/data/backups
 ts=$(date -u +%Y%m%dT%H%M%SZ)
 DB=$(grep -oP '^JOY_MEDIA_DATABASE_URL=\K.*' /etc/joy-media/api.env)
-pg_dump --format=custom "$DB" | gzip > "/opt/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz"
-gzip -t "/opt/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz" && \
-  sha256sum "/opt/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz"
+pg_dump --format=custom "$DB" | gzip > "<server-path>/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz"
+gzip -t "<server-path>/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz" && \
+  sha256sum "<server-path>/joy-media/data/backups/r1-855734cf-predeploy-$ts.sql.gz"
 
 # C3 — build from the lockfile
-cd /opt/joy-media/build-855734cf
+cd <server-path>/joy-media/build-855734cf
 CI=true npm_config_confirm_modules_purge=false /usr/local/bin/pnpm install --frozen-lockfile
 sha256sum pnpm-lock.yaml          # still 36426937…
 /usr/local/bin/pnpm --filter @joy-media/editor-web run build
@@ -208,7 +208,7 @@ test -f apps/editor-web/dist/index.html && echo dist-OK
 
 # C4 — stage the immutable web release (no pointer moved yet)
 rel="editor-web-$(date -u +%Y%m%dT%H%M%SZ)-855734c-r1-live-director"
-dst="/opt/joy-media/web-releases/$rel"
+dst="<server-path>/joy-media/web-releases/$rel"
 cp -a apps/editor-web/dist "$dst"
 bash deploy/joy-media-release-identity.sh write "$dst/release-identity.env" \
   855734cf0c875101a632426983db2638c2adddcd \
@@ -219,25 +219,25 @@ echo "WEB_RELEASE=$rel"
 
 # (Optional) C4b — immutable API archive for identity bookkeeping. server.js must be byte-identical:
 CI=true npm_config_confirm_modules_purge=false /usr/local/bin/pnpm deploy --legacy --prod \
-  /opt/joy-media/releases/r1-855734cf-api-$ts
+  <server-path>/joy-media/releases/r1-855734cf-api-$ts
 bash deploy/joy-media-release-identity.sh write \
-  /opt/joy-media/releases/r1-855734cf-api-$ts/release-identity.env \
+  <server-path>/joy-media/releases/r1-855734cf-api-$ts/release-identity.env \
   855734cf0c875101a632426983db2638c2adddcd 54ccefce85daf174b25620b24b64b9d54c130dcc \
   36426937a41309d10cc85fd16a3fc4d42a74c1e234c4cfb77cdd838f8427b0b3 5
-diff -q /opt/joy-media/releases/r1-855734cf-api-$ts/dist/server.js \
-  "$(readlink -f /opt/joy-media/releases/current-api)/dist/server.js" && echo "server.js unchanged"
+diff -q <server-path>/joy-media/releases/r1-855734cf-api-$ts/dist/server.js \
+  "$(readlink -f <server-path>/joy-media/releases/current-api)/dist/server.js" && echo "server.js unchanged"
 
 # C5 — atomic switch (FIRST irreversible step)
 nginx -t
 cp -p /etc/joy-media/api.env /etc/joy-media/api.env.before-r1-855734cf-$ts.env
 # web pointer:
-ln -sfn "/opt/joy-media/web-releases/$rel" /opt/joy-media/.web.new
-mv -Tf /opt/joy-media/.web.new /opt/joy-media/web
+ln -sfn "<server-path>/joy-media/web-releases/$rel" <server-path>/joy-media/.web.new
+mv -Tf <server-path>/joy-media/.web.new <server-path>/joy-media/web
 # api pointer + identity merge ONLY if you did C4b:
 bash deploy/joy-media-release-identity.sh merge /etc/joy-media/api.env \
-  /opt/joy-media/releases/r1-855734cf-api-$ts/release-identity.env /etc/joy-media/.api.env.new
-ln -sfn /opt/joy-media/releases/r1-855734cf-api-$ts /opt/joy-media/releases/.current-api.new
-mv -Tf /opt/joy-media/releases/.current-api.new /opt/joy-media/releases/current-api
+  <server-path>/joy-media/releases/r1-855734cf-api-$ts/release-identity.env /etc/joy-media/.api.env.new
+ln -sfn <server-path>/joy-media/releases/r1-855734cf-api-$ts <server-path>/joy-media/releases/.current-api.new
+mv -Tf <server-path>/joy-media/releases/.current-api.new <server-path>/joy-media/releases/current-api
 mv -Tf /etc/joy-media/.api.env.new /etc/joy-media/api.env
 systemctl restart joy-media@api
 ok=0
@@ -255,14 +255,14 @@ curl -fsS "https://joyst.ir/?deploy=855734c" | sha256sum      # == sha256 of $ds
 If the source does not reach the VPS via `origin`/`vps-local` fetch, from the
 **PC** worktree: `git push vps 855734cf:refs/heads/live-director-r1` (or push
 the branch), then fetch on the VPS. The `vps` remote →
-`sweden:/opt/joy-media.git`.
+`sweden:<server-path>/joy-media.git`.
 
 ### On failure
 
 `bash deploy/joy-media-rollback.sh --dry-run <good-api> <good-web>` then
 `--apply`. `<good-*>` = the C0 pre-deploy `current-api` / `web` targets. If only
-the web pointer moved: `ln -sfn <good-web> /opt/joy-media/.web.rb && mv -Tf
-/opt/joy-media/.web.rb /opt/joy-media/web && systemctl reload nginx`. Keep the
+the web pointer moved: `ln -sfn <good-web> <server-path>/joy-media/.web.rb && mv -Tf
+<server-path>/joy-media/.web.rb <server-path>/joy-media/web && systemctl reload nginx`. Keep the
 DB backup. Report honestly; never relabel a failed smoke as success.
 
 ---
@@ -282,7 +282,7 @@ paths; read it before touching the VPS.
 
 ### Gbrain MCP — NOT done (classifier blocked the `.mcp.json` write)
 
-Create `C:\Users\HadiMoti\joy-media\.mcp.json` (from `~/.codex/config.toml`
+Create `<owner-profile>\joy-media\.mcp.json` (from `~/.codex/config.toml`
 `[mcp_servers.gbrain]`):
 
 ```json
@@ -302,18 +302,18 @@ Then in an interactive `claude` session, approve the server when prompted (or
 `claude mcp add`). Tools: `search`, `get_page`, `put_page`, `add_link`,
 `add_timeline_entry`, `query`, `get_backlinks` (see `brain-ops` skill). Prior
 sessions sometimes hit `Transport closed` on this MCP — if it persists, the
-PC-side helpers still work: `C:\Users\HadiMoti\Desktop\gbrain-pc\scripts\`
+PC-side helpers still work: `<owner-profile>\Desktop\gbrain-pc\scripts\`
 (`Start-Agent-Process.ps1`, `Invoke-VpsGbrainExport.ps1`,
 `Publish-PcReceipt.ps1`, `Use-PcGbrain.ps1`).
 
 ### SSH permission — add so the deploy session isn't re-walled
 
-In `C:\Users\HadiMoti\joy-media\.claude\settings.local.json` (or via
+In `<owner-profile>\joy-media\.claude\settings.local.json` (or via
 `/permissions` in an interactive session), add to `permissions.allow`:
 
 ```
 "Bash(ssh sweden:*)",
-"Bash(ssh -i ~/.ssh/Joy-Vps-New.pem root@<JOY_VPS_IP>:*)",
+"Bash(ssh -i ~/.ssh/<vps-key-file> <server-user>@<JOY_VPS_IP>:*)",
 "mcp__gbrain__search", "mcp__gbrain__get_page", "mcp__gbrain__put_page",
 "mcp__gbrain__add_link", "mcp__gbrain__add_timeline_entry"
 ```
@@ -361,15 +361,15 @@ From `~/.codex/AGENTS.md` + `sweden-vps-ops` skill:
    rollback command, next open milestone = R2. **No secrets.** Add a
    `joy-media-state` / `add_timeline_entry` entry.
 2. **Read it back** to confirm it persisted.
-3. `& 'C:\Users\HadiMoti\Desktop\gbrain-pc\scripts\Invoke-VpsGbrainExport.ps1'`
+3. `& '<owner-profile>\Desktop\gbrain-pc\scripts\Invoke-VpsGbrainExport.ps1'`
    with **NO arguments**. Record the verified export SHA in a **redacted**
-   `C:\Users\HadiMoti\Desktop\gbrain-pc\receipts\` entry.
-4. `& 'C:\Users\HadiMoti\Desktop\gbrain-pc\scripts\Publish-PcReceipt.ps1'`.
-5. Fresh-read `C:\Users\HadiMoti\Desktop\VPS-AGENT-BRIEF.md`; **append** the
+   `<owner-profile>\Desktop\gbrain-pc\receipts\` entry.
+4. `& '<owner-profile>\Desktop\gbrain-pc\scripts\Publish-PcReceipt.ps1'`.
+5. Fresh-read `<owner-profile>\Desktop\VPS-AGENT-BRIEF.md`; **append** the
    validated R1 release facts (candidate/artifact identity, scope, tests,
    rollback, next milestone). Preserve the independent `joy-vps` agent's
    sections and any concurrent edits. No secrets.
-6. **Never** edit or push `C:\Users\HadiMoti\Desktop\gbrain` (pull-only mirror).
+6. **Never** edit or push `<owner-profile>\Desktop\gbrain` (pull-only mirror).
 7. Update `STATE.md` on `codex/joy-live-director` with an "R1 Live Director
    deployment" section in the house style (see §3 examples), commit
    `docs(release): record R1 Live Director deployment evidence`.
@@ -410,29 +410,29 @@ Astra's non-blocking R2 follow-ups (from the R1 review) to fold in early:
 
 ## 9. Pointers
 
-| What                           | Where                                                                                                      |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Master plan + release rules    | `docs/superpowers/plans/2026-09-05-joy-live-director-master.md`                                            |
-| R1 task list                   | `docs/superpowers/plans/2026-09-05-joy-live-director-r1.md`                                                |
-| R2/R3 task list                | `docs/superpowers/plans/2026-09-05-joy-live-director-r2-r3.md`                                             |
-| Original next-agent plan       | `C:\Users\HadiMoti\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`                                      |
-| Astra acceptance bundle        | `docs/reviews/joy-live-director-r1-acceptance-bundle-2026-09-07.md`                                        |
-| Deploy runbook (C0–C6)         | `docs/reviews/joy-live-director-r1-deploy-runbook-2026-09-07.md`                                           |
-| Coverage ledger + verifier     | `docs/reviews/joy-live-director-coverage.json`, `tooling/release/verify-agent-operation-coverage.mjs`      |
-| Decoder (mediabunny) selection | `docs/reviews/joy-observation-decoder-selection.md`                                                        |
-| Deploy manifests + rollback    | `deploy/README.md`, `deploy/joy-media-rollback.sh`, `deploy/joy-media-release-identity.sh`                 |
-| Historical deploy evidence     | `STATE.md` (built-in engine 2026-09-04; WP-34/35/36 closeouts)                                             |
-| VPS operational map            | `~/.claude/skills/sweden-vps-ops/references/operational-map.md`                                            |
-| Gbrain ritual                  | `~/.codex/AGENTS.md`, `~/.claude/skills/brain-ops/SKILL.md`                                                |
-| Memory (update each session)   | `C:\Users\HadiMoti\.claude\projects\C--Users-HadiMoti-joy-media\memory\joy-media-live-director-state.md`   |
-| Worktree (work happens here)   | `C:\Users\HadiMoti\.config\superpowers\worktrees\joy-media\joy-live-director` on `codex/joy-live-director` |
-| WIP safety snapshot            | `stash@{0}` `e0eb6368`, tag `wip-snapshot-2026-09-06`, branch `codex/joy-live-director-wip` — never delete |
+| What                           | Where                                                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Master plan + release rules    | `docs/superpowers/plans/2026-09-05-joy-live-director-master.md`                                               |
+| R1 task list                   | `docs/superpowers/plans/2026-09-05-joy-live-director-r1.md`                                                   |
+| R2/R3 task list                | `docs/superpowers/plans/2026-09-05-joy-live-director-r2-r3.md`                                                |
+| Original next-agent plan       | `<owner-profile>\Desktop\joy-media-CLAUDE-agent-plan-2026-09-06.md`                                           |
+| Astra acceptance bundle        | `docs/reviews/joy-live-director-r1-acceptance-bundle-2026-09-07.md`                                           |
+| Deploy runbook (C0–C6)         | `docs/reviews/joy-live-director-r1-deploy-runbook-2026-09-07.md`                                              |
+| Coverage ledger + verifier     | `docs/reviews/joy-live-director-coverage.json`, `tooling/release/verify-agent-operation-coverage.mjs`         |
+| Decoder (mediabunny) selection | `docs/reviews/joy-observation-decoder-selection.md`                                                           |
+| Deploy manifests + rollback    | `deploy/README.md`, `deploy/joy-media-rollback.sh`, `deploy/joy-media-release-identity.sh`                    |
+| Historical deploy evidence     | `STATE.md` (built-in engine 2026-09-04; WP-34/35/36 closeouts)                                                |
+| VPS operational map            | `~/.claude/skills/sweden-vps-ops/references/operational-map.md`                                               |
+| Gbrain ritual                  | `~/.codex/AGENTS.md`, `~/.claude/skills/brain-ops/SKILL.md`                                                   |
+| Memory (update each session)   | `<owner-profile>\.claude\projects\C--Users-<owner-profile>-joy-media\memory\joy-media-live-director-state.md` |
+| Worktree (work happens here)   | `<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director` on `codex/joy-live-director`      |
+| WIP safety snapshot            | `stash@{0}` `e0eb6368`, tag `wip-snapshot-2026-09-06`, branch `codex/joy-live-director-wip` — never delete    |
 
 ### Hard limits (unchanged)
 
 Claude-only, no OpenAI/Codex. Keep the BYOK browser engine — no KiloCode /
 local model / rewrite. Fontiran redistribution gate stays **CLOSED**. Don't
-touch the parallel `joy-vps` work (`/opt/joy-vps`, `/opt/joy-wg-bot`, its
+touch the parallel `joy-vps` work (`<server-path>/joy-vps`, `<server-path>/joy-wg-bot`, its
 services, shared nginx). Never edit/push the pull-only Desktop `gbrain` mirror.
 No deploy / service restart / pipeline run without Astra approval **and** the
 owner's go-ahead. The implementer never self-approves.

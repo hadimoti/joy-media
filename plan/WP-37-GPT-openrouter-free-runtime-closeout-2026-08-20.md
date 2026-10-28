@@ -20,7 +20,7 @@ Completed in the canonical repository through commit `aa11daa` and deployed disa
 - Added guarded server composition that reads only six explicit non-secret runtime keys and remains unavailable when mode/config/credential is absent.
 - Added server-owned versioned consent columns; legacy boolean opt-ins without the current disclosure version now read as disabled, and enabling writes the current version plus acceptance time.
 - Verification: 460 focused tests pass across the final policy/runtime/HTTP/schema/control-plane/editor set; adapter/API/editor builds pass; `git diff --check` passes. Editor build emits only existing chunk-size warnings. The composition fixture was aligned with the pinned model and canonical secret reference in `8fb1c83`.
-- VPS release gate: database backup `/opt/joy-media/data/backups/joymedia-20260819-225649.sql.gz` completed and synced; immutable API `wp37-api-20260819T225744-aa11daa43428` and editor `editor-web-20260819T225744-aa11daa43428-wp37` are active; `nginx -t`, API health, and service readiness pass. The owner-approved Hermes `OPENROUTER_API_KEY` is mounted only through `/etc/credstore.encrypted/openrouter-api-key`; six exact free-only runtime keys are configured in `/etc/joy-media/api.env` with no key value. No project is opted in and no provider request has been made.
+- VPS release gate: database backup `<server-path>/joy-media/data/backups/joymedia-20260819-225649.sql.gz` completed and synced; immutable API `wp37-api-20260819T225744-aa11daa43428` and editor `editor-web-20260819T225744-aa11daa43428-wp37` are active; `nginx -t`, API health, and service readiness pass. The owner-approved Hermes `OPENROUTER_API_KEY` is mounted only through `/etc/credstore.encrypted/openrouter-api-key`; six exact free-only runtime keys are configured in `/etc/joy-media/api.env` with no key value. No project is opted in and no provider request has been made.
 - Repository-wide `pnpm check` remains red on the pre-existing editor-web typecheck backlog (panel runner/coordinator fixtures and related UI contracts); no unrelated cleanup was mixed into this work.
 
 Still intentionally not executed: a live provider canary with an owner-approved non-confidential disposable project, browser evidence of the consent/opt-in flow, rollback rehearsal, and WP-37 closeout. Runtime configuration is enabled but egress remains gated by project consent and admission policy.
@@ -67,7 +67,7 @@ Primary references:
 
 ## 2. Starting state and known gaps
 
-Start from canonical repository `C:/Users/HadiMoti/joy-vps/joy-media-fix`, branch `main`, commit `a00e011` or its reviewed descendant, with a clean worktree.
+Start from canonical repository `<owner-profile>/joy-vps/joy-media-fix`, branch `main`, commit `a00e011` or its reviewed descendant, with a clean worktree.
 
 Already complete:
 
@@ -496,8 +496,8 @@ If a repair is needed, use a separate narrow commit. Otherwise create no empty v
 systemd --version
 systemctl cat joy-media@api
 systemctl show joy-media@api -p User -p Group -p FragmentPath -p DropInPaths -p EnvironmentFiles
-readlink -f /opt/joy-media/releases/current-api
-readlink -f /opt/joy-media/web
+readlink -f <server-path>/joy-media/releases/current-api
+readlink -f <server-path>/joy-media/web
 systemctl is-active joy-media@api postgresql nginx
 curl -fsS http://127.0.0.1:8790/health
 ```

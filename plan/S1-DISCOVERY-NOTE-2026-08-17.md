@@ -78,7 +78,7 @@ Each component increments independently when mutated, ensuring stale plan detect
 
 - **Local checkout:** `0287946` (verified 2026-08-17)
 - **VPS checkout:** `0287946` (verified 2026-08-17)
-- **Deployed WP-36 artifact:** `733f584` at `/opt/joy-media/web-releases/editor-web-20260816T233403Z-733f584-wp36-color-render-final`
+- **Deployed WP-36 artifact:** `733f584` at `<server-path>/joy-media/web-releases/editor-web-20260816T233403Z-733f584-wp36-color-render-final`
 
 ---
 

@@ -4,7 +4,7 @@
 >
 > **Generated**: 2026-07-25  
 > **Live Editor**: https://media.joyteam.ir/  
-> **Local Repo**: `C:\Users\HadiMoti\joy-media` (pnpm monorepo, ~30 packages)  
+> **Local Repo**: `<owner-profile>\joy-media` (pnpm monorepo, ~30 packages)  
 > **VPS Deploy Target**: Sweden VPS (media.joyteam.ir, port 8790, systemd `joy-media@api`)
 
 ---
@@ -544,7 +544,7 @@ if (node.effects && node.effects.length > 0) {
 # Server: <CONTROL_PLANE_IP> (joyteam.ir)
 # App: media.joyteam.ir → Cloudflare → nginx :80/443 → localhost:8790
 # Service: systemd joy-media@api
-# Repo: /opt/joy-media (cloned from GitHub)
+# Repo: <server-path>/joy-media (cloned from GitHub)
 # Build: pnpm install --frozen-lockfile && pnpm build
 # Deploy: systemctl restart joy-media@api
 # Logs: journalctl -u joy-media@api -f
@@ -560,7 +560,7 @@ if (node.effects && node.effects.length > 0) {
 - pnpm typecheck
 - pnpm test
 - pnpm build
-- rsync dist/ to VPS:/opt/joy-media/apps/editor-web/dist
+- rsync dist/ to VPS:<server-path>/joy-media/apps/editor-web/dist
 - systemctl reload nginx
 - systemctl restart joy-media@api
 ```
@@ -589,7 +589,7 @@ if (node.effects && node.effects.length > 0) {
 
 ## 10. CHATGPT PROMPT TEMPLATE (Copy-Paste)
 
-> **You are a senior full-stack engineer. Below is a complete BEFORE/AFTER specification for the JOY Media editor's Effects/Transitions/Color/Audio/Motion panels. The live editor is at https://media.joyteam.ir/ (Dockview + PixiJS + React). Local repo is a pnpm monorepo at `C:\Users\HadiMoti\joy-media` (~30 packages). Target deployment: Sweden VPS (systemd + nginx).**
+> **You are a senior full-stack engineer. Below is a complete BEFORE/AFTER specification for the JOY Media editor's Effects/Transitions/Color/Audio/Motion panels. The live editor is at https://media.joyteam.ir/ (Dockview + PixiJS + React). Local repo is a pnpm monorepo at `<owner-profile>\joy-media` (~30 packages). Target deployment: Sweden VPS (systemd + nginx).**
 >
 > **Task**: Produce a **debugged, step-by-step implementation plan** (Phases 1–5, each with tasks, file paths, commands, verification steps) that Hermes (AI agent on VPS) can execute autonomously. The plan must:
 >

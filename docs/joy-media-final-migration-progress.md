@@ -1,6 +1,6 @@
 # JOY Media final migration — progress log
 
-Lead: Claude Code (`claude-sonnet-5`), worktree `C:\Users\HadiMoti\joy-media-final-migration`,
+Lead: Claude Code (`claude-sonnet-5`), worktree `<owner-profile>\joy-media-final-migration`,
 branch `codex/joy-media-final-migration-20260914`. This log is updated at every wave boundary
 with exact evidence so Codex can update external handoffs. No deploy, VPS restart, production
 data change, secret change, or payment activation has been performed.

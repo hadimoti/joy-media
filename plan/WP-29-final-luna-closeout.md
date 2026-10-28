@@ -1,8 +1,8 @@
 # WP-29 Final Luna Closeout
 
 **Status:** Ready for execution; evidence-driven closeout loop
-**Repository:** `/opt/joy-media/repo`
-**Production root:** `/opt/joy-media`
+**Repository:** `<server-path>/joy-media/repo`
+**Production root:** `<server-path>/joy-media`
 **Candidate:** `8756325dc1c336385008332f5200c706c0c09954`
 
 This is the execution checklist for GPT Luna. R0–R5 have retained accepted
@@ -14,7 +14,7 @@ order. Do not mark WP-29 finished when a step is running, skipped, or blocked.
 For every step, record SHA, UTC timestamp, environment, viewport, project
 context, logs, screenshots/traces, console/page/network failures, and cleanup.
 Review the evidence before continuing. A product failure is reproduced once,
-fixed only in `/opt/joy-media/repo`, covered by a regression test, committed and
+fixed only in `<server-path>/joy-media/repo`, covered by a regression test, committed and
 pushed, and restarts the loop at Step 1 with the new SHA. An environmental
 blocker is recorded as `BLOCKED-INTEGRATION` and stops closeout. Never rewrite
 history, edit a release directory directly, expose secrets, or mutate the
@@ -38,7 +38,7 @@ surviving user project/upload.
 
 ### 3. VPS backup and preflight
 
-- Fast-forward `/opt/joy-media/repo` to the candidate and verify a clean tree.
+- Fast-forward `<server-path>/joy-media/repo` to the candidate and verify a clean tree.
 - Record old API/editor symlinks, service/PID/restart/socket, disk/inodes,
   database connectivity, schema-only dump, and `nginx -t`.
 - Create a fresh PostgreSQL backup, record SHA-256, and verify gzip/PostgreSQL

@@ -53,10 +53,15 @@ records the decisions. It does not repeat the plan's removal lists.
 
 ## Release trust: pin lookup
 
-On 2026-10-28 two read-only searches ran. The titles and branch names of up to 500 pull requests were filtered for pin,
-release-key, release-trust, ceremony, signing and signed. The bodies were searched for release-key. No pin, release-key or signing
-pull request was found, and a search for open pull requests returned none. The pin work is recorded as cancelled. Nothing was
-closed.
+On 2026-10-28 the read-only lookup in PLAN-v4 section 8d ran with `gh`, and both commands exited 0.
+
+- `gh pr list --state all --limit 500` listed 13 pull requests. Their titles and branch names, filtered for pin, release-key,
+  release-trust, ceremony, signing and signed, matched one: #12 (merged). The match is the substring "pin" inside "housekeeping" in
+  its branch name, and its title concerns the v1.0.2 release record.
+- `gh pr list --search "release-key in:body"` returned four pull requests, all merged: #2, #3, #7 and #12. None of them is a pin
+  change.
+
+No open pull request matched, so none was closed. The pin work is recorded as cancelled.
 
 ## Consequences
 

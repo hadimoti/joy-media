@@ -15,8 +15,8 @@ The design covers the native Pexels/Pixabay stock-video catalog shown under Clou
 
 Reference evidence:
 
-- Current UI screenshot: C:\Users\HadiMoti\AppData\Local\Temp\codex-clipboard-ea730c48-c987-4f1b-b411-87d0d06f4cbf.png
-- Existing cloud picture category-rail screenshot: C:\Users\HadiMoti\AppData\Local\Temp\codex-clipboard-c0b227cc-19e2-405f-a0b6-c1ccd4c1185f.png
+- Current UI screenshot: <owner-profile>\AppData\Local\Temp\codex-clipboard-ea730c48-c987-4f1b-b411-87d0d06f4cbf.png
+- Existing cloud picture category-rail screenshot: <owner-profile>\AppData\Local\Temp\codex-clipboard-c0b227cc-19e2-405f-a0b6-c1ccd4c1185f.png
 - Primary source files: apps/editor-web/src/StockVideoDiscovery.tsx, apps/editor-web/src/AssetLibraryPanel.tsx, apps/editor-web/src/asset-library-icons.ts, apps/editor-web/src/icon-assets.ts, and apps/editor-web/src/app.css
 
 ## Problem evidence and root cause
@@ -315,7 +315,7 @@ Guardrails:
 
 - This document is a plan, not implementation authorization. The owner must separately approve code changes and any later release.
 - No lane may implement, commit, push, deploy, restart a service, access an owner browser profile, or read production credentials without explicit owner approval.
-- If SuperPlane or independent agents under C:\Users\HadiMoti\Desktop\HadiPc-Agents are used, they are advisory/evidence lanes only. Treat Cline and Kilo as repository-evidence lanes only after a read-only source snapshot; treat dynamic OpenRouter and unavailable NVIDIA lanes as context-only critics, never acceptance voters.
+- If SuperPlane or independent agents under <owner-profile>\Desktop\HadiPc-Agents are used, they are advisory/evidence lanes only. Treat Cline and Kilo as repository-evidence lanes only after a read-only source snapshot; treat dynamic OpenRouter and unavailable NVIDIA lanes as context-only critics, never acceptance voters.
 - Any subagent used in the implementation plan must use gpt-5.6-luna only. The owner orchestrator independently verifies claims; a successful pipeline process is not acceptance evidence.
 - Advisory workers must receive bounded, read-only, redacted context. They must not receive secrets, owner cookies, browser auth state, raw provider output, or user media.
 - Preserve the user's dirty worktree and data. Do not use destructive Git commands or broad test/cleanup commands.

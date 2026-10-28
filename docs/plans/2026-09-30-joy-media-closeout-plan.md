@@ -15,7 +15,7 @@
 - Keep the GitHub repository private through this plan; no visibility change, tag, public release, remote push, or production deployment is authorized by this document.
 - Before implementation, use a clean isolated checkout based on the then-current GitHub main; preserve any existing work, including the unrelated local nul entry seen during the 2026-09-30 research.
 - The research baseline was GitHub main at 17353bd050d2f10aa308fb66b2873a73777b348f; the local checkout at research time was 53d7bb60b75e4bacca0fd3e3d745815c8764d5d4. Re-fetch and record the exact candidate before acting.
-- Before the first Kilo run, read C:\Users\HadiMoti\Desktop\agents-handoff.md and verify the selected Kilo CLI route, model mapping, entitlement, credit/billing behavior, data handling, and isolation. The screenshot shows a Kilo menu item named “BytePlus Coding Plan DeepSeek-V4-Flash” (BYOK / Kilo Gateway); it separately shows “DeepSeek V4.1 Flash” with catalog ID deepseek/deepseek-v4.1-flash. Do not assume these entries resolve to the same model or plan.
+- Before the first Kilo run, read <owner-profile>\Desktop\agents-handoff.md and verify the selected Kilo CLI route, model mapping, entitlement, credit/billing behavior, data handling, and isolation. The screenshot shows a Kilo menu item named “BytePlus Coding Plan DeepSeek-V4-Flash” (BYOK / Kilo Gateway); it separately shows “DeepSeek V4.1 Flash” with catalog ID deepseek/deepseek-v4.1-flash. Do not assume these entries resolve to the same model or plan.
 - The selected BytePlus route is not authorization for a new purchase or an uncovered paid fallback. If model mapping, plan access, or expected billing is unclear or changes, stop before worker execution and report it. Do not silently route to another paid provider.
 - Kilo must use isolated work and sanitized configuration, with no production credentials and no Gbrain write access. Keep real Kilo session IDs, actual worker diffs, and command output as evidence; do not substitute stub output.
 - Start each implementation session using the owner’s Gbrain start/read process and query the authenticated VPS Gbrain for live project facts. The Desktop gbrain export is pull-only; never hand-edit, commit, or push it. The PC workbench is not a replica of the VPS brain.
@@ -60,7 +60,7 @@
 - **Route gate:** Before creating a worker session, inspect the current Kilo catalog and runbook; confirm the exact model ID behind the selected BytePlus menu item, active plan access, credit behavior, CLI compatibility, data policy, and isolation. Save redacted evidence. The screenshot alone does not prove runtime routing or billing.
 - **Worker limits:** One isolated worktree for this closeout; sanitized environment; no production credentials, no Gbrain access, no automatic provider promotion, no direct push, and no deployment. Use real session IDs and actual patch/test artifacts.
 - **Source gate:** Fetch current origin/main, confirm repository instructions, and base the worktree on that exact commit. The research SHA above is a starting reference only.
-- **Session context:** Run C:\Users\HadiMoti\Desktop\gbrain-pc\scripts\Start-Agent-Process.ps1, then query the authenticated VPS Gbrain. If the PC bootstrap is unavailable, report it and use the VPS MCP for live facts; never treat the Desktop mirror as authoritative.
+- **Session context:** Run <owner-profile>\Desktop\gbrain-pc\scripts\Start-Agent-Process.ps1, then query the authenticated VPS Gbrain. If the PC bootstrap is unavailable, report it and use the VPS MCP for live facts; never treat the Desktop mirror as authoritative.
 - **Stop conditions:** Kilo route or billing mismatch; dirty/diverged source or unexplained work; a suspected secret in source/history that lacks owner disposition; any test failure outside the intended change; or inability to preserve a guarded JOY edit invariant.
 
 ## Plan
@@ -200,11 +200,11 @@ The owner later explicitly authorized bounded implementation, exact-candidate CI
 
 ### Production attempt and recovery
 
-- A pre-deployment database dump was created at `/opt/joy-media/backups/joymedia-pre-83eef395-20260930T233443Z.dump`; SHA-256 `909c7edd7e64e9c61cb23bbe1f713db50f29c1ce579e00e72952a981f3033081`. Its checksum and `pg_restore --list` validation passed.
-- The guarded cutover staged `/opt/joy-media/releases/joy-media-api-83eef395dce2-20260930T233542Z` from the exact candidate. Local and public health endpoints returned HTTP 200 and `nginx -t` passed.
-- Candidate Gmail OTP requests returned HTTP 500. After rollback, the previous immutable API release `/opt/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z` accepted the Gmail request with HTTP 200 and the email appeared in the authenticated inbox. This isolates the failure to the candidate release path, but the exact SMTP exception is not known.
+- A pre-deployment database dump was created at `<server-path>/joy-media/backups/joymedia-pre-83eef395-20260930T233443Z.dump`; SHA-256 `909c7edd7e64e9c61cb23bbe1f713db50f29c1ce579e00e72952a981f3033081`. Its checksum and `pg_restore --list` validation passed.
+- The guarded cutover staged `<server-path>/joy-media/releases/joy-media-api-83eef395dce2-20260930T233542Z` from the exact candidate. Local and public health endpoints returned HTTP 200 and `nginx -t` passed.
+- Candidate Gmail OTP requests returned HTTP 500. After rollback, the previous immutable API release `<server-path>/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z` accepted the Gmail request with HTTP 200 and the email appeared in the authenticated inbox. This isolates the failure to the candidate release path, but the exact SMTP exception is not known.
 - The connected Gmail tool masks one-time codes, so a code-level verify-OTP round trip could not be performed. The Telegram request returned HTTP 200, but its code-level round trip also remains unverified because no authenticated Telegram session was available.
-- The rehearsed rollback was applied. Current API pointer is `/opt/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z`; the account/login root and existing editor-web pointer were left in place. Post-rollback local and public health checks returned HTTP 200 and `nginx -t` passed.
+- The rehearsed rollback was applied. Current API pointer is `<server-path>/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z`; the account/login root and existing editor-web pointer were left in place. Post-rollback local and public health checks returned HTTP 200 and `nginx -t` passed.
 
 ### Current release gates
 
@@ -230,10 +230,10 @@ The owner specified that the editor UI must remain off production. This update r
 
 ### Production API
 
-- The API-only `deploy/deploy-cutover.sh` activated `/opt/joy-media/releases/joy-media-api-0cafd135fb9f-20261001T032845Z` with matching release identity.
+- The API-only `deploy/deploy-cutover.sh` activated `<server-path>/joy-media/releases/joy-media-api-0cafd135fb9f-20261001T032845Z` with matching release identity.
 - API service is active; `/live` and `/ready` return HTTP 200; direct-origin `joyst.ir/` returns HTTP 200; `nginx -t` passes.
-- The previous API release remains available at `/opt/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z` for rollback. The validated database backup remains `/opt/joy-media/backups/joymedia-pre-83eef395-20260930T233443Z.dump` (SHA-256 `909c7edd7e64e9c61cb23bbe1f713db50f29c1ce579e00e72952a981f3033081`).
-- The web pointer remains `/opt/joy-media/web-releases/joy-media-9fef910e714a4fd87dba0449ea5f103b5fdd81fa-web`; Nginx still serves `/opt/joy-media/account-web`. No editor route or web pointer change occurred.
+- The previous API release remains available at `<server-path>/joy-media/releases/joy-media-api-17353bd050d2-20260925T024824Z` for rollback. The validated database backup remains `<server-path>/joy-media/backups/joymedia-pre-83eef395-20260930T233443Z.dump` (SHA-256 `909c7edd7e64e9c61cb23bbe1f713db50f29c1ce579e00e72952a981f3033081`).
+- The web pointer remains `<server-path>/joy-media/web-releases/joy-media-9fef910e714a4fd87dba0449ea5f103b5fdd81fa-web`; Nginx still serves `<server-path>/joy-media/account-web`. No editor route or web pointer change occurred.
 
 ### OTP smoke status
 
@@ -245,12 +245,11 @@ The owner specified that the editor UI must remain off production. This update r
 
 - **A — Public source:** CLEARED. Repository is prepared and ready for public open-source release. All path literals generalized to `os.homedir()` / `tmpdir()`; test scripts sanitized; operational disclosures and private key paths sanitized; author metadata and commit history approved by owner for public release; whole-artifact asset review confirmed (OFL-1.1 fonts, MPL-2.0 Mediabunny route, synthetic test media); MIT licensing verified throughout.
 - **B — Desktop binary:** remains pending on binary rights/MPL source-route review, signing, and release-note approval. No binary was distributed.
-- **C — Production:** active API release `/opt/joy-media/releases/joy-media-api-0cafd135fb9f-20261001T032845Z`. Intermittent first Gmail OTP 500 diagnosed from `/opt/joy-media/logs/api.error.log` as transient `{ code: 'ESOCKET', command: 'CONN' }` socket timeout. Telegram delivery and code verification passed. The editor UI stays off production per owner decision.
+- **C — Production:** active API release `<server-path>/joy-media/releases/joy-media-api-0cafd135fb9f-20261001T032845Z`. Intermittent first Gmail OTP 500 diagnosed from `<server-path>/joy-media/logs/api.error.log` as transient `{ code: 'ESOCKET', command: 'CONN' }` socket timeout. Telegram delivery and code verification passed. The editor UI stays off production per owner decision.
 
 ## Final Public Release Closeout & Gate A Clearance (2026-10-01)
 
-- **Intermittent Gmail OTP 500 Evidence:** Root cause definitively identified in `/opt/joy-media/logs/api.error.log` as `{ code: 'ESOCKET', command: 'CONN' }`. Initial TCP connection to the SMTP provider timed out; retry succeeded with HTTP 200.
+- **Intermittent Gmail OTP 500 Evidence:** Root cause definitively identified in `<server-path>/joy-media/logs/api.error.log` as `{ code: 'ESOCKET', command: 'CONN' }`. Initial TCP connection to the SMTP provider timed out; retry succeeded with HTTP 200.
 - **Sanitization Complete:** Removed hardcoded user paths and session directories from test scripts (`tests/desktop/computer-use-debug.mjs`, `tests/desktop/verify-asset-library.mjs`); sanitized private key paths in `ORCHESTRATION.md` and `plan/X01-vps-control-plane.md`.
 - **Public Open-Source Metadata Aligned:** `README.md` status badge updated to `License: MIT`; repository status section updated to Open Source Status under MIT; `docs/OPEN_SOURCE_RELEASE.md` updated with Gate A clearance.
 - **Release Status:** Repository is clean, tested, documented, and fully ready for public release.
-

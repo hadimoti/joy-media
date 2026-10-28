@@ -17,7 +17,7 @@ Close the honest residuals after WP-17–22: fixture-only Whisper, sine-stub TTS
 
 ## Exit checklist
 
-- [x] **Whisper helper** — [`apps/api/scripts/whisper_transcribe.py`](../apps/api/scripts/whisper_transcribe.py); models under `/opt/joy-media/data/whisper-models`.
+- [x] **Whisper helper** — [`apps/api/scripts/whisper_transcribe.py`](../apps/api/scripts/whisper_transcribe.py); models under `<server-path>/joy-media/data/whisper-models`.
 - [x] **API** `POST /v1/providers/speech/transcribe` (auth required) — JSON `{ language, referenceAssetId }` or raw media + `?language=`.
 - [x] **Captions** — [`local-transcription.ts`](../apps/editor-web/src/local-transcription.ts) tries live API then FA/EN fixtures.
 - [x] **TTS** — `edge-tts` engine in [`adapter-tts`](../packages/adapter-tts); API `POST /v1/providers/speech/synthesize`; workflow speech port drops `__stub`, discloses remote deferral.
