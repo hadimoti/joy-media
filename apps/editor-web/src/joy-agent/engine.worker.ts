@@ -16,6 +16,7 @@ import {
   assessProviderCapabilities,
   assessProviderMediaCapabilities,
   PROVIDER_MEDIA_CAPABILITY_PROBE_ACK,
+  PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN,
   PROVIDER_TOOL_PROBE_RESULT,
   resolveProviderExecutionMode,
   type ProviderMediaCapabilityAssessment,
@@ -817,9 +818,15 @@ async function testConnection(): Promise<void> {
       const probeTool = makeProbeTool();
       const initialRequest = {
         model: connection.modelId,
-        messages: [{ role: 'user', content: 'Use the joy_probe tool exactly once with {}.' }],
+        messages: [
+          {
+            role: 'user',
+            content: `Use the joy_probe tool exactly once with {}. After its result, reply with exactly ${PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN} and nothing else.`,
+          },
+        ],
         tools: [probeTool],
-        tool_choice: { type: 'function', function: { name: 'joy_probe' } },
+        // Auto, not a named tool: Claude Sonnet 5.5 accepts only auto or none, so a forced choice fails for it.
+        tool_choice: 'auto',
         max_tokens: 1024,
       } as const;
       const initialResponse = parseProviderEnvelope(

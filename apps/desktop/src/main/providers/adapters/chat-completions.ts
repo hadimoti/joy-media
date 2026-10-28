@@ -16,11 +16,16 @@ export function prepareChatCompletion(input: {
   readonly body: CompletionBody;
   /** The name the completion limit is sent under. Only OpenAI's newer models differ. */
   readonly tokenLimitKey?: 'max_tokens' | 'max_completion_tokens';
+  /** The provider state a tool call carries back unchanged, by call id (see ContinuationState). */
+  readonly extraContentFor?: (callId: string) => unknown;
 }): PreparedCall {
-  const { max_tokens: maxTokens, ...rest } = input.body;
+  const { max_tokens: maxTokens, messages, ...rest } = input.body;
   const limitKey = input.tokenLimitKey ?? 'max_tokens';
+  const carry = input.extraContentFor;
   const payload = {
     ...rest,
+    messages:
+      carry === undefined ? messages : messages.map((message) => withExtraContent(message, carry)),
     ...(maxTokens === undefined ? {} : { [limitKey]: maxTokens }),
     model: input.modelId,
     stream: false,
@@ -30,6 +35,22 @@ export function prepareChatCompletion(input: {
     url: endpointUrl(input.baseUrl, 'chat/completions'),
     headers: headersFor(input.apiKey),
     body: JSON.stringify(payload),
+  };
+}
+
+/** Adds the provider state kept for each tool call of an assistant message. Nothing else in the message changes. */
+function withExtraContent(
+  message: Record<string, unknown>,
+  extraContentFor: (callId: string) => unknown,
+): Record<string, unknown> {
+  if (message.role !== 'assistant' || !Array.isArray(message.tool_calls)) return message;
+  return {
+    ...message,
+    tool_calls: message.tool_calls.map((call: unknown) => {
+      if (!isRecord(call) || typeof call.id !== 'string') return call;
+      const extra = extraContentFor(call.id);
+      return extra === undefined ? call : { ...call, extra_content: extra };
+    }),
   };
 }
 

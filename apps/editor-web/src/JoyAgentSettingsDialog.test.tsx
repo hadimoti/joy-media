@@ -1059,7 +1059,34 @@ describe('JOY Agent Settings saved profile connect', () => {
     expect(saves[0]?.[1]).toEqual(
       expect.objectContaining({ provider: 'minimax', apiKey: 'sk-typed-for-china' }),
     );
-    expect(saves[0]?.[1]).not.toHaveProperty('id', 'prof-china');
+    expect((saves[0]?.[1] as { id?: unknown }).id).toBeUndefined();
+  });
+
+  it('refuses to connect a typed key while the saved profiles are still loading', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return new Promise(() => undefined);
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-typed-while-loading');
+    });
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(rendered.textContent).toContain('The saved profiles are still loading.');
   });
 
   it('refuses to connect a typed key until the saved profiles have been read, so it cannot save beside them', async () => {

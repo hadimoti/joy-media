@@ -29,6 +29,16 @@ const workerEntry = join(workerDir, 'dist', 'index.js');
 const tscEntry = fileURLToPath(
   new URL('../../../../node_modules/typescript/bin/tsc', import.meta.url),
 );
+const readObserverPath = fileURLToPath(new URL('./read-observer.cjs', import.meta.url));
+
+/** The provider key files a Worker process has read, as the read observer logged them. */
+function providerFileReads(logPath: string): string[] {
+  return existsSync(logPath)
+    ? readFileSync(logPath, 'utf8')
+        .split('\n')
+        .filter((line) => line.length > 0)
+    : [];
+}
 // Above the Worker's 10 s heartbeat interval (apps/worker/src/worker-daemon.ts). At 3 s, a job that is slow under load can
 // expire before its first heartbeat. That is the lease rule working as designed, and it was the survives flake (2026-10-28).
 const LEASE_CAP_MS = 20_000;
@@ -47,7 +57,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
   // The Worker runs from its build, so the build is brought up to date from its source before any test starts.
   // An old build would otherwise pass or fail for reasons the current source does not have.
   beforeAll(() => {
-    execFileSync(process.execPath, [tscEntry, '-b', workerDir], {
+    execFileSync(process.execPath, [tscEntry, '-b', '--force', workerDir], {
       stdio: 'pipe',
       timeout: 120_000,
     });
@@ -119,11 +129,17 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
   // The last output of each Worker, so a timeout can say what the Worker printed before it went quiet.
   const workerTails = new Map<ChildProcess, { text: string }>();
 
+  /** Every Worker process loads the read observer, so a test sees each provider-file read the process makes. */
+  function observedEnv(): NodeJS.ProcessEnv {
+    return { NODE_OPTIONS: `--require=${readObserverPath.replaceAll('\\', '/')}` };
+  }
+
   function startWorker(extraEnv: NodeJS.ProcessEnv = {}): ChildProcess {
     const child = spawn(process.execPath, [workerEntry], {
       cwd: workerDir,
       env: {
         ...localWorkerEnv(process.env, { apiEnv: api.workerEnv, workerRoot: join(dir, 'worker') }),
+        ...observedEnv(),
         ...extraEnv,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -224,7 +240,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
     expect(JSON.parse(finished.resultJson ?? '{}')).toMatchObject({ kind: 'asset.thumbnail' });
   }, 90_000);
 
-  it('keeps a provider key file out of a local Worker, which advertises no AI provider', async () => {
+  it('keeps a provider key file out of a local Worker, which advertises no AI provider and reads no key file', async () => {
     // A key file in the Worker PC's home directory, the file a standalone Worker would read at startup.
     const home = join(dir, 'home');
     mkdirSync(join(home, '.joy-media'), { recursive: true });
@@ -238,11 +254,36 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
         },
       }),
     );
-    startWorker({ HOME: home, USERPROFILE: home });
+    const readLog = join(dir, 'provider-reads.log');
+    startWorker({ HOME: home, USERPROFILE: home, JOY_TEST_READ_LOG: readLog });
     await waitForWorker();
 
     expect(database.jobDispatch.presence()?.capabilities).not.toContain('text.lm-studio');
-  }, 90_000);
+    // The process itself is observed, so a read whose result is discarded still shows up here.
+    expect(providerFileReads(readLog)).toEqual([]);
+
+    // Control: a Worker with no local token reads the same file. Without this, the empty log proves nothing.
+    const standalone = spawn(process.execPath, [workerEntry], {
+      cwd: workerDir,
+      env: {
+        ...localWorkerEnv(process.env, { apiEnv: {}, workerRoot: join(dir, 'standalone') }),
+        ...observedEnv(),
+        HOME: home,
+        USERPROFILE: home,
+        JOY_TEST_READ_LOG: readLog,
+      },
+      stdio: 'ignore',
+    });
+    try {
+      await waitFor(
+        () => (providerFileReads(readLog).length > 0 ? true : undefined),
+        FIRST_JOB_TIMEOUT_MS,
+        'the standalone Worker to read its provider file',
+      );
+    } finally {
+      standalone.kill();
+    }
+  }, 150_000);
 
   it('reports a real failure, with no derivative, when the source is not a video', async () => {
     const job = orchestrator();

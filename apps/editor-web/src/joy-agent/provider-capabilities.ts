@@ -154,7 +154,8 @@ const MAX_TOOL_CALL_ID_LENGTH = 128;
 const MAX_ARGUMENT_BYTES = 8_192;
 const MAX_PLAN_ONLY_TEXT_BYTES = 8_192;
 const SAFE_TOOL_NAME = /^[A-Za-z][A-Za-z0-9_.-]*$/;
-const SAFE_TOOL_CALL_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+// The same shapes the broker accepts: some providers write dots and colons into an id (Kimi writes `functions.name:0`).
+const SAFE_TOOL_CALL_ID = /^[A-Za-z0-9_.:-]+$/;
 
 /**
  * Classify provider compatibility from ephemeral probe evidence. The result is
@@ -321,7 +322,8 @@ function validateContinuation(
   if (
     continuationMessage === undefined ||
     (continuationMessage.role !== undefined && continuationMessage.role !== 'assistant') ||
-    continuationMessage.content !== PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN ||
+    typeof continuationMessage.content !== 'string' ||
+    continuationMessage.content.trim() !== PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN ||
     (continuationMessage.tool_calls !== undefined &&
       (!Array.isArray(continuationMessage.tool_calls) ||
         continuationMessage.tool_calls.length !== 0))

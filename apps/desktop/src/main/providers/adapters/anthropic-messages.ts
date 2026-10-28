@@ -28,8 +28,10 @@ export function prepareAnthropicMessages(input: {
   readonly apiKey: string;
   readonly modelId: string;
   readonly body: CompletionBody;
+  /** The thinking blocks a tool use came after, by call id (see ContinuationState). */
+  readonly thinkingBefore?: (callId: string) => unknown;
 }): PreparedCall {
-  const { system, messages } = toAnthropicMessages(input.body.messages);
+  const { system, messages } = toAnthropicMessages(input.body.messages, input.thinkingBefore);
   const tools = (input.body.tools ?? []).map(toAnthropicTool);
   const payload: Record<string, unknown> = {
     model: input.modelId,
@@ -125,7 +127,10 @@ function headersFor(apiKey: string): Readonly<Record<string, string>> {
   };
 }
 
-function toAnthropicMessages(messages: readonly Record<string, unknown>[]): {
+function toAnthropicMessages(
+  messages: readonly Record<string, unknown>[],
+  thinkingBefore?: (callId: string) => unknown,
+): {
   readonly system?: string;
   readonly messages: AnthropicMessage[];
 } {
@@ -138,7 +143,7 @@ function toAnthropicMessages(messages: readonly Record<string, unknown>[]): {
     } else if (role === 'user') {
       append(out, 'user', userBlocks(message.content));
     } else if (role === 'assistant') {
-      append(out, 'assistant', assistantBlocks(message));
+      append(out, 'assistant', assistantBlocks(message, thinkingBefore));
     } else if (role === 'tool') {
       append(out, 'user', [
         {
@@ -180,21 +185,45 @@ function userBlocks(content: unknown): Block[] {
   });
 }
 
-function assistantBlocks(message: Record<string, unknown>): Block[] {
-  const blocks = textBlocks(textOf(message.content));
-  if (!Array.isArray(message.tool_calls)) return blocks;
+function assistantBlocks(
+  message: Record<string, unknown>,
+  thinkingBefore?: (callId: string) => unknown,
+): Block[] {
+  const text = textBlocks(textOf(message.content));
+  if (!Array.isArray(message.tool_calls)) return text;
+  const toolUses: Block[] = [];
   for (const call of message.tool_calls) {
     if (!isRecord(call) || !isRecord(call.function)) {
       throw new AdapterRequestError('A tool call is malformed.');
     }
-    blocks.push({
+    toolUses.push({
       type: 'tool_use',
       id: requireString(call.id, 'tool call id'),
       name: requireString(call.function.name, 'tool name'),
       input: parseArguments(call.function.arguments),
     });
   }
-  return blocks;
+  // The thinking a tool use came after goes first, exactly as the provider sent it.
+  return [...thinkingFor(message.tool_calls, thinkingBefore), ...text, ...toolUses];
+}
+
+/** The thinking blocks kept for this assistant turn, found through any of its tool calls. */
+function thinkingFor(
+  calls: readonly unknown[],
+  thinkingBefore?: (callId: string) => unknown,
+): Block[] {
+  if (thinkingBefore === undefined) return [];
+  for (const call of calls) {
+    if (!isRecord(call) || typeof call.id !== 'string') continue;
+    const kept = thinkingBefore(call.id);
+    if (
+      Array.isArray(kept) &&
+      kept.every((block) => isRecord(block) && typeof block.type === 'string')
+    ) {
+      return kept as Block[];
+    }
+  }
+  return [];
 }
 
 function textBlocks(text: string): Block[] {

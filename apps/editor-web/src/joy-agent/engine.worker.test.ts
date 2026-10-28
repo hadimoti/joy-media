@@ -296,10 +296,17 @@ async function waitForRunFinished(
   );
 }
 
+// A model answers the probe's continuation with the token only when the probe asked for it, as a real model must.
+function continuationAnswer(body: unknown): string {
+  return JSON.stringify(body).includes(PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN)
+    ? PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN
+    : 'Done.';
+}
+
 function structuredProvider(exchange: ProviderHandler): ProviderHandler {
   return (body, index, init) => {
     if (index === 0) return providerToolResponse('probe-1', 'joy_probe');
-    if (index === 1) return providerTextResponse(PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN);
+    if (index === 1) return providerTextResponse(continuationAnswer(body));
     if (index === 2) return providerTextResponse('plan-only probe ready');
     return exchange(body, index - 3, init);
   };
@@ -334,7 +341,7 @@ describe('JOY Agent Engine Worker V2', () => {
       throw new Error('Expected the full provider capability probe');
     }
     expect(initialRequest).toMatchObject({
-      tool_choice: { type: 'function', function: { name: 'joy_probe' } },
+      tool_choice: 'auto',
       tools: [
         expect.objectContaining({ function: expect.objectContaining({ name: 'joy_probe' }) }),
       ],
@@ -351,6 +358,47 @@ describe('JOY Agent Engine Worker V2', () => {
     expect(planOnlyRequest.tool_choice).toBeUndefined();
     expect(JSON.stringify(worker.output)).not.toContain('fixture-only');
     expect(bodies).toHaveLength(0);
+  });
+
+  it('asks for the continuation token in the probe itself, and forces no named tool', async () => {
+    const probeBodies: unknown[] = [];
+    const worker = await mountedWorker((body, index, init) => {
+      if (index < 3) probeBodies.push(body);
+      return structuredProvider(() => providerTextResponse('unused'))(body, index, init);
+    });
+
+    await verifyStructuredConnection(worker);
+
+    expect(probeBodies[0]).toMatchObject({ tool_choice: 'auto' });
+    expect(JSON.stringify(probeBodies[0])).toContain(PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN);
+  });
+
+  it('accepts a probe whose tool call id has dots and colons, as Kimi writes it', async () => {
+    const worker = await mountedWorker((body, index, init) => {
+      if (index === 0) return providerToolResponse('functions.joy_probe:0', 'joy_probe');
+      return structuredProvider(() => providerTextResponse('unused'))(body, index, init);
+    });
+
+    await verifyStructuredConnection(worker);
+  });
+
+  it('reports plan-only when the model answers the continuation without the token', async () => {
+    const worker = await mountedWorker((body, index, init) => {
+      if (index === 0) return providerToolResponse('probe-1', 'joy_probe');
+      if (index === 1) return providerTextResponse('Done.');
+      return structuredProvider(() => providerTextResponse('unused'))(body, index, init);
+    });
+
+    worker.send({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type: 'test' });
+
+    await vi.waitFor(() =>
+      expect(worker.output).toContainEqual(
+        expect.objectContaining({
+          type: 'test-result',
+          status: expect.objectContaining({ capability: 'plan-only' }),
+        }),
+      ),
+    );
   });
 
   it('gives each probe call its own deadline, so three replies of 16 seconds each all count', async () => {

@@ -27,6 +27,7 @@ import {
 import { AdapterRequestError, type ModelEntry, type PreparedCall } from './adapters/types.js';
 import { isRecord, parseCompletionBody, type CompletionBody } from './request-body.js';
 import { endpointBindingDigest } from '../../store/profile-binding.js';
+import { ContinuationState } from './continuation-state.js';
 
 export { endpointBindingDigest };
 
@@ -128,6 +129,8 @@ export interface ProviderBroker {
 }
 
 interface Endpoint {
+  /** The saved profile this call is for; empty for an unsaved draft. Keys the provider state of a tool call. */
+  readonly profileId: string;
   readonly api: 'chat-completions' | 'anthropic-messages';
   readonly provider: string;
   readonly baseUrl: string;
@@ -149,6 +152,8 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
   const resolveHost = deps.resolveHost ?? defaultResolveHost;
   const completeMs = deps.timeoutMs?.complete ?? COMPLETE_TIMEOUT_MS;
   const controlMs = deps.timeoutMs?.control ?? CONTROL_TIMEOUT_MS;
+  // The provider state each tool call of a reply carries back. Kept here, never sent on in a reply.
+  const continuation = new ContinuationState();
 
   async function resolveProfile(profileId: string, expectedBaseUrl?: string): Promise<Endpoint> {
     const profile = deps.store.getProfile(profileId);
@@ -200,7 +205,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     if (apiKey === undefined && verdict.kind === 'registry') {
       throw new BrokerError('CREDENTIAL_UNAVAILABLE', 'The provider key is no longer available');
     }
-    return makeEndpoint(profile.provider, profile.baseUrl, profile.modelId, apiKey);
+    return makeEndpoint(profile.id, profile.provider, profile.baseUrl, profile.modelId, apiKey);
   }
 
   async function resolveDraft(draft: ProviderDraft): Promise<Endpoint> {
@@ -208,7 +213,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     if (!verdict.allowed) throw new BrokerError('ENDPOINT_REFUSED', verdict.reason);
     const hostname = new URL(draft.baseUrl).hostname;
     if (verdict.kind === 'loopback') await assertLoopbackHost(hostname, resolveHost);
-    return makeEndpoint(draft.provider, draft.baseUrl, '', usableKey(draft.apiKey));
+    return makeEndpoint('', draft.provider, draft.baseUrl, '', usableKey(draft.apiKey));
   }
 
   async function run(
@@ -217,11 +222,12 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<string> {
-    const call = prepareCompletion(endpoint, body);
+    const call = prepareCompletion(endpoint, body, continuation);
     const reply = assertNoCredential(
       await send(deps.fetch, call, timeoutMs, endpoint.apiKey, signal),
       endpoint,
     );
+    rememberContinuation(continuation, endpoint, reply);
     if (endpoint.api === 'anthropic-messages') {
       if (stopReasonOf(reply) === 'pause_turn') {
         throw new BrokerError(
@@ -317,13 +323,14 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
 }
 
 function makeEndpoint(
+  profileId: string,
   provider: string,
   baseUrl: string,
   modelId: string,
   apiKey: string | undefined,
 ): Endpoint {
   const api = findRegistryProvider(provider)?.api ?? 'chat-completions';
-  return { api, provider, baseUrl: normalizeBaseUrl(baseUrl), modelId, apiKey };
+  return { profileId, api, provider, baseUrl: normalizeBaseUrl(baseUrl), modelId, apiKey };
 }
 
 /** A reply that carries the key is refused, and its text is never returned. */
@@ -396,6 +403,10 @@ function notUnderstood(): never {
  * underscores, and some add dots and colons (Kimi writes `functions.name:0`). A slash is never part of an id.
  */
 const TOOL_CALL_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+/** A tool name, as the capability check reads it. A URL or a path in that field is refused. */
+const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_.-]*$/;
+/** A finish reason is a lowercase word, such as `stop` or `tool_calls`. A URL in that field is refused. */
+const FINISH_REASON = /^[a-z_]{1,32}$/;
 
 /**
  * The completion the engine reads, rebuilt from the fields it needs and nothing else. The engine reads
@@ -418,7 +429,10 @@ function completionEnvelope(reply: string): string {
 function completionChoice(choice: unknown): Record<string, unknown> {
   if (!isRecord(choice)) notUnderstood();
   const out: Record<string, unknown> = {};
-  if (choice.finish_reason === null || typeof choice.finish_reason === 'string') {
+  if (
+    choice.finish_reason === null ||
+    (typeof choice.finish_reason === 'string' && FINISH_REASON.test(choice.finish_reason))
+  ) {
     out.finish_reason = choice.finish_reason;
   } else if (choice.finish_reason !== undefined) {
     notUnderstood();
@@ -445,7 +459,8 @@ function completionMessage(message: unknown): Record<string, unknown> {
   } else if (message.refusal !== undefined) {
     notUnderstood();
   }
-  if (message.tool_calls !== undefined) {
+  // Some servers send `tool_calls: null` on a text answer. That is the same as no tool calls.
+  if (message.tool_calls !== undefined && message.tool_calls !== null) {
     if (!Array.isArray(message.tool_calls)) notUnderstood();
     out.tool_calls = message.tool_calls.map(completionToolCall);
   }
@@ -457,9 +472,63 @@ function completionToolCall(call: unknown): Record<string, unknown> {
   const fn = call.function;
   if (typeof call.id !== 'string' || !TOOL_CALL_ID.test(call.id)) notUnderstood();
   if (call.type !== undefined && call.type !== 'function') notUnderstood();
-  if (typeof fn.name !== 'string' || typeof fn.arguments !== 'string') notUnderstood();
+  if (typeof fn.name !== 'string' || !TOOL_NAME.test(fn.name)) notUnderstood();
+  if (typeof fn.arguments !== 'string') notUnderstood();
   // Written back as 'function': a provider requires that type when the call is sent again.
   return { id: call.id, type: 'function', function: { name: fn.name, arguments: fn.arguments } };
+}
+
+/**
+ * Keeps the state each tool call of a reply must carry back: a Chat Completions call's `extra_content`, or the
+ * Claude thinking blocks that a tool use follows. The reply itself does not carry it onward (ContinuationState).
+ */
+function rememberContinuation(state: ContinuationState, endpoint: Endpoint, reply: string): void {
+  if (endpoint.profileId === '') return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(reply);
+  } catch {
+    return; // Not JSON: the completion check refuses it, so there is nothing to keep.
+  }
+  if (!isRecord(parsed)) return;
+  if (endpoint.api === 'anthropic-messages') {
+    rememberThinking(state, endpoint.profileId, parsed);
+    return;
+  }
+  if (!Array.isArray(parsed.choices)) return;
+  for (const choice of parsed.choices) {
+    if (
+      !isRecord(choice) ||
+      !isRecord(choice.message) ||
+      !Array.isArray(choice.message.tool_calls)
+    ) {
+      continue;
+    }
+    for (const call of choice.message.tool_calls) {
+      if (isRecord(call) && typeof call.id === 'string' && call.extra_content !== undefined) {
+        state.remember(endpoint.profileId, call.id, call.extra_content);
+      }
+    }
+  }
+}
+
+/** Claude's thinking blocks come before a tool use, and the tool use needs them on its next request. */
+function rememberThinking(
+  state: ContinuationState,
+  profileId: string,
+  reply: Record<string, unknown>,
+): void {
+  if (!Array.isArray(reply.content)) return;
+  const thinking = reply.content.filter(
+    (block): block is Record<string, unknown> =>
+      isRecord(block) && (block.type === 'thinking' || block.type === 'redacted_thinking'),
+  );
+  if (thinking.length === 0) return;
+  for (const block of reply.content) {
+    if (isRecord(block) && block.type === 'tool_use' && typeof block.id === 'string') {
+      state.remember(profileId, block.id, thinking);
+    }
+  }
 }
 
 /** The reply that leaves the broker holds no credential, and a refusal is not passed off as an answer. */
@@ -521,7 +590,12 @@ function requireKey(endpoint: Endpoint): string {
   return endpoint.apiKey;
 }
 
-function prepareCompletion(endpoint: Endpoint, body: CompletionBody): PreparedCall {
+function prepareCompletion(
+  endpoint: Endpoint,
+  body: CompletionBody,
+  continuation: ContinuationState,
+): PreparedCall {
+  const stateFor = (callId: string): unknown => continuation.recall(endpoint.profileId, callId);
   try {
     if (endpoint.api === 'anthropic-messages') {
       return prepareAnthropicMessages({
@@ -529,6 +603,7 @@ function prepareCompletion(endpoint: Endpoint, body: CompletionBody): PreparedCa
         apiKey: requireKey(endpoint),
         modelId: endpoint.modelId,
         body,
+        thinkingBefore: stateFor,
       });
     }
     return prepareChatCompletion({
@@ -538,6 +613,7 @@ function prepareCompletion(endpoint: Endpoint, body: CompletionBody): PreparedCa
       body,
       // OpenAI's newer models take the completion limit under this name.
       tokenLimitKey: endpoint.provider === 'openai' ? 'max_completion_tokens' : 'max_tokens',
+      extraContentFor: stateFor,
     });
   } catch (error) {
     if (error instanceof AdapterRequestError)

@@ -92,6 +92,18 @@ function keyScopeFor(provider: DialogProvider, baseUrl: string): string {
   return `${provider}|${normalizeProviderBaseUrl(baseUrl)}`;
 }
 
+/** How long the saved-profile list may take. A read that is still pending after this is treated as unreadable. */
+const PROFILE_LIST_TIMEOUT_MS = 15_000;
+
+/** Rejects when the promise has not settled in time, so a read that never returns cannot leave the dialog waiting. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('The saved profiles did not load in time.')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 /** A saved profile's stored key may be used as it is: the key is confirmed for its endpoint and readable. */
 function canUseStoredKey(profile: DesktopProviderProfileState | undefined): boolean {
   return (
@@ -294,8 +306,13 @@ export function JoyAgentSettingsDialog({
 
   const loadProfiles = async () => {
     if (!isDesktopHost()) return;
+    // Each read starts from unknown: no saved profile is used until this read has succeeded.
+    setProfilesReady(false);
     try {
-      const list = (await listDesktopProviderProfiles()) as readonly DesktopProviderProfileState[];
+      const list = (await withTimeout(
+        listDesktopProviderProfiles(),
+        PROFILE_LIST_TIMEOUT_MS,
+      )) as readonly DesktopProviderProfileState[];
       if (!mountedRef.current) return;
       setProfiles(list);
       setProfilesReady(true);
@@ -492,6 +509,12 @@ export function JoyAgentSettingsDialog({
     // A profile whose stored key cannot be used is shown in the form, so its key is entered again.
     if (!canUseStoredKey(profile)) {
       selectProfileIntoForm(profile);
+      return;
+    }
+    // A saved profile is used only once the saved-profile list is known, as connect and discovery require.
+    if (!profilesReady) {
+      setConnectionNotice({ kind: 'error', message: profilesNotReadyMessage });
+      onNotice?.(profilesNotReadyMessage, 'error');
       return;
     }
     if (working || engineClient === undefined || engineClient === null) return;

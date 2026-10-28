@@ -655,6 +655,198 @@ describe('provider broker: probe and model lists', () => {
   });
 });
 
+describe('provider broker: state a tool call carries back', () => {
+  it('sends a function call back with the extra_content it came with, and shows it in no reply', async () => {
+    const p1 = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const p2 = bound('p2', 'grok', 'https://api.x.ai/v1');
+    const replies = [
+      jsonReply({
+        choices: [
+          {
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call-g',
+                  type: 'function',
+                  extra_content: { google: { thought_signature: 'sig-1' } },
+                  function: { name: 'read_file', arguments: '{}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      jsonReply({
+        choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }],
+      }),
+    ];
+    let next = 0;
+    const { broker, sent } = harness({
+      profiles: [p1, p2],
+      keys: { [p1.secretHandleId]: KEY, [p2.secretHandleId]: KEY },
+      reply: () => replies[next++] ?? jsonReply({ choices: [] }),
+    });
+    const followUp = {
+      messages: [
+        { role: 'user', content: 'read it' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'call-g', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'call-g', content: 'file body' },
+      ],
+    };
+
+    const first = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error('expected a reply');
+    expect(first.data.text).not.toContain('sig-1');
+
+    await broker.complete({ profileId: 'p1', body: followUp });
+    const sameProfile = JSON.parse(String(sent[1]?.init.body));
+    expect(sameProfile.messages[1].tool_calls[0]).toEqual({
+      id: 'call-g',
+      type: 'function',
+      function: { name: 'read_file', arguments: '{}' },
+      extra_content: { google: { thought_signature: 'sig-1' } },
+    });
+
+    await broker.complete({ profileId: 'p2', body: followUp });
+    const otherProfile = JSON.parse(String(sent[2]?.init.body));
+    expect(otherProfile.messages[1].tool_calls[0]).not.toHaveProperty('extra_content');
+  });
+
+  it('sends a Claude tool use back after the thinking block it came after, exactly as received', async () => {
+    const p = bound('p1', 'claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5');
+    const thinking = { type: 'thinking', thinking: 'The file is notes.md.', signature: 'sig-2' };
+    const replies = [
+      jsonReply({
+        id: 'msg_2',
+        stop_reason: 'tool_use',
+        content: [
+          thinking,
+          { type: 'tool_use', id: 'toolu_t', name: 'read_file', input: { path: 'notes.md' } },
+        ],
+        usage: { input_tokens: 2, output_tokens: 3 },
+      }),
+      jsonReply({
+        id: 'msg_3',
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'done' }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    ];
+    let next = 0;
+    const { broker, sent } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () => replies[next++] ?? jsonReply({ id: 'x', stop_reason: 'end_turn', content: [] }),
+    });
+
+    const first = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error('expected a reply');
+    expect(first.data.text).not.toContain('sig-2');
+
+    await broker.complete({
+      profileId: 'p1',
+      body: {
+        messages: [
+          { role: 'user', content: 'read it' },
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'toolu_t',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{"path":"notes.md"}' },
+              },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'toolu_t', content: 'file body' },
+        ],
+        max_tokens: 256,
+      },
+    });
+    const followUp = JSON.parse(String(sent[1]?.init.body));
+    expect(followUp.messages[1].content).toEqual([
+      thinking,
+      { type: 'tool_use', id: 'toolu_t', name: 'read_file', input: { path: 'notes.md' } },
+    ]);
+  });
+
+  it('refuses a function name that is a URL, and a finish reason that is not a word', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    let body: Record<string, unknown> = {};
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () => jsonReply(body),
+    });
+
+    body = {
+      choices: [
+        {
+          finish_reason: 'tool_calls',
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call-u',
+                type: 'function',
+                function: { name: 'http://127.0.0.1:1234/v1', arguments: '{}' },
+              },
+            ],
+          },
+        },
+      ],
+    };
+    expect(await broker.complete({ profileId: 'p1', body: CHAT_BODY })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+    });
+
+    body = { choices: [{ finish_reason: 'http://127.0.0.1:1234/v1', message: { content: 'hi' } }] };
+    expect(await broker.complete({ profileId: 'p1', body: CHAT_BODY })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+    });
+  });
+
+  it('reads a text answer whose tool_calls is null as an answer with no tool calls', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: { role: 'assistant', content: 'plain', tool_calls: null },
+            },
+          ],
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected a reply');
+    expect(JSON.parse(result.data.text)).toEqual({
+      choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'plain' } }],
+    });
+  });
+});
+
 describe('endpointBindingDigest', () => {
   it('changes when the profile, the origin or the base path changes', () => {
     const base = endpointBindingDigest('p1', 'https://api.x.ai', '/v1');

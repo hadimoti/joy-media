@@ -81,6 +81,7 @@ describe('the desktop entry point', () => {
       'utf8',
     );
 
-    expect(entry).toContain('cancelWhenPageGoes(agentRequests, win);');
+    // A line that is the call itself, not a comment that mentions it.
+    expect(entry).toMatch(/^\s*cancelWhenPageGoes\(agentRequests, win\);\s*$/m);
   });
 });
