@@ -21,7 +21,9 @@ approved that candidate's commit (GD5). Nothing in it runs unattended.
 
 ## Step 2: a dedicated worktree of the candidate SHA, outside C:\JoyMediaG1
 
-This is the dependency fetch into the worktree. It is not a system install.
+This is the dependency fetch into the worktree. It is not a system install. The install writes pnpm's store and downloads the
+pinned Electron binary into the owner's per-user caches, which are outside `C:\JoyMediaG1`. Those writes are part of the plan's
+fetch, and this checklist names them here.
 
 ```powershell
 git worktree add C:\JoyMediaG1\acceptance-tree <candidate SHA>

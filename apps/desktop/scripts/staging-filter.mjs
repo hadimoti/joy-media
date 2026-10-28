@@ -1,5 +1,5 @@
 // Which files `package-release.mjs` copies from the desktop build folder into a package (plan section 10d, G0 item 2; OA3).
-// The test-only instrumentation folder is staged only into an `--instrumented` package. Test files are never staged.
+// The test-only instrumentation folder is staged only into an instrumented package (the package-release option). Test files are never staged.
 
 const INSTRUMENTATION_FOLDER = 'test-instrumentation';
 const TEST_FILE = /\.test\.(js|d\.ts)(\.map)?$/;

@@ -41,7 +41,11 @@ if (recordPath !== undefined) {
           event: 'gpu-child-process-gone',
           reason: details.reason,
           exitCode,
-          exitCodeHex: `0x${(exitCode >>> 0).toString(16).toUpperCase().padStart(8, '0')}`,
+          // A missing code stays null. It is never turned into 0x00000000 by the unsigned shift.
+          exitCodeHex:
+            typeof exitCode === 'number'
+              ? `0x${(exitCode >>> 0).toString(16).toUpperCase().padStart(8, '0')}`
+              : null,
         };
         fs.appendFileSync(file, `${JSON.stringify(line)}\n`);
       });

@@ -22,6 +22,9 @@ After the runs, the harness runs export-semantics.spec.ts once more (the export-
 the registered G2 thresholds in docs/qa/attended/model-thresholds.json, records that file's SHA-256, and writes steps.json for
 write-receipt.mjs. A step that lacks data for any run fails.
 
+Before each run the system-wide encoder count must be zero. If it is not, the run is a harness error and no app starts.
+The GPU record of each run is removed before the run starts, so an old record cannot hide a missing one.
+
 Three consecutive harness errors (not app failures) end the loop. App failures never stop it, so every run is recorded.
 
 Raw reports and logs go to -OutDir, which must be outside the repository.
@@ -56,6 +59,8 @@ $exportSpec = 'tests/desktop/export-semantics.spec.ts'
 # Consecutive harness errors that end the loop (plan section 10d, G0 item 4).
 $harnessErrorLimit = 3
 $pollMilliseconds = 500
+# WER writes its crash event a few seconds after the crash, so each run's window runs on for this grace period.
+$werGraceSeconds = 10
 
 # A harness error is a failed measurement, not a failed app. Only these end the loop.
 class HarnessError : System.Exception {
@@ -118,6 +123,13 @@ function Get-EncoderContext {
     try { return [string](Get-EncoderSessionTotal) } catch { return $_.Exception.Message }
 }
 
+function Get-EncoderBaselineError {
+    # A run starts only when no encoder session is open. The count is system-wide, so another encoder user would count as the app.
+    param([int]$Count)
+    if ($Count -gt 0) { return "$Count encoder session(s) were open before the run. Close the other encoder users, then rerun." }
+    return $null
+}
+
 function Get-TestInstallProcesses {
     # Matched by executable path, so a JOY Media the operator runs from another folder is never counted or stopped.
     return @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'joy-media.exe'" |
@@ -127,8 +139,14 @@ function Get-TestInstallProcesses {
 
 function Get-WerCrashCodes {
     # Read-only. The Application Error events for joy-media.exe in the window. Only the exception code is kept, never a path or a message.
+    # A failed query is an error, not zero crashes. Only "no events matched" is an empty answer.
     param([datetime]$Start, [datetime]$End)
-    $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Application Error'; StartTime = $Start; EndTime = $End } -ErrorAction SilentlyContinue)
+    try {
+        $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Application Error'; StartTime = $Start; EndTime = $End } -ErrorAction Stop)
+    }
+    catch {
+        if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { $events = @() } else { throw }
+    }
     $codes = New-Object System.Collections.Generic.List[string]
     foreach ($event in $events) {
         $message = [string]$event.Message
@@ -223,10 +241,24 @@ function Invoke-SpecRun {
     $reportPath = Join-Path $outFull "$Stem.json"
     $gpuPath = Join-Path $outFull "$Stem.gpu.jsonl"
     $env:PLAYWRIGHT_JSON_OUTPUT_NAME = $reportPath
-    if ($CollectGpu) { $env:JOY_MEDIA_GPU_ACCEPTANCE_OUT = $gpuPath }
+    if ($CollectGpu) {
+        # A record left by an earlier run in this folder would hide a missing record, so it is removed first.
+        Remove-Item -LiteralPath $gpuPath -Force -ErrorAction SilentlyContinue
+        $env:JOY_MEDIA_GPU_ACCEPTANCE_OUT = $gpuPath
+    }
     else { Remove-Item -Path Env:JOY_MEDIA_GPU_ACCEPTANCE_OUT -ErrorAction SilentlyContinue }
 
     $encoderBefore = Get-EncoderContext
+    if ($CollectGpu) {
+        $baselineError = $null
+        try { $baselineError = Get-EncoderBaselineError -Count (Get-EncoderSessionTotal) }
+        catch { $baselineError = $_.Exception.Message }
+        if ($null -ne $baselineError) {
+            return New-RunRecord -Run $Run -HarnessError $baselineError -SpecPassed $false -TimedOut $false -ExitCode $null `
+                -Launches 0 -FallbackArgument $false -FallbackMarkerSeen $false -GpuExitsListener 0 -WerExceptionCodes @() `
+                -EncoderMax $null -EncoderBefore $encoderBefore -EncoderAfter '' -LeftoversStopped 0 -Seconds 0 -ReportName ''
+        }
+    }
     $argumentLine = '"{0}" test --config {1} {2} --retries=0 --reporter=json' -f $playwrightCli, $configPath, $Spec
     $started = Get-Date
     $process = Start-Process -FilePath $nodeExe -ArgumentList $argumentLine -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru `
@@ -282,8 +314,10 @@ function Invoke-SpecRun {
             $fallbackArgumentLaunch = @($gpu.launches | Where-Object { $_.fallbackArgument }).Count -gt 0
             $listenerExits = $gpu.exits.Count
         }
+        # The window runs on for the grace period, so a crash event written a few seconds late still lands in its own run.
+        Start-Sleep -Seconds $werGraceSeconds
         try {
-            $werCodes = Get-WerCrashCodes -Start $started -End $ended
+            $werCodes = Get-WerCrashCodes -Start $started -End (Get-Date)
         }
         catch {
             if ($null -eq $harnessError) { $harnessError = 'the Windows Error Reporting query failed' }
@@ -336,7 +370,7 @@ function New-AcceptanceSteps {
     return @(
         [pscustomobject]@{
             id = 'default-launches'
-            result = $(if ($completed -eq [int]$Limits.defaultLaunches) { 'pass' } else { 'fail' })
+            result = $(if ($completed -ge [int]$Limits.defaultLaunches) { 'pass' } else { 'fail' })
             measurement = $completed
             unit = 'runs'
         }
@@ -423,6 +457,16 @@ function Invoke-SelfTest {
     }
     Assert-Same $stopLoop.records.Count 3 'three consecutive harness errors end the loop after run 3'
     if ($null -eq $stopLoop.stopReason) { $failures.Add('the stop reason is recorded') }
+
+    Assert-Same (Get-EncoderBaselineError -Count 0) $null 'a clean encoder count starts a run'
+    if ($null -eq (Get-EncoderBaselineError -Count 2)) { $failures.Add('an open encoder session refuses the run') }
+    $thirtyOne = @(1..31 | ForEach-Object {
+            New-RunRecord -Run $_ -HarnessError $null -SpecPassed $true -TimedOut $false -ExitCode 0 -Launches 1 -FallbackArgument $false `
+                -FallbackMarkerSeen $false -GpuExitsListener 0 -WerExceptionCodes @() -EncoderMax 1 -EncoderBefore '0' -EncoderAfter '0' `
+                -LeftoversStopped 0 -Seconds 1 -ReportName 'selftest'
+        })
+    $moreRuns = New-AcceptanceSteps -Records $thirtyOne -Limits $limits -ExportRecord $exportRecord
+    Assert-Same ($moreRuns[0].result) 'pass' 'more clean runs than the registered count still pass default-launches'
 
     $result = [pscustomobject]@{
         passed = ($failures.Count -eq 0)

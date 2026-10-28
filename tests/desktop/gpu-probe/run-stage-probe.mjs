@@ -81,7 +81,13 @@ function runStage(stage, resultPath) {
   return new Promise((resolveRun) => {
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
-    const args = [probeMain, `--stage=${stage}`, `--out=${resultPath}`];
+    // A private user-data folder per stage, so Electron never writes to the owner's default profile (for example %APPDATA%\Electron).
+    const args = [
+      probeMain,
+      `--stage=${stage}`,
+      `--out=${resultPath}`,
+      `--user-data-dir=${join(outDir, 'userdata', stage)}`,
+    ];
     if (fakeStagePage) args.push('--fake=1');
     const child = spawn(electronBinary, args, {
       env,

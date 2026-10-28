@@ -62,13 +62,28 @@ test('the staging filter keeps the instrumentation only in an instrumented packa
   assert.equal(isTestInstrumentationPath('/pkg/dist/main/test-instrumentation-notes.js'), false);
 });
 
-test('no workflow file and no package script passes --instrumented', () => {
+test('no workflow, package script, or desktop script passes --instrumented', () => {
   const workflows = join(repoRoot, '.github', 'workflows');
   const workflowFiles = readdirSync(workflows).filter((name) => /\.ya?ml$/.test(name));
   assert.ok(workflowFiles.length > 0, 'expected workflow files');
   for (const name of workflowFiles) {
     assert.equal(
       readFileSync(join(workflows, name), 'utf8').includes('--instrumented'),
+      false,
+      `${name} must not pass --instrumented`,
+    );
+  }
+  // The desktop scripts are scanned too, so a new caller of package-release.mjs cannot pass --instrumented unnoticed.
+  const desktopScripts = join(repoRoot, 'apps', 'desktop', 'scripts');
+  const callers = readdirSync(desktopScripts).filter(
+    (name) =>
+      name.endsWith('.mjs') &&
+      name !== 'package-release.mjs' &&
+      name !== 'test-instrumentation-exclusion.test.mjs',
+  );
+  for (const name of callers) {
+    assert.equal(
+      readFileSync(join(desktopScripts, name), 'utf8').includes('--instrumented'),
       false,
       `${name} must not pass --instrumented`,
     );

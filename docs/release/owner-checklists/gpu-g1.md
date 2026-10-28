@@ -21,12 +21,13 @@ committed (OA1), and this session only diagnoses.
 
 ## Where everything goes
 
-- Everything is read and written inside `C:\JoyMediaG1`. Nothing is written elsewhere, and nothing is added to the PATH.
+- Everything the session creates is meant to stay inside `C:\JoyMediaG1`. Two things are outside it: the `joy://` registration
+  described under Safety rules, and whatever the GPU driver caches on its own. Nothing is added to the PATH.
 - The instrumented build always runs with `--joy-media-test-user-data=C:\JoyMediaG1\userdata`. Its GPU event log and its
-  diagnostic dumps go to that folder.
+  diagnostic dumps go to that folder. The instrumented build does not register the `joy://` protocol.
 - The baseline build runs with `--user-data-dir=C:\JoyMediaG1\userdata-baseline`, so the candidate never opens your own profile.
   The switch is UNVERIFIED on this build: step 2 records the folder the app opens.
-- Your own user-data folder is never read, copied, or listed. Step 4 lists folder names only.
+- Your own user-data folder is never read or copied. Step 4 lists folder names under AppData only, and that is the only look at them.
 - **Node:** the Node 22.6 or later already on this PC is used, and its version is recorded in step 0. Nothing is installed. If
   Node is missing or older, the inventory step is recorded as "not run". Installing Node is a Part 2 item.
 - No checkout of the repository is needed for this session.
@@ -34,7 +35,9 @@ committed (OA1), and this session only diagnoses.
 ## Safety rules (do not skip)
 
 - Install nothing, and do not run any setup executable.
-- Change nothing in the driver, the registry, the PATH, the services, or the Windows settings.
+- Change nothing in the driver, the PATH, the services, or the Windows settings.
+- The shipped build registers the `joy://` protocol at every launch, which writes `HKCU\Software\Classes\joy`. Steps 2 and 3 can
+  change that key. Step 0 exports it, and step 10 restores it when it differs. That restore is the only registry change allowed.
 - Work only in `C:\JoyMediaG1`. Delete it at the end, after the logs are handed over.
 - If a Windows administrator prompt appears, cancel it and tell engineering.
 - Keep every log file as it is. Do not edit a log.
@@ -53,9 +56,11 @@ nvidia-smi --query-gpu=name,driver_version --format=csv,noheader | Tee-Object -A
 Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,Status | Format-List | Out-String |
   Tee-Object -Append C:\JoyMediaG1\logs\host.txt
 node --version | Tee-Object -Append C:\JoyMediaG1\logs\host.txt
+reg.exe export "HKCU\Software\Classes\joy" C:\JoyMediaG1\logs\joy-key-before.reg /y
 ```
 
-Expected: an NVIDIA GeForce RTX 5070 Ti. A different driver version is recorded, not a stop.
+Expected: an NVIDIA GeForce RTX 5070 Ti. A different driver version is recorded, not a stop. The `reg export` file is the
+`joy://` registration as it was before the session. If the key is absent, the export fails, and the log records "absent".
 
 ### Step 1: copy and hash-check the baseline and the kit
 
@@ -96,7 +101,7 @@ pwsh -NoProfile -File C:\JoyMediaG1\kit\tree\tooling\diagnostics\sample-encoder-
 
 Wait 60 seconds, then record: did the window open, did WebGL work (the editor preview draws), and did a second
 `joy-media.exe` appear (the relaunch)? If the window opened, start the export of the sample project and record whether the
-export finishes.
+export finishes. In the save dialog, choose `C:\JoyMediaG1\exports`, so the file stays in the session folder.
 
 Then list the processes, with their command lines, and the user-data folder the app opened:
 
@@ -179,7 +184,8 @@ node C:\JoyMediaG1\kit\tree\tests\desktop\gpu-probe\run-stage-probe.mjs --out C:
 The probe uses `stage-runtime`, a plain copy of the runtime with no app. It refuses any runtime that holds an app, so it cannot
 start the JOY Media app by mistake. Do not point it at `app\`.
 
-The probe starts each stage in a fresh process, and it stops at the first stage that kills the GPU process. Record the
+The probe keeps each stage's user data under `C:\JoyMediaG1\logs\stage-probe\userdata`, not in your AppData. It starts each
+stage in a fresh process, and it stops at the first stage that kills the GPU process. Record the
 `summary.json` `stoppedAfter` value. That is the measurement `failing-stage`.
 
 ### Step 8: Media Foundation encode, one encoder per process
@@ -210,8 +216,20 @@ The receipt steps, with their measurements, are: `encoder-max-baseline-default`,
 
 ### Step 10: clean up
 
-Confirm that no `joy-media.exe` and no probe process is still running. Then send the logs to engineering. Delete `C:\JoyMediaG1`
-after they confirm that they have the logs.
+Confirm that no `joy-media.exe` and no probe process is still running.
+
+Compare the `joy://` registration with the one from step 0:
+
+```powershell
+reg.exe export "HKCU\Software\Classes\joy" C:\JoyMediaG1\logs\joy-key-after.reg /y
+fc.exe C:\JoyMediaG1\logs\joy-key-before.reg C:\JoyMediaG1\logs\joy-key-after.reg
+```
+
+If the files differ, restore the step-0 value with `reg.exe import C:\JoyMediaG1\logs\joy-key-before.reg`. If the key was absent in
+step 0, delete it with `reg.exe delete "HKCU\Software\Classes\joy" /f`. This restore reverses a change the session made, and the
+owner runs it. Record the outcome in the log.
+
+Then send the logs to engineering. Delete `C:\JoyMediaG1` after they confirm that they have the logs.
 
 ## Part 2: state-changing items (only if Part 1 is inconclusive)
 

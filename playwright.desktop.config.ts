@@ -15,6 +15,8 @@ process.env.JOY_MEDIA_E2E_REQUEST_LOG = requestLogPath;
 export default defineConfig({
   testDir: './tests/desktop',
   testMatch: '**/*.spec.ts',
+  // The GPU wrapper runs only when the harness names its output file (run-default-export-repeat.ps1 sets it).
+  testIgnore: process.env['JOY_MEDIA_GPU_ACCEPTANCE_OUT'] ? [] : ['**/gpu-acceptance.spec.ts'],
   timeout: 360_000,
   expect: { timeout: 15_000 },
   workers: 1,
