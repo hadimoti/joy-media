@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from './job-orchestrator.js';
-import { startLocalJobApi, type LocalJobApi } from './local-job-api.js';
+import { MAX_LOCAL_SOURCE_BYTES, startLocalJobApi, type LocalJobApi } from './local-job-api.js';
 
 const WORKER = 'worker-http';
 const TOKEN = 'test-token-0123456789';
@@ -174,11 +174,21 @@ describe('local job API', () => {
 
   it('refuses to read a source larger than the local route limit, before reading it', async () => {
     const leased = await queueThumbnailAndLease();
-    reportedSourceSize = 512 * 1024 * 1024 + 1;
+    reportedSourceSize = MAX_LOCAL_SOURCE_BYTES + 1;
     const response = await call(`/v1/workers/${WORKER}/jobs/job-http/source`, {
       headers: { 'x-joy-lease-token': leased.leaseToken },
     });
     expect(response.status).toBe(413);
+  });
+
+  it('serves a source of exactly the local route limit, the largest original that registers', async () => {
+    const leased = await queueThumbnailAndLease();
+    reportedSourceSize = MAX_LOCAL_SOURCE_BYTES;
+    const response = await call(`/v1/workers/${WORKER}/jobs/job-http/source`, {
+      headers: { 'x-joy-lease-token': leased.leaseToken },
+    });
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(SOURCE);
   });
 
   it('rejects a derivative whose bytes do not match the reported digest and stores nothing', async () => {

@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { JobProtocolError, type JobOrchestrator } from './job-orchestrator.js';
+import { MAX_LOCAL_ORIGINAL_BYTES } from '../main/local-originals.js';
 
 /**
  * Loopback HTTP API that the local Worker process speaks to. It implements the same
@@ -14,10 +15,11 @@ import { JobProtocolError, type JobOrchestrator } from './job-orchestrator.js';
 const MAX_JSON_BYTES = 64 * 1024;
 const MAX_DERIVATIVE_BYTES = 64 * 1024 * 1024;
 /**
- * Largest source served over the loopback route. The source is read into memory on both sides, so
- * a larger file is refused explicitly rather than risking the desktop process. Streaming is the follow-up.
+ * Largest source served over the loopback route. It is the registration limit, so every original
+ * that registers can render. The source is read into memory on both sides, so a large file is a
+ * real load on the desktop process. Streaming is the follow-up.
  */
-export const MAX_LOCAL_SOURCE_BYTES = 512 * 1024 * 1024;
+export const MAX_LOCAL_SOURCE_BYTES = MAX_LOCAL_ORIGINAL_BYTES;
 const MAX_CAPABILITIES = 64;
 const ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 const CAPABILITY_PATTERN = /^[a-z0-9._-]{1,64}$/;
