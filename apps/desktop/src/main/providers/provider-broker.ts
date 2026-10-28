@@ -27,7 +27,7 @@ import {
 import { AdapterRequestError, type ModelEntry, type PreparedCall } from './adapters/types.js';
 import { isRecord, parseCompletionBody, type CompletionBody } from './request-body.js';
 import { endpointBindingDigest } from '../../store/profile-binding.js';
-import { ContinuationState, historyDigests } from './continuation-state.js';
+import { callFingerprint, ContinuationState, historyDigests } from './continuation-state.js';
 
 export { endpointBindingDigest };
 
@@ -224,7 +224,8 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     signal?: AbortSignal,
   ): Promise<string> {
     const history = historyDigests(body.messages);
-    const call = prepareCompletion(endpoint, body, continuation, history, maxBytes);
+    const baseBytes = Buffer.byteLength(JSON.stringify(body));
+    const call = prepareCompletion(endpoint, body, continuation, history, maxBytes, baseBytes);
     // The state a call carries back is part of the body, so the limit holds for the body that is sent.
     if (Buffer.byteLength(call.body ?? '') > maxBytes) throw requestTooLarge(maxBytes);
     const reply = assertNoCredential(
@@ -391,6 +392,11 @@ function notUnderstood(): never {
  */
 const TOOL_CALL_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 /**
+ * The most tool calls one reply may hold. The engine allows eight tool steps in a run (run-budget.ts), so no reply the
+ * engine could use comes near this. A reply above it is refused before any of its state is kept.
+ */
+const MAX_TOOL_CALLS_PER_REPLY = 64;
+/**
  * The finish reasons a provider sends for a turn. The engine does not read the finish reason; the broker reads only
  * `content_filter`, for a refusal. Any other value is dropped, so no provider text reaches the Worker in that field.
  */
@@ -481,6 +487,12 @@ function completionMessage(
   // Some servers send `tool_calls: null` on a text answer. That is the same as no tool calls.
   if (message.tool_calls !== undefined && message.tool_calls !== null) {
     if (!Array.isArray(message.tool_calls)) notUnderstood();
+    if (message.tool_calls.length > MAX_TOOL_CALLS_PER_REPLY) {
+      throw new BrokerError(
+        'PROVIDER_INCOMPATIBLE',
+        'The provider asked for too many tool calls in one reply.',
+      );
+    }
     out.tool_calls = message.tool_calls.map((call) => completionToolCall(call, requested));
   }
   return out;
@@ -531,15 +543,24 @@ function rememberContinuation(
     return;
   }
   for (const call of first.message.tool_calls) {
-    if (isRecord(call) && typeof call.id === 'string' && call.extra_content !== undefined) {
-      state.remember(endpoint.profileId, call.id, history, call.extra_content);
-    }
+    const carried = carriedCall(call);
+    if (carried === undefined || !isRecord(call) || call.extra_content === undefined) continue;
+    state.remember(
+      {
+        profileId: endpoint.profileId,
+        callId: carried.id,
+        history,
+        call: callFingerprint(carried.name, carried.arguments),
+      },
+      call.extra_content,
+    );
   }
 }
 
 /**
- * A Claude turn is kept whole, as the provider sent it, under each of its tool uses. Its thinking and text come back
- * with the tool uses, in the order they came, so nothing is reordered or rebuilt.
+ * A Claude turn is kept whole, as the provider sent it, once: under its first tool use, which is the call the engine
+ * sends back first. Its thinking and text come back with the tool uses, in the order they came, so nothing is reordered
+ * or rebuilt. Kept once, the turn is charged once, however many tool uses it holds.
  */
 function rememberTurn(
   state: ContinuationState,
@@ -551,10 +572,27 @@ function rememberTurn(
   if (!Array.isArray(blocks)) return;
   if (!blocks.every((block) => isRecord(block) && typeof block.type === 'string')) return;
   for (const block of blocks) {
-    if (isRecord(block) && block.type === 'tool_use' && typeof block.id === 'string') {
-      state.remember(profileId, block.id, history, blocks);
+    if (
+      isRecord(block) &&
+      block.type === 'tool_use' &&
+      typeof block.id === 'string' &&
+      typeof block.name === 'string'
+    ) {
+      const call = callFingerprint(block.name, JSON.stringify(block.input ?? {}));
+      state.remember({ profileId, callId: block.id, history, call }, blocks);
+      return;
     }
   }
+}
+
+/** The id, tool name and arguments text of a call, or undefined when it is not a call the broker can key. */
+function carriedCall(
+  call: unknown,
+): { readonly id: string; readonly name: string; readonly arguments: string } | undefined {
+  if (!isRecord(call) || typeof call.id !== 'string' || !isRecord(call.function)) return undefined;
+  const fn = call.function;
+  if (typeof fn.name !== 'string' || typeof fn.arguments !== 'string') return undefined;
+  return { id: call.id, name: fn.name, arguments: fn.arguments };
 }
 
 /** The tool names a request offered. A reply may call only these. */
@@ -640,12 +678,21 @@ function prepareCompletion(
   continuation: ContinuationState,
   history: readonly string[],
   maxBytes: number,
+  baseBytes: number,
 ): PreparedCall {
-  let attached = 0;
-  // The state a call carries back comes from the conversation this request continues. Its size counts toward the
-  // limit as it is attached, so a body that would grow past the limit is refused before it is built.
-  const stateFor = (callId: string, messageIndex: number): unknown => {
-    const kept = continuation.recall(endpoint.profileId, callId, history[messageIndex] ?? '');
+  // The body counts toward the limit from the start, so the state a call carries back is refused as soon as the body
+  // with it would pass the limit, before the body is built.
+  let attached = baseBytes;
+  // The state of a call comes only from the same call in the conversation this request continues.
+  const stateFor = (call: unknown, messageIndex: number): unknown => {
+    const carried = carriedCall(call);
+    if (carried === undefined) return undefined;
+    const kept = continuation.recall({
+      profileId: endpoint.profileId,
+      callId: carried.id,
+      history: history[messageIndex] ?? '',
+      call: callFingerprint(carried.name, carried.arguments),
+    });
     if (kept === undefined) return undefined;
     attached += kept.bytes;
     if (attached > maxBytes) throw requestTooLarge(maxBytes);

@@ -111,19 +111,37 @@ function countLeafTextMatches(rendered: HTMLElement, expression: RegExp): number
   ).length;
 }
 
-/** The desktop host, as the connection tests need it: a save returns the profile id. */
+/**
+ * The desktop host, as the connection tests need it: a save returns the profile id, and the list shows what was saved,
+ * so the read after a save finds the profile. The key is never part of the list.
+ */
 function installDesktopBridge(): void {
+  let stored: readonly Record<string, unknown>[] = [];
   window.joyDesktop = {
     channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
     invoke: vi.fn().mockImplementation(async (channel: string, payload?: unknown) => {
-      if (channel === 'desktop.provider-profile.list') return [];
+      if (channel === 'desktop.provider-profile.list') return stored;
       if (channel === 'desktop.provider-profile.save') {
-        return {
+        const input = payload as Record<string, unknown>;
+        const saved = {
           id: 'prof-test',
-          ...(payload as Record<string, unknown>),
+          ...input,
           createdAt: '2026-10-28T00:00:00.000Z',
           updatedAt: '2026-10-28T00:00:00.000Z',
         };
+        stored = [
+          {
+            id: 'prof-test',
+            provider: input.provider,
+            name: input.name,
+            baseUrl: input.baseUrl,
+            modelId: input.modelId,
+            bound: true,
+            createdAt: saved.createdAt,
+            updatedAt: saved.updatedAt,
+          },
+        ];
+        return saved;
       }
       return undefined;
     }),
@@ -1228,6 +1246,114 @@ describe('JOY Agent Settings saved profile connect', () => {
       .mocked(engineClient.configure)
       .mock.calls.map(([config]) => (config as { profileId?: unknown }).profileId);
     expect(connected).toEqual(['prof-local', 'prof-local']);
+  });
+
+  it('does not connect when the saved profile is missing from the list read back after the save', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      // Every read succeeds, and none of them lists the profile that was just saved.
+      if (channel === 'desktop.provider-profile.list') return [];
+      if (channel === 'desktop.provider-profile.save') return savedLocal;
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    await fillLocalEndpoint(rendered);
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('could not be read back');
+  });
+
+  it('keeps the profile chosen while an older removal read was still pending', async () => {
+    const profile = (id: string, name: string) => ({
+      id,
+      name,
+      provider: 'grok',
+      baseUrl: 'https://api.x.ai/v1',
+      modelId: 'grok-model',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    });
+    const alpha = profile('prof-alpha', 'Alpha');
+    const bravo = profile('prof-bravo', 'Bravo');
+    const charlie = profile('prof-charlie', 'Charlie');
+    let reads = 0;
+    let releaseAlphaRemovalRead: ((list: readonly unknown[]) => void) | undefined;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // The read at mount lists all three. The read that starts the removal of Alpha is held until the test
+        // releases it. The read that follows the removal of Charlie lists only Bravo, and finishes first.
+        if (reads === 1) return [alpha, bravo, charlie];
+        if (reads === 2) {
+          return new Promise<readonly unknown[]>((resolve) => {
+            releaseAlphaRemovalRead = resolve;
+          });
+        }
+        return [bravo];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.delete'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    const card = (name: string): HTMLElement => {
+      const found = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent?.trim() === name,
+      );
+      if (found === undefined) throw new Error(`Expected a card for ${name}`);
+      return found;
+    };
+    const cardButton = (name: string, text: string): HTMLButtonElement => {
+      const button = [...card(name).querySelectorAll<HTMLButtonElement>('button')].find(
+        (candidate) => candidate.textContent?.trim() === text,
+      );
+      if (button === undefined) throw new Error(`Expected ${text} on ${name}`);
+      return button;
+    };
+    const press = async (button: HTMLButtonElement): Promise<void> => {
+      await act(async () => {
+        button.click();
+      });
+      await settle();
+    };
+
+    await press(cardButton('Alpha', 'Use'));
+    await press(cardButton('Alpha', '✕'));
+    await press(cardButton('Charlie', '✕'));
+    await press(cardButton('Bravo', 'Use'));
+    await act(async () => {
+      releaseAlphaRemovalRead?.([alpha, bravo, charlie]);
+    });
+    await settle();
+
+    expect(
+      rendered.querySelector('.joy-settings-provider-card.is-active strong')?.textContent?.trim(),
+    ).toBe('Bravo');
   });
 
   it('refuses to connect a typed key while the saved profiles are still loading', async () => {

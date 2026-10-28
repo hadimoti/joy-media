@@ -4,9 +4,9 @@ import { createHash } from 'node:crypto';
  * Provider state that a tool call must carry back on its next request: the `extra_content` a Chat Completions
  * provider attaches to a function call (Gemini 3 puts a thought signature there), and the Claude content of the turn
  * a tool use came in. The provider sends it with the reply. The broker keeps it here and sends it back only with the
- * same call, in the same conversation: an entry is found by profile, call id and the history the request that
- * produced the reply carried (see historyDigests). It is never part of a reply, so the Worker and the editor never
- * see it. It is kept in memory only.
+ * same call, in the same conversation: an entry is found by profile, call id, the history the request that produced
+ * the reply carried (see historyDigests) and the call itself (see callFingerprint). It is never part of a reply, so the
+ * Worker and the editor never see it. It is kept in memory only.
  */
 
 /** How long a call's state is kept. A tool loop finishes well inside this. */
@@ -15,6 +15,16 @@ const LIFETIME_MS = 60 * 60 * 1000;
 const MAX_ENTRIES = 512;
 /** The most state kept at once, in serialized bytes. The oldest is dropped first. */
 const MAX_RETAINED_BYTES = 32 * 1024 * 1024;
+
+/** Where a call's state is kept: the profile it was sent to, its id, the history before it, and the call itself. */
+export interface CallScope {
+  readonly profileId: string;
+  readonly callId: string;
+  /** The digest of the messages before the call (see historyDigests). */
+  readonly history: string;
+  /** The call as the provider wrote it (see callFingerprint). */
+  readonly call: string;
+}
 
 interface Entry {
   readonly value: unknown;
@@ -37,13 +47,10 @@ export class ContinuationState {
     this.#now = now;
   }
 
-  /**
-   * Keeps the state a call was given, for the conversation whose history before the call has the digest `history`.
-   * A later reply with the same call in that conversation replaces it.
-   */
-  remember(profileId: string, callId: string, history: string, value: unknown): void {
+  /** Keeps the state of a call. A later reply with the same call in the same conversation replaces it. */
+  remember(scope: CallScope, value: unknown): void {
     if (value === undefined) return;
-    const key = keyOf(profileId, callId, history);
+    const key = keyOf(scope);
     this.#drop(key);
     const bytes = Buffer.byteLength(JSON.stringify(value));
     this.#entries.set(key, { value, storedAt: this.#now(), bytes });
@@ -57,9 +64,9 @@ export class ContinuationState {
   }
 
   /** The state kept for this call in this conversation, or undefined when none is kept. */
-  recall(profileId: string, callId: string, history: string): RetainedState | undefined {
+  recall(scope: CallScope): RetainedState | undefined {
     this.#expire();
-    const entry = this.#entries.get(keyOf(profileId, callId, history));
+    const entry = this.#entries.get(keyOf(scope));
     return entry === undefined ? undefined : { value: entry.value, bytes: entry.bytes };
   }
 
@@ -96,6 +103,14 @@ export function historyDigests(messages: readonly unknown[]): readonly string[] 
   return digests;
 }
 
-function keyOf(profileId: string, callId: string, history: string): string {
-  return `${profileId}\u0000${callId}\u0000${history}`;
+/**
+ * The call as the provider wrote it: its tool name and its arguments text. A call with other arguments is another call,
+ * so it never receives this state, even when a second run writes the same id.
+ */
+export function callFingerprint(name: string, argumentsText: string): string {
+  return `${name}\u0000${argumentsText}`;
+}
+
+function keyOf(scope: CallScope): string {
+  return [scope.profileId, scope.callId, scope.history, scope.call].join('\u0000');
 }

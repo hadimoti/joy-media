@@ -28,8 +28,8 @@ export function prepareAnthropicMessages(input: {
   readonly apiKey: string;
   readonly modelId: string;
   readonly body: CompletionBody;
-  /** The content of the turn a tool use came in, by call id and message index (see ContinuationState). */
-  readonly turnFor?: (callId: string, messageIndex: number) => unknown;
+  /** The content of the turn a tool use came in, by the call and its message index (see ContinuationState). */
+  readonly turnFor?: (call: Record<string, unknown>, messageIndex: number) => unknown;
 }): PreparedCall {
   const { system, messages } = toAnthropicMessages(input.body.messages, input.turnFor);
   const tools = (input.body.tools ?? []).map(toAnthropicTool);
@@ -129,7 +129,7 @@ function headersFor(apiKey: string): Readonly<Record<string, string>> {
 
 function toAnthropicMessages(
   messages: readonly Record<string, unknown>[],
-  turnFor?: (callId: string, messageIndex: number) => unknown,
+  turnFor?: (call: Record<string, unknown>, messageIndex: number) => unknown,
 ): {
   readonly system?: string;
   readonly messages: AnthropicMessage[];
@@ -188,7 +188,7 @@ function userBlocks(content: unknown): Block[] {
 function assistantBlocks(
   message: Record<string, unknown>,
   messageIndex: number,
-  turnFor?: (callId: string, messageIndex: number) => unknown,
+  turnFor?: (call: Record<string, unknown>, messageIndex: number) => unknown,
 ): Block[] {
   const text = textBlocks(textOf(message.content));
   if (!Array.isArray(message.tool_calls)) return text;
@@ -204,35 +204,42 @@ function assistantBlocks(
       input: parseArguments(call.function.arguments),
     });
   }
-  return keptTurn(message.tool_calls, messageIndex, turnFor) ?? [...text, ...toolUses];
+  return keptTurn(message.tool_calls, toolUses, messageIndex, turnFor) ?? [...text, ...toolUses];
 }
 
 /**
  * The content of the turn these tool calls came in, exactly as the provider sent it, when the broker kept it. It is
- * used only when its tool uses are these calls, in this order; otherwise the turn is rebuilt from the message.
+ * used only when the turn is these calls: the same tool uses, with the same ids, names and inputs, in the same order.
+ * Otherwise the turn is rebuilt from the message.
  */
 function keptTurn(
   calls: readonly unknown[],
+  toolUses: readonly Block[],
   messageIndex: number,
-  turnFor?: (callId: string, messageIndex: number) => unknown,
+  turnFor?: (call: Record<string, unknown>, messageIndex: number) => unknown,
 ): Block[] | undefined {
-  const ids = calls.map((call) =>
-    isRecord(call) && typeof call.id === 'string' ? call.id : undefined,
-  );
-  const first = ids[0];
-  if (turnFor === undefined || first === undefined) return undefined;
+  const first = calls[0];
+  if (turnFor === undefined || !isRecord(first)) return undefined;
   const kept: unknown = turnFor(first, messageIndex);
   if (!Array.isArray(kept)) return undefined;
   const blocks: unknown[] = kept;
   if (!blocks.every((block) => isRecord(block) && typeof block.type === 'string')) return undefined;
-  const keptIds = blocks.flatMap((block) =>
-    isRecord(block) && block.type === 'tool_use' && typeof block.id === 'string' ? [block.id] : [],
+  const keptUses = blocks.filter(
+    (block): block is Block => isRecord(block) && block.type === 'tool_use',
   );
-  if (keptIds.length !== ids.length || keptIds.some((id, index) => id !== ids[index])) {
-    return undefined;
-  }
+  const same =
+    keptUses.length === toolUses.length &&
+    toolUses.every((use, index) => {
+      const match = keptUses[index];
+      return (
+        match !== undefined &&
+        match.id === use.id &&
+        match.name === use.name &&
+        JSON.stringify(match.input ?? {}) === JSON.stringify(use.input)
+      );
+    });
   // A copy: blocks added to the message later must never change what was kept.
-  return [...(blocks as Block[])];
+  return same ? [...(blocks as Block[])] : undefined;
 }
 
 function textBlocks(text: string): Block[] {

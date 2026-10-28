@@ -306,9 +306,12 @@ export function JoyAgentSettingsDialog({
     };
   }, []);
 
-  /** Reads the saved profiles. Resolves true when this read is the latest and has succeeded. */
-  const loadProfiles = async (): Promise<boolean> => {
-    if (!isDesktopHost()) return true;
+  /**
+   * Reads the saved profiles. Resolves to the list when this read is the latest and has succeeded, and to undefined
+   * otherwise.
+   */
+  const loadProfiles = async (): Promise<readonly DesktopProviderProfileState[] | undefined> => {
+    if (!isDesktopHost()) return [];
     // A read that started earlier and finishes later must not put back a list that is out of date.
     const read = ++profileReadRef.current;
     // Each read starts from unknown: no saved profile is used until this read has succeeded.
@@ -318,7 +321,7 @@ export function JoyAgentSettingsDialog({
         listDesktopProviderProfiles(),
         PROFILE_LIST_TIMEOUT_MS,
       )) as readonly DesktopProviderProfileState[];
-      if (!mountedRef.current || read !== profileReadRef.current) return false;
+      if (!mountedRef.current || read !== profileReadRef.current) return undefined;
       setProfiles(list);
       setProfilesReady(true);
       setProfilesUnreadable(false);
@@ -328,7 +331,7 @@ export function JoyAgentSettingsDialog({
         const chosen = list.find((p) => p.id === chosenId);
         setSavedProfile(chosen);
         if (chosen === undefined) selectedProfileIdRef.current = undefined;
-        return true;
+        return list;
       }
       // Shown by default only when it is the one OpenRouter profile. With several on the same endpoint, the user
       // chooses one (the form refuses to connect until then), so no profile is picked for them.
@@ -345,11 +348,11 @@ export function JoyAgentSettingsDialog({
         setProvider('openrouter');
         setCustomDisclosure(false);
       }
-      return true;
+      return list;
     } catch {
       // A failed read that is no longer the latest says nothing about the list the user now sees.
       if (read === profileReadRef.current) setProfilesUnreadable(true);
-      return false;
+      return undefined;
     }
   };
 
@@ -690,7 +693,8 @@ export function JoyAgentSettingsDialog({
           profileId = saved.id;
           selectProfile(saved);
           // The connection waits for a list that shows the saved profile. When it cannot be read, nothing connects.
-          if (!(await loadProfiles())) {
+          const readBack = await loadProfiles();
+          if (readBack === undefined || !readBack.some((profile) => profile.id === saved.id)) {
             throw new Error('The saved profile could not be read back. Try connecting again.');
           }
         }
@@ -772,7 +776,8 @@ export function JoyAgentSettingsDialog({
     try {
       await deleteDesktopProviderProfile(profId);
       await loadProfiles();
-      if (savedProfile?.id === profId) selectProfile(undefined);
+      // Only a selection that is still this profile is cleared; a profile chosen while this read was pending stays.
+      if (selectedProfileIdRef.current === profId) selectProfile(undefined);
     } catch (err) {
       console.warn('Failed to delete provider profile:', err);
     }

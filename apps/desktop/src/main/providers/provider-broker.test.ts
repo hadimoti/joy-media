@@ -1152,6 +1152,365 @@ describe('provider broker: state a tool call carries back', () => {
   });
 });
 
+describe('provider broker: state is kept per call, and bounded', () => {
+  const ASKED = [{ role: 'user', content: 'read it' }];
+
+  it('keeps two runs that write the same call id apart, each with the state of its own call', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const reply = (args: string, sig: string) =>
+      jsonReply({
+        choices: [
+          {
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_0',
+                  type: 'function',
+                  extra_content: { sig },
+                  function: { name: 'read_file', arguments: args },
+                },
+              ],
+            },
+          },
+        ],
+      });
+    const replies = [reply('{"path":"a.md"}', 'sig-a'), reply('{"path":"b.md"}', 'sig-b')];
+    let next = 0;
+    const { broker, sent } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () => replies[next++] ?? jsonReply({ choices: [] }),
+    });
+    const continuation = (args: string) => ({
+      messages: [
+        ...ASKED,
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'call_0', type: 'function', function: { name: 'read_file', arguments: args } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'call_0', content: 'file body' },
+      ],
+    });
+
+    // Two runs with the same first message: the same history, and the same id from the provider.
+    await broker.complete({ profileId: 'p1', body: { messages: ASKED, tools: READ_FILE } });
+    await broker.complete({ profileId: 'p1', body: { messages: ASKED, tools: READ_FILE } });
+    await broker.complete({ profileId: 'p1', body: continuation('{"path":"a.md"}') });
+    await broker.complete({ profileId: 'p1', body: continuation('{"path":"b.md"}') });
+
+    const firstRun = JSON.parse(String(sent[2]?.init.body));
+    const secondRun = JSON.parse(String(sent[3]?.init.body));
+    expect(firstRun.messages[1].tool_calls[0]).toHaveProperty('extra_content', { sig: 'sig-a' });
+    expect(secondRun.messages[1].tool_calls[0]).toHaveProperty('extra_content', { sig: 'sig-b' });
+  });
+
+  it("does not send a call's state with other arguments, even under the same id", async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker, sent } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          choices: [
+            {
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call_0',
+                    type: 'function',
+                    extra_content: { sig: 'sig-a' },
+                    function: { name: 'read_file', arguments: '{"path":"a.md"}' },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+    });
+
+    await broker.complete({ profileId: 'p1', body: { messages: ASKED, tools: READ_FILE } });
+    await broker.complete({
+      profileId: 'p1',
+      body: {
+        messages: [
+          ...ASKED,
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_0',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{"path":"other.md"}' },
+              },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'call_0', content: 'x' },
+        ],
+      },
+    });
+
+    const followUp = JSON.parse(String(sent[1]?.init.body));
+    expect(followUp.messages[1].tool_calls[0]).not.toHaveProperty('extra_content');
+  });
+
+  it('does not replay a Claude turn whose tool uses differ from the calls the engine sends back', async () => {
+    const p = bound('p1', 'claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5');
+    const thinking = { type: 'thinking', thinking: 'Two files.', signature: 'sig-t' };
+    const first = { type: 'tool_use', id: 'toolu_a', name: 'read_file', input: { path: 'a.md' } };
+    const second = { type: 'tool_use', id: 'toolu_b', name: 'read_file', input: { path: 'b.md' } };
+    const replies = [
+      jsonReply({
+        id: 'msg_t',
+        stop_reason: 'tool_use',
+        content: [thinking, first, second],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    ];
+    let next = 0;
+    const { broker, sent } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () => replies[next++] ?? jsonReply({ id: 'x', stop_reason: 'end_turn', content: [] }),
+    });
+
+    await broker.complete({ profileId: 'p1', body: { messages: ASKED, tools: READ_FILE } });
+    // The engine sends the first call back as it was, and the second with other arguments.
+    await broker.complete({
+      profileId: 'p1',
+      body: {
+        messages: [
+          ...ASKED,
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'toolu_a',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{"path":"a.md"}' },
+              },
+              {
+                id: 'toolu_b',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{"path":"c.md"}' },
+              },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'toolu_a', content: 'a' },
+          { role: 'tool', tool_call_id: 'toolu_b', content: 'c' },
+        ],
+      },
+    });
+
+    const followUp = JSON.parse(String(sent[1]?.init.body));
+    expect(followUp.messages[1].content).toEqual([
+      { type: 'tool_use', id: 'toolu_a', name: 'read_file', input: { path: 'a.md' } },
+      { type: 'tool_use', id: 'toolu_b', name: 'read_file', input: { path: 'c.md' } },
+    ]);
+  });
+
+  it('keeps a Claude turn once, however many tool uses it holds', async () => {
+    const p = bound('p1', 'claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5');
+    const thinking = { type: 'thinking', thinking: 'x'.repeat(1024 * 1024), signature: 'sig-big' };
+    const uses = Array.from({ length: 50 }, (_, index) => ({
+      type: 'tool_use',
+      id: `toolu_${index}`,
+      name: 'read_file',
+      input: { index },
+    }));
+    const replies = [
+      jsonReply({
+        id: 'msg_b',
+        stop_reason: 'tool_use',
+        content: [thinking, ...uses],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    ];
+    let next = 0;
+    const { broker, sent } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () => replies[next++] ?? jsonReply({ id: 'x', stop_reason: 'end_turn', content: [] }),
+    });
+
+    await broker.complete({ profileId: 'p1', body: { messages: ASKED, tools: READ_FILE } });
+    await broker.complete({
+      profileId: 'p1',
+      body: {
+        messages: [
+          ...ASKED,
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: uses.map((use) => ({
+              id: use.id,
+              type: 'function',
+              function: { name: 'read_file', arguments: JSON.stringify(use.input) },
+            })),
+          },
+          ...uses.map((use) => ({ role: 'tool', tool_call_id: use.id, content: 'ok' })),
+        ],
+      },
+    });
+
+    // Fifty copies of a megabyte would overflow the budget. Charged once, the turn is kept whole.
+    const followUp = JSON.parse(String(sent[1]?.init.body));
+    expect(followUp.messages[1].content[0]).toEqual(thinking);
+    expect(followUp.messages[1].content).toHaveLength(51);
+  });
+
+  it('refuses a reply with more tool calls than one reply may hold', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const calls = Array.from({ length: 65 }, (_, index) => ({
+      id: `call_${index}`,
+      type: 'function',
+      function: { name: 'read_file', arguments: '{}' },
+    }));
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          choices: [
+            {
+              finish_reason: 'tool_calls',
+              message: { role: 'assistant', content: null, tool_calls: calls },
+            },
+          ],
+        }),
+    });
+
+    expect(
+      await broker.complete({ profileId: 'p1', body: { messages: ASKED, tools: READ_FILE } }),
+    ).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+  });
+
+  it('refuses a request whose body and carried state pass the limit together, before it is sent', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const replies = [
+      jsonReply({
+        choices: [
+          {
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_big',
+                  type: 'function',
+                  extra_content: { sig: 'x'.repeat(MAX_WORKER_REQUEST_BYTES) },
+                  function: { name: 'read_file', arguments: '{}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ];
+    let next = 0;
+    const { broker, sent } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () => replies[next++] ?? jsonReply({ choices: [] }),
+    });
+    await broker.complete({ profileId: 'p1', body: { messages: ASKED, tools: READ_FILE } });
+
+    const result = await broker.complete({
+      profileId: 'p1',
+      maxRequestBytes: MAX_WORKER_REQUEST_BYTES,
+      body: {
+        messages: [
+          ...ASKED,
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_big',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{}' },
+              },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'call_big', content: 'x' },
+        ],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: 'REQUEST_TOO_LARGE' });
+    expect(sent).toHaveLength(1);
+  });
+
+  it("refuses a request that only the provider's own fields take past the limit", async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const followUpBody = {
+      messages: [
+        ...ASKED,
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'call_fit', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'call_fit', content: 'x' },
+      ],
+    };
+    // The body and the carried state fit together, with 10 bytes to spare. The state is serialized as its text
+    // plus 10 bytes of JSON around it, so the sent body grows past the limit only with the provider's own fields.
+    const base = Buffer.byteLength(JSON.stringify(followUpBody));
+    const value = { sig: 'x'.repeat(MAX_WORKER_REQUEST_BYTES - base - 20) };
+    const replies = [
+      jsonReply({
+        choices: [
+          {
+            finish_reason: 'tool_calls',
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_fit',
+                  type: 'function',
+                  extra_content: value,
+                  function: { name: 'read_file', arguments: '{}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ];
+    let next = 0;
+    const { broker, sent } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () => replies[next++] ?? jsonReply({ choices: [] }),
+    });
+    await broker.complete({ profileId: 'p1', body: { messages: ASKED, tools: READ_FILE } });
+
+    const result = await broker.complete({
+      profileId: 'p1',
+      maxRequestBytes: MAX_WORKER_REQUEST_BYTES,
+      body: followUpBody,
+    });
+
+    expect(result).toMatchObject({ ok: false, code: 'REQUEST_TOO_LARGE' });
+    expect(sent).toHaveLength(1);
+  });
+});
+
 describe('endpointBindingDigest', () => {
   it('changes when the profile, the origin or the base path changes', () => {
     const base = endpointBindingDigest('p1', 'https://api.x.ai', '/v1');

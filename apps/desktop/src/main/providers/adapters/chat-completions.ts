@@ -16,8 +16,8 @@ export function prepareChatCompletion(input: {
   readonly body: CompletionBody;
   /** The name the completion limit is sent under. Only OpenAI's newer models differ. */
   readonly tokenLimitKey?: 'max_tokens' | 'max_completion_tokens';
-  /** The provider state a tool call carries back unchanged, by call id and message index (see ContinuationState). */
-  readonly extraContentFor?: (callId: string, messageIndex: number) => unknown;
+  /** The provider state a tool call carries back unchanged, by the call and its message index (see ContinuationState). */
+  readonly extraContentFor?: (call: Record<string, unknown>, messageIndex: number) => unknown;
 }): PreparedCall {
   const { max_tokens: maxTokens, messages, ...rest } = input.body;
   const limitKey = input.tokenLimitKey ?? 'max_tokens';
@@ -27,9 +27,7 @@ export function prepareChatCompletion(input: {
     messages:
       carry === undefined
         ? messages
-        : messages.map((message, index) =>
-            withExtraContent(message, (callId) => carry(callId, index)),
-          ),
+        : messages.map((message, index) => withExtraContent(message, (call) => carry(call, index))),
     ...(maxTokens === undefined ? {} : { [limitKey]: maxTokens }),
     model: input.modelId,
     stream: false,
@@ -45,14 +43,14 @@ export function prepareChatCompletion(input: {
 /** Adds the provider state kept for each tool call of an assistant message. Nothing else in the message changes. */
 function withExtraContent(
   message: Record<string, unknown>,
-  extraContentFor: (callId: string) => unknown,
+  extraContentFor: (call: Record<string, unknown>) => unknown,
 ): Record<string, unknown> {
   if (message.role !== 'assistant' || !Array.isArray(message.tool_calls)) return message;
   return {
     ...message,
     tool_calls: message.tool_calls.map((call: unknown) => {
-      if (!isRecord(call) || typeof call.id !== 'string') return call;
-      const extra = extraContentFor(call.id);
+      if (!isRecord(call)) return call;
+      const extra = extraContentFor(call);
       return extra === undefined ? call : { ...call, extra_content: extra };
     }),
   };

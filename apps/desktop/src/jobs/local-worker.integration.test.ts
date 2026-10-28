@@ -275,11 +275,13 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       kind: 'derivative:thumbnail',
     });
     if (!submitted.ok) throw new Error(`submit refused: ${submitted.message}`);
-    await waitFor(
+    const finished = await waitFor(
       () => terminal(database.jobDispatch.get(submitted.jobId)),
       FIRST_JOB_TIMEOUT_MS,
       'the thumbnail job to finish',
     );
+    // A failed job also ends the wait, and would leave the check with no real job path behind it.
+    expect(finished).toMatchObject({ status: 'done' });
 
     // Checked after the Worker has stopped: the log then holds every read the process made in its life.
     await stopWorker(local);
