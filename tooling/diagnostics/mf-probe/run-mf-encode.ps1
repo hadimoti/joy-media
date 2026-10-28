@@ -8,7 +8,7 @@ Each encoder runs in its own probe process, so a fault in one encoder cannot aff
 to 0x%08X (plan section 10e). The probe's JSON line is kept as text. The output file must lie outside the repository.
 
 .EXAMPLE
-pwsh -NoProfile -File tooling/diagnostics/mf-probe/run-mf-encode.ps1 -Probe 'C:\JoyMediaG1\kit\mf-probe.exe' -OutFile 'C:\JoyMediaG1\logs\mf-encode.jsonl'
+pwsh -NoProfile -File tooling/diagnostics/mf-probe/run-mf-encode.ps1 -Probe 'C:\JoyMediaG1\kit\tree\tooling\diagnostics\mf-probe\mf-probe.exe' -OutFile 'C:\JoyMediaG1\logs\mf-encode.jsonl'
 #>
 [CmdletBinding()]
 param(

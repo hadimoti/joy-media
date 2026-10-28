@@ -43,7 +43,7 @@ committed (OA1), and this session only diagnoses.
 - Keep every log file as it is. Do not edit a log.
 - Type nothing into a credential field. The app should not ask for one in this session. If it does, stop and tell engineering.
 
-## Part 1: no system change
+## Part 1: no system change, except the registry reversal in step 10
 
 Each step lists what to run, what to expect, and what to record. Stop and tell engineering if a step does not match.
 
@@ -237,7 +237,7 @@ Then act on the step-0 record in `host.txt`:
   `reg.exe import C:\JoyMediaG1\logs\joy-key-before.reg`.
 - If step 0 recorded `joy-key absent`, delete the key if it exists now: `reg.exe delete "HKCU\Software\Classes\joy" /f`.
 
-This restore reverses a change the session made, and the owner runs it. Record the outcome in the log.
+Approval class: a reversal of a change this session made. You approve it by running this step. It is the only registry write in Part 1, and it runs only when the comparison shows a difference. Record the outcome in the log.
 
 Then send the logs to engineering. Delete `C:\JoyMediaG1` after they confirm that they have the logs.
 
