@@ -784,8 +784,8 @@ export class WorkerRuntime {
     if (!this.tools.ffmpeg || !this.tools.ffprobe)
       throw new Error('FFmpeg and FFprobe are required');
     if (options.cancelled()) return { state: 'canceled' };
-    const sourcePath = this.options.sources?.resolve(job.assetId);
-    if (sourcePath === undefined)
+    const registeredSource = this.options.sources?.resolve(job.assetId);
+    if (registeredSource === undefined && this.options.downloadJobAsset === undefined)
       throw new Error(`asset ${job.assetId} is not available on this Worker`);
     const tempDir = mkdtempSync(join(tmpdir(), `joy-media-${job.id}-`));
     const temporaryOutput = join(tempDir, 'thumbnail.jpg');
@@ -793,8 +793,11 @@ export class WorkerRuntime {
     try {
       if (options.cancelled()) return { state: 'canceled' };
       await options.progress(5);
+      // A local-route job's source is not in this Worker's registry, so the desktop serves its bytes.
+      const sourcePath =
+        registeredSource ?? (await this.stageDownloadedSource(job.id, job.leaseToken, tempDir));
       await options.progress(25);
-      const transcoded = await runBounded(
+      const outcome = await runBounded(
         'ffmpeg',
         [
           '-y',
@@ -815,10 +818,14 @@ export class WorkerRuntime {
         ],
         options.cancelled,
       );
-      if (!transcoded || options.cancelled()) {
+      if (outcome.state === 'cancelled' || options.cancelled()) {
         this.log.write(`job ${job.id} canceled`);
         return { state: 'canceled' };
       }
+      if (outcome.state === 'failed')
+        throw new Error(
+          `ffmpeg could not create a thumbnail (exit ${outcome.exitCode ?? 'signal'})`,
+        );
       await options.progress(75);
       const descriptor = probeThumbnail(temporaryOutput);
       await options.progress(90);
@@ -848,6 +855,18 @@ export class WorkerRuntime {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
+  }
+
+  private async stageDownloadedSource(
+    jobId: string,
+    leaseToken: string | undefined,
+    tempDir: string,
+  ): Promise<string> {
+    const download = this.options.downloadJobAsset;
+    if (download === undefined) throw new Error('no source downloader is configured');
+    const path = join(tempDir, 'source');
+    writeFileSync(path, Buffer.from(await download(jobId, leaseToken)), { mode: 0o600 });
+    return path;
   }
 
   private async runFixtureThumbnail(
@@ -1053,11 +1072,17 @@ export interface RenderExportReceipt {
   };
 }
 
+/** How a bounded child process ended. A non-zero exit is a failure, never a cancellation. */
+type BoundedOutcome =
+  | { readonly state: 'completed' }
+  | { readonly state: 'cancelled' }
+  | { readonly state: 'failed'; readonly exitCode: number | null };
+
 async function runBounded(
   command: string,
   args: readonly string[],
   cancelled: () => boolean,
-): Promise<boolean> {
+): Promise<BoundedOutcome> {
   const child = spawn(command, args, { shell: false, stdio: 'ignore' });
   const completed = new Promise<number | null>((resolve, reject) => {
     child.once('error', reject);
@@ -1067,11 +1092,12 @@ async function runBounded(
     if (cancelled()) {
       child.kill();
       await completed.catch(() => undefined);
-      return false;
+      return { state: 'cancelled' };
     }
     await sleep(20);
   }
-  return (await completed) === 0;
+  const exitCode = await completed;
+  return exitCode === 0 ? { state: 'completed' } : { state: 'failed', exitCode };
 }
 
 function probeThumbnail(path: string): RealThumbnailReceipt['descriptor'] {
