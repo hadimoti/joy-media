@@ -1,7 +1,8 @@
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { internalPackageDirectories } from './workspace-packages.mjs';
+import { keepDistPath } from './staging-filter.mjs';
 
 /**
  * Release-plan gate for signed public releases (unchanged — see the `else` branch below). The
@@ -12,6 +13,9 @@ import { internalPackageDirectories } from './workspace-packages.mjs';
  * `--staging`/`--unpacked` is a different, non-public path: it stages a real, runnable copy of
  * the app (no certificate needed, nothing distributable) so `test:smoke-packaged` and manual
  * QA have something to launch. See `stageRenderer` and `assembleUnpacked` below.
+ *
+ * `--instrumented` (only with `--unpacked` or `--staging`) also stages the test-only GPU instrumentation, and `--out <folder>`
+ * writes the package outside the build folder. Neither option is used by the release workflow.
  */
 const desktopRoot = resolve(import.meta.dirname, '..');
 const repoRoot = resolve(desktopRoot, '..', '..');
@@ -19,11 +23,41 @@ const editorWebDistDir = resolve(repoRoot, 'apps', 'editor-web', 'dist');
 const workerDistDir = resolve(repoRoot, 'apps', 'worker', 'dist');
 const rendererStagingDir = resolve(desktopRoot, 'renderer');
 const desktopDistDir = resolve(desktopRoot, 'dist');
-const unpackedDir = resolve(desktopDistDir, 'joy-media-unpacked');
 const compiledMainEntry = resolve(desktopDistDir, 'main', 'electron-entry.js');
 
-const output = resolve(desktopDistDir, 'joy-media-release-plan.json');
 const isStagingUnpacked = process.argv.includes('--staging') || process.argv.includes('--unpacked');
+// Test-only instrumentation (plan section 10d, G0 item 2; OA3). Only an unpacked or staging build may include it.
+const isInstrumented = process.argv.includes('--instrumented');
+
+/** The value after a `--name` option, or undefined when the option is absent. A missing value is a usage error. */
+function optionValue(name) {
+  const index = process.argv.indexOf(name);
+  if (index < 0) return undefined;
+  const value = process.argv[index + 1];
+  if (value === undefined || value.startsWith('--')) {
+    process.stderr.write(`${name} needs a folder\n`);
+    process.exit(2);
+  }
+  return value;
+}
+
+// `--out <folder>` writes the unpacked package and the plan there instead of the build folder. It must lie outside the repository.
+const outOption = optionValue('--out');
+const outRoot = outOption === undefined ? desktopDistDir : resolve(outOption);
+const unpackedDir = resolve(outRoot, 'joy-media-unpacked');
+const output = resolve(outRoot, 'joy-media-release-plan.json');
+
+if (outOption !== undefined) {
+  const inside = relative(repoRoot, outRoot);
+  if (inside === '' || (!inside.startsWith('..') && !isAbsolute(inside))) {
+    process.stderr.write('--out must be outside the repository\n');
+    process.exit(2);
+  }
+}
+if (isInstrumented && !isStagingUnpacked) {
+  process.stderr.write('--instrumented needs --unpacked or --staging\n');
+  process.exit(2);
+}
 
 /**
  * Copies the production editor-web build into `apps/desktop/renderer`, where
@@ -101,7 +135,7 @@ async function assembleUnpacked() {
     if (entry.name.endsWith('.json')) continue; // dev/release-plan evidence, not runtime
     await cp(resolve(desktopDistDir, entry.name), resolve(unpackedDistDir, entry.name), {
       recursive: true,
-      filter: (source) => !/\.test\.(js|d\.ts)(\.map)?$/.test(source.replaceAll('\\', '/')),
+      filter: (source) => keepDistPath(source, { instrumented: isInstrumented }),
     });
   }
 
@@ -215,6 +249,7 @@ if (isStagingUnpacked) {
     platform: 'windows-x64',
     status: 'staging-unpacked',
     signing: 'unsigned',
+    instrumented: isInstrumented,
     unpackedDir,
     reasons: [
       'staging/unpacked build requested via --staging/--unpacked; certificate and release-signing key checks are skipped',
