@@ -54,19 +54,17 @@ export type JoyAgentErrorCode =
   | 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
 
 export type JoyAgentProvider =
-  'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom' | 'dual-brain';
+  'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom';
 
-/**
- * Providers the local build no longer runs (PLAN-v4 §4a). Their IDs stay in the type for the
- * legacy-profile reader, which shows the saved profiles as disabled. A configure call refuses them.
- */
-const RETIRED_PROVIDER_IDS: readonly string[] = ['joy-hosted', 'kilo', 'dual-brain'];
+/** The providers this build runs. The other IDs stay in JoyAgentProvider for the legacy-profile reader. */
+export type JoyProviderMode = 'openrouter' | 'openai-compatible' | 'custom';
 
-export function isRetiredProvider(provider: string): boolean {
-  return RETIRED_PROVIDER_IDS.includes(provider);
+const SUPPORTED_PROVIDER_IDS: readonly string[] = ['openrouter', 'openai-compatible', 'custom'];
+
+/** A configure call refuses any provider this build does not run (PLAN-v4 §4a). */
+export function isSupportedProvider(provider: unknown): provider is JoyProviderMode {
+  return typeof provider === 'string' && SUPPORTED_PROVIDER_IDS.includes(provider);
 }
-
-export type JoyProviderMode = Exclude<JoyAgentProvider, 'dual-brain'>;
 
 export interface ByokSessionConfig {
   readonly provider: JoyProviderMode;
@@ -76,31 +74,11 @@ export interface ByokSessionConfig {
   readonly apiKey: string;
 }
 
-export interface DualBrainConfig {
-  readonly mode: 'dual-brain';
-  readonly workhorse: ByokSessionConfig;
-  readonly creative: ByokSessionConfig;
-}
-
-export function isDualBrainConfig(config: unknown): config is DualBrainConfig {
-  return (
-    typeof config === 'object' &&
-    config !== null &&
-    (config as Record<string, unknown>).mode === 'dual-brain' &&
-    typeof (config as Record<string, unknown>).workhorse === 'object' &&
-    typeof (config as Record<string, unknown>).creative === 'object'
-  );
-}
-
 export interface ByokSessionStatus {
   readonly provider: JoyAgentProvider;
   readonly modelId: string;
   readonly capability: 'untested' | 'tool-loop' | 'plan-only' | 'incompatible';
   readonly message?: string;
-  readonly dualBrain?: {
-    readonly workhorse: ByokSessionStatus;
-    readonly creative: ByokSessionStatus;
-  };
 }
 
 /**

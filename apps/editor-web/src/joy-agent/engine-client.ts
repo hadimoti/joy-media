@@ -6,13 +6,11 @@ import {
   type HostRpcRun,
 } from './host-rpc.js';
 import {
-  isDualBrainConfig,
-  isRetiredProvider,
+  isSupportedProvider,
   isWorkerToMainMessage,
   JOY_AGENT_PROTOCOL_VERSION,
   type ByokSessionConfig,
   type ByokSessionStatus,
-  type DualBrainConfig,
   type JoyAgentMediaCapabilityReport,
   type JoyAgentRunRequest,
   type JoyAgentSafeEvent,
@@ -108,7 +106,7 @@ export interface JoyAgentApprovedImageObservationRequest {
 }
 
 export interface JoyAgentEngineClient {
-  configure(config: ByokSessionConfig | DualBrainConfig): Promise<ByokSessionStatus>;
+  configure(config: ByokSessionConfig): Promise<ByokSessionStatus>;
   testConnection(): Promise<ByokSessionStatus>;
   /**
    * Explicit-only, session-scoped synthetic media probe. Calling configure,
@@ -140,7 +138,6 @@ export interface JoyAgentEngineClient {
   sendApprovedImageObservation(
     input: JoyAgentApprovedImageObservationRequest,
   ): Promise<PrivateObservationTransferResult>;
-  getDualBrainConfig?(): DualBrainConfig | undefined;
 }
 
 type Pending = {
@@ -866,8 +863,7 @@ export function createSingleWorkerEngineClient(workerFactory?: () => Worker): Jo
 
   return {
     async configure(next) {
-      if (isDualBrainConfig(next)) throw new Error('Provider is not supported by the editor');
-      if (isRetiredProvider(next.provider))
+      if (!isSupportedProvider(next.provider))
         throw new Error('Provider is not supported by the editor');
       const safe = normalizeByokSessionConfig(next);
       clear();
@@ -979,16 +975,10 @@ export function createSingleWorkerEngineClient(workerFactory?: () => Worker): Jo
 }
 
 /**
- * Main-thread Intelligent Agent Dispatcher & Dual-Brain Runtime.
- * Manages Model 1 (Workhorse / Router) for text, cuts, trims, ripple, labeling, tool orchestration,
- * and Model 2 (Creative / Visual Brain) for frames, scene description, Living Looks color grading.
- * Automatically dispatches tasks based on taskKind and prompt intent with automatic fallback.
+ * Main-thread agent dispatcher. It keeps one provider session, served by one Worker-backed client.
  */
 export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAgentEngineClient {
   let singleClient: JoyAgentEngineClient | undefined;
-  let workhorseClient: JoyAgentEngineClient | undefined;
-  let creativeClient: JoyAgentEngineClient | undefined;
-  let dualBrainConfig: DualBrainConfig | undefined;
   let currentStatus: ByokSessionStatus | undefined;
 
   const ensureSingleClient = (): JoyAgentEngineClient => {
@@ -1002,138 +992,38 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
     singleClient?.clear();
     singleClient?.dispose();
     singleClient = undefined;
-    workhorseClient?.clear();
-    workhorseClient?.dispose();
-    workhorseClient = undefined;
-    creativeClient?.clear();
-    creativeClient?.dispose();
-    creativeClient = undefined;
-    dualBrainConfig = undefined;
     currentStatus = undefined;
   };
 
   return {
-    async configure(config: ByokSessionConfig | DualBrainConfig): Promise<ByokSessionStatus> {
+    async configure(config: ByokSessionConfig): Promise<ByokSessionStatus> {
       // Refuse before any client is torn down: a rejected configure keeps the current session.
-      if (isDualBrainConfig(config)) throw new Error('Provider is not supported by the editor');
-      if (isRetiredProvider(config.provider))
+      if (!isSupportedProvider(config.provider)) {
         throw new Error('Provider is not supported by the editor');
-      clearClients();
-
-      if (isDualBrainConfig(config)) {
-        dualBrainConfig = config;
-        workhorseClient = createSingleWorkerEngineClient(workerFactory);
-        creativeClient = createSingleWorkerEngineClient(workerFactory);
-
-        const [wStatus, cStatus] = await Promise.all([
-          workhorseClient.configure(config.workhorse),
-          creativeClient.configure(config.creative),
-        ]);
-
-        const capability = dualBrainCapability(wStatus.capability, cStatus.capability);
-
-        currentStatus = {
-          provider: 'dual-brain',
-          modelId: `${config.workhorse.modelId} + ${config.creative.modelId}`,
-          capability,
-          message: `Workhorse (${config.workhorse.modelId}): ${wStatus.capability} | Creative (${config.creative.modelId}): ${cStatus.capability}`,
-          dualBrain: {
-            workhorse: wStatus,
-            creative: cStatus,
-          },
-        };
-        return currentStatus;
       }
-
+      clearClients();
       const client = ensureSingleClient();
       currentStatus = await client.configure(config);
       return currentStatus;
     },
 
     async testConnection(): Promise<ByokSessionStatus> {
-      const brains = dualBrainConfig;
-      if (brains && workhorseClient && creativeClient) {
-        const [wStatus, cStatus] = await Promise.all([
-          workhorseClient.testConnection().catch((error: unknown) => ({
-            provider: brains.workhorse.provider,
-            modelId: brains.workhorse.modelId,
-            capability: 'incompatible' as const,
-            message: error instanceof Error ? error.message : 'Workhorse connection test failed',
-          })),
-          creativeClient.testConnection().catch((error: unknown) => ({
-            provider: brains.creative.provider,
-            modelId: brains.creative.modelId,
-            capability: 'incompatible' as const,
-            message: error instanceof Error ? error.message : 'Creative connection test failed',
-          })),
-        ]);
-
-        const capability = dualBrainCapability(wStatus.capability, cStatus.capability);
-
-        currentStatus = {
-          provider: 'dual-brain',
-          modelId: `${brains.workhorse.modelId} + ${brains.creative.modelId}`,
-          capability,
-          message: `Workhorse (${brains.workhorse.modelId}): ${wStatus.capability} | Creative (${brains.creative.modelId}): ${cStatus.capability}`,
-          dualBrain: {
-            workhorse: wStatus,
-            creative: cStatus,
-          },
-        };
-        return currentStatus;
-      }
       if (!singleClient) throw new Error('Configure a model connection first');
       currentStatus = await singleClient.testConnection();
       return currentStatus;
     },
 
     async probeMediaCapabilities(): Promise<JoyAgentMediaCapabilityReport> {
-      if (dualBrainConfig && creativeClient) {
-        try {
-          return await creativeClient.probeMediaCapabilities();
-        } catch {
-          if (workhorseClient) return await workhorseClient.probeMediaCapabilities();
-          throw new Error('Media capability probe failed across dual-brain runtime');
-        }
-      }
       if (!singleClient) throw new Error('Configure a model connection first');
       return singleClient.probeMediaCapabilities();
     },
 
     startRun(request, runHost, lifecycleHooks): JoyAgentRunIterator {
-      if (dualBrainConfig && workhorseClient && creativeClient) {
-        const isCreativeTask =
-          request.taskKind === 'color' ||
-          request.taskKind === 'effects' ||
-          request.taskKind === 'filters' ||
-          request.taskKind === 'motion' ||
-          request.taskKind === 'camera' ||
-          request.taskKind === '3d' ||
-          request.taskKind === 'creative-brief' ||
-          request.taskKind === 'asset-edit' ||
-          /\b(look|grade|color|visual|filter|aesthetic|style|palette|camera|lens|frame)\b/i.test(
-            request.prompt,
-          );
-
-        const primary = isCreativeTask ? creativeClient : workhorseClient;
-        const fallback = isCreativeTask ? workhorseClient : creativeClient;
-
-        try {
-          return primary.startRun(request, runHost, lifecycleHooks);
-        } catch {
-          return fallback.startRun(request, runHost, lifecycleHooks);
-        }
-      }
-
       if (!singleClient) throw new Error('Configure a model connection first');
       return singleClient.startRun(request, runHost, lifecycleHooks);
     },
 
     async cancel(runId: string): Promise<void> {
-      if (dualBrainConfig) {
-        await Promise.allSettled([workhorseClient?.cancel(runId), creativeClient?.cancel(runId)]);
-        return;
-      }
       await singleClient?.cancel(runId);
     },
 
@@ -1150,18 +1040,12 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
     },
 
     getMediaCapabilities(): JoyAgentMediaCapabilityReport | undefined {
-      if (dualBrainConfig) {
-        return creativeClient?.getMediaCapabilities() ?? workhorseClient?.getMediaCapabilities();
-      }
       return singleClient?.getMediaCapabilities();
     },
 
     registerObservationReviewLease(
       input: JoyAgentObservationReviewLeaseRequest,
     ): Promise<JoyAgentObservationReviewLease | undefined> {
-      if (dualBrainConfig && creativeClient) {
-        return creativeClient.registerObservationReviewLease(input);
-      }
       if (!singleClient) return Promise.resolve(undefined);
       return singleClient.registerObservationReviewLease(input);
     },
@@ -1169,27 +1053,10 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
     sendApprovedImageObservation(
       input: JoyAgentApprovedImageObservationRequest,
     ): Promise<PrivateObservationTransferResult> {
-      if (dualBrainConfig && creativeClient) {
-        return creativeClient.sendApprovedImageObservation(input);
-      }
       if (!singleClient) {
         return Promise.resolve({ ok: false, code: 'capability-unavailable' });
       }
       return singleClient.sendApprovedImageObservation(input);
     },
-
-    getDualBrainConfig(): DualBrainConfig | undefined {
-      return dualBrainConfig;
-    },
   };
-}
-
-function dualBrainCapability(
-  workhorse: ByokSessionStatus['capability'],
-  creative: ByokSessionStatus['capability'],
-): ByokSessionStatus['capability'] {
-  if (workhorse === 'tool-loop' && creative === 'tool-loop') return 'tool-loop';
-  if (workhorse === 'incompatible' || creative === 'incompatible') return 'incompatible';
-  if (workhorse === 'plan-only' && creative === 'plan-only') return 'plan-only';
-  return 'untested';
 }
