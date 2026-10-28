@@ -7,10 +7,11 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import type * as nodeFs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BoundedLog,
   JsonFileWorkerStore,
@@ -24,6 +25,12 @@ import {
 } from './runtime.js';
 import type { UnsupportedWorkerJobError } from './runtime.js';
 import { ffmpegFilterPath, gpuDerivativeLocalRef, rnnoiseFilter } from './local-gpu.js';
+
+// Counts the reads of the provider file. The wrapper passes every call through, so no other test is affected.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof nodeFs>();
+  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
 
 // Independent of `process.cwd()` (which is `apps/worker` under `pnpm --filter @joy-media/worker
 // test`, not the repo root) so this fixture resolves the same way from any invocation.
@@ -443,6 +450,16 @@ describe('Worker provider-key boundary', () => {
   };
   const tempDirs: string[] = [];
 
+  beforeEach(() => {
+    vi.mocked(readFileSync).mockClear();
+  });
+
+  /** The reads of the provider file since the test began. */
+  const providerFileReads = () =>
+    vi
+      .mocked(readFileSync)
+      .mock.calls.filter(([path]) => String(path).endsWith('ai-providers.json'));
+
   function restoreEnv(name: string, value: string | undefined): void {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
@@ -482,9 +499,12 @@ describe('Worker provider-key boundary', () => {
     const runtime = await loadRuntimeWithProviderFile();
     delete process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN;
     expect(runtime.detectMediaTools(() => false).aiProviders).toEqual(['lm-studio']);
+    expect(providerFileReads()).not.toHaveLength(0);
 
+    vi.mocked(readFileSync).mockClear();
     process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN = 'desktop-local-token';
     expect(runtime.detectMediaTools(() => false).aiProviders).toEqual([]);
+    expect(providerFileReads()).toEqual([]);
   });
 
   it('advertises no provider capability under the desktop app', async () => {
@@ -519,6 +539,7 @@ describe('Worker provider-key boundary', () => {
       ),
     ).rejects.toThrow('AI provider "lm-studio" is not available on this Worker');
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(providerFileReads()).toEqual([]);
   });
 
   it('runs the same provider job for a standalone Worker that holds the file', async () => {
@@ -550,5 +571,6 @@ describe('Worker provider-key boundary', () => {
     expect(outcome.state).toBe('completed');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('http://127.0.0.1:1234/v1/chat/completions');
+    expect(providerFileReads()).not.toHaveLength(0);
   });
 });

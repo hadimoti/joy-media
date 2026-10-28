@@ -235,7 +235,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
       } catch {
         throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not understood.');
       }
-      return checkedReply(converted, endpoint);
+      return checkedReply(completionEnvelope(converted), endpoint);
     }
     return checkedReply(completionEnvelope(reply), endpoint);
   }
@@ -386,20 +386,23 @@ function isJsonText(text: string): boolean {
   }
 }
 
-/**
- * The completion fields the engine reads. Any other field a provider adds to its envelope, such as a base URL
- * or other provider metadata, stays with the broker and never reaches the Worker. Model text is kept exactly
- * as the provider wrote it (PLAN-v4 §6b).
- */
 /** Thrown for a reply the engine could not read. The text of the reply is never part of the message. */
 function notUnderstood(): never {
   throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not understood.');
 }
 
 /**
- * The completion the engine reads, rebuilt from the fields it needs and nothing else. Each field is type-checked,
- * so provider metadata (a base URL in `usage`, or an extra property on a tool call) never reaches the Worker
- * through a field the engine does not read. Model-authored strings are kept exactly as written (PLAN-v4 §6b).
+ * A tool call id, as the engine sends it back to the provider. Providers write letters, digits, dashes and
+ * underscores, and some add dots and colons (Kimi writes `functions.name:0`). A slash is never part of an id.
+ */
+const TOOL_CALL_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+
+/**
+ * The completion the engine reads, rebuilt from the fields it needs and nothing else. The engine reads
+ * `choices[0].message` and the tool calls in it, so the provider's envelope (`id`, `object`, `created`, `model`
+ * and `usage`) is dropped, and none of its metadata reaches the Worker. Each field the engine or the checks read
+ * is type-checked: a wrong type is refused, not dropped. Model-authored strings are kept exactly as written
+ * (PLAN-v4 §6b). Both paths pass through here; the Anthropic reply is converted to this shape first.
  */
 function completionEnvelope(reply: string): string {
   let parsed: unknown;
@@ -409,20 +412,16 @@ function completionEnvelope(reply: string): string {
     throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not valid JSON.');
   }
   if (!isRecord(parsed) || !Array.isArray(parsed.choices)) notUnderstood();
-  const envelope: Record<string, unknown> = {};
-  if (typeof parsed.id === 'string') envelope.id = parsed.id;
-  if (typeof parsed.object === 'string') envelope.object = parsed.object;
-  if (typeof parsed.created === 'number') envelope.created = parsed.created;
-  if (typeof parsed.model === 'string') envelope.model = parsed.model;
-  return JSON.stringify({ ...envelope, choices: parsed.choices.map(completionChoice) });
+  return JSON.stringify({ choices: parsed.choices.map(completionChoice) });
 }
 
 function completionChoice(choice: unknown): Record<string, unknown> {
   if (!isRecord(choice)) notUnderstood();
   const out: Record<string, unknown> = {};
-  if (typeof choice.index === 'number') out.index = choice.index;
   if (choice.finish_reason === null || typeof choice.finish_reason === 'string') {
     out.finish_reason = choice.finish_reason;
+  } else if (choice.finish_reason !== undefined) {
+    notUnderstood();
   }
   if (choice.message !== undefined) out.message = completionMessage(choice.message);
   return out;
@@ -431,7 +430,11 @@ function completionChoice(choice: unknown): Record<string, unknown> {
 function completionMessage(message: unknown): Record<string, unknown> {
   if (!isRecord(message)) notUnderstood();
   const out: Record<string, unknown> = {};
-  if (typeof message.role === 'string') out.role = message.role;
+  // The engine reads a present role as the assistant's. Any other value, null included, is refused.
+  if (message.role !== undefined) {
+    if (message.role !== 'assistant') notUnderstood();
+    out.role = message.role;
+  }
   if (message.content === null || typeof message.content === 'string') {
     out.content = message.content;
   } else if (message.content !== undefined) {
@@ -452,12 +455,11 @@ function completionMessage(message: unknown): Record<string, unknown> {
 function completionToolCall(call: unknown): Record<string, unknown> {
   if (!isRecord(call) || !isRecord(call.function)) notUnderstood();
   const fn = call.function;
+  if (typeof call.id !== 'string' || !TOOL_CALL_ID.test(call.id)) notUnderstood();
+  if (call.type !== undefined && call.type !== 'function') notUnderstood();
   if (typeof fn.name !== 'string' || typeof fn.arguments !== 'string') notUnderstood();
-  return {
-    ...(typeof call.id === 'string' ? { id: call.id } : {}),
-    ...(typeof call.type === 'string' ? { type: call.type } : {}),
-    function: { name: fn.name, arguments: fn.arguments },
-  };
+  // Written back as 'function': a provider requires that type when the call is sent again.
+  return { id: call.id, type: 'function', function: { name: fn.name, arguments: fn.arguments } };
 }
 
 /** The reply that leaves the broker holds no credential, and a refusal is not passed off as an answer. */

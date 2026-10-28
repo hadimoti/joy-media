@@ -238,16 +238,26 @@ export function JoyAgentSettingsDialog({
   const [savedProfile, setSavedProfile] = useState<DesktopProviderProfileState | undefined>(
     undefined,
   );
+  // The saved profiles are read when the dialog opens. Until they are read, the form cannot tell which saved
+  // profile its endpoint belongs to, so connect and discovery wait for the read, and refuse when it fails.
+  const [profilesReady, setProfilesReady] = useState(() => !isDesktopHost());
+  const [profilesUnreadable, setProfilesUnreadable] = useState(false);
   // The saved profiles for the endpoint the form describes. The profile the user chose among them is the
   // one used. When several share the endpoint and none is chosen, the endpoint is ambiguous: nothing connects.
   const describingProfiles = profiles.filter((p) =>
     profileDescribesForm(p, provider, normalizeProviderBaseUrl(baseUrl)),
   );
   const chosenDescribingProfile = describingProfiles.find((p) => p.id === savedProfile?.id);
+  // Once a profile is chosen, only that profile can match. Editing the endpoint away from it leaves the form
+  // matching nothing, so a key typed there saves a new profile rather than updating another saved one.
   const matchedProfile =
-    chosenDescribingProfile ??
-    (describingProfiles.length === 1 ? describingProfiles[0] : undefined);
+    savedProfile === undefined && describingProfiles.length === 1
+      ? describingProfiles[0]
+      : chosenDescribingProfile;
   const endpointAmbiguous = describingProfiles.length > 1 && chosenDescribingProfile === undefined;
+  const profilesNotReadyMessage = profilesUnreadable
+    ? 'The saved profiles could not be read. Close and reopen settings to try again.'
+    : 'The saved profiles are still loading.';
   // Whether any saved profile exists that the form does not describe. Named in the messages below.
   const hasOtherSavedProfiles = profiles.some(
     (p) => p.id !== undefined && p.state !== 'disabled-legacy',
@@ -288,6 +298,8 @@ export function JoyAgentSettingsDialog({
       const list = (await listDesktopProviderProfiles()) as readonly DesktopProviderProfileState[];
       if (!mountedRef.current) return;
       setProfiles(list);
+      setProfilesReady(true);
+      setProfilesUnreadable(false);
       // A profile the user chose stays chosen, and is refreshed from the list.
       const chosenId = selectedProfileIdRef.current;
       if (chosenId !== undefined) {
@@ -312,7 +324,7 @@ export function JoyAgentSettingsDialog({
         setCustomDisclosure(false);
       }
     } catch {
-      /* Ignore profile read error in background */
+      setProfilesUnreadable(true);
     }
   };
 
@@ -369,6 +381,10 @@ export function JoyAgentSettingsDialog({
       return;
     }
     const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
+    if (!profilesReady) {
+      setDiscoveryError(profilesNotReadyMessage);
+      return;
+    }
     if (endpointAmbiguous) {
       setDiscoveryError(
         'More than one saved profile uses this endpoint. Choose one in the list first.',
@@ -522,6 +538,11 @@ export function JoyAgentSettingsDialog({
   const connect = async () => {
     if (working) return;
     const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
+    if (!profilesReady) {
+      setConnectionNotice({ kind: 'error', message: profilesNotReadyMessage });
+      onNotice?.(profilesNotReadyMessage, 'error');
+      return;
+    }
     if (endpointAmbiguous) {
       const message =
         'More than one saved profile uses this endpoint. Choose one in the list first.';

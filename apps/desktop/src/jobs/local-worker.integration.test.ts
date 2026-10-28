@@ -5,7 +5,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createFileRegistry } from '../main/file-registry.js';
 import { LocalDatabase } from '../store/local-database.js';
 import type { DispatchJob } from './job-dispatch.js';
@@ -26,6 +26,9 @@ import { localWorkerEnv } from './worker-env.js';
 // The Worker build sits beside this package, so it is located from this file, not from the cwd.
 const workerDir = fileURLToPath(new URL('../../../worker/', import.meta.url));
 const workerEntry = join(workerDir, 'dist', 'index.js');
+const tscEntry = fileURLToPath(
+  new URL('../../../../node_modules/typescript/bin/tsc', import.meta.url),
+);
 // Above the Worker's 10 s heartbeat interval (apps/worker/src/worker-daemon.ts). At 3 s, a job that is slow under load can
 // expire before its first heartbeat. That is the lease rule working as designed, and it was the survives flake (2026-10-28).
 const LEASE_CAP_MS = 20_000;
@@ -40,6 +43,15 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
   let videoPath: string;
   let sourceDelayMs = 0;
   let stopApiReads: () => void;
+
+  // The Worker runs from its build, so the build is brought up to date from its source before any test starts.
+  // An old build would otherwise pass or fail for reasons the current source does not have.
+  beforeAll(() => {
+    execFileSync(process.execPath, [tscEntry, '-b', workerDir], {
+      stdio: 'pipe',
+      timeout: 120_000,
+    });
+  }, 150_000);
 
   beforeEach(async () => {
     if (!existsSync(workerEntry))

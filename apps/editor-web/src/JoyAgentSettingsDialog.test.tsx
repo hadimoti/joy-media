@@ -986,6 +986,109 @@ describe('JOY Agent Settings saved profile connect', () => {
     );
   });
 
+  it('saves a new profile when the endpoint is edited away from the chosen one, and leaves the other profile alone', async () => {
+    const [international, china] = findRegistryProvider('minimax')?.regions ?? [];
+    if (international === undefined || china === undefined) throw new Error('Expected two regions');
+    const base = {
+      provider: 'minimax',
+      modelId: 'MiniMax-M2',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: true,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        return [
+          { ...base, id: 'prof-intl', name: 'International', baseUrl: international.baseUrl },
+          { ...base, id: 'prof-china', name: 'China', baseUrl: china.baseUrl },
+        ];
+      }
+      if (channel === 'desktop.provider-profile.save') {
+        return { ...base, id: 'prof-new', name: 'New', baseUrl: china.baseUrl };
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const useFor = (name: string): HTMLButtonElement => {
+      const card = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent?.trim() === name,
+      );
+      const use = [...(card?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (button) => button.textContent?.trim() === 'Use',
+      );
+      if (use === undefined) throw new Error(`Expected a Use button on ${name}`);
+      return use;
+    };
+
+    await act(async () => {
+      useFor('International').click();
+      await Promise.resolve();
+    });
+    expect(engineClient.configure).toHaveBeenCalledWith(
+      expect.objectContaining({ profileId: 'prof-intl' }),
+    );
+    const regionSelect = [...rendered.querySelectorAll('label')]
+      .find((label) => label.textContent?.includes('Region'))
+      ?.querySelector('select');
+    if (regionSelect === undefined || regionSelect === null) {
+      throw new Error('Expected the region select');
+    }
+    await act(async () => {
+      regionSelect.value = china.id;
+      regionSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-typed-for-china');
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    const saves = invoke.mock.calls.filter(
+      ([channel]) => channel === 'desktop.provider-profile.save',
+    );
+    expect(saves).toHaveLength(1);
+    expect(saves[0]?.[1]).toEqual(
+      expect.objectContaining({ provider: 'minimax', apiKey: 'sk-typed-for-china' }),
+    );
+    expect(saves[0]?.[1]).not.toHaveProperty('id', 'prof-china');
+  });
+
+  it('refuses to connect a typed key until the saved profiles have been read, so it cannot save beside them', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') throw new Error('profile store unavailable');
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-typed-while-unread');
+    });
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(rendered.textContent).toContain('The saved profiles could not be read.');
+  });
+
   it('does not pick one of several saved profiles on the same endpoint when the dialog opens', async () => {
     const shared = {
       provider: 'openrouter',

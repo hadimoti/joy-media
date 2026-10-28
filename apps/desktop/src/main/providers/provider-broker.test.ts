@@ -923,11 +923,9 @@ describe('provider broker: the reply that leaves the broker', () => {
     expect(result.data.text).not.toContain('base_url');
     expect(result.data.text).not.toContain('provider_note');
     expect(result.data.text).not.toContain('annotations');
-    expect(JSON.parse(result.data.text)).toMatchObject({
-      id: 'c1',
+    expect(JSON.parse(result.data.text)).toEqual({
       choices: [
         {
-          index: 0,
           finish_reason: 'stop',
           message: {
             role: 'assistant',
@@ -978,8 +976,7 @@ describe('provider broker: the reply that leaves the broker', () => {
     if (!result.ok) throw new Error('expected a reply');
     expect(result.data.text).not.toContain('base_url');
     expect(result.data.text).not.toContain('endpoint');
-    expect(JSON.parse(result.data.text)).toMatchObject({
-      id: 'c2',
+    expect(JSON.parse(result.data.text)).toEqual({
       choices: [
         {
           finish_reason: 'tool_calls',
@@ -996,6 +993,116 @@ describe('provider broker: the reply that leaves the broker', () => {
           },
         },
       ],
+    });
+  });
+
+  it('drops the envelope the engine never reads, including a model string that holds a URL', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          id: 'chat-1',
+          object: 'chat.completion',
+          created: 1,
+          model: 'http://127.0.0.1:1234/v1',
+          usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
+          choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'answer' } }],
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected a reply');
+    expect(result.data.text).not.toContain('127.0.0.1');
+    expect(JSON.parse(result.data.text)).toEqual({
+      choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'answer' } }],
+    });
+  });
+
+  it('refuses a tool call id that is not an id, such as a URL, and keeps an id with dots and colons', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    let callId = 'http://127.0.0.1:1234/v1';
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          choices: [
+            {
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  {
+                    id: callId,
+                    type: 'function',
+                    function: { name: 'read_file', arguments: '{}' },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+    });
+
+    expect(await broker.complete({ profileId: 'p1', body: CHAT_BODY })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+    });
+
+    callId = 'functions.read_file:0';
+    const kept = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+    expect(kept.ok).toBe(true);
+    if (!kept.ok) throw new Error('expected a reply');
+    expect(JSON.parse(kept.data.text).choices[0].message.tool_calls[0]).toEqual({
+      id: 'functions.read_file:0',
+      type: 'function',
+      function: { name: 'read_file', arguments: '{}' },
+    });
+  });
+
+  it.each([null, 'user'])(
+    'refuses a message whose role is %s, which the engine would read as absent',
+    async (role) => {
+      const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+      const { broker } = harness({
+        profiles: [p],
+        keys: { [p.secretHandleId]: KEY },
+        reply: () => jsonReply({ choices: [{ message: { role, content: 'a probe answer' } }] }),
+      });
+
+      expect(await broker.complete({ profileId: 'p1', body: CHAT_BODY })).toMatchObject({
+        ok: false,
+        code: 'PROVIDER_INCOMPATIBLE',
+      });
+    },
+  );
+
+  it('drops the id and usage of a Claude reply, which the engine never reads', async () => {
+    const p = bound('p1', 'claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          id: 'http://127.0.0.1:1234/v1',
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: 'hi' }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected a reply');
+    expect(result.data.text).not.toContain('127.0.0.1');
+    expect(JSON.parse(result.data.text)).toEqual({
+      choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'hi' } }],
     });
   });
 

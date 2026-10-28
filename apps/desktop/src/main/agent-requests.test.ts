@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { AgentRequestRegistry, cancelWhenPageGoes } from './agent-requests.js';
 
@@ -68,5 +70,17 @@ describe('AgentRequestRegistry', () => {
     browserWindow.emit('closed');
 
     expect(call.signal.aborted).toBe(true);
+  });
+});
+
+describe('the desktop entry point', () => {
+  it('ends the calls in progress when the main window goes', () => {
+    // electron-entry.ts loads Electron, so it cannot be imported here. Its source must make the wiring call.
+    const entry = readFileSync(
+      fileURLToPath(new URL('./electron-entry.ts', import.meta.url)),
+      'utf8',
+    );
+
+    expect(entry).toContain('cancelWhenPageGoes(agentRequests, win);');
   });
 });
