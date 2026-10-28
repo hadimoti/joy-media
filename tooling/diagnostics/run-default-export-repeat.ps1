@@ -509,9 +509,14 @@ function Invoke-SelfTest {
     $exitSteps = @(New-AcceptanceSteps -Records $thirty -Limits $limits -ExportRecord $exportExit)
     Assert-Same ($exitSteps[1].result) 'fail' 'an exit in the export run fails gpu-process-exits'
     # An export run that did not measure cleanly fails the GPU step, even with a zero count.
-    $exportBroken = [pscustomobject]@{ specPassed = $false; gpuExitsTotal = 0; harnessError = 'the Windows Error Reporting query failed' }
+    # The spec passed, so only the harness error makes the step fail.
+    $exportBroken = [pscustomobject]@{ specPassed = $true; gpuExitsTotal = 0; harnessError = 'the Windows Error Reporting query failed' }
     $brokenSteps = @(New-AcceptanceSteps -Records $thirty -Limits $limits -ExportRecord $exportBroken)
     Assert-Same ($brokenSteps[1].result) 'fail' 'an export run that did not measure cleanly fails gpu-process-exits'
+    # The counterpart: a clean export run, with no harness error, does not fail the GPU step.
+    $exportCleanRecord = [pscustomobject]@{ specPassed = $true; gpuExitsTotal = 0; harnessError = $null }
+    $cleanExportSteps = @(New-AcceptanceSteps -Records $thirty -Limits $limits -ExportRecord $exportCleanRecord)
+    Assert-Same ($cleanExportSteps[1].result) 'pass' 'a clean export run with no harness error passes gpu-process-exits'
 
     # End to end through the real spec-run path: the poll loop, the sampling and the records. A scripted process stands in for
     # Playwright, and a function stands in for nvidia-smi. No app and no GPU are used.
