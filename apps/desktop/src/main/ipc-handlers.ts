@@ -14,6 +14,7 @@ import type {
   ProviderProfile,
 } from '../store/local-database.js';
 import { LEGACY_PROVIDER_IDS } from '../store/migrations.js';
+import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
 import type { DirectProviderProbeReport, SecretStore } from '@joy-media/provider-sdk';
 
@@ -43,6 +44,10 @@ export type ProbeProvider = (request: {
 export interface IpcHandlerDeps {
   readonly fileRegistry: FileRegistry;
   readonly workerSupervisor: WorkerSupervisor;
+  /** The `desktop.media.*` handlers (media-channel.ts). Absent means every media call is refused. */
+  readonly mediaChannel?: Readonly<
+    Record<MediaChannel, (payload: unknown) => MediaResult | Promise<MediaResult>>
+  >;
   readonly showOpenDialog: ShowOpenDialog;
   readonly showOpenDirectoryDialog?: ShowOpenDialog;
   readonly localDatabase: LocalDatabase;
@@ -70,6 +75,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
   const newId = deps.newId ?? (() => crypto.randomUUID());
 
   return {
+    ...mediaChannelTable(deps.mediaChannel),
     'desktop.select-file': async () => {
       const result = await deps.showOpenDialog();
       if (result.canceled || result.path === undefined) return { ok: true, data: undefined };
@@ -456,6 +462,16 @@ function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileReques
       : {}),
     apiKey: candidate['apiKey'],
   };
+}
+
+/** Every `desktop.media.*` channel, refused when no media handlers were supplied. */
+function mediaChannelTable(
+  handlers: IpcHandlerDeps['mediaChannel'],
+): Record<MediaChannel, IpcHandler> {
+  const refused: IpcHandler = () => ({ ok: false, error: 'Media channel is not available' });
+  return Object.fromEntries(
+    MEDIA_CHANNELS.map((channel) => [channel, handlers?.[channel] ?? refused]),
+  ) as Record<MediaChannel, IpcHandler>;
 }
 
 /** Shown for a v1.0.x profile that v1.1.0 no longer offers (PLAN-v4 §9a). */

@@ -22,7 +22,7 @@ import {
 } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path, { dirname, join } from 'node:path';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseProjectDeepLink } from '../deep-link.js';
 import { createFileRegistry } from './file-registry.js';
@@ -38,6 +38,10 @@ import {
 import { registerShutdownHooks } from './shutdown.js';
 import { resolveDesktopPaths } from '../store/paths.js';
 import { LocalDatabase } from '../store/local-database.js';
+import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
+import { startLocalJobApi, type LocalJobApi } from '../jobs/local-job-api.js';
+import { localWorkerEnv } from '../jobs/worker-env.js';
+import { createMediaChannelHandlers } from './media-channel.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { probeOpenAiCompatibleProvider } from '@joy-media/provider-sdk';
@@ -83,11 +87,21 @@ if (!app.requestSingleInstanceLock()) {
   localDatabase.recoverInterrupted();
 
   const fileRegistry = createFileRegistry();
+  const jobOrchestrator = createJobOrchestrator({ store: localDatabase.jobDispatch });
+  const workerRoot = join(app.getPath('userData'), 'worker');
+  mkdirSync(workerRoot, { recursive: true });
+  // Started in app.whenReady, before any window loads. The Worker gets its loopback URL and token
+  // only once it has started, so its environment is read at spawn time.
+  let localJobApi: LocalJobApi | undefined;
   const workerEntry = resolveWorkerEntry({ mainDirname: __dirname, execPath: process.execPath });
   const workerSupervisor = createWorkerSupervisor({
     spawn: (command, args, options) => spawn(command, args, options),
     command: workerEntry.command,
     args: workerEntry.args,
+    env: () =>
+      localJobApi === undefined
+        ? undefined
+        : localWorkerEnv(process.env, { apiEnv: localJobApi.workerEnv, workerRoot }),
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
   // Marks, but never deletes, any profile whose stored key cannot be read (PLAN-v4 §9c).
@@ -96,6 +110,10 @@ if (!app.requestSingleInstanceLock()) {
     fileRegistry,
     workerSupervisor,
     localDatabase,
+    mediaChannel: createMediaChannelHandlers({
+      orchestrator: jobOrchestrator,
+      jobStore: localDatabase.jobDispatch,
+    }),
     probeMedia: async (path) => {
       const probe = await checksumFile(path);
       return { ...probe, kind: classifyMediaKind(path) };
@@ -157,7 +175,24 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    try {
+      localJobApi = await startLocalJobApi({
+        orchestrator: jobOrchestrator,
+        derivativeDirectory: join(paths.mediaRoot, 'derivatives'),
+        sourceSize: async (refId) =>
+          statSync(fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: '' }))
+            .size,
+        readSource: async (refId) =>
+          readFileSync(
+            fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: '' }),
+          ),
+        onWarning: (message) => console.warn(message),
+      });
+    } catch (error) {
+      // Without the local API the Worker cannot connect. The rest of the app still opens.
+      console.error('local job API did not start', error);
+    }
     Menu.setApplicationMenu(null);
     app.setAsDefaultProtocolClient('joy');
 
@@ -308,6 +343,7 @@ if (!app.requestSingleInstanceLock()) {
         // wired here: no IPC channel opens/saves a project through it yet (see
         // docs/joy-media-final-migration-progress.md's wave 2 entry). LocalDatabase is the
         // one open handle this process holds today.
+        void localJobApi?.close().catch(() => undefined);
         localDatabase.close();
       },
       quit: () => app.quit(),
