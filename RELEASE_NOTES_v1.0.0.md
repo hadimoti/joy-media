@@ -21,9 +21,10 @@ JOY Media is a modern, 100% offline-first desktop non-linear video editor (NLE) 
 > This initial community release is currently **unsigned** (it does not yet include a commercial Authenticode Code Signing Certificate).
 >
 > When launching `joy-media-setup.exe`, Windows SmartScreen may display a warning:
-> *"Windows protected your PC / Microsoft Defender SmartScreen prevented an unrecognized app from starting"*.
+> _"Windows protected your PC / Microsoft Defender SmartScreen prevented an unrecognized app from starting"_.
 >
 > **How to install:**
+>
 > 1. Click **More info**.
 > 2. Click **Run anyway**.
 >
@@ -33,11 +34,11 @@ JOY Media is a modern, 100% offline-first desktop non-linear video editor (NLE) 
 
 ### Downloads & Assets
 
-| File | Type | Description |
-|---|---|---|
-| `joy-media-setup.exe` | Windows Installer | One-click setup with Start Menu & Desktop shortcuts and user PATH configuration |
-| `joy-media-windows-x64-v1.0.0.zip` | Portable Archive | Fully self-contained portable application |
-| `SHA256SUMS.txt` | Integrity | SHA256 checksums for all release binaries |
+| File                               | Type              | Description                                                                     |
+| ---------------------------------- | ----------------- | ------------------------------------------------------------------------------- |
+| `joy-media-setup.exe`              | Windows Installer | One-click setup with Start Menu & Desktop shortcuts and user PATH configuration |
+| `joy-media-windows-x64-v1.0.0.zip` | Portable Archive  | Fully self-contained portable application                                       |
+| `SHA256SUMS.txt`                   | Integrity         | SHA256 checksums for all release binaries                                       |
 
 #### SHA256 Checksums
 
