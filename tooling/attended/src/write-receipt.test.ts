@@ -22,7 +22,10 @@ const A1_STEPS = [
 ];
 const G2_STEPS = [
   { id: 'default-launches', result: 'pass', measurement: 30, unit: 'launches' },
-  { id: 'export-spec', result: 'pass' },
+  { id: 'gpu-process-exits', result: 'pass', measurement: 0, unit: 'exits' },
+  { id: 'fallback-relaunches', result: 'pass', measurement: 0, unit: 'runs' },
+  { id: 'encoder-sessions-during-export', result: 'pass', measurement: 1, unit: 'sessions' },
+  { id: 'export-spec', result: 'pass', measurement: 1, unit: 'spec' },
 ];
 
 let directory: string;
@@ -265,5 +268,17 @@ describe('attended session receipts', () => {
     });
     expect(run(args).status).toBe(0);
     expect(JSON.parse(readFileSync(argValue(args, '--out'), 'utf8')).verdict).toBe('not-accepted');
+  });
+
+  it('refuses a G2 receipt that leaves out a GPU step, and writes nothing', () => {
+    const args = receiptArgs({
+      session: 'G2',
+      thresholds: g2ThresholdsFile(),
+      steps: G2_STEPS.filter((step) => step.id !== 'gpu-process-exits'),
+    });
+    const result = run(args);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/gpu-process-exits/u);
+    expect(existsSync(argValue(args, '--out'))).toBe(false);
   });
 });

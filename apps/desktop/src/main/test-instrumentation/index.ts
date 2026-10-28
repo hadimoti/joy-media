@@ -9,6 +9,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { installGpuDiagnostics } from './gpu-diagnostics.js';
 import { GpuEventLog, nodeGpuEventFileSystem } from './gpu-event-log.js';
+import { disableProtocolRegistration } from './protocol-registration.js';
 
 /** Test-only switch: the user-data folder for this launch. A G1 session keeps all its data in one folder this way. */
 export const TEST_USER_DATA_SWITCH = '--joy-media-test-user-data=';
@@ -34,6 +35,8 @@ function appendUserDataLine(file: string, line: string): void {
 
 /** Wires every test-only hook. electron-entry.ts calls this once, before the app is ready. */
 export function installTestInstrumentation(argv: readonly string[]): void {
+  // The instrumented build must not change the owner's joy:// registration. See protocol-registration.ts.
+  disableProtocolRegistration(app);
   const userData = testUserDataFromArgv(argv);
   if (userData !== undefined) app.setPath('userData', userData);
 

@@ -42,7 +42,13 @@ const REQUIRED_THRESHOLDS = {
 // G1 records a diagnosis and has no pass gate, so it has no required steps.
 const REQUIRED_STEPS = {
   G1: [],
-  G2: ['default-launches', 'export-spec'],
+  G2: [
+    'default-launches',
+    'gpu-process-exits',
+    'fallback-relaunches',
+    'encoder-sessions-during-export',
+    'export-spec',
+  ],
   A1: [
     'sign-in',
     'restart-keeps-session',
