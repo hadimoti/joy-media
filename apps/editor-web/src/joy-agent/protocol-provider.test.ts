@@ -31,6 +31,11 @@ describe('provider messages on the agent protocol', () => {
     );
   });
 
+  it('refuses a provider request body larger than the largest legal observation batch', () => {
+    const oversized = { messages: [{ role: 'user', content: 'x'.repeat(32 * 1024 * 1024) }] };
+    expect(isWorkerToMainMessage({ ...providerRequest, body: oversized })).toBe(false);
+  });
+
   it('accepts a provider response from the main thread, a reply or a code, and nothing else', () => {
     const response = {
       protocolVersion: JOY_AGENT_PROTOCOL_VERSION,

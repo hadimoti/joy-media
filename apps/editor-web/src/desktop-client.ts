@@ -1,3 +1,4 @@
+import { evaluateEndpoint } from '@joy-media/provider-sdk';
 import { ProviderCallError, type ProviderCallRequest } from './joy-agent/provider-call.js';
 /**
  * Typed helpers for the desktop host bridge (`window.joyDesktop`), injected by
@@ -106,7 +107,14 @@ export interface DiscoveredModel {
 export async function saveDesktopProviderProfile(
   request: SaveDesktopProviderProfileRequest,
 ): Promise<DesktopProviderProfile> {
-  const data = await requireBridge().invoke('desktop.provider-profile.save', request);
+  // A new profile for a local endpoint may be saved with no key (PLAN-v4 D8). It is stored with the
+  // placeholder, so the profile still reads as having a key. An existing profile is left alone.
+  const keyless = request.apiKey === undefined || request.apiKey === '';
+  const verdict = evaluateEndpoint(request.provider, request.baseUrl);
+  const local = verdict.allowed && verdict.kind === 'loopback';
+  const payload =
+    request.id === undefined && keyless && local ? { ...request, apiKey: 'not-provided' } : request;
+  const data = await requireBridge().invoke('desktop.provider-profile.save', payload);
   return data as DesktopProviderProfile;
 }
 

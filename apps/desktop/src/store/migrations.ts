@@ -1,3 +1,4 @@
+import { bindUnboundProfiles } from './profile-binding.js';
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
@@ -51,6 +52,14 @@ interface OneTimeStep {
 }
 
 const ONE_TIME_STEPS: readonly OneTimeStep[] = [
+  {
+    id: 'v110.bind-legacy-profiles',
+    // A v1.0.x profile was saved with its key and its URL together, so its stored URL is the one
+    // the key was given for. Bound once, here, when the endpoint policy allows that URL (§6c, §9a).
+    run: (db) => {
+      bindUnboundProfiles(db, new Date().toISOString());
+    },
+  },
   {
     id: 'v110.update-settings-ignored',
     // Nothing to write. Update settings from v1.0.x are ignored by v1.1.0 and are not deleted,

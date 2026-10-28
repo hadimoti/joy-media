@@ -275,6 +275,7 @@ export class WorkerControlPlaneClient {
    */
   async completeAi(
     jobId: string,
+    leaseToken: string,
     input: {
       readonly messages: readonly unknown[];
       readonly params?: Readonly<Record<string, unknown>>;
@@ -282,7 +283,7 @@ export class WorkerControlPlaneClient {
   ): Promise<string> {
     const result = await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/ai/complete`,
-      { jobId, messages: input.messages, params: input.params ?? {} },
+      { jobId, leaseToken, messages: input.messages, params: input.params ?? {} },
     );
     const text = isRecord(result) ? result['text'] : undefined;
     if (typeof text !== 'string') throw new Error('The desktop returned an unreadable AI reply');

@@ -11,6 +11,7 @@ import type {
 import { CloseIcon } from './icons.js';
 import { sessionProviderFor } from './joy-agent/provider-call.js';
 import {
+  evaluateEndpoint,
   findRegistryProvider,
   PROVIDER_REGISTRY,
   type ProviderRegionId,
@@ -55,6 +56,12 @@ type DialogProvider = 'openrouter' | 'openai-compatible' | RegistryProviderId;
 /** The engine runs every registry provider on the chat transport, so its status names that transport. */
 function statusProviderFor(provider: DialogProvider): 'openrouter' | 'openai-compatible' {
   return provider === 'openrouter' ? 'openrouter' : 'openai-compatible';
+}
+
+/** A local endpoint with no key: the one case in which a profile is saved without a key (PLAN-v4 D8). */
+function isKeylessLocalEndpoint(baseUrl: string): boolean {
+  const verdict = evaluateEndpoint('openai-compatible', baseUrl);
+  return verdict.allowed && verdict.kind === 'loopback';
 }
 
 /** The saved-profile fields a connect needs. */
@@ -426,6 +433,7 @@ export function JoyAgentSettingsDialog({
     setDiscoveryError(null);
 
     const key = keyRef.current?.value.trim() ?? '';
+    const keylessLocal = isKeylessLocalEndpoint(normalizedBaseUrl);
     const normalizedModelId = modelId.trim();
     const savedProfileMatches = Boolean(
       savedProfile &&
@@ -442,7 +450,7 @@ export function JoyAgentSettingsDialog({
 
     if (provider === 'openai-compatible') {
       const missing: string[] = [];
-      if (!key && !reuseSavedKey)
+      if (!key && !reuseSavedKey && !keylessLocal)
         missing.push(
           savedProfile?.id && !savedProfileMatches
             ? 'a new API key because the saved key belongs to a different provider or endpoint'
@@ -468,7 +476,7 @@ export function JoyAgentSettingsDialog({
       }
     }
 
-    if (!key && !reuseSavedKey) {
+    if (!key && !reuseSavedKey && !keylessLocal) {
       const message =
         savedProfile?.id && !savedProfileMatches
           ? 'The saved API key belongs to a different provider or endpoint. Enter a new API key to connect.'
@@ -494,7 +502,7 @@ export function JoyAgentSettingsDialog({
     }
 
     try {
-      if (isDesktopHost() && key) {
+      if (isDesktopHost() && (key || keylessLocal)) {
         const saved = await saveDesktopProviderProfile({
           provider: provider === 'openai-compatible' ? 'custom' : provider,
           name: connectionName.trim() || undefined,

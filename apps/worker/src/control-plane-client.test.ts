@@ -122,7 +122,7 @@ describe('WorkerControlPlaneClient', () => {
       },
     });
 
-    const text = await client.completeAi('job-1', {
+    const text = await client.completeAi('job-1', 'lease-1', {
       messages: [{ role: 'user', content: 'hi' }],
       params: { temperature: 0.2 },
     });
@@ -133,6 +133,7 @@ describe('WorkerControlPlaneClient', () => {
     expect(requests[0]?.auth).toBe('Bearer local-token');
     expect(requests[0]?.body).toEqual({
       jobId: 'job-1',
+      leaseToken: 'lease-1',
       messages: [{ role: 'user', content: 'hi' }],
       params: { temperature: 0.2 },
     });
@@ -150,7 +151,7 @@ describe('WorkerControlPlaneClient', () => {
       fetch: async () => response(200, { data: { unexpected: true } }),
     });
 
-    await expect(client.completeAi('job-1', { messages: [] })).rejects.toThrow(
+    await expect(client.completeAi('job-1', 'lease-1', { messages: [] })).rejects.toThrow(
       'The desktop returned an unreadable AI reply',
     );
   });

@@ -71,6 +71,7 @@ describe('v1.1.0 migrations', () => {
     insertProfile(db, 'p-kilo', 'kilo');
 
     expect(runMigrations(db, { now: NOW })).toEqual([
+      'v110.bind-legacy-profiles',
       'v110.update-settings-ignored',
       'v110.legacy-profiles',
     ]);
@@ -111,6 +112,7 @@ describe('v1.1.0 migrations', () => {
     // finished before it stays recorded, and it is not run again.
     expect(listProfileStates(db)).toEqual([]);
     expect(db.prepare('SELECT step FROM migration_state').all()).toEqual([
+      { step: 'v110.bind-legacy-profiles' },
       { step: 'v110.update-settings-ignored' },
     ]);
 

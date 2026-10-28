@@ -812,6 +812,67 @@ describe('legacy provider profiles (v1.1.0)', () => {
     expect(await d.secretStore.get(secretHandle)).toBe('sk-kept');
   });
 
+  it('saves a new key to a new handle, and removes the old key only after the profile points at it', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const saved = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'm',
+        apiKey: 'sk-old-key',
+      },
+    });
+    const id = (saved.data as { id: string }).id;
+    const oldHandle = d.localDatabase.getProviderProfile(id)?.secretHandleId ?? '';
+
+    const resaved = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        id,
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'm',
+        apiKey: 'sk-new-key',
+      },
+    });
+
+    expect(resaved.ok).toBe(true);
+    const newHandle = d.localDatabase.getProviderProfile(id)?.secretHandleId ?? '';
+    expect(newHandle).not.toBe(oldHandle);
+    expect(await d.secretStore.get(newHandle)).toBe('sk-new-key');
+    expect(await d.secretStore.get(oldHandle)).toBeNull();
+  });
+
+  it('saves a keyless local profile with the placeholder, and refuses a keyless remote one', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const local = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        modelId: 'llama3',
+      },
+    });
+
+    expect(local.ok).toBe(true);
+    const handle =
+      d.localDatabase.getProviderProfile((local.data as { id: string }).id)?.secretHandleId ?? '';
+    expect(await d.secretStore.get(handle)).toBe('not-provided');
+
+    const remote = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', modelId: 'm' },
+    });
+    expect(remote).toEqual({ ok: false, error: 'An API key is required for this endpoint' });
+  });
+
   it('desktop.agent.request sends the request through the broker and returns the reply text only', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);

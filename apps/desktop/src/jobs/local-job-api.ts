@@ -15,6 +15,8 @@ import { MAX_LOCAL_ORIGINAL_BYTES } from '../main/local-originals.js';
 const MAX_JSON_BYTES = 64 * 1024;
 /** Largest AI request a Worker may send (PLAN-v4 §6b). */
 export const MAX_AI_REQUEST_BYTES = 1024 * 1024;
+/** Largest reply the Worker route returns, with its JSON envelope counted (PLAN-v4 §6b). */
+export const MAX_AI_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_DERIVATIVE_BYTES = 64 * 1024 * 1024;
 /**
  * Largest source served over the loopback route. It is the registration limit, so every original
@@ -220,17 +222,16 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
     const body = await readJson(request, MAX_AI_REQUEST_BYTES, 413);
     const jobId = typeof body.jobId === 'string' ? body.jobId : '';
     if (!ID_PATTERN.test(jobId)) throw new JobProtocolError(422, 'invalid job id');
+    const leaseToken = typeof body.leaseToken === 'string' ? body.leaseToken : '';
     const job = orchestrator.get(jobId);
     if (job === undefined) throw new JobProtocolError(404, 'unknown job');
     if (job.workerId !== workerId) {
       throw new JobProtocolError(403, 'the job is not leased to this Worker');
     }
-    if (job.status !== 'running') throw new JobProtocolError(409, 'the job is not running');
+    // The lease token, the running status and the expiry are checked exactly as the other job
+    // routes check them. A stale or cancelled lease is refused here too (PLAN-v4 §6b item 2).
+    orchestrator.assertLeaseHolder(workerId, jobId, leaseToken);
     if (job.cancelRequested) throw new JobProtocolError(409, 'the job was cancelled');
-    // An expired lease is no lease: the Worker may not spend on the job any more.
-    if (job.leaseExpiresAt === undefined || Date.parse(job.leaseExpiresAt) <= Date.now()) {
-      throw new JobProtocolError(409, 'the lease has expired');
-    }
     if (job.profileId === undefined) throw new JobProtocolError(409, 'the job has no AI profile');
     // Only messages and the sampling parameters come from the Worker. Any other field, including a
     // profile name or a model, is left out here and dropped again by the broker's allow-list.
@@ -243,6 +244,12 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
     if (!result.ok) {
       sendError(response, result.status, result.message);
       return;
+    }
+    // JSON escaping can grow a reply well past its text length, so the envelope is counted.
+    if (
+      Buffer.byteLength(JSON.stringify({ data: { text: result.text } })) > MAX_AI_RESPONSE_BYTES
+    ) {
+      throw new JobProtocolError(502, 'the reply is too large');
     }
     sendData(response, { text: result.text });
   }

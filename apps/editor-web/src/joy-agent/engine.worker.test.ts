@@ -358,7 +358,7 @@ describe('JOY Agent Engine Worker V2', () => {
     vi.useFakeTimers();
     worker.send({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type: 'test' });
 
-    await vi.advanceTimersByTimeAsync(15_001);
+    await vi.advanceTimersByTimeAsync(45_001);
     await Promise.resolve();
 
     expect(worker.output).toContainEqual(

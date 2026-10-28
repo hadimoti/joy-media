@@ -736,7 +736,7 @@ describe('provider broker: request and reply rules', () => {
     ).toMatchObject({ ok: false, code: 'REQUEST_INVALID' });
   });
 
-  it('asks Anthropic for its first page of 1000 models, and maps a refusal to a content filter', async () => {
+  it('asks Anthropic for its first page of 1000 models, and refuses a refusal rather than passing it on as an answer', async () => {
     const p = bound('p1', 'claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5');
     const { broker, sent } = harness({
       profiles: [p],
@@ -753,11 +753,7 @@ describe('provider broker: request and reply rules', () => {
     expect(sent[0]?.url).toBe('https://api.anthropic.com/v1/models?limit=1000');
 
     const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('expected a reply');
-    expect(JSON.parse(result.data.text)).toMatchObject({
-      choices: [{ finish_reason: 'content_filter' }],
-    });
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
   });
 
   it('accepts a request body up to the agent limit by default, and refuses past it', async () => {
@@ -779,5 +775,117 @@ describe('provider broker: request and reply rules', () => {
         body: { messages: [{ role: 'user', content: 'x'.repeat(MAX_AGENT_REQUEST_BYTES) }] },
       }),
     ).toMatchObject({ ok: false, code: 'REQUEST_TOO_LARGE' });
+  });
+});
+
+describe('provider broker: the reply that leaves the broker', () => {
+  it('refuses an Anthropic key split across two text blocks, which the join would rejoin', async () => {
+    const p = bound('p1', 'claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          id: 'msg_3',
+          stop_reason: 'end_turn',
+          content: [
+            { type: 'text', text: 'sk-test-0123' },
+            { type: 'text', text: '456789abcdef' },
+          ],
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+    expect(JSON.stringify(result)).not.toContain(KEY);
+  });
+
+  it('refuses a key written as a JSON property name with escapes', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () => new Response('{"\\u0073k-test-0123456789abcdef":1}', { status: 200 }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+    expect(JSON.stringify(result)).not.toContain(KEY);
+  });
+
+  it('refuses a model list that names the key, however it is escaped', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        new Response('{"data":[{"id":"\\u0073k-test-0123456789abcdef"}]}', { status: 200 }),
+    });
+
+    const result = await broker.listModels({ profileId: 'p1' });
+
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+    expect(JSON.stringify(result)).not.toContain(KEY);
+  });
+
+  it('never names a redirect target that holds the key in percent-encoded form', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://evil.example/x/%73k-test-0123456789abcdef' },
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result).toMatchObject({ ok: false, code: 'REDIRECT_REFUSED' });
+    expect(JSON.stringify(result)).not.toContain('%73k');
+    expect(JSON.stringify(result)).not.toContain('evil.example');
+  });
+
+  it('refuses an Anthropic reply that paused its turn, rather than passing it on as complete', async () => {
+    const p = bound('p1', 'claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          id: 'msg_4',
+          stop_reason: 'pause_turn',
+          content: [{ type: 'text', text: 'Let me' }],
+        }),
+    });
+
+    expect(await broker.complete({ profileId: 'p1', body: CHAT_BODY })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+      message: expect.stringContaining('paused'),
+    });
+  });
+
+  it('refuses a chat reply the model refused, rather than passing an empty answer on', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          choices: [
+            { finish_reason: 'content_filter', message: { role: 'assistant', content: null } },
+          ],
+        }),
+    });
+
+    expect(await broker.complete({ profileId: 'p1', body: CHAT_BODY })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+      message: expect.stringContaining('refused'),
+    });
   });
 });

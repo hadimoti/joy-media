@@ -267,6 +267,10 @@ describe('local job API', () => {
   describe('AI completion route (PLAN-v4 §6b)', () => {
     const aiPath = `/v1/workers/${WORKER}/ai/complete`;
     const messages = [{ role: 'user', content: 'hi' }];
+    let leaseToken = '';
+    async function leaseForAi(profileId?: string): Promise<void> {
+      leaseToken = (await queueThumbnailAndLease(profileId)).leaseToken;
+    }
 
     it('refuses a wrong token before reading the body', async () => {
       const response = await call(aiPath, { method: 'POST', body: '{}' }, 'wrong-token');
@@ -275,9 +279,10 @@ describe('local job API', () => {
     });
 
     it('completes for the profile attached to the job, and ignores a profile named in the body', async () => {
-      await queueThumbnailAndLease('prof-saved');
+      await leaseForAi('prof-saved');
       const response = await postJson(aiPath, {
         jobId: 'job-http',
+        leaseToken,
         profileId: 'attacker-profile',
         messages,
         params: { temperature: 0.1, profileId: 'attacker-profile', model: 'attacker-model' },
@@ -294,8 +299,19 @@ describe('local job API', () => {
       expect(JSON.stringify(aiRequests[0]?.body)).not.toContain('attacker');
     });
 
+    it("refuses a request whose lease token is not the job's, with 409", async () => {
+      await leaseForAi('prof-saved');
+      const response = await postJson(aiPath, {
+        jobId: 'job-http',
+        leaseToken: 'not-the-lease',
+        messages,
+      });
+      expect(response.status).toBe(409);
+      expect(aiRequests).toEqual([]);
+    });
+
     it('answers 403 when the job is leased to another Worker', async () => {
-      await queueThumbnailAndLease('prof-saved');
+      await leaseForAi('prof-saved');
       const response = await postJson('/v1/workers/worker-other/ai/complete', {
         jobId: 'job-http',
         messages,
@@ -305,32 +321,32 @@ describe('local job API', () => {
     });
 
     it('answers 409 once the job has finished, and never calls a provider', async () => {
-      const leased = await queueThumbnailAndLease('prof-saved');
+      await leaseForAi('prof-saved');
       await postJson(`/v1/workers/${WORKER}/jobs/job-http/fail`, {
         error: 'stopped',
-        leaseToken: leased.leaseToken,
+        leaseToken,
       });
-      const response = await postJson(aiPath, { jobId: 'job-http', messages });
+      const response = await postJson(aiPath, { jobId: 'job-http', leaseToken, messages });
       expect(response.status).toBe(409);
       expect(aiRequests).toEqual([]);
     });
 
     it('answers 409 for a job that has no AI profile', async () => {
-      await queueThumbnailAndLease();
-      const response = await postJson(aiPath, { jobId: 'job-http', messages });
+      await leaseForAi();
+      const response = await postJson(aiPath, { jobId: 'job-http', leaseToken, messages });
       expect(response.status).toBe(409);
       expect(aiRequests).toEqual([]);
     });
 
     it('answers 404 for an unknown job and 422 for a malformed job id', async () => {
-      await queueThumbnailAndLease('prof-saved');
+      await leaseForAi('prof-saved');
       expect((await postJson(aiPath, { jobId: 'missing-job', messages })).status).toBe(404);
       expect((await postJson(aiPath, { jobId: 'bad/id', messages })).status).toBe(422);
       expect(aiRequests).toEqual([]);
     });
 
     it('answers 413 for a request over the AI size limit, before any provider call', async () => {
-      await queueThumbnailAndLease('prof-saved');
+      await leaseForAi('prof-saved');
       const oversized = JSON.stringify({
         jobId: 'job-http',
         messages: [{ role: 'user', content: 'x'.repeat(MAX_AI_REQUEST_BYTES) }],
@@ -345,9 +361,9 @@ describe('local job API', () => {
     });
 
     it('passes the broker failure status and message through, with no credential', async () => {
-      await queueThumbnailAndLease('prof-saved');
+      await leaseForAi('prof-saved');
       aiReply = { ok: false, status: 502, message: 'The provider could not be reached.' };
-      const response = await postJson(aiPath, { jobId: 'job-http', messages });
+      const response = await postJson(aiPath, { jobId: 'job-http', leaseToken, messages });
       expect(response.status).toBe(502);
       const text = await response.text();
       expect(text).toContain('The provider could not be reached.');
@@ -355,17 +371,21 @@ describe('local job API', () => {
     });
 
     it('answers 409 for a cancelled job, and for a job whose lease has expired', async () => {
-      await queueThumbnailAndLease('prof-saved');
+      await leaseForAi('prof-saved');
       const held = database.jobDispatch.get('job-http');
       if (held === undefined) throw new Error('expected the leased job');
       database.jobDispatch.save({ ...held, cancelRequested: true });
-      expect((await postJson(aiPath, { jobId: 'job-http', messages })).status).toBe(409);
+      expect((await postJson(aiPath, { jobId: 'job-http', leaseToken, messages })).status).toBe(
+        409,
+      );
       database.jobDispatch.save({
         ...held,
         cancelRequested: false,
         leaseExpiresAt: '2000-01-01T00:00:00.000Z',
       });
-      expect((await postJson(aiPath, { jobId: 'job-http', messages })).status).toBe(409);
+      expect((await postJson(aiPath, { jobId: 'job-http', leaseToken, messages })).status).toBe(
+        409,
+      );
       expect(aiRequests).toEqual([]);
     });
   });

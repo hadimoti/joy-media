@@ -33,6 +33,7 @@ import {
   MAX_MULTIMODAL_ANALYSIS_TEXT_BYTES,
   type ObservationEvidencePayload,
   type MultimodalTransport,
+  MAX_MULTIMODAL_REQUEST_BYTES,
   MAX_MULTIMODAL_RESPONSE_BYTES,
 } from './multimodal-transport.js';
 import { issueObservationConsent } from './observation-consent.js';
@@ -65,7 +66,8 @@ import {
   type WorkerToMainMessage,
 } from './protocol.js';
 
-const CONNECTION_TIMEOUT_MS = 15_000;
+// Longer than the broker's own probe timeout (30 s), so a bounded refusal is shown, not a watchdog.
+const CONNECTION_TIMEOUT_MS = 45_000;
 const PROBE_MAX_BYTES = 64 * 1024;
 const MAX_PLAN_ONLY_RESULT_BYTES = 65_536;
 /** Explicit synthetic media probes are independently bounded below 16 KiB each. */
@@ -698,6 +700,9 @@ async function callProvider(
   maxBytes: number,
 ): Promise<BoundedProviderResponse> {
   if (signal.aborted) throw new JoyAgentWorkerError('JOY_AGENT_ABORTED', 'Run cancelled');
+  if (JSON.stringify(body).length > MAX_MULTIMODAL_REQUEST_BYTES) {
+    throw new JoyAgentWorkerError('JOY_AGENT_PROVIDER_INCOMPATIBLE', 'Provider request too large');
+  }
   providerRequestSequence += 1;
   const requestId = `provider-${providerRequestSequence}`;
   const result = await new Promise<ProviderCallResult>((resolve, reject) => {
@@ -805,7 +810,7 @@ async function testConnection(): Promise<void> {
           messages: [{ role: 'user', content: 'Use the joy_probe tool exactly once with {}.' }],
           tools: [probeTool],
           tool_choice: { type: 'function', function: { name: 'joy_probe' } },
-          max_tokens: 32,
+          max_tokens: 1024,
         } as const;
         const initialResponse = parseProviderEnvelope(
           (await callProvider(connection, initialRequest, controller.signal, PROBE_MAX_BYTES)).text,
@@ -825,7 +830,7 @@ async function testConnection(): Promise<void> {
             ],
             tools: [probeTool],
             tool_choice: 'none',
-            max_tokens: 32,
+            max_tokens: 1024,
           };
           continuationResponse = parseProviderEnvelope(
             (
@@ -851,7 +856,7 @@ async function testConnection(): Promise<void> {
                       'Reply with one brief confirmation that plan-only text mode is available.',
                   },
                 ],
-                max_tokens: 32,
+                max_tokens: 1024,
               },
               controller.signal,
               PROBE_MAX_BYTES,
@@ -1287,6 +1292,11 @@ function failureMessage(
     return { code: 'JOY_AGENT_TIMEOUT', message: 'Provider request timed out' };
   if (active.cancelledByUser || active.budgetCancellation === 'externally-cancelled')
     return { code: 'JOY_AGENT_ABORTED', message: 'JOY run stopped' };
+  // A refusal by the endpoint policy, the key binding or the request names its cause. That text is
+  // safe to show, so it is shown rather than a generic network message.
+  if (error instanceof JoyAgentWorkerError && error.code === 'JOY_AGENT_PROVIDER_INCOMPATIBLE') {
+    return { code: error.code, message: error.message.slice(0, 180) };
+  }
   const code = classifyError(error);
   if (code === 'JOY_AGENT_AUTH_FAILED') return { code, message: 'Provider authentication failed' };
   if (code === 'JOY_AGENT_RESPONSE_TOO_LARGE')

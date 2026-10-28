@@ -1,4 +1,3 @@
-import { bindUnboundProfiles } from './profile-binding.js';
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -207,8 +206,6 @@ export class LocalDatabase {
     );
     // Additive v1.1.0 migrations (see store/migrations.ts). Each step is transactional.
     runMigrations(this.db, { now: this.now, ...(options.migration ?? {}) });
-    // Legacy v1.0.x profiles get their endpoint binding on the first start (PLAN-v4 §9a, §6c).
-    bindUnboundProfiles(this.db, new Date().toISOString());
   }
 
   recordMedia(entry: MediaManifestEntry): void {

@@ -154,6 +154,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       let id = request.id;
       let secretHandleId: string;
       let createdAt: string;
+      let previousHandle: string | undefined;
       if (id !== undefined) {
         const existing = deps.localDatabase.getProviderProfile(id);
         if (existing === undefined) return { ok: false, error: 'Unknown provider profile id' };
@@ -165,7 +166,10 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         ) {
           return { ok: false, error: 'Enter the key again to change the endpoint' };
         }
-        secretHandleId = existing.secretHandleId;
+        // A new key gets a new handle. Until the profile points at it, the saved profile keeps its
+        // old handle, so a key is never paired with the wrong endpoint (PLAN-v4 §6c).
+        secretHandleId = request.apiKey === undefined ? existing.secretHandleId : newId();
+        if (secretHandleId !== existing.secretHandleId) previousHandle = existing.secretHandleId;
         createdAt = existing.createdAt;
       } else {
         id = newId();
@@ -184,6 +188,12 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
 
       if (request.apiKey !== undefined) {
         await deps.secretStore.set(secretHandleId, request.apiKey);
+      } else if (request.id === undefined) {
+        // A keyless local model stores the placeholder, so its profile still reads as present.
+        if (verdict.kind !== 'loopback') {
+          return { ok: false, error: 'An API key is required for this endpoint' };
+        }
+        await deps.secretStore.set(secretHandleId, 'not-provided');
       }
       const profile: ProviderProfile = {
         id,
@@ -198,6 +208,10 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         updatedAt: timestamp,
       };
       deps.localDatabase.saveProviderProfile(profile);
+      // The old key goes only now, after the profile points at the new one.
+      if (previousHandle !== undefined) {
+        await deps.secretStore.delete(previousHandle).catch(() => undefined);
+      }
       // A key saved again makes the profile usable again, without waiting for a restart.
       deps.localDatabase.clearProfileCredentialUnavailable(id);
       return { ok: true, data: listedProfile(profile) };
@@ -474,7 +488,6 @@ function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileReques
   const apiKey = candidate['apiKey'];
   const keyOmitted = apiKey === undefined || apiKey === '';
   if (!keyOmitted && typeof apiKey !== 'string') return undefined;
-  if (keyOmitted && candidate['id'] === undefined) return undefined;
   if (candidate['id'] !== undefined && typeof candidate['id'] !== 'string') return undefined;
   return {
     ...(candidate['id'] !== undefined ? { id: candidate['id'] as string } : {}),

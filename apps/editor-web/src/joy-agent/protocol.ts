@@ -632,6 +632,17 @@ export function isMainToWorkerMessage(value: unknown): value is MainToWorkerMess
  * The client turns a version rejection into an actionable reload/reconnect
  * failure instead of coercing a stale cached Worker message.
  */
+/** The broker is the size authority. This bound only stops a body no legal batch could reach. */
+const MAX_PROVIDER_BODY_CHARS = 32 * 1024 * 1024;
+
+function isBoundedBody(body: Record<string, unknown>): boolean {
+  try {
+    return JSON.stringify(body).length <= MAX_PROVIDER_BODY_CHARS;
+  } catch {
+    return false;
+  }
+}
+
 export function isWorkerToMainMessage(value: unknown): value is WorkerToMainMessage {
   if (!isRecord(value) || value.protocolVersion !== JOY_AGENT_PROTOCOL_VERSION) return false;
   if (value.type === 'provider-request')
@@ -653,7 +664,8 @@ export function isWorkerToMainMessage(value: unknown): value is WorkerToMainMess
       value.baseUrl.length > 0 &&
       value.baseUrl.length <= 2_048 &&
       isSafePublicModelId(value.modelId) &&
-      isRecord(value.body)
+      isRecord(value.body) &&
+      isBoundedBody(value.body)
     );
   if (value.type === 'event') {
     const event = value.event;

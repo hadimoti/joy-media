@@ -604,6 +604,7 @@ function sanitizeProviderAnalysisText(value: unknown, apiKey: string): string | 
 function isDirectProviderEndpoint(url: URL): boolean {
   return (
     (url.protocol === 'https:' || (url.protocol === 'http:' && isLoopbackHost(url.hostname))) &&
+    url.hostname !== '[::1]' &&
     !url.username &&
     !url.password &&
     !url.search &&

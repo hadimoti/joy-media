@@ -204,18 +204,26 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
       endpoint,
     );
     if (endpoint.api === 'anthropic-messages') {
+      if (stopReasonOf(reply) === 'pause_turn') {
+        throw new BrokerError(
+          'PROVIDER_INCOMPATIBLE',
+          'The model paused its turn. This build cannot continue it.',
+        );
+      }
+      let converted: string;
       try {
-        return anthropicReplyToChatCompletion(reply, endpoint.modelId);
+        converted = anthropicReplyToChatCompletion(reply, endpoint.modelId);
       } catch {
         throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not understood.');
       }
+      return checkedReply(converted, endpoint);
     }
     try {
       JSON.parse(reply);
     } catch {
       throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not valid JSON.');
     }
-    return reply;
+    return checkedReply(reply, endpoint);
   }
 
   return {
@@ -277,15 +285,17 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
           await send(deps.fetch, call, controlMs, endpoint.apiKey),
           endpoint,
         );
+        let models: readonly ModelEntry[];
         try {
-          const models =
+          models =
             endpoint.api === 'anthropic-messages'
               ? parseAnthropicModels(reply)
               : parseChatModels(reply);
-          return { ok: true, data: models };
         } catch {
           throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The model list was not understood.');
         }
+        assertNoCredential(JSON.stringify(models), endpoint);
+        return { ok: true, data: models };
       } catch (error) {
         return failureOf(error);
       }
@@ -330,9 +340,41 @@ function containsInStrings(value: unknown, needle: string): boolean {
   if (typeof value === 'string') return value.includes(needle);
   if (Array.isArray(value)) return value.some((item) => containsInStrings(item, needle));
   if (typeof value === 'object' && value !== null) {
-    return Object.values(value).some((item) => containsInStrings(item, needle));
+    return Object.entries(value).some(
+      ([key, item]) => key.includes(needle) || containsInStrings(item, needle),
+    );
   }
   return false;
+}
+
+/** The reply that leaves the broker holds no credential, and a refusal is not passed off as an answer. */
+function checkedReply(text: string, endpoint: Endpoint): string {
+  assertNoCredential(text, endpoint);
+  if (finishReasonOf(text) === 'content_filter') {
+    throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The model refused this request.');
+  }
+  return text;
+}
+
+function parseObject(text: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function stopReasonOf(reply: string): string | undefined {
+  const stop = parseObject(reply)?.stop_reason;
+  return typeof stop === 'string' ? stop : undefined;
+}
+
+function finishReasonOf(text: string): string | undefined {
+  const first = parseObject(text)?.choices;
+  if (!Array.isArray(first) || !isRecord(first[0])) return undefined;
+  const reason = first[0].finish_reason;
+  return typeof reason === 'string' ? reason : undefined;
 }
 
 /** A keyless local model sends no credential. Any other value is a key, sent as given. */
@@ -449,7 +491,19 @@ function namedTarget(
     return '';
   }
   const named = `${target.origin}${target.pathname}`;
-  return secret !== undefined && secret.length > 0 && named.includes(secret) ? '' : named;
+  const holds =
+    secret !== undefined &&
+    secret.length > 0 &&
+    (named.includes(secret) || safeDecode(named).includes(secret));
+  return holds ? '' : named;
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 async function readBounded(response: Response, limit: number): Promise<string> {

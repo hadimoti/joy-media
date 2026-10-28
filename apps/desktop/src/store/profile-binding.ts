@@ -22,10 +22,16 @@ interface UnboundRow {
  * start, because it only touches profiles that have no binding.
  */
 export function bindUnboundProfiles(db: DatabaseSync, now: string): number {
+  db.exec(`CREATE TABLE IF NOT EXISTS profile_binding (
+    profile_id TEXT PRIMARY KEY,
+    binding_digest TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
   const rows = db
     .prepare(
       `SELECT id, provider, base_url FROM provider_profiles
        WHERE id NOT IN (SELECT profile_id FROM profile_binding)
+         AND provider NOT IN ('kilo', 'joy-hosted')
          AND id NOT IN (SELECT profile_id FROM profile_state WHERE state = 'disabled-legacy')`,
     )
     .all() as unknown as readonly UnboundRow[];
