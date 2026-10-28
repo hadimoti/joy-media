@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { SqliteJobDispatchStore } from '../jobs/job-dispatch.js';
+import { ensureLocalAssetSchema, SqliteLocalAssetStore } from './local-assets.js';
+import { ensureProjectDocumentSchema, SqliteProjectDocumentStore } from './project-documents.js';
 import {
   forgetProfileState,
   listProfileStates,
@@ -115,6 +117,10 @@ export class LocalDatabase {
   private readonly idFactory: () => string;
   /** Dispatch and Worker presence for the local job API (jobs/job-dispatch.ts). */
   readonly jobDispatch: SqliteJobDispatchStore;
+  /** The project document the editor saves locally (store/project-documents.ts). */
+  readonly projectDocuments: SqliteProjectDocumentStore;
+  /** Assets registered for a local render, and where their originals are stored. */
+  readonly localAssets: SqliteLocalAssetStore;
 
   constructor(options: LocalDatabaseOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
@@ -122,6 +128,10 @@ export class LocalDatabase {
     this.db = new DatabaseSync(options.filePath);
     this.db.exec('PRAGMA journal_mode = WAL');
     this.jobDispatch = new SqliteJobDispatchStore(this.db);
+    ensureProjectDocumentSchema(this.db);
+    ensureLocalAssetSchema(this.db);
+    this.projectDocuments = new SqliteProjectDocumentStore(this.db, this.now);
+    this.localAssets = new SqliteLocalAssetStore(this.db, this.now);
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS media_manifest (
          ref_id TEXT PRIMARY KEY,

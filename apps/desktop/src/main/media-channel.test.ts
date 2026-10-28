@@ -1,12 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import type { DispatchJob } from '../jobs/job-dispatch.js';
+import { createLocalOriginalWriter } from './local-originals.js';
 import { createMediaChannelHandlers, MEDIA_CHANNELS } from './media-channel.js';
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 function setup() {
   const db = new LocalDatabase({ filePath: ':memory:', now: () => 'T0' });
@@ -17,12 +24,19 @@ function setup() {
     newId: () => `job-${++ids}`,
     newLeaseToken: () => 'lease-token',
   });
+  const originalsDir = mkdtempSync(join(tmpdir(), 'joy-media-originals-'));
+  tempDirs.push(originalsDir);
   const handlers = createMediaChannelHandlers({
     orchestrator,
     jobStore: db.jobDispatch,
+    projectDocuments: db.projectDocuments,
+    assets: db.localAssets,
+    originals: createLocalOriginalWriter({ directory: originalsDir, assets: db.localAssets }),
   });
   return { db, orchestrator, handlers };
 }
+
+const DOCUMENT = { schemaVersion: 1, clips: [] };
 
 describe('desktop.media channels', () => {
   it('declares every media channel once', () => {
@@ -221,15 +235,145 @@ describe('desktop.media channels', () => {
 
   it('reports not-yet-available for the channels whose local stores are not built', () => {
     const { handlers } = setup();
-    for (const channel of [
-      'desktop.media.asset.register',
-      'desktop.media.asset.upload-original',
-      'desktop.media.project.document.get',
-      'desktop.media.project.document.put',
-      'desktop.media.preview.frame',
-    ] as const) {
+    for (const channel of ['desktop.media.preview.frame', 'desktop.media.audio.denoise'] as const) {
       const result = handlers[channel]({});
       expect(result).toMatchObject({ ok: false, error: expect.stringContaining('not available') });
     }
+  });
+
+  it('stores a project document, refuses a stale base, and reports a missing project', () => {
+    const { handlers } = setup();
+    expect(
+      handlers['desktop.media.project.document.put']({
+        projectId: 'proj-1',
+        baseRevisionId: '',
+        revisionId: 'rev-1',
+        document: DOCUMENT,
+      }),
+    ).toEqual({ ok: true, data: { projectId: 'proj-1', revisionId: 'rev-1' } });
+    expect(handlers['desktop.media.project.document.get']({ projectId: 'proj-1' })).toEqual({
+      ok: true,
+      data: { projectId: 'proj-1', revisionId: 'rev-1', document: DOCUMENT },
+    });
+    expect(
+      handlers['desktop.media.project.document.put']({
+        projectId: 'proj-1',
+        baseRevisionId: 'rev-0',
+        revisionId: 'rev-2',
+        document: DOCUMENT,
+      }),
+    ).toEqual({
+      ok: false,
+      code: 'DOCUMENT_REVISION_CONFLICT',
+      error: expect.stringContaining('different revision'),
+      data: { revisionId: 'rev-1' },
+    });
+    expect(
+      handlers['desktop.media.project.document.put']({
+        projectId: 'proj-2',
+        baseRevisionId: 'rev-1',
+        revisionId: 'rev-2',
+        document: DOCUMENT,
+      }),
+    ).toEqual({
+      ok: false,
+      code: 'PROJECT_DOCUMENT_NOT_FOUND',
+      error: 'Project document not found',
+    });
+  });
+
+  it('reads nothing for an unknown project or for an older revision', () => {
+    const { handlers } = setup();
+    handlers['desktop.media.project.document.put']({
+      projectId: 'proj-1',
+      baseRevisionId: '',
+      revisionId: 'rev-1',
+      document: DOCUMENT,
+    });
+    expect(handlers['desktop.media.project.document.get']({ projectId: 'missing' })).toEqual({
+      ok: true,
+      data: null,
+    });
+    expect(
+      handlers['desktop.media.project.document.get']({ projectId: 'proj-1', revisionId: 'rev-0' }),
+    ).toEqual({ ok: true, data: null });
+  });
+
+  it('refuses a document write with a bad project ID or a document that is not an object', () => {
+    const { handlers } = setup();
+    expect(
+      handlers['desktop.media.project.document.put']({
+        projectId: '../escape',
+        baseRevisionId: '',
+        revisionId: 'rev-1',
+        document: DOCUMENT,
+      }),
+    ).toEqual({ ok: false, error: 'Invalid media request' });
+    expect(
+      handlers['desktop.media.project.document.put']({
+        projectId: 'proj-1',
+        baseRevisionId: '',
+        revisionId: 'rev-1',
+        document: [],
+      }),
+    ).toEqual({ ok: false, error: 'Invalid media request' });
+  });
+
+  it('registers an asset, and stores an original only when it matches the registration', async () => {
+    const { db, handlers } = setup();
+    const bytes = Buffer.from('original-bytes');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const registration = {
+      id: 'asset-1',
+      kind: 'video',
+      displayName: 'clip.webm.stage',
+      sha256,
+      bytes: bytes.length,
+    };
+    expect(handlers['desktop.media.asset.register'](registration)).toEqual({
+      ok: true,
+      data: { id: 'asset-1' },
+    });
+    expect(handlers['desktop.media.asset.register'](registration)).toEqual({
+      ok: true,
+      data: { id: 'asset-1' },
+    });
+    expect(
+      handlers['desktop.media.asset.register']({ ...registration, sha256: 'b'.repeat(64) }),
+    ).toEqual({ ok: false, error: 'Asset ID is already registered with other content' });
+    expect(handlers['desktop.media.asset.register']({ ...registration, id: '../escape' })).toEqual({
+      ok: false,
+      error: 'Invalid media request',
+    });
+
+    const stored = await handlers['desktop.media.asset.upload-original']({
+      assetId: 'asset-1',
+      bytes: new Uint8Array(bytes),
+    });
+    expect(stored).toEqual({ ok: true, data: { assetId: 'asset-1' } });
+    const storedPath = db.localAssets.storedPath('asset-1');
+    expect(storedPath).toBeDefined();
+    expect(readFileSync(storedPath!).equals(bytes)).toBe(true);
+    expect(JSON.stringify(stored)).not.toContain(storedPath!);
+
+    expect(
+      await handlers['desktop.media.asset.upload-original']({
+        assetId: 'asset-1',
+        bytes: new Uint8Array(Buffer.from('original-bytes-longer')),
+      }),
+    ).toEqual({ ok: false, error: 'Original size does not match its registration' });
+    expect(
+      await handlers['desktop.media.asset.upload-original']({
+        assetId: 'asset-1',
+        bytes: new Uint8Array(Buffer.from('ORIGINAL-BYTES')),
+      }),
+    ).toEqual({ ok: false, error: 'Original does not match its registered checksum' });
+    expect(
+      await handlers['desktop.media.asset.upload-original']({
+        assetId: 'asset-unknown',
+        bytes: new Uint8Array(bytes),
+      }),
+    ).toEqual({ ok: false, error: 'Asset is not registered' });
+    expect(existsSync(storedPath!)).toBe(true);
   });
 });

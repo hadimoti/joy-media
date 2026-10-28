@@ -41,6 +41,7 @@ import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import { startLocalJobApi, type LocalJobApi } from '../jobs/local-job-api.js';
 import { localWorkerEnv } from '../jobs/worker-env.js';
+import { createLocalOriginalWriter } from './local-originals.js';
 import { createMediaChannelHandlers } from './media-channel.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
@@ -113,6 +114,12 @@ if (!app.requestSingleInstanceLock()) {
     mediaChannel: createMediaChannelHandlers({
       orchestrator: jobOrchestrator,
       jobStore: localDatabase.jobDispatch,
+      projectDocuments: localDatabase.projectDocuments,
+      assets: localDatabase.localAssets,
+      originals: createLocalOriginalWriter({
+        directory: join(paths.mediaRoot, 'originals'),
+        assets: localDatabase.localAssets,
+      }),
     }),
     probeMedia: async (path) => {
       const probe = await checksumFile(path);
@@ -175,18 +182,19 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
+  // A render source is either a registered local asset (its stored original) or a file the user
+  // selected in this session. Both are resolved here, in the main process, and never sent out.
+  const resolveSourcePath = (refId: string): string =>
+    localDatabase.localAssets.storedPath(refId) ??
+    fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: '' });
+
   app.whenReady().then(async () => {
     try {
       localJobApi = await startLocalJobApi({
         orchestrator: jobOrchestrator,
         derivativeDirectory: join(paths.mediaRoot, 'derivatives'),
-        sourceSize: async (refId) =>
-          statSync(fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: '' }))
-            .size,
-        readSource: async (refId) =>
-          readFileSync(
-            fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: '' }),
-          ),
+        sourceSize: async (refId) => statSync(resolveSourcePath(refId)).size,
+        readSource: async (refId) => readFileSync(resolveSourcePath(refId)),
         onWarning: (message) => console.warn(message),
       });
     } catch (error) {
