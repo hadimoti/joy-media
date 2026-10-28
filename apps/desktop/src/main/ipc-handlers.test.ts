@@ -7,7 +7,7 @@ import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import type { SupervisedChild } from './worker-supervisor.js';
 import { LocalDatabase } from '../store/local-database.js';
-import { createMemorySecretStore } from '@joy-media/provider-sdk';
+import { createMemorySecretStore, findRegistryProvider } from '@joy-media/provider-sdk';
 import { createProviderBroker } from './providers/provider-broker.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 
@@ -1045,12 +1045,14 @@ describe('legacy provider profiles (v1.1.0)', () => {
   it('lists a profile as unbound when its endpoint changed without its binding', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
+    // Two registry endpoints, both allowed, so only the binding tells them apart.
+    const [international, china] = findRegistryProvider('minimax')?.regions ?? [];
     const saved = await dispatchIpcRequest(handlers, {
       origin: renderer,
       channel: 'desktop.provider-profile.save',
       payload: {
-        provider: 'openrouter',
-        baseUrl: 'https://openrouter.ai/api/v1',
+        provider: 'minimax',
+        baseUrl: international?.baseUrl,
         modelId: 'm',
         apiKey: 'sk-moved',
       },
@@ -1059,7 +1061,8 @@ describe('legacy provider profiles (v1.1.0)', () => {
     const stored = d.localDatabase.getProviderProfile(id);
     if (stored === undefined) throw new Error('expected the saved profile');
     // The URL changes in the record, but its binding does not: a change made outside the app.
-    d.localDatabase.saveProviderProfile({ ...stored, baseUrl: 'https://openrouter.ai/api/v2' });
+    if (china === undefined) throw new Error('expected a second MiniMax region');
+    d.localDatabase.saveProviderProfile({ ...stored, baseUrl: china.baseUrl });
 
     const listed = await dispatchIpcRequest(handlers, {
       origin: renderer,

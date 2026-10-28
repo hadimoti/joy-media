@@ -136,6 +136,31 @@ describe('engine client provider calls', () => {
     });
   });
 
+  it('ends the provider call the Worker cancels, and sends it no answer', async () => {
+    let callSignal: AbortSignal | undefined;
+    let finish: ((text: string) => void) | undefined;
+    const providerCall = vi.fn<ProviderCall>(async (request) => {
+      callSignal = request.signal;
+      return new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+    });
+    const worker = await startedClient(providerCall);
+    worker.emit(PROVIDER_REQUEST);
+    await vi.waitFor(() => expect(providerCall).toHaveBeenCalledTimes(1));
+
+    worker.emit({
+      protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+      type: 'provider-cancel',
+      requestId: 'provider-1',
+    });
+    expect(callSignal?.aborted).toBe(true);
+    finish?.('{"choices":[]}');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(answers(worker)).toHaveLength(0);
+  });
+
   it('ends a provider call in progress when the client clears its worker', async () => {
     let callSignal: AbortSignal | undefined;
     const providerCall = vi.fn<ProviderCall>(async (request) => {

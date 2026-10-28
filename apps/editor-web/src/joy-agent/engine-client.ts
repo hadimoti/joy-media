@@ -294,6 +294,8 @@ async function answerProviderRequest(
       };
     }
   }
+  // A call the Worker cancelled, or one whose worker was ended, gets no answer: nobody is waiting for it.
+  if (signal.aborted) return;
   worker.postMessage({
     protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
     type: 'provider-response',
@@ -321,10 +323,11 @@ export function createSingleWorkerEngineClient(
 ): JoyAgentEngineClient {
   let worker: Worker | undefined;
   let generation = 0;
-  // Provider calls this client started and has not finished. Ending the worker ends them as well.
-  const activeProviderCalls = new Set<AbortController>();
+  // Provider calls this client started and has not finished, by the Worker's request id. Ending the worker
+  // ends them all, and a `provider-cancel` ends the one it names.
+  const activeProviderCalls = new Map<string, AbortController>();
   const abortProviderCalls = (): void => {
-    for (const call of activeProviderCalls) call.abort();
+    for (const call of activeProviderCalls.values()) call.abort();
     activeProviderCalls.clear();
   };
   const terminateWorker = (): void => {
@@ -648,9 +651,13 @@ export function createSingleWorkerEngineClient(
         return;
       }
       const message = event.data;
+      if (message.type === 'provider-cancel') {
+        activeProviderCalls.get(message.requestId)?.abort();
+        return;
+      }
       if (message.type === 'provider-request') {
         const call = new AbortController();
-        activeProviderCalls.add(call);
+        activeProviderCalls.set(message.requestId, call);
         void answerProviderRequest(
           owner,
           message,
@@ -658,7 +665,9 @@ export function createSingleWorkerEngineClient(
           configured ? activeSession : undefined,
           call.signal,
         ).finally(() => {
-          activeProviderCalls.delete(call);
+          if (activeProviderCalls.get(message.requestId) === call) {
+            activeProviderCalls.delete(message.requestId);
+          }
         });
         return;
       }

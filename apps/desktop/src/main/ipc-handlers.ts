@@ -14,6 +14,7 @@ import type {
   ProviderProfile,
 } from '../store/local-database.js';
 import { LEGACY_PROVIDER_IDS } from '../store/migrations.js';
+import { AgentRequestRegistry } from './agent-requests.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
 import { evaluateEndpoint, normalizeBaseUrl } from '@joy-media/provider-sdk';
@@ -41,6 +42,8 @@ export type ProbeMedia = (path: string) => Promise<{
 export interface IpcHandlerDeps {
   readonly fileRegistry: FileRegistry;
   readonly workerSupervisor: WorkerSupervisor;
+  /** The provider calls in progress. The entry point shares it with the window, which ends them on reload. */
+  readonly agentRequests?: AgentRequestRegistry;
   /** The `desktop.media.*` handlers (media-channel.ts). Absent means every media call is refused. */
   readonly mediaChannel?: Readonly<
     Record<MediaChannel, (payload: unknown) => MediaResult | Promise<MediaResult>>
@@ -71,8 +74,7 @@ export type IpcHandler = (payload: unknown) => Promise<IpcResult> | IpcResult;
 export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcHandler> {
   const now = deps.now ?? (() => new Date().toISOString());
   const newId = deps.newId ?? (() => crypto.randomUUID());
-  // The provider calls the renderer may cancel, by the id it gave each one.
-  const agentRequests = new Map<string, AbortController>();
+  const agentRequests = deps.agentRequests ?? new AgentRequestRegistry();
 
   return {
     ...mediaChannelTable(deps.mediaChannel),
@@ -286,10 +288,13 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.agent.request': async (payload): Promise<IpcResult> => {
       const request = asAgentRequest(payload);
       if (request === undefined) return { ok: false, error: 'Invalid agent request' };
-      // A call the renderer may cancel carries an id. The id is forgotten once the call has ended.
+      // A call with an id can be cancelled. An id already in use is refused rather than shared.
       const { requestId, ...brokerRequest } = request;
-      const controller = new AbortController();
-      if (requestId !== undefined) agentRequests.set(requestId, controller);
+      const controller =
+        requestId === undefined ? new AbortController() : agentRequests.begin(requestId);
+      if (controller === undefined) {
+        return { ok: false, error: 'That agent request id is already in use' };
+      }
       try {
         // A refusal is data, not a handler error, so the renderer keeps the broker's code.
         const result = await deps.providerBroker.complete({
@@ -303,7 +308,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
             : { ok: false, code: result.code, message: result.message },
         };
       } finally {
-        if (requestId !== undefined) agentRequests.delete(requestId);
+        if (requestId !== undefined) agentRequests.finish(requestId, controller);
       }
     },
     'desktop.agent.cancel': (payload): IpcResult => {
@@ -313,7 +318,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
           : undefined,
       );
       if (requestId === undefined) return { ok: false, error: 'Invalid agent request id' };
-      agentRequests.get(requestId)?.abort();
+      agentRequests.cancel(requestId);
       return { ok: true, data: undefined };
     },
     'desktop.window-minimize': async () => {

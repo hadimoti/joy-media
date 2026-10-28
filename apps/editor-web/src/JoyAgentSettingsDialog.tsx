@@ -238,10 +238,16 @@ export function JoyAgentSettingsDialog({
   const [savedProfile, setSavedProfile] = useState<DesktopProviderProfileState | undefined>(
     undefined,
   );
-  // The saved profile for the endpoint the form describes. The form decides which profile is used.
-  const matchedProfile = profiles.find((p) =>
+  // The saved profiles for the endpoint the form describes. The profile the user chose among them is the
+  // one used. When several share the endpoint and none is chosen, the endpoint is ambiguous: nothing connects.
+  const describingProfiles = profiles.filter((p) =>
     profileDescribesForm(p, provider, normalizeProviderBaseUrl(baseUrl)),
   );
+  const chosenDescribingProfile = describingProfiles.find((p) => p.id === savedProfile?.id);
+  const matchedProfile =
+    chosenDescribingProfile ??
+    (describingProfiles.length === 1 ? describingProfiles[0] : undefined);
+  const endpointAmbiguous = describingProfiles.length > 1 && chosenDescribingProfile === undefined;
   // Whether any saved profile exists that the form does not describe. Named in the messages below.
   const hasOtherSavedProfiles = profiles.some(
     (p) => p.id !== undefined && p.state !== 'disabled-legacy',
@@ -360,6 +366,12 @@ export function JoyAgentSettingsDialog({
       return;
     }
     const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
+    if (endpointAmbiguous) {
+      setDiscoveryError(
+        'More than one saved profile uses this endpoint. Choose one in the list first.',
+      );
+      return;
+    }
     const matchingSavedProfile = matchedProfile;
     if (
       requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
@@ -453,7 +465,8 @@ export function JoyAgentSettingsDialog({
   };
 
   const connectSavedProfile = async (profile: DesktopProviderProfileState) => {
-    if (profile.bound !== true) {
+    // A profile whose stored key cannot be used is shown in the form, so its key is entered again.
+    if (!canUseStoredKey(profile)) {
       selectProfileIntoForm(profile);
       return;
     }
@@ -499,6 +512,13 @@ export function JoyAgentSettingsDialog({
   const connect = async () => {
     if (working) return;
     const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
+    if (endpointAmbiguous) {
+      const message =
+        'More than one saved profile uses this endpoint. Choose one in the list first.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      return;
+    }
     const matchingSavedProfile = matchedProfile;
     if (
       requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
@@ -1072,8 +1092,13 @@ export function JoyAgentSettingsDialog({
                               defaultValue=""
                               autoComplete="off"
                               spellCheck={false}
-                              onChange={() => {
-                                keyScopeRef.current = keyScopeFor(provider, baseUrl);
+                              onChange={(event) => {
+                                // The scope is the endpoint in force when the key was started. Later edits keep
+                                // it, so an endpoint edited in between cannot take the key over. An empty field
+                                // starts afresh.
+                                if (event.target.value === '') keyScopeRef.current = undefined;
+                                else if (keyScopeRef.current === undefined)
+                                  keyScopeRef.current = keyScopeFor(provider, baseUrl);
                               }}
                             />
                           </label>

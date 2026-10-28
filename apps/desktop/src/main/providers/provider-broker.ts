@@ -237,12 +237,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
       }
       return checkedReply(converted, endpoint);
     }
-    try {
-      JSON.parse(reply);
-    } catch {
-      throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not valid JSON.');
-    }
-    return checkedReply(reply, endpoint);
+    return checkedReply(completionEnvelope(reply), endpoint);
   }
 
   return {
@@ -389,6 +384,41 @@ function isJsonText(text: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The completion fields the engine reads. Any other field a provider adds to its envelope, such as a base URL
+ * or other provider metadata, stays with the broker and never reaches the Worker. Model text is kept exactly
+ * as the provider wrote it (PLAN-v4 §6b).
+ */
+const ENVELOPE_FIELDS = ['id', 'object', 'created', 'model', 'usage'] as const;
+const CHOICE_FIELDS = ['index', 'finish_reason'] as const;
+const MESSAGE_FIELDS = ['role', 'content', 'tool_calls', 'refusal'] as const;
+
+function completionEnvelope(reply: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(reply);
+  } catch {
+    throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not valid JSON.');
+  }
+  if (!isRecord(parsed) || !Array.isArray(parsed.choices)) {
+    throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not understood.');
+  }
+  const choices = parsed.choices.filter(isRecord).map((choice) => ({
+    ...pickFields(choice, CHOICE_FIELDS),
+    ...(isRecord(choice.message) ? { message: pickFields(choice.message, MESSAGE_FIELDS) } : {}),
+  }));
+  return JSON.stringify({ ...pickFields(parsed, ENVELOPE_FIELDS), choices });
+}
+
+function pickFields(
+  source: Record<string, unknown>,
+  fields: readonly string[],
+): Record<string, unknown> {
+  return Object.fromEntries(
+    fields.filter((field) => field in source).map((field) => [field, source[field]]),
+  );
 }
 
 /** The reply that leaves the broker holds no credential, and a refusal is not passed off as an answer. */

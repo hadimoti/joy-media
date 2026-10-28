@@ -63,12 +63,17 @@ const client =
     ? undefined
     : new WorkerControlPlaneClient({ apiUrl, identity, sessionStore });
 const derivativeDirectory = process.env.JOY_MEDIA_WORKER_DERIVATIVE_DIR?.trim() || undefined;
-const runtime = new WorkerRuntime(identity, detectMediaTools(), {
-  ...(sources === undefined ? {} : { sources }),
-  ...(derivativeDirectory === undefined ? {} : { derivativeDirectory }),
-  gpuPreviewAvailable: gpuPreviewHost !== undefined,
-  ...(client === undefined ? {} : { downloadJobAsset: client.downloadJobAsset.bind(client) }),
-});
+// A local Worker under the desktop app holds no provider key, so it reads no provider file (PLAN-v4 §6b).
+const runtime = new WorkerRuntime(
+  identity,
+  detectMediaTools(undefined, { readAiProviderFile: localToken === undefined }),
+  {
+    ...(sources === undefined ? {} : { sources }),
+    ...(derivativeDirectory === undefined ? {} : { derivativeDirectory }),
+    gpuPreviewAvailable: gpuPreviewHost !== undefined,
+    ...(client === undefined ? {} : { downloadJobAsset: client.downloadJobAsset.bind(client) }),
+  },
+);
 console.log(JSON.stringify(runtime.hello(process.platform, process.arch)));
 
 if (apiUrl !== undefined && client !== undefined) {

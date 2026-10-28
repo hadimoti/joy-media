@@ -167,8 +167,6 @@ export async function fetchDesktopProviderModels(request: {
   return (data as readonly DiscoveredModel[]) ?? [];
 }
 
-let nextAgentRequestId = 0;
-
 /**
  * One model call through the desktop broker. The key never reaches this side (PLAN-v4 §6a). A call that
  * is aborted here is cancelled in the desktop as well, so the provider request it began is not left running.
@@ -177,7 +175,8 @@ export async function requestAgentCompletion(request: ProviderCallRequest): Prom
   const bridge = requireBridge();
   const { signal, ...payload } = request;
   if (signal?.aborted) throw new ProviderCallError('NETWORK_ERROR', 'The request was cancelled.');
-  const requestId = `agent-${++nextAgentRequestId}`;
+  // A random id per call: a counter restarts on every reload, and an old page's id could then match a new call.
+  const requestId = `agent-${crypto.randomUUID()}`;
   const cancel = (): void => {
     void bridge.invoke('desktop.agent.cancel', { requestId }).catch(() => undefined);
   };

@@ -29,6 +29,7 @@ import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
 import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
+import { AgentRequestRegistry } from './agent-requests.js';
 import { registerJoyProtocol } from './protocol-registration.js';
 import type { IpcRequest } from '../ipc.js';
 import { isAllowedEditorOrigin, originOfPageUrl } from '../origin-policy.js';
@@ -121,7 +122,10 @@ if (!app.requestSingleInstanceLock()) {
     secrets: secretStore,
     fetch: (url, init) => fetch(url, init),
   });
+  // The provider calls in progress. A reload of the page ends them, since nothing will read their replies.
+  const agentRequests = new AgentRequestRegistry();
   const ipcHandlers = createIpcHandlers({
+    agentRequests,
     fileRegistry,
     workerSupervisor,
     localDatabase,
@@ -310,6 +314,7 @@ if (!app.requestSingleInstanceLock()) {
       webPreferences: buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
     });
     mainWindow = win;
+    win.webContents.on('did-start-loading', () => agentRequests.cancelAll());
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));
 

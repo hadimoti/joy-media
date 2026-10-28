@@ -234,6 +234,12 @@ export type WorkerToMainMessage =
     }
   | {
       readonly protocolVersion: typeof JOY_AGENT_PROTOCOL_VERSION;
+      /** The Worker no longer wants this call's reply. The main process ends the call and sends nothing back. */
+      readonly type: 'provider-cancel';
+      readonly requestId: string;
+    }
+  | {
+      readonly protocolVersion: typeof JOY_AGENT_PROTOCOL_VERSION;
       readonly type: 'run-finished';
       readonly runId: string;
       readonly runEpoch: number;
@@ -673,6 +679,12 @@ export function isWorkerToMainMessage(value: unknown): value is WorkerToMainMess
       isSafePublicModelId(value.modelId) &&
       isRecord(value.body) &&
       isBoundedBody(value.body)
+    );
+  if (value.type === 'provider-cancel')
+    return (
+      exactKeys(value, ['protocolVersion', 'type', 'requestId']) &&
+      typeof value.requestId === 'string' &&
+      OPAQUE_ID.test(value.requestId)
     );
   if (value.type === 'event') {
     const event = value.event;

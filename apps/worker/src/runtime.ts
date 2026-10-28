@@ -448,7 +448,15 @@ export function localAssetSourcesFromEnvironment(
   }
   return new StaticLocalAssetSourceRegistry(sources);
 }
-export function detectMediaTools(run: (tool: string) => boolean = canRun): ToolAvailability {
+/**
+ * What this Worker can run. A local Worker under the desktop app holds no provider key, so it is started
+ * with `readAiProviderFile` false and reads no provider file. Its provider jobs go through the desktop
+ * broker instead (PLAN-v4 §6b).
+ */
+export function detectMediaTools(
+  run: (tool: string) => boolean = canRun,
+  options: { readonly readAiProviderFile?: boolean } = {},
+): ToolAvailability {
   const comfyUrl = (process.env.JOY_MEDIA_LOCAL_COMFY_URL ?? '').trim();
   return {
     ffmpeg: run('ffmpeg'),
@@ -457,8 +465,8 @@ export function detectMediaTools(run: (tool: string) => boolean = canRun): ToolA
     comfy: comfyUrl.length > 0,
     // Opt-in: owner PC has ML denoise tooling installed.
     mlDenoise: (process.env.JOY_MEDIA_LOCAL_ML_DENOISE ?? '').trim() === '1',
-    // AI providers configured via ~/.joy-media/ai-providers.json
-    aiProviders: getConfiguredProviders(),
+    // AI providers configured via ~/.joy-media/ai-providers.json, unless this Worker holds no keys
+    aiProviders: options.readAiProviderFile === false ? [] : getConfiguredProviders(),
     masking: maskingAvailabilityFromEnvironment(),
     upscaling: upscalingAvailabilityFromEnvironment(),
   };
@@ -756,6 +764,11 @@ export class WorkerRuntime {
       job.type.startsWith('edit.')
     ) {
       const provider = job.type.replace(/^(text\.|video\.|edit\.)/, '') as AiProvider;
+      // Only a Worker configured for this provider reads its key. A local Worker under the desktop app is
+      // configured for none, so its provider job fails here, before any key file is read (PLAN-v4 §6b).
+      if (!this.tools.aiProviders.includes(provider)) {
+        throw new Error(`AI provider "${provider}" is not available on this Worker`);
+      }
       const derivativeDirectory =
         this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
       this.log.write(`job ${job.id} started (${job.type})`);

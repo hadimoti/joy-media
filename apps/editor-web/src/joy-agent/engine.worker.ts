@@ -711,6 +711,8 @@ async function callProvider(
   const result = await new Promise<ProviderCallResult>((resolve, reject) => {
     const abort = (): void => {
       pendingProviderCalls.delete(requestId);
+      // The main thread ends the call and sends nothing back, so no reply arrives for a call nobody awaits.
+      post({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type: 'provider-cancel', requestId });
       reject(new JoyAgentWorkerError('JOY_AGENT_ABORTED', 'Run cancelled'));
     };
     signal.addEventListener('abort', abort, { once: true });

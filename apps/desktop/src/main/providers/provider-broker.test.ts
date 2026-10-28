@@ -892,6 +892,52 @@ describe('provider broker: the reply that leaves the broker', () => {
     });
   });
 
+  it('forwards the completion fields the engine reads, and drops provider metadata such as a base URL', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          id: 'c1',
+          base_url: 'http://127.0.0.1:1234/v1',
+          choices: [
+            {
+              index: 0,
+              finish_reason: 'stop',
+              provider_note: 'http://127.0.0.1:1234/v1',
+              message: {
+                role: 'assistant',
+                content: 'Point the client at http://127.0.0.1:1234/v1 for the local server.',
+                annotations: ['http://127.0.0.1:1234/v1'],
+              },
+            },
+          ],
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected a reply');
+    expect(result.data.text).not.toContain('base_url');
+    expect(result.data.text).not.toContain('provider_note');
+    expect(result.data.text).not.toContain('annotations');
+    expect(JSON.parse(result.data.text)).toMatchObject({
+      id: 'c1',
+      choices: [
+        {
+          index: 0,
+          finish_reason: 'stop',
+          message: {
+            role: 'assistant',
+            content: 'Point the client at http://127.0.0.1:1234/v1 for the local server.',
+          },
+        },
+      ],
+    });
+  });
+
   it('refuses a chat reply with a refusal message, even when its finish reason is stop', async () => {
     const p = bound('p1', 'grok', 'https://api.x.ai/v1');
     const { broker } = harness({

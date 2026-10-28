@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { jsonUtf8Size } from './json-bytes.js';
 
 const utf8 = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength;
@@ -78,6 +78,17 @@ describe('jsonUtf8Size', () => {
 
     expect(jsonUtf8Size(counted, 100)).toBeUndefined();
     expect(reads).toBeLessThan(20);
+  });
+
+  it('does not scan a string that is already over the budget', () => {
+    const scan = vi.spyOn(RegExp.prototype, 'test');
+    try {
+      // The string is the whole value, so no shorter string (such as a key name) is scanned first.
+      expect(jsonUtf8Size('x'.repeat(10_000), 100)).toBeUndefined();
+      expect(scan).not.toHaveBeenCalled();
+    } finally {
+      scan.mockRestore();
+    }
   });
 
   it('stops at the limit for a body far larger than it', () => {

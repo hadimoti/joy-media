@@ -36,6 +36,17 @@ describe('provider messages on the agent protocol', () => {
     expect(isWorkerToMainMessage({ ...providerRequest, body: oversized })).toBe(false);
   });
 
+  it('accepts a provider cancel that names a request, and refuses any other field', () => {
+    const cancel = {
+      protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+      type: 'provider-cancel',
+      requestId: 'provider-1',
+    };
+    expect(isWorkerToMainMessage(cancel)).toBe(true);
+    expect(isWorkerToMainMessage({ ...cancel, body: {} })).toBe(false);
+    expect(isWorkerToMainMessage({ ...cancel, requestId: 'bad id with spaces' })).toBe(false);
+  });
+
   it('counts UTF-8 bytes: 12 Mi Chinese characters are 36 MiB and are refused', () => {
     // Under 32 Mi characters, so a character count would accept it. In UTF-8 it is over the limit.
     const oversized = { messages: [{ role: 'user', content: '界'.repeat(12 * 1024 * 1024) }] };

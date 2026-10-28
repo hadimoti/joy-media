@@ -269,7 +269,7 @@ describe('requestAgentCompletion', () => {
     await expect(requestAgentCompletion(request)).resolves.toBe('{"choices":[]}');
     expect(invoke).toHaveBeenCalledWith('desktop.agent.request', {
       ...request,
-      requestId: expect.stringMatching(/^agent-\d+$/),
+      requestId: expect.stringMatching(/^agent-[0-9a-f-]{36}$/),
     });
   });
 
