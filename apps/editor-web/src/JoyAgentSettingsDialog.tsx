@@ -790,9 +790,9 @@ export function JoyAgentSettingsDialog({
     if (!isDesktopHost()) return;
     try {
       await deleteDesktopProviderProfile(profId);
+      // The read clears a chosen profile that the list no longer shows. A failed read leaves it chosen until the next
+      // successful read clears it, and connect waits for a successful read, so nothing is saved beside the stale choice.
       await loadProfiles();
-      // Only a selection that is still this profile is cleared; a profile chosen while this read was pending stays.
-      if (selectedProfileIdRef.current === profId) selectProfile(undefined);
     } catch (err) {
       console.warn('Failed to delete provider profile:', err);
     }
