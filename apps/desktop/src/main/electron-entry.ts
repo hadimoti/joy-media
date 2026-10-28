@@ -29,7 +29,7 @@ import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
 import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
-import { AgentRequestRegistry } from './agent-requests.js';
+import { AgentRequestRegistry, cancelWhenPageGoes } from './agent-requests.js';
 import { registerJoyProtocol } from './protocol-registration.js';
 import type { IpcRequest } from '../ipc.js';
 import { isAllowedEditorOrigin, originOfPageUrl } from '../origin-policy.js';
@@ -314,7 +314,7 @@ if (!app.requestSingleInstanceLock()) {
       webPreferences: buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
     });
     mainWindow = win;
-    win.webContents.on('did-start-loading', () => agentRequests.cancelAll());
+    cancelWhenPageGoes(agentRequests, win);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));
 

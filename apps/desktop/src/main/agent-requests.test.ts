@@ -1,5 +1,6 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
-import { AgentRequestRegistry } from './agent-requests.js';
+import { AgentRequestRegistry, cancelWhenPageGoes } from './agent-requests.js';
 
 describe('AgentRequestRegistry', () => {
   it('refuses an id that is already in use, rather than sharing it', () => {
@@ -38,5 +39,34 @@ describe('AgentRequestRegistry', () => {
 
     expect(second.signal.aborted).toBe(true);
     expect(calls.cancel('b')).toBe(false);
+  });
+
+  it.each(['did-start-loading', 'render-process-gone'])(
+    'ends every call in progress when the page emits %s',
+    (pageEvent) => {
+      const calls = new AgentRequestRegistry();
+      const webContents = new EventEmitter();
+      const browserWindow = Object.assign(new EventEmitter(), { webContents });
+      cancelWhenPageGoes(calls, browserWindow);
+      const call = calls.begin('call-1');
+      if (call === undefined) throw new Error('expected the call');
+
+      webContents.emit(pageEvent);
+
+      expect(call.signal.aborted).toBe(true);
+      expect(calls.cancel('call-1')).toBe(false);
+    },
+  );
+
+  it('ends every call in progress when the window closes', () => {
+    const calls = new AgentRequestRegistry();
+    const browserWindow = Object.assign(new EventEmitter(), { webContents: new EventEmitter() });
+    cancelWhenPageGoes(calls, browserWindow);
+    const call = calls.begin('call-1');
+    if (call === undefined) throw new Error('expected the call');
+
+    browserWindow.emit('closed');
+
+    expect(call.signal.aborted).toBe(true);
   });
 });

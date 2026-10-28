@@ -1,3 +1,5 @@
+import type { EventEmitter } from 'node:events';
+
 /**
  * The provider calls the renderer started and has not finished, by the id the renderer gave each one. A
  * call ends when the renderer cancels it, or when the page that started it goes away. A call that finishes
@@ -32,4 +34,18 @@ export class AgentRequestRegistry {
     for (const controller of this.#calls.values()) controller.abort();
     this.#calls.clear();
   }
+}
+
+/**
+ * Ends every call in progress when the page is about to load again, its renderer crashes, or the window
+ * closes. The page that started a call can no longer receive its reply, so the call is cancelled instead.
+ */
+export function cancelWhenPageGoes(
+  registry: AgentRequestRegistry,
+  browserWindow: { readonly webContents: Pick<EventEmitter, 'on'> } & Pick<EventEmitter, 'on'>,
+): void {
+  const cancelAll = (): void => registry.cancelAll();
+  browserWindow.webContents.on('did-start-loading', cancelAll);
+  browserWindow.webContents.on('render-process-gone', cancelAll);
+  browserWindow.on('closed', cancelAll);
 }

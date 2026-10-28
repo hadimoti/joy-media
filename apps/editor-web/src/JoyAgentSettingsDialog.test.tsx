@@ -931,6 +931,96 @@ describe('JOY Agent Settings saved profile connect', () => {
     expect(JSON.stringify(vi.mocked(engineClient.configure).mock.calls)).not.toContain('apiKey');
   });
 
+  it('records the consent a card confirms for the profile that card names, not another on the same endpoint', async () => {
+    const endpoint = 'http://127.0.0.1:1234/v1';
+    const shared = {
+      provider: 'custom',
+      baseUrl: endpoint,
+      modelId: 'llama3',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: true,
+    };
+    const first = { ...shared, id: 'prof-first', name: 'First' };
+    const second = { ...shared, id: 'prof-second', name: 'Second', modelId: 'qwen3' };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return [first, second];
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const useButtonFor = (name: string): HTMLButtonElement => {
+      const card = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent?.trim() === name,
+      );
+      const use = [...(card?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (button) => button.textContent?.trim() === 'Use',
+      );
+      if (use === undefined) throw new Error(`Expected a Use button on ${name}`);
+      return use;
+    };
+
+    await act(async () => {
+      useButtonFor('Second').click();
+      await Promise.resolve();
+    });
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('Acknowledge this custom endpoint before connecting.');
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (consent === null) throw new Error('Expected the endpoint consent');
+    await act(async () => {
+      consent.click();
+    });
+    await act(async () => {
+      useButtonFor('Second').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).toHaveBeenCalledTimes(1);
+    expect(engineClient.configure).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: endpoint, modelId: 'qwen3', profileId: 'prof-second' }),
+    );
+  });
+
+  it('does not pick one of several saved profiles on the same endpoint when the dialog opens', async () => {
+    const shared = {
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/free',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: true,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        return [
+          { ...shared, id: 'prof-work', name: 'Work' },
+          { ...shared, id: 'prof-personal', name: 'Personal' },
+        ];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    expect(rendered.querySelectorAll('.joy-settings-provider-card.is-active')).toHaveLength(0);
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('Choose one in the list first.');
+  });
+
   it('asks for the key again, and does not connect, when its key is not confirmed for the endpoint', async () => {
     const savedProfile = {
       id: 'prof-or-unbound',

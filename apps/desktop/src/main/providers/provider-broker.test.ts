@@ -938,6 +938,105 @@ describe('provider broker: the reply that leaves the broker', () => {
     });
   });
 
+  it('drops metadata nested in the usage and tool-call fields, which the engine does not read', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          id: 'c2',
+          usage: { prompt_tokens: 3, base_url: 'http://127.0.0.1:1234/v1' },
+          choices: [
+            {
+              index: 0,
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call-1',
+                    type: 'function',
+                    provider: { base_url: 'http://127.0.0.1:1234/v1' },
+                    function: {
+                      name: 'read_file',
+                      arguments: '{"path":"notes.md"}',
+                      endpoint: 'http://127.0.0.1:1234/v1',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected a reply');
+    expect(result.data.text).not.toContain('base_url');
+    expect(result.data.text).not.toContain('endpoint');
+    expect(JSON.parse(result.data.text)).toMatchObject({
+      id: 'c2',
+      choices: [
+        {
+          finish_reason: 'tool_calls',
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call-1',
+                type: 'function',
+                function: { name: 'read_file', arguments: '{"path":"notes.md"}' },
+              },
+            ],
+          },
+        },
+      ],
+    });
+  });
+
+  it('refuses a reply with a malformed choice, rather than promoting the next choice to first', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          choices: [null, { message: { role: 'assistant', content: 'second choice' } }],
+        }),
+    });
+
+    expect(await broker.complete({ profileId: 'p1', body: CHAT_BODY })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+    });
+  });
+
+  it('refuses a message whose content is not text, which the engine cannot read', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          choices: [
+            {
+              message: { role: 'assistant', content: [{ type: 'text', text: 'parts, not text' }] },
+            },
+          ],
+        }),
+    });
+
+    expect(await broker.complete({ profileId: 'p1', body: CHAT_BODY })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+    });
+  });
+
   it('refuses a chat reply with a refusal message, even when its finish reason is stop', async () => {
     const p = bound('p1', 'grok', 'https://api.x.ai/v1');
     const { broker } = harness({

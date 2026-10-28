@@ -190,6 +190,8 @@ export async function requestAgentCompletion(request: ProviderCallRequest): Prom
           readonly message?: unknown;
         }
       | undefined;
+    // A reply that lands after the caller aborted is not returned: the caller has stopped waiting for it.
+    if (signal?.aborted) throw new ProviderCallError('NETWORK_ERROR', 'The request was cancelled.');
     if (data?.ok === true && typeof data.text === 'string') return data.text;
     throw new ProviderCallError(
       typeof data?.code === 'string' ? data.code : 'NETWORK_ERROR',

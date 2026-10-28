@@ -288,10 +288,9 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.agent.request': async (payload): Promise<IpcResult> => {
       const request = asAgentRequest(payload);
       if (request === undefined) return { ok: false, error: 'Invalid agent request' };
-      // A call with an id can be cancelled. An id already in use is refused rather than shared.
+      // Every call has an id the renderer can cancel. An id already in use is refused, not shared.
       const { requestId, ...brokerRequest } = request;
-      const controller =
-        requestId === undefined ? new AbortController() : agentRequests.begin(requestId);
+      const controller = agentRequests.begin(requestId);
       if (controller === undefined) {
         return { ok: false, error: 'That agent request id is already in use' };
       }
@@ -308,7 +307,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
             : { ok: false, code: result.code, message: result.message },
         };
       } finally {
-        if (requestId !== undefined) agentRequests.finish(requestId, controller);
+        agentRequests.finish(requestId, controller);
       }
     },
     'desktop.agent.cancel': (payload): IpcResult => {
@@ -519,7 +518,7 @@ function asModelSource(
 function asAgentRequest(
   value: unknown,
 ):
-  | { profileId: string; body: unknown; baseUrl: string; modelId?: string; requestId?: string }
+  | { profileId: string; body: unknown; baseUrl: string; modelId?: string; requestId: string }
   | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
@@ -528,14 +527,15 @@ function asAgentRequest(
   if (typeof profileId !== 'string' || profileId.length === 0) return undefined;
   if (typeof baseUrl !== 'string' || baseUrl.length === 0 || baseUrl.length > 2048)
     return undefined;
-  const modelId = candidate['modelId'];
   const requestId = asAgentRequestId(candidate['requestId']);
+  if (requestId === undefined) return undefined;
+  const modelId = candidate['modelId'];
   return {
     profileId,
     baseUrl,
     body: candidate['body'],
     ...(typeof modelId === 'string' ? { modelId } : {}),
-    ...(requestId === undefined ? {} : { requestId }),
+    requestId,
   };
 }
 

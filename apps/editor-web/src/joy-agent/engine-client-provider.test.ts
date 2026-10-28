@@ -178,6 +178,31 @@ describe('engine client provider calls', () => {
     expect(callSignal?.aborted).toBe(true);
   });
 
+  it('ignores a second provider request that reuses an id still in use, and keeps the first call', async () => {
+    let callSignal: AbortSignal | undefined;
+    let finish: ((text: string) => void) | undefined;
+    const providerCall = vi.fn<ProviderCall>(async (request) => {
+      callSignal = request.signal;
+      return new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+    });
+    const worker = await startedClient(providerCall);
+    worker.emit(PROVIDER_REQUEST);
+    await vi.waitFor(() => expect(providerCall).toHaveBeenCalledTimes(1));
+
+    worker.emit({
+      ...PROVIDER_REQUEST,
+      body: { messages: [{ role: 'user', content: 'a second call under the same id' }] },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(providerCall).toHaveBeenCalledTimes(1);
+    expect(callSignal?.aborted).toBe(false);
+    finish?.('{"choices":[]}');
+    await vi.waitFor(() => expect(answers(worker)).toHaveLength(1));
+  });
+
   it('waits past the status deadline for a connection test, whose provider calls take longer', async () => {
     vi.useFakeTimers();
     try {

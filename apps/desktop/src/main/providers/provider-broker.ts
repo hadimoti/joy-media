@@ -391,10 +391,16 @@ function isJsonText(text: string): boolean {
  * or other provider metadata, stays with the broker and never reaches the Worker. Model text is kept exactly
  * as the provider wrote it (PLAN-v4 §6b).
  */
-const ENVELOPE_FIELDS = ['id', 'object', 'created', 'model', 'usage'] as const;
-const CHOICE_FIELDS = ['index', 'finish_reason'] as const;
-const MESSAGE_FIELDS = ['role', 'content', 'tool_calls', 'refusal'] as const;
+/** Thrown for a reply the engine could not read. The text of the reply is never part of the message. */
+function notUnderstood(): never {
+  throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not understood.');
+}
 
+/**
+ * The completion the engine reads, rebuilt from the fields it needs and nothing else. Each field is type-checked,
+ * so provider metadata (a base URL in `usage`, or an extra property on a tool call) never reaches the Worker
+ * through a field the engine does not read. Model-authored strings are kept exactly as written (PLAN-v4 §6b).
+ */
 function completionEnvelope(reply: string): string {
   let parsed: unknown;
   try {
@@ -402,23 +408,56 @@ function completionEnvelope(reply: string): string {
   } catch {
     throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not valid JSON.');
   }
-  if (!isRecord(parsed) || !Array.isArray(parsed.choices)) {
-    throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not understood.');
-  }
-  const choices = parsed.choices.filter(isRecord).map((choice) => ({
-    ...pickFields(choice, CHOICE_FIELDS),
-    ...(isRecord(choice.message) ? { message: pickFields(choice.message, MESSAGE_FIELDS) } : {}),
-  }));
-  return JSON.stringify({ ...pickFields(parsed, ENVELOPE_FIELDS), choices });
+  if (!isRecord(parsed) || !Array.isArray(parsed.choices)) notUnderstood();
+  const envelope: Record<string, unknown> = {};
+  if (typeof parsed.id === 'string') envelope.id = parsed.id;
+  if (typeof parsed.object === 'string') envelope.object = parsed.object;
+  if (typeof parsed.created === 'number') envelope.created = parsed.created;
+  if (typeof parsed.model === 'string') envelope.model = parsed.model;
+  return JSON.stringify({ ...envelope, choices: parsed.choices.map(completionChoice) });
 }
 
-function pickFields(
-  source: Record<string, unknown>,
-  fields: readonly string[],
-): Record<string, unknown> {
-  return Object.fromEntries(
-    fields.filter((field) => field in source).map((field) => [field, source[field]]),
-  );
+function completionChoice(choice: unknown): Record<string, unknown> {
+  if (!isRecord(choice)) notUnderstood();
+  const out: Record<string, unknown> = {};
+  if (typeof choice.index === 'number') out.index = choice.index;
+  if (choice.finish_reason === null || typeof choice.finish_reason === 'string') {
+    out.finish_reason = choice.finish_reason;
+  }
+  if (choice.message !== undefined) out.message = completionMessage(choice.message);
+  return out;
+}
+
+function completionMessage(message: unknown): Record<string, unknown> {
+  if (!isRecord(message)) notUnderstood();
+  const out: Record<string, unknown> = {};
+  if (typeof message.role === 'string') out.role = message.role;
+  if (message.content === null || typeof message.content === 'string') {
+    out.content = message.content;
+  } else if (message.content !== undefined) {
+    notUnderstood();
+  }
+  if (message.refusal === null || typeof message.refusal === 'string') {
+    out.refusal = message.refusal;
+  } else if (message.refusal !== undefined) {
+    notUnderstood();
+  }
+  if (message.tool_calls !== undefined) {
+    if (!Array.isArray(message.tool_calls)) notUnderstood();
+    out.tool_calls = message.tool_calls.map(completionToolCall);
+  }
+  return out;
+}
+
+function completionToolCall(call: unknown): Record<string, unknown> {
+  if (!isRecord(call) || !isRecord(call.function)) notUnderstood();
+  const fn = call.function;
+  if (typeof fn.name !== 'string' || typeof fn.arguments !== 'string') notUnderstood();
+  return {
+    ...(typeof call.id === 'string' ? { id: call.id } : {}),
+    ...(typeof call.type === 'string' ? { type: call.type } : {}),
+    function: { name: fn.name, arguments: fn.arguments },
+  };
 }
 
 /** The reply that leaves the broker holds no credential, and a refusal is not passed off as an answer. */

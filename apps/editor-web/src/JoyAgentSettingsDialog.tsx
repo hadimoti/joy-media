@@ -296,9 +296,12 @@ export function JoyAgentSettingsDialog({
         if (chosen === undefined) selectedProfileIdRef.current = undefined;
         return;
       }
-      const openRouterProfile = list.find(
+      // Shown by default only when it is the one OpenRouter profile. With several on the same endpoint, the user
+      // chooses one (the form refuses to connect until then), so no profile is picked for them.
+      const openRouterProfiles = list.filter(
         (p) => p.provider === 'openrouter' && p.state !== 'disabled-legacy',
       );
+      const openRouterProfile = openRouterProfiles.length === 1 ? openRouterProfiles[0] : undefined;
       if (openRouterProfile) {
         // Written out here, not through selectProfile, so this effect depends on stable setters only.
         selectedProfileIdRef.current = openRouterProfile.id;
@@ -440,9 +443,8 @@ export function JoyAgentSettingsDialog({
     }
   };
 
-  /** Connects a saved profile by its id. The key is never read here: the main process holds it. */
-  /** Shows a saved profile in the form, so the key typed there is confirmed for its own endpoint. */
-  const selectProfileIntoForm = (profile: DesktopProviderProfileState) => {
+  /** Shows a saved profile in the form: its endpoint, model and name, and the saved profile it stands for. */
+  const showProfileInForm = (profile: DesktopProviderProfileState) => {
     const next = dialogProviderFor(profile.provider);
     selectProfile(profile);
     if (next !== undefined) {
@@ -457,13 +459,19 @@ export function JoyAgentSettingsDialog({
     setBaseUrl(profile.baseUrl);
     setModelId(profile.modelId);
     setConnectionName(profile.name ?? '');
-    setCustomDisclosure(false);
     clearTypedKey();
+  };
+
+  /** Shows a saved profile whose key must be entered again, so the key typed there confirms it. */
+  const selectProfileIntoForm = (profile: DesktopProviderProfileState) => {
+    showProfileInForm(profile);
+    setCustomDisclosure(false);
     const message = 'Enter the API key again to confirm this endpoint, then connect.';
     setConnectionNotice({ kind: 'error', message });
     onNotice?.(message, 'error');
   };
 
+  /** Connects a saved profile by its id. The key is never read here: the main process holds it. */
   const connectSavedProfile = async (profile: DesktopProviderProfileState) => {
     // A profile whose stored key cannot be used is shown in the form, so its key is entered again.
     if (!canUseStoredKey(profile)) {
@@ -473,6 +481,8 @@ export function JoyAgentSettingsDialog({
     if (working || engineClient === undefined || engineClient === null) return;
     const sessionProvider = sessionProviderFor(profile.provider);
     if (sessionProvider === undefined) return;
+    // The form and the selection name the profile being connected, so both point at the same profile.
+    showProfileInForm(profile);
     if (
       requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
       !requireCustomEndpointAcknowledgement({
@@ -1137,26 +1147,12 @@ export function JoyAgentSettingsDialog({
                                   }
                                   if (checked) {
                                     const normalized = normalizeProviderBaseUrl(baseUrl);
-                                    const providerProfile = profiles.find(
-                                      (profile) =>
-                                        profile.provider ===
-                                          (provider === 'openai-compatible'
-                                            ? 'custom'
-                                            : provider) &&
-                                        normalizeProviderBaseUrl(profile.baseUrl) === normalized,
-                                    );
-                                    const exactProfile =
-                                      providerProfile ??
-                                      (savedProfile &&
-                                      savedProfile.provider ===
-                                        (provider === 'openai-compatible' ? 'custom' : provider) &&
-                                      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalized
-                                        ? savedProfile
-                                        : undefined);
+                                    // The acknowledgement belongs to the saved profile the form chose, not to
+                                    // another profile that happens to share this endpoint.
                                     acknowledgeCustomEndpoint({
                                       provider: 'custom',
                                       baseUrl: normalized,
-                                      profileId: exactProfile?.id,
+                                      profileId: matchedProfile?.id,
                                     });
                                   }
                                 }}

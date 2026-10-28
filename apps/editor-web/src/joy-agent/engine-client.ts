@@ -656,6 +656,8 @@ export function createSingleWorkerEngineClient(
         return;
       }
       if (message.type === 'provider-request') {
+        // An id still in use is ignored: the call it names keeps running, and a second call cannot replace it.
+        if (activeProviderCalls.has(message.requestId)) return;
         const call = new AbortController();
         activeProviderCalls.set(message.requestId, call);
         void answerProviderRequest(

@@ -107,10 +107,13 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
   // The last output of each Worker, so a timeout can say what the Worker printed before it went quiet.
   const workerTails = new Map<ChildProcess, { text: string }>();
 
-  function startWorker(): ChildProcess {
+  function startWorker(extraEnv: NodeJS.ProcessEnv = {}): ChildProcess {
     const child = spawn(process.execPath, [workerEntry], {
       cwd: workerDir,
-      env: localWorkerEnv(process.env, { apiEnv: api.workerEnv, workerRoot: join(dir, 'worker') }),
+      env: {
+        ...localWorkerEnv(process.env, { apiEnv: api.workerEnv, workerRoot: join(dir, 'worker') }),
+        ...extraEnv,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const tail = { text: '' };
@@ -207,6 +210,26 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
     expect(createHash('sha256').update(bytes).digest('hex')).toBe(derivative.sha256);
     expect(derivative).toMatchObject({ mimeType: 'image/jpeg', bytes: bytes.length });
     expect(JSON.parse(finished.resultJson ?? '{}')).toMatchObject({ kind: 'asset.thumbnail' });
+  }, 90_000);
+
+  it('keeps a provider key file out of a local Worker, which advertises no AI provider', async () => {
+    // A key file in the Worker PC's home directory, the file a standalone Worker would read at startup.
+    const home = join(dir, 'home');
+    mkdirSync(join(home, '.joy-media'), { recursive: true });
+    writeFileSync(
+      join(home, '.joy-media', 'ai-providers.json'),
+      JSON.stringify({
+        'lm-studio': {
+          baseUrl: 'http://127.0.0.1:1234/v1',
+          apiKey: 'sk-local-boundary-test',
+          defaultModel: 'local-model',
+        },
+      }),
+    );
+    startWorker({ HOME: home, USERPROFILE: home });
+    await waitForWorker();
+
+    expect(database.jobDispatch.presence()?.capabilities).not.toContain('text.lm-studio');
   }, 90_000);
 
   it('reports a real failure, with no derivative, when the source is not a video', async () => {

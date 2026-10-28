@@ -1021,6 +1021,16 @@ describe('JOY Agent Engine Worker V2', () => {
         }),
       }),
     );
+    // The desktop call that was in flight is ended by name, so its reply cannot land after the cancel.
+    const requests = worker.output.filter(
+      (message): message is Extract<WorkerToMainMessage, { type: 'provider-request' }> =>
+        message.type === 'provider-request',
+    );
+    expect(worker.output).toContainEqual({
+      protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+      type: 'provider-cancel',
+      requestId: requests[requests.length - 1]?.requestId,
+    });
   });
 
   it('turns an expired host-RPC deadline into a bounded timeout failure', async () => {

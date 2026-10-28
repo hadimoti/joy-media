@@ -466,11 +466,19 @@ export function detectMediaTools(
     // Opt-in: owner PC has ML denoise tooling installed.
     mlDenoise: (process.env.JOY_MEDIA_LOCAL_ML_DENOISE ?? '').trim() === '1',
     // AI providers configured via ~/.joy-media/ai-providers.json, unless this Worker holds no keys
-    aiProviders: options.readAiProviderFile === false ? [] : getConfiguredProviders(),
+    // A Worker started by the desktop app carries a local token and holds no provider key, so it reads no
+    // provider file (PLAN-v4 §6b). A Worker without one keeps its own file.
+    aiProviders: providerFileRead(options) ? getConfiguredProviders() : [],
     masking: maskingAvailabilityFromEnvironment(),
     upscaling: upscalingAvailabilityFromEnvironment(),
   };
 }
+/** Whether this Worker reads the provider file. A Worker started by the desktop app carries a local token. */
+function providerFileRead(options: { readonly readAiProviderFile?: boolean }): boolean {
+  if (options.readAiProviderFile !== undefined) return options.readAiProviderFile;
+  return (process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN ?? '').trim() === '';
+}
+
 function canRun(tool: string): boolean {
   const result = spawnSync(tool, ['-version'], { shell: false, stdio: 'ignore' });
   return result.status === 0;

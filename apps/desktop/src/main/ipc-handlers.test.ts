@@ -1112,6 +1112,7 @@ describe('legacy provider profiles (v1.1.0)', () => {
           profileId: id,
           baseUrl: 'https://openrouter.ai/api/v1',
           body: { messages: [{ role: 'user', content: 'hi' }] },
+          requestId: 'call-binding',
         },
       });
     d.providerFetch.mockResolvedValue(
@@ -1164,6 +1165,7 @@ describe('legacy provider profiles (v1.1.0)', () => {
         profileId: id,
         baseUrl: 'https://openrouter.ai/api/v1',
         body: { messages: [{ role: 'user', content: 'hi' }] },
+        requestId: 'call-reply',
       },
     });
     expect(result).toEqual({ ok: true, data: { ok: true, text: expect.any(String) } });
@@ -1184,6 +1186,81 @@ describe('legacy provider profiles (v1.1.0)', () => {
     });
     expect(result).toEqual({ ok: false, error: 'Invalid agent request' });
     expect(d.providerFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, '../../other'])(
+    'refuses a call without a plain request id, before any request (id: %s)',
+    async (requestId) => {
+      const d = deps();
+      const result = await dispatchIpcRequest(createIpcHandlers(d), {
+        origin: renderer,
+        channel: 'desktop.agent.request',
+        payload: {
+          profileId: 'prof-any',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          body: { messages: [{ role: 'user', content: 'hi' }] },
+          requestId,
+        },
+      });
+      expect(result).toEqual({ ok: false, error: 'Invalid agent request' });
+      expect(d.providerFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses a second call under an id already in use, and leaves the first call running', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const saved = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openai/gpt-4o-mini',
+        apiKey: 'sk-shared-id',
+      },
+    });
+    const id = (saved.data as { id: string }).id;
+    let providerSignal: AbortSignal | undefined;
+    d.providerFetch.mockImplementationOnce(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          providerSignal = init.signal ?? undefined;
+          init.signal?.addEventListener('abort', () =>
+            reject(new DOMException('aborted', 'AbortError')),
+          );
+        }),
+    );
+    const request = {
+      profileId: id,
+      baseUrl: 'https://openrouter.ai/api/v1',
+      body: { messages: [{ role: 'user', content: 'hi' }] },
+      requestId: 'call-shared',
+    };
+
+    const first = dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.agent.request',
+      payload: request,
+    });
+    await vi.waitFor(() => expect(providerSignal).toBeDefined());
+    const second = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.agent.request',
+      payload: request,
+    });
+
+    expect(second).toEqual({ ok: false, error: 'That agent request id is already in use' });
+    expect(providerSignal?.aborted).toBe(false);
+    await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.agent.cancel',
+      payload: { requestId: 'call-shared' },
+    });
+    await expect(first).resolves.toMatchObject({
+      ok: true,
+      data: { ok: false, code: 'NETWORK_ERROR' },
+    });
   });
 });
 
