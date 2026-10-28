@@ -16,6 +16,7 @@ import {
   assessProviderCapabilities,
   assessProviderMediaCapabilities,
   PROVIDER_MEDIA_CAPABILITY_PROBE_ACK,
+  PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN,
   PROVIDER_TOOL_PROBE_RESULT,
   resolveProviderExecutionMode,
   type ProviderMediaCapabilityAssessment,
@@ -33,7 +34,10 @@ import {
   MAX_MULTIMODAL_ANALYSIS_TEXT_BYTES,
   type ObservationEvidencePayload,
   type MultimodalTransport,
+  MAX_MULTIMODAL_REQUEST_BYTES,
+  MAX_MULTIMODAL_RESPONSE_BYTES,
 } from './multimodal-transport.js';
+import { jsonUtf8Size } from './json-bytes.js';
 import { issueObservationConsent } from './observation-consent.js';
 import {
   isPrivateObservationMainToWorkerMessage,
@@ -53,6 +57,7 @@ import {
   type ByokSessionConfig,
   type ByokSessionStatus,
   type JoyAgentErrorCode,
+  type ProviderCallResult,
   type JoyAgentMediaCapabilityReport,
   type JoyAgentMediaModality,
   type JoyAgentPhase,
@@ -61,9 +66,12 @@ import {
   type JoyAgentSafeEvent,
   type JoyAgentTaskKind,
   type WorkerToMainMessage,
+  PROVIDER_CONNECTION_CALL_TIMEOUT_MS,
 } from './protocol.js';
 
-const CONNECTION_TIMEOUT_MS = 15_000;
+// The deadline of one provider call in the connection test. It is longer than the broker's own
+// probe timeout (30 s), so a refusal from the broker arrives before this deadline fires.
+const CONNECTION_TIMEOUT_MS = PROVIDER_CONNECTION_CALL_TIMEOUT_MS;
 const PROBE_MAX_BYTES = 64 * 1024;
 const MAX_PLAN_ONLY_RESULT_BYTES = 65_536;
 /** Explicit synthetic media probes are independently bounded below 16 KiB each. */
@@ -501,7 +509,10 @@ async function sendObservationEvidence(
   let transport: MultimodalTransport | undefined;
   try {
     const endpointOrigin = new URL(connection.baseUrl).origin;
-    transport = createMultimodalTransport();
+    transport = createMultimodalTransport({
+      providerCall: ({ connection: call, body, signal }) =>
+        callProvider(call, body, signal, MAX_MULTIMODAL_RESPONSE_BYTES).then((reply) => reply.text),
+    });
     active.transport = transport;
     transport.grant(
       issueObservationConsent(
@@ -651,88 +662,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isSafeBaseUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    const host = url.hostname
-      .toLowerCase()
-      .replace(/^\[|\]$/g, '')
-      .replace(/\.$/, '');
-    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash)
-      return false;
-    if (isBlockedHost(host)) return false;
-    return !url.pathname.toLowerCase().endsWith('/chat/completions');
-  } catch {
-    return false;
-  }
-}
-
-function isBlockedHost(host: string): boolean {
-  if (
-    host === 'localhost' ||
-    host.endsWith('.localhost') ||
-    host === 'metadata' ||
-    host === 'metadata.google.internal' ||
-    host.endsWith('.internal')
-  )
-    return true;
-  const mappedIpv4 = host.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (mappedIpv4?.[1] !== undefined) return isBlockedHost(mappedIpv4[1]);
-  const compressedMapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
-  if (compressedMapped?.[1] !== undefined && compressedMapped[2] !== undefined) {
-    const high = Number.parseInt(compressedMapped[1], 16);
-    const low = Number.parseInt(compressedMapped[2], 16);
-    return isBlockedHost(`${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`);
-  }
-  const mappedGroups = host.split(':');
-  if (mappedGroups.length === 8 && mappedGroups[5] === 'ffff') {
-    const high = Number.parseInt(mappedGroups[6] ?? '', 16);
-    const low = Number.parseInt(mappedGroups[7] ?? '', 16);
-    if (Number.isInteger(high) && Number.isInteger(low) && high <= 0xffff && low <= 0xffff)
-      return isBlockedHost(`${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`);
-  }
-  const parts = host.split('.');
-  if (parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part))) {
-    const [firstRaw = '-1', secondRaw = '-1'] = parts;
-    const first = Number(firstRaw);
-    const second = Number(secondRaw);
-    if (parts.some((part) => Number(part) > 255)) return true;
-    return (
-      first === 0 ||
-      first === 10 ||
-      first === 127 ||
-      (first === 100 && second >= 64 && second <= 127) ||
-      (first === 169 && second === 254) ||
-      (first === 172 && second >= 16 && second <= 31) ||
-      (first === 192 && second === 168) ||
-      (first === 198 && second >= 18 && second <= 19) ||
-      first >= 224
-    );
-  }
-  return (
-    host === '::' ||
-    host === '::1' ||
-    host.startsWith('fe80:') ||
-    host.startsWith('fc') ||
-    host.startsWith('fd')
-  );
-}
-
 async function configure(config: ByokSessionConfig): Promise<void> {
-  if (
-    !isSafeBaseUrl(config.baseUrl) ||
-    config.baseUrl.length > 2_048 ||
-    config.apiKey.length === 0 ||
-    config.apiKey.length > 4_096 ||
-    config.modelId.length === 0 ||
-    config.modelId.length > 256
-  )
+  if (config.modelId.length === 0 || config.modelId.length > 256)
     throw new Error('Invalid model connection');
   for (const controller of mediaCapabilityProbeControllers) controller.abort();
   mediaCapabilityProbeControllers.clear();
   // A replaced BYOK session revokes every in-flight run. Otherwise a run that
-  // captured the previous connection keeps calling the old baseUrl with the
-  // old apiKey and can still stage a preview after the owner switched models.
+  // captured the previous connection keeps calling the old profile and can
+  // still stage a preview after the owner switched models.
   for (const active of runs.values()) abortForCancellation(active, false);
   clearObservationReviewState();
   observationSessionEpoch += 1;
@@ -752,65 +689,76 @@ interface BoundedProviderResponse {
   readonly bytes: number;
 }
 
-async function readBoundedResponse(
-  response: Response,
-  maxBytes: number,
-): Promise<BoundedProviderResponse> {
-  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)
-    throw new JoyAgentWorkerError('JOY_AGENT_RESPONSE_TOO_LARGE', 'Provider response too large');
-  const announced = Number(response.headers.get('content-length') ?? '0');
-  if (Number.isFinite(announced) && announced > maxBytes)
-    throw new JoyAgentWorkerError('JOY_AGENT_RESPONSE_TOO_LARGE', 'Provider response too large');
-  if (response.body === null) return { text: '', bytes: 0 };
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      total += next.value.byteLength;
-      if (total > maxBytes)
-        throw new JoyAgentWorkerError(
-          'JOY_AGENT_RESPONSE_TOO_LARGE',
-          'Provider response too large',
-        );
-      chunks.push(next.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { text: new TextDecoder().decode(merged), bytes: total };
-}
+/** Provider calls waiting for the main process, by request id. */
+const pendingProviderCalls = new Map<string, (result: ProviderCallResult) => void>();
+let providerRequestSequence = 0;
 
+/**
+ * One model call. The worker never holds a key: it posts the request to the main thread, which sends
+ * it through the broker and answers with the reply text or a code (PLAN-v4 §6a).
+ */
 async function callProvider(
   connection: ByokSessionConfig,
   body: Record<string, unknown>,
   signal: AbortSignal,
   maxBytes: number,
 ): Promise<BoundedProviderResponse> {
-  const response = await fetch(`${connection.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    credentials: 'omit',
-    cache: 'no-store',
-    referrerPolicy: 'no-referrer',
-    redirect: 'error',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${connection.apiKey}` },
-    body: JSON.stringify(body),
-    signal,
+  if (signal.aborted) throw new JoyAgentWorkerError('JOY_AGENT_ABORTED', 'Run cancelled');
+  if (jsonUtf8Size(body, MAX_MULTIMODAL_REQUEST_BYTES) === undefined) {
+    throw new JoyAgentWorkerError('JOY_AGENT_PROVIDER_INCOMPATIBLE', 'Provider request too large');
+  }
+  providerRequestSequence += 1;
+  const requestId = `provider-${providerRequestSequence}`;
+  const result = await new Promise<ProviderCallResult>((resolve, reject) => {
+    const abort = (): void => {
+      pendingProviderCalls.delete(requestId);
+      // The main thread ends the call and sends nothing back, so no reply arrives for a call nobody awaits.
+      post({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type: 'provider-cancel', requestId });
+      reject(new JoyAgentWorkerError('JOY_AGENT_ABORTED', 'Run cancelled'));
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    pendingProviderCalls.set(requestId, (answer) => {
+      signal.removeEventListener('abort', abort);
+      resolve(answer);
+    });
+    post({
+      protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+      type: 'provider-request',
+      requestId,
+      profileId: connection.profileId,
+      baseUrl: connection.baseUrl,
+      modelId: connection.modelId,
+      body,
+    });
   });
-  if (response.status === 401 || response.status === 403)
-    throw new JoyAgentWorkerError('JOY_AGENT_AUTH_FAILED', 'Provider authentication failed');
-  if (!response.ok)
-    throw new JoyAgentWorkerError('JOY_AGENT_CORS_OR_NETWORK', 'Provider request failed');
-  return readBoundedResponse(response, maxBytes);
+  if (!result.ok) throw new JoyAgentWorkerError(providerErrorCode(result.code), result.message);
+  const bytes = new TextEncoder().encode(result.text).byteLength;
+  if (bytes > maxBytes)
+    throw new JoyAgentWorkerError('JOY_AGENT_RESPONSE_TOO_LARGE', 'Provider response too large');
+  return { text: result.text, bytes };
 }
+
+/** Maps the broker's codes onto the engine's error codes. Anything unknown is a network failure. */
+function providerErrorCode(code: string): JoyAgentErrorCode {
+  if (code === 'AUTH_FAILED' || code === 'CREDENTIAL_UNAVAILABLE') return 'JOY_AGENT_AUTH_FAILED';
+  if (code === 'TIMEOUT') return 'JOY_AGENT_TIMEOUT';
+  if (code === 'RESPONSE_TOO_LARGE' || code === 'JOY_AGENT_RESPONSE_TOO_LARGE') {
+    return 'JOY_AGENT_RESPONSE_TOO_LARGE';
+  }
+  // A refusal by the endpoint policy, the key binding or the request itself is not a network failure.
+  if (PROVIDER_REFUSAL_CODES.has(code)) return 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
+  return 'JOY_AGENT_CORS_OR_NETWORK';
+}
+
+const PROVIDER_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'PROVIDER_INCOMPATIBLE',
+  'ENDPOINT_REFUSED',
+  'BINDING_MISMATCH',
+  'PROFILE_NOT_FOUND',
+  'PROFILE_DISABLED',
+  'REQUEST_INVALID',
+  'REQUEST_TOO_LARGE',
+]);
 
 function parseProviderEnvelope(text: string): Record<string, unknown> {
   try {
@@ -849,97 +797,97 @@ function makeProbeTool() {
 async function testConnection(): Promise<void> {
   if (session === undefined) throw new Error('Configure a model connection first');
   const connection = session;
-  const controller = new AbortController();
   let timedOut = false;
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timeout = setTimeout(() => {
+  // Each provider call has its own deadline. A probe is up to three calls, and a slow first call
+  // must not leave the later ones with no time at all (PLAN-v4 §6a).
+  const probeCall = (
+    body: Record<string, unknown>,
+    maxBytes: number,
+  ): Promise<BoundedProviderResponse> => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
       timedOut = true;
       controller.abort();
-      reject(new JoyAgentWorkerError('JOY_AGENT_TIMEOUT', 'Connection timed out'));
     }, CONNECTION_TIMEOUT_MS);
-  });
+    return callProvider(connection, body, controller.signal, maxBytes).finally(() => {
+      clearTimeout(timeout);
+    });
+  };
   try {
-    const capability = await Promise.race([
-      (async (): Promise<ByokSessionStatus['capability']> => {
-        const probeTool = makeProbeTool();
-        const initialRequest = {
-          model: connection.modelId,
-          messages: [{ role: 'user', content: 'Use the joy_probe tool exactly once with {}.' }],
-          tools: [probeTool],
-          tool_choice: { type: 'function', function: { name: 'joy_probe' } },
-          max_tokens: 32,
-        } as const;
-        const initialResponse = parseProviderEnvelope(
-          (await callProvider(connection, initialRequest, controller.signal, PROBE_MAX_BYTES)).text,
-        );
-        const initialMessage = firstProviderMessage(initialResponse);
-        const calls = initialMessage?.tool_calls;
-        let continuationRequest: Record<string, unknown> | undefined;
-        let continuationResponse: Record<string, unknown> | undefined;
-        if (Array.isArray(calls) && calls.length === 1 && isRecord(calls[0])) {
-          const call = calls[0];
-          continuationRequest = {
-            model: connection.modelId,
-            messages: [
-              initialRequest.messages[0],
-              { role: 'assistant', content: null, tool_calls: [call] },
-              { role: 'tool', tool_call_id: call.id, content: PROVIDER_TOOL_PROBE_RESULT },
-            ],
-            tools: [probeTool],
-            tool_choice: 'none',
-            max_tokens: 32,
-          };
-          continuationResponse = parseProviderEnvelope(
-            (
-              await callProvider(
-                connection,
-                continuationRequest,
-                controller.signal,
-                PROBE_MAX_BYTES,
-              )
-            ).text,
-          );
-        }
-        const planOnlyResponse = parseProviderEnvelope(
-          (
-            await callProvider(
-              connection,
-              {
-                model: connection.modelId,
-                messages: [
-                  {
-                    role: 'user',
-                    content:
-                      'Reply with one brief confirmation that plan-only text mode is available.',
-                  },
-                ],
-                max_tokens: 32,
-              },
-              controller.signal,
-              PROBE_MAX_BYTES,
-            )
-          ).text,
-        );
-        const assessment = assessProviderCapabilities({
-          structuredTool: {
-            tool: { name: 'joy_probe', validateArguments: isEmptyObject },
-            transcript: {
-              initialResponse,
-              continuationRequest,
-              continuationResponse,
-            },
+    const capability = await (async (): Promise<ByokSessionStatus['capability']> => {
+      const probeTool = makeProbeTool();
+      const initialRequest = {
+        model: connection.modelId,
+        messages: [
+          {
+            role: 'user',
+            content: `Use the joy_probe tool exactly once with {}. After its result, reply with exactly ${PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN} and nothing else.`,
           },
-          planOnly: { response: planOnlyResponse },
-        });
-        return assessment.state === 'structured-tools'
-          ? 'tool-loop'
-          : assessment.state === 'plan-only'
-            ? 'plan-only'
-            : 'incompatible';
-      })(),
-      deadline,
-    ]);
+        ],
+        tools: [probeTool],
+        // Auto, not a named tool: Claude Sonnet 5.5 accepts only auto or none, so a forced choice fails for it.
+        tool_choice: 'auto',
+        max_tokens: 1024,
+      } as const;
+      const initialResponse = parseProviderEnvelope(
+        (await probeCall(initialRequest, PROBE_MAX_BYTES)).text,
+      );
+      const initialMessage = firstProviderMessage(initialResponse);
+      const calls = initialMessage?.tool_calls;
+      let continuationRequest: Record<string, unknown> | undefined;
+      let continuationResponse: Record<string, unknown> | undefined;
+      if (Array.isArray(calls) && calls.length === 1 && isRecord(calls[0])) {
+        const call = calls[0];
+        continuationRequest = {
+          model: connection.modelId,
+          messages: [
+            initialRequest.messages[0],
+            { role: 'assistant', content: null, tool_calls: [call] },
+            { role: 'tool', tool_call_id: call.id, content: PROVIDER_TOOL_PROBE_RESULT },
+          ],
+          tools: [probeTool],
+          tool_choice: 'none',
+          max_tokens: 1024,
+        };
+        continuationResponse = parseProviderEnvelope(
+          (await probeCall(continuationRequest, PROBE_MAX_BYTES)).text,
+        );
+      }
+      const planOnlyResponse = parseProviderEnvelope(
+        (
+          await probeCall(
+            {
+              model: connection.modelId,
+              messages: [
+                {
+                  role: 'user',
+                  content:
+                    'Reply with one brief confirmation that plan-only text mode is available.',
+                },
+              ],
+              max_tokens: 1024,
+            },
+            PROBE_MAX_BYTES,
+          )
+        ).text,
+      );
+      const assessment = assessProviderCapabilities({
+        structuredTool: {
+          tool: { name: 'joy_probe', validateArguments: isEmptyObject },
+          transcript: {
+            initialResponse,
+            continuationRequest,
+            continuationResponse,
+          },
+        },
+        planOnly: { response: planOnlyResponse },
+      });
+      return assessment.state === 'structured-tools'
+        ? 'tool-loop'
+        : assessment.state === 'plan-only'
+          ? 'plan-only'
+          : 'incompatible';
+    })();
     providerCapability = capability;
     post({
       protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
@@ -969,11 +917,12 @@ async function testConnection(): Promise<void> {
             ? 'Provider authentication failed'
             : errorCode === 'JOY_AGENT_RESPONSE_TOO_LARGE'
               ? 'Provider response too large'
-              : 'CORS or network error',
+              : errorCode === 'JOY_AGENT_PROVIDER_INCOMPATIBLE' &&
+                  error instanceof JoyAgentWorkerError
+                ? error.message.slice(0, 180)
+                : 'CORS or network error',
       ),
     });
-  } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 
@@ -1350,6 +1299,11 @@ function failureMessage(
     return { code: 'JOY_AGENT_TIMEOUT', message: 'Provider request timed out' };
   if (active.cancelledByUser || active.budgetCancellation === 'externally-cancelled')
     return { code: 'JOY_AGENT_ABORTED', message: 'JOY run stopped' };
+  // A refusal by the endpoint policy, the key binding or the request names its cause. That text is
+  // safe to show, so it is shown rather than a generic network message.
+  if (error instanceof JoyAgentWorkerError && error.code === 'JOY_AGENT_PROVIDER_INCOMPATIBLE') {
+    return { code: error.code, message: error.message.slice(0, 180) };
+  }
   const code = classifyError(error);
   if (code === 'JOY_AGENT_AUTH_FAILED') return { code, message: 'Provider authentication failed' };
   if (code === 'JOY_AGENT_RESPONSE_TOO_LARGE')
@@ -1676,6 +1630,12 @@ globalThis.addEventListener('message', (event: MessageEvent<unknown>) => {
   if (!isMainToWorkerMessage(message)) {
     if (isRecord(message) && Object.prototype.hasOwnProperty.call(message, 'protocolVersion'))
       postProtocolMismatch();
+    return;
+  }
+  if (message.type === 'provider-response') {
+    const settle = pendingProviderCalls.get(message.requestId);
+    pendingProviderCalls.delete(message.requestId);
+    settle?.(message.result);
     return;
   }
   if (message.type === 'configure') {

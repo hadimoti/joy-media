@@ -11,7 +11,7 @@ const MAX_ERROR_LENGTH = 240;
 /** Protocol refusal that the loopback API maps onto an HTTP status. */
 export class JobProtocolError extends Error {
   constructor(
-    readonly status: 404 | 409 | 413 | 422,
+    readonly status: 403 | 404 | 409 | 413 | 422 | 502,
     message: string,
   ) {
     super(message);
@@ -116,11 +116,13 @@ export interface JobOrchestratorOptions {
 }
 
 export interface JobOrchestrator {
+  /** Main-process callers only. A Worker can never name a profile (PLAN-v4 §6b). */
   submit(request: {
     readonly jobType: string;
     readonly refId: string;
     readonly kind: string;
     readonly payload?: unknown;
+    readonly profileId?: string;
   }): SubmitResult;
   hello(workerId: string, capabilities: readonly string[]): void;
   lease(workerId: string, durationMs?: number): LeasedWorkerJob | undefined;
@@ -212,7 +214,7 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
   }
 
   return {
-    submit({ jobType, refId, kind, payload }) {
+    submit({ jobType, refId, kind, payload, profileId }) {
       const requirement = JOB_REQUIREMENTS[jobType];
       if (requirement === undefined) {
         return {
@@ -273,6 +275,7 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
         derivative: undefined,
         resultJson: undefined,
         payloadJson: payloadResult.json,
+        ...(profileId === undefined ? {} : { profileId }),
       };
       store.transaction(() => store.insert(job));
       return { ok: true, jobId: job.id };

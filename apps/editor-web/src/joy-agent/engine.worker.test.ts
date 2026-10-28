@@ -148,6 +148,35 @@ async function mountedWorker(
       receive = listener;
     },
   );
+  // The desktop side answers each provider request the way the broker would: the fake provider sees
+  // the endpoint and body, and the worker gets the reply text or a code. No key is involved here.
+  const answerProviderRequest = async (
+    request: Extract<WorkerToMainMessage, { readonly type: 'provider-request' }>,
+  ): Promise<void> => {
+    const response = await fetcher(`${request.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request.body),
+    });
+    const result = response.ok
+      ? { ok: true as const, text: await response.text() }
+      : {
+          ok: false as const,
+          code:
+            response.status === 401 || response.status === 403
+              ? 'AUTH_FAILED'
+              : 'PROVIDER_HTTP_ERROR',
+          message: 'The provider returned an error.',
+        };
+    receive?.({
+      data: {
+        protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+        type: 'provider-response',
+        requestId: request.requestId,
+        result,
+      },
+    } as MessageEvent<unknown>);
+  };
   vi.stubGlobal('postMessage', (message: WorkerToMainMessage) => {
     output.push(message);
     if (
@@ -156,6 +185,7 @@ async function mountedWorker(
     ) {
       host.receive(message.message);
     }
+    if (message.type === 'provider-request') void answerProviderRequest(message);
   });
   vi.stubGlobal('fetch', fetcher);
   vi.stubGlobal('close', vi.fn());
@@ -169,7 +199,7 @@ async function mountedWorker(
       provider: 'openai-compatible',
       baseUrl: 'https://provider.example/v1',
       modelId: 'fixture-model',
-      apiKey: 'fixture-only',
+      profileId: 'profile-test',
     },
   });
   await vi.waitFor(() =>
@@ -266,10 +296,17 @@ async function waitForRunFinished(
   );
 }
 
+// A model answers the probe's continuation with the token only when the probe asked for it, as a real model must.
+function continuationAnswer(body: unknown): string {
+  return JSON.stringify(body).includes(PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN)
+    ? PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN
+    : 'Done.';
+}
+
 function structuredProvider(exchange: ProviderHandler): ProviderHandler {
   return (body, index, init) => {
     if (index === 0) return providerToolResponse('probe-1', 'joy_probe');
-    if (index === 1) return providerTextResponse(PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN);
+    if (index === 1) return providerTextResponse(continuationAnswer(body));
     if (index === 2) return providerTextResponse('plan-only probe ready');
     return exchange(body, index - 3, init);
   };
@@ -304,7 +341,7 @@ describe('JOY Agent Engine Worker V2', () => {
       throw new Error('Expected the full provider capability probe');
     }
     expect(initialRequest).toMatchObject({
-      tool_choice: { type: 'function', function: { name: 'joy_probe' } },
+      tool_choice: 'auto',
       tools: [
         expect.objectContaining({ function: expect.objectContaining({ name: 'joy_probe' }) }),
       ],
@@ -323,12 +360,84 @@ describe('JOY Agent Engine Worker V2', () => {
     expect(bodies).toHaveLength(0);
   });
 
+  it('asks for the continuation token in the probe itself, and forces no named tool', async () => {
+    const probeBodies: unknown[] = [];
+    const worker = await mountedWorker((body, index, init) => {
+      if (index < 3) probeBodies.push(body);
+      return structuredProvider(() => providerTextResponse('unused'))(body, index, init);
+    });
+
+    await verifyStructuredConnection(worker);
+
+    expect(probeBodies[0]).toMatchObject({ tool_choice: 'auto' });
+    expect(JSON.stringify(probeBodies[0])).toContain(PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN);
+  });
+
+  it('accepts a probe whose tool call id has dots and colons, as Kimi writes it', async () => {
+    const worker = await mountedWorker((body, index, init) => {
+      if (index === 0) return providerToolResponse('functions.joy_probe:0', 'joy_probe');
+      return structuredProvider(() => providerTextResponse('unused'))(body, index, init);
+    });
+
+    await verifyStructuredConnection(worker);
+  });
+
+  it('reports plan-only when the model answers the continuation without the token', async () => {
+    const worker = await mountedWorker((body, index, init) => {
+      if (index === 0) return providerToolResponse('probe-1', 'joy_probe');
+      if (index === 1) return providerTextResponse('Done.');
+      return structuredProvider(() => providerTextResponse('unused'))(body, index, init);
+    });
+
+    worker.send({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type: 'test' });
+
+    await vi.waitFor(() =>
+      expect(worker.output).toContainEqual(
+        expect.objectContaining({
+          type: 'test-result',
+          status: expect.objectContaining({ capability: 'plan-only' }),
+        }),
+      ),
+    );
+  });
+
+  it('gives each probe call its own deadline, so three replies of 16 seconds each all count', async () => {
+    const [first, second, third] = [
+      providerToolResponse('probe-1', 'joy_probe'),
+      providerTextResponse(PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN),
+      providerTextResponse('plan-only probe ready'),
+    ];
+    // The three calls take 48 s together, more than one deadline, and each one is within its own.
+    const worker = await mountedWorker(
+      (_body, index) =>
+        new Promise<Response>((resolve) => {
+          setTimeout(() => resolve(index === 0 ? first : index === 1 ? second : third), 16_000);
+        }),
+    );
+    vi.useFakeTimers();
+    worker.send({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type: 'test' });
+
+    await vi.advanceTimersByTimeAsync(48_000);
+    await Promise.resolve();
+
+    expect(worker.output).toContainEqual(
+      expect.objectContaining({
+        protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+        type: 'test-result',
+        status: expect.objectContaining({ capability: 'tool-loop' }),
+      }),
+    );
+  });
+
   it('bounds a connection probe even when the provider ignores the abort signal', async () => {
     const worker = await mountedWorker(() => new Promise<Response>(() => undefined));
     vi.useFakeTimers();
     worker.send({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type: 'test' });
 
-    await vi.advanceTimersByTimeAsync(15_001);
+    // Nothing has timed out at 44 s: the deadline is 45 s, not the 15 s of an earlier build.
+    await vi.advanceTimersByTimeAsync(44_000);
+    expect(worker.output).not.toContainEqual(expect.objectContaining({ type: 'test-result' }));
+    await vi.advanceTimersByTimeAsync(1_001);
     await Promise.resolve();
 
     expect(worker.output).toContainEqual(
@@ -390,7 +499,11 @@ describe('JOY Agent Engine Worker V2', () => {
       const content = (body.messages as readonly Record<string, unknown>[])[0]?.content;
       expect(Array.isArray(content)).toBe(true);
     }
-    const serializedOutput = JSON.stringify(worker.output);
+    // A provider request is the Worker's transport to the broker, so it alone carries the probe body.
+    // Every other message, the events and results included, must stay free of fixture media.
+    const serializedOutput = JSON.stringify(
+      worker.output.filter((message) => message.type !== 'provider-request'),
+    );
     expect(serializedOutput).not.toContain('fixture-only');
     expect(serializedOutput).not.toContain('data:image');
     expect(serializedOutput).not.toContain('data:video');
@@ -590,7 +703,7 @@ describe('JOY Agent Engine Worker V2', () => {
         provider: 'openai-compatible',
         baseUrl: 'https://provider.example/v1',
         modelId: 'replacement-model',
-        apiKey: 'replacement-fixture-only',
+        profileId: 'profile-test',
       },
     });
 
@@ -956,6 +1069,16 @@ describe('JOY Agent Engine Worker V2', () => {
         }),
       }),
     );
+    // The desktop call that was in flight is ended by name, so its reply cannot land after the cancel.
+    const requests = worker.output.filter(
+      (message): message is Extract<WorkerToMainMessage, { type: 'provider-request' }> =>
+        message.type === 'provider-request',
+    );
+    expect(worker.output).toContainEqual({
+      protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+      type: 'provider-cancel',
+      requestId: requests[requests.length - 1]?.requestId,
+    });
   });
 
   it('turns an expired host-RPC deadline into a bounded timeout failure', async () => {

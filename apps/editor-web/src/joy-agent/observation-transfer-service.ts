@@ -508,7 +508,10 @@ function parseRequest(value: unknown): ParsedServiceRequest | undefined {
 }
 
 function parseConnection(value: unknown): ByokSessionConfig | undefined {
-  if (!isPlainRecord(value) || !hasExactKeys(value, ['provider', 'baseUrl', 'modelId', 'apiKey']))
+  if (
+    !isPlainRecord(value) ||
+    !hasExactKeys(value, ['provider', 'baseUrl', 'modelId', 'profileId'])
+  )
     return undefined;
   if (
     (value.provider !== 'openrouter' && value.provider !== 'openai-compatible') ||
@@ -516,10 +519,7 @@ function parseConnection(value: unknown): ByokSessionConfig | undefined {
     value.baseUrl.length === 0 ||
     value.baseUrl.length > 2_048 ||
     !isOpaqueId(value.modelId) ||
-    typeof value.apiKey !== 'string' ||
-    value.apiKey.length === 0 ||
-    value.apiKey.length > 4_096 ||
-    /[\r\n]/.test(value.apiKey)
+    !isOpaqueId(value.profileId)
   ) {
     return undefined;
   }
@@ -527,7 +527,7 @@ function parseConnection(value: unknown): ByokSessionConfig | undefined {
     provider: value.provider,
     baseUrl: value.baseUrl,
     modelId: value.modelId,
-    apiKey: value.apiKey,
+    profileId: value.profileId,
   });
 }
 

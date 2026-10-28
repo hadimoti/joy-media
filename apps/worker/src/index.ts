@@ -63,6 +63,7 @@ const client =
     ? undefined
     : new WorkerControlPlaneClient({ apiUrl, identity, sessionStore });
 const derivativeDirectory = process.env.JOY_MEDIA_WORKER_DERIVATIVE_DIR?.trim() || undefined;
+// A Worker under the desktop app carries a local token, so detectMediaTools reads no provider file.
 const runtime = new WorkerRuntime(identity, detectMediaTools(), {
   ...(sources === undefined ? {} : { sources }),
   ...(derivativeDirectory === undefined ? {} : { derivativeDirectory }),

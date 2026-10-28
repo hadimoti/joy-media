@@ -29,6 +29,7 @@ import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
 import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
+import { AgentRequestRegistry, cancelWhenPageGoes } from './agent-requests.js';
 import { registerJoyProtocol } from './protocol-registration.js';
 import type { IpcRequest } from '../ipc.js';
 import { isAllowedEditorOrigin, originOfPageUrl } from '../origin-policy.js';
@@ -47,7 +48,8 @@ import { createLocalOriginalWriter } from './local-originals.js';
 import { createMediaChannelHandlers } from './media-channel.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
-import { probeOpenAiCompatibleProvider } from '@joy-media/provider-sdk';
+import { createProviderBroker } from './providers/provider-broker.js';
+import { createWorkerCompletion } from './providers/worker-completion.js';
 import { checkProfileCredentials } from './profile-credential-check.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -107,7 +109,23 @@ if (!app.requestSingleInstanceLock()) {
         : localWorkerEnv(process.env, { apiEnv: localJobApi.workerEnv, workerRoot }),
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
+  const providerBroker = createProviderBroker({
+    store: {
+      getProfile: (id) => localDatabase.getProviderProfile(id),
+      isDisabledLegacy: (id) =>
+        localDatabase
+          .listProfileStates()
+          .some((s) => s.profileId === id && s.state === 'disabled-legacy'),
+      markCredentialUnavailable: (id) => localDatabase.markProfileCredentialUnavailable(id),
+      secretVersion: (handleId) => localDatabase.secretVersion(handleId),
+    },
+    secrets: secretStore,
+    fetch: (url, init) => fetch(url, init),
+  });
+  // The provider calls in progress. A reload of the page ends them, since nothing will read their replies.
+  const agentRequests = new AgentRequestRegistry();
   const ipcHandlers = createIpcHandlers({
+    agentRequests,
     fileRegistry,
     workerSupervisor,
     localDatabase,
@@ -142,7 +160,7 @@ if (!app.requestSingleInstanceLock()) {
       return { canceled: result.canceled, path: result.filePaths[0] };
     },
     secretStore,
-    probeProvider: (request) => probeOpenAiCompatibleProvider(request, fetch),
+    providerBroker,
     handleWindowControl: (action) => {
       const win =
         BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
@@ -206,6 +224,7 @@ if (!app.requestSingleInstanceLock()) {
         sourceSize: async (refId) => statSync(resolveSourcePath(refId)).size,
         readSource: async (refId) => readFileSync(resolveSourcePath(refId)),
         onWarning: (message) => console.warn(message),
+        completeAi: createWorkerCompletion(providerBroker),
       });
     } catch (error) {
       // Without the local API the Worker cannot connect. The rest of the app still opens.
@@ -295,6 +314,7 @@ if (!app.requestSingleInstanceLock()) {
       webPreferences: buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
     });
     mainWindow = win;
+    cancelWhenPageGoes(agentRequests, win);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));
 

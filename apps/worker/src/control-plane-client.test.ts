@@ -102,6 +102,60 @@ describe('WorkerControlPlaneClient', () => {
     expect(saved).toBe(false);
   });
 
+  it('asks the desktop for one AI completion on a held job and returns only the reply text', async () => {
+    const requests: { url: string; body: unknown; auth: string | null }[] = [];
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'http://127.0.0.1:4000',
+      identity: { workerId: 'worker-1', createdAt: '2026-10-28T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => 'local-token',
+        saveWorkerSession: () => undefined,
+        clearWorkerSession: () => undefined,
+      },
+      fetch: async (input, init) => {
+        requests.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body)),
+          auth: new Headers(init?.headers).get('authorization'),
+        });
+        return response(200, { data: { text: '{"choices":[]}' } });
+      },
+    });
+
+    const text = await client.completeAi('job-1', 'lease-1', {
+      messages: [{ role: 'user', content: 'hi' }],
+      params: { temperature: 0.2 },
+    });
+
+    expect(text).toBe('{"choices":[]}');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe('http://127.0.0.1:4000/v1/workers/worker-1/ai/complete');
+    expect(requests[0]?.auth).toBe('Bearer local-token');
+    expect(requests[0]?.body).toEqual({
+      jobId: 'job-1',
+      leaseToken: 'lease-1',
+      messages: [{ role: 'user', content: 'hi' }],
+      params: { temperature: 0.2 },
+    });
+  });
+
+  it('refuses an AI reply that carries no text', async () => {
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'http://127.0.0.1:4000',
+      identity: { workerId: 'worker-1', createdAt: '2026-10-28T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => 'local-token',
+        saveWorkerSession: () => undefined,
+        clearWorkerSession: () => undefined,
+      },
+      fetch: async () => response(200, { data: { unexpected: true } }),
+    });
+
+    await expect(client.completeAi('job-1', 'lease-1', { messages: [] })).rejects.toThrow(
+      'The desktop returned an unreadable AI reply',
+    );
+  });
+
   it('clears a revoked Worker session after a 401 response', async () => {
     let session: string | undefined = 'revoked-session';
     const client = new WorkerControlPlaneClient({
@@ -184,6 +238,32 @@ describe('WorkerControlPlaneClient', () => {
       fetch: async () => new Response(new ReadableStream<Uint8Array>()),
     });
 
+    await expect(client.lease()).rejects.toMatchObject({
+      name: 'WorkerRequestTimeoutError',
+      timeoutMs: 100,
+    } satisfies Partial<WorkerRequestTimeoutError>);
+  });
+
+  it('gives an AI completion a longer deadline than a control call, so the desktop reports its own timeout', async () => {
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => 'worker-session',
+        saveWorkerSession: () => undefined,
+        clearWorkerSession: () => undefined,
+      },
+      requestTimeoutMs: 100,
+      fetch: async () => {
+        // Slower than the control deadline, and well within the AI deadline.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return response(200, { data: { text: 'a slow reply' } });
+      },
+    });
+
+    await expect(client.completeAi('job-1', 'lease-1', { messages: [] })).resolves.toBe(
+      'a slow reply',
+    );
     await expect(client.lease()).rejects.toMatchObject({
       name: 'WorkerRequestTimeoutError',
       timeoutMs: 100,

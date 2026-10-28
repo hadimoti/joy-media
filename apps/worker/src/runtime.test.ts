@@ -1,8 +1,17 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import type * as nodeFs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BoundedLog,
   JsonFileWorkerStore,
@@ -16,6 +25,12 @@ import {
 } from './runtime.js';
 import type { UnsupportedWorkerJobError } from './runtime.js';
 import { ffmpegFilterPath, gpuDerivativeLocalRef, rnnoiseFilter } from './local-gpu.js';
+
+// Counts the reads of the provider file. The wrapper passes every call through, so no other test is affected.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof nodeFs>();
+  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
 
 // Independent of `process.cwd()` (which is `apps/worker` under `pnpm --filter @joy-media/worker
 // test`, not the repo root) so this fixture resolves the same way from any invocation.
@@ -421,5 +436,141 @@ describe('Worker runtime', () => {
       if (previousModel === undefined) delete process.env.JOY_MEDIA_RNNOISE_MODEL;
       else process.env.JOY_MEDIA_RNNOISE_MODEL = previousModel;
     }
+  });
+});
+
+describe('Worker provider-key boundary', () => {
+  const seededKey = 'sk-seeded-boundary-test';
+  const identity = { workerId: 'boundary-worker', createdAt: '2026-01-01T00:00:00.000Z' };
+  const progress = async () => undefined;
+  const saved = {
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+    localToken: process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN,
+  };
+  const tempDirs: string[] = [];
+
+  beforeEach(() => {
+    vi.mocked(readFileSync).mockClear();
+  });
+
+  /** The reads of the provider file since the test began. */
+  const providerFileReads = () =>
+    vi
+      .mocked(readFileSync)
+      .mock.calls.filter(([path]) => String(path).endsWith('ai-providers.json'));
+
+  function restoreEnv(name: string, value: string | undefined): void {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    restoreEnv('HOME', saved.HOME);
+    restoreEnv('USERPROFILE', saved.USERPROFILE);
+    restoreEnv('JOY_MEDIA_WORKER_LOCAL_TOKEN', saved.localToken);
+    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** Loads the runtime under a home directory holding a provider file with a key, as on a Worker PC. */
+  async function loadRuntimeWithProviderFile() {
+    const home = mkdtempSync(join(tmpdir(), 'joy-media-worker-home-'));
+    tempDirs.push(home);
+    mkdirSync(join(home, '.joy-media'));
+    writeFileSync(
+      join(home, '.joy-media', 'ai-providers.json'),
+      JSON.stringify({
+        'lm-studio': {
+          baseUrl: 'http://127.0.0.1:1234/v1',
+          apiKey: seededKey,
+          defaultModel: 'local-model',
+        },
+      }),
+    );
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    // local-ai.ts reads the home directory when it loads, so the runtime is loaded again under this home.
+    vi.resetModules();
+    return import('./runtime.js');
+  }
+
+  it('reads the provider file only for a Worker with no local token', async () => {
+    const runtime = await loadRuntimeWithProviderFile();
+    delete process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN;
+    expect(runtime.detectMediaTools(() => false).aiProviders).toEqual(['lm-studio']);
+    expect(providerFileReads()).not.toHaveLength(0);
+
+    vi.mocked(readFileSync).mockClear();
+    process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN = 'desktop-local-token';
+    expect(runtime.detectMediaTools(() => false).aiProviders).toEqual([]);
+    expect(providerFileReads()).toEqual([]);
+  });
+
+  it('advertises no provider capability under the desktop app', async () => {
+    const runtime = await loadRuntimeWithProviderFile();
+    process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN = 'desktop-local-token';
+    const worker = new runtime.WorkerRuntime(
+      identity,
+      runtime.detectMediaTools(() => false),
+    );
+
+    expect(worker.hello('win32', 'x64').capabilities).not.toContain('text.lm-studio');
+  });
+
+  it('refuses a provider job under the desktop app before any key is read or request sent', async () => {
+    const runtime = await loadRuntimeWithProviderFile();
+    process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN = 'desktop-local-token';
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const worker = new runtime.WorkerRuntime(
+      identity,
+      runtime.detectMediaTools(() => false),
+    );
+
+    await expect(
+      worker.run(
+        {
+          id: 'job-local-lm',
+          type: 'text.lm-studio',
+          payload: { prompt: 'hi', model: 'local-model' },
+        },
+        { cancelled: () => false, progress },
+      ),
+    ).rejects.toThrow('AI provider "lm-studio" is not available on this Worker');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(providerFileReads()).toEqual([]);
+  });
+
+  it('runs the same provider job for a standalone Worker that holds the file', async () => {
+    const runtime = await loadRuntimeWithProviderFile();
+    delete process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN;
+    const fetchSpy = vi.fn<(input: string | URL | Request) => Promise<Response>>(async () =>
+      Response.json({ choices: [{ message: { content: 'ok' } }] }),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-standalone-ai-'));
+    tempDirs.push(derivativeDirectory);
+    const worker = new runtime.WorkerRuntime(
+      identity,
+      runtime.detectMediaTools(() => false),
+      {
+        derivativeDirectory,
+      },
+    );
+
+    const outcome = await worker.run(
+      {
+        id: 'job-standalone-lm',
+        type: 'text.lm-studio',
+        payload: { prompt: 'hi', model: 'local-model' },
+      },
+      { cancelled: () => false, progress },
+    );
+
+    expect(outcome.state).toBe('completed');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('http://127.0.0.1:1234/v1/chat/completions');
+    expect(providerFileReads()).not.toHaveLength(0);
   });
 });

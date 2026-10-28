@@ -9,13 +9,20 @@ import type {
   JoyAgentMediaCapabilityState,
 } from './joy-agent/protocol.js';
 import { CloseIcon } from './icons.js';
+import { sessionProviderFor } from './joy-agent/provider-call.js';
+import {
+  evaluateEndpoint,
+  findRegistryProvider,
+  PROVIDER_REGISTRY,
+  type ProviderRegionId,
+  type RegistryProviderId,
+} from '@joy-media/provider-sdk';
 import {
   isDesktopHost,
   saveDesktopProviderProfile,
   listDesktopProviderProfiles,
   deleteDesktopProviderProfile,
   fetchDesktopProviderModels,
-  beginDesktopProviderSession,
   type DesktopProviderProfile,
 } from './desktop-client.js';
 import {
@@ -43,8 +50,66 @@ type DesktopProviderProfileState = DesktopProviderProfile & {
 };
 
 /** A saved profile cannot connect until the local provider broker ships (PLAN-v4 P2). */
-const SAVED_PROFILE_CONNECT_UNAVAILABLE =
-  'Saved profiles cannot connect in this build yet. Enter the key in the connection form.';
+/** The provider the dialog can connect: OpenRouter, a registry provider, or a custom endpoint. */
+type DialogProvider = 'openrouter' | 'openai-compatible' | RegistryProviderId;
+
+/** The engine runs every registry provider on the chat transport, so its status names that transport. */
+function statusProviderFor(provider: DialogProvider): 'openrouter' | 'openai-compatible' {
+  return provider === 'openrouter' ? 'openrouter' : 'openai-compatible';
+}
+
+/** A local endpoint with no key: the one case in which a profile is saved without a key (PLAN-v4 D8). */
+function isKeylessLocalEndpoint(baseUrl: string): boolean {
+  const verdict = evaluateEndpoint('openai-compatible', baseUrl);
+  return verdict.allowed && verdict.kind === 'loopback';
+}
+
+/** The dialog provider a saved profile is listed under. A custom endpoint is the openai-compatible choice. */
+function dialogProviderFor(profileProvider: string): DialogProvider | undefined {
+  if (isCustomEndpointProvider(profileProvider)) return 'openai-compatible';
+  if (profileProvider === 'openrouter') return 'openrouter';
+  return findRegistryProvider(profileProvider) === undefined
+    ? undefined
+    : (profileProvider as RegistryProviderId);
+}
+
+/** A saved profile that is the connection the form describes: the same provider and endpoint. */
+function profileDescribesForm(
+  profile: DesktopProviderProfileState,
+  provider: DialogProvider,
+  normalizedBaseUrl: string,
+): boolean {
+  if (profile.state === 'disabled-legacy' || !profile.id) return false;
+  const sameProvider =
+    provider === 'openai-compatible'
+      ? isCustomEndpointProvider(profile.provider)
+      : profile.provider === provider;
+  return sameProvider && normalizeProviderBaseUrl(profile.baseUrl) === normalizedBaseUrl;
+}
+
+/** A key belongs to one provider and endpoint. A key typed for another one is never sent there. */
+function keyScopeFor(provider: DialogProvider, baseUrl: string): string {
+  return `${provider}|${normalizeProviderBaseUrl(baseUrl)}`;
+}
+
+/** How long the saved-profile list may take. A read that is still pending after this is treated as unreadable. */
+const PROFILE_LIST_TIMEOUT_MS = 15_000;
+
+/** Rejects when the promise has not settled in time, so a read that never returns cannot leave the dialog waiting. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('The saved profiles did not load in time.')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** A saved profile's stored key may be used as it is: the key is confirmed for its endpoint and readable. */
+function canUseStoredKey(profile: DesktopProviderProfileState | undefined): boolean {
+  return (
+    profile !== undefined && profile.bound === true && profile.state !== 'credential-unavailable'
+  );
+}
 
 const MODES: Readonly<Record<AgentExecutionMode, string>> = {
   'suggest-only': 'Suggest only',
@@ -140,8 +205,14 @@ export function JoyAgentSettingsDialog({
   readonly initialTab?: JoyAgentSettingsTab;
 }) {
   const keyRef = useRef<HTMLInputElement>(null);
+  // The provider and endpoint in force when the key was typed. A key is never sent to another one.
+  const keyScopeRef = useRef<string | undefined>(undefined);
+  // The profile the user chose, kept across refreshes of the list.
+  const selectedProfileIdRef = useRef<string | undefined>(undefined);
   const mountedRef = useRef(true);
   const mediaProbeEpochRef = useRef(0);
+  // The number of the latest read of the saved profiles. Only that read may change the list, the selection or readiness.
+  const profileReadRef = useRef(0);
 
   const [activeTab, setActiveTab] = useState<JoyAgentSettingsTab>(initialTab);
 
@@ -163,7 +234,7 @@ export function JoyAgentSettingsDialog({
     setOpenAccordions((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const [provider, setProvider] = useState<'openrouter' | 'openai-compatible'>(
+  const [provider, setProvider] = useState<DialogProvider>(
     status?.provider === 'openai-compatible' ? 'openai-compatible' : 'openrouter',
   );
   const [baseUrl, setBaseUrl] = useState(
@@ -181,7 +252,38 @@ export function JoyAgentSettingsDialog({
   const [savedProfile, setSavedProfile] = useState<DesktopProviderProfileState | undefined>(
     undefined,
   );
-  const [hasSavedKey, setHasSavedKey] = useState(false);
+  // The saved profiles are read when the dialog opens. Until they are read, the form cannot tell which saved
+  // profile its endpoint belongs to, so connect and discovery wait for the read, and refuse when it fails.
+  const [profilesReady, setProfilesReady] = useState(() => !isDesktopHost());
+  const [profilesUnreadable, setProfilesUnreadable] = useState(false);
+  // The saved profiles for the endpoint the form describes. The profile the user chose among them is the
+  // one used. When several share the endpoint and none is chosen, the endpoint is ambiguous: nothing connects.
+  const describingProfiles = profiles.filter((p) =>
+    profileDescribesForm(p, provider, normalizeProviderBaseUrl(baseUrl)),
+  );
+  const chosenDescribingProfile = describingProfiles.find((p) => p.id === savedProfile?.id);
+  // Once a profile is chosen, only that profile can match. Editing the endpoint away from it leaves the form
+  // matching nothing, so a key typed there saves a new profile rather than updating another saved one.
+  const matchedProfile =
+    savedProfile === undefined && describingProfiles.length === 1
+      ? describingProfiles[0]
+      : chosenDescribingProfile;
+  const endpointAmbiguous = describingProfiles.length > 1 && chosenDescribingProfile === undefined;
+  const profilesNotReadyMessage = profilesUnreadable
+    ? 'The saved profiles could not be read. Close and reopen settings to try again.'
+    : 'The saved profiles are still loading.';
+  // Whether any saved profile exists that the form does not describe. Named in the messages below.
+  const hasOtherSavedProfiles = profiles.some(
+    (p) => p.id !== undefined && p.state !== 'disabled-legacy',
+  );
+  const selectProfile = (profile: DesktopProviderProfileState | undefined) => {
+    selectedProfileIdRef.current = profile?.id;
+    setSavedProfile(profile);
+  };
+  const clearTypedKey = () => {
+    if (keyRef.current) keyRef.current.value = '';
+    keyScopeRef.current = undefined;
+  };
 
   // Dynamic model discovery & Drawer state
   const [discoveredModels, setDiscoveredModels] = useState<readonly string[]>([]);
@@ -204,26 +306,62 @@ export function JoyAgentSettingsDialog({
     };
   }, []);
 
-  const loadProfiles = async () => {
-    if (!isDesktopHost()) return;
+  /**
+   * Reads the saved profiles. Resolves to the list when this read is the latest and has succeeded, and to undefined
+   * otherwise.
+   */
+  const loadProfiles = async (): Promise<readonly DesktopProviderProfileState[] | undefined> => {
+    if (!isDesktopHost()) return [];
+    // A read that started earlier and finishes later must not put back a list that is out of date.
+    const read = ++profileReadRef.current;
+    // Each read starts from unknown: no saved profile is used until this read has succeeded.
+    setProfilesReady(false);
     try {
-      const list = (await listDesktopProviderProfiles()) as readonly DesktopProviderProfileState[];
-      if (!mountedRef.current) return;
+      const list = (await withTimeout(
+        listDesktopProviderProfiles(),
+        PROFILE_LIST_TIMEOUT_MS,
+      )) as readonly DesktopProviderProfileState[];
+      if (!mountedRef.current || read !== profileReadRef.current) return undefined;
       setProfiles(list);
-      const openRouterProfile = list.find(
+      setProfilesReady(true);
+      setProfilesUnreadable(false);
+      // A profile the user chose stays chosen, and is refreshed from the list.
+      const chosenId = selectedProfileIdRef.current;
+      if (chosenId !== undefined) {
+        const chosen = list.find((p) => p.id === chosenId);
+        setSavedProfile(chosen);
+        if (chosen === undefined) {
+          // However the chosen profile left the list, the form that described it is cleared too. Only refs and setters
+          // are used here, so this function depends on stable values only.
+          selectedProfileIdRef.current = undefined;
+          if (keyRef.current) keyRef.current.value = '';
+          keyScopeRef.current = undefined;
+          setBaseUrl('');
+          setModelId('');
+          setConnectionName('');
+        }
+        return list;
+      }
+      // Shown by default only when it is the one OpenRouter profile. With several on the same endpoint, the user
+      // chooses one (the form refuses to connect until then), so no profile is picked for them.
+      const openRouterProfiles = list.filter(
         (p) => p.provider === 'openrouter' && p.state !== 'disabled-legacy',
       );
+      const openRouterProfile = openRouterProfiles.length === 1 ? openRouterProfiles[0] : undefined;
       if (openRouterProfile) {
+        // Written out here, not through selectProfile, so this effect depends on stable setters only.
+        selectedProfileIdRef.current = openRouterProfile.id;
         setSavedProfile(openRouterProfile);
-        // A key that cannot be read is not a saved key, so the dialog asks for it again.
-        setHasSavedKey(openRouterProfile.state !== 'credential-unavailable');
         setModelId(openRouterProfile.modelId);
         setBaseUrl(openRouterProfile.baseUrl);
         setProvider('openrouter');
         setCustomDisclosure(false);
       }
+      return list;
     } catch {
-      /* Ignore profile read error in background */
+      // A failed read that is no longer the latest says nothing about the list the user now sees.
+      if (read === profileReadRef.current) setProfilesUnreadable(true);
+      return undefined;
     }
   };
 
@@ -254,14 +392,19 @@ export function JoyAgentSettingsDialog({
     onClose();
   };
 
-  const handleProviderChange = (next: 'openrouter' | 'openai-compatible') => {
+  const [region, setRegion] = useState<ProviderRegionId>('international');
+  const handleProviderChange = (next: DialogProvider) => {
+    clearTypedKey();
     setProvider(next);
+    setRegion('international');
     setCustomDisclosure(false);
     setConnectionNotice(undefined);
     setDiscoveryError(null);
     if (next === 'openrouter') {
       setBaseUrl('https://openrouter.ai/api/v1');
       if (!modelId) setModelId('openrouter/auto');
+    } else if (findRegistryProvider(next) !== undefined) {
+      setBaseUrl(findRegistryProvider(next)?.regions[0]?.baseUrl ?? '');
     } else {
       setBaseUrl('');
     }
@@ -275,12 +418,17 @@ export function JoyAgentSettingsDialog({
       return;
     }
     const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
-    const matchingSavedProfile =
-      savedProfile &&
-      savedProfile.provider === (provider === 'openai-compatible' ? 'custom' : provider) &&
-      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl
-        ? savedProfile
-        : undefined;
+    if (!profilesReady) {
+      setDiscoveryError(profilesNotReadyMessage);
+      return;
+    }
+    if (endpointAmbiguous) {
+      setDiscoveryError(
+        'More than one saved profile uses this endpoint. Choose one in the list first.',
+      );
+      return;
+    }
+    const matchingSavedProfile = matchedProfile;
     if (
       requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
       !requireCustomEndpointAcknowledgement({
@@ -297,6 +445,21 @@ export function JoyAgentSettingsDialog({
       setDiscoveryError('Please enter a Base URL before discovering models');
       return;
     }
+    if (key && keyScopeRef.current !== keyScopeFor(provider, normalizedBaseUrl)) {
+      clearTypedKey();
+      setDiscoveryError(
+        'The key was entered for a different provider or endpoint. Enter it again.',
+      );
+      return;
+    }
+    // Without a typed key, the saved profile for this endpoint lends its stored key, by its id. A profile
+    // whose key is not confirmed for this endpoint asks for the key again first.
+    if (!key && matchingSavedProfile !== undefined && !canUseStoredKey(matchingSavedProfile)) {
+      setDiscoveryError('Enter the API key again to confirm this endpoint.');
+      return;
+    }
+    const storedKeyProfileId =
+      !key && canUseStoredKey(matchingSavedProfile) ? matchingSavedProfile?.id : undefined;
     setIsDiscovering(true);
     setDiscoveryError(null);
     try {
@@ -304,6 +467,7 @@ export function JoyAgentSettingsDialog({
         provider: provider === 'openai-compatible' ? 'custom' : provider,
         baseUrl: normalizedBaseUrl,
         ...(key ? { apiKey: key } : {}),
+        ...(storedKeyProfileId === undefined ? {} : { id: storedKeyProfileId }),
       });
       if (!mountedRef.current) return;
       const modelIds = models.map((m) => m.id).filter(Boolean);
@@ -332,17 +496,104 @@ export function JoyAgentSettingsDialog({
     }
   };
 
+  /** Shows a saved profile in the form: its endpoint, model and name, and the saved profile it stands for. */
+  const showProfileInForm = (profile: DesktopProviderProfileState) => {
+    const next = dialogProviderFor(profile.provider);
+    selectProfile(profile);
+    if (next !== undefined) {
+      setProvider(next);
+      const normalizedUrl = normalizeProviderBaseUrl(profile.baseUrl);
+      setRegion(
+        findRegistryProvider(next)?.regions.find(
+          (item) => normalizeProviderBaseUrl(item.baseUrl) === normalizedUrl,
+        )?.id ?? 'international',
+      );
+    }
+    setBaseUrl(profile.baseUrl);
+    setModelId(profile.modelId);
+    setConnectionName(profile.name ?? '');
+    clearTypedKey();
+  };
+
+  /** Shows a saved profile whose key must be entered again, so the key typed there confirms it. */
+  const selectProfileIntoForm = (profile: DesktopProviderProfileState) => {
+    showProfileInForm(profile);
+    setCustomDisclosure(false);
+    const message = 'Enter the API key again to confirm this endpoint, then connect.';
+    setConnectionNotice({ kind: 'error', message });
+    onNotice?.(message, 'error');
+  };
+
+  /** Connects a saved profile by its id. The key is never read here: the main process holds it. */
+  const connectSavedProfile = async (profile: DesktopProviderProfileState) => {
+    // A profile whose stored key cannot be used is shown in the form, so its key is entered again.
+    if (!canUseStoredKey(profile)) {
+      selectProfileIntoForm(profile);
+      return;
+    }
+    // A saved profile is used only once the saved-profile list is known, as connect and discovery require.
+    if (!profilesReady) {
+      setConnectionNotice({ kind: 'error', message: profilesNotReadyMessage });
+      onNotice?.(profilesNotReadyMessage, 'error');
+      return;
+    }
+    if (working || engineClient === undefined || engineClient === null) return;
+    const sessionProvider = sessionProviderFor(profile.provider);
+    if (sessionProvider === undefined) return;
+    // The form and the selection name the profile being connected, so both point at the same profile.
+    showProfileInForm(profile);
+    if (
+      requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: profile.baseUrl,
+        profileId: profile.id,
+      })
+    ) {
+      setConnectionNotice({
+        kind: 'error',
+        message: 'Acknowledge this custom endpoint before connecting.',
+      });
+      return;
+    }
+    setWorking(true);
+    setConnectionNotice(undefined);
+    try {
+      assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
+      await engineClient.configure({
+        provider: sessionProvider,
+        baseUrl: profile.baseUrl,
+        modelId: profile.modelId,
+        profileId: profile.id,
+      });
+      const next = await engineClient.testConnection();
+      setConnectionStatus(next);
+      onStatusChange?.(next);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'The connection failed.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const connect = async () => {
     if (working) return;
     const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
-    const matchingSavedProfile =
-      savedProfile &&
-      (provider === 'openai-compatible'
-        ? isCustomEndpointProvider(savedProfile.provider)
-        : savedProfile.provider === provider) &&
-      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl
-        ? savedProfile
-        : undefined;
+    if (!profilesReady) {
+      setConnectionNotice({ kind: 'error', message: profilesNotReadyMessage });
+      onNotice?.(profilesNotReadyMessage, 'error');
+      return;
+    }
+    if (endpointAmbiguous) {
+      const message =
+        'More than one saved profile uses this endpoint. Choose one in the list first.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      return;
+    }
+    const matchingSavedProfile = matchedProfile;
     if (
       requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
       !requireCustomEndpointAcknowledgement({
@@ -361,35 +612,34 @@ export function JoyAgentSettingsDialog({
     setConnectionNotice(undefined);
     setDiscoveryError(null);
 
-    let key = keyRef.current?.value.trim() ?? '';
-    const normalizedModelId = modelId.trim();
-    const savedProfileMatches = Boolean(
-      savedProfile &&
-      savedProfile.id &&
-      (provider === 'openai-compatible'
-        ? isCustomEndpointProvider(savedProfile.provider)
-        : savedProfile.provider === provider) &&
-      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl,
-    );
-    if (!key && hasSavedKey && savedProfile?.id && savedProfileMatches) {
-      try {
-        const session = (await beginDesktopProviderSession(savedProfile.id)) as
-          { apiKey?: string; baseUrl?: string; modelId?: string } | undefined;
-        if (session?.apiKey) {
-          key = session.apiKey;
-        }
-      } catch {
-        /* proceed to validation */
-      }
+    const key = keyRef.current?.value.trim() ?? '';
+    if (key !== '' && keyScopeRef.current !== keyScopeFor(provider, normalizedBaseUrl)) {
+      clearTypedKey();
+      setWorking(false);
+      const message = 'The key was entered for a different provider or endpoint. Enter it again.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      return;
     }
+    const keylessLocal = isKeylessLocalEndpoint(normalizedBaseUrl);
+    const normalizedModelId = modelId.trim();
+    const savedProfileMatches = matchingSavedProfile !== undefined;
+    // The profile for this endpoint connects by its id, so its key stays in the main process. That needs
+    // the key to be confirmed for this endpoint; otherwise the key is entered again.
+    const reuseSavedProfile = !key && canUseStoredKey(matchingSavedProfile);
+    // A new local model with no saved profile for this endpoint is saved with no key (PLAN-v4 D8).
+    const keylessNew = keylessLocal && !savedProfileMatches;
+    let profileId: string | undefined = reuseSavedProfile ? matchingSavedProfile?.id : undefined;
 
     if (provider === 'openai-compatible') {
       const missing: string[] = [];
-      if (!key)
+      if (!key && !reuseSavedProfile && !keylessNew)
         missing.push(
-          savedProfile?.id && !savedProfileMatches
-            ? 'a new API key because the saved key belongs to a different provider or endpoint'
-            : 'an API key',
+          savedProfileMatches
+            ? 'the API key again to confirm this endpoint'
+            : hasOtherSavedProfiles
+              ? 'a new API key because the saved key belongs to a different provider or endpoint'
+              : 'an API key',
         );
       if (!normalizedModelId) missing.push('a model ID');
       if (!normalizedBaseUrl) missing.push('a base URL');
@@ -411,9 +661,10 @@ export function JoyAgentSettingsDialog({
       }
     }
 
-    if (!key) {
-      const message =
-        savedProfile?.id && !savedProfileMatches
+    if (!key && !reuseSavedProfile && !keylessNew) {
+      const message = savedProfileMatches
+        ? 'Enter the API key again to confirm this endpoint.'
+        : hasOtherSavedProfiles
           ? 'The saved API key belongs to a different provider or endpoint. Enter a new API key to connect.'
           : 'API key is required.';
       setConnectionNotice({ kind: 'error', message });
@@ -437,8 +688,10 @@ export function JoyAgentSettingsDialog({
     }
 
     try {
-      if (isDesktopHost() && key) {
+      if (isDesktopHost() && (key || keylessNew)) {
         const saved = await saveDesktopProviderProfile({
+          // A key typed for the saved endpoint updates that profile in place: one profile per connection.
+          ...(key && matchingSavedProfile !== undefined ? { id: matchingSavedProfile.id } : {}),
           provider: provider === 'openai-compatible' ? 'custom' : provider,
           name: connectionName.trim() || undefined,
           baseUrl: normalizedBaseUrl,
@@ -446,18 +699,34 @@ export function JoyAgentSettingsDialog({
           apiKey: key,
         });
         if (saved) {
-          setSavedProfile(saved);
-          setHasSavedKey(true);
-          await loadProfiles();
+          profileId = saved.id;
+          selectProfile(saved);
+          // The connection waits for a list that shows the saved profile as it was saved: bound when a key was typed, at
+          // the endpoint that was saved. Otherwise nothing connects.
+          const readBack = await loadProfiles();
+          const listed = readBack?.find((profile) => profile.id === saved.id);
+          if (
+            listed === undefined ||
+            (key !== '' && listed.bound !== true) ||
+            normalizeProviderBaseUrl(listed.baseUrl) !== normalizedBaseUrl
+          ) {
+            throw new Error('The saved profile could not be read back. Try connecting again.');
+          }
         }
       }
 
-      assertCustomEndpointConsentHolds(provider, normalizedBaseUrl, savedProfile?.id);
+      assertCustomEndpointConsentHolds(provider, normalizedBaseUrl, matchingSavedProfile?.id);
+      const sessionProvider = sessionProviderFor(
+        provider === 'openai-compatible' ? 'custom' : provider,
+      );
+      if (sessionProvider === undefined || profileId === undefined) {
+        throw new Error('This connection could not be saved in the desktop app.');
+      }
       await engineClient.configure({
-        provider,
+        provider: sessionProvider,
         baseUrl: normalizedBaseUrl,
         modelId: normalizedModelId,
-        apiKey: key,
+        profileId,
       });
 
       const next = await engineClient.testConnection();
@@ -488,13 +757,13 @@ export function JoyAgentSettingsDialog({
       const safeMessage = redactProviderError(rawMessage, key);
       const message = `Connection failed: ${safeMessage}`;
       setConnectionStatus({
-        provider,
+        provider: statusProviderFor(provider),
         modelId: normalizedModelId,
         capability: 'incompatible',
         message: safeMessage,
       });
       onStatusChange?.({
-        provider,
+        provider: statusProviderFor(provider),
         modelId: normalizedModelId,
         capability: 'incompatible',
         message: safeMessage,
@@ -502,7 +771,7 @@ export function JoyAgentSettingsDialog({
       setConnectionNotice({ kind: 'error', message });
       onNotice?.(message, 'error');
     } finally {
-      if (keyRef.current) keyRef.current.value = '';
+      clearTypedKey();
       setWorking(false);
     }
   };
@@ -521,11 +790,9 @@ export function JoyAgentSettingsDialog({
     if (!isDesktopHost()) return;
     try {
       await deleteDesktopProviderProfile(profId);
+      // The read clears a chosen profile that the list no longer shows. A failed read leaves it chosen until the next
+      // successful read clears it, and connect waits for a successful read, so nothing is saved beside the stale choice.
       await loadProfiles();
-      if (savedProfile?.id === profId) {
-        setSavedProfile(undefined);
-        setHasSavedKey(false);
-      }
     } catch (err) {
       console.warn('Failed to delete provider profile:', err);
     }
@@ -580,7 +847,7 @@ export function JoyAgentSettingsDialog({
     const message = 'Connection cleared. Your API key was removed from this page session.';
     setConnectionNotice({ kind: 'info', message });
     onNotice?.(message, 'info');
-    if (keyRef.current) keyRef.current.value = '';
+    clearTypedKey();
   };
 
   const filteredDiscoveredModels = discoveredModels.filter((m) =>
@@ -744,6 +1011,13 @@ export function JoyAgentSettingsDialog({
                                   Saved key could not be read. Enter it again.
                                 </span>
                               )}
+                              {prof.bound === false &&
+                                !disabledLegacy &&
+                                prof.state !== 'credential-unavailable' && (
+                                  <span className="joy-settings-legacy-status">
+                                    Enter the key again to confirm this endpoint.
+                                  </span>
+                                )}
                             </div>
                             <div style={{ display: 'flex', gap: '6px' }}>
                               {disabledLegacy ? (
@@ -760,8 +1034,8 @@ export function JoyAgentSettingsDialog({
                                   <button
                                     type="button"
                                     className="joy-btn-secondary joy-btn-sm"
-                                    disabled
-                                    title={SAVED_PROFILE_CONNECT_UNAVAILABLE}
+                                    disabled={working}
+                                    onClick={() => void connectSavedProfile(prof)}
                                   >
                                     Use
                                   </button>
@@ -813,17 +1087,53 @@ export function JoyAgentSettingsDialog({
                             <select
                               value={provider}
                               onChange={(e) =>
-                                handleProviderChange(
-                                  e.target.value as 'openrouter' | 'openai-compatible',
-                                )
+                                handleProviderChange(e.target.value as DialogProvider)
                               }
                             >
                               <option value="openrouter">OpenRouter (BYOK)</option>
+                              {PROVIDER_REGISTRY.filter((item) => item.id !== 'openrouter').map(
+                                (item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.label}
+                                  </option>
+                                ),
+                              )}
                               <option value="openai-compatible">
                                 Custom S3 / OpenAI Compatible
                               </option>
                             </select>
                           </label>
+                          {(findRegistryProvider(provider)?.regions.length ?? 0) > 1 && (
+                            <label>
+                              <span>Region</span>
+                              <select
+                                value={region}
+                                onChange={(e) => {
+                                  const next = findRegistryProvider(provider)?.regions.find(
+                                    (item) => item.id === e.target.value,
+                                  );
+                                  if (next === undefined) return;
+                                  clearTypedKey();
+                                  setRegion(next.id);
+                                  setBaseUrl(next.baseUrl);
+                                }}
+                              >
+                                {findRegistryProvider(provider)?.regions.map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                          {findRegistryProvider(provider) !== undefined && (
+                            <small>
+                              Get a key at{' '}
+                              {findRegistryProvider(provider)?.regions.find(
+                                (item) => item.id === region,
+                              )?.keyUrl ?? ''}
+                            </small>
+                          )}
                         </div>
 
                         <div className="joy-settings-field">
@@ -860,20 +1170,31 @@ export function JoyAgentSettingsDialog({
                               ref={keyRef}
                               type="password"
                               placeholder={
-                                hasSavedKey
+                                canUseStoredKey(matchedProfile)
                                   ? '•••••••••••••••• (Leave blank to keep saved)'
                                   : 'sk-...'
                               }
                               defaultValue=""
                               autoComplete="off"
                               spellCheck={false}
+                              onChange={(event) => {
+                                // The scope is the endpoint in force when the key was started. Later edits keep
+                                // it, so an endpoint edited in between cannot take the key over. An empty field
+                                // starts afresh.
+                                if (event.target.value === '') keyScopeRef.current = undefined;
+                                else if (keyScopeRef.current === undefined)
+                                  keyScopeRef.current = keyScopeFor(provider, baseUrl);
+                              }}
                             />
                           </label>
-                          {hasSavedKey && (
-                            <span style={{ fontSize: '11px', color: '#10b981', marginTop: '2px' }}>
-                              (Saved in desktop vault)
-                            </span>
-                          )}
+                          {matchedProfile !== undefined &&
+                            matchedProfile.state !== 'credential-unavailable' && (
+                              <span
+                                style={{ fontSize: '11px', color: '#10b981', marginTop: '2px' }}
+                              >
+                                (Saved in desktop vault)
+                              </span>
+                            )}
                           <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
                             🔒 Keys are encrypted via Windows DPAPI and never logged or proxied.
                           </span>
@@ -901,26 +1222,12 @@ export function JoyAgentSettingsDialog({
                                   }
                                   if (checked) {
                                     const normalized = normalizeProviderBaseUrl(baseUrl);
-                                    const providerProfile = profiles.find(
-                                      (profile) =>
-                                        profile.provider ===
-                                          (provider === 'openai-compatible'
-                                            ? 'custom'
-                                            : provider) &&
-                                        normalizeProviderBaseUrl(profile.baseUrl) === normalized,
-                                    );
-                                    const exactProfile =
-                                      providerProfile ??
-                                      (savedProfile &&
-                                      savedProfile.provider ===
-                                        (provider === 'openai-compatible' ? 'custom' : provider) &&
-                                      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalized
-                                        ? savedProfile
-                                        : undefined);
+                                    // The acknowledgement belongs to the saved profile the form chose, not to
+                                    // another profile that happens to share this endpoint.
                                     acknowledgeCustomEndpoint({
                                       provider: 'custom',
                                       baseUrl: normalized,
-                                      profileId: exactProfile?.id,
+                                      profileId: matchedProfile?.id,
                                     });
                                   }
                                 }}

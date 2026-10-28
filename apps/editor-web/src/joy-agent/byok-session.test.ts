@@ -7,7 +7,7 @@ describe('page-session BYOK lifecycle', () => {
       provider: 'openrouter' as const,
       baseUrl: 'https://openrouter.ai/api/v1',
       modelId: 'openrouter/auto',
-      apiKey: 'session-secret',
+      profileId: 'profile-test',
     };
     const session = createByokSession(config);
     expect(session.status).toEqual({
@@ -24,9 +24,9 @@ describe('page-session BYOK lifecycle', () => {
       provider: 'openrouter' as const,
       baseUrl: 'https://openrouter.ai/api/v1',
       modelId: 'openrouter/auto',
-      apiKey: 'session-secret',
+      profileId: 'profile-test',
     };
     forgetByokConfig(config);
-    expect(config).toEqual({ provider: 'openrouter', baseUrl: '', modelId: '', apiKey: '' });
+    expect(config).toEqual({ provider: 'openrouter', baseUrl: '', modelId: '', profileId: '' });
   });
 });

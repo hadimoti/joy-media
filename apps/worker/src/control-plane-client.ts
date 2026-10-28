@@ -79,6 +79,12 @@ export class WorkerRequestTimeoutError extends Error {
   }
 }
 
+/**
+ * The desktop allows a chat reply 120 s (the broker's own limit). The Worker waits a little longer, so
+ * the desktop's timeout is the one that is reported, and the provider call is not left running.
+ */
+const AI_COMPLETE_TIMEOUT_MS = 130_000;
+
 /** Outbound-only Worker client. It never holds a JOY user session or password. */
 export class WorkerControlPlaneClient {
   readonly #fetch: typeof fetch;
@@ -269,6 +275,28 @@ export class WorkerControlPlaneClient {
     if (!response.ok) throw new Error(`Worker derivative upload failed (${response.status})`);
   }
 
+  /**
+   * One AI completion on a job this Worker holds (PLAN-v4 §6b). The desktop takes the profile from
+   * the job and returns only the reply text, so this Worker never sees a key, a URL or a profile.
+   */
+  async completeAi(
+    jobId: string,
+    leaseToken: string,
+    input: {
+      readonly messages: readonly unknown[];
+      readonly params?: Readonly<Record<string, unknown>>;
+    },
+  ): Promise<string> {
+    const result = await this.authenticatedRequest(
+      `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/ai/complete`,
+      { jobId, leaseToken, messages: input.messages, params: input.params ?? {} },
+      AI_COMPLETE_TIMEOUT_MS,
+    );
+    const text = isRecord(result) ? result['text'] : undefined;
+    if (typeof text !== 'string') throw new Error('The desktop returned an unreadable AI reply');
+    return text;
+  }
+
   async fail(jobId: string, error: string, leaseToken?: string): Promise<void> {
     await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/fail`,
@@ -279,10 +307,11 @@ export class WorkerControlPlaneClient {
   private async authenticatedRequest(
     pathname: string,
     body: Record<string, unknown>,
+    timeoutMs?: number,
   ): Promise<unknown> {
     const sessionToken = this.options.sessionStore.loadWorkerSession();
     if (sessionToken === undefined) throw new Error('Worker is not paired');
-    const response = await this.fetchJson(pathname, body, sessionToken);
+    const response = await this.fetchJson(pathname, body, sessionToken, timeoutMs);
     if (response.status === 401) {
       this.options.sessionStore.clearWorkerSession();
       throw new WorkerSessionExpiredError();
@@ -308,6 +337,7 @@ export class WorkerControlPlaneClient {
     pathname: string,
     body: Record<string, unknown>,
     sessionToken?: string,
+    timeoutMs?: number,
   ): Promise<{ readonly ok: boolean; readonly status: number; readonly body: unknown }> {
     const url = `${this.options.apiUrl.replace(/\/$/, '')}${pathname}`;
     const responseBody = await this.runTimedRequest(
@@ -333,6 +363,7 @@ export class WorkerControlPlaneClient {
         }
         return { response: result, raw: await result.text() };
       },
+      timeoutMs,
     );
     const response = responseBody.response;
     // Authentication failures are actionable even when an upstream proxy
@@ -359,8 +390,10 @@ export class WorkerControlPlaneClient {
     input: RequestInfo | URL,
     init: RequestInit | undefined,
     consume: (response: Response) => Promise<T>,
+    timeoutMs?: number,
   ): Promise<T> {
     const url = String(input);
+    const deadlineMs = timeoutMs ?? this.#requestTimeoutMs;
     const controller = new AbortController();
     const callerSignal = init?.signal ?? undefined;
     const abortFromCaller = (): void => controller.abort();
@@ -372,9 +405,9 @@ export class WorkerControlPlaneClient {
     try {
       const timeout = new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(() => {
-          reject(new WorkerRequestTimeoutError(url, this.#requestTimeoutMs));
+          reject(new WorkerRequestTimeoutError(url, deadlineMs));
           controller.abort();
-        }, this.#requestTimeoutMs);
+        }, deadlineMs);
       });
       return await Promise.race([
         this.#fetch(input, { ...init, signal: controller.signal }).then(consume),

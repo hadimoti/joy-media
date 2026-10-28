@@ -1,4 +1,6 @@
-import { normalizeByokSessionConfig } from '@joy-media/joy-agent-engine';
+import { requestAgentCompletion } from '../desktop-client.js';
+import { normalizeBaseUrl } from '@joy-media/provider-sdk';
+import { ProviderCallError, type ProviderCall } from './provider-call.js';
 import {
   createHostRpcHost,
   type HostRpcHost,
@@ -11,9 +13,13 @@ import {
   JOY_AGENT_PROTOCOL_VERSION,
   type ByokSessionConfig,
   type ByokSessionStatus,
+  type ProviderCallResult,
+  type WorkerToMainMessage,
   type JoyAgentMediaCapabilityReport,
   type JoyAgentRunRequest,
   type JoyAgentSafeEvent,
+  CONNECTION_TEST_CALLS,
+  PROVIDER_CONNECTION_CALL_TIMEOUT_MS,
 } from './protocol.js';
 import type { JoyAgentHostToolName } from './host-tool-contract.js';
 import type { ObservationTransferEvidenceResolver } from './observation-transfer-service.js';
@@ -29,10 +35,13 @@ import {
 
 const RELOAD_RECONNECT_MESSAGE =
   'JOY Agent Engine updated. Reconnect the model and reload this page.';
-// The Worker deliberately gives connection probes 15 seconds. This outer
-// watchdog must remain longer, otherwise a bounded provider timeout races the
-// Worker’s safe `test-result` and is misreported as a stale Worker update.
+// The outer watchdog for a reply from the Worker. It outlasts the Worker's own deadlines, so a bounded
+// provider timeout reaches the Worker's safe `test-result` rather than racing this watchdog.
 const STATUS_TIMEOUT_MS = 20_000;
+// A connection test is up to three provider calls, each with its own deadline in the Worker. Its
+// watchdog outlasts all three, so a valid slow probe is not reported as a protocol mismatch.
+const CONNECTION_TEST_TIMEOUT_MS =
+  CONNECTION_TEST_CALLS * PROVIDER_CONNECTION_CALL_TIMEOUT_MS + 15_000;
 
 export interface JoyAgentRunHost {
   /** Main-thread-only methods; this object is never posted to the Worker. */
@@ -228,10 +237,106 @@ function samePrivateIds(left: readonly string[], right: readonly string[]): bool
  * endpoint; no editor object, writer, storage surface, or credential crosses
  * this boundary. Epochs are minted here rather than trusted from callers.
  */
-export function createSingleWorkerEngineClient(workerFactory?: () => Worker): JoyAgentEngineClient {
+/**
+ * Checks a connection before it is posted to the Worker. It keeps the saved profile and the URL the
+ * user saw; no key is part of it (PLAN-v4 §6b).
+ */
+export function normalizeSessionConfig(
+  input: Readonly<Partial<ByokSessionConfig>>,
+): ByokSessionConfig {
+  const provider = input.provider;
+  const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl.trim() : '';
+  const modelId = typeof input.modelId === 'string' ? input.modelId.trim() : '';
+  const profileId = typeof input.profileId === 'string' ? input.profileId.trim() : '';
+  if (
+    !isSupportedProvider(provider) ||
+    baseUrl.length === 0 ||
+    baseUrl.length > 2_048 ||
+    modelId.length === 0 ||
+    modelId.length > 256 ||
+    profileId.length === 0
+  )
+    throw new Error('Invalid model connection');
+  return Object.freeze({ provider, baseUrl, modelId, profileId });
+}
+
+/** Runs one provider call and answers the Worker with its reply text or the broker's code. */
+async function answerProviderRequest(
+  worker: Worker,
+  request: Extract<WorkerToMainMessage, { readonly type: 'provider-request' }>,
+  providerCall: ProviderCall,
+  expected: ByokSessionConfig | undefined,
+  signal: AbortSignal,
+): Promise<void> {
+  let result: ProviderCallResult;
+  if (!matchesSession(request, expected)) {
+    // The Worker may name only the profile, URL and model this session was configured with.
+    result = {
+      ok: false,
+      code: 'REQUEST_INVALID',
+      message: 'The provider request does not match the configured session.',
+    };
+  } else {
+    try {
+      const text = await providerCall({
+        profileId: request.profileId,
+        baseUrl: request.baseUrl,
+        modelId: request.modelId,
+        body: request.body,
+        signal,
+      });
+      result = { ok: true, text };
+    } catch (error) {
+      result = {
+        ok: false,
+        code: error instanceof ProviderCallError ? error.code : 'NETWORK_ERROR',
+        message: error instanceof Error ? error.message : 'The provider request failed',
+      };
+    }
+  }
+  // A call the Worker cancelled, or one whose worker was ended, gets no answer: nobody is waiting for it.
+  if (signal.aborted) return;
+  worker.postMessage({
+    protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+    type: 'provider-response',
+    requestId: request.requestId,
+    result,
+  });
+}
+
+/** True only for the profile, URL and model the main thread configured the session with. */
+function matchesSession(
+  request: Extract<WorkerToMainMessage, { readonly type: 'provider-request' }>,
+  expected: ByokSessionConfig | undefined,
+): boolean {
+  return (
+    expected !== undefined &&
+    request.profileId === expected.profileId &&
+    request.modelId === expected.modelId &&
+    normalizeBaseUrl(request.baseUrl) === normalizeBaseUrl(expected.baseUrl)
+  );
+}
+
+export function createSingleWorkerEngineClient(
+  workerFactory?: () => Worker,
+  providerCall: ProviderCall = requestAgentCompletion,
+): JoyAgentEngineClient {
   let worker: Worker | undefined;
   let generation = 0;
+  // Provider calls this client started and has not finished, by the Worker's request id. Ending the worker
+  // ends them all, and a `provider-cancel` ends the one it names.
+  const activeProviderCalls = new Map<string, AbortController>();
+  const abortProviderCalls = (): void => {
+    for (const call of activeProviderCalls.values()) call.abort();
+    activeProviderCalls.clear();
+  };
+  const terminateWorker = (): void => {
+    abortProviderCalls();
+    worker?.terminate();
+  };
   let configured = false;
+  /** The session the main thread configured. A provider request must match it (PLAN-v4 §6a). */
+  let activeSession: ByokSessionConfig | undefined;
   let latestStatus: ByokSessionStatus | undefined;
   let latestMediaCapabilities: JoyAgentMediaCapabilityReport | undefined;
   const pending = new Map<'configure' | 'test', Pending>();
@@ -522,7 +627,7 @@ export function createSingleWorkerEngineClient(workerFactory?: () => Worker): Jo
     }
     for (const queue of [...runQueues.values()]) failQueue(queue, error);
     generation += 1;
-    worker?.terminate();
+    terminateWorker();
     worker = undefined;
     configured = false;
     latestStatus = undefined;
@@ -538,13 +643,36 @@ export function createSingleWorkerEngineClient(workerFactory?: () => Worker): Jo
         name: 'joy-agent-engine',
       });
     const expectedGeneration = generation;
-    worker.onmessage = (event: MessageEvent<unknown>) => {
+    const owner: Worker = worker;
+    owner.onmessage = (event: MessageEvent<unknown>) => {
       if (expectedGeneration !== generation) return;
       if (!isWorkerToMainMessage(event.data)) {
         failProtocolMismatch();
         return;
       }
       const message = event.data;
+      if (message.type === 'provider-cancel') {
+        activeProviderCalls.get(message.requestId)?.abort();
+        return;
+      }
+      if (message.type === 'provider-request') {
+        // An id still in use is ignored: the call it names keeps running, and a second call cannot replace it.
+        if (activeProviderCalls.has(message.requestId)) return;
+        const call = new AbortController();
+        activeProviderCalls.set(message.requestId, call);
+        void answerProviderRequest(
+          owner,
+          message,
+          providerCall,
+          configured ? activeSession : undefined,
+          call.signal,
+        ).finally(() => {
+          if (activeProviderCalls.get(message.requestId) === call) {
+            activeProviderCalls.delete(message.requestId);
+          }
+        });
+        return;
+      }
       if (message.type === 'configured' || message.type === 'test-result') {
         const key = message.type === 'configured' ? 'configure' : 'test';
         const item = pending.get(key);
@@ -649,7 +777,7 @@ export function createSingleWorkerEngineClient(workerFactory?: () => Worker): Jo
       }
       for (const queue of [...runQueues.values()]) failQueue(queue, error);
       generation += 1;
-      worker?.terminate();
+      terminateWorker();
       worker = undefined;
       configured = false;
       latestStatus = undefined;
@@ -669,13 +797,16 @@ export function createSingleWorkerEngineClient(workerFactory?: () => Worker): Jo
         clearTimeout(previous.timer);
         previous.reject(new Error('JOY Agent connection request was superseded'));
       }
-      const timer = setTimeout(() => {
-        const item = pending.get(type);
-        if (item === undefined) return;
-        pending.delete(type);
-        item.reject(new Error(RELOAD_RECONNECT_MESSAGE));
-        failProtocolMismatch();
-      }, STATUS_TIMEOUT_MS);
+      const timer = setTimeout(
+        () => {
+          const item = pending.get(type);
+          if (item === undefined) return;
+          pending.delete(type);
+          item.reject(new Error(RELOAD_RECONNECT_MESSAGE));
+          failProtocolMismatch();
+        },
+        type === 'test' ? CONNECTION_TEST_TIMEOUT_MS : STATUS_TIMEOUT_MS,
+      );
       pending.set(type, { resolve, reject, timer });
       ensureWorker().postMessage({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type, ...message });
     });
@@ -705,7 +836,7 @@ export function createSingleWorkerEngineClient(workerFactory?: () => Worker): Jo
   const clear = (): void => {
     closeObservationPort();
     generation += 1;
-    worker?.terminate();
+    terminateWorker();
     worker = undefined;
     configured = false;
     latestStatus = undefined;
@@ -865,10 +996,11 @@ export function createSingleWorkerEngineClient(workerFactory?: () => Worker): Jo
     async configure(next) {
       if (!isSupportedProvider(next.provider))
         throw new Error('Provider is not supported by the editor');
-      const safe = normalizeByokSessionConfig(next);
+      const safe = normalizeSessionConfig(next);
       clear();
       latestStatus = { provider: safe.provider, modelId: safe.modelId, capability: 'untested' };
       const result = await requestStatus('configure', { config: safe });
+      activeSession = safe;
       configured = true;
       return result;
     },
@@ -977,13 +1109,16 @@ export function createSingleWorkerEngineClient(workerFactory?: () => Worker): Jo
 /**
  * Main-thread agent dispatcher. It keeps one provider session, served by one Worker-backed client.
  */
-export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAgentEngineClient {
+export function createJoyAgentEngineClient(
+  workerFactory?: () => Worker,
+  providerCall?: ProviderCall,
+): JoyAgentEngineClient {
   let singleClient: JoyAgentEngineClient | undefined;
   let currentStatus: ByokSessionStatus | undefined;
 
   const ensureSingleClient = (): JoyAgentEngineClient => {
     if (!singleClient) {
-      singleClient = createSingleWorkerEngineClient(workerFactory);
+      singleClient = createSingleWorkerEngineClient(workerFactory, providerCall);
     }
     return singleClient;
   };

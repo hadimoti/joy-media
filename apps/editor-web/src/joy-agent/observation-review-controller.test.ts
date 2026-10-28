@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { createEvidenceStore } from '../media-observation/evidence-store.js';
 import {
   createMultimodalTransport,
-  type MultimodalFetch,
   type ObservationEvidencePayload,
 } from './multimodal-transport.js';
+import {
+  providerCallFromFetch,
+  type FakeProviderFetch,
+} from './multimodal-provider-call.test-fixture.js';
 import { issueObservationConsent, type ObservationMediaCapability } from './observation-consent.js';
 import type { JoyAgentObservationHostBridge } from './observation-tool-adapter.js';
 import {
@@ -411,7 +414,7 @@ describe('observation review controller', () => {
       return new Response(JSON.stringify({ choices: [{ message: { content: 12 } }] }), {
         status: 200,
       });
-    }) as unknown as MultimodalFetch;
+    }) as unknown as FakeProviderFetch;
     const bridgeResolver = Object.freeze({
       resolve: () =>
         Object.freeze([
@@ -432,7 +435,7 @@ describe('observation review controller', () => {
       currentAuthority: () => live,
       createHostTransfer(input) {
         const service = createObservationTransferService({
-          transport: createMultimodalTransport({ fetch: fetcher }),
+          transport: createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) }),
           evidenceStore: store,
           evidenceResolver: input.evidenceResolver,
           currentAuthority: input.currentAuthority,
@@ -464,7 +467,7 @@ describe('observation review controller', () => {
                 provider: 'openrouter',
                 baseUrl: 'https://provider.example/v1',
                 modelId: input.authority.modelId,
-                apiKey: 'PRIVATE_BYOK_KEY_NEVER_LEAVES_HOST_CLOSURE',
+                profileId: 'profile-saved',
               },
               authority: input.authority,
               range: input.range,

@@ -100,6 +100,27 @@ export { createSynthesisAuditLog } from './synthesis-audit.js';
 // Re-export BYOK provider-profile validation (JOY Media desktop migration, wave 3)
 export type { ByokProvider, ProviderProfileInput, ValidationIssue } from './validation.js';
 export { BYOK_PROVIDERS, validateProviderProfileInput } from './validation.js';
+export type {
+  ProviderApi,
+  ProviderRegion,
+  ProviderRegionId,
+  RegistryProvider,
+  RegistryProviderId,
+  EndpointVerdict,
+} from './registry.js';
+export {
+  CUSTOM_PROVIDER_ALIAS,
+  CUSTOM_PROVIDER_ID,
+  PROVIDER_REGISTRY,
+  REGISTRY_PROVIDER_IDS,
+  endpointUrl,
+  evaluateEndpoint,
+  findRegistryProvider,
+  findRegistryRegion,
+  isCustomProviderId,
+  isLoopbackHostname,
+  normalizeBaseUrl,
+} from './registry.js';
 
 // Re-export the direct-provider capability probe adapter (wave 3)
 export type {

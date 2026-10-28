@@ -30,7 +30,7 @@ export function createByokSession(
 export function forgetByokConfig(config: ByokSessionConfig): void {
   // Explicitly overwrite the object fields owned by this session. The caller
   // must also terminate its Worker; this helper never persists or logs keys.
-  (config as { baseUrl: string; modelId: string; apiKey: string }).baseUrl = '';
-  (config as { baseUrl: string; modelId: string; apiKey: string }).modelId = '';
-  (config as { baseUrl: string; modelId: string; apiKey: string }).apiKey = '';
+  (config as { baseUrl: string; modelId: string; profileId: string }).baseUrl = '';
+  (config as { baseUrl: string; modelId: string; profileId: string }).modelId = '';
+  (config as { baseUrl: string; modelId: string; profileId: string }).profileId = '';
 }

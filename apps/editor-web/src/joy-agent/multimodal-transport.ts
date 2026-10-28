@@ -77,11 +77,19 @@ export type MultimodalTransportResult =
         'consent-denied' | 'invalid-request' | 'cancelled' | 'network-failed' | 'provider-rejected';
     };
 
-export type MultimodalFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+/**
+ * One provider call for an observation batch. The key stays in the main process; the reply text is
+ * what comes back (PLAN-v4 §6a).
+ */
+export type MultimodalProviderCall = (request: {
+  readonly connection: ByokSessionConfig;
+  readonly body: Readonly<Record<string, unknown>>;
+  readonly signal: AbortSignal;
+}) => Promise<string>;
 
 export interface MultimodalTransportOptions {
-  /** Test seam only; production uses the browser's direct fetch implementation. */
-  readonly fetch?: MultimodalFetch;
+  /** Test seam; the Worker supplies the broker-backed call. Without it a request fails closed. */
+  readonly providerCall?: MultimodalProviderCall;
 }
 
 export interface MultimodalTransport {
@@ -139,7 +147,7 @@ const UNSAFE_ANALYSIS_CHARACTERS =
 export function createMultimodalTransport(
   options: MultimodalTransportOptions = {},
 ): MultimodalTransport {
-  const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
+  const providerCall = options.providerCall;
   const consents = new ObservationConsentRegistry();
   const controllersByRun = new Map<string, Set<AbortController>>();
   let disposed = false;
@@ -216,21 +224,18 @@ export function createMultimodalTransport(
       }
 
       try {
-        const response = await fetcher(prepared.endpoint, {
-          method: 'POST',
-          credentials: 'omit',
-          cache: 'no-store',
-          referrerPolicy: 'no-referrer',
-          redirect: 'error',
-          headers: {
-            accept: 'application/json',
-            'content-type': 'application/json',
-            authorization: `Bearer ${request.connection.apiKey}`,
-          },
-          body: prepared.body,
+        if (providerCall === undefined) return failure('network-failed');
+        const text = await providerCall({
+          connection: request.connection,
+          body: JSON.parse(prepared.body) as Record<string, unknown>,
           signal: controller.signal,
         });
         if (controller.signal.aborted) return failure('cancelled');
+        // The broker has already read the whole reply, so it is checked as an in-memory response.
+        const response = new Response(text, {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
         if (!isDirectProviderResponse(response, prepared.endpoint)) {
           discardResponseBody(response);
           return failure('provider-rejected');
@@ -238,7 +243,7 @@ export function createMultimodalTransport(
         const analysis = await readProviderAnalysis(
           response,
           prepared.evidenceIds,
-          request.connection.apiKey,
+          '',
           controller.signal,
         );
         if (controller.signal.aborted) return failure('cancelled');
@@ -249,8 +254,9 @@ export function createMultimodalTransport(
           remainingRequests: authorization.remainingRequests,
           analysis,
         };
-      } catch {
-        return failure(controller.signal.aborted ? 'cancelled' : 'network-failed');
+      } catch (error) {
+        if (controller.signal.aborted) return failure('cancelled');
+        return failure(isProviderAuthFailure(error) ? 'provider-rejected' : 'network-failed');
       } finally {
         unlinkAbort();
         removeController(request.runId, controller);
@@ -309,20 +315,17 @@ function parseRequest(value: unknown): ParsedRequest | undefined {
 
 function parseConnection(value: unknown): ByokSessionConfig | undefined {
   if (!isRecord(value) || !hasExactKeys(value, CONNECTION_KEYS)) return undefined;
-  const { provider, baseUrl, modelId, apiKey } = value;
+  const { provider, baseUrl, modelId, profileId } = value;
   if (
     (provider !== 'openrouter' && provider !== 'openai-compatible') ||
     typeof baseUrl !== 'string' ||
     baseUrl.length === 0 ||
     baseUrl.length > 2_048 ||
     !isOpaqueId(modelId) ||
-    typeof apiKey !== 'string' ||
-    apiKey.length === 0 ||
-    apiKey.length > 4_096 ||
-    /[\r\n]/.test(apiKey)
+    !isOpaqueId(profileId)
   )
     return undefined;
-  return { provider, baseUrl, modelId, apiKey };
+  return { provider, baseUrl, modelId, profileId };
 }
 
 function endpointForConnection(connection: ByokSessionConfig): URL | undefined {
@@ -568,6 +571,22 @@ function responseContentLengthExceedsLimit(response: Response): boolean {
  * bidirectional override characters are rejected instead of being passed to a
  * future UI or tool loop; an API-key reflection is rejected outright.
  */
+/** The broker and the Worker report a provider that refused the request with these codes. */
+const PROVIDER_REJECTION_CODES: ReadonlySet<unknown> = new Set([
+  'AUTH_FAILED',
+  'JOY_AGENT_AUTH_FAILED',
+  'PROVIDER_HTTP_ERROR',
+  'PROVIDER_INCOMPATIBLE',
+  'JOY_AGENT_PROVIDER_INCOMPATIBLE',
+  'RESPONSE_TOO_LARGE',
+  'JOY_AGENT_RESPONSE_TOO_LARGE',
+]);
+
+function isProviderAuthFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  return PROVIDER_REJECTION_CODES.has(error.code);
+}
+
 function sanitizeProviderAnalysisText(value: unknown, apiKey: string): string | undefined {
   if (typeof value !== 'string') return undefined;
   const text = value.normalize('NFC').replace(/\r\n?/g, '\n').trim();
@@ -576,7 +595,7 @@ function sanitizeProviderAnalysisText(value: unknown, apiKey: string): string | 
     text.length === 0 ||
     TEXT_ENCODER.encode(text).byteLength > MAX_MULTIMODAL_ANALYSIS_TEXT_BYTES ||
     UNSAFE_ANALYSIS_CHARACTERS.test(text) ||
-    text.includes(normalizedApiKey)
+    (normalizedApiKey.length > 0 && text.includes(normalizedApiKey))
   )
     return undefined;
   return text;
@@ -585,6 +604,7 @@ function sanitizeProviderAnalysisText(value: unknown, apiKey: string): string | 
 function isDirectProviderEndpoint(url: URL): boolean {
   return (
     (url.protocol === 'https:' || (url.protocol === 'http:' && isLoopbackHost(url.hostname))) &&
+    url.hostname !== '[::1]' &&
     !url.username &&
     !url.password &&
     !url.search &&
@@ -593,7 +613,8 @@ function isDirectProviderEndpoint(url: URL): boolean {
 }
 
 function isLoopbackHost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+  // [::1] is not allowed for local models (PLAN-v4 S4), so consent never names it.
+  return hostname === 'localhost' || hostname === '127.0.0.1';
 }
 
 function isMimeTypeForModality(mimeType: string, modality: ObservationModality): boolean {
@@ -680,7 +701,7 @@ const REQUEST_KEYS = [
   'evidence',
   'mediaCapability',
 ] as const;
-const CONNECTION_KEYS = ['provider', 'baseUrl', 'modelId', 'apiKey'] as const;
+const CONNECTION_KEYS = ['provider', 'baseUrl', 'modelId', 'profileId'] as const;
 const RANGE_KEYS = ['domain', 'startUs', 'endUs'] as const;
 const EVIDENCE_KEYS = ['evidenceId', 'modality', 'mimeType', 'data'] as const;
 const MEDIA_CAPABILITY_KEYS = ['modelId', 'modalities'] as const;

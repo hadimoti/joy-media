@@ -1,3 +1,5 @@
+import { evaluateEndpoint } from '@joy-media/provider-sdk';
+import { ProviderCallError, type ProviderCallRequest } from './joy-agent/provider-call.js';
 /**
  * Typed helpers for the desktop host bridge (`window.joyDesktop`), injected by
  * `apps/desktop/src/preload/preload.cjs` via `contextBridge.exposeInMainWorld` when
@@ -82,6 +84,8 @@ export interface DesktopProviderProfile {
   readonly cachedModels?: readonly string[] | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** False until the saved key is confirmed for this endpoint. Such a profile asks for its key again. */
+  readonly bound?: boolean | undefined;
 }
 
 export interface SaveDesktopProviderProfileRequest {
@@ -105,7 +109,14 @@ export interface DiscoveredModel {
 export async function saveDesktopProviderProfile(
   request: SaveDesktopProviderProfileRequest,
 ): Promise<DesktopProviderProfile> {
-  const data = await requireBridge().invoke('desktop.provider-profile.save', request);
+  // A new profile for a local endpoint may be saved with no key (PLAN-v4 D8). It is stored with the
+  // placeholder, so the profile still reads as having a key. An existing profile is left alone.
+  const keyless = request.apiKey === undefined || request.apiKey === '';
+  const verdict = evaluateEndpoint(request.provider, request.baseUrl);
+  const local = verdict.allowed && verdict.kind === 'loopback';
+  const payload =
+    request.id === undefined && keyless && local ? { ...request, apiKey: 'not-provided' } : request;
+  const data = await requireBridge().invoke('desktop.provider-profile.save', payload);
   return data as DesktopProviderProfile;
 }
 
@@ -125,18 +136,10 @@ export async function deleteDesktopProviderProfile(id: string): Promise<void> {
 }
 
 /**
- * Provider sessions move to the local provider broker (PLAN-v4 §6b, P2). The desktop no longer
- * hands a decrypted key to the renderer, so this build refuses instead of asking for one.
- */
-export async function beginDesktopProviderSession(_id: string): Promise<unknown> {
-  throw new Error('Provider sessions are not available until the local provider broker ships');
-}
-
-/**
  * Probes the provider profile connectivity in the desktop host without exposing the key.
  */
 export async function testDesktopProviderProfile(id: string): Promise<unknown> {
-  const data = await requireBridge().invoke('desktop.provider-profile.test', { id });
+  const data = await requireBridge().invoke('desktop.provider.test', { id });
   return data;
 }
 
@@ -149,31 +152,54 @@ export async function fetchDesktopProviderModels(request: {
   apiKey?: string | undefined;
   provider?: string | undefined;
 }): Promise<readonly DiscoveredModel[]> {
-  if (isDesktopHost()) {
-    const data = await requireBridge().invoke('desktop.provider-profile.fetch-models', request);
-    return (data as readonly DiscoveredModel[]) ?? [];
+  if (!isDesktopHost()) throw new Error('Model lists are available in the desktop app only');
+  const payload =
+    request.id === undefined || request.id.length === 0
+      ? {
+          draft: {
+            provider: request.provider ?? '',
+            baseUrl: request.baseUrl ?? '',
+            apiKey: request.apiKey ?? '',
+          },
+        }
+      : { id: request.id };
+  const data = await requireBridge().invoke('desktop.provider.models', payload);
+  return (data as readonly DiscoveredModel[]) ?? [];
+}
+
+/**
+ * One model call through the desktop broker. The key never reaches this side (PLAN-v4 §6a). A call that
+ * is aborted here is cancelled in the desktop as well, so the provider request it began is not left running.
+ */
+export async function requestAgentCompletion(request: ProviderCallRequest): Promise<string> {
+  const bridge = requireBridge();
+  const { signal, ...payload } = request;
+  if (signal?.aborted) throw new ProviderCallError('NETWORK_ERROR', 'The request was cancelled.');
+  // A random id per call: a counter restarts on every reload, and an old page's id could then match a new call.
+  const requestId = `agent-${crypto.randomUUID()}`;
+  const cancel = (): void => {
+    void bridge.invoke('desktop.agent.cancel', { requestId }).catch(() => undefined);
+  };
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    const data = (await bridge.invoke('desktop.agent.request', { ...payload, requestId })) as
+      | {
+          readonly ok?: unknown;
+          readonly text?: unknown;
+          readonly code?: unknown;
+          readonly message?: unknown;
+        }
+      | undefined;
+    // A reply that lands after the caller aborted is not returned: the caller has stopped waiting for it.
+    if (signal?.aborted) throw new ProviderCallError('NETWORK_ERROR', 'The request was cancelled.');
+    if (data?.ok === true && typeof data.text === 'string') return data.text;
+    throw new ProviderCallError(
+      typeof data?.code === 'string' ? data.code : 'NETWORK_ERROR',
+      typeof data?.message === 'string' ? data.message : 'The provider request failed',
+    );
+  } finally {
+    signal?.removeEventListener('abort', cancel);
   }
-  if (!request.baseUrl) return [];
-  const normalizedBaseUrl = request.baseUrl.replace(/\/+$/, '');
-  const headers: Record<string, string> = {};
-  if (request.apiKey && request.apiKey !== 'not-provided') {
-    headers['Authorization'] = `Bearer ${request.apiKey}`;
-  }
-  const res = await fetch(`${normalizedBaseUrl}/models`, { headers });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = (await res.json()) as { data?: unknown };
-  const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
-  return raw
-    .map((item) => {
-      if (typeof item === 'string') return { id: item, name: item };
-      if (item && typeof item === 'object') {
-        const id = (item as { id?: string }).id || '';
-        const name = (item as { name?: string }).name || id;
-        return { id, name };
-      }
-      return null;
-    })
-    .filter((m): m is DiscoveredModel => Boolean(m && m.id));
 }
 
 /**
