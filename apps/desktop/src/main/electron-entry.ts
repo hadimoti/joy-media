@@ -194,7 +194,9 @@ if (!app.requestSingleInstanceLock()) {
       console.error('local job API did not start', error);
     }
     Menu.setApplicationMenu(null);
-    app.setAsDefaultProtocolClient('joy');
+    // Only the installed app claims the joy:// scheme. A development run would otherwise point
+    // it at the Electron binary in the source tree.
+    if (app.isPackaged) app.setAsDefaultProtocolClient('joy');
 
     if (!isDev) {
       protocol.handle(PACKAGED_RENDERER_SCHEME, (request) => {
