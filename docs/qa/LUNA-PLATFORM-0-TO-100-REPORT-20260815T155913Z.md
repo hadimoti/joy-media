@@ -37,7 +37,7 @@ seams, not the core editor shell.
 | Global pnpm              | `11.17.0` (not used for gates)                                                                                          |
 | Python                   | `3.11.15` in audio and masking environments                                                                             |
 | FFmpeg / FFprobe         | available from WinGet links                                                                                             |
-| Model root               | `C:\Users\HadiMoti\JOY\models`                                                                                          |
+| Model root               | `<owner-profile>\JOY\models`                                                                                            |
 | Model root inventory     | 55 files / 13,370,020,669 bytes / 12.45 GiB                                                                             |
 | GPU                      | no GPU-dependent path was assumed; CPU paths were used                                                                  |
 | Live editor              | `https://joyst.ir/` returned HTTP 200                                                                                   |
@@ -151,7 +151,7 @@ confidence, and caption seek` under desktop-primary, desktop-compact, and
 - Area: H / audio Worker
 - Severity: **P1**, open
 - Reproduction: run FFmpeg with the configured path from `run-worker.bat`:
-  `arnndn=m=C:\Users\HadiMoti\JOY\models\audio\rnnoise\mp.rnnn`.
+  `arnndn=m=<owner-profile>\JOY\models\audio\rnnoise\mp.rnnn`.
 - Expected: configured Worker route produces a denoised WAV.
 - Actual: FFmpeg rejects the filter expression because the Windows drive/path
   is parsed as filter syntax. The same model succeeds when the drive colon is

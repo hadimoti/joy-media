@@ -3,7 +3,7 @@
 **Status:** STEP-00 through STEP-21 approved; WP-29 FINISHED
 **Parent:** [`WP-29-closeout-remaining-acceptance.md`](WP-29-closeout-remaining-acceptance.md)
 **Execution model:** Codex orchestrator reviews; one persistent Codex agent on the Sweden VPS implements
-**Repository:** `/opt/joy-media/repo`
+**Repository:** `<server-path>/joy-media/repo`
 **Live application:** [https://joyst.ir/](https://joyst.ir/)
 **Target:** close every remaining WP-29 gate through a review-controlled loop without skipping evidence
 
@@ -121,17 +121,17 @@ At kickoff, the orchestrator chooses:
 ```text
 RUN_ID=wp29-closeout-YYYYMMDD-HHMM
 BRANCH=codex/wp29-closeout-YYYYMMDD-HHMM
-WORKTREE=/opt/joy-media/worktrees/wp29-closeout-YYYYMMDD-HHMM
+WORKTREE=<server-path>/joy-media/worktrees/wp29-closeout-YYYYMMDD-HHMM
 DISPOSABLE_PROJECT=WP-29 closeout YYYYMMDD-HHMM
 REVIEW_LOG=docs/qa/WP-29-closeout-review-log-YYYYMMDD-HHMM.md
 RESULTS=docs/qa/gpt-chrome-usage-audit-YYYYMMDD-HHMM.md
-EVIDENCE=/opt/joy-media/evidence/wp29-closeout-YYYYMMDD-HHMM
+EVIDENCE=<server-path>/joy-media/evidence/wp29-closeout-YYYYMMDD-HHMM
 ```
 
 The branch begins at the current clean `origin/main`. The main production
-checkout `/opt/joy-media/repo` stays on `main`; the doer works only in the
+checkout `<server-path>/joy-media/repo` stays on `main`; the doer works only in the
 validated worktree path. Before adding the worktree, resolve both absolute paths
-and verify the new target is inside `/opt/joy-media/worktrees`.
+and verify the new target is inside `<server-path>/joy-media/worktrees`.
 
 Binary downloads, videos, traces, and raw performance samples stay in the
 excluded evidence directory or CI artifacts. The repository stores sanitized
@@ -237,7 +237,7 @@ Doer actions:
 1. Record local/VPS time, `origin/main`, current production source, active API
    and editor releases, service health, public index hash, Chrome version, OS,
    GPU, hardware acceleration, and FFmpeg/FFprobe versions.
-2. Confirm `/opt/joy-media/repo` and the local checkout are clean.
+2. Confirm `<server-path>/joy-media/repo` and the local checkout are clean.
 3. Create the exact closeout branch/worktree and evidence directory.
 4. Create the review log and new results report with the run metadata.
 5. Capture the live project list and current project without mutation.
@@ -555,7 +555,7 @@ Orchestrator actions:
 1. Review the complete branch diff and commit sequence.
 2. Fast-forward or reviewed-merge into `main`, push GitHub, and wait for required
    CI.
-3. Fast-forward `/opt/joy-media/repo` to the pushed commit.
+3. Fast-forward `<server-path>/joy-media/repo` to the pushed commit.
 4. Create and verify a fresh compressed PostgreSQL backup; sync it off-host when
    the established backup route is available.
 5. Build immutable API and editor releases from that commit.

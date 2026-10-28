@@ -1,6 +1,6 @@
 # JOY Media final migration — progress log
 
-Lead: Claude Code (`claude-sonnet-5`), worktree `C:\Users\HadiMoti\joy-media-final-migration`,
+Lead: Claude Code (`claude-sonnet-5`), worktree `<owner-profile>\joy-media-final-migration`,
 branch `codex/joy-media-final-migration-20260914`. This log is updated at every wave boundary
 with exact evidence so Codex can update external handoffs. No deploy, VPS restart, production
 data change, secret change, or payment activation has been performed.
@@ -387,7 +387,7 @@ wave 3 commit).
   `LoadCredentialEncrypted=joy-media-entitlement-signing-key:...` line. Unlike the nginx config
   doc mirror, this file's precedent (`docs/reviews/...deploy-handoff...`) suggests it may be
   applied close to verbatim during a real deploy — adding that line without the owner first
-  creating `/etc/credstore.encrypted/joy-media-entitlement-signing-key` via `systemd-creds
+  creating `<server-path>/credstore.encrypted/joy-media-entitlement-signing-key` via `systemd-creds
 encrypt` would make `systemctl restart joy-media@api.service` fail outright (systemd refuses
   to start a unit whose `LoadCredentialEncrypted=` target is missing). That is a live-deploy
   risk this worktree will not take; Codex/the owner should add that line together with actually

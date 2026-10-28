@@ -27,7 +27,8 @@ records the decisions. It does not repeat the plan's removal lists.
    spike passes. If the spike fails, the documented limit stays: an ACL-restricted file. The shipped option is recorded here when
    P4 decides it (D10).
 6. **Updates are a download page only (D3 = B).** There are no signed updates, no update check and no public-key pin. The
-   release-trust documents are archived (S6). `rollback` is kept, because it is local. Users check the SHA-256 by hand.
+   release-trust documents are archived (S6). The owner's key backups are kept and unused. `rollback` is kept, because it is
+   local. Users check the SHA-256 by hand.
 7. **Hosting.** joyst.ir and the downloads are served from Cloudflare Pages, with GitHub release assets (D1). The VPS is not shut
    down before v1.1.0 is released (S1), and the DNS moves no earlier than that release (S2).
 8. **Server.** The JOY Media server code is deleted after the local control plane moves to a dev-only fixture (D5). In joy-vps,
@@ -40,7 +41,7 @@ records the decisions. It does not repeat the plan's removal lists.
      `X-Title: JOY Media` is sent. D15: there is no AI video generation in v1.1.0.
    - S3: the owner turns off new checkout on the live server before v1.0.3 ships.
    - S7: a Telegram bot token is revoked only if it is dedicated to JOY Media. A shared token is never revoked under this plan.
-   - The GPU answers OA1 to OA4 are recorded in the planning notes (section 12e). This ADR does not restate them.
+   - The owner's answers OA1 to OA4 are recorded in the planning notes (section 0b). This ADR does not restate them.
 
 ## Open proposals (not confirmed)
 
@@ -53,10 +54,16 @@ records the decisions. It does not repeat the plan's removal lists.
 
 ## Release trust: pin lookup
 
-On 2026-10-28 two read-only searches ran. The titles and branch names of up to 500 pull requests were filtered for pin,
-release-key, release-trust, ceremony, signing and signed. The bodies were searched for release-key. No pin, release-key or signing
-pull request was found, and a search for open pull requests returned none. The pin work is recorded as cancelled. Nothing was
-closed.
+On 2026-10-28 the read-only lookup in PLAN-v4 section 8d ran with `gh`. Both commands exited 0.
+
+- `gh pr list --repo hadimoti/joy-media --state all --limit 500 --json number,title,headRefName,state` listed 13 pull requests.
+  Filtering their titles and branch names for `pin|release-key|release-trust|ceremony|signing|signed` matched one, #12 (merged).
+  The match is the substring `pin` inside `housekeeping` in its branch name. Its title is about the v1.0.2 release record.
+- `gh pr list --repo hadimoti/joy-media --state all --search "release-key in:body" --json number,title,state` returned four pull
+  requests, all merged: #2, #3, #7 and #12. Their titles describe a release candidate, a release, a CLI test suite and the v1.0.2
+  release record, so none of them is a pin change.
+
+No open pull request matched, so none was closed. The pin work is recorded as cancelled.
 
 ## Consequences
 

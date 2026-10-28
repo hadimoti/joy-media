@@ -10,7 +10,7 @@ assumption) · **UNVERIFIED** (asserted, no receipt).
 > **P0-R1 revision (2026-09-09, Claude session `7c5ec584`).** The per-sample matrix
 > (§2), provenance matrix (§3), command register (§7) and proposed next scope (§9)
 > are reworked from fresh read-only observations in
-> `C:\Users\HadiMoti\Desktop\joy-r2-p0-r1-evidence-20260909T192442Z\`. The original
+> `<owner-profile>\Desktop\joy-r2-p0-r1-evidence-20260909T192442Z\`. The original
 > P0 preservation bundle and its `MANIFEST.csv` are unchanged.
 
 ---
