@@ -56,8 +56,10 @@ function delay(milliseconds, value) {
 // no children, so nothing else needs stopping there.
 function stopTree(child) {
   if (process.platform === 'win32') {
+    // Bounded, so a stuck taskkill cannot block the event loop and stop the timer that ends the wait.
     const { status } = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
       stdio: 'ignore',
+      timeout: STOP_TIMEOUT_MILLISECONDS,
     });
     if (status === 0) return;
   }
