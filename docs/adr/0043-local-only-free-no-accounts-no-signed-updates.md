@@ -41,7 +41,7 @@ records the decisions. It does not repeat the plan's removal lists.
      `X-Title: JOY Media` is sent. D15: there is no AI video generation in v1.1.0.
    - S3: the owner turns off new checkout on the live server before v1.0.3 ships.
    - S7: a Telegram bot token is revoked only if it is dedicated to JOY Media. A shared token is never revoked under this plan.
-   - The GPU answers OA1 to OA4 are recorded in the planning notes (section 0b). This ADR does not restate them.
+   - The owner's answers OA1 to OA4 are recorded in the planning notes (section 0b). This ADR does not restate them.
 
 ## Open proposals (not confirmed)
 
