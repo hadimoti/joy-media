@@ -26,7 +26,7 @@ internal static class MfProbe
     private const int ExitEncoded = 0;
     private const int ExitNoEncoder = 2;
     private const int ExitFailure = 3;
-    // Not checked against mferror.h (no SDK on this PC). If the value is wrong, the waits still sleep and stop at the deadline.
+    // Not checked against mferror.h (no SDK on this PC). If the value is wrong, the first wait reports the real HRESULT.
     private const int MfENoEventsAvailable = unchecked((int)0xC00D36D8);
     private const int MfETransformNeedMoreInput = unchecked((int)0xC00D6D72);
     private const uint MftMessageCommandDrain = 0x00000001;
@@ -376,33 +376,33 @@ internal static class MfProbe
         string stage = "start";
         int exit = ExitFailure;
 
-        int hr = MFStartup(MfVersion, 0);
-        if (hr != SOk)
-        {
-            Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, "mfstartup hr=" + hr));
-            return ExitFailure;
-        }
-
-        IntPtr activates;
-        uint count;
-        hr = EnumerateH264Encoders(out activates, out count);
-        if (hr != SOk)
-        {
-            Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, "mftenumex hr=" + hr));
-            MFShutdown();
-            return ExitFailure;
-        }
-        if (index >= count)
-        {
-            Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, "no-encoder"));
-            if (activates != IntPtr.Zero) CoTaskMemFree(activates);
-            MFShutdown();
-            return ExitNoEncoder;
-        }
-
-        IntPtr activateRaw = Marshal.ReadIntPtr(activates, index * IntPtr.Size);
+        IntPtr activates = IntPtr.Zero;
+        IntPtr activateRaw = IntPtr.Zero;
+        bool started = false;
         try
         {
+            int hr = MFStartup(MfVersion, 0);
+            if (hr != SOk)
+            {
+                Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, "mfstartup hr=" + hr));
+                return ExitFailure;
+            }
+            started = true;
+
+            uint count;
+            hr = EnumerateH264Encoders(out activates, out count);
+            if (hr != SOk)
+            {
+                Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, "mftenumex hr=" + hr));
+                return ExitFailure;
+            }
+            if (index >= count)
+            {
+                Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, "no-encoder"));
+                return ExitNoEncoder;
+            }
+
+            activateRaw = Marshal.ReadIntPtr(activates, index * IntPtr.Size);
             name = ReadFriendlyName(activateRaw);
             IMFActivate activate = (IMFActivate)Marshal.GetObjectForIUnknown(activateRaw);
             stage = "activate";
@@ -457,7 +457,7 @@ internal static class MfProbe
                 if (isAsync)
                 {
                     int eventType = NextEventType(events);
-                    if (eventType < 0)
+                    if (eventType == -1)
                     {
                         Thread.Sleep(10);
                         continue;
@@ -499,15 +499,16 @@ internal static class MfProbe
         }
         catch (Exception failure)
         {
-            // Any other failure (a COM or cast exception) still prints one result line, so the parent never reads a silent exit.
-            Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, stage + " " + failure.GetType().Name));
+            // Any other failure, including one before the first step, still prints one result line, with its HRESULT.
+            string detail = stage + " " + failure.GetType().Name + " hr=0x" + ((uint)failure.HResult).ToString("X8");
+            Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, detail));
             exit = ExitFailure;
         }
         finally
         {
-            Marshal.Release(activateRaw);
+            if (activateRaw != IntPtr.Zero) Marshal.Release(activateRaw);
             if (activates != IntPtr.Zero) CoTaskMemFree(activates);
-            MFShutdown();
+            if (started) MFShutdown();
         }
         return exit;
     }
@@ -611,20 +612,20 @@ internal static class MfProbe
         {
             int eventType = NextEventType(events);
             if (eventType == wanted) return;
-            if (eventType != wanted) Thread.Sleep(10);
+            if (eventType == -1) Thread.Sleep(10);
         }
         throw new EncodeStepException(stage, unchecked((int)0x80004004));
     }
 
-    // The next event's type, -1 when none is waiting, and -2 when reading it failed.
+    // The next event's type, or -1 when none is waiting. A failed read throws with its HRESULT, so it is reported, not waited out.
     private static int NextEventType(IMFMediaEventGenerator events)
     {
         IMFMediaEvent mediaEvent;
         int hr = events.GetEvent(MfEventFlagNoWait, out mediaEvent);
         if (hr == MfENoEventsAvailable) return -1;
-        if (hr != SOk) return -2;
+        Check(hr, "get-event");
         uint eventType;
-        if (mediaEvent.GetType(out eventType) != SOk) return -2;
+        Check(mediaEvent.GetType(out eventType), "get-event-type");
         return (int)eventType;
     }
 
