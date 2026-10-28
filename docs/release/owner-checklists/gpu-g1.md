@@ -26,10 +26,11 @@ committed (OA1), and this session only diagnoses.
 - The instrumented build always runs with `--joy-media-test-user-data=C:\JoyMediaG1\userdata`. Its GPU event log and its
   diagnostic dumps go to that folder. The instrumented build does not register the `joy://` protocol.
 - The baseline build runs with `--user-data-dir=C:\JoyMediaG1\userdata-baseline`, so the candidate never opens your own profile.
-  The switch is UNVERIFIED on this build: step 2 records the folder the app opens.
+  That is a launch option, so it is part of Part 1 (no system change). The repository's installed-build test passes the same switch
+  (`tests/desktop/export-semantics.spec.ts`), but it stays UNVERIFIED on this build until step 2 records the folder the app opens.
 - Your own user-data folder is never read or copied. Step 4 lists folder names under AppData only, and that is the only look at them.
 - **Node:** the Node 22.6 or later already on this PC is used, and its version is recorded in step 0. Nothing is installed. If
-  Node is missing or older, the inventory step is recorded as "not run". Installing Node is a Part 2 item.
+  Node is missing or older, steps 5 and 7 are recorded as "not run". Installing Node is a Part 2 item.
 - No checkout of the repository is needed for this session.
 
 ## Safety rules (do not skip)
@@ -64,6 +65,8 @@ if ($joyState -eq 'present') { reg.exe export "HKCU\Software\Classes\joy" C:\Joy
 
 Expected: an NVIDIA GeForce RTX 5070 Ti. A different driver version is recorded, not a stop. `host.txt` records
 `joy-key present` or `joy-key absent`. If the key was present, `joy-key-before.reg` holds it as it was before the session.
+
+Approval class: read-only record. Nothing here changes the system; the only writes are the log and export folders under `C:\JoyMediaG1`.
 
 ### Step 1: copy and hash-check the baseline and the kit
 
@@ -158,9 +161,11 @@ dialog, choose `C:\JoyMediaG1\exports`. Then:
 
 - Read `C:\JoyMediaG1\userdata\gpu-events.jsonl`. Record each line's `exitCodeHex` and `reason`. The measurement is
   `encoder-max-instrumented-default`.
-- Read the crash events for the same window:
+- Read the crash events for the same window. Close the app first, or wait for it to exit, then wait 15 seconds, so Windows Error
+  Reporting has written any event. The reader stops with an error if the query fails, so a failed query is never recorded as zero:
 
   ```powershell
+  Start-Sleep -Seconds 15
   $end = (Get-Date).ToUniversalTime()
   pwsh -NoProfile -File C:\JoyMediaG1\kit\tree\tooling\diagnostics\read-wer-events.ps1 -Start $start -End $end |
     Tee-Object C:\JoyMediaG1\logs\wer-events-matched.jsonl
@@ -169,7 +174,7 @@ dialog, choose `C:\JoyMediaG1\exports`. Then:
   The measurement `wer-events-matched` counts the lines. It answers whether Windows Error Reporting records the known crash on
   this PC. If no line appears when the crash is expected, record zero. That is a finding, not a stop.
 
-Close the app as in step 2.
+The app should have exited by now. If it has not, close it as in step 2.
 
 Then the diagnostic launch, whose local dumps go to the same folder:
 
@@ -188,6 +193,8 @@ node C:\JoyMediaG1\kit\tree\tests\desktop\gpu-probe\run-stage-probe.mjs --out C:
 The probe uses `stage-runtime`, a plain copy of the runtime with no app. It refuses any runtime that holds an app, so it cannot
 start the JOY Media app by mistake. Do not point it at `app\`.
 
+The probe runs under Node, so the Node rule of step 5 applies to it too: if Node is missing or older, record step 7 as "not run".
+
 The probe keeps each stage's user data under `C:\JoyMediaG1\stage-userdata`, outside `logs`, so it is not part of the log
 handover. Each stage starts with a fresh profile, in a fresh process, and the probe stops at the first stage that kills the GPU
 process. Record the
@@ -197,11 +204,15 @@ process. Record the
 
 ```powershell
 pwsh -NoProfile -File C:\JoyMediaG1\kit\tree\tooling\diagnostics\mf-probe\run-mf-encode.ps1 `
-  -Probe C:\JoyMediaG1\kit\tree\tooling\diagnostics\mf-probe\mf-probe.exe -OutFile C:\JoyMediaG1\logs\mf-encode.jsonl
+  -Probe C:\JoyMediaG1\kit\tree\tooling\diagnostics\mf-probe\mf-probe.exe -OutFile C:\JoyMediaG1\logs\mf-encode.jsonl -OwnerPresent
 ```
 
+Approval class: Part 1 (no system change). The step runs only with you present, and `-OwnerPresent` confirms that.
+
 Run the sampler to `C:\JoyMediaG1\logs\encoder-mfprobe.csv` during this step. Each encoder runs in its own process, and each
-result line records its exit code. The NVIDIA encoder is the one that matters. Its maximum during the encode is
+result line records its exit code, or `timeout` if the process did not exit within 120 seconds (it is then killed, and the next
+encoder still runs), and its start and end time in UTC. Each probe session stays open for three seconds after its result line, so
+the sampler can see it. The NVIDIA encoder is the one that matters. Its maximum during the encode is
 `encoder-max-mfprobe-nvidia`. If the NVIDIA encode crashes outside Chromium, the fault is in the encoder or the driver, not in
 the Chromium sandbox. Record that, and do not interpret it further.
 
@@ -223,7 +234,8 @@ The receipt steps, with their measurements, are: `encoder-max-baseline-default`,
 
 Confirm that no `joy-media.exe` and no probe process is still running.
 
-Compare the `joy://` registration with the one from step 0, if step 0 recorded `joy-key present`:
+Compare the `joy://` registration with the one from step 0, if step 0 recorded `joy-key present`. The compare is read-only; the
+restore below it is the one registry write in Part 1:
 
 ```powershell
 reg.exe export "HKCU\Software\Classes\joy" C:\JoyMediaG1\logs\joy-key-after.reg /y
@@ -276,5 +288,8 @@ The G1 result leads to one of three outcomes (plan section 10d):
 - (i) A fix candidate with a discriminating test. It goes to G3, and it keeps the NVIDIA hardware encoder in use.
 - (ii) The diagnosis is inconclusive even after Part 2. v1.0.3 is blocked, and you decide again (GD4).
 - (iii) The cause is outside the product, for example only a driver version fixes it. v1.0.3 is blocked, and you decide (GD4).
+
+A result where the NVIDIA encode in step 8 succeeds but `encoder-max-mfprobe-nvidia` stays 0 means the counter cannot see the
+hardware session on this host. Under plan section 10d that blocks v1.0.3, and you decide again (GD4).
 
 Nothing is adopted automatically. No threshold, no fallback, and no MF setting changes without your written decision.

@@ -18,12 +18,18 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$events = @(Get-WinEvent -FilterHashtable @{
-        LogName = 'Application'
-        ProviderName = 'Application Error'
-        StartTime = $Start.ToLocalTime()
-        EndTime = $End.ToLocalTime()
-    } -ErrorAction SilentlyContinue)
+try {
+    $events = @(Get-WinEvent -FilterHashtable @{
+            LogName = 'Application'
+            ProviderName = 'Application Error'
+            StartTime = $Start.ToLocalTime()
+            EndTime = $End.ToLocalTime()
+        } -ErrorAction Stop)
+}
+catch {
+    # "No events matched" is an empty answer. Any other failure stops the script: a failed query is never a zero.
+    if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { $events = @() } else { throw }
+}
 
 foreach ($event in $events) {
     $message = [string]$event.Message

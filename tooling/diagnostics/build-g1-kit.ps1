@@ -70,6 +70,10 @@ try {
     New-Item -ItemType Directory -Path $resourcesApp -Force | Out-Null
     Get-ChildItem -LiteralPath (Join-Path $packageFolder 'joy-media-unpacked') -Force |
         Copy-Item -Destination $resourcesApp -Recurse -Force
+    # The shipped portable build also carries the worker, the bundled CLI with its fonts, and the CLI launchers. The kit carries
+    # them too, so its app matches the baseline's layout apart from the instrumentation (stage-portable-extras.mjs).
+    node (Join-Path $repoRoot 'apps\desktop\scripts\stage-portable-extras.mjs') $appFolder
+    if ($LASTEXITCODE -ne 0) { throw "stage-portable-extras.mjs failed with exit code $LASTEXITCODE." }
     Remove-Item -LiteralPath $packageFolder -Recurse -Force
 
     # The stage probe needs a plain runtime, with no app: Electron would start a packaged app in resources instead of the probe.
@@ -115,6 +119,7 @@ try {
         "stage-runtime: a plain copy of the same runtime, with no app"
         "thresholds-sha256: $thresholdsSha256"
         "node: $(node --version)"
+        "portable layout: worker $(if (Test-Path -LiteralPath (Join-Path $appFolder 'resources\app\worker\joy-worker.exe')) { 'embedded' } else { 'NOT embedded (CI builds joy-worker.exe with Node SEA; the desktop then starts its worker another way, so an export may take a different path than the shipped build)' }); CLI bundle, fonts and launchers as package-installer.mjs lays them out"
     )
     Set-Content -LiteralPath (Join-Path $outFull 'kit.txt') -Value $kitRecord -Encoding UTF8
     $sums = Get-ChildItem -LiteralPath $outFull -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName |

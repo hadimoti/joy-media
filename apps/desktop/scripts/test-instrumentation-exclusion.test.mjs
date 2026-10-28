@@ -5,7 +5,7 @@
 // A failure names the file and the string only. It never prints file contents.
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { isTestInstrumentationPath, keepDistPath } from './staging-filter.mjs';
@@ -63,14 +63,22 @@ test('the staging filter keeps the instrumentation only in an instrumented packa
 });
 
 test('no workflow, package script, or desktop script passes --instrumented', () => {
-  const workflows = join(repoRoot, '.github', 'workflows');
-  const workflowFiles = readdirSync(workflows).filter((name) => /\.ya?ml$/.test(name));
-  assert.ok(workflowFiles.length > 0, 'expected workflow files');
-  for (const name of workflowFiles) {
+  // Every YAML file under .github is checked: the workflows, and any composite action beside them.
+  const yamlFiles = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (/\.ya?ml$/.test(entry.name)) yamlFiles.push(path);
+    }
+  };
+  walk(join(repoRoot, '.github'));
+  assert.ok(yamlFiles.length > 0, 'expected workflow files');
+  for (const file of yamlFiles) {
     assert.equal(
-      readFileSync(join(workflows, name), 'utf8').includes('--instrumented'),
+      readFileSync(file, 'utf8').includes('--instrumented'),
       false,
-      `${name} must not pass --instrumented`,
+      `${relative(repoRoot, file)} must not pass --instrumented`,
     );
   }
   // The desktop scripts are scanned too, so a new caller of package-release.mjs cannot pass --instrumented unnoticed.
