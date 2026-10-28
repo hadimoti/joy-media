@@ -18,6 +18,9 @@ const args = process.argv.slice(2);
 const standalone = args[0];
 const workerIndex = args.indexOf('--worker');
 const workerOption = workerIndex === -1 ? null : (args[workerIndex + 1] ?? null);
+if (workerIndex !== -1 && (workerOption === null || workerOption.startsWith('--'))) {
+  throw new Error('--worker needs the path of a joy-worker.exe, for example --worker <exe>.');
+}
 if (!standalone || !existsSync(resolve(standalone, 'joy-media.exe'))) {
   throw new Error('usage: node stage-portable-extras.mjs <folder that holds joy-media.exe>');
 }

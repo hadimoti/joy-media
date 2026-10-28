@@ -387,6 +387,8 @@ function New-AcceptanceSteps {
     if ($measured.Count -gt 0) { $encoderMin = [int](($measured | Measure-Object -Property encoderMaxDuringRun -Minimum).Minimum) }
     $encoderPass = ($measured.Count -eq $Records.Count) -and ($null -ne $encoderMin) -and ($encoderMin -ge [int]$Limits.minEncoderSessionsDuringExport)
     $exportPassed = ($null -ne $ExportRecord) -and [bool]$ExportRecord.specPassed
+    # An export run that did not measure cleanly does not pass the GPU step, even when its partial count is zero.
+    $exportClean = ($null -eq $ExportRecord) -or ($ExportRecord.PSObject.Properties.Name -notcontains 'harnessError') -or ($null -eq $ExportRecord.harnessError)
     return @(
         [pscustomobject]@{
             id = 'default-launches'
@@ -396,7 +398,7 @@ function New-AcceptanceSteps {
         }
         [pscustomobject]@{
             id = 'gpu-process-exits'
-            result = $(if ($allHealthy -and $gpuExits -le [int]$Limits.maxGpuProcessExits) { 'pass' } else { 'fail' })
+            result = $(if ($allHealthy -and $exportClean -and $gpuExits -le [int]$Limits.maxGpuProcessExits) { 'pass' } else { 'fail' })
             measurement = $gpuExits
             unit = 'exits'
         }
@@ -516,8 +518,11 @@ function Invoke-SelfTest {
     $script:shimAnswers = @('0')
     $script:shimCalls = 0
     # -NodeDirectory when given, otherwise node on PATH. The scripted spec process runs under it.
-    $selfTestNode = if ($NodeDirectory) { Join-Path (Resolve-Path -LiteralPath $NodeDirectory).Path 'node.exe' } else { $null }
-    if ([string]::IsNullOrEmpty($selfTestNode)) {
+    if ($NodeDirectory) {
+        $selfTestNode = Join-Path (Resolve-Path -LiteralPath $NodeDirectory).Path 'node.exe'
+        if (-not (Test-Path -LiteralPath $selfTestNode -PathType Leaf)) { throw "node.exe is missing from $NodeDirectory." }
+    }
+    else {
         $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
         if (-not $nodeCommand) { throw 'node is not on PATH. Pass -NodeDirectory, the folder that holds node.exe, for -SelfTest too.' }
         $selfTestNode = $nodeCommand.Source

@@ -136,7 +136,8 @@ internal static class MfProbe
         [PreserveSig]
         int ActivateObject(ref Guid riid, out IntPtr obj);
 
-        void ShutdownObject();
+        [PreserveSig]
+        int ShutdownObject();
         void DetachObject();
     }
 
@@ -501,6 +502,7 @@ internal static class MfProbe
             // Keep the encoder session open for the hold. ShutdownObject then ends the session, which would otherwise last until
             // the process exits. The objects are released after that.
             if (holdMilliseconds > 0) Thread.Sleep(holdMilliseconds);
+            // The result line is already out. Its HRESULT is ignored, so a shutdown failure cannot change the encode result.
             activate.ShutdownObject();
             Marshal.ReleaseComObject(activate);
             Marshal.ReleaseComObject(transform);
