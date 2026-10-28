@@ -250,7 +250,7 @@ describe('desktop.media channels', () => {
         revisionId: 'rev-1',
         document: DOCUMENT,
       }),
-    ).toEqual({ ok: true, data: { projectId: 'proj-1', revisionId: 'rev-1' } });
+    ).toEqual({ ok: true, data: { kind: 'saved', projectId: 'proj-1', revisionId: 'rev-1' } });
     expect(handlers['desktop.media.project.document.get']({ projectId: 'proj-1' })).toEqual({
       ok: true,
       data: { projectId: 'proj-1', revisionId: 'rev-1', document: DOCUMENT },
@@ -262,12 +262,7 @@ describe('desktop.media channels', () => {
         revisionId: 'rev-2',
         document: DOCUMENT,
       }),
-    ).toEqual({
-      ok: false,
-      code: 'DOCUMENT_REVISION_CONFLICT',
-      error: expect.stringContaining('different revision'),
-      data: { revisionId: 'rev-1' },
-    });
+    ).toEqual({ ok: true, data: { kind: 'conflict', revisionId: 'rev-1' } });
     expect(
       handlers['desktop.media.project.document.put']({
         projectId: 'proj-2',
@@ -275,11 +270,7 @@ describe('desktop.media channels', () => {
         revisionId: 'rev-2',
         document: DOCUMENT,
       }),
-    ).toEqual({
-      ok: false,
-      code: 'PROJECT_DOCUMENT_NOT_FOUND',
-      error: 'Project document not found',
-    });
+    ).toEqual({ ok: true, data: { kind: 'missing' } });
   });
 
   it('reads nothing for an unknown project or for an older revision', () => {

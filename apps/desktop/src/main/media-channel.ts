@@ -26,8 +26,6 @@ export type MediaResult = {
   readonly ok: boolean;
   readonly data?: unknown;
   readonly error?: string;
-  /** Set for the refusals the editor reacts to, such as a document revision conflict. */
-  readonly code?: string;
 };
 
 export const MEDIA_CHANNELS = [
@@ -259,19 +257,19 @@ export function createMediaChannelHandlers(
   const putDocument = (payload: unknown): MediaResult => {
     const write = asDocumentWrite(payload);
     if (write === undefined) return { ok: false, error: 'Invalid media request' };
+    // A conflict or a missing project is an answer, not a failure: the preload only passes a
+    // result's data through, so the outcome travels in `data.kind`.
     const result = deps.projectDocuments.put(write);
     if (result.kind === 'saved') {
-      return { ok: true, data: { projectId: write.projectId, revisionId: result.revisionId } };
-    }
-    if (result.kind === 'conflict') {
       return {
-        ok: false,
-        code: 'DOCUMENT_REVISION_CONFLICT',
-        error: 'The stored project document has a different revision',
-        data: { revisionId: result.revisionId },
+        ok: true,
+        data: { kind: 'saved', projectId: write.projectId, revisionId: result.revisionId },
       };
     }
-    return { ok: false, code: 'PROJECT_DOCUMENT_NOT_FOUND', error: 'Project document not found' };
+    if (result.kind === 'conflict') {
+      return { ok: true, data: { kind: 'conflict', revisionId: result.revisionId } };
+    }
+    return { ok: true, data: { kind: 'missing' } };
   };
 
   return {
