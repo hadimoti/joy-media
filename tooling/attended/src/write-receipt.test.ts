@@ -20,6 +20,10 @@ const A1_STEPS = [
   { id: 'token-rejected-after-sign-out', result: 'pass' },
   { id: 'upscale-quality', result: 'pass', measurement: 0.031, unit: 'ssim-margin' },
 ];
+const G2_STEPS = [
+  { id: 'default-launches', result: 'pass', measurement: 30, unit: 'launches' },
+  { id: 'export-spec', result: 'pass' },
+];
 
 let directory: string;
 
@@ -51,6 +55,36 @@ function thresholdsFile(ssimMarginOverBicubic: number | null): string {
           minEncoderSessionsDuringExport: 1,
         },
       },
+    })}\n`,
+  );
+  return path;
+}
+
+/**
+ * A thresholds file with the G2 values registered, except the keys named in `nullKeys`. Upscale and denoise stay null, as they
+ * are in the registered file, so the G2 receipt must not depend on them.
+ */
+function g2ThresholdsFile(nullKeys: readonly string[] = []): string {
+  const g2: Record<string, number | null> = {
+    defaultLaunches: 30,
+    maxGpuProcessExits: 0,
+    maxFallbackRelaunches: 0,
+    minEncoderSessionsDuringExport: 1,
+  };
+  for (const key of nullKeys) g2[key] = null;
+  const path = join(directory, 'g2-thresholds.json');
+  writeFileSync(
+    path,
+    `${JSON.stringify({
+      schemaVersion: 1,
+      upscale: { scaleFactor: 4, ssimMarginOverBicubic: null },
+      denoise: {
+        sampleRateMustMatch: true,
+        lengthMustMatch: true,
+        clippingAllowed: false,
+        snrImprovementDbMin: null,
+      },
+      sessions: { G2: g2 },
     })}\n`,
   );
   return path;
@@ -195,5 +229,41 @@ describe('attended session receipts', () => {
     const result = run(receiptArgs({ session: 'Z9' }));
     expect(result.status).toBe(2);
     expect(result.stderr).toMatch(/--session must be G1, G2 or A1/u);
+  });
+
+  it('writes an accepted G2 receipt while the upscale and denoise thresholds are still null', () => {
+    const args = receiptArgs({ session: 'G2', thresholds: g2ThresholdsFile(), steps: G2_STEPS });
+    expect(run(args).status).toBe(0);
+    const receipt = JSON.parse(readFileSync(argValue(args, '--out'), 'utf8'));
+    expect(receipt).toMatchObject({ session: 'G2', verdict: 'accepted' });
+  });
+
+  it.each([
+    'defaultLaunches',
+    'maxGpuProcessExits',
+    'maxFallbackRelaunches',
+    'minEncoderSessionsDuringExport',
+  ])('refuses a G2 receipt while sessions.G2.%s is null, and writes nothing', (key) => {
+    const args = receiptArgs({
+      session: 'G2',
+      thresholds: g2ThresholdsFile([key]),
+      steps: G2_STEPS,
+    });
+    const result = run(args);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`sessions.G2.${key}`);
+    expect(existsSync(argValue(args, '--out'))).toBe(false);
+  });
+
+  it('keeps a failed G2 step and records the verdict as not accepted', () => {
+    const args = receiptArgs({
+      session: 'G2',
+      thresholds: g2ThresholdsFile(),
+      steps: G2_STEPS.map((step) =>
+        step.id === 'export-spec' ? { ...step, result: 'fail' } : step,
+      ),
+    });
+    expect(run(args).status).toBe(0);
+    expect(JSON.parse(readFileSync(argValue(args, '--out'), 'utf8')).verdict).toBe('not-accepted');
   });
 });
