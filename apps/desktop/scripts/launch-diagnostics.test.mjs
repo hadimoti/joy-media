@@ -51,28 +51,22 @@ function delay(milliseconds, value) {
   });
 }
 
-// The packaged app has child processes (GPU, renderer), so the whole tree is stopped: taskkill /T on Windows, and the process
-// group elsewhere, since launchAndCheck starts the program as a group leader there. If that fails, the direct child is stopped.
+// The packaged app has child processes (GPU, renderer), so on Windows the whole tree is stopped with taskkill /T. Elsewhere only
+// the direct child is stopped. The live check runs only on Windows (assertDisposableHost refuses elsewhere), and the stand-in has
+// no children, so nothing else needs stopping there.
 function stopTree(child) {
   if (process.platform === 'win32') {
     const { status } = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
       stdio: 'ignore',
     });
     if (status === 0) return;
-  } else {
-    try {
-      process.kill(-child.pid, 'SIGKILL');
-      return;
-    } catch {
-      // The group is already gone, so the direct child is stopped below.
-    }
   }
   child.kill('SIGKILL');
 }
 
 /**
- * Starts a program with the diagnostics switch and a private user-data folder, waits, stops its whole process tree, and reports
- * whether it was still running and which diagnostic files it left behind.
+ * Starts a program with the diagnostics switch and a private user-data folder, waits, stops it (on Windows, its whole process
+ * tree), and reports whether it was still running and which diagnostic files it left behind.
  */
 export async function launchAndCheck({
   exe,
@@ -86,10 +80,13 @@ export async function launchAndCheck({
     env,
     stdio: 'ignore',
     windowsHide: true,
-    detached: process.platform !== 'win32',
   });
   const exited = new Promise((resolve) => {
-    child.once('error', (error) => resolve({ code: null, signal: null, error }));
+    // An error without a process id is a failed spawn. A failed kill also raises an error, but the process is still there,
+    // so only the wait for its exit decides that case.
+    child.on('error', (error) => {
+      if (child.pid === undefined) resolve({ code: null, signal: null, error });
+    });
     child.once('exit', (code, signal) => resolve({ code, signal, error: null }));
   });
   const early = await Promise.race([exited, delay(waitMilliseconds, null)]);
@@ -97,6 +94,8 @@ export async function launchAndCheck({
   if (stillRunning) stopTree(child);
   const finished = await Promise.race([exited, delay(STOP_TIMEOUT_MILLISECONDS, null)]);
   if (finished === null) {
+    // Stopped once more, so a program that survived the first stop is not left running before the test fails.
+    stopTree(child);
     throw new Error(
       `the program did not exit within ${STOP_TIMEOUT_MILLISECONDS / 1000} seconds of being stopped`,
     );
