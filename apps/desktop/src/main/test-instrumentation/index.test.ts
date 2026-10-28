@@ -1,0 +1,33 @@
+import { describe, expect, it, vi } from 'vitest';
+
+type ProtocolClient = (protocol: string, path?: string, args?: string[]) => boolean;
+
+// Electron is replaced, so the wiring can be checked without a runtime. Before the stub, the registration reports success.
+const electron = vi.hoisted(() => ({
+  app: {
+    setAsDefaultProtocolClient: ((protocol: string): boolean =>
+      protocol.length > 0) as ProtocolClient,
+    setPath: (): void => undefined,
+    on: (): void => undefined,
+    commandLine: { appendSwitch: (): void => undefined },
+    whenReady: (): Promise<void> => Promise.resolve(),
+    getPath: (): string => '/test/user-data',
+    getGPUInfo: async (): Promise<unknown> => ({}),
+    getGPUFeatureStatus: (): unknown => ({}),
+  },
+  crashReporter: { start: (): void => undefined },
+}));
+
+vi.mock('electron', () => electron);
+
+import { installTestInstrumentation } from './index.js';
+
+describe('installTestInstrumentation', () => {
+  // This shows that installTestInstrumentation stubs the registration. It does not show that electron-entry calls it first;
+  // the G1 key comparison checks that in practice.
+  it('stops the joy:// registration once the instrumentation is installed', () => {
+    expect(electron.app.setAsDefaultProtocolClient('joy')).toBe(true);
+    installTestInstrumentation([]);
+    expect(electron.app.setAsDefaultProtocolClient('joy', 'C:/app/joy-media.exe', [])).toBe(false);
+  });
+});

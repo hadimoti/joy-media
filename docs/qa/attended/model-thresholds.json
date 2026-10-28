@@ -1,7 +1,7 @@
 {
-  "$comment": "Pre-registered thresholds for the attended model qualification (plan section 3.3). The owner fixes each value before the session, and the receipt records this file's SHA-256. A null value means the threshold is not registered yet, and no receipt may be accepted while one is null. These values were not chosen by the engineering track.",
+  "$comment": "Thresholds for the attended model qualification (plan section 3.3). The owner fixed the G2 values on 2026-10-28 (OA1), and engineering does not change them. Each session needs only its own thresholds, listed in write-receipt.mjs; a null blocks only the session that needs it. The status field refers to the G2 values only: the upscale and denoise values stay null until their own sessions are prepared. The receipt records this file's SHA-256.",
   "schemaVersion": 1,
-  "status": "not-registered",
+  "status": "registered",
   "upscale": {
     "scaleFactor": 4,
     "ssimMarginOverBicubic": null

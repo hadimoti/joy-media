@@ -61,7 +61,10 @@ async function main() {
     STAGE_TIMEOUT_MS,
   );
   try {
-    await window.loadFile(join(__dirname, 'probe-page.html'));
+    // --fake=1 loads the page that does no GPU or media work (run-stage-probe.mjs --fake-stage-page).
+    await window.loadFile(
+      join(__dirname, option('fake') === '1' ? 'fake-stage-page.html' : 'probe-page.html'),
+    );
     const result = await window.webContents.executeJavaScript(
       `window.runProbeStage(${JSON.stringify(stage)})`,
       true,

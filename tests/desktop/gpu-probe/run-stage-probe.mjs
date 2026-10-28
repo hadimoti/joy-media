@@ -1,8 +1,11 @@
-/* Runs the GPU stage probe, one fresh Electron process per stage (L2, plan section 3.2, step 2). Attended G1 tool: a stage
- * can crash the GPU process on this PC, so it runs only with the owner present. It starts the Electron binary that
- * apps/desktop installs and never touches the installed app or the app's source. */
+/* Runs the GPU stage probe, one fresh Electron process per stage (L2, plan section 3.2, step 2; plan section 10d, G0 item 5).
+ * Attended G1 tool: a real stage can crash the GPU process on this PC, so the real stages run only with the owner present.
+ * `--fake-stage-page` runs every stage against a page that does no GPU or media work, so the runner's own control flow can be
+ * checked on any PC. The runner stops after the first stage that kills the GPU process, and records the later stages as not
+ * run. It never touches the installed app or the app's source. */
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +15,9 @@ const repoRoot = resolve(here, '..', '..', '..');
 const desktopDir = join(repoRoot, 'apps', 'desktop');
 const probeMain = join(here, 'probe-main.cjs');
 const probeStages = ['S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
+const desktopManifest = createRequire(import.meta.url)(join(desktopDir, 'package.json'));
+const pinnedElectron =
+  desktopManifest.dependencies?.electron ?? desktopManifest.devDependencies?.electron;
 
 function option(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -21,7 +27,7 @@ function option(name, fallback) {
 const outOption = option('out', '');
 if (!outOption) {
   throw new Error(
-    'usage: run-stage-probe.mjs --out <folder outside the repository> [--stages S0,S1] [--timeout-seconds 120]',
+    'usage: run-stage-probe.mjs --out <folder outside the repository> [--stages S0,S1] [--timeout-seconds 120] [--electron <electron.exe>] [--user-data <folder>] [--fake-stage-page]',
   );
 }
 const outDir = resolve(outOption);
@@ -40,13 +46,55 @@ for (const stage of stages) {
   }
 }
 const timeoutMs = Number(option('timeout-seconds', '120')) * 1000;
-const electronBinary = createRequire(join(desktopDir, 'package.json'))('electron');
+const fakeStagePage = process.argv.includes('--fake-stage-page');
+// The user-data root for the stages. The G1 checklist names a folder outside the logs, so the handover does not carry profiles.
+const userDataOption = option('user-data', '') ?? '';
+const userDataRoot = resolve(userDataOption === '' ? join(outDir, 'userdata') : userDataOption);
 
-function runStage(stage, resultPath) {
+// The Electron executable: the copy named by --electron (G1 uses a copied runtime), or the one apps/desktop installs.
+const electronOption = option('electron', '') ?? '';
+const electronBinary =
+  electronOption === ''
+    ? createRequire(join(desktopDir, 'package.json'))('electron')
+    : resolve(electronOption);
+if (!existsSync(electronBinary)) {
+  throw new Error('the Electron executable was not found; pass --electron <path to electron.exe>.');
+}
+// A runtime keeps a `version` file next to its executable. A different version would not test the pinned build.
+const runtimeVersionFile = join(dirname(electronBinary), 'version');
+if (existsSync(runtimeVersionFile)) {
+  const runtimeVersion = (await readFile(runtimeVersionFile, 'utf8')).trim();
+  if (runtimeVersion !== pinnedElectron) {
+    throw new Error(
+      `the Electron runtime is ${runtimeVersion}; the pinned version is ${pinnedElectron}.`,
+    );
+  }
+}
+// Electron prefers an app in resources/ to the script it is given. A runtime with one would start that app, so refuse it.
+const holdsPackagedApp = ['app', 'app.asar'].some((name) =>
+  existsSync(join(dirname(electronBinary), 'resources', name)),
+);
+if (holdsPackagedApp) {
+  throw new Error(
+    'the Electron runtime holds an app in resources, so the probe would start that app. Pass a runtime copy with no app.',
+  );
+}
+
+async function runStage(stage, resultPath) {
+  // Each run of a stage starts from a fresh profile, so no earlier run's data reaches the handover.
+  await rm(join(userDataRoot, stage), { recursive: true, force: true });
   return new Promise((resolveRun) => {
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
-    const child = spawn(electronBinary, [probeMain, `--stage=${stage}`, `--out=${resultPath}`], {
+    // A private user-data folder per stage, so Electron never writes to the owner's default profile (for example %APPDATA%\Electron).
+    const args = [
+      probeMain,
+      `--stage=${stage}`,
+      `--out=${resultPath}`,
+      `--user-data-dir=${join(userDataRoot, stage)}`,
+    ];
+    if (fakeStagePage) args.push('--fake=1');
+    const child = spawn(electronBinary, args, {
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -84,7 +132,16 @@ async function readResult(resultPath, stage, exit) {
 
 await mkdir(outDir, { recursive: true });
 const summary = [];
+let stoppedAfter = null;
 for (const stage of stages) {
+  if (stoppedAfter !== null) {
+    summary.push({
+      stage,
+      ok: null,
+      notRun: `an earlier stage (${stoppedAfter}) killed the GPU process`,
+    });
+    continue;
+  }
   const resultPath = join(outDir, `${stage}.json`);
   const exit = await runStage(stage, resultPath);
   const result = await readResult(resultPath, stage, exit);
@@ -99,7 +156,22 @@ for (const stage of stages) {
   console.log(
     `${stage} ok=${result.ok === true} crashed=${result.crashed ?? '-'} exit=${exit.exitCode} error=${result.error ?? '-'}`,
   );
+  if (result.crashed === 'GPU') stoppedAfter = stage;
 }
+// The summary holds results and counts only: no machine paths, so it can be shared after redaction review.
 const summaryPath = join(outDir, 'summary.json');
-await writeFile(summaryPath, JSON.stringify({ electronBinary, stages: summary }, null, 2), 'utf8');
+await writeFile(
+  summaryPath,
+  JSON.stringify(
+    {
+      mode: fakeStagePage ? 'fake-stage-page' : 'real',
+      electronVersion: pinnedElectron,
+      stoppedAfter,
+      stages: summary,
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
 console.log(`summary: ${summaryPath}`);
