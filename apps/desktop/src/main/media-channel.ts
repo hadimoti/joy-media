@@ -205,6 +205,15 @@ function asAssetRegistration(payload: unknown): LocalAssetRegistration | undefin
   return { id, kind, displayName, sha256, bytes };
 }
 
+/** Says why an original is refused when it is above the local limit, so the editor can tell the user. */
+const OVERSIZED_ORIGINAL_MESSAGE = `The original is larger than the ${MAX_LOCAL_ORIGINAL_BYTES / 1024 ** 3} GiB local limit`;
+
+function isOversizedRegistration(payload: unknown): boolean {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const bytes = (payload as Record<string, unknown>)['bytes'];
+  return typeof bytes === 'number' && bytes > MAX_LOCAL_ORIGINAL_BYTES;
+}
+
 function asOriginalUpload(payload: unknown): { assetId: string; bytes: Uint8Array } | undefined {
   if (typeof payload !== 'object' || payload === null) return undefined;
   const candidate = payload as Record<string, unknown>;
@@ -239,7 +248,11 @@ export function createMediaChannelHandlers(
 
   const registerAsset = (payload: unknown): MediaResult => {
     const registration = asAssetRegistration(payload);
-    if (registration === undefined) return { ok: false, error: 'Invalid media request' };
+    if (registration === undefined) {
+      return isOversizedRegistration(payload)
+        ? { ok: false, error: OVERSIZED_ORIGINAL_MESSAGE }
+        : { ok: false, error: 'Invalid media request' };
+    }
     if (deps.assets.register(registration).kind === 'conflict') {
       return { ok: false, error: 'Asset ID is already registered with other content' };
     }

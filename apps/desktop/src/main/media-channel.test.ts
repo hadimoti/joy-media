@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import type { DispatchJob } from '../jobs/job-dispatch.js';
-import { createLocalOriginalWriter } from './local-originals.js';
+import { createLocalOriginalWriter, MAX_LOCAL_ORIGINAL_BYTES } from './local-originals.js';
 import { createMediaChannelHandlers, MEDIA_CHANNELS, publicJobError } from './media-channel.js';
 
 const tempDirs: string[] = [];
@@ -331,6 +331,19 @@ describe('desktop.media channels', () => {
         lookInstances: { blob: 'x'.repeat(32 * 1024 * 1024) },
       }),
     ).toEqual({ ok: false, error: 'Invalid media request' });
+  });
+
+  it('says why an original is refused when it is larger than the local limit', () => {
+    const { handlers } = setup();
+    expect(
+      handlers['desktop.media.asset.register']({
+        id: 'asset-large',
+        kind: 'video',
+        displayName: 'large.mp4',
+        sha256: 'a'.repeat(64),
+        bytes: MAX_LOCAL_ORIGINAL_BYTES + 1,
+      }),
+    ).toEqual({ ok: false, error: 'The original is larger than the 1 GiB local limit' });
   });
 
   it('registers an asset, and stores an original only when it matches the registration', async () => {
