@@ -64,7 +64,7 @@ Recommended adapters:
   and SAM License must be accepted by the model owner.
 - SAM 2.1 plus Grounding DINO / Grounded-SAM-2 through the included runner
   when a permissive Apache-2.0 implementation is required.
-- BiRefNet via the bundled runner for high-resolution hair and edge mattes.
+- BiRefNet via the bundled runner for high-resolution hair and edge mattes (experimental; needs model setup and is not qualified in this release).
 
 Never point this configuration at a shell command. The Worker invokes the
 executable directly with `shell: false`.

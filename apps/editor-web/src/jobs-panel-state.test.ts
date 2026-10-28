@@ -11,10 +11,9 @@ describe('project Jobs panel state', () => {
     expect(status).not.toContain('Not connected');
   });
 
-  it('distinguishes connected, disconnected, and revoked Workers', () => {
+  it('distinguishes connected and disconnected Workers', () => {
     expect(workerPresence(worker({ lastSeenAt: NOW - 1 }), NOW)).toBe('connected');
     expect(workerPresence(worker({ lastSeenAt: NOW - 35_000 }), NOW)).toBe('disconnected');
-    expect(workerPresence(worker({ revoked: true, lastSeenAt: NOW - 1 }), NOW)).toBe('revoked');
     expect(projectJobStatus(false, [worker({ lastSeenAt: NOW - 1 })], NOW)).toContain('connected');
   });
 
@@ -52,7 +51,6 @@ describe('project Jobs panel state', () => {
 
 function worker(
   input: Partial<{
-    readonly revoked: boolean;
     readonly lastSeenAt: number;
     readonly capabilities: readonly string[];
   }>,

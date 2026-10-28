@@ -1,6 +1,6 @@
 import type { BrowserJob, BrowserWorker } from './control-plane-client.js';
 
-export type WorkerPresence = 'connected' | 'disconnected' | 'revoked';
+export type WorkerPresence = 'connected' | 'disconnected';
 
 const AI_CAPS = ['text.lm-studio', 'text.openrouter', 'video.runway', 'edit.higgsfield'] as const;
 const LOCAL_GPU_CAPS = [
@@ -11,7 +11,6 @@ const LOCAL_GPU_CAPS = [
 ] as const;
 
 export function workerPresence(worker: BrowserWorker, now = Date.now()): WorkerPresence {
-  if (worker.revoked) return 'revoked';
   return worker.lastSeenAt !== undefined && worker.lastSeenAt > now - 35_000
     ? 'connected'
     : 'disconnected';

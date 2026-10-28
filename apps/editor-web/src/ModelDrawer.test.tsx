@@ -11,8 +11,8 @@ import { resetCustomEndpointAcknowledgementsForTests } from './custom-endpoint-a
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const initialStatus: ByokSessionStatus = {
-  provider: 'kilo',
-  modelId: 'minimax/minimax-m3',
+  provider: 'openrouter',
+  modelId: 'openrouter/free',
   capability: 'tool-loop',
 };
 
@@ -49,12 +49,12 @@ describe('ModelDrawer', () => {
     vi.spyOn(desktopClient, 'isDesktopHost').mockReturnValue(true);
     vi.spyOn(desktopClient, 'listDesktopProviderProfiles').mockResolvedValue([
       {
-        id: 'kilo-profile-1',
-        name: 'Kilo Gateway',
-        provider: 'kilo',
-        baseUrl: 'https://api.kilo.ai/v1',
-        modelId: 'minimax/minimax-m3',
-        cachedModels: ['minimax/minimax-m3', 'kilo-auto/efficient'],
+        id: 'openrouter-profile-1',
+        name: 'OpenRouter Secondary',
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openrouter/free',
+        cachedModels: ['openrouter/free', 'openrouter/auto'],
         createdAt: '2026-09-17T00:00:00Z',
         updatedAt: '2026-09-17T00:00:00Z',
       },
@@ -70,10 +70,10 @@ describe('ModelDrawer', () => {
       },
     ]);
     vi.spyOn(desktopClient, 'beginDesktopProviderSession').mockResolvedValue({
-      provider: 'kilo',
-      baseUrl: 'https://api.kilo.ai/v1',
-      modelId: 'minimax/minimax-m3',
-      apiKey: 'kilo-secret-key-123',
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/free',
+      apiKey: 'openrouter-secret-key-123',
     });
     vi.spyOn(desktopClient, 'saveDesktopProviderProfile').mockImplementation(async (req) => ({
       id: req.id ?? 'new-profile-id',
@@ -86,9 +86,9 @@ describe('ModelDrawer', () => {
       updatedAt: '2026-09-17T00:00:00Z',
     }));
     vi.spyOn(desktopClient, 'fetchDesktopProviderModels').mockResolvedValue([
-      { id: 'minimax/minimax-m3', name: 'minimax/minimax-m3' },
-      { id: 'kilo-auto/efficient', name: 'kilo-auto/efficient' },
-      { id: 'kilo-auto/free', name: 'kilo-auto/free' },
+      { id: 'openrouter/free', name: 'openrouter/free' },
+      { id: 'openrouter/auto', name: 'openrouter/auto' },
+      { id: 'openrouter/other', name: 'openrouter/other' },
     ]);
   });
 
@@ -101,6 +101,7 @@ describe('ModelDrawer', () => {
     container = undefined;
     vi.restoreAllMocks();
     resetCustomEndpointAcknowledgementsForTests();
+    delete (window as { joyDesktop?: unknown }).joyDesktop;
   });
 
   it('renders active model badge and configured profiles when open', async () => {
@@ -112,10 +113,17 @@ describe('ModelDrawer', () => {
     });
 
     expect(container?.textContent).toContain('Model Drawer');
-    expect(container?.textContent).toContain('kilo: minimax/minimax-m3');
-    expect(container?.textContent).toContain('Kilo Gateway');
+    expect(container?.textContent).toContain('openrouter: openrouter/free');
+    expect(container?.textContent).toContain('OpenRouter Secondary');
     expect(container?.textContent).toContain('OpenRouter Primary');
-    expect(container?.textContent).toContain('kilo-auto/efficient');
+    expect(container?.textContent).toContain('openrouter/auto');
+
+    await act(async () => {
+      (container?.querySelector('.model-drawer-add-btn') as HTMLButtonElement).click();
+    });
+    const provider = container?.querySelector('#md-provider-type') as HTMLSelectElement;
+    const options = [...provider.options].map((option) => `${option.value} ${option.textContent}`);
+    expect(options.join(' ')).not.toMatch(/kilo|joy-hosted/i);
   });
 
   it('does not render anything when open is false', async () => {
@@ -145,12 +153,13 @@ describe('ModelDrawer', () => {
       'value',
     )?.set;
     await act(async () => {
-      nativeInputValueSetter?.call(searchInput, 'efficient');
+      nativeInputValueSetter?.call(searchInput, 'auto');
       searchInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    expect(container?.textContent).toContain('kilo-auto/efficient');
-    expect(container?.textContent).not.toContain('openrouter/free');
+    expect(container?.textContent).toContain('openrouter/auto');
+    // The header still names the active model, so the filtered-out model is checked in the list.
+    expect(container?.textContent).not.toContain('openrouter/other');
   });
 
   it('switches model immediately on click, updating engine configuration', async () => {
@@ -173,7 +182,7 @@ describe('ModelDrawer', () => {
 
     const modelItems = container?.querySelectorAll('.model-drawer-model-item');
     const efficientItem = Array.from(modelItems ?? []).find((el) =>
-      el.textContent?.includes('kilo-auto/efficient'),
+      el.textContent?.includes('openrouter/auto'),
     ) as HTMLElement;
 
     expect(efficientItem).toBeTruthy();
@@ -184,17 +193,17 @@ describe('ModelDrawer', () => {
 
     expect(client.configure).toHaveBeenCalledWith(
       expect.objectContaining({
-        provider: 'kilo',
-        modelId: 'kilo-auto/efficient',
+        provider: 'openrouter',
+        modelId: 'openrouter/auto',
       }),
     );
     expect(onStatusChange).toHaveBeenCalledWith(
       expect.objectContaining({
-        modelId: 'kilo-auto/efficient',
+        modelId: 'openrouter/auto',
       }),
     );
     expect(onNotice).toHaveBeenCalledWith(
-      expect.stringContaining('Switched active model to kilo-auto/efficient'),
+      expect.stringContaining('Switched active model to openrouter/auto'),
       'success',
     );
   });
@@ -217,7 +226,7 @@ describe('ModelDrawer', () => {
     });
     const modelItem = [
       ...(container?.querySelectorAll<HTMLElement>('.model-drawer-model-item') ?? []),
-    ].find((el) => el.textContent?.includes('kilo-auto/efficient'));
+    ].find((el) => el.textContent?.includes('openrouter/auto'));
     expect(modelItem).toBeTruthy();
     await act(async () => {
       modelItem?.click();
@@ -225,11 +234,62 @@ describe('ModelDrawer', () => {
     });
     expect(onStatusChange).toHaveBeenCalledWith(
       expect.objectContaining({
-        provider: 'kilo',
-        modelId: 'kilo-auto/efficient',
+        provider: 'openrouter',
+        modelId: 'openrouter/auto',
         capability: 'incompatible',
       }),
     );
+  });
+
+  it('keeps disabled legacy profiles inert and offers the Later IPC action', async () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.later'],
+      invoke,
+    };
+    const legacyProfile = {
+      id: 'legacy-kilo-profile',
+      provider: 'kilo',
+      name: 'Old provider',
+      baseUrl: 'https://api.kilo.ai/v1',
+      modelId: 'retired-model',
+      createdAt: '2026-09-17T00:00:00Z',
+      updatedAt: '2026-09-17T00:00:00Z',
+      state: 'disabled-legacy' as const,
+    } as desktopClient.DesktopProviderProfile & { readonly state: 'disabled-legacy' };
+    vi.mocked(desktopClient.listDesktopProviderProfiles).mockResolvedValue([legacyProfile]);
+    const client = createMockEngineClient();
+
+    await act(async () => {
+      root?.render(<ModelDrawer open={true} onClose={vi.fn()} engineClient={client} />);
+      await Promise.resolve();
+    });
+
+    expect(container?.textContent).toContain('Disabled legacy profile');
+    expect(container?.textContent).toContain('retired-model');
+    expect(
+      [...(container?.querySelectorAll('button') ?? [])].some(
+        (button) =>
+          button.textContent?.trim() === 'Use' || button.textContent?.trim() === '↻ Refresh',
+      ),
+    ).toBe(false);
+
+    const later = [...(container?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent?.trim() === 'Later',
+    );
+    expect(later).toBeTruthy();
+    await act(async () => {
+      later?.click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.later', {
+      id: 'legacy-kilo-profile',
+    });
+    expect(desktopClient.beginDesktopProviderSession).not.toHaveBeenCalled();
+    expect(desktopClient.fetchDesktopProviderModels).not.toHaveBeenCalled();
+    expect(desktopClient.saveDesktopProviderProfile).not.toHaveBeenCalled();
+    expect(client.configure).not.toHaveBeenCalled();
   });
 
   it('discovers models dynamically when adding a new API endpoint', async () => {

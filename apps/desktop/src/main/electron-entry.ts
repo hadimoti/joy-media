@@ -22,14 +22,16 @@ import {
 } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path, { dirname, join } from 'node:path';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseProjectDeepLink } from '../deep-link.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
 import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
+import { registerJoyProtocol } from './protocol-registration.js';
 import type { IpcRequest } from '../ipc.js';
+import { isAllowedEditorOrigin, originOfPageUrl } from '../origin-policy.js';
 import {
   PACKAGED_RENDERER_SCHEME,
   buildSecureWebPreferences,
@@ -38,10 +40,15 @@ import {
 import { registerShutdownHooks } from './shutdown.js';
 import { resolveDesktopPaths } from '../store/paths.js';
 import { LocalDatabase } from '../store/local-database.js';
+import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
+import { startLocalJobApi, type LocalJobApi } from '../jobs/local-job-api.js';
+import { localWorkerEnv } from '../jobs/worker-env.js';
+import { createLocalOriginalWriter } from './local-originals.js';
+import { createMediaChannelHandlers } from './media-channel.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { probeOpenAiCompatibleProvider } from '@joy-media/provider-sdk';
-import { evaluateAutoUpdate } from './auto-update-policy.js';
+import { checkProfileCredentials } from './profile-credential-check.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
@@ -83,17 +90,37 @@ if (!app.requestSingleInstanceLock()) {
   localDatabase.recoverInterrupted();
 
   const fileRegistry = createFileRegistry();
+  const jobOrchestrator = createJobOrchestrator({ store: localDatabase.jobDispatch });
+  const workerRoot = join(app.getPath('userData'), 'worker');
+  mkdirSync(workerRoot, { recursive: true });
+  // Started in app.whenReady, before any window loads. The Worker gets its loopback URL and token
+  // only once it has started, so its environment is read at spawn time.
+  let localJobApi: LocalJobApi | undefined;
   const workerEntry = resolveWorkerEntry({ mainDirname: __dirname, execPath: process.execPath });
   const workerSupervisor = createWorkerSupervisor({
     spawn: (command, args, options) => spawn(command, args, options),
     command: workerEntry.command,
     args: workerEntry.args,
+    env: () =>
+      localJobApi === undefined
+        ? undefined
+        : localWorkerEnv(process.env, { apiEnv: localJobApi.workerEnv, workerRoot }),
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
   const ipcHandlers = createIpcHandlers({
     fileRegistry,
     workerSupervisor,
     localDatabase,
+    mediaChannel: createMediaChannelHandlers({
+      orchestrator: jobOrchestrator,
+      jobStore: localDatabase.jobDispatch,
+      projectDocuments: localDatabase.projectDocuments,
+      assets: localDatabase.localAssets,
+      originals: createLocalOriginalWriter({
+        directory: join(paths.mediaRoot, 'originals'),
+        assets: localDatabase.localAssets,
+      }),
+    }),
     probeMedia: async (path) => {
       const probe = await checksumFile(path);
       return { ...probe, kind: classifyMediaKind(path) };
@@ -116,20 +143,6 @@ if (!app.requestSingleInstanceLock()) {
     },
     secretStore,
     probeProvider: (request) => probeOpenAiCompatibleProvider(request, fetch),
-    // Pure, network-free decision (see auto-update-policy.ts). The renderer fetches the
-    // manifest from the public `GET /v1/releases/:channel` route and its own subscription
-    // status from `GET /v1/account/subscription` itself; the pinned public key and the app's
-    // actual running version — trust material a compromised renderer must never be able to
-    // supply itself — come only from the main process's own environment and `app.getVersion()`,
-    // never from the IPC payload.
-    checkForUpdate: (request) => {
-      const pinnedPublicKeyPem = process.env['JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY'];
-      return evaluateAutoUpdate({
-        ...request,
-        currentVersion: app.getVersion(),
-        ...(pinnedPublicKeyPem === undefined ? {} : { pinnedPublicKeyPem }),
-      });
-    },
     handleWindowControl: (action) => {
       const win =
         BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
@@ -151,9 +164,16 @@ if (!app.requestSingleInstanceLock()) {
     },
   });
 
-  ipcMain.handle('joy-desktop-ipc', (_event, request: IpcRequest) =>
-    dispatchIpcRequest(ipcHandlers, request),
-  );
+  // The sender frame is what the browser reports, so it decides whether a page may call at all.
+  // The origin inside the request is the renderer's own claim, and dispatch checks it as well.
+  ipcMain.handle('joy-desktop-ipc', (event, request: IpcRequest) => {
+    const senderOrigin = originOfPageUrl(event.senderFrame?.url ?? '');
+    if (senderOrigin === undefined || !isAllowedEditorOrigin(senderOrigin)) {
+      console.error(`[joy-desktop] refused IPC from ${senderOrigin ?? 'an unreadable frame'}`);
+      return { ok: false, error: 'Blocked IPC request' };
+    }
+    return dispatchIpcRequest(ipcHandlers, request);
+  });
 
   app.on('second-instance', (_event, argv) => {
     const link = argv.find((arg) => arg.startsWith('joy://'));
@@ -169,9 +189,32 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(() => {
+  // A render source is either a registered local asset (its stored original) or a file the user
+  // selected in this session. Both are resolved here, in the main process, and never sent out.
+  const resolveSourcePath = (refId: string): string =>
+    localDatabase.localAssets.storedPath(refId) ??
+    fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: '' });
+
+  app.whenReady().then(async () => {
+    // Marks, but never deletes, any profile whose stored key cannot be read (PLAN-v4 §9c).
+    // Keys are read only after ready: safeStorage is not guaranteed to work before it.
+    void checkProfileCredentials(localDatabase, secretStore).catch(() => undefined);
+    try {
+      localJobApi = await startLocalJobApi({
+        orchestrator: jobOrchestrator,
+        derivativeDirectory: join(paths.mediaRoot, 'derivatives'),
+        sourceSize: async (refId) => statSync(resolveSourcePath(refId)).size,
+        readSource: async (refId) => readFileSync(resolveSourcePath(refId)),
+        onWarning: (message) => console.warn(message),
+      });
+    } catch (error) {
+      // Without the local API the Worker cannot connect. The rest of the app still opens.
+      console.error('local job API did not start', error);
+    }
     Menu.setApplicationMenu(null);
-    app.setAsDefaultProtocolClient('joy');
+    // Only the installed app claims the joy:// scheme. A development run would otherwise point
+    // it at the Electron binary in the source tree. A smoke run leaves the host alone as well.
+    if (!isSmokeMode) registerJoyProtocol(app);
 
     if (!isDev) {
       protocol.handle(PACKAGED_RENDERER_SCHEME, (request) => {
@@ -320,6 +363,7 @@ if (!app.requestSingleInstanceLock()) {
         // wired here: no IPC channel opens/saves a project through it yet (see
         // docs/joy-media-final-migration-progress.md's wave 2 entry). LocalDatabase is the
         // one open handle this process holds today.
+        void localJobApi?.close().catch(() => undefined);
         localDatabase.close();
       },
       quit: () => app.quit(),

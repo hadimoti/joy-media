@@ -272,8 +272,7 @@ import {
 } from './MonitorAspectRatioSelector.js';
 import { MotionPanel } from './MotionPanel.js';
 import { CameraPanel } from './CameraPanel.js';
-import { JobsPanel, workerAudioDenoiseOperationId } from './JobsPanel.js';
-import type { VerifiedWorkerAudioResult } from './worker-result.js';
+import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import {
   BrowserControlPlaneClient,
@@ -423,7 +422,6 @@ import {
   ExportIcon,
   FullscreenIcon,
   HighBitrateIcon,
-  LogoutIcon,
   PauseIcon,
   PlayIcon,
   PngMaskIcon,
@@ -432,15 +430,11 @@ import {
   SkipBackIcon,
   SkipForwardIcon,
   UndoIcon,
-  UserIcon,
   VerticalViewIcon,
   WideViewIcon,
   YoutubeIcon,
   ZoomInIcon,
 } from './icons.js';
-import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
-import { getStoredMediaToken } from './media-session.js';
-import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   markCompletedExportCacheUnavailable,
   recoverInterruptedProjectExports,
@@ -1091,7 +1085,6 @@ function EditorWorkspace({
   const [processFilter, setProcessFilter] = useState<EditorUiPreferencesV2['processFilter']>(
     () => loadEditorUiPreferences(storage).processFilter,
   );
-  const [accountOpen, setAccountOpen] = useState(false);
   const projectPackageInputRef = useRef<HTMLInputElement | null>(null);
   const [exportPresetOpen, setExportPresetOpen] = useState(false);
   const [stickerTick, setStickerTick] = useState(0);
@@ -1155,7 +1148,7 @@ function EditorWorkspace({
         try {
           const sessionConfig = (await beginDesktopProviderSession(profile.id)) as
             | {
-                provider: 'joy-hosted' | 'openrouter' | 'openai-compatible';
+                provider: 'openrouter' | 'openai-compatible';
                 baseUrl: string;
                 modelId: string;
                 apiKey: string;
@@ -1198,24 +1191,6 @@ function EditorWorkspace({
   const creativeBriefOptedIn =
     agentConnectionStatus?.capability === 'tool-loop' ||
     agentConnectionStatus?.capability === 'plan-only';
-  const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
-  const avatarObjectUrl = joySession.kind === 'ready' ? joySession.avatarObjectUrl : undefined;
-  const pendingAvatarOwner = usePendingObjectUrlOwner();
-  const avatarObjectUrlRef = useReleasableObjectUrl<HTMLImageElement>(
-    avatarObjectUrl,
-    undefined,
-    revokeDetachedObjectUrl,
-    pendingAvatarOwner,
-  );
-  const joySessionRefreshSeqRef = useRef(0);
-  useLayoutEffect(
-    () => () => {
-      joySessionRefreshSeqRef.current += 1;
-      pendingAvatarOwner.revokePending();
-    },
-    [pendingAvatarOwner],
-  );
-  const [desktopAccountModalOpen, setDesktopAccountModalOpen] = useState(false);
   const [toasts, setToasts] = useState<
     readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
   >([]);
@@ -1233,7 +1208,6 @@ function EditorWorkspace({
   const [createTool, setCreateTool] = useState<FeatureToolId>('media');
   const [enhanceTool, setEnhanceTool] = useState<FeatureToolId>('effects');
   const paletteRef = useRef<HTMLElement | null>(null);
-  const accountDropdownRef = useRef<HTMLElement | null>(null);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
   const [effectStudioSession, setEffectStudioSession] = useState<
     { readonly recipeId: string; readonly objectId?: string } | undefined
@@ -1355,12 +1329,12 @@ function EditorWorkspace({
       onResult: (result) => {
         if (result.kind === 'conflict') {
           showToast(
-            'Cloud document changed elsewhere. Your local edits were kept; reload the project before saving again.',
+            'The project changed elsewhere. Your local edits were kept; reload the project before saving again.',
             'error',
           );
         } else if (result.kind === 'request-failure') {
           showToast(
-            `Cloud document save failed; retrying in ${Math.ceil(result.retryDelayMs / 1000)}s. Local edits are safe in this browser.`,
+            `Saving the project failed; retrying in ${Math.ceil(result.retryDelayMs / 1000)}s. Local edits are safe in this browser.`,
             'error',
           );
         }
@@ -1587,12 +1561,7 @@ function EditorWorkspace({
     } else setAudioStateRaw(canonical);
     setAudioHydrated(true);
   }, [projectId, session, storage]);
-  const controlPlaneOwnerKey =
-    joySession.kind === 'ready'
-      ? (joySession.subject ?? 'signed-in')
-      : getStoredMediaToken(storage) !== undefined
-        ? 'signed-in'
-        : 'signed-out';
+  const controlPlaneOwnerKey = 'local';
   const controlPlaneProject = useMemo(
     () =>
       getOrCreateControlPlaneProjectBinding(storage, session.visualProject, {
@@ -1606,7 +1575,6 @@ function EditorWorkspace({
     let retryTimer: number | undefined;
     const controlPlaneProjectId = controlPlaneProject.controlPlaneProjectId;
     setControlPlaneProjectReady(false);
-    if (joySession.kind !== 'ready') return () => undefined;
     void mediaControlPlaneClient
       .ensureProject(controlPlaneProject.controlPlaneProjectId, controlPlaneProject.title)
       .then(() => {
@@ -1620,10 +1588,7 @@ function EditorWorkspace({
           (controlPlaneProjectEnsureFailuresRef.current.get(controlPlaneProjectId) ?? 0) + 1;
         controlPlaneProjectEnsureFailuresRef.current.set(controlPlaneProjectId, failures);
         if (failures >= CONTROL_PLANE_PROJECT_ENSURE_MAX_ATTEMPTS) {
-          showToast(
-            'Cloud project setup is temporarily unavailable. Reload to retry when the service recovers.',
-            'error',
-          );
+          showToast('Project setup is temporarily unavailable. Reload to retry.', 'error');
           return;
         }
         const retryDelayMs = Math.min(
@@ -1642,11 +1607,10 @@ function EditorWorkspace({
     controlPlaneProject.controlPlaneProjectId,
     controlPlaneProject.title,
     controlPlaneProjectEnsureRetry,
-    joySession.kind,
     showToast,
   ]);
   useEffect(() => {
-    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return;
+    if (!controlPlaneProjectReady) return;
     const controlPlaneProjectId = controlPlaneProject.controlPlaneProjectId;
     if (remoteDocumentHydrationRef.current.has(controlPlaneProjectId)) return;
     remoteDocumentHydrationRef.current.add(controlPlaneProjectId);
@@ -1694,7 +1658,7 @@ function EditorWorkspace({
           if (!cancelled) setRemoteDocumentBootstrapRetry((retry) => retry + 1);
         }, retryDelayMs);
         showToast(
-          `Cloud document could not be hydrated: ${error instanceof Error ? error.message : String(error)}. Retrying shortly.`,
+          `The project could not be loaded: ${error instanceof Error ? error.message : String(error)}. Retrying shortly.`,
           'error',
         );
       });
@@ -1706,13 +1670,12 @@ function EditorWorkspace({
     controlPlaneOwnerKey,
     controlPlaneProject,
     controlPlaneProjectReady,
-    joySession.kind,
     remoteDocumentBootstrapRetry,
     session,
     showToast,
   ]);
   useEffect(() => {
-    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return;
+    if (!controlPlaneProjectReady) return;
     if (remoteDocumentBootstrapProjectId !== controlPlaneProject.controlPlaneProjectId) return;
     remoteDocumentAutosyncRef.current?.schedule(
       controlPlaneProject,
@@ -1728,7 +1691,6 @@ function EditorWorkspace({
     controlPlaneOwnerKey,
     controlPlaneProject,
     controlPlaneProjectReady,
-    joySession.kind,
     remoteDocumentBootstrapProjectId,
     session.projectRevisionId,
     session.visualProject,
@@ -1829,27 +1791,14 @@ function EditorWorkspace({
     () =>
       new ProjectMediaResolver({
         projectId: controlPlaneProject.controlPlaneProjectId,
-        // The auth probe runs asynchronously after the editor mounts. A valid
-        // stored token is already sufficient for owner-authorized media reads;
-        // waiting for the probe to flip to `ready` creates a real user-facing
-        // race where Cloud/Worker actions fail with a misleading "session is
-        // not ready" error immediately after opening a project.
-        controlPlaneReady:
-          controlPlaneProjectReady ||
-          (joySession.kind === 'unknown' && getStoredMediaToken(storage) !== undefined),
+        controlPlaneReady: controlPlaneProjectReady,
         project: session.visualProject,
         client: mediaControlPlaneClient,
         originalCache: {
           get: (assetId) => originalAssetCachePromise.then((cache) => cache.get(assetId)),
         },
       }),
-    [
-      controlPlaneProject.controlPlaneProjectId,
-      controlPlaneProjectReady,
-      joySession.kind,
-      session.visualProject,
-      storage,
-    ],
+    [controlPlaneProject.controlPlaneProjectId, controlPlaneProjectReady, session.visualProject],
   );
   useLayoutEffect(
     () => () =>
@@ -3043,15 +2992,14 @@ function EditorWorkspace({
       }
 
       // A generated 3D render is a real image asset, not just a transient
-      // canvas frame. Authenticated sessions use the normal media-import
-      // pipeline so the exact PNG is registered and uploaded before the
-      // document points at it. Signed-out/offline sessions retain the local
-      // integrity-checked cache path and can be backed up later from Media.
+      // canvas frame. Ready control-plane projects use the normal media-import
+      // pipeline so the exact PNG is registered before the document points at
+      // it. Offline projects retain the local integrity-checked cache path.
       const mimeType = asset.blob.type || 'image/png';
       let persistedAsset:
         | Awaited<ReturnType<typeof importMediaFile>>
         | { readonly id: string; readonly sha256: string; readonly bytes: number };
-      if (joySession.kind === 'ready') {
+      if (controlPlaneProjectReady) {
         const generatedFile = new File([asset.blob], `${asset.assetId}.png`, {
           type: mimeType,
         });
@@ -3104,7 +3052,7 @@ function EditorWorkspace({
     },
     [
       controlPlaneProject,
-      joySession.kind,
+      controlPlaneProjectReady,
       session,
       showToast,
       state.playheadUs,
@@ -3492,23 +3440,6 @@ function EditorWorkspace({
     },
     [activatePanel, selectClips],
   );
-  const refreshJoySession = useCallback(() => {
-    const requestId = ++joySessionRefreshSeqRef.current;
-    void probeJoySession(storage)
-      .then((next) => {
-        if (requestId !== joySessionRefreshSeqRef.current) {
-          if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
-            revokeDetachedObjectUrl(next.avatarObjectUrl);
-          }
-          return;
-        }
-        if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
-          pendingAvatarOwner.track(next.avatarObjectUrl);
-        }
-        setJoySession(next);
-      })
-      .catch(() => undefined);
-  }, [pendingAvatarOwner, storage]);
   useEffect(() => {
     if (session.recoveryWarnings.length === 0) return;
     showToast(
@@ -3686,28 +3617,6 @@ function EditorWorkspace({
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [paletteOpen]);
-  useEffect(() => {
-    if (!accountOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const root = accountDropdownRef.current;
-      if (root === null || root.contains(event.target as Node)) return;
-      setAccountOpen(false);
-    };
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [accountOpen]);
-  useEffect(() => {
-    refreshJoySession();
-  }, [refreshJoySession]);
-  const signOut = useCallback(async () => {
-    if (!window.confirm('Sign out of JOY Studio? Your local project will remain on this device.'))
-      return;
-    setAccountOpen(false);
-    joyAgentEngineClientRef.current?.clear();
-    appAgentPresenceStore.clear();
-    await logoutJoySession(storage);
-    refreshJoySession();
-  }, [refreshJoySession, storage]);
   const recordExportEntry = useCallback(
     (entry: ProjectExportProcessEntry) => {
       const next = upsertProjectEntry(exportHistoryRef.current, entry);
@@ -3755,7 +3664,6 @@ function EditorWorkspace({
         case 'palette.close':
           setPaletteOpen(false);
           setProcessesOpen(false);
-          setAccountOpen(false);
           break;
         case 'playhead.back':
           seek(Math.max(0, current.playheadUs - 1_000_000));
@@ -4987,9 +4895,6 @@ function EditorWorkspace({
         return;
       }
       switch (id) {
-        case 'file.account':
-          setDesktopAccountModalOpen(true);
-          break;
         case 'file.projects':
           onBackToLibrary();
           break;
@@ -5001,9 +4906,6 @@ function EditorWorkspace({
           break;
         case 'file.export':
           void handleExport();
-          break;
-        case 'file.signOut':
-          void signOut();
           break;
         case 'edit.undo':
           undo();
@@ -5072,7 +4974,6 @@ function EditorWorkspace({
       onBackToLibrary,
       redo,
       runSelectedClipAction,
-      signOut,
       undo,
     ],
   );
@@ -5493,79 +5394,6 @@ function EditorWorkspace({
           clipId,
           controllerId,
         ),
-      );
-    };
-    const applyWorkerAudioResult = async (
-      result: VerifiedWorkerAudioResult,
-      mode: 'replace' | 'keep',
-    ): Promise<void> => {
-      const existingGeneratedAsset = context.session.visualProject.assets[result.generatedAsset.id];
-      if (existingGeneratedAsset !== undefined) {
-        const provenance = existingGeneratedAsset.generationProvenance;
-        const parameters = provenance?.parameters;
-        const parameterRecord = recordValue(parameters);
-        if (
-          provenance?.providerId !== 'local-worker' ||
-          parameterRecord?.jobId !== result.jobId ||
-          parameterRecord?.derivativeId !== result.derivativeId
-        )
-          throw new Error('Generated asset ID collision with unrelated project media');
-        context.showToast('This Worker result is already applied.', 'info');
-        return;
-      }
-      const targetClipId = state.selectedIds[0];
-      if (mode === 'replace' && targetClipId === undefined)
-        throw new Error('Select a timeline clip before replacing audio');
-      const expectedRevision = context.session.historyCursorSequence;
-      const generated = result.generatedAsset;
-      const cache = await originalAssetCachePromise;
-      await cache.put(
-        {
-          assetId: generated.id,
-          sha256: generated.sha256!,
-          bytes: generated.bytes!,
-          mimeType: generated.descriptor!.mimeType,
-        },
-        result.blob,
-      );
-      if (context.session.historyCursorSequence !== expectedRevision)
-        throw new Error('The project changed while the Worker result was being prepared');
-      const currentProject = context.session.visualProject;
-      const currentAudio = loadAudioStateFromProject(storage, projectId, currentProject);
-      if (
-        mode === 'replace' &&
-        !Object.values(context.session.timelineProject.compositions)
-          .flatMap((composition) => composition.tracks)
-          .flatMap((track) => track.clips)
-          .some((clip) => clip.id === targetClipId)
-      )
-        throw new Error('The selected clip no longer exists');
-      const nextProject = projectWithImportedAsset(currentProject, {
-        ...generated,
-        kind: 'audio',
-      });
-      if (mode === 'replace') {
-        const clipId = targetClipId!;
-        const current = currentAudio.clips[clipId] ?? {
-          gain: 1,
-          pan: 0,
-          mute: false,
-          solo: false,
-        };
-        const nextAudio = {
-          ...currentAudio,
-          clips: {
-            ...currentAudio.clips,
-            [clipId]: { ...current, sourceAssetId: generated.id },
-          },
-        };
-        context.replaceVisualProjectAndAudio(nextProject, nextAudio);
-      } else {
-        context.replaceVisualProject(nextProject);
-      }
-      context.showToast(
-        mode === 'replace' ? 'Processed audio applied.' : 'Processed audio kept in the project.',
-        'success',
       );
     };
     const selectedTimelineEntry = state.selectedIds
@@ -6000,10 +5828,6 @@ function EditorWorkspace({
           clipIds,
         },
       ];
-      const selectedAudioClip =
-        audioClips.find(
-          (clip): clip is VideoClip => clip.kind === 'video' && state.selectedIds.includes(clip.id),
-        ) ?? audioClips.find((clip): clip is VideoClip => clip.kind === 'video');
       return withFeatureHub(
         <AudioPanel
           clipIds={clipIds}
@@ -6052,287 +5876,6 @@ function EditorWorkspace({
               `Browser Voice Polish applied to ${targetClipIds.length} clip${targetClipIds.length === 1 ? '' : 's'}.`,
               'success',
             );
-          }}
-          onRunLocalWorker={async (workflowId) => {
-            if (selectedAudioClip === undefined)
-              throw new Error('Place a video or audio clip before running Local Worker.');
-            const operationId = workerAudioDenoiseOperationId(
-              controlPlaneProject.controlPlaneProjectId,
-              selectedAudioClip.assetId,
-            );
-            const existing = operationLedger.get(operationId);
-            if (
-              existing?.status === 'running' ||
-              existing?.status === 'review' ||
-              existing?.status === 'applied' ||
-              existing?.status === 'completed'
-            ) {
-              context.showToast('This Local Worker operation is already in Jobs.', 'info');
-              context.activatePanel('jobs');
-              return;
-            }
-            operationLedger.begin({
-              id: operationId,
-              type: 'worker-job',
-              fingerprint: `${selectedAudioClip.assetId}:audio.ml-denoise:v1`,
-              revision: context.session.historyCursorSequence,
-            });
-            try {
-              await mediaControlPlaneClient.ensureProject(
-                controlPlaneProject.controlPlaneProjectId,
-                controlPlaneProject.title,
-              );
-              // A Worker fetches its source through the control plane, not from
-              // this tab's OPFS cache. A browser reload can restore the visual
-              // project before an ephemeral/dev catalog has restored its asset
-              // row, so repair that durable source boundary before queueing.
-              const catalogAssets = await mediaControlPlaneClient.assets(
-                controlPlaneProject.controlPlaneProjectId,
-              );
-              const catalogAsset = catalogAssets.find(
-                (asset) => asset.id === selectedAudioClip.assetId,
-              );
-              if (catalogAsset?.cloudBacked !== true) {
-                const sourceAsset = context.session.visualProject.assets[selectedAudioClip.assetId];
-                if (sourceAsset === undefined)
-                  throw new Error('The selected audio source is no longer part of this project.');
-                let original = await (
-                  await originalAssetCachePromise
-                ).get(selectedAudioClip.assetId);
-                if (original === undefined) {
-                  const source = await mediaResolver.resolve(selectedAudioClip.assetId);
-                  const response = await fetch(source.url);
-                  if (!response.ok)
-                    throw new Error('The selected audio original is unavailable for Local Worker.');
-                  original = await response.blob();
-                }
-                if (catalogAsset !== undefined) {
-                  await mediaControlPlaneClient.uploadAssetOriginal(
-                    controlPlaneProject.controlPlaneProjectId,
-                    catalogAsset,
-                    original,
-                  );
-                } else {
-                  const file = new File([original], sourceAsset.displayName, {
-                    type: sourceAsset.descriptor?.mimeType || original.type,
-                  });
-                  await importMediaFile({
-                    projectId: controlPlaneProject.controlPlaneProjectId,
-                    projectTitle: controlPlaneProject.title,
-                    file,
-                    assetId: selectedAudioClip.assetId,
-                    client: mediaControlPlaneClient,
-                    originalAssetCache: originalAssetCachePromise,
-                  });
-                }
-              }
-              if (existing?.status === 'failed' || existing?.status === 'cancelled')
-                await mediaControlPlaneClient.retry(
-                  controlPlaneProject.controlPlaneProjectId,
-                  operationId,
-                );
-              else
-                await mediaControlPlaneClient.enqueueWorkerGeneration(
-                  controlPlaneProject.controlPlaneProjectId,
-                  operationId,
-                  'audio.ml-denoise',
-                  selectedAudioClip.assetId,
-                );
-              // Jobs is a mounted Dockview panel, so activating it does not
-              // remount its polling loop. Notify it immediately instead of
-              // making a user wait for the next ten-second poll tick.
-              window.dispatchEvent(new Event('joy-media-jobs-changed'));
-              context.showToast(`Local Worker ${workflowId} queued in Jobs.`, 'success');
-              context.activatePanel('jobs');
-            } catch (error) {
-              operationLedger.finish(operationId, 'failed', {
-                error: error instanceof Error ? error.message : String(error),
-              });
-              throw error;
-            }
-          }}
-          onRunRemoteMediaJob={async (workflowId) => {
-            if (selectedAudioClip === undefined)
-              throw new Error('Place a video or audio clip before running a remote provider job.');
-            const targetClipId = selectedAudioClip.id;
-            const targetAssetId = selectedAudioClip.assetId;
-            const sourceProjectRevisionId = context.session.projectRevisionId;
-            const sourceRevision = context.session.historyCursorSequence;
-            const sourceAsset = context.session.visualProject.assets[targetAssetId];
-            const operationId = `cloud-audio-${targetAssetId}-${workflowId}`;
-            const existingForShortCircuit = operationLedger.get(operationId);
-            if (
-              existingForShortCircuit?.status === 'applied' ||
-              existingForShortCircuit?.status === 'completed'
-            ) {
-              context.showToast('This remote provider result is already applied.', 'info');
-              return;
-            }
-            const source = await mediaResolver.resolve(targetAssetId);
-            const response = await fetch(source.url);
-            if (!response.ok)
-              throw new Error('The remote provider could not read the selected media.');
-            const sourceBlob = await response.blob();
-            const sourceSha256 =
-              sourceAsset?.sha256 ??
-              (await sha256Hex(new Uint8Array(await sourceBlob.arrayBuffer())));
-            const fingerprint = `${sourceSha256}:${workflowId}:afftdn:0.8`;
-            const existing = operationLedger.get(operationId);
-            if (existing?.status === 'applied' || existing?.status === 'completed') {
-              context.showToast('This remote provider result is already applied.', 'info');
-              return;
-            }
-            if (existing === undefined)
-              operationLedger.begin({
-                id: operationId,
-                type: 'cloud-audio',
-                fingerprint,
-                revision: sourceRevision,
-              });
-            try {
-              await mediaControlPlaneClient.ensureProject(
-                controlPlaneProject.controlPlaneProjectId,
-                controlPlaneProject.title,
-              );
-              let recovered:
-                | Awaited<ReturnType<typeof mediaControlPlaneClient.denoiseAudioOperation>>
-                | undefined;
-              if (existing !== undefined) {
-                recovered = await mediaControlPlaneClient.denoiseAudioOperation(
-                  controlPlaneProject.controlPlaneProjectId,
-                  operationId,
-                );
-                if (recovered === undefined) {
-                  // A 429 before the durable server claim is safe to retry: the
-                  // authoritative recovery lookup proves no provider run exists.
-                  operationLedger.begin({
-                    id: operationId,
-                    type: 'cloud-audio',
-                    fingerprint,
-                    revision: sourceRevision,
-                  });
-                }
-              }
-              if (
-                recovered?.status === 'running' &&
-                recovered.leaseExpiresAt !== undefined &&
-                recovered.leaseExpiresAt > Date.now()
-              ) {
-                context.showToast(
-                  'This remote provider job is still running. Try recovery again shortly.',
-                  'info',
-                );
-                return;
-              }
-              if (recovered?.status === 'running' || recovered?.status === 'failed')
-                operationLedger.begin({
-                  id: operationId,
-                  type: 'cloud-audio',
-                  fingerprint,
-                  revision: sourceRevision,
-                });
-              const result =
-                recovered?.result ??
-                (await mediaControlPlaneClient.denoiseAudio({
-                  projectId: controlPlaneProject.controlPlaneProjectId,
-                  operationId,
-                  assetId: targetAssetId,
-                  media: sourceBlob,
-                  strength: 0.8,
-                }));
-              const generatedBytes = bytesFromBase64(result.bytesBase64);
-              const generatedBlob = new Blob([generatedBytes.buffer as ArrayBuffer], {
-                type: result.mimeType,
-              });
-              const generatedSha256 = await sha256Hex(generatedBytes);
-              const generatedAsset: AssetRecordV1 = {
-                id: result.assetId,
-                kind: 'audio',
-                displayName: `Cloud denoise · ${sourceAsset?.displayName ?? targetAssetId}`,
-                sha256: generatedSha256,
-                bytes: generatedBlob.size,
-                descriptor: { mimeType: result.mimeType },
-                generationProvenance: {
-                  providerId: 'joy.remote-audio',
-                  modelId: result.method,
-                  modelVersion: 'v1',
-                  prompt: workflowId,
-                  inputAssetHashes: [sourceSha256],
-                  parameters: { strength: result.strength },
-                  generatedAssetId: result.assetId,
-                  createdAt: new Date().toISOString(),
-                },
-              };
-              await (
-                await originalAssetCachePromise
-              ).put(
-                {
-                  assetId: generatedAsset.id,
-                  sha256: generatedSha256,
-                  bytes: generatedBlob.size,
-                  mimeType: result.mimeType,
-                },
-                generatedBlob,
-              );
-              if (
-                context.session.projectRevisionId !== sourceProjectRevisionId ||
-                context.session.historyCursorSequence !== sourceRevision
-              )
-                throw new Error(
-                  'The project changed while the remote provider job was running. The result was not applied.',
-                );
-              const currentTimeline =
-                context.session.timelineProject.compositions[
-                  context.session.timelineProject.rootCompositionId
-                ];
-              const currentTarget = currentTimeline?.tracks
-                .flatMap((track) => track.clips)
-                .find(
-                  (clip): clip is VideoClip => clip.id === targetClipId && clip.kind === 'video',
-                );
-              if (currentTarget?.assetId !== targetAssetId)
-                throw new Error(
-                  'The target clip changed while the remote provider job was running. The result was not applied.',
-                );
-              const currentProject = context.session.visualProject;
-              const collision = currentProject.assets[generatedAsset.id];
-              if (collision !== undefined && collision.sha256 !== generatedAsset.sha256)
-                throw new Error(
-                  'The remote provider returned an asset ID already used by different media.',
-                );
-              const nextProject = projectWithImportedAsset(currentProject, {
-                ...generatedAsset,
-                kind: 'audio',
-              });
-              const currentAudioState = loadAudioStateFromProject(
-                storage,
-                projectId,
-                currentProject,
-              );
-              const currentClipAudio = currentAudioState.clips[targetClipId] ?? {
-                gain: 1,
-                pan: 0,
-                mute: false,
-                solo: false,
-              };
-              context.replaceVisualProjectAndAudio(nextProject, {
-                ...currentAudioState,
-                clips: {
-                  ...currentAudioState.clips,
-                  [targetClipId]: {
-                    ...currentClipAudio,
-                    sourceAssetId: generatedAsset.id,
-                  },
-                },
-              });
-              operationLedger.finish(operationId, 'applied', { resultRef: generatedAsset.id });
-              context.showToast('Remote provider audio applied to the selected clip.', 'success');
-            } catch (error) {
-              operationLedger.finish(operationId, 'failed', {
-                error: error instanceof Error ? error.message : String(error),
-              });
-              throw error;
-            }
           }}
         />,
       );
@@ -6726,37 +6269,10 @@ function EditorWorkspace({
         />
       );
     if (api.id === 'jobs') {
-      const selectedWorkerAsset = state.selectedIds
-        .map((clipId) =>
-          context.timelineProject.compositions[context.timelineProject.rootCompositionId]?.tracks
-            .flatMap((track) => track.clips.map((clip) => ({ clip, track })))
-            .find((item) => item.clip.id === clipId),
-        )
-        .find((item) => item?.clip.kind === 'video');
-      const selectedVideoAsset =
-        selectedWorkerAsset?.clip.kind === 'video' ? selectedWorkerAsset.clip : undefined;
-      const selectedVideoTrackFamily =
-        selectedWorkerAsset?.clip.kind === 'video' ? selectedWorkerAsset.track.family : undefined;
-      const selectedAudioAssetId =
-        selectedVideoAsset !== undefined && selectedVideoTrackFamily === 'audio'
-          ? selectedVideoAsset.assetId
-          : undefined;
-      const selectedThumbnailAssetId =
-        selectedVideoAsset !== undefined && selectedVideoTrackFamily === 'audio'
-          ? undefined
-          : selectedVideoAsset?.assetId;
       return (
         <JobsPanel
           projectId={controlPlaneProject.controlPlaneProjectId}
           projectTitle={controlPlaneProject.title}
-          controlPlaneReady={controlPlaneProjectReady}
-          {...(selectedAudioAssetId === undefined ? {} : { audioAssetId: selectedAudioAssetId })}
-          {...(selectedThumbnailAssetId === undefined
-            ? {}
-            : { thumbnailAssetId: selectedThumbnailAssetId })}
-          onApplyWorkerAudioResult={applyWorkerAudioResult}
-          operationLedger={operationLedger}
-          operationRevision={session.historyCursorSequence}
         />
       );
     }
@@ -7019,7 +6535,6 @@ function EditorWorkspace({
                 canRedo={session.canRedo}
                 hasSelection={state.selectedIds.length > 0}
                 exporting={exporting}
-                signedIn={joySession.kind === 'ready'}
                 onAction={runMenuAction}
               />
             </div>
@@ -7083,73 +6598,6 @@ function EditorWorkspace({
               </button>
             </div>
             <div className="header-group" role="group" aria-label="Deliver">
-              <div className="header-menu">
-                <button
-                  type="button"
-                  className="icon-button header-export-preset-trigger"
-                  disabled={exporting}
-                  aria-label="Export preset"
-                  aria-expanded={exportPresetOpen}
-                  data-guide="Export preset"
-                  onClick={() => {
-                    setExportPresetOpen((open) => !open);
-                    setProcessesOpen(false);
-                    setAccountOpen(false);
-                  }}
-                >
-                  <span className="header-disclosure-chevron" aria-hidden="true">
-                    <ChevronDownIcon />
-                  </span>
-                  <span className="header-export-preset-label">
-                    {exportPreset === 'reels-1080'
-                      ? 'Reels 1080×1920'
-                      : exportPreset === 'shorts-1080'
-                        ? 'Shorts 1080×1920'
-                        : exportPreset === 'youtube-1080'
-                          ? 'YouTube 1920×1080'
-                          : exportPreset === 'high-bitrate'
-                            ? 'High bitrate'
-                            : 'Social H.264'}
-                  </span>
-                </button>
-                {exportPresetOpen && (
-                  <section
-                    className="header-dropdown header-export-preset-dropdown"
-                    aria-label="Export preset"
-                  >
-                    <h3>Export preset</h3>
-                    <ul className="export-preset-list">
-                      {(
-                        [
-                          ['social-h264-aac', ExportIcon, 'Social H.264'],
-                          ['reels-1080', ReelsIcon, 'Reels 1080×1920'],
-                          ['shorts-1080', ReelsIcon, 'Shorts 1080×1920'],
-                          ['youtube-1080', YoutubeIcon, 'YouTube 1920×1080'],
-                          ['high-bitrate', HighBitrateIcon, 'High bitrate'],
-                        ] as const
-                      ).map(([id, Icon, label]) => (
-                        <li key={id}>
-                          <button
-                            type="button"
-                            className="icon-button icon-button-labeled"
-                            disabled={exporting}
-                            aria-pressed={exportPreset === id}
-                            aria-label={label}
-                            data-guide={label}
-                            onClick={() => {
-                              setExportPreset(id);
-                              setExportPresetOpen(false);
-                            }}
-                          >
-                            <Icon />
-                            <span className="export-preset-option-label">{label}</span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                )}
-              </div>
               <button
                 type="button"
                 className="header-export-btn"
@@ -7174,13 +6622,78 @@ function EditorWorkspace({
               )}
               <div className="header-menu">
                 <button
+                  type="button"
+                  className="icon-button header-export-preset-trigger"
+                  aria-label="Export preset"
+                  aria-haspopup="menu"
+                  aria-expanded={exportPresetOpen}
+                  title={`Export preset: ${exportPreset}`}
+                  onClick={() => {
+                    setExportPresetOpen((open) => !open);
+                    setProcessesOpen(false);
+                  }}
+                >
+                  <span className="header-export-preset-label">
+                    {exportPreset === 'reels-1080'
+                      ? 'Reels 1080p'
+                      : exportPreset === 'shorts-1080'
+                        ? 'Shorts 1080p'
+                        : exportPreset === 'youtube-1080'
+                          ? 'YouTube 1080p'
+                          : 'High bitrate'}
+                  </span>
+                  <span className="header-disclosure-chevron">
+                    <ChevronDownIcon />
+                  </span>
+                </button>
+                {exportPresetOpen && (
+                  <section
+                    className="header-dropdown header-export-preset-dropdown"
+                    aria-label="Export preset"
+                  >
+                    <h3>Export preset</h3>
+                    <ul className="export-preset-list" role="menu">
+                      {[
+                        { id: 'reels-1080', label: 'Instagram Reels · 1080p' },
+                        { id: 'shorts-1080', label: 'YouTube Shorts · 1080p' },
+                        { id: 'youtube-1080', label: 'YouTube · 1080p' },
+                        { id: 'high-bitrate', label: 'High bitrate' },
+                      ].map(({ id, label }) => (
+                        <li key={id} role="none">
+                          <button
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={exportPreset === id}
+                            onClick={() => {
+                              setExportPreset(id as ExportPresetId);
+                              setExportPresetOpen(false);
+                            }}
+                          >
+                            <span className="preset-icon-group" aria-hidden="true">
+                              {id === 'youtube-1080' ? (
+                                <YoutubeIcon />
+                              ) : id === 'high-bitrate' ? (
+                                <HighBitrateIcon />
+                              ) : (
+                                <ReelsIcon />
+                              )}
+                            </span>
+                            <span className="export-preset-option-label">{label}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </div>
+              <div className="header-menu">
+                <button
                   className="icon-button header-processes-trigger"
                   aria-label="Recent processes"
                   aria-expanded={processesOpen}
                   title="Recent processes"
                   onClick={() => {
                     setProcessesOpen((open) => !open);
-                    setAccountOpen(false);
                     setExportPresetOpen(false);
                   }}
                 >
@@ -7292,125 +6805,6 @@ function EditorWorkspace({
                             ),
                         )}
                       </div>
-                    )}
-                  </section>
-                )}
-              </div>
-              <div className="header-menu">
-                <button
-                  className="icon-button"
-                  aria-label={`${JOY_STUDIO_NAME} account`}
-                  aria-expanded={accountOpen}
-                  title={
-                    joySession.kind === 'ready'
-                      ? `Signed in · ${joySession.displayName ?? joySession.subject ?? JOY_STUDIO_NAME}`
-                      : joySession.kind === 'no-access'
-                        ? `Signed in, ${JOY_STUDIO_NAME} access not enabled`
-                        : joySession.kind === 'signed-out'
-                          ? 'Signed out'
-                          : joySession.kind === 'unavailable'
-                            ? 'Sign-in status unavailable'
-                            : `${JOY_STUDIO_NAME} account`
-                  }
-                  onClick={() => {
-                    if (joySession.kind === 'ready' && joySession.subject === 'local-creator') {
-                      setDesktopAccountModalOpen(true);
-                      return;
-                    }
-                    setAccountOpen((open) => !open);
-                    setProcessesOpen(false);
-                    setExportPresetOpen(false);
-                    refreshJoySession();
-                  }}
-                >
-                  <span className="session-icon-wrap">
-                    <UserIcon />
-                    <span className={`session-dot session-${joySession.kind}`} aria-hidden="true" />
-                  </span>
-                </button>
-                {accountOpen && (
-                  <section
-                    ref={accountDropdownRef}
-                    className="header-dropdown account-dropdown"
-                    aria-label={`${JOY_STUDIO_NAME} account`}
-                  >
-                    {joySession.kind === 'ready' && (
-                      <>
-                        <div className="account-card">
-                          <div className="account-card-avatar" aria-hidden="true">
-                            {joySession.avatarObjectUrl !== undefined ? (
-                              <img
-                                className="account-card-avatar-img"
-                                ref={avatarObjectUrlRef}
-                                src={joySession.avatarObjectUrl}
-                                alt=""
-                              />
-                            ) : (
-                              (
-                                (joySession.displayName ?? joySession.subject ?? 'J')
-                                  .replace(/^@/, '')
-                                  .trim()
-                                  .charAt(0) || 'J'
-                              ).toUpperCase()
-                            )}
-                          </div>
-                          <div className="account-card-meta">
-                            <p className="account-card-status">Signed in</p>
-                            {(joySession.displayName ?? joySession.subject) !== undefined && (
-                              <p className="account-card-subject">
-                                <bdi>{joySession.displayName ?? joySession.subject}</bdi>
-                              </p>
-                            )}
-                          </div>
-                          <span className="account-card-dot session-ready" aria-hidden="true" />
-                        </div>
-                        {joySession.subject === 'local-creator' ? (
-                          <button
-                            type="button"
-                            className="account-sign-out"
-                            style={{
-                              background: 'linear-gradient(135deg, #f7f586, #f4b72f)',
-                              color: '#0c0d10',
-                              fontWeight: 700,
-                              border: 'none',
-                              boxShadow: '0 2px 10px rgba(244, 183, 47, 0.3)',
-                            }}
-                            title="Connect your JOY account to activate Joy Model and sync subscription"
-                            onClick={() => {
-                              setAccountOpen(false);
-                              setDesktopAccountModalOpen(true);
-                            }}
-                          >
-                            🔑 Connect JOY Account
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="account-sign-out"
-                            title={`Sign out of ${JOY_STUDIO_NAME}`}
-                            onClick={() => void signOut()}
-                          >
-                            <LogoutIcon />
-                            Sign out
-                          </button>
-                        )}
-                      </>
-                    )}
-                    {joySession.kind === 'no-access' && (
-                      <p className="empty-hint">
-                        {JOY_STUDIO_NAME} access is not enabled for this account.
-                      </p>
-                    )}
-                    {joySession.kind === 'signed-out' && (
-                      <p className="empty-hint">Returning to login…</p>
-                    )}
-                    {joySession.kind === 'unknown' && (
-                      <p className="empty-hint">Checking session…</p>
-                    )}
-                    {joySession.kind === 'unavailable' && (
-                      <p className="empty-hint">
-                        Sign-in status could not be verified. Try again shortly.
-                      </p>
                     )}
                   </section>
                 )}
@@ -7782,11 +7176,6 @@ function EditorWorkspace({
               </div>
             </div>
           )}
-          <DesktopAccountModal
-            isOpen={desktopAccountModalOpen}
-            onClose={() => setDesktopAccountModalOpen(false)}
-            onSuccess={refreshJoySession}
-          />
         </main>
       </AgentPresenceProvider>
     </AgentPreviewProvider>
@@ -8653,13 +8042,6 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
       .join('');
   }
   return fallbackSha256Hex(bytes);
-}
-
-function bytesFromBase64(value: string): Uint8Array {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
-  return bytes;
 }
 
 function recordValue(value: unknown): Readonly<Record<string, unknown>> | undefined {

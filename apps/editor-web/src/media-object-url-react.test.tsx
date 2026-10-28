@@ -237,8 +237,6 @@ describe('useReleasableObjectUrl React lifecycle', () => {
         controlPlaneReady: false,
         client: {
           assets: vi.fn(async () => []),
-          originalBytes: vi.fn(),
-          sharedCloudOriginalBytes: vi.fn(),
         },
         originalCache: {
           get: vi.fn(async () => new Blob(['video-bytes'], { type: 'video/mp4' })),
@@ -322,8 +320,6 @@ describe('useReleasableObjectUrl React lifecycle', () => {
         controlPlaneReady: false,
         client: {
           assets: vi.fn(async () => []),
-          originalBytes: vi.fn(),
-          sharedCloudOriginalBytes: vi.fn(),
         },
         originalCache: {
           get: vi.fn(async () => new Blob(['video-bytes'], { type: 'video/mp4' })),
@@ -393,8 +389,6 @@ describe('useReleasableObjectUrl React lifecycle', () => {
         controlPlaneReady: false,
         client: {
           assets: vi.fn(async () => []),
-          originalBytes: vi.fn(),
-          sharedCloudOriginalBytes: vi.fn(),
         },
         originalCache: {
           get: vi.fn(async () => new Blob(['partner-bytes'], { type: 'video/mp4' })),

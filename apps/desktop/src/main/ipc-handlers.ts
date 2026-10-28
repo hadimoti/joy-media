@@ -13,9 +13,10 @@ import type {
   MediaKind,
   ProviderProfile,
 } from '../store/local-database.js';
+import { LEGACY_PROVIDER_IDS } from '../store/migrations.js';
+import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
 import type { DirectProviderProbeReport, SecretStore } from '@joy-media/provider-sdk';
-import type { AutoUpdateDecision, SignedReleaseManifest } from './auto-update-policy.js';
 
 /** Native "select a file" prompt, injected so main-process wiring stays unit-testable. */
 export type ShowOpenDialog = () => Promise<{
@@ -40,28 +41,19 @@ export type ProbeProvider = (request: {
   readonly modelId: string;
 }) => Promise<DirectProviderProbeReport>;
 
-/** Evaluates a release manifest the renderer already fetched from the public
- * `GET /v1/releases/:channel` route against the pinned release-signing public key and the
- * running app's own version. Injected so the two pieces of trust material a compromised
- * renderer must never be able to supply itself — the pinned public key and the app's real
- * running version (`app.getVersion()`) — stay main-process-only; see main/electron-entry.ts
- * for the real wiring to `../auto-update-policy.js`'s `evaluateAutoUpdate`. This never
- * downloads or installs anything — see that module's own doc comment. */
-export type CheckForUpdate = (request: {
-  readonly manifest: SignedReleaseManifest;
-  readonly subscriptionActive: boolean;
-}) => AutoUpdateDecision;
-
 export interface IpcHandlerDeps {
   readonly fileRegistry: FileRegistry;
   readonly workerSupervisor: WorkerSupervisor;
+  /** The `desktop.media.*` handlers (media-channel.ts). Absent means every media call is refused. */
+  readonly mediaChannel?: Readonly<
+    Record<MediaChannel, (payload: unknown) => MediaResult | Promise<MediaResult>>
+  >;
   readonly showOpenDialog: ShowOpenDialog;
   readonly showOpenDirectoryDialog?: ShowOpenDialog;
   readonly localDatabase: LocalDatabase;
   readonly probeMedia: ProbeMedia;
   readonly secretStore: SecretStore;
   readonly probeProvider: ProbeProvider;
-  readonly checkForUpdate: CheckForUpdate;
   readonly handleWindowControl?: (
     action: 'minimize' | 'maximize' | 'close' | 'is-maximized',
   ) => Promise<boolean | void> | boolean | void;
@@ -83,6 +75,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
   const newId = deps.newId ?? (() => crypto.randomUUID());
 
   return {
+    ...mediaChannelTable(deps.mediaChannel),
     'desktop.select-file': async () => {
       const result = await deps.showOpenDialog();
       if (result.canceled || result.path === undefined) return { ok: true, data: undefined };
@@ -154,6 +147,10 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (issues.length > 0) {
         return { ok: false, error: issues.map((issue) => issue.message).join('; ') };
       }
+      // v1.1.0 no longer offers these providers, so nothing new can be saved under them.
+      if (LEGACY_PROVIDER_IDS.includes(request.provider)) {
+        return { ok: false, error: 'This provider is no longer offered in v1.1.0' };
+      }
 
       const timestamp = now();
       let id = request.id;
@@ -186,12 +183,37 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         updatedAt: timestamp,
       };
       deps.localDatabase.saveProviderProfile(profile);
+      // A key saved again makes the profile usable again, without waiting for a restart.
+      deps.localDatabase.clearProfileCredentialUnavailable(id);
       return { ok: true, data: profile };
     },
-    'desktop.provider-profile.list': (): IpcResult => ({
-      ok: true,
-      data: deps.localDatabase.listProviderProfiles(),
-    }),
+    'desktop.provider-profile.list': (): IpcResult => {
+      // Metadata only: no key, and no field that could carry one.
+      const states = new Map(deps.localDatabase.listProfileStates().map((s) => [s.profileId, s]));
+      return {
+        ok: true,
+        data: deps.localDatabase.listProviderProfiles().map((profile) => {
+          const state = states.get(profile.id);
+          return {
+            ...profile,
+            state: state?.state ?? 'active',
+            ...(state?.decision === undefined ? {} : { decision: state.decision }),
+          };
+        }),
+      };
+    },
+    'desktop.provider-profile.later': (payload): IpcResult => {
+      const id = asProfileId(payload);
+      if (id === undefined) return { ok: false, error: 'Invalid profile id' };
+      const profile = deps.localDatabase.getProviderProfile(id);
+      if (profile === undefined) return { ok: false, error: 'Unknown provider profile id' };
+      // "Later" only applies to a legacy profile. Any other profile is left alone.
+      if (!LEGACY_PROVIDER_IDS.includes(profile.provider)) {
+        return { ok: false, error: 'Only a legacy profile can be deferred' };
+      }
+      deps.localDatabase.recordProfileLater(id);
+      return { ok: true };
+    },
     'desktop.provider-profile.delete': async (payload): Promise<IpcResult> => {
       const id = asProfileId(payload);
       if (id === undefined) return { ok: false, error: 'Invalid profile id' };
@@ -201,32 +223,12 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       deps.localDatabase.deleteProviderProfile(id);
       return { ok: true };
     },
-    'desktop.provider-profile.begin-session': async (payload): Promise<IpcResult> => {
-      const id = asProfileId(payload);
-      if (id === undefined) return { ok: false, error: 'Invalid profile id' };
-      const profile = deps.localDatabase.getProviderProfile(id);
-      if (profile === undefined) return { ok: false, error: 'Unknown provider profile id' };
-      const apiKey = await deps.secretStore.get(profile.secretHandleId);
-      if (apiKey === null) return { ok: false, error: 'Provider key is no longer available' };
-      // Volatile, one-time handoff: the caller must discard this plaintext key when the
-      // session ends and never persist or log it — mirrors
-      // apps/editor-web/src/joy-agent/byok-session.ts's forgetByokConfig semantics for the
-      // existing manual-entry BYOK flow this is designed to slot into.
-      return {
-        ok: true,
-        data: {
-          provider: profile.provider,
-          baseUrl: profile.baseUrl,
-          modelId: profile.modelId,
-          apiKey,
-        },
-      };
-    },
     'desktop.provider-profile.test': async (payload): Promise<IpcResult> => {
       const id = asProfileId(payload);
       if (id === undefined) return { ok: false, error: 'Invalid profile id' };
       const profile = deps.localDatabase.getProviderProfile(id);
       if (profile === undefined) return { ok: false, error: 'Unknown provider profile id' };
+      if (isDisabledLegacy(deps, id)) return { ok: false, error: DISABLED_LEGACY_MESSAGE };
       const apiKey = await deps.secretStore.get(profile.secretHandleId);
       if (apiKey === null) return { ok: false, error: 'Provider key is no longer available' };
       // The key is used for exactly this one probe call and never returned to the caller —
@@ -250,6 +252,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         if (p.id) {
           const profile = deps.localDatabase.getProviderProfile(p.id);
           if (!profile) return { ok: false, error: 'Unknown provider profile' };
+          if (isDisabledLegacy(deps, p.id)) return { ok: false, error: DISABLED_LEGACY_MESSAGE };
           baseUrl = profile.baseUrl;
           const storedKey = await deps.secretStore.get(profile.secretHandleId);
           if (storedKey) {
@@ -294,11 +297,6 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
-    },
-    'desktop.check-for-update': (payload): IpcResult => {
-      const request = asCheckForUpdateRequest(payload);
-      if (request === undefined) return { ok: false, error: 'Invalid update check request' };
-      return { ok: true, data: deps.checkForUpdate(request) };
     },
     'desktop.window-minimize': async () => {
       await deps.handleWindowControl?.('minimize');
@@ -396,7 +394,14 @@ export async function dispatchIpcRequest(
   if (!safeIsAllowedIpcRequest(request)) {
     return { ok: false, error: `Blocked IPC request: ${request.channel}` };
   }
-  return handlers[request.channel](request.payload);
+  try {
+    return await handlers[request.channel](request.payload);
+  } catch (error) {
+    // A thrown message can carry a file path, so the renderer gets a fixed message. The detail
+    // stays in the main process log.
+    console.error(`[joy-desktop] IPC ${request.channel} failed`, error);
+    return { ok: false, error: 'The request failed' };
+  }
 }
 
 function asOpaqueFileRef(value: unknown): OpaqueFileRef | undefined {
@@ -468,35 +473,23 @@ function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileReques
   };
 }
 
-function asCheckForUpdateRequest(
-  value: unknown,
-): { manifest: SignedReleaseManifest; subscriptionActive: boolean } | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const candidate = value as Record<string, unknown>;
-  const manifest = candidate['manifest'];
-  if (typeof candidate['subscriptionActive'] !== 'boolean') return undefined;
-  if (typeof manifest !== 'object' || manifest === null) return undefined;
-  const manifestCandidate = manifest as Record<string, unknown>;
-  const payload = manifestCandidate['payload'];
-  if (typeof manifestCandidate['signature'] !== 'string') return undefined;
-  if (typeof payload !== 'object' || payload === null) return undefined;
-  const payloadCandidate = payload as Record<string, unknown>;
-  if (payloadCandidate['channel'] !== 'stable' && payloadCandidate['channel'] !== 'beta') {
-    return undefined;
-  }
-  if (typeof payloadCandidate['version'] !== 'string') return undefined;
-  if (typeof payloadCandidate['downloadUrl'] !== 'string') return undefined;
-  if (typeof payloadCandidate['sha256'] !== 'string') return undefined;
-  if (
-    payloadCandidate['minSupportedVersion'] !== undefined &&
-    typeof payloadCandidate['minSupportedVersion'] !== 'string'
-  ) {
-    return undefined;
-  }
-  return {
-    manifest: manifest as SignedReleaseManifest,
-    subscriptionActive: candidate['subscriptionActive'],
-  };
+/** Every `desktop.media.*` channel, refused when no media handlers were supplied. */
+function mediaChannelTable(
+  handlers: IpcHandlerDeps['mediaChannel'],
+): Record<MediaChannel, IpcHandler> {
+  const refused: IpcHandler = () => ({ ok: false, error: 'Media channel is not available' });
+  return Object.fromEntries(
+    MEDIA_CHANNELS.map((channel) => [channel, handlers?.[channel] ?? refused]),
+  ) as Record<MediaChannel, IpcHandler>;
+}
+
+/** Shown for a v1.0.x profile that v1.1.0 no longer offers (PLAN-v4 §9a). */
+const DISABLED_LEGACY_MESSAGE = 'This profile is a v1.0.x provider that v1.1.0 no longer offers';
+
+function isDisabledLegacy(deps: IpcHandlerDeps, profileId: string): boolean {
+  return deps.localDatabase
+    .listProfileStates()
+    .some((s) => s.profileId === profileId && s.state === 'disabled-legacy');
 }
 
 export type { WorkerStatus };

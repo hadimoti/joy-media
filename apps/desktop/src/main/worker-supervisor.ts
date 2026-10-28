@@ -10,7 +10,7 @@ export interface SupervisedChild {
 export type SpawnFn = (
   command: string,
   args: readonly string[],
-  options: { readonly cwd?: string },
+  options: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv },
 ) => SupervisedChild;
 
 export interface WorkerSupervisorOptions {
@@ -18,6 +18,11 @@ export interface WorkerSupervisorOptions {
   readonly command: string;
   readonly args?: readonly string[];
   readonly cwd?: string;
+  /**
+   * Environment for each spawn, read at spawn time. The local route needs it, because the
+   * loopback URL and token exist only after the local job API has started (see localWorkerEnv).
+   */
+  readonly env?: () => NodeJS.ProcessEnv | undefined;
   /** Consecutive crash-restarts allowed before the worker is marked degraded. Default 3. */
   readonly maxRestarts?: number;
   /** Schedules a restart attempt; overridable so tests can run synchronously. */
@@ -44,6 +49,7 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     command,
     args = [],
     cwd,
+    env,
     maxRestarts = DEFAULT_MAX_RESTARTS,
     scheduleRestart = (run, delayMs) => {
       setTimeout(run, delayMs);
@@ -64,7 +70,11 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     stopRequested = false;
     connection = 'starting';
     currentWorkerId = workerId();
-    const proc = spawn(command, args, cwd === undefined ? {} : { cwd });
+    const childEnv = env?.();
+    const proc = spawn(command, args, {
+      ...(cwd === undefined ? {} : { cwd }),
+      ...(childEnv === undefined ? {} : { env: childEnv }),
+    });
     child = proc;
     proc.once('error', () => {
       handleExit();

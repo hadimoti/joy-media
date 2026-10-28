@@ -45,67 +45,10 @@ export interface DesktopFileSelection {
   readonly displayName: string;
 }
 
-/** Mirrors apps/desktop/src/main/auto-update-policy.ts's `ReleaseManifestPayload`. */
-export interface DesktopReleaseManifestPayload {
-  readonly channel: 'stable' | 'beta';
-  readonly version: string;
-  readonly downloadUrl: string;
-  readonly sha256: string;
-  readonly minSupportedVersion?: string;
-}
-
-/** Mirrors apps/desktop/src/main/auto-update-policy.ts's `SignedReleaseManifest`. The renderer
- * is the one that fetches this from the existing public `GET /v1/releases/:channel` route;
- * this helper only forwards it to the main process for verification. */
-export interface DesktopSignedReleaseManifest {
-  readonly payload: DesktopReleaseManifestPayload;
-  readonly signature: string;
-}
-
-export interface DesktopUpdateCheckRequest {
-  readonly manifest: DesktopSignedReleaseManifest;
-  readonly subscriptionActive: boolean;
-}
-
-export type DesktopUpdateBlockReason =
-  | 'subscription-required'
-  | 'release-key-unconfigured'
-  | 'manifest-invalid'
-  | 'signature-invalid'
-  | 'download-url-invalid'
-  | 'not-newer';
-
-/** Mirrors apps/desktop/src/main/auto-update-policy.ts's `AutoUpdateDecision`. */
-export type DesktopUpdateDecision =
-  | { readonly status: 'blocked'; readonly reason: DesktopUpdateBlockReason }
-  | { readonly status: 'current'; readonly reason: 'not-newer' }
-  | {
-      readonly status: 'update';
-      readonly manifest: DesktopSignedReleaseManifest;
-      readonly forced: boolean;
-      readonly autoDownload: boolean;
-    };
-
-export const DEFAULT_JOY_REMOTE_API_BASE = 'https://joyst.ir/api';
-
 /** True only inside the Electron desktop shell. Safe to call from any environment, including
  * server-side rendering, where `window` itself may not exist. */
 export function isDesktopHost(): boolean {
   return typeof window !== 'undefined' && window.joyDesktop !== undefined;
-}
-
-/** Resolves the base URL for VPS backend requests. Inside desktop host, targets https://joyst.ir/api. */
-export function getRemoteApiBaseUrl(): string {
-  if (
-    typeof window !== 'undefined' &&
-    (window as unknown as Record<string, unknown>).__JOY_MEDIA_API_BASE__
-  ) {
-    return (window as unknown as Record<string, unknown>).__JOY_MEDIA_API_BASE__ as string;
-  }
-  if (isDesktopHost()) {
-    return DEFAULT_JOY_REMOTE_API_BASE;
-  }
-  return '/api';
 }
 
 function requireBridge(): DesktopJoyBridge {
@@ -113,20 +56,6 @@ function requireBridge(): DesktopJoyBridge {
     throw new Error('joy-desktop bridge is unavailable outside the desktop host');
   }
   return window.joyDesktop;
-}
-
-/**
- * Forwards a manifest the caller already fetched from `GET /v1/releases/:channel`, plus the
- * caller's own `GET /v1/account/subscription` result, to the main process's
- * `desktop.check-for-update` handler. The main process alone supplies the pinned
- * release-signing public key and the running app version, so a compromised renderer can never
- * inject either — this call cannot download or install anything by itself.
- */
-export async function checkForDesktopUpdate(
-  request: DesktopUpdateCheckRequest,
-): Promise<DesktopUpdateDecision> {
-  const data = await requireBridge().invoke('desktop.check-for-update', request);
-  return data as DesktopUpdateDecision;
 }
 
 /** Reads the desktop Worker supervisor's current status via `desktop.worker-status`. */
@@ -196,11 +125,11 @@ export async function deleteDesktopProviderProfile(id: string): Promise<void> {
 }
 
 /**
- * Hands back the decrypted provider session configuration for a single session.
+ * Provider sessions move to the local provider broker (PLAN-v4 §6b, P2). The desktop no longer
+ * hands a decrypted key to the renderer, so this build refuses instead of asking for one.
  */
-export async function beginDesktopProviderSession(id: string): Promise<unknown> {
-  const data = await requireBridge().invoke('desktop.provider-profile.begin-session', { id });
-  return data;
+export async function beginDesktopProviderSession(_id: string): Promise<unknown> {
+  throw new Error('Provider sessions are not available until the local provider broker ships');
 }
 
 /**

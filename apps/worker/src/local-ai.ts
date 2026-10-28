@@ -120,7 +120,6 @@ async function runOpenRouter(
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${config.apiKey}`,
-      'HTTP-Referer': 'https://joyst.ir',
       'X-Title': 'JOY Media',
     },
     body: JSON.stringify(body),

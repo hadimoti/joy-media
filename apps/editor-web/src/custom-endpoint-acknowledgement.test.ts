@@ -25,10 +25,8 @@ describe('custom endpoint acknowledgement', () => {
     expect(requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai/api/v1/chat')).toBe(
       true,
     );
-    expect(requiresCustomEndpointConsent('kilo', 'https://api.kilo.ai/v1')).toBe(false);
-    expect(requiresCustomEndpointConsent('joy-hosted', 'https://joyst.ir/api/v1/agent')).toBe(
-      false,
-    );
+    expect(requiresCustomEndpointConsent('custom', 'https://api.kilo.ai/v1')).toBe(true);
+    expect(requiresCustomEndpointConsent('custom', 'https://joyst.ir/api/v1/agent')).toBe(true);
     expect(
       requiresCustomEndpointConsent('openrouter', 'https://openrouter.ai.evil.example/api/v1'),
     ).toBe(true);
@@ -58,22 +56,19 @@ describe('custom endpoint acknowledgement', () => {
     );
   });
 
-  it('allows startup restore of profiles at trusted provider endpoints', () => {
+  it('allows startup restore of profiles only at still-trusted provider endpoints', () => {
     expect(
       mayRestoreProviderProfile({
         provider: 'openrouter',
         baseUrl: 'https://openrouter.ai/api/v1',
       }),
     ).toBe(true);
-    expect(mayRestoreProviderProfile({ provider: 'kilo', baseUrl: 'https://api.kilo.ai/v1' })).toBe(
-      true,
-    );
     expect(
-      mayRestoreProviderProfile({
-        provider: 'joy-hosted',
-        baseUrl: 'https://joyst.ir/api/v1/agent',
-      }),
-    ).toBe(true);
+      mayRestoreProviderProfile({ provider: 'custom', baseUrl: 'https://api.kilo.ai/v1' }),
+    ).toBe(false);
+    expect(
+      mayRestoreProviderProfile({ provider: 'custom', baseUrl: 'https://joyst.ir/api/v1/agent' }),
+    ).toBe(false);
   });
 
   it('withdraws consent when the acknowledgement is revoked', () => {

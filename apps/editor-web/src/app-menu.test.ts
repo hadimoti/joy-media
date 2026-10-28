@@ -18,6 +18,12 @@ describe('app-menu catalog', () => {
     expect(file?.items.some((item) => item.id === 'file.projects')).toBe(true);
   });
 
+  it('omits account and sign-out actions from File', () => {
+    const file = APP_MENU_GROUPS.find((group) => group.id === 'file');
+    expect(file?.items.map((item) => item.id)).not.toContain('file.account');
+    expect(file?.items.map((item) => item.id)).not.toContain('file.signOut');
+  });
+
   it('keeps the Joy Code menu focused on the project conversation and settings', () => {
     const agent = APP_MENU_GROUPS.find((group) => group.id === 'agent');
     expect(agent?.items.map((item) => item.label)).toEqual([
