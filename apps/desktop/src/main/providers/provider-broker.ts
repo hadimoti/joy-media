@@ -224,8 +224,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     signal?: AbortSignal,
   ): Promise<string> {
     const history = historyDigests(body.messages);
-    const baseBytes = Buffer.byteLength(JSON.stringify(body));
-    const call = prepareCompletion(endpoint, body, continuation, history, maxBytes, baseBytes);
+    const call = prepareCompletion(endpoint, body, continuation, history, maxBytes);
     // The state a call carries back is part of the body, so the limit holds for the body that is sent.
     if (Buffer.byteLength(call.body ?? '') > maxBytes) throw requestTooLarge(maxBytes);
     const reply = assertNoCredential(
@@ -678,11 +677,12 @@ function prepareCompletion(
   continuation: ContinuationState,
   history: readonly string[],
   maxBytes: number,
-  baseBytes: number,
 ): PreparedCall {
-  // The body counts toward the limit from the start, so the state a call carries back is refused as soon as the body
-  // with it would pass the limit, before the body is built.
-  let attached = baseBytes;
+  // The state a call carries back is counted as it is attached. In a conversation the engine continues as it was, all of
+  // it is sent, and the sent body is at most the limit, so state above twice the limit could never be sent. That bound
+  // keeps the work done before the exact check on the sent body (run) finite, and it never refuses a request that the
+  // exact check would accept.
+  let attached = 0;
   // The state of a call comes only from the same call in the conversation this request continues.
   const stateFor = (call: unknown, messageIndex: number): unknown => {
     const carried = carriedCall(call);
@@ -695,7 +695,7 @@ function prepareCompletion(
     });
     if (kept === undefined) return undefined;
     attached += kept.bytes;
-    if (attached > maxBytes) throw requestTooLarge(maxBytes);
+    if (attached > 2 * maxBytes) throw requestTooLarge(maxBytes);
     return kept.value;
   };
   try {

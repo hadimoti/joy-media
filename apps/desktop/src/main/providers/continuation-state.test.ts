@@ -99,6 +99,33 @@ describe('ContinuationState', () => {
   });
 });
 
+describe('callFingerprint', () => {
+  it('keeps every fingerprint the same size, however large the arguments are', () => {
+    expect(callFingerprint('read_file', 'x'.repeat(3 * MIB))).toHaveLength(64);
+    expect(callFingerprint('read_file', '{}')).toHaveLength(64);
+  });
+
+  it('gives other tool names and other arguments other fingerprints', () => {
+    expect(callFingerprint('read_file', '{"a":1}')).not.toBe(
+      callFingerprint('read_file', '{"a":2}'),
+    );
+    expect(callFingerprint('read_file', '{}')).not.toBe(callFingerprint('write_file', '{}'));
+  });
+});
+
+describe('ContinuationState budget for keys', () => {
+  it('charges the key of each kept call to the budget, not only its value', () => {
+    const state = new ContinuationState();
+    // Each key is a MiB long and each value is one byte, so only the keys can fill the budget.
+    for (let index = 0; index < 40; index += 1) {
+      state.remember(scope('p1', `call-${index}`, 'h', 'k'.repeat(MIB)), 1);
+    }
+
+    expect(state.recall(scope('p1', 'call-0', 'h', 'k'.repeat(MIB)))).toBeUndefined();
+    expect(state.recall(scope('p1', 'call-39', 'h', 'k'.repeat(MIB)))?.value).toBe(1);
+  });
+});
+
 describe('historyDigests', () => {
   it('gives a prefix of a conversation the digest it has on its own', () => {
     const short = [{ role: 'user', content: 'read it' }];

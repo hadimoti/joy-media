@@ -1283,6 +1283,149 @@ describe('JOY Agent Settings saved profile connect', () => {
     expect(rendered.textContent).toContain('could not be read back');
   });
 
+  it('does not connect when the saved profile is read back unbound', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    let reads = 0;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // The read at mount is empty. The read after the save lists the profile, but not bound to its key.
+        return reads === 1 ? [] : [{ ...savedLocal, bound: false }];
+      }
+      if (channel === 'desktop.provider-profile.save') return savedLocal;
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    await fillLocalEndpoint(rendered);
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('could not be read back');
+  });
+
+  it('does not connect when the saved profile is read back at another endpoint', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    let reads = 0;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // The read after the save lists the profile at an endpoint other than the one that was saved.
+        return reads === 1 ? [] : [{ ...savedLocal, baseUrl: 'http://127.0.0.1:9999/v1' }];
+      }
+      if (channel === 'desktop.provider-profile.save') return savedLocal;
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    await fillLocalEndpoint(rendered);
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('could not be read back');
+  });
+
+  it('does not carry a typed key onto another profile on the same endpoint when the chosen profile is deleted', async () => {
+    const profile = (id: string, name: string) => ({
+      id,
+      name,
+      provider: 'grok',
+      baseUrl: 'https://api.x.ai/v1',
+      modelId: 'grok-model',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    });
+    const alpha = profile('prof-alpha', 'Alpha');
+    const bravo = profile('prof-bravo', 'Bravo');
+    let reads = 0;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // After Alpha is deleted, Bravo is the only profile on the same endpoint.
+        return reads === 1 ? [alpha, bravo] : [bravo];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: [
+        'desktop.provider-profile.list',
+        'desktop.provider-profile.save',
+        'desktop.provider-profile.delete',
+      ],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    const cardButton = (name: string, text: string): HTMLButtonElement => {
+      const card = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent?.trim() === name,
+      );
+      const button = [...(card?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (candidate) => candidate.textContent?.trim() === text,
+      );
+      if (button === undefined) throw new Error(`Expected ${text} on ${name}`);
+      return button;
+    };
+    const press = async (button: HTMLButtonElement): Promise<void> => {
+      await act(async () => {
+        button.click();
+      });
+      await settle();
+    };
+
+    // Alpha is chosen, so the form describes its endpoint, and a key is typed there.
+    await press(cardButton('Alpha', 'Use'));
+    const configuredForAlpha = vi.mocked(engineClient.configure).mock.calls.length;
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-replacement');
+    });
+
+    await press(cardButton('Alpha', '✕'));
+    await press(buttonByText(rendered, 'Connect model'));
+
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(vi.mocked(engineClient.configure).mock.calls).toHaveLength(configuredForAlpha);
+  });
+
   it('keeps the profile chosen while an older removal read was still pending', async () => {
     const profile = (id: string, name: string) => ({
       id,

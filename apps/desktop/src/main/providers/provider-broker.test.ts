@@ -1395,7 +1395,7 @@ describe('provider broker: state is kept per call, and bounded', () => {
     ).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
   });
 
-  it('refuses a request whose body and carried state pass the limit together, before it is sent', async () => {
+  it('refuses a request whose carried state is more than twice the limit, before the body is built', async () => {
     const p = bound('p1', 'grok', 'https://api.x.ai/v1');
     const replies = [
       jsonReply({
@@ -1409,7 +1409,7 @@ describe('provider broker: state is kept per call, and bounded', () => {
                 {
                   id: 'call_big',
                   type: 'function',
-                  extra_content: { sig: 'x'.repeat(MAX_WORKER_REQUEST_BYTES) },
+                  extra_content: { sig: 'x'.repeat((5 * MAX_WORKER_REQUEST_BYTES) / 2) },
                   function: { name: 'read_file', arguments: '{}' },
                 },
               ],
@@ -1450,6 +1450,74 @@ describe('provider broker: state is kept per call, and bounded', () => {
 
     expect(result).toMatchObject({ ok: false, code: 'REQUEST_TOO_LARGE' });
     expect(sent).toHaveLength(1);
+  });
+
+  it('accepts a Claude continuation whose body and kept turn pass the limit together, when the sent body fits', async () => {
+    const p = bound('p1', 'claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5');
+    const args = { data: 'x'.repeat(20_000) };
+    const thinking = { type: 'thinking', thinking: 'y'.repeat(10_000), signature: 'sig-fit' };
+    const replies = [
+      jsonReply({
+        id: 'msg_f',
+        stop_reason: 'tool_use',
+        content: [thinking, { type: 'tool_use', id: 'toolu_f', name: 'read_file', input: args }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+      jsonReply({
+        id: 'msg_g',
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'done' }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    ];
+    let next = 0;
+    const { broker, sent } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () => replies[next++] ?? jsonReply({ id: 'x', stop_reason: 'end_turn', content: [] }),
+    });
+    const call = {
+      id: 'toolu_f',
+      type: 'function',
+      function: { name: 'read_file', arguments: JSON.stringify(args) },
+    };
+    const toolMessage = { role: 'tool', tool_call_id: 'toolu_f', content: 'ok' };
+    // The call's own arguments are in the body, and again in the kept turn. The turn replaces the call when it is
+    // sent, so the sent body fits even though the two together pass the limit.
+    const framing = Buffer.byteLength(
+      JSON.stringify({
+        messages: [
+          { role: 'user', content: '' },
+          { role: 'assistant', content: null, tool_calls: [call] },
+          toolMessage,
+        ],
+      }),
+    );
+    const padded = {
+      messages: [
+        { role: 'user', content: 'p'.repeat(MAX_WORKER_REQUEST_BYTES - 20_000 - framing) },
+        { role: 'assistant', content: null, tool_calls: [call] },
+        toolMessage,
+      ],
+    };
+
+    // The first request carries the same first message, so the reply's state belongs to this conversation.
+    await broker.complete({
+      profileId: 'p1',
+      body: { messages: [padded.messages[0]], tools: READ_FILE },
+    });
+    const result = await broker.complete({
+      profileId: 'p1',
+      maxRequestBytes: MAX_WORKER_REQUEST_BYTES,
+      body: padded,
+    });
+
+    expect(result.ok).toBe(true);
+    const followUp = JSON.parse(String(sent[1]?.init.body));
+    expect(followUp.messages[1].content).toEqual([
+      thinking,
+      { type: 'tool_use', id: 'toolu_f', name: 'read_file', input: args },
+    ]);
   });
 
   it("refuses a request that only the provider's own fields take past the limit", async () => {

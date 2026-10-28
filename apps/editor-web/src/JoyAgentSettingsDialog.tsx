@@ -692,9 +692,15 @@ export function JoyAgentSettingsDialog({
         if (saved) {
           profileId = saved.id;
           selectProfile(saved);
-          // The connection waits for a list that shows the saved profile. When it cannot be read, nothing connects.
+          // The connection waits for a list that shows the saved profile as it was saved: bound when a key was typed, at
+          // the endpoint that was saved. Otherwise nothing connects.
           const readBack = await loadProfiles();
-          if (readBack === undefined || !readBack.some((profile) => profile.id === saved.id)) {
+          const listed = readBack?.find((profile) => profile.id === saved.id);
+          if (
+            listed === undefined ||
+            (key !== '' && listed.bound !== true) ||
+            normalizeProviderBaseUrl(listed.baseUrl) !== normalizedBaseUrl
+          ) {
             throw new Error('The saved profile could not be read back. Try connecting again.');
           }
         }
@@ -775,6 +781,14 @@ export function JoyAgentSettingsDialog({
     if (!isDesktopHost()) return;
     try {
       await deleteDesktopProviderProfile(profId);
+      // The form and the typed key belong to the chosen profile. When that profile is deleted, both are cleared, so a key
+      // typed next cannot update another saved profile on the same endpoint.
+      if (selectedProfileIdRef.current === profId) {
+        clearTypedKey();
+        setBaseUrl('');
+        setModelId('');
+        setConnectionName('');
+      }
       await loadProfiles();
       // Only a selection that is still this profile is cleared; a profile chosen while this read was pending stays.
       if (selectedProfileIdRef.current === profId) selectProfile(undefined);

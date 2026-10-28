@@ -29,7 +29,10 @@ export interface CallScope {
 interface Entry {
   readonly value: unknown;
   readonly storedAt: number;
+  /** The bytes the value takes when it is sent back. */
   readonly bytes: number;
+  /** The bytes the entry holds: its value and its key. Both count toward the budget. */
+  readonly retained: number;
 }
 
 /** The state a call was given, with its size in bytes as it is sent back. */
@@ -53,8 +56,9 @@ export class ContinuationState {
     const key = keyOf(scope);
     this.#drop(key);
     const bytes = Buffer.byteLength(JSON.stringify(value));
-    this.#entries.set(key, { value, storedAt: this.#now(), bytes });
-    this.#retainedBytes += bytes;
+    const retained = bytes + Buffer.byteLength(key);
+    this.#entries.set(key, { value, storedAt: this.#now(), bytes, retained });
+    this.#retainedBytes += retained;
     this.#expire();
     while (this.#entries.size > MAX_ENTRIES || this.#retainedBytes > MAX_RETAINED_BYTES) {
       const oldest = this.#entries.keys().next();
@@ -73,7 +77,7 @@ export class ContinuationState {
   #drop(key: string): void {
     const entry = this.#entries.get(key);
     if (entry === undefined) return;
-    this.#retainedBytes -= entry.bytes;
+    this.#retainedBytes -= entry.retained;
     this.#entries.delete(key);
   }
 
@@ -104,11 +108,14 @@ export function historyDigests(messages: readonly unknown[]): readonly string[] 
 }
 
 /**
- * The call as the provider wrote it: its tool name and its arguments text. A call with other arguments is another call,
- * so it never receives this state, even when a second run writes the same id.
+ * The call as the provider wrote it, as a fixed-size digest of its tool name and its arguments text. A call with other
+ * arguments is another call, so it never receives this state, even when a second run writes the same id. The digest
+ * keeps every key the same size, however large the arguments are.
  */
 export function callFingerprint(name: string, argumentsText: string): string {
-  return `${name}\u0000${argumentsText}`;
+  return createHash('sha256')
+    .update(JSON.stringify([name, argumentsText]))
+    .digest('hex');
 }
 
 function keyOf(scope: CallScope): string {
