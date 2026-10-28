@@ -88,6 +88,7 @@ describe('engine client provider calls', () => {
       baseUrl: 'https://openrouter.ai/api/v1',
       modelId: 'openrouter/free',
       body: { messages: [{ role: 'user', content: 'hi' }] },
+      signal: expect.any(AbortSignal),
     });
     expect(answers(worker)[0]).toEqual({
       protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
@@ -133,5 +134,51 @@ describe('engine client provider calls', () => {
       requestId: 'provider-1',
       result: { ok: false, code: 'NETWORK_ERROR', message: 'bridge went away' },
     });
+  });
+
+  it('ends a provider call in progress when the client clears its worker', async () => {
+    let callSignal: AbortSignal | undefined;
+    const providerCall = vi.fn<ProviderCall>(async (request) => {
+      callSignal = request.signal;
+      return new Promise<string>(() => undefined);
+    });
+    const worker = new RecordingWorker();
+    const client = createJoyAgentEngineClient(() => worker as unknown as Worker, providerCall);
+    await client.configure(CONFIG);
+    worker.emit(PROVIDER_REQUEST);
+    await vi.waitFor(() => expect(providerCall).toHaveBeenCalledTimes(1));
+
+    client.clear();
+
+    expect(callSignal?.aborted).toBe(true);
+  });
+
+  it('waits past the status deadline for a connection test, whose provider calls take longer', async () => {
+    vi.useFakeTimers();
+    try {
+      const worker = new RecordingWorker();
+      const client = createJoyAgentEngineClient(
+        () => worker as unknown as Worker,
+        vi.fn<ProviderCall>(async () => '{}'),
+      );
+      await client.configure(CONFIG);
+
+      const test = client.testConnection();
+      await vi.advanceTimersByTimeAsync(40_000);
+      worker.emit({
+        protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+        type: 'test-result',
+        status: {
+          provider: 'openrouter',
+          modelId: 'openrouter/free',
+          capability: 'tool-loop',
+          message: 'Structured JOY tools verified',
+        },
+      });
+
+      await expect(test).resolves.toMatchObject({ capability: 'tool-loop' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

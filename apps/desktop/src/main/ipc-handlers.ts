@@ -71,6 +71,8 @@ export type IpcHandler = (payload: unknown) => Promise<IpcResult> | IpcResult;
 export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcHandler> {
   const now = deps.now ?? (() => new Date().toISOString());
   const newId = deps.newId ?? (() => crypto.randomUUID());
+  // The provider calls the renderer may cancel, by the id it gave each one.
+  const agentRequests = new Map<string, AbortController>();
 
   return {
     ...mediaChannelTable(deps.mediaChannel),
@@ -284,14 +286,35 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.agent.request': async (payload): Promise<IpcResult> => {
       const request = asAgentRequest(payload);
       if (request === undefined) return { ok: false, error: 'Invalid agent request' };
-      // A refusal is data, not a handler error, so the renderer keeps the broker's code.
-      const result = await deps.providerBroker.complete(request);
-      return {
-        ok: true,
-        data: result.ok
-          ? { ok: true, text: result.data.text }
-          : { ok: false, code: result.code, message: result.message },
-      };
+      // A call the renderer may cancel carries an id. The id is forgotten once the call has ended.
+      const { requestId, ...brokerRequest } = request;
+      const controller = new AbortController();
+      if (requestId !== undefined) agentRequests.set(requestId, controller);
+      try {
+        // A refusal is data, not a handler error, so the renderer keeps the broker's code.
+        const result = await deps.providerBroker.complete({
+          ...brokerRequest,
+          signal: controller.signal,
+        });
+        return {
+          ok: true,
+          data: result.ok
+            ? { ok: true, text: result.data.text }
+            : { ok: false, code: result.code, message: result.message },
+        };
+      } finally {
+        if (requestId !== undefined) agentRequests.delete(requestId);
+      }
+    },
+    'desktop.agent.cancel': (payload): IpcResult => {
+      const requestId = asAgentRequestId(
+        typeof payload === 'object' && payload !== null
+          ? (payload as Record<string, unknown>)['requestId']
+          : undefined,
+      );
+      if (requestId === undefined) return { ok: false, error: 'Invalid agent request id' };
+      agentRequests.get(requestId)?.abort();
+      return { ok: true, data: undefined };
     },
     'desktop.window-minimize': async () => {
       await deps.handleWindowControl?.('minimize');
@@ -435,10 +458,17 @@ function asProfileId(value: unknown): string | undefined {
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
 }
 
-/** A profile the renderer may connect without its key being entered again (PLAN-v4 §6c). */
+/**
+ * A profile the renderer may connect without its key being entered again: its key is confirmed for the
+ * endpoint the record now holds, and that key is still the one confirmed (PLAN-v4 §6c).
+ */
 function isBound(profile: ProviderProfile, versionOf: (handleId: string) => string): boolean {
+  if (profile.bindingDigest === undefined || profile.bindingSecretDigest === undefined)
+    return false;
+  const verdict = evaluateEndpoint(profile.provider, profile.baseUrl);
+  if (!verdict.allowed) return false;
   return (
-    profile.bindingDigest !== undefined &&
+    profile.bindingDigest === endpointBindingDigest(profile.id, verdict.origin, verdict.basePath) &&
     profile.bindingSecretDigest === versionOf(profile.secretHandleId)
   );
 }
@@ -483,7 +513,9 @@ function asModelSource(
 
 function asAgentRequest(
   value: unknown,
-): { profileId: string; body: unknown; baseUrl: string; modelId?: string } | undefined {
+):
+  | { profileId: string; body: unknown; baseUrl: string; modelId?: string; requestId?: string }
+  | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
   const profileId = candidate['profileId'];
@@ -492,12 +524,19 @@ function asAgentRequest(
   if (typeof baseUrl !== 'string' || baseUrl.length === 0 || baseUrl.length > 2048)
     return undefined;
   const modelId = candidate['modelId'];
+  const requestId = asAgentRequestId(candidate['requestId']);
   return {
     profileId,
     baseUrl,
     body: candidate['body'],
     ...(typeof modelId === 'string' ? { modelId } : {}),
+    ...(requestId === undefined ? {} : { requestId }),
   };
+}
+
+/** A cancellable call's id: short, and only letters, digits, dashes and underscores. */
+function asAgentRequestId(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : undefined;
 }
 
 interface SaveProviderProfileRequest {

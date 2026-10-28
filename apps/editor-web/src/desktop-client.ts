@@ -167,21 +167,38 @@ export async function fetchDesktopProviderModels(request: {
   return (data as readonly DiscoveredModel[]) ?? [];
 }
 
-/** One model call through the desktop broker. The key never reaches this side (PLAN-v4 §6a). */
+let nextAgentRequestId = 0;
+
+/**
+ * One model call through the desktop broker. The key never reaches this side (PLAN-v4 §6a). A call that
+ * is aborted here is cancelled in the desktop as well, so the provider request it began is not left running.
+ */
 export async function requestAgentCompletion(request: ProviderCallRequest): Promise<string> {
-  const data = (await requireBridge().invoke('desktop.agent.request', request)) as
-    | {
-        readonly ok?: unknown;
-        readonly text?: unknown;
-        readonly code?: unknown;
-        readonly message?: unknown;
-      }
-    | undefined;
-  if (data?.ok === true && typeof data.text === 'string') return data.text;
-  throw new ProviderCallError(
-    typeof data?.code === 'string' ? data.code : 'NETWORK_ERROR',
-    typeof data?.message === 'string' ? data.message : 'The provider request failed',
-  );
+  const bridge = requireBridge();
+  const { signal, ...payload } = request;
+  if (signal?.aborted) throw new ProviderCallError('NETWORK_ERROR', 'The request was cancelled.');
+  const requestId = `agent-${++nextAgentRequestId}`;
+  const cancel = (): void => {
+    void bridge.invoke('desktop.agent.cancel', { requestId }).catch(() => undefined);
+  };
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    const data = (await bridge.invoke('desktop.agent.request', { ...payload, requestId })) as
+      | {
+          readonly ok?: unknown;
+          readonly text?: unknown;
+          readonly code?: unknown;
+          readonly message?: unknown;
+        }
+      | undefined;
+    if (data?.ok === true && typeof data.text === 'string') return data.text;
+    throw new ProviderCallError(
+      typeof data?.code === 'string' ? data.code : 'NETWORK_ERROR',
+      typeof data?.message === 'string' ? data.message : 'The provider request failed',
+    );
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+  }
 }
 
 /**

@@ -7,6 +7,13 @@ import {
 import { jsonUtf8Size } from './json-bytes.js';
 
 /**
+ * The deadline of one provider call in a connection test, and the number of calls a test makes. The
+ * engine worker enforces the first and the engine client's watchdog is sized from both.
+ */
+export const PROVIDER_CONNECTION_CALL_TIMEOUT_MS = 45_000;
+export const CONNECTION_TEST_CALLS = 3;
+
+/**
  * Public main-thread/Worker transport version. V2 deliberately removes the
  * old implicit structured-run context channel: structured runs get bounded
  * facts and compiler results through host RPC instead.

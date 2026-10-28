@@ -312,7 +312,22 @@ export class LocalDatabase {
 
   // ===== BYOK provider profiles =====
 
+  /**
+   * Writes the profile row and its binding in one transaction. If either write fails, both are rolled
+   * back, so the stored profile still points at the key it had and that key is not removed.
+   */
   saveProviderProfile(profile: ProviderProfile): void {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.writeProviderProfile(profile);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  private writeProviderProfile(profile: ProviderProfile): void {
     this.db
       .prepare(
         `INSERT OR REPLACE INTO provider_profiles

@@ -132,6 +132,40 @@ describe('endpoint binding', () => {
     reopened.close();
   });
 
+  it('keeps the profile and the key it had when its binding cannot be written', () => {
+    const db = open();
+    db.setSecretCiphertext('h-or', 'ciphertext-1');
+    db.saveProviderProfile(
+      profileFor('p-or', 'h-or', {
+        bindingDigest: OPENROUTER_BINDING,
+        bindingSecretDigest: db.secretVersion('h-or'),
+      }),
+    );
+    db.setSecretCiphertext('h-new', 'ciphertext-2');
+
+    // Fail the binding write only, after the profile row for the new key has been written.
+    const raw = new DatabaseSync(file);
+    raw.exec(
+      "CREATE TRIGGER fail_binding BEFORE INSERT ON profile_binding BEGIN SELECT RAISE(ABORT, 'write failed'); END",
+    );
+    raw.close();
+
+    expect(() =>
+      db.saveProviderProfile(
+        profileFor('p-or', 'h-new', {
+          bindingDigest: OPENROUTER_BINDING,
+          bindingSecretDigest: db.secretVersion('h-new'),
+        }),
+      ),
+    ).toThrow('write failed');
+    expect(db.getProviderProfile('p-or')).toMatchObject({
+      secretHandleId: 'h-or',
+      bindingDigest: OPENROUTER_BINDING,
+      bindingSecretDigest: secretVersionDigest('ciphertext-1'),
+    });
+    expect(db.getSecretCiphertext('h-or')).toBe('ciphertext-1');
+  });
+
   it('removes a key that no profile references when the database opens', () => {
     const first = open();
     first.setSecretCiphertext('h-or', 'ciphertext-1');

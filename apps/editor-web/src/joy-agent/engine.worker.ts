@@ -65,11 +65,12 @@ import {
   type JoyAgentSafeEvent,
   type JoyAgentTaskKind,
   type WorkerToMainMessage,
+  PROVIDER_CONNECTION_CALL_TIMEOUT_MS,
 } from './protocol.js';
 
 // The deadline of one provider call in the connection test. It is longer than the broker's own
 // probe timeout (30 s), so a refusal from the broker arrives before this deadline fires.
-const CONNECTION_TIMEOUT_MS = 45_000;
+const CONNECTION_TIMEOUT_MS = PROVIDER_CONNECTION_CALL_TIMEOUT_MS;
 const PROBE_MAX_BYTES = 64 * 1024;
 const MAX_PLAN_ONLY_RESULT_BYTES = 65_536;
 /** Explicit synthetic media probes are independently bounded below 16 KiB each. */

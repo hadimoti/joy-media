@@ -9,6 +9,7 @@ import type { SupervisedChild } from './worker-supervisor.js';
 import { LocalDatabase } from '../store/local-database.js';
 import { createMemorySecretStore } from '@joy-media/provider-sdk';
 import { createProviderBroker } from './providers/provider-broker.js';
+import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 
 function deps() {
   const fileRegistry = createFileRegistry(() => 'ref-1');
@@ -977,6 +978,158 @@ describe('legacy provider profiles (v1.1.0)', () => {
     expect(removed[0]).not.toBe(oldHandle);
     expect(d.localDatabase.getProviderProfile(id)?.secretHandleId).toBe(oldHandle);
     expect(await d.secretStore.get(oldHandle)).toBe('sk-old-key');
+  });
+
+  it('cancels a provider call the renderer names, and the provider request it began is ended', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const saved = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openai/gpt-4o-mini',
+        apiKey: 'sk-cancel',
+      },
+    });
+    const id = (saved.data as { id: string }).id;
+    let providerSignal: AbortSignal | undefined;
+    d.providerFetch.mockImplementationOnce(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          providerSignal = init.signal ?? undefined;
+          init.signal?.addEventListener('abort', () =>
+            reject(new DOMException('aborted', 'AbortError')),
+          );
+        }),
+    );
+
+    const call = dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.agent.request',
+      payload: {
+        profileId: id,
+        baseUrl: 'https://openrouter.ai/api/v1',
+        body: { messages: [{ role: 'user', content: 'hi' }] },
+        requestId: 'call-1',
+      },
+    });
+    await vi.waitFor(() => expect(providerSignal).toBeDefined());
+    const cancelled = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.agent.cancel',
+      payload: { requestId: 'call-1' },
+    });
+
+    expect(cancelled.ok).toBe(true);
+    expect(providerSignal?.aborted).toBe(true);
+    await expect(call).resolves.toMatchObject({
+      ok: true,
+      data: { ok: false, code: 'NETWORK_ERROR' },
+    });
+  });
+
+  it('refuses a cancel request whose id is not a plain call id', async () => {
+    const handlers = createIpcHandlers(deps());
+
+    const refused = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.agent.cancel',
+      payload: { requestId: '../../other' },
+    });
+
+    expect(refused.ok).toBe(false);
+  });
+
+  it('lists a profile as unbound when its endpoint changed without its binding', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const saved = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'm',
+        apiKey: 'sk-moved',
+      },
+    });
+    const id = (saved.data as { id: string }).id;
+    const stored = d.localDatabase.getProviderProfile(id);
+    if (stored === undefined) throw new Error('expected the saved profile');
+    // The URL changes in the record, but its binding does not: a change made outside the app.
+    d.localDatabase.saveProviderProfile({ ...stored, baseUrl: 'https://openrouter.ai/api/v2' });
+
+    const listed = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.list',
+    });
+
+    expect(listed.data).toEqual([expect.objectContaining({ id, bound: false })]);
+  });
+
+  it('refuses a profile whose stored key was overwritten, through the real secret store', async () => {
+    const d = deps();
+    // The OS-protected store, with a stand-in for the OS cipher: its ciphertext is what a version reads.
+    const secrets = createElectronSecretStore(d.localDatabase, {
+      isEncryptionAvailable: () => true,
+      encryptString: (value: string) => Buffer.from(`enc:${value}`, 'utf8'),
+      decryptString: (encrypted: Buffer) => encrypted.toString('utf8').replace(/^enc:/, ''),
+    });
+    const broker = createProviderBroker({
+      store: {
+        getProfile: (id) => d.localDatabase.getProviderProfile(id),
+        isDisabledLegacy: () => false,
+        markCredentialUnavailable: () => undefined,
+        secretVersion: (handleId) => d.localDatabase.secretVersion(handleId),
+      },
+      secrets,
+      fetch: d.providerFetch,
+      resolveHost: async () => ['127.0.0.1'],
+    });
+    const handlers = createIpcHandlers({ ...d, secretStore: secrets, providerBroker: broker });
+    const saved = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openai/gpt-4o-mini',
+        apiKey: 'sk-first-key',
+      },
+    });
+    const id = (saved.data as { id: string }).id;
+    const handle = d.localDatabase.getProviderProfile(id)?.secretHandleId ?? '';
+    const call = () =>
+      dispatchIpcRequest(handlers, {
+        origin: renderer,
+        channel: 'desktop.agent.request',
+        payload: {
+          profileId: id,
+          baseUrl: 'https://openrouter.ai/api/v1',
+          body: { messages: [{ role: 'user', content: 'hi' }] },
+        },
+      });
+    d.providerFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }),
+        {
+          status: 200,
+        },
+      ),
+    );
+    expect(await call()).toMatchObject({ ok: true, data: { ok: true } });
+
+    // An older build writes another key under the same handle.
+    await secrets.set(handle, 'sk-written-by-an-older-build');
+
+    expect(await call()).toMatchObject({ ok: true, data: { ok: false, code: 'BINDING_MISMATCH' } });
+    const listed = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.list',
+    });
+    expect(listed.data).toEqual([expect.objectContaining({ id, bound: false })]);
   });
 
   it('desktop.agent.request sends the request through the broker and returns the reply text only', async () => {

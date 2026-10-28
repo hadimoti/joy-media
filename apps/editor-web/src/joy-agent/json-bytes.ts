@@ -38,6 +38,8 @@ export function jsonUtf8Size(value: unknown, limit: number): number | undefined 
   const addString = (text: string): void => {
     // Printable ASCII other than the quote and the backslash is one byte a character, with nothing to
     // escape. Image data is almost all of this, so it is counted in one step.
+    // Every UTF-16 unit is at least one byte, so a string already past the budget is refused unread.
+    if (bytes + text.length + 2 > limit) throw new SizeLimitExceeded();
     if (PLAIN_ASCII.test(text)) {
       add(text.length + 2);
       return;
@@ -95,6 +97,11 @@ export function jsonUtf8Size(value: unknown, limit: number): number | undefined 
         else visit(item, depth + 1);
       }
       return;
+    }
+    // Only plain data is counted. A boxed number, a Date or a Map is not the object it looks like, and
+    // JSON.stringify writes it differently, so it is refused rather than miscounted.
+    if (Object.prototype.toString.call(node) !== '[object Object]') {
+      throw new UnsupportedJsonValue();
     }
     const record = node as Record<string, unknown>;
     if (typeof record.toJSON === 'function') throw new UnsupportedJsonValue();

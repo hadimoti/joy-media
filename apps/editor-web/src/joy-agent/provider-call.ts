@@ -9,6 +9,8 @@ export interface ProviderCallRequest {
   readonly baseUrl: string;
   readonly modelId: string;
   readonly body: Readonly<Record<string, unknown>>;
+  /** Ends the call early. The desktop cancels the provider request it started, so none is left running. */
+  readonly signal?: AbortSignal | undefined;
 }
 
 /** Resolves to the provider's reply text. Rejects with a ProviderCallError carrying the broker's code. */

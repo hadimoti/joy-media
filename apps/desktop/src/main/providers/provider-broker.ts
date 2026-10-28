@@ -374,8 +374,9 @@ function valueHoldsKey(value: unknown, key: string, depth: number): boolean {
   }
   if (Array.isArray(value)) return value.some((item) => valueHoldsKey(item, key, depth));
   if (typeof value === 'object' && value !== null) {
+    // A property name is a string too: it can hold JSON, escapes and all.
     return Object.entries(value).some(
-      ([name, item]) => name.includes(key) || valueHoldsKey(item, key, depth),
+      ([name, item]) => valueHoldsKey(name, key, depth) || valueHoldsKey(item, key, depth),
     );
   }
   return false;

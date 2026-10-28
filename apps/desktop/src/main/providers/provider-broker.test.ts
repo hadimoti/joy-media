@@ -946,6 +946,22 @@ describe('provider broker: the key in nested JSON, redirects and cancellation', 
     expect(JSON.stringify(result)).not.toContain(KEY);
   });
 
+  it('refuses a key hidden in a property name that is itself JSON text', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    // The property name decodes to the JSON text "sk-test-0123456789abcdef", which parses to the key.
+    const reply = '{"\\"\\\\u0073k-test-0123456789abcdef\\"":1}';
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () => new Response(reply, { status: 200 }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+    expect(JSON.stringify(result)).not.toContain(KEY);
+  });
+
   it('names no redirect target whose percent escapes cannot be read', async () => {
     const p = bound('p1', 'grok', 'https://api.x.ai/v1');
     const { broker } = harness({

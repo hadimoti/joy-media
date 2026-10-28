@@ -18,6 +18,8 @@ import {
   type JoyAgentMediaCapabilityReport,
   type JoyAgentRunRequest,
   type JoyAgentSafeEvent,
+  CONNECTION_TEST_CALLS,
+  PROVIDER_CONNECTION_CALL_TIMEOUT_MS,
 } from './protocol.js';
 import type { JoyAgentHostToolName } from './host-tool-contract.js';
 import type { ObservationTransferEvidenceResolver } from './observation-transfer-service.js';
@@ -33,10 +35,13 @@ import {
 
 const RELOAD_RECONNECT_MESSAGE =
   'JOY Agent Engine updated. Reconnect the model and reload this page.';
-// The Worker deliberately gives connection probes 15 seconds. This outer
-// watchdog must remain longer, otherwise a bounded provider timeout races the
-// Worker’s safe `test-result` and is misreported as a stale Worker update.
+// The outer watchdog for a reply from the Worker. It outlasts the Worker's own deadlines, so a bounded
+// provider timeout reaches the Worker's safe `test-result` rather than racing this watchdog.
 const STATUS_TIMEOUT_MS = 20_000;
+// A connection test is up to three provider calls, each with its own deadline in the Worker. Its
+// watchdog outlasts all three, so a valid slow probe is not reported as a protocol mismatch.
+const CONNECTION_TEST_TIMEOUT_MS =
+  CONNECTION_TEST_CALLS * PROVIDER_CONNECTION_CALL_TIMEOUT_MS + 15_000;
 
 export interface JoyAgentRunHost {
   /** Main-thread-only methods; this object is never posted to the Worker. */
@@ -261,6 +266,7 @@ async function answerProviderRequest(
   request: Extract<WorkerToMainMessage, { readonly type: 'provider-request' }>,
   providerCall: ProviderCall,
   expected: ByokSessionConfig | undefined,
+  signal: AbortSignal,
 ): Promise<void> {
   let result: ProviderCallResult;
   if (!matchesSession(request, expected)) {
@@ -277,6 +283,7 @@ async function answerProviderRequest(
         baseUrl: request.baseUrl,
         modelId: request.modelId,
         body: request.body,
+        signal,
       });
       result = { ok: true, text };
     } catch (error) {
@@ -314,6 +321,16 @@ export function createSingleWorkerEngineClient(
 ): JoyAgentEngineClient {
   let worker: Worker | undefined;
   let generation = 0;
+  // Provider calls this client started and has not finished. Ending the worker ends them as well.
+  const activeProviderCalls = new Set<AbortController>();
+  const abortProviderCalls = (): void => {
+    for (const call of activeProviderCalls) call.abort();
+    activeProviderCalls.clear();
+  };
+  const terminateWorker = (): void => {
+    abortProviderCalls();
+    worker?.terminate();
+  };
   let configured = false;
   /** The session the main thread configured. A provider request must match it (PLAN-v4 §6a). */
   let activeSession: ByokSessionConfig | undefined;
@@ -607,7 +624,7 @@ export function createSingleWorkerEngineClient(
     }
     for (const queue of [...runQueues.values()]) failQueue(queue, error);
     generation += 1;
-    worker?.terminate();
+    terminateWorker();
     worker = undefined;
     configured = false;
     latestStatus = undefined;
@@ -632,12 +649,17 @@ export function createSingleWorkerEngineClient(
       }
       const message = event.data;
       if (message.type === 'provider-request') {
+        const call = new AbortController();
+        activeProviderCalls.add(call);
         void answerProviderRequest(
           owner,
           message,
           providerCall,
           configured ? activeSession : undefined,
-        );
+          call.signal,
+        ).finally(() => {
+          activeProviderCalls.delete(call);
+        });
         return;
       }
       if (message.type === 'configured' || message.type === 'test-result') {
@@ -744,7 +766,7 @@ export function createSingleWorkerEngineClient(
       }
       for (const queue of [...runQueues.values()]) failQueue(queue, error);
       generation += 1;
-      worker?.terminate();
+      terminateWorker();
       worker = undefined;
       configured = false;
       latestStatus = undefined;
@@ -764,13 +786,16 @@ export function createSingleWorkerEngineClient(
         clearTimeout(previous.timer);
         previous.reject(new Error('JOY Agent connection request was superseded'));
       }
-      const timer = setTimeout(() => {
-        const item = pending.get(type);
-        if (item === undefined) return;
-        pending.delete(type);
-        item.reject(new Error(RELOAD_RECONNECT_MESSAGE));
-        failProtocolMismatch();
-      }, STATUS_TIMEOUT_MS);
+      const timer = setTimeout(
+        () => {
+          const item = pending.get(type);
+          if (item === undefined) return;
+          pending.delete(type);
+          item.reject(new Error(RELOAD_RECONNECT_MESSAGE));
+          failProtocolMismatch();
+        },
+        type === 'test' ? CONNECTION_TEST_TIMEOUT_MS : STATUS_TIMEOUT_MS,
+      );
       pending.set(type, { resolve, reject, timer });
       ensureWorker().postMessage({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type, ...message });
     });
@@ -800,7 +825,7 @@ export function createSingleWorkerEngineClient(
   const clear = (): void => {
     closeObservationPort();
     generation += 1;
-    worker?.terminate();
+    terminateWorker();
     worker = undefined;
     configured = false;
     latestStatus = undefined;

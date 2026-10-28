@@ -21,6 +21,7 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.provider.test',
   'desktop.provider.models',
   'desktop.agent.request',
+  'desktop.agent.cancel',
   'desktop.window-minimize',
   'desktop.window-maximize',
   'desktop.window-close',

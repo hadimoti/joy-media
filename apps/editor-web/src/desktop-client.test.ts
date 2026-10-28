@@ -267,7 +267,10 @@ describe('requestAgentCompletion', () => {
     window.joyDesktop = { channels: ['desktop.agent.request'], invoke };
 
     await expect(requestAgentCompletion(request)).resolves.toBe('{"choices":[]}');
-    expect(invoke).toHaveBeenCalledWith('desktop.agent.request', request);
+    expect(invoke).toHaveBeenCalledWith('desktop.agent.request', {
+      ...request,
+      requestId: expect.stringMatching(/^agent-\d+$/),
+    });
   });
 
   it('rejects with the broker code and message when the broker refuses', async () => {
@@ -290,5 +293,52 @@ describe('requestAgentCompletion', () => {
     await expect(requestAgentCompletion(request)).rejects.toThrow(
       'unavailable outside the desktop host',
     );
+  });
+
+  it('cancels the desktop call when the caller aborts, and sends no signal across the bridge', async () => {
+    let finish: ((reply: unknown) => void) | undefined;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.agent.request') {
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      }
+      if (channel === 'desktop.agent.cancel') {
+        // The desktop answers a cancelled call promptly, as the broker does.
+        finish?.({ ok: false, code: 'NETWORK_ERROR', message: 'The request was cancelled.' });
+      }
+      return undefined;
+    });
+    window.joyDesktop = { channels: ['desktop.agent.request', 'desktop.agent.cancel'], invoke };
+    const controller = new AbortController();
+
+    const pending = requestAgentCompletion({ ...request, signal: controller.signal });
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('desktop.agent.request', expect.anything()),
+    );
+    const sent = invoke.mock.calls.find(
+      ([channel]) => channel === 'desktop.agent.request',
+    )?.[1] as {
+      requestId: string;
+    };
+    expect(sent).not.toHaveProperty('signal');
+    controller.abort();
+
+    expect(invoke).toHaveBeenCalledWith('desktop.agent.cancel', { requestId: sent.requestId });
+    await expect(pending).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+  });
+
+  it('starts no desktop call for a request that is already cancelled', async () => {
+    const invoke = vi.fn();
+    window.joyDesktop = { channels: ['desktop.agent.request'], invoke };
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      requestAgentCompletion({ ...request, signal: controller.signal }),
+    ).rejects.toMatchObject({
+      code: 'NETWORK_ERROR',
+    });
+    expect(invoke).not.toHaveBeenCalled();
   });
 });

@@ -60,6 +60,26 @@ describe('jsonUtf8Size', () => {
     expect(jsonUtf8Size({ when: { toJSON: () => 'x' } }, Infinity)).toBeUndefined();
   });
 
+  it('refuses a boxed number, a boxed string or a Date, which JSON.stringify writes differently', () => {
+    expect(jsonUtf8Size({ n: Object(1e20) }, Infinity)).toBeUndefined();
+    expect(jsonUtf8Size({ s: Object('text') }, Infinity)).toBeUndefined();
+    expect(jsonUtf8Size({ d: new Date(0) }, Infinity)).toBeUndefined();
+  });
+
+  it('stops reading a large list once it passes the limit', () => {
+    const items = Array.from({ length: 100_000 }, () => 'x'.repeat(10));
+    let reads = 0;
+    const counted = new Proxy(items, {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) reads += 1;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+
+    expect(jsonUtf8Size(counted, 100)).toBeUndefined();
+    expect(reads).toBeLessThan(20);
+  });
+
   it('stops at the limit for a body far larger than it', () => {
     const huge = { text: 'x'.repeat(5_000_000) };
     expect(jsonUtf8Size(huge, 1_000)).toBeUndefined();
