@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -53,17 +53,20 @@ function delay(milliseconds, value) {
 
 // The packaged app has child processes (GPU, renderer), so on Windows the whole tree is stopped with taskkill /T. Elsewhere only
 // the direct child is stopped. The live check runs only on Windows (assertDisposableHost refuses elsewhere), and the stand-in has
-// no children, so nothing else needs stopping there.
+// no children, so nothing else needs stopping there. Returns false when taskkill could not stop the tree on Windows.
 function stopTree(child) {
-  if (process.platform === 'win32') {
-    // Bounded, so a stuck taskkill cannot block the event loop and stop the timer that ends the wait.
-    const { status } = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
-      stdio: 'ignore',
-      timeout: STOP_TIMEOUT_MILLISECONDS,
-    });
-    if (status === 0) return;
+  if (process.platform !== 'win32') {
+    child.kill('SIGKILL');
+    return true;
   }
+  // Bounded, so a stuck taskkill cannot block the event loop and stop the timer that ends the wait.
+  const { status } = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+    stdio: 'ignore',
+    timeout: STOP_TIMEOUT_MILLISECONDS,
+  });
+  if (status === 0) return true;
   child.kill('SIGKILL');
+  return false;
 }
 
 /**
@@ -93,13 +96,19 @@ export async function launchAndCheck({
   });
   const early = await Promise.race([exited, delay(waitMilliseconds, null)]);
   const stillRunning = early === null;
-  if (stillRunning) stopTree(child);
+  const treeStopped = stillRunning ? stopTree(child) : true;
   const finished = await Promise.race([exited, delay(STOP_TIMEOUT_MILLISECONDS, null)]);
   if (finished === null) {
     // Stopped once more, so a program that survived the first stop is not left running before the test fails.
     stopTree(child);
     throw new Error(
       `the program did not exit within ${STOP_TIMEOUT_MILLISECONDS / 1000} seconds of being stopped`,
+    );
+  }
+  // taskkill could not stop the tree, so child processes may still be running. The check cannot pass on that program.
+  if (!treeStopped) {
+    throw new Error(
+      'taskkill could not stop the program tree, so its child processes may still be running',
     );
   }
   return {
@@ -109,9 +118,14 @@ export async function launchAndCheck({
   };
 }
 
-// Windows can hold a file for a moment after its process is killed, so the scratch folder is removed with retries.
-function removeScratch(root) {
-  return rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+// Windows can hold a file for a moment after its process is killed, so the scratch folder is removed with retries. A folder that
+// stays locked is reported and left behind, so a cleanup error cannot replace the result of the test.
+async function removeScratch(root) {
+  try {
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (error) {
+    console.warn(`could not remove ${root}: ${error.message}`);
+  }
 }
 
 async function scratchFolder() {
@@ -149,9 +163,13 @@ test('a stand-in program that writes nothing passes the launch check', async () 
       exe: process.execPath,
       prefixArgs: [standIn],
       userDataDir,
-      waitMilliseconds: 1500,
+      waitMilliseconds: 5000,
     });
     assert.equal(result.stillRunning, true);
+    assert.ok(
+      existsSync(join(userDataDir, 'stub-started.txt')),
+      'the stand-in did not run its start-up code',
+    );
     assert.deepEqual(result.diagnosticFiles, []);
   } finally {
     await removeScratch(root);
@@ -165,7 +183,7 @@ test('a stand-in program that writes a diagnostic file is reported by the check'
       exe: process.execPath,
       prefixArgs: [standIn],
       userDataDir,
-      waitMilliseconds: 1500,
+      waitMilliseconds: 5000,
       env: { ...process.env, STUB_WRITE_DIAGNOSTICS: '1' },
     });
     assert.deepEqual(result.diagnosticFiles, ['gpu-diagnostics.jsonl']);
