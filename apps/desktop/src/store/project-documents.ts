@@ -48,6 +48,18 @@ export function ensureProjectDocumentSchema(db: DatabaseSync): void {
   );
 }
 
+/**
+ * Whether the stored row already holds the content of a write. Omitted Look Instances keep the
+ * stored value, so they are not compared.
+ */
+function sameContent(stored: ProjectDocumentRow, write: ProjectDocumentWrite): boolean {
+  if (stored.document_json !== JSON.stringify(write.document)) return false;
+  return (
+    write.lookInstances === undefined ||
+    stored.look_instances_json === JSON.stringify(write.lookInstances)
+  );
+}
+
 export class SqliteProjectDocumentStore {
   constructor(
     private readonly db: DatabaseSync,
@@ -78,8 +90,10 @@ export class SqliteProjectDocumentStore {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const current = this.db
-        .prepare('SELECT revision_id FROM project_documents WHERE project_id = ?')
-        .get(write.projectId) as { readonly revision_id: string } | undefined;
+        .prepare(
+          'SELECT revision_id, document_json, look_instances_json FROM project_documents WHERE project_id = ?',
+        )
+        .get(write.projectId) as ProjectDocumentRow | undefined;
       const result = this.apply(write, current);
       this.db.exec('COMMIT');
       return result;
@@ -91,11 +105,14 @@ export class SqliteProjectDocumentStore {
 
   private apply(
     write: ProjectDocumentWrite,
-    current: { readonly revision_id: string } | undefined,
+    current: ProjectDocumentRow | undefined,
   ): ProjectDocumentWriteResult {
-    // A retry of a write that already landed: the stored revision is the one requested.
+    // A retry of a write that already landed carries the same content. The same revision ID with
+    // other content means the editor reused a revision, so the write is refused, not reported saved.
     if (current !== undefined && current.revision_id === write.revisionId) {
-      return { kind: 'saved', revisionId: write.revisionId };
+      return sameContent(current, write)
+        ? { kind: 'saved', revisionId: write.revisionId }
+        : { kind: 'conflict', revisionId: current.revision_id };
     }
     if (current === undefined && write.baseRevisionId !== '') return { kind: 'missing' };
     if (current !== undefined && current.revision_id !== write.baseRevisionId) {

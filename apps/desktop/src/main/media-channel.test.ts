@@ -7,7 +7,7 @@ import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import type { DispatchJob } from '../jobs/job-dispatch.js';
 import { createLocalOriginalWriter } from './local-originals.js';
-import { createMediaChannelHandlers, MEDIA_CHANNELS } from './media-channel.js';
+import { createMediaChannelHandlers, MEDIA_CHANNELS, publicJobError } from './media-channel.js';
 
 const tempDirs: string[] = [];
 
@@ -37,6 +37,16 @@ function setup() {
 }
 
 const DOCUMENT = { schemaVersion: 1, clips: [] };
+
+describe('publicJobError', () => {
+  it('keeps a plain Worker error, and withholds one that names a file', () => {
+    expect(publicJobError('source is not a video')).toBe('source is not a video');
+    expect(publicJobError("ENOENT: no such file, open 'C:\\Users\\HadiMoti\\clip.mp4'")).toBe(
+      'The job failed. Its details are not shown here.',
+    );
+    expect(publicJobError(undefined)).toBeUndefined();
+  });
+});
 
 describe('desktop.media channels', () => {
   it('declares every media channel once', () => {

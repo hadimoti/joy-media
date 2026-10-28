@@ -76,7 +76,7 @@ export interface BrowserSpeechSynthesis {
 interface DesktopJobView {
   readonly id: string;
   readonly jobType: string;
-  readonly status: 'queued' | 'leased' | 'done' | 'failed' | 'cancelled';
+  readonly status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
   readonly progress: number;
   readonly error?: string | null;
   readonly cancelRequested: boolean;
@@ -162,7 +162,7 @@ function trackedJob(projectId: string, jobId: string): TrackedJob {
 
 function jobState(status: DesktopJobView['status']): BrowserJob['state'] {
   switch (status) {
-    case 'leased':
+    case 'running':
       return 'leased';
     case 'done':
       return 'completed';

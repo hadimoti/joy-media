@@ -1329,12 +1329,12 @@ function EditorWorkspace({
       onResult: (result) => {
         if (result.kind === 'conflict') {
           showToast(
-            'Cloud document changed elsewhere. Your local edits were kept; reload the project before saving again.',
+            'The project changed elsewhere. Your local edits were kept; reload the project before saving again.',
             'error',
           );
         } else if (result.kind === 'request-failure') {
           showToast(
-            `Cloud document save failed; retrying in ${Math.ceil(result.retryDelayMs / 1000)}s. Local edits are safe in this browser.`,
+            `Saving the project failed; retrying in ${Math.ceil(result.retryDelayMs / 1000)}s. Local edits are safe in this browser.`,
             'error',
           );
         }
@@ -1588,10 +1588,7 @@ function EditorWorkspace({
           (controlPlaneProjectEnsureFailuresRef.current.get(controlPlaneProjectId) ?? 0) + 1;
         controlPlaneProjectEnsureFailuresRef.current.set(controlPlaneProjectId, failures);
         if (failures >= CONTROL_PLANE_PROJECT_ENSURE_MAX_ATTEMPTS) {
-          showToast(
-            'Cloud project setup is temporarily unavailable. Reload to retry when the service recovers.',
-            'error',
-          );
+          showToast('Project setup is temporarily unavailable. Reload to retry.', 'error');
           return;
         }
         const retryDelayMs = Math.min(
@@ -1661,7 +1658,7 @@ function EditorWorkspace({
           if (!cancelled) setRemoteDocumentBootstrapRetry((retry) => retry + 1);
         }, retryDelayMs);
         showToast(
-          `Cloud document could not be hydrated: ${error instanceof Error ? error.message : String(error)}. Retrying shortly.`,
+          `The project could not be loaded: ${error instanceof Error ? error.message : String(error)}. Retrying shortly.`,
           'error',
         );
       });

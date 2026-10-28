@@ -107,7 +107,6 @@ if (!app.requestSingleInstanceLock()) {
         : localWorkerEnv(process.env, { apiEnv: localJobApi.workerEnv, workerRoot }),
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
-  // Marks, but never deletes, any profile whose stored key cannot be read (PLAN-v4 §9c).
   const ipcHandlers = createIpcHandlers({
     fileRegistry,
     workerSupervisor,
@@ -197,6 +196,7 @@ if (!app.requestSingleInstanceLock()) {
     fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: '' });
 
   app.whenReady().then(async () => {
+    // Marks, but never deletes, any profile whose stored key cannot be read (PLAN-v4 §9c).
     // Keys are read only after ready: safeStorage is not guaranteed to work before it.
     void checkProfileCredentials(localDatabase, secretStore).catch(() => undefined);
     try {
@@ -213,8 +213,8 @@ if (!app.requestSingleInstanceLock()) {
     }
     Menu.setApplicationMenu(null);
     // Only the installed app claims the joy:// scheme. A development run would otherwise point
-    // it at the Electron binary in the source tree.
-    registerJoyProtocol(app);
+    // it at the Electron binary in the source tree. A smoke run leaves the host alone as well.
+    if (!isSmokeMode) registerJoyProtocol(app);
 
     if (!isDev) {
       protocol.handle(PACKAGED_RENDERER_SCHEME, (request) => {

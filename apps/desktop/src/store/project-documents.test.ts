@@ -29,10 +29,13 @@ describe('SqliteProjectDocumentStore', () => {
     expect(documents.get('p')).toEqual({ projectId: 'p', revisionId: 'r1', document: { n: 1 } });
   });
 
-  it('treats a retry of a write that already landed as saved, and keeps the stored document', () => {
+  it('treats a retry of the same write as saved, and refuses other content under a landed revision', () => {
     const documents = createStore();
     documents.put({ projectId: 'p', baseRevisionId: '', revisionId: 'r1', document: { n: 1 } });
     documents.put({ projectId: 'p', baseRevisionId: 'r1', revisionId: 'r2', document: { n: 2 } });
+    expect(
+      documents.put({ projectId: 'p', baseRevisionId: 'r1', revisionId: 'r2', document: { n: 2 } }),
+    ).toEqual({ kind: 'saved', revisionId: 'r2' });
     expect(
       documents.put({
         projectId: 'p',
@@ -40,7 +43,7 @@ describe('SqliteProjectDocumentStore', () => {
         revisionId: 'r2',
         document: { n: 99 },
       }),
-    ).toEqual({ kind: 'saved', revisionId: 'r2' });
+    ).toEqual({ kind: 'conflict', revisionId: 'r2' });
     expect(documents.get('p')?.document).toEqual({ n: 2 });
   });
 

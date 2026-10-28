@@ -719,6 +719,31 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     expect(rendered.textContent).toContain('(Saved in desktop vault)');
   });
 
+  it('asks for the key again when a saved profile key cannot be read', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        return [
+          {
+            id: 'prof-or-unreadable',
+            provider: 'openrouter',
+            baseUrl: 'https://openrouter.ai/api/v1',
+            modelId: 'anthropic/claude-3.5-sonnet',
+            createdAt: '2026-09-15T00:00:00.000Z',
+            updatedAt: '2026-09-15T00:00:00.000Z',
+            state: 'credential-unavailable',
+          },
+        ];
+      }
+      return undefined;
+    });
+    window.joyDesktop = { channels: ['desktop.provider-profile.list'], invoke };
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    expect(rendered.textContent).toContain('Saved key could not be read. Enter it again.');
+    expect(rendered.textContent).not.toContain('(Saved in desktop vault)');
+  });
+
   it('saves profile to desktop DPAPI when user connects with a key', async () => {
     const savedProfile = {
       id: 'prof-or-1',

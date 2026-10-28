@@ -215,7 +215,8 @@ export function JoyAgentSettingsDialog({
       );
       if (openRouterProfile) {
         setSavedProfile(openRouterProfile);
-        setHasSavedKey(true);
+        // A key that cannot be read is not a saved key, so the dialog asks for it again.
+        setHasSavedKey(openRouterProfile.state !== 'credential-unavailable');
         setModelId(openRouterProfile.modelId);
         setBaseUrl(openRouterProfile.baseUrl);
         setProvider('openrouter');
@@ -736,6 +737,11 @@ export function JoyAgentSettingsDialog({
                               {disabledLegacy && (
                                 <span className="joy-settings-legacy-status">
                                   Disabled legacy profile
+                                </span>
+                              )}
+                              {prof.state === 'credential-unavailable' && (
+                                <span className="joy-settings-legacy-status">
+                                  Saved key could not be read. Enter it again.
                                 </span>
                               )}
                             </div>

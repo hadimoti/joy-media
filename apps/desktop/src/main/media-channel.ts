@@ -96,6 +96,15 @@ function asJobId(payload: unknown): string | undefined {
   return asId((payload as Record<string, unknown>)['jobId']);
 }
 
+/**
+ * A Worker error can name the file a job failed on, so an error with a path separator is replaced
+ * by a fixed sentence. The job record keeps the full text.
+ */
+export function publicJobError(error: string | undefined): string | undefined {
+  if (error === undefined) return undefined;
+  return /[\\/]/.test(error) ? 'The job failed. Its details are not shown here.' : error;
+}
+
 /** The job as the editor may see it: never the lease token, the worker ID, or any path. */
 function publicJob(job: DispatchJob): Record<string, unknown> {
   return {
@@ -104,7 +113,7 @@ function publicJob(job: DispatchJob): Record<string, unknown> {
     status: job.status,
     progress: job.progress,
     attempts: job.attempts,
-    error: job.error,
+    error: publicJobError(job.error),
     cancelRequested: job.cancelRequested,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,

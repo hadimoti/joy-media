@@ -119,6 +119,26 @@ describe('BrowserControlPlaneClient on the local desktop channels', () => {
     });
   });
 
+  it('reports a job the desktop is running as leased, not queued', async () => {
+    const { bridge } = fakeBridge({
+      'desktop.media.render.enqueue': { jobId: 'desktop-job-run' },
+      'desktop.media.job.status': {
+        id: 'desktop-job-run',
+        jobType: 'render.export',
+        status: 'running',
+        progress: 0.4,
+        cancelRequested: false,
+      },
+    });
+    const client = new BrowserControlPlaneClient(bridge);
+    await client.enqueueRenderExport('project-run', 'editor-job-run', 'asset-run', {
+      timeline: [],
+    });
+
+    const [status] = await client.jobs('project-run');
+    expect(status).toMatchObject({ id: 'editor-job-run', state: 'leased' });
+  });
+
   it('uploads an original as bytes, and reads a derivative back as a blob', async () => {
     const { bridge, calls } = fakeBridge({
       'desktop.media.asset.register': { id: 'asset-u1' },
