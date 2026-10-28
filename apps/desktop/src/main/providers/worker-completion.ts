@@ -1,5 +1,9 @@
 import type { LocalAiRequest, LocalAiResult } from '../../jobs/local-job-api.js';
-import type { BrokerErrorCode, ProviderBroker } from './provider-broker.js';
+import {
+  MAX_WORKER_REQUEST_BYTES,
+  type BrokerErrorCode,
+  type ProviderBroker,
+} from './provider-broker.js';
 
 /**
  * Adapts the broker to the Worker's loopback route (PLAN-v4 §6b). The Worker gets the reply text
@@ -10,7 +14,11 @@ export function createWorkerCompletion(
   broker: ProviderBroker,
 ): (request: LocalAiRequest) => Promise<LocalAiResult> {
   return async (request) => {
-    const result = await broker.complete({ profileId: request.profileId, body: request.body });
+    const result = await broker.complete({
+      profileId: request.profileId,
+      body: request.body,
+      maxRequestBytes: MAX_WORKER_REQUEST_BYTES,
+    });
     if (result.ok) return { ok: true, text: result.data.text };
     return { ok: false, status: statusFor(result.code), message: result.message };
   };

@@ -394,9 +394,6 @@ function isSafeConfig(value: unknown): value is ByokSessionConfig {
   );
 }
 
-/** Largest provider request the engine may post: the broker's own request limit, in characters. */
-const MAX_PROVIDER_REQUEST_CHARS = 1024 * 1024;
-
 function isProviderCallResult(value: unknown): value is ProviderCallResult {
   if (!isRecord(value)) return false;
   if (value.ok === true) return exactKeys(value, ['ok', 'text']) && typeof value.text === 'string';
@@ -656,8 +653,7 @@ export function isWorkerToMainMessage(value: unknown): value is WorkerToMainMess
       value.baseUrl.length > 0 &&
       value.baseUrl.length <= 2_048 &&
       isSafePublicModelId(value.modelId) &&
-      isRecord(value.body) &&
-      JSON.stringify(value.body).length <= MAX_PROVIDER_REQUEST_CHARS
+      isRecord(value.body)
     );
   if (value.type === 'event') {
     const event = value.event;

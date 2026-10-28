@@ -731,10 +731,23 @@ async function callProvider(
 function providerErrorCode(code: string): JoyAgentErrorCode {
   if (code === 'AUTH_FAILED' || code === 'CREDENTIAL_UNAVAILABLE') return 'JOY_AGENT_AUTH_FAILED';
   if (code === 'TIMEOUT') return 'JOY_AGENT_TIMEOUT';
-  if (code === 'RESPONSE_TOO_LARGE') return 'JOY_AGENT_RESPONSE_TOO_LARGE';
-  if (code === 'PROVIDER_INCOMPATIBLE') return 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
+  if (code === 'RESPONSE_TOO_LARGE' || code === 'JOY_AGENT_RESPONSE_TOO_LARGE') {
+    return 'JOY_AGENT_RESPONSE_TOO_LARGE';
+  }
+  // A refusal by the endpoint policy, the key binding or the request itself is not a network failure.
+  if (PROVIDER_REFUSAL_CODES.has(code)) return 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
   return 'JOY_AGENT_CORS_OR_NETWORK';
 }
+
+const PROVIDER_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'PROVIDER_INCOMPATIBLE',
+  'ENDPOINT_REFUSED',
+  'BINDING_MISMATCH',
+  'PROFILE_NOT_FOUND',
+  'PROFILE_DISABLED',
+  'REQUEST_INVALID',
+  'REQUEST_TOO_LARGE',
+]);
 
 function parseProviderEnvelope(text: string): Record<string, unknown> {
   try {

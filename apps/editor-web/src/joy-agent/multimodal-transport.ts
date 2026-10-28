@@ -578,6 +578,8 @@ const PROVIDER_REJECTION_CODES: ReadonlySet<unknown> = new Set([
   'PROVIDER_HTTP_ERROR',
   'PROVIDER_INCOMPATIBLE',
   'JOY_AGENT_PROVIDER_INCOMPATIBLE',
+  'RESPONSE_TOO_LARGE',
+  'JOY_AGENT_RESPONSE_TOO_LARGE',
 ]);
 
 function isProviderAuthFailure(error: unknown): boolean {
@@ -610,7 +612,8 @@ function isDirectProviderEndpoint(url: URL): boolean {
 }
 
 function isLoopbackHost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+  // [::1] is not allowed for local models (PLAN-v4 S4), so consent never names it.
+  return hostname === 'localhost' || hostname === '127.0.0.1';
 }
 
 function isMimeTypeForModality(mimeType: string, modality: ObservationModality): boolean {

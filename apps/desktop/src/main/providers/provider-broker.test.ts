@@ -3,7 +3,8 @@ import { createMemorySecretStore } from '@joy-media/provider-sdk';
 import {
   createProviderBroker,
   endpointBindingDigest,
-  MAX_REQUEST_BYTES,
+  MAX_AGENT_REQUEST_BYTES,
+  MAX_WORKER_REQUEST_BYTES,
   MAX_RESPONSE_BYTES,
   type BrokerProfile,
   type ProviderFetch,
@@ -404,7 +405,8 @@ describe('provider broker: replies and failures', () => {
     expect(
       await broker.complete({
         profileId: 'p1',
-        body: { messages: [{ role: 'user', content: 'x'.repeat(MAX_REQUEST_BYTES) }] },
+        body: { messages: [{ role: 'user', content: 'x'.repeat(MAX_WORKER_REQUEST_BYTES) }] },
+        maxRequestBytes: MAX_WORKER_REQUEST_BYTES,
       }),
     ).toMatchObject({ ok: false, code: 'REQUEST_TOO_LARGE' });
     expect(await broker.complete({ profileId: 'p1', body: { messages: [] } })).toMatchObject({
@@ -557,7 +559,7 @@ describe('provider broker: probe and model lists', () => {
     const report = await broker.probe('p1');
 
     expect(report).toEqual({ ok: true, modelId: 'gpt-4o-mini' });
-    expect(JSON.parse(String(sent[0]?.init.body))).toMatchObject({ max_tokens: 1 });
+    expect(JSON.parse(String(sent[0]?.init.body))).toMatchObject({ max_completion_tokens: 1 });
   });
 
   it('maps a rejected key to AUTH_FAILED and an unknown profile to a redacted report', async () => {
@@ -657,5 +659,125 @@ describe('endpointBindingDigest', () => {
     expect(endpointBindingDigest('p2', 'https://api.x.ai', '/v1')).not.toBe(base);
     expect(endpointBindingDigest('p1', 'https://api.x.ai', '/v2')).not.toBe(base);
     expect(endpointBindingDigest('p1', 'https://api.example.com', '/v1')).not.toBe(base);
+  });
+});
+
+describe('provider broker: request and reply rules', () => {
+  it('sends OpenAI its completion limit under max_completion_tokens, and other providers max_tokens', async () => {
+    const openai = bound('p-openai', 'openai', 'https://api.openai.com/v1', 'gpt-4o-mini');
+    const grok = bound('p-grok', 'grok', 'https://api.x.ai/v1', 'grok-3');
+    const { broker, sent } = harness({
+      profiles: [openai, grok],
+      keys: { [openai.secretHandleId]: KEY, [grok.secretHandleId]: KEY },
+    });
+
+    await broker.complete({
+      profileId: 'p-openai',
+      body: { messages: [{ role: 'user', content: 'hi' }], max_tokens: 64 },
+    });
+    await broker.complete({
+      profileId: 'p-grok',
+      body: { messages: [{ role: 'user', content: 'hi' }], max_tokens: 64 },
+    });
+
+    const openaiBody = JSON.parse(String(sent[0]?.init.body)) as Record<string, unknown>;
+    expect(openaiBody).toMatchObject({ max_completion_tokens: 64 });
+    expect(openaiBody).not.toHaveProperty('max_tokens');
+    expect(JSON.parse(String(sent[1]?.init.body))).toMatchObject({ max_tokens: 64 });
+  });
+
+  it('refuses a reply whose key is written with JSON escapes', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        new Response('{"choices":[{"message":{"content":"\\u0073k-test-0123456789abcdef"}}]}', {
+          status: 200,
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+    expect(JSON.stringify(result)).not.toContain(KEY);
+  });
+
+  it('names a redirect target without its query, and never names the key', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: `https://evil.example/steal?k=${KEY}` },
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result).toMatchObject({ ok: false, code: 'REDIRECT_REFUSED' });
+    expect(result.ok === false && result.message).toContain('https://evil.example/steal');
+    expect(JSON.stringify(result)).not.toContain(KEY);
+    expect(JSON.stringify(result)).not.toContain('?k=');
+  });
+
+  it('accepts a model id with spaces and brackets, and refuses one with a control character', async () => {
+    const p = bound('p1', 'openai-compatible', 'http://127.0.0.1:1234/v1', 'local');
+    const { broker, sent } = harness({ profiles: [p] });
+
+    expect(
+      (await broker.complete({ profileId: 'p1', body: CHAT_BODY, modelId: 'Llama 3 (8B) q4' })).ok,
+    ).toBe(true);
+    expect(JSON.parse(String(sent[0]?.init.body))).toMatchObject({ model: 'Llama 3 (8B) q4' });
+    expect(
+      await broker.complete({ profileId: 'p1', body: CHAT_BODY, modelId: 'llama\u0007' }),
+    ).toMatchObject({ ok: false, code: 'REQUEST_INVALID' });
+  });
+
+  it('asks Anthropic for its first page of 1000 models, and maps a refusal to a content filter', async () => {
+    const p = bound('p1', 'claude', 'https://api.anthropic.com/v1', 'claude-sonnet-5-5');
+    const { broker, sent } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          id: 'msg_2',
+          stop_reason: 'refusal',
+          content: [{ type: 'text', text: 'No.' }],
+        }),
+    });
+
+    await broker.listModels({ profileId: 'p1' });
+    expect(sent[0]?.url).toBe('https://api.anthropic.com/v1/models?limit=1000');
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected a reply');
+    expect(JSON.parse(result.data.text)).toMatchObject({
+      choices: [{ finish_reason: 'content_filter' }],
+    });
+  });
+
+  it('accepts a request body up to the agent limit by default, and refuses past it', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({ profiles: [p], keys: { [p.secretHandleId]: KEY } });
+    const twoMiB = 'x'.repeat(2 * 1024 * 1024);
+
+    expect(
+      (
+        await broker.complete({
+          profileId: 'p1',
+          body: { messages: [{ role: 'user', content: twoMiB }] },
+        })
+      ).ok,
+    ).toBe(true);
+    expect(
+      await broker.complete({
+        profileId: 'p1',
+        body: { messages: [{ role: 'user', content: 'x'.repeat(MAX_AGENT_REQUEST_BYTES) }] },
+      }),
+    ).toMatchObject({ ok: false, code: 'REQUEST_TOO_LARGE' });
   });
 });

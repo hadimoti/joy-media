@@ -16,7 +16,7 @@ import type {
 import { LEGACY_PROVIDER_IDS } from '../store/migrations.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
-import { evaluateEndpoint } from '@joy-media/provider-sdk';
+import { evaluateEndpoint, normalizeBaseUrl } from '@joy-media/provider-sdk';
 import type { SecretStore } from '@joy-media/provider-sdk';
 import {
   endpointBindingDigest,
@@ -161,7 +161,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         if (
           request.apiKey === undefined &&
           (existing.provider !== request.provider ||
-            normalizeUrl(existing.baseUrl) !== normalizeUrl(request.baseUrl))
+            normalizeBaseUrl(existing.baseUrl) !== normalizeBaseUrl(request.baseUrl))
         ) {
           return { ok: false, error: 'Enter the key again to change the endpoint' };
         }
@@ -200,7 +200,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       deps.localDatabase.saveProviderProfile(profile);
       // A key saved again makes the profile usable again, without waiting for a restart.
       deps.localDatabase.clearProfileCredentialUnavailable(id);
-      return { ok: true, data: profile };
+      return { ok: true, data: listedProfile(profile) };
     },
     'desktop.provider-profile.list': (): IpcResult => {
       // Metadata only: no key, and no field that could carry one.
@@ -402,10 +402,6 @@ function asProfileId(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = (value as { id?: unknown }).id;
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
-}
-
-function normalizeUrl(value: string): string {
-  return value.trim().replace(/\/+$/, '');
 }
 
 /** The profile as the renderer sees it: the binding digest stays in the main process. */

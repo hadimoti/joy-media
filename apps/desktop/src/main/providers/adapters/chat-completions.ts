@@ -14,8 +14,17 @@ export function prepareChatCompletion(input: {
   readonly apiKey: string | undefined;
   readonly modelId: string;
   readonly body: CompletionBody;
+  /** The name the completion limit is sent under. Only OpenAI's newer models differ. */
+  readonly tokenLimitKey?: 'max_tokens' | 'max_completion_tokens';
 }): PreparedCall {
-  const payload = { ...input.body, model: input.modelId, stream: false };
+  const { max_tokens: maxTokens, ...rest } = input.body;
+  const limitKey = input.tokenLimitKey ?? 'max_tokens';
+  const payload = {
+    ...rest,
+    ...(maxTokens === undefined ? {} : { [limitKey]: maxTokens }),
+    model: input.modelId,
+    stream: false,
+  };
   return {
     method: 'POST',
     url: endpointUrl(input.baseUrl, 'chat/completions'),

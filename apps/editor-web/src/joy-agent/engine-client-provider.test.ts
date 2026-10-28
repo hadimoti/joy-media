@@ -58,6 +58,24 @@ function answers(worker: RecordingWorker): Record<string, unknown>[] {
 }
 
 describe('engine client provider calls', () => {
+  it('refuses a provider request that names another profile, model or URL than the session', async () => {
+    const providerCall = vi.fn<ProviderCall>(async () => '{}');
+    const worker = await startedClient(providerCall);
+
+    worker.emit({ ...PROVIDER_REQUEST, profileId: 'prof-other' });
+    worker.emit({ ...PROVIDER_REQUEST, requestId: 'provider-2', modelId: 'other/model' });
+    worker.emit({
+      ...PROVIDER_REQUEST,
+      requestId: 'provider-3',
+      baseUrl: 'https://evil.example/v1',
+    });
+
+    await vi.waitFor(() => expect(answers(worker)).toHaveLength(3));
+    expect(providerCall).not.toHaveBeenCalled();
+    for (const message of answers(worker)) {
+      expect(message.result).toMatchObject({ ok: false, code: 'REQUEST_INVALID' });
+    }
+  });
   it('sends the call to the desktop with the profile, the URL and the model, and answers the Worker with the reply', async () => {
     const providerCall = vi.fn<ProviderCall>(async () => '{"choices":[]}');
     const worker = await startedClient(providerCall);

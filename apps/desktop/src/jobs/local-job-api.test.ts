@@ -353,5 +353,20 @@ describe('local job API', () => {
       expect(text).toContain('The provider could not be reached.');
       expect(text).not.toContain(TOKEN);
     });
+
+    it('answers 409 for a cancelled job, and for a job whose lease has expired', async () => {
+      await queueThumbnailAndLease('prof-saved');
+      const held = database.jobDispatch.get('job-http');
+      if (held === undefined) throw new Error('expected the leased job');
+      database.jobDispatch.save({ ...held, cancelRequested: true });
+      expect((await postJson(aiPath, { jobId: 'job-http', messages })).status).toBe(409);
+      database.jobDispatch.save({
+        ...held,
+        cancelRequested: false,
+        leaseExpiresAt: '2000-01-01T00:00:00.000Z',
+      });
+      expect((await postJson(aiPath, { jobId: 'job-http', messages })).status).toBe(409);
+      expect(aiRequests).toEqual([]);
+    });
   });
 });

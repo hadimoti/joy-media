@@ -226,6 +226,11 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
       throw new JobProtocolError(403, 'the job is not leased to this Worker');
     }
     if (job.status !== 'running') throw new JobProtocolError(409, 'the job is not running');
+    if (job.cancelRequested) throw new JobProtocolError(409, 'the job was cancelled');
+    // An expired lease is no lease: the Worker may not spend on the job any more.
+    if (job.leaseExpiresAt === undefined || Date.parse(job.leaseExpiresAt) <= Date.now()) {
+      throw new JobProtocolError(409, 'the lease has expired');
+    }
     if (job.profileId === undefined) throw new JobProtocolError(409, 'the job has no AI profile');
     // Only messages and the sampling parameters come from the Worker. Any other field, including a
     // profile name or a model, is left out here and dropped again by the broker's allow-list.

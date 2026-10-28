@@ -55,7 +55,8 @@ export function prepareAnthropicModels(input: {
 }): PreparedCall {
   return {
     method: 'GET',
-    url: endpointUrl(input.baseUrl, 'models'),
+    // Anthropic pages its model list, 20 entries by default. 1000 is the largest page it returns.
+    url: `${endpointUrl(input.baseUrl, 'models')}?limit=1000`,
     headers: headersFor(input.apiKey),
     body: undefined,
   };
@@ -261,6 +262,7 @@ function requireString(value: unknown, label: string): string {
 }
 
 function finishReason(stop: unknown): string {
+  if (stop === 'refusal') return 'content_filter';
   if (stop === 'tool_use') return 'tool_calls';
   if (stop === 'max_tokens') return 'length';
   return 'stop';

@@ -4,7 +4,6 @@
  * that the saved key is bound to that exact endpoint, sends one request and returns a reply that
  * never contains a credential, a base URL or a header.
  */
-import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import {
   type DirectProviderErrorCode,
@@ -27,12 +26,19 @@ import {
 } from './adapters/anthropic-messages.js';
 import { AdapterRequestError, type ModelEntry, type PreparedCall } from './adapters/types.js';
 import { isRecord, parseCompletionBody, type CompletionBody } from './request-body.js';
+import { endpointBindingDigest } from '../../store/profile-binding.js';
+
+export { endpointBindingDigest };
 
 /** Largest request the broker sends, and largest reply it reads (PLAN-v4 §6b). */
-export const MAX_REQUEST_BYTES = 1024 * 1024;
+/** The largest request the Worker route may send (PLAN-v4 §6b). */
+export const MAX_WORKER_REQUEST_BYTES = 1024 * 1024;
+/** The largest request the editor may send: the observation batch limit (MAX_MULTIMODAL_REQUEST_BYTES). */
+export const MAX_AGENT_REQUEST_BYTES = 32 * 1024 * 1024;
 export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const COMPLETE_TIMEOUT_MS = 120_000;
-const CONTROL_TIMEOUT_MS = 15_000;
+/** Long enough for a local model that is still loading. */
+const CONTROL_TIMEOUT_MS = 30_000;
 /** The placeholder the editor sends for a keyless local model. It is never a real key. */
 const NO_KEY_PLACEHOLDER = 'not-provided';
 
@@ -105,6 +111,8 @@ export interface ProviderBroker {
     readonly modelId?: string;
     /** The base URL the user saw. It must equal the saved profile's, or the call is refused. */
     readonly baseUrl?: string;
+    /** The largest request this call may send. The Worker route passes its own, smaller limit. */
+    readonly maxRequestBytes?: number;
   }): Promise<BrokerResult<{ readonly text: string }>>;
   /** The redacted connectivity probe the settings dialog shows. Never throws. */
   probe(profileId: string): Promise<DirectProviderProbeReport>;
@@ -113,15 +121,9 @@ export interface ProviderBroker {
   ): Promise<BrokerResult<readonly ModelEntry[]>>;
 }
 
-/** Ties a saved key to one endpoint (PLAN-v4 §6c item 6). A changed URL changes the digest. */
-export function endpointBindingDigest(profileId: string, origin: string, basePath: string): string {
-  return createHash('sha256')
-    .update(JSON.stringify([profileId, origin, basePath]))
-    .digest('hex');
-}
-
 interface Endpoint {
   readonly api: 'chat-completions' | 'anthropic-messages';
+  readonly provider: string;
   readonly baseUrl: string;
   readonly modelId: string;
   readonly apiKey: string | undefined;
@@ -197,7 +199,10 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
 
   async function run(endpoint: Endpoint, body: CompletionBody, timeoutMs: number): Promise<string> {
     const call = prepareCompletion(endpoint, body);
-    const reply = assertNoCredential(await send(deps.fetch, call, timeoutMs), endpoint);
+    const reply = assertNoCredential(
+      await send(deps.fetch, call, timeoutMs, endpoint.apiKey),
+      endpoint,
+    );
     if (endpoint.api === 'anthropic-messages') {
       try {
         return anthropicReplyToChatCompletion(reply, endpoint.modelId);
@@ -218,8 +223,12 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
       try {
         const parsed = parseCompletionBody(request.body);
         if (!parsed.ok) throw new BrokerError('REQUEST_INVALID', parsed.message);
-        if (Buffer.byteLength(JSON.stringify(parsed.body)) > MAX_REQUEST_BYTES) {
-          throw new BrokerError('REQUEST_TOO_LARGE', 'The request is larger than 1 MiB.');
+        const limit = request.maxRequestBytes ?? MAX_AGENT_REQUEST_BYTES;
+        if (Buffer.byteLength(JSON.stringify(parsed.body)) > limit) {
+          throw new BrokerError(
+            'REQUEST_TOO_LARGE',
+            `The request is larger than ${limit / (1024 * 1024)} MiB.`,
+          );
         }
         const resolved = await resolveProfile(request.profileId, request.baseUrl);
         const endpoint =
@@ -264,7 +273,10 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
           endpoint.api === 'anthropic-messages'
             ? prepareAnthropicModels({ baseUrl: endpoint.baseUrl, apiKey: requireKey(endpoint) })
             : prepareChatModels({ baseUrl: endpoint.baseUrl, apiKey: endpoint.apiKey });
-        const reply = assertNoCredential(await send(deps.fetch, call, controlMs), endpoint);
+        const reply = assertNoCredential(
+          await send(deps.fetch, call, controlMs, endpoint.apiKey),
+          endpoint,
+        );
         try {
           const models =
             endpoint.api === 'anthropic-messages'
@@ -288,18 +300,39 @@ function makeEndpoint(
   apiKey: string | undefined,
 ): Endpoint {
   const api = findRegistryProvider(provider)?.api ?? 'chat-completions';
-  return { api, baseUrl: normalizeBaseUrl(baseUrl), modelId, apiKey };
+  return { api, provider, baseUrl: normalizeBaseUrl(baseUrl), modelId, apiKey };
 }
 
 /** A reply that carries the key is refused, and its text is never returned. */
 function assertNoCredential(reply: string, endpoint: Endpoint): string {
-  if (endpoint.apiKey !== undefined && reply.includes(endpoint.apiKey)) {
+  if (endpoint.apiKey !== undefined && holdsCredential(reply, endpoint.apiKey)) {
     throw new BrokerError(
       'PROVIDER_INCOMPATIBLE',
       'The provider reply was refused: it contained a credential.',
     );
   }
   return reply;
+}
+
+/** True when the key, or any string inside the reply, holds the key. JSON escapes do not hide it. */
+function holdsCredential(reply: string, key: string): boolean {
+  if (reply.includes(key)) return true;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(reply);
+  } catch {
+    return false;
+  }
+  return containsInStrings(parsed, key);
+}
+
+function containsInStrings(value: unknown, needle: string): boolean {
+  if (typeof value === 'string') return value.includes(needle);
+  if (Array.isArray(value)) return value.some((item) => containsInStrings(item, needle));
+  if (typeof value === 'object' && value !== null) {
+    return Object.values(value).some((item) => containsInStrings(item, needle));
+  }
+  return false;
 }
 
 /** A keyless local model sends no credential. Any other value is a key, sent as given. */
@@ -309,9 +342,12 @@ function usableKey(value: string | null | undefined): string | undefined {
   return value;
 }
 
-/** A model id is a short token with no spaces or control characters (it is sent as JSON). */
+/** A model id travels inside a JSON body, so it needs a sane length and no control characters. */
 function safeModelId(value: string): string {
-  if (!/^[A-Za-z0-9._:/@+-]{1,256}$/.test(value)) {
+  const hasControl = [...value].some(
+    (char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f,
+  );
+  if (value.length === 0 || value.length > 256 || hasControl) {
     throw new BrokerError('REQUEST_INVALID', 'The model id is not valid.');
   }
   return value;
@@ -339,6 +375,8 @@ function prepareCompletion(endpoint: Endpoint, body: CompletionBody): PreparedCa
       apiKey: endpoint.apiKey,
       modelId: endpoint.modelId,
       body,
+      // OpenAI's newer models take the completion limit under this name.
+      tokenLimitKey: endpoint.provider === 'openai' ? 'max_completion_tokens' : 'max_tokens',
     });
   } catch (error) {
     if (error instanceof AdapterRequestError)
@@ -355,6 +393,7 @@ async function send(
   fetchImpl: ProviderFetch,
   call: PreparedCall,
   timeoutMs: number,
+  secret: string | undefined,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -367,11 +406,10 @@ async function send(
       signal: controller.signal,
     });
     if (response.status >= 300 && response.status < 400) {
-      const target = response.headers.get('location');
-      const named = target === null ? '' : ` to ${target.slice(0, 200)}`;
+      const named = namedTarget(response.headers.get('location'), call.url, secret);
       throw new BrokerError(
         'REDIRECT_REFUSED',
-        `The provider redirected${named}. Redirects are not followed.`,
+        `The provider redirected${named === '' ? '' : ` to ${named}`}. Redirects are not followed.`,
       );
     }
     if (response.status === 401 || response.status === 403) {
@@ -395,6 +433,23 @@ async function send(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** The redirect target without its query or fragment, or nothing when it would hold the key. */
+function namedTarget(
+  location: string | null,
+  requestUrl: string,
+  secret: string | undefined,
+): string {
+  if (location === null) return '';
+  let target: URL;
+  try {
+    target = new URL(location, requestUrl);
+  } catch {
+    return '';
+  }
+  const named = `${target.origin}${target.pathname}`;
+  return secret !== undefined && secret.length > 0 && named.includes(secret) ? '' : named;
 }
 
 async function readBounded(response: Response, limit: number): Promise<string> {

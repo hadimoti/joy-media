@@ -1,4 +1,5 @@
 import { requestAgentCompletion } from '../desktop-client.js';
+import { normalizeBaseUrl } from '@joy-media/provider-sdk';
 import { ProviderCallError, type ProviderCall } from './provider-call.js';
 import {
   createHostRpcHost,
@@ -259,22 +260,32 @@ async function answerProviderRequest(
   worker: Worker,
   request: Extract<WorkerToMainMessage, { readonly type: 'provider-request' }>,
   providerCall: ProviderCall,
+  expected: ByokSessionConfig | undefined,
 ): Promise<void> {
   let result: ProviderCallResult;
-  try {
-    const text = await providerCall({
-      profileId: request.profileId,
-      baseUrl: request.baseUrl,
-      modelId: request.modelId,
-      body: request.body,
-    });
-    result = { ok: true, text };
-  } catch (error) {
+  if (!matchesSession(request, expected)) {
+    // The Worker may name only the profile, URL and model this session was configured with.
     result = {
       ok: false,
-      code: error instanceof ProviderCallError ? error.code : 'NETWORK_ERROR',
-      message: error instanceof Error ? error.message : 'The provider request failed',
+      code: 'REQUEST_INVALID',
+      message: 'The provider request does not match the configured session.',
     };
+  } else {
+    try {
+      const text = await providerCall({
+        profileId: request.profileId,
+        baseUrl: request.baseUrl,
+        modelId: request.modelId,
+        body: request.body,
+      });
+      result = { ok: true, text };
+    } catch (error) {
+      result = {
+        ok: false,
+        code: error instanceof ProviderCallError ? error.code : 'NETWORK_ERROR',
+        message: error instanceof Error ? error.message : 'The provider request failed',
+      };
+    }
   }
   worker.postMessage({
     protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
@@ -284,6 +295,19 @@ async function answerProviderRequest(
   });
 }
 
+/** True only for the profile, URL and model the main thread configured the session with. */
+function matchesSession(
+  request: Extract<WorkerToMainMessage, { readonly type: 'provider-request' }>,
+  expected: ByokSessionConfig | undefined,
+): boolean {
+  return (
+    expected !== undefined &&
+    request.profileId === expected.profileId &&
+    request.modelId === expected.modelId &&
+    normalizeBaseUrl(request.baseUrl) === normalizeBaseUrl(expected.baseUrl)
+  );
+}
+
 export function createSingleWorkerEngineClient(
   workerFactory?: () => Worker,
   providerCall: ProviderCall = requestAgentCompletion,
@@ -291,6 +315,8 @@ export function createSingleWorkerEngineClient(
   let worker: Worker | undefined;
   let generation = 0;
   let configured = false;
+  /** The session the main thread configured. A provider request must match it (PLAN-v4 §6a). */
+  let activeSession: ByokSessionConfig | undefined;
   let latestStatus: ByokSessionStatus | undefined;
   let latestMediaCapabilities: JoyAgentMediaCapabilityReport | undefined;
   const pending = new Map<'configure' | 'test', Pending>();
@@ -606,7 +632,12 @@ export function createSingleWorkerEngineClient(
       }
       const message = event.data;
       if (message.type === 'provider-request') {
-        void answerProviderRequest(owner, message, providerCall);
+        void answerProviderRequest(
+          owner,
+          message,
+          providerCall,
+          configured ? activeSession : undefined,
+        );
         return;
       }
       if (message.type === 'configured' || message.type === 'test-result') {
@@ -933,6 +964,7 @@ export function createSingleWorkerEngineClient(
       clear();
       latestStatus = { provider: safe.provider, modelId: safe.modelId, capability: 'untested' };
       const result = await requestStatus('configure', { config: safe });
+      activeSession = safe;
       configured = true;
       return result;
     },
