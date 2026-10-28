@@ -56,11 +56,14 @@ nvidia-smi --query-gpu=name,driver_version --format=csv,noheader | Tee-Object -A
 Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,Status | Format-List | Out-String |
   Tee-Object -Append C:\JoyMediaG1\logs\host.txt
 node --version | Tee-Object -Append C:\JoyMediaG1\logs\host.txt
-reg.exe export "HKCU\Software\Classes\joy" C:\JoyMediaG1\logs\joy-key-before.reg /y
+New-Item -ItemType Directory -Force C:\JoyMediaG1\exports, C:\JoyMediaG1\stage-userdata | Out-Null
+$joyState = if (Test-Path 'HKCU:\Software\Classes\joy') { 'present' } else { 'absent' }
+"joy-key $joyState" | Tee-Object -Append C:\JoyMediaG1\logs\host.txt
+if ($joyState -eq 'present') { reg.exe export "HKCU\Software\Classes\joy" C:\JoyMediaG1\logs\joy-key-before.reg /y }
 ```
 
-Expected: an NVIDIA GeForce RTX 5070 Ti. A different driver version is recorded, not a stop. The `reg export` file is the
-`joy://` registration as it was before the session. If the key is absent, the export fails, and the log records "absent".
+Expected: an NVIDIA GeForce RTX 5070 Ti. A different driver version is recorded, not a stop. `host.txt` records
+`joy-key present` or `joy-key absent`. If the key was present, `joy-key-before.reg` holds it as it was before the session.
 
 ### Step 1: copy and hash-check the baseline and the kit
 
@@ -120,7 +123,7 @@ Start-Process C:\JoyMediaG1\baseline\joy-media.exe -ArgumentList '--user-data-di
 ```
 
 Run the sampler to `C:\JoyMediaG1\logs\encoder-baseline-fallback.csv` as in step 2, and record the same answers. The
-fallback disables the Media Foundation encoder, so the count is expected to be low. It is recorded, and it is never accepted.
+fallback disables the Media Foundation encoder, so the count is expected to be low. It is recorded, and it is never accepted. If you export, choose `C:\JoyMediaG1\exports` in the save dialog.
 Close the app as in step 2.
 
 ### Step 4: folder names (read only, record only)
@@ -150,7 +153,8 @@ $start = (Get-Date).ToUniversalTime()
 Start-Process C:\JoyMediaG1\kit\app\joy-media.exe -ArgumentList '--joy-media-test-user-data=C:\JoyMediaG1\userdata'
 ```
 
-Run the sampler to `C:\JoyMediaG1\logs\encoder-instrumented-default.csv` during the export attempt, as in step 2. Then:
+Run the sampler to `C:\JoyMediaG1\logs\encoder-instrumented-default.csv` during the export attempt, as in step 2. In the save
+dialog, choose `C:\JoyMediaG1\exports`. Then:
 
 - Read `C:\JoyMediaG1\userdata\gpu-events.jsonl`. Record each line's `exitCodeHex` and `reason`. The measurement is
   `encoder-max-instrumented-default`.
@@ -178,14 +182,15 @@ Record the faulting module and the fast-fail subcode from `C:\JoyMediaG1\userdat
 ### Step 7: stage probe, one stage per process
 
 ```powershell
-node C:\JoyMediaG1\kit\tree\tests\desktop\gpu-probe\run-stage-probe.mjs --out C:\JoyMediaG1\logs\stage-probe --stages S2,S3,S4,S5,S6 --electron C:\JoyMediaG1\kit\stage-runtime\electron.exe
+node C:\JoyMediaG1\kit\tree\tests\desktop\gpu-probe\run-stage-probe.mjs --out C:\JoyMediaG1\logs\stage-probe --stages S2,S3,S4,S5,S6 --electron C:\JoyMediaG1\kit\stage-runtime\electron.exe --user-data C:\JoyMediaG1\stage-userdata
 ```
 
 The probe uses `stage-runtime`, a plain copy of the runtime with no app. It refuses any runtime that holds an app, so it cannot
 start the JOY Media app by mistake. Do not point it at `app\`.
 
-The probe keeps each stage's user data under `C:\JoyMediaG1\logs\stage-probe\userdata`, not in your AppData. It starts each
-stage in a fresh process, and it stops at the first stage that kills the GPU process. Record the
+The probe keeps each stage's user data under `C:\JoyMediaG1\stage-userdata`, outside `logs`, so it is not part of the log
+handover. Each stage starts with a fresh profile, in a fresh process, and the probe stops at the first stage that kills the GPU
+process. Record the
 `summary.json` `stoppedAfter` value. That is the measurement `failing-stage`.
 
 ### Step 8: Media Foundation encode, one encoder per process
@@ -218,16 +223,21 @@ The receipt steps, with their measurements, are: `encoder-max-baseline-default`,
 
 Confirm that no `joy-media.exe` and no probe process is still running.
 
-Compare the `joy://` registration with the one from step 0:
+Compare the `joy://` registration with the one from step 0, if step 0 recorded `joy-key present`:
 
 ```powershell
 reg.exe export "HKCU\Software\Classes\joy" C:\JoyMediaG1\logs\joy-key-after.reg /y
 fc.exe C:\JoyMediaG1\logs\joy-key-before.reg C:\JoyMediaG1\logs\joy-key-after.reg
 ```
 
-If the files differ, restore the step-0 value with `reg.exe import C:\JoyMediaG1\logs\joy-key-before.reg`. If the key was absent in
-step 0, delete it with `reg.exe delete "HKCU\Software\Classes\joy" /f`. This restore reverses a change the session made, and the
-owner runs it. Record the outcome in the log.
+Then act on the step-0 record in `host.txt`:
+
+- If step 0 recorded `joy-key present` and the files differ, delete the key and import the step-0 file. That restores it
+  exactly, including any value the session added: `reg.exe delete "HKCU\Software\Classes\joy" /f`, then
+  `reg.exe import C:\JoyMediaG1\logs\joy-key-before.reg`.
+- If step 0 recorded `joy-key absent`, delete the key if it exists now: `reg.exe delete "HKCU\Software\Classes\joy" /f`.
+
+This restore reverses a change the session made, and the owner runs it. Record the outcome in the log.
 
 Then send the logs to engineering. Delete `C:\JoyMediaG1` after they confirm that they have the logs.
 

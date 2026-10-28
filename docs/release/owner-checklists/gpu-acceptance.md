@@ -12,6 +12,10 @@ approved that candidate's commit (GD5). Nothing in it runs unattended.
 - Node 22.6 or later and pnpm 11.15.0 are on this PC. Their folders are the `-NodeDirectory` and `-PnpmDirectory` values below.
   Nothing is installed.
 - The harness is never run with a JOY Media window open. It refuses to start while the test install is running.
+- Before step 1, create `C:\JoyMediaG1\acceptance` and record the `joy://` key there with
+  `reg.exe export "HKCU\Software\Classes\joy" C:\JoyMediaG1\acceptance\joy-key-before.reg /y`, or note that it is absent.
+  The candidate is the shipped build. Its installer and every launch register `joy://` to the installed folder, as the shipped
+  app does. After step 3, record whether the key changed.
 
 ## Step 1: install the candidate with its own installer
 

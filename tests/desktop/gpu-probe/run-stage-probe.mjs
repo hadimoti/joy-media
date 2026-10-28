@@ -5,7 +5,7 @@
  * run. It never touches the installed app or the app's source. */
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +47,8 @@ for (const stage of stages) {
 }
 const timeoutMs = Number(option('timeout-seconds', '120')) * 1000;
 const fakeStagePage = process.argv.includes('--fake-stage-page');
+// The user-data root for the stages. The G1 checklist names a folder outside the logs, so the handover does not carry profiles.
+const userDataRoot = resolve(option('user-data', join(outDir, 'userdata')));
 
 // The Electron executable: the copy named by --electron (G1 uses a copied runtime), or the one apps/desktop installs.
 const electronOption = option('electron', '') ?? '';
@@ -77,7 +79,9 @@ if (holdsPackagedApp) {
   );
 }
 
-function runStage(stage, resultPath) {
+async function runStage(stage, resultPath) {
+  // Each run of a stage starts from a fresh profile, so no earlier run's data reaches the handover.
+  await rm(join(userDataRoot, stage), { recursive: true, force: true });
   return new Promise((resolveRun) => {
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
@@ -86,7 +90,7 @@ function runStage(stage, resultPath) {
       probeMain,
       `--stage=${stage}`,
       `--out=${resultPath}`,
-      `--user-data-dir=${join(outDir, 'userdata', stage)}`,
+      `--user-data-dir=${join(userDataRoot, stage)}`,
     ];
     if (fakeStagePage) args.push('--fake=1');
     const child = spawn(electronBinary, args, {
