@@ -173,8 +173,11 @@ Record the faulting module and the fast-fail subcode from `C:\JoyMediaG1\userdat
 ### Step 7: stage probe, one stage per process
 
 ```powershell
-node C:\JoyMediaG1\kit\tree\tests\desktop\gpu-probe\run-stage-probe.mjs --out C:\JoyMediaG1\logs\stage-probe --stages S2,S3,S4,S5,S6 --electron C:\JoyMediaG1\kit\app\joy-media.exe
+node C:\JoyMediaG1\kit\tree\tests\desktop\gpu-probe\run-stage-probe.mjs --out C:\JoyMediaG1\logs\stage-probe --stages S2,S3,S4,S5,S6 --electron C:\JoyMediaG1\kit\stage-runtime\electron.exe
 ```
+
+The probe uses `stage-runtime`, a plain copy of the runtime with no app. It refuses any runtime that holds an app, so it cannot
+start the JOY Media app by mistake. Do not point it at `app\`.
 
 The probe starts each stage in a fresh process, and it stops at the first stage that kills the GPU process. Record the
 `summary.json` `stoppedAfter` value. That is the measurement `failing-stage`.

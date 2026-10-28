@@ -72,6 +72,11 @@ try {
         Copy-Item -Destination $resourcesApp -Recurse -Force
     Remove-Item -LiteralPath $packageFolder -Recurse -Force
 
+    # The stage probe needs a plain runtime, with no app: Electron would start a packaged app in resources instead of the probe.
+    $stageRuntime = Join-Path $outFull 'stage-runtime'
+    New-Item -ItemType Directory -Path $stageRuntime -Force | Out-Null
+    Get-ChildItem -LiteralPath $electronDist -Force | Copy-Item -Destination $stageRuntime -Recurse -Force
+
     # 3. The tools, under a tree that mirrors the repository, so each tool's "outside the repository" check is correct.
     $tree = Join-Path $outFull 'tree'
     $diagnostics = Join-Path $tree 'tooling\diagnostics'
@@ -107,6 +112,7 @@ try {
         "built-utc: $((Get-Date).ToUniversalTime().ToString('o'))"
         "build: instrumented (package-release.mjs --unpacked --instrumented)"
         "electron: $electronPin"
+        "stage-runtime: a plain copy of the same runtime, with no app"
         "thresholds-sha256: $thresholdsSha256"
         "node: $(node --version)"
     )

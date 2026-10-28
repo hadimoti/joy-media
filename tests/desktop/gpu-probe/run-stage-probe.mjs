@@ -67,6 +67,15 @@ if (existsSync(runtimeVersionFile)) {
     );
   }
 }
+// Electron prefers an app in resources/ to the script it is given. A runtime with one would start that app, so refuse it.
+const holdsPackagedApp = ['app', 'app.asar'].some((name) =>
+  existsSync(join(dirname(electronBinary), 'resources', name)),
+);
+if (holdsPackagedApp) {
+  throw new Error(
+    'the Electron runtime holds an app in resources, so the probe would start that app. Pass a runtime copy with no app.',
+  );
+}
 
 function runStage(stage, resultPath) {
   return new Promise((resolveRun) => {
