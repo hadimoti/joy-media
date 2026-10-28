@@ -26,7 +26,7 @@ internal static class MfProbe
     private const int ExitEncoded = 0;
     private const int ExitNoEncoder = 2;
     private const int ExitFailure = 3;
-    // Not checked against mferror.h (no SDK on this PC). If the value is wrong, the first wait reports the real HRESULT.
+    // Not checked against mferror.h (no SDK on this PC). A wrong value is harmless: any failed GetEvent counts as no event yet.
     private const int MfENoEventsAvailable = unchecked((int)0xC00D36D8);
     private const int MfETransformNeedMoreInput = unchecked((int)0xC00D6D72);
     private const uint MftMessageCommandDrain = 0x00000001;
@@ -384,7 +384,7 @@ internal static class MfProbe
             int hr = MFStartup(MfVersion, 0);
             if (hr != SOk)
             {
-                Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, "mfstartup hr=" + hr));
+                Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, "mfstartup hr=0x" + ((uint)hr).ToString("X8")));
                 return ExitFailure;
             }
             started = true;
@@ -393,7 +393,7 @@ internal static class MfProbe
             hr = EnumerateH264Encoders(out activates, out count);
             if (hr != SOk)
             {
-                Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, "mftenumex hr=" + hr));
+                Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, "mftenumex hr=0x" + ((uint)hr).ToString("X8")));
                 return ExitFailure;
             }
             if (index >= count)
@@ -490,11 +490,11 @@ internal static class MfProbe
                 if (!isAsync) drained = true;
             }
             exit = outputBytes > 0 ? ExitEncoded : ExitFailure;
-            Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, exit == ExitFailure ? "no-output" : "ok"));
+            Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, exit == ExitFailure ? "no-output last-event-hr=0x" + ((uint)lastEventHr).ToString("X8") : "ok"));
         }
         catch (EncodeStepException failure)
         {
-            Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, failure.Stage + " hr=" + failure.Hr));
+            Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, failure.Stage + " hr=0x" + ((uint)failure.Hr).ToString("X8")));
             exit = ExitFailure;
         }
         catch (Exception failure)
@@ -614,16 +614,23 @@ internal static class MfProbe
             if (eventType == wanted) return;
             if (eventType == -1) Thread.Sleep(10);
         }
-        throw new EncodeStepException(stage, unchecked((int)0x80004004));
+        throw new EncodeStepException(stage, lastEventHr != 0 ? lastEventHr : unchecked((int)0x80004004));
     }
 
-    // The next event's type, or -1 when none is waiting. A failed read throws with its HRESULT, so it is reported, not waited out.
+    // The last GetEvent HRESULT that was not an event. It is diagnostic only, and the wait reports it if it never clears.
+    private static int lastEventHr;
+
+    // The next event's type, or -1 when none is waiting. Any other failed GetEvent also means "none yet", and its HRESULT is kept.
     private static int NextEventType(IMFMediaEventGenerator events)
     {
         IMFMediaEvent mediaEvent;
         int hr = events.GetEvent(MfEventFlagNoWait, out mediaEvent);
         if (hr == MfENoEventsAvailable) return -1;
-        Check(hr, "get-event");
+        if (hr != SOk)
+        {
+            lastEventHr = hr;
+            return -1;
+        }
         uint eventType;
         Check(mediaEvent.GetType(out eventType), "get-event-type");
         return (int)eventType;
