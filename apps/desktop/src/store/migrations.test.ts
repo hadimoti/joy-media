@@ -23,9 +23,7 @@ function createV10Schema(db: DatabaseSync): void {
        id TEXT PRIMARY KEY, kind TEXT NOT NULL, ref_id TEXT NOT NULL, status TEXT NOT NULL,
        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, error TEXT)`,
   );
-  db.exec(
-    `CREATE TABLE secrets (handle_id TEXT PRIMARY KEY, ciphertext_base64 TEXT NOT NULL)`,
-  );
+  db.exec(`CREATE TABLE secrets (handle_id TEXT PRIMARY KEY, ciphertext_base64 TEXT NOT NULL)`);
   db.exec(
     `CREATE TABLE provider_profiles (
        id TEXT PRIMARY KEY, name TEXT, provider TEXT NOT NULL, base_url TEXT NOT NULL,

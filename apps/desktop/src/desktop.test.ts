@@ -19,7 +19,10 @@ describe('desktop shell boundaries', () => {
       isAllowedIpcRequest({ origin: 'joy-media-app://renderer', channel: 'desktop.execute' }),
     ).toBe(false);
     expect(
-      isAllowedIpcRequest({ origin: 'joy-media-app://renderer', channel: 'desktop.check-for-update' }),
+      isAllowedIpcRequest({
+        origin: 'joy-media-app://renderer',
+        channel: 'desktop.check-for-update',
+      }),
     ).toBe(false);
   });
   it('keeps paths behind revocable opaque references', () => {

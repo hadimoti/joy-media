@@ -81,7 +81,10 @@ export function ensureMigrationSchema(db: DatabaseSync): void {
  * Marks every legacy profile that has no state row yet as `disabled-legacy`. Returns the IDs it
  * marked. Runs in one transaction: a failure part-way through rolls the whole pass back.
  */
-export function reconcileLegacyProfiles(db: DatabaseSync, options: MigrationOptions): readonly string[] {
+export function reconcileLegacyProfiles(
+  db: DatabaseSync,
+  options: MigrationOptions,
+): readonly string[] {
   const pending = db
     .prepare(
       `SELECT id FROM provider_profiles
@@ -118,9 +121,8 @@ export function runMigrations(db: DatabaseSync, options: MigrationOptions): read
   ensureMigrationSchema(db);
   const ran: string[] = [];
   for (const step of ONE_TIME_STEPS) {
-    const done = db
-      .prepare('SELECT step FROM migration_state WHERE step = ?')
-      .get(step.id) as { step: string } | undefined;
+    const done = db.prepare('SELECT step FROM migration_state WHERE step = ?').get(step.id) as
+      { step: string } | undefined;
     if (done !== undefined) continue;
     db.exec('BEGIN IMMEDIATE');
     try {
