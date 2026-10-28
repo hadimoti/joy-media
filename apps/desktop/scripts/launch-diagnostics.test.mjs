@@ -1,9 +1,10 @@
 // Launch test for the default packaged build (plan section 10d, G0 item 2). A default packaged launch with the diagnostics switch
 // must write no diagnostic file under its user-data folder. The live check needs the default packaged joy-media.exe, so it runs
-// only when JOY_MEDIA_DEFAULT_LAUNCH_EXE names that file: the G1 step with the owner present, or a machine that is not the RTX
-// host. Without it, the live check is skipped. The checker and the launch plumbing always run, against a stand-in program.
-// A crash reporter leaves no file to look for, so this test does not check for one. The static exclusion test checks that the
-// default staged build contains no crashReporter string.
+// only when JOY_MEDIA_DEFAULT_LAUNCH_EXE names that file, and only on a disposable host (Windows Sandbox, a Hyper-V guest or a CI
+// container). A default launch registers the joy:// protocol and creates ~/joy-media-assets, which would change any other host.
+// Without the variable, the live check is skipped; on any other host it fails. The checker and the launch plumbing always run,
+// against a stand-in program. A crash reporter leaves no file to look for, so this test does not check for one. The static
+// exclusion test checks that the default staged build contains no crashReporter string.
 
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
@@ -13,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { assertDisposableHost } from '../../../tests/desktop/disposable-host.mjs';
 
 /** The switch that enables diagnostics in the instrumented build. The default build must ignore it. */
 export const DIAGNOSTICS_SWITCH = '--joy-media-gpu-diagnostics';
@@ -39,13 +41,33 @@ export function findDiagnosticFiles(root) {
   return found.sort();
 }
 
+// How long a stopped program may take to exit before the test fails, rather than waiting forever.
+const STOP_TIMEOUT_MILLISECONDS = 15000;
+
+/** Resolves to `value` after the given time. The timer does not keep the test process alive. */
+function delay(milliseconds, value) {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(value), milliseconds).unref();
+  });
+}
+
+// The packaged app has child processes (GPU, renderer), so the whole tree is stopped: taskkill /T on Windows, and the process
+// group elsewhere, since launchAndCheck starts the program as a group leader there. If that fails, the direct child is stopped.
 function stopTree(child) {
-  // The packaged app has child processes (GPU, renderer), so the whole tree is stopped.
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    const { status } = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore',
+    });
+    if (status === 0) return;
   } else {
-    child.kill('SIGKILL');
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+      return;
+    } catch {
+      // The group is already gone, so the direct child is stopped below.
+    }
   }
+  child.kill('SIGKILL');
 }
 
 /**
@@ -64,22 +86,31 @@ export async function launchAndCheck({
     env,
     stdio: 'ignore',
     windowsHide: true,
+    detached: process.platform !== 'win32',
   });
-  const exited = new Promise((resolve) =>
-    child.once('exit', (code, signal) => resolve({ code, signal })),
-  );
-  const early = await Promise.race([
-    exited,
-    new Promise((resolve) => setTimeout(() => resolve(null), waitMilliseconds)),
-  ]);
+  const exited = new Promise((resolve) => {
+    child.once('error', (error) => resolve({ code: null, signal: null, error }));
+    child.once('exit', (code, signal) => resolve({ code, signal, error: null }));
+  });
+  const early = await Promise.race([exited, delay(waitMilliseconds, null)]);
   const stillRunning = early === null;
   if (stillRunning) stopTree(child);
-  const { code, signal } = await exited;
+  const finished = await Promise.race([exited, delay(STOP_TIMEOUT_MILLISECONDS, null)]);
+  if (finished === null) {
+    throw new Error(
+      `the program did not exit within ${STOP_TIMEOUT_MILLISECONDS / 1000} seconds of being stopped`,
+    );
+  }
   return {
     stillRunning,
-    exitCode: stillRunning ? null : (code ?? signal),
+    exitCode: stillRunning ? null : (finished.code ?? finished.signal ?? finished.error?.message),
     diagnosticFiles: findDiagnosticFiles(userDataDir),
   };
+}
+
+// Windows can hold a file for a moment after its process is killed, so the scratch folder is removed with retries.
+function removeScratch(root) {
+  return rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 async function scratchFolder() {
@@ -94,7 +125,7 @@ test('the checker reports nothing for an empty user-data folder', async () => {
   try {
     assert.deepEqual(findDiagnosticFiles(root), []);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeScratch(root);
   }
 });
 
@@ -106,7 +137,7 @@ test('the checker names a diagnostic file wherever it sits under the folder', as
     await writeFile(join(root, 'unrelated.json'), '{}\n', 'utf8');
     assert.deepEqual(findDiagnosticFiles(root), ['nested/gpu-diagnostics.jsonl']);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeScratch(root);
   }
 });
 
@@ -122,11 +153,11 @@ test('a stand-in program that writes nothing passes the launch check', async () 
     assert.equal(result.stillRunning, true);
     assert.deepEqual(result.diagnosticFiles, []);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeScratch(root);
   }
 });
 
-test('a stand-in program that writes a diagnostic file fails the launch check', async () => {
+test('a stand-in program that writes a diagnostic file is reported by the check', async () => {
   const { root, userDataDir } = await scratchFolder();
   try {
     const result = await launchAndCheck({
@@ -138,7 +169,7 @@ test('a stand-in program that writes a diagnostic file fails the launch check', 
     });
     assert.deepEqual(result.diagnosticFiles, ['gpu-diagnostics.jsonl']);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeScratch(root);
   }
 });
 
@@ -147,9 +178,16 @@ test(
   {
     skip: process.env.JOY_MEDIA_DEFAULT_LAUNCH_EXE
       ? false
-      : 'set JOY_MEDIA_DEFAULT_LAUNCH_EXE to the default packaged joy-media.exe (G1 with the owner present, or a machine that is not the RTX host)',
+      : 'set JOY_MEDIA_DEFAULT_LAUNCH_EXE to the default packaged joy-media.exe, on a disposable host (Windows Sandbox, a Hyper-V guest or a CI container)',
   },
   async () => {
+    try {
+      assertDisposableHost();
+    } catch (error) {
+      throw new Error(
+        `the live launch check changes the host, so it needs a disposable one. ${error.message}`,
+      );
+    }
     const { root, userDataDir } = await scratchFolder();
     try {
       const result = await launchAndCheck({
@@ -164,7 +202,7 @@ test(
       );
       assert.deepEqual(result.diagnosticFiles, [], 'the default build wrote diagnostic files');
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await removeScratch(root);
     }
   },
 );
