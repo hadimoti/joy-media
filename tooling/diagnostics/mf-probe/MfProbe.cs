@@ -26,6 +26,7 @@ internal static class MfProbe
     private const int ExitEncoded = 0;
     private const int ExitNoEncoder = 2;
     private const int ExitFailure = 3;
+    // Not checked against mferror.h (no SDK on this PC). If the value is wrong, the waits still sleep and stop at the deadline.
     private const int MfENoEventsAvailable = unchecked((int)0xC00D36D8);
     private const int MfETransformNeedMoreInput = unchecked((int)0xC00D6D72);
     private const uint MftMessageCommandDrain = 0x00000001;
@@ -52,6 +53,7 @@ internal static class MfProbe
     private static readonly Guid MfMtSubtype = new Guid("F7E34C9A-42E8-4714-B74B-CB29D72C35E5");
     private static readonly Guid MfMtFrameSize = new Guid("1652C33D-D6B2-4012-B834-72030849A37D");
     private static readonly Guid MfMtFrameRate = new Guid("C459A2E8-3D2C-4E44-B132-FEE5156C7BB0");
+    // Not checked against mfapi.h. A wrong key leaves the aspect ratio unset, which defaults to square pixels.
     private static readonly Guid MfMtPixelAspectRatio = new Guid("C6376A1E-8D0A-4027-BE80-6E42AD4E2F94");
     private static readonly Guid MfMtInterlaceMode = new Guid("E2724BB8-E676-4806-B4B2-A8D6EFB44CCD");
     private static readonly Guid MfMtAvgBitrate = new Guid("20332624-FB0D-4D9E-BD0D-CBF6786C102E");
@@ -427,11 +429,11 @@ internal static class MfProbe
 
             stage = "set-output-type";
             IMFMediaType outputType = NewVideoType(MfVideoFormatH264, true);
-            int outputHr = transform.SetOutputType(0, outputType, 0);
+            setTypeHr = transform.SetOutputType(0, outputType, 0);
+            Check(setTypeHr.Value, stage);
             stage = "set-input-type";
             IMFMediaType inputType = NewVideoType(MfVideoFormatNv12, false);
-            int inputHr = outputHr == SOk ? transform.SetInputType(0, inputType, 0) : outputHr;
-            setTypeHr = outputHr != SOk ? outputHr : inputHr;
+            setTypeHr = transform.SetInputType(0, inputType, 0);
             Check(setTypeHr.Value, stage);
 
             stage = "begin-streaming";
@@ -455,7 +457,7 @@ internal static class MfProbe
                 if (isAsync)
                 {
                     int eventType = NextEventType(events);
-                    if (eventType == -1)
+                    if (eventType < 0)
                     {
                         Thread.Sleep(10);
                         continue;
@@ -468,6 +470,8 @@ internal static class MfProbe
                     if (eventType != MetransformHaveOutput) continue;
                 }
 
+                // The probe supplies its own output sample. An encoder that supplies samples itself is reported as a failed
+                // ProcessOutput; that case is not handled here (UNVERIFIED until G1).
                 IMFSample outputSample = NewOutputSample();
                 IntPtr samplePointer = Marshal.GetComInterfaceForObject(outputSample, typeof(IMFSample));
                 MftOutputDataBuffer buffer = new MftOutputDataBuffer { Sample = samplePointer };
@@ -491,6 +495,12 @@ internal static class MfProbe
         catch (EncodeStepException failure)
         {
             Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, failure.Stage + " hr=" + failure.Hr));
+            exit = ExitFailure;
+        }
+        catch (Exception failure)
+        {
+            // Any other failure (a COM or cast exception) still prints one result line, so the parent never reads a silent exit.
+            Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, stage + " " + failure.GetType().Name));
             exit = ExitFailure;
         }
         finally
@@ -601,7 +611,7 @@ internal static class MfProbe
         {
             int eventType = NextEventType(events);
             if (eventType == wanted) return;
-            if (eventType == -1) Thread.Sleep(10);
+            if (eventType != wanted) Thread.Sleep(10);
         }
         throw new EncodeStepException(stage, unchecked((int)0x80004004));
     }
