@@ -2,7 +2,7 @@ import { iconUrl } from './icon-assets.js';
 
 /**
  * Owner-supplied 24×24 category masks for the Effects left rail.
- * Same art as https://media.joyteam.ir/assets/24_*.png — Favorites uses the
+ * The art ships with the app. Favorites uses the
  * shared StarIcon instead of a PNG.
  */
 export const EFFECT_CATEGORY_ICONS: Readonly<Record<string, string>> = {

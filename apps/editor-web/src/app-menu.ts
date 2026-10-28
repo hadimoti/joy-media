@@ -7,12 +7,10 @@ import {
 } from './panel-metadata.js';
 
 export type AppMenuActionId =
-  | 'file.account'
   | 'file.projects'
   | 'file.projectImport'
   | 'file.projectExport'
   | 'file.export'
-  | 'file.signOut'
   | 'edit.undo'
   | 'edit.redo'
   | 'edit.delete'
@@ -39,8 +37,6 @@ export interface AppMenuItem {
   readonly shortcut?: string;
   readonly separatorAfter?: boolean;
   readonly disabled?: boolean;
-  /** Hide when signed out / no session logout available. */
-  readonly requiresSignedIn?: boolean;
   readonly section?: PanelIntent;
 }
 
@@ -80,12 +76,10 @@ export const APP_MENU_GROUPS: readonly AppMenuGroup[] = [
     id: 'file',
     label: 'File',
     items: [
-      { id: 'file.account', label: 'Account & Workstation…' },
       { id: 'file.projects', label: 'Projects Library…', separatorAfter: true },
       { id: 'file.projectImport', label: 'Import Editable Project…' },
       { id: 'file.projectExport', label: 'Export Editable Project…', separatorAfter: true },
       { id: 'file.export', label: 'Export', separatorAfter: true },
-      { id: 'file.signOut', label: 'Sign Out', requiresSignedIn: true },
     ],
   },
   {

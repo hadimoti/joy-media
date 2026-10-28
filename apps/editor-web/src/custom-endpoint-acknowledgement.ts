@@ -17,8 +17,6 @@ export function normalizeProviderBaseUrl(baseUrl: string): string {
 
 const TRUSTED_PROVIDER_ENDPOINTS: Readonly<Record<string, string>> = {
   openrouter: 'https://openrouter.ai/api/v1',
-  kilo: 'https://api.kilo.ai/v1',
-  'joy-hosted': 'https://joyst.ir/api/v1/agent',
 };
 
 /** Consent is required unless the URL is the provider's exact trusted HTTPS origin and path. */

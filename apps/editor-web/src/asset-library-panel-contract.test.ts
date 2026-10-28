@@ -28,13 +28,12 @@ describe('AssetLibraryPanel successful import contract', () => {
   it('includes ownership, applies the reveal state, and retains refresh reconciliation', () => {
     const successPath = panelSource.slice(
       panelSource.indexOf('const imported = await importMediaFile'),
-      panelSource.indexOf('const fetchCloudOriginal'),
+      panelSource.indexOf('const addAssetToTimeline'),
     );
 
     expect(successPath).toContain('setItems((current) => includeOwnedAsset');
-    expect(successPath).toContain('setOwnedAssetIds((current) => includeOwnedAsset');
     expect(successPath).toContain('const reveal = importedAssetRevealState(imported);');
-    expect(successPath).toContain('setAssetSource(reveal.assetSource);');
+    expect(successPath).not.toContain('setAssetSource');
     expect(successPath).toContain('setCategory(reveal.category);');
     expect(successPath).toContain('setCollection(reveal.collection);');
     expect(successPath).toContain('setQuery(reveal.query);');
@@ -64,17 +63,54 @@ describe('AssetLibraryPanel successful import contract', () => {
     expect(cardAction).toContain('bytes: asset.bytes,');
   });
 
-  it('loads the account and cloud libraries without waiting for project binding readiness', () => {
+  it('loads only the desktop asset catalog and reports when the desktop app is unavailable', () => {
     const refreshPath = panelSource.slice(
       panelSource.indexOf('const refresh = useCallback'),
-      panelSource.indexOf('const importSelectedFile'),
+      panelSource.indexOf('  useEffect(() => {\n    void refresh();'),
     );
     expect(refreshPath).not.toContain('ensureProject(');
-    expect(refreshPath).toContain('client.myAssets();');
+    expect(refreshPath).not.toContain('client.myAssets()');
     expect(refreshPath).not.toContain('if (!projectScopeReady) return;');
-    expect(refreshPath).toContain('client.sharedCloudAssets()');
+    expect(refreshPath).toContain('if (!isDesktopHost())');
+    expect(refreshPath).toContain('getDesktopAssetLibraryCatalog()');
+    expect(refreshPath).toContain('The asset library needs the JOY Media desktop app.');
+    expect(refreshPath).not.toContain('client.sharedCloudAssets()');
+    expect(refreshPath).not.toContain('getStoredMediaToken');
     expect(refreshPath).toContain('setItems(assets.map((asset) => ({ asset, derivatives: [] })));');
+    expect(refreshPath).toContain('client.derivatives(asset.projectId || projectId, asset.id)');
     expect(refreshPath).toContain('void Promise.all(');
+  });
+
+  it('removes sign-in, cloud listing, and stock discovery from the panel', () => {
+    for (const removedBehavior of [
+      'getStoredMediaToken',
+      'MEDIA_SESSION_CHANGED_EVENT',
+      'MediaSessionStorage',
+      'sharedCloudAssets',
+      'sharedCloudOriginalBytes',
+      'fetchCloudOriginal',
+      'asset.cloudBacked',
+      'StockVideoDiscovery',
+      'BrowserStockVideo',
+      'STOCK_VIDEO_CATEGORIES',
+      'stock-video-category-rail',
+      'setAssetSource',
+      'Cloud library',
+      'Ready in cloud',
+    ]) {
+      expect(panelSource).not.toContain(removedBehavior);
+    }
+  });
+
+  it('keeps remote deletion and original upload calls while dropping cloud cleanup copy', () => {
+    expect(
+      panelSource.match(/client\.deleteAsset\(asset\.projectId \|\| projectId, asset\.id\)/g),
+    ).toHaveLength(2);
+    expect(panelSource).toContain(
+      'client.uploadAssetOriginal(asset.projectId || projectId, asset, file)',
+    );
+    expect(panelSource).not.toContain('cloudObjectPurgeFailures');
+    expect(panelSource).not.toContain('cloud cleanup will need an operational retry');
   });
 
   it('reports a real All count alongside media-specific category counts', () => {

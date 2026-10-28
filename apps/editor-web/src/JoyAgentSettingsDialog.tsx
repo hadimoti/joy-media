@@ -5,7 +5,6 @@ import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type {
   ByokSessionStatus,
-  DualBrainConfig,
   JoyAgentMediaCapabilityReport,
   JoyAgentMediaCapabilityState,
 } from './joy-agent/protocol.js';
@@ -19,8 +18,6 @@ import {
   beginDesktopProviderSession,
   type DesktopProviderProfile,
 } from './desktop-client.js';
-import { getStoredMediaToken } from './media-session.js';
-import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   acknowledgeCustomEndpoint,
   revokeCustomEndpointAcknowledgementsForUrl,
@@ -39,6 +36,19 @@ type AgentSettingsNotice = {
   readonly kind: 'info' | 'success' | 'error';
   readonly message: string;
 };
+
+type DesktopProviderProfileState = DesktopProviderProfile & {
+  readonly state?: 'active' | 'disabled-legacy' | 'credential-unavailable';
+  readonly decision?: 'later';
+};
+
+function editorProviderForProfile(
+  profile: Pick<DesktopProviderProfile, 'provider'>,
+): 'openrouter' | 'openai-compatible' | undefined {
+  if (profile.provider === 'openrouter') return 'openrouter';
+  if (isCustomEndpointProvider(profile.provider)) return 'openai-compatible';
+  return undefined;
+}
 
 const MODES: Readonly<Record<AgentExecutionMode, string>> = {
   'suggest-only': 'Suggest only',
@@ -134,8 +144,6 @@ export function JoyAgentSettingsDialog({
   readonly initialTab?: JoyAgentSettingsTab;
 }) {
   const keyRef = useRef<HTMLInputElement>(null);
-  const openRouterKeyRef = useRef<HTMLInputElement>(null);
-  const kiloKeyRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
   const mediaProbeEpochRef = useRef(0);
 
@@ -159,46 +167,24 @@ export function JoyAgentSettingsDialog({
     setOpenAccordions((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const [provider, setProvider] = useState<
-    'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible'
-  >(
-    status?.provider === 'joy-hosted' ||
-      status?.provider === 'openai-compatible' ||
-      status?.provider === 'kilo'
-      ? status.provider
-      : 'openrouter',
+  const [provider, setProvider] = useState<'openrouter' | 'openai-compatible'>(
+    status?.provider === 'openai-compatible' ? 'openai-compatible' : 'openrouter',
   );
   const [baseUrl, setBaseUrl] = useState(
-    status?.provider === 'openai-compatible'
-      ? ''
-      : status?.provider === 'joy-hosted'
-        ? 'https://joyst.ir/api/v1/agent'
-        : status?.provider === 'kilo'
-          ? 'https://api.kilo.ai/v1'
-          : 'https://openrouter.ai/api/v1',
+    status?.provider === 'openai-compatible' ? '' : 'https://openrouter.ai/api/v1',
   );
-  const [modelId, setModelId] = useState(
-    status?.modelId ||
-      (status?.provider === 'joy-hosted' ? 'minimax/minimax-m3' : 'openrouter/auto'),
-  );
+  const [modelId, setModelId] = useState(status?.modelId || 'openrouter/auto');
   const [connectionName, setConnectionName] = useState('');
   const [customDisclosure, setCustomDisclosure] = useState(false);
   const [working, setWorking] = useState(false);
-  const [studioPreset, setStudioPreset] = useState<'dual-brain' | 'joy-hosted' | 'custom'>(
-    status?.provider === 'dual-brain'
-      ? 'dual-brain'
-      : status?.provider === 'joy-hosted'
-        ? 'joy-hosted'
-        : status?.provider === 'openai-compatible'
-          ? 'custom'
-          : 'dual-brain',
-  );
   const [connectionStatus, setConnectionStatus] = useState(status);
   const [connectionNotice, setConnectionNotice] = useState<AgentSettingsNotice | undefined>();
 
   // Multi-profile state
-  const [profiles, setProfiles] = useState<readonly DesktopProviderProfile[]>([]);
-  const [savedProfile, setSavedProfile] = useState<DesktopProviderProfile | undefined>(undefined);
+  const [profiles, setProfiles] = useState<readonly DesktopProviderProfileState[]>([]);
+  const [savedProfile, setSavedProfile] = useState<DesktopProviderProfileState | undefined>(
+    undefined,
+  );
   const [hasSavedKey, setHasSavedKey] = useState(false);
 
   // Dynamic model discovery & Drawer state
@@ -206,7 +192,6 @@ export function JoyAgentSettingsDialog({
   const [modelFilter, setModelFilter] = useState('');
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
-  const [accountModalOpen, setAccountModalOpen] = useState(false);
 
   // Media capability probe state
   const [mediaCapabilities, setMediaCapabilities] = useState<
@@ -226,14 +211,15 @@ export function JoyAgentSettingsDialog({
   const loadProfiles = async () => {
     if (!isDesktopHost()) return;
     try {
-      const list = await listDesktopProviderProfiles();
+      const list = (await listDesktopProviderProfiles()) as readonly DesktopProviderProfileState[];
       if (!mountedRef.current) return;
       setProfiles(list);
-      const openRouterProfile = list.find((p) => p.provider === 'openrouter');
+      const openRouterProfile = list.find(
+        (p) => p.provider === 'openrouter' && p.state !== 'disabled-legacy',
+      );
       if (openRouterProfile) {
         setSavedProfile(openRouterProfile);
         setHasSavedKey(true);
-        setStudioPreset('custom');
         setModelId(openRouterProfile.modelId);
         setBaseUrl(openRouterProfile.baseUrl);
         setProvider('openrouter');
@@ -271,27 +257,14 @@ export function JoyAgentSettingsDialog({
     onClose();
   };
 
-  const handleProviderChange = (
-    next: 'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible',
-  ) => {
+  const handleProviderChange = (next: 'openrouter' | 'openai-compatible') => {
     setProvider(next);
-    if (next === 'openai-compatible') setStudioPreset('custom');
     setCustomDisclosure(false);
     setConnectionNotice(undefined);
     setDiscoveryError(null);
     if (next === 'openrouter') {
       setBaseUrl('https://openrouter.ai/api/v1');
-      if (!modelId || modelId === 'minimax/minimax-m3' || modelId === 'kilo-auto/efficient') {
-        setModelId('openrouter/auto');
-      }
-    } else if (next === 'kilo') {
-      setBaseUrl('https://api.kilo.ai/v1');
-      if (!modelId || modelId === 'openrouter/auto') {
-        setModelId('kilo-auto/efficient');
-      }
-    } else if (next === 'joy-hosted') {
-      setBaseUrl('https://joyst.ir/api/v1/agent');
-      setModelId('minimax/minimax-m3');
+      if (!modelId) setModelId('openrouter/auto');
     } else {
       setBaseUrl('');
     }
@@ -343,13 +316,7 @@ export function JoyAgentSettingsDialog({
         setOpenAccordions((prev) => ({ ...prev, 'models-drawer': true }));
         if (!modelIds.includes(modelId)) {
           const prefer =
-            modelIds.find(
-              (m) =>
-                m.includes('minimax') ||
-                m.includes('efficient') ||
-                m.includes('auto') ||
-                m.includes('claude'),
-            ) || modelIds[0];
+            modelIds.find((m) => m.includes('auto') || m.includes('claude')) || modelIds[0];
           if (prefer) {
             setModelId(prefer);
           }
@@ -365,146 +332,6 @@ export function JoyAgentSettingsDialog({
       );
     } finally {
       if (mountedRef.current) setIsDiscovering(false);
-    }
-  };
-
-  const connectDualBrain = async () => {
-    if (working) return;
-    invalidateMediaProbe();
-    setWorking(true);
-    setConnectionNotice(undefined);
-    setDiscoveryError(null);
-    let openRouterKey = '';
-    let kiloKey = '';
-    try {
-      openRouterKey = openRouterKeyRef.current?.value.trim() ?? '';
-      kiloKey = kiloKeyRef.current?.value.trim() ?? '';
-
-      // Dual-Brain always sends each key to the provider's fixed trusted
-      // endpoint, so a saved key may only come from a profile saved for exactly
-      // that endpoint; a profile with any other URL is never used here.
-      const openRouterProf = profiles.find(
-        (p) =>
-          p.provider === 'openrouter' && !requiresCustomEndpointConsent('openrouter', p.baseUrl),
-      );
-      if (!openRouterKey && openRouterProf) {
-        try {
-          const session = (await beginDesktopProviderSession(openRouterProf.id)) as
-            { apiKey?: string } | undefined;
-          if (session?.apiKey) openRouterKey = session.apiKey;
-        } catch {
-          /* ignore */
-        }
-      }
-
-      const kiloProf = profiles.find(
-        (p) => p.provider === 'kilo' && !requiresCustomEndpointConsent('kilo', p.baseUrl),
-      );
-      if (!kiloKey && kiloProf) {
-        try {
-          const session = (await beginDesktopProviderSession(kiloProf.id)) as
-            { apiKey?: string } | undefined;
-          if (session?.apiKey) kiloKey = session.apiKey;
-        } catch {
-          /* ignore */
-        }
-      }
-
-      const dualConfig: DualBrainConfig = {
-        mode: 'dual-brain',
-        workhorse: {
-          provider: 'openrouter',
-          baseUrl: 'https://openrouter.ai/api/v1',
-          modelId: 'openrouter/free',
-          apiKey: openRouterKey,
-        },
-        creative: {
-          provider: 'kilo',
-          baseUrl: 'https://api.kilo.ai/v1',
-          modelId: 'kilo-auto/efficient',
-          apiKey: kiloKey,
-        },
-      };
-
-      await engineClient.configure(dualConfig);
-      const next = await engineClient.testConnection();
-      const redactedStatus = next.dualBrain
-        ? {
-            ...next,
-            dualBrain: {
-              workhorse: {
-                ...next.dualBrain.workhorse,
-                ...(next.dualBrain.workhorse.message
-                  ? {
-                      message: redactProviderError(next.dualBrain.workhorse.message, openRouterKey),
-                    }
-                  : {}),
-              },
-              creative: {
-                ...next.dualBrain.creative,
-                ...(next.dualBrain.creative.message
-                  ? { message: redactProviderError(next.dualBrain.creative.message, kiloKey) }
-                  : {}),
-              },
-            },
-          }
-        : {
-            ...next,
-            capability: 'incompatible' as const,
-            message: 'Dual-Brain provider status was incomplete.',
-          };
-      const workhorse = redactedStatus.dualBrain?.workhorse;
-      const creative = redactedStatus.dualBrain?.creative;
-      const bothUsable =
-        workhorse?.capability === 'tool-loop' && creative?.capability === 'tool-loop';
-      const bothFailed =
-        workhorse?.capability === 'incompatible' && creative?.capability === 'incompatible';
-      const noProviderStatuses = !workhorse && !creative;
-      let capability: ByokSessionStatus['capability'] = 'untested';
-      if (bothUsable) capability = 'tool-loop';
-      else if (
-        bothFailed ||
-        !workhorse ||
-        !creative ||
-        workhorse.capability === 'incompatible' ||
-        creative.capability === 'incompatible'
-      ) {
-        capability = 'incompatible';
-      } else if (workhorse.capability === 'plan-only' && creative.capability === 'plan-only') {
-        capability = 'plan-only';
-      }
-      const safeStatus = { ...redactedStatus, capability };
-      setConnectionStatus(safeStatus);
-      onStatusChange?.(safeStatus);
-      const message = bothUsable
-        ? 'Dual-Brain Studio connected! Model 1 Workhorse (openrouter/free) & Model 2 Creative Brain (kilo-auto/efficient) are live.'
-        : bothFailed || noProviderStatuses
-          ? `Dual-Brain connection failed. OpenRouter: ${redactProviderError(workhorse?.message ?? 'unavailable', openRouterKey)} Kilo: ${redactProviderError(creative?.message ?? 'unavailable', kiloKey)}`
-          : `Dual-Brain partially connected. OpenRouter: ${workhorse?.capability ?? 'unavailable'}${workhorse?.message ? ` (${workhorse.message})` : ''}; Kilo: ${creative?.capability ?? 'unavailable'}${creative?.message ? ` (${creative.message})` : ''}. Tool-loop readiness requires both brains.`;
-      const kind = bothUsable ? 'success' : 'error';
-      setConnectionNotice({ kind, message });
-      onNotice?.(message, kind);
-    } catch (error) {
-      const rawMessage =
-        error instanceof Error ? error.message : 'Unable to connect Dual-Brain Studio';
-      const safeMessage = redactProviderError(
-        redactProviderError(rawMessage, openRouterKey),
-        kiloKey,
-      );
-      const failedStatus: ByokSessionStatus = {
-        provider: 'dual-brain',
-        modelId: 'openrouter/free + kilo-auto/efficient',
-        capability: 'incompatible',
-        message: safeMessage,
-      };
-      setConnectionStatus(failedStatus);
-      onStatusChange?.(failedStatus);
-      setConnectionNotice({ kind: 'error', message: safeMessage });
-      onNotice?.(safeMessage, 'error');
-    } finally {
-      if (openRouterKeyRef.current) openRouterKeyRef.current.value = '';
-      if (kiloKeyRef.current) kiloKeyRef.current.value = '';
-      if (mountedRef.current) setWorking(false);
     }
   };
 
@@ -532,10 +359,6 @@ export function JoyAgentSettingsDialog({
       onNotice?.(message, 'error');
       return;
     }
-    if (studioPreset === 'dual-brain' && provider !== 'openai-compatible') {
-      void connectDualBrain();
-      return;
-    }
     invalidateMediaProbe();
     setWorking(true);
     setConnectionNotice(undefined);
@@ -551,13 +374,7 @@ export function JoyAgentSettingsDialog({
         : savedProfile.provider === provider) &&
       normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl,
     );
-    if (
-      provider !== 'joy-hosted' &&
-      !key &&
-      hasSavedKey &&
-      savedProfile?.id &&
-      savedProfileMatches
-    ) {
+    if (!key && hasSavedKey && savedProfile?.id && savedProfileMatches) {
       try {
         const session = (await beginDesktopProviderSession(savedProfile.id)) as
           { apiKey?: string; baseUrl?: string; modelId?: string } | undefined;
@@ -597,7 +414,7 @@ export function JoyAgentSettingsDialog({
       }
     }
 
-    if (provider !== 'joy-hosted' && !key) {
+    if (!key) {
       const message =
         savedProfile?.id && !savedProfileMatches
           ? 'The saved API key belongs to a different provider or endpoint. Enter a new API key to connect.'
@@ -623,7 +440,7 @@ export function JoyAgentSettingsDialog({
     }
 
     try {
-      if (isDesktopHost() && provider !== 'joy-hosted' && key) {
+      if (isDesktopHost() && key) {
         const saved = await saveDesktopProviderProfile({
           provider: provider === 'openai-compatible' ? 'custom' : provider,
           name: connectionName.trim() || undefined,
@@ -638,19 +455,12 @@ export function JoyAgentSettingsDialog({
         }
       }
 
-      let sessionKey = key;
-      if (provider === 'joy-hosted') {
-        const mediaToken =
-          typeof window !== 'undefined' ? getStoredMediaToken(window.localStorage) : undefined;
-        sessionKey = mediaToken ?? 'joy-hosted-default';
-      }
-
       assertCustomEndpointConsentHolds(provider, normalizedBaseUrl, savedProfile?.id);
       await engineClient.configure({
         provider,
         baseUrl: normalizedBaseUrl,
         modelId: normalizedModelId,
-        apiKey: sessionKey,
+        apiKey: key,
       });
 
       const next = await engineClient.testConnection();
@@ -700,8 +510,19 @@ export function JoyAgentSettingsDialog({
     }
   };
 
-  const connectProfile = async (prof: DesktopProviderProfile) => {
-    if (working) return;
+  const deferLegacyProfile = async (prof: DesktopProviderProfileState) => {
+    if (!isDesktopHost() || prof.state !== 'disabled-legacy' || prof.decision === 'later') return;
+    try {
+      await window.joyDesktop?.invoke('desktop.provider-profile.later', { id: prof.id });
+      await loadProfiles();
+    } catch (error) {
+      console.warn('Failed to defer legacy provider profile:', error);
+    }
+  };
+
+  const connectProfile = async (prof: DesktopProviderProfileState) => {
+    const resolvedProvider = editorProviderForProfile(prof);
+    if (working || prof.state === 'disabled-legacy' || resolvedProvider === undefined) return;
     if (
       requiresCustomEndpointConsent(prof.provider, prof.baseUrl) &&
       !requireCustomEndpointAcknowledgement({
@@ -710,12 +531,7 @@ export function JoyAgentSettingsDialog({
         profileId: prof.id,
       })
     ) {
-      setProvider(
-        isCustomEndpointProvider(prof.provider)
-          ? 'openai-compatible'
-          : (prof.provider as 'openrouter' | 'kilo' | 'joy-hosted'),
-      );
-      setStudioPreset('custom');
+      setProvider(resolvedProvider);
       setBaseUrl(prof.baseUrl);
       setSavedProfile(prof);
       setModelId(prof.modelId);
@@ -731,9 +547,6 @@ export function JoyAgentSettingsDialog({
       const session = (await beginDesktopProviderSession(prof.id)) as
         { apiKey?: string; baseUrl?: string; modelId?: string; provider?: string } | undefined;
       key = session?.apiKey || '';
-      const resolvedProvider = (
-        isCustomEndpointProvider(prof.provider) ? 'openai-compatible' : prof.provider
-      ) as 'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible';
       setProvider(resolvedProvider);
       setBaseUrl(prof.baseUrl);
       setModelId(prof.modelId);
@@ -771,7 +584,7 @@ export function JoyAgentSettingsDialog({
       );
       if (configurationFailed) {
         const failedStatus: ByokSessionStatus = {
-          provider: prof.provider as ByokSessionStatus['provider'],
+          provider: resolvedProvider,
           modelId: prof.modelId,
           capability: 'incompatible',
           message,
@@ -849,8 +662,6 @@ export function JoyAgentSettingsDialog({
     setConnectionNotice({ kind: 'info', message });
     onNotice?.(message, 'info');
     if (keyRef.current) keyRef.current.value = '';
-    if (openRouterKeyRef.current) openRouterKeyRef.current.value = '';
-    if (kiloKeyRef.current) kiloKeyRef.current.value = '';
   };
 
   const filteredDiscoveredModels = discoveredModels.filter((m) =>
@@ -949,48 +760,11 @@ export function JoyAgentSettingsDialog({
                 )}
                 {/* Studio Presets Picker */}
                 <div className="joy-studio-preset-bar">
-                  <button
-                    type="button"
-                    className={`joy-preset-tab ${studioPreset === 'dual-brain' ? 'is-active' : ''}`}
-                    onClick={() => {
-                      setStudioPreset('dual-brain');
-                      setProvider('openrouter');
-                      setBaseUrl('https://openrouter.ai/api/v1');
-                      setModelId('openrouter/free');
-                    }}
-                  >
-                    <span className="joy-preset-icon">⚡</span>
-                    <div className="joy-preset-text">
-                      <strong>Dual-Brain Studio</strong>
-                      <span>Model 1 Workhorse (free) + Model 2 Creative (kilo-auto)</span>
-                    </div>
-                    <span className="joy-preset-tag">Recommended</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`joy-preset-tab ${studioPreset === 'joy-hosted' ? 'is-active' : ''}`}
-                    onClick={() => {
-                      setStudioPreset('joy-hosted');
-                      handleProviderChange('joy-hosted');
-                    }}
-                  >
-                    <span className="joy-preset-icon">💎</span>
-                    <div className="joy-preset-text">
-                      <strong>Joy Hosted Pro Gateway</strong>
-                      <span>Keyless Sweden VPS Proxy (minimax/minimax-m3)</span>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    className={`joy-preset-tab ${studioPreset === 'custom' ? 'is-active' : ''}`}
-                    onClick={() => {
-                      setStudioPreset('custom');
-                    }}
-                  >
+                  <button type="button" className="joy-preset-tab is-active">
                     <span className="joy-preset-icon">🛠️</span>
                     <div className="joy-preset-text">
                       <strong>Custom BYOK</strong>
-                      <span>Single provider link (OpenRouter, Kilo, OpenAI)</span>
+                      <span>One API-key provider (OpenRouter or a custom endpoint)</span>
                     </div>
                   </button>
                 </div>
@@ -1014,28 +788,6 @@ export function JoyAgentSettingsDialog({
                               ? 'Connection failed. See the details below.'
                               : 'Configure an API endpoint below to connect JOY Code.'}
                       </span>
-                      {connectionStatus?.dualBrain && (
-                        <div className="joy-settings-dual-brain-banner">
-                          <div className="joy-dual-brain-chip">
-                            <span className="joy-chip-label">🧠 Model 1 (Workhorse):</span>
-                            <span className="joy-chip-val">
-                              {connectionStatus.dualBrain.workhorse.modelId}
-                            </span>
-                            <span className="joy-chip-badge">
-                              {connectionStatus.dualBrain.workhorse.capability}
-                            </span>
-                          </div>
-                          <div className="joy-dual-brain-chip">
-                            <span className="joy-chip-label">🎨 Model 2 (Creative Brain):</span>
-                            <span className="joy-chip-val">
-                              {connectionStatus.dualBrain.creative.modelId}
-                            </span>
-                            <span className="joy-chip-badge">
-                              {connectionStatus.dualBrain.creative.capability}
-                            </span>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </div>
                   {connectionStatus?.modelId && (
@@ -1052,34 +804,56 @@ export function JoyAgentSettingsDialog({
                       <span>Saved Vault Profiles ({profiles.length})</span>
                     </div>
                     <div className="joy-settings-vault-profiles-grid">
-                      {profiles.map((prof) => (
-                        <div
-                          key={prof.id}
-                          className={`joy-settings-provider-card ${savedProfile?.id === prof.id ? 'is-active' : ''}`}
-                        >
-                          <div className="joy-settings-provider-meta">
-                            <strong>{prof.name || prof.provider}</strong>
-                            <span>{displayModelId(prof.modelId)}</span>
+                      {profiles.map((prof) => {
+                        const disabledLegacy = prof.state === 'disabled-legacy';
+                        return (
+                          <div
+                            key={prof.id}
+                            data-profile-state={prof.state ?? 'active'}
+                            className={`joy-settings-provider-card ${savedProfile?.id === prof.id ? 'is-active' : ''} ${disabledLegacy ? 'is-disabled-legacy' : ''}`}
+                          >
+                            <div className="joy-settings-provider-meta">
+                              <strong>{prof.name || prof.provider}</strong>
+                              <span>{displayModelId(prof.modelId)}</span>
+                              {disabledLegacy && (
+                                <span className="joy-settings-legacy-status">
+                                  Disabled legacy profile
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              {disabledLegacy ? (
+                                <button
+                                  type="button"
+                                  className="joy-btn-secondary joy-btn-sm"
+                                  onClick={() => void deferLegacyProfile(prof)}
+                                  disabled={working || prof.decision === 'later'}
+                                >
+                                  Later
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="joy-btn-secondary joy-btn-sm"
+                                    onClick={() => void connectProfile(prof)}
+                                    disabled={working}
+                                  >
+                                    Use
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="joy-btn-danger joy-btn-sm"
+                                    onClick={() => void removeProfile(prof.id)}
+                                  >
+                                    ✕
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button
-                              type="button"
-                              className="joy-btn-secondary joy-btn-sm"
-                              onClick={() => void connectProfile(prof)}
-                              disabled={working}
-                            >
-                              Use
-                            </button>
-                            <button
-                              type="button"
-                              className="joy-btn-danger joy-btn-sm"
-                              onClick={() => void removeProfile(prof.id)}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -1100,13 +874,7 @@ export function JoyAgentSettingsDialog({
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-tag">
-                        {provider === 'joy-hosted'
-                          ? 'JOY Pro AI'
-                          : provider === 'kilo'
-                            ? 'Kilo Gateway'
-                            : provider === 'openrouter'
-                              ? 'OpenRouter'
-                              : 'Custom Endpoint'}
+                        {provider === 'openrouter' ? 'OpenRouter' : 'Custom Endpoint'}
                       </span>
                       <span className="joy-accordion-chevron">▾</span>
                     </div>
@@ -1122,17 +890,14 @@ export function JoyAgentSettingsDialog({
                               value={provider}
                               onChange={(e) =>
                                 handleProviderChange(
-                                  e.target.value as
-                                    'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible',
+                                  e.target.value as 'openrouter' | 'openai-compatible',
                                 )
                               }
                             >
                               <option value="openrouter">OpenRouter (BYOK)</option>
-                              <option value="kilo">Kilo Gateway (api.kilo.ai)</option>
                               <option value="openai-compatible">
                                 Custom S3 / OpenAI Compatible
                               </option>
-                              <option value="joy-hosted">Joy Model (Built-in Pro AI)</option>
                             </select>
                           </label>
                         </div>
@@ -1142,7 +907,7 @@ export function JoyAgentSettingsDialog({
                             <span>Connection Profile Name (Optional)</span>
                             <input
                               type="text"
-                              placeholder="e.g. My Kilo Fast, Local Ollama"
+                              placeholder="e.g. My OpenRouter, Local Ollama"
                               value={connectionName}
                               onChange={(e) => setConnectionName(e.target.value)}
                             />
@@ -1164,97 +929,31 @@ export function JoyAgentSettingsDialog({
                           </label>
                         </div>
 
-                        {provider === 'joy-hosted' ? (
-                          <div className="joy-settings-field-full joy-settings-pro-card">
-                            <p style={{ margin: 0, fontSize: '13px', color: '#ffb020' }}>
-                              ⚡ Included with your active JOY Pro subscription.
-                            </p>
-                            <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#888' }}>
-                              Uses authenticated secure reverse-proxy via joyst.ir. No secret key
-                              required.
-                            </p>
-                            {typeof window !== 'undefined' &&
-                            !getStoredMediaToken(window.localStorage) ? (
-                              <div style={{ marginTop: '10px' }}>
-                                <button
-                                  type="button"
-                                  className="joy-settings-text-btn"
-                                  style={{
-                                    padding: '6px 12px',
-                                    background: 'linear-gradient(135deg, #00d2ff, #0077ff)',
-                                    border: 'none',
-                                    borderRadius: '6px',
-                                    color: '#ffffff',
-                                    fontSize: '12px',
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                  }}
-                                  onClick={() => setAccountModalOpen(true)}
-                                >
-                                  🔑 Sign In with JOY Account to Activate
-                                </button>
-                              </div>
-                            ) : (
-                              <p
-                                style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#10b981' }}
-                              >
-                                ✓ JOY Account session linked
-                              </p>
-                            )}
-                          </div>
-                        ) : studioPreset === 'dual-brain' && provider !== 'openai-compatible' ? (
-                          <div className="joy-settings-field-full joy-settings-field">
-                            <label>
-                              <span>OpenRouter API key</span>
-                              <input
-                                ref={openRouterKeyRef}
-                                type="password"
-                                autoComplete="off"
-                                spellCheck={false}
-                              />
-                            </label>
-                            <label>
-                              <span>Kilo API key</span>
-                              <input
-                                ref={kiloKeyRef}
-                                type="password"
-                                autoComplete="off"
-                                spellCheck={false}
-                              />
-                            </label>
-                            <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
-                              Each key is sent only to its matching provider.
+                        <div className="joy-settings-field-full joy-settings-field">
+                          <label>
+                            <span>API Secret Key</span>
+                            <input
+                              ref={keyRef}
+                              type="password"
+                              placeholder={
+                                hasSavedKey
+                                  ? '•••••••••••••••• (Leave blank to keep saved)'
+                                  : 'sk-...'
+                              }
+                              defaultValue=""
+                              autoComplete="off"
+                              spellCheck={false}
+                            />
+                          </label>
+                          {hasSavedKey && (
+                            <span style={{ fontSize: '11px', color: '#10b981', marginTop: '2px' }}>
+                              (Saved in desktop vault)
                             </span>
-                          </div>
-                        ) : (
-                          <div className="joy-settings-field-full joy-settings-field">
-                            <label>
-                              <span>API Secret Key</span>
-                              <input
-                                ref={keyRef}
-                                type="password"
-                                placeholder={
-                                  hasSavedKey
-                                    ? '•••••••••••••••• (Leave blank to keep saved)'
-                                    : 'sk-...'
-                                }
-                                defaultValue=""
-                                autoComplete="off"
-                                spellCheck={false}
-                              />
-                            </label>
-                            {hasSavedKey && (
-                              <span
-                                style={{ fontSize: '11px', color: '#10b981', marginTop: '2px' }}
-                              >
-                                (Saved in desktop vault)
-                              </span>
-                            )}
-                            <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
-                              🔒 Keys are encrypted via Windows DPAPI and never logged or proxied.
-                            </span>
-                          </div>
-                        )}
+                          )}
+                          <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
+                            🔒 Keys are encrypted via Windows DPAPI and never logged or proxied.
+                          </span>
+                        </div>
 
                         {requiresCustomEndpointConsent(provider, baseUrl) && (
                           <div className="joy-settings-field-full joy-settings-field">
@@ -1320,22 +1019,20 @@ export function JoyAgentSettingsDialog({
                               }}
                             >
                               <span>Model ID (User Editable)</span>
-                              {provider !== 'joy-hosted' && (
-                                <button
-                                  type="button"
-                                  className="joy-settings-text-btn"
-                                  onClick={() => {
-                                    toggleAccordion('models-drawer');
-                                    if (discoveredModels.length === 0) {
-                                      void discoverModels();
-                                    }
-                                  }}
-                                >
-                                  {openAccordions['models-drawer']
-                                    ? '▲ Hide Model Drawer'
-                                    : '⚡ Open Model Drawer ▾'}
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                className="joy-settings-text-btn"
+                                onClick={() => {
+                                  toggleAccordion('models-drawer');
+                                  if (discoveredModels.length === 0) {
+                                    void discoverModels();
+                                  }
+                                }}
+                              >
+                                {openAccordions['models-drawer']
+                                  ? '▲ Hide Model Drawer'
+                                  : '⚡ Open Model Drawer ▾'}
+                              </button>
                             </div>
                             <div className="joy-settings-input-with-action">
                               <input
@@ -1345,17 +1042,15 @@ export function JoyAgentSettingsDialog({
                                 value={modelId}
                                 onChange={(e) => setModelId(e.target.value)}
                               />
-                              {provider !== 'joy-hosted' && (
-                                <button
-                                  type="button"
-                                  className="joy-btn-secondary"
-                                  onClick={() => void discoverModels()}
-                                  disabled={isDiscovering || working}
-                                  title="Discover models behind API endpoint"
-                                >
-                                  {isDiscovering ? '🔍 Scanning…' : '🔍 Discover Models'}
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                className="joy-btn-secondary"
+                                onClick={() => void discoverModels()}
+                                disabled={isDiscovering || working}
+                                title="Discover models behind API endpoint"
+                              >
+                                {isDiscovering ? '🔍 Scanning…' : '🔍 Discover Models'}
+                              </button>
                             </div>
                           </label>
                         </div>
@@ -1398,142 +1093,126 @@ export function JoyAgentSettingsDialog({
                 </div>
 
                 {/* ACCORDION 2: Discovered Models Palette / Selection Drawer */}
-                {provider !== 'joy-hosted' && (
-                  <div
-                    className={`joy-accordion-item joy-model-drawer-item ${openAccordions['models-drawer'] ? 'is-open' : ''}`}
+                <div
+                  className={`joy-accordion-item joy-model-drawer-item ${openAccordions['models-drawer'] ? 'is-open' : ''}`}
+                >
+                  <button
+                    type="button"
+                    className="joy-accordion-trigger"
+                    onClick={() => toggleAccordion('models-drawer')}
+                    aria-expanded={openAccordions['models-drawer']}
                   >
-                    <button
-                      type="button"
-                      className="joy-accordion-trigger"
-                      onClick={() => toggleAccordion('models-drawer')}
-                      aria-expanded={openAccordions['models-drawer']}
-                    >
-                      <div className="joy-accordion-trigger-title">
-                        <span className="joy-accordion-icon">🎨</span>
-                        <span>Discovered Models Drawer</span>
-                      </div>
-                      <div className="joy-accordion-trigger-meta">
-                        {discoveredModels.length > 0 ? (
-                          <span className="joy-accordion-tag is-success">
-                            ✓ {discoveredModels.length} Models Ready
-                          </span>
-                        ) : (
-                          <span className="joy-accordion-tag">Click to Resolve</span>
-                        )}
-                        <span className="joy-accordion-chevron">▾</span>
-                      </div>
-                    </button>
+                    <div className="joy-accordion-trigger-title">
+                      <span className="joy-accordion-icon">🎨</span>
+                      <span>Discovered Models Drawer</span>
+                    </div>
+                    <div className="joy-accordion-trigger-meta">
+                      {discoveredModels.length > 0 ? (
+                        <span className="joy-accordion-tag is-success">
+                          ✓ {discoveredModels.length} Models Ready
+                        </span>
+                      ) : (
+                        <span className="joy-accordion-tag">Click to Resolve</span>
+                      )}
+                      <span className="joy-accordion-chevron">▾</span>
+                    </div>
+                  </button>
 
-                    {openAccordions['models-drawer'] && (
-                      <div className="joy-accordion-content joy-model-drawer-content">
-                        <div className="joy-model-drawer-header">
-                          <p className="joy-model-drawer-hint">
-                            Select a discovered model chip to populate the Model ID, or filter by
-                            keyword:
-                          </p>
-                          <div style={{ display: 'flex', gap: '8px' }}>
+                  {openAccordions['models-drawer'] && (
+                    <div className="joy-accordion-content joy-model-drawer-content">
+                      <div className="joy-model-drawer-header">
+                        <p className="joy-model-drawer-hint">
+                          Select a discovered model chip to populate the Model ID, or filter by
+                          keyword:
+                        </p>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            type="button"
+                            className="joy-btn-secondary joy-btn-sm"
+                            onClick={() => void discoverModels()}
+                            disabled={isDiscovering || working}
+                          >
+                            {isDiscovering ? 'Refreshing…' : '🔄 Refresh Models'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {discoveryError && (
+                        <div
+                          className="joy-settings-notice is-error"
+                          style={{ marginBottom: '10px' }}
+                        >
+                          {discoveryError}
+                        </div>
+                      )}
+
+                      <div className="joy-model-drawer-search">
+                        <input
+                          type="text"
+                          placeholder="Filter models (e.g. free, sonnet, 4o)..."
+                          value={modelFilter}
+                          onChange={(e) => setModelFilter(e.target.value)}
+                        />
+                      </div>
+
+                      {/* Quick Filter Tag Buttons */}
+                      <div className="joy-model-drawer-tags">
+                        <button
+                          type="button"
+                          className={`joy-model-tag ${modelFilter === '' ? 'is-active' : ''}`}
+                          onClick={() => setModelFilter('')}
+                        >
+                          All
+                        </button>
+                        <button
+                          type="button"
+                          className={`joy-model-tag ${modelFilter === 'free' ? 'is-active' : ''}`}
+                          onClick={() => setModelFilter('free')}
+                        >
+                          Free
+                        </button>
+                        <button
+                          type="button"
+                          className={`joy-model-tag ${modelFilter === 'claude' ? 'is-active' : ''}`}
+                          onClick={() => setModelFilter('claude')}
+                        >
+                          Claude
+                        </button>
+                        <button
+                          type="button"
+                          className={`joy-model-tag ${modelFilter === 'gpt' ? 'is-active' : ''}`}
+                          onClick={() => setModelFilter('gpt')}
+                        >
+                          GPT
+                        </button>
+                      </div>
+
+                      {/* Interactive Model Chips Grid */}
+                      <div className="joy-settings-model-chips">
+                        {filteredDiscoveredModels.length > 0 ? (
+                          filteredDiscoveredModels.slice(0, 80).map((m) => (
                             <button
+                              key={m}
                               type="button"
-                              className="joy-btn-secondary joy-btn-sm"
-                              onClick={() => void discoverModels()}
-                              disabled={isDiscovering || working}
+                              className={`joy-settings-model-chip ${modelId === m ? 'is-selected' : ''}`}
+                              onClick={() => setModelId(m)}
                             >
-                              {isDiscovering ? 'Refreshing…' : '🔄 Refresh Models'}
+                              {m}
                             </button>
-                          </div>
-                        </div>
-
-                        {discoveryError && (
-                          <div
-                            className="joy-settings-notice is-error"
-                            style={{ marginBottom: '10px' }}
-                          >
-                            {discoveryError}
+                          ))
+                        ) : (
+                          <div className="joy-model-drawer-empty">
+                            {isDiscovering
+                              ? 'Scanning endpoint for available models...'
+                              : discoveredModels.length === 0
+                                ? 'No models discovered yet. Enter Base URL and API Key above, then click "Discover Models".'
+                                : 'No models matching current filter.'}
                           </div>
                         )}
-
-                        <div className="joy-model-drawer-search">
-                          <input
-                            type="text"
-                            placeholder="Filter models (e.g. minimax, efficient, free, sonnet, 4o)..."
-                            value={modelFilter}
-                            onChange={(e) => setModelFilter(e.target.value)}
-                          />
-                        </div>
-
-                        {/* Quick Filter Tag Buttons */}
-                        <div className="joy-model-drawer-tags">
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === '' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('')}
-                          >
-                            All
-                          </button>
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === 'minimax' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('minimax')}
-                          >
-                            MiniMax / M3
-                          </button>
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === 'efficient' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('efficient')}
-                          >
-                            Efficient
-                          </button>
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === 'free' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('free')}
-                          >
-                            Free
-                          </button>
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === 'claude' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('claude')}
-                          >
-                            Claude
-                          </button>
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === 'gpt' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('gpt')}
-                          >
-                            GPT
-                          </button>
-                        </div>
-
-                        {/* Interactive Model Chips Grid */}
-                        <div className="joy-settings-model-chips">
-                          {filteredDiscoveredModels.length > 0 ? (
-                            filteredDiscoveredModels.slice(0, 80).map((m) => (
-                              <button
-                                key={m}
-                                type="button"
-                                className={`joy-settings-model-chip ${modelId === m ? 'is-selected' : ''}`}
-                                onClick={() => setModelId(m)}
-                              >
-                                {m}
-                              </button>
-                            ))
-                          ) : (
-                            <div className="joy-model-drawer-empty">
-                              {isDiscovering
-                                ? 'Scanning endpoint for available models...'
-                                : discoveredModels.length === 0
-                                  ? 'No models discovered yet. Enter Base URL and API Key above, then click "Discover Models".'
-                                  : 'No models matching current filter.'}
-                            </div>
-                          )}
-                        </div>
                       </div>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  )}
+                </div>
 
                 {/* ACCORDION 3: Synthetic Media Capability Diagnostics */}
                 <div
@@ -1959,16 +1638,6 @@ export function JoyAgentSettingsDialog({
           </button>
         </footer>
       </section>
-      <DesktopAccountModal
-        isOpen={accountModalOpen}
-        onClose={() => setAccountModalOpen(false)}
-        onSuccess={() => {
-          setConnectionNotice({
-            kind: 'info',
-            message: 'JOY Account linked successfully! Joy Model is now ready to use.',
-          });
-        }}
-      />
     </div>
   );
 }

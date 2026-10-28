@@ -1,15 +1,23 @@
-import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import type { BrowserWorker } from './control-plane-client.js';
+// @vitest-environment jsdom
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BrowserControlPlaneClient, type BrowserWorker } from './control-plane-client.js';
+import { JobsPanel } from './JobsPanel.js';
 import {
   queueWorkerReadiness,
   workerAudioDenoiseOperationId,
   workerResultWasApplied,
 } from './JobsPanel.js';
 
-const panelSource = readFileSync(new URL('./JobsPanel.tsx', import.meta.url), 'utf8');
+// jsdom runs transform the module URL to http, so the source is read through Vite instead.
+const panelSource = import.meta.glob('./JobsPanel.tsx', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+})['./JobsPanel.tsx'] as string;
 
-describe('JobsPanel R2 pairing and exactly-once contract', () => {
+describe('JobsPanel R2 exactly-once contract', () => {
   it('treats applied terminal states as non-reviewable', () => {
     expect(workerResultWasApplied('applied')).toBe(true);
     expect(workerResultWasApplied('completed')).toBe(true);
@@ -26,14 +34,9 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
     );
   });
 
-  it('uses guarded form submission and preserves action feedback across refreshes', () => {
+  it('preserves action feedback across refreshes', () => {
     expect(panelSource).toContain('const [connectionStatus, setConnectionStatus]');
     expect(panelSource).toContain('note={status ?? connectionStatus}');
-    expect(panelSource).toContain('if (pairBusyRef.current) return;');
-    expect(panelSource).toContain('onSubmit={(event) => {');
-    expect(panelSource).toContain("{pairBusy ? 'Approving…' : 'Approve'}");
-    expect(panelSource).toContain('connected successfully.');
-    expect(panelSource).toContain('no restart is');
   });
 
   it('bootstraps each project once before polling jobs and never reuses a previous project state', () => {
@@ -103,6 +106,45 @@ describe('JobsPanel R2 pairing and exactly-once contract', () => {
     expect(panelSource).toContain(
       "client.enqueueWorkerGeneration(projectId, jobId, 'audio.ml-denoise', audioAssetId)",
     );
+  });
+});
+
+describe('JobsPanel local Worker controls', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    container?.remove();
+    root = undefined;
+    container = undefined;
+    vi.restoreAllMocks();
+  });
+
+  it('keeps local Worker status and Queue while omitting pairing and revocation controls', async () => {
+    vi.spyOn(BrowserControlPlaneClient.prototype, 'workers').mockResolvedValue([
+      worker({ lastSeenAt: Date.now() }),
+    ]);
+    vi.spyOn(BrowserControlPlaneClient.prototype, 'ensureProject').mockResolvedValue();
+    vi.spyOn(BrowserControlPlaneClient.prototype, 'jobs').mockResolvedValue([]);
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(createElement(JobsPanel, { projectId: 'project-a', projectTitle: 'Project A' }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const tabs = Array.from(container.querySelectorAll('[role="tab"]')).map((tab) =>
+      tab.textContent?.trim(),
+    );
+    expect(tabs).toEqual(['Workers', 'Queue']);
+    expect(container.querySelector('[aria-label="One-time pairing code"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Revoke Worker worker-1"]')).toBeNull();
+    expect(container.textContent).toContain('worker-1');
+    expect(container.textContent).toContain('connected');
   });
 });
 

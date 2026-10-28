@@ -4,16 +4,8 @@ import {
   BrowserControlPlaneClient,
   type BrowserAsset,
   type BrowserDerivative,
-  type BrowserStockVideo,
-  STOCK_VIDEO_CATEGORIES,
-  type BrowserStockVideoCategory,
 } from './control-plane-client.js';
 import { describeMedia, importMediaFile } from './media-import.js';
-import {
-  getStoredMediaToken,
-  MEDIA_SESSION_CHANGED_EVENT,
-  type MediaSessionStorage,
-} from './media-session.js';
 import {
   assetCollectionId,
   assetCollectionLabel,
@@ -22,7 +14,6 @@ import {
   filterAssetLibrary,
   includeOwnedAsset,
   importedAssetRevealState,
-  preferredDerivative,
   type AssetAvailability,
   type AssetCategory,
   type AssetCollectionId,
@@ -64,21 +55,15 @@ import {
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
-import {
-  ASSET_CATEGORY_ICONS,
-  assetCollectionIconUrl,
-  stockVideoCategoryIconUrl,
-} from './asset-library-icons.js';
+import { ASSET_CATEGORY_ICONS, assetCollectionIconUrl } from './asset-library-icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import {
   loadEditorUiPreferences,
   saveEditorUiPreferences,
   type UiPreferenceStorage,
 } from './ui-preferences.js';
-import { StockVideoDiscovery, waitForStockVideoImport } from './StockVideoDiscovery.js';
 
-type AssetSource = 'cloud' | 'user';
-type AssetLibraryStorage = UiPreferenceStorage & MediaSessionStorage;
+type AssetLibraryStorage = UiPreferenceStorage & { removeItem(key: string): void };
 
 const categories: readonly {
   readonly id: AssetCategory;
@@ -187,8 +172,6 @@ export function AssetLibraryPanel({
   const previewSeqRef = useRef(0);
   const initialUiPreferences = useRef(loadEditorUiPreferences(storage));
   const [items, setItems] = useState<readonly AssetLibraryItem[]>([]);
-  const [cloudAssetIds, setCloudAssetIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [ownedAssetIds, setOwnedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(() => new Set());
   const [category, setCategory] = useState<AssetCategory>(
     initialUiPreferences.current.assetLibrary.category,
@@ -213,56 +196,13 @@ export function AssetLibraryPanel({
     pendingPreviewOwner,
   );
   const [selectedFile, setSelectedFile] = useState<File | undefined>(undefined);
-  const [assetSource, setAssetSource] = useState<AssetSource>(
-    initialUiPreferences.current.assetLibrary.source,
-  );
   const [filterOpen, setFilterOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importProgress, setImportProgress] = useState<number | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const assetLibraryContentRef = useRef<HTMLDivElement | null>(null);
-  const [isHorizontalStockRail, setIsHorizontalStockRail] = useState(false);
   const filterActive = availability !== 'all' || sort !== 'name';
   const canImport = selectedFile !== undefined && importProgress === undefined;
-  const [stockVideoCategory, setStockVideoCategory] = useState<BrowserStockVideoCategory>(
-    STOCK_VIDEO_CATEGORIES[0].id,
-  );
-  const [stockVideoCategoryCounts, setStockVideoCategoryCounts] = useState<
-    Readonly<Record<BrowserStockVideoCategory, number>>
-  >(
-    () =>
-      Object.fromEntries(STOCK_VIDEO_CATEGORIES.map(({ id }) => [id, 6])) as Record<
-        BrowserStockVideoCategory,
-        number
-      >,
-  );
-
-  useEffect(() => {
-    const content = assetLibraryContentRef.current;
-    if (content === null || typeof ResizeObserver === 'undefined') return;
-    const updateOrientation = (width: number): void => {
-      setIsHorizontalStockRail(width <= 288);
-    };
-    updateOrientation(content.getBoundingClientRect().width);
-    const observer = new ResizeObserver(() => {
-      updateOrientation(content.getBoundingClientRect().width);
-    });
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, []);
-
-  const mergeStockVideoCounts = useCallback(
-    (counts: Readonly<Partial<Record<BrowserStockVideoCategory, number>>>): void => {
-      setStockVideoCategoryCounts((current) => ({ ...current, ...counts }));
-    },
-    [],
-  );
-  const handleStockVideoCategoryChange = useCallback(
-    (nextCategory: BrowserStockVideoCategory): void => {
-      setStockVideoCategory(nextCategory);
-    },
-    [],
-  );
 
   useEffect(() => {
     const current = loadEditorUiPreferences(storage);
@@ -270,7 +210,6 @@ export function AssetLibraryPanel({
       ...current,
       assetLibrary: {
         ...current.assetLibrary,
-        source: assetSource,
         category,
         view: viewMode,
         sort,
@@ -280,7 +219,7 @@ export function AssetLibraryPanel({
         },
       },
     });
-  }, [assetSource, category, collection, sort, storage, viewMode]);
+  }, [category, collection, sort, storage, viewMode]);
 
   const clearPreview = useCallback(() => {
     // A superseded or cleared request may own a URL React never committed.
@@ -289,69 +228,24 @@ export function AssetLibraryPanel({
   }, [pendingPreviewOwner]);
   const refresh = useCallback(async () => {
     const requestId = ++refreshSeqRef.current;
-    const token = getStoredMediaToken(storage);
-    if (!isDesktopHost() && token === undefined) {
-      // LoginGate keeps the editor mounted under the blur; don't wipe a prior
-      // catalog or treat "not signed in yet" as a hard failure.
+    if (!isDesktopHost()) {
+      setItems([]);
+      setStatus('The asset library needs the JOY Media desktop app.');
       return;
     }
     try {
-      // Catalog listing must not create or reconcile a control-plane project.
-      // My Media is the signed-in account library; importing still owns the
-      // ensure-before-register transaction, so this remains read-only while
-      // the active project binding is settling.
-      const ownedResultPromise = client.myAssets();
-      const sharedResultPromise = isDesktopHost()
-        ? getDesktopAssetLibraryCatalog().then(
-            (catalog) => catalog.assets as readonly BrowserAsset[],
-          )
-        : client.sharedCloudAssets();
-      const [ownedResult, sharedResult] = await Promise.allSettled([
-        ownedResultPromise,
-        sharedResultPromise,
-      ]);
-      const ownedAssets =
-        ownedResult.status === 'fulfilled' ? ownedResult.value : ([] as readonly BrowserAsset[]);
-      const sharedAssets =
-        sharedResult.status === 'fulfilled' ? sharedResult.value : ([] as readonly BrowserAsset[]);
-      if (ownedResult.status === 'rejected' && sharedResult.status === 'rejected') {
-        throw ownedResult.reason instanceof Error
-          ? ownedResult.reason
-          : new Error('Failed to load media catalog');
-      }
-      const byId = new Map<string, BrowserAsset>();
-      for (const asset of ownedAssets) byId.set(asset.id, asset);
-      for (const asset of sharedAssets) {
-        const existing = byId.get(asset.id);
-        if (existing === undefined) {
-          byId.set(asset.id, asset);
-          continue;
-        }
-        byId.set(asset.id, {
-          ...existing,
-          ...(asset.tags !== undefined ? { tags: asset.tags } : {}),
-          ...(asset.sortName !== undefined ? { sortName: asset.sortName } : {}),
-        });
-      }
-      const assets = [...byId.values()];
+      const catalog = await getDesktopAssetLibraryCatalog();
+      const assets = catalog.assets as readonly BrowserAsset[];
       if (requestId !== refreshSeqRef.current) return;
-      setCloudAssetIds(new Set(sharedAssets.map((asset) => asset.id)));
-      setOwnedAssetIds(new Set(ownedAssets.map((asset) => asset.id)));
       // Render catalog metadata immediately. Derivatives only improve add-to-
       // timeline behavior and must not make the libraries appear empty while
       // their requests settle.
       setItems(assets.map((asset) => ({ asset, derivatives: [] })));
-      if (sharedResult.status === 'rejected') {
-        setStatus(
-          `Cloud library unavailable (${message(sharedResult.reason)}). Showing ${assets.length} owned item(s).`,
-        );
-      } else {
-        setStatus(undefined);
-      }
+      setStatus(undefined);
       if (assets.length === 0) setImportOpen(true);
 
       void Promise.all(
-        ownedAssets.map(async (asset) => {
+        assets.map(async (asset) => {
           try {
             return [
               asset.id,
@@ -375,20 +269,11 @@ export function AssetLibraryPanel({
       if (requestId !== refreshSeqRef.current) return;
       const detail = message(error);
       setItems([]);
-      setCloudAssetIds(new Set());
-      setOwnedAssetIds(new Set());
       setStatus(`Failed to load media catalog: ${detail}`);
     }
-  }, [client, projectId, storage]);
+  }, [client, projectId]);
   useEffect(() => {
     void refresh();
-  }, [refresh]);
-  useEffect(() => {
-    const onSession = (): void => {
-      void refresh();
-    };
-    window.addEventListener(MEDIA_SESSION_CHANGED_EVENT, onSession);
-    return () => window.removeEventListener(MEDIA_SESSION_CHANGED_EVENT, onSession);
   }, [refresh]);
   useEffect(() => {
     return () => {
@@ -440,13 +325,7 @@ export function AssetLibraryPanel({
     [onEditWithAi],
   );
 
-  const sourceItems = useMemo(
-    () =>
-      items.filter(({ asset }) =>
-        assetSource === 'cloud' ? cloudAssetIds.has(asset.id) : ownedAssetIds.has(asset.id),
-      ),
-    [assetSource, cloudAssetIds, items, ownedAssetIds],
-  );
+  const sourceItems = items;
   const collections = useMemo(
     () => assetCollectionsForCategory(sourceItems, category),
     [sourceItems, category],
@@ -462,9 +341,6 @@ export function AssetLibraryPanel({
   useEffect(() => {
     setRenderLimit(ASSET_RENDER_PAGE_SIZE);
   }, [sourceItems, category, collection, deferredQuery, availability, sort]);
-  useEffect(() => {
-    setSelectedAssetIds(new Set());
-  }, [assetSource]);
   const rendered = useMemo(() => visible.slice(0, renderLimit), [visible, renderLimit]);
   const registerSelectedAsset = useCallback(async () => {
     if (selectedFile === undefined) {
@@ -484,18 +360,14 @@ export function AssetLibraryPanel({
         },
       });
       setItems((current) => includeOwnedAsset(current, new Set(), imported).items);
-      setOwnedAssetIds((current) => includeOwnedAsset([], current, imported).ownedAssetIds);
       const reveal = importedAssetRevealState(imported);
-      setAssetSource(reveal.assetSource);
       setCategory(reveal.category);
       setCollection(reveal.collection);
       setQuery(reveal.query);
       setAvailability(reveal.availability);
       setSort(reveal.sort);
       setRenderLimit(reveal.renderLimit);
-      setStatus(
-        `${selectedFile.name} backed up to the cloud. Agent tags applied; catalog refreshing.`,
-      );
+      setStatus(`${selectedFile.name} imported. Agent tags applied; catalog refreshing.`);
       setImportProgress(1);
       setSelectedFile(undefined);
       if (fileInputRef.current !== null) fileInputRef.current.value = '';
@@ -507,23 +379,6 @@ export function AssetLibraryPanel({
       setStatus(`Media import failed: ${message(error)}`);
     }
   }, [client, originalAssetCache, projectId, projectTitle, refresh, selectedFile]);
-  const fetchCloudOriginal = useCallback(
-    async (id: string) => {
-      const asset = items.find((candidate) => candidate.asset.id === id)?.asset;
-      if (asset === undefined) throw new Error('The catalog asset is no longer listed.');
-      if (isDesktopHost()) {
-        const relativePath =
-          asset.relativePath ||
-          (asset.kind === 'audio' ? `audio/${asset.id}` : `images/${asset.id}`);
-        const url = resolveDesktopAssetUrl(relativePath);
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`Failed to load local asset: ${res.statusText}`);
-        return await res.blob();
-      }
-      return client.originalBytes(asset.projectId || projectId, id);
-    },
-    [client, items, projectId],
-  );
   const addAssetToTimeline = useCallback(
     async (asset: {
       readonly assetId: string;
@@ -580,11 +435,7 @@ export function AssetLibraryPanel({
                 }
               }
               if (blob === undefined) {
-                try {
-                  blob = await client.originalBytes(projectId, asset.assetId);
-                } catch {
-                  blob = await client.sharedCloudOriginalBytes(asset.assetId);
-                }
+                blob = await client.originalBytes(projectId, asset.assetId);
               }
             }
             if (blob !== undefined) {
@@ -682,7 +533,6 @@ export function AssetLibraryPanel({
           projectId,
           resolver: resolverInstance,
           originalCache,
-          fetchCloudOriginal,
         });
         if (requestId !== previewSeqRef.current) {
           outcome.revoke();
@@ -704,23 +554,14 @@ export function AssetLibraryPanel({
         setStatus(
           outcome.source === 'derivative'
             ? `Preview for ${asset.displayName} is shown from this browser’s verified local cache.`
-            : outcome.source === 'cloud'
-              ? `Preview for ${asset.displayName} is shown from the shared cloud library.`
-              : `Preview for ${asset.displayName} is shown from this browser’s local copy.`,
+            : `Preview for ${asset.displayName} is shown from this browser’s local copy.`,
         );
       } catch (error) {
         if (requestId !== previewSeqRef.current) return;
         setStatus(`Failed to open preview: ${message(error)}`);
       }
     },
-    [
-      clearPreview,
-      fetchCloudOriginal,
-      originalAssetCache,
-      pendingPreviewOwner,
-      projectId,
-      resolver,
-    ],
+    [clearPreview, originalAssetCache, pendingPreviewOwner, projectId, resolver],
   );
 
   const toggleSelected = useCallback((assetId: string) => {
@@ -734,19 +575,19 @@ export function AssetLibraryPanel({
 
   const recoverOriginal = useCallback(
     async (asset: BrowserAsset, file: File) => {
-      if (asset.cloudBacked || asset.kind !== 'video' || !ownedAssetIds.has(asset.id)) return;
+      if (asset.kind !== 'video') return;
       try {
         setStatus(`Verifying ${asset.displayName} before recovery…`);
         await verifyOriginalRecoveryCandidate(asset, file);
         setStatus(`Uploading the verified original for ${asset.displayName}…`);
         await client.uploadAssetOriginal(asset.projectId || projectId, asset, file);
         await refresh();
-        setStatus(`${asset.displayName} is backed up to private cloud storage.`);
+        setStatus(`${asset.displayName} original uploaded.`);
       } catch (error) {
         setStatus(`Original recovery stopped: ${message(error)}`);
       }
     },
-    [client, ownedAssetIds, projectId, refresh],
+    [client, projectId, refresh],
   );
 
   const deleteAsset = useCallback(
@@ -754,7 +595,7 @@ export function AssetLibraryPanel({
       const ok = window.confirm(`Delete “${asset.displayName}” from the catalog?`);
       if (!ok) return;
       try {
-        const deleted = await client.deleteAsset(asset.projectId || projectId, asset.id);
+        await client.deleteAsset(asset.projectId || projectId, asset.id);
         setSelectedAssetIds((current) => {
           if (!current.has(asset.id)) return current;
           const next = new Set(current);
@@ -762,11 +603,7 @@ export function AssetLibraryPanel({
           return next;
         });
         await refresh();
-        setStatus(
-          deleted.cloudObjectPurgeFailures === 0
-            ? `${asset.displayName} deleted.`
-            : `${asset.displayName} deleted; cloud cleanup will need an operational retry.`,
-        );
+        setStatus(`${asset.displayName} deleted.`);
       } catch (error) {
         setStatus(`Failed to delete media: ${message(error)}`);
       }
@@ -803,60 +640,23 @@ export function AssetLibraryPanel({
     const ok = window.confirm(`Delete ${targets.length} selected media item(s) from the catalog?`);
     if (!ok) return;
     let deleted = 0;
-    let cloudObjectPurgeFailures = 0;
     for (const { asset } of targets) {
       try {
-        const result = await client.deleteAsset(asset.projectId || projectId, asset.id);
+        await client.deleteAsset(asset.projectId || projectId, asset.id);
         deleted += 1;
-        cloudObjectPurgeFailures += result.cloudObjectPurgeFailures;
       } catch {
         /* continue remaining */
       }
     }
     setSelectedAssetIds(new Set());
     await refresh();
-    setStatus(
-      `Deleted ${deleted} of ${targets.length} selected media items.${
-        cloudObjectPurgeFailures > 0 ? ' Some cloud objects need an operational cleanup retry.' : ''
-      }`,
-    );
+    setStatus(`Deleted ${deleted} of ${targets.length} selected media items.`);
   }, [client, projectId, refresh, selectedAssetIds, visible]);
-
-  const importStockVideo = useCallback(
-    async (video: BrowserStockVideo): Promise<void> => {
-      const started = await client.startStockVideoImport(projectId, video.id);
-      const completed =
-        started.state === 'completed' || started.state === 'failed'
-          ? started
-          : await waitForStockVideoImport(client, projectId, started.importId);
-      if (completed.state === 'failed') {
-        throw new Error(completed.errorCode ?? 'Native stock video import failed');
-      }
-      const importedAsset =
-        completed.asset ??
-        (completed.assetId === undefined
-          ? undefined
-          : (await client.myAssets(projectId)).find(({ id }) => id === completed.assetId));
-      if (importedAsset === undefined) throw new Error('Import completed without a My media asset');
-      setItems((current) => includeOwnedAsset(current, new Set(), importedAsset).items);
-      setOwnedAssetIds((current) => includeOwnedAsset([], current, importedAsset).ownedAssetIds);
-      setAssetSource('user');
-      setCategory('video');
-      setCollection('browse');
-      setQuery('');
-      setAvailability('all');
-      setSort('recent');
-      await refresh();
-      setStatus(`${importedAsset.displayName} imported to My media.`);
-    },
-    [client, projectId, refresh],
-  );
 
   const visibleIds = useMemo(() => rendered.map(({ asset }) => asset.id), [rendered]);
   const allVisibleSelected =
     visibleIds.length > 0 && visibleIds.every((id) => selectedAssetIds.has(id));
   const selectedCount = selectedAssetIds.size;
-  const showingStockVideos = assetSource === 'cloud' && category === 'video';
 
   // The top level is intentionally media-specific. Collections below it are
   // driven by category-* tags, so future videos and audio inherit the same UI.
@@ -890,28 +690,6 @@ export function AssetLibraryPanel({
       note={status}
       leadingActions={
         <>
-          <div className="asset-source-switch" role="group" aria-label="Asset source">
-            <button
-              type="button"
-              aria-pressed={assetSource === 'user'}
-              aria-label="My media — Showing user assets; switch to cloud bucket assets"
-              onClick={() => setAssetSource('user')}
-            >
-              My media
-            </button>
-            <button
-              type="button"
-              aria-pressed={assetSource === 'cloud'}
-              aria-label={
-                isDesktopHost()
-                  ? 'Library — Showing local asset library'
-                  : 'Cloud library — Showing cloud assets; switch to user assets'
-              }
-              onClick={() => setAssetSource('cloud')}
-            >
-              {isDesktopHost() ? 'Library' : 'Cloud library'}
-            </button>
-          </div>
           {isDesktopHost() && onOpenAssetSettings && (
             <button
               type="button"
@@ -1017,120 +795,41 @@ export function AssetLibraryPanel({
       }
     >
       <AgentPreviewBadge surface="Assets" />
-      <div
-        className="asset-library-content"
-        ref={assetLibraryContentRef}
-        data-asset-library-source={showingStockVideos ? 'stock' : undefined}
-        data-stock-rail-orientation={isHorizontalStockRail ? 'horizontal' : 'vertical'}
-      >
-        <aside
-          className="asset-library-sidebar"
-          aria-label={
-            showingStockVideos ? 'Native JOY stock video categories' : `${category} collections`
-          }
-        >
+      <div className="asset-library-content" ref={assetLibraryContentRef}>
+        <aside className="asset-library-sidebar" aria-label={`${category} collections`}>
           <span className="asset-library-sidebar-title">Collections</span>
-          {showingStockVideos ? (
-            <div
-              className="stock-video-category-rail"
-              role="tablist"
-              aria-label="Native JOY stock video categories"
-              aria-orientation={isHorizontalStockRail ? 'horizontal' : 'vertical'}
-            >
-              {STOCK_VIDEO_CATEGORIES.map((entry, index) => {
-                const selected = stockVideoCategory === entry.id;
-                const categoryCount = stockVideoCategoryCounts[entry.id];
-                const activate = (): void => {
-                  handleStockVideoCategoryChange(entry.id);
-                };
-                return (
-                  <button
-                    key={entry.id}
-                    id={`stock-video-category-${entry.id}`}
-                    type="button"
-                    role="tab"
-                    className="stock-video-category-tab"
-                    aria-selected={selected}
-                    aria-controls="stock-video-panel"
-                    aria-label={`${entry.label} — ${categoryCount} clips`}
-                    title={`${entry.label} — ${categoryCount} clips`}
-                    tabIndex={selected ? 0 : -1}
-                    onClick={(event) => {
-                      activate();
-                      event.currentTarget.focus();
-                    }}
-                    onKeyDown={(event) => {
-                      const horizontal = isHorizontalStockRail;
-                      const nextKey = horizontal ? 'ArrowRight' : 'ArrowDown';
-                      const previousKey = horizontal ? 'ArrowLeft' : 'ArrowUp';
-                      let nextIndex = index;
-                      if (event.key === nextKey)
-                        nextIndex = (index + 1) % STOCK_VIDEO_CATEGORIES.length;
-                      else if (event.key === previousKey) {
-                        nextIndex =
-                          (index - 1 + STOCK_VIDEO_CATEGORIES.length) %
-                          STOCK_VIDEO_CATEGORIES.length;
-                      } else if (event.key === 'Home') nextIndex = 0;
-                      else if (event.key === 'End') nextIndex = STOCK_VIDEO_CATEGORIES.length - 1;
-                      else if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        activate();
-                        return;
-                      } else return;
-                      event.preventDefault();
-                      const next = STOCK_VIDEO_CATEGORIES[nextIndex]!;
-                      handleStockVideoCategoryChange(next.id);
-                      document.getElementById(`stock-video-category-${next.id}`)?.focus();
-                    }}
-                  >
-                    {stockVideoCategoryIconUrl(entry.id) !== undefined && (
-                      <span
-                        className="asset-library-collection-tab-icon"
-                        style={{
-                          maskImage: `url(${stockVideoCategoryIconUrl(entry.id)})`,
-                          WebkitMaskImage: `url(${stockVideoCategoryIconUrl(entry.id)})`,
-                        }}
-                        aria-hidden="true"
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div
-              className="asset-library-collections"
-              role="tablist"
-              aria-label={`${category} collections`}
-            >
-              {collections.map((entry) => {
-                const collectionIcon = assetCollectionIconUrl(entry.id);
-                return (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    role="tab"
-                    className="asset-library-collection-tab"
-                    aria-label={`${entry.label} (${entry.count})`}
-                    title={`${entry.label} (${entry.count})`}
-                    aria-selected={collection === entry.id}
-                    onClick={() => setCollection(entry.id)}
-                  >
-                    {collectionIcon !== undefined && (
-                      <span
-                        className="asset-library-collection-tab-icon"
-                        style={{
-                          maskImage: `url(${collectionIcon})`,
-                          WebkitMaskImage: `url(${collectionIcon})`,
-                        }}
-                        aria-hidden="true"
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <div
+            className="asset-library-collections"
+            role="tablist"
+            aria-label={`${category} collections`}
+          >
+            {collections.map((entry) => {
+              const collectionIcon = assetCollectionIconUrl(entry.id);
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  role="tab"
+                  className="asset-library-collection-tab"
+                  aria-label={`${entry.label} (${entry.count})`}
+                  title={`${entry.label} (${entry.count})`}
+                  aria-selected={collection === entry.id}
+                  onClick={() => setCollection(entry.id)}
+                >
+                  {collectionIcon !== undefined && (
+                    <span
+                      className="asset-library-collection-tab-icon"
+                      style={{
+                        maskImage: `url(${collectionIcon})`,
+                        WebkitMaskImage: `url(${collectionIcon})`,
+                      }}
+                      aria-hidden="true"
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </aside>
         <div className="asset-library-main">
           {importProgress !== undefined && (
@@ -1232,7 +931,6 @@ export function AssetLibraryPanel({
                   aria-label="Filter by availability"
                 >
                   <option value="all">Any status</option>
-                  <option value="available-cloud">Ready in cloud</option>
                   <option value="available-local">Cached locally</option>
                   <option value="pending">Processing</option>
                   <option value="evicted">Cache evicted</option>
@@ -1267,7 +965,7 @@ export function AssetLibraryPanel({
               )}
             </div>
           )}
-          {!showingStockVideos && filterActive && (
+          {filterActive && (
             <div className="asset-filter-summary" aria-label="Active asset filters">
               <span>Active filters</span>
               {availability !== 'all' && <span className="asset-filter-chip">{availability}</span>}
@@ -1284,7 +982,7 @@ export function AssetLibraryPanel({
               </button>
             </div>
           )}
-          {!showingStockVideos && preview !== undefined && (
+          {preview !== undefined && (
             <section className="asset-preview" aria-label={`Preview: ${preview.displayName}`}>
               <div>
                 <strong>{preview.displayName}</strong>
@@ -1324,7 +1022,7 @@ export function AssetLibraryPanel({
               )}
             </section>
           )}
-          {!showingStockVideos && selectedCount > 0 && (
+          {selectedCount > 0 && (
             <div className="asset-bulk-bar" role="toolbar" aria-label="Bulk asset actions">
               <span className="asset-bulk-count">{selectedCount}</span>
               <button
@@ -1359,44 +1057,25 @@ export function AssetLibraryPanel({
               </button>
             </div>
           )}
-          {showingStockVideos ? (
-            <StockVideoDiscovery
-              client={client}
-              projectId={projectId}
-              query={deferredQuery}
-              category={stockVideoCategory}
-              categoryCounts={stockVideoCategoryCounts}
-              onCategoryCountsChange={mergeStockVideoCounts}
-              viewMode={viewMode}
-              onImport={importStockVideo}
-              onStatus={setStatus}
-            />
-          ) : visible.length === 0 ? (
+          {visible.length === 0 ? (
             <div className="asset-library-empty">
-              {status?.includes('Failed to load media catalog') ? (
-                // The status line is the shell's note now — do not print it twice.
-                <p>Failed to load media catalog.</p>
-              ) : (
-                <>
-                  <p>
-                    {assetSource === 'cloud'
-                      ? isDesktopHost()
-                        ? 'No library assets match the current filters.'
-                        : 'No cloud assets match the current filters.'
-                      : 'No user assets match the current filters.'}
-                  </p>
-                  <button
-                    type="button"
-                    className="icon-button icon-button-labeled"
-                    onClick={() => setImportOpen(true)}
-                    aria-label="Import media"
-                    title="Import media"
-                  >
-                    <UploadIcon />
-                    Import
-                  </button>
-                </>
-              )}
+              {isDesktopHost() &&
+                (status?.includes('Failed to load media catalog') ? (
+                  // The status line is the shell's note now — do not print it twice.
+                  <p>Failed to load media catalog.</p>
+                ) : (
+                  <p>No library assets match the current filters.</p>
+                ))}
+              <button
+                type="button"
+                className="icon-button icon-button-labeled"
+                onClick={() => setImportOpen(true)}
+                aria-label="Import media"
+                title="Import media"
+              >
+                <UploadIcon />
+                Import
+              </button>
             </div>
           ) : (
             <>
@@ -1424,11 +1103,6 @@ export function AssetLibraryPanel({
               )}
               <ul className={`asset-grid asset-grid--${viewMode}`} aria-label="Assets">
                 {rendered.map(({ asset, derivatives }) => {
-                  const derivative = preferredDerivative(derivatives);
-                  const avail =
-                    derivative?.availability ??
-                    (derivatives.length === 0 ? 'none' : derivatives[0]!.availability);
-                  const cloudBacked = asset.cloudBacked;
                   const selected = selectedAssetIds.has(asset.id);
                   const assetCollection = assetCollectionLabel(assetCollectionId(asset));
                   const detailHint = [
@@ -1436,7 +1110,6 @@ export function AssetLibraryPanel({
                     assetCollection,
                     asset.descriptor.mimeType,
                     formatBytes(asset.bytes),
-                    cloudBacked ? 'Cloud original' : availabilityLabel(avail),
                   ].join(' · ');
                   return (
                     <li
@@ -1488,7 +1161,6 @@ export function AssetLibraryPanel({
                           projectId={projectId}
                           resolverPromise={resolver}
                           originalCachePromise={originalAssetCache}
-                          fetchCloudOriginal={fetchCloudOriginal}
                           {...(asset.kind === 'image' ||
                           asset.kind === 'video' ||
                           asset.kind === 'audio'
@@ -1541,16 +1213,13 @@ export function AssetLibraryPanel({
                             <PlusIcon />
                           </button>
                         )}
-                        {assetSource === 'user' &&
-                          !cloudBacked &&
-                          asset.kind === 'video' &&
-                          ownedAssetIds.has(asset.id) && (
-                            <AssetLocateOriginalButton
-                              asset={asset}
-                              originalCachePromise={originalAssetCache}
-                              onRecover={(file) => void recoverOriginal(asset, file)}
-                            />
-                          )}
+                        {asset.kind === 'video' && (
+                          <AssetLocateOriginalButton
+                            asset={asset}
+                            originalCachePromise={originalAssetCache}
+                            onRecover={(file) => void recoverOriginal(asset, file)}
+                          />
+                        )}
                         <button
                           type="button"
                           className="icon-button"
@@ -1585,25 +1254,6 @@ export function AssetLibraryPanel({
       </div>
     </PanelShell>
   );
-}
-
-function availabilityLabel(status: AssetAvailability): string {
-  switch (status) {
-    case 'available-cloud':
-      return 'Ready in private cloud storage';
-    case 'available-local':
-      return 'Available in local cache';
-    case 'pending':
-      return 'Derivative is processing';
-    case 'evicted':
-      return 'Local cache was cleared';
-    case 'invalid':
-      return 'Derivative needs repair';
-    case 'none':
-      return 'No derivative yet';
-    default:
-      return 'Unknown status';
-  }
 }
 
 function AssetLocateOriginalButton({
@@ -1662,7 +1312,6 @@ function AssetCardMedia({
   projectId,
   resolverPromise,
   originalCachePromise,
-  fetchCloudOriginal,
   onOpenDerivative,
 }: {
   readonly asset: BrowserAsset;
@@ -1670,7 +1319,6 @@ function AssetCardMedia({
   readonly projectId: string;
   readonly resolverPromise: Promise<AuthorizedDerivativeResolver>;
   readonly originalCachePromise: Promise<OpfsOriginalAssetCache>;
-  readonly fetchCloudOriginal: (assetId: string) => Promise<Blob>;
   readonly onOpenDerivative?: () => void;
 }) {
   const mediaRef = useRef<HTMLButtonElement | null>(null);
@@ -1718,7 +1366,6 @@ function AssetCardMedia({
         projectId,
         resolver,
         originalCache,
-        fetchCloudOriginal,
       });
       if (cancelled) {
         result.revoke();
@@ -1744,15 +1391,7 @@ function AssetCardMedia({
       if (activeUrl !== undefined) releaseMediaObjectUrl(media, activeUrl, revoke);
       else revoke();
     };
-  }, [
-    asset,
-    derivatives,
-    projectId,
-    resolverPromise,
-    originalCachePromise,
-    fetchCloudOriginal,
-    nearViewport,
-  ]);
+  }, [asset, derivatives, projectId, resolverPromise, originalCachePromise, nearViewport]);
 
   const interactive = onOpenDerivative !== undefined;
   return (

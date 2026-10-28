@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BrowserControlPlaneClient,
-  invalidateWorkerReadCache,
   type BrowserJob,
   type BrowserWorker,
 } from './control-plane-client.js';
@@ -18,12 +17,11 @@ import {
   useReleasableObjectUrl,
 } from './media-object-url.js';
 
-const PRESENCE_ORDER = { connected: 0, disconnected: 1, revoked: 2 } as const;
+const PRESENCE_ORDER = { connected: 0, disconnected: 1 } as const;
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'workers', label: 'Workers' },
   { id: 'queue', label: 'Queue' },
-  { id: 'pair', label: 'Pair' },
 ];
 
 export function workerResultWasApplied(status: ProjectOperationStatus | undefined): boolean {
@@ -98,16 +96,12 @@ export function JobsPanel({
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
   const [workers, setWorkers] = useState<readonly BrowserWorker[]>([]);
   const [jobs, setJobs] = useState<readonly BrowserJob[]>([]);
-  const [workerId, setWorkerId] = useState('');
-  const [pairingCode, setPairingCode] = useState('');
   // Track the initialized *project ID*, rather than a boolean. A panel can
   // stay mounted while the editor switches projects; a boolean would let the
   // next project's first poll skip its required idempotent bootstrap.
   const [initializedProjectId, setInitializedProjectId] = useState<string>();
   const [connectionStatus, setConnectionStatus] = useState('Checking JOY Media connection…');
   const [status, setStatus] = useState<string>();
-  const [guideOpen, setGuideOpen] = useState(false);
-  const [showRevoked, setShowRevoked] = useState(false);
   const [tab, setTab] = useState('workers');
   const [review, setReview] = useState<VerifiedWorkerAudioResult | undefined>();
   const [reviewUrl, setReviewUrl] = useState<string | undefined>();
@@ -120,9 +114,6 @@ export function JobsPanel({
   );
   const [reviewBusy, setReviewBusy] = useState(false);
   const reviewBusyRef = useRef(false);
-  const [pairBusy, setPairBusy] = useState(false);
-  const pairBusyRef = useRef(false);
-  const [pendingPairWorkerId, setPendingPairWorkerId] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const refreshSeqRef = useRef(0);
   const pollingRef = useRef<BoundedPollingLoop | undefined>(undefined);
@@ -179,13 +170,7 @@ export function JobsPanel({
     }
   }, [client, controlPlaneReady, projectId, projectInitialized, projectTitle]);
 
-  const refresh = useCallback(() => {
-    // Pair/hello is also used directly by the protocol acceptance journeys;
-    // an explicit user refresh must bypass the cross-panel worker projection
-    // cache so newly connected capabilities become actionable immediately.
-    invalidateWorkerReadCache();
-    return pollingRef.current?.refresh() ?? load();
-  }, [load]);
+  const refresh = useCallback(() => pollingRef.current?.refresh() ?? load(), [load]);
 
   useEffect(() => {
     const onJobsChanged = () => {
@@ -221,9 +206,6 @@ export function JobsPanel({
     });
   }, [workers]);
 
-  const activeWorkers = sortedWorkers.filter((w) => !w.revoked);
-  const revokedWorkers = sortedWorkers.filter((w) => w.revoked);
-  const visibleWorkers = showRevoked ? sortedWorkers : activeWorkers;
   const connectedCount = workers.filter((w) => workerPresence(w) === 'connected').length;
   const queuedAssetId = audioAssetId ?? thumbnailAssetId;
   const queuedCapability = audioAssetId === undefined ? 'asset.thumbnail' : 'audio.ml-denoise';
@@ -240,39 +222,11 @@ export function JobsPanel({
     !projectInitialized &&
     (!controlPlaneReady || connectionStatus.startsWith('Not connected or not signed in:'));
 
-  useEffect(() => {
-    if (pendingPairWorkerId === undefined) return;
-    const paired = workers.find((worker) => worker.id === pendingPairWorkerId);
-    if (paired === undefined || workerPresence(paired) !== 'connected') return;
-    setStatus(`Worker ${shortId(paired.id)} connected successfully.`);
-    setPendingPairWorkerId(undefined);
-  }, [pendingPairWorkerId, workers]);
-
-  const pair = async () => {
-    if (pairBusyRef.current) return;
-    pairBusyRef.current = true;
-    setPairBusy(true);
-    try {
-      const approved = await client.pairWorker(workerId.trim(), pairingCode.trim());
-      setPairingCode('');
-      setPendingPairWorkerId(approved.id);
-      setStatus(
-        `Pairing approved for ${shortId(approved.id)}; waiting for the Worker to claim automatically.`,
-      );
-      await refresh();
-    } catch (error) {
-      setStatus(`Pairing failed: ${message(error)}`);
-    } finally {
-      pairBusyRef.current = false;
-      setPairBusy(false);
-    }
-  };
-
   const initialize = async () => {
     try {
       await client.ensureProject(projectId, projectTitle);
       setInitializedProjectId(projectId);
-      setStatus('Project is ready. Pair a Worker, then queue a job.');
+      setStatus('Project is ready. Queue a job for the local Worker.');
       await refresh();
     } catch (error) {
       setStatus(`Failed to initialize project: ${message(error)}`);
@@ -327,7 +281,7 @@ export function JobsPanel({
           `asset-thumbnail-${crypto.randomUUID()}`,
           thumbnailAssetId,
         );
-        setStatus('Thumbnail job queued for the paired local Worker.');
+        setStatus('Thumbnail job queued for the local Worker.');
       } else {
         setStatus('Select a media clip before queueing a thumbnail.');
         return;
@@ -498,64 +452,19 @@ export function JobsPanel({
         </>
       }
     >
-      {tab === 'pair' && (
-        <form
-          className="jobs-pair"
-          aria-label="Pair local Worker"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void pair();
-          }}
-        >
-          <label className="jobs-field">
-            <span>Worker ID</span>
-            <input
-              value={workerId}
-              onChange={(event) => setWorkerId(event.target.value)}
-              placeholder="worker-…"
-              spellCheck={false}
-              aria-label="Worker ID"
-            />
-          </label>
-          <label className="jobs-field">
-            <span>Pairing code</span>
-            <input
-              value={pairingCode}
-              onChange={(event) => setPairingCode(event.target.value)}
-              placeholder="One-time code"
-              autoComplete="off"
-              spellCheck={false}
-              aria-label="One-time pairing code"
-            />
-          </label>
-          <div className="jobs-pair-action">
-            <span className="jobs-pair-action-label" aria-hidden>
-              &nbsp;
-            </span>
-            <button
-              type="submit"
-              className="jobs-pair-submit"
-              disabled={pairBusy || !workerId.trim() || !pairingCode.trim()}
-            >
-              {pairBusy ? 'Approving…' : 'Approve'}
-            </button>
-          </div>
-        </form>
-      )}
-
       {tab === 'workers' && (
         <section className="jobs-section" aria-label="Workers">
           <div className="jobs-section-head">
             <h3>Workers</h3>
             <span className="jobs-section-meta">
-              {connectedCount} connected · {activeWorkers.length} active
+              {connectedCount} connected · {workers.length} total
             </span>
           </div>
-          {visibleWorkers.length === 0 ? (
-            <p className="jobs-empty">No active Worker. Pair one using the guide below.</p>
+          {sortedWorkers.length === 0 ? (
+            <p className="jobs-empty">No local Worker found.</p>
           ) : (
             <ul className="jobs-workers">
-              {visibleWorkers.map((worker) => {
+              {sortedWorkers.map((worker) => {
                 const presence = workerPresence(worker);
                 return (
                   <li key={worker.id} className={`worker-${presence}`}>
@@ -569,36 +478,11 @@ export function JobsPanel({
                           <p className="jobs-caps">{worker.capabilities.join(' · ')}</p>
                         )}
                       </div>
-                      {!worker.revoked && (
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={`Revoke Worker ${worker.id}`}
-                          title="Revoke"
-                          data-guide="Revoke"
-                          onClick={() => {
-                            if (!window.confirm(`Revoke Worker ${worker.id}?`)) return;
-                            void client.revokeWorker(worker.id).then(refresh).catch(report);
-                          }}
-                        >
-                          <CloseIcon />
-                        </button>
-                      )}
                     </div>
                   </li>
                 );
               })}
             </ul>
-          )}
-          {revokedWorkers.length > 0 && (
-            <button
-              type="button"
-              className="jobs-muted-toggle"
-              aria-pressed={showRevoked}
-              onClick={() => setShowRevoked((open) => !open)}
-            >
-              {showRevoked ? 'Hide' : 'Show'} {revokedWorkers.length} revoked
-            </button>
           )}
         </section>
       )}
@@ -738,51 +622,6 @@ export function JobsPanel({
                 </button>
               </div>
             </section>
-          )}
-        </section>
-      )}
-
-      {tab === 'pair' && (
-        <section className="jobs-guide" aria-label="How to find Worker ID and pairing code">
-          <button
-            type="button"
-            className="jobs-guide-toggle"
-            aria-expanded={guideOpen}
-            onClick={() => setGuideOpen((open) => !open)}
-          >
-            How to find Worker ID & pairing code
-            <span aria-hidden>{guideOpen ? '−' : '+'}</span>
-          </button>
-          {guideOpen && (
-            <ol className="jobs-guide-steps">
-              <li>
-                Run a local Worker on your computer with <code>JOY_MEDIA_API_URL</code> pointing at
-                this Media API. The Worker runs on your machine, not the VPS.
-              </li>
-              <li>
-                <strong>Pairing code</strong> — the Worker terminal shows{' '}
-                <code>Approve this Worker in JOY Media with pairing code: …</code>. Codes are valid
-                for about five minutes; the running Worker prints a fresh code automatically after
-                expiry.
-              </li>
-              <li>
-                <strong>Worker ID</strong> — copy <code>workerId</code> from the Worker startup JSON
-                or from <code>~/.joy-media/worker-state.json</code> (or{' '}
-                <code>JOY_MEDIA_WORKER_STATE_PATH</code>).
-              </li>
-              <li>
-                Enter both values above and click <strong>Approve</strong>. The running Worker polls
-                for approval and should appear as connected within a few seconds; no restart is
-                required.
-              </li>
-              <li>
-                GPU jobs need local <code>image.comfy</code>, <code>audio.ml-denoise</code>, or{' '}
-                <code>text.lm-studio</code> on that same machine and never run on the Media VPS.
-                Remote AI jobs (<code>text.openrouter</code>, <code>video.runway</code>,{' '}
-                <code>edit.higgsfield</code>) require API keys configured in{' '}
-                <code>~/.joy-media/ai-providers.json</code> on the Worker PC.
-              </li>
-            </ol>
           )}
         </section>
       )}

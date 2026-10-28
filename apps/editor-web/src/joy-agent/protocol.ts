@@ -56,6 +56,16 @@ export type JoyAgentErrorCode =
 export type JoyAgentProvider =
   'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom' | 'dual-brain';
 
+/**
+ * Providers the local build no longer runs (PLAN-v4 §4a). Their IDs stay in the type for the
+ * legacy-profile reader, which shows the saved profiles as disabled. A configure call refuses them.
+ */
+const RETIRED_PROVIDER_IDS: readonly string[] = ['joy-hosted', 'kilo', 'dual-brain'];
+
+export function isRetiredProvider(provider: string): boolean {
+  return RETIRED_PROVIDER_IDS.includes(provider);
+}
+
 export type JoyProviderMode = Exclude<JoyAgentProvider, 'dual-brain'>;
 
 export interface ByokSessionConfig {

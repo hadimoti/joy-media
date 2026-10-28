@@ -7,13 +7,12 @@ export interface AppMenuBarProps {
   readonly canRedo: boolean;
   readonly hasSelection: boolean;
   readonly exporting: boolean;
-  readonly signedIn: boolean;
   readonly onAction: (id: AppMenuActionId) => void;
 }
 
 function itemDisabled(
   item: AppMenuItem,
-  props: Pick<AppMenuBarProps, 'canUndo' | 'canRedo' | 'hasSelection' | 'exporting' | 'signedIn'>,
+  props: Pick<AppMenuBarProps, 'canUndo' | 'canRedo' | 'hasSelection' | 'exporting'>,
 ): boolean {
   if (item.disabled === true) return true;
   switch (item.id) {
@@ -27,15 +26,13 @@ function itemDisabled(
       return !props.hasSelection;
     case 'file.export':
       return props.exporting;
-    case 'file.signOut':
-      return !props.signedIn;
     default:
       return false;
   }
 }
 
 export function AppMenuBar(props: AppMenuBarProps) {
-  const { onAction, signedIn } = props;
+  const { onAction } = props;
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
   const menuRefs = useRef(new Map<string, HTMLUListElement>());
@@ -92,7 +89,7 @@ export function AppMenuBar(props: AppMenuBarProps) {
       {APP_MENU_GROUPS.map((group) => {
         const menuId = `${baseId}-${group.id}`;
         const isOpen = openMenu === group.id;
-        const items = group.items.filter((item) => !(item.requiresSignedIn === true && !signedIn));
+        const items = group.items;
         return (
           <div key={group.id} className="app-menu">
             <button

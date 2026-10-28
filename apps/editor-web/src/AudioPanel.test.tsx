@@ -1,11 +1,32 @@
+// @vitest-environment jsdom
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
-import { AudioPanel, prepareAudioCommandState, selectConnectedAudioWorker } from './AudioPanel.js';
-import type { BrowserWorker } from './control-plane-client.js';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  AudioPanel,
+  prepareAudioCommandState,
+  selectAudioReasoningProvider,
+  selectConnectedAudioWorker,
+} from './AudioPanel.js';
+import {
+  BrowserControlPlaneClient,
+  type BrowserReasoningProvider,
+  type BrowserWorker,
+} from './control-plane-client.js';
 import { EMPTY_AUDIO_STATE } from './audio-session.js';
 import { applyAudioCommand } from '@joy-media/commands';
 
 describe('AudioPanel Enhance workspace', () => {
+  it('skips retired reasoning providers and keeps OpenRouter', () => {
+    const providers: readonly BrowserReasoningProvider[] = [
+      { providerId: 'joy-hosted', state: 'healthy', models: [], adapterVersion: 'v1' },
+      { providerId: 'kilo', state: 'configured', models: [], adapterVersion: 'v1' },
+      { providerId: 'openrouter', state: 'healthy', models: [], adapterVersion: 'v1' },
+    ];
+    expect(selectAudioReasoningProvider(providers)?.providerId).toBe('openrouter');
+  });
+
   it('selects a capable recent Worker instead of depending on API list order', () => {
     const renderWorker: BrowserWorker = {
       id: 'render-worker',

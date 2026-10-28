@@ -7,6 +7,7 @@ import {
 } from './host-rpc.js';
 import {
   isDualBrainConfig,
+  isRetiredProvider,
   isWorkerToMainMessage,
   JOY_AGENT_PROTOCOL_VERSION,
   type ByokSessionConfig,
@@ -865,9 +866,9 @@ export function createSingleWorkerEngineClient(workerFactory?: () => Worker): Jo
 
   return {
     async configure(next) {
-      if (isDualBrainConfig(next)) {
-        throw new Error('Single worker engine client cannot configure dual-brain directly');
-      }
+      if (isDualBrainConfig(next)) throw new Error('Provider is not supported by the editor');
+      if (isRetiredProvider(next.provider))
+        throw new Error('Provider is not supported by the editor');
       const safe = normalizeByokSessionConfig(next);
       clear();
       latestStatus = { provider: safe.provider, modelId: safe.modelId, capability: 'untested' };
@@ -1013,6 +1014,10 @@ export function createJoyAgentEngineClient(workerFactory?: () => Worker): JoyAge
 
   return {
     async configure(config: ByokSessionConfig | DualBrainConfig): Promise<ByokSessionStatus> {
+      // Refuse before any client is torn down: a rejected configure keeps the current session.
+      if (isDualBrainConfig(config)) throw new Error('Provider is not supported by the editor');
+      if (isRetiredProvider(config.provider))
+        throw new Error('Provider is not supported by the editor');
       clearClients();
 
       if (isDualBrainConfig(config)) {

@@ -423,7 +423,6 @@ import {
   ExportIcon,
   FullscreenIcon,
   HighBitrateIcon,
-  LogoutIcon,
   PauseIcon,
   PlayIcon,
   PngMaskIcon,
@@ -432,15 +431,11 @@ import {
   SkipBackIcon,
   SkipForwardIcon,
   UndoIcon,
-  UserIcon,
   VerticalViewIcon,
   WideViewIcon,
   YoutubeIcon,
   ZoomInIcon,
 } from './icons.js';
-import { logoutJoySession, probeJoySession, type JoySessionState } from './identity.js';
-import { getStoredMediaToken } from './media-session.js';
-import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   markCompletedExportCacheUnavailable,
   recoverInterruptedProjectExports,
@@ -1091,7 +1086,6 @@ function EditorWorkspace({
   const [processFilter, setProcessFilter] = useState<EditorUiPreferencesV2['processFilter']>(
     () => loadEditorUiPreferences(storage).processFilter,
   );
-  const [accountOpen, setAccountOpen] = useState(false);
   const projectPackageInputRef = useRef<HTMLInputElement | null>(null);
   const [exportPresetOpen, setExportPresetOpen] = useState(false);
   const [stickerTick, setStickerTick] = useState(0);
@@ -1198,24 +1192,6 @@ function EditorWorkspace({
   const creativeBriefOptedIn =
     agentConnectionStatus?.capability === 'tool-loop' ||
     agentConnectionStatus?.capability === 'plan-only';
-  const [joySession, setJoySession] = useState<JoySessionState>({ kind: 'unknown' });
-  const avatarObjectUrl = joySession.kind === 'ready' ? joySession.avatarObjectUrl : undefined;
-  const pendingAvatarOwner = usePendingObjectUrlOwner();
-  const avatarObjectUrlRef = useReleasableObjectUrl<HTMLImageElement>(
-    avatarObjectUrl,
-    undefined,
-    revokeDetachedObjectUrl,
-    pendingAvatarOwner,
-  );
-  const joySessionRefreshSeqRef = useRef(0);
-  useLayoutEffect(
-    () => () => {
-      joySessionRefreshSeqRef.current += 1;
-      pendingAvatarOwner.revokePending();
-    },
-    [pendingAvatarOwner],
-  );
-  const [desktopAccountModalOpen, setDesktopAccountModalOpen] = useState(false);
   const [toasts, setToasts] = useState<
     readonly { id: string; message: string; kind: 'info' | 'success' | 'error' }[]
   >([]);
@@ -1233,7 +1209,6 @@ function EditorWorkspace({
   const [createTool, setCreateTool] = useState<FeatureToolId>('media');
   const [enhanceTool, setEnhanceTool] = useState<FeatureToolId>('effects');
   const paletteRef = useRef<HTMLElement | null>(null);
-  const accountDropdownRef = useRef<HTMLElement | null>(null);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
   const [effectStudioSession, setEffectStudioSession] = useState<
     { readonly recipeId: string; readonly objectId?: string } | undefined
@@ -1587,12 +1562,7 @@ function EditorWorkspace({
     } else setAudioStateRaw(canonical);
     setAudioHydrated(true);
   }, [projectId, session, storage]);
-  const controlPlaneOwnerKey =
-    joySession.kind === 'ready'
-      ? (joySession.subject ?? 'signed-in')
-      : getStoredMediaToken(storage) !== undefined
-        ? 'signed-in'
-        : 'signed-out';
+  const controlPlaneOwnerKey = 'local';
   const controlPlaneProject = useMemo(
     () =>
       getOrCreateControlPlaneProjectBinding(storage, session.visualProject, {
@@ -1606,7 +1576,6 @@ function EditorWorkspace({
     let retryTimer: number | undefined;
     const controlPlaneProjectId = controlPlaneProject.controlPlaneProjectId;
     setControlPlaneProjectReady(false);
-    if (joySession.kind !== 'ready') return () => undefined;
     void mediaControlPlaneClient
       .ensureProject(controlPlaneProject.controlPlaneProjectId, controlPlaneProject.title)
       .then(() => {
@@ -1642,11 +1611,10 @@ function EditorWorkspace({
     controlPlaneProject.controlPlaneProjectId,
     controlPlaneProject.title,
     controlPlaneProjectEnsureRetry,
-    joySession.kind,
     showToast,
   ]);
   useEffect(() => {
-    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return;
+    if (!controlPlaneProjectReady) return;
     const controlPlaneProjectId = controlPlaneProject.controlPlaneProjectId;
     if (remoteDocumentHydrationRef.current.has(controlPlaneProjectId)) return;
     remoteDocumentHydrationRef.current.add(controlPlaneProjectId);
@@ -1706,13 +1674,12 @@ function EditorWorkspace({
     controlPlaneOwnerKey,
     controlPlaneProject,
     controlPlaneProjectReady,
-    joySession.kind,
     remoteDocumentBootstrapRetry,
     session,
     showToast,
   ]);
   useEffect(() => {
-    if (!controlPlaneProjectReady || joySession.kind !== 'ready') return;
+    if (!controlPlaneProjectReady) return;
     if (remoteDocumentBootstrapProjectId !== controlPlaneProject.controlPlaneProjectId) return;
     remoteDocumentAutosyncRef.current?.schedule(
       controlPlaneProject,
@@ -1728,7 +1695,6 @@ function EditorWorkspace({
     controlPlaneOwnerKey,
     controlPlaneProject,
     controlPlaneProjectReady,
-    joySession.kind,
     remoteDocumentBootstrapProjectId,
     session.projectRevisionId,
     session.visualProject,
@@ -1829,27 +1795,14 @@ function EditorWorkspace({
     () =>
       new ProjectMediaResolver({
         projectId: controlPlaneProject.controlPlaneProjectId,
-        // The auth probe runs asynchronously after the editor mounts. A valid
-        // stored token is already sufficient for owner-authorized media reads;
-        // waiting for the probe to flip to `ready` creates a real user-facing
-        // race where Cloud/Worker actions fail with a misleading "session is
-        // not ready" error immediately after opening a project.
-        controlPlaneReady:
-          controlPlaneProjectReady ||
-          (joySession.kind === 'unknown' && getStoredMediaToken(storage) !== undefined),
+        controlPlaneReady: controlPlaneProjectReady,
         project: session.visualProject,
         client: mediaControlPlaneClient,
         originalCache: {
           get: (assetId) => originalAssetCachePromise.then((cache) => cache.get(assetId)),
         },
       }),
-    [
-      controlPlaneProject.controlPlaneProjectId,
-      controlPlaneProjectReady,
-      joySession.kind,
-      session.visualProject,
-      storage,
-    ],
+    [controlPlaneProject.controlPlaneProjectId, controlPlaneProjectReady, session.visualProject],
   );
   useLayoutEffect(
     () => () =>
@@ -3043,15 +2996,14 @@ function EditorWorkspace({
       }
 
       // A generated 3D render is a real image asset, not just a transient
-      // canvas frame. Authenticated sessions use the normal media-import
-      // pipeline so the exact PNG is registered and uploaded before the
-      // document points at it. Signed-out/offline sessions retain the local
-      // integrity-checked cache path and can be backed up later from Media.
+      // canvas frame. Ready control-plane projects use the normal media-import
+      // pipeline so the exact PNG is registered before the document points at
+      // it. Offline projects retain the local integrity-checked cache path.
       const mimeType = asset.blob.type || 'image/png';
       let persistedAsset:
         | Awaited<ReturnType<typeof importMediaFile>>
         | { readonly id: string; readonly sha256: string; readonly bytes: number };
-      if (joySession.kind === 'ready') {
+      if (controlPlaneProjectReady) {
         const generatedFile = new File([asset.blob], `${asset.assetId}.png`, {
           type: mimeType,
         });
@@ -3104,7 +3056,7 @@ function EditorWorkspace({
     },
     [
       controlPlaneProject,
-      joySession.kind,
+      controlPlaneProjectReady,
       session,
       showToast,
       state.playheadUs,
@@ -3492,23 +3444,6 @@ function EditorWorkspace({
     },
     [activatePanel, selectClips],
   );
-  const refreshJoySession = useCallback(() => {
-    const requestId = ++joySessionRefreshSeqRef.current;
-    void probeJoySession(storage)
-      .then((next) => {
-        if (requestId !== joySessionRefreshSeqRef.current) {
-          if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
-            revokeDetachedObjectUrl(next.avatarObjectUrl);
-          }
-          return;
-        }
-        if (next.kind === 'ready' && next.avatarObjectUrl !== undefined) {
-          pendingAvatarOwner.track(next.avatarObjectUrl);
-        }
-        setJoySession(next);
-      })
-      .catch(() => undefined);
-  }, [pendingAvatarOwner, storage]);
   useEffect(() => {
     if (session.recoveryWarnings.length === 0) return;
     showToast(
@@ -3686,28 +3621,6 @@ function EditorWorkspace({
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [paletteOpen]);
-  useEffect(() => {
-    if (!accountOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const root = accountDropdownRef.current;
-      if (root === null || root.contains(event.target as Node)) return;
-      setAccountOpen(false);
-    };
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [accountOpen]);
-  useEffect(() => {
-    refreshJoySession();
-  }, [refreshJoySession]);
-  const signOut = useCallback(async () => {
-    if (!window.confirm('Sign out of JOY Studio? Your local project will remain on this device.'))
-      return;
-    setAccountOpen(false);
-    joyAgentEngineClientRef.current?.clear();
-    appAgentPresenceStore.clear();
-    await logoutJoySession(storage);
-    refreshJoySession();
-  }, [refreshJoySession, storage]);
   const recordExportEntry = useCallback(
     (entry: ProjectExportProcessEntry) => {
       const next = upsertProjectEntry(exportHistoryRef.current, entry);
@@ -3755,7 +3668,6 @@ function EditorWorkspace({
         case 'palette.close':
           setPaletteOpen(false);
           setProcessesOpen(false);
-          setAccountOpen(false);
           break;
         case 'playhead.back':
           seek(Math.max(0, current.playheadUs - 1_000_000));
@@ -4987,9 +4899,6 @@ function EditorWorkspace({
         return;
       }
       switch (id) {
-        case 'file.account':
-          setDesktopAccountModalOpen(true);
-          break;
         case 'file.projects':
           onBackToLibrary();
           break;
@@ -5001,9 +4910,6 @@ function EditorWorkspace({
           break;
         case 'file.export':
           void handleExport();
-          break;
-        case 'file.signOut':
-          void signOut();
           break;
         case 'edit.undo':
           undo();
@@ -5072,7 +4978,6 @@ function EditorWorkspace({
       onBackToLibrary,
       redo,
       runSelectedClipAction,
-      signOut,
       undo,
     ],
   );
@@ -7019,7 +6924,6 @@ function EditorWorkspace({
                 canRedo={session.canRedo}
                 hasSelection={state.selectedIds.length > 0}
                 exporting={exporting}
-                signedIn={joySession.kind === 'ready'}
                 onAction={runMenuAction}
               />
             </div>
@@ -7083,73 +6987,6 @@ function EditorWorkspace({
               </button>
             </div>
             <div className="header-group" role="group" aria-label="Deliver">
-              <div className="header-menu">
-                <button
-                  type="button"
-                  className="icon-button header-export-preset-trigger"
-                  disabled={exporting}
-                  aria-label="Export preset"
-                  aria-expanded={exportPresetOpen}
-                  data-guide="Export preset"
-                  onClick={() => {
-                    setExportPresetOpen((open) => !open);
-                    setProcessesOpen(false);
-                    setAccountOpen(false);
-                  }}
-                >
-                  <span className="header-disclosure-chevron" aria-hidden="true">
-                    <ChevronDownIcon />
-                  </span>
-                  <span className="header-export-preset-label">
-                    {exportPreset === 'reels-1080'
-                      ? 'Reels 1080×1920'
-                      : exportPreset === 'shorts-1080'
-                        ? 'Shorts 1080×1920'
-                        : exportPreset === 'youtube-1080'
-                          ? 'YouTube 1920×1080'
-                          : exportPreset === 'high-bitrate'
-                            ? 'High bitrate'
-                            : 'Social H.264'}
-                  </span>
-                </button>
-                {exportPresetOpen && (
-                  <section
-                    className="header-dropdown header-export-preset-dropdown"
-                    aria-label="Export preset"
-                  >
-                    <h3>Export preset</h3>
-                    <ul className="export-preset-list">
-                      {(
-                        [
-                          ['social-h264-aac', ExportIcon, 'Social H.264'],
-                          ['reels-1080', ReelsIcon, 'Reels 1080×1920'],
-                          ['shorts-1080', ReelsIcon, 'Shorts 1080×1920'],
-                          ['youtube-1080', YoutubeIcon, 'YouTube 1920×1080'],
-                          ['high-bitrate', HighBitrateIcon, 'High bitrate'],
-                        ] as const
-                      ).map(([id, Icon, label]) => (
-                        <li key={id}>
-                          <button
-                            type="button"
-                            className="icon-button icon-button-labeled"
-                            disabled={exporting}
-                            aria-pressed={exportPreset === id}
-                            aria-label={label}
-                            data-guide={label}
-                            onClick={() => {
-                              setExportPreset(id);
-                              setExportPresetOpen(false);
-                            }}
-                          >
-                            <Icon />
-                            <span className="export-preset-option-label">{label}</span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                )}
-              </div>
               <button
                 type="button"
                 className="header-export-btn"
@@ -7174,13 +7011,78 @@ function EditorWorkspace({
               )}
               <div className="header-menu">
                 <button
+                  type="button"
+                  className="icon-button header-export-preset-trigger"
+                  aria-label="Export preset"
+                  aria-haspopup="menu"
+                  aria-expanded={exportPresetOpen}
+                  title={`Export preset: ${exportPreset}`}
+                  onClick={() => {
+                    setExportPresetOpen((open) => !open);
+                    setProcessesOpen(false);
+                  }}
+                >
+                  <span className="header-export-preset-label">
+                    {exportPreset === 'reels-1080'
+                      ? 'Reels 1080p'
+                      : exportPreset === 'shorts-1080'
+                        ? 'Shorts 1080p'
+                        : exportPreset === 'youtube-1080'
+                          ? 'YouTube 1080p'
+                          : 'High bitrate'}
+                  </span>
+                  <span className="header-disclosure-chevron">
+                    <ChevronDownIcon />
+                  </span>
+                </button>
+                {exportPresetOpen && (
+                  <section
+                    className="header-dropdown header-export-preset-dropdown"
+                    aria-label="Export preset"
+                  >
+                    <h3>Export preset</h3>
+                    <ul className="export-preset-list" role="menu">
+                      {[
+                        { id: 'reels-1080', label: 'Instagram Reels · 1080p' },
+                        { id: 'shorts-1080', label: 'YouTube Shorts · 1080p' },
+                        { id: 'youtube-1080', label: 'YouTube · 1080p' },
+                        { id: 'high-bitrate', label: 'High bitrate' },
+                      ].map(({ id, label }) => (
+                        <li key={id} role="none">
+                          <button
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={exportPreset === id}
+                            onClick={() => {
+                              setExportPreset(id as ExportPresetId);
+                              setExportPresetOpen(false);
+                            }}
+                          >
+                            <span className="preset-icon-group" aria-hidden="true">
+                              {id === 'youtube-1080' ? (
+                                <YoutubeIcon />
+                              ) : id === 'high-bitrate' ? (
+                                <HighBitrateIcon />
+                              ) : (
+                                <ReelsIcon />
+                              )}
+                            </span>
+                            <span className="export-preset-option-label">{label}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </div>
+              <div className="header-menu">
+                <button
                   className="icon-button header-processes-trigger"
                   aria-label="Recent processes"
                   aria-expanded={processesOpen}
                   title="Recent processes"
                   onClick={() => {
                     setProcessesOpen((open) => !open);
-                    setAccountOpen(false);
                     setExportPresetOpen(false);
                   }}
                 >
@@ -7292,125 +7194,6 @@ function EditorWorkspace({
                             ),
                         )}
                       </div>
-                    )}
-                  </section>
-                )}
-              </div>
-              <div className="header-menu">
-                <button
-                  className="icon-button"
-                  aria-label={`${JOY_STUDIO_NAME} account`}
-                  aria-expanded={accountOpen}
-                  title={
-                    joySession.kind === 'ready'
-                      ? `Signed in · ${joySession.displayName ?? joySession.subject ?? JOY_STUDIO_NAME}`
-                      : joySession.kind === 'no-access'
-                        ? `Signed in, ${JOY_STUDIO_NAME} access not enabled`
-                        : joySession.kind === 'signed-out'
-                          ? 'Signed out'
-                          : joySession.kind === 'unavailable'
-                            ? 'Sign-in status unavailable'
-                            : `${JOY_STUDIO_NAME} account`
-                  }
-                  onClick={() => {
-                    if (joySession.kind === 'ready' && joySession.subject === 'local-creator') {
-                      setDesktopAccountModalOpen(true);
-                      return;
-                    }
-                    setAccountOpen((open) => !open);
-                    setProcessesOpen(false);
-                    setExportPresetOpen(false);
-                    refreshJoySession();
-                  }}
-                >
-                  <span className="session-icon-wrap">
-                    <UserIcon />
-                    <span className={`session-dot session-${joySession.kind}`} aria-hidden="true" />
-                  </span>
-                </button>
-                {accountOpen && (
-                  <section
-                    ref={accountDropdownRef}
-                    className="header-dropdown account-dropdown"
-                    aria-label={`${JOY_STUDIO_NAME} account`}
-                  >
-                    {joySession.kind === 'ready' && (
-                      <>
-                        <div className="account-card">
-                          <div className="account-card-avatar" aria-hidden="true">
-                            {joySession.avatarObjectUrl !== undefined ? (
-                              <img
-                                className="account-card-avatar-img"
-                                ref={avatarObjectUrlRef}
-                                src={joySession.avatarObjectUrl}
-                                alt=""
-                              />
-                            ) : (
-                              (
-                                (joySession.displayName ?? joySession.subject ?? 'J')
-                                  .replace(/^@/, '')
-                                  .trim()
-                                  .charAt(0) || 'J'
-                              ).toUpperCase()
-                            )}
-                          </div>
-                          <div className="account-card-meta">
-                            <p className="account-card-status">Signed in</p>
-                            {(joySession.displayName ?? joySession.subject) !== undefined && (
-                              <p className="account-card-subject">
-                                <bdi>{joySession.displayName ?? joySession.subject}</bdi>
-                              </p>
-                            )}
-                          </div>
-                          <span className="account-card-dot session-ready" aria-hidden="true" />
-                        </div>
-                        {joySession.subject === 'local-creator' ? (
-                          <button
-                            type="button"
-                            className="account-sign-out"
-                            style={{
-                              background: 'linear-gradient(135deg, #f7f586, #f4b72f)',
-                              color: '#0c0d10',
-                              fontWeight: 700,
-                              border: 'none',
-                              boxShadow: '0 2px 10px rgba(244, 183, 47, 0.3)',
-                            }}
-                            title="Connect your JOY account to activate Joy Model and sync subscription"
-                            onClick={() => {
-                              setAccountOpen(false);
-                              setDesktopAccountModalOpen(true);
-                            }}
-                          >
-                            🔑 Connect JOY Account
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="account-sign-out"
-                            title={`Sign out of ${JOY_STUDIO_NAME}`}
-                            onClick={() => void signOut()}
-                          >
-                            <LogoutIcon />
-                            Sign out
-                          </button>
-                        )}
-                      </>
-                    )}
-                    {joySession.kind === 'no-access' && (
-                      <p className="empty-hint">
-                        {JOY_STUDIO_NAME} access is not enabled for this account.
-                      </p>
-                    )}
-                    {joySession.kind === 'signed-out' && (
-                      <p className="empty-hint">Returning to login…</p>
-                    )}
-                    {joySession.kind === 'unknown' && (
-                      <p className="empty-hint">Checking session…</p>
-                    )}
-                    {joySession.kind === 'unavailable' && (
-                      <p className="empty-hint">
-                        Sign-in status could not be verified. Try again shortly.
-                      </p>
                     )}
                   </section>
                 )}
@@ -7782,11 +7565,6 @@ function EditorWorkspace({
               </div>
             </div>
           )}
-          <DesktopAccountModal
-            isOpen={desktopAccountModalOpen}
-            onClose={() => setDesktopAccountModalOpen(false)}
-            onSuccess={refreshJoySession}
-          />
         </main>
       </AgentPresenceProvider>
     </AgentPreviewProvider>

@@ -27,9 +27,7 @@ class FakeWorker {
           protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
           type: 'configured',
           status: {
-            // The Worker reports the normalized provider; Kilo is OpenAI-compatible.
-            provider:
-              message.config.provider === 'kilo' ? 'openai-compatible' : message.config.provider,
+            provider: message.config.provider,
             modelId: message.config.modelId,
             capability: 'untested',
           },
@@ -259,40 +257,52 @@ describe('JOY Agent Engine client V2 lifecycle', () => {
     ).toHaveLength(0);
   });
 
-  it('requires both Dual-Brain workers to pass before reporting tool-loop readiness', async () => {
-    const workers = [new FakeWorker(0, 'tool-loop'), new FakeWorker(0, 'incompatible')];
-    let index = 0;
-    const client = createJoyAgentEngineClient(() => workers[index++] as unknown as Worker);
-    const config = {
-      mode: 'dual-brain' as const,
-      workhorse: {
-        provider: 'openrouter' as const,
-        baseUrl: 'https://openrouter.ai/api/v1',
-        modelId: 'openrouter/free',
-        apiKey: 'only-openrouter-key',
-      },
-      creative: {
-        provider: 'kilo' as const,
-        baseUrl: 'https://api.kilo.ai/v1',
-        modelId: 'kilo-auto/efficient',
-        apiKey: 'only-kilo-key',
-      },
-    };
-    await client.configure(config);
-    const status = await client.testConnection();
+  it.each(['joy-hosted', 'kilo'] as const)(
+    'rejects retired %s configuration before creating a Worker',
+    async (provider) => {
+      let workerFactoryCalls = 0;
+      const client = createJoyAgentEngineClient(() => {
+        workerFactoryCalls += 1;
+        return new FakeWorker() as unknown as Worker;
+      });
 
-    expect(status.capability).toBe('incompatible');
-    expect(status.dualBrain?.workhorse.capability).toBe('tool-loop');
-    expect(status.dualBrain?.creative.capability).toBe('incompatible');
-    const workerConfigs = workers.map(
-      (worker) =>
-        worker.messages.find(
-          (message): message is Extract<MainToWorkerMessage, { type: 'configure' }> =>
-            isMainMessage(message) && message.type === 'configure',
-        )?.config,
-    );
-    expect(workerConfigs[0]?.apiKey).toBe('only-openrouter-key');
-    expect(workerConfigs[1]?.apiKey).toBe('only-kilo-key');
+      await expect(
+        client.configure({
+          provider,
+          baseUrl: 'https://legacy.example/v1',
+          modelId: 'retired-model',
+          apiKey: 'legacy-key',
+        } as never),
+      ).rejects.toThrow('Provider is not supported by the editor');
+      expect(workerFactoryCalls).toBe(0);
+    },
+  );
+
+  it('rejects Dual-Brain configuration and keeps the single-worker contract', async () => {
+    let workerFactoryCalls = 0;
+    const client = createJoyAgentEngineClient(() => {
+      workerFactoryCalls += 1;
+      return new FakeWorker() as unknown as Worker;
+    });
+
+    await expect(
+      client.configure({
+        mode: 'dual-brain',
+        workhorse: {
+          provider: 'openrouter',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          modelId: 'openrouter/free',
+          apiKey: 'workhorse-key',
+        },
+        creative: {
+          provider: 'openai-compatible',
+          baseUrl: 'https://custom.example/v1',
+          modelId: 'creative-model',
+          apiKey: 'creative-key',
+        },
+      } as never),
+    ).rejects.toThrow('Provider is not supported by the editor');
+    expect(workerFactoryCalls).toBe(0);
   });
 
   it('runs a media capability probe only when explicitly requested and keeps it session-only', async () => {

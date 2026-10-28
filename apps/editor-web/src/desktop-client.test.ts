@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  checkForDesktopUpdate,
   getDesktopWorkerStatus,
   isDesktopHost,
   selectDesktopFile,
@@ -16,7 +15,6 @@ import {
   resetDesktopAssetLibraryDirectory,
   getDesktopAssetLibraryCatalog,
   resolveDesktopAssetUrl,
-  type DesktopUpdateCheckRequest,
   type SaveDesktopProviderProfileRequest,
   type DesktopProviderProfile,
 } from './desktop-client.js';
@@ -76,36 +74,6 @@ describe('selectDesktopFile', () => {
     window.joyDesktop = { channels: ['desktop.select-file'], invoke };
 
     await expect(selectDesktopFile()).resolves.toBeUndefined();
-  });
-});
-
-describe('checkForDesktopUpdate', () => {
-  const request: DesktopUpdateCheckRequest = {
-    manifest: {
-      payload: {
-        channel: 'stable',
-        version: '1.2.3',
-        downloadUrl: 'https://joyst.ir/releases/1.2.3.exe',
-        sha256: 'a'.repeat(64),
-      },
-      signature: 'sig',
-    },
-    subscriptionActive: true,
-  };
-
-  it('rejects outside the desktop host', async () => {
-    await expect(checkForDesktopUpdate(request)).rejects.toThrow(
-      'unavailable outside the desktop host',
-    );
-  });
-
-  it('forwards the manifest and subscription flag to desktop.check-for-update', async () => {
-    const decision = { status: 'current' as const, reason: 'not-newer' as const };
-    const invoke = vi.fn().mockResolvedValue(decision);
-    window.joyDesktop = { channels: ['desktop.check-for-update'], invoke };
-
-    await expect(checkForDesktopUpdate(request)).resolves.toEqual(decision);
-    expect(invoke).toHaveBeenCalledWith('desktop.check-for-update', request);
   });
 });
 
@@ -179,28 +147,6 @@ describe('deleteDesktopProviderProfile', () => {
 
     await expect(deleteDesktopProviderProfile('prof-1')).resolves.toBeUndefined();
     expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.delete', { id: 'prof-1' });
-  });
-});
-
-describe('beginDesktopProviderSession', () => {
-  it('rejects outside the desktop host', async () => {
-    await expect(beginDesktopProviderSession('prof-1')).rejects.toThrow(
-      'unavailable outside the desktop host',
-    );
-  });
-
-  it('invokes desktop.provider-profile.begin-session with the profile id and returns session config', async () => {
-    const sessionData = {
-      provider: 'openrouter',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      modelId: 'anthropic/claude-3.5-sonnet',
-      apiKey: 'sk-or-session-key',
-    };
-    const invoke = vi.fn().mockResolvedValue(sessionData);
-    window.joyDesktop = { channels: ['desktop.provider-profile.begin-session'], invoke };
-
-    await expect(beginDesktopProviderSession('prof-1')).resolves.toEqual(sessionData);
-    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.begin-session', { id: 'prof-1' });
   });
 });
 
@@ -305,5 +251,17 @@ describe('asset library helpers', () => {
     expect(resolveDesktopAssetUrl('joy-asset://library/audio/test.wav')).toBe(
       'joy-asset://library/audio/test.wav',
     );
+  });
+});
+
+describe('beginDesktopProviderSession', () => {
+  it('refuses until the local provider broker ships, and never asks the desktop for a key', async () => {
+    const invoke = vi.fn();
+    window.joyDesktop = { channels: [], invoke };
+
+    await expect(beginDesktopProviderSession('prof-1')).rejects.toThrow(
+      'not available until the local provider broker ships',
+    );
+    expect(invoke).not.toHaveBeenCalled();
   });
 });

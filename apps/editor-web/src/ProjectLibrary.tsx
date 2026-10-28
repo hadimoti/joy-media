@@ -296,7 +296,7 @@ export function ProjectLibrary({
           <h1>{showTrash ? 'Trash' : 'Projects'}</h1>
           <p>
             {showTrash
-              ? 'Restore a project or permanently remove it from this account.'
+              ? 'Restore a project or permanently remove it.'
               : 'Open a recent project or create a new one to enter the editor.'}
           </p>
         </div>

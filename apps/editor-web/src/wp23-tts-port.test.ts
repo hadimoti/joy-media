@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createStubFirstPartyLibrary } from './first-party-handlers.js';
 
 describe('generation.speech edge-tts port', () => {
-  it('drops __stub and discloses remote Edge TTS deferral', () => {
+  it('drops __stub and refuses the online voice service in the local build', () => {
     const library = createStubFirstPartyLibrary();
     const handler = library.handlers['generation.speech'];
     expect(handler).toBeDefined();
@@ -28,9 +28,9 @@ describe('generation.speech edge-tts port', () => {
     if (!('ok' in result) || !result.ok) return;
     const output = result.output as Record<string, unknown>;
     expect(output.__stub).toBeUndefined();
-    expect(output.method).toBe('edge-tts');
-    expect(output.dataLeavesDevice).toBe(true);
-    expect(output.deferredEndpoint).toBe('/v1/providers/speech/synthesize');
+    expect(output.method).toBe('unavailable');
+    expect(output.dataLeavesDevice).toBe(false);
+    expect(output.deferredEndpoint).toBeUndefined();
     expect(String(output.voiceId)).toContain('fa-IR');
   });
 });

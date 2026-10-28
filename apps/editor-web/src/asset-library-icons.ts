@@ -1,11 +1,10 @@
 import { iconUrl } from './icon-assets.js';
-import type { BrowserStockVideoCategory } from './control-plane-client.js';
 import type { AssetCategory, AssetCollectionId } from './asset-library-state.js';
 
 /**
  * Owner-supplied 24×24 black-on-transparent masks for Assets sections and
- * collection tabs. Same art as https://media.joyteam.ir/assets/24_*.png —
- * imported through Vite so redeploys bust CDN/browser caches.
+ * collection tabs. The art ships with the app and is imported through Vite so
+ * redeploys bust browser caches.
  */
 export const ASSET_CATEGORY_ICONS: Readonly<Record<AssetCategory, string>> = {
   all: iconUrl('asset/24_Browse.png'),
@@ -13,22 +12,6 @@ export const ASSET_CATEGORY_ICONS: Readonly<Record<AssetCategory, string>> = {
   video: iconUrl('asset/24_video.png'),
   audio: iconUrl('asset/24_Audio.png'),
 };
-
-/** Stable local masks for the native stock category rail. */
-export const STOCK_VIDEO_CATEGORY_ICONS: Readonly<Record<BrowserStockVideoCategory, string>> = {
-  'business-work': iconUrl('ui/charts.png'),
-  technology: iconUrl('asset/24_UI.png'),
-  'people-lifestyle': iconUrl('24_socials.png'),
-  nature: iconUrl('24_scenes.png'),
-  'travel-places': iconUrl('camera.png'),
-  'city-transport': iconUrl('asset/24_arrows.png'),
-  'food-drink': iconUrl('asset/24_creative.png'),
-  'abstract-backgrounds': iconUrl('asset/24_patterns.png'),
-};
-
-export function stockVideoCategoryIconUrl(id: BrowserStockVideoCategory): string {
-  return STOCK_VIDEO_CATEGORY_ICONS[id];
-}
 
 const COLLECTION_ICONS: Readonly<Record<string, string>> = {
   browse: iconUrl('asset/24_Browse.png'),
