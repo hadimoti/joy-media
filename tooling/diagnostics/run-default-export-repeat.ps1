@@ -30,7 +30,7 @@ Three consecutive harness errors (not app failures) end the loop. App failures n
 Raw reports and logs go to -OutDir, which must be outside the repository.
 
 -PreflightOnly checks the paths and tools and prints the plan without starting anything.
--SelfTest checks the conversion and aggregation logic against scripted runs. It needs no app and no GPU.
+-SelfTest checks the conversion and aggregation logic against scripted runs, and runs the real spawn and poll path against a scripted spec process and a stub nvidia-smi. It needs no app and no GPU. It needs Node: -NodeDirectory when given, otherwise node on PATH.
 
 .EXAMPLE
 pwsh -NoProfile -File tooling/diagnostics/run-default-export-repeat.ps1 -InstallRoot 'D:\JOY Media' -OutDir 'D:\joy-gpu-g5' -Runs 30 -NodeDirectory 'D:\node24' -PnpmDirectory 'D:\pnpm'
@@ -61,6 +61,8 @@ $harnessErrorLimit = 3
 $pollMilliseconds = 500
 # WER writes its crash event a few seconds after the crash, so each run's window runs on for this grace period.
 $werGraceSeconds = 10
+# Set only by -SelfTest: a scripted process stands in for Playwright, and the grace period is skipped.
+$script:SelfTestSpecRunner = $null
 
 # A harness error is a failed measurement, not a failed app. Only these end the loop.
 class HarnessError : System.Exception {
@@ -259,9 +261,17 @@ function Invoke-SpecRun {
                 -EncoderMax $null -EncoderBefore $encoderBefore -EncoderAfter '' -LeftoversStopped 0 -Seconds 0 -ReportName ''
         }
     }
-    $argumentLine = '"{0}" test --config {1} {2} --retries=0 --reporter=json' -f $playwrightCli, $configPath, $Spec
+    if ($null -ne $script:SelfTestSpecRunner) {
+        # -SelfTest only: a scripted process stands in for Playwright. The loop, the sampling and the records are the real ones.
+        $runnerExe = $script:SelfTestSpecRunner.Exe
+        $argumentLine = & $script:SelfTestSpecRunner.Arguments $Stem
+    }
+    else {
+        $runnerExe = $nodeExe
+        $argumentLine = '"{0}" test --config {1} {2} --retries=0 --reporter=json' -f $playwrightCli, $configPath, $Spec
+    }
     $started = Get-Date
-    $process = Start-Process -FilePath $nodeExe -ArgumentList $argumentLine -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru `
+    $process = Start-Process -FilePath $runnerExe -ArgumentList $argumentLine -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $outFull "$Stem.stdout.log") `
         -RedirectStandardError (Join-Path $outFull "$Stem.stderr.log")
 
@@ -286,7 +296,8 @@ function Invoke-SpecRun {
         $harnessError = $_.Exception.Message
     }
 
-    $timedOut = -not $process.HasExited
+    # Timed out means the deadline passed while the process still ran. A harness error ends the wait early, so it is not a timeout.
+    $timedOut = (-not $process.HasExited) -and ($null -eq $harnessError) -and ((Get-Date) -ge $deadline)
     if ($timedOut -or $null -ne $harnessError) { & taskkill.exe /PID $process.Id /T /F | Out-Null }
     $exitCode = $null
     if (-not $timedOut -and $null -eq $harnessError) { $exitCode = $process.ExitCode }
@@ -314,14 +325,16 @@ function Invoke-SpecRun {
             $fallbackArgumentLaunch = @($gpu.launches | Where-Object { $_.fallbackArgument }).Count -gt 0
             $listenerExits = $gpu.exits.Count
         }
-        # The window runs on for the grace period, so a crash event written a few seconds late still lands in its own run.
-        Start-Sleep -Seconds $werGraceSeconds
-        try {
-            $werCodes = Get-WerCrashCodes -Start $started -End (Get-Date)
-        }
-        catch {
-            if ($null -eq $harnessError) { $harnessError = 'the Windows Error Reporting query failed' }
-        }
+    }
+    # The window runs on for the grace period, so a crash event written a few seconds late still lands in its own run.
+    # Every run reads Windows Error Reporting. The export run has no listener, so its events count as its GPU exits.
+    $graceSeconds = if ($null -ne $script:SelfTestSpecRunner) { 0 } else { $werGraceSeconds }
+    Start-Sleep -Seconds $graceSeconds
+    try {
+        $werCodes = Get-WerCrashCodes -Start $started -End (Get-Date)
+    }
+    catch {
+        if ($null -eq $harnessError) { $harnessError = 'the Windows Error Reporting query failed' }
     }
 
     $specPassed = [bool]($outcome.reported -and (-not $timedOut) -and ($null -eq $harnessError) -and ($exitCode -eq 0) -and
@@ -354,29 +367,38 @@ function Invoke-AcceptanceLoop {
     return [pscustomobject]@{ records = $records.ToArray(); stopReason = $stopReason }
 }
 
+function Get-ExportExits {
+    # The export run has no listener, so the Windows Error Reporting crashes it produced are its GPU exits. A record without the field counts none.
+    param($ExportRecord)
+    if (($null -ne $ExportRecord) -and ($ExportRecord.PSObject.Properties.Name -contains 'gpuExitsTotal')) { return [int]$ExportRecord.gpuExitsTotal }
+    return 0
+}
+
 function New-AcceptanceSteps {
     # The five steps of plan section 10d, G0 item 4. Any run without a measurement makes the step fail.
     param([object[]]$Records, $Limits, $ExportRecord)
     $healthy = @($Records | Where-Object { $null -eq $_.harnessError })
     $allHealthy = $healthy.Count -eq $Records.Count
     $completed = @($healthy | Where-Object { $_.specPassed -and $_.defaultLaunch }).Count
-    $gpuExits = [int](($healthy | Measure-Object -Property gpuExitsTotal -Sum).Sum)
+    $gpuExits = [int](($healthy | Measure-Object -Property gpuExitsTotal -Sum).Sum) + (Get-ExportExits $ExportRecord)
     $fallbackRuns = @($healthy | Where-Object { $_.fallbackRelaunchSeen }).Count
     $measured = @($Records | Where-Object { $null -ne $_.encoderMaxDuringRun })
     $encoderMin = $null
     if ($measured.Count -gt 0) { $encoderMin = [int](($measured | Measure-Object -Property encoderMaxDuringRun -Minimum).Minimum) }
     $encoderPass = ($measured.Count -eq $Records.Count) -and ($null -ne $encoderMin) -and ($encoderMin -ge [int]$Limits.minEncoderSessionsDuringExport)
     $exportPassed = ($null -ne $ExportRecord) -and [bool]$ExportRecord.specPassed
+    # An export run that did not measure cleanly does not pass the GPU step, even when its partial count is zero.
+    $exportClean = ($null -eq $ExportRecord) -or ($ExportRecord.PSObject.Properties.Name -notcontains 'harnessError') -or ($null -eq $ExportRecord.harnessError)
     return @(
         [pscustomobject]@{
             id = 'default-launches'
-            result = $(if ($completed -ge [int]$Limits.defaultLaunches) { 'pass' } else { 'fail' })
+            result = $(if (($Records.Count -eq [int]$Limits.defaultLaunches) -and ($completed -eq $Records.Count)) { 'pass' } else { 'fail' })
             measurement = $completed
             unit = 'runs'
         }
         [pscustomobject]@{
             id = 'gpu-process-exits'
-            result = $(if ($allHealthy -and $gpuExits -le [int]$Limits.maxGpuProcessExits) { 'pass' } else { 'fail' })
+            result = $(if ($allHealthy -and $exportClean -and $gpuExits -le [int]$Limits.maxGpuProcessExits) { 'pass' } else { 'fail' })
             measurement = $gpuExits
             unit = 'exits'
         }
@@ -466,7 +488,109 @@ function Invoke-SelfTest {
                 -LeftoversStopped 0 -Seconds 1 -ReportName 'selftest'
         })
     $moreRuns = New-AcceptanceSteps -Records $thirtyOne -Limits $limits -ExportRecord $exportRecord
-    Assert-Same ($moreRuns[0].result) 'pass' 'more clean runs than the registered count still pass default-launches'
+    Assert-Same ($moreRuns[0].result) 'fail' 'more runs than the registered count fail default-launches'
+
+    # Exactly the registered number of clean runs passes. One failed spec among them fails the step.
+    $thirty = @(1..([int]$limits.defaultLaunches) | ForEach-Object {
+            New-RunRecord -Run $_ -HarnessError $null -SpecPassed $true -TimedOut $false -ExitCode 0 -Launches 1 -FallbackArgument $false `
+                -FallbackMarkerSeen $false -GpuExitsListener 0 -WerExceptionCodes @() -EncoderMax 1 -EncoderBefore '0' -EncoderAfter '0' `
+                -LeftoversStopped 0 -Seconds 1 -ReportName 'selftest'
+        })
+    $thirtySteps = @(New-AcceptanceSteps -Records $thirty -Limits $limits -ExportRecord $exportRecord)
+    Assert-Same ($thirtySteps[0].result) 'pass' 'exactly the registered clean runs pass default-launches'
+    $oneFailed = @($thirty)
+    $oneFailed[0] = New-RunRecord -Run 1 -HarnessError $null -SpecPassed $false -TimedOut $false -ExitCode 1 -Launches 1 `
+        -FallbackArgument $false -FallbackMarkerSeen $false -GpuExitsListener 0 -WerExceptionCodes @() -EncoderMax 1 `
+        -EncoderBefore '0' -EncoderAfter '0' -LeftoversStopped 0 -Seconds 1 -ReportName 'selftest'
+    $oneFailedSteps = @(New-AcceptanceSteps -Records $oneFailed -Limits $limits -ExportRecord $exportRecord)
+    Assert-Same ($oneFailedSteps[0].result) 'fail' 'a failed spec among the registered runs fails default-launches'
+    # A GPU exit in the export run is a GPU exit of the session.
+    $exportExit = [pscustomobject]@{ specPassed = $true; gpuExitsTotal = 1 }
+    $exitSteps = @(New-AcceptanceSteps -Records $thirty -Limits $limits -ExportRecord $exportExit)
+    Assert-Same ($exitSteps[1].result) 'fail' 'an exit in the export run fails gpu-process-exits'
+    # An export run that did not measure cleanly fails the GPU step, even with a zero count.
+    $exportBroken = [pscustomobject]@{ specPassed = $false; gpuExitsTotal = 0; harnessError = 'the Windows Error Reporting query failed' }
+    $brokenSteps = @(New-AcceptanceSteps -Records $thirty -Limits $limits -ExportRecord $exportBroken)
+    Assert-Same ($brokenSteps[1].result) 'fail' 'an export run that did not measure cleanly fails gpu-process-exits'
+
+    # End to end through the real spec-run path: the poll loop, the sampling and the records. A scripted process stands in for
+    # Playwright, and a function stands in for nvidia-smi. No app and no GPU are used.
+    New-Item -ItemType Directory -Force -Path $outFull | Out-Null
+    $appExe = Join-Path $outFull 'no-app\joy-media.exe'
+    $script:fakeSpecPath = Join-Path $PSScriptRoot 'selftest-fake-spec.mjs'
+    $script:fakeScenario = 'clean'
+    $script:shimAnswers = @('0')
+    $script:shimCalls = 0
+    # -NodeDirectory when given, otherwise node on PATH. The scripted spec process runs under it.
+    if ($NodeDirectory) {
+        $selfTestNode = Join-Path (Resolve-Path -LiteralPath $NodeDirectory).Path 'node.exe'
+        if (-not (Test-Path -LiteralPath $selfTestNode -PathType Leaf)) { throw "node.exe is missing from $NodeDirectory." }
+    }
+    else {
+        $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+        if (-not $nodeCommand) { throw 'node is not on PATH. Pass -NodeDirectory, the folder that holds node.exe, for -SelfTest too.' }
+        $selfTestNode = $nodeCommand.Source
+    }
+    $script:SelfTestSpecRunner = @{
+        Exe = $selfTestNode
+        Arguments = { param([string]$stem) '"' + $script:fakeSpecPath + '" ' + $script:fakeScenario }
+    }
+    function Get-WerCrashCodes {
+        # The scripted Windows Error Reporting answer for the run in progress.
+        param($Start, $End)
+        return , @($script:shimWer)
+    }
+    function nvidia-smi {
+        # The first two calls are the pre-run context and the baseline, both 0. The later calls answer the scripted values.
+        $script:shimCalls++
+        if ($script:shimCalls -le 2) { return '0' }
+        return $script:shimAnswers[[math]::Min($script:shimCalls - 3, $script:shimAnswers.Count - 1)]
+    }
+    $cases = @(
+        @{ name = 'clean'; answers = @('2', '2'); wer = @(); collect = $true }
+        @{ name = 'gpu-exit'; answers = @('2'); wer = @(); collect = $true }
+        @{ name = 'relaunch'; answers = @('1'); wer = @(); collect = $true }
+        @{ name = 'non-numeric'; answers = @('Not Supported'); wer = @(); collect = $true }
+        @{ name = 'wer-exit'; answers = @('2'); wer = @('0xC0000409'); collect = $true }
+        @{ name = 'export'; answers = @('0'); wer = @('0xC0000409'); collect = $false }
+    )
+    $e2e = @{}
+    $runNumber = 0
+    foreach ($case in $cases) {
+        $runNumber++
+        $script:fakeScenario = $case.name
+        $script:shimAnswers = $case.answers
+        $script:shimCalls = 0
+        $script:shimWer = $case.wer
+        $e2e[$case.name] = @(Invoke-SpecRun -Run $runNumber -Spec 'selftest' -Stem ('selftest-' + $case.name) -CollectGpu $case.collect) | Select-Object -Last 1
+    }
+    $script:SelfTestSpecRunner = $null
+    $clean = $e2e['clean']
+    if (($null -ne $clean.harnessError) -or (-not $clean.specPassed) -or ($clean.launches -ne 1) -or ($clean.encoderMaxDuringRun -ne 2) -or ($clean.gpuExitsTotal -ne 0)) {
+        $failures.Add("end-to-end clean run: harnessError=$($clean.harnessError) specPassed=$($clean.specPassed) launches=$($clean.launches) encoderMax=$($clean.encoderMaxDuringRun) exits=$($clean.gpuExitsTotal)")
+    }
+    $gpuExit = $e2e['gpu-exit']
+    if (($gpuExit.gpuExitsListener -ne 1) -or ($gpuExit.gpuExitsTotal -ne 1)) {
+        $failures.Add("end-to-end GPU exit: listener=$($gpuExit.gpuExitsListener) total=$($gpuExit.gpuExitsTotal)")
+    }
+    $relaunch = $e2e['relaunch']
+    if (($relaunch.launches -ne 2) -or (-not $relaunch.fallbackRelaunchSeen) -or $relaunch.defaultLaunch) {
+        $failures.Add("end-to-end relaunch: launches=$($relaunch.launches) fallback=$($relaunch.fallbackRelaunchSeen) default=$($relaunch.defaultLaunch)")
+    }
+    $nonNumeric = $e2e['non-numeric']
+    if (($null -eq $nonNumeric.harnessError) -or ($nonNumeric.harnessError -notlike '*not a session count*')) {
+        $failures.Add("end-to-end non-numeric answer: harnessError=$($nonNumeric.harnessError)")
+    }
+
+    if ($nonNumeric.timedOut) { $failures.Add('end-to-end non-numeric answer: a harness error is not a timeout') }
+    $werExit = $e2e['wer-exit']
+    if (($werExit.gpuExitsListener -ne 0) -or ($werExit.gpuExitsTotal -ne 1)) {
+        $failures.Add("end-to-end unexplained WER exit: listener=$($werExit.gpuExitsListener) total=$($werExit.gpuExitsTotal)")
+    }
+    $exportRun = $e2e['export']
+    if (($exportRun.gpuExitsTotal -ne 1) -or ($null -ne $exportRun.harnessError)) {
+        $failures.Add("end-to-end export run WER exit: total=$($exportRun.gpuExitsTotal) harnessError=$($exportRun.harnessError)")
+    }
 
     $result = [pscustomobject]@{
         passed = ($failures.Count -eq 0)
@@ -523,6 +647,9 @@ try { $baselineNow = Get-EncoderBaselineError -Count (Get-EncoderSessionTotal) }
 $running = @(Get-TestInstallProcesses)
 if ($running.Count -gt 0) {
     throw "The test install is already running (PIDs $($running.ProcessId -join ', ')). Close it first. This harness does not count or stop processes it did not start."
+}
+if ($Runs -ne [int]$limits.defaultLaunches) {
+    Write-Warning "-Runs is $Runs, but the registered count is $($limits.defaultLaunches). default-launches passes only at the registered count, so this run is diagnostic only."
 }
 if ($PreflightOnly) {
     if ($null -ne $baselineNow) { throw "preflight failed: $baselineNow" }

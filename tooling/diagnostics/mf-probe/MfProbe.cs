@@ -26,8 +26,9 @@ internal static class MfProbe
     private const int ExitEncoded = 0;
     private const int ExitNoEncoder = 2;
     private const int ExitFailure = 3;
-    // Not checked against mferror.h (no SDK on this PC). A wrong value is harmless: any failed GetEvent counts as no event yet.
-    private const int MfENoEventsAvailable = unchecked((int)0xC00D36D8);
+    // Recalled, not checked: no Windows SDK on this PC, and a web search did not confirm it. It only labels the last-event text;
+    // a failed GetEvent counts as no event yet either way.
+    private const int MfENoEventsAvailable = unchecked((int)0xC00D3E80);
     private const int MfETransformNeedMoreInput = unchecked((int)0xC00D6D72);
     private const uint MftMessageCommandDrain = 0x00000001;
     private const uint MftMessageNotifyBeginStreaming = 0x10000000;
@@ -42,6 +43,8 @@ internal static class MfProbe
     private const uint InputFrameBytes = FrameWidth * FrameHeight * 3 / 2;
     private const uint OutputBufferBytes = 1024 * 1024;
     private const int EncodeWaitMilliseconds = 10000;
+    // The encoder session stays open this long after the result line, so a sampler polling every 250 ms can see it.
+    private const int DefaultHoldMilliseconds = 3000;
 
     private static readonly Guid MftCategoryVideoEncoder = new Guid("F79EAC7D-E545-4387-BDEE-D647D7BDE42A");
     // Confirmed on this PC: the activation objects carry this key (see ListKeys, which lists the keys they do carry).
@@ -53,8 +56,9 @@ internal static class MfProbe
     private static readonly Guid MfMtSubtype = new Guid("F7E34C9A-42E8-4714-B74B-CB29D72C35E5");
     private static readonly Guid MfMtFrameSize = new Guid("1652C33D-D6B2-4012-B834-72030849A37D");
     private static readonly Guid MfMtFrameRate = new Guid("C459A2E8-3D2C-4E44-B132-FEE5156C7BB0");
-    // Not checked against mfapi.h. A wrong key leaves the aspect ratio unset, which defaults to square pixels.
-    private static readonly Guid MfMtPixelAspectRatio = new Guid("C6376A1E-8D0A-4027-BE80-6E42AD4E2F94");
+    // Recalled, not checked: no Windows SDK on this PC, and a web search did not confirm it. A wrong key leaves the aspect ratio
+    // unset, which defaults to square pixels.
+    private static readonly Guid MfMtPixelAspectRatio = new Guid("C6376A1E-8D0A-4027-BE45-6D9A0AD39BB6");
     private static readonly Guid MfMtInterlaceMode = new Guid("E2724BB8-E676-4806-B4B2-A8D6EFB44CCD");
     private static readonly Guid MfMtAvgBitrate = new Guid("20332624-FB0D-4D9E-BD0D-CBF6786C102E");
     private static readonly Guid MfTransformAsyncUnlock = new Guid("E5666D6B-3422-4EB6-A421-DA7DB1F8E207");
@@ -132,7 +136,8 @@ internal static class MfProbe
         [PreserveSig]
         int ActivateObject(ref Guid riid, out IntPtr obj);
 
-        void ShutdownObject();
+        [PreserveSig]
+        int ShutdownObject();
         void DetachObject();
     }
 
@@ -287,10 +292,13 @@ internal static class MfProbe
 
     private static int Main(string[] args)
     {
-        if (args.Length == 2 && args[0] == "--encode")
+        // --encode <index> [--hold-ms <milliseconds>]. The hold keeps the encoder session open after the result line.
+        if ((args.Length == 2 || args.Length == 4) && args[0] == "--encode")
         {
             int index;
-            if (int.TryParse(args[1], out index) && index >= 0) return EncodeOne(index);
+            int holdMilliseconds = DefaultHoldMilliseconds;
+            bool holdOk = args.Length == 2 || (args[2] == "--hold-ms" && int.TryParse(args[3], out holdMilliseconds) && holdMilliseconds >= 0);
+            if (holdOk && int.TryParse(args[1], out index) && index >= 0) return EncodeOne(index, holdMilliseconds);
             Emit("{\"event\":\"usage\",\"error\":\"index\"}");
             return ExitFailure;
         }
@@ -366,7 +374,7 @@ internal static class MfProbe
     // Activates encoder `index`, sends one NV12 frame, drains, and prints the one result line. Exit 0 when output bytes were
     // produced, 2 when there is no encoder at that index, and 3 for any failure. Each step's HRESULT is printed, so a failure
     // shows the step that failed.
-    private static int EncodeOne(int index)
+    private static int EncodeOne(int index, int holdMilliseconds)
     {
         int? activateHr = null;
         int? setTypeHr = null;
@@ -491,6 +499,13 @@ internal static class MfProbe
             }
             exit = outputBytes > 0 ? ExitEncoded : ExitFailure;
             Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, exit == ExitFailure ? "no-output last-event-hr=0x" + ((uint)lastEventHr).ToString("X8") : "ok"));
+            // Keep the encoder session open for the hold. ShutdownObject then ends the session, which would otherwise last until
+            // the process exits. The objects are released after that.
+            if (holdMilliseconds > 0) Thread.Sleep(holdMilliseconds);
+            // The result line is already out. Its HRESULT is ignored, so a shutdown failure cannot change the encode result.
+            activate.ShutdownObject();
+            Marshal.ReleaseComObject(activate);
+            Marshal.ReleaseComObject(transform);
         }
         catch (EncodeStepException failure)
         {

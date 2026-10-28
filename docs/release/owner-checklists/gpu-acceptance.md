@@ -12,6 +12,9 @@ approved that candidate's commit (GD5). Nothing in it runs unattended.
 - Node 22.6 or later and pnpm 11.15.0 are on this PC. Their folders are the `-NodeDirectory` and `-PnpmDirectory` values below.
   Nothing is installed.
 - The harness is never run with a JOY Media window open. It refuses to start while the test install is running.
+- Close any other program that uses the NVIDIA encoder, such as a screen recorder or an overlay, before the session. The encoder
+  count is system-wide. A run starts only when no encoder session is open, so one open session makes every run a harness error,
+  and three in a row stop the loop.
 - Before step 1, create `C:\JoyMediaG1\acceptance` and record the `joy://` key there with
   `reg.exe export "HKCU\Software\Classes\joy" C:\JoyMediaG1\acceptance\joy-key-before.reg /y`, or note that it is absent.
   The candidate is the shipped build. Its installer and every launch register `joy://` to the installed folder, as the shipped
@@ -44,7 +47,8 @@ pwsh -NoProfile -File C:\JoyMediaG1\acceptance-tree\tooling\diagnostics\run-defa
   -Runs 30 -NodeDirectory '<folder of node.exe>' -PnpmDirectory '<folder of pnpm>'
 ```
 
-Replace the install folder with the one step 1 recorded. Each run is a default launch and an export, sampled during the export.
+Replace the install folder with the one step 1 recorded. Each run is a default launch and an export, sampled during the export. The export run after the thirty runs is checked for GPU
+exits through Windows Error Reporting, and any exit it has counts toward the session.
 The harness runs the export spec once more at the end. It writes `steps.json` and `summary.json` into `C:\JoyMediaG1\acceptance-out`.
 
 Expected for a pass: the five steps are `pass`. Those are `default-launches` (30 runs), `gpu-process-exits` (0),

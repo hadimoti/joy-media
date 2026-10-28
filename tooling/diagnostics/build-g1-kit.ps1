@@ -22,7 +22,9 @@ pwsh -NoProfile -File tooling/diagnostics/build-g1-kit.ps1 -OutDir 'D:\joy-g1-ki
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$OutDir,
-    [string]$PnpmDirectory
+    [string]$PnpmDirectory,
+    # Optional. A joy-worker.exe built from this commit, embedded with its SHA-256 recorded in kit.txt. Nothing is picked up by itself.
+    [string]$WorkerExe
 )
 
 Set-StrictMode -Version Latest
@@ -70,6 +72,12 @@ try {
     New-Item -ItemType Directory -Path $resourcesApp -Force | Out-Null
     Get-ChildItem -LiteralPath (Join-Path $packageFolder 'joy-media-unpacked') -Force |
         Copy-Item -Destination $resourcesApp -Recurse -Force
+    # The shipped portable build also carries the worker, the bundled CLI with its fonts, and the CLI launchers. The kit carries
+    # them too, so its app matches the baseline's layout apart from the instrumentation (stage-portable-extras.mjs).
+    $extrasArgs = @($appFolder)
+    if ($WorkerExe) { $extrasArgs += @('--worker', (Resolve-Path -LiteralPath $WorkerExe).Path) }
+    node (Join-Path $repoRoot 'apps\desktop\scripts\stage-portable-extras.mjs') @extrasArgs
+    if ($LASTEXITCODE -ne 0) { throw "stage-portable-extras.mjs failed with exit code $LASTEXITCODE." }
     Remove-Item -LiteralPath $packageFolder -Recurse -Force
 
     # The stage probe needs a plain runtime, with no app: Electron would start a packaged app in resources instead of the probe.
@@ -115,6 +123,7 @@ try {
         "stage-runtime: a plain copy of the same runtime, with no app"
         "thresholds-sha256: $thresholdsSha256"
         "node: $(node --version)"
+        "portable layout: worker $(if (Test-Path -LiteralPath (Join-Path $appFolder 'resources\app\worker\joy-worker.exe')) { 'embedded from ' + $WorkerExe + ', sha256 ' + (Get-FileHash -LiteralPath (Join-Path $appFolder 'resources\app\worker\joy-worker.exe') -Algorithm SHA256).Hash.ToLowerInvariant() } else { 'NOT embedded (pass -WorkerExe to embed a worker built from this commit; the desktop then starts its worker another way, so an export may take a different path than the shipped build)' }); CLI bundle, fonts and launchers as package-installer.mjs lays them out"
     )
     Set-Content -LiteralPath (Join-Path $outFull 'kit.txt') -Value $kitRecord -Encoding UTF8
     $sums = Get-ChildItem -LiteralPath $outFull -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName |

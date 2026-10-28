@@ -4,10 +4,10 @@
  * checked on any PC. The runner stops after the first stage that kills the GPU process, and records the later stages as not
  * run. It never touches the installed app or the app's source. */
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync, readdirSync } from 'node:fs';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -49,7 +49,10 @@ const timeoutMs = Number(option('timeout-seconds', '120')) * 1000;
 const fakeStagePage = process.argv.includes('--fake-stage-page');
 // The user-data root for the stages. The G1 checklist names a folder outside the logs, so the handover does not carry profiles.
 const userDataOption = option('user-data', '') ?? '';
-const userDataRoot = resolve(userDataOption === '' ? join(outDir, 'userdata') : userDataOption);
+// Without --user-data, the profiles go to a sibling folder, so they are never part of the out folder that the handover copies.
+const userDataRoot = resolve(
+  userDataOption === '' ? join(dirname(outDir), `${basename(outDir)}-userdata`) : userDataOption,
+);
 
 // The Electron executable: the copy named by --electron (G1 uses a copied runtime), or the one apps/desktop installs.
 const electronOption = option('electron', '') ?? '';
@@ -62,13 +65,14 @@ if (!existsSync(electronBinary)) {
 }
 // A runtime keeps a `version` file next to its executable. A different version would not test the pinned build.
 const runtimeVersionFile = join(dirname(electronBinary), 'version');
-if (existsSync(runtimeVersionFile)) {
-  const runtimeVersion = (await readFile(runtimeVersionFile, 'utf8')).trim();
-  if (runtimeVersion !== pinnedElectron) {
-    throw new Error(
-      `the Electron runtime is ${runtimeVersion}; the pinned version is ${pinnedElectron}.`,
-    );
-  }
+if (!existsSync(runtimeVersionFile)) {
+  throw new Error('the Electron runtime has no version file, so its version cannot be checked.');
+}
+const runtimeVersion = (await readFile(runtimeVersionFile, 'utf8')).trim().replace(/^v/u, '');
+if (runtimeVersion !== pinnedElectron) {
+  throw new Error(
+    `the Electron runtime is ${runtimeVersion}; the pinned version is ${pinnedElectron}.`,
+  );
 }
 // Electron prefers an app in resources/ to the script it is given. A runtime with one would start that app, so refuse it.
 const holdsPackagedApp = ['app', 'app.asar'].some((name) =>
@@ -131,6 +135,32 @@ async function readResult(resultPath, stage, exit) {
 }
 
 await mkdir(outDir, { recursive: true });
+// The user-data root belongs to this probe. A folder that holds other files is refused, so a stage reset can never remove
+// something the probe did not create.
+const userDataMarker = '.joy-probe-userdata';
+if (
+  existsSync(userDataRoot) &&
+  readdirSync(userDataRoot).length > 0 &&
+  !existsSync(join(userDataRoot, userDataMarker))
+) {
+  throw new Error(
+    'the user-data folder holds files this probe did not create. Pass an empty folder, or one this probe made.',
+  );
+}
+await mkdir(userDataRoot, { recursive: true });
+await writeFile(join(userDataRoot, userDataMarker), 'joy-media stage probe user-data\n', 'utf8');
+// Earlier results and logs in this folder move to previous/ before the run, so the handover holds this run's files. Nothing is deleted.
+const earlierFiles = [
+  ...probeStages.flatMap((stage) => [`${stage}.json`, `${stage}.log`]),
+  'summary.json',
+].filter((name) => existsSync(join(outDir, name)));
+if (earlierFiles.length > 0) {
+  const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
+  await mkdir(join(outDir, 'previous'), { recursive: true });
+  for (const name of earlierFiles) {
+    await rename(join(outDir, name), join(outDir, 'previous', `${stamp}-${name}`));
+  }
+}
 const summary = [];
 let stoppedAfter = null;
 for (const stage of stages) {
@@ -143,6 +173,8 @@ for (const stage of stages) {
     continue;
   }
   const resultPath = join(outDir, `${stage}.json`);
+  // A result left by an earlier run in this folder would stand in for a missing one, so it is removed first.
+  await rm(resultPath, { force: true });
   const exit = await runStage(stage, resultPath);
   const result = await readResult(resultPath, stage, exit);
   summary.push({
