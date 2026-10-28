@@ -116,7 +116,7 @@ async function configuredClient(): Promise<{
     provider: 'openrouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     modelId: 'model',
-    apiKey: 'session-key',
+    profileId: 'profile-test',
   });
   return { worker, client };
 }
@@ -271,7 +271,7 @@ describe('JOY Agent Engine client V2 lifecycle', () => {
           provider,
           baseUrl: 'https://legacy.example/v1',
           modelId: 'retired-model',
-          apiKey: 'legacy-key',
+          profileId: 'profile-test',
         } as never),
       ).rejects.toThrow('Provider is not supported by the editor');
       expect(workerFactoryCalls).toBe(0);
@@ -292,13 +292,13 @@ describe('JOY Agent Engine client V2 lifecycle', () => {
           provider: 'openrouter',
           baseUrl: 'https://openrouter.ai/api/v1',
           modelId: 'openrouter/free',
-          apiKey: 'workhorse-key',
+          profileId: 'profile-test',
         },
         creative: {
           provider: 'openai-compatible',
           baseUrl: 'https://custom.example/v1',
           modelId: 'creative-model',
-          apiKey: 'creative-key',
+          profileId: 'profile-test',
         },
       } as never),
     ).rejects.toThrow('Provider is not supported by the editor');
@@ -349,7 +349,7 @@ describe('JOY Agent Engine client V2 lifecycle', () => {
         audio: 'unavailable',
         video: 'unavailable',
         modalities: ['image'],
-        apiKey: 'sk-owner-secret-must-not-appear',
+        profileId: 'profile-test',
       },
     });
 
@@ -384,7 +384,7 @@ describe('JOY Agent Engine client V2 lifecycle', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
       modelId: 'model',
-      apiKey: 'session-key',
+      profileId: 'profile-test',
     });
     const reconfigured = vi.fn();
     const second = replacementClient.startRun(
@@ -398,7 +398,7 @@ describe('JOY Agent Engine client V2 lifecycle', () => {
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
       modelId: 'model-next',
-      apiKey: 'session-key-next',
+      profileId: 'profile-test',
     });
 
     await expect(pendingSecond).resolves.toMatchObject({ done: true });
@@ -436,7 +436,7 @@ describe('JOY Agent Engine client V2 lifecycle', () => {
         provider: 'openrouter',
         baseUrl: 'https://openrouter.ai/api/v1',
         modelId: 'model',
-        apiKey: 'session-key',
+        profileId: 'profile-test',
       });
       await vi.runAllTicks();
       await configured;

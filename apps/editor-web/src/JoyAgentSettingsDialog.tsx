@@ -9,13 +9,19 @@ import type {
   JoyAgentMediaCapabilityState,
 } from './joy-agent/protocol.js';
 import { CloseIcon } from './icons.js';
+import { sessionProviderFor } from './joy-agent/provider-call.js';
+import {
+  findRegistryProvider,
+  PROVIDER_REGISTRY,
+  type ProviderRegionId,
+  type RegistryProviderId,
+} from '@joy-media/provider-sdk';
 import {
   isDesktopHost,
   saveDesktopProviderProfile,
   listDesktopProviderProfiles,
   deleteDesktopProviderProfile,
   fetchDesktopProviderModels,
-  beginDesktopProviderSession,
   type DesktopProviderProfile,
 } from './desktop-client.js';
 import {
@@ -43,8 +49,21 @@ type DesktopProviderProfileState = DesktopProviderProfile & {
 };
 
 /** A saved profile cannot connect until the local provider broker ships (PLAN-v4 P2). */
-const SAVED_PROFILE_CONNECT_UNAVAILABLE =
-  'Saved profiles cannot connect in this build yet. Enter the key in the connection form.';
+/** The provider the dialog can connect: OpenRouter, a registry provider, or a custom endpoint. */
+type DialogProvider = 'openrouter' | 'openai-compatible' | RegistryProviderId;
+
+/** The engine runs every registry provider on the chat transport, so its status names that transport. */
+function statusProviderFor(provider: DialogProvider): 'openrouter' | 'openai-compatible' {
+  return provider === 'openrouter' ? 'openrouter' : 'openai-compatible';
+}
+
+/** The saved-profile fields a connect needs. */
+type SavedProfileForConnect = {
+  readonly id: string;
+  readonly provider: string;
+  readonly baseUrl: string;
+  readonly modelId: string;
+};
 
 const MODES: Readonly<Record<AgentExecutionMode, string>> = {
   'suggest-only': 'Suggest only',
@@ -163,7 +182,7 @@ export function JoyAgentSettingsDialog({
     setOpenAccordions((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const [provider, setProvider] = useState<'openrouter' | 'openai-compatible'>(
+  const [provider, setProvider] = useState<DialogProvider>(
     status?.provider === 'openai-compatible' ? 'openai-compatible' : 'openrouter',
   );
   const [baseUrl, setBaseUrl] = useState(
@@ -254,14 +273,18 @@ export function JoyAgentSettingsDialog({
     onClose();
   };
 
-  const handleProviderChange = (next: 'openrouter' | 'openai-compatible') => {
+  const [region, setRegion] = useState<ProviderRegionId>('international');
+  const handleProviderChange = (next: DialogProvider) => {
     setProvider(next);
+    setRegion('international');
     setCustomDisclosure(false);
     setConnectionNotice(undefined);
     setDiscoveryError(null);
     if (next === 'openrouter') {
       setBaseUrl('https://openrouter.ai/api/v1');
       if (!modelId) setModelId('openrouter/auto');
+    } else if (findRegistryProvider(next) !== undefined) {
+      setBaseUrl(findRegistryProvider(next)?.regions[0]?.baseUrl ?? '');
     } else {
       setBaseUrl('');
     }
@@ -332,6 +355,47 @@ export function JoyAgentSettingsDialog({
     }
   };
 
+  /** Connects a saved profile by its id. The key is never read here: the main process holds it. */
+  const connectSavedProfile = async (profile: SavedProfileForConnect) => {
+    if (working || engineClient === undefined || engineClient === null) return;
+    const sessionProvider = sessionProviderFor(profile.provider);
+    if (sessionProvider === undefined) return;
+    if (
+      requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: profile.baseUrl,
+        profileId: profile.id,
+      })
+    ) {
+      setConnectionNotice({
+        kind: 'error',
+        message: 'Acknowledge this custom endpoint before connecting.',
+      });
+      return;
+    }
+    setWorking(true);
+    setConnectionNotice(undefined);
+    try {
+      assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
+      await engineClient.configure({
+        provider: sessionProvider,
+        baseUrl: profile.baseUrl,
+        modelId: profile.modelId,
+        profileId: profile.id,
+      });
+      const next = await engineClient.testConnection();
+      setConnectionStatus(next);
+      onStatusChange?.(next);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'The connection failed.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const connect = async () => {
     if (working) return;
     const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
@@ -361,7 +425,7 @@ export function JoyAgentSettingsDialog({
     setConnectionNotice(undefined);
     setDiscoveryError(null);
 
-    let key = keyRef.current?.value.trim() ?? '';
+    const key = keyRef.current?.value.trim() ?? '';
     const normalizedModelId = modelId.trim();
     const savedProfileMatches = Boolean(
       savedProfile &&
@@ -371,21 +435,14 @@ export function JoyAgentSettingsDialog({
         : savedProfile.provider === provider) &&
       normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl,
     );
-    if (!key && hasSavedKey && savedProfile?.id && savedProfileMatches) {
-      try {
-        const session = (await beginDesktopProviderSession(savedProfile.id)) as
-          { apiKey?: string; baseUrl?: string; modelId?: string } | undefined;
-        if (session?.apiKey) {
-          key = session.apiKey;
-        }
-      } catch {
-        /* proceed to validation */
-      }
-    }
+    // A saved profile whose endpoint matches connects by its id: its key stays in the main process.
+    const reuseSavedKey =
+      !key && hasSavedKey && savedProfile?.id !== undefined && savedProfileMatches;
+    let profileId: string | undefined = reuseSavedKey ? savedProfile?.id : undefined;
 
     if (provider === 'openai-compatible') {
       const missing: string[] = [];
-      if (!key)
+      if (!key && !reuseSavedKey)
         missing.push(
           savedProfile?.id && !savedProfileMatches
             ? 'a new API key because the saved key belongs to a different provider or endpoint'
@@ -411,7 +468,7 @@ export function JoyAgentSettingsDialog({
       }
     }
 
-    if (!key) {
+    if (!key && !reuseSavedKey) {
       const message =
         savedProfile?.id && !savedProfileMatches
           ? 'The saved API key belongs to a different provider or endpoint. Enter a new API key to connect.'
@@ -446,6 +503,7 @@ export function JoyAgentSettingsDialog({
           apiKey: key,
         });
         if (saved) {
+          profileId = saved.id;
           setSavedProfile(saved);
           setHasSavedKey(true);
           await loadProfiles();
@@ -453,11 +511,17 @@ export function JoyAgentSettingsDialog({
       }
 
       assertCustomEndpointConsentHolds(provider, normalizedBaseUrl, savedProfile?.id);
+      const sessionProvider = sessionProviderFor(
+        provider === 'openai-compatible' ? 'custom' : provider,
+      );
+      if (sessionProvider === undefined || profileId === undefined) {
+        throw new Error('This connection could not be saved in the desktop app.');
+      }
       await engineClient.configure({
-        provider,
+        provider: sessionProvider,
         baseUrl: normalizedBaseUrl,
         modelId: normalizedModelId,
-        apiKey: key,
+        profileId,
       });
 
       const next = await engineClient.testConnection();
@@ -488,13 +552,13 @@ export function JoyAgentSettingsDialog({
       const safeMessage = redactProviderError(rawMessage, key);
       const message = `Connection failed: ${safeMessage}`;
       setConnectionStatus({
-        provider,
+        provider: statusProviderFor(provider),
         modelId: normalizedModelId,
         capability: 'incompatible',
         message: safeMessage,
       });
       onStatusChange?.({
-        provider,
+        provider: statusProviderFor(provider),
         modelId: normalizedModelId,
         capability: 'incompatible',
         message: safeMessage,
@@ -760,8 +824,8 @@ export function JoyAgentSettingsDialog({
                                   <button
                                     type="button"
                                     className="joy-btn-secondary joy-btn-sm"
-                                    disabled
-                                    title={SAVED_PROFILE_CONNECT_UNAVAILABLE}
+                                    disabled={working}
+                                    onClick={() => void connectSavedProfile(prof)}
                                   >
                                     Use
                                   </button>
@@ -813,17 +877,52 @@ export function JoyAgentSettingsDialog({
                             <select
                               value={provider}
                               onChange={(e) =>
-                                handleProviderChange(
-                                  e.target.value as 'openrouter' | 'openai-compatible',
-                                )
+                                handleProviderChange(e.target.value as DialogProvider)
                               }
                             >
                               <option value="openrouter">OpenRouter (BYOK)</option>
+                              {PROVIDER_REGISTRY.filter((item) => item.id !== 'openrouter').map(
+                                (item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.label}
+                                  </option>
+                                ),
+                              )}
                               <option value="openai-compatible">
                                 Custom S3 / OpenAI Compatible
                               </option>
                             </select>
                           </label>
+                          {(findRegistryProvider(provider)?.regions.length ?? 0) > 1 && (
+                            <label>
+                              <span>Region</span>
+                              <select
+                                value={region}
+                                onChange={(e) => {
+                                  const next = findRegistryProvider(provider)?.regions.find(
+                                    (item) => item.id === e.target.value,
+                                  );
+                                  if (next === undefined) return;
+                                  setRegion(next.id);
+                                  setBaseUrl(next.baseUrl);
+                                }}
+                              >
+                                {findRegistryProvider(provider)?.regions.map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                          {findRegistryProvider(provider) !== undefined && (
+                            <small>
+                              Get a key at{' '}
+                              {findRegistryProvider(provider)?.regions.find(
+                                (item) => item.id === region,
+                              )?.keyUrl ?? ''}
+                            </small>
+                          )}
                         </div>
 
                         <div className="joy-settings-field">

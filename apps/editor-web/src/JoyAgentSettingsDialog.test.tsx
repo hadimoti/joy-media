@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_AGENT_POLICY } from './agent-policy-settings.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
@@ -110,7 +110,33 @@ function countLeafTextMatches(rendered: HTMLElement, expression: RegExp): number
   ).length;
 }
 
+/** The desktop host, as the connection tests need it: a save returns the profile id. */
+function installDesktopBridge(): void {
+  window.joyDesktop = {
+    channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+    invoke: vi.fn().mockImplementation(async (channel: string, payload?: unknown) => {
+      if (channel === 'desktop.provider-profile.list') return [];
+      if (channel === 'desktop.provider-profile.save') {
+        return {
+          id: 'prof-test',
+          ...(payload as Record<string, unknown>),
+          createdAt: '2026-10-28T00:00:00.000Z',
+          updatedAt: '2026-10-28T00:00:00.000Z',
+        };
+      }
+      return undefined;
+    }),
+  } as unknown as NonNullable<typeof window.joyDesktop>;
+}
+
 describe('JOY Agent Settings connection status', () => {
+  beforeEach(() => {
+    installDesktopBridge();
+  });
+  afterEach(() => {
+    delete (window as { joyDesktop?: unknown }).joyDesktop;
+  });
+
   async function connectWithKey(rendered: HTMLElement): Promise<HTMLInputElement> {
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');
@@ -132,6 +158,9 @@ describe('JOY Agent Settings connection status', () => {
     expect(providerSelect).toBeTruthy();
     const options = [...(providerSelect?.options ?? [])].map((option) => option.value);
     expect(options).toEqual(expect.arrayContaining(['openrouter', 'openai-compatible']));
+    expect(options).toEqual(
+      expect.arrayContaining(['openai', 'grok', 'claude', 'minimax', 'gemini', 'kimi']),
+    );
     expect(options).not.toContain('kilo');
     expect(options).not.toContain('joy-hosted');
     expect(rendered.textContent).not.toMatch(/Joy Pro|Sign In with JOY Account|quota|plan limits/i);
@@ -214,6 +243,7 @@ describe('JOY Agent Settings connection status', () => {
   });
 
   it('refuses model discovery in the browser build without sending the key', async () => {
+    delete (window as { joyDesktop?: unknown }).joyDesktop;
     const privateKey = 'browser-discovery-key';
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -238,12 +268,12 @@ describe('JOY Agent Settings connection status', () => {
   it('redacts the API key from desktop model discovery errors', async () => {
     const privateKey = 'discovery-test-key';
     const invoke = vi.fn((channel: string) =>
-      channel === 'desktop.provider-profile.fetch-models'
+      channel === 'desktop.provider.models'
         ? Promise.reject(new Error(`Provider rejected key ${privateKey}`))
         : Promise.resolve([]),
     );
     window.joyDesktop = {
-      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.fetch-models'],
+      channels: ['desktop.provider-profile.list', 'desktop.provider.models'],
       invoke,
     } as unknown as NonNullable<typeof window.joyDesktop>;
     const rendered = await render(client(), undefined);
@@ -266,6 +296,13 @@ describe('JOY Agent Settings connection status', () => {
 });
 
 describe('JOY Agent Settings media capability probe', () => {
+  beforeEach(() => {
+    installDesktopBridge();
+  });
+  afterEach(() => {
+    delete (window as { joyDesktop?: unknown }).joyDesktop;
+  });
+
   it('does not probe on mount or connection test, then explicitly sends the check and preserves the connection success notice', async () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
@@ -531,7 +568,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
   it('blocks OpenRouter-labeled custom model discovery before sending an entered key', async () => {
     const invoke = vi.fn().mockResolvedValue([]);
     window.joyDesktop = {
-      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.fetch-models'],
+      channels: ['desktop.provider-profile.list', 'desktop.provider.models'],
       invoke,
     };
     const rendered = await render(client(), undefined);
@@ -559,94 +596,10 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
       await Promise.resolve();
     });
 
-    expect(invoke).not.toHaveBeenCalledWith(
-      'desktop.provider-profile.fetch-models',
-      expect.anything(),
-    );
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider.models', expect.anything());
     expect(rendered.textContent).toContain(
       'Enter the custom-provider acknowledgement before discovering models.',
     );
-  });
-
-  it('keeps a saved custom profile disabled until the local provider broker ships', async () => {
-    const invoke = vi.fn().mockImplementation(async (channel: string) => {
-      if (channel === 'desktop.provider-profile.list') {
-        return [
-          {
-            id: 'custom-prof-1',
-            provider: 'openrouter',
-            name: 'OpenRouter custom endpoint',
-            baseUrl: 'https://other.example/api/v1',
-            modelId: 'private-model',
-            createdAt: '2026-09-15T00:00:00.000Z',
-            updatedAt: '2026-09-15T00:00:00.000Z',
-          },
-        ];
-      }
-      return undefined;
-    });
-    window.joyDesktop = {
-      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
-      invoke,
-    };
-    const engineClient = client();
-    const rendered = await render(engineClient, undefined);
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const useButton = buttonByText(rendered, 'Use');
-    expect(useButton.disabled).toBe(true);
-    expect(useButton.title).toBe(
-      'Saved profiles cannot connect in this build yet. Enter the key in the connection form.',
-    );
-    await act(async () => {
-      useButton.click();
-      await Promise.resolve();
-    });
-
-    expect(invoke).not.toHaveBeenCalledWith(
-      'desktop.provider-profile.begin-session',
-      expect.anything(),
-    );
-    expect(engineClient.configure).not.toHaveBeenCalled();
-  });
-
-  it('does not configure a saved profile until the local provider broker ships', async () => {
-    const invoke = vi.fn().mockImplementation(async (channel: string) => {
-      if (channel === 'desktop.provider-profile.list')
-        return [
-          {
-            id: 'openrouter-trusted',
-            provider: 'openrouter',
-            name: 'OpenRouter',
-            baseUrl: 'https://openrouter.ai/api/v1',
-            modelId: 'openrouter/auto',
-            createdAt: '2026-09-15T00:00:00.000Z',
-            updatedAt: '2026-09-15T00:00:00.000Z',
-          },
-        ];
-      if (channel === 'desktop.provider-profile.begin-session') return { apiKey: 'saved-secret' };
-      return undefined;
-    });
-    window.joyDesktop = {
-      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
-      invoke,
-    };
-    const onStatusChange = vi.fn();
-    const engineClient = client({
-      configure: vi.fn().mockRejectedValue(new Error('configure failed')),
-    });
-    const rendered = await render(engineClient, readyStatus, onStatusChange);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    await act(async () => {
-      buttonByText(rendered, 'Use').click();
-      await Promise.resolve();
-    });
-    expect(engineClient.configure).not.toHaveBeenCalled();
-    expect(onStatusChange).not.toHaveBeenCalled();
   });
 
   it('requires acknowledgement before connecting a custom endpoint', async () => {
@@ -687,6 +640,46 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     await changeProvider(rendered, 'openrouter');
     await changeProvider(rendered, 'openai-compatible');
     expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(false);
+  });
+});
+
+describe('JOY Agent Settings saved profile connect', () => {
+  it('connects a saved profile by its id, and the dialog never reads its key', async () => {
+    const savedProfile = {
+      id: 'prof-or-saved',
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/free',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return [savedProfile];
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    await act(async () => {
+      buttonByText(rendered, 'Use').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).toHaveBeenCalledWith({
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/free',
+      profileId: 'prof-or-saved',
+    });
+    expect(invoke).not.toHaveBeenCalledWith(
+      'desktop.provider-profile.begin-session',
+      expect.anything(),
+    );
+    expect(JSON.stringify(vi.mocked(engineClient.configure).mock.calls)).not.toContain('apiKey');
   });
 });
 
@@ -782,64 +775,6 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     });
   });
 
-  it('does not connect a saved profile with a blank key until the local provider broker ships', async () => {
-    const invoke = vi.fn().mockImplementation(async (channel: string) => {
-      if (channel === 'desktop.provider-profile.list') {
-        return [
-          {
-            id: 'prof-or-1',
-            provider: 'openrouter',
-            baseUrl: 'https://openrouter.ai/api/v1',
-            modelId: 'anthropic/claude-3.5-sonnet',
-            createdAt: '2026-09-15T00:00:00.000Z',
-            updatedAt: '2026-09-15T00:00:00.000Z',
-          },
-        ];
-      }
-      if (channel === 'desktop.provider-profile.begin-session') {
-        return {
-          provider: 'openrouter',
-          baseUrl: 'https://openrouter.ai/api/v1',
-          modelId: 'anthropic/claude-3.5-sonnet',
-          apiKey: 'sk-or-saved-vault-key',
-        };
-      }
-      if (channel === 'desktop.provider-profile.save') {
-        return {
-          id: 'prof-or-1',
-          provider: 'openrouter',
-          baseUrl: 'https://openrouter.ai/api/v1',
-          modelId: 'anthropic/claude-3.5-sonnet',
-          createdAt: '2026-09-15T00:00:00.000Z',
-          updatedAt: '2026-09-15T00:00:00.000Z',
-        };
-      }
-      return undefined;
-    });
-    window.joyDesktop = {
-      channels: [
-        'desktop.provider-profile.list',
-        'desktop.provider-profile.begin-session',
-        'desktop.provider-profile.save',
-      ],
-      invoke,
-    };
-    const engineClient = client();
-    const rendered = await render(engineClient, undefined);
-    await selectCustomPreset(rendered);
-
-    await act(async () => {
-      buttonByText(rendered, 'Connect model').click();
-      await Promise.resolve();
-    });
-
-    expect(invoke).not.toHaveBeenCalledWith(
-      'desktop.provider-profile.begin-session',
-      expect.anything(),
-    );
-    expect(engineClient.configure).not.toHaveBeenCalled();
-  });
-
   it('shows legacy profiles as disabled and defers them without provider operations', async () => {
     let decision: 'later' | undefined;
     const legacyProfile = {
@@ -894,8 +829,8 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     expect(engineClient.testConnection).not.toHaveBeenCalled();
     for (const channel of [
       'desktop.provider-profile.begin-session',
-      'desktop.provider-profile.test',
-      'desktop.provider-profile.fetch-models',
+      'desktop.provider.test',
+      'desktop.provider.models',
       'desktop.provider-profile.save',
     ]) {
       expect(invoke).not.toHaveBeenCalledWith(channel, expect.anything());

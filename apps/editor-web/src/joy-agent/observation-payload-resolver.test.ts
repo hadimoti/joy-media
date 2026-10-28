@@ -25,7 +25,11 @@ import type {
   ObservationTransferEvidenceResolverRequest,
 } from './observation-transfer-service.js';
 import { createObservationTransferService } from './observation-transfer-service.js';
-import { createMultimodalTransport, type MultimodalFetch } from './multimodal-transport.js';
+import { createMultimodalTransport } from './multimodal-transport.js';
+import {
+  providerCallFromFetch,
+  type FakeProviderFetch,
+} from './multimodal-provider-call.test-fixture.js';
 import { issueObservationConsent } from './observation-consent.js';
 import type { JoyAgentObservationToolAuthority } from './tool-bridge.js';
 
@@ -303,9 +307,9 @@ describe('host-only observation payload resolver', () => {
             status: 200,
           },
         ),
-    ) as unknown as MultimodalFetch;
+    ) as unknown as FakeProviderFetch;
     const service = createObservationTransferService({
-      transport: createMultimodalTransport({ fetch: fetcher }),
+      transport: createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) }),
       evidenceStore,
       evidenceResolver: bridge.createEvidenceResolver(manifest),
       currentAuthority: () => transferAuthority,
@@ -336,7 +340,7 @@ describe('host-only observation payload resolver', () => {
           provider: 'openrouter',
           baseUrl: 'https://provider.example/v1',
           modelId: current.modelId,
-          apiKey: 'TEST_ONLY_BYOK_KEY',
+          profileId: 'profile-saved',
         },
         authority: transferAuthority,
         range: { domain: 'source', startUs: 0, endUs: 100_000 },

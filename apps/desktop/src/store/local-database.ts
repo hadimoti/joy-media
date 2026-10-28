@@ -63,6 +63,8 @@ export interface ProviderProfile {
   readonly modelId: string;
   readonly cachedModels?: readonly string[] | undefined;
   readonly secretHandleId: string;
+  /** Digest of (profile id, origin, base path) taken when the profile was saved (PLAN-v4 §6c). */
+  readonly bindingDigest?: string | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -95,6 +97,7 @@ interface JobRow {
 
 interface ProviderProfileRow {
   readonly id: string;
+  readonly binding_digest?: string | null;
   readonly name?: string | null;
   readonly provider: string;
   readonly base_url: string;
@@ -185,6 +188,15 @@ export class LocalDatabase {
     } catch {
       // Column already exists
     }
+    // Additive (PLAN-v4 §9c): the v1.0.x provider_profiles table is never altered. The endpoint
+    // binding (§6c item 6) lives beside it, keyed by profile id.
+    this.db.exec(
+      `CREATE TABLE IF NOT EXISTS profile_binding (
+         profile_id TEXT PRIMARY KEY,
+         binding_digest TEXT NOT NULL,
+         updated_at TEXT NOT NULL
+       )`,
+    );
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS app_settings (
          key TEXT PRIMARY KEY,
@@ -308,23 +320,33 @@ export class LocalDatabase {
         profile.createdAt,
         profile.updatedAt,
       );
+    if (profile.bindingDigest === undefined) {
+      this.db.prepare('DELETE FROM profile_binding WHERE profile_id = ?').run(profile.id);
+    } else {
+      this.db
+        .prepare(
+          'INSERT OR REPLACE INTO profile_binding (profile_id, binding_digest, updated_at) VALUES (?, ?, ?)',
+        )
+        .run(profile.id, profile.bindingDigest, this.now());
+    }
   }
 
   getProviderProfile(id: string): ProviderProfile | undefined {
-    const row = this.db.prepare('SELECT * FROM provider_profiles WHERE id = ?').get(id) as
+    const row = this.db.prepare(PROFILE_SELECT + ' WHERE p.id = ?').get(id) as
       ProviderProfileRow | undefined;
     return row === undefined ? undefined : providerProfileFromRow(row);
   }
 
   listProviderProfiles(): readonly ProviderProfile[] {
     const rows = this.db
-      .prepare('SELECT * FROM provider_profiles ORDER BY created_at ASC')
+      .prepare(PROFILE_SELECT + ' ORDER BY p.created_at ASC')
       .all() as unknown as readonly ProviderProfileRow[];
     return rows.map(providerProfileFromRow);
   }
 
   deleteProviderProfile(id: string): void {
     this.db.prepare('DELETE FROM provider_profiles WHERE id = ?').run(id);
+    this.db.prepare('DELETE FROM profile_binding WHERE profile_id = ?').run(id);
     forgetProfileState(this.db, id);
   }
 
@@ -457,6 +479,10 @@ function jobFromRow(row: JobRow): JobRecord {
   };
 }
 
+/** A profile row with its endpoint binding, if one was recorded. */
+const PROFILE_SELECT =
+  'SELECT p.*, b.binding_digest AS binding_digest FROM provider_profiles p LEFT JOIN profile_binding b ON b.profile_id = p.id';
+
 function providerProfileFromRow(row: ProviderProfileRow): ProviderProfile {
   let cachedModels: readonly string[] | undefined;
   if (row.cached_models) {
@@ -474,6 +500,7 @@ function providerProfileFromRow(row: ProviderProfileRow): ProviderProfile {
     modelId: row.model_id,
     ...(cachedModels !== undefined ? { cachedModels } : {}),
     secretHandleId: row.secret_handle_id,
+    ...(row.binding_digest ? { bindingDigest: row.binding_digest } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

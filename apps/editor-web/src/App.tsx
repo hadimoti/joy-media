@@ -67,6 +67,7 @@ import type {
 } from '@joy-media/project-schema';
 import { normalizePlaybackRate, sourceTimeAtVideoClipTime } from '@joy-media/project-schema';
 import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
+import { sessionProviderFor } from './joy-agent/provider-call.js';
 import { markOverridesFromCommittedKeys } from './joy-agent/look-instance-operations.js';
 import { type VisualObjectTransaction } from '@joy-media/property-system';
 import {
@@ -333,7 +334,6 @@ import { AssetLibrarySettingsDialog } from './AssetLibrarySettingsDialog.js';
 import {
   isDesktopHost,
   listDesktopProviderProfiles,
-  beginDesktopProviderSession,
   isDesktopWindowMaximized,
   minimizeDesktopWindow,
   toggleMaximizeDesktopWindow,
@@ -346,7 +346,6 @@ import { runCreativeBriefTask } from './joy-agent/entry-points.js';
 import {
   assertCustomEndpointConsentHolds,
   mayRestoreProviderProfile,
-  normalizeProviderBaseUrl,
 } from './custom-endpoint-acknowledgement.js';
 import {
   observationMetadataForAsset,
@@ -1131,8 +1130,15 @@ function EditorWorkspace({
     void listDesktopProviderProfiles()
       .then(async (profiles) => {
         if (cancelled || profiles.length === 0) return;
-        const profile = profiles.find((p) => p.provider === 'openrouter') ?? profiles[0];
+        // Only an active profile restores: a legacy or credential-unavailable one never connects (PLAN-V4 §9a).
+        const usable = profiles.filter((p) => {
+          const state = (p as { readonly state?: string }).state;
+          return state === undefined || state === 'active';
+        });
+        const profile = usable.find((p) => p.provider === 'openrouter') ?? usable[0];
         if (!profile) return;
+        const provider = sessionProviderFor(profile.provider);
+        if (provider === undefined) return;
         if (
           !mayRestoreProviderProfile({
             provider: profile.provider,
@@ -1146,31 +1152,16 @@ function EditorWorkspace({
           return;
         }
         try {
-          const sessionConfig = (await beginDesktopProviderSession(profile.id)) as
-            | {
-                provider: 'openrouter' | 'openai-compatible';
-                baseUrl: string;
-                modelId: string;
-                apiKey: string;
-              }
-            | undefined;
-          if (cancelled || !sessionConfig || !joyAgentEngineClientRef.current) return;
-          // The vault must return the endpoint of the profile it was asked for,
-          // and consent (which may have been withdrawn during the vault read)
-          // is re-checked immediately before the key is sent.
-          if (
-            normalizeProviderBaseUrl(sessionConfig.baseUrl) !==
-            normalizeProviderBaseUrl(profile.baseUrl)
-          ) {
-            console.warn('Desktop vault returned a different endpoint; restoration skipped.');
-            return;
-          }
+          const client = joyAgentEngineClientRef.current;
+          if (cancelled || !client) return;
+          // Consent is re-checked right before the session is configured. The key is never read here:
+          // the main process holds it and the calls go through the broker.
           assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
-          const status = await joyAgentEngineClientRef.current.configure({
-            provider: sessionConfig.provider,
-            baseUrl: sessionConfig.baseUrl,
-            modelId: sessionConfig.modelId,
-            apiKey: sessionConfig.apiKey,
+          const status = await client.configure({
+            provider,
+            baseUrl: profile.baseUrl,
+            modelId: profile.modelId,
+            profileId: profile.id,
           });
           if (!cancelled) {
             setAgentConnectionStatus(status);

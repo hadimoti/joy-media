@@ -148,6 +148,35 @@ async function mountedWorker(
       receive = listener;
     },
   );
+  // The desktop side answers each provider request the way the broker would: the fake provider sees
+  // the endpoint and body, and the worker gets the reply text or a code. No key is involved here.
+  const answerProviderRequest = async (
+    request: Extract<WorkerToMainMessage, { readonly type: 'provider-request' }>,
+  ): Promise<void> => {
+    const response = await fetcher(`${request.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request.body),
+    });
+    const result = response.ok
+      ? { ok: true as const, text: await response.text() }
+      : {
+          ok: false as const,
+          code:
+            response.status === 401 || response.status === 403
+              ? 'AUTH_FAILED'
+              : 'PROVIDER_HTTP_ERROR',
+          message: 'The provider returned an error.',
+        };
+    receive?.({
+      data: {
+        protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+        type: 'provider-response',
+        requestId: request.requestId,
+        result,
+      },
+    } as MessageEvent<unknown>);
+  };
   vi.stubGlobal('postMessage', (message: WorkerToMainMessage) => {
     output.push(message);
     if (
@@ -156,6 +185,7 @@ async function mountedWorker(
     ) {
       host.receive(message.message);
     }
+    if (message.type === 'provider-request') void answerProviderRequest(message);
   });
   vi.stubGlobal('fetch', fetcher);
   vi.stubGlobal('close', vi.fn());
@@ -169,7 +199,7 @@ async function mountedWorker(
       provider: 'openai-compatible',
       baseUrl: 'https://provider.example/v1',
       modelId: 'fixture-model',
-      apiKey: 'fixture-only',
+      profileId: 'profile-test',
     },
   });
   await vi.waitFor(() =>
@@ -390,7 +420,11 @@ describe('JOY Agent Engine Worker V2', () => {
       const content = (body.messages as readonly Record<string, unknown>[])[0]?.content;
       expect(Array.isArray(content)).toBe(true);
     }
-    const serializedOutput = JSON.stringify(worker.output);
+    // A provider request is the Worker's transport to the broker, so it alone carries the probe body.
+    // Every other message, the events and results included, must stay free of fixture media.
+    const serializedOutput = JSON.stringify(
+      worker.output.filter((message) => message.type !== 'provider-request'),
+    );
     expect(serializedOutput).not.toContain('fixture-only');
     expect(serializedOutput).not.toContain('data:image');
     expect(serializedOutput).not.toContain('data:video');
@@ -590,7 +624,7 @@ describe('JOY Agent Engine Worker V2', () => {
         provider: 'openai-compatible',
         baseUrl: 'https://provider.example/v1',
         modelId: 'replacement-model',
-        apiKey: 'replacement-fixture-only',
+        profileId: 'profile-test',
       },
     });
 

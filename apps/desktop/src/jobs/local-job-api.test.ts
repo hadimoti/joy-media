@@ -5,7 +5,14 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from './job-orchestrator.js';
-import { MAX_LOCAL_SOURCE_BYTES, startLocalJobApi, type LocalJobApi } from './local-job-api.js';
+import {
+  MAX_AI_REQUEST_BYTES,
+  MAX_LOCAL_SOURCE_BYTES,
+  startLocalJobApi,
+  type LocalAiRequest,
+  type LocalAiResult,
+  type LocalJobApi,
+} from './local-job-api.js';
 
 const WORKER = 'worker-http';
 const TOKEN = 'test-token-0123456789';
@@ -19,12 +26,16 @@ describe('local job API', () => {
   let derivativeDirectory: string;
 
   let reportedSourceSize: number;
+  let aiRequests: LocalAiRequest[];
+  let aiReply: LocalAiResult;
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'joy-job-api-'));
     derivativeDirectory = join(dir, 'derivatives');
     database = new LocalDatabase({ filePath: join(dir, 'jobs.sqlite') });
     reportedSourceSize = SOURCE.length;
+    aiRequests = [];
+    aiReply = { ok: true, text: '{"choices":[]}' };
     api = await startLocalJobApi({
       orchestrator: createJobOrchestrator({ store: database.jobDispatch }),
       derivativeDirectory,
@@ -32,6 +43,10 @@ describe('local job API', () => {
       readSource: async (refId) => {
         if (refId !== 'ref-1') throw new Error('unknown ref');
         return SOURCE;
+      },
+      completeAi: async (request) => {
+        aiRequests.push(request);
+        return aiReply;
       },
       token: TOKEN,
     });
@@ -61,7 +76,9 @@ describe('local job API', () => {
     });
   }
 
-  async function queueThumbnailAndLease(): Promise<{ id: string; leaseToken: string }> {
+  async function queueThumbnailAndLease(
+    profileId?: string,
+  ): Promise<{ id: string; leaseToken: string }> {
     await postJson(`/v1/workers/${WORKER}/hello`, {
       capabilities: ['asset.thumbnail'],
       assetIds: [],
@@ -83,6 +100,7 @@ describe('local job API', () => {
       cancelRequested: false,
       derivative: undefined,
       resultJson: undefined,
+      profileId,
     });
     const response = await postJson(`/v1/workers/${WORKER}/leases`, { durationMs: 30_000 });
     const body = (await response.json()) as { data: { id: string; leaseToken: string } };
@@ -243,6 +261,97 @@ describe('local job API', () => {
     expect(database.jobDispatch.get('job-http')).toMatchObject({
       status: 'failed',
       error: 'ffmpeg exited 1',
+    });
+  });
+
+  describe('AI completion route (PLAN-v4 §6b)', () => {
+    const aiPath = `/v1/workers/${WORKER}/ai/complete`;
+    const messages = [{ role: 'user', content: 'hi' }];
+
+    it('refuses a wrong token before reading the body', async () => {
+      const response = await call(aiPath, { method: 'POST', body: '{}' }, 'wrong-token');
+      expect(response.status).toBe(401);
+      expect(aiRequests).toEqual([]);
+    });
+
+    it('completes for the profile attached to the job, and ignores a profile named in the body', async () => {
+      await queueThumbnailAndLease('prof-saved');
+      const response = await postJson(aiPath, {
+        jobId: 'job-http',
+        profileId: 'attacker-profile',
+        messages,
+        params: { temperature: 0.1, profileId: 'attacker-profile', model: 'attacker-model' },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ data: { text: '{"choices":[]}' } });
+      expect(aiRequests).toHaveLength(1);
+      expect(aiRequests[0]).toMatchObject({
+        workerId: WORKER,
+        jobId: 'job-http',
+        profileId: 'prof-saved',
+      });
+      expect(aiRequests[0]?.body).toMatchObject({ messages, temperature: 0.1 });
+      expect(JSON.stringify(aiRequests[0]?.body)).not.toContain('attacker');
+    });
+
+    it('answers 403 when the job is leased to another Worker', async () => {
+      await queueThumbnailAndLease('prof-saved');
+      const response = await postJson('/v1/workers/worker-other/ai/complete', {
+        jobId: 'job-http',
+        messages,
+      });
+      expect(response.status).toBe(403);
+      expect(aiRequests).toEqual([]);
+    });
+
+    it('answers 409 once the job has finished, and never calls a provider', async () => {
+      const leased = await queueThumbnailAndLease('prof-saved');
+      await postJson(`/v1/workers/${WORKER}/jobs/job-http/fail`, {
+        error: 'stopped',
+        leaseToken: leased.leaseToken,
+      });
+      const response = await postJson(aiPath, { jobId: 'job-http', messages });
+      expect(response.status).toBe(409);
+      expect(aiRequests).toEqual([]);
+    });
+
+    it('answers 409 for a job that has no AI profile', async () => {
+      await queueThumbnailAndLease();
+      const response = await postJson(aiPath, { jobId: 'job-http', messages });
+      expect(response.status).toBe(409);
+      expect(aiRequests).toEqual([]);
+    });
+
+    it('answers 404 for an unknown job and 422 for a malformed job id', async () => {
+      await queueThumbnailAndLease('prof-saved');
+      expect((await postJson(aiPath, { jobId: 'missing-job', messages })).status).toBe(404);
+      expect((await postJson(aiPath, { jobId: 'bad/id', messages })).status).toBe(422);
+      expect(aiRequests).toEqual([]);
+    });
+
+    it('answers 413 for a request over the AI size limit, before any provider call', async () => {
+      await queueThumbnailAndLease('prof-saved');
+      const oversized = JSON.stringify({
+        jobId: 'job-http',
+        messages: [{ role: 'user', content: 'x'.repeat(MAX_AI_REQUEST_BYTES) }],
+      });
+      const response = await call(aiPath, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: oversized,
+      });
+      expect(response.status).toBe(413);
+      expect(aiRequests).toEqual([]);
+    });
+
+    it('passes the broker failure status and message through, with no credential', async () => {
+      await queueThumbnailAndLease('prof-saved');
+      aiReply = { ok: false, status: 502, message: 'The provider could not be reached.' };
+      const response = await postJson(aiPath, { jobId: 'job-http', messages });
+      expect(response.status).toBe(502);
+      const text = await response.text();
+      expect(text).toContain('The provider could not be reached.');
+      expect(text).not.toContain(TOKEN);
     });
   });
 });

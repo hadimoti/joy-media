@@ -29,6 +29,8 @@ export interface DispatchJob {
   readonly resultJson: string | undefined;
   /** The payload a Worker needs for render.export or upscale.image, stored as JSON at submit and sent with the lease. */
   readonly payloadJson?: string | undefined;
+  /** The saved AI profile this job may call, attached by the main process at dispatch (PLAN-v4 §6b). */
+  readonly profileId?: string | undefined;
 }
 
 export interface WorkerPresence {
@@ -74,12 +76,13 @@ interface DispatchRow {
   readonly derivative_path: string | null;
   readonly result_json: string | null;
   readonly payload_json: string | null;
+  readonly profile_id: string | null;
 }
 
 const SELECT_DISPATCH = `SELECT j.id, j.kind, j.ref_id, j.status, j.created_at, j.updated_at, j.error,
   d.job_type, d.progress, d.attempts, d.worker_id, d.lease_token, d.lease_expires_at,
   d.cancel_requested, d.derivative_sha256, d.derivative_bytes, d.derivative_mime,
-  d.derivative_path, d.result_json, d.payload_json
+  d.derivative_path, d.result_json, d.payload_json, d.profile_id
 FROM jobs j JOIN job_dispatch d ON d.job_id = j.id`;
 
 /**
@@ -108,6 +111,7 @@ export class SqliteJobDispatchStore implements JobDispatchStore {
        )`,
     );
     addColumnIfMissing(db, 'job_dispatch', 'payload_json', 'TEXT');
+    addColumnIfMissing(db, 'job_dispatch', 'profile_id', 'TEXT');
     db.exec(
       `CREATE TABLE IF NOT EXISTS worker_presence (
          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -137,8 +141,10 @@ export class SqliteJobDispatchStore implements JobDispatchStore {
       )
       .run(job.id, job.kind, job.refId, job.createdAt, job.createdAt);
     this.db
-      .prepare('INSERT INTO job_dispatch (job_id, job_type, payload_json) VALUES (?, ?, ?)')
-      .run(job.id, job.jobType, job.payloadJson ?? null);
+      .prepare(
+        'INSERT INTO job_dispatch (job_id, job_type, payload_json, profile_id) VALUES (?, ?, ?, ?)',
+      )
+      .run(job.id, job.jobType, job.payloadJson ?? null, job.profileId ?? null);
     this.save({ ...job, status: 'queued', error: undefined });
   }
 
@@ -267,6 +273,7 @@ function fromRow(row: DispatchRow): DispatchJob {
           },
     resultJson: row.result_json ?? undefined,
     payloadJson: row.payload_json ?? undefined,
+    profileId: row.profile_id ?? undefined,
   };
 }
 

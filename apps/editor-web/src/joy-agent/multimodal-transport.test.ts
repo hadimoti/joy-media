@@ -3,10 +3,13 @@ import {
   createMultimodalTransport,
   MAX_MULTIMODAL_ANALYSIS_TEXT_BYTES,
   MAX_MULTIMODAL_RESPONSE_BYTES,
-  type MultimodalFetch,
   type MultimodalTransportRequest,
   type ObservationEvidencePayload,
 } from './multimodal-transport.js';
+import {
+  providerCallFromFetch,
+  type FakeProviderFetch,
+} from './multimodal-provider-call.test-fixture.js';
 import {
   issueObservationConsent,
   type ObservationConsent,
@@ -65,7 +68,7 @@ function request(overrides: Partial<MultimodalTransportRequest> = {}): Multimoda
       provider: 'openrouter',
       baseUrl: 'https://provider.example/v1',
       modelId: 'openrouter/model-a',
-      apiKey: 'fixture-byok-key',
+      profileId: 'profile-saved',
     },
     projectId: 'project-1',
     runId: 'run-1',
@@ -83,14 +86,14 @@ function providerSuccess(content = 'The subject enters at 00:01.'): Response {
 
 function successfulFetch(
   content = 'The subject enters at 00:01.',
-): ReturnType<typeof vi.fn<MultimodalFetch>> {
+): ReturnType<typeof vi.fn<FakeProviderFetch>> {
   return vi.fn(async () => providerSuccess(content));
 }
 
 describe('multimodal direct-provider transport', () => {
   it('sends zero media without a host-issued consent and never exposes the canary in its result', async () => {
     const fetcher = successfulFetch();
-    const transport = createMultimodalTransport({ fetch: fetcher });
+    const transport = createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) });
     const result = await transport.send(
       request({ evidence: [imageEvidence(new TextEncoder().encode('PRIVATE_FRAME_CANARY'))] }),
     );
@@ -103,7 +106,7 @@ describe('multimodal direct-provider transport', () => {
 
   it('accepts only an opaque issued consent, sends a bounded direct body, and returns only a sanitized model analysis', async () => {
     const fetcher = successfulFetch();
-    const transport = createMultimodalTransport({ fetch: fetcher });
+    const transport = createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) });
     expect(() => transport.grant(consentInput())).toThrow('must be issued by the local host');
 
     transport.grant(issue());
@@ -120,30 +123,28 @@ describe('multimodal direct-provider transport', () => {
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
     const [endpoint, init] = fetcher.mock.calls[0] ?? [];
-    expect(endpoint).toBeInstanceOf(URL);
-    expect((endpoint as URL).toString()).toBe('https://provider.example/v1/chat/completions');
-    expect(init).toMatchObject({
-      method: 'POST',
-      credentials: 'omit',
-      cache: 'no-store',
-      referrerPolicy: 'no-referrer',
-      redirect: 'error',
-    });
-    expect(init?.headers).toMatchObject({ authorization: 'Bearer fixture-byok-key' });
+    expect(endpoint).toBe('https://provider.example/v1/chat/completions');
     if (typeof init?.body !== 'string') throw new Error('Expected a JSON provider body');
-    expect(init.body).not.toContain('fixture-byok-key');
     expect(result).toMatchObject({ requestBytes: new TextEncoder().encode(init.body).byteLength });
   });
 
-  it('reads a provider response through its bounded stream rather than Response.text()', async () => {
-    const response = providerSuccess('A safe bounded analysis.');
-    Object.defineProperty(response, 'text', {
-      value: () => {
-        throw new Error('Response.text must not be used');
-      },
+  it('refuses a reply the call returns above the bounded analysis size', async () => {
+    const oversized = JSON.stringify({
+      choices: [{ message: { content: 'x'.repeat(MAX_MULTIMODAL_RESPONSE_BYTES + 1) } }],
     });
-    const fetcher = vi.fn(async () => response) as unknown as MultimodalFetch;
-    const transport = createMultimodalTransport({ fetch: fetcher });
+    const transport = createMultimodalTransport({ providerCall: async () => oversized });
+    transport.grant(issue());
+
+    await expect(transport.send(request())).resolves.toEqual({
+      ok: false,
+      code: 'provider-rejected',
+    });
+  });
+
+  it('reads a reply the call returns as text, bounded by the analysis rules', async () => {
+    const response = providerSuccess('A safe bounded analysis.');
+    const fetcher = vi.fn(async () => response) as unknown as FakeProviderFetch;
+    const transport = createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) });
     transport.grant(issue());
 
     await expect(transport.send(request())).resolves.toEqual({
@@ -159,7 +160,7 @@ describe('multimodal direct-provider transport', () => {
 
   it('enforces the exact serialized request-byte budget before any direct fetch', async () => {
     const fetcher = successfulFetch();
-    const transport = createMultimodalTransport({ fetch: fetcher });
+    const transport = createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) });
     transport.grant(issue({ maxBytes: 128 }));
 
     const result = await transport.send(request());
@@ -170,7 +171,9 @@ describe('multimodal direct-provider transport', () => {
 
   it('rejects non-HTTPS/non-loopback configured endpoints and redirected provider responses', async () => {
     const unsafeFetcher = successfulFetch();
-    const unsafeTransport = createMultimodalTransport({ fetch: unsafeFetcher });
+    const unsafeTransport = createMultimodalTransport({
+      providerCall: providerCallFromFetch(unsafeFetcher),
+    });
     unsafeTransport.grant(issue());
     expect(
       await unsafeTransport.send(
@@ -190,7 +193,9 @@ describe('multimodal direct-provider transport', () => {
     expect(unsafeFetcher).not.toHaveBeenCalled();
 
     const loopbackFetcher = successfulFetch();
-    const loopbackTransport = createMultimodalTransport({ fetch: loopbackFetcher });
+    const loopbackTransport = createMultimodalTransport({
+      providerCall: providerCallFromFetch(loopbackFetcher),
+    });
     loopbackTransport.grant(
       issue({ runId: 'loopback-run', endpointOrigin: 'http://localhost:4010' }),
     );
@@ -206,8 +211,10 @@ describe('multimodal direct-provider transport', () => {
 
     const redirected = new Response('{}', { status: 200 });
     Object.defineProperty(redirected, 'redirected', { value: true });
-    const redirectFetcher = vi.fn(async () => redirected) as unknown as MultimodalFetch;
-    const redirectTransport = createMultimodalTransport({ fetch: redirectFetcher });
+    const redirectFetcher = vi.fn(async () => redirected) as unknown as FakeProviderFetch;
+    const redirectTransport = createMultimodalTransport({
+      providerCall: providerCallFromFetch(redirectFetcher),
+    });
     redirectTransport.grant(issue({ runId: 'redirect-run' }));
     expect(await redirectTransport.send(request({ runId: 'redirect-run' }))).toEqual({
       ok: false,
@@ -221,14 +228,18 @@ describe('multimodal direct-provider transport', () => {
       modalities: ['transcript'],
     };
     const fetcher = successfulFetch();
-    const imageTransport = createMultimodalTransport({ fetch: fetcher });
+    const imageTransport = createMultimodalTransport({
+      providerCall: providerCallFromFetch(fetcher),
+    });
     imageTransport.grant(issue());
     expect(await imageTransport.send(request({ mediaCapability: textOnly }))).toEqual({
       ok: false,
       code: 'invalid-request',
     });
 
-    const videoTransport = createMultimodalTransport({ fetch: fetcher });
+    const videoTransport = createMultimodalTransport({
+      providerCall: providerCallFromFetch(fetcher),
+    });
     videoTransport.grant(issue({ runId: 'video-run' }));
     expect(
       await videoTransport.send(
@@ -252,8 +263,8 @@ describe('multimodal direct-provider transport', () => {
             { once: true },
           );
         }),
-    ) as unknown as MultimodalFetch;
-    const transport = createMultimodalTransport({ fetch: fetcher });
+    ) as unknown as FakeProviderFetch;
+    const transport = createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) });
     transport.grant(issue());
 
     const first = transport.send(request());
@@ -274,8 +285,8 @@ describe('multimodal direct-provider transport', () => {
       }),
       { status: 200 },
     );
-    const fetcher = vi.fn(async () => response) as unknown as MultimodalFetch;
-    const transport = createMultimodalTransport({ fetch: fetcher });
+    const fetcher = vi.fn(async () => response) as unknown as FakeProviderFetch;
+    const transport = createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) });
     transport.grant(issue());
 
     const pending = transport.send(request());
@@ -288,8 +299,8 @@ describe('multimodal direct-provider transport', () => {
   it('returns a redacted provider failure without reading the response body', async () => {
     const fetcher = vi.fn(
       async () => new Response('PROVIDER_FAILURE_CANARY', { status: 500 }),
-    ) as unknown as MultimodalFetch;
-    const transport = createMultimodalTransport({ fetch: fetcher });
+    ) as unknown as FakeProviderFetch;
+    const transport = createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) });
     transport.grant(issue());
 
     const result = await transport.send(request());
@@ -325,13 +336,9 @@ describe('multimodal direct-provider transport', () => {
       name: 'a control-character analysis',
       response: providerSuccess('unsafe\u202Eanalysis'),
     },
-    {
-      name: 'an analysis that reflects the private BYOK key',
-      response: providerSuccess('The key is fixture-byok-key.'),
-    },
   ])('rejects $name without returning raw provider output', async ({ response }) => {
-    const fetcher = vi.fn(async () => response) as unknown as MultimodalFetch;
-    const transport = createMultimodalTransport({ fetch: fetcher });
+    const fetcher = vi.fn(async () => response) as unknown as FakeProviderFetch;
+    const transport = createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) });
     transport.grant(issue());
 
     const result = await transport.send(request());

@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus, JoyProviderMode } from './joy-agent/protocol.js';
+import { sessionProviderFor } from './joy-agent/provider-call.js';
+import { PROVIDER_REGISTRY, type RegistryProviderId } from '@joy-media/provider-sdk';
 import { CloseIcon, PlusIcon, CheckIcon } from './icons.js';
 import {
   isDesktopHost,
   saveDesktopProviderProfile,
   listDesktopProviderProfiles,
   deleteDesktopProviderProfile,
-  beginDesktopProviderSession,
   fetchDesktopProviderModels,
   type DesktopProviderProfile,
 } from './desktop-client.js';
@@ -29,7 +30,7 @@ export interface ModelDrawerProps {
   readonly onNotice?: ((message: string, kind: 'info' | 'success' | 'error') => void) | undefined;
 }
 
-type ProviderType = 'openrouter' | 'openai-compatible' | 'custom';
+type ProviderType = 'openrouter' | 'openai-compatible' | 'custom' | RegistryProviderId;
 type DesktopProviderProfileState = DesktopProviderProfile & {
   readonly state?: 'active' | 'disabled-legacy' | 'credential-unavailable';
   readonly decision?: 'later';
@@ -51,9 +52,10 @@ const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
   openrouter: 'https://openrouter.ai/api/v1',
   'openai-compatible': '',
   custom: '',
-};
+  ...Object.fromEntries(PROVIDER_REGISTRY.map((item) => [item.id, item.regions[0]?.baseUrl ?? ''])),
+} as Record<ProviderType, string>;
 
-const COMMON_MODEL_PRESETS: Record<ProviderType, readonly string[]> = {
+const COMMON_MODEL_PRESETS: Partial<Record<ProviderType, readonly string[]>> = {
   openrouter: [
     'openrouter/free',
     'openrouter/auto',
@@ -153,7 +155,7 @@ export function ModelDrawer({
     setNewProvider(type);
     setCustomAcknowledged(false);
     setNewBaseUrl(PROVIDER_DEFAULT_URLS[type]);
-    const presets = COMMON_MODEL_PRESETS[type];
+    const presets = COMMON_MODEL_PRESETS[type] ?? [];
     if (presets.length > 0 && presets[0] !== undefined) {
       setNewSelectedModel(presets[0]);
     }
@@ -177,6 +179,7 @@ export function ModelDrawer({
     setDiscoveryError(null);
     try {
       const models = await fetchDesktopProviderModels({
+        provider: newProvider,
         baseUrl: newBaseUrl.trim(),
         apiKey: newApiKey.trim() || undefined,
       });
@@ -240,12 +243,16 @@ export function ModelDrawer({
       }
 
       if (engineClient) {
+        const sessionProvider = sessionProviderFor(newProvider);
+        if (sessionProvider === undefined) {
+          throw new Error('This provider is not available in this build');
+        }
         configurationFailed = true;
         const nextStatus = await engineClient.configure({
-          provider: newProvider,
+          provider: sessionProvider,
           baseUrl: newBaseUrl.trim(),
           modelId: newSelectedModel.trim(),
-          apiKey: newApiKey.trim(),
+          profileId: saved.id,
         });
         configurationFailed = false;
         onStatusChange?.(nextStatus);
@@ -288,14 +295,7 @@ export function ModelDrawer({
     }
     let configurationFailed = false;
     try {
-      let apiKey = '';
-      if (isDesktopHost()) {
-        const session = (await beginDesktopProviderSession(profile.id)) as
-          { apiKey?: string } | undefined;
-        apiKey = session?.apiKey ?? '';
-      }
-
-      // Re-check consent after the vault await, before the key is sent.
+      // Consent is re-checked before the session is configured. The key stays in the main process.
       if (
         requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
         !requireCustomEndpointAcknowledgement({
@@ -309,12 +309,16 @@ export function ModelDrawer({
       }
 
       if (engineClient) {
+        const sessionProvider = sessionProviderFor(profile.provider);
+        if (sessionProvider === undefined) {
+          throw new Error('This provider is not available in this build');
+        }
         configurationFailed = true;
         const nextStatus = await engineClient.configure({
-          provider: profile.provider as JoyProviderMode,
+          provider: sessionProvider,
           baseUrl: profile.baseUrl,
           modelId,
-          apiKey,
+          profileId: profile.id,
         });
         configurationFailed = false;
         onStatusChange?.(nextStatus);
@@ -358,19 +362,8 @@ export function ModelDrawer({
     }
     setRefreshingProfileId(profile.id);
     try {
-      let apiKey = '';
-      if (isDesktopHost()) {
-        const session = (await beginDesktopProviderSession(profile.id)) as
-          { apiKey?: string } | undefined;
-        apiKey = session?.apiKey ?? '';
-      }
-
       assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
-      const models = await fetchDesktopProviderModels({
-        id: profile.id,
-        baseUrl: profile.baseUrl,
-        apiKey: apiKey || undefined,
-      });
+      const models = await fetchDesktopProviderModels({ id: profile.id });
 
       const modelIds = models.map((m) => m.id);
       if (modelIds.length > 0) {
@@ -508,6 +501,11 @@ export function ModelDrawer({
                     onChange={(e) => handleProviderTypeChange(e.target.value as ProviderType)}
                   >
                     <option value="openrouter">OpenRouter</option>
+                    {PROVIDER_REGISTRY.filter((item) => item.id !== 'openrouter').map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
                     <option value="openai-compatible">OpenAI-Compatible</option>
                     <option value="custom">Custom Endpoint (S3 / Proxy)</option>
                   </select>

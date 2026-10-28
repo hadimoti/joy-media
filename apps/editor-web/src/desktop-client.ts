@@ -1,3 +1,4 @@
+import { ProviderCallError, type ProviderCallRequest } from './joy-agent/provider-call.js';
 /**
  * Typed helpers for the desktop host bridge (`window.joyDesktop`), injected by
  * `apps/desktop/src/preload/preload.cjs` via `contextBridge.exposeInMainWorld` when
@@ -125,18 +126,10 @@ export async function deleteDesktopProviderProfile(id: string): Promise<void> {
 }
 
 /**
- * Provider sessions move to the local provider broker (PLAN-v4 §6b, P2). The desktop no longer
- * hands a decrypted key to the renderer, so this build refuses instead of asking for one.
- */
-export async function beginDesktopProviderSession(_id: string): Promise<unknown> {
-  throw new Error('Provider sessions are not available until the local provider broker ships');
-}
-
-/**
  * Probes the provider profile connectivity in the desktop host without exposing the key.
  */
 export async function testDesktopProviderProfile(id: string): Promise<unknown> {
-  const data = await requireBridge().invoke('desktop.provider-profile.test', { id });
+  const data = await requireBridge().invoke('desktop.provider.test', { id });
   return data;
 }
 
@@ -149,31 +142,36 @@ export async function fetchDesktopProviderModels(request: {
   apiKey?: string | undefined;
   provider?: string | undefined;
 }): Promise<readonly DiscoveredModel[]> {
-  if (isDesktopHost()) {
-    const data = await requireBridge().invoke('desktop.provider-profile.fetch-models', request);
-    return (data as readonly DiscoveredModel[]) ?? [];
-  }
-  if (!request.baseUrl) return [];
-  const normalizedBaseUrl = request.baseUrl.replace(/\/+$/, '');
-  const headers: Record<string, string> = {};
-  if (request.apiKey && request.apiKey !== 'not-provided') {
-    headers['Authorization'] = `Bearer ${request.apiKey}`;
-  }
-  const res = await fetch(`${normalizedBaseUrl}/models`, { headers });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = (await res.json()) as { data?: unknown };
-  const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
-  return raw
-    .map((item) => {
-      if (typeof item === 'string') return { id: item, name: item };
-      if (item && typeof item === 'object') {
-        const id = (item as { id?: string }).id || '';
-        const name = (item as { name?: string }).name || id;
-        return { id, name };
+  if (!isDesktopHost()) throw new Error('Model lists are available in the desktop app only');
+  const payload =
+    request.id === undefined || request.id.length === 0
+      ? {
+          draft: {
+            provider: request.provider ?? '',
+            baseUrl: request.baseUrl ?? '',
+            apiKey: request.apiKey ?? '',
+          },
+        }
+      : { id: request.id };
+  const data = await requireBridge().invoke('desktop.provider.models', payload);
+  return (data as readonly DiscoveredModel[]) ?? [];
+}
+
+/** One model call through the desktop broker. The key never reaches this side (PLAN-v4 §6a). */
+export async function requestAgentCompletion(request: ProviderCallRequest): Promise<string> {
+  const data = (await requireBridge().invoke('desktop.agent.request', request)) as
+    | {
+        readonly ok?: unknown;
+        readonly text?: unknown;
+        readonly code?: unknown;
+        readonly message?: unknown;
       }
-      return null;
-    })
-    .filter((m): m is DiscoveredModel => Boolean(m && m.id));
+    | undefined;
+  if (data?.ok === true && typeof data.text === 'string') return data.text;
+  throw new ProviderCallError(
+    typeof data?.code === 'string' ? data.code : 'NETWORK_ERROR',
+    typeof data?.message === 'string' ? data.message : 'The provider request failed',
+  );
 }
 
 /**

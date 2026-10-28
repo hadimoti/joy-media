@@ -66,13 +66,24 @@ export function isSupportedProvider(provider: unknown): provider is JoyProviderM
   return typeof provider === 'string' && SUPPORTED_PROVIDER_IDS.includes(provider);
 }
 
+/**
+ * The model connection the engine runs on. It names a saved profile, and the main process holds
+ * that profile's key (PLAN-v4 §6a, §6b). No key and no URL cross into this side.
+ */
+/**
+ * The saved profile whose key the main process holds. The key itself never reaches this side.
+ */
 export interface ByokSessionConfig {
   readonly provider: JoyProviderMode;
   readonly baseUrl: string;
   readonly modelId: string;
-  /** Volatile only: never present in a Worker event or host RPC envelope. */
-  readonly apiKey: string;
+  readonly profileId: string;
 }
+
+/** The outcome of one provider call the main process made through the broker. */
+export type ProviderCallResult =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly code: string; readonly message: string };
 
 export interface ByokSessionStatus {
   readonly provider: JoyAgentProvider;
@@ -165,6 +176,13 @@ export interface JoyAgentSafeEvent {
 export type MainToWorkerMessage =
   | {
       readonly protocolVersion: typeof JOY_AGENT_PROTOCOL_VERSION;
+      /** The answer to a `provider-request`, matched by requestId. */
+      readonly type: 'provider-response';
+      readonly requestId: string;
+      readonly result: ProviderCallResult;
+    }
+  | {
+      readonly protocolVersion: typeof JOY_AGENT_PROTOCOL_VERSION;
       readonly type: 'configure';
       readonly config: ByokSessionConfig;
     }
@@ -195,6 +213,17 @@ export type MainToWorkerMessage =
     };
 
 export type WorkerToMainMessage =
+  | {
+      readonly protocolVersion: typeof JOY_AGENT_PROTOCOL_VERSION;
+      /** One model call. The main process sends it through the broker and answers with a `provider-response`. */
+      readonly type: 'provider-request';
+      readonly requestId: string;
+      readonly profileId: string;
+      /** The URL the user saw. The broker refuses the call unless it equals the saved profile's. */
+      readonly baseUrl: string;
+      readonly modelId: string;
+      readonly body: Readonly<Record<string, unknown>>;
+    }
   | {
       readonly protocolVersion: typeof JOY_AGENT_PROTOCOL_VERSION;
       readonly type: 'run-finished';
@@ -359,10 +388,23 @@ function isSafeConfig(value: unknown): value is ByokSessionConfig {
     value.baseUrl.length > 0 &&
     value.baseUrl.length <= 2_048 &&
     isSafePublicModelId(value.modelId) &&
-    typeof value.apiKey === 'string' &&
-    value.apiKey.length > 0 &&
-    value.apiKey.length <= 4_096 &&
-    exactKeys(value, ['provider', 'baseUrl', 'modelId', 'apiKey'])
+    typeof value.profileId === 'string' &&
+    OPAQUE_ID.test(value.profileId) &&
+    exactKeys(value, ['provider', 'baseUrl', 'modelId', 'profileId'])
+  );
+}
+
+/** Largest provider request the engine may post: the broker's own request limit, in characters. */
+const MAX_PROVIDER_REQUEST_CHARS = 1024 * 1024;
+
+function isProviderCallResult(value: unknown): value is ProviderCallResult {
+  if (!isRecord(value)) return false;
+  if (value.ok === true) return exactKeys(value, ['ok', 'text']) && typeof value.text === 'string';
+  return (
+    value.ok === false &&
+    exactKeys(value, ['ok', 'code', 'message']) &&
+    typeof value.code === 'string' &&
+    typeof value.message === 'string'
   );
 }
 
@@ -518,6 +560,13 @@ export function isMainToWorkerMessage(value: unknown): value is MainToWorkerMess
   if (!isRecord(value) || value.protocolVersion !== JOY_AGENT_PROTOCOL_VERSION) return false;
   if (value.type === 'configure')
     return exactKeys(value, ['protocolVersion', 'type', 'config']) && isSafeConfig(value.config);
+  if (value.type === 'provider-response')
+    return (
+      exactKeys(value, ['protocolVersion', 'type', 'requestId', 'result']) &&
+      typeof value.requestId === 'string' &&
+      OPAQUE_ID.test(value.requestId) &&
+      isProviderCallResult(value.result)
+    );
   if (value.type === 'test' || value.type === 'dispose')
     return exactKeys(value, ['protocolVersion', 'type']);
   if (value.type === 'probe-media-capabilities')
@@ -588,6 +637,28 @@ export function isMainToWorkerMessage(value: unknown): value is MainToWorkerMess
  */
 export function isWorkerToMainMessage(value: unknown): value is WorkerToMainMessage {
   if (!isRecord(value) || value.protocolVersion !== JOY_AGENT_PROTOCOL_VERSION) return false;
+  if (value.type === 'provider-request')
+    return (
+      exactKeys(value, [
+        'protocolVersion',
+        'type',
+        'requestId',
+        'profileId',
+        'baseUrl',
+        'modelId',
+        'body',
+      ]) &&
+      typeof value.requestId === 'string' &&
+      OPAQUE_ID.test(value.requestId) &&
+      typeof value.profileId === 'string' &&
+      OPAQUE_ID.test(value.profileId) &&
+      typeof value.baseUrl === 'string' &&
+      value.baseUrl.length > 0 &&
+      value.baseUrl.length <= 2_048 &&
+      isSafePublicModelId(value.modelId) &&
+      isRecord(value.body) &&
+      JSON.stringify(value.body).length <= MAX_PROVIDER_REQUEST_CHARS
+    );
   if (value.type === 'event') {
     const event = value.event;
     if (

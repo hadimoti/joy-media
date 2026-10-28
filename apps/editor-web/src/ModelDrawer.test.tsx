@@ -69,12 +69,6 @@ describe('ModelDrawer', () => {
         updatedAt: '2026-09-17T00:00:00Z',
       },
     ]);
-    vi.spyOn(desktopClient, 'beginDesktopProviderSession').mockResolvedValue({
-      provider: 'openrouter',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      modelId: 'openrouter/free',
-      apiKey: 'openrouter-secret-key-123',
-    });
     vi.spyOn(desktopClient, 'saveDesktopProviderProfile').mockImplementation(async (req) => ({
       id: req.id ?? 'new-profile-id',
       name: req.name ?? req.provider,
@@ -286,7 +280,6 @@ describe('ModelDrawer', () => {
     expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.later', {
       id: 'legacy-kilo-profile',
     });
-    expect(desktopClient.beginDesktopProviderSession).not.toHaveBeenCalled();
     expect(desktopClient.fetchDesktopProviderModels).not.toHaveBeenCalled();
     expect(desktopClient.saveDesktopProviderProfile).not.toHaveBeenCalled();
     expect(client.configure).not.toHaveBeenCalled();
@@ -497,7 +490,6 @@ describe('ModelDrawer', () => {
       modelItem?.click();
       await Promise.resolve();
     });
-    expect(desktopClient.beginDesktopProviderSession).not.toHaveBeenCalled();
     expect(client.configure).not.toHaveBeenCalled();
     expect(container?.textContent).toContain(
       'I acknowledge OpenRouter custom endpoint for this session.',

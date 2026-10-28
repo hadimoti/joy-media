@@ -8,6 +8,7 @@ import { createWorkerSupervisor } from './worker-supervisor.js';
 import type { SupervisedChild } from './worker-supervisor.js';
 import { LocalDatabase } from '../store/local-database.js';
 import { createMemorySecretStore } from '@joy-media/provider-sdk';
+import { createProviderBroker } from './providers/provider-broker.js';
 
 function deps() {
   const fileRegistry = createFileRegistry(() => 'ref-1');
@@ -28,7 +29,23 @@ function deps() {
     kind: 'video' as const,
   }));
   const secretStore = createMemorySecretStore();
-  const probeProvider = vi.fn(async () => ({ ok: true, modelId: 'gpt-4o-mini' }));
+  // The broker is the real one, wired to this database and a fake provider reply.
+  const providerFetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(
+    async () => new Response(JSON.stringify({ choices: [] }), { status: 200 }),
+  );
+  const providerBroker = createProviderBroker({
+    store: {
+      getProfile: (id) => localDatabase.getProviderProfile(id),
+      isDisabledLegacy: (id) =>
+        localDatabase
+          .listProfileStates()
+          .some((s) => s.profileId === id && s.state === 'disabled-legacy'),
+      markCredentialUnavailable: (id) => localDatabase.markProfileCredentialUnavailable(id),
+    },
+    secrets: secretStore,
+    fetch: providerFetch,
+    resolveHost: async () => ['127.0.0.1'],
+  });
   let idCount = 0;
   return {
     fileRegistry,
@@ -37,7 +54,8 @@ function deps() {
     localDatabase,
     probeMedia,
     secretStore,
-    probeProvider,
+    providerFetch,
+    providerBroker,
     now: () => 'T0',
     newId: () => `id-${++idCount}`,
   };
@@ -250,7 +268,7 @@ describe('IPC dispatch', () => {
       channel: 'desktop.provider-profile.save',
       payload: {
         provider: 'openai-compatible',
-        baseUrl: 'https://api.example.com/v1',
+        baseUrl: 'http://127.0.0.1:1234/v1',
         modelId: 'gpt-4o-mini',
         apiKey: 'sk-secret',
       },
@@ -286,7 +304,7 @@ describe('IPC dispatch', () => {
       channel: 'desktop.provider-profile.save',
       payload: {
         provider: 'openai-compatible',
-        baseUrl: 'https://api.example.com/v1',
+        baseUrl: 'http://127.0.0.1:1234/v1',
         modelId: 'gpt-4o-mini',
         apiKey: 'sk-old',
       },
@@ -298,7 +316,7 @@ describe('IPC dispatch', () => {
       payload: {
         id,
         provider: 'openai-compatible',
-        baseUrl: 'https://api.example.com/v1',
+        baseUrl: 'http://127.0.0.1:1234/v1',
         modelId: 'gpt-4o',
         apiKey: 'sk-new',
       },
@@ -355,7 +373,7 @@ describe('IPC dispatch', () => {
     expect(await d.secretStore.get(profile.secretHandleId)).toBeNull();
   });
 
-  it('provider-profile.test probes with the resolved key but never returns it to the caller', async () => {
+  it('desktop.provider.test probes a saved profile and never returns its key', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
     const created = await dispatchIpcRequest(handlers, {
@@ -363,7 +381,7 @@ describe('IPC dispatch', () => {
       channel: 'desktop.provider-profile.save',
       payload: {
         provider: 'openai-compatible',
-        baseUrl: 'https://api.example.com/v1',
+        baseUrl: 'http://127.0.0.1:1234/v1',
         modelId: 'gpt-4o-mini',
         apiKey: 'sk-secret',
       },
@@ -371,58 +389,38 @@ describe('IPC dispatch', () => {
     const id = (created.data as { id: string }).id;
     const result = await dispatchIpcRequest(handlers, {
       origin: 'joy-media-app://renderer',
-      channel: 'desktop.provider-profile.test',
+      channel: 'desktop.provider.test',
       payload: { id },
     });
     expect(result).toEqual({ ok: true, data: { ok: true, modelId: 'gpt-4o-mini' } });
-    expect(d.probeProvider).toHaveBeenCalledWith({
-      baseUrl: 'https://api.example.com/v1',
-      apiKey: 'sk-secret',
-      modelId: 'gpt-4o-mini',
-    });
+    expect(d.providerFetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:1234/v1/chat/completions',
+      expect.objectContaining({ method: 'POST' }),
+    );
     expect(JSON.stringify(result)).not.toContain('sk-secret');
   });
-
-  it('provider-profile.fetch-models queries /models and returns parsed models list', async () => {
+  it('desktop.provider.models lists a draft through the broker and never returns its key', async () => {
     const d = deps();
+    d.providerFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: [{ id: 'gpt-4o-mini' }] }), { status: 200 }),
+    );
     const handlers = createIpcHandlers(d);
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: [
-          { id: 'minimax/minimax-m3', name: 'MiniMax M3' },
-          { id: 'kilo-auto/efficient', name: 'Kilo Auto' },
-        ],
-      }),
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider.models',
+      payload: {
+        draft: { provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-draft' },
+      },
     });
-    vi.stubGlobal('fetch', mockFetch);
-    try {
-      const result = await dispatchIpcRequest(handlers, {
-        origin: 'joy-media-app://renderer',
-        channel: 'desktop.provider-profile.fetch-models',
-        payload: {
-          baseUrl: 'https://api.kilo.ai/v1',
-          apiKey: 'test-key',
-        },
-      });
-      expect(result).toEqual({
-        ok: true,
-        data: [
-          { id: 'minimax/minimax-m3', name: 'MiniMax M3' },
-          { id: 'kilo-auto/efficient', name: 'Kilo Auto' },
-        ],
-      });
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.kilo.ai/v1/models',
-        expect.objectContaining({
-          headers: { Authorization: 'Bearer test-key' },
-        }),
-      );
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    expect(result).toEqual({ ok: true, data: [{ id: 'gpt-4o-mini', name: 'gpt-4o-mini' }] });
+    expect(d.providerFetch).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/models',
+      expect.objectContaining({
+        headers: expect.objectContaining({ authorization: 'Bearer sk-draft' }),
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('sk-draft');
   });
-
   it('handles desktop window control actions', async () => {
     const handleWindowControl = vi.fn(async (action: string) => {
       if (action === 'maximize') return true;
@@ -685,7 +683,7 @@ describe('legacy provider profiles (v1.1.0)', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('test and fetch-models refuse a disabled legacy profile', async () => {
+  it('desktop.provider.test and desktop.provider.models refuse a disabled legacy profile', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
     d.localDatabase.saveProviderProfile({
@@ -699,20 +697,27 @@ describe('legacy provider profiles (v1.1.0)', () => {
     });
     d.localDatabase.markLegacyProfiles();
     const test = await dispatchIpcRequest(handlers, {
-      origin: renderer,
-      channel: 'desktop.provider-profile.test',
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider.test',
       payload: { id: 'p-kilo' },
     });
     const models = await dispatchIpcRequest(handlers, {
-      origin: renderer,
-      channel: 'desktop.provider-profile.fetch-models',
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider.models',
       payload: { id: 'p-kilo' },
     });
-    expect(test.ok).toBe(false);
+    expect(test).toEqual({
+      ok: true,
+      data: {
+        ok: false,
+        modelId: 'm',
+        errorCode: 'PROVIDER_INCOMPATIBLE',
+        message: expect.any(String),
+      },
+    });
     expect(models.ok).toBe(false);
-    expect(d.probeProvider).not.toHaveBeenCalled();
+    expect(d.providerFetch).not.toHaveBeenCalled();
   });
-
   it('save refuses to create a new profile under a legacy provider', async () => {
     const handlers = createIpcHandlers(deps());
     const result = await dispatchIpcRequest(handlers, {
@@ -727,6 +732,136 @@ describe('legacy provider profiles (v1.1.0)', () => {
     });
     expect(result.ok).toBe(false);
   });
+
+  it('keeps the endpoint binding out of the profile list, and refuses a public custom endpoint on save', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const saved = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'm',
+        apiKey: 'sk-1',
+      },
+    });
+    const id = (saved.data as { id: string }).id;
+    expect(d.localDatabase.getProviderProfile(id)?.bindingDigest).toMatch(/^[0-9a-f]{64}$/);
+    const listed = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.list',
+    });
+    expect(JSON.stringify(listed)).not.toContain('bindingDigest');
+    const refused = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        modelId: 'm',
+        apiKey: 'sk-2',
+      },
+    });
+    expect(refused).toEqual({
+      ok: false,
+      error: expect.stringContaining('not available in this build'),
+    });
+  });
+
+  it('keeps the stored key when only the model changes, and refuses an endpoint change without a key', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const saved = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        modelId: 'openai/gpt-4o-mini',
+        apiKey: 'sk-kept',
+      },
+    });
+    const id = (saved.data as { id: string }).id;
+    const secretHandle = d.localDatabase.getProviderProfile(id)?.secretHandleId ?? '';
+
+    const modelOnly = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        id,
+        provider: 'openai-compatible',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        modelId: 'openai/gpt-4o',
+      },
+    });
+    expect(modelOnly.ok).toBe(true);
+    expect(await d.secretStore.get(secretHandle)).toBe('sk-kept');
+
+    const moved = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        id,
+        provider: 'openai-compatible',
+        baseUrl: 'http://127.0.0.1:9999/v1',
+        modelId: 'openai/gpt-4o',
+      },
+    });
+    expect(moved).toEqual({ ok: false, error: 'Enter the key again to change the endpoint' });
+    expect(await d.secretStore.get(secretHandle)).toBe('sk-kept');
+  });
+
+  it('desktop.agent.request sends the request through the broker and returns the reply text only', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const saved = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openai/gpt-4o-mini',
+        apiKey: 'sk-agent',
+      },
+    });
+    const id = (saved.data as { id: string }).id;
+    d.providerFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'hello' } }] }),
+        {
+          status: 200,
+        },
+      ),
+    );
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.agent.request',
+      payload: {
+        profileId: id,
+        baseUrl: 'https://openrouter.ai/api/v1',
+        body: { messages: [{ role: 'user', content: 'hi' }] },
+      },
+    });
+    expect(result).toEqual({ ok: true, data: { ok: true, text: expect.any(String) } });
+    const text = (result.data as { text: string }).text;
+    expect(JSON.parse(text)).toMatchObject({ choices: [{ message: { content: 'hello' } }] });
+    expect(JSON.stringify(result)).not.toContain('sk-agent');
+    expect(d.providerFetch.mock.calls[0]?.[0]).toBe(
+      'https://openrouter.ai/api/v1/chat/completions',
+    );
+  });
+
+  it('desktop.agent.request refuses a payload without a profile id before any request', async () => {
+    const d = deps();
+    const result = await dispatchIpcRequest(createIpcHandlers(d), {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.agent.request',
+      payload: { body: { messages: [{ role: 'user', content: 'hi' }] } },
+    });
+    expect(result).toEqual({ ok: false, error: 'Invalid agent request' });
+    expect(d.providerFetch).not.toHaveBeenCalled();
+  });
 });
 
 describe('IPC failures', () => {
@@ -737,29 +872,21 @@ describe('IPC failures', () => {
   it('answers a handler that throws with a fixed message and logs the detail in the main process', async () => {
     const d = deps();
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    d.localDatabase.saveProviderProfile({
-      id: 'p-custom',
-      provider: 'openai-compatible',
-      baseUrl: 'https://api.example.com/v1',
-      modelId: 'm',
-      secretHandleId: 'h-custom',
-      createdAt: 'T0',
-      updatedAt: 'T0',
-    });
-    await d.secretStore.set('h-custom', 'sk-test');
-    d.probeProvider.mockRejectedValueOnce(new Error('EACCES: C:\\Users\\HadiMoti\\secret-path'));
+    vi.spyOn(d.providerBroker, 'probe').mockRejectedValueOnce(
+      new Error('EACCES: C:\\Users\\HadiMoti\\secret-path'),
+    );
     const handlers = createIpcHandlers(d);
 
     const result = await dispatchIpcRequest(handlers, {
       origin: 'joy-media-app://renderer',
-      channel: 'desktop.provider-profile.test',
-      payload: { id: 'p-custom' },
+      channel: 'desktop.provider.test',
+      payload: { id: 'p-any' },
     });
 
     expect(result).toEqual({ ok: false, error: 'The request failed' });
     expect(JSON.stringify(result)).not.toContain('secret-path');
     expect(logged).toHaveBeenCalledWith(
-      '[joy-desktop] IPC desktop.provider-profile.test failed',
+      '[joy-desktop] IPC desktop.provider.test failed',
       expect.any(Error),
     );
   });

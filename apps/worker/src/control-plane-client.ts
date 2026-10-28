@@ -269,6 +269,26 @@ export class WorkerControlPlaneClient {
     if (!response.ok) throw new Error(`Worker derivative upload failed (${response.status})`);
   }
 
+  /**
+   * One AI completion on a job this Worker holds (PLAN-v4 §6b). The desktop takes the profile from
+   * the job and returns only the reply text, so this Worker never sees a key, a URL or a profile.
+   */
+  async completeAi(
+    jobId: string,
+    input: {
+      readonly messages: readonly unknown[];
+      readonly params?: Readonly<Record<string, unknown>>;
+    },
+  ): Promise<string> {
+    const result = await this.authenticatedRequest(
+      `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/ai/complete`,
+      { jobId, messages: input.messages, params: input.params ?? {} },
+    );
+    const text = isRecord(result) ? result['text'] : undefined;
+    if (typeof text !== 'string') throw new Error('The desktop returned an unreadable AI reply');
+    return text;
+  }
+
   async fail(jobId: string, error: string, leaseToken?: string): Promise<void> {
     await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/fail`,

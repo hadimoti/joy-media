@@ -47,7 +47,8 @@ import { createLocalOriginalWriter } from './local-originals.js';
 import { createMediaChannelHandlers } from './media-channel.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
-import { probeOpenAiCompatibleProvider } from '@joy-media/provider-sdk';
+import { createProviderBroker } from './providers/provider-broker.js';
+import { createWorkerCompletion } from './providers/worker-completion.js';
 import { checkProfileCredentials } from './profile-credential-check.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -107,6 +108,18 @@ if (!app.requestSingleInstanceLock()) {
         : localWorkerEnv(process.env, { apiEnv: localJobApi.workerEnv, workerRoot }),
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
+  const providerBroker = createProviderBroker({
+    store: {
+      getProfile: (id) => localDatabase.getProviderProfile(id),
+      isDisabledLegacy: (id) =>
+        localDatabase
+          .listProfileStates()
+          .some((s) => s.profileId === id && s.state === 'disabled-legacy'),
+      markCredentialUnavailable: (id) => localDatabase.markProfileCredentialUnavailable(id),
+    },
+    secrets: secretStore,
+    fetch: (url, init) => fetch(url, init),
+  });
   const ipcHandlers = createIpcHandlers({
     fileRegistry,
     workerSupervisor,
@@ -142,7 +155,7 @@ if (!app.requestSingleInstanceLock()) {
       return { canceled: result.canceled, path: result.filePaths[0] };
     },
     secretStore,
-    probeProvider: (request) => probeOpenAiCompatibleProvider(request, fetch),
+    providerBroker,
     handleWindowControl: (action) => {
       const win =
         BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
@@ -206,6 +219,7 @@ if (!app.requestSingleInstanceLock()) {
         sourceSize: async (refId) => statSync(resolveSourcePath(refId)).size,
         readSource: async (refId) => readFileSync(resolveSourcePath(refId)),
         onWarning: (message) => console.warn(message),
+        completeAi: createWorkerCompletion(providerBroker),
       });
     } catch (error) {
       // Without the local API the Worker cannot connect. The rest of the app still opens.

@@ -1,3 +1,5 @@
+import { findRegistryRegion } from '@joy-media/provider-sdk';
+
 /** Session-scoped consent for sending credentials or requests to custom URLs. */
 export type CustomEndpointIdentity = {
   readonly provider: string;
@@ -15,38 +17,12 @@ export function normalizeProviderBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, '');
 }
 
-const TRUSTED_PROVIDER_ENDPOINTS: Readonly<Record<string, string>> = {
-  openrouter: 'https://openrouter.ai/api/v1',
-};
-
-/** Consent is required unless the URL is the provider's exact trusted HTTPS origin and path. */
+/**
+ * A registry provider at one of its own region URLs is a fixed, known origin, so it needs no
+ * acknowledgement (PLAN-v4 §6c). Every other endpoint needs one.
+ */
 export function requiresCustomEndpointConsent(provider: string, baseUrl: string): boolean {
-  const trustedEndpoint = TRUSTED_PROVIDER_ENDPOINTS[provider];
-  if (!trustedEndpoint) return true;
-
-  try {
-    const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
-    const candidate = new URL(normalizedBaseUrl);
-    const trusted = new URL(trustedEndpoint);
-    const authority = normalizedBaseUrl.match(/^https:\/\/([^/?#]*)/i)?.[1] ?? '';
-    if (
-      candidate.protocol !== 'https:' ||
-      candidate.hostname !== trusted.hostname ||
-      authority.includes('@') ||
-      candidate.username !== '' ||
-      candidate.password !== '' ||
-      candidate.port !== '' ||
-      candidate.search !== '' ||
-      candidate.hash !== ''
-    ) {
-      return true;
-    }
-    // Exact trusted path only: a sub-path such as /api/v1/chat is a different
-    // configured endpoint and needs consent.
-    return candidate.pathname !== trusted.pathname;
-  } catch {
-    return true;
-  }
+  return findRegistryRegion(provider, baseUrl) === undefined;
 }
 
 function identityKey(identity: CustomEndpointIdentity): string {

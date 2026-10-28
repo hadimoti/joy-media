@@ -16,7 +16,13 @@ import type {
 import { LEGACY_PROVIDER_IDS } from '../store/migrations.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
-import type { DirectProviderProbeReport, SecretStore } from '@joy-media/provider-sdk';
+import { evaluateEndpoint } from '@joy-media/provider-sdk';
+import type { SecretStore } from '@joy-media/provider-sdk';
+import {
+  endpointBindingDigest,
+  type ProviderBroker,
+  type ProviderDraft,
+} from './providers/provider-broker.js';
 
 /** Native "select a file" prompt, injected so main-process wiring stays unit-testable. */
 export type ShowOpenDialog = () => Promise<{
@@ -32,15 +38,6 @@ export type ProbeMedia = (path: string) => Promise<{
   readonly kind: MediaKind;
 }>;
 
-/** Runs the host-side direct-provider connectivity probe (never exposes the key to the
- * renderer). Injected — see main/electron-entry.ts for the real wiring to
- * provider-sdk's `probeOpenAiCompatibleProvider` + global `fetch`. */
-export type ProbeProvider = (request: {
-  readonly baseUrl: string;
-  readonly apiKey: string;
-  readonly modelId: string;
-}) => Promise<DirectProviderProbeReport>;
-
 export interface IpcHandlerDeps {
   readonly fileRegistry: FileRegistry;
   readonly workerSupervisor: WorkerSupervisor;
@@ -53,7 +50,8 @@ export interface IpcHandlerDeps {
   readonly localDatabase: LocalDatabase;
   readonly probeMedia: ProbeMedia;
   readonly secretStore: SecretStore;
-  readonly probeProvider: ProbeProvider;
+  /** Every provider call goes through the broker (providers/provider-broker.ts). */
+  readonly providerBroker: ProviderBroker;
   readonly handleWindowControl?: (
     action: 'minimize' | 'maximize' | 'close' | 'is-maximized',
   ) => Promise<boolean | void> | boolean | void;
@@ -159,6 +157,14 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (id !== undefined) {
         const existing = deps.localDatabase.getProviderProfile(id);
         if (existing === undefined) return { ok: false, error: 'Unknown provider profile id' };
+        // The stored key may stay only while it still belongs to this exact endpoint (PLAN-v4 §6c).
+        if (
+          request.apiKey === undefined &&
+          (existing.provider !== request.provider ||
+            normalizeUrl(existing.baseUrl) !== normalizeUrl(request.baseUrl))
+        ) {
+          return { ok: false, error: 'Enter the key again to change the endpoint' };
+        }
         secretHandleId = existing.secretHandleId;
         createdAt = existing.createdAt;
       } else {
@@ -170,7 +176,15 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       // The key is written to OS-protected storage before the (secret-free) profile metadata
       // is saved, so a crash between the two calls never leaves a profile pointing at a
       // handle that was never actually written.
-      await deps.secretStore.set(secretHandleId, request.apiKey);
+      // The endpoint is bound to the saved key (PLAN-v4 §6c). Validation already refused any URL the
+      // policy would not allow, so the verdict is allowed here.
+      const verdict = evaluateEndpoint(request.provider, request.baseUrl);
+      if (!verdict.allowed) return { ok: false, error: verdict.reason };
+      const bindingDigest = endpointBindingDigest(id, verdict.origin, verdict.basePath);
+
+      if (request.apiKey !== undefined) {
+        await deps.secretStore.set(secretHandleId, request.apiKey);
+      }
       const profile: ProviderProfile = {
         id,
         ...(request.name !== undefined ? { name: request.name } : {}),
@@ -179,6 +193,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         modelId: request.modelId,
         ...(request.cachedModels !== undefined ? { cachedModels: request.cachedModels } : {}),
         secretHandleId,
+        bindingDigest,
         createdAt,
         updatedAt: timestamp,
       };
@@ -195,7 +210,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         data: deps.localDatabase.listProviderProfiles().map((profile) => {
           const state = states.get(profile.id);
           return {
-            ...profile,
+            ...listedProfile(profile),
             state: state?.state ?? 'active',
             ...(state?.decision === undefined ? {} : { decision: state.decision }),
           };
@@ -223,80 +238,29 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       deps.localDatabase.deleteProviderProfile(id);
       return { ok: true };
     },
-    'desktop.provider-profile.test': async (payload): Promise<IpcResult> => {
+    'desktop.provider.test': async (payload): Promise<IpcResult> => {
       const id = asProfileId(payload);
       if (id === undefined) return { ok: false, error: 'Invalid profile id' };
-      const profile = deps.localDatabase.getProviderProfile(id);
-      if (profile === undefined) return { ok: false, error: 'Unknown provider profile id' };
-      if (isDisabledLegacy(deps, id)) return { ok: false, error: DISABLED_LEGACY_MESSAGE };
-      const apiKey = await deps.secretStore.get(profile.secretHandleId);
-      if (apiKey === null) return { ok: false, error: 'Provider key is no longer available' };
-      // The key is used for exactly this one probe call and never returned to the caller —
-      // `report` is the redacted shape documented in provider-sdk's openai-compatible adapter.
-      const report = await deps.probeProvider({
-        baseUrl: profile.baseUrl,
-        apiKey,
-        modelId: profile.modelId,
-      });
-      return { ok: true, data: report };
+      // The broker reads the key for this one probe, and the report it returns is redacted.
+      return { ok: true, data: await deps.providerBroker.probe(id) };
     },
-    'desktop.provider-profile.fetch-models': async (payload): Promise<IpcResult> => {
-      try {
-        const p = (payload && typeof payload === 'object' ? payload : {}) as {
-          id?: string;
-          baseUrl?: string;
-          apiKey?: string;
-        };
-        let baseUrl = typeof p.baseUrl === 'string' ? p.baseUrl.trim() : '';
-        let apiKey = typeof p.apiKey === 'string' ? p.apiKey.trim() : '';
-        if (p.id) {
-          const profile = deps.localDatabase.getProviderProfile(p.id);
-          if (!profile) return { ok: false, error: 'Unknown provider profile' };
-          if (isDisabledLegacy(deps, p.id)) return { ok: false, error: DISABLED_LEGACY_MESSAGE };
-          baseUrl = profile.baseUrl;
-          const storedKey = await deps.secretStore.get(profile.secretHandleId);
-          if (storedKey) {
-            apiKey = storedKey;
-          }
-        }
-        if (!baseUrl) return { ok: false, error: 'Base URL required' };
-        const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
-        const endpoint = `${normalizedBaseUrl}/models`;
-        const headers: Record<string, string> = {};
-        if (apiKey && apiKey !== 'not-provided') {
-          headers['Authorization'] = `Bearer ${apiKey}`;
-        }
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 10000);
-        const res = await fetch(endpoint, {
-          headers,
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
-        if (!res.ok) {
-          const errText = await res.text().catch(() => '');
-          return {
-            ok: false,
-            error: `Provider returned status ${res.status}: ${errText.slice(0, 100)}`,
-          };
-        }
-        const json = (await res.json()) as { data?: unknown };
-        const rawList = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
-        const models = rawList
-          .map((item) => {
-            if (typeof item === 'string') return { id: item, name: item };
-            if (item && typeof item === 'object') {
-              const id = (item as { id?: string }).id || '';
-              const name = (item as { name?: string }).name || id;
-              return { id, name };
-            }
-            return null;
-          })
-          .filter((m): m is { id: string; name: string } => Boolean(m && m.id));
-        return { ok: true, data: models };
-      } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
-      }
+    'desktop.provider.models': async (payload): Promise<IpcResult> => {
+      const source = asModelSource(payload);
+      if (source === undefined) return { ok: false, error: 'Invalid model source' };
+      const result = await deps.providerBroker.listModels(source);
+      return result.ok ? { ok: true, data: result.data } : { ok: false, error: result.message };
+    },
+    'desktop.agent.request': async (payload): Promise<IpcResult> => {
+      const request = asAgentRequest(payload);
+      if (request === undefined) return { ok: false, error: 'Invalid agent request' };
+      // A refusal is data, not a handler error, so the renderer keeps the broker's code.
+      const result = await deps.providerBroker.complete(request);
+      return {
+        ok: true,
+        data: result.ok
+          ? { ok: true, text: result.data.text }
+          : { ok: false, code: result.code, message: result.message },
+      };
     },
     'desktop.window-minimize': async () => {
       await deps.handleWindowControl?.('minimize');
@@ -440,6 +404,60 @@ function asProfileId(value: unknown): string | undefined {
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
 }
 
+function normalizeUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '');
+}
+
+/** The profile as the renderer sees it: the binding digest stays in the main process. */
+function listedProfile(profile: ProviderProfile): Omit<ProviderProfile, 'bindingDigest'> {
+  const { bindingDigest: _bindingDigest, ...visible } = profile;
+  return visible;
+}
+
+/** A saved profile by id, or an unsaved draft. A draft's key is used for this one call only. */
+function asModelSource(
+  value: unknown,
+): { profileId: string } | { draft: ProviderDraft } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (candidate['draft'] !== undefined) {
+    const draft = candidate['draft'];
+    if (typeof draft !== 'object' || draft === null) return undefined;
+    const fields = draft as Record<string, unknown>;
+    if (
+      typeof fields['provider'] !== 'string' ||
+      typeof fields['baseUrl'] !== 'string' ||
+      typeof fields['apiKey'] !== 'string'
+    ) {
+      return undefined;
+    }
+    return {
+      draft: { provider: fields['provider'], baseUrl: fields['baseUrl'], apiKey: fields['apiKey'] },
+    };
+  }
+  const id = asProfileId(value);
+  return id === undefined ? undefined : { profileId: id };
+}
+
+function asAgentRequest(
+  value: unknown,
+): { profileId: string; body: unknown; baseUrl: string; modelId?: string } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const profileId = candidate['profileId'];
+  const baseUrl = candidate['baseUrl'];
+  if (typeof profileId !== 'string' || profileId.length === 0) return undefined;
+  if (typeof baseUrl !== 'string' || baseUrl.length === 0 || baseUrl.length > 2048)
+    return undefined;
+  const modelId = candidate['modelId'];
+  return {
+    profileId,
+    baseUrl,
+    body: candidate['body'],
+    ...(typeof modelId === 'string' ? { modelId } : {}),
+  };
+}
+
 interface SaveProviderProfileRequest {
   readonly id?: string;
   readonly name?: string;
@@ -447,7 +465,8 @@ interface SaveProviderProfileRequest {
   readonly baseUrl: string;
   readonly modelId: string;
   readonly cachedModels?: readonly string[];
-  readonly apiKey: string;
+  /** Omitted to keep the stored key. Allowed only while the endpoint is unchanged. */
+  readonly apiKey?: string | undefined;
 }
 
 function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileRequest | undefined {
@@ -456,7 +475,10 @@ function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileReques
   if (typeof candidate['provider'] !== 'string') return undefined;
   if (typeof candidate['baseUrl'] !== 'string') return undefined;
   if (typeof candidate['modelId'] !== 'string') return undefined;
-  if (typeof candidate['apiKey'] !== 'string' || candidate['apiKey'].length === 0) return undefined;
+  const apiKey = candidate['apiKey'];
+  const keyOmitted = apiKey === undefined || apiKey === '';
+  if (!keyOmitted && typeof apiKey !== 'string') return undefined;
+  if (keyOmitted && candidate['id'] === undefined) return undefined;
   if (candidate['id'] !== undefined && typeof candidate['id'] !== 'string') return undefined;
   return {
     ...(candidate['id'] !== undefined ? { id: candidate['id'] as string } : {}),
@@ -469,7 +491,7 @@ function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileReques
           cachedModels: candidate['cachedModels'].filter((m): m is string => typeof m === 'string'),
         }
       : {}),
-    apiKey: candidate['apiKey'],
+    ...(keyOmitted ? {} : { apiKey: apiKey as string }),
   };
 }
 
@@ -481,15 +503,6 @@ function mediaChannelTable(
   return Object.fromEntries(
     MEDIA_CHANNELS.map((channel) => [channel, handlers?.[channel] ?? refused]),
   ) as Record<MediaChannel, IpcHandler>;
-}
-
-/** Shown for a v1.0.x profile that v1.1.0 no longer offers (PLAN-v4 §9a). */
-const DISABLED_LEGACY_MESSAGE = 'This profile is a v1.0.x provider that v1.1.0 no longer offers';
-
-function isDisabledLegacy(deps: IpcHandlerDeps, profileId: string): boolean {
-  return deps.localDatabase
-    .listProfileStates()
-    .some((s) => s.profileId === profileId && s.state === 'disabled-legacy');
 }
 
 export type { WorkerStatus };

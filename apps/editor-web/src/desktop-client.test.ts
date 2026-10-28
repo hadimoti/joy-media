@@ -7,7 +7,7 @@ import {
   saveDesktopProviderProfile,
   listDesktopProviderProfiles,
   deleteDesktopProviderProfile,
-  beginDesktopProviderSession,
+  requestAgentCompletion,
   testDesktopProviderProfile,
   getDesktopAssetLibrarySettings,
   setDesktopAssetLibraryDirectory,
@@ -157,17 +157,17 @@ describe('testDesktopProviderProfile', () => {
     );
   });
 
-  it('invokes desktop.provider-profile.test with the profile id and returns the probe report', async () => {
+  it('invokes desktop.provider.test with the profile id and returns the probe report', async () => {
     const probeReport = {
       modelId: 'anthropic/claude-3.5-sonnet',
       capability: 'tool-loop',
       status: 'ok',
     };
     const invoke = vi.fn().mockResolvedValue(probeReport);
-    window.joyDesktop = { channels: ['desktop.provider-profile.test'], invoke };
+    window.joyDesktop = { channels: ['desktop.provider.test'], invoke };
 
     await expect(testDesktopProviderProfile('prof-1')).resolves.toEqual(probeReport);
-    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.test', { id: 'prof-1' });
+    expect(invoke).toHaveBeenCalledWith('desktop.provider.test', { id: 'prof-1' });
   });
 });
 
@@ -254,14 +254,41 @@ describe('asset library helpers', () => {
   });
 });
 
-describe('beginDesktopProviderSession', () => {
-  it('refuses until the local provider broker ships, and never asks the desktop for a key', async () => {
-    const invoke = vi.fn();
-    window.joyDesktop = { channels: [], invoke };
+describe('requestAgentCompletion', () => {
+  const request = {
+    profileId: 'prof-1',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    modelId: 'openai/gpt-4o-mini',
+    body: { messages: [{ role: 'user', content: 'hi' }] },
+  };
 
-    await expect(beginDesktopProviderSession('prof-1')).rejects.toThrow(
-      'not available until the local provider broker ships',
+  it('sends the request to the broker and returns the reply text', async () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true, text: '{"choices":[]}' });
+    window.joyDesktop = { channels: ['desktop.agent.request'], invoke };
+
+    await expect(requestAgentCompletion(request)).resolves.toBe('{"choices":[]}');
+    expect(invoke).toHaveBeenCalledWith('desktop.agent.request', request);
+  });
+
+  it('rejects with the broker code and message when the broker refuses', async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      ok: false,
+      code: 'BINDING_MISMATCH',
+      message: 'Save this profile again to confirm its endpoint.',
+    });
+    window.joyDesktop = { channels: ['desktop.agent.request'], invoke };
+
+    await expect(requestAgentCompletion(request)).rejects.toMatchObject({
+      code: 'BINDING_MISMATCH',
+      message: 'Save this profile again to confirm its endpoint.',
+    });
+  });
+
+  it('refuses outside the desktop host without sending anything', async () => {
+    delete (window as { joyDesktop?: unknown }).joyDesktop;
+
+    await expect(requestAgentCompletion(request)).rejects.toThrow(
+      'unavailable outside the desktop host',
     );
-    expect(invoke).not.toHaveBeenCalled();
   });
 });

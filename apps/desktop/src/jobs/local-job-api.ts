@@ -13,6 +13,8 @@ import { MAX_LOCAL_ORIGINAL_BYTES } from '../main/local-originals.js';
  */
 
 const MAX_JSON_BYTES = 64 * 1024;
+/** Largest AI request a Worker may send (PLAN-v4 §6b). */
+export const MAX_AI_REQUEST_BYTES = 1024 * 1024;
 const MAX_DERIVATIVE_BYTES = 64 * 1024 * 1024;
 /**
  * Largest source served over the loopback route. It is the registration limit, so every original
@@ -39,9 +41,25 @@ export interface LocalJobApiOptions {
   readonly readSource: (refId: string) => Promise<Uint8Array>;
   readonly maxSourceBytes?: number;
   readonly onWarning?: (message: string) => void;
+  /**
+   * Runs one AI request for a job the Worker holds. The main process supplies it; the profile comes
+   * from the job, never from the Worker (PLAN-v4 §6b). Absent means the route answers 404.
+   */
+  readonly completeAi?: (request: LocalAiRequest) => Promise<LocalAiResult>;
   /** Fixed token for tests. Production always uses a fresh random token per app run. */
   readonly token?: string;
 }
+
+export interface LocalAiRequest {
+  readonly workerId: string;
+  readonly jobId: string;
+  readonly profileId: string;
+  readonly body: Readonly<Record<string, unknown>>;
+}
+
+export type LocalAiResult =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly status: number; readonly message: string };
 
 export interface LocalJobApi {
   readonly url: string;
@@ -121,6 +139,10 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
       sendData(response, null);
       return;
     }
+    if (rest === 'ai/complete' && method === 'POST') {
+      await completeAi(request, response, workerId);
+      return;
+    }
     const jobRoute = /^jobs\/([^/]+)\/(heartbeat|complete|fail|source|derivative)$/.exec(rest);
     if (jobRoute === null) {
       sendError(response, 404, 'not found');
@@ -182,6 +204,42 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
       return;
     }
     sendError(response, 404, 'not found');
+  }
+
+  /**
+   * The Worker asks for one AI completion on a job it holds. The job must be leased to this Worker
+   * and running, and it must carry a profile that the main process attached at dispatch.
+   */
+  async function completeAi(
+    request: IncomingMessage,
+    response: ServerResponse,
+    workerId: string,
+  ): Promise<void> {
+    const complete = options.completeAi;
+    if (complete === undefined) throw new JobProtocolError(404, 'not found');
+    const body = await readJson(request, MAX_AI_REQUEST_BYTES, 413);
+    const jobId = typeof body.jobId === 'string' ? body.jobId : '';
+    if (!ID_PATTERN.test(jobId)) throw new JobProtocolError(422, 'invalid job id');
+    const job = orchestrator.get(jobId);
+    if (job === undefined) throw new JobProtocolError(404, 'unknown job');
+    if (job.workerId !== workerId) {
+      throw new JobProtocolError(403, 'the job is not leased to this Worker');
+    }
+    if (job.status !== 'running') throw new JobProtocolError(409, 'the job is not running');
+    if (job.profileId === undefined) throw new JobProtocolError(409, 'the job has no AI profile');
+    // Only messages and the sampling parameters come from the Worker. Any other field, including a
+    // profile name or a model, is left out here and dropped again by the broker's allow-list.
+    const result = await complete({
+      workerId,
+      jobId,
+      profileId: job.profileId,
+      body: { messages: body.messages, ...samplingParams(body.params) },
+    });
+    if (!result.ok) {
+      sendError(response, result.status, result.message);
+      return;
+    }
+    sendData(response, { text: result.text });
   }
 
   async function acceptDerivative(
@@ -275,20 +333,28 @@ function headerValue(request: IncomingMessage, name: string): string {
   return typeof value === 'string' ? value : '';
 }
 
-async function readBytes(request: IncomingMessage, limit: number): Promise<Buffer> {
+async function readBytes(
+  request: IncomingMessage,
+  limit: number,
+  tooLargeStatus: 413 | 422 = 422,
+): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
     total += buffer.length;
-    if (total > limit) throw new JobProtocolError(422, 'payload is too large');
+    if (total > limit) throw new JobProtocolError(tooLargeStatus, 'payload is too large');
     chunks.push(buffer);
   }
   return Buffer.concat(chunks);
 }
 
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
-  const text = (await readBytes(request, MAX_JSON_BYTES)).toString('utf8');
+async function readJson(
+  request: IncomingMessage,
+  limit = MAX_JSON_BYTES,
+  tooLargeStatus: 413 | 422 = 422,
+): Promise<Record<string, unknown>> {
+  const text = (await readBytes(request, limit, tooLargeStatus)).toString('utf8');
   if (text.length === 0) return {};
   let parsed: unknown;
   try {
@@ -298,6 +364,16 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   }
   if (!isRecord(parsed)) throw new JobProtocolError(422, 'body must be a JSON object');
   return parsed;
+}
+
+/** The sampling fields a Worker may set, and nothing else. */
+function samplingParams(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const picked: Record<string, unknown> = {};
+  for (const key of ['temperature', 'max_tokens', 'tools', 'tool_choice']) {
+    if (value[key] !== undefined) picked[key] = value[key];
+  }
+  return picked;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

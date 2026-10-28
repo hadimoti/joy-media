@@ -1,11 +1,21 @@
 /**
- * Model/base-URL validation for BYOK direct-provider profiles (JOY Media desktop migration,
- * wave 3). Mirrors `apps/editor-web/src/joy-agent/protocol.ts`'s `ByokSessionConfig` field
- * names (`provider`, `baseUrl`, `modelId`) so a future editor-web integration is a straight
- * type match rather than a translation layer.
+ * Validation for BYOK provider profiles (JOY Media desktop, PLAN-v4 §6c). A profile is checked
+ * against the shared registry and endpoint policy before it is ever persisted, so a key is
+ * never written for an endpoint the broker would later refuse.
  */
 
-export const BYOK_PROVIDERS = ['openrouter', 'openai-compatible', 'kilo', 'custom'] as const;
+import {
+  CUSTOM_PROVIDER_ALIAS,
+  CUSTOM_PROVIDER_ID,
+  REGISTRY_PROVIDER_IDS,
+  evaluateEndpoint,
+} from './registry.js';
+
+export const BYOK_PROVIDERS = [
+  ...REGISTRY_PROVIDER_IDS,
+  CUSTOM_PROVIDER_ID,
+  CUSTOM_PROVIDER_ALIAS,
+] as const;
 export type ByokProvider = (typeof BYOK_PROVIDERS)[number];
 
 export interface ProviderProfileInput {
@@ -20,11 +30,8 @@ export interface ValidationIssue {
 }
 
 /**
- * Fails closed: an insecure or malformed base URL, an unknown provider, or an empty model id
- * are all rejected before a profile is ever persisted or a key ever leaves DPAPI/Keychain
- * storage. `http://` is allowed only to loopback hosts, for local OpenAI-compatible servers
- * (Ollama, LM Studio, ...) a developer runs on their own machine — anything else must be
- * `https://` so a provider key is never sent over a plaintext network hop.
+ * Fails closed: an unknown provider, an empty model id, a malformed base URL, or a base URL the
+ * endpoint policy refuses are all rejected before a profile is saved or a key is written.
  */
 export function validateProviderProfileInput(
   input: ProviderProfileInput,
@@ -42,30 +49,20 @@ export function validateProviderProfileInput(
     issues.push({ code: 'MODEL_ID_REQUIRED', message: 'modelId must not be empty' });
   }
 
-  const url = parseUrl(input.baseUrl);
-  if (url === undefined) {
+  if (!isAbsoluteUrl(input.baseUrl)) {
     issues.push({ code: 'BASE_URL_INVALID', message: 'baseUrl must be a valid absolute URL' });
-  } else if (
-    url.protocol !== 'https:' &&
-    !(url.protocol === 'http:' && isLoopbackHost(url.hostname))
-  ) {
-    issues.push({
-      code: 'BASE_URL_INSECURE',
-      message: 'baseUrl must be https://, or http:// to a loopback host only',
-    });
+  } else {
+    const verdict = evaluateEndpoint(input.provider, input.baseUrl);
+    if (!verdict.allowed) issues.push({ code: verdict.code, message: verdict.reason });
   }
 
   return issues;
 }
 
-function parseUrl(value: string): URL | undefined {
+function isAbsoluteUrl(value: string): boolean {
   try {
-    return new URL(value);
+    return new URL(value.trim()).href.length > 0;
   } catch {
-    return undefined;
+    return false;
   }
-}
-
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
