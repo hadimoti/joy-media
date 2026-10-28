@@ -97,12 +97,16 @@ try {
 
     # 4. The record: the commit, the pinned runtime, the thresholds digest, and a SHA-256 over every file in the kit.
     $manifest = Get-Content -LiteralPath (Join-Path $repoRoot 'apps\desktop\package.json') -Raw | ConvertFrom-Json
+    # The pin may sit under either section, as the stage probe reads it.
+    $electronPin = @($manifest.devDependencies, $manifest.dependencies) |
+        Where-Object { $null -ne $_ -and ($_.PSObject.Properties.Name -contains 'electron') } |
+        ForEach-Object { $_.electron } | Select-Object -First 1
     $thresholdsSha256 = (Get-FileHash -LiteralPath (Join-Path $repoRoot 'docs\qa\attended\model-thresholds.json') -Algorithm SHA256).Hash.ToLowerInvariant()
     $kitRecord = @(
         "commit: $commit"
         "built-utc: $((Get-Date).ToUniversalTime().ToString('o'))"
         "build: instrumented (package-release.mjs --unpacked --instrumented)"
-        "electron: $($manifest.dependencies.electron)"
+        "electron: $electronPin"
         "thresholds-sha256: $thresholdsSha256"
         "node: $(node --version)"
     )
