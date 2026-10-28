@@ -70,6 +70,8 @@ type SavedProfileForConnect = {
   readonly provider: string;
   readonly baseUrl: string;
   readonly modelId: string;
+  /** False until the saved key is confirmed for this endpoint. */
+  readonly bound?: boolean | undefined;
 };
 
 const MODES: Readonly<Record<AgentExecutionMode, string>> = {
@@ -367,6 +369,12 @@ export function JoyAgentSettingsDialog({
     if (working || engineClient === undefined || engineClient === null) return;
     const sessionProvider = sessionProviderFor(profile.provider);
     if (sessionProvider === undefined) return;
+    if (profile.bound !== true) {
+      const message = 'Enter the API key again to confirm this endpoint before connecting.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      return;
+    }
     if (
       requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
       !requireCustomEndpointAcknowledgement({
@@ -443,18 +451,23 @@ export function JoyAgentSettingsDialog({
         : savedProfile.provider === provider) &&
       normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl,
     );
-    // A saved profile whose endpoint matches connects by its id: its key stays in the main process.
-    const reuseSavedKey =
-      !key && hasSavedKey && savedProfile?.id !== undefined && savedProfileMatches;
-    let profileId: string | undefined = reuseSavedKey ? savedProfile?.id : undefined;
+    // A saved profile whose endpoint matches connects by its id, so its key stays in the main process.
+    // That is allowed only once the key is confirmed for this endpoint; otherwise the key is entered again.
+    const reuseSavedProfile =
+      !key && hasSavedKey && savedProfile?.bound === true && savedProfileMatches;
+    // A new local model with no saved profile for this endpoint is saved with no key (PLAN-v4 D8).
+    const keylessNew = keylessLocal && !savedProfileMatches;
+    let profileId: string | undefined = reuseSavedProfile ? savedProfile?.id : undefined;
 
     if (provider === 'openai-compatible') {
       const missing: string[] = [];
-      if (!key && !reuseSavedKey && !keylessLocal)
+      if (!key && !reuseSavedProfile && !keylessNew)
         missing.push(
           savedProfile?.id && !savedProfileMatches
             ? 'a new API key because the saved key belongs to a different provider or endpoint'
-            : 'an API key',
+            : savedProfileMatches
+              ? 'the API key again to confirm this endpoint'
+              : 'an API key',
         );
       if (!normalizedModelId) missing.push('a model ID');
       if (!normalizedBaseUrl) missing.push('a base URL');
@@ -476,11 +489,13 @@ export function JoyAgentSettingsDialog({
       }
     }
 
-    if (!key && !reuseSavedKey && !keylessLocal) {
+    if (!key && !reuseSavedProfile && !keylessNew) {
       const message =
         savedProfile?.id && !savedProfileMatches
           ? 'The saved API key belongs to a different provider or endpoint. Enter a new API key to connect.'
-          : 'API key is required.';
+          : savedProfileMatches
+            ? 'Enter the API key again to confirm this endpoint.'
+            : 'API key is required.';
       setConnectionNotice({ kind: 'error', message });
       onNotice?.(message, 'error');
       setWorking(false);
@@ -502,8 +517,12 @@ export function JoyAgentSettingsDialog({
     }
 
     try {
-      if (isDesktopHost() && (key || keylessLocal)) {
+      if (isDesktopHost() && (key || keylessNew)) {
         const saved = await saveDesktopProviderProfile({
+          // A key typed for the saved endpoint updates that profile in place: one profile per connection.
+          ...(key && savedProfileMatches && savedProfile?.id !== undefined
+            ? { id: savedProfile.id }
+            : {}),
           provider: provider === 'openai-compatible' ? 'custom' : provider,
           name: connectionName.trim() || undefined,
           baseUrl: normalizedBaseUrl,
@@ -816,6 +835,13 @@ export function JoyAgentSettingsDialog({
                                   Saved key could not be read. Enter it again.
                                 </span>
                               )}
+                              {prof.bound === false &&
+                                !disabledLegacy &&
+                                prof.state !== 'credential-unavailable' && (
+                                  <span className="joy-settings-legacy-status">
+                                    Enter the key again to confirm this endpoint.
+                                  </span>
+                                )}
                             </div>
                             <div style={{ display: 'flex', gap: '6px' }}>
                               {disabledLegacy ? (

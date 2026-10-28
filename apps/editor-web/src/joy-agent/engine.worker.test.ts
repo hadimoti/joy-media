@@ -353,12 +353,43 @@ describe('JOY Agent Engine Worker V2', () => {
     expect(bodies).toHaveLength(0);
   });
 
+  it('gives each probe call its own deadline, so three replies of 16 seconds each all count', async () => {
+    const [first, second, third] = [
+      providerToolResponse('probe-1', 'joy_probe'),
+      providerTextResponse(PROVIDER_TOOL_PROBE_CONTINUATION_TOKEN),
+      providerTextResponse('plan-only probe ready'),
+    ];
+    // The three calls take 48 s together, more than one deadline, and each one is within its own.
+    const worker = await mountedWorker(
+      (_body, index) =>
+        new Promise<Response>((resolve) => {
+          setTimeout(() => resolve(index === 0 ? first : index === 1 ? second : third), 16_000);
+        }),
+    );
+    vi.useFakeTimers();
+    worker.send({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type: 'test' });
+
+    await vi.advanceTimersByTimeAsync(48_000);
+    await Promise.resolve();
+
+    expect(worker.output).toContainEqual(
+      expect.objectContaining({
+        protocolVersion: JOY_AGENT_PROTOCOL_VERSION,
+        type: 'test-result',
+        status: expect.objectContaining({ capability: 'tool-loop' }),
+      }),
+    );
+  });
+
   it('bounds a connection probe even when the provider ignores the abort signal', async () => {
     const worker = await mountedWorker(() => new Promise<Response>(() => undefined));
     vi.useFakeTimers();
     worker.send({ protocolVersion: JOY_AGENT_PROTOCOL_VERSION, type: 'test' });
 
-    await vi.advanceTimersByTimeAsync(45_001);
+    // Nothing has timed out at 44 s: the deadline is 45 s, not the 15 s of an earlier build.
+    await vi.advanceTimersByTimeAsync(44_000);
+    expect(worker.output).not.toContainEqual(expect.objectContaining({ type: 'test-result' }));
+    await vi.advanceTimersByTimeAsync(1_001);
     await Promise.resolve();
 
     expect(worker.output).toContainEqual(

@@ -1,4 +1,4 @@
-import { bindUnboundProfiles } from './profile-binding.js';
+import { PROFILE_BINDING_TABLE_SQL } from './profile-binding.js';
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
@@ -53,11 +53,14 @@ interface OneTimeStep {
 
 const ONE_TIME_STEPS: readonly OneTimeStep[] = [
   {
-    id: 'v110.bind-legacy-profiles',
-    // A v1.0.x profile was saved with its key and its URL together, so its stored URL is the one
-    // the key was given for. Bound once, here, when the endpoint policy allows that URL (§6c, §9a).
+    id: 'v110.reset-profile-bindings',
+    // Nothing records that a v1.0.x key belongs to its stored URL: a save could write the key and
+    // fail before the URL. So no binding is made on upgrade. Every saved key is confirmed again for
+    // its endpoint when the profile is next saved (PLAN-v4 §6c, §9a). Bindings written before the
+    // key version was recorded are dropped with them, since none of them was checked.
     run: (db) => {
-      bindUnboundProfiles(db, new Date().toISOString());
+      db.exec('DROP TABLE IF EXISTS profile_binding');
+      db.exec(PROFILE_BINDING_TABLE_SQL);
     },
   },
   {

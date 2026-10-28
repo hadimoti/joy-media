@@ -21,6 +21,7 @@ function bound(id: string, provider: string, baseUrl: string, modelId = 'model-x
     modelId,
     secretHandleId: `handle-${id}`,
     bindingDigest: endpointBindingDigest(id, url.origin, url.pathname.replace(/\/+$/, '')),
+    bindingSecretDigest: `v-handle-${id}`,
   };
 }
 
@@ -57,6 +58,7 @@ function harness(
       getProfile: (id) => profiles.find((p) => p.id === id),
       isDisabledLegacy: (id) => (options.disabled ?? []).includes(id),
       markCredentialUnavailable: (id) => unavailable.push(id),
+      secretVersion: (handleId) => `v-${handleId}`,
     },
     secrets,
     fetch,
@@ -165,6 +167,7 @@ describe('provider broker: profile checks', () => {
         getProfile: () => p,
         isDisabledLegacy: () => false,
         markCredentialUnavailable: (id) => unavailable.push(id),
+        secretVersion: (handleId) => `v-${handleId}`,
       },
       secrets: {
         set: async () => undefined,
@@ -887,5 +890,155 @@ describe('provider broker: the reply that leaves the broker', () => {
       code: 'PROVIDER_INCOMPATIBLE',
       message: expect.stringContaining('refused'),
     });
+  });
+
+  it('refuses a chat reply with a refusal message, even when its finish reason is stop', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: { role: 'assistant', content: null, refusal: 'I cannot help with that.' },
+            },
+          ],
+        }),
+    });
+
+    expect(await broker.complete({ profileId: 'p1', body: CHAT_BODY })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+      message: expect.stringContaining('refused'),
+    });
+  });
+});
+
+describe('provider broker: the key in nested JSON, redirects and cancellation', () => {
+  it('refuses a key hidden in tool call arguments, which are JSON inside a JSON string', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const arguments_ = '{"k":"\\u0073k-test-0123456789abcdef"}';
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        jsonReply({
+          choices: [
+            {
+              finish_reason: 'tool_calls',
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  { id: 'c1', type: 'function', function: { name: 'f', arguments: arguments_ } },
+                ],
+              },
+            },
+          ],
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+    expect(JSON.stringify(result)).not.toContain(KEY);
+  });
+
+  it('names no redirect target whose percent escapes cannot be read', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://evil.example/x/%73k-test-0123456789abcdef/%ZZ' },
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result).toMatchObject({ ok: false, code: 'REDIRECT_REFUSED' });
+    expect(JSON.stringify(result)).not.toContain('evil.example');
+    expect(JSON.stringify(result)).not.toContain('%73k');
+  });
+
+  it('still names a redirect target that holds no key, without its query', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const { broker } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://api.x.ai/v2/chat?token=abc' },
+        }),
+    });
+
+    const result = await broker.complete({ profileId: 'p1', body: CHAT_BODY });
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'REDIRECT_REFUSED',
+      message: expect.stringContaining('https://api.x.ai/v2/chat'),
+    });
+    expect(JSON.stringify(result)).not.toContain('token=abc');
+  });
+
+  it('ends the provider call when the caller has gone, and says the request was cancelled', async () => {
+    const p = bound('p1', 'grok', 'https://api.x.ai/v1');
+    const caller = new AbortController();
+    const { broker, sent } = harness({
+      profiles: [p],
+      keys: { [p.secretHandleId]: KEY },
+      reply: (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const fail = (): void => reject(new DOMException('aborted', 'AbortError'));
+          if (init.signal?.aborted) fail();
+          else init.signal?.addEventListener('abort', fail, { once: true });
+        }),
+    });
+
+    const pending = broker.complete({ profileId: 'p1', body: CHAT_BODY, signal: caller.signal });
+    caller.abort();
+
+    expect(await pending).toMatchObject({
+      ok: false,
+      code: 'NETWORK_ERROR',
+      message: 'The request was cancelled.',
+    });
+    expect(sent).toHaveLength(1);
+  });
+
+  it('refuses a profile whose key has changed since the key was confirmed for this endpoint', async () => {
+    const good = bound('p1', 'openrouter', 'https://openrouter.ai/api/v1');
+    const changed = { ...good, bindingSecretDigest: 'v-an-older-key' };
+    const { broker, sent } = harness({
+      profiles: [changed],
+      keys: { [good.secretHandleId]: KEY },
+    });
+
+    expect(await broker.complete({ profileId: 'p1', body: CHAT_BODY })).toMatchObject({
+      ok: false,
+      code: 'BINDING_MISMATCH',
+    });
+    expect(sent).toHaveLength(0);
+  });
+
+  it('refuses a profile whose key was never confirmed for its endpoint', async () => {
+    const good = bound('p1', 'openrouter', 'https://openrouter.ai/api/v1');
+    const { bindingSecretDigest: _unconfirmed, ...unconfirmed } = good;
+    const { broker, sent } = harness({
+      profiles: [unconfirmed],
+      keys: { [good.secretHandleId]: KEY },
+    });
+
+    expect(await broker.complete({ profileId: 'p1', body: CHAT_BODY })).toMatchObject({
+      ok: false,
+      code: 'BINDING_MISMATCH',
+    });
+    expect(sent).toHaveLength(0);
   });
 });

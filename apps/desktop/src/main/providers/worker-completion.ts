@@ -2,6 +2,7 @@ import type { LocalAiRequest, LocalAiResult } from '../../jobs/local-job-api.js'
 import {
   MAX_WORKER_REQUEST_BYTES,
   type BrokerErrorCode,
+  type BrokerFailure,
   type ProviderBroker,
 } from './provider-broker.js';
 
@@ -18,9 +19,10 @@ export function createWorkerCompletion(
       profileId: request.profileId,
       body: request.body,
       maxRequestBytes: MAX_WORKER_REQUEST_BYTES,
+      signal: request.signal,
     });
     if (result.ok) return { ok: true, text: result.data.text };
-    return { ok: false, status: statusFor(result.code), message: result.message };
+    return { ok: false, status: statusFor(result.code), message: messageFor(result) };
   };
 }
 
@@ -33,4 +35,14 @@ export function statusFor(code: BrokerErrorCode): 413 | 422 | 502 {
     default:
       return 502;
   }
+}
+
+/**
+ * The Worker is told that a redirect happened, not where it led: the target names the provider's own
+ * host and path, and the Worker route must not carry either (PLAN-v4 §6b).
+ */
+function messageFor(result: BrokerFailure): string {
+  return result.code === 'REDIRECT_REFUSED'
+    ? 'The provider redirected the request. Redirects are not followed.'
+    : result.message;
 }

@@ -36,6 +36,12 @@ describe('provider messages on the agent protocol', () => {
     expect(isWorkerToMainMessage({ ...providerRequest, body: oversized })).toBe(false);
   });
 
+  it('counts UTF-8 bytes: 12 Mi Chinese characters are 36 MiB and are refused', () => {
+    // Under 32 Mi characters, so a character count would accept it. In UTF-8 it is over the limit.
+    const oversized = { messages: [{ role: 'user', content: '界'.repeat(12 * 1024 * 1024) }] };
+    expect(isWorkerToMainMessage({ ...providerRequest, body: oversized })).toBe(false);
+  });
+
   it('accepts a provider response from the main thread, a reply or a code, and nothing else', () => {
     const response = {
       protocolVersion: JOY_AGENT_PROTOCOL_VERSION,

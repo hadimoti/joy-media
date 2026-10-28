@@ -4,6 +4,7 @@ import {
   JOY_AGENT_HOST_TOOL_NAMES,
   type JoyAgentHostToolName,
 } from './host-tool-contract.js';
+import { jsonUtf8Size } from './json-bytes.js';
 
 /**
  * Public main-thread/Worker transport version. V2 deliberately removes the
@@ -632,15 +633,14 @@ export function isMainToWorkerMessage(value: unknown): value is MainToWorkerMess
  * The client turns a version rejection into an actionable reload/reconnect
  * failure instead of coercing a stale cached Worker message.
  */
-/** The broker is the size authority. This bound only stops a body no legal batch could reach. */
-const MAX_PROVIDER_BODY_CHARS = 32 * 1024 * 1024;
+/**
+ * The broker is the size authority. This bound only stops a body no legal batch could reach, and it
+ * counts UTF-8 bytes, not characters: a body of Chinese text is three bytes a character.
+ */
+const MAX_PROVIDER_BODY_BYTES = 32 * 1024 * 1024;
 
 function isBoundedBody(body: Record<string, unknown>): boolean {
-  try {
-    return JSON.stringify(body).length <= MAX_PROVIDER_BODY_CHARS;
-  } catch {
-    return false;
-  }
+  return jsonUtf8Size(body, MAX_PROVIDER_BODY_BYTES) !== undefined;
 }
 
 export function isWorkerToMainMessage(value: unknown): value is WorkerToMainMessage {

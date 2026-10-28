@@ -1,6 +1,4 @@
 import { createHash } from 'node:crypto';
-import type { DatabaseSync } from 'node:sqlite';
-import { evaluateEndpoint } from '@joy-media/provider-sdk';
 
 /** Ties a saved key to one endpoint (PLAN-v4 §6c item 6). A changed URL changes the digest. */
 export function endpointBindingDigest(profileId: string, origin: string, basePath: string): string {
@@ -9,40 +7,21 @@ export function endpointBindingDigest(profileId: string, origin: string, basePat
     .digest('hex');
 }
 
-interface UnboundRow {
-  readonly id: string;
-  readonly provider: string;
-  readonly base_url: string;
+/**
+ * Identifies one stored key by its ciphertext. A different key gives different ciphertext, so a
+ * write of another key, by this build or an older one, changes the digest and the binding no longer
+ * matches. Nothing is derived from the key itself (PLAN-v4 §6c item 6).
+ */
+export function secretVersionDigest(ciphertextBase64: string | undefined): string {
+  return createHash('sha256')
+    .update(ciphertextBase64 ?? '')
+    .digest('hex');
 }
 
-/**
- * Binds every saved profile that has no binding yet, when the endpoint policy allows its URL. A
- * v1.0.x profile always saved its key together with its URL, so the stored URL is the one that key
- * was given for. Disabled legacy profiles stay unbound: they never connect. Safe to run on every
- * start, because it only touches profiles that have no binding.
- */
-export function bindUnboundProfiles(db: DatabaseSync, now: string): number {
-  db.exec(`CREATE TABLE IF NOT EXISTS profile_binding (
-    profile_id TEXT PRIMARY KEY,
-    binding_digest TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`);
-  const rows = db
-    .prepare(
-      `SELECT id, provider, base_url FROM provider_profiles
-       WHERE id NOT IN (SELECT profile_id FROM profile_binding)
-         AND provider NOT IN ('kilo', 'joy-hosted')
-         AND id NOT IN (SELECT profile_id FROM profile_state WHERE state = 'disabled-legacy')`,
-    )
-    .all() as unknown as readonly UnboundRow[];
-  let bound = 0;
-  for (const row of rows) {
-    const verdict = evaluateEndpoint(row.provider, row.base_url);
-    if (!verdict.allowed) continue;
-    db.prepare(
-      'INSERT OR REPLACE INTO profile_binding (profile_id, binding_digest, updated_at) VALUES (?, ?, ?)',
-    ).run(row.id, endpointBindingDigest(row.id, verdict.origin, verdict.basePath), now);
-    bound += 1;
-  }
-  return bound;
-}
+/** The binding table, as v1.1.0 creates it. Each row ties a profile to its endpoint and key version. */
+export const PROFILE_BINDING_TABLE_SQL = `CREATE TABLE IF NOT EXISTS profile_binding (
+  profile_id TEXT PRIMARY KEY,
+  binding_digest TEXT NOT NULL,
+  secret_digest TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)`;

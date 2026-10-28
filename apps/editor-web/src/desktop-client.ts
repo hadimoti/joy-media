@@ -84,6 +84,8 @@ export interface DesktopProviderProfile {
   readonly cachedModels?: readonly string[] | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** False until the saved key is confirmed for this endpoint. Such a profile asks for its key again. */
+  readonly bound?: boolean | undefined;
 }
 
 export interface SaveDesktopProviderProfileRequest {

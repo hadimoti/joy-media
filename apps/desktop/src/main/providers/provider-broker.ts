@@ -75,12 +75,16 @@ export interface BrokerProfile {
   readonly secretHandleId: string;
   /** Digest of (profile id, origin, base path) taken at save time. Missing means never bound. */
   readonly bindingDigest?: string | undefined;
+  /** The key version the binding was made for. A key written since then no longer matches. */
+  readonly bindingSecretDigest?: string | undefined;
 }
 
 export interface ProviderBrokerStore {
   getProfile(id: string): BrokerProfile | undefined;
   isDisabledLegacy(id: string): boolean;
   markCredentialUnavailable(id: string): void;
+  /** The version of the key stored under a handle (see secretVersionDigest in the store). */
+  secretVersion(handleId: string): string;
 }
 
 /** An unsaved profile, sent once for a model list. The broker holds it in memory only. */
@@ -113,6 +117,8 @@ export interface ProviderBroker {
     readonly baseUrl?: string;
     /** The largest request this call may send. The Worker route passes its own, smaller limit. */
     readonly maxRequestBytes?: number;
+    /** Ends the provider call when the caller has gone, so a request nobody reads is not paid for. */
+    readonly signal?: AbortSignal | undefined;
   }): Promise<BrokerResult<{ readonly text: string }>>;
   /** The redacted connectivity probe the settings dialog shows. Never throws. */
   probe(profileId: string): Promise<DirectProviderProbeReport>;
@@ -167,7 +173,15 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     if (!verdict.allowed) throw new BrokerError('ENDPOINT_REFUSED', verdict.reason);
     const expected = endpointBindingDigest(profile.id, verdict.origin, verdict.basePath);
     if (profile.bindingDigest !== expected) {
-      throw new BrokerError('BINDING_MISMATCH', 'Save this profile again to confirm its endpoint.');
+      throw new BrokerError('BINDING_MISMATCH', 'Enter the key again to confirm this endpoint.');
+    }
+    // The key must be the one confirmed for this endpoint. A key written since, by any build, has a
+    // new version and is refused until it is entered again (PLAN-v4 §6c item 6).
+    if (profile.bindingSecretDigest !== deps.store.secretVersion(profile.secretHandleId)) {
+      throw new BrokerError(
+        'BINDING_MISMATCH',
+        'The saved key changed after it was confirmed for this endpoint. Enter it again.',
+      );
     }
     const hostname = new URL(profile.baseUrl).hostname;
     if (verdict.kind === 'loopback') await assertLoopbackHost(hostname, resolveHost);
@@ -197,10 +211,15 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     return makeEndpoint(draft.provider, draft.baseUrl, '', usableKey(draft.apiKey));
   }
 
-  async function run(endpoint: Endpoint, body: CompletionBody, timeoutMs: number): Promise<string> {
+  async function run(
+    endpoint: Endpoint,
+    body: CompletionBody,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const call = prepareCompletion(endpoint, body);
     const reply = assertNoCredential(
-      await send(deps.fetch, call, timeoutMs, endpoint.apiKey),
+      await send(deps.fetch, call, timeoutMs, endpoint.apiKey, signal),
       endpoint,
     );
     if (endpoint.api === 'anthropic-messages') {
@@ -243,7 +262,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
           request.modelId === undefined
             ? resolved
             : { ...resolved, modelId: safeModelId(request.modelId) };
-        const text = await run(endpoint, parsed.body, completeMs);
+        const text = await run(endpoint, parsed.body, completeMs, request.signal);
         return { ok: true, data: { text } };
       } catch (error) {
         return failureOf(error);
@@ -294,7 +313,6 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         } catch {
           throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The model list was not understood.');
         }
-        assertNoCredential(JSON.stringify(models), endpoint);
         return { ok: true, data: models };
       } catch (error) {
         return failureOf(error);
@@ -324,33 +342,58 @@ function assertNoCredential(reply: string, endpoint: Endpoint): string {
   return reply;
 }
 
-/** True when the key, or any string inside the reply, holds the key. JSON escapes do not hide it. */
+/** How deep a string that holds JSON is searched. Past it, a string that parses is refused. */
+const MAX_NESTED_JSON = 8;
+
+/**
+ * True when the key shows in the reply: in its text, in a JSON string, or in a string that is itself
+ * JSON, such as a tool call's arguments. JSON escapes do not hide it (PLAN-v4 §6b).
+ */
 function holdsCredential(reply: string, key: string): boolean {
-  if (reply.includes(key)) return true;
+  return textHoldsKey(reply, key, 0);
+}
+
+function textHoldsKey(text: string, key: string, depth: number): boolean {
+  if (text.includes(key)) return true;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(reply);
+    parsed = JSON.parse(text);
   } catch {
     return false;
   }
-  return containsInStrings(parsed, key);
+  return valueHoldsKey(parsed, key, depth);
 }
 
-function containsInStrings(value: unknown, needle: string): boolean {
-  if (typeof value === 'string') return value.includes(needle);
-  if (Array.isArray(value)) return value.some((item) => containsInStrings(item, needle));
+function valueHoldsKey(value: unknown, key: string, depth: number): boolean {
+  if (typeof value === 'string') {
+    if (value.includes(key)) return true;
+    // Only a string with a backslash can hide the key behind a JSON escape.
+    if (!value.includes('\\')) return false;
+    if (depth >= MAX_NESTED_JSON) return isJsonText(value);
+    return textHoldsKey(value, key, depth + 1);
+  }
+  if (Array.isArray(value)) return value.some((item) => valueHoldsKey(item, key, depth));
   if (typeof value === 'object' && value !== null) {
     return Object.entries(value).some(
-      ([key, item]) => key.includes(needle) || containsInStrings(item, needle),
+      ([name, item]) => name.includes(key) || valueHoldsKey(item, key, depth),
     );
   }
   return false;
 }
 
+function isJsonText(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The reply that leaves the broker holds no credential, and a refusal is not passed off as an answer. */
 function checkedReply(text: string, endpoint: Endpoint): string {
   assertNoCredential(text, endpoint);
-  if (finishReasonOf(text) === 'content_filter') {
+  if (modelRefused(text)) {
     throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The model refused this request.');
   }
   return text;
@@ -370,11 +413,15 @@ function stopReasonOf(reply: string): string | undefined {
   return typeof stop === 'string' ? stop : undefined;
 }
 
-function finishReasonOf(text: string): string | undefined {
+/** A refusal is a finish reason of content_filter, or a refusal message, in the first choice. */
+function modelRefused(text: string): boolean {
   const first = parseObject(text)?.choices;
-  if (!Array.isArray(first) || !isRecord(first[0])) return undefined;
-  const reason = first[0].finish_reason;
-  return typeof reason === 'string' ? reason : undefined;
+  if (!Array.isArray(first)) return false;
+  const choice: unknown = first[0];
+  if (!isRecord(choice)) return false;
+  if (choice.finish_reason === 'content_filter') return true;
+  const message: unknown = choice.message;
+  return isRecord(message) && typeof message.refusal === 'string' && message.refusal.length > 0;
 }
 
 /** A keyless local model sends no credential. Any other value is a key, sent as given. */
@@ -436,9 +483,13 @@ async function send(
   call: PreparedCall,
   timeoutMs: number,
   secret: string | undefined,
+  signal?: AbortSignal,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromCaller = (): void => controller.abort();
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener('abort', abortFromCaller, { once: true });
   try {
     const response = await fetchImpl(call.url, {
       method: call.method,
@@ -469,15 +520,20 @@ async function send(
     return await readBounded(response, MAX_RESPONSE_BYTES);
   } catch (error) {
     if (error instanceof BrokerError) throw error;
+    if (signal?.aborted) throw new BrokerError('NETWORK_ERROR', 'The request was cancelled.');
     if (isAbortError(error))
       throw new BrokerError('TIMEOUT', 'The provider did not answer in time.');
     throw new BrokerError('NETWORK_ERROR', 'The provider could not be reached.');
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', abortFromCaller);
   }
 }
 
-/** The redirect target without its query or fragment, or nothing when it would hold the key. */
+/**
+ * The redirect target without its query or fragment, or nothing when the key could show in it. A
+ * target whose escapes cannot be read counts as one that could (PLAN-v4 §6b).
+ */
 function namedTarget(
   location: string | null,
   requestUrl: string,
@@ -491,19 +547,27 @@ function namedTarget(
     return '';
   }
   const named = `${target.origin}${target.pathname}`;
-  const holds =
-    secret !== undefined &&
-    secret.length > 0 &&
-    (named.includes(secret) || safeDecode(named).includes(secret));
-  return holds ? '' : named;
+  if (secret !== undefined && secret.length > 0 && mayShowKey(named, secret)) return '';
+  return named;
 }
 
-function safeDecode(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
+const MAX_DECODE_PASSES = 4;
+
+/** True when the key shows in the text as written, or once its percent escapes are decoded. */
+function mayShowKey(text: string, key: string): boolean {
+  let current = text;
+  for (let pass = 0; pass <= MAX_DECODE_PASSES; pass += 1) {
+    if (current.includes(key)) return true;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      return true;
+    }
+    if (decoded === current) return false;
+    current = decoded;
   }
+  return true;
 }
 
 async function readBounded(response: Response, limit: number): Promise<string> {

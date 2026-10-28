@@ -5,6 +5,7 @@ import os from 'node:os';
 import { SqliteJobDispatchStore } from '../jobs/job-dispatch.js';
 import { ensureLocalAssetSchema, SqliteLocalAssetStore } from './local-assets.js';
 import { ensureProjectDocumentSchema, SqliteProjectDocumentStore } from './project-documents.js';
+import { PROFILE_BINDING_TABLE_SQL, secretVersionDigest } from './profile-binding.js';
 import {
   clearCredentialUnavailable,
   forgetProfileState,
@@ -65,6 +66,8 @@ export interface ProviderProfile {
   readonly secretHandleId: string;
   /** Digest of (profile id, origin, base path) taken when the profile was saved (PLAN-v4 §6c). */
   readonly bindingDigest?: string | undefined;
+  /** The version of the stored key when the binding was made. A different key no longer matches. */
+  readonly bindingSecretDigest?: string | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -98,6 +101,7 @@ interface JobRow {
 interface ProviderProfileRow {
   readonly id: string;
   readonly binding_digest?: string | null;
+  readonly binding_secret_digest?: string | null;
   readonly name?: string | null;
   readonly provider: string;
   readonly base_url: string;
@@ -190,13 +194,7 @@ export class LocalDatabase {
     }
     // Additive (PLAN-v4 §9c): the v1.0.x provider_profiles table is never altered. The endpoint
     // binding (§6c item 6) lives beside it, keyed by profile id.
-    this.db.exec(
-      `CREATE TABLE IF NOT EXISTS profile_binding (
-         profile_id TEXT PRIMARY KEY,
-         binding_digest TEXT NOT NULL,
-         updated_at TEXT NOT NULL
-       )`,
-    );
+    this.db.exec(PROFILE_BINDING_TABLE_SQL);
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS app_settings (
          key TEXT PRIMARY KEY,
@@ -206,6 +204,13 @@ export class LocalDatabase {
     );
     // Additive v1.1.0 migrations (see store/migrations.ts). Each step is transactional.
     runMigrations(this.db, { now: this.now, ...(options.migration ?? {}) });
+    // A key whose save never reached its profile row belongs to no profile. Nothing is saving while
+    // the database opens, so those rows can go now (PLAN-v4 §6c).
+    this.db
+      .prepare(
+        'DELETE FROM secrets WHERE handle_id NOT IN (SELECT secret_handle_id FROM provider_profiles)',
+      )
+      .run();
   }
 
   recordMedia(entry: MediaManifestEntry): void {
@@ -300,6 +305,11 @@ export class LocalDatabase {
     this.db.prepare('DELETE FROM secrets WHERE handle_id = ?').run(handleId);
   }
 
+  /** The version of the stored key: the digest of its ciphertext (see secretVersionDigest). */
+  secretVersion(handleId: string): string {
+    return secretVersionDigest(this.getSecretCiphertext(handleId));
+  }
+
   // ===== BYOK provider profiles =====
 
   saveProviderProfile(profile: ProviderProfile): void {
@@ -320,14 +330,14 @@ export class LocalDatabase {
         profile.createdAt,
         profile.updatedAt,
       );
-    if (profile.bindingDigest === undefined) {
+    if (profile.bindingDigest === undefined || profile.bindingSecretDigest === undefined) {
       this.db.prepare('DELETE FROM profile_binding WHERE profile_id = ?').run(profile.id);
     } else {
       this.db
         .prepare(
-          'INSERT OR REPLACE INTO profile_binding (profile_id, binding_digest, updated_at) VALUES (?, ?, ?)',
+          'INSERT OR REPLACE INTO profile_binding (profile_id, binding_digest, secret_digest, updated_at) VALUES (?, ?, ?, ?)',
         )
-        .run(profile.id, profile.bindingDigest, this.now());
+        .run(profile.id, profile.bindingDigest, profile.bindingSecretDigest, this.now());
     }
   }
 
@@ -481,7 +491,7 @@ function jobFromRow(row: JobRow): JobRecord {
 
 /** A profile row with its endpoint binding, if one was recorded. */
 const PROFILE_SELECT =
-  'SELECT p.*, b.binding_digest AS binding_digest FROM provider_profiles p LEFT JOIN profile_binding b ON b.profile_id = p.id';
+  'SELECT p.*, b.binding_digest AS binding_digest, b.secret_digest AS binding_secret_digest FROM provider_profiles p LEFT JOIN profile_binding b ON b.profile_id = p.id';
 
 function providerProfileFromRow(row: ProviderProfileRow): ProviderProfile {
   let cachedModels: readonly string[] | undefined;
@@ -500,7 +510,9 @@ function providerProfileFromRow(row: ProviderProfileRow): ProviderProfile {
     modelId: row.model_id,
     ...(cachedModels !== undefined ? { cachedModels } : {}),
     secretHandleId: row.secret_handle_id,
-    ...(row.binding_digest ? { bindingDigest: row.binding_digest } : {}),
+    ...(row.binding_digest && row.binding_secret_digest
+      ? { bindingDigest: row.binding_digest, bindingSecretDigest: row.binding_secret_digest }
+      : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

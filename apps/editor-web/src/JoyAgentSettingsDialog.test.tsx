@@ -641,6 +641,63 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     await changeProvider(rendered, 'openai-compatible');
     expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(false);
   });
+
+  it('reconnects a keyed local profile with its key field empty, without saving a second profile', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return [];
+      if (channel === 'desktop.provider-profile.save') return savedLocal;
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'openai-compatible');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    const model = rendered.querySelector<HTMLInputElement>('input[placeholder="provider/model"]');
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!baseUrl || !model || !key || !consent)
+      throw new Error('Expected the custom endpoint fields');
+    await act(async () => {
+      setInputValue(baseUrl, 'http://127.0.0.1:1234/v1');
+      setInputValue(model, 'llama3');
+      setInputValue(key, 'local-key');
+      consent.click();
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    const saves = () =>
+      invoke.mock.calls.filter(([channel]) => channel === 'desktop.provider-profile.save');
+    expect(saves()).toHaveLength(1);
+
+    // Connect again with the key field empty: the saved profile is used, and nothing else is saved.
+    const keyAgain = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    await act(async () => {
+      if (keyAgain) setInputValue(keyAgain, '');
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(saves()).toHaveLength(1);
+    expect(engineClient.configure).toHaveBeenLastCalledWith(
+      expect.objectContaining({ profileId: 'prof-local' }),
+    );
+  });
 });
 
 describe('JOY Agent Settings saved profile connect', () => {
@@ -652,6 +709,7 @@ describe('JOY Agent Settings saved profile connect', () => {
       modelId: 'openrouter/free',
       createdAt: '2026-09-15T00:00:00.000Z',
       updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: true,
     };
     const invoke = vi.fn().mockImplementation(async (channel: string) => {
       if (channel === 'desktop.provider-profile.list') return [savedProfile];
@@ -680,6 +738,39 @@ describe('JOY Agent Settings saved profile connect', () => {
       expect.anything(),
     );
     expect(JSON.stringify(vi.mocked(engineClient.configure).mock.calls)).not.toContain('apiKey');
+  });
+
+  it('asks for the key again, and does not connect, when its key is not confirmed for the endpoint', async () => {
+    const savedProfile = {
+      id: 'prof-or-unbound',
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/free',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: false,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return [savedProfile];
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    expect(rendered.textContent).toContain('Enter the key again to confirm this endpoint.');
+    await act(async () => {
+      buttonByText(rendered, 'Use').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain(
+      'Enter the API key again to confirm this endpoint before connecting.',
+    );
   });
 });
 

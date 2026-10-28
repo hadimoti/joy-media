@@ -41,6 +41,7 @@ function deps() {
           .listProfileStates()
           .some((s) => s.profileId === id && s.state === 'disabled-legacy'),
       markCredentialUnavailable: (id) => localDatabase.markProfileCredentialUnavailable(id),
+      secretVersion: (handleId) => localDatabase.secretVersion(handleId),
     },
     secrets: secretStore,
     fetch: providerFetch,
@@ -871,6 +872,111 @@ describe('legacy provider profiles (v1.1.0)', () => {
       payload: { provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', modelId: 'm' },
     });
     expect(remote).toEqual({ ok: false, error: 'An API key is required for this endpoint' });
+  });
+
+  it('keeps a profile unbound when its key is kept, and binds it once the key is entered again', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    // A v1.0.x profile, saved with no binding.
+    d.localDatabase.saveProviderProfile({
+      id: 'p-legacy',
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'm',
+      secretHandleId: 'h-legacy',
+      createdAt: 'T0',
+      updatedAt: 'T0',
+    });
+    await d.secretStore.set('h-legacy', 'sk-legacy');
+    const payload = {
+      id: 'p-legacy',
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'm',
+    };
+
+    const kept = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.save',
+      payload,
+    });
+    expect(kept).toMatchObject({ ok: true, data: { id: 'p-legacy', bound: false } });
+    expect(d.localDatabase.getProviderProfile('p-legacy')?.bindingDigest).toBeUndefined();
+
+    const entered = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.save',
+      payload: { ...payload, apiKey: 'sk-entered' },
+    });
+    expect(entered).toMatchObject({ ok: true, data: { id: 'p-legacy', bound: true } });
+    expect(d.localDatabase.getProviderProfile('p-legacy')?.bindingDigest).toBeDefined();
+  });
+
+  it('lists a profile as unbound once its stored key was written again by another build', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const saved = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'm',
+        apiKey: 'sk-first',
+      },
+    });
+    const id = (saved.data as { id: string }).id;
+    const handle = d.localDatabase.getProviderProfile(id)?.secretHandleId ?? '';
+    const list = () =>
+      dispatchIpcRequest(handlers, { origin: renderer, channel: 'desktop.provider-profile.list' });
+    expect((await list()).data).toEqual([expect.objectContaining({ id, bound: true })]);
+
+    // An older build rewrites the key under the same handle, so the stored record changes.
+    d.localDatabase.setSecretCiphertext(handle, 'written-by-an-older-build');
+    const listed = await list();
+
+    expect(listed.data).toEqual([expect.objectContaining({ id, bound: false })]);
+    expect(JSON.stringify(listed)).not.toContain('bindingDigest');
+    expect(JSON.stringify(listed)).not.toContain('bindingSecretDigest');
+  });
+
+  it('removes the key a failed save wrote, and keeps the key the profile had', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const saved = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'm',
+        apiKey: 'sk-old-key',
+      },
+    });
+    const id = (saved.data as { id: string }).id;
+    const oldHandle = d.localDatabase.getProviderProfile(id)?.secretHandleId ?? '';
+    const deleteSpy = vi.spyOn(d.secretStore, 'delete');
+    vi.spyOn(d.localDatabase, 'saveProviderProfile').mockImplementationOnce(() => {
+      throw new Error('write failed');
+    });
+
+    await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        id,
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'm',
+        apiKey: 'sk-new-key',
+      },
+    }).catch(() => undefined);
+
+    const removed = deleteSpy.mock.calls.map((call) => call[0]);
+    expect(removed).toHaveLength(1);
+    expect(removed[0]).not.toBe(oldHandle);
+    expect(d.localDatabase.getProviderProfile(id)?.secretHandleId).toBe(oldHandle);
+    expect(await d.secretStore.get(oldHandle)).toBe('sk-old-key');
   });
 
   it('desktop.agent.request sends the request through the broker and returns the reply text only', async () => {

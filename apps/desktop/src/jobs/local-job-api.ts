@@ -57,6 +57,8 @@ export interface LocalAiRequest {
   readonly jobId: string;
   readonly profileId: string;
   readonly body: Readonly<Record<string, unknown>>;
+  /** Ends the provider call when the Worker has gone (PLAN-v4 §6b). */
+  readonly signal?: AbortSignal | undefined;
 }
 
 export type LocalAiResult =
@@ -235,11 +237,18 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
     if (job.profileId === undefined) throw new JobProtocolError(409, 'the job has no AI profile');
     // Only messages and the sampling parameters come from the Worker. Any other field, including a
     // profile name or a model, is left out here and dropped again by the broker's allow-list.
+    // A Worker that has given up on the reply has stopped waiting, so the provider call is stopped
+    // with it: a retry must not pay for a second request while the first still runs.
+    const abandoned = new AbortController();
+    response.once('close', () => {
+      if (!response.writableFinished) abandoned.abort();
+    });
     const result = await complete({
       workerId,
       jobId,
       profileId: job.profileId,
       body: { messages: body.messages, ...samplingParams(body.params) },
+      signal: abandoned.signal,
     });
     if (!result.ok) {
       sendError(response, result.status, result.message);

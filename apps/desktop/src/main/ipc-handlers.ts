@@ -154,9 +154,9 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       let id = request.id;
       let secretHandleId: string;
       let createdAt: string;
-      let previousHandle: string | undefined;
+      let existing: ProviderProfile | undefined;
       if (id !== undefined) {
-        const existing = deps.localDatabase.getProviderProfile(id);
+        existing = deps.localDatabase.getProviderProfile(id);
         if (existing === undefined) return { ok: false, error: 'Unknown provider profile id' };
         // The stored key may stay only while it still belongs to this exact endpoint (PLAN-v4 §6c).
         if (
@@ -169,32 +169,36 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         // A new key gets a new handle. Until the profile points at it, the saved profile keeps its
         // old handle, so a key is never paired with the wrong endpoint (PLAN-v4 §6c).
         secretHandleId = request.apiKey === undefined ? existing.secretHandleId : newId();
-        if (secretHandleId !== existing.secretHandleId) previousHandle = existing.secretHandleId;
         createdAt = existing.createdAt;
       } else {
         id = newId();
         secretHandleId = newId();
         createdAt = timestamp;
       }
+      // Whether this save writes a handle the profile does not hold yet.
+      const freshHandle = secretHandleId !== existing?.secretHandleId;
 
-      // The key is written to OS-protected storage before the (secret-free) profile metadata
-      // is saved, so a crash between the two calls never leaves a profile pointing at a
-      // handle that was never actually written.
-      // The endpoint is bound to the saved key (PLAN-v4 §6c). Validation already refused any URL the
-      // policy would not allow, so the verdict is allowed here.
+      // Validation already refused any URL the policy would not allow, so the verdict is allowed here.
       const verdict = evaluateEndpoint(request.provider, request.baseUrl);
       if (!verdict.allowed) return { ok: false, error: verdict.reason };
-      const bindingDigest = endpointBindingDigest(id, verdict.origin, verdict.basePath);
 
+      // The key is written to OS-protected storage before the (secret-free) profile metadata is
+      // saved, so a crash between the two calls never leaves a profile pointing at a handle that was
+      // never actually written.
       if (request.apiKey !== undefined) {
         await deps.secretStore.set(secretHandleId, request.apiKey);
-      } else if (request.id === undefined) {
+      } else if (existing === undefined) {
         // A keyless local model stores the placeholder, so its profile still reads as present.
         if (verdict.kind !== 'loopback') {
           return { ok: false, error: 'An API key is required for this endpoint' };
         }
         await deps.secretStore.set(secretHandleId, 'not-provided');
       }
+
+      // A saved key keeps the binding it has. A key written now, or a new profile, is bound to this
+      // endpoint and to the version of the key just written (PLAN-v4 §6c). A keyless save therefore
+      // never binds a key that was never confirmed for this endpoint.
+      const rebinds = request.apiKey !== undefined || existing === undefined;
       const profile: ProviderProfile = {
         id,
         ...(request.name !== undefined ? { name: request.name } : {}),
@@ -203,28 +207,41 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         modelId: request.modelId,
         ...(request.cachedModels !== undefined ? { cachedModels: request.cachedModels } : {}),
         secretHandleId,
-        bindingDigest,
+        bindingDigest: rebinds
+          ? endpointBindingDigest(id, verdict.origin, verdict.basePath)
+          : existing?.bindingDigest,
+        bindingSecretDigest: rebinds
+          ? deps.localDatabase.secretVersion(secretHandleId)
+          : existing?.bindingSecretDigest,
         createdAt,
         updatedAt: timestamp,
       };
-      deps.localDatabase.saveProviderProfile(profile);
+      try {
+        deps.localDatabase.saveProviderProfile(profile);
+      } catch (error) {
+        // The profile still points at its old key, so the key this save wrote is removed.
+        if (freshHandle) await deps.secretStore.delete(secretHandleId).catch(() => undefined);
+        throw error;
+      }
       // The old key goes only now, after the profile points at the new one.
-      if (previousHandle !== undefined) {
-        await deps.secretStore.delete(previousHandle).catch(() => undefined);
+      if (existing !== undefined && freshHandle) {
+        await deps.secretStore.delete(existing.secretHandleId).catch(() => undefined);
       }
       // A key saved again makes the profile usable again, without waiting for a restart.
       deps.localDatabase.clearProfileCredentialUnavailable(id);
-      return { ok: true, data: listedProfile(profile) };
+      const versionOf = (handleId: string): string => deps.localDatabase.secretVersion(handleId);
+      return { ok: true, data: listedProfile(profile, isBound(profile, versionOf)) };
     },
     'desktop.provider-profile.list': (): IpcResult => {
       // Metadata only: no key, and no field that could carry one.
       const states = new Map(deps.localDatabase.listProfileStates().map((s) => [s.profileId, s]));
+      const versionOf = (handleId: string): string => deps.localDatabase.secretVersion(handleId);
       return {
         ok: true,
         data: deps.localDatabase.listProviderProfiles().map((profile) => {
           const state = states.get(profile.id);
           return {
-            ...listedProfile(profile),
+            ...listedProfile(profile, isBound(profile, versionOf)),
             state: state?.state ?? 'active',
             ...(state?.decision === undefined ? {} : { decision: state.decision }),
           };
@@ -418,10 +435,25 @@ function asProfileId(value: unknown): string | undefined {
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
 }
 
-/** The profile as the renderer sees it: the binding digest stays in the main process. */
-function listedProfile(profile: ProviderProfile): Omit<ProviderProfile, 'bindingDigest'> {
-  const { bindingDigest: _bindingDigest, ...visible } = profile;
-  return visible;
+/** A profile the renderer may connect without its key being entered again (PLAN-v4 §6c). */
+function isBound(profile: ProviderProfile, versionOf: (handleId: string) => string): boolean {
+  return (
+    profile.bindingDigest !== undefined &&
+    profile.bindingSecretDigest === versionOf(profile.secretHandleId)
+  );
+}
+
+/** The profile as the renderer sees it: the binding digests stay in the main process. */
+function listedProfile(
+  profile: ProviderProfile,
+  bound: boolean,
+): Omit<ProviderProfile, 'bindingDigest' | 'bindingSecretDigest'> & { readonly bound: boolean } {
+  const {
+    bindingDigest: _bindingDigest,
+    bindingSecretDigest: _bindingSecretDigest,
+    ...visible
+  } = profile;
+  return { ...visible, bound };
 }
 
 /** A saved profile by id, or an unsaved draft. A draft's key is used for this one call only. */

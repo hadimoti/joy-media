@@ -244,6 +244,32 @@ describe('WorkerControlPlaneClient', () => {
     } satisfies Partial<WorkerRequestTimeoutError>);
   });
 
+  it('gives an AI completion a longer deadline than a control call, so the desktop reports its own timeout', async () => {
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => 'worker-session',
+        saveWorkerSession: () => undefined,
+        clearWorkerSession: () => undefined,
+      },
+      requestTimeoutMs: 100,
+      fetch: async () => {
+        // Slower than the control deadline, and well within the AI deadline.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return response(200, { data: { text: 'a slow reply' } });
+      },
+    });
+
+    await expect(client.completeAi('job-1', 'lease-1', { messages: [] })).resolves.toBe(
+      'a slow reply',
+    );
+    await expect(client.lease()).rejects.toMatchObject({
+      name: 'WorkerRequestTimeoutError',
+      timeoutMs: 100,
+    } satisfies Partial<WorkerRequestTimeoutError>);
+  });
+
   it('rejects invalid request timeout configuration instead of allowing unbounded I/O', () => {
     expect(
       () =>

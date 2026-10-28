@@ -7,6 +7,7 @@ import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from './job-orchestrator.js';
 import {
   MAX_AI_REQUEST_BYTES,
+  MAX_AI_RESPONSE_BYTES,
   MAX_LOCAL_SOURCE_BYTES,
   startLocalJobApi,
   type LocalAiRequest,
@@ -28,6 +29,7 @@ describe('local job API', () => {
   let reportedSourceSize: number;
   let aiRequests: LocalAiRequest[];
   let aiReply: LocalAiResult;
+  let holdAi: ((request: LocalAiRequest) => Promise<void>) | undefined;
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'joy-job-api-'));
@@ -36,6 +38,7 @@ describe('local job API', () => {
     reportedSourceSize = SOURCE.length;
     aiRequests = [];
     aiReply = { ok: true, text: '{"choices":[]}' };
+    holdAi = undefined;
     api = await startLocalJobApi({
       orchestrator: createJobOrchestrator({ store: database.jobDispatch }),
       derivativeDirectory,
@@ -46,6 +49,7 @@ describe('local job API', () => {
       },
       completeAi: async (request) => {
         aiRequests.push(request);
+        await holdAi?.(request);
         return aiReply;
       },
       token: TOKEN,
@@ -387,6 +391,58 @@ describe('local job API', () => {
         409,
       );
       expect(aiRequests).toEqual([]);
+    });
+
+    it('answers 502 for a reply too large once its JSON envelope is counted', async () => {
+      await leaseForAi('prof-saved');
+      // Each backslash takes two bytes once the reply is written as JSON, so this text is under the
+      // limit on its own and over it inside the envelope.
+      aiReply = { ok: true, text: '\\'.repeat(MAX_AI_RESPONSE_BYTES / 2 + 1024) };
+      expect((await postJson(aiPath, { jobId: 'job-http', leaseToken, messages })).status).toBe(
+        502,
+      );
+    });
+
+    it('answers a reply whose envelope is within the limit', async () => {
+      await leaseForAi('prof-saved');
+      aiReply = { ok: true, text: '\\'.repeat(MAX_AI_RESPONSE_BYTES / 2 - 1024) };
+      expect((await postJson(aiPath, { jobId: 'job-http', leaseToken, messages })).status).toBe(
+        200,
+      );
+    });
+
+    it('stops the provider call when the Worker drops its connection', async () => {
+      await leaseForAi('prof-saved');
+      let providerCallEnded = false;
+      holdAi = (request) =>
+        new Promise<void>((resolve) => {
+          request.signal?.addEventListener(
+            'abort',
+            () => {
+              providerCallEnded = true;
+              resolve();
+            },
+            { once: true },
+          );
+        });
+      const dropped = new AbortController();
+      const pending = call(aiPath, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jobId: 'job-http', leaseToken, messages }),
+        signal: dropped.signal,
+      });
+      for (let attempt = 0; aiRequests.length === 0 && attempt < 200; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(aiRequests).toHaveLength(1);
+
+      dropped.abort();
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+      for (let attempt = 0; !providerCallEnded && attempt < 200; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(providerCallEnded).toBe(true);
     });
   });
 });

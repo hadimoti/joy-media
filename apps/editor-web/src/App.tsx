@@ -1130,10 +1130,11 @@ function EditorWorkspace({
     void listDesktopProviderProfiles()
       .then(async (profiles) => {
         if (cancelled || profiles.length === 0) return;
-        // Only an active profile restores: a legacy or credential-unavailable one never connects (PLAN-V4 §9a).
+        // Only an active profile whose key is confirmed restores. A legacy, unreadable or unbound one never
+        // connects (PLAN-V4 §9a, §6c).
         const usable = profiles.filter((p) => {
           const state = (p as { readonly state?: string }).state;
-          return state === undefined || state === 'active';
+          return (state === undefined || state === 'active') && p.bound !== false;
         });
         const profile = usable.find((p) => p.provider === 'openrouter') ?? usable[0];
         if (!profile) return;

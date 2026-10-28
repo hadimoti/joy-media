@@ -116,6 +116,7 @@ if (!app.requestSingleInstanceLock()) {
           .listProfileStates()
           .some((s) => s.profileId === id && s.state === 'disabled-legacy'),
       markCredentialUnavailable: (id) => localDatabase.markProfileCredentialUnavailable(id),
+      secretVersion: (handleId) => localDatabase.secretVersion(handleId),
     },
     secrets: secretStore,
     fetch: (url, init) => fetch(url, init),
