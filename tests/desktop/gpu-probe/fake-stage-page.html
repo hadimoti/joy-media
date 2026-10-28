@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Stage probe, fake page</title>
+  </head>
+  <body>
+    <script>
+      // Test-only fake for run-stage-probe.mjs --fake-stage-page. It does no WebGL, encoder or media work, so it checks the
+      // runner's control flow (one process per stage, the stop rule, the redacted summary) and not the GPU.
+      window.runProbeStage = async function runProbeStage(stage) {
+        return { stage, fake: true };
+      };
+    </script>
+  </body>
+</html>
