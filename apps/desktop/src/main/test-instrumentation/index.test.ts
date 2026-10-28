@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-// Electron is replaced, so the wiring can be checked without a runtime.
+type ProtocolClient = (protocol: string, path?: string, args?: string[]) => boolean;
+
+// Electron is replaced, so the wiring can be checked without a runtime. Before the stub, the registration reports success.
 const electron = vi.hoisted(() => ({
   app: {
-    setAsDefaultProtocolClient: (): boolean => true,
+    setAsDefaultProtocolClient: ((protocol: string): boolean =>
+      protocol.length > 0) as ProtocolClient,
     setPath: (): void => undefined,
     on: (): void => undefined,
     commandLine: { appendSwitch: (): void => undefined },
