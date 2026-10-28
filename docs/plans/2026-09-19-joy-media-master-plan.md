@@ -10,7 +10,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
   - Desktop executable installed at `%LOCALAPPDATA%\Programs\JOY Media\joy-media.exe`.
   - Local database is SQLite with WAL at `%APPDATA%\@joy-media\desktop\joy-media.sqlite3`.
   - Local media worker (`joy-worker.exe`) embeds Real-ESRGAN, DeepFilterNet, and BiRefNet.
-  - Local asset catalog at `H:\VPS-DATA\joy-media-assets` accessed via `joy-asset://` protocol.
+  - Local asset catalog at `<owner-drive>\VPS-DATA\joy-media-assets` accessed via `joy-asset://` protocol.
   - The Sweden VPS (`joyst.ir`) is reduced to a lean control plane (OTP auth, subscriptions, installer downloads, release metadata, and the Joy Model AI Gateway).
 - **Authentication**: "Gmail login" in the JOY system is **email OTP verification** (`apps/api/src/media-auth.ts`, `media-mailer.ts`), not Google OAuth. The `LoginGate.tsx` component already exists and implements Gmail/Telegram OTP input.
 - **Git & Deployment Drift**:
