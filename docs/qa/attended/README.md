@@ -19,7 +19,8 @@ session. A receipt is refused while any value it needs is still null.
 ## G1: GPU diagnosis (RTX 5070 Ti, owner PC)
 
 1. Read-only inventory: `node --experimental-strip-types tooling/diagnostics/src/gpu-inventory.ts --out <file outside the repo>`.
-   The inventory changes no setting. Its output passes the redactor before it is kept.
+   The inventory changes no setting, and it writes its output already redacted. The G1 steps, in order, are in
+   [gpu-g1.md](../../release/owner-checklists/gpu-g1.md). The session runs from the kit that `build-g1-kit.ps1` builds.
 2. Crash evidence from the default build: record the GPU process exit code, the faulting module and the fast-fail
    subcode. Diagnostics that change system state (WinDbg, a driver change, an exploit-protection override, a sandbox-off
    launch) need the owner's per-item approval, and each is reversed before the session ends.
@@ -27,11 +28,18 @@ session. A receipt is refused while any value it needs is still null.
 
 ## G2: default-path acceptance (RTX 5070 Ti, owner PC)
 
-1. Thirty default launches of the candidate, each followed by a short export. Record the GPU process exits, the fallback
-   relaunches, and the encoder session count during each export (from `nvidia-smi`).
-2. Pass means 0 GPU process exits, 0 fallback relaunches, and at least one encoder session during export, as the
-   thresholds file states.
-3. The export spec runs once on the same build. Its result goes into the receipt as a step.
+The steps are in [gpu-acceptance.md](../../release/owner-checklists/gpu-acceptance.md). The harness is
+`tooling/diagnostics/run-default-export-repeat.ps1`. It is attended, and it never runs unattended.
+
+1. Thirty default launches of the candidate, each followed by an export. GPU process exits are counted from the test side:
+   a listener in `tests/desktop/gpu-acceptance.spec.ts` records every GPU child-process exit, and Windows Error Reporting is
+   read as a cross-check. A crash that the listener did not see counts as an unexplained exit. The production build carries
+   no part of this (OA3).
+2. The encoder session count is sampled from `nvidia-smi` on every poll during each run. A non-numeric answer is a harness error,
+   never a zero. Three consecutive harness errors end the loop. App failures never do.
+3. Pass means 0 GPU process exits, 0 fallback relaunches, and at least one encoder session in every run, as the thresholds
+   file states. A run with no measurement fails its step.
+4. The export spec runs once after the thirty runs. Its result goes into the receipt as the `export-spec` step.
 
 ## A1: account and worker qualification (dedicated test account, no payment method)
 
