@@ -1,8 +1,7 @@
 # ADR-0013 — Marketplace commercial boundary
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-0043](./0043-local-only-free-no-accounts-no-signed-updates.md) (2026-10-28)
 **Date:** 2026-07-20
-**Superseded by:** [ADR-0043](./0043-local-only-free-no-accounts-no-signed-updates.md) (2026-10-28): free and local, with no payments or checkout.
 
 ## Context
 

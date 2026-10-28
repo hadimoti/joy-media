@@ -1,8 +1,7 @@
 # ADR-0017: Independent JOY Media login and allow-list
 
-Status: Accepted
+Status: Superseded by [ADR-0043](./0043-local-only-free-no-accounts-no-signed-updates.md) (2026-10-28)
 Date: 2026-07-29
-Superseded by [ADR-0043](./0043-local-only-free-no-accounts-no-signed-updates.md) (2026-10-28): no accounts and no login.
 
 ## Context
 
