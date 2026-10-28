@@ -29,10 +29,6 @@ function deps() {
   }));
   const secretStore = createMemorySecretStore();
   const probeProvider = vi.fn(async () => ({ ok: true, modelId: 'gpt-4o-mini' }));
-  const checkForUpdate = vi.fn((): { status: 'current'; reason: 'not-newer' } => ({
-    status: 'current',
-    reason: 'not-newer',
-  }));
   let idCount = 0;
   return {
     fileRegistry,
@@ -42,7 +38,6 @@ function deps() {
     probeMedia,
     secretStore,
     probeProvider,
-    checkForUpdate,
     now: () => 'T0',
     newId: () => `id-${++idCount}`,
   };
@@ -151,7 +146,7 @@ describe('IPC dispatch', () => {
     d.workerSupervisor.start();
     const handlers = createIpcHandlers(d);
     const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.worker-status',
     });
     expect(result.ok).toBe(true);
@@ -161,7 +156,7 @@ describe('IPC dispatch', () => {
   it('startup-preference fails closed on garbage input and starts nothing', async () => {
     const handlers = createIpcHandlers(deps());
     const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.startup-preference',
       payload: 'not-a-real-preference',
     });
@@ -171,7 +166,7 @@ describe('IPC dispatch', () => {
   it('job-status reports an unknown job id as an error, not a thrown exception', async () => {
     const handlers = createIpcHandlers(deps());
     const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.job-status',
       payload: { jobId: 'missing' },
     });
@@ -183,7 +178,7 @@ describe('IPC dispatch', () => {
     const handlers = createIpcHandlers(d);
     d.localDatabase.enqueueJob('export', 'ref-9');
     const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.job-status',
       payload: { jobId: 'job-1' },
     });
@@ -205,7 +200,7 @@ describe('IPC dispatch', () => {
     const handlers = createIpcHandlers(d);
     d.localDatabase.enqueueJob('export', 'ref-9');
     const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.cancel-job',
       payload: { jobId: 'job-1' },
     });
@@ -222,7 +217,7 @@ describe('IPC dispatch', () => {
     d.localDatabase.enqueueJob('export', 'ref-9');
     d.localDatabase.updateJobStatus('job-1', 'done');
     const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.cancel-job',
       payload: { jobId: 'job-1' },
     });
@@ -234,7 +229,7 @@ describe('IPC dispatch', () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
     const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.save',
       payload: {
         provider: 'openai-compatible',
@@ -251,7 +246,7 @@ describe('IPC dispatch', () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
     const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.save',
       payload: {
         provider: 'openai-compatible',
@@ -270,7 +265,7 @@ describe('IPC dispatch', () => {
   it('provider-profile.save with an unknown id is rejected rather than creating a forged profile', async () => {
     const handlers = createIpcHandlers(deps());
     const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.save',
       payload: {
         id: 'forged-id',
@@ -287,7 +282,7 @@ describe('IPC dispatch', () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
     const created = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.save',
       payload: {
         provider: 'openai-compatible',
@@ -298,7 +293,7 @@ describe('IPC dispatch', () => {
     });
     const id = (created.data as { id: string }).id;
     const updated = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.save',
       payload: {
         id,
@@ -319,7 +314,7 @@ describe('IPC dispatch', () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
     await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.save',
       payload: {
         provider: 'openrouter',
@@ -329,7 +324,7 @@ describe('IPC dispatch', () => {
       },
     });
     const list = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.list',
     });
     expect(list.ok).toBe(true);
@@ -340,7 +335,7 @@ describe('IPC dispatch', () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
     const created = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.save',
       payload: {
         provider: 'openrouter',
@@ -351,7 +346,7 @@ describe('IPC dispatch', () => {
     });
     const profile = created.data as { id: string; secretHandleId: string };
     const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.delete',
       payload: { id: profile.id },
     });
@@ -360,51 +355,11 @@ describe('IPC dispatch', () => {
     expect(await d.secretStore.get(profile.secretHandleId)).toBeNull();
   });
 
-  it('provider-profile.begin-session hands back the plaintext key once, ByokSessionConfig-shaped', async () => {
-    const d = deps();
-    const handlers = createIpcHandlers(d);
-    const created = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
-      channel: 'desktop.provider-profile.save',
-      payload: {
-        provider: 'openai-compatible',
-        baseUrl: 'https://api.example.com/v1',
-        modelId: 'gpt-4o-mini',
-        apiKey: 'sk-secret',
-      },
-    });
-    const id = (created.data as { id: string }).id;
-    const session = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
-      channel: 'desktop.provider-profile.begin-session',
-      payload: { id },
-    });
-    expect(session).toEqual({
-      ok: true,
-      data: {
-        provider: 'openai-compatible',
-        baseUrl: 'https://api.example.com/v1',
-        modelId: 'gpt-4o-mini',
-        apiKey: 'sk-secret',
-      },
-    });
-  });
-
-  it('provider-profile.begin-session fails for an unknown id', async () => {
-    const handlers = createIpcHandlers(deps());
-    const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
-      channel: 'desktop.provider-profile.begin-session',
-      payload: { id: 'missing' },
-    });
-    expect(result.ok).toBe(false);
-  });
-
   it('provider-profile.test probes with the resolved key but never returns it to the caller', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);
     const created = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.save',
       payload: {
         provider: 'openai-compatible',
@@ -415,7 +370,7 @@ describe('IPC dispatch', () => {
     });
     const id = (created.data as { id: string }).id;
     const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.test',
       payload: { id },
     });
@@ -443,7 +398,7 @@ describe('IPC dispatch', () => {
     vi.stubGlobal('fetch', mockFetch);
     try {
       const result = await dispatchIpcRequest(handlers, {
-        origin: 'https://joyst.ir',
+        origin: 'joy-media-app://renderer',
         channel: 'desktop.provider-profile.fetch-models',
         payload: {
           baseUrl: 'https://api.kilo.ai/v1',
@@ -468,39 +423,6 @@ describe('IPC dispatch', () => {
     }
   });
 
-  it('check-for-update forwards a well-shaped request to the injected policy check', async () => {
-    const d = deps();
-    const handlers = createIpcHandlers(d);
-    const manifest = {
-      payload: {
-        channel: 'stable' as const,
-        version: '1.2.0',
-        downloadUrl: 'https://joyst.ir/downloads/joy-media-1.2.0.exe',
-        sha256: 'a'.repeat(64),
-      },
-      signature: 'sig',
-    };
-    const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
-      channel: 'desktop.check-for-update',
-      payload: { manifest, subscriptionActive: true },
-    });
-    expect(result).toEqual({ ok: true, data: { status: 'current', reason: 'not-newer' } });
-    expect(d.checkForUpdate).toHaveBeenCalledWith({ manifest, subscriptionActive: true });
-  });
-
-  it('check-for-update rejects a malformed request without calling the injected policy check', async () => {
-    const d = deps();
-    const handlers = createIpcHandlers(d);
-    const result = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
-      channel: 'desktop.check-for-update',
-      payload: { manifest: { payload: {}, signature: 'sig' }, subscriptionActive: true },
-    });
-    expect(result.ok).toBe(false);
-    expect(d.checkForUpdate).not.toHaveBeenCalled();
-  });
-
   it('handles desktop window control actions', async () => {
     const handleWindowControl = vi.fn(async (action: string) => {
       if (action === 'maximize') return true;
@@ -511,28 +433,28 @@ describe('IPC dispatch', () => {
     const handlers = createIpcHandlers(d);
 
     const minRes = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.window-minimize',
     });
     expect(minRes).toEqual({ ok: true, data: undefined });
     expect(handleWindowControl).toHaveBeenCalledWith('minimize');
 
     const maxRes = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.window-maximize',
     });
     expect(maxRes).toEqual({ ok: true, data: true });
     expect(handleWindowControl).toHaveBeenCalledWith('maximize');
 
     const closeRes = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.window-close',
     });
     expect(closeRes).toEqual({ ok: true, data: undefined });
     expect(handleWindowControl).toHaveBeenCalledWith('close');
 
     const isMaxRes = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.window-is-maximized',
     });
     expect(isMaxRes).toEqual({ ok: true, data: false });
@@ -548,14 +470,14 @@ describe('IPC dispatch', () => {
     const handlers = createIpcHandlers(d);
 
     const getSettingsRes = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.asset-library.get-settings',
     });
     expect(getSettingsRes.ok).toBe(true);
     expect((getSettingsRes.data as { directory: string }).directory).toBeDefined();
 
     const setDirRes = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.asset-library.set-directory',
       payload: { directory: '/test-assets/my-assets' },
     });
@@ -563,7 +485,7 @@ describe('IPC dispatch', () => {
     expect((setDirRes.data as { directory: string }).directory).toBe('/test-assets/my-assets');
 
     const selectDirRes = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.asset-library.select-directory',
     });
     expect(selectDirRes.ok).toBe(true);
@@ -573,7 +495,7 @@ describe('IPC dispatch', () => {
     expect(showOpenDirectoryDialog).toHaveBeenCalled();
 
     const catalogRes = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.asset-library.get-catalog',
     });
     expect(catalogRes.ok).toBe(true);
@@ -627,7 +549,7 @@ describe('IPC dispatch', () => {
       const filesBeforeReselect = snapshot(previousLibrary);
 
       const initial = await dispatchIpcRequest(handlers, {
-        origin: 'https://joyst.ir',
+        origin: 'joy-media-app://renderer',
         channel: 'desktop.asset-library.get-settings',
       });
       expect(initial.ok).toBe(true);
@@ -640,7 +562,7 @@ describe('IPC dispatch', () => {
       expect(d.localDatabase.getSetting('asset_library_directory')).toBeUndefined();
 
       const selected = await dispatchIpcRequest(handlers, {
-        origin: 'https://joyst.ir',
+        origin: 'joy-media-app://renderer',
         channel: 'desktop.asset-library.select-directory',
       });
       expect(selected.ok).toBe(true);
@@ -654,7 +576,7 @@ describe('IPC dispatch', () => {
       expect(showOpenDirectoryDialog).toHaveBeenCalledTimes(1);
 
       const catalogResult = await dispatchIpcRequest(handlers, {
-        origin: 'https://joyst.ir',
+        origin: 'joy-media-app://renderer',
         channel: 'desktop.asset-library.get-catalog',
       });
       expect(catalogResult).toEqual({ ok: true, data: catalog });
@@ -672,12 +594,137 @@ describe('IPC dispatch', () => {
     d.localDatabase.setAssetLibraryDirectory('/custom/path');
 
     const resetRes = await dispatchIpcRequest(handlers, {
-      origin: 'https://joyst.ir',
+      origin: 'joy-media-app://renderer',
       channel: 'desktop.asset-library.reset-directory',
     });
     expect(resetRes.ok).toBe(true);
     const info = resetRes.data as { directory: string; isDefault: boolean };
     expect(info.directory).toBe(d.localDatabase.getDefaultAssetLibraryDirectory());
     expect(info.isDefault).toBe(true);
+  });
+});
+
+describe('legacy provider profiles (v1.1.0)', () => {
+  const renderer = 'joy-media-app://renderer';
+
+  it('list shows a legacy profile as disabled-legacy and a current one as active', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    d.localDatabase.saveProviderProfile({
+      id: 'p-kilo',
+      provider: 'kilo',
+      baseUrl: 'https://kilo.example.com/v1',
+      modelId: 'm',
+      secretHandleId: 'h-kilo',
+      createdAt: 'T0',
+      updatedAt: 'T0',
+    });
+    d.localDatabase.saveProviderProfile({
+      id: 'p-custom',
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.example.com/v1',
+      modelId: 'm',
+      secretHandleId: 'h-custom',
+      createdAt: 'T0',
+      updatedAt: 'T0',
+    });
+    d.localDatabase.markLegacyProfiles();
+    const result = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.list',
+    });
+    const states = Object.fromEntries(
+      (result.data as { id: string; state: string }[]).map((p) => [p.id, p.state]),
+    );
+    expect(states).toEqual({ 'p-kilo': 'disabled-legacy', 'p-custom': 'active' });
+  });
+
+  it('"Later" is accepted for a legacy profile and recorded in the list', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    d.localDatabase.saveProviderProfile({
+      id: 'p-kilo',
+      provider: 'kilo',
+      baseUrl: 'https://kilo.example.com/v1',
+      modelId: 'm',
+      secretHandleId: 'h-kilo',
+      createdAt: 'T0',
+      updatedAt: 'T0',
+    });
+    d.localDatabase.markLegacyProfiles();
+    const later = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.later',
+      payload: { id: 'p-kilo' },
+    });
+    expect(later.ok).toBe(true);
+    const list = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.list',
+    });
+    expect((list.data as { decision?: string }[])[0]?.decision).toBe('later');
+  });
+
+  it('"Later" is refused for a profile that is not a legacy provider', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    d.localDatabase.saveProviderProfile({
+      id: 'p-custom',
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.example.com/v1',
+      modelId: 'm',
+      secretHandleId: 'h-custom',
+      createdAt: 'T0',
+      updatedAt: 'T0',
+    });
+    const result = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.later',
+      payload: { id: 'p-custom' },
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it('test and fetch-models refuse a disabled legacy profile', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    d.localDatabase.saveProviderProfile({
+      id: 'p-kilo',
+      provider: 'kilo',
+      baseUrl: 'https://kilo.example.com/v1',
+      modelId: 'm',
+      secretHandleId: 'h-kilo',
+      createdAt: 'T0',
+      updatedAt: 'T0',
+    });
+    d.localDatabase.markLegacyProfiles();
+    const test = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.test',
+      payload: { id: 'p-kilo' },
+    });
+    const models = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.fetch-models',
+      payload: { id: 'p-kilo' },
+    });
+    expect(test.ok).toBe(false);
+    expect(models.ok).toBe(false);
+    expect(d.probeProvider).not.toHaveBeenCalled();
+  });
+
+  it('save refuses to create a new profile under a legacy provider', async () => {
+    const handlers = createIpcHandlers(deps());
+    const result = await dispatchIpcRequest(handlers, {
+      origin: renderer,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'kilo',
+        baseUrl: 'https://kilo.example.com/v1',
+        modelId: 'm',
+        apiKey: 'k',
+      },
+    });
+    expect(result.ok).toBe(false);
   });
 });

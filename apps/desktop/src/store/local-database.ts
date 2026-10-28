@@ -2,6 +2,16 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import {
+  forgetProfileState,
+  listProfileStates,
+  markCredentialUnavailable,
+  reconcileLegacyProfiles,
+  recordLaterDecision,
+  runMigrations,
+  type MigrationOptions,
+  type ProfileStateRecord,
+} from './migrations.js';
 
 export interface AssetLibraryInfo {
   readonly directory: string;
@@ -57,6 +67,8 @@ export interface LocalDatabaseOptions {
   readonly filePath: string;
   readonly now?: () => string;
   readonly idFactory?: () => string;
+  /** Test hook for the migration steps (see store/migrations.ts). */
+  readonly migration?: Pick<MigrationOptions, 'afterStepRow'>;
 }
 
 interface MediaRow {
@@ -165,6 +177,8 @@ export class LocalDatabase {
          updated_at TEXT NOT NULL
        )`,
     );
+    // Additive v1.1.0 migrations (see store/migrations.ts). Each step is transactional.
+    runMigrations(this.db, { now: this.now, ...(options.migration ?? {}) });
   }
 
   recordMedia(entry: MediaManifestEntry): void {
@@ -296,6 +310,27 @@ export class LocalDatabase {
 
   deleteProviderProfile(id: string): void {
     this.db.prepare('DELETE FROM provider_profiles WHERE id = ?').run(id);
+    forgetProfileState(this.db, id);
+  }
+
+  /** Every recorded profile state. A profile without a row is `active`. */
+  listProfileStates(): readonly ProfileStateRecord[] {
+    return listProfileStates(this.db);
+  }
+
+  /** Marks legacy profiles that have no state yet. Runs on every start; safe to repeat. */
+  markLegacyProfiles(): readonly string[] {
+    return reconcileLegacyProfiles(this.db, { now: this.now });
+  }
+
+  /** "Later" on a legacy profile: it stays disabled, and the choice survives restarts. */
+  recordProfileLater(profileId: string): void {
+    recordLaterDecision(this.db, profileId, this.now());
+  }
+
+  /** The secret store could not return this profile's key. The profile is kept, not deleted. */
+  markProfileCredentialUnavailable(profileId: string): void {
+    markCredentialUnavailable(this.db, profileId, this.now());
   }
 
   getSetting(key: string): string | undefined {

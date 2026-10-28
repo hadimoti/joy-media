@@ -1,7 +1,7 @@
+// Local-only: the packaged renderer and the dev server are the only editor origins.
+// No remote origin is trusted (PLAN-v4 §4a; ADR-0043).
 export const ALLOWED_EDITOR_ORIGINS = [
   'joy-media-app://renderer',
-  'https://joyst.ir',
-  'https://www.joyst.ir',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
 ] as const;
