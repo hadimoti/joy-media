@@ -183,6 +183,8 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         updatedAt: timestamp,
       };
       deps.localDatabase.saveProviderProfile(profile);
+      // A key saved again makes the profile usable again, without waiting for a restart.
+      deps.localDatabase.clearProfileCredentialUnavailable(id);
       return { ok: true, data: profile };
     },
     'desktop.provider-profile.list': (): IpcResult => {
@@ -392,7 +394,14 @@ export async function dispatchIpcRequest(
   if (!safeIsAllowedIpcRequest(request)) {
     return { ok: false, error: `Blocked IPC request: ${request.channel}` };
   }
-  return handlers[request.channel](request.payload);
+  try {
+    return await handlers[request.channel](request.payload);
+  } catch (error) {
+    // A thrown message can carry a file path, so the renderer gets a fixed message. The detail
+    // stays in the main process log.
+    console.error(`[joy-desktop] IPC ${request.channel} failed`, error);
+    return { ok: false, error: 'The request failed' };
+  }
 }
 
 function asOpaqueFileRef(value: unknown): OpaqueFileRef | undefined {

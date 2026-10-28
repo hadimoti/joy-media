@@ -175,14 +175,25 @@ export function recordLaterDecision(db: DatabaseSync, profileId: string, now: st
 
 /**
  * Marks a profile whose key the secret store could not return. The row is kept and the profile
- * is never deleted automatically. Only an explicit user delete removes it.
+ * is never deleted automatically. Only an explicit user delete removes it. A legacy profile keeps
+ * its disabled state, which does not depend on its key.
  */
 export function markCredentialUnavailable(db: DatabaseSync, profileId: string, now: string): void {
   db.prepare(
     `INSERT INTO profile_state (profile_id, state, decision, updated_at)
      VALUES (?, 'credential-unavailable', NULL, ?)
-     ON CONFLICT(profile_id) DO UPDATE SET state = 'credential-unavailable', updated_at = excluded.updated_at`,
+     ON CONFLICT(profile_id) DO UPDATE SET
+       state = CASE WHEN profile_state.state = 'disabled-legacy' THEN 'disabled-legacy'
+                    ELSE 'credential-unavailable' END,
+       updated_at = excluded.updated_at`,
   ).run(profileId, now);
+}
+
+/** Clears the credential mark once the key reads again, or the profile is saved again. */
+export function clearCredentialUnavailable(db: DatabaseSync, profileId: string): void {
+  db.prepare(
+    "DELETE FROM profile_state WHERE profile_id = ? AND state = 'credential-unavailable'",
+  ).run(profileId);
 }
 
 /** Removes the state row when the user explicitly deletes a profile. */

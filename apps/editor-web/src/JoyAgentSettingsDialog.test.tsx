@@ -568,7 +568,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     );
   });
 
-  it('blocks a saved custom profile before retrieving its key until acknowledged', async () => {
+  it('keeps a saved custom profile disabled until the local provider broker ships', async () => {
     const invoke = vi.fn().mockImplementation(async (channel: string) => {
       if (channel === 'desktop.provider-profile.list') {
         return [
@@ -595,8 +595,13 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
       await Promise.resolve();
     });
 
+    const useButton = buttonByText(rendered, 'Use');
+    expect(useButton.disabled).toBe(true);
+    expect(useButton.title).toBe(
+      'Saved profiles cannot connect in this build yet. Enter the key in the connection form.',
+    );
     await act(async () => {
-      buttonByText(rendered, 'Use').click();
+      useButton.click();
       await Promise.resolve();
     });
 
@@ -605,10 +610,6 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
       expect.anything(),
     );
     expect(engineClient.configure).not.toHaveBeenCalled();
-    expect(rendered.textContent).toContain(
-      'Enter the custom-provider acknowledgement before connecting.',
-    );
-    expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeNull();
   });
 
   it('does not configure a saved profile until the local provider broker ships', async () => {

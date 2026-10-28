@@ -186,12 +186,8 @@ describe('BrowserControlPlaneClient on the local desktop channels', () => {
     expect(calls).toEqual([]);
   });
 
-  it('passes a denoise request to its channel, which refuses until the store exists', async () => {
-    const { bridge, calls } = fakeBridge({
-      'desktop.media.audio.denoise': new Error(
-        'This media operation is not available in this build',
-      ),
-    });
+  it('refuses audio denoise locally with NOT_AVAILABLE_LOCALLY, without calling a channel', async () => {
+    const { bridge, calls } = fakeBridge({});
     const client = new BrowserControlPlaneClient(bridge);
     await expect(
       client.denoiseAudio({
@@ -200,8 +196,8 @@ describe('BrowserControlPlaneClient on the local desktop channels', () => {
         assetId: 'asset-d',
         media: new Blob(),
       }),
-    ).rejects.toMatchObject({ status: 500 });
-    expect(calls.map((call) => call.channel)).toEqual(['desktop.media.audio.denoise']);
+    ).rejects.toMatchObject({ status: 501, code: 'NOT_AVAILABLE_LOCALLY' });
+    expect(calls).toEqual([]);
   });
 
   it('makes no network request for any operation', async () => {

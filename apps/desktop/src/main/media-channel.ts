@@ -162,11 +162,10 @@ function asDocumentWrite(payload: unknown): ProjectDocumentWrite | undefined {
   if (typeof document !== 'object' || document === null || Array.isArray(document))
     return undefined;
   if (Buffer.byteLength(JSON.stringify(document)) > MAX_DOCUMENT_JSON_BYTES) return undefined;
-  if (
-    lookInstances !== undefined &&
-    (typeof lookInstances !== 'object' || lookInstances === null)
-  ) {
-    return undefined;
+  if (lookInstances !== undefined) {
+    if (typeof lookInstances !== 'object' || lookInstances === null) return undefined;
+    if (Buffer.byteLength(JSON.stringify(lookInstances)) > MAX_DOCUMENT_JSON_BYTES)
+      return undefined;
   }
   return {
     projectId,

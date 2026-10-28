@@ -310,6 +310,19 @@ describe('desktop.media channels', () => {
     ).toEqual({ ok: false, error: 'Invalid media request' });
   });
 
+  it('refuses a Look Instances document over the same size cap as the document', () => {
+    const { handlers } = setup();
+    expect(
+      handlers['desktop.media.project.document.put']({
+        projectId: 'proj-1',
+        baseRevisionId: '',
+        revisionId: 'rev-1',
+        document: DOCUMENT,
+        lookInstances: { blob: 'x'.repeat(32 * 1024 * 1024) },
+      }),
+    ).toEqual({ ok: false, error: 'Invalid media request' });
+  });
+
   it('registers an asset, and stores an original only when it matches the registration', async () => {
     const { db, handlers } = setup();
     const bytes = Buffer.from('original-bytes');

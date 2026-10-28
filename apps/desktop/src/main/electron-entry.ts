@@ -29,7 +29,9 @@ import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import { resolveWorkerEntry } from './worker-entry.js';
 import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
+import { registerJoyProtocol } from './protocol-registration.js';
 import type { IpcRequest } from '../ipc.js';
+import { isAllowedEditorOrigin, originOfPageUrl } from '../origin-policy.js';
 import {
   PACKAGED_RENDERER_SCHEME,
   buildSecureWebPreferences,
@@ -106,7 +108,6 @@ if (!app.requestSingleInstanceLock()) {
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
   // Marks, but never deletes, any profile whose stored key cannot be read (PLAN-v4 §9c).
-  void checkProfileCredentials(localDatabase, secretStore).catch(() => undefined);
   const ipcHandlers = createIpcHandlers({
     fileRegistry,
     workerSupervisor,
@@ -164,9 +165,16 @@ if (!app.requestSingleInstanceLock()) {
     },
   });
 
-  ipcMain.handle('joy-desktop-ipc', (_event, request: IpcRequest) =>
-    dispatchIpcRequest(ipcHandlers, request),
-  );
+  // The sender frame is what the browser reports, so it decides whether a page may call at all.
+  // The origin inside the request is the renderer's own claim, and dispatch checks it as well.
+  ipcMain.handle('joy-desktop-ipc', (event, request: IpcRequest) => {
+    const senderOrigin = originOfPageUrl(event.senderFrame?.url ?? '');
+    if (senderOrigin === undefined || !isAllowedEditorOrigin(senderOrigin)) {
+      console.error(`[joy-desktop] refused IPC from ${senderOrigin ?? 'an unreadable frame'}`);
+      return { ok: false, error: 'Blocked IPC request' };
+    }
+    return dispatchIpcRequest(ipcHandlers, request);
+  });
 
   app.on('second-instance', (_event, argv) => {
     const link = argv.find((arg) => arg.startsWith('joy://'));
@@ -189,6 +197,8 @@ if (!app.requestSingleInstanceLock()) {
     fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: '' });
 
   app.whenReady().then(async () => {
+    // Keys are read only after ready: safeStorage is not guaranteed to work before it.
+    void checkProfileCredentials(localDatabase, secretStore).catch(() => undefined);
     try {
       localJobApi = await startLocalJobApi({
         orchestrator: jobOrchestrator,
@@ -204,7 +214,7 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(null);
     // Only the installed app claims the joy:// scheme. A development run would otherwise point
     // it at the Electron binary in the source tree.
-    if (app.isPackaged) app.setAsDefaultProtocolClient('joy');
+    registerJoyProtocol(app);
 
     if (!isDev) {
       protocol.handle(PACKAGED_RENDERER_SCHEME, (request) => {

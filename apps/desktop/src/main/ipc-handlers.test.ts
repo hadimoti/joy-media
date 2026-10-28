@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIpcHandlers, dispatchIpcRequest } from './ipc-handlers.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
@@ -726,5 +726,41 @@ describe('legacy provider profiles (v1.1.0)', () => {
       },
     });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('IPC failures', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('answers a handler that throws with a fixed message and logs the detail in the main process', async () => {
+    const d = deps();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    d.localDatabase.saveProviderProfile({
+      id: 'p-custom',
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.example.com/v1',
+      modelId: 'm',
+      secretHandleId: 'h-custom',
+      createdAt: 'T0',
+      updatedAt: 'T0',
+    });
+    await d.secretStore.set('h-custom', 'sk-test');
+    d.probeProvider.mockRejectedValueOnce(new Error('EACCES: C:\\Users\\HadiMoti\\secret-path'));
+    const handlers = createIpcHandlers(d);
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.test',
+      payload: { id: 'p-custom' },
+    });
+
+    expect(result).toEqual({ ok: false, error: 'The request failed' });
+    expect(JSON.stringify(result)).not.toContain('secret-path');
+    expect(logged).toHaveBeenCalledWith(
+      '[joy-desktop] IPC desktop.provider-profile.test failed',
+      expect.any(Error),
+    );
   });
 });

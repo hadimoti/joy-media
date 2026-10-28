@@ -65,9 +65,9 @@ const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
 const generatedAssetIdsByFile = new WeakMap<File, Map<string, string>>();
 
 /**
- * Registers an original only after local integrity verification, then uploads
- * the exact bytes to private object storage. A retry resumes an interrupted
- * upload when the existing registration still matches the selected file.
+ * Registers an original only after local integrity verification, then stores
+ * the exact bytes in the local media library. A retry resumes an interrupted
+ * store when the existing registration still matches the selected file.
  */
 export async function importMediaFile(options: MediaImportOptions): Promise<BrowserAsset> {
   const client = options.client ?? new BrowserControlPlaneClient();
@@ -130,16 +130,16 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
   await client.ensureProject(options.projectId, options.projectTitle);
   const registered = await registerOrResume(client, options.projectId, registration);
 
-  report(options, 0.9, `Uploading ${file.name} to private cloud storage...`);
+  report(options, 0.9, `Storing ${file.name} in the local media library...`);
   const uploaded = await client.uploadAssetOriginal(
     options.projectId,
     registered,
     file,
     (ratio) => {
-      report(options, 0.9 + 0.1 * ratio, `Uploading ${file.name} to private cloud storage...`);
+      report(options, 0.9 + 0.1 * ratio, `Storing ${file.name} in the local media library...`);
     },
   );
-  report(options, 1, `${file.name} backed up to private cloud storage.`);
+  report(options, 1, `${file.name} stored in the local media library.`);
   if (explicitAssetId === undefined) {
     idsByProject?.delete(options.projectId);
     if (idsByProject?.size === 0) generatedAssetIdsByFile.delete(file);

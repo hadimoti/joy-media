@@ -56,12 +56,19 @@ test('a legacy profile is shown disabled, with a Later action that keeps it', as
   expect(channels).not.toContain('desktop.provider-profile.fetch-models');
 });
 
-test('the active profile stays usable beside the disabled legacy one', async ({ page }) => {
+test('a saved profile shows Use disabled until the local provider broker ships', async ({
+  page,
+}) => {
   await installDesktopBridge(page, { profiles: [LEGACY_PROFILE, ACTIVE_PROFILE] });
   await openFirstProject(page);
   const dialog = await openJoyCodeSettings(page);
 
   const activeRow = dialog.locator('[data-profile-state="active"]');
   await expect(activeRow).toHaveCount(1);
-  await expect(activeRow.getByRole('button', { name: 'Use', exact: true })).toBeEnabled();
+  const use = activeRow.getByRole('button', { name: 'Use', exact: true });
+  await expect(use).toBeDisabled();
+  await expect(use).toHaveAttribute(
+    'title',
+    'Saved profiles cannot connect in this build yet. Enter the key in the connection form.',
+  );
 });

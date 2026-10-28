@@ -6,6 +6,7 @@ import { SqliteJobDispatchStore } from '../jobs/job-dispatch.js';
 import { ensureLocalAssetSchema, SqliteLocalAssetStore } from './local-assets.js';
 import { ensureProjectDocumentSchema, SqliteProjectDocumentStore } from './project-documents.js';
 import {
+  clearCredentialUnavailable,
   forgetProfileState,
   listProfileStates,
   markCredentialUnavailable,
@@ -345,6 +346,11 @@ export class LocalDatabase {
   /** The secret store could not return this profile's key. The profile is kept, not deleted. */
   markProfileCredentialUnavailable(profileId: string): void {
     markCredentialUnavailable(this.db, profileId, this.now());
+  }
+
+  /** Clears the credential mark once the key reads again, or the profile is saved again. */
+  clearProfileCredentialUnavailable(profileId: string): void {
+    clearCredentialUnavailable(this.db, profileId);
   }
 
   getSetting(key: string): string | undefined {

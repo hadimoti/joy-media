@@ -42,13 +42,9 @@ type DesktopProviderProfileState = DesktopProviderProfile & {
   readonly decision?: 'later';
 };
 
-function editorProviderForProfile(
-  profile: Pick<DesktopProviderProfile, 'provider'>,
-): 'openrouter' | 'openai-compatible' | undefined {
-  if (profile.provider === 'openrouter') return 'openrouter';
-  if (isCustomEndpointProvider(profile.provider)) return 'openai-compatible';
-  return undefined;
-}
+/** A saved profile cannot connect until the local provider broker ships (PLAN-v4 P2). */
+const SAVED_PROFILE_CONNECT_UNAVAILABLE =
+  'Saved profiles cannot connect in this build yet. Enter the key in the connection form.';
 
 const MODES: Readonly<Record<AgentExecutionMode, string>> = {
   'suggest-only': 'Suggest only',
@@ -520,84 +516,6 @@ export function JoyAgentSettingsDialog({
     }
   };
 
-  const connectProfile = async (prof: DesktopProviderProfileState) => {
-    const resolvedProvider = editorProviderForProfile(prof);
-    if (working || prof.state === 'disabled-legacy' || resolvedProvider === undefined) return;
-    if (
-      requiresCustomEndpointConsent(prof.provider, prof.baseUrl) &&
-      !requireCustomEndpointAcknowledgement({
-        provider: 'custom',
-        baseUrl: prof.baseUrl,
-        profileId: prof.id,
-      })
-    ) {
-      setProvider(resolvedProvider);
-      setBaseUrl(prof.baseUrl);
-      setSavedProfile(prof);
-      setModelId(prof.modelId);
-      const message = 'Enter the custom-provider acknowledgement before connecting.';
-      setConnectionNotice({ kind: 'error', message });
-      onNotice?.(message, 'error');
-      return;
-    }
-    setWorking(true);
-    let key = '';
-    let configurationFailed = false;
-    try {
-      const session = (await beginDesktopProviderSession(prof.id)) as
-        { apiKey?: string; baseUrl?: string; modelId?: string; provider?: string } | undefined;
-      key = session?.apiKey || '';
-      setProvider(resolvedProvider);
-      setBaseUrl(prof.baseUrl);
-      setModelId(prof.modelId);
-      setSavedProfile(prof);
-      setHasSavedKey(Boolean(key));
-
-      assertCustomEndpointConsentHolds(prof.provider, prof.baseUrl, prof.id);
-      configurationFailed = true;
-      await engineClient.configure({
-        provider: resolvedProvider,
-        baseUrl: prof.baseUrl.replace(/\/$/, ''),
-        modelId: prof.modelId,
-        apiKey: key,
-      });
-      // configure() has already replaced the previous client, so a later
-      // testConnection() rejection must also publish a failed status.
-      const next = await engineClient.testConnection();
-      const safeStatus =
-        next.capability === 'incompatible'
-          ? { ...next, message: redactProviderError(next.message ?? 'Connection failed', key) }
-          : next;
-      setConnectionStatus(safeStatus);
-      onStatusChange?.(safeStatus);
-      const kind = next.capability === 'incompatible' ? 'error' : 'success';
-      const message =
-        next.capability === 'incompatible'
-          ? `Connection failed: ${safeStatus.message}`
-          : `Connected to ${prof.name || prof.provider}: ${prof.modelId}`;
-      setConnectionNotice({ kind, message });
-      onNotice?.(message, kind);
-    } catch (err) {
-      const message = redactProviderError(
-        err instanceof Error ? err.message : 'Failed to switch provider',
-        key,
-      );
-      if (configurationFailed) {
-        const failedStatus: ByokSessionStatus = {
-          provider: resolvedProvider,
-          modelId: prof.modelId,
-          capability: 'incompatible',
-          message,
-        };
-        setConnectionStatus(failedStatus);
-        onStatusChange?.(failedStatus);
-      }
-      setConnectionNotice({ kind: 'error', message });
-    } finally {
-      setWorking(false);
-    }
-  };
-
   const removeProfile = async (profId: string) => {
     if (!isDesktopHost()) return;
     try {
@@ -836,8 +754,8 @@ export function JoyAgentSettingsDialog({
                                   <button
                                     type="button"
                                     className="joy-btn-secondary joy-btn-sm"
-                                    onClick={() => void connectProfile(prof)}
-                                    disabled={working}
+                                    disabled
+                                    title={SAVED_PROFILE_CONNECT_UNAVAILABLE}
                                   >
                                     Use
                                   </button>

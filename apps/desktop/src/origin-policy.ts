@@ -11,3 +11,17 @@ export function isAllowedEditorOrigin(origin: string): boolean {
 export function assertAllowedEditorOrigin(origin: string): void {
   if (!isAllowedEditorOrigin(origin)) throw new Error(`Blocked editor origin: ${origin}`);
 }
+
+/**
+ * The origin a page URL is checked against. A custom scheme such as `joy-media-app:` has no WHATWG
+ * origin (its `URL.origin` is "null"), so the scheme and host are read instead. Undefined when the
+ * URL does not parse.
+ */
+export function originOfPageUrl(pageUrl: string): string | undefined {
+  try {
+    const url = new URL(pageUrl);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return undefined;
+  }
+}

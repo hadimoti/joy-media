@@ -612,7 +612,7 @@ export class BrowserControlPlaneClient {
     throw notAvailable('Speech synthesis');
   }
 
-  async denoiseAudio(input: {
+  async denoiseAudio(_input: {
     readonly projectId: string;
     readonly operationId: string;
     readonly assetId: string;
@@ -620,11 +620,7 @@ export class BrowserControlPlaneClient {
     readonly sampleRate?: number;
     readonly strength?: number;
   }): Promise<BrowserSpectralDenoiseResult> {
-    // The channel itself refuses until the denoise store exists, so the refusal names the source.
-    return call<BrowserSpectralDenoiseResult>(this.bridge, 'desktop.media.audio.denoise', {
-      refId: input.assetId,
-      payload: { operationId: input.operationId, projectId: input.projectId },
-    });
+    throw notAvailable('Audio denoise');
   }
 
   async denoiseAudioOperation(
