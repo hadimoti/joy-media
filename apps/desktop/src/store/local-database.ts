@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { SqliteJobDispatchStore } from '../jobs/job-dispatch.js';
 import {
   forgetProfileState,
   listProfileStates,
@@ -112,12 +113,15 @@ export class LocalDatabase {
   private readonly db: DatabaseSync;
   private readonly now: () => string;
   private readonly idFactory: () => string;
+  /** Dispatch and Worker presence for the local job API (jobs/job-dispatch.ts). */
+  readonly jobDispatch: SqliteJobDispatchStore;
 
   constructor(options: LocalDatabaseOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
     this.idFactory = options.idFactory ?? (() => crypto.randomUUID());
     this.db = new DatabaseSync(options.filePath);
     this.db.exec('PRAGMA journal_mode = WAL');
+    this.jobDispatch = new SqliteJobDispatchStore(this.db);
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS media_manifest (
          ref_id TEXT PRIMARY KEY,
