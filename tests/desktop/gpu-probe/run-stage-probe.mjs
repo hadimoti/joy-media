@@ -68,7 +68,7 @@ const runtimeVersionFile = join(dirname(electronBinary), 'version');
 if (!existsSync(runtimeVersionFile)) {
   throw new Error('the Electron runtime has no version file, so its version cannot be checked.');
 }
-const runtimeVersion = (await readFile(runtimeVersionFile, 'utf8')).trim();
+const runtimeVersion = (await readFile(runtimeVersionFile, 'utf8')).trim().replace(/^v/u, '');
 if (runtimeVersion !== pinnedElectron) {
   throw new Error(
     `the Electron runtime is ${runtimeVersion}; the pinned version is ${pinnedElectron}.`,
@@ -153,6 +153,9 @@ const summary = [];
 let stoppedAfter = null;
 for (const stage of stages) {
   if (stoppedAfter !== null) {
+    // A stage that did not run keeps no result or log from an earlier run in this folder.
+    await rm(join(outDir, `${stage}.json`), { force: true });
+    await rm(join(outDir, `${stage}.log`), { force: true });
     summary.push({
       stage,
       ok: null,

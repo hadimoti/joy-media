@@ -498,8 +498,11 @@ internal static class MfProbe
             }
             exit = outputBytes > 0 ? ExitEncoded : ExitFailure;
             Emit(EncodeLine(index, name, activateHr, setTypeHr, processHr, outputBytes, exit == ExitFailure ? "no-output last-event-hr=0x" + ((uint)lastEventHr).ToString("X8") : "ok"));
-            // Keep the encoder session open for the hold, then release it, so the session ends at a known time.
+            // Keep the encoder session open for the hold. ShutdownObject then ends the session, which would otherwise last until
+            // the process exits. The objects are released after that.
             if (holdMilliseconds > 0) Thread.Sleep(holdMilliseconds);
+            activate.ShutdownObject();
+            Marshal.ReleaseComObject(activate);
             Marshal.ReleaseComObject(transform);
         }
         catch (EncodeStepException failure)

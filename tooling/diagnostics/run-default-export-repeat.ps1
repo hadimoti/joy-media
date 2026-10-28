@@ -30,7 +30,7 @@ Three consecutive harness errors (not app failures) end the loop. App failures n
 Raw reports and logs go to -OutDir, which must be outside the repository.
 
 -PreflightOnly checks the paths and tools and prints the plan without starting anything.
--SelfTest checks the conversion and aggregation logic against scripted runs. It needs no app and no GPU.
+-SelfTest checks the conversion and aggregation logic against scripted runs, and runs the real spawn and poll path against a scripted spec process and a stub nvidia-smi. It needs no app and no GPU. It needs Node: -NodeDirectory when given, otherwise node on PATH.
 
 .EXAMPLE
 pwsh -NoProfile -File tooling/diagnostics/run-default-export-repeat.ps1 -InstallRoot 'D:\JOY Media' -OutDir 'D:\joy-gpu-g5' -Runs 30 -NodeDirectory 'D:\node24' -PnpmDirectory 'D:\pnpm'
@@ -296,7 +296,8 @@ function Invoke-SpecRun {
         $harnessError = $_.Exception.Message
     }
 
-    $timedOut = -not $process.HasExited
+    # Timed out means the deadline passed while the process still ran. A harness error ends the wait early, so it is not a timeout.
+    $timedOut = (-not $process.HasExited) -and ($null -eq $harnessError) -and ((Get-Date) -ge $deadline)
     if ($timedOut -or $null -ne $harnessError) { & taskkill.exe /PID $process.Id /T /F | Out-Null }
     $exitCode = $null
     if (-not $timedOut -and $null -eq $harnessError) { $exitCode = $process.ExitCode }
@@ -514,9 +515,21 @@ function Invoke-SelfTest {
     $script:fakeScenario = 'clean'
     $script:shimAnswers = @('0')
     $script:shimCalls = 0
+    # -NodeDirectory when given, otherwise node on PATH. The scripted spec process runs under it.
+    $selfTestNode = if ($NodeDirectory) { Join-Path (Resolve-Path -LiteralPath $NodeDirectory).Path 'node.exe' } else { $null }
+    if ([string]::IsNullOrEmpty($selfTestNode)) {
+        $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+        if (-not $nodeCommand) { throw 'node is not on PATH. Pass -NodeDirectory, the folder that holds node.exe, for -SelfTest too.' }
+        $selfTestNode = $nodeCommand.Source
+    }
     $script:SelfTestSpecRunner = @{
-        Exe = (Get-Command node -ErrorAction Stop).Source
+        Exe = $selfTestNode
         Arguments = { param([string]$stem) '"' + $script:fakeSpecPath + '" ' + $script:fakeScenario }
+    }
+    function Get-WerCrashCodes {
+        # The scripted Windows Error Reporting answer for the run in progress.
+        param($Start, $End)
+        return , @($script:shimWer)
     }
     function nvidia-smi {
         # The first two calls are the pre-run context and the baseline, both 0. The later calls answer the scripted values.
@@ -525,10 +538,12 @@ function Invoke-SelfTest {
         return $script:shimAnswers[[math]::Min($script:shimCalls - 3, $script:shimAnswers.Count - 1)]
     }
     $cases = @(
-        @{ name = 'clean'; answers = @('2', '2') }
-        @{ name = 'gpu-exit'; answers = @('2') }
-        @{ name = 'relaunch'; answers = @('1') }
-        @{ name = 'non-numeric'; answers = @('Not Supported') }
+        @{ name = 'clean'; answers = @('2', '2'); wer = @(); collect = $true }
+        @{ name = 'gpu-exit'; answers = @('2'); wer = @(); collect = $true }
+        @{ name = 'relaunch'; answers = @('1'); wer = @(); collect = $true }
+        @{ name = 'non-numeric'; answers = @('Not Supported'); wer = @(); collect = $true }
+        @{ name = 'wer-exit'; answers = @('2'); wer = @('0xC0000409'); collect = $true }
+        @{ name = 'export'; answers = @('0'); wer = @('0xC0000409'); collect = $false }
     )
     $e2e = @{}
     $runNumber = 0
@@ -537,7 +552,8 @@ function Invoke-SelfTest {
         $script:fakeScenario = $case.name
         $script:shimAnswers = $case.answers
         $script:shimCalls = 0
-        $e2e[$case.name] = @(Invoke-SpecRun -Run $runNumber -Spec 'selftest' -Stem ('selftest-' + $case.name) -CollectGpu $true) | Select-Object -Last 1
+        $script:shimWer = $case.wer
+        $e2e[$case.name] = @(Invoke-SpecRun -Run $runNumber -Spec 'selftest' -Stem ('selftest-' + $case.name) -CollectGpu $case.collect) | Select-Object -Last 1
     }
     $script:SelfTestSpecRunner = $null
     $clean = $e2e['clean']
@@ -555,6 +571,16 @@ function Invoke-SelfTest {
     $nonNumeric = $e2e['non-numeric']
     if (($null -eq $nonNumeric.harnessError) -or ($nonNumeric.harnessError -notlike '*not a session count*')) {
         $failures.Add("end-to-end non-numeric answer: harnessError=$($nonNumeric.harnessError)")
+    }
+
+    if ($nonNumeric.timedOut) { $failures.Add('end-to-end non-numeric answer: a harness error is not a timeout') }
+    $werExit = $e2e['wer-exit']
+    if (($werExit.gpuExitsListener -ne 0) -or ($werExit.gpuExitsTotal -ne 1)) {
+        $failures.Add("end-to-end unexplained WER exit: listener=$($werExit.gpuExitsListener) total=$($werExit.gpuExitsTotal)")
+    }
+    $exportRun = $e2e['export']
+    if (($exportRun.gpuExitsTotal -ne 1) -or ($null -ne $exportRun.harnessError)) {
+        $failures.Add("end-to-end export run WER exit: total=$($exportRun.gpuExitsTotal) harnessError=$($exportRun.harnessError)")
     }
 
     $result = [pscustomobject]@{
@@ -612,6 +638,9 @@ try { $baselineNow = Get-EncoderBaselineError -Count (Get-EncoderSessionTotal) }
 $running = @(Get-TestInstallProcesses)
 if ($running.Count -gt 0) {
     throw "The test install is already running (PIDs $($running.ProcessId -join ', ')). Close it first. This harness does not count or stop processes it did not start."
+}
+if ($Runs -ne [int]$limits.defaultLaunches) {
+    Write-Warning "-Runs is $Runs, but the registered count is $($limits.defaultLaunches). default-launches passes only at the registered count, so this run is diagnostic only."
 }
 if ($PreflightOnly) {
     if ($null -ne $baselineNow) { throw "preflight failed: $baselineNow" }
