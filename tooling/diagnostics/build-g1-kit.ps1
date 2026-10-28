@@ -62,12 +62,14 @@ try {
     finally { Pop-Location }
     $electronDist = Split-Path -Parent $electronExe
     $appFolder = Join-Path $outFull 'app'
-    Copy-Item -Path (Join-Path $electronDist '*') -Destination $appFolder -Recurse -Force
+    New-Item -ItemType Directory -Path $appFolder -Force | Out-Null
+    Get-ChildItem -LiteralPath $electronDist -Force | Copy-Item -Destination $appFolder -Recurse -Force
     Rename-Item -LiteralPath (Join-Path $appFolder 'electron.exe') -NewName 'joy-media.exe'
     Remove-Item -LiteralPath (Join-Path $appFolder 'resources\default_app.asar') -Force -ErrorAction SilentlyContinue
     $resourcesApp = Join-Path $appFolder 'resources\app'
     New-Item -ItemType Directory -Path $resourcesApp -Force | Out-Null
-    Copy-Item -Path (Join-Path $packageFolder 'joy-media-unpacked\*') -Destination $resourcesApp -Recurse -Force
+    Get-ChildItem -LiteralPath (Join-Path $packageFolder 'joy-media-unpacked') -Force |
+        Copy-Item -Destination $resourcesApp -Recurse -Force
     Remove-Item -LiteralPath $packageFolder -Recurse -Force
 
     # 3. The tools, under a tree that mirrors the repository, so each tool's "outside the repository" check is correct.
