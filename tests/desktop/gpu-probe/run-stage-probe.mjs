@@ -150,9 +150,10 @@ if (
 await mkdir(userDataRoot, { recursive: true });
 await writeFile(join(userDataRoot, userDataMarker), 'joy-media stage probe user-data\n', 'utf8');
 // Earlier results and logs in this folder move to previous/ before the run, so the handover holds this run's files. Nothing is deleted.
-const earlierFiles = probeStages
-  .flatMap((stage) => [`${stage}.json`, `${stage}.log`])
-  .filter((name) => existsSync(join(outDir, name)));
+const earlierFiles = [
+  ...probeStages.flatMap((stage) => [`${stage}.json`, `${stage}.log`]),
+  'summary.json',
+].filter((name) => existsSync(join(outDir, name)));
 if (earlierFiles.length > 0) {
   const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
   await mkdir(join(outDir, 'previous'), { recursive: true });
