@@ -460,7 +460,7 @@ function Invoke-SelfTest {
 
     Assert-Same (Get-EncoderBaselineError -Count 0) $null 'a clean encoder count starts a run'
     if ($null -eq (Get-EncoderBaselineError -Count 2)) { $failures.Add('an open encoder session refuses the run') }
-    $thirtyOne = @(1..31 | ForEach-Object {
+    $thirtyOne = @(1..([int]$limits.defaultLaunches + 1) | ForEach-Object {
             New-RunRecord -Run $_ -HarnessError $null -SpecPassed $true -TimedOut $false -ExitCode 0 -Launches 1 -FallbackArgument $false `
                 -FallbackMarkerSeen $false -GpuExitsListener 0 -WerExceptionCodes @() -EncoderMax 1 -EncoderBefore '0' -EncoderAfter '0' `
                 -LeftoversStopped 0 -Seconds 1 -ReportName 'selftest'
@@ -517,11 +517,15 @@ Write-Output "node: $nodeExe"
 Write-Output "pnpm: $((Get-Command pnpm).Source)"
 Write-Output "thresholds sha256: $thresholdsSha256"
 Write-Output "encoder sessions now: $(Get-EncoderContext)"
+# The same gate as a run, so a preflight that would fail every run says so here.
+$baselineNow = $null
+try { $baselineNow = Get-EncoderBaselineError -Count (Get-EncoderSessionTotal) } catch { $baselineNow = $_.Exception.Message }
 $running = @(Get-TestInstallProcesses)
 if ($running.Count -gt 0) {
     throw "The test install is already running (PIDs $($running.ProcessId -join ', ')). Close it first. This harness does not count or stop processes it did not start."
 }
 if ($PreflightOnly) {
+    if ($null -ne $baselineNow) { throw "preflight failed: $baselineNow" }
     Write-Output "preflight ok; nothing was started. Runs: $Runs; spec: $acceptanceSpec; then $exportSpec once."
     return
 }
