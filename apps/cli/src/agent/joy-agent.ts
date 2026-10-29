@@ -2,11 +2,14 @@
 import {
   JoyAgentEngine,
   type JoyAgentSafeEvent,
+  type JoyAgentSlotSettings,
   type JoyAgentTaskKind,
 } from '@joy-media/joy-agent-engine';
+import type { AgentSlot } from '@joy-media/provider-sdk';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { c, logInfo, logStep, logSuccess, logWarn } from '../utils/logger.js';
 import { CliJoyAgentToolBridge, type StagedOperationsSummary } from './bridge.js';
+import { loadAgentSlot } from './agent-slots.js';
 import {
   createModelFromConfig,
   resolveByokConfig,
@@ -108,10 +111,15 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     }
   };
 
+  const slotSettings =
+    options.providerOptions?.slot === undefined
+      ? undefined
+      : slotSettingsFor(loadAgentSlot(options.providerOptions.slot));
   const engine = new JoyAgentEngine({
     model,
     bridge,
     onEvent: eventLogger,
+    ...(slotSettings === undefined ? {} : { slot: slotSettings }),
   });
 
   const runId = `cli-${Date.now().toString(36)}`;
@@ -164,5 +172,16 @@ export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOut
     updatedProject,
     appliedCount,
     errors,
+  };
+}
+
+/** The part of a slot that a run applies: its instructions and its settings. */
+function slotSettingsFor(slot: AgentSlot): JoyAgentSlotSettings {
+  return {
+    ...(slot.instructions === '' ? {} : { instructions: slot.instructions }),
+    ...(slot.settings.temperature === undefined ? {} : { temperature: slot.settings.temperature }),
+    ...(slot.settings.maxOutputTokens === undefined
+      ? {}
+      : { maxOutputTokens: slot.settings.maxOutputTokens }),
   };
 }

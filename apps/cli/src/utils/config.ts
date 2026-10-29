@@ -9,11 +9,21 @@ import {
 } from './credential-store.js';
 import { createDpapiProtector, createRestrictedFileProtector } from './dpapi-protector.js';
 
+/** One agent slot as the config file keeps it. Nothing here is secret: the key stays in the credential store. */
+export interface SavedAgentSlot {
+  profileId?: string | undefined;
+  model?: string | undefined;
+  instructions?: string | undefined;
+  settings?: { temperature?: number | undefined; maxOutputTokens?: number | undefined } | undefined;
+}
+
 export interface CliConfig {
   activeProvider?: string | undefined;
   defaultModel?: string | undefined;
   customBaseUrl?: string | undefined;
   sqlitePath?: string | undefined;
+  /** The two agent slots (PLAN-v4 §6d-1). A slot that is not saved is empty. */
+  agentSlots?: Partial<Record<'workhorse' | 'creative', SavedAgentSlot>> | undefined;
 }
 
 export interface AiProviderConfig {

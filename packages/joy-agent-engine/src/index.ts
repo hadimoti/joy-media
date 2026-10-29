@@ -66,10 +66,12 @@ export {
   validateOperationDependencies,
 } from './tools.js';
 export {
+  composeAgentInstructions,
   JOY_AGENT_INSTRUCTIONS,
   JoyAgentEngine,
   probeJoyAgentModel,
   type JoyAgentEngineOptions,
   type JoyAgentProbeResult,
   type JoyAgentRunResult,
+  type JoyAgentSlotSettings,
 } from './engine.js';

@@ -1,11 +1,16 @@
 /* global console */
 import {
+  AGENT_SLOT_IDS,
+  AGENT_SLOT_LABELS,
   defaultBaseUrl,
   evaluateEndpoint,
   findRegistryProvider,
+  isAgentSlotConfigured,
   isCustomProviderId,
+  parseAgentSlotId,
 } from '@joy-media/provider-sdk';
 import type { CliFlags } from '../cli.js';
+import { clearAgentSlot, loadAgentSlot, saveAgentSlot } from '../agent/agent-slots.js';
 import { probeAgent, runJoyAgent } from '../agent/joy-agent.js';
 import { environmentKey, inferProviderType, isRetiredProvider } from '../agent/provider.js';
 import { startAgentRepl } from '../agent/repl.js';
@@ -42,6 +47,12 @@ export interface AgentCommandFlags {
   baseUrl?: string | undefined;
 }
 
+/** A number from a flag. A blank value is NaN, so the slot rules refuse it instead of reading it as zero. */
+function numberFlag(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  return value.trim() === '' ? Number.NaN : Number(value);
+}
+
 export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {
   const sub = args[0] ?? 'chat';
 
@@ -51,7 +62,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
     if (action === 'list' || action === 'ls') {
       const providers = loadAiProviders();
       const cfg = loadCliConfig();
-      const active = cfg.activeProvider ?? 'openrouter';
+      const active = cfg.activeProvider ?? 'none';
 
       console.log(`\n  ${c('Configured AI Providers:', 'bold')}\n`);
       const keys = Object.keys(providers);
@@ -205,8 +216,11 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
   }
 
   if (sub === 'models') {
-    const targetProviderName =
-      args[1] ?? flags.provider ?? loadCliConfig().activeProvider ?? 'openrouter';
+    const targetProviderName = args[1] ?? flags.provider ?? loadCliConfig().activeProvider;
+    if (targetProviderName === undefined) {
+      logError('Choose a provider first: joy-media agent provider use <name>, or pass one.');
+      return 1;
+    }
     const providers = loadAiProviders();
     const providerConfig = providers[targetProviderName];
     if (isRetiredProvider(targetProviderName)) {
@@ -327,6 +341,77 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
     return 0;
   }
 
+  if (sub === 'slot') {
+    const action = args[1] ?? 'list';
+    if (action === 'list') {
+      const providers = loadAiProviders();
+      for (const id of AGENT_SLOT_IDS) {
+        const slot = loadAgentSlot(id);
+        const saved = slot.profileId === undefined ? undefined : providers[slot.profileId];
+        const state = !isAgentSlotConfigured(slot)
+          ? 'not set'
+          : saved === undefined
+            ? 'profile missing'
+            : 'ready';
+        console.log(`  ${c(slot.label, 'cyan')} (${id}): ${state}`);
+        console.log(
+          `    Profile: ${slot.profileId ?? 'not set'}   Model: ${slot.model ?? 'not set'}`,
+        );
+        console.log(
+          `    Instructions: ${slot.instructions === '' ? 'none' : `${slot.instructions.length} characters`}`,
+        );
+        const settings = Object.entries(slot.settings)
+          .map(([name, value]) => `${name}=${String(value)}`)
+          .join(', ');
+        console.log(`    Settings: ${settings === '' ? 'defaults' : settings}`);
+      }
+      return 0;
+    }
+
+    const id = parseAgentSlotId(args[2]);
+    if (id === undefined) {
+      logError(
+        'Choose a slot: workhorse or creative. Usage: joy-media agent slot <list|set|clear> <workhorse|creative>',
+      );
+      return 1;
+    }
+    if (action === 'clear') {
+      clearAgentSlot(id);
+      logSuccess(`${AGENT_SLOT_LABELS[id]} cleared.`);
+      return 0;
+    }
+    if (action === 'set') {
+      if (flags.profile !== undefined && loadAiProviders()[flags.profile] === undefined) {
+        logError(
+          `No saved provider named "${flags.profile}". Add it first with: joy-media agent provider add ${flags.profile} --url <url>`,
+        );
+        return 1;
+      }
+      // Only the fields given change; the rest keep the slot's current values.
+      const current = loadAgentSlot(id);
+      const result = saveAgentSlot(id, {
+        profileId: flags.profile ?? current.profileId,
+        model: flags.model ?? current.model,
+        instructions: flags.instructions ?? current.instructions,
+        settings: {
+          temperature: numberFlag(flags.temperature) ?? current.settings.temperature,
+          maxOutputTokens: numberFlag(flags.maxOutputTokens) ?? current.settings.maxOutputTokens,
+        },
+      });
+      if (!result.ok) {
+        const where = result.field === undefined ? '' : ` (${result.field})`;
+        logError(`The slot was not saved: ${result.issue}${where}.`);
+        return 1;
+      }
+      logSuccess(`${result.slot.label} saved.`);
+      logStep('Profile', result.slot.profileId ?? 'not set');
+      logStep('Model', result.slot.model ?? 'not set');
+      return 0;
+    }
+    logError(`Unknown slot action "${action}". Available actions: list, set, clear`);
+    return 1;
+  }
+
   // Resolve target project
   let projectInfo;
   if (flags.project) {
@@ -360,11 +445,6 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
   if (sub === 'chat') {
     if (flags.model) {
       console.log();
-      logInfo(
-        `${c('Dual-Brain:', 'bold')} ${c('Active', 'green')}  ` +
-          `${c('Workhorse', 'cyan')}=openrouter/${c('openrouter/free', 'magenta')}  ` +
-          `${c('Creative', 'cyan')}=${c('none', 'magenta')}`,
-      );
       logStep('Override model', flags.model);
     }
     await startAgentRepl({
@@ -377,6 +457,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         model: flags.model,
         apiKey: flags.apiKey,
         baseUrl: flags.baseUrl,
+        slot: parseAgentSlotId(flags.slot),
       },
     });
     return 0;
@@ -404,6 +485,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
           model: flags.model,
           apiKey: flags.apiKey,
           baseUrl: flags.baseUrl,
+          slot: parseAgentSlotId(flags.slot),
         },
       });
 

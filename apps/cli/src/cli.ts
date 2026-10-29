@@ -44,6 +44,15 @@ export interface CliFlags {
   json: boolean;
   system: boolean;
   'media-engine': boolean;
+  /** The agent slot a run uses, `workhorse` or `creative`. */
+  slot?: string | undefined;
+  /** The saved provider profile a slot names, for `agent slot set`. */
+  profile?: string | undefined;
+  /** The instructions of a slot, for `agent slot set`. */
+  instructions?: string | undefined;
+  /** Settings of a slot, for `agent slot set`. Validated by the slot rules, not here. */
+  temperature?: string | undefined;
+  maxOutputTokens?: string | undefined;
 }
 
 export function printHelp(): void {
@@ -101,6 +110,12 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     name: typeof v.name === 'string' ? v.name : undefined,
     provider: typeof v.provider === 'string' ? v.provider : undefined,
     model: typeof v.model === 'string' ? v.model : undefined,
+    slot: typeof v.slot === 'string' ? v.slot : undefined,
+    profile: typeof v.profile === 'string' ? v.profile : undefined,
+    instructions: typeof v.instructions === 'string' ? v.instructions : undefined,
+    temperature: typeof v.temperature === 'string' ? v.temperature : undefined,
+    maxOutputTokens:
+      typeof v['max-output-tokens'] === 'string' ? v['max-output-tokens'] : undefined,
     apiKey: typeof v['api-key'] === 'string' ? v['api-key'] : undefined,
     baseUrl:
       typeof v['base-url'] === 'string'
@@ -147,6 +162,11 @@ export async function runCli(argv: string[]): Promise<number> {
         name: { type: 'string', short: 'n' },
         provider: { type: 'string' },
         model: { type: 'string', short: 'm' },
+        slot: { type: 'string' },
+        profile: { type: 'string' },
+        instructions: { type: 'string' },
+        temperature: { type: 'string' },
+        'max-output-tokens': { type: 'string' },
         'api-key': { type: 'string' },
         'base-url': { type: 'string' },
         url: { type: 'string', short: 'u' },

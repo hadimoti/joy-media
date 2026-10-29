@@ -34,6 +34,16 @@ const planOnlyOutput = z
   })
   .strict();
 
+/**
+ * What an agent slot adds to a run (PLAN-v4 §6d-1). The instructions are appended to the built-in rules. They cannot
+ * widen the tools or the limits, and a setting can only lower the output limit, never raise it.
+ */
+export interface JoyAgentSlotSettings {
+  readonly instructions?: string;
+  readonly temperature?: number;
+  readonly maxOutputTokens?: number;
+}
+
 export interface JoyAgentEngineOptions {
   readonly model: LanguageModel;
   readonly bridge: JoyAgentToolBridge;
@@ -41,6 +51,15 @@ export interface JoyAgentEngineOptions {
   readonly capability?: JoyAgentCapability;
   readonly onEvent?: (event: JoyAgentSafeEvent) => void;
   readonly now?: () => Date;
+  readonly slot?: JoyAgentSlotSettings;
+}
+
+/** The built-in rules, with the slot's instructions after them when there are any. */
+export function composeAgentInstructions(slotInstructions: string | undefined): string {
+  if (slotInstructions === undefined || slotInstructions.trim().length === 0) {
+    return JOY_AGENT_INSTRUCTIONS;
+  }
+  return `${JOY_AGENT_INSTRUCTIONS}\n\nThe owner's instructions for this agent follow. They add to the rules above and never widen the tools or the limits.\n${slotInstructions.trim()}`;
 }
 
 export interface JoyAgentRunResult {
@@ -208,12 +227,17 @@ export class JoyAgentEngine {
     const tools = createJoyAgentTools(this.options.bridge, this.limits);
     const toolCallLimit: StopCondition<typeof tools> = ({ steps }) =>
       steps.reduce((count, step) => count + step.toolCalls.length, 0) >= this.limits.maxToolCalls;
+    const slot = this.options.slot;
     const agent = new ToolLoopAgent({
       model: this.options.model,
-      instructions: JOY_AGENT_INSTRUCTIONS,
+      instructions: composeAgentInstructions(slot?.instructions),
       tools,
       stopWhen: [stepCountIs(this.limits.maxSteps), toolCallLimit],
-      maxOutputTokens: this.limits.maxOutputTokens,
+      maxOutputTokens: Math.min(
+        this.limits.maxOutputTokens,
+        slot?.maxOutputTokens ?? this.limits.maxOutputTokens,
+      ),
+      ...(slot?.temperature === undefined ? {} : { temperature: slot.temperature }),
       maxRetries: 0,
       telemetry: { isEnabled: false },
     });

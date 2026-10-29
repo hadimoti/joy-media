@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MockLanguageModelV3 } from 'ai/test';
-import { JoyAgentEngine, probeJoyAgentModel } from './engine.js';
+import { composeAgentInstructions, JoyAgentEngine, probeJoyAgentModel } from './engine.js';
 import type { JoyAgentRunRequest } from './contracts.js';
 import type { JoyAgentToolBridge } from './tools.js';
 
@@ -53,6 +53,50 @@ describe('JOY Agent bounded model loop', () => {
     });
     await expect(engine.run(request)).rejects.toThrow('JOY_AGENT_PROVIDER_INCOMPATIBLE');
     expect(events).toHaveLength(0);
+  });
+
+  it('appends the slot instructions after the built-in rules', () => {
+    expect(composeAgentInstructions(undefined)).toBe(composeAgentInstructions('  '));
+    const composed = composeAgentInstructions('Answer in one sentence.');
+    expect(composed.startsWith(composeAgentInstructions(undefined))).toBe(true);
+    expect(composed).toContain('Answer in one sentence.');
+    expect(composed).toContain('never widen the tools or the limits');
+  });
+
+  it('sends the slot instructions as a system message, and applies its settings', async () => {
+    const calls: Array<{
+      prompt: unknown;
+      temperature: number | undefined;
+      maxOutputTokens: number | undefined;
+    }> = [];
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        calls.push({
+          prompt: options.prompt,
+          temperature: options.temperature,
+          maxOutputTokens: options.maxOutputTokens,
+        });
+        return {
+          content: [{ type: 'text', text: 'Done.' }],
+          finishReason: { unified: 'stop', raw: 'stop' },
+          usage: {
+            inputTokens: { total: 2, noCache: 2, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 1, text: 1, reasoning: undefined },
+          },
+          warnings: [],
+        };
+      },
+    });
+    const engine = new JoyAgentEngine({
+      model,
+      bridge,
+      slot: { instructions: 'Answer in one sentence.', temperature: 0.2, maxOutputTokens: 500 },
+    });
+    await engine.run(request);
+
+    expect(JSON.stringify(calls[0]?.prompt)).toContain('Answer in one sentence.');
+    expect(calls[0]?.temperature).toBe(0.2);
+    expect(calls[0]?.maxOutputTokens).toBe(500);
   });
 
   it('keeps engine limits at or below approved defaults', () => {

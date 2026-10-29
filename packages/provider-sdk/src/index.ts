@@ -123,6 +123,25 @@ export {
   normalizeBaseUrl,
 } from './registry.js';
 
+// Re-export the two general-purpose agent slots (D17, PLAN-v4 §6d-1)
+export type {
+  AgentSlot,
+  AgentSlotDraft,
+  AgentSlotId,
+  AgentSlotIssue,
+  AgentSlotResult,
+  AgentSlotSettings,
+} from './agent-slots.js';
+export {
+  AGENT_SLOT_IDS,
+  AGENT_SLOT_LABELS,
+  AGENT_SLOT_LIMITS,
+  emptyAgentSlot,
+  isAgentSlotConfigured,
+  parseAgentSlotId,
+  validateAgentSlot,
+} from './agent-slots.js';
+
 // Re-export the direct-provider capability probe adapter (wave 3)
 export type {
   DirectProviderErrorCode,
