@@ -102,6 +102,8 @@ export type { ByokProvider, ProviderProfileInput, ValidationIssue } from './vali
 export { BYOK_PROVIDERS, validateProviderProfileInput } from './validation.js';
 export type {
   ProviderApi,
+  ProviderAuthMethod,
+  ProviderAuthRule,
   ProviderRegion,
   ProviderRegionId,
   RegistryProvider,
@@ -111,6 +113,7 @@ export type {
 } from './registry.js';
 export {
   CUSTOM_PROVIDER_ALIAS,
+  CUSTOM_PROVIDER_AUTH,
   CUSTOM_PROVIDER_ID,
   PROVIDER_REGISTRY,
   REGISTRY_PROVIDER_IDS,
@@ -119,10 +122,14 @@ export {
   evaluateEndpoint,
   findRegistryProvider,
   findRegistryRegion,
+  isAuthGated,
+  isAuthMethodPermitted,
   isCustomProviderId,
   isLoopbackHostname,
   isPrivateOrInternalHost,
   normalizeBaseUrl,
+  offeredAuthMethods,
+  permittedAuthMethods,
 } from './registry.js';
 
 // Re-export the two general-purpose agent slots (D17, PLAN-v4 §6d-1)

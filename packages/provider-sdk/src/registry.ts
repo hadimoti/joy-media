@@ -34,6 +34,37 @@ export function isCustomProviderId(provider: string): boolean {
 /** The wire format a provider speaks. The broker converts only Anthropic Messages. */
 export type ProviderApi = 'chat-completions' | 'anthropic-messages' | 'chatgpt-responses';
 
+/**
+ * The authentication a provider officially permits for a third-party app (PLAN-v4 §6d-1).
+ *
+ * - `api-key`: the owner brings a key from the provider's own console.
+ * - `subscription-sign-in`: the owner signs in with a paid plan. Only a provider whose §6d-1 row permits it may offer
+ *   it, and only where the provider permits it for third-party apps.
+ * - `none`: no credential at all. A local model on loopback (D8).
+ */
+export type ProviderAuthMethod = 'api-key' | 'subscription-sign-in' | 'none';
+
+/**
+ * One row of the §6d-1 table: the authentication a provider permits, with the source that says so.
+ *
+ * The facts come from the PLAN-v4 §6d-1 table (research of 2026-10-29). A row that is not confirmed is marked
+ * `unverified`, and a row that stays hidden until the owner has what it needs is marked `gated`.
+ */
+export interface ProviderAuthRule {
+  /** The authentication methods this provider permits. Never empty. */
+  readonly methods: readonly ProviderAuthMethod[];
+  /** Where the fact was read: the §6d-1 row and its basis. */
+  readonly source: string;
+  /** The date the source was read. */
+  readonly sourceDate: string;
+  /** True while the row stays hidden: the owner has not registered the app yet (PLAN-v4 §6d). */
+  readonly gated?: true;
+  /** True when the row is a research gap: the fact is not confirmed. */
+  readonly unverified?: true;
+  /** What the source says, in one line. */
+  readonly note: string;
+}
+
 export type ProviderRegionId = 'international' | 'china';
 
 export interface ProviderRegion {
@@ -53,6 +84,8 @@ export interface RegistryProvider {
   readonly regions: readonly [ProviderRegion, ...ProviderRegion[]];
   /** Offered only for sign-in, never as an API-key provider (ChatGPT, PLAN-v4 §6d). */
   readonly signInOnly?: true;
+  /** The authentication this provider permits, with its source and date (PLAN-v4 §6d-1). */
+  readonly auth: ProviderAuthRule;
 }
 
 const INTERNATIONAL = 'international';
@@ -63,6 +96,12 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     id: 'openai',
     label: 'OpenAI',
     api: 'chat-completions',
+    auth: {
+      methods: ['api-key'],
+      source: "PLAN-v4 §6d-1 table, row 'OpenAI (API platform)': the OpenAI API",
+      sourceDate: '2026-10-29',
+      note: 'An API key from the OpenAI API platform. No subscription sign-in is offered.',
+    },
     regions: [
       {
         id: INTERNATIONAL,
@@ -77,6 +116,12 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     id: 'grok',
     label: 'Grok (xAI)',
     api: 'chat-completions',
+    auth: {
+      methods: ['api-key'],
+      source: "PLAN-v4 §6d-1 table, row 'Grok (xAI)': xAI's API key guides (secondary)",
+      sourceDate: '2026-10-29',
+      note: 'An API key, sent as a Bearer token. The source in §6d-1 is secondary reporting.',
+    },
     regions: [
       {
         id: INTERNATIONAL,
@@ -91,6 +136,13 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     id: 'claude',
     label: 'Claude (Anthropic)',
     api: 'anthropic-messages',
+    auth: {
+      methods: ['api-key'],
+      source:
+        "PLAN-v4 §6d-1 table, row 'Claude (Anthropic)': Anthropic's February 2026 policy bars third-party apps from consumer-plan OAuth",
+      sourceDate: '2026-10-29',
+      note: 'An API key from the Anthropic Console. No subscription sign-in. §6d-1 notes the basis as secondary reporting.',
+    },
     regions: [
       {
         id: INTERNATIONAL,
@@ -105,6 +157,14 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     id: 'minimax',
     label: 'MiniMax',
     api: 'chat-completions',
+    auth: {
+      methods: ['api-key'],
+      source:
+        "PLAN-v4 §6d-1 table, row 'MiniMax': the MiniMax platform docs. Coding Plan keys (sk-cp-) are documented for MiniMax's own listed tools, and JOY Media is not one of them",
+      sourceDate: '2026-10-29',
+      unverified: true,
+      note: 'A pay-as-you-go API key only. UNVERIFIED: whether a Coding Plan key may be used by JOY Media. MiniMax must confirm it in writing.',
+    },
     regions: [
       {
         id: INTERNATIONAL,
@@ -126,6 +186,13 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     id: 'gemini',
     label: 'Google Gemini',
     api: 'chat-completions',
+    auth: {
+      methods: ['api-key'],
+      source: "PLAN-v4 §6d-1 table, row 'Gemini (Google)': Google's key guide",
+      sourceDate: '2026-10-29',
+      unverified: true,
+      note: 'An API key only; end-user OAuth to the public Gemini API is not confirmed. UNVERIFIED: the current key type. Google dates the retirement of standard keys to September 2026.',
+    },
     regions: [
       {
         id: INTERNATIONAL,
@@ -140,6 +207,13 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     id: 'kimi',
     label: 'Kimi (Moonshot AI)',
     api: 'chat-completions',
+    auth: {
+      methods: ['api-key'],
+      source: "PLAN-v4 §6d-1 table, row 'Kimi (Moonshot)': the registry entry",
+      sourceDate: '2026-10-29',
+      unverified: true,
+      note: 'An API key only. UNVERIFIED: the key page. §6d-1 asks for it to be checked in P4b.',
+    },
     regions: [
       {
         id: INTERNATIONAL,
@@ -161,6 +235,12 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     id: 'openrouter',
     label: 'OpenRouter',
     api: 'chat-completions',
+    auth: {
+      methods: ['api-key'],
+      source: "PLAN-v4 §6d-1 table, row 'OpenRouter': §6d",
+      sourceDate: '2026-10-29',
+      note: 'An API key (BYOK). The PKCE sign-in in §6d issues a user key, which is stored as a normal key. OpenRouter is optional and never a default.',
+    },
     regions: [
       {
         id: INTERNATIONAL,
@@ -176,6 +256,14 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     label: 'ChatGPT (Preview)',
     api: 'chatgpt-responses',
     signInOnly: true,
+    auth: {
+      methods: ['subscription-sign-in'],
+      source:
+        "PLAN-v4 §6d-1 table, row 'ChatGPT plan': the OpenAI sign-in-with-ChatGPT terms. A paid or hosted app needs OpenAI clearance",
+      sourceDate: '2026-10-29',
+      gated: true,
+      note: 'The supported OpenAI sign-in flow for a ChatGPT plan. Gated: the option stays hidden until the owner registers the app with OpenAI, and the flow refuses with NOT_CONFIGURED. §6d-3 makes that registration dynamic.',
+    },
     regions: [
       {
         id: INTERNATIONAL,
@@ -190,6 +278,44 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
 
 export function findRegistryProvider(id: string): RegistryProvider | undefined {
   return PROVIDER_REGISTRY.find((provider) => provider.id === id);
+}
+
+/**
+ * The authentication a custom OpenAI-compatible endpoint permits (PLAN-v4 §6d-1, rows 'OpenAI-compatible endpoint' and
+ * 'Local model (LM Studio)').
+ */
+export const CUSTOM_PROVIDER_AUTH: ProviderAuthRule = {
+  methods: ['api-key', 'none'],
+  source:
+    "PLAN-v4 §6d-1 table, rows 'OpenAI-compatible endpoint' and 'Local model (LM Studio)': §6c and D8",
+  sourceDate: '2026-10-29',
+  note: 'A key, or none at all for a local model on loopback (D8). A public endpoint waits for the S8 consent, which is still undecided.',
+};
+
+/** The authentication a provider permits. An unknown id permits nothing. */
+export function permittedAuthMethods(provider: string): readonly ProviderAuthMethod[] {
+  if (isCustomProviderId(provider)) return CUSTOM_PROVIDER_AUTH.methods;
+  return findRegistryProvider(provider)?.auth.methods ?? [];
+}
+
+/** True when the provider permits this authentication method. */
+export function isAuthMethodPermitted(provider: string, method: ProviderAuthMethod): boolean {
+  return permittedAuthMethods(provider).includes(method);
+}
+
+/** True while the provider's row stays hidden: the owner has not registered the app yet (PLAN-v4 §6d). */
+export function isAuthGated(provider: string): boolean {
+  if (isCustomProviderId(provider)) return false;
+  return findRegistryProvider(provider)?.auth.gated === true;
+}
+
+/**
+ * The authentication a provider offers right now: its permitted methods, unless the row is gated. A gated provider
+ * offers nothing, so the option stays hidden (PLAN-v4 §6d-1 rule 5, §6d).
+ */
+export function offeredAuthMethods(provider: string): readonly ProviderAuthMethod[] {
+  if (isAuthGated(provider)) return [];
+  return permittedAuthMethods(provider);
 }
 
 /** The base URL a registry provider uses by default: its first region. Undefined for any other id. */

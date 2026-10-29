@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CUSTOM_PROVIDER_AUTH,
   CUSTOM_PROVIDER_ID,
   PROVIDER_REGISTRY,
   REGISTRY_PROVIDER_IDS,
@@ -8,6 +9,10 @@ import {
   evaluateEndpoint,
   findRegistryProvider,
   findRegistryRegion,
+  isAuthGated,
+  isAuthMethodPermitted,
+  offeredAuthMethods,
+  permittedAuthMethods,
 } from './registry.js';
 
 describe('provider registry', () => {
@@ -56,6 +61,51 @@ describe('provider registry', () => {
     expect(endpointUrl('https://openrouter.ai/api/v1/', 'chat/completions')).toBe(
       'https://openrouter.ai/api/v1/chat/completions',
     );
+  });
+});
+
+describe('permitted authentication (PLAN-v4 §6d-1)', () => {
+  it('gives every provider a permitted authentication, with its source and a date', () => {
+    for (const provider of PROVIDER_REGISTRY) {
+      expect(provider.auth.methods.length, provider.id).toBeGreaterThan(0);
+      expect(provider.auth.source, provider.id).not.toBe('');
+      expect(provider.auth.sourceDate, provider.id).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(provider.auth.note, provider.id).not.toBe('');
+    }
+  });
+
+  it('offers a subscription sign-in only to ChatGPT, and hides it while the row is gated', () => {
+    const withSignIn = PROVIDER_REGISTRY.filter((provider) =>
+      provider.auth.methods.includes('subscription-sign-in'),
+    ).map((provider) => provider.id);
+    expect(withSignIn).toEqual(['chatgpt']);
+    expect(permittedAuthMethods('chatgpt')).toEqual(['subscription-sign-in']);
+    expect(isAuthGated('chatgpt')).toBe(true);
+    expect(offeredAuthMethods('chatgpt')).toEqual([]);
+  });
+
+  it('offers an API key to every provider except ChatGPT, which signs in', () => {
+    for (const provider of PROVIDER_REGISTRY) {
+      const expected = provider.id !== 'chatgpt';
+      expect(provider.auth.methods.includes('api-key'), provider.id).toBe(expected);
+      expect(isAuthMethodPermitted(provider.id, 'api-key'), provider.id).toBe(expected);
+    }
+  });
+
+  it('marks the rows the plan leaves unverified as unverified', () => {
+    const unverified = PROVIDER_REGISTRY.filter(
+      (provider) => provider.auth.unverified === true,
+    ).map((provider) => provider.id);
+    expect(unverified).toEqual(['minimax', 'gemini', 'kimi']);
+  });
+
+  it('permits a key or nothing for a custom endpoint, and nothing for an unknown provider', () => {
+    expect(CUSTOM_PROVIDER_AUTH.methods).toEqual(['api-key', 'none']);
+    expect(permittedAuthMethods(CUSTOM_PROVIDER_ID)).toEqual(['api-key', 'none']);
+    expect(offeredAuthMethods(CUSTOM_PROVIDER_ID)).toEqual(['api-key', 'none']);
+    expect(permittedAuthMethods('kilo')).toEqual([]);
+    expect(offeredAuthMethods('kilo')).toEqual([]);
+    expect(isAuthMethodPermitted('kilo', 'api-key')).toBe(false);
   });
 });
 
