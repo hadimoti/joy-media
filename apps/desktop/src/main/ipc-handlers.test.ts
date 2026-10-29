@@ -778,7 +778,7 @@ describe('legacy provider profiles (v1.1.0)', () => {
     });
     expect(refused).toEqual({
       ok: false,
-      error: expect.stringContaining('not available in this build'),
+      error: expect.stringContaining('explicit consent'),
     });
   });
 
@@ -1564,5 +1564,55 @@ describe('a provider request that names its agent slot (D17)', () => {
     });
     expect(mismatch).toEqual({ ok: false, error: 'The request does not match its agent slot' });
     expect(d.providerFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a public custom endpoint once the owner acknowledges it (S8)', () => {
+  const origin = 'joy-media-app://renderer';
+
+  it('saves it only with the acknowledgement, and the broker refuses a name that resolves to a private address', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const refused = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        modelId: 'm',
+        apiKey: 'sk-public',
+      },
+    });
+    expect(refused.ok).toBe(false);
+
+    const saved = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        modelId: 'm',
+        apiKey: 'sk-public',
+        acknowledgedPublicEndpoint: true,
+      },
+    });
+    expect(saved.ok).toBe(true);
+    const id = (saved.data as { id: string }).id;
+    expect(d.localDatabase.getProviderProfile(id)?.bindingDigest).toMatch(/^[0-9a-f]{64}$/);
+
+    // The test harness resolves every name to loopback, so the broker must refuse the call before any request.
+    const call = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent.request',
+      payload: {
+        profileId: id,
+        baseUrl: 'https://api.example.com/v1',
+        modelId: 'm',
+        body: { messages: [{ role: 'user', content: 'hi' }] },
+        requestId: 'public-call-1',
+      },
+    });
+    expect(call).toMatchObject({ ok: true, data: { ok: false, code: 'ENDPOINT_REFUSED' } });
+    expect(d.providerFetch).not.toHaveBeenCalled();
   });
 });

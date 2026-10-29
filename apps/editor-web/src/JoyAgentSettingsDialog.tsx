@@ -31,6 +31,7 @@ import {
   acknowledgeCustomEndpoint,
   revokeCustomEndpointAcknowledgementsForUrl,
   assertCustomEndpointConsentHolds,
+  isCustomEndpointAcknowledged,
   isCustomEndpointProvider,
   normalizeProviderBaseUrl,
   requiresCustomEndpointConsent,
@@ -495,6 +496,15 @@ export function JoyAgentSettingsDialog({
     setDiscoveryError(null);
     try {
       const models = await fetchDesktopProviderModels({
+        ...(requiresCustomEndpointConsent(provider, normalizedBaseUrl)
+          ? {
+              acknowledgedPublicEndpoint: isCustomEndpointAcknowledged({
+                provider: 'custom',
+                baseUrl: normalizedBaseUrl,
+                profileId: storedKeyProfileId,
+              }),
+            }
+          : {}),
         provider: provider === 'openai-compatible' ? 'custom' : provider,
         baseUrl: normalizedBaseUrl,
         ...(key ? { apiKey: key } : {}),
@@ -727,6 +737,16 @@ export function JoyAgentSettingsDialog({
           name: connectionName.trim() || undefined,
           baseUrl: normalizedBaseUrl,
           modelId: normalizedModelId,
+          ...(requiresCustomEndpointConsent(provider, normalizedBaseUrl)
+            ? {
+                // The owner's acknowledgement of this public custom endpoint (S8).
+                acknowledgedPublicEndpoint: isCustomEndpointAcknowledged({
+                  provider: 'custom',
+                  baseUrl: normalizedBaseUrl,
+                  profileId: matchingSavedProfile?.id,
+                }),
+              }
+            : {}),
           apiKey: key,
         });
         if (saved) {

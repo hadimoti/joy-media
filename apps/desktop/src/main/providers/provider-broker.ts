@@ -26,6 +26,7 @@ import {
 } from './adapters/anthropic-messages.js';
 import { AdapterRequestError, type ModelEntry, type PreparedCall } from './adapters/types.js';
 import { isRecord, parseCompletionBody, type CompletionBody } from './request-body.js';
+import { isPrivateOrInternalHost } from '@joy-media/provider-sdk';
 import { endpointBindingDigest } from '../../store/profile-binding.js';
 import { callFingerprint, ContinuationState, historyDigests } from './continuation-state.js';
 import { holdsCredential } from './credential-screen.js';
@@ -49,6 +50,21 @@ import {
 import { OAuthFlowError } from '../oauth/errors.js';
 
 export { endpointBindingDigest };
+
+/**
+ * Whether the saved binding confirms this public custom endpoint (S8). The binding ties the key to the profile, the origin
+ * and the base path, so a changed endpoint has no confirmation until the key is entered for it again.
+ */
+export function publicEndpointConfirmed(profile: BrokerProfile): boolean {
+  const verdict = evaluateEndpoint(profile.provider, profile.baseUrl, {
+    consentToPublicEndpoint: true,
+  });
+  return (
+    verdict.allowed &&
+    verdict.kind === 'public' &&
+    profile.bindingDigest === endpointBindingDigest(profile.id, verdict.origin, verdict.basePath)
+  );
+}
 
 /** Largest request the broker sends, and largest reply it reads (PLAN-v4 §6b). */
 /** The largest request the Worker route may send (PLAN-v4 §6b). */
@@ -122,6 +138,8 @@ export interface ProviderDraft {
   readonly provider: string;
   readonly baseUrl: string;
   readonly apiKey: string;
+  /** The owner has confirmed this public endpoint for this one call (S8). */
+  readonly acknowledgedPublicEndpoint?: boolean | undefined;
 }
 
 export type ProviderFetch = (url: string, init: RequestInit) => Promise<Response>;
@@ -301,7 +319,9 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         'This profile is a v1.0.x provider that v1.1.0 no longer offers',
       );
     }
-    const verdict = evaluateEndpoint(profile.provider, profile.baseUrl);
+    const verdict = evaluateEndpoint(profile.provider, profile.baseUrl, {
+      consentToPublicEndpoint: publicEndpointConfirmed(profile),
+    });
     if (!verdict.allowed) throw new BrokerError('ENDPOINT_REFUSED', verdict.reason);
     const expected = endpointBindingDigest(profile.id, verdict.origin, verdict.basePath);
     if (profile.bindingDigest !== expected) {
@@ -317,6 +337,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     }
     const hostname = new URL(profile.baseUrl).hostname;
     if (verdict.kind === 'loopback') await assertLoopbackHost(hostname, resolveHost);
+    if (verdict.kind === 'public') await assertPublicHost(hostname, resolveHost);
 
     let stored: string | null;
     try {
@@ -350,10 +371,13 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
   }
 
   async function resolveDraft(draft: ProviderDraft): Promise<Endpoint> {
-    const verdict = evaluateEndpoint(draft.provider, draft.baseUrl);
+    const verdict = evaluateEndpoint(draft.provider, draft.baseUrl, {
+      consentToPublicEndpoint: draft.acknowledgedPublicEndpoint === true,
+    });
     if (!verdict.allowed) throw new BrokerError('ENDPOINT_REFUSED', verdict.reason);
     const hostname = new URL(draft.baseUrl).hostname;
     if (verdict.kind === 'loopback') await assertLoopbackHost(hostname, resolveHost);
+    if (verdict.kind === 'public') await assertPublicHost(hostname, resolveHost);
     return makeEndpoint('', draft.provider, draft.baseUrl, '', usableKey(draft.apiKey));
   }
 
@@ -1053,6 +1077,17 @@ async function readBounded(response: Response, limit: number): Promise<string> {
 }
 
 /** `localhost` is trusted only when every address it resolves to is this computer (PLAN-v4 §6a). */
+/** A public endpoint name must resolve to public addresses only, so a name cannot reach a private one (S8). */
+async function assertPublicHost(
+  hostname: string,
+  resolveHost: (name: string) => Promise<readonly string[]>,
+): Promise<void> {
+  const addresses = await resolveHost(hostname);
+  if (addresses.length === 0 || addresses.some((address) => isPrivateOrInternalHost(address))) {
+    throw new BrokerError('ENDPOINT_REFUSED', 'This endpoint name resolves to a private address.');
+  }
+}
+
 async function assertLoopbackHost(
   hostname: string,
   resolveHost: (name: string) => Promise<readonly string[]>,

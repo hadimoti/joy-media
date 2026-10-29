@@ -32,6 +32,7 @@ import { evaluateEndpoint, normalizeBaseUrl } from '@joy-media/provider-sdk';
 import type { SecretStore } from '@joy-media/provider-sdk';
 import {
   endpointBindingDigest,
+  publicEndpointConfirmed,
   type ProviderBroker,
   type ProviderDraft,
 } from './providers/provider-broker.js';
@@ -231,7 +232,9 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       const freshHandle = secretHandleId !== existing?.secretHandleId;
 
       // Validation already refused any URL the policy would not allow, so the verdict is allowed here.
-      const verdict = evaluateEndpoint(request.provider, request.baseUrl);
+      const verdict = evaluateEndpoint(request.provider, request.baseUrl, {
+        consentToPublicEndpoint: request.acknowledgedPublicEndpoint === true,
+      });
       if (!verdict.allowed) return { ok: false, error: verdict.reason };
 
       // The key is written to OS-protected storage before the (secret-free) profile metadata is
@@ -570,7 +573,9 @@ function asProfileId(value: unknown): string | undefined {
 function isBound(profile: ProviderProfile, versionOf: (handleId: string) => string): boolean {
   if (profile.bindingDigest === undefined || profile.bindingSecretDigest === undefined)
     return false;
-  const verdict = evaluateEndpoint(profile.provider, profile.baseUrl);
+  const verdict = evaluateEndpoint(profile.provider, profile.baseUrl, {
+    consentToPublicEndpoint: publicEndpointConfirmed(profile),
+  });
   if (!verdict.allowed) return false;
   return (
     profile.bindingDigest === endpointBindingDigest(profile.id, verdict.origin, verdict.basePath) &&
@@ -609,7 +614,14 @@ function asModelSource(
       return undefined;
     }
     return {
-      draft: { provider: fields['provider'], baseUrl: fields['baseUrl'], apiKey: fields['apiKey'] },
+      draft: {
+        provider: fields['provider'],
+        baseUrl: fields['baseUrl'],
+        apiKey: fields['apiKey'],
+        ...(fields['acknowledgedPublicEndpoint'] === true
+          ? { acknowledgedPublicEndpoint: true }
+          : {}),
+      },
     };
   }
   const id = asProfileId(value);
@@ -779,6 +791,8 @@ interface SaveProviderProfileRequest {
   readonly cachedModels?: readonly string[];
   /** Omitted to keep the stored key. Allowed only while the endpoint is unchanged. */
   readonly apiKey?: string | undefined;
+  /** The owner has confirmed this public custom endpoint (S8). */
+  readonly acknowledgedPublicEndpoint?: boolean | undefined;
 }
 
 function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileRequest | undefined {
@@ -801,6 +815,9 @@ function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileReques
       ? {
           cachedModels: candidate['cachedModels'].filter((m): m is string => typeof m === 'string'),
         }
+      : {}),
+    ...(candidate['acknowledgedPublicEndpoint'] === true
+      ? { acknowledgedPublicEndpoint: true }
       : {}),
     ...(keyOmitted ? {} : { apiKey: apiKey as string }),
   };

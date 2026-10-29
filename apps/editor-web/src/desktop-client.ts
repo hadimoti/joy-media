@@ -97,6 +97,8 @@ export interface DesktopProviderProfile {
 }
 
 export interface SaveDesktopProviderProfileRequest {
+  /** The owner has confirmed this public custom endpoint (S8). */
+  readonly acknowledgedPublicEndpoint?: boolean | undefined;
   readonly id?: string | undefined;
   readonly name?: string | undefined;
   readonly provider: string;
@@ -120,7 +122,9 @@ export async function saveDesktopProviderProfile(
   // A new profile for a local endpoint may be saved with no key (PLAN-v4 D8). It is stored with the
   // placeholder, so the profile still reads as having a key. An existing profile is left alone.
   const keyless = request.apiKey === undefined || request.apiKey === '';
-  const verdict = evaluateEndpoint(request.provider, request.baseUrl);
+  const verdict = evaluateEndpoint(request.provider, request.baseUrl, {
+    consentToPublicEndpoint: request.acknowledgedPublicEndpoint === true,
+  });
   const local = verdict.allowed && verdict.kind === 'loopback';
   const payload =
     request.id === undefined && keyless && local ? { ...request, apiKey: 'not-provided' } : request;
@@ -167,6 +171,8 @@ export async function testDesktopProviderProfile(id: string): Promise<unknown> {
  * Discovers models available behind an API endpoint (via desktop bridge if available, or direct fetch in browser).
  */
 export async function fetchDesktopProviderModels(request: {
+  /** The owner has confirmed this public custom endpoint (S8). */
+  readonly acknowledgedPublicEndpoint?: boolean | undefined;
   id?: string | undefined;
   baseUrl?: string | undefined;
   apiKey?: string | undefined;
