@@ -1360,6 +1360,78 @@ describe('agent slots over IPC (D17)', () => {
     ]);
   });
 
+  it('lists two configured slots without exposing either profile key in slot save or list data', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const workhorseProfile = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openai/workhorse-model',
+        apiKey: 'sk-workhorse-only-test-key',
+      },
+    });
+    const creativeProfile = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openai/creative-model',
+        apiKey: 'sk-creative-only-test-key',
+      },
+    });
+    const workhorseProfileId = (workhorseProfile.data as { id: string }).id;
+    const creativeProfileId = (creativeProfile.data as { id: string }).id;
+    const workhorseSavePayload = {
+      id: 'workhorse',
+      draft: { profileId: workhorseProfileId, model: 'openai/workhorse-model' },
+    };
+    const creativeSavePayload = {
+      id: 'creative',
+      draft: { profileId: creativeProfileId, model: 'openai/creative-model' },
+    };
+
+    const workhorseSaved = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.save',
+      payload: workhorseSavePayload,
+    });
+    const creativeSaved = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.save',
+      payload: creativeSavePayload,
+    });
+    const listed = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.list',
+    });
+
+    expect(workhorseSaved.ok).toBe(true);
+    expect(creativeSaved.ok).toBe(true);
+    expect(
+      (listed.data as Array<{ id: string; profileId: string; ready: boolean }>).map((slot) => [
+        slot.id,
+        slot.profileId,
+        slot.ready,
+      ]),
+    ).toEqual([
+      ['workhorse', workhorseProfileId, true],
+      ['creative', creativeProfileId, true],
+    ]);
+    const slotPayloads = JSON.stringify([
+      workhorseSavePayload,
+      creativeSavePayload,
+      workhorseSaved,
+      creativeSaved,
+      listed,
+    ]);
+    expect(slotPayloads).not.toContain('sk-workhorse-only-test-key');
+    expect(slotPayloads).not.toContain('sk-creative-only-test-key');
+  });
+
   it('refuses a slot that names an unknown profile or a retired one, and a draft that breaks the rules', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);

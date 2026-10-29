@@ -121,6 +121,64 @@ describe('AgentSlotsSection', () => {
     expect(panel.textContent).toContain('Workhorse saved.');
   });
 
+  it('shows two empty slots on first setup and binds Workhorse to a local profile without a key', async () => {
+    const emptySlots = [slot({}), slot({ id: 'creative', label: 'Creative Brain' })];
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'desktop.agent-slots.list') return emptySlots;
+      if (channel === 'desktop.agent-slots.save') {
+        const saved = payload as { id: string; draft: { profileId?: string; model?: string } };
+        return slot({
+          id: saved.id as 'workhorse',
+          label: 'Workhorse',
+          profileId: saved.draft.profileId ?? null,
+          profileName: 'Local LM',
+          profileProvider: 'custom',
+          model: saved.draft.model ?? null,
+          ready: true,
+        });
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.agent-slots.list', 'desktop.agent-slots.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+
+    const panel = await render({ profiles: [profile], onUseSlot: vi.fn() });
+    expect(panel.querySelectorAll('.agent-slot-card')).toHaveLength(2);
+    expect(panel.querySelector('[aria-label="Workhorse profile"]')).toHaveProperty('value', '');
+    expect(panel.querySelector('[aria-label="Creative Brain profile"]')).toHaveProperty(
+      'value',
+      '',
+    );
+    expect(
+      Array.from(
+        (panel.querySelector('[aria-label="Workhorse profile"]') as HTMLSelectElement).options,
+      ).map((option) => option.value),
+    ).toEqual(['', 'profile-1']);
+
+    await act(async () => {
+      typeInto(panel.querySelector('[aria-label="Workhorse profile"]'), 'profile-1');
+      typeInto(panel.querySelector('[aria-label="Workhorse model"]'), 'llama3');
+    });
+    const save = Array.from(panel.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent === 'Save Workhorse',
+    );
+    await act(async () => {
+      save?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const saveCall = invoke.mock.calls.find(([channel]) => channel === 'desktop.agent-slots.save');
+    expect(saveCall?.[1]).toMatchObject({
+      id: 'workhorse',
+      draft: { profileId: 'profile-1', model: 'llama3' },
+    });
+    expect(JSON.stringify(invoke.mock.calls).toLowerCase()).not.toContain('openrouter');
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('sk-or-');
+    expect(panel.textContent).toContain('Workhorse saved.');
+  });
+
   it('runs the agent in a slot only once the slot is ready, and then with its profile', async () => {
     const onUseSlot = vi.fn(async () => undefined);
     window.joyDesktop = {

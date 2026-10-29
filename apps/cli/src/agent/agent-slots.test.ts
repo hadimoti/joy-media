@@ -2,10 +2,21 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  AGENT_SLOT_IDS,
+  PROVIDER_REGISTRY,
+  isAuthMethodPermitted,
+  offeredAuthMethods,
+  permittedAuthMethods,
+} from '@joy-media/provider-sdk';
 import { runCli } from '../cli.js';
 import { saveCliConfig, setAiProvider } from '../utils/config.js';
 import { clearAgentSlot, loadAgentSlot, loadAgentSlots, saveAgentSlot } from './agent-slots.js';
 import { resolveByokConfig } from './provider.js';
+
+const PROVIDER_SLOT_CASES = PROVIDER_REGISTRY.flatMap(({ id }) =>
+  AGENT_SLOT_IDS.map((slotId) => ({ providerId: id, slotId })),
+);
 
 /** Each test runs against its own home directory, so the owner's real configuration is never read or written. */
 const savedEnvironment = {
@@ -140,6 +151,62 @@ describe('agent slots in the CLI', () => {
       baseUrl: 'http://127.0.0.1:5678/v1',
       modelId: 'model-b',
     });
+  });
+
+  it.each(PROVIDER_SLOT_CASES)(
+    'resolves the $providerId registry auth policy through the $slotId slot',
+    ({ providerId, slotId }) => {
+      const provider = PROVIDER_REGISTRY.find((item) => item.id === providerId);
+      if (provider === undefined) throw new Error(`Missing registry provider: ${providerId}`);
+      const region = provider.regions[0];
+      const profileId = `profile-${providerId}`;
+      const model = `test-model-${providerId}`;
+      const apiKey = `test-key-${providerId}-${slotId}`;
+      const apiKeyPermitted = isAuthMethodPermitted(providerId, 'api-key');
+
+      expect(permittedAuthMethods(providerId)).toEqual(provider.auth.methods);
+      expect(offeredAuthMethods(providerId)).toEqual(
+        provider.auth.gated ? [] : provider.auth.methods,
+      );
+      setAiProvider(profileId, {
+        name: provider.label,
+        provider: providerId,
+        baseUrl: region.baseUrl,
+        defaultModel: model,
+        ...(apiKeyPermitted ? { apiKey } : {}),
+      });
+      expect(saveAgentSlot(slotId, { profileId, model }).ok).toBe(true);
+      expect(loadAgentSlot(slotId)).toMatchObject({ profileId, model });
+
+      if (apiKeyPermitted) {
+        expect(resolveByokConfig({ slot: slotId })).toMatchObject({
+          baseUrl: region.baseUrl,
+          modelId: model,
+          apiKey,
+        });
+      } else {
+        expect(provider.auth.methods).toContain('subscription-sign-in');
+        expect(provider.auth.gated).toBe(true);
+        expect(() => resolveByokConfig({ slot: slotId })).toThrow(
+          'ChatGPT sign-in is not available in the CLI. Use the desktop app for ChatGPT.',
+        );
+      }
+    },
+  );
+
+  it('keeps the S8 consent check on a public custom profile bound to a slot', () => {
+    setAiProvider('public-custom', {
+      name: 'Public custom',
+      provider: 'custom',
+      baseUrl: 'https://provider.example/v1',
+      defaultModel: 'public-model',
+      apiKey: 'public-custom-test-key',
+    });
+    saveAgentSlot('workhorse', { profileId: 'public-custom', model: 'public-model' });
+
+    expect(() => resolveByokConfig({ slot: 'workhorse' })).toThrow(
+      'The base URL of "public-custom" is refused: A public endpoint needs your explicit consent before any key is sent to it.',
+    );
   });
 
   it('sets, lists and clears a slot through the command line, without opening a project', async () => {

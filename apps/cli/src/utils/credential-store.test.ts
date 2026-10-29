@@ -2,6 +2,15 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { clearAgentSlot, loadAgentSlot, saveAgentSlot } from '../agent/agent-slots.js';
+import {
+  getAiProvidersPath,
+  getJoyMediaDir,
+  loadAiProviders,
+  openCredentialStore,
+  saveAiProviders,
+} from './config.js';
+import { resolveByokConfig } from '../agent/provider.js';
 import { createDpapiProtector, type SecretProtector } from './dpapi-protector.js';
 import {
   createCredentialStore,
@@ -35,14 +44,33 @@ const CUSTOM: ProviderCredential = {
 let dir = '';
 let storePath = '';
 let providersPath = '';
+const originalEnvironment = {
+  HOME: process.env.HOME,
+  USERPROFILE: process.env.USERPROFILE,
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+};
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'joy-credentials-'));
+  process.env.HOME = dir;
+  process.env.USERPROFILE = dir;
+  delete process.env.OPENROUTER_API_KEY;
+  delete process.env.OPENAI_API_KEY;
   storePath = join(dir, 'credentials.json');
   providersPath = join(dir, 'ai-providers.json');
 });
 
 afterEach(() => {
+  if (originalEnvironment.HOME === undefined) delete process.env.HOME;
+  else process.env.HOME = originalEnvironment.HOME;
+  if (originalEnvironment.USERPROFILE === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = originalEnvironment.USERPROFILE;
+  if (originalEnvironment.OPENROUTER_API_KEY === undefined)
+    delete process.env.OPENROUTER_API_KEY;
+  else process.env.OPENROUTER_API_KEY = originalEnvironment.OPENROUTER_API_KEY;
+  if (originalEnvironment.OPENAI_API_KEY === undefined) delete process.env.OPENAI_API_KEY;
+  else process.env.OPENAI_API_KEY = originalEnvironment.OPENAI_API_KEY;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -63,6 +91,61 @@ describe('credential store', () => {
     expect(store.list()).toEqual(['openrouter']);
     expect(readFileSync(storePath, 'utf8')).not.toContain(OPENROUTER.apiKey);
   });
+
+  it('keeps two profile keys separate when one of their agent bindings is cleared', () => {
+    const firstProfile = 'openrouter-profile';
+    const secondProfile = 'claude-profile';
+    saveAiProviders({
+      [firstProfile]: { name: 'OpenRouter', provider: 'openrouter', ...OPENROUTER },
+      [secondProfile]: {
+        name: 'Claude',
+        provider: 'claude',
+        ...CUSTOM,
+        baseUrl: 'https://api.anthropic.com/v1',
+        defaultModel: 'claude-test-model',
+      },
+    });
+    saveAgentSlot('workhorse', { profileId: firstProfile, model: 'openrouter-model' });
+    saveAgentSlot('creative', { profileId: secondProfile, model: 'claude-test-model' });
+
+    expect(resolveByokConfig({ slot: 'workhorse' })).toMatchObject({
+      provider: 'openrouter',
+      apiKey: OPENROUTER.apiKey,
+      modelId: 'openrouter-model',
+    });
+    expect(resolveByokConfig({ slot: 'creative' })).toMatchObject({
+      provider: 'anthropic-messages',
+      apiKey: CUSTOM.apiKey,
+      modelId: 'claude-test-model',
+    });
+
+    clearAgentSlot('workhorse');
+
+    expect(loadAgentSlot('workhorse').profileId).toBeUndefined();
+    expect(loadAgentSlot('creative')).toMatchObject({
+      profileId: secondProfile,
+      model: 'claude-test-model',
+    });
+    expect(resolveByokConfig({ slot: 'creative' })).toMatchObject({
+      provider: 'anthropic-messages',
+      apiKey: CUSTOM.apiKey,
+      modelId: 'claude-test-model',
+    });
+    const store = openCredentialStore();
+    expect(store.read(firstProfile)).toMatchObject({ apiKey: OPENROUTER.apiKey });
+    expect(store.read(secondProfile)).toMatchObject({ apiKey: CUSTOM.apiKey });
+    expect(loadAiProviders()).toMatchObject({
+      [firstProfile]: { apiKey: OPENROUTER.apiKey },
+      [secondProfile]: { apiKey: CUSTOM.apiKey },
+    });
+    expect(store.list()).toEqual([firstProfile, secondProfile]);
+    const stored = readFileSync(join(getJoyMediaDir(), 'credentials.json'), 'utf8');
+    expect(stored).not.toContain(OPENROUTER.apiKey);
+    expect(stored).not.toContain(CUSTOM.apiKey);
+    const providerMetadata = readFileSync(getAiProvidersPath(), 'utf8');
+    expect(providerMetadata).not.toContain(OPENROUTER.apiKey);
+    expect(providerMetadata).not.toContain(CUSTOM.apiKey);
+  }, 30_000);
 
   it('refuses a save whose value does not read back as the same credential', () => {
     const lying: SecretProtector = {

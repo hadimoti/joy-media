@@ -151,7 +151,9 @@ export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSes
     baseUrl,
     modelId,
     apiKey: apiKey ?? 'not-provided',
-    consentToPublicEndpoint: consented,
+    // The provider-specific allowlist above authorizes registry URLs. The engine's generic chat-completions mode
+    // validates the same URL as a custom endpoint, so carry this already-checked registry verdict through.
+    consentToPublicEndpoint: consented || verdict.kind === 'registry',
   });
 }
 
