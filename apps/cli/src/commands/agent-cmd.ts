@@ -113,11 +113,20 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         return 1;
       }
       // The endpoint is checked before anything is sent to it, the model list request included.
-      const verdict = evaluateEndpoint(type, flags.baseUrl);
+      // A public endpoint needs the owner's consent, given with --accept-public-endpoint (S8).
+      const verdict = evaluateEndpoint(type, flags.baseUrl, {
+        consentToPublicEndpoint: flags.acceptPublicEndpoint === true,
+      });
       if (!verdict.allowed) {
-        logError(`The base URL is refused: ${verdict.reason}`);
+        const hint =
+          verdict.code === 'CONSENT_REQUIRED'
+            ? ' To use a public endpoint, add --accept-public-endpoint after reading what it receives.'
+            : '';
+        logError(`The base URL is refused: ${verdict.reason}${hint}`);
         return 1;
       }
+      const endpointConsent =
+        verdict.kind === 'public' ? `${verdict.origin}${verdict.basePath}` : undefined;
 
       let cachedModels: string[] | undefined;
       // Try to discover models behind link
@@ -147,6 +156,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         name,
         provider: type,
         baseUrl: flags.baseUrl,
+        endpointConsent,
         apiKey: flags.apiKey,
         defaultModel,
         cachedModels,

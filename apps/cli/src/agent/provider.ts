@@ -47,6 +47,14 @@ export function inferProviderType(baseUrl: string): string {
   );
 }
 
+/** The origin and base path of a public endpoint, the key the owner's consent is recorded under. */
+export function consentKey(type: string, baseUrl: string): string | undefined {
+  const verdict = evaluateEndpoint(type, baseUrl, { consentToPublicEndpoint: true });
+  return verdict.allowed && verdict.kind === 'public'
+    ? `${verdict.origin}${verdict.basePath}`
+    : undefined;
+}
+
 /** The key the environment supplies for a provider, when it has one. */
 export function environmentKey(provider: string): string | undefined {
   const variable = KEY_ENVIRONMENT[provider];
@@ -101,8 +109,10 @@ export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSes
     );
   }
 
-  // 4. The endpoint policy, the same rules the desktop broker applies.
-  const verdict = evaluateEndpoint(type, baseUrl);
+  // 4. The endpoint policy, the same rules the desktop broker applies. A public endpoint needs the owner's consent.
+  const consented =
+    profile?.endpointConsent !== undefined && profile.endpointConsent === consentKey(type, baseUrl);
+  const verdict = evaluateEndpoint(type, baseUrl, { consentToPublicEndpoint: consented });
   if (!verdict.allowed) {
     throw new Error(`The base URL of "${name}" is refused: ${verdict.reason}`);
   }
@@ -128,6 +138,7 @@ export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSes
     baseUrl,
     modelId,
     apiKey: apiKey ?? 'not-provided',
+    consentToPublicEndpoint: consented,
   });
 }
 

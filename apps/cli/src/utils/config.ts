@@ -27,6 +27,8 @@ export interface CliConfig {
 }
 
 export interface AiProviderConfig {
+  /** The public endpoint the owner consented to, as origin and base path (S8). A changed endpoint needs consent again. */
+  endpointConsent?: string | undefined;
   name?: string | undefined;
   provider?: string | undefined;
   apiKey?: string | undefined;

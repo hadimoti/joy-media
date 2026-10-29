@@ -229,7 +229,7 @@ export function endpointUrl(baseUrl: string, path: string): string {
 export type EndpointVerdict =
   | {
       readonly allowed: true;
-      readonly kind: 'registry' | 'loopback';
+      readonly kind: 'registry' | 'loopback' | 'public';
       /** `scheme://host[:port]`, lower-cased by the URL parser. */
       readonly origin: string;
       /** The path of the base URL with no trailing slash, such as `/v1`. */
@@ -237,20 +237,33 @@ export type EndpointVerdict =
     }
   | {
       readonly allowed: false;
-      readonly code: 'BASE_URL_INSECURE' | 'BASE_URL_REFUSED';
+      readonly code: 'BASE_URL_INSECURE' | 'BASE_URL_REFUSED' | 'CONSENT_REQUIRED';
       readonly reason: string;
     };
 
+export interface EndpointOptions {
+  /**
+   * The owner has confirmed this public endpoint (S8, PLAN-v4 §6c). It is needed for a public custom endpoint, and it
+   * changes nothing else: a registry provider, a loopback server and a private address keep their rules.
+   */
+  readonly consentToPublicEndpoint?: boolean;
+}
+
 /**
- * The endpoint policy for every profile (PLAN-v4 §6a, §6c). It is pure: DNS checks for a
- * loopback host name happen in the broker, at connection time.
+ * The endpoint policy for every profile (PLAN-v4 §6a, §6c). It is pure: DNS checks for a loopback host name happen in
+ * the broker, at connection time.
  *
- * - A loopback profile (`127.0.0.1` or `localhost`, `http` or `https`) is allowed for a custom
- *   endpoint only, with no key required (D8). `[::1]` is refused (S4).
+ * - A loopback profile (`127.0.0.1` or `localhost`, `http` or `https`) is allowed for a custom endpoint only, with no
+ *   key required (D8). `[::1]` is refused (S4).
  * - A registry provider may use only its own region URLs, over `https` (S5 region choice).
- * - A public custom endpoint is refused until S8 is confirmed.
+ * - A public custom endpoint is allowed over `https` only with the owner's consent (S8). A private, link-local or
+ *   internal address is refused even with consent.
  */
-export function evaluateEndpoint(provider: string, baseUrl: string): EndpointVerdict {
+export function evaluateEndpoint(
+  provider: string,
+  baseUrl: string,
+  options: EndpointOptions = {},
+): EndpointVerdict {
   const url = parseUrl(baseUrl);
   if (url === undefined) {
     return refuse('BASE_URL_REFUSED', 'The base URL must be a valid absolute URL.');
@@ -277,10 +290,19 @@ export function evaluateEndpoint(provider: string, baseUrl: string): EndpointVer
     return refuse('BASE_URL_INSECURE', 'A remote endpoint must use https://.');
   }
   if (isCustomProviderId(provider)) {
-    return refuse(
-      'BASE_URL_REFUSED',
-      'Public custom endpoints are not available in this build yet.',
-    );
+    if (isPrivateOrInternalHost(url.hostname)) {
+      return refuse(
+        'BASE_URL_REFUSED',
+        'A custom endpoint may not name a private, link-local or internal address.',
+      );
+    }
+    if (options.consentToPublicEndpoint !== true) {
+      return refuse(
+        'CONSENT_REQUIRED',
+        'A public endpoint needs your explicit consent before any key is sent to it.',
+      );
+    }
+    return allowedVerdict('public', url);
   }
   if (findRegistryRegion(provider, baseUrl) === undefined) {
     return refuse('BASE_URL_REFUSED', 'The base URL is not one of the regions of this provider.');
@@ -288,7 +310,47 @@ export function evaluateEndpoint(provider: string, baseUrl: string): EndpointVer
   return allowedVerdict('registry', url);
 }
 
-function allowedVerdict(kind: 'registry' | 'loopback', url: URL): EndpointVerdict {
+/** A host that is never a public endpoint: local names, private and link-local addresses, and cloud metadata. */
+export function isPrivateOrInternalHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host === 'metadata' || host === 'metadata.google.internal') return true;
+  if (host.endsWith('.internal') || host.endsWith('.local')) return true;
+  return host.includes(':') ? isPrivateIpv6(host) : isPrivateIpv4(host);
+}
+
+function isPrivateIpv4(host: string): boolean {
+  const parts = host.split('.');
+  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return false;
+  const numbers = parts.map(Number);
+  if (numbers.some((part) => part > 255)) return false;
+  const [first = -1, second = -1] = numbers;
+  return (
+    first === 0 ||
+    first === 10 ||
+    first === 127 ||
+    (first === 100 && second >= 64 && second <= 127) ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168) ||
+    (first === 198 && (second === 18 || second === 19)) ||
+    first >= 224
+  );
+}
+
+function isPrivateIpv6(host: string): boolean {
+  if (host === '::' || host === '::1') return true;
+  if (/^f[cd]/.test(host) || /^fe[89ab]/.test(host)) return true;
+  const mapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mapped?.[1] !== undefined && mapped[2] !== undefined) {
+    const high = Number.parseInt(mapped[1], 16);
+    const low = Number.parseInt(mapped[2], 16);
+    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  }
+  return false;
+}
+
+function allowedVerdict(kind: 'registry' | 'loopback' | 'public', url: URL): EndpointVerdict {
   return {
     allowed: true,
     kind,
@@ -297,7 +359,10 @@ function allowedVerdict(kind: 'registry' | 'loopback', url: URL): EndpointVerdic
   };
 }
 
-function refuse(code: 'BASE_URL_INSECURE' | 'BASE_URL_REFUSED', reason: string): EndpointVerdict {
+function refuse(
+  code: 'BASE_URL_INSECURE' | 'BASE_URL_REFUSED' | 'CONSENT_REQUIRED',
+  reason: string,
+): EndpointVerdict {
   return { allowed: false, code, reason };
 }
 

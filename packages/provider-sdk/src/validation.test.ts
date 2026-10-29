@@ -57,13 +57,18 @@ describe('validateProviderProfileInput', () => {
     expect(issues).toEqual([{ code: 'BASE_URL_REFUSED', message: expect.any(String) }]);
   });
 
-  it('refuses a public custom endpoint until S8 is confirmed', () => {
-    const issues = validateProviderProfileInput({
+  it('refuses a public custom endpoint until the owner acknowledges it (S8)', () => {
+    const input = {
       provider: 'openai-compatible',
       baseUrl: 'https://api.example.com/v1',
       modelId: 'gpt-4o-mini',
-    });
-    expect(issues).toEqual([{ code: 'BASE_URL_REFUSED', message: expect.any(String) }]);
+    };
+    expect(validateProviderProfileInput(input)).toEqual([
+      { code: 'CONSENT_REQUIRED', message: expect.any(String) },
+    ]);
+    expect(validateProviderProfileInput({ ...input, acknowledgedPublicEndpoint: true })).toEqual(
+      [],
+    );
   });
 
   it('refuses a loopback address for a registry provider', () => {

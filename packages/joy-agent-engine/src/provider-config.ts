@@ -29,7 +29,7 @@ const MAX_MODEL_ID_LENGTH = 256;
 const MAX_API_KEY_LENGTH = 512;
 
 export function normalizeByokSessionConfig(
-  input: Readonly<Partial<ByokSessionConfig>>,
+  input: Readonly<Partial<ByokSessionConfig> & { readonly consentToPublicEndpoint?: boolean }>,
 ): ByokSessionConfig {
   const provider = input.provider;
   const modelId = typeof input.modelId === 'string' ? input.modelId.trim() : '';
@@ -56,7 +56,9 @@ export function normalizeByokSessionConfig(
     return Object.freeze({ provider, baseUrl: OPENROUTER_BASE_URL, modelId, apiKey });
   }
 
-  const baseUrl = normalizeCustomBaseUrl(input.baseUrl);
+  const baseUrl = normalizeCustomBaseUrl(input.baseUrl, {
+    consentToPublicEndpoint: input.consentToPublicEndpoint === true,
+  });
   return Object.freeze({ provider, baseUrl, modelId, apiKey });
 }
 
@@ -69,14 +71,19 @@ export function safeByokSessionStatus(
 
 /**
  * The base URL of a user-configured endpoint. The rule is the registry's endpoint policy (`evaluateEndpoint`), which
- * the desktop broker applies too: a loopback server is allowed, and a public endpoint is refused until S8 is
- * confirmed. A base URL that already names the completion path is refused as well.
+ * the desktop broker applies too: a loopback server is allowed, and a public endpoint is allowed only with the owner's
+ * consent (S8). A base URL that already names the completion path is refused as well.
  */
-export function normalizeCustomBaseUrl(value: unknown): string {
+export function normalizeCustomBaseUrl(
+  value: unknown,
+  options: { readonly consentToPublicEndpoint?: boolean } = {},
+): string {
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > 2048) {
     throw new ProviderConfigError();
   }
-  const verdict = evaluateEndpoint('custom', value.trim());
+  const verdict = evaluateEndpoint('custom', value.trim(), {
+    consentToPublicEndpoint: options.consentToPublicEndpoint === true,
+  });
   if (!verdict.allowed || verdict.basePath.toLowerCase().endsWith('/chat/completions')) {
     throw new ProviderConfigError();
   }

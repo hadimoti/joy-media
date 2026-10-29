@@ -320,6 +320,31 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(loadAiProviders()['public-test']).toBeUndefined();
     });
 
+    it('saves a public custom endpoint only with the owner consent (S8)', async () => {
+      const args = [
+        'agent',
+        'provider',
+        'add',
+        'consented-test',
+        '--url',
+        'https://consent.example.test/v1',
+        '--api-key',
+        'consented-test-key-999',
+        '--model',
+        'consented/model',
+      ];
+      expect(await runCli(args)).toBe(1);
+      expect(await runCli([...args, '--accept-public-endpoint'])).toBe(0);
+      expect(
+        resolveByokConfig({ provider: 'consented-test', model: 'consented/model' }),
+      ).toMatchObject({
+        provider: 'custom',
+        baseUrl: 'https://consent.example.test/v1',
+        modelId: 'consented/model',
+      });
+      expect(await runCli(['agent', 'provider', 'remove', 'consented-test'])).toBe(0);
+    });
+
     it('refuses the retired Kilo profile instead of routing requests to it', () => {
       expect(() => resolveByokConfig({ provider: 'kilo' })).toThrow('retired from JOY Media');
     });

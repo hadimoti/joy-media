@@ -72,3 +72,26 @@ describe('BYOK provider configuration', () => {
     ).toThrow();
   });
 });
+
+describe('a public custom endpoint in the engine (S8)', () => {
+  it('accepts a public https endpoint only with the owner consent', () => {
+    expect(
+      normalizeCustomBaseUrl('https://provider.example/v1/', { consentToPublicEndpoint: true }),
+    ).toBe('https://provider.example/v1');
+    expect(
+      normalizeByokSessionConfig({
+        provider: 'custom',
+        baseUrl: 'https://provider.example/v1',
+        modelId: 'model',
+        apiKey: key,
+        consentToPublicEndpoint: true,
+      }).baseUrl,
+    ).toBe('https://provider.example/v1');
+  });
+
+  it('refuses a private address even with the owner consent', () => {
+    expect(() =>
+      normalizeCustomBaseUrl('https://192.168.1.1/v1', { consentToPublicEndpoint: true }),
+    ).toThrow('JOY_AGENT_PROVIDER_CONFIG_INVALID');
+  });
+});

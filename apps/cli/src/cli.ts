@@ -50,6 +50,8 @@ export interface CliFlags {
   profile?: string | undefined;
   /** The instructions of a slot, for `agent slot set`. */
   instructions?: string | undefined;
+  /** The owner's consent to a public custom endpoint (S8), for `agent provider add`. */
+  acceptPublicEndpoint?: boolean | undefined;
   /** Settings of a slot, for `agent slot set`. Validated by the slot rules, not here. */
   temperature?: string | undefined;
   maxOutputTokens?: string | undefined;
@@ -111,6 +113,7 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     provider: typeof v.provider === 'string' ? v.provider : undefined,
     model: typeof v.model === 'string' ? v.model : undefined,
     slot: typeof v.slot === 'string' ? v.slot : undefined,
+    acceptPublicEndpoint: Boolean(v['accept-public-endpoint']),
     profile: typeof v.profile === 'string' ? v.profile : undefined,
     instructions: typeof v.instructions === 'string' ? v.instructions : undefined,
     temperature: typeof v.temperature === 'string' ? v.temperature : undefined,
@@ -163,6 +166,7 @@ export async function runCli(argv: string[]): Promise<number> {
         provider: { type: 'string' },
         model: { type: 'string', short: 'm' },
         slot: { type: 'string' },
+        'accept-public-endpoint': { type: 'boolean', default: false },
         profile: { type: 'string' },
         instructions: { type: 'string' },
         temperature: { type: 'string' },

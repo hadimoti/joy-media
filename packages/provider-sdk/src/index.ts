@@ -106,6 +106,7 @@ export type {
   ProviderRegionId,
   RegistryProvider,
   RegistryProviderId,
+  EndpointOptions,
   EndpointVerdict,
 } from './registry.js';
 export {
@@ -120,6 +121,7 @@ export {
   findRegistryRegion,
   isCustomProviderId,
   isLoopbackHostname,
+  isPrivateOrInternalHost,
   normalizeBaseUrl,
 } from './registry.js';
 

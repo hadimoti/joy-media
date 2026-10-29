@@ -22,6 +22,8 @@ export interface ProviderProfileInput {
   readonly provider: string;
   readonly baseUrl: string;
   readonly modelId: string;
+  /** The owner has confirmed this public endpoint (S8). Without it, a public custom endpoint is refused. */
+  readonly acknowledgedPublicEndpoint?: boolean | undefined;
 }
 
 export interface ValidationIssue {
@@ -52,7 +54,9 @@ export function validateProviderProfileInput(
   if (!isAbsoluteUrl(input.baseUrl)) {
     issues.push({ code: 'BASE_URL_INVALID', message: 'baseUrl must be a valid absolute URL' });
   } else {
-    const verdict = evaluateEndpoint(input.provider, input.baseUrl);
+    const verdict = evaluateEndpoint(input.provider, input.baseUrl, {
+      consentToPublicEndpoint: input.acknowledgedPublicEndpoint === true,
+    });
     if (!verdict.allowed) issues.push({ code: verdict.code, message: verdict.reason });
   }
 
