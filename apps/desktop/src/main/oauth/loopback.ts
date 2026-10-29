@@ -21,6 +21,11 @@ export interface LoopbackCallback {
   readonly redirectUri: string;
   /** Resolves with the authorization code. Rejects with an OAuthFlowError when the flow ends another way. */
   readonly code: Promise<string>;
+  /**
+   * Resolves with the client ID the callback named, when it named one (ChatGPT first-time registration).
+   * Undefined when it named none, and when the flow ends without a code.
+   */
+  readonly clientId: Promise<string | undefined>;
   /** Stops listening. A flow still waiting is cancelled. Safe to call more than once. */
   close(): void;
 }
@@ -48,6 +53,12 @@ export async function startLoopbackCallback(
   });
   // A caller that closes the flow early never awaits `code`. This keeps that from being reported as unhandled.
   code.catch(() => undefined);
+  let resolveClientId: (clientId: string | undefined) => void = () => undefined;
+  const clientId = new Promise<string | undefined>((resolve) => {
+    resolveClientId = resolve;
+  });
+  // The client ID the callback named, kept until the flow settles.
+  let issuedClientId: string | undefined;
 
   let finished = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -69,8 +80,13 @@ export async function startLoopbackCallback(
     timer = undefined;
     if (server.listening) server.close();
     server.closeAllConnections();
-    if (typeof outcome === 'string') resolveCode(outcome);
-    else rejectCode(outcome);
+    if (typeof outcome === 'string') {
+      resolveCode(outcome);
+      resolveClientId(issuedClientId);
+    } else {
+      rejectCode(outcome);
+      resolveClientId(undefined);
+    }
   };
 
   const answer = (request: IncomingMessage, response: ServerResponse): void => {
@@ -87,6 +103,7 @@ export async function startLoopbackCallback(
       return;
     }
     finished = true;
+    issuedClientId = clientIdOf(url);
     const outcome = outcomeOf(url, options.expectedState);
     const succeeded = typeof outcome === 'string';
     response.statusCode = succeeded ? 200 : 400;
@@ -127,6 +144,7 @@ export async function startLoopbackCallback(
   return {
     redirectUri: `http://${LOOPBACK_HOST}:${address.port}${options.path}`,
     code,
+    clientId,
     close,
   };
 }
@@ -151,4 +169,10 @@ function outcomeOf(url: URL, expectedState: string): string | OAuthFlowError {
     return new OAuthFlowError('CALLBACK_INVALID', 'The sign-in returned no code.');
   }
   return code;
+}
+
+/** The client ID a callback names: short, and only letters, digits, dots, dashes and underscores. */
+function clientIdOf(url: URL): string | undefined {
+  const value = url.searchParams.get('client_id');
+  return value !== null && /^[A-Za-z0-9._-]{1,256}$/.test(value) ? value : undefined;
 }

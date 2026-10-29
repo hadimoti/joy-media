@@ -3,6 +3,7 @@ import {
   CHATGPT_AUTHORIZE_URL,
   CHATGPT_ISSUER,
   CHATGPT_JWKS_URL,
+  CHATGPT_RESPONSES_BASE_URL,
   CHATGPT_TOKEN_URL,
 } from '@joy-media/provider-sdk';
 import { isRecord } from '../providers/request-body.js';
@@ -20,8 +21,15 @@ export { CHATGPT_AUTHORIZE_URL, CHATGPT_ISSUER, CHATGPT_JWKS_URL, CHATGPT_TOKEN_
  * attended sign-in is what confirms it.
  */
 export const CHATGPT_REQUIRED_SCOPE = 'chatgpt.tokens.use.direct';
-export const CHATGPT_SCOPE = `openid profile email offline_access ${CHATGPT_REQUIRED_SCOPE}`;
-/** UNVERIFIED: the fixed loopback port and path. Only the owner's attended sign-in can confirm them. */
+/** The scopes of a sign-in as the official flow names them: identity, then plan usage. */
+export const CHATGPT_SCOPE = `openid profile email offline_access resource.invoke ${CHATGPT_REQUIRED_SCOPE}`;
+/** The Responses API a granted token calls. It is sent as `resource` on every authorization, token and refresh request. */
+export const CHATGPT_RESOURCE = CHATGPT_RESPONSES_BASE_URL;
+/** The client a first-time sign-in names. ChatGPT issues the client itself, on the callback (SIWC dynamic registration). */
+export const CHATGPT_DYNAMIC_CLIENT_ID = 'dynamic_agent_client';
+/** The name ChatGPT shows for the app on a first-time registration. It is the same on every install. */
+export const CHATGPT_AGENT_NAME = 'JOY Media';
+/** The loopback path is the one the official sign-in page names. The port is its example; any free port is allowed. */
 export const CHATGPT_CALLBACK_PORT = 1455;
 export const CHATGPT_CALLBACK_PATH = '/auth/callback';
 /** A refresh starts when the access token has less than this left (PLAN-v4 §6d: refresh just before a request). */
@@ -49,8 +57,8 @@ export interface ChatGptCode {
 }
 
 export interface ChatGptSignInOptions {
-  /** The OAuth client this build signs in with. Undefined until the owner decides it, so sign-in is refused. */
-  readonly clientId: string | undefined;
+  /** The client of a saved account, to sign in to that account again. Undefined registers a new client. */
+  readonly issuedClientId: string | undefined;
   /** The ID this install sends. It is created once per install (PLAN-v4 §6d). */
   readonly extAgentHostId: string;
   /** Opens the system browser on the sign-in page. Injected, so the flow never opens one by itself. */
@@ -89,6 +97,8 @@ export function buildChatGptAuthUrl(input: {
   readonly nonce: string;
   readonly codeChallenge: string;
   readonly extAgentHostId: string;
+  /** Sent on a first-time registration only, so ChatGPT can name the app. */
+  readonly agentNameHint?: string | undefined;
 }): string {
   assertLoopbackRedirect(input.redirectUri);
   const url = new URL(CHATGPT_AUTHORIZE_URL);
@@ -101,6 +111,9 @@ export function buildChatGptAuthUrl(input: {
   url.searchParams.set('state', input.state);
   url.searchParams.set('nonce', input.nonce);
   url.searchParams.set('ext_agent_host_id', input.extAgentHostId);
+  url.searchParams.set('resource', CHATGPT_RESOURCE);
+  if (input.agentNameHint !== undefined)
+    url.searchParams.set('agent_name_hint', input.agentNameHint);
   return url.toString();
 }
 
@@ -135,6 +148,7 @@ export async function exchangeChatGptCode(input: {
       code: input.code,
       code_verifier: input.codeVerifier,
       redirect_uri: input.redirectUri,
+      resource: CHATGPT_RESOURCE,
     }),
   );
   if (!grantedScopes(reply).includes(CHATGPT_REQUIRED_SCOPE)) {
@@ -207,6 +221,7 @@ export async function refreshChatGptTokens(input: {
       grant_type: 'refresh_token',
       client_id: input.record.clientId,
       refresh_token: input.record.refreshToken,
+      resource: CHATGPT_RESOURCE,
     }),
   );
   const rotated = reply.refresh_token;
@@ -246,18 +261,17 @@ export function createChatGptTokenKeeper(deps: ChatGptTokenKeeperDeps): ChatGptT
 }
 
 /**
- * Runs one ChatGPT sign-in and returns the record to keep (PLAN-v4 §6d). The listener is closed however the flow ends.
+ * Runs one ChatGPT sign-in and returns the record to keep (PLAN-v4 §6d). With no client saved, the sign-in registers a
+ * new one: ChatGPT names the client on the callback, and the tokens are bound to it. A sign-in to a saved account must
+ * come back with that account's client, or with none. The listener is closed however the flow ends.
  */
 export async function signInWithChatGpt(
   options: ChatGptSignInOptions,
 ): Promise<ChatGptTokenRecord> {
-  const clientId = options.clientId;
-  if (clientId === undefined || clientId.length === 0) {
-    throw new OAuthFlowError(
-      'NOT_CONFIGURED',
-      'ChatGPT sign-in is not configured in this build yet.',
-    );
-  }
+  const saved =
+    options.issuedClientId !== undefined && options.issuedClientId.length > 0
+      ? options.issuedClientId
+      : undefined;
   const state = randomToken();
   const nonce = randomToken();
   const pkce = createPkcePair();
@@ -270,15 +284,30 @@ export async function signInWithChatGpt(
   try {
     await options.openExternal(
       buildChatGptAuthUrl({
-        clientId,
+        clientId: saved ?? CHATGPT_DYNAMIC_CLIENT_ID,
         redirectUri: callback.redirectUri,
         state,
         nonce,
         codeChallenge: pkce.challenge,
         extAgentHostId: options.extAgentHostId,
+        ...(saved === undefined ? { agentNameHint: CHATGPT_AGENT_NAME } : {}),
       }),
     );
     const code = await callback.code;
+    const issued = await callback.clientId;
+    if (saved !== undefined && issued !== undefined && issued !== saved) {
+      throw new OAuthFlowError(
+        'REGISTRATION_FAILED',
+        'ChatGPT returned a different client for this account.',
+      );
+    }
+    const clientId = saved ?? issued;
+    if (clientId === undefined) {
+      throw new OAuthFlowError(
+        'REGISTRATION_FAILED',
+        'ChatGPT did not register a client for this app.',
+      );
+    }
     const tokens = await exchangeChatGptCode({
       clientId,
       code,

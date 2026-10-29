@@ -135,6 +135,7 @@ describe('buildChatGptAuthUrl', () => {
       state: 'state-1',
       nonce: 'nonce-1',
       ext_agent_host_id: 'install-1',
+      resource: 'https://api.openai.com/v1',
     });
   });
 
@@ -262,20 +263,84 @@ describe('exchangeChatGptCode', () => {
 });
 
 describe('signInWithChatGpt', () => {
-  it('refuses to start until the client is configured, and opens no browser', async () => {
-    const openExternal = vi.fn();
-    const { fetch } = provider(() => jsonReply({}));
-    await expect(
+  it('registers a client when none is saved, and keeps the client ChatGPT names on the callback', async () => {
+    const issued = 'oaiapp_issued-1';
+    let authUrl = '';
+    const { fetch, tokenForms } = provider(() => {
+      // The nonce is the one the browser was sent with, and the ID token is for the client ChatGPT issued.
+      const nonce = new URL(authUrl).searchParams.get('nonce') ?? '';
+      return jsonReply({
+        access_token: 'at-new',
+        refresh_token: 'rt-new',
+        id_token: signed(claimsFor(nonce, { aud: [issued] })),
+        expires_in: 3600,
+        scope: CHATGPT_SCOPE,
+      });
+    });
+
+    const record = await signInWithChatGpt({
+      issuedClientId: undefined,
+      extAgentHostId: 'install-1',
+      openExternal: async (url) => {
+        authUrl = url;
+        await returnFromBrowser(url, (state) => `client_id=${issued}&code=the-code&state=${state}`);
+      },
+      fetch,
+      now,
+      port: 0,
+      timeoutMs: 5_000,
+    });
+
+    const sent = new URL(authUrl).searchParams;
+    expect(sent.get('client_id')).toBe('dynamic_agent_client');
+    expect(sent.get('agent_name_hint')).toBe('JOY Media');
+    expect(sent.get('ext_agent_host_id')).toBe('install-1');
+    expect(sent.get('resource')).toBe('https://api.openai.com/v1');
+    expect(sent.get('scope')).toBe(CHATGPT_SCOPE);
+    expect(record).toMatchObject({ clientId: issued, accountId: 'acct-1', accessToken: 'at-new' });
+    expect(tokenForms[0]?.get('client_id')).toBe(issued);
+    expect(tokenForms[0]?.get('resource')).toBe('https://api.openai.com/v1');
+  });
+
+  it('refuses a registration whose callback names no client, and exchanges no code', async () => {
+    const { fetch, tokenForms } = provider(() => jsonReply({}));
+    const failure = await codeOf(() =>
       signInWithChatGpt({
-        clientId: undefined,
+        issuedClientId: undefined,
         extAgentHostId: 'install-1',
-        openExternal,
+        openExternal: async (url) => {
+          await returnFromBrowser(url, (state) => `code=the-code&state=${state}`);
+        },
         fetch,
         now,
         port: 0,
+        timeoutMs: 5_000,
       }),
-    ).rejects.toMatchObject({ code: 'NOT_CONFIGURED' });
-    expect(openExternal).not.toHaveBeenCalled();
+    );
+    expect(failure).toBe('REGISTRATION_FAILED');
+    expect(tokenForms).toHaveLength(0);
+  });
+
+  it('refuses a sign-in to a saved account that comes back with another client', async () => {
+    const { fetch, tokenForms } = provider(() => jsonReply({}));
+    const failure = await codeOf(() =>
+      signInWithChatGpt({
+        issuedClientId: CLIENT_ID,
+        extAgentHostId: 'install-1',
+        openExternal: async (url) => {
+          await returnFromBrowser(
+            url,
+            (state) => `client_id=oaiapp_other&code=the-code&state=${state}`,
+          );
+        },
+        fetch,
+        now,
+        port: 0,
+        timeoutMs: 5_000,
+      }),
+    );
+    expect(failure).toBe('REGISTRATION_FAILED');
+    expect(tokenForms).toHaveLength(0);
   });
 
   it('signs in through the loopback callback and keeps the account and tokens in one record', async () => {
@@ -293,7 +358,7 @@ describe('signInWithChatGpt', () => {
     });
 
     const record = await signInWithChatGpt({
-      clientId: CLIENT_ID,
+      issuedClientId: CLIENT_ID,
       extAgentHostId: 'install-1',
       openExternal: async (url) => {
         authUrl = url;
@@ -324,7 +389,7 @@ describe('signInWithChatGpt', () => {
     const { fetch, tokenForms } = provider(() => jsonReply({}));
     await expect(
       signInWithChatGpt({
-        clientId: CLIENT_ID,
+        issuedClientId: CLIENT_ID,
         extAgentHostId: 'install-1',
         openExternal: (url) => returnFromBrowser(url, () => 'code=the-code&state=other'),
         fetch,
@@ -341,7 +406,7 @@ describe('signInWithChatGpt', () => {
     const { fetch, tokenForms } = provider(() => jsonReply({}));
     await expect(
       signInWithChatGpt({
-        clientId: CLIENT_ID,
+        issuedClientId: CLIENT_ID,
         extAgentHostId: 'install-1',
         openExternal: async (url) => {
           redirect = new URL(url).searchParams.get('redirect_uri') ?? '';
@@ -470,5 +535,20 @@ describe('token record', () => {
     expect(decodeTokenRecord('not json')).toBeUndefined();
     expect(decodeTokenRecord(JSON.stringify({ version: 2 }))).toBeUndefined();
     expect(decodeTokenRecord(JSON.stringify({ ...record, accessToken: 5 }))).toBeUndefined();
+  });
+});
+
+describe('the requests a ChatGPT sign-in makes', () => {
+  it('sends the resource and the saved client on a refresh, and no scope', async () => {
+    const { fetch, tokenForms } = provider(() =>
+      jsonReply({ access_token: 'at-2', refresh_token: 'rt-2', expires_in: 3600 }),
+    );
+    const record = recordAt(-1_000);
+    await refreshChatGptTokens({ record, fetch, now, save: async () => undefined });
+    const form = tokenForms[0];
+    expect(form?.get('grant_type')).toBe('refresh_token');
+    expect(form?.get('client_id')).toBe(record.clientId);
+    expect(form?.get('resource')).toBe('https://api.openai.com/v1');
+    expect(form?.has('scope')).toBe(false);
   });
 });

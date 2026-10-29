@@ -22,7 +22,7 @@
 
 - **100% Offline Creative Independence**: Edit multi-track 4K video, audio waveforms, motion titles, and living look transitions with zero Internet connection required.
 - **Local Asset Streaming (`joy-asset://`)**: Custom protocol streaming video frames, waveforms, and catalog media straight from your NVMe drive with sub-millisecond seek times.
-- **Bring Your Own AI Keys**: Connect OpenRouter, OpenAI, Claude, Gemini, Grok, MiniMax, or Kimi with your own API key. Keys stay on this PC, encrypted with Windows DPAPI. ChatGPT sign-in is not enabled yet.
+- **Bring Your Own AI Keys**: Connect OpenRouter, OpenAI, Claude, Gemini, Grok, MiniMax, or Kimi with your own API key. Keys stay on this PC, encrypted with Windows DPAPI. ChatGPT sign-in needs a ChatGPT plan. The first sign-in registers this app with ChatGPT.
 - **Living Looks GPU Color Science**: Cinematic real-time color grading, dynamic film grain, and LUT emulation running at 60 FPS on your GPU.
 - **Pixel-Perfect Preview / Export Parity**: What you see in the timeline monitor matches the final encoded MP4 byte-for-byte.
 

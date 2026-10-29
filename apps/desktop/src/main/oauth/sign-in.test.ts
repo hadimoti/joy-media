@@ -94,17 +94,28 @@ describe('createProviderSignIn', () => {
     });
   });
 
-  it('refuses ChatGPT until its client is configured, and opens no browser', async () => {
-    const openExternal = vi.fn();
+  it('starts a ChatGPT registration when no client is saved, and ends when the person declines', async () => {
+    let authUrl = '';
+    const openExternal = vi.fn(async (url: string) => {
+      authUrl = url;
+      // The person declines in the browser, so the flow ends here, and its listener is closed.
+      const sent = new URL(url).searchParams;
+      await fetch(
+        `${sent.get('redirect_uri') ?? ''}?error=access_denied&state=${sent.get('state') ?? ''}`,
+      );
+    });
     const signIn = createProviderSignIn({
       openExternal,
       fetch: vi.fn(),
       now: Date.now,
       chatGptClientId: undefined,
       installId: () => 'install-1',
+      chatGptPort: 0,
     });
-    await expect(signIn('chatgpt')).rejects.toMatchObject({ code: 'NOT_CONFIGURED' });
-    expect(openExternal).not.toHaveBeenCalled();
+    await expect(signIn('chatgpt')).rejects.toMatchObject({ code: 'ACCESS_DENIED' });
+    expect(openExternal).toHaveBeenCalledTimes(1);
+    expect(new URL(authUrl).searchParams.get('client_id')).toBe('dynamic_agent_client');
+    expect(new URL(authUrl).searchParams.get('agent_name_hint')).toBe('JOY Media');
   });
 
   it('signs ChatGPT in and starts the profile on the first model the account lists', async () => {

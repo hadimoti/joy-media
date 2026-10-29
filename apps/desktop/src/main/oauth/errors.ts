@@ -4,6 +4,7 @@
  */
 export type OAuthErrorCode =
   | 'NOT_CONFIGURED'
+  | 'REGISTRATION_FAILED'
   | 'LISTEN_FAILED'
   | 'STATE_MISMATCH'
   | 'ACCESS_DENIED'

@@ -169,7 +169,7 @@ if (!app.requestSingleInstanceLock()) {
       openExternal: (url) => shell.openExternal(url),
       fetch: (url, init) => fetch(url, init),
       now: () => Date.now(),
-      // The ChatGPT OAuth client is not decided yet (PLAN-v4 §6d). Until it is, ChatGPT sign-in is refused.
+      // No saved client: each ChatGPT sign-in registers one with ChatGPT (SIWC dynamic registration, PLAN-v4 §6d).
       chatGptClientId: undefined,
       installId: () => loadOrCreateInstallId(localDatabase, () => crypto.randomUUID()),
     }),

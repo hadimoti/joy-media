@@ -28,7 +28,7 @@ export interface ProviderSignInDeps {
   readonly openExternal: (url: string) => void | Promise<void>;
   readonly fetch: FetchLike;
   readonly now: () => number;
-  /** The OAuth client ChatGPT signs in with. Undefined until the owner decides it (PLAN-v4 §6d). */
+  /** The client of a saved ChatGPT account, to sign in to it again. Undefined registers a new client (SIWC). */
   readonly chatGptClientId: string | undefined;
   /** This install's ChatGPT ID, from loadOrCreateInstallId. */
   readonly installId: () => string;
@@ -57,7 +57,7 @@ export function createProviderSignIn(
       };
     }
     const record = await signInWithChatGpt({
-      clientId: deps.chatGptClientId,
+      issuedClientId: deps.chatGptClientId,
       extAgentHostId: deps.installId(),
       openExternal: deps.openExternal,
       fetch: deps.fetch,
