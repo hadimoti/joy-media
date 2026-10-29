@@ -248,7 +248,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
     expect(JSON.parse(finished.resultJson ?? '{}')).toMatchObject({ kind: 'asset.thumbnail' });
   }, 90_000);
 
-  it('keeps a provider key file out of a local Worker, which advertises no AI provider and reads no key file', async () => {
+  it('keeps a provider key file out of a local Worker, which runs AI text only through the desktop broker and reads no key file', async () => {
     // A key file in the Worker PC's home directory, the file a standalone Worker would read at startup.
     const home = join(dir, 'home');
     mkdirSync(join(home, '.joy-media'), { recursive: true });
@@ -265,7 +265,8 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
     const localLog = join(dir, 'provider-reads-local.log');
     const local = startWorker({ HOME: home, USERPROFILE: home, JOY_TEST_READ_LOG: localLog });
     await waitForWorker();
-    expect(database.jobDispatch.presence()?.capabilities).not.toContain('text.lm-studio');
+    // AI text reaches this Worker only through the desktop broker, which holds the key. The capability names the route.
+    expect(database.jobDispatch.presence()?.capabilities).toContain('text.lm-studio');
 
     // A job the Worker really runs, so the reads it makes on the way to a result are observed too.
     const job = orchestrator();
@@ -287,28 +288,21 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
     await stopWorker(local);
     expect(providerFileReads(localLog)).toEqual([]);
 
-    // Control: a Worker with no local token reads the same file. Its own log, so the local run cannot satisfy it.
-    const standaloneLog = join(dir, 'provider-reads-standalone.log');
-    const standalone = spawn(process.execPath, [workerEntry], {
-      cwd: workerDir,
-      env: {
-        ...localWorkerEnv(process.env, { apiEnv: {}, workerRoot: join(dir, 'standalone') }),
-        ...observedEnv(),
-        HOME: home,
-        USERPROFILE: home,
-        JOY_TEST_READ_LOG: standaloneLog,
-      },
-      stdio: 'ignore',
-    });
-    try {
-      await waitFor(
-        () => (providerFileReads(standaloneLog).length > 0 ? true : undefined),
-        FIRST_JOB_TIMEOUT_MS,
-        'the standalone Worker to read its provider file',
-      );
-    } finally {
-      await stopWorker(standalone);
-    }
+    // Control: the observer records a read of the same file in a plain Node process. The Worker no longer reads
+    // this file at all (PLAN-v4 §6b), so an empty log above proves something only if the observer sees a read.
+    const providerFile = join(home, '.joy-media', 'ai-providers.json');
+    const controlLog = join(dir, 'provider-reads-control.log');
+    execFileSync(
+      process.execPath,
+      [
+        '--require',
+        readObserverPath,
+        '-e',
+        `require('node:fs').readFileSync(${JSON.stringify(providerFile)})`,
+      ],
+      { env: { ...process.env, JOY_TEST_READ_LOG: controlLog }, stdio: 'ignore' },
+    );
+    expect(providerFileReads(controlLog)).toContain(providerFile);
   }, 150_000);
 
   it('reports a real failure, with no derivative, when the source is not a video', async () => {
