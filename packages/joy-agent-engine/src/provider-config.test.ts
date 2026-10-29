@@ -9,6 +9,12 @@ import {
 const key = 'session-key';
 
 describe('BYOK provider configuration', () => {
+  it('refuses the retired joy-hosted profile, which has no endpoint of its own', () => {
+    expect(() =>
+      normalizeByokSessionConfig({ provider: 'joy-hosted', modelId: 'model', apiKey: key }),
+    ).toThrow('JOY_AGENT_PROVIDER_CONFIG_INVALID');
+  });
+
   it('normalizes the OpenRouter preset and returns secret-free status', () => {
     const config = normalizeByokSessionConfig({
       provider: 'openrouter',

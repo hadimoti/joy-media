@@ -25,7 +25,6 @@ export class ProviderConfigError extends Error {
 }
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-export const DEFAULT_JOY_HOSTED_BASE_URL = 'https://joyst.ir/api/v1/agent';
 const MAX_MODEL_ID_LENGTH = 256;
 const MAX_API_KEY_LENGTH = 512;
 
@@ -35,9 +34,9 @@ export function normalizeByokSessionConfig(
   const provider = input.provider;
   const modelId = typeof input.modelId === 'string' ? input.modelId.trim() : '';
   const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+  // joy-hosted is a retired legacy profile with no endpoint and no key, so it is refused here (PLAN-v4 §9a).
   if (
-    (provider !== 'joy-hosted' &&
-      provider !== 'openrouter' &&
+    (provider !== 'openrouter' &&
       provider !== 'openai-compatible' &&
       provider !== 'kilo' &&
       provider !== 'custom') ||
@@ -47,14 +46,6 @@ export function normalizeByokSessionConfig(
     apiKey.length > MAX_API_KEY_LENGTH
   ) {
     throw new ProviderConfigError();
-  }
-
-  if (provider === 'joy-hosted') {
-    const baseUrl =
-      input.baseUrl === undefined || input.baseUrl.trim().length === 0
-        ? DEFAULT_JOY_HOSTED_BASE_URL
-        : normalizeCustomBaseUrl(input.baseUrl);
-    return Object.freeze({ provider, baseUrl, modelId, apiKey });
   }
 
   if (provider === 'openrouter') {
