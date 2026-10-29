@@ -54,6 +54,30 @@ describe('startLoopbackCallback', () => {
     await expect(get(callback.redirectUri)).rejects.toThrow();
   });
 
+  it('settles with the code when the browser drops the connection before the page arrives', async () => {
+    const callback = await startLoopbackCallback({
+      path: '/callback',
+      expectedState: 'state-1',
+      timeoutMs: 5_000,
+    });
+    const target = new URL(`${callback.redirectUri}?code=the-code&state=state-1`);
+    await new Promise<void>((resolve) => {
+      const req = request({
+        host: target.hostname,
+        port: target.port,
+        path: `${target.pathname}${target.search}`,
+        method: 'GET',
+      });
+      req.on('error', () => undefined);
+      req.end();
+      setTimeout(() => {
+        req.destroy();
+        resolve();
+      }, 20);
+    });
+    await expect(callback.code).resolves.toBe('the-code');
+  });
+
   it('ends the flow with ACCESS_DENIED when the person declines', async () => {
     const callback = await startLoopbackCallback({ path: '/callback', expectedState: 'state-1' });
     await get(`${callback.redirectUri}?error=access_denied&state=state-1`);

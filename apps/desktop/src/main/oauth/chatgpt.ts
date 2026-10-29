@@ -65,14 +65,21 @@ export interface ChatGptSignInOptions {
 export interface ChatGptTokenKeeperDeps {
   readonly fetch: FetchLike;
   readonly now: () => number;
-  /** Saves the whole record for a profile in one write. */
-  readonly save: (profileId: string, record: ChatGptTokenRecord) => Promise<void>;
+  /**
+   * Saves the whole record in one write. The handle is the one the refresh started from, so the broker can refuse to
+   * write a refreshed record into a key that a later sign-in has replaced.
+   */
+  readonly save: (profileId: string, handleId: string, record: ChatGptTokenRecord) => Promise<void>;
   readonly marginMs?: number;
 }
 
 export interface ChatGptTokenKeeper {
   /** The record to send with. It is refreshed first only when its access token is close to expiry. */
-  current(profileId: string, record: ChatGptTokenRecord): Promise<ChatGptTokenRecord>;
+  current(
+    profileId: string,
+    handleId: string,
+    record: ChatGptTokenRecord,
+  ): Promise<ChatGptTokenRecord>;
 }
 
 export function buildChatGptAuthUrl(input: {
@@ -222,7 +229,7 @@ export function createChatGptTokenKeeper(deps: ChatGptTokenKeeperDeps): ChatGptT
   const marginMs = deps.marginMs ?? ACCESS_TOKEN_REFRESH_MARGIN_MS;
   const refreshing = new Map<string, Promise<ChatGptTokenRecord>>();
   return {
-    current(profileId, record) {
+    current(profileId, handleId, record) {
       if (record.accessExpiresAt - deps.now() > marginMs) return Promise.resolve(record);
       const inFlight = refreshing.get(profileId);
       if (inFlight !== undefined) return inFlight;
@@ -230,7 +237,7 @@ export function createChatGptTokenKeeper(deps: ChatGptTokenKeeperDeps): ChatGptT
         record,
         fetch: deps.fetch,
         now: deps.now,
-        save: (next) => deps.save(profileId, next),
+        save: (next) => deps.save(profileId, handleId, next),
       }).finally(() => refreshing.delete(profileId));
       refreshing.set(profileId, refresh);
       return refresh;

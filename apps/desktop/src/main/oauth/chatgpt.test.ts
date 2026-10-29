@@ -426,17 +426,17 @@ describe('createChatGptTokenKeeper', () => {
     const keeper = createChatGptTokenKeeper({
       fetch,
       now,
-      save: async (profileId, record) => {
-        saved.push(`${profileId}:${record.accessToken}`);
+      save: async (profileId, handleId, record) => {
+        saved.push(`${profileId}/${handleId}:${record.accessToken}`);
       },
     });
     const fresh = recordAt(10 * 60_000);
-    await expect(keeper.current('profile-1', fresh)).resolves.toBe(fresh);
+    await expect(keeper.current('profile-1', 'handle-1', fresh)).resolves.toBe(fresh);
     expect(tokenForms).toHaveLength(0);
 
-    await keeper.current('profile-1', recordAt(-1));
+    await keeper.current('profile-1', 'handle-1', recordAt(-1));
     expect(tokenForms).toHaveLength(1);
-    expect(saved).toEqual(['profile-1:new-access']);
+    expect(saved).toEqual(['profile-1/handle-1:new-access']);
   });
 
   it('shares one refresh between concurrent requests for the same profile', async () => {
@@ -454,8 +454,8 @@ describe('createChatGptTokenKeeper', () => {
     });
     const keeper = createChatGptTokenKeeper({ fetch, now, save: async () => undefined });
     const stale = recordAt(-1);
-    const first = keeper.current('profile-1', stale);
-    const second = keeper.current('profile-1', stale);
+    const first = keeper.current('profile-1', 'handle-1', stale);
+    const second = keeper.current('profile-1', 'handle-1', stale);
     release();
     const [a, b] = await Promise.all([first, second]);
     expect(a).toEqual(b);

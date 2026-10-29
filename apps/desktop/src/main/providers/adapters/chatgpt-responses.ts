@@ -1,7 +1,8 @@
 /**
  * ChatGPT Responses adapter (PLAN-v4 §6a, §6d). It sends a Chat Completions-shaped request as a Responses request, and
  * reads the Responses stream back into the Chat Completions JSON the engine reads. It performs no I/O; the broker
- * sends the request. Requests go only to api.openai.com, never to backend-api (PLAN-v4 §6d).
+ * sends the request. Requests go only to the Responses base URL of the shared provider package, never to the backend
+ * API (PLAN-v4 §6d).
  */
 import { CHATGPT_RESPONSES_BASE_URL, endpointUrl } from '@joy-media/provider-sdk';
 import type { CompletionBody } from '../request-body.js';
@@ -140,19 +141,21 @@ export function needsModelChoice(models: readonly ModelEntry[], modelId: string)
 
 /** The model list of each account. It loads once per account, and loads again for another account (PLAN-v4 §6d). */
 export interface ChatGptCatalog {
-  list(accountId: string): Promise<readonly ModelEntry[]>;
+  /** The list of an account, loaded once: `load` runs only while that account has no list yet. */
+  list(
+    accountId: string,
+    load: () => Promise<readonly ModelEntry[]>,
+  ): Promise<readonly ModelEntry[]>;
   forget(accountId: string): void;
 }
 
-export function createChatGptCatalog(
-  load: (accountId: string) => Promise<readonly ModelEntry[]>,
-): ChatGptCatalog {
+export function createChatGptCatalog(): ChatGptCatalog {
   const byAccount = new Map<string, Promise<readonly ModelEntry[]>>();
   return {
-    list(accountId) {
+    list(accountId, load) {
       const cached = byAccount.get(accountId);
       if (cached !== undefined) return cached;
-      const loading = load(accountId);
+      const loading = load();
       byAccount.set(accountId, loading);
       // A list that failed to load is not kept, so the next call loads it again.
       void loading.catch(() => byAccount.delete(accountId));

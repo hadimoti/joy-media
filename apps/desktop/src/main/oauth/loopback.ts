@@ -60,7 +60,11 @@ export async function startLoopbackCallback(
       : '';
   };
 
+  // Settles the flow once: whichever of the page sent, the browser gone, the timeout or the caller's close comes first.
+  let settled = false;
   const settle = (outcome: string | OAuthFlowError): void => {
+    if (settled) return;
+    settled = true;
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
     if (server.listening) server.close();
@@ -88,7 +92,9 @@ export async function startLoopbackCallback(
     response.statusCode = succeeded ? 200 : 400;
     response.setHeader('content-type', 'text/html; charset=utf-8');
     response.setHeader('cache-control', 'no-store');
-    // The listener stops only once the page has been sent, so the browser always receives it.
+    // The flow settles once the page is sent, or once the browser has gone before it arrived. A dropped connection
+    // therefore cannot leave the sign-in waiting for a page that will never be sent.
+    response.once('close', () => settle(outcome));
     response.end(succeeded ? PAGE_DONE : PAGE_FAILED, () => settle(outcome));
   };
 
@@ -109,18 +115,13 @@ export async function startLoopbackCallback(
   }
 
   timer = setTimeout(() => {
-    if (finished) return;
     finished = true;
     settle(new OAuthFlowError('TIMEOUT', 'The sign-in was not finished in time.'));
   }, options.timeoutMs ?? CALLBACK_TIMEOUT_MS);
 
   const close = (): void => {
-    if (!finished) {
-      finished = true;
-      settle(new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.'));
-    }
-    if (server.listening) server.close();
-    server.closeAllConnections();
+    finished = true;
+    settle(new OAuthFlowError('CANCELLED', 'The sign-in was cancelled.'));
   };
 
   return {

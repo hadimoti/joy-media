@@ -351,23 +351,25 @@ describe('ChatGPT model list', () => {
   });
 
   it('loads a list once per account, and loads it again for another account', async () => {
-    const load = vi.fn(async (accountId: string): Promise<readonly ModelEntry[]> => [
-      { id: `model-for-${accountId}`, name: accountId },
-    ]);
-    const catalog = createChatGptCatalog(load);
+    const loads: string[] = [];
+    const loaderFor = (accountId: string) => async (): Promise<readonly ModelEntry[]> => {
+      loads.push(accountId);
+      return [{ id: `model-for-${accountId}`, name: accountId }];
+    };
+    const catalog = createChatGptCatalog();
 
-    await catalog.list('acct-1');
-    await catalog.list('acct-1');
-    expect(load).toHaveBeenCalledTimes(1);
+    await catalog.list('acct-1', loaderFor('acct-1'));
+    await catalog.list('acct-1', loaderFor('acct-1'));
+    expect(loads).toEqual(['acct-1']);
 
-    await expect(catalog.list('acct-2')).resolves.toEqual([
+    await expect(catalog.list('acct-2', loaderFor('acct-2'))).resolves.toEqual([
       { id: 'model-for-acct-2', name: 'acct-2' },
     ]);
-    expect(load).toHaveBeenCalledTimes(2);
+    expect(loads).toEqual(['acct-1', 'acct-2']);
 
     catalog.forget('acct-1');
-    await catalog.list('acct-1');
-    expect(load).toHaveBeenCalledTimes(3);
+    await catalog.list('acct-1', loaderFor('acct-1'));
+    expect(loads).toEqual(['acct-1', 'acct-2', 'acct-1']);
   });
 
   it('asks for a choice when the saved model is not in the list', () => {
