@@ -1,0 +1,189 @@
+import { createSign, generateKeyPairSync } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
+import { CHATGPT_RESPONSES_BASE_URL } from '../providers/adapters/chatgpt-responses.js';
+import {
+  CHATGPT_ISSUER,
+  CHATGPT_JWKS_URL,
+  CHATGPT_SCOPE,
+  CHATGPT_TOKEN_URL,
+  decodeTokenRecord,
+} from './chatgpt.js';
+import type { FetchLike } from './http.js';
+import { OPENROUTER_BASE_URL } from './openrouter.js';
+import {
+  createProviderSignIn,
+  INSTALL_ID_SETTING,
+  loadOrCreateInstallId,
+  OPENROUTER_DEFAULT_MODEL,
+} from './sign-in.js';
+
+const CLIENT_ID = 'test-client-id';
+const KID = 'test-kid';
+const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const JWK = { ...publicKey.export({ format: 'jwk' }), kid: KID, alg: 'RS256', use: 'sig' };
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function signedIdToken(nonce: string): string {
+  const base64url = (value: unknown): string =>
+    Buffer.from(JSON.stringify(value)).toString('base64url');
+  const header = base64url({ alg: 'RS256', typ: 'JWT', kid: KID });
+  const payload = base64url({
+    iss: CHATGPT_ISSUER,
+    aud: [CLIENT_ID],
+    sub: 'acct-1',
+    nonce,
+    exp: Math.floor(Date.now() / 1000) + 600,
+  });
+  const signature = createSign('RSA-SHA256')
+    .update(`${header}.${payload}`)
+    .sign(privateKey, 'base64url');
+  return `${header}.${payload}.${signature}`;
+}
+
+/** Plays the browser: follows the redirect_uri of the authorization request with the given query. */
+async function returnFromBrowser(
+  authUrl: string,
+  parameter: 'callback_url' | 'redirect_uri',
+  query: (state: string) => string,
+): Promise<void> {
+  const url = new URL(authUrl);
+  const redirect = url.searchParams.get(parameter) ?? '';
+  const state = url.searchParams.get('state') ?? '';
+  const response = await fetch(`${redirect}?${query(state)}`);
+  await response.text();
+}
+
+describe('loadOrCreateInstallId', () => {
+  it('creates the install ID once and keeps it after', () => {
+    const saved = new Map<string, string>();
+    const settings = {
+      getSetting: (key: string) => saved.get(key),
+      setSetting: (key: string, value: string) => {
+        saved.set(key, value);
+      },
+    };
+    const newId = vi.fn(() => 'install-new');
+    expect(loadOrCreateInstallId(settings, newId)).toBe('install-new');
+    expect(loadOrCreateInstallId(settings, newId)).toBe('install-new');
+    expect(newId).toHaveBeenCalledTimes(1);
+    expect(saved.get(INSTALL_ID_SETTING)).toBe('install-new');
+  });
+});
+
+describe('createProviderSignIn', () => {
+  it('returns the OpenRouter key as a profile to save, on the default model', async () => {
+    const signIn = createProviderSignIn({
+      openExternal: (url) =>
+        returnFromBrowser(url, 'callback_url', (state) => `code=the-code&state=${state}`),
+      fetch: async () => json({ key: 'sk-or-v1-test' }),
+      now: Date.now,
+      chatGptClientId: undefined,
+      installId: () => 'install-1',
+    });
+    await expect(signIn('openrouter')).resolves.toEqual({
+      provider: 'openrouter',
+      baseUrl: OPENROUTER_BASE_URL,
+      modelId: OPENROUTER_DEFAULT_MODEL,
+      secret: 'sk-or-v1-test',
+    });
+  });
+
+  it('refuses ChatGPT until its client is configured, and opens no browser', async () => {
+    const openExternal = vi.fn();
+    const signIn = createProviderSignIn({
+      openExternal,
+      fetch: vi.fn(),
+      now: Date.now,
+      chatGptClientId: undefined,
+      installId: () => 'install-1',
+    });
+    await expect(signIn('chatgpt')).rejects.toMatchObject({ code: 'NOT_CONFIGURED' });
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('signs ChatGPT in and starts the profile on the first model the account lists', async () => {
+    let authUrl = '';
+    const fetchStub: FetchLike = async (url, init) => {
+      if (url === CHATGPT_JWKS_URL) return json({ keys: [JWK] });
+      if (url === CHATGPT_TOKEN_URL) {
+        const nonce = new URL(authUrl).searchParams.get('nonce') ?? '';
+        return json({
+          access_token: 'at-1',
+          refresh_token: 'rt-1',
+          id_token: signedIdToken(nonce),
+          expires_in: 3600,
+          scope: CHATGPT_SCOPE,
+        });
+      }
+      if (url === `${CHATGPT_RESPONSES_BASE_URL}/models`) {
+        expect(new Headers(init.headers).get('authorization')).toBe('Bearer at-1');
+        return json({
+          models: [
+            { slug: 'gpt-first', display_name: 'First', visibility: 'list' },
+            { slug: 'gpt-second', visibility: 'list' },
+          ],
+        });
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const signIn = createProviderSignIn({
+      openExternal: async (url) => {
+        authUrl = url;
+        await returnFromBrowser(url, 'redirect_uri', (state) => `code=the-code&state=${state}`);
+      },
+      fetch: fetchStub,
+      now: Date.now,
+      chatGptClientId: CLIENT_ID,
+      installId: () => 'install-1',
+      chatGptPort: 0,
+    });
+
+    const result = await signIn('chatgpt');
+    expect(result).toMatchObject({
+      provider: 'chatgpt',
+      baseUrl: CHATGPT_RESPONSES_BASE_URL,
+      modelId: 'gpt-first',
+    });
+    expect(decodeTokenRecord(result.secret)).toMatchObject({
+      accountId: 'acct-1',
+      accessToken: 'at-1',
+      refreshToken: 'rt-1',
+    });
+  });
+
+  it('saves nothing when the account lists no model', async () => {
+    let authUrl = '';
+    const fetchStub: FetchLike = async (url) => {
+      if (url === CHATGPT_JWKS_URL) return json({ keys: [JWK] });
+      if (url === CHATGPT_TOKEN_URL) {
+        const nonce = new URL(authUrl).searchParams.get('nonce') ?? '';
+        return json({
+          access_token: 'at-1',
+          refresh_token: 'rt-1',
+          id_token: signedIdToken(nonce),
+          expires_in: 3600,
+          scope: CHATGPT_SCOPE,
+        });
+      }
+      return json({ models: [{ slug: 'hidden', visibility: 'hide' }] });
+    };
+    const signIn = createProviderSignIn({
+      openExternal: async (url) => {
+        authUrl = url;
+        await returnFromBrowser(url, 'redirect_uri', (state) => `code=the-code&state=${state}`);
+      },
+      fetch: fetchStub,
+      now: Date.now,
+      chatGptClientId: CLIENT_ID,
+      installId: () => 'install-1',
+      chatGptPort: 0,
+    });
+    await expect(signIn('chatgpt')).rejects.toMatchObject({ code: 'EXCHANGE_FAILED' });
+  });
+});
