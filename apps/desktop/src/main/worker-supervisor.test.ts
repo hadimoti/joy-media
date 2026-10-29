@@ -189,4 +189,118 @@ describe('createWorkerSupervisor', () => {
     expect(supervisor.status().connection).toBe('starting');
     expect(pendingRestarts).toHaveLength(1);
   });
+
+  it('does not start a second child when a retry arrives during an automatic restart delay', () => {
+    const exits: Array<(code: number | null, signal: string | null) => void> = [];
+    let spawnCount = 0;
+    const pendingRestarts: Array<() => void> = [];
+    const supervisor = createWorkerSupervisor({
+      spawn: () => {
+        spawnCount += 1;
+        return {
+          once: (event, listener) => {
+            if (event === 'exit')
+              exits.push(listener as (code: number | null, signal: string | null) => void);
+          },
+          kill: () => true,
+        };
+      },
+      command: 'node',
+      maxRestarts: 1,
+      scheduleRestart: (run) => pendingRestarts.push(run),
+    });
+
+    supervisor.start();
+    exits[0]?.(1, null); // crash: the automatic restart waits for its delay
+    supervisor.start(); // the owner's retry arrives first
+    expect(spawnCount).toBe(1);
+    pendingRestarts.shift()?.();
+    expect(spawnCount).toBe(2);
+    expect(supervisor.status().connection).toBe('online');
+  });
+
+  it('cancels an automatic restart that is still waiting when the owner stops the Worker', () => {
+    const exits: Array<(code: number | null, signal: string | null) => void> = [];
+    let spawnCount = 0;
+    const pendingRestarts: Array<() => void> = [];
+    const supervisor = createWorkerSupervisor({
+      spawn: () => {
+        spawnCount += 1;
+        return {
+          once: (event, listener) => {
+            if (event === 'exit')
+              exits.push(listener as (code: number | null, signal: string | null) => void);
+          },
+          kill: () => true,
+        };
+      },
+      command: 'node',
+      maxRestarts: 1,
+      scheduleRestart: (run) => pendingRestarts.push(run),
+    });
+
+    supervisor.start();
+    exits[0]?.(1, null); // crash: the automatic restart waits for its delay
+    supervisor.stop(); // the app quits during that delay
+    pendingRestarts.shift()?.(); // the timer still fires, and must start nothing
+    expect(spawnCount).toBe(1);
+    expect(supervisor.status().connection).toBe('offline');
+  });
+
+  it('starts the Worker again after a stop that cancelled a waiting restart', () => {
+    const exits: Array<(code: number | null, signal: string | null) => void> = [];
+    let spawnCount = 0;
+    const pendingRestarts: Array<() => void> = [];
+    const supervisor = createWorkerSupervisor({
+      spawn: () => {
+        spawnCount += 1;
+        return {
+          once: (event, listener) => {
+            if (event === 'exit')
+              exits.push(listener as (code: number | null, signal: string | null) => void);
+          },
+          kill: () => true,
+        };
+      },
+      command: 'node',
+      maxRestarts: 1,
+      scheduleRestart: (run) => pendingRestarts.push(run),
+    });
+
+    supervisor.start();
+    exits[0]?.(1, null);
+    supervisor.stop();
+    supervisor.start(); // the owner starts it again
+    expect(spawnCount).toBe(2);
+    pendingRestarts.shift()?.(); // the cancelled timer does nothing
+    expect(spawnCount).toBe(2);
+    expect(supervisor.status().connection).toBe('online');
+  });
+
+  it('counts an error and the exit that follows it as one crash', () => {
+    const onError: Array<(error: Error) => void> = [];
+    const onExit: Array<(code: number | null, signal: string | null) => void> = [];
+    const pendingRestarts: Array<() => void> = [];
+    const supervisor = createWorkerSupervisor({
+      spawn: () => ({
+        once: (event, listener) => {
+          if (event === 'error') onError.push(listener as (error: Error) => void);
+          else onExit.push(listener as (code: number | null, signal: string | null) => void);
+        },
+        kill: () => true,
+      }),
+      command: 'node',
+      maxRestarts: 3,
+      scheduleRestart: (run) => pendingRestarts.push(run),
+    });
+
+    supervisor.start();
+    onError[0]?.(new Error('spawn ENOENT'));
+    onExit[0]?.(null, null); // the same failure reported again as an exit
+    expect(pendingRestarts).toHaveLength(1);
+    expect(supervisor.status()).toMatchObject({
+      connection: 'starting',
+      lastError: 'Worker could not run: spawn ENOENT',
+    });
+  });
 });

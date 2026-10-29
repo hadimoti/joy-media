@@ -71,6 +71,8 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
   let restarts = 0;
   let stopRequested = false;
   let spawnedAtMs = 0;
+  // The automatic restart that is waiting for its delay, if any. Stopping the Worker cancels it.
+  let pendingRestart: { cancelled: boolean } | undefined;
 
   function spawnChild(): void {
     stopRequested = false;
@@ -85,10 +87,11 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     child = proc;
     spawnedAtMs = Date.parse(now());
     proc.once('error', (error) => {
-      handleExit(`Worker could not run: ${error.message}`);
+      handleExit(proc, `Worker could not run: ${error.message}`);
     });
     proc.once('exit', (code, signal) => {
       handleExit(
+        proc,
         signal === null
           ? `Worker exited with code ${code ?? 'unknown'}`
           : `Worker was stopped by ${signal}`,
@@ -103,7 +106,9 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
    * twice as long as the one before. The crash reason is kept, so the desktop can show it. After the
    * last attempt the Worker stays degraded until the owner asks for a retry with `start()`.
    */
-  function handleExit(reason: string): void {
+  function handleExit(exited: SupervisedChild, reason: string): void {
+    // Node can report one failure as both an error and an exit. Only the first report counts.
+    if (child !== exited) return;
     child = undefined;
     if (stopRequested) {
       connection = 'offline';
@@ -118,18 +123,32 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     }
     restarts += 1;
     connection = 'starting';
-    scheduleRestart(() => spawnChild(), restartDelayMs * 2 ** (restarts - 1));
+    const attempt = { cancelled: false };
+    pendingRestart = attempt;
+    scheduleRestart(
+      () => {
+        if (attempt.cancelled) return;
+        pendingRestart = undefined;
+        spawnChild();
+      },
+      restartDelayMs * 2 ** (restarts - 1),
+    );
   }
 
   return {
     start() {
-      if (child !== undefined) return;
+      // A restart that is already waiting will start the Worker, so a second spawn now would leak a child.
+      if (child !== undefined || pendingRestart !== undefined) return;
       restarts = 0;
       spawnChild();
     },
     stop(killTimeoutMs = 5000) {
       stopRequested = true;
       connection = 'stopping';
+      if (pendingRestart !== undefined) {
+        pendingRestart.cancelled = true;
+        pendingRestart = undefined;
+      }
       if (child === undefined) {
         connection = 'offline';
         return;
