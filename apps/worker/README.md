@@ -9,7 +9,7 @@
 
 **First built in part:** P00 (spike) then P01. Do not scaffold code here before that part is marked active in [`STATE.md`](../../STATE.md).
 
-Set `JOY_MEDIA_API_URL` to run the daemon against the versioned API. On its
+Set `JOY_MEDIA_API_URL` to `http://127.0.0.1:<port>` to run the daemon against a local versioned API. Any other URL stops the Worker before it reads its state. On its
 first run it writes an ephemeral owner-facing pairing notification beside the
 private state file (override with `JOY_MEDIA_WORKER_PAIRING_NOTIFICATION_PATH`)
 and emits only a redacted diagnostic message. The signed-in owner approves the

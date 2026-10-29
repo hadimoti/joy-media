@@ -10,7 +10,7 @@ import {
   localAssetSourcesFromEnvironment,
 } from './runtime.js';
 import { GpuPreviewHost } from './gpu-preview-host.js';
-import { createLocalSessionStore, isLoopbackApiUrl } from './local-session.js';
+import { createLocalSessionStore, workerApiUrl } from './local-session.js';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -18,6 +18,8 @@ import {
   createPairingNotificationWriter,
 } from './pairing-notification.js';
 
+// Checked first: a Worker that names a remote control plane stops before it reads or writes any state.
+const apiUrl = workerApiUrl(process.env.JOY_MEDIA_API_URL);
 const configuredStatePath = process.env.JOY_MEDIA_WORKER_STATE_PATH?.trim();
 const statePath = configuredStatePath || join(homedir(), '.joy-media', 'worker-state.json');
 const configuredPairingNotificationPath =
@@ -34,8 +36,7 @@ const sources = localAssetSourcesFromEnvironment(process.env.JOY_MEDIA_LOCAL_ASS
 // The desktop app's local job route supplies a per-run token instead of a cloud pairing. That
 // token is only accepted on the loopback address the desktop app bound.
 const localToken = process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN?.trim() || undefined;
-const apiUrl = process.env.JOY_MEDIA_API_URL;
-if (localToken !== undefined && (apiUrl === undefined || !isLoopbackApiUrl(apiUrl)))
+if (localToken !== undefined && apiUrl === undefined)
   throw new Error('JOY_MEDIA_WORKER_LOCAL_TOKEN requires JOY_MEDIA_API_URL on 127.0.0.1');
 const sessionStore: WorkerSessionStore =
   localToken === undefined ? store : createLocalSessionStore(localToken);

@@ -23,3 +23,13 @@ export function isLoopbackApiUrl(value: string): boolean {
   }
   return url.protocol === 'http:' && url.hostname === '127.0.0.1';
 }
+
+/**
+ * The control-plane URL this Worker may use. Only the loopback address is accepted, so the Worker
+ * never sends its work to another machine. The error does not repeat the URL, which may carry
+ * credentials. An unset URL means the Worker has no control plane.
+ */
+export function workerApiUrl(value: string | undefined): string | undefined {
+  if (value === undefined || isLoopbackApiUrl(value)) return value;
+  throw new Error('JOY_MEDIA_API_URL must be an http://127.0.0.1 address; remote URLs are refused');
+}
