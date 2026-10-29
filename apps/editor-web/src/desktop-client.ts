@@ -136,6 +136,18 @@ export async function deleteDesktopProviderProfile(id: string): Promise<void> {
 }
 
 /**
+ * Signs in to OpenRouter or ChatGPT in the desktop app, and saves the profile it makes. The key or token stays in the
+ * desktop: the reply is the saved profile, which holds no secret (PLAN-v4 §6b, §6d).
+ */
+export async function signInDesktopProviderProfile(request: {
+  readonly provider: 'openrouter' | 'chatgpt';
+  readonly id?: string | undefined;
+}): Promise<DesktopProviderProfile> {
+  const data = await requireBridge().invoke('desktop.provider-profile.sign-in', request);
+  return data as DesktopProviderProfile;
+}
+
+/**
  * Probes the provider profile connectivity in the desktop host without exposing the key.
  */
 export async function testDesktopProviderProfile(id: string): Promise<unknown> {

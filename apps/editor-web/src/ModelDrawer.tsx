@@ -501,7 +501,9 @@ export function ModelDrawer({
                     onChange={(e) => handleProviderTypeChange(e.target.value as ProviderType)}
                   >
                     <option value="openrouter">OpenRouter</option>
-                    {PROVIDER_REGISTRY.filter((item) => item.id !== 'openrouter').map((item) => (
+                    {PROVIDER_REGISTRY.filter(
+                      (item) => item.id !== 'openrouter' && item.signInOnly !== true,
+                    ).map((item) => (
                       <option key={item.id} value={item.id}>
                         {item.label}
                       </option>

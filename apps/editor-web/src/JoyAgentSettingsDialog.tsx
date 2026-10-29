@@ -34,6 +34,7 @@ import {
   requiresCustomEndpointConsent,
   requireCustomEndpointAcknowledgement,
 } from './custom-endpoint-acknowledgement.js';
+import { ProviderSignInPanel } from './ProviderSignInPanel.js';
 import './JoyAgentSettingsDialog.css';
 
 export type JoyAgentSettingsTab =
@@ -1080,6 +1081,7 @@ export function JoyAgentSettingsDialog({
 
                   {openAccordions['models-endpoint'] && (
                     <div className="joy-accordion-content">
+                      <ProviderSignInPanel onSignedIn={() => void loadProfiles()} />
                       <div className="joy-settings-form-grid">
                         <div className="joy-settings-field">
                           <label>
@@ -1091,13 +1093,13 @@ export function JoyAgentSettingsDialog({
                               }
                             >
                               <option value="openrouter">OpenRouter (BYOK)</option>
-                              {PROVIDER_REGISTRY.filter((item) => item.id !== 'openrouter').map(
-                                (item) => (
-                                  <option key={item.id} value={item.id}>
-                                    {item.label}
-                                  </option>
-                                ),
-                              )}
+                              {PROVIDER_REGISTRY.filter(
+                                (item) => item.id !== 'openrouter' && item.signInOnly !== true,
+                              ).map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.label}
+                                </option>
+                              ))}
                               <option value="openai-compatible">
                                 Custom S3 / OpenAI Compatible
                               </option>

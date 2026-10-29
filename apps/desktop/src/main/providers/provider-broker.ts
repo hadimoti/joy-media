@@ -28,6 +28,19 @@ import { AdapterRequestError, type ModelEntry, type PreparedCall } from './adapt
 import { isRecord, parseCompletionBody, type CompletionBody } from './request-body.js';
 import { endpointBindingDigest } from '../../store/profile-binding.js';
 import { callFingerprint, ContinuationState, historyDigests } from './continuation-state.js';
+import {
+  prepareChatGptModels,
+  prepareChatGptResponses,
+  readChatGptModels,
+  readChatGptStream,
+} from './adapters/chatgpt-responses.js';
+import {
+  createChatGptTokenKeeper,
+  decodeTokenRecord,
+  encodeTokenRecord,
+  type ChatGptTokenKeeper,
+} from '../oauth/chatgpt.js';
+import { OAuthFlowError } from '../oauth/errors.js';
 
 export { endpointBindingDigest };
 
@@ -57,7 +70,11 @@ export type BrokerErrorCode =
   | 'PROVIDER_INCOMPATIBLE'
   | 'RESPONSE_TOO_LARGE'
   | 'TIMEOUT'
-  | 'NETWORK_ERROR';
+  | 'NETWORK_ERROR'
+  | 'SIGN_IN_REQUIRED'
+  | 'PLAN_LIMIT_REACHED'
+  | 'RESPONSE_INCOMPLETE'
+  | 'RESPONSE_INTERRUPTED';
 
 export interface BrokerFailure {
   readonly ok: false;
@@ -86,6 +103,11 @@ export interface ProviderBrokerStore {
   markCredentialUnavailable(id: string): void;
   /** The version of the key stored under a handle (see secretVersionDigest in the store). */
   secretVersion(handleId: string): string;
+  /**
+   * Records the version of a key this build wrote itself, such as a refreshed ChatGPT token. When it is absent, a
+   * refreshed token stops matching its binding, which fails closed until the sign-in is repeated.
+   */
+  rebindSecretVersion?(profileId: string, version: string): void;
 }
 
 /** An unsaved profile, sent once for a model list. The broker holds it in memory only. */
@@ -105,6 +127,8 @@ export interface ProviderBrokerDeps {
   readonly resolveHost?: (hostname: string) => Promise<readonly string[]>;
   /** Test hook: shorter timeouts. Production uses the defaults above. */
   readonly timeoutMs?: { readonly complete?: number; readonly control?: number };
+  /** The clock for ChatGPT token expiry. Production uses the system clock. */
+  readonly now?: () => number;
 }
 
 export interface ProviderBroker {
@@ -131,7 +155,7 @@ export interface ProviderBroker {
 interface Endpoint {
   /** The saved profile this call is for; empty for an unsaved draft. Keys the provider state of a tool call. */
   readonly profileId: string;
-  readonly api: 'chat-completions' | 'anthropic-messages';
+  readonly api: 'chat-completions' | 'anthropic-messages' | 'chatgpt-responses';
   readonly provider: string;
   readonly baseUrl: string;
   readonly modelId: string;
@@ -154,6 +178,41 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
   const controlMs = deps.timeoutMs?.control ?? CONTROL_TIMEOUT_MS;
   // The provider state each tool call of a reply carries back. Kept here, never sent on in a reply.
   const continuation = new ContinuationState();
+  const nowMs = deps.now ?? Date.now;
+  // A ChatGPT record is refreshed here, only just before a request. The refreshed record is written in one call, and
+  // the binding is then recorded against that write (PLAN-v4 §6d).
+  const tokens: ChatGptTokenKeeper = createChatGptTokenKeeper({
+    fetch: deps.fetch,
+    now: nowMs,
+    save: async (profileId, record) => {
+      const profile = deps.store.getProfile(profileId);
+      if (profile === undefined) {
+        throw new BrokerError('PROFILE_NOT_FOUND', 'Unknown provider profile');
+      }
+      await deps.secrets.set(profile.secretHandleId, encodeTokenRecord(record));
+      deps.store.rebindSecretVersion?.(profileId, deps.store.secretVersion(profile.secretHandleId));
+    },
+  });
+
+  /** The access token to send with. A stored record that cannot be read means the sign-in must be repeated. */
+  async function chatGptAccessToken(profileId: string, stored: string | null): Promise<string> {
+    const record = stored === null ? undefined : decodeTokenRecord(stored);
+    if (record === undefined) {
+      deps.store.markCredentialUnavailable(profileId);
+      throw new BrokerError('SIGN_IN_REQUIRED', 'Sign in with ChatGPT again.');
+    }
+    try {
+      return (await tokens.current(profileId, record)).accessToken;
+    } catch (error) {
+      if (error instanceof OAuthFlowError && error.code === 'SIGN_IN_REQUIRED') {
+        deps.store.markCredentialUnavailable(profileId);
+        throw new BrokerError('SIGN_IN_REQUIRED', 'ChatGPT needs a new sign-in.');
+      }
+      if (error instanceof OAuthFlowError)
+        throw new BrokerError('PROVIDER_HTTP_ERROR', error.message);
+      throw error;
+    }
+  }
 
   async function resolveProfile(profileId: string, expectedBaseUrl?: string): Promise<Endpoint> {
     const profile = deps.store.getProfile(profileId);
@@ -199,6 +258,16 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
       throw new BrokerError(
         'CREDENTIAL_UNAVAILABLE',
         'The saved key could not be read. Enter it again.',
+      );
+    }
+    if (findRegistryProvider(profile.provider)?.api === 'chatgpt-responses') {
+      const accessToken = await chatGptAccessToken(profile.id, stored);
+      return makeEndpoint(
+        profile.id,
+        profile.provider,
+        profile.baseUrl,
+        profile.modelId,
+        accessToken,
       );
     }
     const apiKey = usableKey(stored);
@@ -284,10 +353,15 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
           'draft' in source
             ? await resolveDraft(source.draft)
             : await resolveProfile(source.profileId);
+        if (endpoint.api === 'chatgpt-responses' && 'draft' in source) {
+          throw new BrokerError('REQUEST_INVALID', 'Sign in with ChatGPT to list its models.');
+        }
         const call =
-          endpoint.api === 'anthropic-messages'
-            ? prepareAnthropicModels({ baseUrl: endpoint.baseUrl, apiKey: requireKey(endpoint) })
-            : prepareChatModels({ baseUrl: endpoint.baseUrl, apiKey: endpoint.apiKey });
+          endpoint.api === 'chatgpt-responses'
+            ? prepareChatGptModels({ accessToken: requireKey(endpoint) })
+            : endpoint.api === 'anthropic-messages'
+              ? prepareAnthropicModels({ baseUrl: endpoint.baseUrl, apiKey: requireKey(endpoint) })
+              : prepareChatModels({ baseUrl: endpoint.baseUrl, apiKey: endpoint.apiKey });
         const reply = assertNoCredential(
           await send(deps.fetch, call, controlMs, endpoint.apiKey),
           endpoint,
@@ -295,9 +369,11 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         let models: readonly ModelEntry[];
         try {
           models =
-            endpoint.api === 'anthropic-messages'
-              ? parseAnthropicModels(reply)
-              : parseChatModels(reply);
+            endpoint.api === 'chatgpt-responses'
+              ? readChatGptModels(reply)
+              : endpoint.api === 'anthropic-messages'
+                ? parseAnthropicModels(reply)
+                : parseChatModels(reply);
         } catch {
           throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The model list was not understood.');
         }
@@ -408,7 +484,34 @@ const FINISH_REASONS: ReadonlySet<string> = new Set([
 ]);
 
 /** The completion the engine reads, for a reply of either provider shape. */
+/**
+ * The reply of one ChatGPT stream, as the engine reads it. Only a completed stream is a reply. A stream that ended
+ * early, or a usage limit, is a failure, so its partial text is never shown as a whole answer (PLAN-v4 §6d).
+ */
+function chatGptCompletion(reply: string, requested: ReadonlySet<string>): string {
+  const outcome = readChatGptStream(reply);
+  switch (outcome.kind) {
+    case 'completed':
+      return completionEnvelope(outcome.completion, requested);
+    case 'plan-limit':
+      throw new BrokerError(
+        'PLAN_LIMIT_REACHED',
+        'ChatGPT plan limit reached. You can switch to an API-key profile.',
+      );
+    case 'incomplete':
+      throw new BrokerError('RESPONSE_INCOMPLETE', 'The ChatGPT reply stopped before it finished.');
+    case 'interrupted':
+      throw new BrokerError(
+        'RESPONSE_INTERRUPTED',
+        'The ChatGPT reply was cut off before it finished.',
+      );
+    case 'failed':
+      throw new BrokerError('PROVIDER_HTTP_ERROR', `ChatGPT reported an error (${outcome.code}).`);
+  }
+}
+
 function completionText(reply: string, endpoint: Endpoint, requested: ReadonlySet<string>): string {
+  if (endpoint.api === 'chatgpt-responses') return chatGptCompletion(reply, requested);
   if (endpoint.api !== 'anthropic-messages') return completionEnvelope(reply, requested);
   if (stopReasonOf(reply) === 'pause_turn') {
     throw new BrokerError(
@@ -699,6 +802,13 @@ function prepareCompletion(
     return kept.value;
   };
   try {
+    if (endpoint.api === 'chatgpt-responses') {
+      return prepareChatGptResponses({
+        accessToken: requireKey(endpoint),
+        modelId: endpoint.modelId,
+        body,
+      });
+    }
     if (endpoint.api === 'anthropic-messages') {
       return prepareAnthropicMessages({
         baseUrl: endpoint.baseUrl,
@@ -872,6 +982,7 @@ function probeErrorCode(code: BrokerErrorCode): DirectProviderErrorCode {
   switch (code) {
     case 'AUTH_FAILED':
     case 'CREDENTIAL_UNAVAILABLE':
+    case 'SIGN_IN_REQUIRED':
       return 'AUTH_FAILED';
     case 'TIMEOUT':
       return 'TIMEOUT';

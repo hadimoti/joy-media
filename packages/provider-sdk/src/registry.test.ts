@@ -5,6 +5,7 @@ import {
   REGISTRY_PROVIDER_IDS,
   endpointUrl,
   evaluateEndpoint,
+  findRegistryProvider,
   findRegistryRegion,
 } from './registry.js';
 
@@ -13,7 +14,9 @@ describe('provider registry', () => {
     expect(PROVIDER_REGISTRY.map((provider) => provider.id)).toEqual([...REGISTRY_PROVIDER_IDS]);
     for (const provider of PROVIDER_REGISTRY) {
       expect(provider.regions.length).toBeGreaterThan(0);
-      expect(['chat-completions', 'anthropic-messages']).toContain(provider.api);
+      expect(['chat-completions', 'anthropic-messages', 'chatgpt-responses']).toContain(
+        provider.api,
+      );
     }
   });
 
@@ -22,6 +25,17 @@ describe('provider registry', () => {
     expect(apis.claude).toBe('anthropic-messages');
     expect(apis.openai).toBe('chat-completions');
     expect(apis.kimi).toBe('chat-completions');
+  });
+
+  it('offers ChatGPT for sign-in only, over the Responses API at its own origin', () => {
+    const chatgpt = findRegistryProvider('chatgpt');
+    expect(chatgpt?.api).toBe('chatgpt-responses');
+    expect(chatgpt?.signInOnly).toBe(true);
+    expect(evaluateEndpoint('chatgpt', 'https://api.openai.com/v1')).toMatchObject({
+      allowed: true,
+      kind: 'registry',
+    });
+    expect(evaluateEndpoint('chatgpt', 'http://127.0.0.1:1234/v1').allowed).toBe(false);
   });
 
   it('finds a region by its exact base URL, ignoring a trailing slash', () => {

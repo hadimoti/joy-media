@@ -400,6 +400,16 @@ export class LocalDatabase {
     clearCredentialUnavailable(this.db, profileId);
   }
 
+  /**
+   * Records the version of a key this build wrote itself, such as a refreshed ChatGPT token. The profile's endpoint
+   * binding is unchanged; only the key version it is confirmed against moves (PLAN-v4 §6c item 6).
+   */
+  rebindProfileSecret(profileId: string, secretDigest: string): void {
+    this.db
+      .prepare('UPDATE profile_binding SET secret_digest = ?, updated_at = ? WHERE profile_id = ?')
+      .run(secretDigest, this.now(), profileId);
+  }
+
   getSetting(key: string): string | undefined {
     const row = this.db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as
       { value: string } | undefined;
