@@ -96,7 +96,7 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     const unverified = PROVIDER_REGISTRY.filter(
       (provider) => provider.auth.unverified === true,
     ).map((provider) => provider.id);
-    expect(unverified).toEqual(['minimax', 'gemini', 'kimi']);
+    expect(unverified).toEqual(['minimax']);
   });
 
   it('permits a key or nothing for a custom endpoint, and nothing for an unknown provider', () => {

@@ -188,10 +188,10 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     api: 'chat-completions',
     auth: {
       methods: ['api-key'],
-      source: "PLAN-v4 §6d-1 table, row 'Gemini (Google)': Google's key guide",
+      source:
+        "PLAN-v4 §6d-1 table, row 'Gemini (Google)': Google's key guide, https://ai.google.dev/gemini-api/docs/api-key (read 2026-10-29)",
       sourceDate: '2026-10-29',
-      unverified: true,
-      note: 'An API key only; end-user OAuth to the public Gemini API is not confirmed. UNVERIFIED: the current key type. Google dates the retirement of standard keys to September 2026.',
+      note: 'An API key only; end-user OAuth to the public Gemini API is not confirmed. The current key type is an auth key: every new AI Studio key is created as an auth key, an unrestricted key must be secured to keep working, and dormant unrestricted keys are blocked from May 7, 2026.',
     },
     regions: [
       {
@@ -209,10 +209,10 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     api: 'chat-completions',
     auth: {
       methods: ['api-key'],
-      source: "PLAN-v4 §6d-1 table, row 'Kimi (Moonshot)': the registry entry",
+      source:
+        "PLAN-v4 §6d-1 table, row 'Kimi (Moonshot)': the Kimi API Platform quickstart, https://platform.kimi.ai/docs/get-your-api-key (read 2026-10-29)",
       sourceDate: '2026-10-29',
-      unverified: true,
-      note: 'An API key only. UNVERIFIED: the key page. §6d-1 asks for it to be checked in P4b.',
+      note: 'An API key only. The key is created in the Kimi API Platform console, on the API Keys page, and is sent as Authorization: Bearer <key>. The page offers no third-party OAuth.',
     },
     regions: [
       {
