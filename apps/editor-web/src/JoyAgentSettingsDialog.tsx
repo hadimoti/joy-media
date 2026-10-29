@@ -80,10 +80,12 @@ function dialogProviderFor(profileProvider: string): DialogProvider | undefined 
 /** A saved profile that is the connection the form describes: the same provider and endpoint. */
 function profileDescribesForm(
   profile: DesktopProviderProfileState,
-  provider: DialogProvider,
+  provider: DialogProvider | '',
   normalizedBaseUrl: string,
 ): boolean {
   if (profile.state === 'disabled-legacy' || !profile.id) return false;
+  // No provider is chosen, so the form describes no saved profile.
+  if (provider === '') return false;
   const sameProvider =
     provider === 'openai-compatible'
       ? isCustomEndpointProvider(profile.provider)
@@ -92,7 +94,7 @@ function profileDescribesForm(
 }
 
 /** A key belongs to one provider and endpoint. A key typed for another one is never sent there. */
-function keyScopeFor(provider: DialogProvider, baseUrl: string): string {
+function keyScopeFor(provider: DialogProvider | '', baseUrl: string): string {
   return `${provider}|${normalizeProviderBaseUrl(baseUrl)}`;
 }
 
@@ -266,13 +268,25 @@ export function JoyAgentSettingsDialog({
     setOpenAccordions((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const [provider, setProvider] = useState<DialogProvider>(
-    status?.provider === 'openai-compatible' ? 'openai-compatible' : 'openrouter',
+  // No provider is preselected, and OpenRouter is never a default (PLAN-v4 §6d-1 rule 3). A new connection
+  // starts with nothing chosen; a session that is already connected keeps the provider it has.
+  const [provider, setProvider] = useState<DialogProvider | ''>(
+    status === undefined
+      ? ''
+      : status.provider === 'openai-compatible'
+        ? 'openai-compatible'
+        : 'openrouter',
   );
   const [baseUrl, setBaseUrl] = useState(
-    status?.provider === 'openai-compatible' ? '' : 'https://openrouter.ai/api/v1',
+    status === undefined
+      ? ''
+      : status.provider === 'openai-compatible'
+        ? ''
+        : 'https://openrouter.ai/api/v1',
   );
-  const [modelId, setModelId] = useState(status?.modelId || 'openrouter/auto');
+  const [modelId, setModelId] = useState(
+    status === undefined ? '' : status.modelId || 'openrouter/auto',
+  );
   const [connectionName, setConnectionName] = useState('');
   const [customDisclosure, setCustomDisclosure] = useState(false);
   const [working, setWorking] = useState(false);
@@ -454,6 +468,11 @@ export function JoyAgentSettingsDialog({
       setDiscoveryError(profilesNotReadyMessage);
       return;
     }
+    // No provider is preselected, so there is nothing to discover until the owner chooses one.
+    if (provider === '') {
+      setDiscoveryError('Choose a provider before discovering models.');
+      return;
+    }
     if (endpointAmbiguous) {
       setDiscoveryError(
         'More than one saved profile uses this endpoint. Choose one in the list first.',
@@ -630,6 +649,14 @@ export function JoyAgentSettingsDialog({
     if (endpointAmbiguous) {
       const message =
         'More than one saved profile uses this endpoint. Choose one in the list first.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      return;
+    }
+    // No provider is preselected, so there is nothing to connect until the owner chooses one. This is
+    // checked after the saved-profile refusals, so their message is the one the owner sees.
+    if (provider === '') {
+      const message = 'Choose a provider before connecting.';
       setConnectionNotice({ kind: 'error', message });
       onNotice?.(message, 'error');
       return;
@@ -1126,7 +1153,11 @@ export function JoyAgentSettingsDialog({
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-tag">
-                        {provider === 'openrouter' ? 'OpenRouter' : 'Custom Endpoint'}
+                        {provider === ''
+                          ? 'No provider'
+                          : provider === 'openrouter'
+                            ? 'OpenRouter'
+                            : 'Custom Endpoint'}
                       </span>
                       <span className="joy-accordion-chevron">▾</span>
                     </div>
@@ -1145,6 +1176,9 @@ export function JoyAgentSettingsDialog({
                                 handleProviderChange(e.target.value as DialogProvider)
                               }
                             >
+                              <option value="" disabled>
+                                Choose a provider
+                              </option>
                               <option value="openrouter">OpenRouter (BYOK)</option>
                               {PROVIDER_REGISTRY.filter(
                                 (item) => item.id !== 'openrouter' && item.signInOnly !== true,

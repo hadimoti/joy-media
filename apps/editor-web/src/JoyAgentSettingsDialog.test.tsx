@@ -84,6 +84,20 @@ async function selectCustomPreset(rendered: HTMLElement): Promise<void> {
   });
 }
 
+/**
+ * No provider is preselected (PLAN-v4 §6d-1 rule 3), so a test that connects picks one first, as the owner does.
+ */
+async function chooseProvider(rendered: HTMLElement, provider: string): Promise<void> {
+  await act(async () => {
+    const select = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find((candidate) =>
+      [...candidate.options].some((option) => option.value === 'openrouter'),
+    );
+    if (select === undefined) throw new Error('Expected provider select dropdown');
+    select.value = provider;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
 function setInputValue(input: HTMLInputElement, value: string): void {
   const nativeValueSetter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -159,6 +173,8 @@ describe('JOY Agent Settings connection status', () => {
   async function connectWithKey(rendered: HTMLElement): Promise<HTMLInputElement> {
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');
+    // The form preselects no provider, so the owner picks one before connecting.
+    await chooseProvider(rendered, 'openrouter');
     await act(async () => {
       setInputValue(key, 'connection-test-key');
       buttonByText(rendered, 'Connect model').click();
@@ -183,6 +199,29 @@ describe('JOY Agent Settings connection status', () => {
     expect(options).not.toContain('kilo');
     expect(options).not.toContain('joy-hosted');
     expect(rendered.textContent).not.toMatch(/Joy Pro|Sign In with JOY Account|quota|plan limits/i);
+  });
+
+  it('preselects no provider, and refuses to connect until the owner chooses one', async () => {
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await selectCustomPreset(rendered);
+
+    const providerSelect = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find(
+      (select) => [...select.options].some((option) => option.value === 'openrouter'),
+    );
+    // No provider is preselected, and OpenRouter is never a default (PLAN-v4 §6d-1 rule 3).
+    expect(providerSelect?.value).toBe('');
+    expect(
+      rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]')?.value,
+    ).toBe('');
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('Choose a provider before connecting.');
   });
 
   it('shows tool-loop readiness and the connection notice in the dialog', async () => {
@@ -297,6 +336,7 @@ describe('JOY Agent Settings connection status', () => {
     } as unknown as NonNullable<typeof window.joyDesktop>;
     const rendered = await render(client(), undefined);
     await selectCustomPreset(rendered);
+    await chooseProvider(rendered, 'openrouter');
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     const openDrawer = rendered.querySelector<HTMLButtonElement>('.joy-settings-text-btn');
     if (key === null || openDrawer === null) {
@@ -326,6 +366,8 @@ describe('JOY Agent Settings media capability probe', () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
     await selectCustomPreset(rendered);
+    // The form preselects no provider, so the owner picks one before connecting.
+    await chooseProvider(rendered, 'openrouter');
     const probe = vi.mocked(engineClient.probeMediaCapabilities);
     const configure = vi.mocked(engineClient.configure);
     const testConnection = vi.mocked(engineClient.testConnection);
@@ -1717,6 +1759,8 @@ describe('JOY Agent Settings saved profile connect', () => {
     const rendered = await render(engineClient, undefined);
 
     expect(rendered.querySelectorAll('.joy-settings-provider-card.is-active')).toHaveLength(0);
+    // The owner picks OpenRouter, so the form describes the endpoint the two saved profiles share.
+    await chooseProvider(rendered, 'openrouter');
     await act(async () => {
       buttonByText(rendered, 'Connect model').click();
       await Promise.resolve();
@@ -1835,6 +1879,8 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
     await selectCustomPreset(rendered);
+    // The form preselects no provider, so the owner picks one before connecting.
+    await chooseProvider(rendered, 'openrouter');
 
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');
