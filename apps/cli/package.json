@@ -22,6 +22,7 @@
     "@joy-media/commands": "workspace:*",
     "@joy-media/agent-tools": "workspace:*",
     "@joy-media/motion-core": "workspace:*",
+    "@joy-media/provider-sdk": "workspace:*",
     "ai": "7.0.92"
   },
   "devDependencies": {

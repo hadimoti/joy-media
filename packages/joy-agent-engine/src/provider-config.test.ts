@@ -31,11 +31,17 @@ describe('BYOK provider configuration', () => {
     expect(JSON.stringify(safeByokSessionStatus(config))).not.toContain(key);
   });
 
-  it('accepts a custom HTTPS base URL but not a completion endpoint', () => {
-    expect(normalizeCustomBaseUrl('https://provider.example/v1/')).toBe(
-      'https://provider.example/v1',
+  it('accepts a loopback endpoint for a local AI server, over http or https', () => {
+    expect(normalizeCustomBaseUrl('http://127.0.0.1:1234/v1/')).toBe('http://127.0.0.1:1234/v1');
+    expect(normalizeCustomBaseUrl('http://localhost:1234/v1')).toBe('http://localhost:1234/v1');
+    expect(normalizeCustomBaseUrl('https://localhost/v1')).toBe('https://localhost/v1');
+  });
+
+  it('refuses a public endpoint until S8 is confirmed, and a completion endpoint', () => {
+    expect(() => normalizeCustomBaseUrl('https://provider.example/v1')).toThrow(
+      'JOY_AGENT_PROVIDER_CONFIG_INVALID',
     );
-    expect(() => normalizeCustomBaseUrl('https://provider.example/v1/chat/completions')).toThrow(
+    expect(() => normalizeCustomBaseUrl('http://127.0.0.1:1234/v1/chat/completions')).toThrow(
       'JOY_AGENT_PROVIDER_CONFIG_INVALID',
     );
   });
@@ -45,14 +51,12 @@ describe('BYOK provider configuration', () => {
     'https://user:pass@provider.example/v1',
     'https://provider.example/v1?token=secret',
     'https://provider.example/v1#fragment',
-    'https://localhost/v1',
-    'https://127.0.0.1/v1',
-    'https://[::ffff:7f00:1]/v1',
-    'https://[::1]/v1',
     'https://169.254.169.254/v1',
     'https://192.168.1.1/v1',
     'https://10.0.0.4/v1',
-  ])('rejects unsafe public-web URL %s', (url) => {
+    'http://[::1]:1234/v1',
+    'https://[::ffff:7f00:1]/v1',
+  ])('rejects unsafe custom URL %s', (url) => {
     expect(() => normalizeCustomBaseUrl(url)).toThrow('JOY_AGENT_PROVIDER_CONFIG_INVALID');
   });
 

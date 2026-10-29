@@ -113,6 +113,7 @@ export {
   CUSTOM_PROVIDER_ID,
   PROVIDER_REGISTRY,
   REGISTRY_PROVIDER_IDS,
+  defaultBaseUrl,
   endpointUrl,
   evaluateEndpoint,
   findRegistryProvider,

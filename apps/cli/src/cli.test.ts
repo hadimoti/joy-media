@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { runCli } from './cli.js';
 import { CliJoyAgentToolBridge } from './agent/bridge.js';
 import { resolveByokConfig } from './agent/provider.js';
+import { loadAiProviders } from './utils/config.js';
 import {
   createDefaultProject,
   listProjects,
@@ -272,7 +273,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
         'add',
         'gateway-test',
         '--url',
-        'https://gateway.example.test/v1',
+        'http://127.0.0.1:1234/v1',
         '--api-key',
         'gateway-test-key-999',
         '--model',
@@ -295,7 +296,7 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       // 5. Verify resolution with active provider
       const resolved = resolveByokConfig();
       expect(resolved.provider).toBe('custom');
-      expect(resolved.baseUrl).toBe('https://gateway.example.test/v1');
+      expect(resolved.baseUrl).toBe('http://127.0.0.1:1234/v1');
       expect(resolved.apiKey).toBe('gateway-test-key-999');
       expect(resolved.modelId).toBe('gateway/model-b');
 
@@ -303,6 +304,21 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       const removeCode = await runCli(['agent', 'provider', 'remove', 'gateway-test']);
       expect(removeCode).toBe(0);
     }, 15000);
+
+    it('refuses a public custom endpoint until S8 is confirmed, and saves nothing', async () => {
+      const code = await runCli([
+        'agent',
+        'provider',
+        'add',
+        'public-test',
+        '--url',
+        'https://gateway.example.test/v1',
+        '--api-key',
+        'public-test-key-999',
+      ]);
+      expect(code).toBe(1);
+      expect(loadAiProviders()['public-test']).toBeUndefined();
+    });
 
     it('refuses the retired Kilo profile instead of routing requests to it', () => {
       expect(() => resolveByokConfig({ provider: 'kilo' })).toThrow('retired from JOY Media');

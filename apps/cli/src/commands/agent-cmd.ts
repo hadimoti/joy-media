@@ -1,6 +1,13 @@
 /* global console */
+import {
+  defaultBaseUrl,
+  evaluateEndpoint,
+  findRegistryProvider,
+  isCustomProviderId,
+} from '@joy-media/provider-sdk';
 import type { CliFlags } from '../cli.js';
 import { probeAgent, runJoyAgent } from '../agent/joy-agent.js';
+import { environmentKey, inferProviderType, isRetiredProvider } from '../agent/provider.js';
 import { startAgentRepl } from '../agent/repl.js';
 import {
   deleteAiProvider,
@@ -85,6 +92,21 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         logError('Base URL required. Specify --url <url>');
         return 1;
       }
+      const type = flags.provider ?? inferProviderType(flags.baseUrl);
+      if (isRetiredProvider(type)) {
+        logError(`The ${type} provider was retired from JOY Media. Add another provider instead.`);
+        return 1;
+      }
+      if (findRegistryProvider(type) === undefined && !isCustomProviderId(type)) {
+        logError(`Unknown provider type "${type}". Use a registry provider id or "custom".`);
+        return 1;
+      }
+      // The endpoint is checked before anything is sent to it, the model list request included.
+      const verdict = evaluateEndpoint(type, flags.baseUrl);
+      if (!verdict.allowed) {
+        logError(`The base URL is refused: ${verdict.reason}`);
+        return 1;
+      }
 
       let cachedModels: string[] | undefined;
       // Try to discover models behind link
@@ -107,14 +129,12 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         // Model discovery is optional
       }
 
-      const defaultModel =
-        flags.model ??
-        (cachedModels && cachedModels.length > 0 ? cachedModels[0] : 'minimax/minimax-m3');
+      // No built-in model: the first one the endpoint lists, unless one is given.
+      const defaultModel = flags.model ?? cachedModels?.[0];
 
       setAiProvider(name, {
         name,
-        provider:
-          flags.provider ?? (flags.baseUrl.includes('openrouter') ? 'openrouter' : 'custom'),
+        provider: type,
         baseUrl: flags.baseUrl,
         apiKey: flags.apiKey,
         defaultModel,
@@ -136,7 +156,11 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         return 1;
       }
       const providers = loadAiProviders();
-      if (!providers[name] && name !== 'openrouter' && name !== 'openai') {
+      if (isRetiredProvider(name)) {
+        logError(`The ${name} provider was retired from JOY Media. Choose another provider.`);
+        return 1;
+      }
+      if (!providers[name] && findRegistryProvider(name) === undefined) {
         logError(
           `Unknown provider "${name}". Run "joy-media agent provider list" to see available providers.`,
         );
@@ -185,8 +209,10 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       args[1] ?? flags.provider ?? loadCliConfig().activeProvider ?? 'openrouter';
     const providers = loadAiProviders();
     const providerConfig = providers[targetProviderName];
-    if (targetProviderName === 'kilo') {
-      logError('The kilo provider was retired from JOY Media. Choose another provider.');
+    if (isRetiredProvider(targetProviderName)) {
+      logError(
+        `The ${targetProviderName} provider was retired from JOY Media. Choose another provider.`,
+      );
       return 1;
     }
 
@@ -194,13 +220,13 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
     let apiKey = flags.apiKey ?? providerConfig?.apiKey;
 
     if (!baseUrl) {
-      if (targetProviderName === 'openrouter') {
-        baseUrl = 'https://openrouter.ai/api/v1';
-        apiKey = apiKey ?? process.env.OPENROUTER_API_KEY;
-      } else {
+      const registeredUrl = defaultBaseUrl(targetProviderName);
+      if (registeredUrl === undefined) {
         logError(`No baseUrl found for provider "${targetProviderName}". Specify --url <url>`);
         return 1;
       }
+      baseUrl = registeredUrl;
+      apiKey = apiKey ?? environmentKey(targetProviderName);
     }
 
     printBanner();

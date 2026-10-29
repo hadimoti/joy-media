@@ -143,6 +143,9 @@ importers:
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../../packages/project-schema
+      '@joy-media/provider-sdk':
+        specifier: workspace:*
+        version: link:../../packages/provider-sdk
       ai:
         specifier: 7.0.92
         version: 7.0.92(zod@4.4.3)
@@ -473,6 +476,9 @@ importers:
       '@joy-media/agent-tools':
         specifier: workspace:*
         version: link:../agent-tools
+      '@joy-media/provider-sdk':
+        specifier: workspace:*
+        version: link:../provider-sdk
       ai:
         specifier: 7.0.92
         version: 7.0.92(zod@4.1.8)

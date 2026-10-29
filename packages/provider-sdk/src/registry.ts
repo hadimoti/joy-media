@@ -192,6 +192,11 @@ export function findRegistryProvider(id: string): RegistryProvider | undefined {
   return PROVIDER_REGISTRY.find((provider) => provider.id === id);
 }
 
+/** The base URL a registry provider uses by default: its first region. Undefined for any other id. */
+export function defaultBaseUrl(provider: string): string | undefined {
+  return findRegistryProvider(provider)?.regions[0].baseUrl;
+}
+
 /** The region whose base URL is `baseUrl`, or undefined when no region matches exactly. */
 export function findRegistryRegion(provider: string, baseUrl: string): ProviderRegion | undefined {
   const registered = findRegistryProvider(provider);

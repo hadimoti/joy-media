@@ -3,6 +3,7 @@ import {
   CUSTOM_PROVIDER_ID,
   PROVIDER_REGISTRY,
   REGISTRY_PROVIDER_IDS,
+  defaultBaseUrl,
   endpointUrl,
   evaluateEndpoint,
   findRegistryProvider,
@@ -42,6 +43,13 @@ describe('provider registry', () => {
     expect(findRegistryRegion('kimi', 'https://api.moonshot.cn/v1/')?.id).toBe('china');
     expect(findRegistryRegion('kimi', 'https://api.moonshot.ai/v1')?.id).toBe('international');
     expect(findRegistryRegion('kimi', 'https://api.moonshot.ai/v2')).toBeUndefined();
+  });
+
+  it('gives a registry provider its first region as the default, and no default to any other id', () => {
+    expect(defaultBaseUrl('openrouter')).toBe('https://openrouter.ai/api/v1');
+    expect(defaultBaseUrl('minimax')).toBe('https://api.minimax.io/v1');
+    expect(defaultBaseUrl('kilo')).toBeUndefined();
+    expect(defaultBaseUrl(CUSTOM_PROVIDER_ID)).toBeUndefined();
   });
 
   it('joins an endpoint path without a double slash', () => {
