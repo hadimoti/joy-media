@@ -147,6 +147,11 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       }
     },
     'desktop.worker-status': (): IpcResult => ({ ok: true, data: deps.workerSupervisor.status() }),
+    // The owner's manual retry after the bounded automatic attempts are used up. It starts a new budget.
+    'desktop.worker-retry': (): IpcResult => {
+      deps.workerSupervisor.start();
+      return { ok: true, data: deps.workerSupervisor.status() };
+    },
     'desktop.startup-preference': (payload): IpcResult => {
       const preference = normalizeStartupPreference(payload);
       if (preference === 'start-worker') deps.workerSupervisor.start();

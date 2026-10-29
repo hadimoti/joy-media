@@ -173,6 +173,17 @@ describe('IPC dispatch', () => {
     expect(result.data).toMatchObject({ connection: 'online', workerId: 'w-1', capabilities: [] });
   });
 
+  it('worker-retry starts the Worker again and reports its new status', async () => {
+    const handlers = createIpcHandlers(deps());
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.worker-retry',
+      payload: undefined,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data).toMatchObject({ connection: 'online', workerId: 'w-1' });
+  });
+
   it('startup-preference fails closed on garbage input and starts nothing', async () => {
     const handlers = createIpcHandlers(deps());
     const result = await dispatchIpcRequest(handlers, {

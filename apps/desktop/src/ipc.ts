@@ -4,6 +4,7 @@ export const IPC_CHANNELS = [
   'desktop.revoke-file',
   'desktop.request-derivative',
   'desktop.worker-status',
+  'desktop.worker-retry',
   'desktop.startup-preference',
   'desktop.job-status',
   'desktop.cancel-job',

@@ -12,7 +12,10 @@ function fakeChild(): {
   return {
     child: {
       once: (event, listener) => {
-        if (event === 'exit') exitListener = () => (listener as () => void)();
+        if (event === 'exit') {
+          exitListener = () =>
+            (listener as (code: number | null, signal: string | null) => void)(1, null);
+        }
       },
       kill: (signal?: NodeJS.Signals) => {
         kill(signal);
@@ -92,5 +95,98 @@ describe('createWorkerSupervisor', () => {
     const supervisor = createWorkerSupervisor({ spawn: () => fakeChild().child, command: 'node' });
     supervisor.stop();
     expect(supervisor.status().connection).toBe('offline');
+  });
+
+  it('keeps the crash reason, and a manual retry starts a new attempt budget', () => {
+    const exits: Array<(code: number | null, signal: string | null) => void> = [];
+    let spawnCount = 0;
+    const pendingRestarts: Array<() => void> = [];
+    const supervisor = createWorkerSupervisor({
+      spawn: () => {
+        spawnCount += 1;
+        return {
+          once: (event, listener) => {
+            if (event === 'exit')
+              exits.push(listener as (code: number | null, signal: string | null) => void);
+          },
+          kill: () => true,
+        };
+      },
+      command: 'node',
+      maxRestarts: 1,
+      scheduleRestart: (run) => pendingRestarts.push(run),
+    });
+
+    supervisor.start();
+    exits[0]?.(1, null); // automatic attempt 1 is scheduled
+    pendingRestarts.shift()?.();
+    exits[1]?.(137, null); // no attempts left: degraded, and the reason is kept
+    expect(supervisor.status()).toMatchObject({
+      connection: 'degraded',
+      lastError: 'Worker exited with code 137',
+    });
+    expect(pendingRestarts).toHaveLength(0);
+
+    supervisor.start(); // the owner's manual retry
+    expect(spawnCount).toBe(3);
+    expect(supervisor.status().connection).toBe('online');
+    expect(supervisor.status().lastError).toBeUndefined();
+  });
+
+  it('waits twice as long before each automatic attempt', () => {
+    const delays: number[] = [];
+    let currentExit: ((code: number | null, signal: string | null) => void) | undefined;
+    const supervisor = createWorkerSupervisor({
+      spawn: () => ({
+        once: (event, listener) => {
+          if (event === 'exit')
+            currentExit = listener as (code: number | null, signal: string | null) => void;
+        },
+        kill: () => true,
+      }),
+      command: 'node',
+      maxRestarts: 3,
+      restartDelayMs: 1000,
+      scheduleRestart: (run, delayMs) => {
+        delays.push(delayMs);
+        run();
+      },
+    });
+
+    supervisor.start();
+    currentExit?.(1, null);
+    currentExit?.(1, null);
+    currentExit?.(1, null);
+    expect(delays).toEqual([1000, 2000, 4000]);
+    expect(supervisor.status().connection).toBe('online');
+  });
+
+  it('lets a long healthy run start a new attempt budget', () => {
+    let clock = Date.parse('2026-10-29T00:00:00.000Z');
+    const exits: Array<(code: number | null, signal: string | null) => void> = [];
+    const pendingRestarts: Array<() => void> = [];
+    const supervisor = createWorkerSupervisor({
+      spawn: () => ({
+        once: (event, listener) => {
+          if (event === 'exit')
+            exits.push(listener as (code: number | null, signal: string | null) => void);
+        },
+        kill: () => true,
+      }),
+      command: 'node',
+      maxRestarts: 1,
+      stableRunMs: 60_000,
+      now: () => new Date(clock).toISOString(),
+      scheduleRestart: (run) => pendingRestarts.push(run),
+    });
+
+    supervisor.start();
+    clock += 1_000;
+    exits[0]?.(1, null); // a quick crash uses the only automatic attempt
+    pendingRestarts.shift()?.();
+    clock += 300_000; // the second run was healthy for five minutes
+    exits[1]?.(1, null);
+    expect(supervisor.status().connection).toBe('starting');
+    expect(pendingRestarts).toHaveLength(1);
   });
 });

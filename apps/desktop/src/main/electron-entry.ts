@@ -242,6 +242,8 @@ if (!app.requestSingleInstanceLock()) {
       // Without the local API the Worker cannot connect. The rest of the app still opens.
       console.error('local job API did not start', error);
     }
+    // The Worker starts with the app, once the loopback job API it connects to is listening.
+    if (localJobApi !== undefined) workerSupervisor.start();
     Menu.setApplicationMenu(null);
     // Only the installed app claims the joy:// scheme. A development run would otherwise point
     // it at the Electron binary in the source tree. A smoke run leaves the host alone as well.
