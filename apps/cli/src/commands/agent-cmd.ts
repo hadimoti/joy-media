@@ -78,10 +78,8 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
           console.log(`  ${marker} ${c(key, 'bold')} (${p.provider ?? 'custom'})`);
           logStep('  Base URL', p.baseUrl ?? 'default');
           logStep('  Default Model', p.defaultModel ?? 'not-set');
-          logStep(
-            '  API Key',
-            p.apiKey ? `${p.apiKey.slice(0, 4)}...${p.apiKey.slice(-4)}` : 'none',
-          );
+          // A key never appears in a listing, not even a part of one (PLAN-v4 §6d-1).
+          logStep('  API Key', p.apiKey ? 'set (hidden)' : 'none');
           if (p.cachedModels && p.cachedModels.length > 0) {
             logStep('  Discovered Models', `${p.cachedModels.length} models cached`);
           }
