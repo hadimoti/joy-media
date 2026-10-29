@@ -1,4 +1,4 @@
-import { evaluateEndpoint } from '@joy-media/provider-sdk';
+import { evaluateEndpoint, type AgentSlotId } from '@joy-media/provider-sdk';
 import { ProviderCallError, type ProviderCallRequest } from './joy-agent/provider-call.js';
 /**
  * Typed helpers for the desktop host bridge (`window.joyDesktop`), injected by
@@ -225,6 +225,45 @@ export async function requestAgentCompletion(request: ProviderCallRequest): Prom
 /**
  * Minimizes the host application window.
  */
+/** One agent slot as the desktop reports it. The key stays in the desktop, and the profile is named, not sent. */
+export interface DesktopAgentSlot {
+  readonly id: AgentSlotId;
+  readonly label: string;
+  readonly profileId: string | null;
+  readonly profileName: string | null;
+  readonly profileProvider: string | null;
+  readonly model: string | null;
+  readonly instructions: string;
+  readonly settings: { readonly temperature?: number; readonly maxOutputTokens?: number };
+  /** True when the slot names a saved profile and a model, and that profile is not a retired one. */
+  readonly ready: boolean;
+}
+
+/** What the owner sets for a slot. An absent field is not set, and an empty draft empties the slot. */
+export interface DesktopAgentSlotDraft {
+  readonly profileId?: string | undefined;
+  readonly model?: string | undefined;
+  readonly instructions?: string | undefined;
+  readonly settings?:
+    | { readonly temperature?: number | undefined; readonly maxOutputTokens?: number | undefined }
+    | undefined;
+}
+
+/** Both agent slots, through `desktop.agent-slots.list`. */
+export async function listDesktopAgentSlots(): Promise<readonly DesktopAgentSlot[]> {
+  const data = await requireBridge().invoke('desktop.agent-slots.list');
+  return Array.isArray(data) ? (data as readonly DesktopAgentSlot[]) : [];
+}
+
+/** Saves one slot through `desktop.agent-slots.save`. The desktop refuses a draft that breaks the rules. */
+export async function saveDesktopAgentSlot(
+  id: AgentSlotId,
+  draft: DesktopAgentSlotDraft,
+): Promise<DesktopAgentSlot> {
+  const data = await requireBridge().invoke('desktop.agent-slots.save', { id, draft });
+  return data as DesktopAgentSlot;
+}
+
 export async function minimizeDesktopWindow(): Promise<void> {
   await requireBridge().invoke('desktop.window-minimize');
 }

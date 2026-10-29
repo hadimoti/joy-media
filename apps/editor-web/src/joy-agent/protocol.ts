@@ -1,3 +1,4 @@
+import type { AgentSlotId } from '@joy-media/provider-sdk';
 import type { HostRpcWireMessage } from './host-rpc.js';
 import {
   isJoyAgentHostToolName,
@@ -86,6 +87,8 @@ export interface ByokSessionConfig {
   readonly baseUrl: string;
   readonly modelId: string;
   readonly profileId: string;
+  /** The agent slot the session runs in, when it runs in one. It stays on the main thread; the Worker never sees it. */
+  readonly slot?: AgentSlotId | undefined;
 }
 
 /** The outcome of one provider call the main process made through the broker. */

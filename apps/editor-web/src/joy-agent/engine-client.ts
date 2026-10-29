@@ -1,5 +1,5 @@
 import { requestAgentCompletion } from '../desktop-client.js';
-import { normalizeBaseUrl } from '@joy-media/provider-sdk';
+import { normalizeBaseUrl, parseAgentSlotId } from '@joy-media/provider-sdk';
 import { ProviderCallError, type ProviderCall } from './provider-call.js';
 import {
   createHostRpcHost,
@@ -284,6 +284,7 @@ async function answerProviderRequest(
         modelId: request.modelId,
         body: request.body,
         signal,
+        ...(expected?.slot === undefined ? {} : { slot: expected.slot }),
       });
       result = { ok: true, text };
     } catch (error) {
@@ -1000,7 +1001,9 @@ export function createSingleWorkerEngineClient(
       clear();
       latestStatus = { provider: safe.provider, modelId: safe.modelId, capability: 'untested' };
       const result = await requestStatus('configure', { config: safe });
-      activeSession = safe;
+      // The Worker receives only the four session fields; the slot is kept here, for the provider calls.
+      const slot = parseAgentSlotId(next.slot);
+      activeSession = slot === undefined ? safe : Object.freeze({ ...safe, slot });
       configured = true;
       return result;
     },

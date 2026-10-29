@@ -1,4 +1,4 @@
-import { findRegistryProvider } from '@joy-media/provider-sdk';
+import { findRegistryProvider, type AgentSlotId } from '@joy-media/provider-sdk';
 
 /**
  * The one way the agent reaches a model (PLAN-v4 §6a). A call names a saved profile, its base URL
@@ -8,6 +8,8 @@ export interface ProviderCallRequest {
   readonly profileId: string;
   readonly baseUrl: string;
   readonly modelId: string;
+  /** The agent slot the call runs in, when the session is one. The main process checks the call against it. */
+  readonly slot?: AgentSlotId | undefined;
   readonly body: Readonly<Record<string, unknown>>;
   /** Ends the call early. The desktop cancels the provider request it started, so none is left running. */
   readonly signal?: AbortSignal | undefined;

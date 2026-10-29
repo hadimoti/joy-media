@@ -9,6 +9,8 @@ import type {
   JoyAgentMediaCapabilityState,
 } from './joy-agent/protocol.js';
 import { CloseIcon } from './icons.js';
+import { AgentSlotsSection } from './AgentSlotsSection.js';
+import type { DesktopAgentSlot } from './desktop-client.js';
 import { sessionProviderFor } from './joy-agent/provider-call.js';
 import {
   evaluateEndpoint,
@@ -230,6 +232,34 @@ export function JoyAgentSettingsDialog({
     'diag-probe': true,
     'diag-health': true,
   });
+
+  /** Runs the agent in one slot: the session takes the slot's profile and model, and the slot's instructions. */
+  const useAgentSlot = async (
+    slot: DesktopAgentSlot,
+    profile: DesktopProviderProfile,
+  ): Promise<void> => {
+    const sessionProvider = sessionProviderFor(profile.provider);
+    if (sessionProvider === undefined || slot.model === null) {
+      throw new Error('This agent slot cannot run yet. Save it with a profile and a model.');
+    }
+    assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
+    setWorking(true);
+    setConnectionNotice(undefined);
+    try {
+      await engineClient.configure({
+        provider: sessionProvider,
+        baseUrl: profile.baseUrl,
+        modelId: slot.model,
+        profileId: profile.id,
+        slot: slot.id,
+      });
+      const next = await engineClient.testConnection();
+      setConnectionStatus(next);
+      onStatusChange?.(next);
+    } finally {
+      setWorking(false);
+    }
+  };
 
   const toggleAccordion = (id: string) => {
     setOpenAccordions((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -934,6 +964,9 @@ export function JoyAgentSettingsDialog({
             </div>
 
             {/* TAB 1: AI MODELS & APIS */}
+            {activeTab === 'models' ? (
+              <AgentSlotsSection profiles={profiles} onUseSlot={useAgentSlot} />
+            ) : null}
             {activeTab === 'models' && (
               <div className="joy-accordion">
                 {onOpenModelDrawer && (
