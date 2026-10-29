@@ -1,96 +1,44 @@
-import { WorkerControlPlaneClient, type WorkerSessionStore } from './control-plane-client.js';
-import { waitForWorkerPairing } from './pairing-loop.js';
+import { WorkerControlPlaneClient } from './control-plane-client.js';
 import { WorkerDaemon } from './worker-daemon.js';
 import {
   getDeviceIdentity,
   JsonFileWorkerStore,
-  WindowsDpapiSecretProtector,
   WorkerRuntime,
   detectMediaTools,
   localAssetSourcesFromEnvironment,
 } from './runtime.js';
-import { GpuPreviewHost } from './gpu-preview-host.js';
 import { createLocalSessionStore, workerApiUrl } from './local-session.js';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-import {
-  clearPairingNotification,
-  createPairingNotificationWriter,
-} from './pairing-notification.js';
+import { join } from 'node:path';
 
 // Checked first: a Worker that names a remote control plane stops before it reads or writes any state.
 const apiUrl = workerApiUrl(process.env.JOY_MEDIA_API_URL);
+if (apiUrl === undefined)
+  throw new Error(
+    'JOY_MEDIA_API_URL is required: set it to the desktop app local job API, http://127.0.0.1:<port>',
+  );
+// The desktop app's local job route gives the Worker a per-run token. That token is the only credential,
+// and it is held in memory only.
+const localToken = process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN?.trim() || undefined;
+if (localToken === undefined)
+  throw new Error('JOY_MEDIA_WORKER_LOCAL_TOKEN is required with JOY_MEDIA_API_URL');
+
 const configuredStatePath = process.env.JOY_MEDIA_WORKER_STATE_PATH?.trim();
 const statePath = configuredStatePath || join(homedir(), '.joy-media', 'worker-state.json');
-const configuredPairingNotificationPath =
-  process.env.JOY_MEDIA_WORKER_PAIRING_NOTIFICATION_PATH?.trim();
-const pairingNotificationPath =
-  configuredPairingNotificationPath || join(dirname(statePath), 'pairing-notification.json');
-const store = new JsonFileWorkerStore(
-  statePath,
-  process.platform === 'win32' ? { secretProtector: new WindowsDpapiSecretProtector() } : {},
-);
-store.migrateLegacySecrets();
+const store = new JsonFileWorkerStore(statePath);
 const identity = getDeviceIdentity(store);
 const sources = localAssetSourcesFromEnvironment(process.env.JOY_MEDIA_LOCAL_ASSETS_JSON);
-// The desktop app's local job route supplies a per-run token instead of a cloud pairing. That
-// token is only accepted on the loopback address the desktop app bound.
-const localToken = process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN?.trim() || undefined;
-if (localToken !== undefined && apiUrl === undefined)
-  throw new Error('JOY_MEDIA_WORKER_LOCAL_TOKEN requires JOY_MEDIA_API_URL on 127.0.0.1');
-const sessionStore: WorkerSessionStore =
-  localToken === undefined ? store : createLocalSessionStore(localToken);
-if (sessionStore.loadWorkerSession() !== undefined)
-  clearPairingNotification(pairingNotificationPath);
-let gpuPreviewHost: GpuPreviewHost | undefined;
-if (localToken === undefined) {
-  try {
-    gpuPreviewHost = await GpuPreviewHost.create();
-    console.log(
-      JSON.stringify({
-        gpuPreview: 'hardware',
-        renderer: gpuPreviewHost.identity.renderer,
-        backend: gpuPreviewHost.identity.backend,
-      }),
-    );
-  } catch (error) {
-    console.warn(
-      `GPU preview unavailable: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
-const client =
-  apiUrl === undefined
-    ? undefined
-    : new WorkerControlPlaneClient({ apiUrl, identity, sessionStore });
+const client = new WorkerControlPlaneClient({
+  apiUrl,
+  identity,
+  sessionStore: createLocalSessionStore(localToken),
+});
 const derivativeDirectory = process.env.JOY_MEDIA_WORKER_DERIVATIVE_DIR?.trim() || undefined;
-// A Worker under the desktop app carries a local token, so detectMediaTools reads no provider file.
-const runtime = new WorkerRuntime(identity, detectMediaTools(), {
+const runtime = new WorkerRuntime(identity, detectMediaTools(undefined, { aiBroker: true }), {
   ...(sources === undefined ? {} : { sources }),
   ...(derivativeDirectory === undefined ? {} : { derivativeDirectory }),
-  gpuPreviewAvailable: gpuPreviewHost !== undefined,
-  ...(client === undefined ? {} : { downloadJobAsset: client.downloadJobAsset.bind(client) }),
+  downloadJobAsset: client.downloadJobAsset.bind(client),
+  completeAi: client.completeAi.bind(client),
 });
 console.log(JSON.stringify(runtime.hello(process.platform, process.arch)));
-
-if (apiUrl !== undefined && client !== undefined) {
-  if (sessionStore.loadWorkerSession() === undefined) {
-    try {
-      await waitForWorkerPairing(client, store, {
-        createPairingCode: WorkerControlPlaneClient.createPairingCode,
-        log: (message) => console.log(message),
-        notify: createPairingNotificationWriter(pairingNotificationPath),
-      });
-    } finally {
-      clearPairingNotification(pairingNotificationPath);
-    }
-  }
-  // Pairing only returns once the control plane accepted the offer, so a
-  // missing session here is a local state fault. Exiting quietly would be
-  // indistinguishable from a Worker that never paired and leaves the operator
-  // with a daemon that produced no control-plane traffic and no reason why.
-  if (sessionStore.loadWorkerSession() === undefined)
-    throw new Error('Worker session is unavailable after pairing; refusing to run unpaired');
-  const daemon = new WorkerDaemon(client, runtime, gpuPreviewHost);
-  await daemon.run({ stopped: () => false });
-}
+await new WorkerDaemon(client, runtime).run({ stopped: () => false });

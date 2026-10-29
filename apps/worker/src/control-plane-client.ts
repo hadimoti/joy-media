@@ -1,10 +1,8 @@
-import { randomBytes } from 'node:crypto';
 import type { DeviceIdentity } from './runtime.js';
 import type { GpuPreviewFrameRequest, GpuPreviewFrameResponse } from '@joy-media/job-protocol';
 
 export interface WorkerSessionStore {
   loadWorkerSession(): string | undefined;
-  saveWorkerSession(sessionToken: string): void;
   clearWorkerSession(): void;
 }
 
@@ -28,8 +26,7 @@ export interface WorkerJobResult {
     | 'mask.image'
     | 'mask.video'
     | 'text'
-    | 'image'
-    | 'video';
+    | 'image';
   readonly assetId?: string;
   readonly sha256?: string;
   readonly bytes?: number;
@@ -57,9 +54,9 @@ export interface WorkerControlPlaneClientOptions {
 }
 
 /**
- * Signals that the persisted Worker session is no longer usable. The daemon
- * must stop so its supervisor can restart it through the pairing flow instead
- * of polling forever with an empty session.
+ * Signals that the Worker's session token was refused. The daemon must stop, so
+ * the desktop app's supervisor can start it again with a fresh token instead of
+ * polling forever with a rejected one.
  */
 export class WorkerSessionExpiredError extends Error {
   constructor() {
@@ -96,33 +93,6 @@ export class WorkerControlPlaneClient {
     if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs < 100 || requestTimeoutMs > 120_000)
       throw new Error('Worker request timeout must be between 100ms and 120000ms');
     this.#requestTimeoutMs = Math.round(requestTimeoutMs);
-  }
-
-  static createPairingCode(): string {
-    return randomBytes(24).toString('base64url');
-  }
-
-  async publishPairingOffer(pairingCode: string): Promise<number> {
-    const result = await this.request('/v1/worker-pair/offers', {
-      workerId: this.options.identity.workerId,
-      pairingCode,
-    });
-    return requiredNumber(result, 'expiresAt');
-  }
-
-  /** Returns undefined until the signed-in JOY user approves the pairing code. */
-  async claimPairing(pairingCode: string): Promise<boolean> {
-    const response = await this.request(
-      '/v1/worker-pair/claim',
-      {
-        workerId: this.options.identity.workerId,
-        pairingCode,
-      },
-      false,
-    );
-    if (response === undefined) return false;
-    this.options.sessionStore.saveWorkerSession(requiredString(response, 'sessionToken'));
-    return true;
   }
 
   async lease(durationMs = 30_000): Promise<LeasedJob | undefined> {
@@ -422,12 +392,6 @@ export class WorkerControlPlaneClient {
 
 function requiredString(value: unknown, field: string): string {
   if (!isRecord(value) || typeof value[field] !== 'string')
-    throw new Error(`Invalid Worker response: ${field}`);
-  return value[field];
-}
-
-function requiredNumber(value: unknown, field: string): number {
-  if (!isRecord(value) || typeof value[field] !== 'number')
     throw new Error(`Invalid Worker response: ${field}`);
   return value[field];
 }

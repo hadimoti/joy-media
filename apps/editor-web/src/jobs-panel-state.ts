@@ -2,7 +2,7 @@ import type { BrowserJob, BrowserWorker } from './control-plane-client.js';
 
 export type WorkerPresence = 'connected' | 'disconnected';
 
-const AI_CAPS = ['text.lm-studio', 'text.openrouter', 'video.runway', 'edit.higgsfield'] as const;
+const AI_CAPS = ['text.lm-studio', 'text.openrouter'] as const;
 const LOCAL_GPU_CAPS = [
   'render.preview.gpu',
   'image.comfy',

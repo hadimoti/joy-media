@@ -17,8 +17,6 @@ import {
   JsonFileWorkerStore,
   StaticLocalAssetSourceRegistry,
   WorkerRuntime,
-  WindowsDpapiSecretProtector,
-  WorkerSecretProtectorUnavailableError,
   detectMediaTools,
   getDeviceIdentity,
   localAssetSourcesFromEnvironment,
@@ -26,7 +24,7 @@ import {
 import type { UnsupportedWorkerJobError } from './runtime.js';
 import { ffmpegFilterPath, gpuDerivativeLocalRef, rnnoiseFilter } from './local-gpu.js';
 
-// Counts the reads of the provider file. The wrapper passes every call through, so no other test is affected.
+// Counts reads of the legacy provider file, which the Worker must never open. Every call passes through unchanged.
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof nodeFs>();
   return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
@@ -36,18 +34,34 @@ vi.mock('node:fs', async (importOriginal) => {
 // test`, not the repo root) so this fixture resolves the same way from any invocation.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 describe('Worker runtime', () => {
-  it.each(['text.openrouter', 'video.runway', 'edit.higgsfield'])(
-    'fails closed before invoking provider job %s',
+  it('fails closed before invoking the unsupported OpenRouter text job', async () => {
+    const runtime = new WorkerRuntime(
+      { workerId: 'provider-worker', createdAt: '2026-01-01T00:00:00.000Z' },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiBroker: true },
+    );
+
+    await expect(
+      runtime.run(
+        {
+          id: 'job-text.openrouter',
+          type: 'text.openrouter',
+          payload: { prompt: 'must not reach a provider' },
+        },
+        { cancelled: () => false, progress: async () => undefined },
+      ),
+    ).rejects.toMatchObject({
+      name: 'UnsupportedWorkerJobError',
+      code: 'JOB_TYPE_UNSUPPORTED',
+      jobType: 'text.openrouter',
+    } satisfies Partial<UnsupportedWorkerJobError>);
+  });
+
+  it.each(['video.runway', 'edit.higgsfield'])(
+    'refuses the retired AI video job type %s as an unknown type',
     async (type) => {
       const runtime = new WorkerRuntime(
         { workerId: 'provider-worker', createdAt: '2026-01-01T00:00:00.000Z' },
-        {
-          ffmpeg: false,
-          ffprobe: false,
-          comfy: false,
-          mlDenoise: false,
-          aiProviders: ['openrouter', 'runway', 'higgsfield'],
-        },
+        { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiBroker: true },
       );
 
       await expect(
@@ -55,13 +69,22 @@ describe('Worker runtime', () => {
           { id: `job-${type}`, type, payload: { prompt: 'must not reach a provider' } },
           { cancelled: () => false, progress: async () => undefined },
         ),
-      ).rejects.toMatchObject({
-        name: 'UnsupportedWorkerJobError',
-        code: 'JOB_TYPE_UNSUPPORTED',
-        jobType: type,
-      } satisfies Partial<UnsupportedWorkerJobError>);
+      ).rejects.toThrow(`unsupported Worker job ${type}`);
     },
   );
+
+  it('advertises no retired AI video capability and keeps the core render export', () => {
+    const runtime = new WorkerRuntime(
+      { workerId: 'provider-worker', createdAt: '2026-01-01T00:00:00.000Z' },
+      detectMediaTools(() => true, { aiBroker: true }),
+      { downloadJobAsset: async () => new Uint8Array() },
+    );
+    const capabilities = runtime.hello('win32', 'x64').capabilities;
+    expect(capabilities).not.toContain('video.runway');
+    expect(capabilities).not.toContain('edit.higgsfield');
+    expect(capabilities).toContain('render.export');
+    expect(capabilities).toContain('asset.thumbnail');
+  });
 
   it('escapes a Windows RNNoise path for ffmpeg filter syntax', () => {
     const path = 'C:\\Users\\JOY Media\\models\\rnnoise\\mp.rnnn';
@@ -100,7 +123,7 @@ describe('Worker runtime', () => {
     expect(log.lines()).toEqual(['b', 'c']);
     const runtime = new WorkerRuntime(
       { workerId: 'w', createdAt: 'now' },
-      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiProviders: [] },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiBroker: false },
     );
     expect(
       (
@@ -124,7 +147,7 @@ describe('Worker runtime', () => {
     );
     const runtime = new WorkerRuntime(
       { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
-      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiProviders: [] },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiBroker: false },
       {
         sources: new StaticLocalAssetSourceRegistry({ 'asset-intro': source }),
         derivativeDirectory,
@@ -175,7 +198,7 @@ describe('Worker runtime', () => {
     );
     const runtime = new WorkerRuntime(
       { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
-      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiProviders: [] },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiBroker: false },
       {
         sources: new StaticLocalAssetSourceRegistry({ 'asset-intro': source }),
         derivativeDirectory,
@@ -204,7 +227,7 @@ describe('Worker runtime', () => {
   it('runs the Jobs-panel fixture thumbnail without FFmpeg or a local asset', async () => {
     const runtime = new WorkerRuntime(
       { workerId: 'worker-fixture', createdAt: '2026-08-16T00:00:00.000Z' },
-      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiProviders: [] },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiBroker: false },
     );
     const updates: number[] = [];
     const result = await runtime.run(
@@ -226,133 +249,34 @@ describe('Worker runtime', () => {
     });
     expect(updates).toEqual([5, 50, 90, 100]);
   });
-  it('persists identity, Worker session, and a pending pairing separately from project data', () => {
+  it('keeps the Worker identity and carries older pairing fields over without reading them', () => {
     const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-')), 'state.json');
-    const store = new JsonFileWorkerStore(path);
-    const identity = getDeviceIdentity(store, new Date('2026-07-22T00:00:00.000Z'));
-    store.saveWorkerSession('worker-session');
-    store.savePendingPairing('pairing-code', Date.now() + 60_000);
-
-    const restarted = new JsonFileWorkerStore(path);
-    expect(restarted.load()).toEqual(identity);
-    expect(restarted.loadWorkerSession()).toBe('worker-session');
-    expect(restarted.loadPendingPairing()?.code).toBe('pairing-code');
-    restarted.clearWorkerSession();
-    expect(restarted.load()).toEqual(identity);
-    expect(restarted.loadWorkerSession()).toBeUndefined();
-    restarted.clearPendingPairing();
-    expect(restarted.loadPendingPairing()).toBeUndefined();
-  });
-
-  it('stores Worker session and pending pairing through the configured secret protector', () => {
-    const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-protected-')), 'state.json');
-    const protector = {
-      protect: (value: string) => Buffer.from(value).toString('base64url'),
-      unprotect: (value: string) => Buffer.from(value, 'base64url').toString('utf8'),
-    };
-    const store = new JsonFileWorkerStore(path, { secretProtector: protector });
-    store.save({ workerId: 'worker-protected', createdAt: '2026-07-22T00:00:00.000Z' });
-    store.saveWorkerSession('worker-session-secret');
-    store.savePendingPairing('pairing-code-secret', Date.now() + 60_000);
-    const raw = readFileSync(path, 'utf8');
-    expect(raw).not.toContain('worker-session-secret');
-    expect(raw).not.toContain('pairing-code-secret');
-    const restarted = new JsonFileWorkerStore(path, { secretProtector: protector });
-    expect(restarted.loadWorkerSession()).toBe('worker-session-secret');
-    expect(restarted.loadPendingPairing()?.code).toBe('pairing-code-secret');
-  });
-
-  it('migrates legacy plaintext Worker secrets when protection is enabled', () => {
-    const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-migrate-')), 'state.json');
-    const legacy = new JsonFileWorkerStore(path);
-    legacy.save({ workerId: 'worker-legacy', createdAt: '2026-07-22T00:00:00.000Z' });
-    legacy.saveWorkerSession('legacy-session-secret');
-    legacy.savePendingPairing('legacy-pairing-secret', Date.now() + 60_000);
-    const protector = {
-      protect: (value: string) => Buffer.from(value).toString('base64url'),
-      unprotect: (value: string) => Buffer.from(value, 'base64url').toString('utf8'),
-    };
-    const protectedStore = new JsonFileWorkerStore(path, { secretProtector: protector });
-    protectedStore.migrateLegacySecrets();
-    const raw = readFileSync(path, 'utf8');
-    expect(raw).not.toContain('legacy-session-secret');
-    expect(raw).not.toContain('legacy-pairing-secret');
-    expect(protectedStore.loadWorkerSession()).toBe('legacy-session-secret');
-    expect(protectedStore.loadPendingPairing()?.code).toBe('legacy-pairing-secret');
-  });
-
-  it('does not expose legacy plaintext secrets when configured protection cannot decrypt them', () => {
-    const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-fail-closed-')), 'state.json');
-    const legacy = new JsonFileWorkerStore(path);
-    legacy.save({ workerId: 'worker-legacy', createdAt: '2026-07-22T00:00:00.000Z' });
-    legacy.saveWorkerSession('legacy-session-secret');
-    legacy.savePendingPairing('legacy-pairing-secret', Date.now() + 60_000);
-    const protectedStore = new JsonFileWorkerStore(path, {
-      secretProtector: { protect: () => 'ciphertext', unprotect: () => undefined },
-    });
-
-    expect(protectedStore.loadWorkerSession()).toBeUndefined();
-    expect(protectedStore.loadPendingPairing()).toBeUndefined();
-  });
-
-  it('reports an unavailable protector instead of claiming the Worker has no session', () => {
-    const path = join(
-      mkdtempSync(join(tmpdir(), 'joy-media-worker-protector-down-')),
-      'state.json',
-    );
-    const protector = {
-      protect: (value: string) => Buffer.from(value).toString('base64url'),
-      unprotect: (value: string) => Buffer.from(value, 'base64url').toString('utf8'),
-    };
-    const store = new JsonFileWorkerStore(path, { secretProtector: protector });
-    store.saveWorkerSession('worker-session-secret');
-
-    const unavailable = new JsonFileWorkerStore(path, {
-      secretProtector: {
-        protect: () => 'ciphertext',
-        unprotect: () => {
-          throw new WorkerSecretProtectorUnavailableError('unprotect', 'helper did not run');
-        },
-      },
-    });
-    expect(() => unavailable.loadWorkerSession()).toThrow(WorkerSecretProtectorUnavailableError);
-  });
-
-  it('fails migration closed when a protected legacy read cannot be decoded', () => {
-    const path = join(mkdtempSync(join(tmpdir(), 'joy-media-worker-migrate-fail-')), 'state.json');
     writeFileSync(
       path,
       JSON.stringify({
-        identity: { workerId: 'worker-legacy', createdAt: '2026-07-22T00:00:00.000Z' },
-        sessionToken: 'legacy-session-secret',
-        protectedSessionToken: 'unreadable-ciphertext',
+        sessionToken: 'older-session',
+        pendingPairing: { code: 'older-code', expiresAt: Date.now() + 60_000 },
       }),
     );
-    const protectedStore = new JsonFileWorkerStore(path, {
-      secretProtector: {
-        protect: () => 'ciphertext',
-        unprotect: () => {
-          throw new Error('cannot decrypt');
-        },
-      },
-    });
+    const store = new JsonFileWorkerStore(path);
+    const identity = getDeviceIdentity(store, new Date('2026-07-22T00:00:00.000Z'));
 
-    expect(() => protectedStore.migrateLegacySecrets()).toThrow(
-      'Unable to protect legacy Worker state',
-    );
-    expect(readFileSync(path, 'utf8')).toContain('legacy-session-secret');
+    const restarted = new JsonFileWorkerStore(path);
+    expect(restarted.load()).toEqual(identity);
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({
+      identity,
+      sessionToken: 'older-session',
+      pendingPairing: { code: 'older-code' },
+    });
   });
 
-  it.runIf(process.platform === 'win32')(
-    'preserves exact Windows DPAPI-protected secret values',
-    () => {
-      const protector = new WindowsDpapiSecretProtector();
-      const value = '  worker-secret with spaces  \n';
-      const encrypted = protector.protect(value);
-      expect(protector.unprotect(encrypted)).toBe(value);
-    },
-    30_000,
-  );
+  it('treats a malformed or missing state file as having no identity', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'joy-media-worker-malformed-'));
+    const path = join(dir, 'state.json');
+    writeFileSync(path, '{ not json');
+    expect(new JsonFileWorkerStore(path).load()).toBeUndefined();
+    expect(new JsonFileWorkerStore(join(dir, 'missing.json')).load()).toBeUndefined();
+  });
 
   it('keeps source paths local while advertising configured opaque IDs only', () => {
     const registry = localAssetSourcesFromEnvironment(
@@ -381,7 +305,7 @@ describe('Worker runtime', () => {
     const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-ml-'));
     const runtime = new WorkerRuntime(
       { workerId: 'worker-ml', createdAt: '2026-07-24T00:00:00.000Z' },
-      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: true, aiProviders: [] },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: true, aiBroker: false },
       { derivativeDirectory },
     );
     try {
@@ -392,6 +316,8 @@ describe('Worker runtime', () => {
       expect(result.state).toBe('completed');
       if (result.state !== 'completed') return;
       expect(result.result.kind).toBe('audio.ml-denoise');
+      if (result.result.kind !== 'audio.ml-denoise')
+        throw new Error('expected the denoised audio receipt');
       expect(result.result.bytes).toBeGreaterThan(100);
       expect(runtime.readDerivative(result.result).byteLength).toBe(result.result.bytes);
     } finally {
@@ -406,7 +332,7 @@ describe('Worker runtime', () => {
   it('fails closed instead of synthesizing audio when a selected source is unavailable', async () => {
     const runtime = new WorkerRuntime(
       { workerId: 'worker-audio-source', createdAt: '2026-07-24T00:00:00.000Z' },
-      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: true, aiProviders: [] },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: true, aiBroker: false },
     );
     await expect(
       runtime.run(
@@ -423,7 +349,7 @@ describe('Worker runtime', () => {
     delete process.env.JOY_MEDIA_RNNOISE_MODEL;
     const runtime = new WorkerRuntime(
       { workerId: 'w', createdAt: 'now' },
-      { ffmpeg: true, ffprobe: true, comfy: true, mlDenoise: true, aiProviders: [] },
+      { ffmpeg: true, ffprobe: true, comfy: true, mlDenoise: true, aiBroker: false },
     );
     try {
       expect(runtime.hello('linux', 'x64').capabilities).toEqual([
@@ -439,138 +365,117 @@ describe('Worker runtime', () => {
   });
 });
 
-describe('Worker provider-key boundary', () => {
-  const seededKey = 'sk-seeded-boundary-test';
-  const identity = { workerId: 'boundary-worker', createdAt: '2026-01-01T00:00:00.000Z' };
+describe('Worker AI text jobs through the desktop broker', () => {
+  const identity = { workerId: 'broker-worker', createdAt: '2026-01-01T00:00:00.000Z' };
   const progress = async () => undefined;
-  const saved = {
-    HOME: process.env.HOME,
-    USERPROFILE: process.env.USERPROFILE,
-    localToken: process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN,
-  };
-  const tempDirs: string[] = [];
 
   beforeEach(() => {
     vi.mocked(readFileSync).mockClear();
   });
 
-  /** The reads of the provider file since the test began. */
-  const providerFileReads = () =>
-    vi
-      .mocked(readFileSync)
-      .mock.calls.filter(([path]) => String(path).endsWith('ai-providers.json'));
-
-  function restoreEnv(name: string, value: string | undefined): void {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
-  }
-
   afterEach(() => {
     vi.unstubAllGlobals();
-    restoreEnv('HOME', saved.HOME);
-    restoreEnv('USERPROFILE', saved.USERPROFILE);
-    restoreEnv('JOY_MEDIA_WORKER_LOCAL_TOKEN', saved.localToken);
-    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  /** Loads the runtime under a home directory holding a provider file with a key, as on a Worker PC. */
-  async function loadRuntimeWithProviderFile() {
-    const home = mkdtempSync(join(tmpdir(), 'joy-media-worker-home-'));
-    tempDirs.push(home);
-    mkdirSync(join(home, '.joy-media'));
-    writeFileSync(
-      join(home, '.joy-media', 'ai-providers.json'),
-      JSON.stringify({
-        'lm-studio': {
-          baseUrl: 'http://127.0.0.1:1234/v1',
-          apiKey: seededKey,
-          defaultModel: 'local-model',
-        },
-      }),
-    );
-    process.env.HOME = home;
-    process.env.USERPROFILE = home;
-    // local-ai.ts reads the home directory when it loads, so the runtime is loaded again under this home.
-    vi.resetModules();
-    return import('./runtime.js');
-  }
-
-  it('reads the provider file only for a Worker with no local token', async () => {
-    const runtime = await loadRuntimeWithProviderFile();
-    delete process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN;
-    expect(runtime.detectMediaTools(() => false).aiProviders).toEqual(['lm-studio']);
-    expect(providerFileReads()).not.toHaveLength(0);
-
-    vi.mocked(readFileSync).mockClear();
-    process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN = 'desktop-local-token';
-    expect(runtime.detectMediaTools(() => false).aiProviders).toEqual([]);
-    expect(providerFileReads()).toEqual([]);
-  });
-
-  it('advertises no provider capability under the desktop app', async () => {
-    const runtime = await loadRuntimeWithProviderFile();
-    process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN = 'desktop-local-token';
-    const worker = new runtime.WorkerRuntime(
+  it('advertises the LM Studio text capability only when the desktop broker is available', () => {
+    const withBroker = new WorkerRuntime(
       identity,
-      runtime.detectMediaTools(() => false),
+      detectMediaTools(() => false, { aiBroker: true }),
     );
-
-    expect(worker.hello('win32', 'x64').capabilities).not.toContain('text.lm-studio');
+    const withoutBroker = new WorkerRuntime(
+      identity,
+      detectMediaTools(() => false),
+    );
+    expect(withBroker.hello('win32', 'x64').capabilities).toContain('text.lm-studio');
+    expect(withoutBroker.hello('win32', 'x64').capabilities).not.toContain('text.lm-studio');
   });
 
-  it('refuses a provider job under the desktop app before any key is read or request sent', async () => {
-    const runtime = await loadRuntimeWithProviderFile();
-    process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN = 'desktop-local-token';
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-    const worker = new runtime.WorkerRuntime(
+  it('sends the prompt through the broker and returns only the reply text', async () => {
+    const calls: Array<{ jobId: string; leaseToken: string; input: unknown }> = [];
+    const worker = new WorkerRuntime(
       identity,
-      runtime.detectMediaTools(() => false),
-    );
-
-    await expect(
-      worker.run(
-        {
-          id: 'job-local-lm',
-          type: 'text.lm-studio',
-          payload: { prompt: 'hi', model: 'local-model' },
-        },
-        { cancelled: () => false, progress },
-      ),
-    ).rejects.toThrow('AI provider "lm-studio" is not available on this Worker');
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(providerFileReads()).toEqual([]);
-  });
-
-  it('runs the same provider job for a standalone Worker that holds the file', async () => {
-    const runtime = await loadRuntimeWithProviderFile();
-    delete process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN;
-    const fetchSpy = vi.fn<(input: string | URL | Request) => Promise<Response>>(async () =>
-      Response.json({ choices: [{ message: { content: 'ok' } }] }),
-    );
-    vi.stubGlobal('fetch', fetchSpy);
-    const derivativeDirectory = mkdtempSync(join(tmpdir(), 'joy-media-standalone-ai-'));
-    tempDirs.push(derivativeDirectory);
-    const worker = new runtime.WorkerRuntime(
-      identity,
-      runtime.detectMediaTools(() => false),
+      detectMediaTools(() => false, { aiBroker: true }),
       {
-        derivativeDirectory,
+        completeAi: async (jobId, leaseToken, input) => {
+          calls.push({ jobId, leaseToken, input });
+          return 'reply from the desktop';
+        },
       },
     );
 
     const outcome = await worker.run(
       {
-        id: 'job-standalone-lm',
+        id: 'job-text-1',
         type: 'text.lm-studio',
-        payload: { prompt: 'hi', model: 'local-model' },
+        leaseToken: 'lease-1',
+        payload: { prompt: 'hi', model: 'chosen-by-the-desktop' },
       },
       { cancelled: () => false, progress },
     );
 
-    expect(outcome.state).toBe('completed');
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('http://127.0.0.1:1234/v1/chat/completions');
-    expect(providerFileReads()).not.toHaveLength(0);
+    expect(outcome).toEqual({
+      state: 'completed',
+      result: {
+        kind: 'text',
+        jobId: 'job-text-1',
+        provider: 'lm-studio',
+        text: 'reply from the desktop',
+      },
+    });
+    expect(calls).toEqual([
+      {
+        jobId: 'job-text-1',
+        leaseToken: 'lease-1',
+        input: { messages: [{ role: 'user', content: 'hi' }] },
+      },
+    ]);
+    expect(JSON.stringify(calls)).not.toContain('chosen-by-the-desktop');
+  });
+
+  it('refuses an AI text job without the broker before any request is sent', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const worker = new WorkerRuntime(
+      identity,
+      detectMediaTools(() => false),
+    );
+
+    await expect(
+      worker.run(
+        {
+          id: 'job-no-broker',
+          type: 'text.lm-studio',
+          leaseToken: 'lease-2',
+          payload: { prompt: 'hi' },
+        },
+        { cancelled: () => false, progress },
+      ),
+    ).rejects.toThrow('AI text jobs need the desktop app broker on this Worker');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('never reads the legacy provider file', async () => {
+    const worker = new WorkerRuntime(
+      identity,
+      detectMediaTools(() => false, { aiBroker: true }),
+      {
+        completeAi: async () => 'ok',
+      },
+    );
+
+    await worker.run(
+      {
+        id: 'job-no-file',
+        type: 'text.lm-studio',
+        leaseToken: 'lease-3',
+        payload: { prompt: 'hi' },
+      },
+      { cancelled: () => false, progress },
+    );
+
+    const providerFileReads = vi
+      .mocked(readFileSync)
+      .mock.calls.filter(([path]) => String(path).endsWith('ai-providers.json'));
+    expect(providerFileReads).toEqual([]);
   });
 });

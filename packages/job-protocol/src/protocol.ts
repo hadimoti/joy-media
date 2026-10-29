@@ -15,9 +15,7 @@ export type WorkerCapability =
   | 'mask.video'
   | 'audio.ml-denoise'
   | 'text.lm-studio'
-  | 'text.openrouter'
-  | 'video.runway'
-  | 'edit.higgsfield';
+  | 'text.openrouter';
 
 export type SpecializedJobType =
   | 'image.comfy'
@@ -27,9 +25,7 @@ export type SpecializedJobType =
   | 'mask.video'
   | 'audio.ml-denoise'
   | 'text.lm-studio'
-  | 'text.openrouter'
-  | 'video.runway'
-  | 'edit.higgsfield';
+  | 'text.openrouter';
 export const SPECIALIZED_JOB_TYPES: readonly WorkerCapability[] = [
   'image.comfy',
   'upscale.image',
@@ -39,8 +35,6 @@ export const SPECIALIZED_JOB_TYPES: readonly WorkerCapability[] = [
   'audio.ml-denoise',
   'text.lm-studio',
   'text.openrouter',
-  'video.runway',
-  'edit.higgsfield',
 ] as const;
 
 export type UpscalePreset = 'fast' | 'quality';

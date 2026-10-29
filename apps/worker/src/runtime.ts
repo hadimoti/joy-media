@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { spawn, spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { WorkerCapability, WorkerHello, WorkerModelInventory } from '@joy-media/job-protocol';
@@ -20,12 +20,7 @@ import {
   runImageComfyJob,
   type LocalGpuReceipt,
 } from './local-gpu.js';
-import {
-  runAiJob,
-  getConfiguredProviders,
-  type LocalAiReceipt,
-  type AiProvider,
-} from './local-ai.js';
+import { runBrokerTextJob, type BrokerCompletion, type LocalAiReceipt } from './local-ai.js';
 import {
   maskingAvailabilityFromEnvironment,
   readMaskDerivative,
@@ -51,298 +46,41 @@ export interface IdentityStore {
   load(): DeviceIdentity | undefined;
   save(identity: DeviceIdentity): void;
 }
-export interface PersistentWorkerStore extends IdentityStore {
-  loadWorkerSession(): string | undefined;
-  saveWorkerSession(sessionToken: string): void;
-  clearWorkerSession(): void;
-  loadPendingPairing(): { readonly code: string; readonly expiresAt: number } | undefined;
-  savePendingPairing(code: string, expiresAt: number): void;
-  clearPendingPairing(): void;
-}
-
-/** Protects Worker-only secrets before they leave process memory. */
-export interface WorkerSecretProtector {
-  protect(value: string): string;
-  unprotect(value: string): string | undefined;
-}
 
 /**
- * A cold powershell.exe plus `Add-Type System.Security` is slow on Windows
- * Server Core containers, where 5s was short enough to abort routine pairings.
+ * The Worker's identity is the only thing this file is read for. A Worker under the desktop app
+ * authenticates with its per-run token alone, so no session token is read or written here. Pairing and
+ * session fields that older builds stored are neither read nor deleted: `save` carries them over unchanged.
  */
-const DPAPI_HELPER_TIMEOUT_MS = 30_000;
-/**
- * Bounds the in-process plaintext cache for a long-lived unpaired Worker that
- * re-protects a pairing code every few minutes.
- */
-const DPAPI_CACHE_LIMIT = 32;
-
-/**
- * The protector itself could not run, so the ciphertext is still unjudged.
- *
- * This is deliberately distinct from `unprotect` returning `undefined`: that
- * answer means "this machine/user cannot decrypt these bytes" and correctly
- * fails closed into a fresh pairing, while this error means the Worker learned
- * nothing and must not present itself as unpaired.
- */
-export class WorkerSecretProtectorUnavailableError extends Error {
-  constructor(action: 'protect' | 'unprotect', detail: string) {
-    super(`Worker secret protector could not ${action}: ${detail}`);
-    this.name = 'WorkerSecretProtectorUnavailableError';
-  }
-}
-
-/**
- * Uses the Windows user DPAPI through PowerShell without placing a secret in
- * command-line arguments or logs. The portable JSON store remains injectable
- * for non-Windows/test environments; the packaged Windows Worker selects this
- * protector from index.ts and fails closed if DPAPI cannot complete an action.
- */
-export class WindowsDpapiSecretProtector implements WorkerSecretProtector {
-  /**
-   * Ciphertext to plaintext for this process only. Pairing reads and writes the
-   * state file several times, and every uncached read cost another cold
-   * powershell.exe. The process already holds these secrets in memory, and the
-   * map is never serialized.
-   */
-  readonly #decrypted = new Map<string, string>();
-
-  private static readonly ENCODING_TIMEOUT_MS = DPAPI_HELPER_TIMEOUT_MS;
-
-  private static runPowerShell(command: string, input: string): SpawnSyncReturns<string> {
-    return spawnSync(
-      'powershell.exe',
-      [
-        '-NoLogo',
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-Command',
-        command,
-      ],
-      {
-        input,
-        encoding: 'utf8',
-        timeout: WindowsDpapiSecretProtector.ENCODING_TIMEOUT_MS,
-        windowsHide: true,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      },
-    );
-  }
-
-  protect(value: string): string {
-    const result = this.#run(
-      "$ErrorActionPreference='Stop'; $plain=[Console]::In.ReadToEnd(); Add-Type -AssemblyName System.Security; $bytes=[Text.Encoding]::UTF8.GetBytes($plain); $protected=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($protected))",
-      value,
-      'protect',
-    );
-    if (result.status !== 0) {
-      throw new Error(
-        `Windows DPAPI protection failed (status=${result.status}: ${result.stderr ?? ''})`,
-      );
-    }
-    const encrypted = result.stdout.trim();
-    if (encrypted.length === 0) throw new Error('Windows DPAPI protection returned no ciphertext');
-    this.#remember(encrypted, value);
-    return encrypted;
-  }
-
-  unprotect(value: string): string | undefined {
-    const cached = this.#decrypted.get(value);
-    if (cached !== undefined) return cached;
-    const result = this.#run(
-      "$ErrorActionPreference='Stop'; $encrypted=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); Add-Type -AssemblyName System.Security; $plain=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); $writer=[Console]::Out; $utf8=[Text.Encoding]::UTF8; $writer.Write($utf8.GetString($plain))",
-      value,
-      'unprotect',
-    );
-    // A non-zero exit means PowerShell ran and DPAPI refused the ciphertext
-    // (foreign user or migrated profile), which must fail closed into a fresh
-    // pairing. A helper that never ran is reported by #run instead, because
-    // treating it as "undecryptable" silently downgrades a paired Worker.
-    if (result.status !== 0) return undefined;
-    const encoded = result.stdout;
-    if (encoded.length === 0) return undefined;
-    const plain = encoded;
-    this.#remember(value, plain);
-    return plain;
-  }
-
-  #run(command: string, input: string, action: 'protect' | 'unprotect'): SpawnSyncReturns<string> {
-    const result = WindowsDpapiSecretProtector.runPowerShell(command, input);
-    if (result.error !== undefined)
-      throw new WorkerSecretProtectorUnavailableError(action, result.error.message);
-    // spawnSync reports a timeout or an external kill as a signal with no exit
-    // status; neither says anything about the secret it was handed.
-    if (result.status === null || result.signal !== null)
-      throw new WorkerSecretProtectorUnavailableError(
-        action,
-        `powershell.exe exited on ${result.signal ?? 'an unknown signal'} after ${DPAPI_HELPER_TIMEOUT_MS}ms`,
-      );
-    return result;
-  }
-
-  #remember(ciphertext: string, plain: string): void {
-    if (this.#decrypted.size >= DPAPI_CACHE_LIMIT) {
-      const oldest = this.#decrypted.keys().next();
-      if (!oldest.done) this.#decrypted.delete(oldest.value);
-    }
-    this.#decrypted.set(ciphertext, plain);
-  }
-}
-
-export class JsonFileWorkerStore implements PersistentWorkerStore {
-  constructor(
-    private readonly path = join(homedir(), '.joy-media', 'worker-state.json'),
-    private readonly options: { readonly secretProtector?: WorkerSecretProtector } = {},
-  ) {}
+export class JsonFileWorkerStore implements IdentityStore {
+  constructor(private readonly path = join(homedir(), '.joy-media', 'worker-state.json')) {}
 
   load(): DeviceIdentity | undefined {
-    return this.read().identity;
+    const identity = this.read().identity;
+    return isDeviceIdentity(identity) ? identity : undefined;
   }
+
   save(identity: DeviceIdentity): void {
     this.write({ ...this.read(), identity });
   }
-  loadWorkerSession(): string | undefined {
-    return this.read().sessionToken;
-  }
-  saveWorkerSession(sessionToken: string): void {
-    this.write({ ...this.read(), sessionToken });
-  }
-  clearWorkerSession(): void {
-    const { identity } = this.read();
-    this.write(identity === undefined ? {} : { identity });
-  }
-  loadPendingPairing(): { readonly code: string; readonly expiresAt: number } | undefined {
-    const pending = this.read().pendingPairing;
-    return pending === undefined || pending.expiresAt <= Date.now() ? undefined : pending;
-  }
-  savePendingPairing(code: string, expiresAt: number): void {
-    this.write({ ...this.read(), pendingPairing: { code, expiresAt } });
-  }
-  clearPendingPairing(): void {
-    const { identity, sessionToken } = this.read();
-    this.write({
-      ...(identity === undefined ? {} : { identity }),
-      ...(sessionToken === undefined ? {} : { sessionToken }),
-    });
-  }
 
-  /** Rewrite pre-DPAPI state once during Windows Worker startup. */
-  migrateLegacySecrets(): void {
-    if (this.options.secretProtector === undefined || !existsSync(this.path)) return;
-    let raw: unknown;
-    try {
-      raw = JSON.parse(readFileSync(this.path, 'utf8'));
-    } catch {
-      // A malformed/locked state is handled by the ordinary fail-closed reads.
-      return;
-    }
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return;
-    const record = raw as Record<string, unknown>;
-    const hasLegacySession = typeof record.sessionToken === 'string';
-    const hasLegacyPairing = isPendingPairing(record.pendingPairing);
-    // Deliberately let protection errors surface: retaining plaintext would be
-    // worse than refusing to start the packaged Worker.
-    if (hasLegacySession || hasLegacyPairing) {
-      const legacyState = this.read(true);
-      if (
-        (hasLegacySession && typeof legacyState.sessionToken !== 'string') ||
-        (hasLegacyPairing && legacyState.pendingPairing === undefined)
-      )
-        throw new Error('Unable to protect legacy Worker state');
-      this.write(legacyState);
-    }
-  }
-
-  private read(allowLegacyPlaintext = false): {
-    readonly identity?: DeviceIdentity;
-    readonly sessionToken?: string;
-    readonly pendingPairing?: { readonly code: string; readonly expiresAt: number };
-  } {
+  private read(): Record<string, unknown> {
     if (!existsSync(this.path)) return {};
     try {
       const value: unknown = JSON.parse(readFileSync(this.path, 'utf8'));
-      if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
-      const raw = value as Record<string, unknown>;
-      const identity = raw.identity;
-      const protectedSessionToken =
-        typeof raw.protectedSessionToken === 'string'
-          ? this.options.secretProtector?.unprotect(raw.protectedSessionToken)
-          : undefined;
-      const protectedPairing = raw.protectedPendingPairing;
-      const protectedPairingCode =
-        protectedPairing !== null &&
-        typeof protectedPairing === 'object' &&
-        !Array.isArray(protectedPairing) &&
-        typeof (protectedPairing as Record<string, unknown>).ciphertext === 'string'
-          ? this.options.secretProtector?.unprotect(
-              (protectedPairing as Record<string, unknown>).ciphertext as string,
-            )
-          : undefined;
-      const protectedPairingExpiresAt =
-        protectedPairing !== null &&
-        typeof protectedPairing === 'object' &&
-        !Array.isArray(protectedPairing) &&
-        typeof (protectedPairing as Record<string, unknown>).expiresAt === 'number'
-          ? ((protectedPairing as Record<string, unknown>).expiresAt as number)
-          : undefined;
-      return {
-        ...(isDeviceIdentity(identity) ? { identity } : {}),
-        ...(protectedSessionToken !== undefined
-          ? { sessionToken: protectedSessionToken }
-          : (this.options.secretProtector === undefined || allowLegacyPlaintext) &&
-              typeof raw.sessionToken === 'string'
-            ? { sessionToken: raw.sessionToken }
-            : {}),
-        ...(protectedPairingCode !== undefined &&
-        protectedPairingExpiresAt !== undefined &&
-        Number.isSafeInteger(protectedPairingExpiresAt)
-          ? {
-              pendingPairing: {
-                code: protectedPairingCode,
-                expiresAt: protectedPairingExpiresAt,
-              },
-            }
-          : (this.options.secretProtector === undefined || allowLegacyPlaintext) &&
-              isPendingPairing(raw.pendingPairing)
-            ? { pendingPairing: raw.pendingPairing }
-            : {}),
-      };
-    } catch (error) {
+      return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+    } catch {
       // Missing, locked, or malformed state legitimately reads as "no state".
-      // A protector that could not run does not: swallowing it here is what
-      // makes a paired Worker look like it never paired at all.
-      if (error instanceof WorkerSecretProtectorUnavailableError) throw error;
       return {};
     }
   }
 
-  private write(state: {
-    readonly identity?: DeviceIdentity;
-    readonly sessionToken?: string;
-    readonly pendingPairing?: { readonly code: string; readonly expiresAt: number };
-  }): void {
+  private write(state: Record<string, unknown>): void {
     mkdirSync(dirname(this.path), { recursive: true });
     const temporaryPath = `${this.path}.tmp-${randomUUID()}`;
-    const persisted: Record<string, unknown> = {
-      ...(state.identity === undefined ? {} : { identity: state.identity }),
-    };
-    if (state.sessionToken !== undefined) {
-      if (this.options.secretProtector === undefined) persisted.sessionToken = state.sessionToken;
-      else
-        persisted.protectedSessionToken = this.options.secretProtector.protect(state.sessionToken);
-    }
-    if (state.pendingPairing !== undefined) {
-      if (this.options.secretProtector === undefined)
-        persisted.pendingPairing = state.pendingPairing;
-      else
-        persisted.protectedPendingPairing = {
-          ciphertext: this.options.secretProtector.protect(state.pendingPairing.code),
-          expiresAt: state.pendingPairing.expiresAt,
-        };
-    }
-    writeFileSync(temporaryPath, JSON.stringify(persisted), { encoding: 'utf8', mode: 0o600 });
+    writeFileSync(temporaryPath, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
     renameSync(temporaryPath, this.path);
   }
 }
@@ -371,8 +109,8 @@ export interface ToolAvailability {
   readonly comfy: boolean;
   /** Local ML denoise tool/env on the Worker PC — ADR-0018. */
   readonly mlDenoise: boolean;
-  /** AI providers configured via ~/.joy-media/ai-providers.json — never on the VPS. */
-  readonly aiProviders: readonly AiProvider[];
+  /** Whether the desktop app broker relays AI text jobs for this Worker (PLAN-v4 §6b). */
+  readonly aiBroker: boolean;
   /** Explicit local model runners; omitted means masking is unavailable. */
   readonly masking?: MaskingAvailability;
   /** Explicit image/video upscaling runners; omitted means enhancement is unavailable. */
@@ -389,11 +127,7 @@ export class UnsupportedWorkerJobError extends Error {
   }
 }
 
-const UNSUPPORTED_PROVIDER_JOB_TYPES = new Set([
-  'text.openrouter',
-  'video.runway',
-  'edit.higgsfield',
-]);
+const UNSUPPORTED_PROVIDER_JOB_TYPES = new Set(['text.openrouter']);
 
 /** Private mapping held only by the Worker; it is never serialized to the API. */
 export interface LocalAssetSourceRegistry {
@@ -449,13 +183,12 @@ export function localAssetSourcesFromEnvironment(
   return new StaticLocalAssetSourceRegistry(sources);
 }
 /**
- * What this Worker can run. A local Worker under the desktop app holds no provider key, so it is started
- * with `readAiProviderFile` false and reads no provider file. Its provider jobs go through the desktop
- * broker instead (PLAN-v4 §6b).
+ * What this Worker can run. A Worker under the desktop app holds no provider key. Its AI text jobs go
+ * through the desktop broker, which the app's local token enables (PLAN-v4 §6b).
  */
 export function detectMediaTools(
   run: (tool: string) => boolean = canRun,
-  options: { readonly readAiProviderFile?: boolean } = {},
+  options: { readonly aiBroker?: boolean } = {},
 ): ToolAvailability {
   const comfyUrl = (process.env.JOY_MEDIA_LOCAL_COMFY_URL ?? '').trim();
   return {
@@ -465,18 +198,10 @@ export function detectMediaTools(
     comfy: comfyUrl.length > 0,
     // Opt-in: owner PC has ML denoise tooling installed.
     mlDenoise: (process.env.JOY_MEDIA_LOCAL_ML_DENOISE ?? '').trim() === '1',
-    // AI providers configured via ~/.joy-media/ai-providers.json, unless this Worker holds no keys
-    // A Worker started by the desktop app carries a local token and holds no provider key, so it reads no
-    // provider file (PLAN-v4 §6b). A Worker without one keeps its own file.
-    aiProviders: providerFileRead(options) ? getConfiguredProviders() : [],
+    aiBroker: options.aiBroker === true,
     masking: maskingAvailabilityFromEnvironment(),
     upscaling: upscalingAvailabilityFromEnvironment(),
   };
-}
-/** Whether this Worker reads the provider file. A Worker started by the desktop app carries a local token. */
-function providerFileRead(options: { readonly readAiProviderFile?: boolean }): boolean {
-  if (options.readAiProviderFile !== undefined) return options.readAiProviderFile;
-  return (process.env.JOY_MEDIA_WORKER_LOCAL_TOKEN ?? '').trim() === '';
 }
 
 function canRun(tool: string): boolean {
@@ -492,17 +217,6 @@ function isDeviceIdentity(value: unknown): value is DeviceIdentity {
     typeof (value as Record<string, unknown>).createdAt === 'string'
   );
 }
-function isPendingPairing(
-  value: unknown,
-): value is { readonly code: string; readonly expiresAt: number } {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    typeof (value as Record<string, unknown>).code === 'string' &&
-    typeof (value as Record<string, unknown>).expiresAt === 'number' &&
-    Number.isSafeInteger((value as Record<string, unknown>).expiresAt)
-  );
-}
 export class WorkerRuntime {
   readonly log = new BoundedLog();
   constructor(
@@ -513,6 +227,7 @@ export class WorkerRuntime {
       readonly derivativeDirectory?: string;
       readonly gpuPreviewAvailable?: boolean;
       readonly downloadJobAsset?: (jobId: string, leaseToken?: string) => Promise<Uint8Array>;
+      readonly completeAi?: BrokerCompletion;
     } = {},
   ) {}
   hello(platform: string, architecture: string): WorkerHello {
@@ -532,10 +247,7 @@ export class WorkerRuntime {
     if (this.tools.ffprobe && this.tools.masking?.video !== undefined)
       capabilities.push('mask.video');
     if (this.tools.mlDenoise && mlDenoiseRunnable()) capabilities.push('audio.ml-denoise');
-    if (this.tools.aiProviders.includes('lm-studio')) capabilities.push('text.lm-studio');
-    if (this.tools.aiProviders.includes('openrouter')) capabilities.push('text.openrouter');
-    if (this.tools.aiProviders.includes('runway')) capabilities.push('video.runway');
-    if (this.tools.aiProviders.includes('higgsfield')) capabilities.push('edit.higgsfield');
+    if (this.tools.aiBroker) capabilities.push('text.lm-studio');
     return {
       protocolVersion: WORKER_PROTOCOL_VERSION,
       workerId: this.identity.workerId,
@@ -765,40 +477,23 @@ export class WorkerRuntime {
         throw error;
       }
     }
-    // AI provider jobs (LM Studio, OpenRouter, Runway, Higgsfield)
-    if (
-      job.type.startsWith('text.') ||
-      job.type.startsWith('video.') ||
-      job.type.startsWith('edit.')
-    ) {
-      const provider = job.type.replace(/^(text\.|video\.|edit\.)/, '') as AiProvider;
-      // Only a Worker configured for this provider reads its key. A local Worker under the desktop app is
-      // configured for none, so its provider job fails here, before any key file is read (PLAN-v4 §6b).
-      if (!this.tools.aiProviders.includes(provider)) {
-        throw new Error(`AI provider "${provider}" is not available on this Worker`);
-      }
-      const derivativeDirectory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+    // AI text jobs go through the desktop broker, which holds the job's profile and its key (PLAN-v4 §6b).
+    if (job.type === 'text.lm-studio') {
+      const complete = this.options.completeAi;
+      if (!this.tools.aiBroker || complete === undefined || job.leaseToken === undefined)
+        throw new Error('AI text jobs need the desktop app broker on this Worker');
+      if (options.cancelled()) return { state: 'canceled' };
       this.log.write(`job ${job.id} started (${job.type})`);
-      try {
-        const result = await runAiJob({
-          jobId: job.id,
-          provider,
-          model: job.payload?.model ?? '',
-          prompt: job.payload?.prompt ?? '',
-          derivativeDirectory,
-          cancelled: options.cancelled,
-          progress: options.progress,
-        });
-        this.log.write(`job ${job.id} completed`);
-        return { state: 'completed', result };
-      } catch (error) {
-        if (error instanceof Error && error.message === 'canceled') {
-          this.log.write(`job ${job.id} canceled`);
-          return { state: 'canceled' };
-        }
-        throw error;
-      }
+      const result = await runBrokerTextJob({
+        jobId: job.id,
+        leaseToken: job.leaseToken,
+        prompt: job.payload?.prompt ?? '',
+        ...(job.payload?.params === undefined ? {} : { params: job.payload.params }),
+        complete,
+        progress: options.progress,
+      });
+      this.log.write(`job ${job.id} completed`);
+      return { state: 'completed', result };
     }
     if (job.type !== 'asset.thumbnail' || job.assetId === undefined)
       throw new Error(`unsupported Worker job ${job.type}`);
@@ -955,21 +650,7 @@ export class WorkerRuntime {
         throw new Error('retained export derivative integrity check failed');
       return bytes;
     }
-    if (result.kind === 'text' || result.kind === 'image' || result.kind === 'video') {
-      if (result.localRef === undefined) throw new Error('AI derivative has no local reference');
-      const ext = result.kind === 'video' ? 'mp4' : result.kind === 'text' ? 'txt' : 'png';
-      const directory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
-      const bytes = readFileSync(join(directory, `${result.localRef}.${ext}`));
-      if (result.sha256 !== undefined && result.bytes !== undefined) {
-        if (
-          bytes.length !== result.bytes ||
-          createHash('sha256').update(bytes).digest('hex') !== result.sha256
-        )
-          throw new Error('retained AI derivative integrity check failed');
-      }
-      return bytes;
-    }
+    if (result.kind === 'text') throw new Error('AI text results have no retained derivative');
     if (result.kind === 'fixture.thumbnail') {
       throw new Error('fixture thumbnail has no retained derivative');
     }

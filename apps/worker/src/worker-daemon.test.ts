@@ -26,7 +26,7 @@ describe('WorkerDaemon', () => {
     } as unknown as WorkerControlPlaneClient;
     const runtime = new WorkerRuntime(
       { workerId: 'worker-expired', createdAt: '2026-08-29T00:00:00.000Z' },
-      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiProviders: [] },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiBroker: false },
     );
 
     await expect(
@@ -45,7 +45,7 @@ describe('WorkerDaemon', () => {
     } as unknown as WorkerControlPlaneClient;
     const runtime = new WorkerRuntime(
       { workerId: 'worker-preview-expired', createdAt: '2026-08-29T00:00:00.000Z' },
-      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiProviders: [] },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiBroker: false },
     );
     const gpuPreviewHost = {
       render: async () => {
@@ -75,7 +75,7 @@ describe('WorkerDaemon', () => {
     } as unknown as WorkerControlPlaneClient;
     const runtime = new WorkerRuntime(
       { workerId: 'worker-preview-idle', createdAt: '2026-08-29T00:00:00.000Z' },
-      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiProviders: [] },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiBroker: false },
     );
     const gpuPreviewHost = {
       render: async () => {
@@ -167,7 +167,7 @@ describe('WorkerDaemon', () => {
     } as unknown as WorkerControlPlaneClient;
     const runtime = new WorkerRuntime(
       { workerId: 'worker-fixture', createdAt: '2026-07-22T00:00:00.000Z' },
-      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiProviders: [] },
+      { ffmpeg: false, ffprobe: false, comfy: false, mlDenoise: false, aiBroker: false },
     );
 
     await new WorkerDaemon(client, runtime).run({ pollIntervalMs: 1, stopped: () => stop });
@@ -228,7 +228,7 @@ describe('WorkerDaemon', () => {
     );
     const runtime = new WorkerRuntime(
       { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
-      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiProviders: [] },
+      { ffmpeg: true, ffprobe: true, comfy: false, mlDenoise: false, aiBroker: false },
       {
         sources: new StaticLocalAssetSourceRegistry({ 'asset-intro': source }),
         derivativeDirectory,
