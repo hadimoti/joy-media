@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -155,26 +155,29 @@ describe.skipIf(!available)('packaged Worker startup', () => {
     }
   }, 120_000);
 
-  it('refuses a remote control plane before the Worker starts', () => {
-    const stateDir = mkdtempSync(join(tmpdir(), 'joy-packaged-worker-refuse-'));
-    try {
-      const result = spawnSync(executable, [], {
-        env: {
-          ...baseEnvironment(stateDir, `\\\\.\\pipe\\joy-media-worker-refuse-${process.pid}`),
-          JOY_MEDIA_API_URL: 'https://joyst.ir/api',
-          JOY_MEDIA_WORKER_LOCAL_TOKEN: TOKEN,
-        },
-        encoding: 'utf8',
-        timeout: 60_000,
-        windowsHide: true,
-      });
-      expect(result.status).not.toBe(0);
-      expect(`${result.stdout}${result.stderr}`).toContain('remote addresses are refused');
-      expect(existsSync(join(stateDir, 'worker-state.json'))).toBe(false);
-    } finally {
-      rmSync(stateDir, { recursive: true, force: true });
-    }
-  });
+  it.each(['https://joyst.ir/api', 'http://192.168.1.20:4174', 'http://localhost:4174'])(
+    'refuses %s before the Worker starts, and creates no state',
+    (remoteUrl) => {
+      const stateDir = mkdtempSync(join(tmpdir(), 'joy-packaged-worker-refuse-'));
+      try {
+        const result = spawnSync(executable, [], {
+          env: {
+            ...baseEnvironment(stateDir, `\\\\.\\pipe\\joy-media-worker-refuse-${process.pid}`),
+            JOY_MEDIA_API_URL: remoteUrl,
+            JOY_MEDIA_WORKER_LOCAL_TOKEN: TOKEN,
+          },
+          encoding: 'utf8',
+          timeout: 60_000,
+          windowsHide: true,
+        });
+        expect(result.status).not.toBe(0);
+        expect(`${result.stdout}${result.stderr}`).toContain('remote addresses are refused');
+        expect(readdirSync(stateDir)).toEqual([]);
+      } finally {
+        rmSync(stateDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('names the missing loopback address instead of defaulting to a remote one', () => {
     const stateDir = mkdtempSync(join(tmpdir(), 'joy-packaged-worker-missing-'));
@@ -189,6 +192,7 @@ describe.skipIf(!available)('packaged Worker startup', () => {
       });
       expect(result.status).not.toBe(0);
       expect(`${result.stdout}${result.stderr}`).toContain('JOY_MEDIA_API_URL is required');
+      expect(readdirSync(stateDir)).toEqual([]);
     } finally {
       rmSync(stateDir, { recursive: true, force: true });
     }
