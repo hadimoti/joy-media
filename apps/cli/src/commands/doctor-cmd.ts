@@ -7,12 +7,49 @@ import { DatabaseSync } from 'node:sqlite';
 import { resolveByokConfig } from '../agent/provider.js';
 import { getDefaultSqlitePath } from '../utils/config.js';
 import { c, logError, logSuccess, logWarn, printBanner } from '../utils/logger.js';
+import { isLocalPath, parseDriveTypes } from '../utils/local-path.js';
+
+const UNCHECKED = 'not checked (network or linked path)';
+
+/** Windows PowerShell by absolute path, so that no PATH entry can supply another program. */
+function powershellPath(): string {
+  const root = process.env.SystemRoot ?? 'C:\\Windows';
+  return join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
+/**
+ * The type of each drive, from .NET's DriveInfo. Only the type is read, never the contents of a
+ * volume. When the query fails, no drive is known, so every drive-letter path is reported unchecked.
+ */
+function readDriveTypes(): Map<string, number> {
+  const res = spawnSync(
+    powershellPath(),
+    [
+      '-NoProfile',
+      '-Command',
+      "[System.IO.DriveInfo]::GetDrives() | ForEach-Object { '{0}={1}' -f $_.Name.TrimEnd('\\'), [int]$_.DriveType }",
+    ],
+    { encoding: 'utf8' },
+  );
+  return res.status === 0 ? parseDriveTypes(res.stdout) : new Map();
+}
 
 export async function handleDoctorCommand(): Promise<number> {
   printBanner();
   console.log(`  ${c('JOY Media System Diagnostic & Health Check (Doctor)', 'bold')}\n`);
 
   let failures = 0;
+
+  // A path on a network drive, behind a UNC name or behind a link is not read at all. The
+  // configuration files are read by the database and BYOK checks, so those checks run only when
+  // every one of them is local.
+  const driveTypes = readDriveTypes();
+  const joyMediaDir = join(homedir(), '.joy-media');
+  const configLocal = [
+    joyMediaDir,
+    join(joyMediaDir, 'cli-config.json'),
+    join(joyMediaDir, 'ai-providers.json'),
+  ].every((path) => isLocalPath(path, driveTypes));
 
   // 1. Node.js Engine
   const nodeVer = process.versions.node;
@@ -37,18 +74,24 @@ export async function handleDoctorCommand(): Promise<number> {
   }
 
   // 3. Desktop Database Path
-  const dbPath = getDefaultSqlitePath();
-  if (existsSync(dbPath)) {
-    logSuccess(`Desktop Project Store: Found at ${c(dbPath, 'cyan')}`);
+  if (!configLocal) {
+    logWarn(`Desktop Project Store: ${UNCHECKED}`);
   } else {
-    logWarn(`Desktop Project Store: Not created yet (${dbPath})`);
+    const dbPath = getDefaultSqlitePath();
+    if (!isLocalPath(dbPath, driveTypes)) {
+      logWarn(`Desktop Project Store: ${UNCHECKED}`);
+    } else if (existsSync(dbPath)) {
+      logSuccess(`Desktop Project Store: Found at ${c(dbPath, 'cyan')}`);
+    } else {
+      logWarn(`Desktop Project Store: Not created yet (${dbPath})`);
+    }
   }
 
   // 4. GPU Telemetry
   let gpuName = 'Unknown';
   try {
     const res = spawnSync(
-      'powershell',
+      powershellPath(),
       [
         '-NoProfile',
         '-Command',
@@ -70,7 +113,9 @@ export async function handleDoctorCommand(): Promise<number> {
 
   // 5. Local Model Inventory
   const modelsDir = process.env.JOY_MODELS_DIR ?? join(homedir(), 'JOY', 'models');
-  if (existsSync(modelsDir)) {
+  if (!isLocalPath(modelsDir, driveTypes)) {
+    logWarn(`Local Model Weights: ${UNCHECKED}`);
+  } else if (existsSync(modelsDir)) {
     const files = readdirSync(modelsDir);
     logSuccess(`Local Model Weights: ${files.length} file(s) found in ${modelsDir}`);
   } else {
@@ -78,32 +123,35 @@ export async function handleDoctorCommand(): Promise<number> {
   }
 
   // 6. Python Environments
-  const joyMediaDir = join(homedir(), '.joy-media');
   const venvs = ['venv-realesrgan', 'venv-birefnet', 'venv-deepfilternet', 'venv-tts'];
-  let venvsReady = 0;
-  for (const v of venvs) {
-    if (existsSync(join(joyMediaDir, v, 'Scripts', 'python.exe'))) {
-      venvsReady++;
-    }
-  }
-  if (venvsReady === venvs.length) {
-    logSuccess(
-      `Local AI Venvs: All ${venvsReady}/${venvs.length} environments ready in ~/.joy-media`,
-    );
+  const pythons = venvs.map((v) => join(joyMediaDir, v, 'Scripts', 'python.exe'));
+  if (!pythons.every((python) => isLocalPath(python, driveTypes))) {
+    logWarn(`Local AI Venvs: ${UNCHECKED}`);
   } else {
-    logWarn(`Local AI Venvs: ${venvsReady}/${venvs.length} ready in ~/.joy-media`);
+    const venvsReady = pythons.filter((python) => existsSync(python)).length;
+    if (venvsReady === venvs.length) {
+      logSuccess(
+        `Local AI Venvs: All ${venvsReady}/${venvs.length} environments ready in ~/.joy-media`,
+      );
+    } else {
+      logWarn(`Local AI Venvs: ${venvsReady}/${venvs.length} ready in ~/.joy-media`);
+    }
   }
 
   // 7. Joy Agent BYOK Configuration
-  const byok = resolveByokConfig();
-  if (byok.apiKey && byok.apiKey !== 'not-provided') {
-    logSuccess(
-      `Joy Agent Provider: ${c(byok.provider, 'bold')} (${c(byok.modelId, 'cyan')}) [API Key Configured]`,
-    );
+  if (!configLocal) {
+    logWarn(`Joy Agent Provider: ${UNCHECKED}`);
   } else {
-    logWarn(
-      `Joy Agent Provider: ${byok.provider} (${byok.modelId}) [No API Key configured - set OPENROUTER_API_KEY]`,
-    );
+    const byok = resolveByokConfig();
+    if (byok.apiKey && byok.apiKey !== 'not-provided') {
+      logSuccess(
+        `Joy Agent Provider: ${c(byok.provider, 'bold')} (${c(byok.modelId, 'cyan')}) [API Key Configured]`,
+      );
+    } else {
+      logWarn(
+        `Joy Agent Provider: ${byok.provider} (${byok.modelId}) [No API Key configured - set OPENROUTER_API_KEY]`,
+      );
+    }
   }
 
   console.log();
