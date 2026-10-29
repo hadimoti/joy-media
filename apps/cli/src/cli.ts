@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util';
 import { handleAgentCommand } from './commands/agent-cmd.js';
 import { handleBenchmarkCommand } from './commands/benchmark-cmd.js';
 import { handleDoctorCommand } from './commands/doctor-cmd.js';
+import { handleDoctorLocalCommand } from './commands/doctor-local-cmd.js';
 import { handleProjectCommand } from './commands/project-cmd.js';
 import { handleRenderCommand } from './commands/render-cmd.js';
 import { handleTimelineCommand } from './commands/timeline-cmd.js';
@@ -68,6 +69,9 @@ export function printHelp(): void {
   );
   console.log(
     `    ${c('doctor', 'cyan')}                            System health check & diagnostics`,
+  );
+  console.log(
+    `    ${c('doctor-local', 'cyan')}                      Explicit local check: models, environments, provider settings`,
   );
   console.log(`    ${c('help', 'cyan')}                              Show this help guide\n`);
   console.log(`  ${c('Examples:', 'bold')}`);
@@ -217,6 +221,8 @@ export async function runCli(argv: string[]): Promise<number> {
         return await handleBenchmarkCommand(subArgs, flags);
       case 'doctor':
         return await handleDoctorCommand();
+      case 'doctor-local':
+        return await handleDoctorLocalCommand();
       case 'help':
         printHelp();
         return 0;
