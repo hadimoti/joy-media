@@ -12,7 +12,7 @@ import {
   signInWithChatGpt,
 } from './chatgpt.js';
 import { OAuthFlowError } from './errors.js';
-import { type FetchLike, replyText } from './http.js';
+import { MAX_CATALOG_CHARS, type FetchLike, replyText } from './http.js';
 import { OPENROUTER_BASE_URL, signInWithOpenRouter } from './openrouter.js';
 
 /** The model a new OpenRouter profile uses. It is the same default the settings dialog offers. */
@@ -102,7 +102,7 @@ async function firstChatGptModel(record: ChatGptTokenRecord, fetch: FetchLike): 
       `ChatGPT did not list models (HTTP ${response.status}).`,
     );
   }
-  const first = listedChatGptModels(await replyText(response))[0];
+  const first = listedChatGptModels(await replyText(response, MAX_CATALOG_CHARS))[0];
   if (first === undefined) {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT lists no models for this account.');
   }

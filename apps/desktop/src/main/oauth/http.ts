@@ -4,13 +4,18 @@ import { OAuthFlowError } from './errors.js';
 /** The `fetch` the sign-in flows use. It is injected, so tests never reach a real provider. */
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
-/** The largest reply a sign-in reads. Every reply here is a few kilobytes, so a longer one is refused. */
+/** The largest token or key-set reply a sign-in reads. Each is a few kilobytes, so a longer one is refused. */
 const MAX_REPLY_CHARS = 64 * 1024;
+/**
+ * The largest model catalog a ChatGPT sign-in reads. The catalog lists every model with its details, so it runs far
+ * longer than a token reply. The bound is 4 MiB, the broker's bound for a provider response.
+ */
+export const MAX_CATALOG_CHARS = 4 * 1024 * 1024;
 
-/** The reply text. A reply that is too large is refused, and its text is never part of the error. */
-export async function replyText(response: Response): Promise<string> {
+/** The reply text. A reply longer than `maxChars` is refused, and its text is never part of the error. */
+export async function replyText(response: Response, maxChars = MAX_REPLY_CHARS): Promise<string> {
   const text = await response.text();
-  if (text.length > MAX_REPLY_CHARS) {
+  if (text.length > maxChars) {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'The provider reply was too large.');
   }
   return text;

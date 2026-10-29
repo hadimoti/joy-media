@@ -201,6 +201,39 @@ describe('createProviderSignIn', () => {
     });
   });
 
+  it('reads a model catalog longer than a token reply, and starts on its first model', async () => {
+    let authUrl = '';
+    const fetchStub: FetchLike = async (url) => {
+      if (url === CHATGPT_JWKS_URL) return json({ keys: [JWK] });
+      if (url === CHATGPT_TOKEN_URL) {
+        const nonce = new URL(authUrl).searchParams.get('nonce') ?? '';
+        return json({
+          access_token: 'at-1',
+          refresh_token: 'rt-1',
+          id_token: signedIdToken(nonce),
+          expires_in: 3600,
+          scope: CHATGPT_SCOPE,
+        });
+      }
+      // The first entry is longer than a token reply, so the catalog runs past the token bound.
+      return json({
+        models: [{ slug: 'gpt-first', display_name: 'x'.repeat(200 * 1024), visibility: 'list' }],
+      });
+    };
+    const signIn = createProviderSignIn({
+      openExternal: async (url) => {
+        authUrl = url;
+        await returnFromBrowser(url, 'redirect_uri', (state) => `code=the-code&state=${state}`);
+      },
+      fetch: fetchStub,
+      now: Date.now,
+      chatGptClientId: CLIENT_ID,
+      installId: () => HOST_ID,
+      chatGptPort: 0,
+    });
+    await expect(signIn('chatgpt')).resolves.toMatchObject({ modelId: 'gpt-first' });
+  });
+
   it('saves nothing when the account lists no model', async () => {
     let authUrl = '';
     const fetchStub: FetchLike = async (url) => {
