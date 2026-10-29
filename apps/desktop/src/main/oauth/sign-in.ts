@@ -4,7 +4,13 @@ import {
   readChatGptModels,
 } from '../providers/adapters/chatgpt-responses.js';
 import { holdsCredential } from '../providers/credential-screen.js';
-import { type ChatGptTokenRecord, encodeTokenRecord, signInWithChatGpt } from './chatgpt.js';
+import {
+  type ChatGptTokenRecord,
+  encodeTokenRecord,
+  isExtAgentHostId,
+  newExtAgentHostId,
+  signInWithChatGpt,
+} from './chatgpt.js';
 import { OAuthFlowError } from './errors.js';
 import { type FetchLike, replyText } from './http.js';
 import { OPENROUTER_BASE_URL, signInWithOpenRouter } from './openrouter.js';
@@ -119,17 +125,26 @@ function listedChatGptModels(text: string): ReturnType<typeof readChatGptModels>
   }
 }
 
-/** This install's ChatGPT ID: the saved one, or a new one saved the first time (PLAN-v4 §6d). */
+/**
+ * This install's ChatGPT host ID (PLAN-v4 §6d). A saved ID in the form ChatGPT accepts is kept. Any other saved value was
+ * never accepted, so a new ID is created once and saved in its place.
+ */
 export function loadOrCreateInstallId(
   settings: {
     getSetting(key: string): string | undefined;
     setSetting(key: string, value: string): void;
   },
-  newId: () => string,
+  newId: () => string = newExtAgentHostId,
 ): string {
   const saved = settings.getSetting(INSTALL_ID_SETTING);
-  if (saved !== undefined && saved.length > 0) return saved;
+  if (saved !== undefined && isExtAgentHostId(saved)) return saved;
   const created = newId();
+  if (!isExtAgentHostId(created)) {
+    throw new OAuthFlowError(
+      'HOST_ID_INVALID',
+      'This app could not create a valid ChatGPT host ID.',
+    );
+  }
   settings.setSetting(INSTALL_ID_SETTING, created);
   return created;
 }

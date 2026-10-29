@@ -7,6 +7,7 @@ import {
   CHATGPT_SCOPE,
   CHATGPT_TOKEN_URL,
   decodeTokenRecord,
+  isExtAgentHostId,
 } from './chatgpt.js';
 import type { FetchLike } from './http.js';
 import { OPENROUTER_BASE_URL } from './openrouter.js';
@@ -18,6 +19,7 @@ import {
 } from './sign-in.js';
 
 const CLIENT_ID = 'test-client-id';
+const HOST_ID = 'urn:uuid:550e8400-e29b-41d4-a716-446655440000';
 const KID = 'test-kid';
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const JWK = { ...publicKey.export({ format: 'jwk' }), kid: KID, alg: 'RS256', use: 'sig' };
@@ -60,19 +62,50 @@ async function returnFromBrowser(
 }
 
 describe('loadOrCreateInstallId', () => {
+  const settingsWith = (saved: Map<string, string>) => ({
+    getSetting: (key: string) => saved.get(key),
+    setSetting: (key: string, value: string) => {
+      saved.set(key, value);
+    },
+  });
+
   it('creates the install ID once and keeps it after', () => {
     const saved = new Map<string, string>();
-    const settings = {
-      getSetting: (key: string) => saved.get(key),
-      setSetting: (key: string, value: string) => {
-        saved.set(key, value);
-      },
-    };
-    const newId = vi.fn(() => 'install-new');
-    expect(loadOrCreateInstallId(settings, newId)).toBe('install-new');
-    expect(loadOrCreateInstallId(settings, newId)).toBe('install-new');
+    const newId = vi.fn(() => HOST_ID);
+    expect(loadOrCreateInstallId(settingsWith(saved), newId)).toBe(HOST_ID);
+    expect(loadOrCreateInstallId(settingsWith(saved), newId)).toBe(HOST_ID);
     expect(newId).toHaveBeenCalledTimes(1);
-    expect(saved.get(INSTALL_ID_SETTING)).toBe('install-new');
+    expect(saved.get(INSTALL_ID_SETTING)).toBe(HOST_ID);
+  });
+
+  it('creates a urn:uuid host ID when none is saved, and saves it', () => {
+    const saved = new Map<string, string>();
+    const created = loadOrCreateInstallId(settingsWith(saved));
+    expect(isExtAgentHostId(created)).toBe(true);
+    expect(saved.get(INSTALL_ID_SETTING)).toBe(created);
+  });
+
+  it('keeps a saved host ID in the form ChatGPT accepts, and creates nothing', () => {
+    const saved = new Map<string, string>([[INSTALL_ID_SETTING, HOST_ID]]);
+    const newId = vi.fn(() => HOST_ID);
+    expect(loadOrCreateInstallId(settingsWith(saved), newId)).toBe(HOST_ID);
+    expect(newId).not.toHaveBeenCalled();
+  });
+
+  it('replaces a saved bare UUID, which ChatGPT refuses, and saves the replacement', () => {
+    const saved = new Map<string, string>([
+      [INSTALL_ID_SETTING, '550e8400-e29b-41d4-a716-446655440000'],
+    ]);
+    expect(loadOrCreateInstallId(settingsWith(saved), () => HOST_ID)).toBe(HOST_ID);
+    expect(saved.get(INSTALL_ID_SETTING)).toBe(HOST_ID);
+  });
+
+  it('refuses a new ID that is not in the form ChatGPT accepts, and saves nothing', () => {
+    const saved = new Map<string, string>();
+    expect(() => loadOrCreateInstallId(settingsWith(saved), () => 'install-new')).toThrow(
+      /valid ChatGPT host ID/,
+    );
+    expect(saved.has(INSTALL_ID_SETTING)).toBe(false);
   });
 });
 
@@ -84,7 +117,7 @@ describe('createProviderSignIn', () => {
       fetch: async () => json({ key: 'sk-or-v1-test' }),
       now: Date.now,
       chatGptClientId: undefined,
-      installId: () => 'install-1',
+      installId: () => HOST_ID,
     });
     await expect(signIn('openrouter')).resolves.toEqual({
       provider: 'openrouter',
@@ -109,7 +142,7 @@ describe('createProviderSignIn', () => {
       fetch: vi.fn(),
       now: Date.now,
       chatGptClientId: undefined,
-      installId: () => 'install-1',
+      installId: () => HOST_ID,
       chatGptPort: 0,
     });
     await expect(signIn('chatgpt')).rejects.toMatchObject({ code: 'ACCESS_DENIED' });
@@ -151,7 +184,7 @@ describe('createProviderSignIn', () => {
       fetch: fetchStub,
       now: Date.now,
       chatGptClientId: CLIENT_ID,
-      installId: () => 'install-1',
+      installId: () => HOST_ID,
       chatGptPort: 0,
     });
 
@@ -192,7 +225,7 @@ describe('createProviderSignIn', () => {
       fetch: fetchStub,
       now: Date.now,
       chatGptClientId: CLIENT_ID,
-      installId: () => 'install-1',
+      installId: () => HOST_ID,
       chatGptPort: 0,
     });
     await expect(signIn('chatgpt')).rejects.toMatchObject({ code: 'EXCHANGE_FAILED' });
@@ -224,7 +257,7 @@ describe('createProviderSignIn', () => {
         fetch: fetchStub,
         now: Date.now,
         chatGptClientId: CLIENT_ID,
-        installId: () => 'install-1',
+        installId: () => HOST_ID,
         chatGptPort: 0,
       });
       await expect(signIn('chatgpt')).rejects.toMatchObject({
@@ -260,7 +293,7 @@ describe('createProviderSignIn', () => {
         fetch: fetchStub,
         now: Date.now,
         chatGptClientId: CLIENT_ID,
-        installId: () => 'install-1',
+        installId: () => HOST_ID,
         chatGptPort: 0,
       });
       await expect(signIn('chatgpt')).rejects.toMatchObject({

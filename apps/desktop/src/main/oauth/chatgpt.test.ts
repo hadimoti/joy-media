@@ -15,6 +15,8 @@ import {
   decodeTokenRecord,
   encodeTokenRecord,
   exchangeChatGptCode,
+  isExtAgentHostId,
+  newExtAgentHostId,
   refreshChatGptTokens,
   signInWithChatGpt,
   verifyIdToken,
@@ -22,6 +24,7 @@ import {
 import type { FetchLike } from './http.js';
 
 const CLIENT_ID = 'test-client-id';
+const HOST_ID = 'urn:uuid:550e8400-e29b-41d4-a716-446655440000';
 const KID = 'test-kid';
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const JWK = { ...publicKey.export({ format: 'jwk' }), kid: KID, alg: 'RS256', use: 'sig' };
@@ -121,7 +124,7 @@ describe('buildChatGptAuthUrl', () => {
         state: 'state-1',
         nonce: 'nonce-1',
         codeChallenge: 'challenge-1',
-        extAgentHostId: 'install-1',
+        extAgentHostId: HOST_ID,
       }),
     );
     expect(`${url.origin}${url.pathname}`).toBe(CHATGPT_AUTHORIZE_URL);
@@ -134,7 +137,7 @@ describe('buildChatGptAuthUrl', () => {
       code_challenge_method: 'S256',
       state: 'state-1',
       nonce: 'nonce-1',
-      ext_agent_host_id: 'install-1',
+      ext_agent_host_id: HOST_ID,
       resource: 'https://api.openai.com/v1',
     });
   });
@@ -155,6 +158,54 @@ describe('buildChatGptAuthUrl', () => {
     expect(() => build('http://127.0.0.1:1455/other')()).toThrow();
     expect(() => build('https://127.0.0.1:1455/auth/callback')()).toThrow();
     expect(() => build('http://127.0.0.1:1455/auth/callback')()).not.toThrow();
+  });
+});
+
+describe('ChatGPT host ID', () => {
+  it.each([
+    'urn:uuid:550e8400-e29b-41d4-a716-446655440000',
+    'urn:uuid:6ba7b810-9dad-41d1-80b4-00c04fd430c8',
+  ])('accepts %s, the urn:uuid form', (hostId) => {
+    expect(isExtAgentHostId(hostId)).toBe(true);
+  });
+
+  it.each([
+    ['a bare UUID, the form ChatGPT refused', '550e8400-e29b-41d4-a716-446655440000'],
+    ['a name, as the tests used before', 'install-1'],
+    ['an empty value', ''],
+    ['the scheme with no ID', 'urn:uuid:'],
+    ['a UUID without hyphens', 'urn:uuid:550e8400e29b41d4a716446655440000'],
+    ['a UUID with a short group', 'urn:uuid:550e8400-e29b-41d4-a716-44665544000'],
+    ['a UUID with a wrong variant', 'urn:uuid:550e8400-e29b-41d4-c716-446655440000'],
+    ['a UUID with version 0', 'urn:uuid:550e8400-e29b-04d4-a716-446655440000'],
+    ['a UUID with a trailing space', 'urn:uuid:550e8400-e29b-41d4-a716-446655440000 '],
+    ['another scheme', 'uuid:550e8400-e29b-41d4-a716-446655440000'],
+  ])('refuses %s', (_name, hostId) => {
+    expect(isExtAgentHostId(hostId)).toBe(false);
+  });
+
+  it('creates a new urn:uuid ID each time, and each one is accepted', () => {
+    const first = newExtAgentHostId();
+    expect(isExtAgentHostId(first)).toBe(true);
+    expect(newExtAgentHostId()).not.toBe(first);
+  });
+
+  it('refuses a host ID of the wrong form before any browser opens', async () => {
+    const openExternal = vi.fn();
+    const { fetch } = provider(() => jsonReply({}));
+    const failure = await codeOf(() =>
+      signInWithChatGpt({
+        issuedClientId: undefined,
+        extAgentHostId: 'install-1',
+        openExternal,
+        fetch,
+        now,
+        port: 0,
+        timeoutMs: 5_000,
+      }),
+    );
+    expect(failure).toBe('HOST_ID_INVALID');
+    expect(openExternal).not.toHaveBeenCalled();
   });
 });
 
@@ -280,7 +331,7 @@ describe('signInWithChatGpt', () => {
 
     const record = await signInWithChatGpt({
       issuedClientId: undefined,
-      extAgentHostId: 'install-1',
+      extAgentHostId: HOST_ID,
       openExternal: async (url) => {
         authUrl = url;
         await returnFromBrowser(url, (state) => `client_id=${issued}&code=the-code&state=${state}`);
@@ -294,7 +345,7 @@ describe('signInWithChatGpt', () => {
     const sent = new URL(authUrl).searchParams;
     expect(sent.get('client_id')).toBe('dynamic_agent_client');
     expect(sent.get('agent_name_hint')).toBe('JOY Media');
-    expect(sent.get('ext_agent_host_id')).toBe('install-1');
+    expect(sent.get('ext_agent_host_id')).toBe(HOST_ID);
     expect(sent.get('resource')).toBe('https://api.openai.com/v1');
     expect(sent.get('scope')).toBe(CHATGPT_SCOPE);
     expect(record).toMatchObject({ clientId: issued, accountId: 'acct-1', accessToken: 'at-new' });
@@ -307,7 +358,7 @@ describe('signInWithChatGpt', () => {
     const failure = await codeOf(() =>
       signInWithChatGpt({
         issuedClientId: undefined,
-        extAgentHostId: 'install-1',
+        extAgentHostId: HOST_ID,
         openExternal: async (url) => {
           await returnFromBrowser(url, (state) => `code=the-code&state=${state}`);
         },
@@ -326,7 +377,7 @@ describe('signInWithChatGpt', () => {
     const failure = await codeOf(() =>
       signInWithChatGpt({
         issuedClientId: CLIENT_ID,
-        extAgentHostId: 'install-1',
+        extAgentHostId: HOST_ID,
         openExternal: async (url) => {
           await returnFromBrowser(
             url,
@@ -359,7 +410,7 @@ describe('signInWithChatGpt', () => {
 
     const record = await signInWithChatGpt({
       issuedClientId: CLIENT_ID,
-      extAgentHostId: 'install-1',
+      extAgentHostId: HOST_ID,
       openExternal: async (url) => {
         authUrl = url;
         await returnFromBrowser(url, (state) => `code=the-code&state=${state}`);
@@ -390,7 +441,7 @@ describe('signInWithChatGpt', () => {
     await expect(
       signInWithChatGpt({
         issuedClientId: CLIENT_ID,
-        extAgentHostId: 'install-1',
+        extAgentHostId: HOST_ID,
         openExternal: (url) => returnFromBrowser(url, () => 'code=the-code&state=other'),
         fetch,
         now,
@@ -407,7 +458,7 @@ describe('signInWithChatGpt', () => {
     await expect(
       signInWithChatGpt({
         issuedClientId: CLIENT_ID,
-        extAgentHostId: 'install-1',
+        extAgentHostId: HOST_ID,
         openExternal: async (url) => {
           redirect = new URL(url).searchParams.get('redirect_uri') ?? '';
           await returnFromBrowser(url, (state) => `error=access_denied&state=${state}`);

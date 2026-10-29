@@ -1,4 +1,4 @@
-import { createPublicKey, createVerify, type JsonWebKey } from 'node:crypto';
+import { createPublicKey, createVerify, type JsonWebKey, randomUUID } from 'node:crypto';
 import {
   CHATGPT_AUTHORIZE_URL,
   CHATGPT_ISSUER,
@@ -29,6 +29,12 @@ export const CHATGPT_RESOURCE = CHATGPT_RESPONSES_BASE_URL;
 export const CHATGPT_DYNAMIC_CLIENT_ID = 'dynamic_agent_client';
 /** The name ChatGPT shows for the app on a first-time registration. It is the same on every install. */
 export const CHATGPT_AGENT_NAME = 'JOY Media';
+/**
+ * The host ID ChatGPT accepts in `ext_agent_host_id`: a UUID as a `urn:uuid:` URN. ChatGPT refuses a bare UUID with
+ * "Invalid authorize request" (the first attended sign-in, 2026-10-29), so only this form is sent or kept.
+ */
+const EXT_AGENT_HOST_ID_PATTERN =
+  /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 /** The loopback path is the one the official sign-in page names. The port is its example; any free port is allowed. */
 export const CHATGPT_CALLBACK_PORT = 1455;
 export const CHATGPT_CALLBACK_PATH = '/auth/callback';
@@ -59,7 +65,7 @@ export interface ChatGptCode {
 export interface ChatGptSignInOptions {
   /** The client of a saved account, to sign in to that account again. Undefined registers a new client. */
   readonly issuedClientId: string | undefined;
-  /** The ID this install sends. It is created once per install (PLAN-v4 §6d). */
+  /** The host ID this install sends: a `urn:uuid:` URN, created once per install (PLAN-v4 §6d). */
   readonly extAgentHostId: string;
   /** Opens the system browser on the sign-in page. Injected, so the flow never opens one by itself. */
   readonly openExternal: (url: string) => void | Promise<void>;
@@ -88,6 +94,16 @@ export interface ChatGptTokenKeeper {
     handleId: string,
     record: ChatGptTokenRecord,
   ): Promise<ChatGptTokenRecord>;
+}
+
+/** Whether a value is a host ID this app sends and keeps (PLAN-v4 §6d). */
+export function isExtAgentHostId(value: string): boolean {
+  return EXT_AGENT_HOST_ID_PATTERN.test(value);
+}
+
+/** A new host ID: a version 4 UUID as a `urn:uuid:` URN, created once per install and kept (PLAN-v4 §6d). */
+export function newExtAgentHostId(): string {
+  return `urn:uuid:${randomUUID()}`;
 }
 
 export function buildChatGptAuthUrl(input: {
@@ -268,6 +284,13 @@ export function createChatGptTokenKeeper(deps: ChatGptTokenKeeperDeps): ChatGptT
 export async function signInWithChatGpt(
   options: ChatGptSignInOptions,
 ): Promise<ChatGptTokenRecord> {
+  // Refused before a listener starts or a browser opens, so ChatGPT never sees a host ID it would refuse.
+  if (!isExtAgentHostId(options.extAgentHostId)) {
+    throw new OAuthFlowError(
+      'HOST_ID_INVALID',
+      'The ChatGPT host ID is not in the form ChatGPT accepts.',
+    );
+  }
   const saved =
     options.issuedClientId !== undefined && options.issuedClientId.length > 0
       ? options.issuedClientId

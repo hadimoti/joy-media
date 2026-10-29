@@ -16,7 +16,8 @@ export type OAuthErrorCode =
   | 'EXCHANGE_FAILED'
   | 'MISSING_SCOPE'
   | 'ID_TOKEN_INVALID'
-  | 'SIGN_IN_REQUIRED';
+  | 'SIGN_IN_REQUIRED'
+  | 'HOST_ID_INVALID';
 
 export class OAuthFlowError extends Error {
   constructor(
