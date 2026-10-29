@@ -372,6 +372,25 @@ describe('ChatGPT model list', () => {
     expect(loads).toEqual(['acct-1', 'acct-2', 'acct-1']);
   });
 
+  it('loads a list again once its time-to-live has passed', async () => {
+    let clock = 0;
+    const loadedAt: number[] = [];
+    const catalog = createChatGptCatalog({ ttlMs: 1_000, now: () => clock });
+    const load = async (): Promise<readonly ModelEntry[]> => {
+      loadedAt.push(clock);
+      return [{ id: 'gpt-a', name: 'gpt-a' }];
+    };
+
+    await catalog.list('acct-1', load);
+    clock = 999;
+    await catalog.list('acct-1', load);
+    expect(loadedAt).toEqual([0]);
+
+    clock = 1_000;
+    await catalog.list('acct-1', load);
+    expect(loadedAt).toEqual([0, 1_000]);
+  });
+
   it('asks for a choice when the saved model is not in the list', () => {
     const models: ModelEntry[] = [{ id: 'gpt-a', name: 'gpt-a' }];
     expect(needsModelChoice(models, 'gpt-a')).toBe(false);

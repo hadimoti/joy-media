@@ -78,6 +78,8 @@ function harness(
   const sent: { url: string; init: RequestInit }[] = [];
   const unavailable: string[] = [];
   let failWrites = false;
+  let currentModels: readonly unknown[] = models;
+  let nextWriteHook: (() => void) | undefined;
 
   values.set(HANDLE, initial === 'unreadable' ? 'not a token record' : encodeTokenRecord(initial));
   versions.set(HANDLE, 1);
@@ -96,6 +98,10 @@ function harness(
       if (failWrites) throw new Error('disk full');
       values.set(handleId, value);
       versions.set(handleId, (versions.get(handleId) ?? 0) + 1);
+      // The hook runs after the write, as a later sign-in could while the broker awaits the write's settlement.
+      const hook = nextWriteHook;
+      nextWriteHook = undefined;
+      hook?.();
     },
     async get(handleId) {
       return values.get(handleId) ?? null;
@@ -109,7 +115,7 @@ function harness(
   };
   const fetch: ProviderFetch = async (url, init) => {
     sent.push({ url, init });
-    if (url === MODELS_URL) return json({ models });
+    if (url === MODELS_URL) return json({ models: currentModels });
     return reply(url, init);
   };
   const broker = createProviderBroker({
@@ -137,6 +143,14 @@ function harness(
     failWrites: (on: boolean) => {
       failWrites = on;
     },
+    /** Runs `hook` right after the next secret write. */
+    onNextWrite: (hook: () => void) => {
+      nextWriteHook = hook;
+    },
+    /** The model list the account now lists, as the server answers it. */
+    setModels: (list: readonly unknown[]) => {
+      currentModels = list;
+    },
     /** A later sign-in: it stores its record under a new handle and points the profile at it, as the save route does. */
     replaceSignIn: (record: ChatGptTokenRecord) => {
       values.set(NEW_HANDLE, encodeTokenRecord(record));
@@ -149,6 +163,41 @@ function harness(
 function authorizationOf(init: RequestInit | undefined): string | null {
   return new Headers(init?.headers).get('authorization');
 }
+
+describe('provider broker: other providers keep their own failures', () => {
+  it('does not read a usage-limit code in a failed status as a ChatGPT plan limit', async () => {
+    const profile: BrokerProfile = {
+      id: 'or-1',
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openai/gpt-x',
+      secretHandleId: 'handle-or',
+      bindingDigest: endpointBindingDigest('or-1', 'https://openrouter.ai', '/api/v1'),
+      bindingSecretDigest: 'v1',
+    };
+    const values = new Map([['handle-or', 'sk-or-v1-test-key']]);
+    const broker = createProviderBroker({
+      store: {
+        getProfile: (id) => (id === profile.id ? profile : undefined),
+        isDisabledLegacy: () => false,
+        markCredentialUnavailable: () => undefined,
+        secretVersion: () => 'v1',
+      },
+      secrets: {
+        set: async () => undefined,
+        get: async (handleId) => values.get(handleId) ?? null,
+        delete: async () => undefined,
+        redact: (logLine) => logLine,
+      },
+      fetch: async () =>
+        json({ error: { code: 'subscription_sharing_usage_limit_exceeded' } }, 429),
+      resolveHost: async () => [],
+      now: () => NOW,
+    });
+    const result = await broker.complete({ profileId: profile.id, body: CHAT });
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_HTTP_ERROR' });
+  });
+});
 
 describe('provider broker: ChatGPT sign-in', () => {
   it('sends a fresh token as the bearer and returns the completed reply as chat JSON', async () => {
@@ -342,6 +391,59 @@ describe('provider broker: ChatGPT sign-in', () => {
     });
     expect(result).toMatchObject({ ok: false, code: 'REQUEST_INVALID' });
     expect(h.sent).toHaveLength(0);
+  });
+
+  it('does not rebind the profile when a later sign-in took it while the refreshed record was written', async () => {
+    const h = harness(recordFor(-1), (url) =>
+      url === CHATGPT_TOKEN_URL
+        ? json({ access_token: 'access-new', refresh_token: 'refresh-new', expires_in: 3600 })
+        : completedWith('x'),
+    );
+    h.onNextWrite(() =>
+      h.replaceSignIn({
+        ...recordFor(60 * 60_000),
+        accessToken: 'access-signed-in',
+        refreshToken: 'refresh-signed-in',
+      }),
+    );
+
+    const result = await h.broker.complete({ profileId: PROFILE_ID, body: CHAT });
+    expect(result).toMatchObject({ ok: false, code: 'CREDENTIAL_UNAVAILABLE' });
+    expect(h.profile()).toMatchObject({ secretHandleId: NEW_HANDLE, bindingSecretDigest: 'v1' });
+    expect(h.sent.map((request) => request.url)).toEqual([CHATGPT_TOKEN_URL]);
+  });
+
+  it('refuses a redirect whose target carries the refresh token, and names no target', async () => {
+    const h = harness(
+      recordFor(60 * 60_000),
+      () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://redirect.example/path/refresh-old' },
+        }),
+    );
+    const result = await h.broker.complete({ profileId: PROFILE_ID, body: CHAT });
+    expect(result).toMatchObject({ ok: false, code: 'REDIRECT_REFUSED' });
+    expect(JSON.stringify(result)).not.toContain('refresh-old');
+  });
+
+  it('reloads the model list when the person reloads it, so a removed model is refused', async () => {
+    const h = harness(recordFor(60 * 60_000), () => completedWith('x'));
+    expect((await h.broker.complete({ profileId: PROFILE_ID, body: CHAT })).ok).toBe(true);
+
+    h.setModels([{ slug: 'gpt-other', visibility: 'list' }]);
+    // Within its time-to-live, the list held before the reload still stands.
+    expect((await h.broker.complete({ profileId: PROFILE_ID, body: CHAT })).ok).toBe(true);
+
+    expect(await h.broker.listModels({ profileId: PROFILE_ID })).toMatchObject({ ok: true });
+    expect(await h.broker.complete({ profileId: PROFILE_ID, body: CHAT })).toMatchObject({
+      ok: false,
+      code: 'MODEL_CHOICE_REQUIRED',
+    });
+    // A model the reloaded list names is accepted.
+    expect(
+      (await h.broker.complete({ profileId: PROFILE_ID, body: CHAT, modelId: 'gpt-other' })).ok,
+    ).toBe(true);
   });
 
   it('lists the visible models of a signed-in profile, and refuses a draft', async () => {

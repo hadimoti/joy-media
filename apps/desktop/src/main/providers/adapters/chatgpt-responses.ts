@@ -139,26 +139,42 @@ export function needsModelChoice(models: readonly ModelEntry[], modelId: string)
   return !models.some((model) => model.id === modelId);
 }
 
-/** The model list of each account. It loads once per account, and loads again for another account (PLAN-v4 §6d). */
+/**
+ * How long a model list is kept before it is loaded again. A model the account stops listing is therefore not sent for
+ * long, even when nobody reloads the list.
+ */
+export const CATALOG_TTL_MS = 10 * 60_000;
+
+/** The model list of each account (PLAN-v4 §6d). It is kept per account, for a time-to-live. */
 export interface ChatGptCatalog {
-  /** The list of an account, loaded once: `load` runs only while that account has no list yet. */
+  /** The list of an account. `load` runs only when the account has no list, or its list is older than the time-to-live. */
   list(
     accountId: string,
     load: () => Promise<readonly ModelEntry[]>,
   ): Promise<readonly ModelEntry[]>;
+  /** Drops the list of an account, so the next call loads it again. */
   forget(accountId: string): void;
 }
 
-export function createChatGptCatalog(): ChatGptCatalog {
-  const byAccount = new Map<string, Promise<readonly ModelEntry[]>>();
+export function createChatGptCatalog(
+  options: { readonly ttlMs?: number; readonly now?: () => number } = {},
+): ChatGptCatalog {
+  const ttlMs = options.ttlMs ?? CATALOG_TTL_MS;
+  const now = options.now ?? Date.now;
+  const byAccount = new Map<
+    string,
+    { readonly loadedAt: number; readonly loading: Promise<readonly ModelEntry[]> }
+  >();
   return {
     list(accountId, load) {
       const cached = byAccount.get(accountId);
-      if (cached !== undefined) return cached;
+      if (cached !== undefined && now() - cached.loadedAt < ttlMs) return cached.loading;
       const loading = load();
-      byAccount.set(accountId, loading);
+      byAccount.set(accountId, { loadedAt: now(), loading });
       // A list that failed to load is not kept, so the next call loads it again.
-      void loading.catch(() => byAccount.delete(accountId));
+      void loading.catch(() => {
+        if (byAccount.get(accountId)?.loading === loading) byAccount.delete(accountId);
+      });
       return loading;
     },
     forget(accountId) {

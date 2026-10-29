@@ -206,6 +206,14 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         );
       }
       await deps.secrets.set(handleId, encodeTokenRecord(record));
+      // The write settled after an await, and a later sign-in may have taken the profile meanwhile. Then this request
+      // fails, and nothing is rebound to the version of a key the profile no longer names.
+      if (deps.store.getProfile(profileId)?.secretHandleId !== handleId) {
+        throw new BrokerError(
+          'CREDENTIAL_UNAVAILABLE',
+          'The ChatGPT sign-in changed during this request. Send it again.',
+        );
+      }
       deps.store.rebindSecretVersion?.(profileId, deps.store.secretVersion(handleId));
     },
   });
@@ -255,9 +263,14 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     if (endpoint.chatGpt === undefined) return;
     const accessToken = requireKey(endpoint);
     const models = await chatGptCatalog.list(endpoint.chatGpt.accountId, () =>
-      send(deps.fetch, prepareChatGptModels({ accessToken }), controlMs, accessToken).then(
-        readChatGptModels,
-      ),
+      send(
+        deps.fetch,
+        prepareChatGptModels({ accessToken }),
+        controlMs,
+        [accessToken],
+        undefined,
+        true,
+      ).then(readChatGptModels),
     );
     if (needsModelChoice(models, endpoint.modelId)) {
       throw new BrokerError(
@@ -354,7 +367,14 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     // The state a call carries back is part of the body, so the limit holds for the body that is sent.
     if (Buffer.byteLength(call.body ?? '') > maxBytes) throw requestTooLarge(maxBytes);
     const reply = assertNoCredential(
-      await send(deps.fetch, call, timeoutMs, endpoint.apiKey, signal),
+      await send(
+        deps.fetch,
+        call,
+        timeoutMs,
+        screenedOf(endpoint),
+        signal,
+        endpoint.api === 'chatgpt-responses',
+      ),
       endpoint,
     );
     const text = checkedReply(completionText(reply, endpoint, requestedToolNames(body)), endpoint);
@@ -422,27 +442,39 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
           'draft' in source
             ? await resolveDraft(source.draft)
             : await resolveProfile(source.profileId);
-        if (endpoint.api === 'chatgpt-responses' && 'draft' in source) {
-          throw new BrokerError('REQUEST_INVALID', 'Sign in with ChatGPT to list its models.');
+        if (endpoint.api === 'chatgpt-responses') {
+          // A reload drops the cached list, so the list just read is the one the next request checks against.
+          const chatGpt = endpoint.chatGpt;
+          if (chatGpt === undefined) {
+            throw new BrokerError('REQUEST_INVALID', 'Sign in with ChatGPT to list its models.');
+          }
+          chatGptCatalog.forget(chatGpt.accountId);
+          const listed = await chatGptCatalog.list(chatGpt.accountId, () =>
+            send(
+              deps.fetch,
+              prepareChatGptModels({ accessToken: requireKey(endpoint) }),
+              controlMs,
+              screenedOf(endpoint),
+              undefined,
+              true,
+            ).then(readChatGptModels),
+          );
+          return { ok: true, data: listed };
         }
         const call =
-          endpoint.api === 'chatgpt-responses'
-            ? prepareChatGptModels({ accessToken: requireKey(endpoint) })
-            : endpoint.api === 'anthropic-messages'
-              ? prepareAnthropicModels({ baseUrl: endpoint.baseUrl, apiKey: requireKey(endpoint) })
-              : prepareChatModels({ baseUrl: endpoint.baseUrl, apiKey: endpoint.apiKey });
+          endpoint.api === 'anthropic-messages'
+            ? prepareAnthropicModels({ baseUrl: endpoint.baseUrl, apiKey: requireKey(endpoint) })
+            : prepareChatModels({ baseUrl: endpoint.baseUrl, apiKey: endpoint.apiKey });
         const reply = assertNoCredential(
-          await send(deps.fetch, call, controlMs, endpoint.apiKey),
+          await send(deps.fetch, call, controlMs, screenedOf(endpoint)),
           endpoint,
         );
         let models: readonly ModelEntry[];
         try {
           models =
-            endpoint.api === 'chatgpt-responses'
-              ? readChatGptModels(reply)
-              : endpoint.api === 'anthropic-messages'
-                ? parseAnthropicModels(reply)
-                : parseChatModels(reply);
+            endpoint.api === 'anthropic-messages'
+              ? parseAnthropicModels(reply)
+              : parseChatModels(reply);
         } catch {
           throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The model list was not understood.');
         }
@@ -466,15 +498,20 @@ function makeEndpoint(
 }
 
 /**
- * A reply that carries the key, or any other secret the endpoint holds, is refused, and its text is never returned.
+ * The secrets a reply must never carry, and a redirect target must never name: the key, and the ChatGPT refresh token.
+ * Empty values are skipped, since an empty value would match every reply.
+ */
+function screenedOf(endpoint: Endpoint): readonly string[] {
+  return [endpoint.apiKey, ...(endpoint.screened ?? [])].filter(
+    (secret): secret is string => secret !== undefined && secret.length > 0,
+  );
+}
+
+/**
+ * A reply that carries any secret the endpoint holds is refused, and its text is never returned.
  */
 function assertNoCredential(reply: string, endpoint: Endpoint): string {
-  const secrets = [endpoint.apiKey, ...(endpoint.screened ?? [])];
-  if (
-    secrets.some(
-      (secret) => secret !== undefined && secret.length > 0 && holdsCredential(reply, secret),
-    )
-  ) {
+  if (screenedOf(endpoint).some((secret) => holdsCredential(reply, secret))) {
     throw new BrokerError(
       'PROVIDER_INCOMPATIBLE',
       'The provider reply was refused: it contained a credential.',
@@ -916,7 +953,9 @@ async function isPlanLimitReply(response: Response): Promise<boolean> {
     const error = parsed?.error;
     const code = isRecord(error) ? error.code : parsed?.code;
     return typeof code === 'string' && PLAN_LIMIT_CODES.has(code);
-  } catch {
+  } catch (error) {
+    // A cancelled or timed-out read is the caller's outcome, not a reply without a limit.
+    if (isAbortError(error)) throw error;
     return false;
   }
 }
@@ -929,8 +968,9 @@ async function send(
   fetchImpl: ProviderFetch,
   call: PreparedCall,
   timeoutMs: number,
-  secret: string | undefined,
+  secrets: readonly string[],
   signal?: AbortSignal,
+  planLimits = false,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -946,13 +986,13 @@ async function send(
       signal: controller.signal,
     });
     if (response.status >= 300 && response.status < 400) {
-      const named = namedTarget(response.headers.get('location'), call.url, secret);
+      const named = namedTarget(response.headers.get('location'), call.url, secrets);
       throw new BrokerError(
         'REDIRECT_REFUSED',
         `The provider redirected${named === '' ? '' : ` to ${named}`}. Redirects are not followed.`,
       );
     }
-    if (!response.ok && (await isPlanLimitReply(response))) {
+    if (planLimits && !response.ok && (await isPlanLimitReply(response))) {
       throw new BrokerError('PLAN_LIMIT_REACHED', PLAN_LIMIT_MESSAGE);
     }
     if (response.status === 401 || response.status === 403) {
@@ -987,7 +1027,7 @@ async function send(
 function namedTarget(
   location: string | null,
   requestUrl: string,
-  secret: string | undefined,
+  secrets: readonly string[],
 ): string {
   if (location === null) return '';
   let target: URL;
@@ -997,7 +1037,7 @@ function namedTarget(
     return '';
   }
   const named = `${target.origin}${target.pathname}`;
-  if (secret !== undefined && secret.length > 0 && mayShowKey(named, secret)) return '';
+  if (secrets.some((secret) => mayShowKey(named, secret))) return '';
   return named;
 }
 
