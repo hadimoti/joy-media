@@ -86,6 +86,26 @@ describe('Worker runtime', () => {
     expect(capabilities).toContain('asset.thumbnail');
   });
 
+  it('advertises GPU preview only while the local GPU preview host exists', () => {
+    const identity = { workerId: 'gpu-preview-worker', createdAt: '2026-01-01T00:00:00.000Z' };
+    const withHost = new WorkerRuntime(
+      identity,
+      detectMediaTools(() => false),
+      {
+        gpuPreviewAvailable: true,
+      },
+    );
+    const withoutHost = new WorkerRuntime(
+      identity,
+      detectMediaTools(() => false),
+      {
+        gpuPreviewAvailable: false,
+      },
+    );
+    expect(withHost.hello('win32', 'x64').capabilities).toContain('render.preview.gpu');
+    expect(withoutHost.hello('win32', 'x64').capabilities).not.toContain('render.preview.gpu');
+  });
+
   it('escapes a Windows RNNoise path for ffmpeg filter syntax', () => {
     const path = 'C:\\Users\\JOY Media\\models\\rnnoise\\mp.rnnn';
     expect(ffmpegFilterPath(path)).toBe("'C\\:/Users/JOY Media/models/rnnoise/mp.rnnn'");
