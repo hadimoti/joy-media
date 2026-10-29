@@ -19,6 +19,7 @@ import {
   protocol,
   safeStorage,
   session,
+  shell,
 } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path, { dirname, join } from 'node:path';
@@ -49,6 +50,7 @@ import { createMediaChannelHandlers } from './media-channel.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { createProviderBroker } from './providers/provider-broker.js';
+import { createProviderSignIn, loadOrCreateInstallId } from './oauth/sign-in.js';
 import { createWorkerCompletion } from './providers/worker-completion.js';
 import { checkProfileCredentials } from './profile-credential-check.js';
 
@@ -118,6 +120,8 @@ if (!app.requestSingleInstanceLock()) {
           .some((s) => s.profileId === id && s.state === 'disabled-legacy'),
       markCredentialUnavailable: (id) => localDatabase.markProfileCredentialUnavailable(id),
       secretVersion: (handleId) => localDatabase.secretVersion(handleId),
+      rebindSecretVersion: (profileId, version) =>
+        localDatabase.rebindProfileSecret(profileId, version),
     },
     secrets: secretStore,
     fetch: (url, init) => fetch(url, init),
@@ -161,6 +165,14 @@ if (!app.requestSingleInstanceLock()) {
     },
     secretStore,
     providerBroker,
+    providerSignIn: createProviderSignIn({
+      openExternal: (url) => shell.openExternal(url),
+      fetch: (url, init) => fetch(url, init),
+      now: () => Date.now(),
+      // The ChatGPT OAuth client is not decided yet (PLAN-v4 §6d). Until it is, ChatGPT sign-in is refused.
+      chatGptClientId: undefined,
+      installId: () => loadOrCreateInstallId(localDatabase, () => crypto.randomUUID()),
+    }),
     handleWindowControl: (action) => {
       const win =
         BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];

@@ -15,6 +15,8 @@ import type {
 } from '../store/local-database.js';
 import { LEGACY_PROVIDER_IDS } from '../store/migrations.js';
 import { AgentRequestRegistry } from './agent-requests.js';
+import { OAuthFlowError } from './oauth/errors.js';
+import type { SignInProvider, SignInResult } from './oauth/sign-in.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import { validateProviderProfileInput } from '@joy-media/provider-sdk';
 import { evaluateEndpoint, normalizeBaseUrl } from '@joy-media/provider-sdk';
@@ -55,6 +57,8 @@ export interface IpcHandlerDeps {
   readonly secretStore: SecretStore;
   /** Every provider call goes through the broker (providers/provider-broker.ts). */
   readonly providerBroker: ProviderBroker;
+  /** Runs a sign-in (oauth/sign-in.ts). Absent means sign-in is refused. The result is saved as a profile. */
+  readonly providerSignIn?: (provider: SignInProvider) => Promise<SignInResult>;
   readonly handleWindowControl?: (
     action: 'minimize' | 'maximize' | 'close' | 'is-maximized',
   ) => Promise<boolean | void> | boolean | void;
@@ -76,8 +80,38 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
   const newId = deps.newId ?? (() => crypto.randomUUID());
   const agentRequests = deps.agentRequests ?? new AgentRequestRegistry();
 
-  return {
+  const handlers: Record<IpcChannel, IpcHandler> = {
     ...mediaChannelTable(deps.mediaChannel),
+    'desktop.provider-profile.sign-in': async (payload): Promise<IpcResult> => {
+      const request = asSignInRequest(payload);
+      if (request === undefined) return { ok: false, error: 'Invalid sign-in request' };
+      if (deps.providerSignIn === undefined) {
+        return { ok: false, error: 'Sign-in is not available in this build' };
+      }
+      // A sign-in can only update a profile of the same provider, so it never changes what a profile is.
+      if (request.id !== undefined) {
+        const existing = deps.localDatabase.getProviderProfile(request.id);
+        if (existing === undefined || existing.provider !== request.provider) {
+          return { ok: false, error: 'That profile cannot be signed in again' };
+        }
+      }
+      try {
+        const signedIn = await deps.providerSignIn(request.provider);
+        // The result is saved through the profile route, so it is checked and bound like any other save.
+        return await handlers['desktop.provider-profile.save']({
+          ...(request.id === undefined ? {} : { id: request.id }),
+          provider: signedIn.provider,
+          baseUrl: signedIn.baseUrl,
+          modelId: signedIn.modelId,
+          apiKey: signedIn.secret,
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof OAuthFlowError ? error.message : 'The sign-in did not complete.',
+        };
+      }
+    },
     'desktop.select-file': async () => {
       const result = await deps.showOpenDialog();
       if (result.canceled || result.path === undefined) return { ok: true, data: undefined };
@@ -390,6 +424,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       }
     },
   };
+  return handlers;
 }
 
 /**
@@ -454,6 +489,19 @@ function asJobId(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = (value as { jobId?: unknown }).jobId;
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
+}
+
+/** The provider to sign in to, and the saved profile to update, when there is one. */
+function asSignInRequest(
+  value: unknown,
+): { readonly provider: SignInProvider; readonly id?: string } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const provider = candidate['provider'];
+  if (provider !== 'openrouter' && provider !== 'chatgpt') return undefined;
+  const id = candidate['id'];
+  if (id !== undefined && (typeof id !== 'string' || id.length === 0)) return undefined;
+  return { provider, ...(typeof id === 'string' ? { id } : {}) };
 }
 
 function asProfileId(value: unknown): string | undefined {

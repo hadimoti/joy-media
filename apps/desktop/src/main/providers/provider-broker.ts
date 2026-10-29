@@ -28,6 +28,25 @@ import { AdapterRequestError, type ModelEntry, type PreparedCall } from './adapt
 import { isRecord, parseCompletionBody, type CompletionBody } from './request-body.js';
 import { endpointBindingDigest } from '../../store/profile-binding.js';
 import { callFingerprint, ContinuationState, historyDigests } from './continuation-state.js';
+import { holdsCredential } from './credential-screen.js';
+import {
+  createChatGptCatalog,
+  isUsableModelId,
+  needsModelChoice,
+  PLAN_LIMIT_CODES,
+  prepareChatGptModels,
+  prepareChatGptResponses,
+  readChatGptModels,
+  readChatGptStream,
+} from './adapters/chatgpt-responses.js';
+import {
+  createChatGptTokenKeeper,
+  decodeTokenRecord,
+  encodeTokenRecord,
+  type ChatGptTokenKeeper,
+  type ChatGptTokenRecord,
+} from '../oauth/chatgpt.js';
+import { OAuthFlowError } from '../oauth/errors.js';
 
 export { endpointBindingDigest };
 
@@ -57,7 +76,12 @@ export type BrokerErrorCode =
   | 'PROVIDER_INCOMPATIBLE'
   | 'RESPONSE_TOO_LARGE'
   | 'TIMEOUT'
-  | 'NETWORK_ERROR';
+  | 'NETWORK_ERROR'
+  | 'SIGN_IN_REQUIRED'
+  | 'PLAN_LIMIT_REACHED'
+  | 'RESPONSE_INCOMPLETE'
+  | 'RESPONSE_INTERRUPTED'
+  | 'MODEL_CHOICE_REQUIRED';
 
 export interface BrokerFailure {
   readonly ok: false;
@@ -86,6 +110,11 @@ export interface ProviderBrokerStore {
   markCredentialUnavailable(id: string): void;
   /** The version of the key stored under a handle (see secretVersionDigest in the store). */
   secretVersion(handleId: string): string;
+  /**
+   * Records the version of a key this build wrote itself, such as a refreshed ChatGPT token. When it is absent, a
+   * refreshed token stops matching its binding, which fails closed until the sign-in is repeated.
+   */
+  rebindSecretVersion?(profileId: string, version: string): void;
 }
 
 /** An unsaved profile, sent once for a model list. The broker holds it in memory only. */
@@ -105,6 +134,8 @@ export interface ProviderBrokerDeps {
   readonly resolveHost?: (hostname: string) => Promise<readonly string[]>;
   /** Test hook: shorter timeouts. Production uses the defaults above. */
   readonly timeoutMs?: { readonly complete?: number; readonly control?: number };
+  /** The clock for ChatGPT token expiry. Production uses the system clock. */
+  readonly now?: () => number;
 }
 
 export interface ProviderBroker {
@@ -131,11 +162,15 @@ export interface ProviderBroker {
 interface Endpoint {
   /** The saved profile this call is for; empty for an unsaved draft. Keys the provider state of a tool call. */
   readonly profileId: string;
-  readonly api: 'chat-completions' | 'anthropic-messages';
+  readonly api: 'chat-completions' | 'anthropic-messages' | 'chatgpt-responses';
   readonly provider: string;
   readonly baseUrl: string;
   readonly modelId: string;
   readonly apiKey: string | undefined;
+  /** For ChatGPT: the account, and the secret handle its token is stored under. */
+  readonly chatGpt?: { readonly accountId: string; readonly handleId: string };
+  /** Secrets a reply must never carry besides the key: the ChatGPT refresh token. */
+  readonly screened?: readonly string[];
 }
 
 /** Thrown inside the broker, turned into a BrokerFailure at each public method. */
@@ -154,6 +189,98 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
   const controlMs = deps.timeoutMs?.control ?? CONTROL_TIMEOUT_MS;
   // The provider state each tool call of a reply carries back. Kept here, never sent on in a reply.
   const continuation = new ContinuationState();
+  const nowMs = deps.now ?? Date.now;
+  // A ChatGPT record is refreshed here, only just before a request. The refreshed record is written in one call, and
+  // the binding is then recorded against that write (PLAN-v4 §6d).
+  const tokens: ChatGptTokenKeeper = createChatGptTokenKeeper({
+    fetch: deps.fetch,
+    now: nowMs,
+    save: async (profileId, handleId, record) => {
+      const profile = deps.store.getProfile(profileId);
+      if (profile === undefined) {
+        throw new BrokerError('PROFILE_NOT_FOUND', 'Unknown provider profile');
+      }
+      // A sign-in that replaced the key while this refresh ran owns the profile now, so the refreshed record is dropped.
+      if (profile.secretHandleId !== handleId) {
+        throw new BrokerError(
+          'CREDENTIAL_UNAVAILABLE',
+          'The ChatGPT sign-in changed during this request. Send it again.',
+        );
+      }
+      await deps.secrets.set(handleId, encodeTokenRecord(record));
+      // The write settled after an await, and a later sign-in may have taken the profile meanwhile. Then this request
+      // fails, and nothing is rebound to the version of a key the profile no longer names.
+      if (deps.store.getProfile(profileId)?.secretHandleId !== handleId) {
+        throw new BrokerError(
+          'CREDENTIAL_UNAVAILABLE',
+          'The ChatGPT sign-in changed during this request. Send it again.',
+        );
+      }
+      deps.store.rebindSecretVersion?.(profileId, deps.store.secretVersion(handleId));
+    },
+  });
+  const chatGptCatalog = createChatGptCatalog();
+
+  /**
+   * The record to send with, refreshed first when it is close to expiry. A record that cannot be read means the
+   * sign-in must be repeated.
+   */
+  async function chatGptRecord(
+    profileId: string,
+    handleId: string,
+    stored: string | null,
+  ): Promise<ChatGptTokenRecord> {
+    const record = stored === null ? undefined : decodeTokenRecord(stored);
+    if (record === undefined) {
+      deps.store.markCredentialUnavailable(profileId);
+      throw new BrokerError('SIGN_IN_REQUIRED', 'Sign in with ChatGPT again.');
+    }
+    try {
+      return await tokens.current(profileId, handleId, record);
+    } catch (error) {
+      if (error instanceof BrokerError) throw error;
+      if (error instanceof OAuthFlowError && error.code === 'SIGN_IN_REQUIRED') {
+        deps.store.markCredentialUnavailable(profileId);
+        throw new BrokerError('SIGN_IN_REQUIRED', 'ChatGPT needs a new sign-in.');
+      }
+      if (error instanceof OAuthFlowError) {
+        throw new BrokerError('PROVIDER_HTTP_ERROR', error.message);
+      }
+      // The refreshed record could not be saved. The old refresh token may already be spent, so the person signs in
+      // again rather than retrying with a record that may no longer work (PLAN-v4 §6d).
+      deps.store.markCredentialUnavailable(profileId);
+      throw new BrokerError(
+        'SIGN_IN_REQUIRED',
+        'The new ChatGPT sign-in could not be saved. Sign in with ChatGPT again.',
+      );
+    }
+  }
+
+  const isChatGptProfile = (profileId: string): boolean =>
+    findRegistryProvider(deps.store.getProfile(profileId)?.provider ?? '')?.api ===
+    'chatgpt-responses';
+
+  /** A saved ChatGPT model that the account no longer lists is refused, so the person chooses again (PLAN-v4 §6d). */
+  async function assertChatGptModelListed(endpoint: Endpoint): Promise<void> {
+    if (endpoint.chatGpt === undefined) return;
+    const accessToken = requireKey(endpoint);
+    const models = await chatGptCatalog.list(endpoint.chatGpt.accountId, () =>
+      send(
+        deps.fetch,
+        prepareChatGptModels({ accessToken }),
+        controlMs,
+        screenedOf(endpoint),
+        undefined,
+        true,
+      ).then((text) => chatGptModelsOf(text, endpoint)),
+    );
+    if (needsModelChoice(models, endpoint.modelId)) {
+      throw new BrokerError(
+        'MODEL_CHOICE_REQUIRED',
+        'The saved ChatGPT model is no longer listed for this account. Choose another model.',
+      );
+    }
+  }
 
   async function resolveProfile(profileId: string, expectedBaseUrl?: string): Promise<Endpoint> {
     const profile = deps.store.getProfile(profileId);
@@ -201,6 +328,20 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         'The saved key could not be read. Enter it again.',
       );
     }
+    if (findRegistryProvider(profile.provider)?.api === 'chatgpt-responses') {
+      const record = await chatGptRecord(profile.id, profile.secretHandleId, stored);
+      return {
+        ...makeEndpoint(
+          profile.id,
+          profile.provider,
+          profile.baseUrl,
+          profile.modelId,
+          record.accessToken,
+        ),
+        chatGpt: { accountId: record.accountId, handleId: profile.secretHandleId },
+        screened: [record.refreshToken],
+      };
+    }
     const apiKey = usableKey(stored);
     if (apiKey === undefined && verdict.kind === 'registry') {
       throw new BrokerError('CREDENTIAL_UNAVAILABLE', 'The provider key is no longer available');
@@ -228,7 +369,14 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     // The state a call carries back is part of the body, so the limit holds for the body that is sent.
     if (Buffer.byteLength(call.body ?? '') > maxBytes) throw requestTooLarge(maxBytes);
     const reply = assertNoCredential(
-      await send(deps.fetch, call, timeoutMs, endpoint.apiKey, signal),
+      await send(
+        deps.fetch,
+        call,
+        timeoutMs,
+        screenedOf(endpoint),
+        signal,
+        endpoint.api === 'chatgpt-responses',
+      ),
       endpoint,
     );
     const text = checkedReply(completionText(reply, endpoint, requestedToolNames(body)), endpoint);
@@ -244,11 +392,23 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         if (!parsed.ok) throw new BrokerError('REQUEST_INVALID', parsed.message);
         const limit = request.maxRequestBytes ?? MAX_AGENT_REQUEST_BYTES;
         if (Buffer.byteLength(JSON.stringify(parsed.body)) > limit) throw requestTooLarge(limit);
+        // A field the ChatGPT sign-in never sends is refused before any token is refreshed or request is made (PLAN-v4 §6d).
+        if (
+          isChatGptProfile(request.profileId) &&
+          isRecord(request.body) &&
+          'programmatic_tool_calling' in request.body
+        ) {
+          throw new BrokerError(
+            'REQUEST_INVALID',
+            'This request cannot be sent with ChatGPT sign-in.',
+          );
+        }
         const resolved = await resolveProfile(request.profileId, request.baseUrl);
         const endpoint =
           request.modelId === undefined
             ? resolved
             : { ...resolved, modelId: safeModelId(request.modelId) };
+        await assertChatGptModelListed(endpoint);
         const text = await run(endpoint, parsed.body, completeMs, limit, request.signal);
         return { ok: true, data: { text } };
       } catch (error) {
@@ -284,12 +444,31 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
           'draft' in source
             ? await resolveDraft(source.draft)
             : await resolveProfile(source.profileId);
+        if (endpoint.api === 'chatgpt-responses') {
+          // A reload drops the cached list, so the list just read is the one the next request checks against.
+          const chatGpt = endpoint.chatGpt;
+          if (chatGpt === undefined) {
+            throw new BrokerError('REQUEST_INVALID', 'Sign in with ChatGPT to list its models.');
+          }
+          chatGptCatalog.forget(chatGpt.accountId);
+          const listed = await chatGptCatalog.list(chatGpt.accountId, () =>
+            send(
+              deps.fetch,
+              prepareChatGptModels({ accessToken: requireKey(endpoint) }),
+              controlMs,
+              screenedOf(endpoint),
+              undefined,
+              true,
+            ).then((text) => chatGptModelsOf(text, endpoint)),
+          );
+          return { ok: true, data: listed };
+        }
         const call =
           endpoint.api === 'anthropic-messages'
             ? prepareAnthropicModels({ baseUrl: endpoint.baseUrl, apiKey: requireKey(endpoint) })
             : prepareChatModels({ baseUrl: endpoint.baseUrl, apiKey: endpoint.apiKey });
         const reply = assertNoCredential(
-          await send(deps.fetch, call, controlMs, endpoint.apiKey),
+          await send(deps.fetch, call, controlMs, screenedOf(endpoint)),
           endpoint,
         );
         let models: readonly ModelEntry[];
@@ -320,64 +499,27 @@ function makeEndpoint(
   return { profileId, api, provider, baseUrl: normalizeBaseUrl(baseUrl), modelId, apiKey };
 }
 
-/** A reply that carries the key is refused, and its text is never returned. */
+/**
+ * The secrets a reply must never carry, and a redirect target must never name: the key, and the ChatGPT refresh token.
+ * Empty values are skipped, since an empty value would match every reply.
+ */
+function screenedOf(endpoint: Endpoint): readonly string[] {
+  return [endpoint.apiKey, ...(endpoint.screened ?? [])].filter(
+    (secret): secret is string => secret !== undefined && secret.length > 0,
+  );
+}
+
+/**
+ * A reply that carries any secret the endpoint holds is refused, and its text is never returned.
+ */
 function assertNoCredential(reply: string, endpoint: Endpoint): string {
-  if (endpoint.apiKey !== undefined && holdsCredential(reply, endpoint.apiKey)) {
+  if (screenedOf(endpoint).some((secret) => holdsCredential(reply, secret))) {
     throw new BrokerError(
       'PROVIDER_INCOMPATIBLE',
       'The provider reply was refused: it contained a credential.',
     );
   }
   return reply;
-}
-
-/** How deep a string that holds JSON is searched. Past it, a string that parses is refused. */
-const MAX_NESTED_JSON = 8;
-
-/**
- * True when the key shows in the reply: in its text, in a JSON string, or in a string that is itself
- * JSON, such as a tool call's arguments. JSON escapes do not hide it (PLAN-v4 §6b).
- */
-function holdsCredential(reply: string, key: string): boolean {
-  return textHoldsKey(reply, key, 0);
-}
-
-function textHoldsKey(text: string, key: string, depth: number): boolean {
-  if (text.includes(key)) return true;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return false;
-  }
-  return valueHoldsKey(parsed, key, depth);
-}
-
-function valueHoldsKey(value: unknown, key: string, depth: number): boolean {
-  if (typeof value === 'string') {
-    if (value.includes(key)) return true;
-    // Only a string with a backslash can hide the key behind a JSON escape.
-    if (!value.includes('\\')) return false;
-    if (depth >= MAX_NESTED_JSON) return isJsonText(value);
-    return textHoldsKey(value, key, depth + 1);
-  }
-  if (Array.isArray(value)) return value.some((item) => valueHoldsKey(item, key, depth));
-  if (typeof value === 'object' && value !== null) {
-    // A property name is a string too: it can hold JSON, escapes and all.
-    return Object.entries(value).some(
-      ([name, item]) => valueHoldsKey(name, key, depth) || valueHoldsKey(item, key, depth),
-    );
-  }
-  return false;
-}
-
-function isJsonText(text: string): boolean {
-  try {
-    JSON.parse(text);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** Thrown for a reply the engine could not read. The text of the reply is never part of the message. */
@@ -407,8 +549,34 @@ const FINISH_REASONS: ReadonlySet<string> = new Set([
   'content_filter',
 ]);
 
+const PLAN_LIMIT_MESSAGE = 'ChatGPT plan limit reached. You can switch to an API-key profile.';
+
+/**
+ * The reply of one ChatGPT stream, as the engine reads it. Only a completed stream is a reply. A stream that ended
+ * early, or a usage limit, is a failure, so its partial text is never shown as a whole answer (PLAN-v4 §6d).
+ */
+function chatGptCompletion(reply: string, requested: ReadonlySet<string>): string {
+  const outcome = readChatGptStream(reply);
+  switch (outcome.kind) {
+    case 'completed':
+      return completionEnvelope(outcome.completion, requested);
+    case 'plan-limit':
+      throw new BrokerError('PLAN_LIMIT_REACHED', PLAN_LIMIT_MESSAGE);
+    case 'incomplete':
+      throw new BrokerError('RESPONSE_INCOMPLETE', 'The ChatGPT reply stopped before it finished.');
+    case 'interrupted':
+      throw new BrokerError(
+        'RESPONSE_INTERRUPTED',
+        'The ChatGPT reply was cut off before it finished.',
+      );
+    case 'failed':
+      throw new BrokerError('PROVIDER_HTTP_ERROR', `ChatGPT reported an error (${outcome.code}).`);
+  }
+}
+
 /** The completion the engine reads, for a reply of either provider shape. */
 function completionText(reply: string, endpoint: Endpoint, requested: ReadonlySet<string>): string {
+  if (endpoint.api === 'chatgpt-responses') return chatGptCompletion(reply, requested);
   if (endpoint.api !== 'anthropic-messages') return completionEnvelope(reply, requested);
   if (stopReasonOf(reply) === 'pause_turn') {
     throw new BrokerError(
@@ -653,15 +821,32 @@ function usableKey(value: string | null | undefined): string | undefined {
   return value;
 }
 
-/** A model id travels inside a JSON body, so it needs a sane length and no control characters. */
+/** A model id travels inside a JSON body, so it must pass the same rule a listed model id passes. */
 function safeModelId(value: string): string {
-  const hasControl = [...value].some(
-    (char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f,
-  );
-  if (value.length === 0 || value.length > 256 || hasControl) {
+  if (!isUsableModelId(value)) {
     throw new BrokerError('REQUEST_INVALID', 'The model id is not valid.');
   }
   return value;
+}
+
+/**
+ * The model list of a ChatGPT reply, once it is read and its values are screened. A reply that is not a model list is
+ * refused, so an account whose list is unknown is never taken for an account with none (PLAN-v4 §6d).
+ */
+function chatGptModelsOf(text: string, endpoint: Endpoint): readonly ModelEntry[] {
+  let models: readonly ModelEntry[];
+  try {
+    models = readChatGptModels(text);
+  } catch {
+    throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The model list was not understood.');
+  }
+  // Only the values that leave the broker are screened. A credential in a field that is never returned cannot reach
+  // the renderer, so it does not refuse the list.
+  for (const model of models) {
+    assertNoCredential(model.id, endpoint);
+    assertNoCredential(model.name, endpoint);
+  }
+  return models;
 }
 
 function requireKey(endpoint: Endpoint): string {
@@ -699,6 +884,13 @@ function prepareCompletion(
     return kept.value;
   };
   try {
+    if (endpoint.api === 'chatgpt-responses') {
+      return prepareChatGptResponses({
+        accessToken: requireKey(endpoint),
+        modelId: endpoint.modelId,
+        body,
+      });
+    }
     if (endpoint.api === 'anthropic-messages') {
       return prepareAnthropicMessages({
         baseUrl: endpoint.baseUrl,
@@ -724,6 +916,20 @@ function prepareCompletion(
   }
 }
 
+/** True when a failed reply names a usage limit. The reply is read for that code only, and is never kept (PLAN-v4 §6d). */
+async function isPlanLimitReply(response: Response): Promise<boolean> {
+  try {
+    const parsed = parseObject(await readBounded(response, MAX_RESPONSE_BYTES));
+    const error = parsed?.error;
+    const code = isRecord(error) ? error.code : parsed?.code;
+    return typeof code === 'string' && PLAN_LIMIT_CODES.has(code);
+  } catch (error) {
+    // A cancelled or timed-out read is the caller's outcome, not a reply without a limit.
+    if (isAbortError(error)) throw error;
+    return false;
+  }
+}
+
 /**
  * Sends one request and returns the reply text. Redirects are never followed; a credential is
  * never placed in an error message; the reply is read up to MAX_RESPONSE_BYTES.
@@ -732,8 +938,9 @@ async function send(
   fetchImpl: ProviderFetch,
   call: PreparedCall,
   timeoutMs: number,
-  secret: string | undefined,
+  secrets: readonly string[],
   signal?: AbortSignal,
+  planLimits = false,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -749,11 +956,14 @@ async function send(
       signal: controller.signal,
     });
     if (response.status >= 300 && response.status < 400) {
-      const named = namedTarget(response.headers.get('location'), call.url, secret);
+      const named = namedTarget(response.headers.get('location'), call.url, secrets);
       throw new BrokerError(
         'REDIRECT_REFUSED',
         `The provider redirected${named === '' ? '' : ` to ${named}`}. Redirects are not followed.`,
       );
+    }
+    if (planLimits && !response.ok && (await isPlanLimitReply(response))) {
+      throw new BrokerError('PLAN_LIMIT_REACHED', PLAN_LIMIT_MESSAGE);
     }
     if (response.status === 401 || response.status === 403) {
       throw new BrokerError(
@@ -787,7 +997,7 @@ async function send(
 function namedTarget(
   location: string | null,
   requestUrl: string,
-  secret: string | undefined,
+  secrets: readonly string[],
 ): string {
   if (location === null) return '';
   let target: URL;
@@ -797,7 +1007,7 @@ function namedTarget(
     return '';
   }
   const named = `${target.origin}${target.pathname}`;
-  if (secret !== undefined && secret.length > 0 && mayShowKey(named, secret)) return '';
+  if (secrets.some((secret) => mayShowKey(named, secret))) return '';
   return named;
 }
 
@@ -872,6 +1082,7 @@ function probeErrorCode(code: BrokerErrorCode): DirectProviderErrorCode {
   switch (code) {
     case 'AUTH_FAILED':
     case 'CREDENTIAL_UNAVAILABLE':
+    case 'SIGN_IN_REQUIRED':
       return 'AUTH_FAILED';
     case 'TIMEOUT':
       return 'TIMEOUT';

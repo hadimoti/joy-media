@@ -6,7 +6,10 @@
  * CLI and the editor can all import it. Only the main-process broker reads a credential.
  */
 
-/** The providers offered for API-key sign-in. Each one has fixed origins (PLAN-v4 §5). */
+/**
+ * The providers offered for API-key sign-in, and ChatGPT for sign-in only (`signInOnly`). Each one has fixed origins
+ * (PLAN-v4 §5, §6d).
+ */
 export const REGISTRY_PROVIDER_IDS = [
   'openai',
   'grok',
@@ -15,6 +18,7 @@ export const REGISTRY_PROVIDER_IDS = [
   'gemini',
   'kimi',
   'openrouter',
+  'chatgpt',
 ] as const;
 export type RegistryProviderId = (typeof REGISTRY_PROVIDER_IDS)[number];
 
@@ -28,7 +32,7 @@ export function isCustomProviderId(provider: string): boolean {
 }
 
 /** The wire format a provider speaks. The broker converts only Anthropic Messages. */
-export type ProviderApi = 'chat-completions' | 'anthropic-messages';
+export type ProviderApi = 'chat-completions' | 'anthropic-messages' | 'chatgpt-responses';
 
 export type ProviderRegionId = 'international' | 'china';
 
@@ -47,6 +51,8 @@ export interface RegistryProvider {
   readonly label: string;
   readonly api: ProviderApi;
   readonly regions: readonly [ProviderRegion, ...ProviderRegion[]];
+  /** Offered only for sign-in, never as an API-key provider (ChatGPT, PLAN-v4 §6d). */
+  readonly signInOnly?: true;
 }
 
 const INTERNATIONAL = 'international';
@@ -162,6 +168,21 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
         baseUrl: 'https://openrouter.ai/api/v1',
         keyUrl: 'https://openrouter.ai/keys',
         docsUrl: 'https://openrouter.ai/docs',
+      },
+    ],
+  },
+  {
+    id: 'chatgpt',
+    label: 'ChatGPT (Preview)',
+    api: 'chatgpt-responses',
+    signInOnly: true,
+    regions: [
+      {
+        id: INTERNATIONAL,
+        label: 'International',
+        baseUrl: 'https://api.openai.com/v1',
+        keyUrl: 'https://chatgpt.com',
+        docsUrl: 'https://developers.openai.com',
       },
     ],
   },

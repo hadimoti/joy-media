@@ -132,6 +132,18 @@ export type {
 } from './adapters/openai-compatible.js';
 export { probeOpenAiCompatibleProvider } from './adapters/openai-compatible.js';
 
+// Re-export the fixed sign-in and ChatGPT origins (PLAN-v4 §5, §6d), so the desktop names no remote host itself.
+export {
+  CHATGPT_AUTHORIZE_URL,
+  CHATGPT_ISSUER,
+  CHATGPT_JWKS_URL,
+  CHATGPT_RESPONSES_BASE_URL,
+  CHATGPT_TOKEN_URL,
+  OPENROUTER_AUTH_URL,
+  OPENROUTER_BASE_URL,
+  OPENROUTER_KEY_EXCHANGE_URL,
+} from './sign-in-endpoints.js';
+
 // ===== V1 Backward Compatibility =====
 
 export function createLocalWhisperProvider(

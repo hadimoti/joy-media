@@ -11,6 +11,7 @@ export const IPC_CHANNELS = [
   'desktop.provider-profile.list',
   'desktop.provider-profile.delete',
   'desktop.provider-profile.later',
+  'desktop.provider-profile.sign-in',
   'desktop.provider.test',
   'desktop.provider.models',
   'desktop.agent.request',
