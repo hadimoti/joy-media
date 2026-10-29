@@ -28,8 +28,8 @@ export const DUAL_BRAIN_STATUS: DualBrainStatus = {
   },
   creative: {
     name: 'Creative Brain',
-    provider: 'kilo',
-    model: 'kilo-auto/efficient',
+    provider: 'none',
+    model: 'none',
   },
 };
 

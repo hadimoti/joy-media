@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -249,19 +249,34 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
   });
 
   describe('Multi-API Provider & Model Configuration Commands', () => {
+    beforeEach(() => {
+      // Adding a provider reads its model list. The test answers that list here, so no DNS lookup is made.
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ data: [{ id: 'gateway/model-a' }] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
     it('supports adding, listing, selecting, and removing providers via CLI', async () => {
       // 1. Add provider
       const addCode = await runCli([
         'agent',
         'provider',
         'add',
-        'kilo-test',
+        'gateway-test',
         '--url',
-        'https://api.kilo.ai/api/gateway/v1',
+        'https://gateway.example.test/v1',
         '--api-key',
-        'kilo-test-key-999',
+        'gateway-test-key-999',
         '--model',
-        'minimax/minimax-m3',
+        'gateway/model-a',
       ]);
       expect(addCode).toBe(0);
 
@@ -270,23 +285,27 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
       expect(listCode).toBe(0);
 
       // 3. Use provider
-      const useCode = await runCli(['agent', 'provider', 'use', 'kilo-test']);
+      const useCode = await runCli(['agent', 'provider', 'use', 'gateway-test']);
       expect(useCode).toBe(0);
 
       // 4. Set default model
-      const modelSetCode = await runCli(['agent', 'model', 'set', 'kilo-auto/efficient']);
+      const modelSetCode = await runCli(['agent', 'model', 'set', 'gateway/model-b']);
       expect(modelSetCode).toBe(0);
 
       // 5. Verify resolution with active provider
       const resolved = resolveByokConfig();
-      expect(resolved.provider).toBe('kilo');
-      expect(resolved.baseUrl).toBe('https://api.kilo.ai/api/gateway/v1');
-      expect(resolved.apiKey).toBe('kilo-test-key-999');
-      expect(resolved.modelId).toBe('kilo-auto/efficient');
+      expect(resolved.provider).toBe('custom');
+      expect(resolved.baseUrl).toBe('https://gateway.example.test/v1');
+      expect(resolved.apiKey).toBe('gateway-test-key-999');
+      expect(resolved.modelId).toBe('gateway/model-b');
 
       // 6. Remove provider
-      const removeCode = await runCli(['agent', 'provider', 'remove', 'kilo-test']);
+      const removeCode = await runCli(['agent', 'provider', 'remove', 'gateway-test']);
       expect(removeCode).toBe(0);
     }, 15000);
+
+    it('refuses the retired Kilo profile instead of routing requests to it', () => {
+      expect(() => resolveByokConfig({ provider: 'kilo' })).toThrow('retired from JOY Media');
+    });
   });
 });

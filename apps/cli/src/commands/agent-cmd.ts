@@ -114,12 +114,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       setAiProvider(name, {
         name,
         provider:
-          flags.provider ??
-          (flags.baseUrl.includes('kilo')
-            ? 'kilo'
-            : flags.baseUrl.includes('openrouter')
-              ? 'openrouter'
-              : 'custom'),
+          flags.provider ?? (flags.baseUrl.includes('openrouter') ? 'openrouter' : 'custom'),
         baseUrl: flags.baseUrl,
         apiKey: flags.apiKey,
         defaultModel,
@@ -141,7 +136,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         return 1;
       }
       const providers = loadAiProviders();
-      if (!providers[name] && name !== 'openrouter' && name !== 'kilo' && name !== 'openai') {
+      if (!providers[name] && name !== 'openrouter' && name !== 'openai') {
         logError(
           `Unknown provider "${name}". Run "joy-media agent provider list" to see available providers.`,
         );
@@ -190,15 +185,16 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       args[1] ?? flags.provider ?? loadCliConfig().activeProvider ?? 'openrouter';
     const providers = loadAiProviders();
     const providerConfig = providers[targetProviderName];
+    if (targetProviderName === 'kilo') {
+      logError('The kilo provider was retired from JOY Media. Choose another provider.');
+      return 1;
+    }
 
     let baseUrl = flags.baseUrl ?? providerConfig?.baseUrl;
     let apiKey = flags.apiKey ?? providerConfig?.apiKey;
 
     if (!baseUrl) {
-      if (targetProviderName === 'kilo') {
-        baseUrl = 'https://api.kilo.ai/api/gateway/v1';
-        apiKey = apiKey ?? process.env.KILO_API_KEY;
-      } else if (targetProviderName === 'openrouter') {
+      if (targetProviderName === 'openrouter') {
         baseUrl = 'https://openrouter.ai/api/v1';
         apiKey = apiKey ?? process.env.OPENROUTER_API_KEY;
       } else {
@@ -341,7 +337,7 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       logInfo(
         `${c('Dual-Brain:', 'bold')} ${c('Active', 'green')}  ` +
           `${c('Workhorse', 'cyan')}=openrouter/${c('openrouter/free', 'magenta')}  ` +
-          `${c('Creative', 'cyan')}=kilo/${c('kilo-auto/efficient', 'magenta')}`,
+          `${c('Creative', 'cyan')}=${c('none', 'magenta')}`,
       );
       logStep('Override model', flags.model);
     }

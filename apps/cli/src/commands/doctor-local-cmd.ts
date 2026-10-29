@@ -95,15 +95,20 @@ export async function handleDoctorLocalCommand(): Promise<number> {
   if (!configLocal) {
     logWarn(`Joy Agent Provider: ${UNCHECKED}`);
   } else {
-    const byok = resolveByokConfig();
-    if (byok.apiKey && byok.apiKey !== 'not-provided') {
-      logSuccess(
-        `Joy Agent Provider: ${c(byok.provider, 'bold')} (${c(byok.modelId, 'cyan')}) [API Key Configured]`,
-      );
-    } else {
-      logWarn(
-        `Joy Agent Provider: ${byok.provider} (${byok.modelId}) [No API Key configured - set OPENROUTER_API_KEY]`,
-      );
+    try {
+      const byok = resolveByokConfig();
+      if (byok.apiKey && byok.apiKey !== 'not-provided') {
+        logSuccess(
+          `Joy Agent Provider: ${c(byok.provider, 'bold')} (${c(byok.modelId, 'cyan')}) [API Key Configured]`,
+        );
+      } else {
+        logWarn(
+          `Joy Agent Provider: ${byok.provider} (${byok.modelId}) [No API Key configured - set OPENROUTER_API_KEY]`,
+        );
+      }
+    } catch (error) {
+      // A retired or unusable provider is reported, so the check itself never throws.
+      logWarn(`Joy Agent Provider: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
