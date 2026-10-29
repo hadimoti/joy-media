@@ -259,34 +259,44 @@ describe('MiniMax device-code sign-in', () => {
     );
   });
 
-  it('waits at least as long as the interval the server asks for', async () => {
-    vi.useFakeTimers({ now: NOW });
-    const gate = openedGate();
-    let pollCount = 0;
-    const fetch: FetchLike = async (url, init) => {
-      if (url.endsWith('/device/code')) {
-        const state = new URLSearchParams(String(init.body)).get('state') ?? '';
-        return deviceReply(state, { interval: 5 });
-      }
-      pollCount += 1;
-      return json({
-        status: 'success',
-        access_token: ACCESS_TOKEN,
-        refresh_token: REFRESH_TOKEN,
-        expired_in: 3_600,
-      });
-    };
-    const pending = signInWithMiniMax(signInOptions(fetch, (url) => gate.open(url)));
+  it.each([
+    { serverIntervalMs: 3_000, expectedPollIntervalMs: 3_000 },
+    { serverIntervalMs: 3, expectedPollIntervalMs: MINIMAX_POLL_INTERVAL_MS },
+  ])(
+    'polls after $expectedPollIntervalMs ms when MiniMax returns interval $serverIntervalMs ms',
+    async ({ serverIntervalMs, expectedPollIntervalMs }) => {
+      vi.useFakeTimers({ now: NOW });
+      const gate = openedGate();
+      let pollCount = 0;
+      const fetch: FetchLike = async (url, init) => {
+        if (url.endsWith('/device/code')) {
+          const state = new URLSearchParams(String(init.body)).get('state') ?? '';
+          return deviceReply(state, { interval: serverIntervalMs });
+        }
+        pollCount += 1;
+        return json({
+          status: 'success',
+          access_token: ACCESS_TOKEN,
+          refresh_token: REFRESH_TOKEN,
+          expired_in: 3_600,
+        });
+      };
+      const pending = signInWithMiniMax(signInOptions(fetch, (url) => gate.open(url)));
+      const outcome = pending.then(
+        (result) => result,
+        (error: unknown) => error,
+      );
 
-    await gate.promise;
-    await flushMicrotasks();
-    await vi.advanceTimersByTimeAsync(4_999);
-    expect(pollCount).toBe(0);
-    await vi.advanceTimersByTimeAsync(1);
+      await gate.promise;
+      await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(expectedPollIntervalMs - 1);
+      expect(pollCount).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(pollCount).toBe(1);
 
-    await expect(pending).resolves.toMatchObject({ accessToken: ACCESS_TOKEN });
-    expect(pollCount).toBe(1);
-  });
+      await expect(outcome).resolves.toMatchObject({ accessToken: ACCESS_TOKEN });
+    },
+  );
 
   it('reads an absolute expiry as an epoch and a relative one as seconds', async () => {
     vi.useFakeTimers({ now: NOW });

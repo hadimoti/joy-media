@@ -337,10 +337,10 @@ async function requestDeviceCode(
   if (reply.state !== state) {
     throw new OAuthFlowError('STATE_MISMATCH', 'MiniMax returned a different device authorization state.');
   }
-  const intervalSeconds = reply.interval;
+  const intervalMsRaw = reply.interval;
   const intervalMs =
-    typeof intervalSeconds === 'number' && Number.isFinite(intervalSeconds) && intervalSeconds > 0
-      ? Math.max(MINIMAX_POLL_INTERVAL_MS, Math.ceil(intervalSeconds * 1000))
+    typeof intervalMsRaw === 'number' && Number.isFinite(intervalMsRaw) && intervalMsRaw > 0
+      ? Math.max(MINIMAX_POLL_INTERVAL_MS, Math.ceil(intervalMsRaw))
       : MINIMAX_POLL_INTERVAL_MS;
   return { userCode, verificationUri, expiresAtMs, intervalMs, codeVerifier };
 }
