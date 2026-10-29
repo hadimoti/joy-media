@@ -333,6 +333,7 @@ import { ModelDrawer } from './ModelDrawer.js';
 import { AssetLibrarySettingsDialog } from './AssetLibrarySettingsDialog.js';
 import {
   isDesktopHost,
+  listDesktopAgentSlots,
   listDesktopProviderProfiles,
   isDesktopWindowMaximized,
   minimizeDesktopWindow,
@@ -1136,7 +1137,19 @@ function EditorWorkspace({
           const state = (p as { readonly state?: string }).state;
           return (state === undefined || state === 'active') && p.bound !== false;
         });
-        const profile = usable.find((p) => p.provider === 'openrouter') ?? usable[0];
+        // The agent restores its Workhorse slot and nothing else. No provider is preferred by default (D17).
+        const workhorse = await listDesktopAgentSlots()
+          .then((slots) => slots.find((slot) => slot.id === 'workhorse'))
+          .catch(() => undefined);
+        if (
+          workhorse === undefined ||
+          !workhorse.ready ||
+          workhorse.profileId === null ||
+          workhorse.model === null
+        ) {
+          return;
+        }
+        const profile = usable.find((p) => p.id === workhorse.profileId);
         if (!profile) return;
         const provider = sessionProviderFor(profile.provider);
         if (provider === undefined) return;
@@ -1161,8 +1174,9 @@ function EditorWorkspace({
           const status = await client.configure({
             provider,
             baseUrl: profile.baseUrl,
-            modelId: profile.modelId,
+            modelId: workhorse.model,
             profileId: profile.id,
+            slot: workhorse.id,
           });
           if (!cancelled) {
             setAgentConnectionStatus(status);
