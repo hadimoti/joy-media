@@ -28,6 +28,7 @@ describe('isLocalPath', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -48,6 +49,13 @@ describe('isLocalPath', () => {
 
     expect(isLocalPath('Z:\\models', drives)).toBe(false);
     expect(isLocalPath('Q:\\models', drives)).toBe(false);
+    expect(lstatSync).not.toHaveBeenCalled();
+  });
+
+  it('refuses a relative path that resolves onto a network drive, without reading it', () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('Z:\\work');
+
+    expect(isLocalPath('models', new Map([['Z:', 4]]))).toBe(false);
     expect(lstatSync).not.toHaveBeenCalled();
   });
 

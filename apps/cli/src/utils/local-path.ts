@@ -7,6 +7,9 @@ import { join, parse, resolve } from 'node:path';
  */
 const LOCAL_DRIVE_TYPES: ReadonlySet<number> = new Set([2, 3, 5, 6]);
 
+const UNC_OR_DEVICE = /^[\\/]{2}/;
+const DRIVE_LETTER = /^([A-Za-z]:)/;
+
 /** Reads the "C:=3" lines of the doctor's drive query. Any other line is ignored. */
 export function parseDriveTypes(output: string): Map<string, number> {
   const types = new Map<string, number>();
@@ -20,20 +23,25 @@ export function parseDriveTypes(output: string): Map<string, number> {
 }
 
 /**
- * Whether reading a path stays on this machine. A UNC or device path is refused, and so is a path on
- * a network drive or on a drive the query did not classify. A path is refused too when a component is
- * a symbolic link or junction, because its target could be remote. Only link metadata is read, and
- * only after the drive is known to be local.
+ * Whether reading a path stays on this machine. A UNC or device path is refused. The path is also
+ * refused when it, or the absolute form it resolves to, is on a network drive or on a drive the query
+ * did not classify, so a relative path under a network working folder is refused too. A path is
+ * refused when a component is a symbolic link or junction, because its target could be remote. Only
+ * link metadata is read, and only after every drive involved is known to be local.
+ *
+ * This is best-effort. It cannot see a cloud placeholder that downloads on read, nor a link created
+ * after the check.
  */
 export function isLocalPath(path: string, driveTypes: ReadonlyMap<string, number>): boolean {
-  if (/^[\\/]{2}/.test(path)) return false;
-  const drive = /^([A-Za-z]:)/.exec(path)?.[1]?.toUpperCase();
-  if (drive !== undefined) {
+  if (UNC_OR_DEVICE.test(path)) return false;
+  const absolute = resolve(path);
+  if (UNC_OR_DEVICE.test(absolute)) return false;
+  for (const candidate of new Set([path, absolute])) {
+    const drive = DRIVE_LETTER.exec(candidate)?.[1]?.toUpperCase();
+    if (drive === undefined) continue;
     const type = driveTypes.get(drive);
     if (type === undefined || !LOCAL_DRIVE_TYPES.has(type)) return false;
   }
-  const absolute = resolve(path);
-  if (/^[\\/]{2}/.test(absolute)) return false;
   return !hasLinkedComponent(absolute);
 }
 

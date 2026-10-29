@@ -34,11 +34,26 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
-const DRIVES = 'C:=3\nD:=3\nZ:=4\n';
-const SAVED_ENV = ['HOME', 'USERPROFILE', 'APPDATA', 'JOY_MODELS_DIR', 'JOY_MEDIA_SQLITE_PATH'];
+const SAVED_ENV = [
+  'HOME',
+  'USERPROFILE',
+  'APPDATA',
+  'SystemRoot',
+  'JOY_MODELS_DIR',
+  'JOY_MEDIA_SQLITE_PATH',
+];
+const SYSTEM_ROOT = 'C:\\Windows';
+const POWERSHELL = join(SYSTEM_ROOT, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+const PS_MODULES = join(SYSTEM_ROOT, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules');
 
 let home = '';
 let saved: Record<string, string | undefined> = {};
+
+/** The drive list the fake query answers with: the test folder's drive is fixed, and Z: is remote. */
+function driveList(): string {
+  const drive = /^[A-Za-z]:/.exec(home)?.[0]?.toUpperCase() ?? 'C:';
+  return `${drive}=3\nZ:=4\n`;
+}
 
 /** Answers the doctor's two PowerShell queries: the drive list, and any other query with a GPU. */
 function answerPowerShell(drives: string): void {
@@ -81,6 +96,7 @@ function blockNetwork(): Array<{ name: string; spy: MockInstance }> {
   block('https.get', https, 'get');
   block('net.connect', net, 'connect');
   block('net.createConnection', net, 'createConnection');
+  block('net.Socket.connect', net.Socket.prototype, 'connect');
   block('tls.connect', tls, 'connect');
   block('dns.lookup', dns, 'lookup');
   block('dns.resolve', dns, 'resolve');
@@ -94,10 +110,11 @@ beforeEach(() => {
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   process.env.APPDATA = join(home, 'AppData', 'Roaming');
+  process.env.SystemRoot = SYSTEM_ROOT;
   delete process.env.JOY_MODELS_DIR;
   delete process.env.JOY_MEDIA_SQLITE_PATH;
   vi.clearAllMocks();
-  answerPowerShell(DRIVES);
+  answerPowerShell(driveList());
 });
 
 afterEach(() => {
@@ -143,6 +160,7 @@ describe('joy doctor (no network calls)', () => {
     call(() => https.get('https://127.0.0.1:1'));
     call(() => net.connect(1, '127.0.0.1'));
     call(() => net.createConnection(1, '127.0.0.1'));
+    call(() => new net.Socket().connect(1, '127.0.0.1'));
     call(() => tls.connect(1, '127.0.0.1'));
     call(() => dns.lookup('localhost', () => undefined));
     call(() => dns.resolve('localhost', () => undefined));
@@ -212,6 +230,60 @@ describe('joy doctor (network and linked paths)', () => {
 
     expect(output()).toContain('Local Model Weights: not checked (network or linked path)');
     expect(existsSync).not.toHaveBeenCalledWith(models);
+    expect(vi.mocked(lstatSync)).toHaveBeenCalledWith(link, expect.anything());
+  });
+
+  it('does not read a relative folder that resolves onto a mapped network drive', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('Z:\\work');
+    process.env.JOY_MODELS_DIR = 'models';
+    const output = captureOutput();
+    const { handleDoctorCommand } = await import('./doctor-cmd.js');
+
+    await handleDoctorCommand();
+
+    expect(output()).toContain('Local Model Weights: not checked (network or linked path)');
+    expect(readdirSync).not.toHaveBeenCalled();
+    expect(vi.mocked(lstatSync).mock.calls.some(([path]) => String(path).startsWith('Z:'))).toBe(
+      false,
+    );
+  });
+
+  it('does not read a database path behind a UNC name', async () => {
+    const unc = '\\\\server\\share\\joy-media.sqlite3';
+    process.env.JOY_MEDIA_SQLITE_PATH = unc;
+    const output = captureOutput();
+    const { handleDoctorCommand } = await import('./doctor-cmd.js');
+
+    await handleDoctorCommand();
+
+    expect(output()).toContain('Desktop Project Store: not checked (network or linked path)');
+    expect(existsSync).not.toHaveBeenCalledWith(unc);
+  });
+
+  it('does not read a relative database path that resolves onto a mapped network drive', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('Z:\\work');
+    process.env.JOY_MEDIA_SQLITE_PATH = 'joy-media.sqlite3';
+    const output = captureOutput();
+    const { handleDoctorCommand } = await import('./doctor-cmd.js');
+
+    await handleDoctorCommand();
+
+    expect(output()).toContain('Desktop Project Store: not checked (network or linked path)');
+    expect(existsSync).not.toHaveBeenCalledWith('joy-media.sqlite3');
+  });
+
+  it('does not read the configuration folder when it is a junction', async () => {
+    const target = join(home, 'remote-config');
+    mkdirSync(target);
+    symlinkSync(target, join(home, '.joy-media'), 'junction');
+    const output = captureOutput();
+    const { handleDoctorCommand } = await import('./doctor-cmd.js');
+
+    await handleDoctorCommand();
+
+    expect(output()).toContain('Desktop Project Store: not checked (network or linked path)');
+    expect(output()).toContain('Joy Agent Provider: not checked (network or linked path)');
+    expect(output()).toContain('Local AI Venvs: not checked (network or linked path)');
   });
 
   it('still reads a local model folder', async () => {
@@ -227,16 +299,31 @@ describe('joy doctor (network and linked paths)', () => {
     expect(output()).toContain('Local Model Weights: 1 file(s) found in');
   });
 
-  it('starts PowerShell only by its absolute path', async () => {
+  it('starts PowerShell only by its absolute path, with the module path pinned', async () => {
     captureOutput();
     const { handleDoctorCommand } = await import('./doctor-cmd.js');
 
     await handleDoctorCommand();
 
-    const files = vi.mocked(spawnSync).mock.calls.map(([file]) => String(file));
-    expect(files.length).toBeGreaterThan(0);
-    for (const file of files) {
-      expect(file).toMatch(/System32[\\/]WindowsPowerShell[\\/]v1\.0[\\/]powershell\.exe$/);
+    const calls = vi.mocked(spawnSync).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [file, , options] of calls) {
+      expect(file).toBe(POWERSHELL);
+      expect(options?.env?.PSModulePath).toBe(PS_MODULES);
+    }
+  });
+
+  it('does not trust a SystemRoot that is relative or a UNC path', async () => {
+    process.env.SystemRoot = '\\\\server\\share\\Windows';
+    captureOutput();
+    const { handleDoctorCommand } = await import('./doctor-cmd.js');
+
+    await handleDoctorCommand();
+
+    const calls = vi.mocked(spawnSync).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [file] of calls) {
+      expect(file).toBe(POWERSHELL);
     }
   });
 });

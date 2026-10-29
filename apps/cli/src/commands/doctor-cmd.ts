@@ -11,10 +11,24 @@ import { isLocalPath, parseDriveTypes } from '../utils/local-path.js';
 
 const UNCHECKED = 'not checked (network or linked path)';
 
+/**
+ * The Windows directory, taken from SystemRoot only when it is a drive path. A relative value or a
+ * UNC path is replaced by C:\Windows.
+ */
+function systemRoot(): string {
+  const root = process.env.SystemRoot ?? '';
+  return /^[A-Za-z]:\\/.test(root) ? root : 'C:\\Windows';
+}
+
 /** Windows PowerShell by absolute path, so that no PATH entry can supply another program. */
 function powershellPath(): string {
-  const root = process.env.SystemRoot ?? 'C:\\Windows';
-  return join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  return join(systemRoot(), 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
+/** The child's environment, with the module path pinned to the system modules folder. */
+function powershellEnv(): NodeJS.ProcessEnv {
+  const modules = join(systemRoot(), 'System32', 'WindowsPowerShell', 'v1.0', 'Modules');
+  return { ...process.env, PSModulePath: modules };
 }
 
 /**
@@ -29,7 +43,7 @@ function readDriveTypes(): Map<string, number> {
       '-Command',
       "[System.IO.DriveInfo]::GetDrives() | ForEach-Object { '{0}={1}' -f $_.Name.TrimEnd('\\'), [int]$_.DriveType }",
     ],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', env: powershellEnv() },
   );
   return res.status === 0 ? parseDriveTypes(res.stdout) : new Map();
 }
@@ -97,7 +111,7 @@ export async function handleDoctorCommand(): Promise<number> {
         '-Command',
         'Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name',
       ],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', env: powershellEnv() },
     );
     if (res.status === 0 && res.stdout.trim()) {
       gpuName = res.stdout.trim().split('\n')[0]?.trim() ?? 'Unknown';
