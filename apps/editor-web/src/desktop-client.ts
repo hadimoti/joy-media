@@ -38,6 +38,8 @@ export interface DesktopWorkerStatus {
   readonly workerId?: string;
   readonly capabilities: readonly string[];
   readonly lastSeenAt?: string;
+  /** Why the Worker stopped on its own. Shown with a retry action once the automatic restarts are used up. */
+  readonly lastError?: string;
 }
 
 /** Mirrors apps/desktop/src/file-boundary.ts's `OpaqueFileRef`. */
@@ -63,6 +65,12 @@ function requireBridge(): DesktopJoyBridge {
 /** Reads the desktop Worker supervisor's current status via `desktop.worker-status`. */
 export async function getDesktopWorkerStatus(): Promise<DesktopWorkerStatus> {
   const data = await requireBridge().invoke('desktop.worker-status');
+  return data as DesktopWorkerStatus;
+}
+
+/** Starts the desktop's Worker again, after its automatic restarts are used up, via `desktop.worker-retry`. */
+export async function retryDesktopWorker(): Promise<DesktopWorkerStatus> {
+  const data = await requireBridge().invoke('desktop.worker-retry');
   return data as DesktopWorkerStatus;
 }
 

@@ -4,7 +4,18 @@ import {
   type BrowserJob,
   type BrowserWorker,
 } from './control-plane-client.js';
-import { jobStateLabel, projectJobStatus, workerPresence } from './jobs-panel-state.js';
+import {
+  jobStateLabel,
+  projectJobStatus,
+  workerPresence,
+  workerProcessView,
+} from './jobs-panel-state.js';
+import {
+  getDesktopWorkerStatus,
+  isDesktopHost,
+  retryDesktopWorker,
+  type DesktopWorkerStatus,
+} from './desktop-client.js';
 import { BoundedPollingLoop } from './bounded-polling.js';
 import { CloseIcon, RefreshIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
@@ -32,6 +43,7 @@ export function JobsPanel({
   const client = useMemo(() => new BrowserControlPlaneClient(), []);
   const [workers, setWorkers] = useState<readonly BrowserWorker[]>([]);
   const [jobs, setJobs] = useState<readonly BrowserJob[]>([]);
+  const [workerProcess, setWorkerProcess] = useState<DesktopWorkerStatus>();
   // Track the initialized *project ID*, rather than a boolean. A panel can stay mounted while the
   // editor switches projects, and the next project must register its own binding first.
   const [initializedProjectId, setInitializedProjectId] = useState<string>();
@@ -49,9 +61,11 @@ export function JobsPanel({
       // Register the project once. Repeating it on every ten-second status poll adds nothing.
       if (!projectInitialized) await client.ensureProject(projectId, projectTitle);
       const nextJobs = await client.jobs(projectId);
+      const nextWorkerProcess = await readWorkerProcess();
       if (requestId !== refreshSeqRef.current) return;
       setWorkers(nextWorkers);
       setJobs(nextJobs);
+      setWorkerProcess(nextWorkerProcess);
       setInitializedProjectId(projectId);
       setConnectionStatus(projectJobStatus(false, nextWorkers));
     } catch (error) {
@@ -87,6 +101,15 @@ export function JobsPanel({
       if (pollingRef.current === polling) pollingRef.current = undefined;
     };
   }, [load]);
+
+  const retryWorkerProcess = useCallback(async () => {
+    try {
+      setWorkerProcess(await retryDesktopWorker());
+      setStatus(undefined);
+    } catch (error) {
+      setStatus(`Worker retry failed: ${message(error)}`);
+    }
+  }, []);
 
   const sortedWorkers = useMemo(() => {
     return [...workers].sort((left, right) => {
@@ -129,6 +152,9 @@ export function JobsPanel({
               {connectedCount} connected · {workers.length} total
             </span>
           </div>
+          {workerProcess !== undefined && (
+            <WorkerProcessRow status={workerProcess} onRetry={() => void retryWorkerProcess()} />
+          )}
           {sortedWorkers.length === 0 ? (
             <p className="jobs-empty">No local Worker found.</p>
           ) : (
@@ -220,6 +246,41 @@ export function JobsPanel({
   function report(error: unknown): void {
     setStatus(`Job action failed: ${message(error)}`);
   }
+}
+
+/** The desktop's own Worker process. Undefined outside the desktop host, or while its status cannot be read. */
+async function readWorkerProcess(): Promise<DesktopWorkerStatus | undefined> {
+  if (!isDesktopHost()) return undefined;
+  return getDesktopWorkerStatus().catch(() => undefined);
+}
+
+function WorkerProcessRow({
+  status,
+  onRetry,
+}: {
+  readonly status: DesktopWorkerStatus;
+  readonly onRetry: () => void;
+}) {
+  const view = workerProcessView(status.connection);
+  return (
+    <div className="jobs-worker-process" data-worker-connection={status.connection}>
+      <div className="jobs-row-main">
+        <strong>Local Worker</strong>
+        <span className={`jobs-pill jobs-pill--${view.tone}`}>{view.label}</span>
+      </div>
+      {status.lastError !== undefined && <p className="jobs-error">{status.lastError}</p>}
+      {view.canRetry && (
+        <button
+          type="button"
+          className="jobs-retry-button"
+          aria-label="Retry local Worker"
+          onClick={onRetry}
+        >
+          Retry
+        </button>
+      )}
+    </div>
+  );
 }
 
 function shortId(id: string): string {

@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getDesktopWorkerStatus,
+  retryDesktopWorker,
   isDesktopHost,
   selectDesktopFile,
   saveDesktopProviderProfile,
@@ -51,6 +52,22 @@ describe('getDesktopWorkerStatus', () => {
 
     await expect(getDesktopWorkerStatus()).resolves.toEqual(status);
     expect(invoke).toHaveBeenCalledWith('desktop.worker-status');
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('retryDesktopWorker', () => {
+  it('invokes desktop.worker-retry with no payload and returns the status it reports', async () => {
+    const status = {
+      connection: 'starting' as const,
+      capabilities: [],
+      lastError: 'Worker exited with code 137',
+    };
+    const invoke = vi.fn().mockResolvedValue(status);
+    window.joyDesktop = { channels: ['desktop.worker-retry'], invoke };
+
+    await expect(retryDesktopWorker()).resolves.toEqual(status);
+    expect(invoke).toHaveBeenCalledWith('desktop.worker-retry');
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 });

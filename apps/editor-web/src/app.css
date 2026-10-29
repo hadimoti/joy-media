@@ -4705,6 +4705,22 @@ label {
 .jobs-error {
   color: #f1a0a0;
 }
+.jobs-worker-process {
+  display: grid;
+  justify-items: start;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+}
+.jobs-retry-button {
+  padding: 0.2rem 0.4rem;
+  border: 1px solid #4e4e55;
+  border-radius: 0.25rem;
+  background: #242428;
+  color: #e4c466;
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
 .jobs-muted-toggle {
   justify-self: start;
   margin: 0;
