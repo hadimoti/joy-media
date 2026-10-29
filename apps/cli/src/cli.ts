@@ -4,6 +4,7 @@ import { handleAgentCommand } from './commands/agent-cmd.js';
 import { handleBenchmarkCommand } from './commands/benchmark-cmd.js';
 import { handleDoctorCommand } from './commands/doctor-cmd.js';
 import { handleDoctorLocalCommand } from './commands/doctor-local-cmd.js';
+import { migrateLegacyProviders } from './utils/config.js';
 import { handleProjectCommand } from './commands/project-cmd.js';
 import { handleRenderCommand } from './commands/render-cmd.js';
 import { handleTimelineCommand } from './commands/timeline-cmd.js';
@@ -206,6 +207,12 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 
   try {
+    // Keys still in the plaintext provider file move to the credential store on the first start (PLAN-v4 §9c).
+    try {
+      migrateLegacyProviders();
+    } catch {
+      logError('The provider file could not be migrated. It was left unchanged.');
+    }
     switch (command) {
       case 'agent':
         return await handleAgentCommand(subArgs, flags);
