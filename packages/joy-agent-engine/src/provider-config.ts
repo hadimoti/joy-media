@@ -34,12 +34,9 @@ export function normalizeByokSessionConfig(
   const provider = input.provider;
   const modelId = typeof input.modelId === 'string' ? input.modelId.trim() : '';
   const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
-  // joy-hosted is a retired legacy profile with no endpoint and no key, so it is refused here (PLAN-v4 §9a).
+  // joy-hosted and kilo are retired legacy profiles, so they are refused here (PLAN-v4 §9a).
   if (
-    (provider !== 'openrouter' &&
-      provider !== 'openai-compatible' &&
-      provider !== 'kilo' &&
-      provider !== 'custom') ||
+    (provider !== 'openrouter' && provider !== 'openai-compatible' && provider !== 'custom') ||
     modelId.length === 0 ||
     modelId.length > MAX_MODEL_ID_LENGTH ||
     apiKey.length === 0 ||
