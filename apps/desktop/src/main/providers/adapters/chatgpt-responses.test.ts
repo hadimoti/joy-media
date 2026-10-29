@@ -372,6 +372,42 @@ describe('ChatGPT model list', () => {
     expect(loads).toEqual(['acct-1', 'acct-2', 'acct-1']);
   });
 
+  it('refuses a reply that is not a model list, rather than reading it as an empty list', () => {
+    expect(() => readChatGptModels('not json')).toThrow();
+    expect(() => readChatGptModels('{"data": []}')).toThrow();
+  });
+
+  it('shares one load between overlapping calls, and loads again after a failed load', async () => {
+    const catalog = createChatGptCatalog();
+    let loads = 0;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow = async (): Promise<readonly ModelEntry[]> => {
+      loads += 1;
+      await gate;
+      return [{ id: 'gpt-a', name: 'gpt-a' }];
+    };
+    const first = catalog.list('acct-1', slow);
+    const second = catalog.list('acct-1', slow);
+    release();
+    await expect(first).resolves.toEqual([{ id: 'gpt-a', name: 'gpt-a' }]);
+    await expect(second).resolves.toEqual([{ id: 'gpt-a', name: 'gpt-a' }]);
+    expect(loads).toBe(1);
+
+    let failNext = true;
+    const flaky = async (): Promise<readonly ModelEntry[]> => {
+      if (failNext) {
+        failNext = false;
+        throw new Error('offline');
+      }
+      return [{ id: 'gpt-b', name: 'gpt-b' }];
+    };
+    await expect(catalog.list('acct-2', flaky)).rejects.toThrow('offline');
+    await expect(catalog.list('acct-2', flaky)).resolves.toEqual([{ id: 'gpt-b', name: 'gpt-b' }]);
+  });
+
   it('loads a list again once its time-to-live has passed', async () => {
     let clock = 0;
     const loadedAt: number[] = [];

@@ -267,10 +267,10 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         deps.fetch,
         prepareChatGptModels({ accessToken }),
         controlMs,
-        [accessToken],
+        screenedOf(endpoint),
         undefined,
         true,
-      ).then(readChatGptModels),
+      ).then((text) => chatGptModelsOf(text, endpoint)),
     );
     if (needsModelChoice(models, endpoint.modelId)) {
       throw new BrokerError(
@@ -457,7 +457,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
               screenedOf(endpoint),
               undefined,
               true,
-            ).then(readChatGptModels),
+            ).then((text) => chatGptModelsOf(text, endpoint)),
           );
           return { ok: true, data: listed };
         }
@@ -877,6 +877,19 @@ function safeModelId(value: string): string {
     throw new BrokerError('REQUEST_INVALID', 'The model id is not valid.');
   }
   return value;
+}
+
+/**
+ * The model list of a ChatGPT reply, once it is screened and read. A reply that is not a model list is refused, so an
+ * account whose list is unknown is never taken for an account with none (PLAN-v4 §6d).
+ */
+function chatGptModelsOf(text: string, endpoint: Endpoint): readonly ModelEntry[] {
+  assertNoCredential(text, endpoint);
+  try {
+    return readChatGptModels(text);
+  } catch {
+    throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The model list was not understood.');
+  }
 }
 
 function requireKey(endpoint: Endpoint): string {

@@ -116,7 +116,7 @@ export function readChatGptStream(text: string): ChatGptOutcome {
  */
 export function readChatGptModels(text: string): readonly ModelEntry[] {
   const models = parseObject(text)?.models;
-  if (!Array.isArray(models)) return [];
+  if (!Array.isArray(models)) throw new Error('The model list was not understood.');
   return models.flatMap((model): ModelEntry[] => {
     if (
       !isRecord(model) ||

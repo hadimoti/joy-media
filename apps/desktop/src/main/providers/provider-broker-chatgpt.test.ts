@@ -72,6 +72,7 @@ function harness(
   initial: ChatGptTokenRecord | 'unreadable',
   reply: (url: string, init: RequestInit) => Response | Promise<Response>,
   models: readonly unknown[] = LISTED,
+  modelsReply?: () => Response,
 ) {
   const values = new Map<string, string>();
   const versions = new Map<string, number>();
@@ -80,6 +81,7 @@ function harness(
   let failWrites = false;
   let currentModels: readonly unknown[] = models;
   let nextWriteHook: (() => void) | undefined;
+  let deleted = false;
 
   values.set(HANDLE, initial === 'unreadable' ? 'not a token record' : encodeTokenRecord(initial));
   versions.set(HANDLE, 1);
@@ -115,12 +117,12 @@ function harness(
   };
   const fetch: ProviderFetch = async (url, init) => {
     sent.push({ url, init });
-    if (url === MODELS_URL) return json({ models: currentModels });
+    if (url === MODELS_URL) return modelsReply ? modelsReply() : json({ models: currentModels });
     return reply(url, init);
   };
   const broker = createProviderBroker({
     store: {
-      getProfile: (id) => (id === PROFILE_ID ? profile : undefined),
+      getProfile: (id) => (id === PROFILE_ID && !deleted ? profile : undefined),
       isDisabledLegacy: () => false,
       markCredentialUnavailable: (id) => {
         unavailable.push(id);
@@ -148,6 +150,10 @@ function harness(
       nextWriteHook = hook;
     },
     /** The model list the account now lists, as the server answers it. */
+    /** Removes the profile, as a deletion does. */
+    deleteProfile: () => {
+      deleted = true;
+    },
     setModels: (list: readonly unknown[]) => {
       currentModels = list;
     },
@@ -444,6 +450,103 @@ describe('provider broker: ChatGPT sign-in', () => {
     expect(
       (await h.broker.complete({ profileId: PROFILE_ID, body: CHAT, modelId: 'gpt-other' })).ok,
     ).toBe(true);
+  });
+
+  it('refuses a redirect from the model endpoint whose target carries the refresh token', async () => {
+    const h = harness(
+      recordFor(60 * 60_000),
+      () => completedWith('x'),
+      LISTED,
+      () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://redirect.example/path/refresh-old' },
+        }),
+    );
+    const result = await h.broker.complete({ profileId: PROFILE_ID, body: CHAT });
+    expect(result).toMatchObject({ ok: false, code: 'REDIRECT_REFUSED' });
+    expect(JSON.stringify(result)).not.toContain('refresh-old');
+  });
+
+  it('refuses a model list that names the access token, and returns none of it', async () => {
+    const h = harness(recordFor(60 * 60_000), () => json({}), [
+      { slug: 'gpt-b', display_name: 'access-old', visibility: 'list' },
+    ]);
+    const result = await h.broker.listModels({ profileId: PROFILE_ID });
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+    expect(JSON.stringify(result)).not.toContain('access-old');
+  });
+
+  it('refuses a model list that spells the refresh token with a JSON escape', async () => {
+    const h = harness(
+      recordFor(60 * 60_000),
+      () => json({}),
+      LISTED,
+      () =>
+        new Response(
+          '{"models":[{"slug":"gpt-b","display_name":"\\u0072efresh-old","visibility":"list"}]}',
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const result = await h.broker.listModels({ profileId: PROFILE_ID });
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+    expect(JSON.stringify(result)).not.toContain('refresh-old');
+  });
+
+  it('refuses a completion whose model list names a credential, before sending a request', async () => {
+    const h = harness(
+      recordFor(60 * 60_000),
+      () => completedWith('x'),
+      LISTED,
+      () =>
+        new Response('{"models":[{"slug":"refresh-old","visibility":"list"}]}', { status: 200 }),
+    );
+    const result = await h.broker.complete({ profileId: PROFILE_ID, body: CHAT });
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+    expect(JSON.stringify(result)).not.toContain('refresh-old');
+    expect(h.sent.map((request) => request.url)).toEqual([MODELS_URL]);
+  });
+
+  it('treats a reply that is not a model list as a failure, and never as an empty list', async () => {
+    const h = harness(
+      recordFor(60 * 60_000),
+      () => completedWith('x'),
+      LISTED,
+      () => new Response('{"data": []}', { status: 200 }),
+    );
+    expect(await h.broker.listModels({ profileId: PROFILE_ID })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+    });
+    expect(await h.broker.complete({ profileId: PROFILE_ID, body: CHAT })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+    });
+  });
+
+  it('maps an abort while reading a failed reply to TIMEOUT, not to a status error', async () => {
+    const h = harness(recordFor(60 * 60_000), () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        },
+      });
+      return new Response(body, { status: 500 });
+    });
+    const result = await h.broker.complete({ profileId: PROFILE_ID, body: CHAT });
+    expect(result).toMatchObject({ ok: false, code: 'TIMEOUT' });
+  });
+
+  it('refuses a refreshed record when the profile was deleted during the write', async () => {
+    const h = harness(recordFor(-1), (url) =>
+      url === CHATGPT_TOKEN_URL
+        ? json({ access_token: 'access-new', refresh_token: 'refresh-new', expires_in: 3600 })
+        : completedWith('x'),
+    );
+    h.onNextWrite(() => h.deleteProfile());
+    const result = await h.broker.complete({ profileId: PROFILE_ID, body: CHAT });
+    expect(result).toMatchObject({ ok: false, code: 'CREDENTIAL_UNAVAILABLE' });
+    expect(h.sent.map((request) => request.url)).toEqual([CHATGPT_TOKEN_URL]);
   });
 
   it('lists the visible models of a signed-in profile, and refuses a draft', async () => {
