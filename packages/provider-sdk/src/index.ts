@@ -136,6 +136,7 @@ export {
   AGENT_SLOT_IDS,
   AGENT_SLOT_LABELS,
   AGENT_SLOT_LIMITS,
+  agentSlotDraft,
   emptyAgentSlot,
   isAgentSlotConfigured,
   parseAgentSlotId,

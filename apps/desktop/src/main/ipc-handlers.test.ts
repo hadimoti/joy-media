@@ -1302,3 +1302,267 @@ describe('IPC failures', () => {
     );
   });
 });
+
+describe('agent slots over IPC (D17)', () => {
+  const origin = 'joy-media-app://renderer';
+
+  async function savedProfile(
+    d: ReturnType<typeof deps>,
+    handlers: ReturnType<typeof createIpcHandlers>,
+  ): Promise<string> {
+    const saved = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openai/gpt-4o-mini',
+        apiKey: 'sk-slot',
+      },
+    });
+    void d;
+    return (saved.data as { id: string }).id;
+  }
+
+  it('saves a slot with a saved profile and lists both slots, the second one empty', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const profileId = await savedProfile(d, handlers);
+
+    const saved = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.save',
+      payload: {
+        id: 'workhorse',
+        draft: { profileId, model: 'openai/gpt-4o-mini', instructions: 'Be brief.' },
+      },
+    });
+    expect(saved).toMatchObject({
+      ok: true,
+      data: {
+        id: 'workhorse',
+        label: 'Workhorse',
+        ready: true,
+        profileId,
+        instructions: 'Be brief.',
+      },
+    });
+
+    const listed = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.list',
+    });
+    expect(
+      (listed.data as Array<{ id: string; ready: boolean }>).map((slot) => [slot.id, slot.ready]),
+    ).toEqual([
+      ['workhorse', true],
+      ['creative', false],
+    ]);
+  });
+
+  it('refuses a slot that names an unknown profile or a retired one, and a draft that breaks the rules', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    d.localDatabase.saveProviderProfile({
+      id: 'legacy-kilo',
+      provider: 'kilo',
+      baseUrl: 'https://api.kilo.ai/api/gateway/v1',
+      modelId: 'kilo-auto/efficient',
+      secretHandleId: 'handle-legacy',
+      createdAt: 'T0',
+      updatedAt: 'T0',
+    });
+
+    const unknown = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.save',
+      payload: { id: 'creative', draft: { profileId: 'no-such-profile' } },
+    });
+    expect(unknown).toEqual({ ok: false, error: 'Unknown provider profile id' });
+
+    const retired = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.save',
+      payload: { id: 'creative', draft: { profileId: 'legacy-kilo' } },
+    });
+    expect(retired).toEqual({
+      ok: false,
+      error: 'A retired profile cannot be used by an agent slot',
+    });
+
+    const broken = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.save',
+      payload: { id: 'creative', draft: { settings: { temperature: 5 } } },
+    });
+    expect(broken).toEqual({
+      ok: false,
+      error: 'The agent slot was not saved: INVALID_VALUE (settings).',
+    });
+  });
+
+  it('sends a slot request with the slot profile, model and instructions, and nothing the renderer chose', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const profileId = await savedProfile(d, handlers);
+    await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.save',
+      payload: {
+        id: 'workhorse',
+        draft: {
+          profileId,
+          model: 'openai/gpt-4o-mini',
+          instructions: 'Keep it short.',
+          settings: { maxOutputTokens: 700 },
+        },
+      },
+    });
+    d.providerFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent.request',
+      payload: {
+        slot: 'workhorse',
+        body: {
+          messages: [
+            { role: 'system', content: 'Rules.' },
+            { role: 'user', content: 'hi' },
+          ],
+          max_tokens: 4000,
+        },
+        requestId: 'slot-call-1',
+      },
+    });
+    expect(result).toEqual({ ok: true, data: { ok: true, text: expect.any(String) } });
+
+    const [url, init] = d.providerFetch.mock.calls[0] ?? [];
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    const sent = JSON.parse(String(init?.body)) as {
+      model: string;
+      max_tokens: number;
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(sent.model).toBe('openai/gpt-4o-mini');
+    expect(sent.max_tokens).toBe(700);
+    expect(sent.messages[0]).toEqual({ role: 'system', content: 'Rules.\n\nKeep it short.' });
+  });
+
+  it('refuses a slot request for a slot that is not set, before any request is made', async () => {
+    const d = deps();
+    const result = await dispatchIpcRequest(createIpcHandlers(d), {
+      origin,
+      channel: 'desktop.agent.request',
+      payload: { slot: 'creative', body: { messages: [] }, requestId: 'slot-call-2' },
+    });
+    expect(result).toEqual({ ok: false, error: 'The Creative Brain slot is not set' });
+    expect(d.providerFetch).not.toHaveBeenCalled();
+  });
+
+  it('empties the profile of a slot when that profile is deleted', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const profileId = await savedProfile(d, handlers);
+    await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.save',
+      payload: { id: 'workhorse', draft: { profileId, model: 'openai/gpt-4o-mini' } },
+    });
+
+    const deleted = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.provider-profile.delete',
+      payload: { id: profileId },
+    });
+    expect(deleted.ok).toBe(true);
+    const listed = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.list',
+    });
+    expect(
+      (listed.data as Array<{ id: string; profileId: string | null; ready: boolean }>)[0],
+    ).toMatchObject({
+      id: 'workhorse',
+      profileId: null,
+      ready: false,
+    });
+  });
+});
+
+describe('a provider request that names its agent slot (D17)', () => {
+  const origin = 'joy-media-app://renderer';
+
+  it('applies the slot instructions, and refuses a request whose model is not the slot model', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const saved = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openrouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openai/gpt-4o-mini',
+        apiKey: 'sk-bound',
+      },
+    });
+    const profileId = (saved.data as { id: string }).id;
+    await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent-slots.save',
+      payload: {
+        id: 'creative',
+        draft: { profileId, model: 'openai/gpt-4o-mini', instructions: 'Write warmly.' },
+      },
+    });
+    d.providerFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }),
+        { status: 200 },
+      ),
+    );
+
+    const bound = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent.request',
+      payload: {
+        profileId,
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'openai/gpt-4o-mini',
+        slot: 'creative',
+        body: {
+          messages: [
+            { role: 'system', content: 'Rules.' },
+            { role: 'user', content: 'hi' },
+          ],
+        },
+        requestId: 'bound-call-1',
+      },
+    });
+    expect(bound).toEqual({ ok: true, data: { ok: true, text: expect.any(String) } });
+    const sent = JSON.parse(String(d.providerFetch.mock.calls[0]?.[1].body)) as {
+      messages: Array<{ content: string }>;
+    };
+    expect(sent.messages[0]?.content).toBe('Rules.\n\nWrite warmly.');
+
+    const mismatch = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.agent.request',
+      payload: {
+        profileId,
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelId: 'other/model',
+        slot: 'creative',
+        body: { messages: [{ role: 'user', content: 'hi' }] },
+        requestId: 'bound-call-2',
+      },
+    });
+    expect(mismatch).toEqual({ ok: false, error: 'The request does not match its agent slot' });
+    expect(d.providerFetch).toHaveBeenCalledTimes(1);
+  });
+});

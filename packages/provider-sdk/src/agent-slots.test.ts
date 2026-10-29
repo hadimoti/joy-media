@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_SLOT_IDS,
   AGENT_SLOT_LIMITS,
+  agentSlotDraft,
   emptyAgentSlot,
   isAgentSlotConfigured,
   parseAgentSlotId,
@@ -114,5 +115,19 @@ describe('agent slots', () => {
     expect(parseAgentSlotId('workhorse')).toBe('workhorse');
     expect(parseAgentSlotId('openrouter')).toBeUndefined();
     expect(parseAgentSlotId(undefined)).toBeUndefined();
+  });
+});
+
+describe('agent slot drafts', () => {
+  it('round-trips a slot through its draft, and saves an empty slot as an empty draft', () => {
+    const result = validateAgentSlot('workhorse', {
+      profileId: 'profile-1',
+      model: 'model-1',
+      instructions: 'Be exact.',
+      settings: { maxOutputTokens: 900 },
+    });
+    if (!result.ok) throw new Error('expected a valid slot');
+    expect(validateAgentSlot('workhorse', agentSlotDraft(result.slot))).toEqual(result);
+    expect(agentSlotDraft(emptyAgentSlot('creative'))).toEqual({});
   });
 });

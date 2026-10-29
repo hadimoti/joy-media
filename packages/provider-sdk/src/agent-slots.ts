@@ -160,3 +160,14 @@ function optionalSettings(value: unknown): AgentSlotSettings | null {
   }
   return Object.freeze(settings);
 }
+
+/** The draft a slot is saved from: only the fields it holds, so an empty slot saves as an empty draft. */
+export function agentSlotDraft(slot: AgentSlot): AgentSlotDraft {
+  const settings = { ...slot.settings };
+  return {
+    ...(slot.profileId === undefined ? {} : { profileId: slot.profileId }),
+    ...(slot.model === undefined ? {} : { model: slot.model }),
+    ...(slot.instructions === '' ? {} : { instructions: slot.instructions }),
+    ...(Object.keys(settings).length === 0 ? {} : { settings }),
+  };
+}

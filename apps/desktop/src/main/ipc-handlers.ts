@@ -14,11 +14,20 @@ import type {
   ProviderProfile,
 } from '../store/local-database.js';
 import { LEGACY_PROVIDER_IDS } from '../store/migrations.js';
+import { clearAgentSlotsForProfile, readAgentSlots, writeAgentSlot } from '../store/agent-slots.js';
+import { resolveSlotRequest } from './agent-slot-request.js';
 import { AgentRequestRegistry } from './agent-requests.js';
 import { OAuthFlowError } from './oauth/errors.js';
 import type { SignInProvider, SignInResult } from './oauth/sign-in.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
-import { validateProviderProfileInput } from '@joy-media/provider-sdk';
+import {
+  isAgentSlotConfigured,
+  parseAgentSlotId,
+  validateProviderProfileInput,
+  type AgentSlot,
+  type AgentSlotId,
+  type AgentSlotResult,
+} from '@joy-media/provider-sdk';
 import { evaluateEndpoint, normalizeBaseUrl } from '@joy-media/provider-sdk';
 import type { SecretStore } from '@joy-media/provider-sdk';
 import {
@@ -310,6 +319,8 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (existing === undefined) return { ok: false, error: 'Unknown provider profile id' };
       await deps.secretStore.delete(existing.secretHandleId);
       deps.localDatabase.deleteProviderProfile(id);
+      // A slot that named the profile is left without one, so it cannot run until the owner picks another.
+      clearAgentSlotsForProfile(deps.localDatabase, id);
       return { ok: true };
     },
     'desktop.provider.test': async (payload): Promise<IpcResult> => {
@@ -327,8 +338,24 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.agent.request': async (payload): Promise<IpcResult> => {
       const request = asAgentRequest(payload);
       if (request === undefined) return { ok: false, error: 'Invalid agent request' };
+      // A slot request takes its profile, model and instructions from the stored slot (D17), not from the renderer.
+      const target: TargetResult =
+        request.kind === 'slot'
+          ? slotTarget(deps.localDatabase, request.slot, request.body)
+          : request.slot !== undefined
+            ? slotBoundTarget(deps.localDatabase, request.slot, request)
+            : {
+                ok: true,
+                value: {
+                  profileId: request.profileId,
+                  baseUrl: request.baseUrl,
+                  body: request.body,
+                  ...(request.modelId === undefined ? {} : { modelId: request.modelId }),
+                },
+              };
+      if (!target.ok) return { ok: false, error: target.error };
+      const { requestId } = request;
       // Every call has an id the renderer can cancel. An id already in use is refused, not shared.
-      const { requestId, ...brokerRequest } = request;
       const controller = agentRequests.begin(requestId);
       if (controller === undefined) {
         return { ok: false, error: 'That agent request id is already in use' };
@@ -336,7 +363,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       try {
         // A refusal is data, not a handler error, so the renderer keeps the broker's code.
         const result = await deps.providerBroker.complete({
-          ...brokerRequest,
+          ...target.value,
           signal: controller.signal,
         });
         return {
@@ -348,6 +375,27 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       } finally {
         agentRequests.finish(requestId, controller);
       }
+    },
+    'desktop.agent-slots.list': (): IpcResult => ({
+      ok: true,
+      data: readAgentSlots(deps.localDatabase).map((slot) =>
+        describeSlot(deps.localDatabase, slot),
+      ),
+    }),
+    'desktop.agent-slots.save': (payload): IpcResult => {
+      const save = asAgentSlotSave(payload);
+      if (save === undefined) return { ok: false, error: 'Invalid agent slot' };
+      const profileId = profileIdOf(save.draft);
+      if (profileId !== undefined) {
+        const profile = deps.localDatabase.getProviderProfile(profileId);
+        if (profile === undefined) return { ok: false, error: 'Unknown provider profile id' };
+        if (LEGACY_PROVIDER_IDS.includes(profile.provider)) {
+          return { ok: false, error: 'A retired profile cannot be used by an agent slot' };
+        }
+      }
+      const result = writeAgentSlot(deps.localDatabase, save.slot, save.draft);
+      if (!result.ok) return { ok: false, error: slotIssueMessage(result) };
+      return { ok: true, data: describeSlot(deps.localDatabase, result.slot) };
     },
     'desktop.agent.cancel': (payload): IpcResult => {
       const requestId = asAgentRequestId(
@@ -568,28 +616,153 @@ function asModelSource(
   return id === undefined ? undefined : { profileId: id };
 }
 
-function asAgentRequest(
-  value: unknown,
-):
-  | { profileId: string; body: unknown; baseUrl: string; modelId?: string; requestId: string }
-  | undefined {
+/** A provider call: either a saved profile named directly (the editor's session), or an agent slot (D17). */
+type AgentRequestInput =
+  | {
+      readonly kind: 'profile';
+      readonly requestId: string;
+      readonly profileId: string;
+      readonly baseUrl: string;
+      readonly modelId?: string;
+      /** The slot the renderer's session runs in, when there is one. The main process checks the request against it. */
+      readonly slot?: AgentSlotId;
+      readonly body: unknown;
+    }
+  | {
+      readonly kind: 'slot';
+      readonly requestId: string;
+      readonly slot: AgentSlotId;
+      readonly body: unknown;
+    };
+
+function asAgentRequest(value: unknown): AgentRequestInput | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
+  const requestId = asAgentRequestId(candidate['requestId']);
+  if (requestId === undefined) return undefined;
+  // A request with no profile names only its slot. A request with a profile may also name its slot (checked below).
+  if (candidate['slot'] !== undefined && candidate['profileId'] === undefined) {
+    const slot = parseAgentSlotId(candidate['slot']);
+    return slot === undefined
+      ? undefined
+      : { kind: 'slot', requestId, slot, body: candidate['body'] };
+  }
   const profileId = candidate['profileId'];
   const baseUrl = candidate['baseUrl'];
   if (typeof profileId !== 'string' || profileId.length === 0) return undefined;
   if (typeof baseUrl !== 'string' || baseUrl.length === 0 || baseUrl.length > 2048)
     return undefined;
-  const requestId = asAgentRequestId(candidate['requestId']);
-  if (requestId === undefined) return undefined;
   const modelId = candidate['modelId'];
+  const slot = candidate['slot'];
+  const parsedSlot = slot === undefined ? undefined : parseAgentSlotId(slot);
+  if (slot !== undefined && parsedSlot === undefined) return undefined;
   return {
+    kind: 'profile',
     profileId,
     baseUrl,
     body: candidate['body'],
     ...(typeof modelId === 'string' ? { modelId } : {}),
+    ...(parsedSlot === undefined ? {} : { slot: parsedSlot }),
     requestId,
   };
+}
+
+interface BrokerTarget {
+  readonly profileId: string;
+  readonly baseUrl: string;
+  readonly modelId?: string;
+  readonly body: unknown;
+}
+
+type TargetResult =
+  | { readonly ok: true; readonly value: BrokerTarget }
+  | { readonly ok: false; readonly error: string };
+
+/** The profile, model and body a slot request sends. The profile must be saved and must not be a retired one. */
+function slotTarget(store: LocalDatabase, slot: AgentSlotId, body: unknown): TargetResult {
+  const resolved = resolveSlotRequest(store, slot, body);
+  if (!resolved.ok) return resolved;
+  const profile = store.getProviderProfile(resolved.profileId);
+  if (profile === undefined)
+    return { ok: false, error: 'The profile of this agent slot was removed' };
+  if (LEGACY_PROVIDER_IDS.includes(profile.provider)) {
+    return { ok: false, error: 'The profile of this agent slot is retired' };
+  }
+  return {
+    ok: true,
+    value: {
+      profileId: resolved.profileId,
+      baseUrl: profile.baseUrl,
+      modelId: resolved.modelId,
+      body: resolved.body,
+    },
+  };
+}
+
+/** A profile request that names its slot: the request must use the slot's profile and model, and the slot's instructions apply. */
+function slotBoundTarget(
+  store: LocalDatabase,
+  slot: AgentSlotId,
+  request: {
+    readonly profileId: string;
+    readonly baseUrl: string;
+    readonly modelId?: string;
+    readonly body: unknown;
+  },
+): TargetResult {
+  const resolved = resolveSlotRequest(store, slot, request.body);
+  if (!resolved.ok) return resolved;
+  if (resolved.profileId !== request.profileId || resolved.modelId !== request.modelId) {
+    return { ok: false, error: 'The request does not match its agent slot' };
+  }
+  return {
+    ok: true,
+    value: {
+      profileId: request.profileId,
+      baseUrl: request.baseUrl,
+      modelId: resolved.modelId,
+      body: resolved.body,
+    },
+  };
+}
+
+function describeSlot(store: LocalDatabase, slot: AgentSlot) {
+  const profile =
+    slot.profileId === undefined ? undefined : store.getProviderProfile(slot.profileId);
+  return {
+    id: slot.id,
+    label: slot.label,
+    profileId: slot.profileId ?? null,
+    profileName: profile?.name ?? profile?.id ?? null,
+    profileProvider: profile?.provider ?? null,
+    model: slot.model ?? null,
+    instructions: slot.instructions,
+    settings: slot.settings,
+    ready:
+      isAgentSlotConfigured(slot) &&
+      profile !== undefined &&
+      !LEGACY_PROVIDER_IDS.includes(profile.provider),
+  };
+}
+
+function asAgentSlotSave(value: unknown): { slot: AgentSlotId; draft: unknown } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const slot = parseAgentSlotId(candidate['id']);
+  return slot === undefined ? undefined : { slot, draft: candidate['draft'] };
+}
+
+/** The profile a draft names, trimmed, or undefined when the draft names none. */
+function profileIdOf(draft: unknown): string | undefined {
+  if (typeof draft !== 'object' || draft === null) return undefined;
+  const profileId = (draft as Record<string, unknown>)['profileId'];
+  if (typeof profileId !== 'string' || profileId.trim().length === 0) return undefined;
+  return profileId.trim();
+}
+
+function slotIssueMessage(result: Extract<AgentSlotResult, { ok: false }>): string {
+  const where = result.field === undefined ? '' : ` (${result.field})`;
+  return `The agent slot was not saved: ${result.issue}${where}.`;
 }
 
 /** A cancellable call's id: short, and only letters, digits, dashes and underscores. */

@@ -17,6 +17,8 @@ export const IPC_CHANNELS = [
   'desktop.provider.models',
   'desktop.agent.request',
   'desktop.agent.cancel',
+  'desktop.agent-slots.list',
+  'desktop.agent-slots.save',
   'desktop.window-minimize',
   'desktop.window-maximize',
   'desktop.window-close',
