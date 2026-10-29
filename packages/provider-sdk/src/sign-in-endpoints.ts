@@ -3,9 +3,7 @@
  * with the rest of the provider origins in the registry, so the desktop main process names no remote host itself.
  */
 
-/** OpenRouter's sign-in page, its key exchange, and the base URL a signed-in profile uses. */
-export const OPENROUTER_AUTH_URL = 'https://openrouter.ai/auth';
-export const OPENROUTER_KEY_EXCHANGE_URL = 'https://openrouter.ai/api/v1/auth/keys';
+/** OpenRouter's API base URL. OpenRouter is an API-key provider under D20, so it has no sign-in origin here. */
 export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 /**

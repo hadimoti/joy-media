@@ -10,8 +10,7 @@ import { OAuthFlowError } from './oauth/errors.js';
 import type { SignInProvider, SignInResult } from './oauth/sign-in.js';
 
 const ORIGIN = 'joy-media-app://renderer';
-const OPENROUTER_SECRET = 'sk-or-v1-secret-value';
-
+const CHATGPT_SECRET = 'signed-in-secret-value';
 function harness(providerSignIn?: (provider: SignInProvider) => Promise<SignInResult>) {
   const localDatabase = new LocalDatabase({
     filePath: ':memory:',
@@ -48,29 +47,62 @@ function harness(providerSignIn?: (provider: SignInProvider) => Promise<SignInRe
 describe('desktop.provider-profile.sign-in', () => {
   it('saves the signed-in profile through the save route, and never returns its secret', async () => {
     const providerSignIn = vi.fn(async (): Promise<SignInResult> => ({
-      provider: 'openrouter',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      modelId: 'openrouter/auto',
-      secret: OPENROUTER_SECRET,
+      provider: 'chatgpt',
+      baseUrl: 'https://api.openai.com/v1',
+      modelId: 'gpt-6.1-sol',
+      secret: CHATGPT_SECRET,
     }));
     const { handlers, localDatabase, secretStore } = harness(providerSignIn);
 
     const result = await dispatchIpcRequest(handlers, {
       origin: ORIGIN,
       channel: 'desktop.provider-profile.sign-in',
-      payload: { provider: 'openrouter' },
+      payload: { provider: 'chatgpt' },
     });
 
     expect(result.ok).toBe(true);
-    expect(JSON.stringify(result)).not.toContain(OPENROUTER_SECRET);
-    expect(providerSignIn).toHaveBeenCalledWith('openrouter');
+    expect(JSON.stringify(result)).not.toContain(CHATGPT_SECRET);
+    expect(providerSignIn).toHaveBeenCalledWith('chatgpt');
     const [profile] = localDatabase.listProviderProfiles();
     expect(profile).toMatchObject({
+      provider: 'chatgpt',
+      baseUrl: 'https://api.openai.com/v1',
+      modelId: 'gpt-6.1-sol',
+    });
+    expect(await secretStore.get(profile?.secretHandleId ?? '')).toBe(CHATGPT_SECRET);
+  });
+
+  it('refuses a provider that is set up with an API key, such as OpenRouter, before any sign-in starts', async () => {
+    const providerSignIn = vi.fn();
+    const { handlers, localDatabase } = harness(providerSignIn);
+    const result = await dispatchIpcRequest(handlers, {
+      origin: ORIGIN,
+      channel: 'desktop.provider-profile.sign-in',
+      payload: { provider: 'openrouter' },
+    });
+    expect(result).toMatchObject({ ok: false, error: 'Invalid sign-in request' });
+    expect(providerSignIn).not.toHaveBeenCalled();
+    expect(localDatabase.listProviderProfiles()).toHaveLength(0);
+  });
+
+  it('refuses a sign-in result that names another provider, and saves nothing', async () => {
+    const providerSignIn = vi.fn(async (): Promise<SignInResult> => ({
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
       modelId: 'openrouter/auto',
+      secret: CHATGPT_SECRET,
+    }));
+    const { handlers, localDatabase } = harness(providerSignIn);
+    const result = await dispatchIpcRequest(handlers, {
+      origin: ORIGIN,
+      channel: 'desktop.provider-profile.sign-in',
+      payload: { provider: 'chatgpt' },
     });
-    expect(await secretStore.get(profile?.secretHandleId ?? '')).toBe(OPENROUTER_SECRET);
+    expect(result).toMatchObject({
+      ok: false,
+      error: 'The sign-in did not return a provider that can be signed in to',
+    });
+    expect(localDatabase.listProviderProfiles()).toHaveLength(0);
   });
 
   it('refuses a request that names no provider it can sign in to, before any sign-in starts', async () => {
@@ -91,7 +123,7 @@ describe('desktop.provider-profile.sign-in', () => {
     const result = await dispatchIpcRequest(handlers, {
       origin: ORIGIN,
       channel: 'desktop.provider-profile.sign-in',
-      payload: { provider: 'openrouter', id: 'missing-profile' },
+      payload: { provider: 'chatgpt', id: 'missing-profile' },
     });
     expect(result).toMatchObject({
       ok: false,
@@ -124,7 +156,7 @@ describe('desktop.provider-profile.sign-in', () => {
     const result = await dispatchIpcRequest(handlers, {
       origin: ORIGIN,
       channel: 'desktop.provider-profile.sign-in',
-      payload: { provider: 'openrouter' },
+      payload: { provider: 'chatgpt' },
     });
     expect(result).toMatchObject({
       ok: false,

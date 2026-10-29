@@ -11,8 +11,10 @@ import {
   findRegistryRegion,
   isAuthGated,
   isAuthMethodPermitted,
+  isSignInProvider,
   offeredAuthMethods,
   permittedAuthMethods,
+  signInProviders,
 } from './registry.js';
 
 describe('provider registry', () => {
@@ -82,6 +84,21 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     expect(permittedAuthMethods('chatgpt')).toEqual(['subscription-sign-in']);
     expect(isAuthGated('chatgpt')).toBe(true);
     expect(offeredAuthMethods('chatgpt')).toEqual([]);
+  });
+
+  it('lists the providers the sign-in surface may offer, which is ChatGPT alone under D20', () => {
+    expect(signInProviders()).toEqual(['chatgpt']);
+    expect(isSignInProvider('chatgpt')).toBe(true);
+  });
+
+  it('never offers a sign-in for a provider that is set up with an API key', () => {
+    for (const provider of PROVIDER_REGISTRY) {
+      if (provider.id === 'chatgpt') continue;
+      expect(isSignInProvider(provider.id), provider.id).toBe(false);
+    }
+    expect(isSignInProvider('openrouter')).toBe(false);
+    expect(isSignInProvider(CUSTOM_PROVIDER_ID)).toBe(false);
+    expect(isSignInProvider('kilo')).toBe(false);
   });
 
   it('offers an API key to every provider except ChatGPT, which signs in', () => {

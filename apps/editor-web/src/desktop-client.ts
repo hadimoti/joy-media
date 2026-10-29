@@ -1,4 +1,8 @@
-import { evaluateEndpoint, type AgentSlotId } from '@joy-media/provider-sdk';
+import {
+  evaluateEndpoint,
+  type AgentSlotId,
+  type RegistryProviderId,
+} from '@joy-media/provider-sdk';
 import { ProviderCallError, type ProviderCallRequest } from './joy-agent/provider-call.js';
 /**
  * Typed helpers for the desktop host bridge (`window.joyDesktop`), injected by
@@ -148,11 +152,12 @@ export async function deleteDesktopProviderProfile(id: string): Promise<void> {
 }
 
 /**
- * Signs in to OpenRouter or ChatGPT in the desktop app, and saves the profile it makes. The key or token stays in the
- * desktop: the reply is the saved profile, which holds no secret (PLAN-v4 §6b, §6d).
+ * Signs in to a provider in the desktop app, and saves the profile it makes. The key or token stays in the
+ * desktop: the reply is the saved profile, which holds no secret (PLAN-v4 §6b, §6d). The registry decides which
+ * providers may be signed in to (PLAN-v4 §6d-1 rule 5, D20).
  */
 export async function signInDesktopProviderProfile(request: {
-  readonly provider: 'openrouter' | 'chatgpt';
+  readonly provider: RegistryProviderId;
   readonly id?: string | undefined;
 }): Promise<DesktopProviderProfile> {
   const data = await requireBridge().invoke('desktop.provider-profile.sign-in', request);

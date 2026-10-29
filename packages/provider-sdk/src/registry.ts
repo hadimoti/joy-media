@@ -237,9 +237,10 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     api: 'chat-completions',
     auth: {
       methods: ['api-key'],
-      source: "PLAN-v4 §6d-1 table, row 'OpenRouter': §6d",
+      source:
+        "PLAN-v4 §6d-1 table, row 'OpenRouter': §6d, and owner decision D20 (2026-10-29): sign-in is offered to ChatGPT and MiniMax only",
       sourceDate: '2026-10-29',
-      note: 'An API key (BYOK). The PKCE sign-in in §6d issues a user key, which is stored as a normal key. OpenRouter is optional and never a default.',
+      note: 'An API key (BYOK) only, on the OpenAI-compatible /api/v1 base URL. D20 withdrew the §6d PKCE sign-in, which was removed from the app; the key comes from the OpenRouter console. OpenRouter is optional and never a default.',
     },
     regions: [
       {
@@ -316,6 +317,25 @@ export function isAuthGated(provider: string): boolean {
 export function offeredAuthMethods(provider: string): readonly ProviderAuthMethod[] {
   if (isAuthGated(provider)) return [];
   return permittedAuthMethods(provider);
+}
+
+/**
+ * The registry providers that permit a subscription sign-in (PLAN-v4 §6d-1 rule 5, D20). Under D20 that is ChatGPT,
+ * and MiniMax once JOY Media has registered its own client ID.
+ *
+ * The sign-in surface is built from this list, so a provider that uses an API key never offers a sign-in. The list
+ * reads the *permitted* methods, not the offered ones: a gated provider keeps its place here, because the gate is the
+ * provider's own registration state and the flow itself refuses it.
+ */
+export function signInProviders(): readonly RegistryProviderId[] {
+  return PROVIDER_REGISTRY.filter((provider) =>
+    provider.auth.methods.includes('subscription-sign-in'),
+  ).map((provider) => provider.id);
+}
+
+/** True when the provider permits a subscription sign-in, so the sign-in surface may offer it. */
+export function isSignInProvider(provider: string): provider is RegistryProviderId {
+  return signInProviders().includes(provider as RegistryProviderId);
 }
 
 /** The base URL a registry provider uses by default: its first region. Undefined for any other id. */

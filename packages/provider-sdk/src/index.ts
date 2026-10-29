@@ -127,9 +127,11 @@ export {
   isCustomProviderId,
   isLoopbackHostname,
   isPrivateOrInternalHost,
+  isSignInProvider,
   normalizeBaseUrl,
   offeredAuthMethods,
   permittedAuthMethods,
+  signInProviders,
 } from './registry.js';
 
 // Re-export the two general-purpose agent slots (D17, PLAN-v4 §6d-1)
@@ -169,9 +171,7 @@ export {
   CHATGPT_JWKS_URL,
   CHATGPT_RESPONSES_BASE_URL,
   CHATGPT_TOKEN_URL,
-  OPENROUTER_AUTH_URL,
   OPENROUTER_BASE_URL,
-  OPENROUTER_KEY_EXCHANGE_URL,
 } from './sign-in-endpoints.js';
 
 // ===== V1 Backward Compatibility =====

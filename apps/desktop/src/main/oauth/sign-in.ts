@@ -1,4 +1,9 @@
 import {
+  findRegistryProvider,
+  signInProviders,
+  type RegistryProviderId,
+} from '@joy-media/provider-sdk';
+import {
   CHATGPT_RESPONSES_BASE_URL,
   prepareChatGptModels,
   readChatGptModels,
@@ -13,14 +18,15 @@ import {
 } from './chatgpt.js';
 import { OAuthFlowError } from './errors.js';
 import { MAX_CATALOG_CHARS, type FetchLike, replyText } from './http.js';
-import { OPENROUTER_BASE_URL, signInWithOpenRouter } from './openrouter.js';
 
-/** The model a new OpenRouter profile uses. It is the same default the settings dialog offers. */
-export const OPENROUTER_DEFAULT_MODEL = 'openrouter/auto';
 /** The setting that holds this install's ChatGPT ID, created once (PLAN-v4 §6d). */
 export const INSTALL_ID_SETTING = 'chatgpt.ext_agent_host_id';
 
-export type SignInProvider = 'openrouter' | 'chatgpt';
+/**
+ * A provider the renderer may ask to sign in to. The registry decides which ones may be signed in to (PLAN-v4 §6d-1
+ * rule 5, D20): under D20 that is ChatGPT, and MiniMax once JOY Media has registered its own client ID.
+ */
+export type SignInProvider = RegistryProviderId;
 
 /** What a finished sign-in saves as a profile. The secret is a key, or for ChatGPT the token record. */
 export interface SignInResult {
@@ -50,17 +56,19 @@ export function createProviderSignIn(
   deps: ProviderSignInDeps,
 ): (provider: SignInProvider) => Promise<SignInResult> {
   return async (provider) => {
-    if (provider === 'openrouter') {
-      const key = await signInWithOpenRouter({
-        openExternal: deps.openExternal,
-        fetch: deps.fetch,
-      });
-      return {
-        provider,
-        baseUrl: OPENROUTER_BASE_URL,
-        modelId: OPENROUTER_DEFAULT_MODEL,
-        secret: key,
-      };
+    // D20: only a provider whose registry row permits a subscription sign-in may be signed in to (PLAN-v4 §6d-1 rule 5).
+    // Every other provider, OpenRouter included, is set up with an API key instead.
+    if (!signInProviders().includes(provider)) {
+      throw new OAuthFlowError(
+        'NOT_CONFIGURED',
+        `${providerLabel(provider)} is set up with an API key and does not offer a sign-in.`,
+      );
+    }
+    if (provider !== 'chatgpt') {
+      throw new OAuthFlowError(
+        'NOT_CONFIGURED',
+        `${providerLabel(provider)} sign-in is not available in this build yet.`,
+      );
     }
     const record = await signInWithChatGpt({
       issuedClientId: deps.chatGptClientId,
@@ -78,6 +86,11 @@ export function createProviderSignIn(
       secret: encodeTokenRecord(record),
     };
   };
+}
+
+/** The name a provider is shown under. */
+function providerLabel(provider: string): string {
+  return findRegistryProvider(provider)?.label ?? provider;
 }
 
 /**

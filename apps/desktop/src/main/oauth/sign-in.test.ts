@@ -10,13 +10,7 @@ import {
   isExtAgentHostId,
 } from './chatgpt.js';
 import type { FetchLike } from './http.js';
-import { OPENROUTER_BASE_URL } from './openrouter.js';
-import {
-  createProviderSignIn,
-  INSTALL_ID_SETTING,
-  loadOrCreateInstallId,
-  OPENROUTER_DEFAULT_MODEL,
-} from './sign-in.js';
+import { createProviderSignIn, INSTALL_ID_SETTING, loadOrCreateInstallId } from './sign-in.js';
 
 const CLIENT_ID = 'test-client-id';
 const HOST_ID = 'urn:uuid:550e8400-e29b-41d4-a716-446655440000';
@@ -51,7 +45,7 @@ function signedIdToken(nonce: string): string {
 /** Plays the browser: follows the redirect_uri of the authorization request with the given query. */
 async function returnFromBrowser(
   authUrl: string,
-  parameter: 'callback_url' | 'redirect_uri',
+  parameter: 'redirect_uri',
   query: (state: string) => string,
 ): Promise<void> {
   const url = new URL(authUrl);
@@ -110,21 +104,22 @@ describe('loadOrCreateInstallId', () => {
 });
 
 describe('createProviderSignIn', () => {
-  it('returns the OpenRouter key as a profile to save, on the default model', async () => {
+  it('refuses OpenRouter, which is set up with an API key under D20, and never opens a browser', async () => {
+    const openExternal = vi.fn();
+    const fetchStub = vi.fn();
     const signIn = createProviderSignIn({
-      openExternal: (url) =>
-        returnFromBrowser(url, 'callback_url', (state) => `code=the-code&state=${state}`),
-      fetch: async () => json({ key: 'sk-or-v1-test' }),
+      openExternal,
+      fetch: fetchStub,
       now: Date.now,
       chatGptClientId: undefined,
       installId: () => HOST_ID,
     });
-    await expect(signIn('openrouter')).resolves.toEqual({
-      provider: 'openrouter',
-      baseUrl: OPENROUTER_BASE_URL,
-      modelId: OPENROUTER_DEFAULT_MODEL,
-      secret: 'sk-or-v1-test',
+    await expect(signIn('openrouter')).rejects.toMatchObject({
+      code: 'NOT_CONFIGURED',
+      message: 'OpenRouter is set up with an API key and does not offer a sign-in.',
     });
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(fetchStub).not.toHaveBeenCalled();
   });
 
   it('starts a ChatGPT registration when no client is saved, and ends when the person declines', async () => {

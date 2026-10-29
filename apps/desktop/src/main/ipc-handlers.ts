@@ -22,6 +22,7 @@ import type { SignInProvider, SignInResult } from './oauth/sign-in.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import {
   isAgentSlotConfigured,
+  isSignInProvider,
   parseAgentSlotId,
   validateProviderProfileInput,
   type AgentSlot,
@@ -107,6 +108,11 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       }
       try {
         const signedIn = await deps.providerSignIn(request.provider);
+        // The result must name the provider that was asked for, and that provider must permit a sign-in. A runner that
+        // answered with another provider would otherwise save a profile for a provider that is set up with an API key.
+        if (signedIn.provider !== request.provider || !isSignInProvider(signedIn.provider)) {
+          return { ok: false, error: 'The sign-in did not return a provider that can be signed in to' };
+        }
         // The result is saved through the profile route, so it is checked and bound like any other save.
         return await handlers['desktop.provider-profile.save']({
           ...(request.id === undefined ? {} : { id: request.id }),
@@ -554,7 +560,9 @@ function asSignInRequest(
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
   const provider = candidate['provider'];
-  if (provider !== 'openrouter' && provider !== 'chatgpt') return undefined;
+  // The registry decides which providers may be signed in to (PLAN-v4 §6d-1 rule 5, D20). A provider that is set up
+  // with an API key, such as OpenRouter, is not one of them.
+  if (typeof provider !== 'string' || !isSignInProvider(provider)) return undefined;
   const id = candidate['id'];
   if (id !== undefined && (typeof id !== 'string' || id.length === 0)) return undefined;
   return { provider, ...(typeof id === 'string' ? { id } : {}) };
