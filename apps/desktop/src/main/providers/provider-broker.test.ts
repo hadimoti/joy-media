@@ -2238,3 +2238,63 @@ describe('provider broker: the key in nested JSON, redirects and cancellation', 
     expect(sent).toHaveLength(0);
   });
 });
+
+describe('provider broker: two agents', () => {
+  it('gives each agent its own key, and returns neither key', async () => {
+    const workhorse = bound(
+      'p-workhorse',
+      'openrouter',
+      'https://openrouter.ai/api/v1',
+      'openai/gpt-4o-mini',
+    );
+    const creative = bound('p-creative', 'grok', 'https://api.x.ai/v1', 'grok-3');
+    const workhorseKey = 'sk-workhorse-0123456789abcdef';
+    const creativeKey = 'sk-creative-0123456789abcdef';
+    const { broker, sent } = harness({
+      profiles: [workhorse, creative],
+      keys: {
+        [workhorse.secretHandleId]: workhorseKey,
+        [creative.secretHandleId]: creativeKey,
+      },
+      reply: () => jsonReply({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }),
+    });
+
+    const first = await broker.complete({ profileId: 'p-workhorse', body: CHAT_BODY });
+    const second = await broker.complete({ profileId: 'p-creative', body: CHAT_BODY });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    // Each request carries the key of the agent that made it, and only that one.
+    expect(headerOf(sent[0]!.init, 'authorization')).toBe(`Bearer ${workhorseKey}`);
+    expect(headerOf(sent[1]!.init, 'authorization')).toBe(`Bearer ${creativeKey}`);
+    expect(String(sent[0]!.init.body)).not.toContain(creativeKey);
+    expect(String(sent[1]!.init.body)).not.toContain(workhorseKey);
+    // Neither key reaches the caller.
+    expect(JSON.stringify(first)).not.toContain(workhorseKey);
+    expect(JSON.stringify(first)).not.toContain(creativeKey);
+    expect(JSON.stringify(second)).not.toContain(workhorseKey);
+    expect(JSON.stringify(second)).not.toContain(creativeKey);
+  });
+
+  it('refuses a reply that echoes the key of the agent that asked, and returns no part of it', async () => {
+    const workhorse = bound('p-workhorse', 'openrouter', 'https://openrouter.ai/api/v1');
+    const creative = bound('p-creative', 'grok', 'https://api.x.ai/v1');
+    const workhorseKey = 'sk-workhorse-0123456789abcdef';
+    const creativeKey = 'sk-creative-0123456789abcdef';
+    const { broker } = harness({
+      profiles: [workhorse, creative],
+      keys: {
+        [workhorse.secretHandleId]: workhorseKey,
+        [creative.secretHandleId]: creativeKey,
+      },
+      reply: () =>
+        jsonReply({ choices: [{ message: { content: `your key is ${workhorseKey}` } }] }),
+    });
+
+    const result = await broker.complete({ profileId: 'p-workhorse', body: CHAT_BODY });
+
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+    expect(JSON.stringify(result)).not.toContain(workhorseKey);
+    expect(JSON.stringify(result)).not.toContain(creativeKey);
+  });
+});
