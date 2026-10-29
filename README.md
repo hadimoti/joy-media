@@ -22,9 +22,7 @@
 
 - **100% Offline Creative Independence**: Edit multi-track 4K video, audio waveforms, motion titles, and living look transitions with zero Internet connection required.
 - **Local Asset Streaming (`joy-asset://`)**: Custom protocol streaming video frames, waveforms, and catalog media straight from your NVMe drive with sub-millisecond seek times.
-- **Dual AI Agent Integration**:
-  - **Free / Open BYOK**: Plug in any OpenRouter or OpenAI-compatible endpoint with your own API key, securely encrypted via Windows DPAPI.
-  - **Joy Pro Gateway**: Instant keyless access to curated frontier models (`minimax/minimax-m3`, `claude-3.5-sonnet`, `gpt-4o-mini`) through our VPS gateway with transparent token usage.
+- **Bring Your Own AI Keys**: Connect OpenRouter, OpenAI, Claude, Gemini, Grok, MiniMax, or Kimi with your own API key. Keys stay on this PC, encrypted with Windows DPAPI. ChatGPT sign-in is not enabled yet.
 - **Living Looks GPU Color Science**: Cinematic real-time color grading, dynamic film grain, and LUT emulation running at 60 FPS on your GPU.
 - **Pixel-Perfect Preview / Export Parity**: What you see in the timeline monitor matches the final encoded MP4 byte-for-byte.
 
@@ -52,19 +50,9 @@
 │   │  • Project state & audio  │         │  • Fast wave peak generation    │   │
 │   └───────────────────────────┘         └─────────────────────────────────┘   │
 └───────────────────────────────────────┬───────────────────────────────────────┘
-                                        │ HTTPS (Optional Cloud Features Only)
-                                        ▼
-┌───────────────────────────────────────────────────────────────────────────────┐
-│                        Hardened Edge & Control Plane                          │
-│                                                                               │
-│   ┌───────────────────────────┐         ┌─────────────────────────────────┐   │
-│   │  joyst.ir (Account Web)   │         │     VPS API Control Plane       │   │
-│   │  • OTP Sign-in (Gmail/TG) │         │  • Device Entitlement Ledger    │   │
-│   │  • Installer Downloads    │◄───────►│  • Postgres Account Store       │   │
-│   │  • SHA-256 Checksum Verify│         │  • Joy Model Gateway (AI Proxy) │   │
-│   └───────────────────────────┘         └─────────────────────────────────┘   │
-└───────────────────────────────────────────────────────────────────────────────┘
 ```
+
+The editor works offline. The only network traffic is the AI provider you choose, and only when you use the agent.
 
 ---
 
@@ -73,13 +61,13 @@
 ```text
 joy-media/
 ├── apps/
-│   ├── desktop/             # Electron desktop shell, DPAPI key vault, IPC bridges, auto-updater
+│   ├── desktop/             # Electron desktop shell, DPAPI key vault, IPC bridges, Worker supervisor
 │   ├── editor-web/          # React 19 NLE timeline, Dockview panels, living looks, project state
-│   ├── account-web/         # joyst.ir portal: OTP login, installer downloads, account dashboard
-│   ├── api/                 # Hardened VPS control plane: OTP auth, device tokens, AI model gateway
+│   ├── account-web/         # Retired joyst.ir portal: not used by v1.1.0 (removed in P5)
+│   ├── api/                 # Retired VPS control plane: not used by v1.1.0 (removed in P5)
 │   └── worker/              # High-performance media processing & export worker
 ├── packages/
-│   ├── joy-agent-engine/    # Universal AI editing agent (dual BYOK & joy-hosted modes)
+│   ├── joy-agent-engine/    # Universal AI editing agent (BYOK provider modes)
 │   ├── agent-tools/         # Deterministic timeline manipulation tool contracts
 │   ├── timeline-engine/     # Track virtualization, clip math, and playback scheduling
 │   ├── project-schema/      # Canonical JSON schema for timeline projects

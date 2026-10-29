@@ -101,13 +101,21 @@ and no update check (ADR-0043; PLAN-v4 §4a). The packaged app opens and exports
 - Legacy provider profiles (`kilo`, `joy-hosted`) stay on disk and are shown as disabled
   (PLAN-v4 §9a). "Later" keeps them. "Delete" removes one after an explicit confirmation.
 
+## Worker startup (v1.1.0, P4)
+
+- The Worker starts when JOY Media starts and stops when it quits. Normal desktop use needs no manual Worker start.
+- There is no Windows sign-in autostart.
+- A Worker that stops on its own restarts up to three times, after 1, 2 and 4 seconds. A run that lasted at least 60 seconds counts as healthy and starts a new budget.
+- When the automatic restarts are used up, the Jobs panel's Workers tab shows the stopped Worker, its last error, and a Retry button. Retry calls `desktop.worker-retry`.
+- The GPU preview host starts only with `JOY_MEDIA_WORKER_GPU_PREVIEW=1`. It is an explicit local capability and is not advertised otherwise.
+
 ## Boundaries
 
 - **Editor origin:** only the packaged renderer origin (`joy-media-app://renderer`) and the loopback development origins may request the bridge. Unknown origins are rejected before IPC dispatch.
 - **IPC:** only the versioned channels in `src/ipc.ts` are exposed. Requests carry opaque IDs and structured data; there is no arbitrary command, shell, or path channel. `ipc-handlers.ts`'s `dispatchIpcRequest` re-validates origin + channel on every call before a handler ever runs.
 - **Files:** native selection is represented by an opaque `local-file` reference. The raw path never crosses the renderer boundary — `main/file-registry.ts` is the only place the real path is resolvable, and only from main-process code (Worker supervision, media ingest), never from preload or the renderer. Derivatives must be explicitly requested by reference and kind.
 - **Deep links:** only `joy://open/project/<UUID>` is accepted. Credentials, arbitrary hosts, and arbitrary paths are rejected.
-- **Worker:** `main/worker-supervisor.ts` supervises the Worker as a child process (spawn, crash-restart with a cap, graceful SIGTERM/SIGKILL stop) and reports lifecycle/status and startup preference only. The Worker remains the owner of probing, hashing, and derivative generation; project mutation stays in the editor command path. Wave 2 adds a local job queue (see below) that tracks a derivative request's lifecycle; it does not yet dispatch that job to the Worker over a real protocol.
+- **Worker:** `main/worker-supervisor.ts` runs the Worker as a child process. It starts with the app, restarts a crash up to three times with doubling delays, and stops on quit (SIGTERM, then SIGKILL). The Worker takes jobs only through the loopback job API (`src/jobs/local-job-api.ts`), which needs a per-run token. The Worker refuses any control-plane address other than `http://127.0.0.1:<port>`. The Worker remains the owner of probing, hashing, and derivative generation; project mutation stays in the editor command path.
 - **Window:** `BrowserWindow` is created with `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`, `nodeIntegrationInWorker: false`, `webviewTag: false` (`main/window.ts`'s `buildSecureWebPreferences`), a denied `setWindowOpenHandler`, and a denied default permission-request handler. The packaged renderer loads from a privileged custom scheme (`joy-media-app://renderer/`) rather than `file://`, so it keeps a normal secure-context origin; dev loads the Vite dev server at `http://localhost:5173`, which is in the `origin-policy.ts` allow-list.
 - **Shutdown:** `main/shutdown.ts` stops the Worker before flushing pending state on `before-quit`, `window-all-closed`, `SIGINT`, and `SIGTERM`, and is idempotent if multiple signals arrive.
 
