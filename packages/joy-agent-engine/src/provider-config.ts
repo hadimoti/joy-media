@@ -1,7 +1,13 @@
 import { evaluateEndpoint, OPENROUTER_BASE_URL } from '@joy-media/provider-sdk';
 import type { JoyAgentCapability } from './contracts.js';
 
-export type JoyProviderMode = 'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom';
+export type JoyProviderMode =
+  | 'joy-hosted'
+  | 'openrouter'
+  | 'openai-compatible'
+  | 'anthropic-messages'
+  | 'kilo'
+  | 'custom';
 
 export interface ByokSessionConfig {
   readonly provider: JoyProviderMode;
@@ -36,7 +42,10 @@ export function normalizeByokSessionConfig(
   const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
   // joy-hosted and kilo are retired legacy profiles, so they are refused here (PLAN-v4 §9a).
   if (
-    (provider !== 'openrouter' && provider !== 'openai-compatible' && provider !== 'custom') ||
+    (provider !== 'openrouter' &&
+      provider !== 'openai-compatible' &&
+      provider !== 'anthropic-messages' &&
+      provider !== 'custom') ||
     modelId.length === 0 ||
     modelId.length > MAX_MODEL_ID_LENGTH ||
     apiKey.length === 0 ||
@@ -56,10 +65,21 @@ export function normalizeByokSessionConfig(
     return Object.freeze({ provider, baseUrl: OPENROUTER_BASE_URL, modelId, apiKey });
   }
 
-  const baseUrl = normalizeCustomBaseUrl(input.baseUrl, {
-    consentToPublicEndpoint: input.consentToPublicEndpoint === true,
-  });
+  const baseUrl =
+    provider === 'anthropic-messages'
+      ? normalizeAnthropicBaseUrl(input.baseUrl)
+      : normalizeCustomBaseUrl(input.baseUrl, {
+          consentToPublicEndpoint: input.consentToPublicEndpoint === true,
+        });
   return Object.freeze({ provider, baseUrl, modelId, apiKey });
+}
+
+function normalizeAnthropicBaseUrl(value: unknown): string {
+  if (typeof value !== 'string') throw new ProviderConfigError();
+  const url = value.trim();
+  const verdict = evaluateEndpoint('claude', url);
+  if (!verdict.allowed) throw new ProviderConfigError();
+  return verdict.origin + verdict.basePath;
 }
 
 export function safeByokSessionStatus(

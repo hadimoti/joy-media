@@ -92,6 +92,43 @@ describe('agent slots in the CLI', () => {
     });
   });
 
+  it('resolves Claude through Anthropic Messages with an API key', () => {
+    setAiProvider('claude-profile', {
+      name: 'Claude',
+      provider: 'claude',
+      baseUrl: 'https://api.anthropic.com/v1',
+    });
+
+    expect(
+      resolveByokConfig({
+        provider: 'claude-profile',
+        model: 'claude-test',
+        apiKey: 'test-anthropic-key',
+      }),
+    ).toMatchObject({
+      provider: 'anthropic-messages',
+      baseUrl: 'https://api.anthropic.com/v1',
+      modelId: 'claude-test',
+      apiKey: 'test-anthropic-key',
+    });
+  });
+
+  it('refuses ChatGPT sign-in in the CLI with a clear desktop direction', () => {
+    setAiProvider('chatgpt-profile', {
+      name: 'ChatGPT',
+      provider: 'chatgpt',
+      baseUrl: 'https://api.openai.com/v1',
+    });
+
+    expect(() =>
+      resolveByokConfig({
+        provider: 'chatgpt-profile',
+        model: 'gpt-5',
+        apiKey: 'not-used',
+      }),
+    ).toThrow('ChatGPT sign-in is not available in the CLI. Use the desktop app for ChatGPT.');
+  });
+
   it('keeps the two slots independent, with their own profiles and models', () => {
     saveAgentSlot('workhorse', { profileId: 'local-a', model: 'model-a' });
     saveAgentSlot('creative', { profileId: 'local-b', model: 'model-b' });

@@ -1,5 +1,9 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
+import {
+  createAnthropicMessagesFetch,
+  transformAnthropicRequestBody,
+} from './anthropic-messages.js';
 import type { ByokSessionConfig, ByokSessionStatus } from './provider-config.js';
 import { safeByokSessionStatus } from './provider-config.js';
 
@@ -83,12 +87,18 @@ export function createJoyAgentProvider(
   config: ByokSessionConfig,
   fetchImpl?: JoyFetch,
 ): { readonly model: LanguageModel; readonly status: ByokSessionStatus } {
+  const hardenedFetch = createHardenedFetch(config.baseUrl, fetchImpl);
+  const isAnthropic = config.provider === 'anthropic-messages';
+  const providerFetch = isAnthropic
+    ? createAnthropicMessagesFetch(config, hardenedFetch)
+    : hardenedFetch;
   const provider = createOpenAICompatible({
     name: 'joy-byok',
     baseURL: config.baseUrl,
-    apiKey: config.apiKey,
-    fetch: createHardenedFetch(config.baseUrl, fetchImpl),
+    ...(isAnthropic ? {} : { apiKey: config.apiKey }),
+    fetch: providerFetch,
     includeUsage: true,
+    ...(isAnthropic ? { transformRequestBody: transformAnthropicRequestBody } : {}),
   });
   return {
     model: provider(config.modelId),

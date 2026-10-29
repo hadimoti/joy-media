@@ -52,6 +52,8 @@ function project(value: unknown, seen: WeakSet<object>, depth: number): unknown 
 export function classifyJoyAgentError(error: unknown): JoyAgentErrorCode {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
+  const safeCode = JOY_AGENT_ERROR_CODES.find((code) => normalized.includes(code.toLowerCase()));
+  if (safeCode !== undefined) return safeCode;
   if (normalized.includes('abort') || normalized.includes('cancel')) return 'JOY_AGENT_ABORTED';
   if (normalized.includes('timeout') || normalized.includes('timed out'))
     return 'JOY_AGENT_TIMEOUT';

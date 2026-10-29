@@ -9,6 +9,7 @@ import {
   evaluateEndpoint,
   findRegistryProvider,
   findRegistryRegion,
+  isAuthMethodPermitted,
   isAgentSlotConfigured,
   isCustomProviderId,
   REGISTRY_PROVIDER_IDS,
@@ -94,9 +95,21 @@ export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSes
       `Unknown provider "${type}". Run "joy-media agent provider list" to see the providers.`,
     );
   }
-  if (registered !== undefined && registered.api !== 'chat-completions') {
+  if (registered?.api === 'chatgpt-responses') {
     throw new Error(
-      `${registered.label} is not available in the CLI yet. Use the desktop app for it.`,
+      'ChatGPT sign-in is not available in the CLI. Use the desktop app for ChatGPT.',
+    );
+  }
+  if (registered?.api === 'anthropic-messages' && !isAuthMethodPermitted(type, 'api-key')) {
+    throw new Error(registered.label + ' does not permit API-key authentication in the CLI.');
+  }
+  if (
+    registered !== undefined &&
+    registered.api !== 'chat-completions' &&
+    registered.api !== 'anthropic-messages'
+  ) {
+    throw new Error(
+      registered.label + ' is not available in the CLI yet. Use the desktop app for it.',
     );
   }
 
@@ -147,8 +160,11 @@ export function createModelFromConfig(config: ByokSessionConfig): LanguageModel 
   return model;
 }
 
-function engineMode(type: string): 'openrouter' | 'openai-compatible' | 'custom' {
+function engineMode(
+  type: string,
+): 'openrouter' | 'openai-compatible' | 'anthropic-messages' | 'custom' {
   if (type === 'openrouter') return 'openrouter';
+  if (type === 'claude') return 'anthropic-messages';
   return isCustomProviderId(type) ? 'custom' : 'openai-compatible';
 }
 
