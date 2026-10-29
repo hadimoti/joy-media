@@ -408,6 +408,13 @@ describe('ChatGPT model list', () => {
     await expect(catalog.list('acct-2', flaky)).resolves.toEqual([{ id: 'gpt-b', name: 'gpt-b' }]);
   });
 
+  it('refuses a listed model without a usable slug, and skips the entries the account does not list', () => {
+    expect(() => readChatGptModels('{"models":[{"visibility":"list"}]}')).toThrow();
+    expect(
+      readChatGptModels('{"models":[{"visibility":"hide"},{"slug":"no-visibility"},"plain text"]}'),
+    ).toEqual([]);
+  });
+
   it('loads a list again once its time-to-live has passed', async () => {
     let clock = 0;
     const loadedAt: number[] = [];

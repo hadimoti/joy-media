@@ -549,6 +549,29 @@ describe('provider broker: ChatGPT sign-in', () => {
     expect(h.sent.map((request) => request.url)).toEqual([CHATGPT_TOKEN_URL]);
   });
 
+  it('treats a listed model without a usable slug as a failure, and succeeds once the list is valid', async () => {
+    const h = harness(recordFor(60 * 60_000), () => json({}), [{ visibility: 'list' }]);
+    expect(await h.broker.listModels({ profileId: PROFILE_ID })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+    });
+    h.setModels(LISTED);
+    expect(await h.broker.listModels({ profileId: PROFILE_ID })).toEqual({
+      ok: true,
+      data: [{ id: 'gpt-first', name: 'gpt-first' }],
+    });
+  });
+
+  it('does not refuse a list whose unused field repeats a token, because no token is returned', async () => {
+    const h = harness(recordFor(60 * 60_000), () => json({}), [
+      { slug: 'gpt-b', visibility: 'list', note: 'refresh-old' },
+    ]);
+    expect(await h.broker.listModels({ profileId: PROFILE_ID })).toEqual({
+      ok: true,
+      data: [{ id: 'gpt-b', name: 'gpt-b' }],
+    });
+  });
+
   it('lists the visible models of a signed-in profile, and refuses a draft', async () => {
     const h = harness(recordFor(60 * 60_000), () => json({}), [
       { slug: 'gpt-b', visibility: 'list' },

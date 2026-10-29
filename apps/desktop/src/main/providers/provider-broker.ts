@@ -880,16 +880,23 @@ function safeModelId(value: string): string {
 }
 
 /**
- * The model list of a ChatGPT reply, once it is screened and read. A reply that is not a model list is refused, so an
- * account whose list is unknown is never taken for an account with none (PLAN-v4 §6d).
+ * The model list of a ChatGPT reply, once it is read and its values are screened. A reply that is not a model list is
+ * refused, so an account whose list is unknown is never taken for an account with none (PLAN-v4 §6d).
  */
 function chatGptModelsOf(text: string, endpoint: Endpoint): readonly ModelEntry[] {
-  assertNoCredential(text, endpoint);
+  let models: readonly ModelEntry[];
   try {
-    return readChatGptModels(text);
+    models = readChatGptModels(text);
   } catch {
     throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The model list was not understood.');
   }
+  // Only the values that leave the broker are screened. A credential in a field that is never returned cannot reach
+  // the renderer, so it does not refuse the list.
+  for (const model of models) {
+    assertNoCredential(model.id, endpoint);
+    assertNoCredential(model.name, endpoint);
+  }
+  return models;
 }
 
 function requireKey(endpoint: Endpoint): string {

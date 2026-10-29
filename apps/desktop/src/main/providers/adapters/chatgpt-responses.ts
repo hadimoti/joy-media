@@ -118,13 +118,10 @@ export function readChatGptModels(text: string): readonly ModelEntry[] {
   const models = parseObject(text)?.models;
   if (!Array.isArray(models)) throw new Error('The model list was not understood.');
   return models.flatMap((model): ModelEntry[] => {
-    if (
-      !isRecord(model) ||
-      model.visibility !== 'list' ||
-      typeof model.slug !== 'string' ||
-      model.slug.length === 0
-    ) {
-      return [];
+    // An entry the account does not list is skipped. A listed entry without a usable slug makes the whole list unknown.
+    if (!isRecord(model) || model.visibility !== 'list') return [];
+    if (typeof model.slug !== 'string' || model.slug.length === 0) {
+      throw new Error('The model list was not understood.');
     }
     const name =
       typeof model.display_name === 'string' && model.display_name.length > 0
