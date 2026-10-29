@@ -48,14 +48,15 @@ const statePath =
     '.joy-media',
     'worker-state.json',
   );
-const apiUrl = process.env.JOY_MEDIA_API_URL?.trim() || 'https://joyst.ir/api';
-const parsedApiUrl = new URL(apiUrl);
-const localTestApi =
-  process.env.JOY_MEDIA_WORKER_TEST_MODE === '1' &&
-  parsedApiUrl.protocol === 'http:' &&
-  ['127.0.0.1', 'localhost', '::1'].includes(parsedApiUrl.hostname);
-if (parsedApiUrl.protocol !== 'https:' && !localTestApi)
-  throw new Error('JOY_MEDIA_API_URL must use HTTPS');
+// No remote default: the desktop app supplies the loopback job API address (PLAN-v4 D19).
+const apiUrl = process.env.JOY_MEDIA_API_URL?.trim() || '';
+const loopbackApi = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})\/?$/.exec(apiUrl);
+if (apiUrl.length === 0)
+  throw new Error(
+    'JOY_MEDIA_API_URL is required: set it to http://127.0.0.1:<port> from the JOY Media desktop app',
+  );
+if (loopbackApi === null || Number(loopbackApi[1]) > 65535)
+  throw new Error('JOY_MEDIA_API_URL must be http://127.0.0.1:<port>; remote addresses are refused');
 if (!existsSync(entryPoint)) throw new Error(`Worker entrypoint not found: ${entryPoint}`);
 
 const stateDirectory = dirname(statePath);

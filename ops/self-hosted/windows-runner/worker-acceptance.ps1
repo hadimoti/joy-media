@@ -266,7 +266,7 @@ try {
     if ([string]::IsNullOrWhiteSpace($powershellPath)) { $powershellPath = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source }
     if ([string]::IsNullOrWhiteSpace($powershellPath)) { throw 'PowerShell is required for scheduled-task acceptance' }
     $runnerPath = Join-Path $PWD 'scripts\run-worker-headless.ps1'
-    $arguments = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -ApiUrl "{1}" -StatePath "{2}" -WorkerExecutable "{3}" -WorkerPipe "{4}" -TestMode' -f $runnerPath, $fixtureBaseUrl, $scheduledStatePath, $installedPath, $scheduledPipe
+    $arguments = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -ApiUrl "{1}" -StatePath "{2}" -WorkerExecutable "{3}" -WorkerPipe "{4}"' -f $runnerPath, $fixtureBaseUrl, $scheduledStatePath, $installedPath, $scheduledPipe
     $userId = "$env:USERDOMAIN\$env:USERNAME"
     $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
     $action = New-ScheduledTaskAction -Execute $powershellPath -Argument $arguments -WorkingDirectory $PWD.Path

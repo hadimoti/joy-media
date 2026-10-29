@@ -1,27 +1,24 @@
 # worker
 
-> **Status:** paired outbound Worker with verified thumbnail, AI, audio, and
-> professional masking derivative jobs. Local AI models (upscale, denoise, matting) are
-> experimental, need separate model setup, and are not qualified in this release.
+> **Status:** local Worker that runs under the JOY Media desktop app. It runs verified
+> thumbnail, AI text (through the desktop broker), audio, and professional masking derivative
+> jobs. Local AI models (upscale, denoise, matting) are experimental, need separate model setup,
+> and are not qualified in this release.
 > Contract: [`JOY_MEDIA_MASTER_PLAN.md`](../../JOY_MEDIA_MASTER_PLAN.md) §26, §8.4 · Work plan: [`ORCHESTRATION.md`](../../ORCHESTRATION.md)
 
 **Role.** Local/GPU worker daemon: probing, proxies, waveforms, FFmpeg, deterministic export, provider execution, resource governor.
 
 **First built in part:** P00 (spike) then P01. Do not scaffold code here before that part is marked active in [`STATE.md`](../../STATE.md).
 
-Set `JOY_MEDIA_API_URL` to `http://127.0.0.1:<port>` to run the daemon against a local versioned API. Any other URL stops the Worker before it reads its state. On its
-first run it writes an ephemeral owner-facing pairing notification beside the
-private state file (override with `JOY_MEDIA_WORKER_PAIRING_NOTIFICATION_PATH`)
-and emits only a redacted diagnostic message. The signed-in owner approves the
-code in the Media UI/API before the Worker can claim its token. The code is
-retained until its five-minute offer expires, so restarting after approval
-claims the same approved offer rather than replacing it. The local
-state path defaults to `~/.joy-media/worker-state.json` and can be overridden
-with `JOY_MEDIA_WORKER_STATE_PATH`. It contains only the device identity and
-revocable Worker session—not a JOY browser login, media path, or project data.
-The current fixture job writes a deterministic 1×1 PPM only in its private job
-directory; the API receives and independently validates its fixed SHA-256
-receipt, never the local path or media bytes.
+The desktop app starts this Worker and supplies `JOY_MEDIA_API_URL=http://127.0.0.1:<port>`,
+the loopback address of its local job API, and a per-run `JOY_MEDIA_WORKER_LOCAL_TOKEN`.
+Any other control-plane address is refused before the Worker reads or writes state.
+The state file at `~/.joy-media/worker-state.json` (override with `JOY_MEDIA_WORKER_STATE_PATH`)
+keeps only the device identity. The per-run token lives in memory and is never written.
+Older pairing fields in that file are ignored and kept. AI text jobs go through the desktop
+broker, which holds the profile and the key. The Worker holds no provider key and reads no
+provider file. The current fixture job writes a deterministic 1×1 PPM only in its private job
+directory. The receipt carries a fixed SHA-256, never the local path or media bytes.
 
 **Must not:** Editing project state without a validated job/command result; building shell strings from input.
 
@@ -34,28 +31,26 @@ paths remain Worker-only. The Worker advertises `mask.image` / `mask.video`
 only when the matching runner is explicitly configured, and the control plane
 leases work only when the source asset ID is present locally.
 
-## Windows headless startup
+## Startup under the desktop app
 
-The Worker is a background process, not a browser extension. From a built
-checkout, create the native `joy-worker.exe` launcher and install an idempotent
-hidden Windows logon task with:
+The JOY Media desktop app starts the Worker when the app starts. No separate
+install and no logon task are needed. The Worker runs while the desktop app is
+open, because the app supplies both the job route and the per-run token. The
+app restarts the Worker after an unexpected exit.
+
+Earlier builds installed a hidden logon task named `JOY Media Local Worker`
+that reconnected to a remote control plane. That task is no longer used.
+Remove it once, in PowerShell:
 
 ```powershell
-pnpm worker:exe
-powershell -NoProfile -File .\scripts\install-worker-autostart.ps1
+Unregister-ScheduledTask -TaskName 'JOY Media Local Worker' -Confirm:$false
 ```
 
-`pnpm worker:exe` uses Node's single-executable application format. The
-resulting executable is a small runtime launcher that starts the audited Worker
-entrypoint with the local Node runtime, so Playwright/GPU and model
-dependencies remain external and upgradeable. The task starts this executable
-from the checkout with `https://joyst.ir/api`, keeps its device identity in
-`%USERPROFILE%\.joy-media\worker-state.json`, restarts after an unexpected exit,
-and writes diagnostics to `%USERPROFILE%\.joy-media\logs\worker.log`. The
-installer builds the executable automatically when it is missing. The first
-install still requires one owner-approved pairing code; after that, opening
-`https://www.joyst.ir/` discovers the connected Worker automatically. Silent
-pairing is intentionally not supported.
+`pnpm worker:exe` builds the native launcher, `joy-worker.exe`.
+`run-worker.bat` and `scripts/run-worker-headless.ps1` are for a standalone run
+from a checkout. They have no remote default. Set `JOY_MEDIA_API_URL` to
+`http://127.0.0.1:<port>` and `JOY_MEDIA_WORKER_LOCAL_TOKEN` first. Otherwise
+they stop with a clear message.
 
 The executable never accepts arbitrary shell commands. It launches one fixed
 Worker entrypoint and the Worker executes only typed, allowlisted job adapters.
