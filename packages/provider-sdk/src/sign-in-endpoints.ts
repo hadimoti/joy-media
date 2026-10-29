@@ -15,3 +15,26 @@ export const CHATGPT_AUTHORIZE_URL = 'https://auth.openai.com/api/accounts/autho
 export const CHATGPT_TOKEN_URL = 'https://auth.openai.com/api/accounts/oauth/token';
 export const CHATGPT_JWKS_URL = 'https://auth.openai.com/.well-known/jwks.json';
 export const CHATGPT_RESPONSES_BASE_URL = 'https://api.openai.com/v1';
+
+/** MiniMax's account base, its sign-in page and its inference base, for one region (PLAN-v4 §6d, §6d-1). */
+export const MINIMAX_OAUTH_ENDPOINTS = {
+  global: {
+    accountBase: 'https://account.minimax.io',
+    authorizeUrl: 'https://platform.minimax.io/oauth-authorize',
+    inferenceBase: 'https://api.minimax.io/v1',
+  },
+  cn: {
+    accountBase: 'https://account.minimaxi.com',
+    authorizeUrl: 'https://platform.minimaxi.com/oauth-authorize',
+    inferenceBase: 'https://api.minimax.cn/v1',
+  },
+} as const;
+
+export type MiniMaxRegion = keyof typeof MINIMAX_OAUTH_ENDPOINTS;
+
+/**
+ * PLAN-v4 §6d's `openid profile coding_plan` scope follows the owner's research. OpenClaw currently requests
+ * `group_id profile model.completion`; JOY Media's exact scope stays unverified until MiniMax confirms it through its
+ * own client-registration path.
+ */
+export const MINIMAX_OAUTH_SCOPE = 'openid profile coding_plan';

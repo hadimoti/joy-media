@@ -1,8 +1,11 @@
 import {
   findRegistryProvider,
   signInProviders,
+  MINIMAX_OAUTH_ENDPOINTS,
+  type MiniMaxRegion,
   type RegistryProviderId,
 } from '@joy-media/provider-sdk';
+import { parseChatModels } from '../providers/adapters/chat-completions.js';
 import {
   CHATGPT_RESPONSES_BASE_URL,
   prepareChatGptModels,
@@ -16,6 +19,11 @@ import {
   newExtAgentHostId,
   signInWithChatGpt,
 } from './chatgpt.js';
+import {
+  encodeMiniMaxTokenRecord,
+  signInWithMiniMax,
+  type MiniMaxTokenRecord,
+} from './minimax.js';
 import { OAuthFlowError } from './errors.js';
 import { MAX_CATALOG_CHARS, type FetchLike, replyText } from './http.js';
 
@@ -42,6 +50,10 @@ export interface ProviderSignInDeps {
   readonly now: () => number;
   /** The client of a saved ChatGPT account, to sign in to it again. Undefined registers a new client (SIWC). */
   readonly chatGptClientId: string | undefined;
+  /** JOY Media's own registered MiniMax client ID. Undefined until the owner registers it. */
+  readonly minimaxClientId: string | undefined;
+  /** The MiniMax account region (S5). International unless the owner picks China. */
+  readonly minimaxRegion?: MiniMaxRegion;
   /** This install's ChatGPT ID, from loadOrCreateInstallId. */
   readonly installId: () => string;
   /** The loopback port for ChatGPT. Absent means the fixed port; tests pass 0. */
@@ -63,6 +75,30 @@ export function createProviderSignIn(
         'NOT_CONFIGURED',
         `${providerLabel(provider)} is set up with an API key and does not offer a sign-in.`,
       );
+    }
+    if (provider === 'minimax') {
+      if (deps.minimaxClientId === undefined || deps.minimaxClientId.trim().length === 0) {
+        throw new OAuthFlowError(
+          'NOT_CONFIGURED',
+          "MiniMax sign-in needs JOY Media's registered client ID.",
+        );
+      }
+      const region = deps.minimaxRegion ?? 'global';
+      const record = await signInWithMiniMax({
+        clientId: deps.minimaxClientId,
+        region,
+        openExternal: deps.openExternal,
+        fetch: deps.fetch,
+        now: deps.now,
+      });
+      const baseUrl = MINIMAX_OAUTH_ENDPOINTS[region].inferenceBase;
+      const modelId = await firstMiniMaxModel(record, baseUrl, deps.fetch);
+      return {
+        provider,
+        baseUrl,
+        modelId,
+        secret: encodeMiniMaxTokenRecord(record),
+      };
     }
     if (provider !== 'chatgpt') {
       throw new OAuthFlowError(
@@ -122,6 +158,40 @@ async function firstChatGptModel(record: ChatGptTokenRecord, fetch: FetchLike): 
   const tokens = [record.accessToken, record.refreshToken];
   if (tokens.some((token) => holdsCredential(first.id, token))) {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT lists no usable model for this account.');
+  }
+  return first.id;
+}
+
+/** The first usable model MiniMax lists for this account; its token values can never become model IDs. */
+async function firstMiniMaxModel(
+  record: MiniMaxTokenRecord,
+  baseUrl: string,
+  fetch: FetchLike,
+): Promise<string> {
+  let models: ReturnType<typeof parseChatModels>;
+  try {
+    const response = await fetch(`${baseUrl}/models`, {
+      method: 'GET',
+      headers: { accept: 'application/json', authorization: `Bearer ${record.accessToken}` },
+      redirect: 'manual',
+    });
+    if (!response.ok) throw new Error('model list request failed');
+    models = parseChatModels(await replyText(response, MAX_CATALOG_CHARS));
+  } catch {
+    throw new OAuthFlowError(
+      'EXCHANGE_FAILED',
+      'MiniMax lists no usable model for this account.',
+    );
+  }
+  const tokens = [record.accessToken, record.refreshToken];
+  const first = models.find(
+    (model) => !tokens.some((token) => holdsCredential(model.id, token)),
+  );
+  if (first === undefined) {
+    throw new OAuthFlowError(
+      'EXCHANGE_FAILED',
+      'MiniMax lists no usable model for this account.',
+    );
   }
   return first.id;
 }

@@ -76,24 +76,29 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     }
   });
 
-  it('offers a subscription sign-in only to ChatGPT, and hides it while the row is gated', () => {
+  it('permits ChatGPT and MiniMax sign-in, and hides each while its row is gated', () => {
     const withSignIn = PROVIDER_REGISTRY.filter((provider) =>
       provider.auth.methods.includes('subscription-sign-in'),
     ).map((provider) => provider.id);
-    expect(withSignIn).toEqual(['chatgpt']);
+    expect(withSignIn).toEqual(['minimax', 'chatgpt']);
     expect(permittedAuthMethods('chatgpt')).toEqual(['subscription-sign-in']);
     expect(isAuthGated('chatgpt')).toBe(true);
     expect(offeredAuthMethods('chatgpt')).toEqual([]);
+    expect(permittedAuthMethods('minimax')).toEqual(['api-key', 'subscription-sign-in']);
+    expect(isAuthGated('minimax')).toBe(true);
+    expect(offeredAuthMethods('minimax')).toEqual([]);
   });
 
-  it('lists the providers the sign-in surface may offer, which is ChatGPT alone under D20', () => {
-    expect(signInProviders()).toEqual(['chatgpt']);
+  it('lists ChatGPT and MiniMax on the sign-in surface under D20', () => {
+    // The registry lists them in its own order; the settings panel decides the order of its buttons.
+    expect(signInProviders()).toEqual(['minimax', 'chatgpt']);
     expect(isSignInProvider('chatgpt')).toBe(true);
+    expect(isSignInProvider('minimax')).toBe(true);
   });
 
   it('never offers a sign-in for a provider that is set up with an API key', () => {
     for (const provider of PROVIDER_REGISTRY) {
-      if (provider.id === 'chatgpt') continue;
+      if (provider.id === 'chatgpt' || provider.id === 'minimax') continue;
       expect(isSignInProvider(provider.id), provider.id).toBe(false);
     }
     expect(isSignInProvider('openrouter')).toBe(false);
@@ -107,6 +112,15 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
       expect(provider.auth.methods.includes('api-key'), provider.id).toBe(expected);
       expect(isAuthMethodPermitted(provider.id, 'api-key'), provider.id).toBe(expected);
     }
+  });
+
+  it('keeps MiniMax API-key eligibility separate from its unverified Coding Plan key question', () => {
+    const minimax = PROVIDER_REGISTRY.find((provider) => provider.id === 'minimax');
+    expect(minimax?.auth.methods).toEqual(['api-key', 'subscription-sign-in']);
+    expect(minimax?.auth.gated).toBe(true);
+    expect(minimax?.auth.unverified).toBe(true);
+    expect(minimax?.auth.note).toContain('JOY Media');
+    expect(minimax?.auth.note).toContain('sk-cp-');
   });
 
   it('marks the rows the plan leaves unverified as unverified', () => {

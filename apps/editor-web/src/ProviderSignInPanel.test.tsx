@@ -15,11 +15,12 @@ describe('ProviderSignInPanel', () => {
     expect(renderToStaticMarkup(<ProviderSignInPanel onSignedIn={() => undefined} />)).toBe('');
   });
 
-  it('offers only ChatGPT, labelled as a preview, in the desktop app', () => {
+  it('offers ChatGPT and MiniMax, both labelled as previews, in the desktop app', () => {
     global.window = { joyDesktop: {} };
     const markup = renderToStaticMarkup(<ProviderSignInPanel onSignedIn={() => undefined} />);
     expect(markup).toContain('Sign in with ChatGPT');
-    expect(markup).toContain('(Preview)');
+    expect(markup).toContain('Sign in with MiniMax');
+    expect(markup.match(/\(Preview\)/g)).toHaveLength(2);
   });
 
   it('never offers OpenRouter, which is set up with an API key under D20', () => {

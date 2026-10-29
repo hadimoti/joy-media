@@ -47,6 +47,13 @@ import {
   type ChatGptTokenKeeper,
   type ChatGptTokenRecord,
 } from '../oauth/chatgpt.js';
+import {
+  createMiniMaxTokenKeeper,
+  decodeMiniMaxTokenRecord,
+  encodeMiniMaxTokenRecord,
+  type MiniMaxTokenKeeper,
+  type MiniMaxTokenRecord,
+} from '../oauth/minimax.js';
 import { OAuthFlowError } from '../oauth/errors.js';
 
 export { endpointBindingDigest };
@@ -187,7 +194,7 @@ interface Endpoint {
   readonly apiKey: string | undefined;
   /** For ChatGPT: the account, and the secret handle its token is stored under. */
   readonly chatGpt?: { readonly accountId: string; readonly handleId: string };
-  /** Secrets a reply must never carry besides the key: the ChatGPT refresh token. */
+  /** Secrets a reply must never carry besides the key: a ChatGPT or MiniMax refresh token. */
   readonly screened?: readonly string[];
 }
 
@@ -237,6 +244,31 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
       deps.store.rebindSecretVersion?.(profileId, deps.store.secretVersion(handleId));
     },
   });
+  // MiniMax's OAuth record is used only for MiniMax profiles; a plain MiniMax key remains a normal API key.
+  const minimaxTokens: MiniMaxTokenKeeper = createMiniMaxTokenKeeper({
+    fetch: deps.fetch,
+    now: nowMs,
+    save: async (profileId, handleId, record) => {
+      const profile = deps.store.getProfile(profileId);
+      if (profile === undefined) {
+        throw new BrokerError('PROFILE_NOT_FOUND', 'Unknown provider profile');
+      }
+      if (profile.secretHandleId !== handleId) {
+        throw new BrokerError(
+          'CREDENTIAL_UNAVAILABLE',
+          'The MiniMax sign-in changed during this request. Send it again.',
+        );
+      }
+      await deps.secrets.set(handleId, encodeMiniMaxTokenRecord(record));
+      if (deps.store.getProfile(profileId)?.secretHandleId !== handleId) {
+        throw new BrokerError(
+          'CREDENTIAL_UNAVAILABLE',
+          'The MiniMax sign-in changed during this request. Send it again.',
+        );
+      }
+      deps.store.rebindSecretVersion?.(profileId, deps.store.secretVersion(handleId));
+    },
+  });
   const chatGptCatalog = createChatGptCatalog();
 
   /**
@@ -270,6 +302,27 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
       throw new BrokerError(
         'SIGN_IN_REQUIRED',
         'The new ChatGPT sign-in could not be saved. Sign in with ChatGPT again.',
+      );
+    }
+  }
+
+  /** Refreshes a MiniMax token record near expiry and refuses a record it cannot save atomically. */
+  async function miniMaxRecord(
+    profileId: string,
+    handleId: string,
+    record: MiniMaxTokenRecord,
+  ): Promise<MiniMaxTokenRecord> {
+    try {
+      return await minimaxTokens.current(profileId, handleId, record);
+    } catch (error) {
+      if (error instanceof BrokerError) throw error;
+      if (error instanceof OAuthFlowError) {
+        throw new BrokerError('PROVIDER_HTTP_ERROR', error.message);
+      }
+      deps.store.markCredentialUnavailable(profileId);
+      throw new BrokerError(
+        'SIGN_IN_REQUIRED',
+        'The MiniMax sign-in could not be saved. Sign in with MiniMax again.',
       );
     }
   }
@@ -362,6 +415,27 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         chatGpt: { accountId: record.accountId, handleId: profile.secretHandleId },
         screened: [record.refreshToken],
       };
+    }
+    if (profile.provider === 'minimax' && stored !== null) {
+      const savedRecord = decodeMiniMaxTokenRecord(stored);
+      if (savedRecord !== undefined) {
+        const record = await miniMaxRecord(profile.id, profile.secretHandleId, savedRecord);
+        return {
+          ...makeEndpoint(
+            profile.id,
+            profile.provider,
+            profile.baseUrl,
+            profile.modelId,
+            record.accessToken,
+          ),
+          screened: [
+            savedRecord.refreshToken,
+            savedRecord.accessToken,
+            record.accessToken,
+            record.refreshToken,
+          ],
+        };
+      }
     }
     const apiKey = usableKey(stored);
     if (apiKey === undefined && verdict.kind === 'registry') {

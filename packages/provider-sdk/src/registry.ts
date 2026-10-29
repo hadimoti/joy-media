@@ -158,12 +158,13 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     label: 'MiniMax',
     api: 'chat-completions',
     auth: {
-      methods: ['api-key'],
+      methods: ['api-key', 'subscription-sign-in'],
       source:
         "PLAN-v4 §6d-1 table, row 'MiniMax': the MiniMax platform docs. Coding Plan keys (sk-cp-) are documented for MiniMax's own listed tools, and JOY Media is not one of them",
       sourceDate: '2026-10-29',
+      gated: true,
       unverified: true,
-      note: 'A pay-as-you-go API key only. UNVERIFIED: whether a Coding Plan key may be used by JOY Media. MiniMax must confirm it in writing.',
+      note: 'An API key remains the normal path. D20 permits device-code sign-in as a second option, gated until JOY Media registers its own client_id (an owner action). UNVERIFIED: whether a Coding Plan key (sk-cp-) may be used by JOY Media remains a separate question; MiniMax must confirm it in writing.',
     },
     regions: [
       {

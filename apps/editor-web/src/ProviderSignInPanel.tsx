@@ -7,16 +7,25 @@ import {
 } from './desktop-client.js';
 
 /** The button text per provider. Which providers are offered comes from the registry (PLAN-v4 §6d-1 rule 5, D20). */
-const LABELS: Partial<Record<RegistryProviderId, string>> = { chatgpt: 'ChatGPT' };
+const LABELS: Partial<Record<RegistryProviderId, string>> = { chatgpt: 'ChatGPT', minimax: 'MiniMax' };
 
 /** The providers the panel marks as a preview. */
-const PREVIEW: Partial<Record<RegistryProviderId, true>> = { chatgpt: true };
+const PREVIEW: Partial<Record<RegistryProviderId, true>> = { chatgpt: true, minimax: true };
+
+/** The order the sign-in buttons appear in. Any provider not named here comes after them. */
+const ORDER: readonly RegistryProviderId[] = ['chatgpt', 'minimax'];
+
+/** The rank of a provider in the button order; a provider not named in the order comes last. */
+function rank(provider: RegistryProviderId): number {
+  const index = ORDER.indexOf(provider);
+  return index === -1 ? ORDER.length : index;
+}
 
 /**
  * Signs in to a provider in the desktop app. The list comes from the registry, so only a provider that permits a
- * subscription sign-in is offered: under D20 that is ChatGPT, labelled as a preview. A provider that is set up with an
- * API key, such as OpenRouter, is never offered here. The browser opens for the sign-in. The key or token is saved by
- * the desktop and is never shown here.
+ * subscription sign-in is offered: under D20 that is ChatGPT and MiniMax, labelled as previews. A provider that is set
+ * up with an API key, such as OpenRouter, is never offered here. The browser opens for the sign-in. The key or token is
+ * saved by the desktop and is never shown here.
  */
 export function ProviderSignInPanel({
   onSignedIn,
@@ -47,7 +56,7 @@ export function ProviderSignInPanel({
   return (
     <div className="joy-provider-signin">
       <div className="joy-provider-signin-actions">
-        {signInProviders().map((target) => (
+        {[...signInProviders()].sort((first, second) => rank(first) - rank(second)).map((target) => (
           <button
             key={target}
             type="button"

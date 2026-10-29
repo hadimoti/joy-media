@@ -171,6 +171,8 @@ if (!app.requestSingleInstanceLock()) {
       now: () => Date.now(),
       // No saved client: each ChatGPT sign-in registers one with ChatGPT (SIWC dynamic registration, PLAN-v4 §6d).
       chatGptClientId: undefined,
+      // JOY Media's own registered MiniMax client ID; it stays undefined until the owner registers it.
+      minimaxClientId: undefined,
       installId: () => loadOrCreateInstallId(localDatabase),
     }),
     handleWindowControl: (action) => {
