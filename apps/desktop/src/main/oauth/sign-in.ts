@@ -96,7 +96,7 @@ async function firstChatGptModel(record: ChatGptTokenRecord, fetch: FetchLike): 
       `ChatGPT did not list models (HTTP ${response.status}).`,
     );
   }
-  const first = readChatGptModels(await replyText(response))[0];
+  const first = listedChatGptModels(await replyText(response))[0];
   if (first === undefined) {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT lists no models for this account.');
   }
@@ -105,6 +105,18 @@ async function firstChatGptModel(record: ChatGptTokenRecord, fetch: FetchLike): 
     throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT lists no usable model for this account.');
   }
   return first.id;
+}
+
+/** The models of a ChatGPT list. A list this build cannot read is a sign-in failure the person can see. */
+function listedChatGptModels(text: string): ReturnType<typeof readChatGptModels> {
+  try {
+    return readChatGptModels(text);
+  } catch {
+    throw new OAuthFlowError(
+      'EXCHANGE_FAILED',
+      'ChatGPT returned a model list this app cannot read.',
+    );
+  }
 }
 
 /** This install's ChatGPT ID: the saved one, or a new one saved the first time (PLAN-v4 §6d). */
