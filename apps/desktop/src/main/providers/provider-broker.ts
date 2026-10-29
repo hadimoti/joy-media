@@ -28,8 +28,10 @@ import { AdapterRequestError, type ModelEntry, type PreparedCall } from './adapt
 import { isRecord, parseCompletionBody, type CompletionBody } from './request-body.js';
 import { endpointBindingDigest } from '../../store/profile-binding.js';
 import { callFingerprint, ContinuationState, historyDigests } from './continuation-state.js';
+import { holdsCredential } from './credential-screen.js';
 import {
   createChatGptCatalog,
+  isUsableModelId,
   needsModelChoice,
   PLAN_LIMIT_CODES,
   prepareChatGptModels,
@@ -520,55 +522,6 @@ function assertNoCredential(reply: string, endpoint: Endpoint): string {
   return reply;
 }
 
-/** How deep a string that holds JSON is searched. Past it, a string that parses is refused. */
-const MAX_NESTED_JSON = 8;
-
-/**
- * True when the key shows in the reply: in its text, in a JSON string, or in a string that is itself
- * JSON, such as a tool call's arguments. JSON escapes do not hide it (PLAN-v4 §6b).
- */
-function holdsCredential(reply: string, key: string): boolean {
-  return textHoldsKey(reply, key, 0);
-}
-
-function textHoldsKey(text: string, key: string, depth: number): boolean {
-  if (text.includes(key)) return true;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return false;
-  }
-  return valueHoldsKey(parsed, key, depth);
-}
-
-function valueHoldsKey(value: unknown, key: string, depth: number): boolean {
-  if (typeof value === 'string') {
-    if (value.includes(key)) return true;
-    // Only a string with a backslash can hide the key behind a JSON escape.
-    if (!value.includes('\\')) return false;
-    if (depth >= MAX_NESTED_JSON) return isJsonText(value);
-    return textHoldsKey(value, key, depth + 1);
-  }
-  if (Array.isArray(value)) return value.some((item) => valueHoldsKey(item, key, depth));
-  if (typeof value === 'object' && value !== null) {
-    // A property name is a string too: it can hold JSON, escapes and all.
-    return Object.entries(value).some(
-      ([name, item]) => valueHoldsKey(name, key, depth) || valueHoldsKey(item, key, depth),
-    );
-  }
-  return false;
-}
-
-function isJsonText(text: string): boolean {
-  try {
-    JSON.parse(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Thrown for a reply the engine could not read. The text of the reply is never part of the message. */
 function notUnderstood(): never {
   throw new BrokerError('PROVIDER_INCOMPATIBLE', 'The provider reply was not understood.');
@@ -868,12 +821,9 @@ function usableKey(value: string | null | undefined): string | undefined {
   return value;
 }
 
-/** A model id travels inside a JSON body, so it needs a sane length and no control characters. */
+/** A model id travels inside a JSON body, so it must pass the same rule a listed model id passes. */
 function safeModelId(value: string): string {
-  const hasControl = [...value].some(
-    (char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f,
-  );
-  if (value.length === 0 || value.length > 256 || hasControl) {
+  if (!isUsableModelId(value)) {
     throw new BrokerError('REQUEST_INVALID', 'The model id is not valid.');
   }
   return value;

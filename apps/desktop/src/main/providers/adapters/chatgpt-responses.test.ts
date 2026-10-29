@@ -415,6 +415,17 @@ describe('ChatGPT model list', () => {
     ).toEqual([]);
   });
 
+  it('refuses a listed model whose slug cannot be a model id', () => {
+    const listed = (slug: string): string =>
+      JSON.stringify({ models: [{ slug, visibility: 'list' }] });
+    expect(() => readChatGptModels(listed('   '))).toThrow();
+    expect(() => readChatGptModels(listed('gpt\u0007-a'))).toThrow();
+    expect(() => readChatGptModels(listed('a'.repeat(257)))).toThrow();
+    expect(readChatGptModels(listed('a'.repeat(256)))).toEqual([
+      { id: 'a'.repeat(256), name: 'a'.repeat(256) },
+    ]);
+  });
+
   it('loads a list again once its time-to-live has passed', async () => {
     let clock = 0;
     const loadedAt: number[] = [];

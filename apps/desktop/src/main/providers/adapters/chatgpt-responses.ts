@@ -111,6 +111,17 @@ export function readChatGptStream(text: string): ChatGptOutcome {
   return { kind: 'interrupted', partialText };
 }
 
+const MAX_MODEL_ID_LENGTH = 256;
+
+/**
+ * Whether a string can be a model id: not blank, at most 256 characters, and no control character. The model list
+ * refuses a listed slug that fails this, and the broker refuses a request whose model id fails it.
+ */
+export function isUsableModelId(value: string): boolean {
+  if (value.trim().length === 0 || value.length > MAX_MODEL_ID_LENGTH) return false;
+  return ![...value].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f);
+}
+
 /**
  * The model list: only the models the account may list, in the order the server gives (PLAN-v4 §6d).
  */
@@ -120,7 +131,7 @@ export function readChatGptModels(text: string): readonly ModelEntry[] {
   return models.flatMap((model): ModelEntry[] => {
     // An entry the account does not list is skipped. A listed entry without a usable slug makes the whole list unknown.
     if (!isRecord(model) || model.visibility !== 'list') return [];
-    if (typeof model.slug !== 'string' || model.slug.length === 0) {
+    if (typeof model.slug !== 'string' || !isUsableModelId(model.slug)) {
       throw new Error('The model list was not understood.');
     }
     const name =

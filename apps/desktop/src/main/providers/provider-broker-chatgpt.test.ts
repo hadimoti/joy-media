@@ -562,6 +562,28 @@ describe('provider broker: ChatGPT sign-in', () => {
     });
   });
 
+  it('does not keep a failed model list, so the next completion loads the corrected one', async () => {
+    const h = harness(recordFor(60 * 60_000), () => completedWith('x'), [{ visibility: 'list' }]);
+    expect(await h.broker.complete({ profileId: PROFILE_ID, body: CHAT })).toMatchObject({
+      ok: false,
+      code: 'PROVIDER_INCOMPATIBLE',
+    });
+    // No reload is asked for here: the completion itself must load the list again.
+    h.setModels(LISTED);
+    expect(await h.broker.complete({ profileId: PROFILE_ID, body: CHAT })).toMatchObject({
+      ok: true,
+    });
+    expect(h.sent.filter((request) => request.url === MODELS_URL)).toHaveLength(2);
+  });
+
+  it('refuses a blank model id in a request before anything is sent', async () => {
+    const h = harness(recordFor(60 * 60_000), () => completedWith('x'));
+    expect(
+      await h.broker.complete({ profileId: PROFILE_ID, body: CHAT, modelId: '   ' }),
+    ).toMatchObject({ ok: false, code: 'REQUEST_INVALID' });
+    expect(h.sent).toEqual([]);
+  });
+
   it('does not refuse a list whose unused field repeats a token, because no token is returned', async () => {
     const h = harness(recordFor(60 * 60_000), () => json({}), [
       { slug: 'gpt-b', visibility: 'list', note: 'refresh-old' },

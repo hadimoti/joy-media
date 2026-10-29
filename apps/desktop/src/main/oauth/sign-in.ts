@@ -3,7 +3,8 @@ import {
   prepareChatGptModels,
   readChatGptModels,
 } from '../providers/adapters/chatgpt-responses.js';
-import { encodeTokenRecord, signInWithChatGpt } from './chatgpt.js';
+import { holdsCredential } from '../providers/credential-screen.js';
+import { type ChatGptTokenRecord, encodeTokenRecord, signInWithChatGpt } from './chatgpt.js';
 import { OAuthFlowError } from './errors.js';
 import { type FetchLike, replyText } from './http.js';
 import { OPENROUTER_BASE_URL, signInWithOpenRouter } from './openrouter.js';
@@ -63,7 +64,7 @@ export function createProviderSignIn(
       now: deps.now,
       ...(deps.chatGptPort === undefined ? {} : { port: deps.chatGptPort }),
     });
-    const modelId = await firstChatGptModel(record.accessToken, deps.fetch);
+    const modelId = await firstChatGptModel(record, deps.fetch);
     return {
       provider,
       baseUrl: CHATGPT_RESPONSES_BASE_URL,
@@ -73,9 +74,12 @@ export function createProviderSignIn(
   };
 }
 
-/** The first model the account may list. A new ChatGPT profile starts on it. */
-async function firstChatGptModel(accessToken: string, fetch: FetchLike): Promise<string> {
-  const call = prepareChatGptModels({ accessToken });
+/**
+ * The first model the account may list. A new ChatGPT profile starts on it, and the profile returns its id to the
+ * renderer, so an id that holds either token is refused.
+ */
+async function firstChatGptModel(record: ChatGptTokenRecord, fetch: FetchLike): Promise<string> {
+  const call = prepareChatGptModels({ accessToken: record.accessToken });
   let response: Response;
   try {
     response = await fetch(call.url, {
@@ -95,6 +99,10 @@ async function firstChatGptModel(accessToken: string, fetch: FetchLike): Promise
   const first = readChatGptModels(await replyText(response))[0];
   if (first === undefined) {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT lists no models for this account.');
+  }
+  const tokens = [record.accessToken, record.refreshToken];
+  if (tokens.some((token) => holdsCredential(first.id, token))) {
+    throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT lists no usable model for this account.');
   }
   return first.id;
 }
