@@ -202,10 +202,9 @@ describe('createProviderSignIn', () => {
       now: Date.now,
       chatGptClientId: undefined,
       minimaxClientId: CLIENT_ID,
-      minimaxRegion: 'cn',
       installId: () => HOST_ID,
     });
-    const pending = signIn('minimax');
+    const pending = signIn('minimax', { minimaxRegion: 'cn' });
 
     await opened;
     await Promise.resolve();

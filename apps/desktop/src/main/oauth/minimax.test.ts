@@ -136,6 +136,7 @@ describe('MiniMax device-code sign-in', () => {
   });
 
   it('refuses a returned state mismatch before opening the browser', async () => {
+    vi.useFakeTimers({ now: NOW });
     const openExternal = vi.fn();
     const fetch: FetchLike = async (_url, init) => {
       const sentState = new URLSearchParams(String(init.body)).get('state');
@@ -150,6 +151,7 @@ describe('MiniMax device-code sign-in', () => {
   });
 
   it('refuses an approve page on another host before opening the browser', async () => {
+    vi.useFakeTimers({ now: NOW });
     const openExternal = vi.fn();
     const fetch: FetchLike = async (_url, init) => {
       const state = new URLSearchParams(String(init.body)).get('state') ?? '';
@@ -166,6 +168,7 @@ describe('MiniMax device-code sign-in', () => {
   });
 
   it('refuses an incomplete device-code reply without opening the browser', async () => {
+    vi.useFakeTimers({ now: NOW });
     const openExternal = vi.fn();
     const fetch: FetchLike = async (_url, init) => {
       const state = new URLSearchParams(String(init.body)).get('state') ?? '';

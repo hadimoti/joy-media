@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import { findRegistryProvider, signInProviders, type RegistryProviderId } from '@joy-media/provider-sdk';
+import {
+  findRegistryProvider,
+  signInProviders,
+  type MiniMaxRegion,
+  type RegistryProviderId,
+} from '@joy-media/provider-sdk';
 import {
   isDesktopHost,
   signInDesktopProviderProfile,
@@ -34,6 +39,8 @@ export function ProviderSignInPanel({
 }) {
   const [busy, setBusy] = useState<RegistryProviderId | undefined>(undefined);
   const [message, setMessage] = useState<string | undefined>(undefined);
+  const [minimaxRegion, setMiniMaxRegion] = useState<MiniMaxRegion>('global');
+  const providers = [...signInProviders()].sort((first, second) => rank(first) - rank(second));
 
   if (!isDesktopHost()) return null;
 
@@ -41,7 +48,10 @@ export function ProviderSignInPanel({
     setBusy(target);
     setMessage(undefined);
     try {
-      const profile = await signInDesktopProviderProfile({ provider: target });
+      const profile = await signInDesktopProviderProfile({
+        provider: target,
+        ...(target === 'minimax' ? { region: minimaxRegion } : {}),
+      });
       onSignedIn(profile);
       setMessage(`Signed in to ${providerLabel(target)}.`);
     } catch (error) {
@@ -56,7 +66,7 @@ export function ProviderSignInPanel({
   return (
     <div className="joy-provider-signin">
       <div className="joy-provider-signin-actions">
-        {[...signInProviders()].sort((first, second) => rank(first) - rank(second)).map((target) => (
+        {providers.map((target) => (
           <button
             key={target}
             type="button"
@@ -70,6 +80,21 @@ export function ProviderSignInPanel({
           </button>
         ))}
       </div>
+      {providers.includes('minimax') ? (
+        <label htmlFor="joy-provider-signin-minimax-region">
+          MiniMax account region
+          <select
+            id="joy-provider-signin-minimax-region"
+            aria-label="MiniMax account region"
+            disabled={busy !== undefined}
+            value={minimaxRegion}
+            onChange={(event) => setMiniMaxRegion(event.currentTarget.value as MiniMaxRegion)}
+          >
+            <option value="global">Global (International)</option>
+            <option value="cn">China</option>
+          </select>
+        </label>
+      ) : null}
       {message !== undefined && <p role="status">{message}</p>}
     </div>
   );

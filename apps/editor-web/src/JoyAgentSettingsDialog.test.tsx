@@ -510,8 +510,10 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     'I understand that custom endpoints may log requests according to their own policy.';
 
   function providerSelect(rendered: HTMLElement): HTMLSelectElement {
-    const select = rendered.querySelector<HTMLSelectElement>('select');
-    if (select === null) throw new Error('Expected provider select dropdown');
+    const select = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find((candidate) =>
+      [...candidate.options].some((option) => option.value === 'openrouter'),
+    );
+    if (select === undefined) throw new Error('Expected provider select dropdown');
     return select;
   }
 

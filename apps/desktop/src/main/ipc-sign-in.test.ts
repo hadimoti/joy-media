@@ -7,11 +7,16 @@ import type { SupervisedChild } from './worker-supervisor.js';
 import { LocalDatabase } from '../store/local-database.js';
 import type { ProviderBroker } from './providers/provider-broker.js';
 import { OAuthFlowError } from './oauth/errors.js';
-import type { SignInProvider, SignInResult } from './oauth/sign-in.js';
+import type { ProviderSignInContext, SignInProvider, SignInResult } from './oauth/sign-in.js';
 
 const ORIGIN = 'joy-media-app://renderer';
 const CHATGPT_SECRET = 'signed-in-secret-value';
-function harness(providerSignIn?: (provider: SignInProvider) => Promise<SignInResult>) {
+function harness(
+  providerSignIn?: (
+    provider: SignInProvider,
+    context?: ProviderSignInContext,
+  ) => Promise<SignInResult>,
+) {
   const localDatabase = new LocalDatabase({
     filePath: ':memory:',
     idFactory: () => 'job-1',
@@ -70,6 +75,77 @@ describe('desktop.provider-profile.sign-in', () => {
       modelId: 'gpt-6.1-sol',
     });
     expect(await secretStore.get(profile?.secretHandleId ?? '')).toBe(CHATGPT_SECRET);
+  });
+
+  it('forwards the selected MiniMax region to the main-process sign-in flow', async () => {
+    const providerSignIn = vi.fn(async (): Promise<SignInResult> => ({
+      provider: 'minimax',
+      baseUrl: 'https://api.minimax.io/v1',
+      modelId: 'MiniMax-M2',
+      secret: 'minimax-secret',
+    }));
+    const { handlers } = harness(providerSignIn);
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin: ORIGIN,
+      channel: 'desktop.provider-profile.sign-in',
+      payload: { provider: 'minimax', region: 'cn' },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(providerSignIn).toHaveBeenCalledWith('minimax', { minimaxRegion: 'cn' });
+  });
+
+  it('defaults a MiniMax sign-in with no region to Global', async () => {
+    const providerSignIn = vi.fn(async (): Promise<SignInResult> => ({
+      provider: 'minimax',
+      baseUrl: 'https://api.minimax.io/v1',
+      modelId: 'MiniMax-M2',
+      secret: 'minimax-secret',
+    }));
+    const { handlers } = harness(providerSignIn);
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin: ORIGIN,
+      channel: 'desktop.provider-profile.sign-in',
+      payload: { provider: 'minimax' },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(providerSignIn).toHaveBeenCalledWith('minimax', { minimaxRegion: 'global' });
+  });
+
+  it.each(['us', 1, null])(
+    'rejects unsupported MiniMax region %j before sign-in or profile writes',
+    async (region) => {
+      const providerSignIn = vi.fn();
+      const { handlers, localDatabase } = harness(providerSignIn);
+
+      const result = await dispatchIpcRequest(handlers, {
+        origin: ORIGIN,
+        channel: 'desktop.provider-profile.sign-in',
+        payload: { provider: 'minimax', region },
+      });
+
+      expect(result).toMatchObject({ ok: false, error: 'Invalid sign-in request' });
+      expect(providerSignIn).not.toHaveBeenCalled();
+      expect(localDatabase.listProviderProfiles()).toHaveLength(0);
+    },
+  );
+
+  it('rejects a region on non-MiniMax sign-in requests before sign-in starts', async () => {
+    const providerSignIn = vi.fn();
+    const { handlers, localDatabase } = harness(providerSignIn);
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin: ORIGIN,
+      channel: 'desktop.provider-profile.sign-in',
+      payload: { provider: 'chatgpt', region: 'global' },
+    });
+
+    expect(result).toMatchObject({ ok: false, error: 'Invalid sign-in request' });
+    expect(providerSignIn).not.toHaveBeenCalled();
+    expect(localDatabase.listProviderProfiles()).toHaveLength(0);
   });
 
   it('refuses a provider that is set up with an API key, such as OpenRouter, before any sign-in starts', async () => {

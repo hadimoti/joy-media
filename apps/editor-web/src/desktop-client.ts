@@ -1,6 +1,7 @@
 import {
   evaluateEndpoint,
   type AgentSlotId,
+  type MiniMaxRegion,
   type RegistryProviderId,
 } from '@joy-media/provider-sdk';
 import { ProviderCallError, type ProviderCallRequest } from './joy-agent/provider-call.js';
@@ -159,6 +160,7 @@ export async function deleteDesktopProviderProfile(id: string): Promise<void> {
 export async function signInDesktopProviderProfile(request: {
   readonly provider: RegistryProviderId;
   readonly id?: string | undefined;
+  readonly region?: MiniMaxRegion | undefined;
 }): Promise<DesktopProviderProfile> {
   const data = await requireBridge().invoke('desktop.provider-profile.sign-in', request);
   return data as DesktopProviderProfile;

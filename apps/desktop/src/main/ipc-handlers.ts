@@ -18,7 +18,7 @@ import { clearAgentSlotsForProfile, readAgentSlots, writeAgentSlot } from '../st
 import { resolveSlotRequest } from './agent-slot-request.js';
 import { AgentRequestRegistry } from './agent-requests.js';
 import { OAuthFlowError } from './oauth/errors.js';
-import type { SignInProvider, SignInResult } from './oauth/sign-in.js';
+import type { ProviderSignInContext, SignInProvider, SignInResult } from './oauth/sign-in.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import {
   isAgentSlotConfigured,
@@ -28,6 +28,7 @@ import {
   type AgentSlot,
   type AgentSlotId,
   type AgentSlotResult,
+  type MiniMaxRegion,
 } from '@joy-media/provider-sdk';
 import { evaluateEndpoint, normalizeBaseUrl } from '@joy-media/provider-sdk';
 import type { SecretStore } from '@joy-media/provider-sdk';
@@ -69,7 +70,10 @@ export interface IpcHandlerDeps {
   /** Every provider call goes through the broker (providers/provider-broker.ts). */
   readonly providerBroker: ProviderBroker;
   /** Runs a sign-in (oauth/sign-in.ts). Absent means sign-in is refused. The result is saved as a profile. */
-  readonly providerSignIn?: (provider: SignInProvider) => Promise<SignInResult>;
+  readonly providerSignIn?: (
+    provider: SignInProvider,
+    context?: ProviderSignInContext,
+  ) => Promise<SignInResult>;
   readonly handleWindowControl?: (
     action: 'minimize' | 'maximize' | 'close' | 'is-maximized',
   ) => Promise<boolean | void> | boolean | void;
@@ -107,7 +111,10 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         }
       }
       try {
-        const signedIn = await deps.providerSignIn(request.provider);
+        const signedIn =
+          request.provider === 'minimax'
+            ? await deps.providerSignIn(request.provider, { minimaxRegion: request.region ?? 'global' })
+            : await deps.providerSignIn(request.provider);
         // The result must name the provider that was asked for, and that provider must permit a sign-in. A runner that
         // answered with another provider would otherwise save a profile for a provider that is set up with an API key.
         if (signedIn.provider !== request.provider || !isSignInProvider(signedIn.provider)) {
@@ -556,7 +563,7 @@ function asJobId(value: unknown): string | undefined {
 /** The provider to sign in to, and the saved profile to update, when there is one. */
 function asSignInRequest(
   value: unknown,
-): { readonly provider: SignInProvider; readonly id?: string } | undefined {
+): { readonly provider: SignInProvider; readonly id?: string; readonly region?: MiniMaxRegion } | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
   const provider = candidate['provider'];
@@ -565,6 +572,17 @@ function asSignInRequest(
   if (typeof provider !== 'string' || !isSignInProvider(provider)) return undefined;
   const id = candidate['id'];
   if (id !== undefined && (typeof id !== 'string' || id.length === 0)) return undefined;
+  const hasRegion = Object.prototype.hasOwnProperty.call(candidate, 'region');
+  const region = candidate['region'];
+  if (provider === 'minimax') {
+    if (region !== undefined && region !== 'global' && region !== 'cn') return undefined;
+    return {
+      provider,
+      ...(typeof id === 'string' ? { id } : {}),
+      region: region === 'cn' ? 'cn' : 'global',
+    };
+  }
+  if (hasRegion) return undefined;
   return { provider, ...(typeof id === 'string' ? { id } : {}) };
 }
 

@@ -44,6 +44,11 @@ export interface SignInResult {
   readonly secret: string;
 }
 
+/** Validated per-request context passed by the desktop main process. */
+export interface ProviderSignInContext {
+  readonly minimaxRegion?: MiniMaxRegion;
+}
+
 export interface ProviderSignInDeps {
   readonly openExternal: (url: string) => void | Promise<void>;
   readonly fetch: FetchLike;
@@ -66,8 +71,8 @@ export interface ProviderSignInDeps {
  */
 export function createProviderSignIn(
   deps: ProviderSignInDeps,
-): (provider: SignInProvider) => Promise<SignInResult> {
-  return async (provider) => {
+): (provider: SignInProvider, context?: ProviderSignInContext) => Promise<SignInResult> {
+  return async (provider, context) => {
     // D20: only a provider whose registry row permits a subscription sign-in may be signed in to (PLAN-v4 §6d-1 rule 5).
     // Every other provider, OpenRouter included, is set up with an API key instead.
     if (!signInProviders().includes(provider)) {
@@ -83,7 +88,7 @@ export function createProviderSignIn(
           "MiniMax sign-in needs JOY Media's registered client ID.",
         );
       }
-      const region = deps.minimaxRegion ?? 'global';
+      const region = context?.minimaxRegion ?? deps.minimaxRegion ?? 'global';
       const record = await signInWithMiniMax({
         clientId: deps.minimaxClientId,
         region,
