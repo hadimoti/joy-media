@@ -83,7 +83,8 @@ export async function signInOAuthProfile(
       return { provider: 'kimi', tokenRecord };
     }
     case 'xai': {
-      // The shared registry still marks xAI's route and account access unverified; saving is pending only.
+      // The shared registry records the OAuth base and model access confirmed by the attended probe.
+      // Source: D22 step 4 probe evidence (2026-10-31).
       const tokenRecord = await signInWithXai({
         ...(client?.clientId === undefined ? {} : { clientId: client.clientId }),
         openExternal: doNotOpenBrowser,

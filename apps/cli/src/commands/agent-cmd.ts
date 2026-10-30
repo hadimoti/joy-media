@@ -4,6 +4,7 @@ import {
   AGENT_SLOT_LABELS,
   CHATGPT_RESPONSES_BASE_URL,
   MINIMAX_OAUTH_ENDPOINTS,
+  XAI_OAUTH_INFERENCE_BASE_URL,
   defaultBaseUrl,
   evaluateEndpoint,
   findRegistryProvider,
@@ -80,8 +81,7 @@ function oauthProfileBaseUrl(
   if (provider === 'chatgpt') return CHATGPT_RESPONSES_BASE_URL;
   if (provider === 'minimax') return MINIMAX_OAUTH_ENDPOINTS[region].inferenceBase;
   if (provider === 'kimi') return KIMI_CODE_BASE_URL;
-  // The registry's xAI OAuth base remains a candidate until attended verification.
-  return undefined;
+  return XAI_OAUTH_INFERENCE_BASE_URL;
 }
 
 async function addOAuthProvider(name: string, flags: CliFlags): Promise<number> {
@@ -190,9 +190,6 @@ async function addOAuthProvider(name: string, flags: CliFlags): Promise<number> 
   logStep('Provider', flags.provider);
   logStep('Auth', `OAuth (${flags.provider})`);
   if (model) logStep('Default Model', model);
-  if (flags.provider === 'xai') {
-    logStep('Inference', 'needs attended verification');
-  }
   return 0;
 }
 
@@ -201,11 +198,7 @@ async function listOAuthModels(
   profile: NonNullable<ReturnType<typeof loadAiProviders>[string]>,
 ): Promise<number> {
   const provider = profile.provider;
-  if (provider === 'xai') {
-    logError('Inference: needs attended verification for xAI OAuth.');
-    return 1;
-  }
-  if (provider !== 'chatgpt' && provider !== 'kimi' && provider !== 'minimax') {
+  if (provider !== 'chatgpt' && provider !== 'kimi' && provider !== 'minimax' && provider !== 'xai') {
     logError(`OAuth profile "${profileId}" has no supported model-list route.`);
     return 1;
   }
@@ -227,7 +220,9 @@ async function listOAuthModels(
       ? CHATGPT_RESPONSES_BASE_URL
       : credential.provider === 'minimax'
         ? MINIMAX_OAUTH_ENDPOINTS[credential.tokenRecord.region].inferenceBase
-        : KIMI_CODE_BASE_URL;
+        : credential.provider === 'xai'
+          ? XAI_OAUTH_INFERENCE_BASE_URL
+          : KIMI_CODE_BASE_URL;
   printBanner();
   logInfo(`Fetching models from ${c(baseUrl, 'bold')}...`);
   try {
@@ -335,9 +330,6 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
               // A listing reports only whether the secret is readable, never the stored value.
             }
             logStep('  Access token', expiry);
-            if (p.provider === 'xai') {
-              logStep('  Inference', 'needs attended verification');
-            }
           } else {
             // A key never appears in a listing, not even a part of one (PLAN-v4 §6d-1).
             logStep('  API Key', p.apiKey ? 'set (hidden)' : 'none');

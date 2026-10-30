@@ -12,6 +12,7 @@ import {
   findRegistryRegion,
   isAuthMethodPermitted,
   MINIMAX_OAUTH_ENDPOINTS,
+  XAI_OAUTH_INFERENCE_BASE_URL,
   isAgentSlotConfigured,
   isCustomProviderId,
   REGISTRY_PROVIDER_IDS,
@@ -216,10 +217,6 @@ export async function resolveAgentConfig(
       `No model is set for "${name}". Choose one with: joy-media agent model set <id>`,
     );
   }
-  if (type === 'xai') {
-    throw new Error('Inference: needs attended verification for xAI OAuth.');
-  }
-
   let credential: OAuthCredential;
   try {
     credential = await tokenManager.current(name, type as OAuthCredential['provider']);
@@ -243,7 +240,9 @@ export async function resolveAgentConfig(
   const baseUrl =
     credential.provider === 'minimax'
       ? MINIMAX_OAUTH_ENDPOINTS[credential.tokenRecord.region].inferenceBase
-      : KIMI_CODE_BASE_URL;
+      : credential.provider === 'xai'
+        ? XAI_OAUTH_INFERENCE_BASE_URL
+        : KIMI_CODE_BASE_URL;
   const verdict = evaluateEndpoint(type, baseUrl);
   if (!verdict.allowed) {
     throw new Error(`The base URL of OAuth profile "${name}" is refused: ${verdict.reason}`);

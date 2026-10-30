@@ -194,6 +194,34 @@ describe('OAuth provider profiles', () => {
     expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
   });
 
+  it('creates an xAI OAuth profile with the verified base and keeps tokens out of output', async () => {
+    const accessToken = 'xai-access-secret-for-cli-test';
+    const refreshToken = 'xai-refresh-secret-for-cli-test';
+    signInOAuthProfileMock.mockResolvedValue({
+      provider: 'xai',
+      tokenRecord: {
+        version: 1,
+        clientId: 'xai-client-test',
+        accessToken,
+        refreshToken,
+        accessExpiresAt: Date.now() + 3_600_000,
+        scope: 'openid profile api:access',
+      },
+    });
+
+    expect(
+      await runCli(['agent', 'provider', 'add', 'xai-profile', '--provider', 'xai', '--oauth']),
+    ).toBe(0);
+    expect(loadAiProviders()['xai-profile']).toMatchObject({
+      provider: 'xai',
+      authKind: 'oauth',
+      baseUrl: 'https://api.x.ai/v1',
+    });
+    expect(printed.join('\n')).not.toContain(accessToken);
+    expect(printed.join('\n')).not.toContain(refreshToken);
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+  });
+
   it('rejects missing provider, unsupported regions and mixed auth flags before sign-in', async () => {
     const cases = [
       {
@@ -386,7 +414,7 @@ describe('OAuth provider profiles', () => {
     expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
   });
 
-  it('lists xAI OAuth as pending without displaying its candidate base or token', async () => {
+  it('lists xAI OAuth without displaying its base or token', async () => {
     setAiProvider('xai-profile', {
       name: 'xai-profile',
       provider: 'xai',
@@ -408,8 +436,8 @@ describe('OAuth provider profiles', () => {
     const output = printed.join('\n');
     expect(output).toContain('Auth: OAuth (xai)');
     expect(output).toContain('Access token: expires in 40 minutes');
-    expect(output).toContain('Inference: needs attended verification');
-    expect(output).not.toContain('cli-chat-proxy.grok.com');
+    expect(output).not.toContain('Inference: needs attended verification');
+    expect(output).not.toContain('https://api.x.ai/v1');
     expect(output).not.toContain('xai-access-secret');
     expect(output).not.toContain('xai-refresh-secret');
     expect(output).not.toContain('xai-access');
@@ -660,7 +688,9 @@ describe('OAuth provider profiles', () => {
     expect(openCredentialStore().read('kimi-profile')).toEqual(expired);
   });
 
-  it('blocks model listing for a pending xAI OAuth profile before any provider request', async () => {
+  it('lists models with an xAI bearer token from the OAuth profile', async () => {
+    const accessToken = 'xai-model-list-access-secret';
+    const refreshToken = 'xai-model-list-refresh-secret';
     setAiProvider('xai-profile', {
       name: 'xai-profile',
       provider: 'xai',
@@ -671,19 +701,34 @@ describe('OAuth provider profiles', () => {
       tokenRecord: {
         version: 1,
         clientId: 'xai-client-test',
-        accessToken: 'xai-access-test',
-        refreshToken: 'xai-refresh-test',
+        accessToken,
+        refreshToken,
         accessExpiresAt: Date.now() + 3_600_000,
         scope: 'openid profile api:access',
       },
     });
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: 'grok-test-model' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
 
-    expect(await runCli(['agent', 'models', 'xai-profile'])).toBe(1);
-    expect(errors.join('\n')).toContain('Inference: needs attended verification');
-    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+    expect(await runCli(['agent', 'models', 'xai-profile'])).toBe(0);
+    expect(errors).toEqual([]);
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
+    expect(url).toBe('https://api.x.ai/v1/models');
+    expect(init?.method).toBe('GET');
+    expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${accessToken}`);
+    const output = printed.join('\n');
+    expect(output).toContain('grok-test-model');
+    expect(output).not.toContain(accessToken);
+    expect(output).not.toContain(refreshToken);
   });
 
-  it('blocks inference from a pending xAI OAuth profile before refreshing or sending a request', async () => {
+  it('resolves an xAI OAuth profile to a bearer session config at the verified base', async () => {
+    const accessToken = 'xai-inference-access-secret';
     setAiProvider('xai-profile', {
       name: 'xai-profile',
       provider: 'xai',
@@ -695,16 +740,22 @@ describe('OAuth provider profiles', () => {
       tokenRecord: {
         version: 1,
         clientId: 'xai-client-test',
-        accessToken: 'xai-inference-access-test',
-        refreshToken: 'xai-inference-refresh-test',
-        accessExpiresAt: Date.now() + 1_000,
+        accessToken,
+        refreshToken: 'xai-inference-refresh-secret',
+        accessExpiresAt: Date.now() + 3_600_000,
         scope: 'openid profile api:access',
       },
     });
 
-    await expect(resolveAgentConfig({ provider: 'xai-profile' })).rejects.toThrow(
-      'Inference: needs attended verification for xAI OAuth.',
-    );
+    const config = await resolveAgentConfig({ provider: 'xai-profile' });
+
+    expect(config).toMatchObject({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.x.ai/v1',
+      modelId: 'grok-test',
+      auth: { kind: 'bearer-token', token: accessToken },
+    });
+    expect('apiKey' in config).toBe(false);
     expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
   });
 });
