@@ -1,3 +1,7 @@
+import { isRecord } from '@joy-media/provider-oauth';
+
+export { isRecord } from '@joy-media/provider-oauth';
+
 /**
  * The only fields a caller may send to a provider (PLAN-v4 §6b). Everything else is dropped, so a
  * renderer or a Worker cannot choose a model, a stream mode, a URL or a header by adding a field.
@@ -72,8 +76,4 @@ export function parseCompletionBody(value: unknown): CompletionBodyResult {
 
 function invalid(message: string): CompletionBodyResult {
   return { ok: false, message };
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

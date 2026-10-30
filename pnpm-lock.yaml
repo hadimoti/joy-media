@@ -162,6 +162,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@joy-media/provider-oauth':
+        specifier: workspace:*
+        version: link:../../packages/provider-oauth
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../../packages/provider-sdk
@@ -538,6 +541,12 @@ importers:
       '@joy-media/test-fixtures':
         specifier: workspace:*
         version: link:../test-fixtures
+
+  packages/provider-oauth:
+    dependencies:
+      '@joy-media/provider-sdk':
+        specifier: workspace:*
+        version: link:../provider-sdk
 
   packages/provider-sdk:
     dependencies:

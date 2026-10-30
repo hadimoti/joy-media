@@ -19,26 +19,22 @@ import {
   isExtAgentHostId,
   newExtAgentHostId,
   signInWithChatGpt,
-} from './chatgpt.js';
-import {
   encodeMiniMaxTokenRecord,
   signInWithMiniMax,
   type MiniMaxTokenRecord,
-} from './minimax.js';
-import {
   XAI_OAUTH_INFERENCE_BASE_URL,
   encodeXaiTokenRecord,
   signInWithXai,
   type XaiTokenRecord,
-} from './xai.js';
-import {
   KIMI_CODE_BASE_URL,
   encodeKimiTokenRecord,
   signInWithKimiCode,
   type KimiTokenRecord,
-} from './kimi.js';
-import { OAuthFlowError } from './errors.js';
-import { MAX_CATALOG_CHARS, type FetchLike, replyText } from './http.js';
+  OAuthFlowError,
+  MAX_CATALOG_CHARS,
+  type FetchLike,
+  replyText,
+} from '@joy-media/provider-oauth';
 
 /** The setting that holds this install's ChatGPT ID, created once (PLAN-v4 §6d). */
 export const INSTALL_ID_SETTING = 'chatgpt.ext_agent_host_id';
