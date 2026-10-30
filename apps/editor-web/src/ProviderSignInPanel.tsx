@@ -193,7 +193,7 @@ function ProviderRouteAccordion({
       </button>
 
       {open && (
-        <div className="joy-accordion-content">
+        <div id={'joy-provider-routes-' + provider.id} className="joy-accordion-content">
           <section className="joy-provider-route" aria-label={label + ' API-key route'}>
             <h4 className="joy-provider-route-title">API key route (Primary)</h4>
             {selectedRegion === undefined ? (

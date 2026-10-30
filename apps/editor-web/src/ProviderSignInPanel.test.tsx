@@ -114,6 +114,22 @@ describe('ProviderSignInPanel', () => {
     expect(markup).not.toContain('DeepSeek');
   });
 
+  it('connects every provider accordion trigger to its route content', async () => {
+    global.window = { joyDesktop: {} };
+    await mount();
+
+    const triggers = [...container.querySelectorAll<HTMLButtonElement>('.joy-accordion-trigger')];
+    expect(triggers).toHaveLength(4);
+
+    for (const trigger of triggers) await act(async () => trigger.click());
+
+    for (const trigger of triggers) {
+      const contentId = trigger.getAttribute('aria-controls');
+      expect(contentId).not.toBeNull();
+      expect(contentId === null ? null : document.getElementById(contentId)).not.toBeNull();
+    }
+  });
+
   it('renders the same approved notice directly below each sign-in button', async () => {
     installDesktopBridge();
     await mount();
