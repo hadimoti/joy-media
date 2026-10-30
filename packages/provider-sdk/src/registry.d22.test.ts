@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   XAI_OAUTH_INFERENCE_BASE_URL,
+  defaultBaseUrl,
   evaluateEndpoint,
   findRegistryProvider,
   findRegistryRegion,
+  permittedAuthMethods,
   signInProviders,
 } from './registry.js';
 
@@ -33,17 +35,19 @@ describe('D22 provider routes', () => {
     expect(signInProviders()).toEqual(['minimax', 'kimi', 'chatgpt', 'xai']);
   });
 
-  it('registers DeepSeek and Kilo as API-key-only provider routes', () => {
-    const routes = [
-      ['deepseek', 'https://api.deepseek.com'],
-      ['kilo', 'https://ai-gateway.kilo.ai/api/v1'],
-    ] as const;
+  it('registers DeepSeek and leaves Kilo unregistered until its fixed integration is verified', () => {
+    const routes = [['deepseek', 'https://api.deepseek.com']] as const;
     for (const [provider, baseUrl] of routes) {
       expect(findRegistryRegion(provider, baseUrl)?.baseUrl).toBe(baseUrl);
       expect(evaluateEndpoint(provider, baseUrl)).toMatchObject({ allowed: true, kind: 'registry' });
       expect(findRegistryProvider(provider)?.auth.methods).toEqual(['api-key']);
       expect(signInProviders()).not.toContain(provider);
     }
+    expect(findRegistryProvider('kilo')).toBeUndefined();
+    expect(findRegistryRegion('kilo', 'https://ai-gateway.kilo.ai/api/v1')).toBeUndefined();
+    expect(defaultBaseUrl('kilo')).toBeUndefined();
+    expect(permittedAuthMethods('kilo')).toEqual([]);
+    expect(signInProviders()).not.toContain('kilo');
     for (const provider of ['openrouter', 'claude', 'gemini']) {
       expect(signInProviders()).not.toContain(provider);
     }

@@ -36,7 +36,7 @@ describe('provider registry', () => {
     expect(apis.kimi).toBe('chat-completions');
   });
 
-  it('keeps the ChatGPT API and sign-in routes while adding xAI, DeepSeek, and Kilo', () => {
+  it('keeps the ChatGPT API and sign-in routes while adding xAI and DeepSeek', () => {
     expect(REGISTRY_PROVIDER_IDS).toEqual([
       'openai',
       'grok',
@@ -48,7 +48,6 @@ describe('provider registry', () => {
       'chatgpt',
       'xai',
       'deepseek',
-      'kilo',
     ]);
     expect(findRegistryProvider('openai')?.auth.methods).toEqual(['api-key']);
     expect(findRegistryProvider('chatgpt')?.auth.methods).toEqual(['subscription-sign-in']);
@@ -66,7 +65,6 @@ describe('provider registry', () => {
       ['xai', 'https://api.x.ai/v1'],
       ['kimi', 'https://api.kimi.ai/coding/v1'],
       ['deepseek', 'https://api.deepseek.com'],
-      ['kilo', 'https://ai-gateway.kilo.ai/api/v1'],
     ] as const;
     for (const [provider, baseUrl] of bases) {
       expect(findRegistryRegion(provider, baseUrl)?.baseUrl).toBe(baseUrl);
@@ -77,7 +75,6 @@ describe('provider registry', () => {
     }
     expect(defaultBaseUrl('xai')).toBe('https://api.x.ai/v1');
     expect(defaultBaseUrl('deepseek')).toBe('https://api.deepseek.com');
-    expect(defaultBaseUrl('kilo')).toBe('https://ai-gateway.kilo.ai/api/v1');
   });
 
   it('uses the verified xAI base for both routes and resolves the API-key region first', () => {
@@ -120,7 +117,7 @@ describe('provider registry', () => {
   it('gives a registry provider its first region as the default, and no default to any other id', () => {
     expect(defaultBaseUrl('openrouter')).toBe('https://openrouter.ai/api/v1');
     expect(defaultBaseUrl('minimax')).toBe('https://api.minimax.io/v1');
-    expect(defaultBaseUrl('kilo')).toBe('https://ai-gateway.kilo.ai/api/v1');
+    expect(defaultBaseUrl('kilo')).toBeUndefined();
     expect(defaultBaseUrl(CUSTOM_PROVIDER_ID)).toBeUndefined();
   });
 
@@ -224,7 +221,7 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     expect(offeredAuthMethods('not-a-provider')).toEqual([]);
     expect(isAuthMethodPermitted('not-a-provider', 'api-key')).toBe(false);
     expect(permittedAuthMethods('deepseek')).toEqual(['api-key']);
-    expect(permittedAuthMethods('kilo')).toEqual(['api-key']);
+    expect(permittedAuthMethods('kilo')).toEqual([]);
   });
 });
 

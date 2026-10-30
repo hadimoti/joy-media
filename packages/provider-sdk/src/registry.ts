@@ -21,7 +21,6 @@ export const REGISTRY_PROVIDER_IDS = [
   'chatgpt',
   'xai',
   'deepseek',
-  'kilo',
 ] as const;
 export type RegistryProviderId = (typeof REGISTRY_PROVIDER_IDS)[number];
 
@@ -357,27 +356,6 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
         baseUrl: 'https://api.deepseek.com',
         keyUrl: 'https://platform.deepseek.com/api_keys',
         docsUrl: 'https://api-docs.deepseek.com/quick_start/agent_integrations/oh_my_pi/',
-      },
-    ],
-  },
-  {
-    id: 'kilo',
-    label: 'Kilo Gateway',
-    api: 'chat-completions',
-    auth: {
-      methods: ['api-key'],
-      source:
-        'D22 follow-up (2026-10-30), Kilo Gateway API reference https://kilo.ai/docs/gateway/api-reference',
-      sourceDate: '2026-10-30',
-      note: 'The Kilo Gateway uses an API key with its OpenAI-compatible gateway base URL.',
-    },
-    regions: [
-      {
-        id: INTERNATIONAL,
-        label: 'International',
-        baseUrl: 'https://ai-gateway.kilo.ai/api/v1',
-        keyUrl: 'https://kilo.ai',
-        docsUrl: 'https://kilo.ai/docs/gateway/api-reference',
       },
     ],
   },

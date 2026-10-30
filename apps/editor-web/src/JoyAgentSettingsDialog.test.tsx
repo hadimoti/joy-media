@@ -193,9 +193,8 @@ describe('JOY Agent Settings connection status', () => {
     expect(providerSelect).toBeTruthy();
     const options = [...(providerSelect?.options ?? [])].map((option) => option.value);
     expect(options).toEqual(expect.arrayContaining(['openrouter', 'openai-compatible']));
-    expect(options).toEqual(
-      expect.arrayContaining(['openai', 'claude', 'gemini', 'deepseek', 'kilo']),
-    );
+    expect(options).toEqual(expect.arrayContaining(['openai', 'claude', 'gemini', 'deepseek']));
+    expect(options).not.toContain('kilo');
     expect(options).not.toContain('grok');
     expect(options).not.toContain('minimax');
     expect(options).not.toContain('kimi');
