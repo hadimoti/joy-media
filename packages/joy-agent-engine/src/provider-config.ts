@@ -1,8 +1,13 @@
-import { evaluateEndpoint, OPENROUTER_BASE_URL } from '@joy-media/provider-sdk';
+import {
+  CHATGPT_RESPONSES_BASE_URL,
+  evaluateEndpoint,
+  OPENROUTER_BASE_URL,
+} from '@joy-media/provider-sdk';
 import type { JoyAgentCapability } from './contracts.js';
 
 export type JoyProviderMode =
   | 'joy-hosted'
+  | 'chatgpt-responses'
   | 'openrouter'
   | 'openai-compatible'
   | 'anthropic-messages'
@@ -69,10 +74,11 @@ export function normalizeByokSessionConfig(
     input.apiKey === undefined &&
     bearerToken.length > 0 &&
     bearerToken.length <= MAX_BEARER_TOKEN_LENGTH &&
-    provider === 'openai-compatible';
+    (provider === 'openai-compatible' || provider === 'chatgpt-responses');
   // joy-hosted and kilo are retired legacy profiles, so they are refused here (PLAN-v4 §9a).
   if (
     (provider !== 'openrouter' &&
+      provider !== 'chatgpt-responses' &&
       provider !== 'openai-compatible' &&
       provider !== 'anthropic-messages' &&
       provider !== 'custom') ||
@@ -93,6 +99,22 @@ export function normalizeByokSessionConfig(
     }
     if (!hasApiKey) throw new ProviderConfigError();
     return Object.freeze({ provider, baseUrl: OPENROUTER_BASE_URL, modelId, apiKey });
+  }
+
+  if (provider === 'chatgpt-responses') {
+    if (
+      !hasBearerToken ||
+      input.apiKey !== undefined ||
+      (input.baseUrl !== undefined && input.baseUrl !== CHATGPT_RESPONSES_BASE_URL)
+    ) {
+      throw new ProviderConfigError();
+    }
+    return Object.freeze({
+      provider,
+      baseUrl: CHATGPT_RESPONSES_BASE_URL,
+      modelId,
+      auth: { kind: 'bearer-token' as const, token: bearerToken },
+    });
   }
 
   const baseUrl =

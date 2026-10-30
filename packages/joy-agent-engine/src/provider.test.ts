@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { generateText } from 'ai';
+import { generateText, streamText } from 'ai';
 import { createHardenedFetch, createJoyAgentProvider } from './provider.js';
 import { normalizeByokSessionConfig } from './provider-config.js';
 import type { JoyFetch } from './provider.js';
+import { CHATGPT_RESPONSES_BASE_URL } from '@joy-media/provider-sdk';
 
 function response(body: string, init?: ResponseInit): Response {
   return new Response(body, {
@@ -56,6 +57,103 @@ describe('hardened provider fetch', () => {
       if (savedOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
       else process.env.OPENAI_API_KEY = savedOpenAiKey;
     }
+  });
+
+  it('bridges the ChatGPT Responses event stream into the engine text stream', async () => {
+    const token = 'chatgpt-access-token';
+    const calls: Array<{
+      url: string;
+      authorization: string | null;
+      accept: string | null;
+      body: string;
+    }> = [];
+    const responsesBody = JSON.stringify({
+      id: 'resp-local-fixture',
+      status: 'completed',
+      output: [
+        { type: 'message', content: [{ type: 'output_text', text: 'Hello from ChatGPT.' }] },
+      ],
+    });
+    const fetchImpl = vi.fn<JoyFetch>(async (input, init) => {
+      calls.push({
+        url: String(input),
+        authorization: new Headers(init?.headers).get('authorization'),
+        accept: new Headers(init?.headers).get('accept'),
+        body: String(init?.body),
+      });
+      return new Response(responsesBody, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const config = normalizeByokSessionConfig({
+      provider: 'chatgpt-responses',
+      modelId: 'gpt-test',
+      auth: { kind: 'bearer-token', token },
+    });
+    const { model } = createJoyAgentProvider(config, fetchImpl);
+
+    const result = await generateText({ model, prompt: 'Say hello.', maxRetries: 0 });
+
+    expect(result.text).toBe('Hello from ChatGPT.');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      url: `${CHATGPT_RESPONSES_BASE_URL}/responses`,
+      authorization: `Bearer ${token}`,
+      accept: 'application/json',
+    });
+    const request = JSON.parse(calls[0]!.body) as Record<string, unknown>;
+    expect(request).toMatchObject({ model: 'gpt-test', store: false, stream: false });
+    expect(request.input).toEqual([
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Say hello.' }] },
+    ]);
+    expect(request).not.toHaveProperty('previous_response_id');
+  });
+
+  it('keeps the ChatGPT bridge streaming when the engine requests a stream', async () => {
+    const token = 'chatgpt-stream-access-token';
+    const calls: Array<{ url: string; accept: string | null; body: string }> = [];
+    const responsesStream = [
+      `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'Streamed ' })}`,
+      `data: ${JSON.stringify({
+        type: 'response.completed',
+        response: {
+          output: [
+            { type: 'message', content: [{ type: 'output_text', text: 'Streamed answer.' }] },
+          ],
+        },
+      })}`,
+      '',
+    ].join('\n\n');
+    const fetchImpl = vi.fn<JoyFetch>(async (input, init) => {
+      calls.push({
+        url: String(input),
+        accept: new Headers(init?.headers).get('accept'),
+        body: String(init?.body),
+      });
+      return new Response(responsesStream, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    });
+    const config = normalizeByokSessionConfig({
+      provider: 'chatgpt-responses',
+      modelId: 'gpt-test',
+      auth: { kind: 'bearer-token', token },
+    });
+    const { model } = createJoyAgentProvider(config, fetchImpl);
+
+    const result = streamText({ model, prompt: 'Say hello.', maxRetries: 0 });
+
+    await expect(result.text).resolves.toBe('Streamed answer.');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe(`${CHATGPT_RESPONSES_BASE_URL}/responses`);
+    expect(calls[0]?.accept).toBe('text/event-stream');
+    expect(JSON.parse(calls[0]?.body ?? '{}')).toMatchObject({
+      model: 'gpt-test',
+      store: false,
+      stream: true,
+    });
   });
 
   it('pins origin and safe request options', async () => {

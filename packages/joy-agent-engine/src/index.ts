@@ -32,6 +32,15 @@ export {
 export type { JoyAgentLimits } from './limits.js';
 export { DEFAULT_JOY_AGENT_LIMITS, clampJoyAgentLimits } from './limits.js';
 export {
+  createChatGptResponsesFetch,
+  prepareChatGptModels,
+  readChatGptModels,
+  type ChatGptFetch,
+  type ChatGptModelEntry,
+  type ChatGptOutcome,
+  type ChatGptPreparedCall,
+} from './chatgpt-responses.js';
+export {
   redactUnknownValue,
   classifyJoyAgentError,
   isJoyAgentErrorCode,

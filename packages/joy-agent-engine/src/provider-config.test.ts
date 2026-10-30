@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CHATGPT_RESPONSES_BASE_URL } from '@joy-media/provider-sdk';
 import {
   normalizeByokSessionConfig,
   normalizeCustomBaseUrl,
@@ -26,6 +27,36 @@ describe('BYOK provider configuration', () => {
     });
     expect('apiKey' in config).toBe(false);
     expect(JSON.stringify(safeByokSessionStatus(config))).not.toContain('oauth-access-token');
+  });
+
+  it('accepts a ChatGPT Responses profile only with bearer auth at the fixed Responses base', () => {
+    const config = normalizeByokSessionConfig({
+      provider: 'chatgpt-responses',
+      baseUrl: CHATGPT_RESPONSES_BASE_URL,
+      modelId: 'gpt-test',
+      auth: { kind: 'bearer-token', token: 'chatgpt-access-token' },
+    });
+    expect(config).toEqual({
+      provider: 'chatgpt-responses',
+      baseUrl: CHATGPT_RESPONSES_BASE_URL,
+      modelId: 'gpt-test',
+      auth: { kind: 'bearer-token', token: 'chatgpt-access-token' },
+    });
+    expect(() =>
+      normalizeByokSessionConfig({
+        provider: 'chatgpt-responses',
+        baseUrl: 'https://other.example/v1',
+        modelId: 'gpt-test',
+        auth: { kind: 'bearer-token', token: 'chatgpt-access-token' },
+      }),
+    ).toThrow('JOY_AGENT_PROVIDER_CONFIG_INVALID');
+    expect(() =>
+      normalizeByokSessionConfig({
+        provider: 'chatgpt-responses',
+        modelId: 'gpt-test',
+        apiKey: key,
+      }),
+    ).toThrow('JOY_AGENT_PROVIDER_CONFIG_INVALID');
   });
 
   it.each(['joy-hosted', 'kilo'] as const)('refuses the retired %s profile', (provider) => {

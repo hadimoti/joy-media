@@ -1,5 +1,6 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
+import { createChatGptResponsesFetch } from './chatgpt-responses.js';
 import {
   createAnthropicMessagesFetch,
   transformAnthropicRequestBody,
@@ -95,12 +96,22 @@ export function createJoyAgentProvider(
   const isAnthropic = config.provider === 'anthropic-messages';
   const apiKey = 'apiKey' in config ? config.apiKey : undefined;
   if (isAnthropic && apiKey === undefined) throw new ProviderConfigError();
-  const providerFetch = isAnthropic
-    ? createAnthropicMessagesFetch(
-        { baseUrl: config.baseUrl, modelId: config.modelId, apiKey: apiKey! },
-        hardenedFetch,
-      )
-    : hardenedFetch;
+  let providerFetch: JoyFetch;
+  if (config.provider === 'chatgpt-responses') {
+    if (config.auth?.kind !== 'bearer-token') throw new ProviderConfigError();
+    providerFetch = createChatGptResponsesFetch({
+      accessToken: config.auth.token,
+      modelId: config.modelId,
+      fetch: hardenedFetch,
+    });
+  } else if (isAnthropic) {
+    providerFetch = createAnthropicMessagesFetch(
+      { baseUrl: config.baseUrl, modelId: config.modelId, apiKey: apiKey! },
+      hardenedFetch,
+    );
+  } else {
+    providerFetch = hardenedFetch;
+  }
   const provider = createOpenAICompatible({
     name: 'joy-byok',
     baseURL: config.baseUrl,

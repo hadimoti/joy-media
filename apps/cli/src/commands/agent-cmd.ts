@@ -11,6 +11,7 @@ import {
   isCustomProviderId,
   parseAgentSlotId,
 } from '@joy-media/provider-sdk';
+import { prepareChatGptModels, readChatGptModels } from '@joy-media/joy-agent-engine';
 import type { CliFlags } from '../cli.js';
 import {
   isMiniMaxRegion,
@@ -204,11 +205,7 @@ async function listOAuthModels(
     logError('Inference: needs attended verification for xAI OAuth.');
     return 1;
   }
-  if (provider === 'chatgpt') {
-    logError('ChatGPT Responses model listing is not available in the CLI yet.');
-    return 1;
-  }
-  if (provider !== 'kimi' && provider !== 'minimax') {
+  if (provider !== 'chatgpt' && provider !== 'kimi' && provider !== 'minimax') {
     logError(`OAuth profile "${profileId}" has no supported model-list route.`);
     return 1;
   }
@@ -226,31 +223,46 @@ async function listOAuthModels(
   }
 
   const baseUrl =
-    credential.provider === 'minimax'
-      ? MINIMAX_OAUTH_ENDPOINTS[credential.tokenRecord.region].inferenceBase
-      : KIMI_CODE_BASE_URL;
+    credential.provider === 'chatgpt'
+      ? CHATGPT_RESPONSES_BASE_URL
+      : credential.provider === 'minimax'
+        ? MINIMAX_OAUTH_ENDPOINTS[credential.tokenRecord.region].inferenceBase
+        : KIMI_CODE_BASE_URL;
   printBanner();
   logInfo(`Fetching models from ${c(baseUrl, 'bold')}...`);
   try {
-    const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
-      method: 'GET',
-      headers: {
-        accept: 'application/json',
-        authorization: `Bearer ${credential.tokenRecord.accessToken}`,
-      },
-    });
+    const chatGptRequest =
+      credential.provider === 'chatgpt'
+        ? prepareChatGptModels({ accessToken: credential.tokenRecord.accessToken })
+        : undefined;
+    const response = await fetch(
+      chatGptRequest?.url ?? `${baseUrl.replace(/\/+$/, '')}/models`,
+      chatGptRequest === undefined
+        ? {
+            method: 'GET',
+            headers: {
+              accept: 'application/json',
+              authorization: `Bearer ${credential.tokenRecord.accessToken}`,
+            },
+          }
+        : {
+            method: chatGptRequest.method,
+            headers: chatGptRequest.headers,
+            credentials: 'omit',
+            redirect: 'error',
+          },
+    );
     if (!response.ok) throw new Error('model list request failed');
-    const json = (await response.json()) as { data?: unknown };
-    const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
-    const modelIds = raw
-      .map((item: { id?: string } | string) => (typeof item === 'string' ? item : item.id))
-      .filter((id): id is string =>
-        typeof id === 'string' &&
-        id.length > 0 &&
-        ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some((token) =>
-          id.includes(token),
-        ),
-      );
+    const modelIds =
+      credential.provider === 'chatgpt'
+        ? (await readChatGptModels(await response.text()))
+            .map((model) => model.id)
+            .filter((id) =>
+              ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some(
+                (token) => id.includes(token),
+              ),
+            )
+        : await readOAuthModelIds(response, credential);
 
     console.log(`\n  ${c(`Discovered ${modelIds.length} models:`, 'bold')}\n`);
     for (const id of modelIds) console.log(`  • ${id}`);
@@ -261,6 +273,23 @@ async function listOAuthModels(
     logError(`Failed to fetch models for OAuth profile "${profileId}".`);
     return 1;
   }
+}
+
+async function readOAuthModelIds(
+  response: Response,
+  credential: OAuthCredential,
+): Promise<string[]> {
+  const json = (await response.json()) as { data?: unknown };
+  const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+  return raw
+    .map((item: { id?: string } | string) => (typeof item === 'string' ? item : item.id))
+    .filter((id): id is string =>
+      typeof id === 'string' &&
+      id.length > 0 &&
+      ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some((token) =>
+        id.includes(token),
+      ),
+    );
 }
 
 export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {

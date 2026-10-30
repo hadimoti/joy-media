@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CHATGPT_TOKEN_URL } from '@joy-media/provider-oauth';
 import type { SecretProtector } from '../utils/dpapi-protector.js';
 import {
   createCredentialStore,
@@ -109,6 +110,56 @@ describe('CLI OAuth token manager', () => {
 
     await expect(manager.current(KIMI_PROFILE, 'kimi')).resolves.toEqual(fresh);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('refreshes ChatGPT at the inclusive 60-second boundary and stores rotated credentials', async () => {
+    const store = createCredentialStore({ path: storePath, protector });
+    const profileId = 'chatgpt-profile';
+    const expired: OAuthCredential = {
+      provider: 'chatgpt',
+      tokenRecord: {
+        version: 1,
+        clientId: 'chatgpt-client-test',
+        accountId: 'chatgpt-account-test',
+        accessToken: 'chatgpt-old-access-test',
+        refreshToken: 'chatgpt-old-refresh-test',
+        accessExpiresAt: NOW + 60_000,
+      },
+    };
+    store.save(profileId, expired);
+    const fetch = vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toBe(CHATGPT_TOKEN_URL);
+      expect(new URLSearchParams(String(init.body))).toEqual(
+        new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: 'chatgpt-client-test',
+          refresh_token: 'chatgpt-old-refresh-test',
+          resource: 'https://api.openai.com/v1',
+        }),
+      );
+      return new Response(
+        JSON.stringify({
+          access_token: 'chatgpt-new-access-test',
+          refresh_token: 'chatgpt-new-refresh-test',
+          expires_in: 1800,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    const manager = createOAuthTokenManager({ store: () => store, fetch, now: () => NOW });
+
+    const refreshed = await manager.current(profileId, 'chatgpt');
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(refreshed).toMatchObject({
+      provider: 'chatgpt',
+      tokenRecord: {
+        accessToken: 'chatgpt-new-access-test',
+        refreshToken: 'chatgpt-new-refresh-test',
+        accessExpiresAt: NOW + 1_800_000,
+      },
+    });
+    expect(store.read(profileId)).toEqual(refreshed);
   });
 
   it('leaves the stored token unchanged when refresh fails', async () => {

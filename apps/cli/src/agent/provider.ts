@@ -6,6 +6,7 @@ import {
 } from '@joy-media/joy-agent-engine';
 import {
   defaultBaseUrl,
+  CHATGPT_RESPONSES_BASE_URL,
   evaluateEndpoint,
   findRegistryProvider,
   findRegistryRegion,
@@ -218,9 +219,6 @@ export async function resolveAgentConfig(
   if (type === 'xai') {
     throw new Error('Inference: needs attended verification for xAI OAuth.');
   }
-  if (type === 'chatgpt') {
-    throw new Error('ChatGPT Responses support is not available in the CLI yet.');
-  }
 
   let credential: OAuthCredential;
   try {
@@ -228,6 +226,18 @@ export async function resolveAgentConfig(
   } catch (error) {
     if (error instanceof OAuthProfileLockTimeoutError) throw error;
     throw new OAuthRefreshFailedError(name, type as OAuthCredential['provider']);
+  }
+
+  if (type === 'chatgpt') {
+    if (credential.provider !== 'chatgpt') {
+      throw new OAuthRefreshFailedError(name, 'chatgpt');
+    }
+    return normalizeByokSessionConfig({
+      provider: 'chatgpt-responses',
+      baseUrl: CHATGPT_RESPONSES_BASE_URL,
+      modelId,
+      auth: { kind: 'bearer-token', token: credential.tokenRecord.accessToken },
+    });
   }
 
   const baseUrl =
@@ -254,7 +264,8 @@ export function createModelFromConfig(config: ByokSessionConfig): LanguageModel 
 
 function engineMode(
   type: string,
-): 'openrouter' | 'openai-compatible' | 'anthropic-messages' | 'custom' {
+): 'chatgpt-responses' | 'openrouter' | 'openai-compatible' | 'anthropic-messages' | 'custom' {
+  if (type === 'chatgpt') return 'chatgpt-responses';
   if (type === 'openrouter') return 'openrouter';
   if (type === 'claude') return 'anthropic-messages';
   return isCustomProviderId(type) ? 'custom' : 'openai-compatible';

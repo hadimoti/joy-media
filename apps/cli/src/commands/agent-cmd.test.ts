@@ -490,6 +490,77 @@ describe('OAuth provider profiles', () => {
     expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
   });
 
+  it('resolves a ChatGPT OAuth profile to the fixed Responses bridge with typed bearer auth', async () => {
+    const accessToken = 'chatgpt-chat-access-token';
+    setAiProvider('chatgpt-profile', {
+      name: 'chatgpt-profile',
+      provider: 'chatgpt',
+      authKind: 'oauth',
+      defaultModel: 'gpt-test',
+    });
+    openCredentialStore().save('chatgpt-profile', {
+      provider: 'chatgpt',
+      tokenRecord: {
+        version: 1,
+        clientId: 'chatgpt-client-test',
+        accountId: 'chatgpt-account-test',
+        accessToken,
+        refreshToken: 'chatgpt-chat-refresh-token',
+        accessExpiresAt: Date.now() + 3_600_000,
+      },
+    });
+
+    const config = await resolveAgentConfig({ provider: 'chatgpt-profile' });
+
+    expect(config).toMatchObject({
+      provider: 'chatgpt-responses',
+      baseUrl: 'https://api.openai.com/v1',
+      modelId: 'gpt-test',
+      auth: { kind: 'bearer-token', token: accessToken },
+    });
+    expect('apiKey' in config).toBe(false);
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+  });
+
+  it('lists the ChatGPT account models with the OAuth bearer route', async () => {
+    const accessToken = 'chatgpt-model-access-test';
+    setAiProvider('chatgpt-profile', {
+      name: 'chatgpt-profile',
+      provider: 'chatgpt',
+      authKind: 'oauth',
+      defaultModel: 'gpt-visible',
+    });
+    openCredentialStore().save('chatgpt-profile', {
+      provider: 'chatgpt',
+      tokenRecord: {
+        version: 1,
+        clientId: 'chatgpt-client-test',
+        accountId: 'chatgpt-account-test',
+        accessToken,
+        refreshToken: 'chatgpt-model-refresh-test',
+        accessExpiresAt: Date.now() + 3_600_000,
+      },
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          models: [
+            { slug: 'gpt-visible', display_name: 'Visible GPT', visibility: 'list' },
+            { slug: 'gpt-hidden', display_name: 'Hidden GPT', visibility: 'hide' },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    expect(await runCli(['agent', 'models', 'chatgpt-profile'])).toBe(0);
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
+    expect(url).toBe('https://api.openai.com/v1/models');
+    expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${accessToken}`);
+    expect(printed.join('\n')).toContain('gpt-visible');
+    expect(printed.join('\n')).not.toContain('gpt-hidden');
+  });
+
   it('stores a rotated token before making the OAuth model-list request', async () => {
     const expired: OAuthCredential = {
       provider: 'kimi',
@@ -609,6 +680,31 @@ describe('OAuth provider profiles', () => {
 
     expect(await runCli(['agent', 'models', 'xai-profile'])).toBe(1);
     expect(errors.join('\n')).toContain('Inference: needs attended verification');
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+  });
+
+  it('blocks inference from a pending xAI OAuth profile before refreshing or sending a request', async () => {
+    setAiProvider('xai-profile', {
+      name: 'xai-profile',
+      provider: 'xai',
+      authKind: 'oauth',
+      defaultModel: 'grok-test',
+    });
+    openCredentialStore().save('xai-profile', {
+      provider: 'xai',
+      tokenRecord: {
+        version: 1,
+        clientId: 'xai-client-test',
+        accessToken: 'xai-inference-access-test',
+        refreshToken: 'xai-inference-refresh-test',
+        accessExpiresAt: Date.now() + 1_000,
+        scope: 'openid profile api:access',
+      },
+    });
+
+    await expect(resolveAgentConfig({ provider: 'xai-profile' })).rejects.toThrow(
+      'Inference: needs attended verification for xAI OAuth.',
+    );
     expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
   });
 });
