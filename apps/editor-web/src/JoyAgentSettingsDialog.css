@@ -464,6 +464,37 @@
   gap: 12px;
 }
 
+.joy-provider-route {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.joy-provider-route-accordions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.joy-provider-route + .joy-provider-route {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 12px;
+}
+
+.joy-provider-route-title {
+  margin: 0;
+  color: #e5e7eb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.joy-provider-risk-notice {
+  margin: 0;
+  color: #c7c9d0;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
 /* Forms in Accordions */
 .joy-settings-form-grid {
   display: grid;

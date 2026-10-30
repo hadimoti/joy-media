@@ -86,6 +86,11 @@ export interface ProviderRegion {
   /** Where the owner creates a key. Opened only by an explicit click. */
   readonly keyUrl: string;
   readonly docsUrl: string;
+  /**
+   * OAuth-only regions stay out of API-key setup; an omitted route means API-key.
+   * Source: D22 step 2 brief (2026-10-30).
+   */
+  readonly route?: 'api-key' | 'oauth';
 }
 
 export interface RegistryProvider {
@@ -249,6 +254,9 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
         baseUrl: 'https://api.kimi.ai/coding/v1',
         keyUrl: 'https://www.kimi.ai/code',
         docsUrl: 'https://www.kimi.com/code/docs/en/',
+        // D22 step 2 assigns this base to OAuth, not API-key setup.
+        // Source: D22 step 2 brief (2026-10-30).
+        route: 'oauth',
       },
     ],
   },
@@ -324,6 +332,9 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
         keyUrl: 'https://console.x.ai',
         docsUrl:
           'https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md',
+        // D22 step 2 keeps this unverified candidate on OAuth, not API-key setup.
+        // Source: D22 step 2 brief (2026-10-30).
+        route: 'oauth',
       },
     ],
   },

@@ -16,6 +16,7 @@ import {
   evaluateEndpoint,
   findRegistryProvider,
   PROVIDER_REGISTRY,
+  signInProviders,
   type ProviderRegionId,
   type RegistryProviderId,
 } from '@joy-media/provider-sdk';
@@ -58,6 +59,8 @@ type DesktopProviderProfileState = DesktopProviderProfile & {
 /** A saved profile cannot connect until the local provider broker ships (PLAN-v4 P2). */
 /** The provider the dialog can connect: OpenRouter, a registry provider, or a custom endpoint. */
 type DialogProvider = 'openrouter' | 'openai-compatible' | RegistryProviderId;
+
+const SIGN_IN_PROVIDER_IDS = new Set(signInProviders());
 
 /** The engine runs every registry provider on the chat transport, so its status names that transport. */
 function statusProviderFor(provider: DialogProvider): 'openrouter' | 'openai-compatible' {
@@ -1281,7 +1284,10 @@ export function JoyAgentSettingsDialog({
 
                   {openAccordions['models-endpoint'] && (
                     <div className="joy-accordion-content">
-                      <ProviderSignInPanel onSignedIn={() => void loadProfiles()} />
+                      <ProviderSignInPanel
+                        onSignedIn={() => void loadProfiles()}
+                        onSaved={() => void loadProfiles()}
+                      />
                       <div className="joy-settings-form-grid">
                         <div className="joy-settings-field">
                           <label>
@@ -1296,8 +1302,14 @@ export function JoyAgentSettingsDialog({
                                 Choose a provider
                               </option>
                               <option value="openrouter">OpenRouter (BYOK)</option>
+                              {/* The legacy Grok row uses xAI's API route, whose key entry lives in the xAI accordion.
+                                  Source: D22 step 2 brief (2026-10-30) and registry rows `grok`/`xai`. */}
                               {PROVIDER_REGISTRY.filter(
-                                (item) => item.id !== 'openrouter' && item.signInOnly !== true,
+                                (item) =>
+                                  item.id !== 'openrouter' &&
+                                  item.id !== 'grok' &&
+                                  !SIGN_IN_PROVIDER_IDS.has(item.id) &&
+                                  item.signInOnly !== true,
                               ).map((item) => (
                                 <option key={item.id} value={item.id}>
                                   {item.label}

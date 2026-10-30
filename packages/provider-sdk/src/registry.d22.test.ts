@@ -8,6 +8,17 @@ import {
 } from './registry.js';
 
 describe('D22 provider routes', () => {
+  it('marks OAuth-only bases separately from API-key regions', () => {
+    expect(
+      findRegistryProvider('kimi')?.regions.find((region) => region.id === 'code-international')?.route,
+    ).toBe('oauth');
+    expect(
+      findRegistryProvider('xai')?.regions.find((region) => region.id === 'oauth-international')?.route,
+    ).toBe('oauth');
+    expect(findRegistryRegion('kimi', 'https://api.moonshot.ai/v1')?.route).toBeUndefined();
+    expect(findRegistryRegion('xai', 'https://api.x.ai/v1')?.route).toBeUndefined();
+  });
+
   it('registers xAI API-key and OAuth bases as exact accepted regions', () => {
     for (const baseUrl of ['https://api.x.ai/v1', XAI_OAUTH_INFERENCE_BASE_URL]) {
       expect(findRegistryRegion('xai', baseUrl)?.baseUrl).toBe(baseUrl);

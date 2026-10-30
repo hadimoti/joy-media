@@ -194,9 +194,15 @@ describe('JOY Agent Settings connection status', () => {
     const options = [...(providerSelect?.options ?? [])].map((option) => option.value);
     expect(options).toEqual(expect.arrayContaining(['openrouter', 'openai-compatible']));
     expect(options).toEqual(
-      expect.arrayContaining(['openai', 'grok', 'claude', 'minimax', 'gemini', 'kimi']),
+      expect.arrayContaining(['openai', 'claude', 'gemini', 'deepseek', 'kilo']),
     );
-    expect(options).not.toContain('kilo');
+    expect(options).not.toContain('grok');
+    expect(options).not.toContain('minimax');
+    expect(options).not.toContain('kimi');
+    expect(options).not.toContain('xai');
+    expect(providerSelect?.closest('.joy-settings-form-grid')?.textContent).not.toContain(
+      'Signing in uses a third-party public app and may stop working or be deactivated by the provider at any time. An API key is the dependable way to connect.',
+    );
     expect(options).not.toContain('joy-hosted');
     expect(rendered.textContent).not.toMatch(/Joy Pro|Sign In with JOY Account|quota|plan limits/i);
   });
@@ -792,17 +798,19 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
       invoke,
     };
     const rendered = await render(client(), undefined);
-    // MiniMax has two registry regions, so the second one is a registry endpoint that needs no acknowledgement.
-    const otherRegion = findRegistryProvider('minimax')?.regions[1]?.baseUrl;
-    if (otherRegion === undefined) throw new Error('Expected a second MiniMax region');
-    await changeProvider(rendered, 'minimax');
+    // The acknowledgement permits discovery to reach the key-scope guard. Source: custom-endpoint-acknowledgement.ts.
+    const firstEndpoint = 'http://127.0.0.1:1234/v1';
+    const otherEndpoint = 'http://127.0.0.1:9999/v1';
+    await changeProvider(rendered, 'openai-compatible');
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
     if (key === null || baseUrl === null) throw new Error('Expected key and endpoint fields');
-    await act(async () => {
-      setInputValue(key, 'minimax-key-for-the-first-region');
-      setInputValue(baseUrl, otherRegion);
-    });
+    await act(async () => setInputValue(baseUrl, firstEndpoint));
+    await act(async () => setInputValue(key, 'custom-key-for-the-first-endpoint'));
+    await act(async () => setInputValue(baseUrl, otherEndpoint));
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (consent === null) throw new Error('Expected custom endpoint acknowledgement');
+    await act(async () => consent.click());
 
     await act(async () => {
       const drawer = [...rendered.querySelectorAll('button')].find((button) =>
