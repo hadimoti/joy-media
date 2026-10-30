@@ -1,10 +1,21 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
+import {
+  decodeKimiTokenRecord,
+  decodeMiniMaxTokenRecord,
+  decodeTokenRecord,
+  decodeXaiTokenRecord,
+  isRecord,
+  type ChatGptTokenRecord,
+  type KimiTokenRecord,
+  type MiniMaxTokenRecord,
+  type XaiTokenRecord,
+} from '@joy-media/provider-oauth';
 import type { SecretProtector } from './dpapi-protector.js';
 
 /** The store format this build reads and writes. A newer format is refused and never rewritten. */
-export const CREDENTIAL_STORE_VERSION = 1;
+export const CREDENTIAL_STORE_VERSION = 2;
 
 /** Legacy profiles the migration never moves. They stay listed as disabled (PLAN-v4 §9a). */
 export const LEGACY_DISABLED_PROVIDERS: ReadonlySet<string> = new Set(['kilo', 'joy-hosted']);
@@ -16,11 +27,32 @@ export interface ProviderCredential {
   readonly defaultModel?: string;
 }
 
-interface StoreFile {
-  readonly version: number;
-  readonly protector: string;
-  readonly entries: Record<string, { readonly ciphertext: string }>;
+/** OAuth records are provider-tagged and checked by the shared flow decoders (D22 step 3 design, §5). */
+export type OAuthCredential =
+  | { readonly provider: 'chatgpt'; readonly tokenRecord: ChatGptTokenRecord }
+  | { readonly provider: 'minimax'; readonly tokenRecord: MiniMaxTokenRecord }
+  | { readonly provider: 'kimi'; readonly tokenRecord: KimiTokenRecord }
+  | { readonly provider: 'xai'; readonly tokenRecord: XaiTokenRecord };
+
+export type StoredCredential = ProviderCredential | OAuthCredential;
+
+interface StoreEntry {
+  readonly ciphertext: string;
 }
+
+interface StoreFileV1 {
+  readonly version: 1;
+  readonly protector: string;
+  readonly entries: Record<string, StoreEntry>;
+}
+
+interface StoreFileV2 {
+  readonly version: 2;
+  readonly protector: string;
+  readonly entries: Record<string, StoreEntry>;
+}
+
+type StoreFile = StoreFileV1 | StoreFileV2;
 
 export class CredentialStoreVersionError extends Error {
   constructor(readonly version: unknown) {
@@ -39,9 +71,9 @@ export class CredentialUnavailableError extends Error {
 
 export interface CredentialStore {
   list(): readonly string[];
-  read(name: string): ProviderCredential | undefined;
-  /** Encrypts the credential, writes the store, then reads it back and checks it before returning. */
-  save(name: string, credential: ProviderCredential): void;
+  read(name: string): StoredCredential | undefined;
+  /** Encrypts and verifies the credential before atomically replacing the store. */
+  save(name: string, credential: StoredCredential): void;
   remove(name: string): void;
 }
 
@@ -49,12 +81,21 @@ function emptyFile(protector: SecretProtector): StoreFile {
   return { version: CREDENTIAL_STORE_VERSION, protector: protector.name, entries: {} };
 }
 
-function sameCredential(left: ProviderCredential, right: ProviderCredential): boolean {
-  return (
-    left.apiKey === right.apiKey &&
-    left.baseUrl === right.baseUrl &&
-    left.defaultModel === right.defaultModel
-  );
+function sameCredential(left: StoredCredential, right: StoredCredential): boolean {
+  if ('apiKey' in left && 'apiKey' in right) {
+    return (
+      left.apiKey === right.apiKey &&
+      left.baseUrl === right.baseUrl &&
+      left.defaultModel === right.defaultModel
+    );
+  }
+  if ('provider' in left && 'provider' in right) {
+    return (
+      left.provider === right.provider &&
+      JSON.stringify(left.tokenRecord) === JSON.stringify(right.tokenRecord)
+    );
+  }
+  return false;
 }
 
 /** Reads a value as a credential, or returns undefined when it carries no API key (metadata only). */
@@ -67,6 +108,46 @@ export function parseCredential(value: unknown): ProviderCredential | undefined 
     ...(typeof record.baseUrl === 'string' ? { baseUrl: record.baseUrl } : {}),
     ...(typeof record.defaultModel === 'string' ? { defaultModel: record.defaultModel } : {}),
   };
+}
+
+/** A provider tag is accepted only when its provider-specific decoder accepts the record (D22 step 3 design, §5). */
+function parseOAuthCredential(value: Record<string, unknown>): OAuthCredential | undefined {
+  if (!('tokenRecord' in value)) return undefined;
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value.tokenRecord);
+  } catch {
+    return undefined;
+  }
+  if (serialized === undefined) return undefined;
+
+  switch (value.provider) {
+    case 'chatgpt': {
+      const tokenRecord = decodeTokenRecord(serialized);
+      return tokenRecord === undefined ? undefined : { provider: 'chatgpt', tokenRecord };
+    }
+    case 'minimax': {
+      const tokenRecord = decodeMiniMaxTokenRecord(serialized);
+      return tokenRecord === undefined ? undefined : { provider: 'minimax', tokenRecord };
+    }
+    case 'kimi': {
+      const tokenRecord = decodeKimiTokenRecord(serialized);
+      return tokenRecord === undefined ? undefined : { provider: 'kimi', tokenRecord };
+    }
+    case 'xai': {
+      const tokenRecord = decodeXaiTokenRecord(serialized);
+      return tokenRecord === undefined ? undefined : { provider: 'xai', tokenRecord };
+    }
+    default:
+      return undefined;
+  }
+}
+
+function parseStoredCredential(value: unknown): StoredCredential | undefined {
+  if (isRecord(value) && typeof value.provider === 'string' && 'tokenRecord' in value) {
+    return parseOAuthCredential(value);
+  }
+  return parseCredential(value);
 }
 
 /**
@@ -83,7 +164,7 @@ export function createCredentialStore(options: {
   function load(): StoreFile {
     if (!existsSync(path)) return emptyFile(protector);
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<StoreFile>;
-    if (parsed.version !== CREDENTIAL_STORE_VERSION) {
+    if (parsed.version !== 1 && parsed.version !== CREDENTIAL_STORE_VERSION) {
       throw new CredentialStoreVersionError(parsed.version);
     }
     if (parsed.protector !== protector.name) {
@@ -98,52 +179,92 @@ export function createCredentialStore(options: {
   function write(file: StoreFile): void {
     mkdirSync(dirname(path), { recursive: true });
     const temporary = `${path}.tmp-${randomUUID()}`;
-    writeFileSync(temporary, `${JSON.stringify(file, null, 2)}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    renameSync(temporary, path);
+    try {
+      writeFileSync(temporary, `${JSON.stringify(file, null, 2)}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      renameSync(temporary, path);
+    } catch (error) {
+      rmSync(temporary, { force: true });
+      throw error;
+    }
   }
 
-  function decrypt(name: string, ciphertext: string): ProviderCredential {
+  function decrypt(name: string, ciphertext: string, version: 1 | 2): StoredCredential {
     let plain: string;
     try {
       plain = protector.unprotect(ciphertext);
     } catch {
       throw new CredentialUnavailableError(name, 'the protector could not decrypt it');
     }
-    const credential = parseCredential(JSON.parse(plain));
+    let credential: StoredCredential | undefined;
+    try {
+      const value: unknown = JSON.parse(plain);
+      credential = version === 1 ? parseCredential(value) : parseStoredCredential(value);
+    } catch {
+      throw new CredentialUnavailableError(name, 'the stored value is malformed');
+    }
     if (credential === undefined)
       throw new CredentialUnavailableError(name, 'the stored value is malformed');
     return credential;
   }
 
+  function encryptAndVerify(name: string, credential: StoredCredential): StoreEntry {
+    const normalized = parseStoredCredential(credential);
+    if (normalized === undefined) {
+      throw new CredentialUnavailableError(name, 'the credential is malformed');
+    }
+    let ciphertext: string;
+    try {
+      ciphertext = protector.protect(JSON.stringify(normalized));
+    } catch {
+      throw new CredentialUnavailableError(name, 'the protector could not encrypt it');
+    }
+    const back = decrypt(name, ciphertext, 2);
+    if (!sameCredential(back, normalized)) {
+      throw new CredentialUnavailableError(
+        name,
+        'the value read back did not match the value saved',
+      );
+    }
+    return { ciphertext };
+  }
+
+  function convertVersionOneEntries(file: StoreFileV1): Record<string, StoreEntry> {
+    const entries = Object.create(null) as Record<string, StoreEntry>;
+    for (const [name, entry] of Object.entries(file.entries)) {
+      entries[name] = encryptAndVerify(name, decrypt(name, entry.ciphertext, 1));
+    }
+    return entries;
+  }
+
   return {
     list: () => Object.keys(load().entries),
     read(name) {
-      const entry = load().entries[name];
-      return entry === undefined ? undefined : decrypt(name, entry.ciphertext);
+      const file = load();
+      const entry = file.entries[name];
+      return entry === undefined ? undefined : decrypt(name, entry.ciphertext, file.version);
     },
     save(name, credential) {
       const file = load();
-      let ciphertext: string;
-      try {
-        ciphertext = protector.protect(JSON.stringify(credential));
-      } catch {
-        throw new CredentialUnavailableError(name, 'the protector could not encrypt it');
+      if (file.version === 1) {
+        const entries = convertVersionOneEntries(file);
+        entries[name] = encryptAndVerify(name, credential);
+        write({ version: 2, protector: file.protector, entries });
+        return;
       }
-      write({ ...file, entries: { ...file.entries, [name]: { ciphertext } } });
-      // A save counts only when the stored value reads back as the same credential.
-      const back = decrypt(name, ciphertext);
-      if (!sameCredential(back, credential)) {
-        throw new CredentialUnavailableError(
-          name,
-          'the value read back did not match the value saved',
-        );
-      }
+      const entries = { ...file.entries, [name]: encryptAndVerify(name, credential) };
+      write({ ...file, entries });
     },
     remove(name) {
       const file = load();
+      if (file.version === 1) {
+        const entries = convertVersionOneEntries(file);
+        delete entries[name];
+        write({ version: 2, protector: file.protector, entries });
+        return;
+      }
       const { [name]: _removed, ...rest } = file.entries;
       write({ ...file, entries: rest });
     },

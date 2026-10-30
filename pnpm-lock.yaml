@@ -143,6 +143,9 @@ importers:
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../../packages/project-schema
+      '@joy-media/provider-oauth':
+        specifier: workspace:*
+        version: link:../../packages/provider-oauth
       '@joy-media/provider-sdk':
         specifier: workspace:*
         version: link:../../packages/provider-sdk

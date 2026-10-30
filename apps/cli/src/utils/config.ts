@@ -31,6 +31,8 @@ export interface AiProviderConfig {
   endpointConsent?: string | undefined;
   name?: string | undefined;
   provider?: string | undefined;
+  /** Older profile metadata without this field remains on the API-key route (D22 step 3 design, §11). */
+  authKind?: 'api-key' | 'oauth' | undefined;
   apiKey?: string | undefined;
   baseUrl?: string | undefined;
   defaultModel?: string | undefined;
@@ -107,11 +109,11 @@ export function loadAiProviders(): Record<string, AiProviderConfig> {
   }
   let store: CredentialStore | undefined;
   for (const [name, entry] of Object.entries(providers)) {
-    if (entry.apiKey !== undefined) continue;
+    if (entry.apiKey !== undefined || entry.authKind === 'oauth') continue;
     store ??= openCredentialStore();
     try {
       const credential = store.read(name);
-      if (credential !== undefined) {
+      if (credential !== undefined && 'apiKey' in credential) {
         providers[name] = {
           ...entry,
           apiKey: credential.apiKey,
@@ -132,7 +134,8 @@ export function saveAiProviders(providers: Record<string, AiProviderConfig>): vo
   const store = openCredentialStore();
   const metadata: Record<string, AiProviderConfig> = {};
   for (const [name, entry] of Object.entries(providers)) {
-    const { apiKey, ...rest } = entry;
+    // OAuth tokens stay in the encrypted credential store (D22 step 3 design, §5).
+    const { apiKey } = entry;
     if (apiKey !== undefined && apiKey.length > 0) {
       store.save(name, {
         apiKey,
@@ -140,7 +143,15 @@ export function saveAiProviders(providers: Record<string, AiProviderConfig>): vo
         ...(entry.defaultModel === undefined ? {} : { defaultModel: entry.defaultModel }),
       });
     }
-    metadata[name] = rest;
+    metadata[name] = {
+      endpointConsent: entry.endpointConsent,
+      name: entry.name,
+      provider: entry.provider,
+      authKind: entry.authKind,
+      baseUrl: entry.baseUrl,
+      defaultModel: entry.defaultModel,
+      cachedModels: entry.cachedModels,
+    };
   }
   writeFileSync(path, JSON.stringify(metadata, null, 2), 'utf8');
 }

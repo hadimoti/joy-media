@@ -9,6 +9,7 @@ import {
   loadAiProviders,
   openCredentialStore,
   saveAiProviders,
+  type AiProviderConfig,
 } from './config.js';
 import { resolveByokConfig } from '../agent/provider.js';
 import { createDpapiProtector, type SecretProtector } from './dpapi-protector.js';
@@ -17,6 +18,7 @@ import {
   CredentialStoreVersionError,
   CredentialUnavailableError,
   migrateProviderFile,
+  type OAuthCredential,
   type ProviderCredential,
 } from './credential-store.js';
 
@@ -40,6 +42,52 @@ const CUSTOM: ProviderCredential = {
   baseUrl: 'http://127.0.0.1:1234/v1',
   defaultModel: 'local-model',
 };
+const OAUTH_CREDENTIALS: readonly OAuthCredential[] = [
+  {
+    provider: 'chatgpt',
+    tokenRecord: {
+      version: 1,
+      clientId: 'chatgpt-test-client',
+      accountId: 'chatgpt-test-account',
+      accessToken: 'chatgpt-access-token-secret',
+      refreshToken: 'chatgpt-refresh-token-secret',
+      accessExpiresAt: 1_798_000_000_000,
+    },
+  },
+  {
+    provider: 'minimax',
+    tokenRecord: {
+      version: 1,
+      clientId: 'minimax-test-client',
+      region: 'global',
+      accessToken: 'minimax-access-token-secret',
+      refreshToken: 'minimax-refresh-token-secret',
+      accessExpiresAt: 1_798_000_000_000,
+    },
+  },
+  {
+    provider: 'kimi',
+    tokenRecord: {
+      version: 1,
+      clientId: 'kimi-test-client',
+      accessToken: 'kimi-access-token-secret',
+      refreshToken: 'kimi-refresh-token-secret',
+      accessExpiresAt: 1_798_000_000_000,
+      scope: 'kimi-code',
+    },
+  },
+  {
+    provider: 'xai',
+    tokenRecord: {
+      version: 1,
+      clientId: 'xai-test-client',
+      accessToken: 'xai-access-token-secret',
+      refreshToken: 'xai-refresh-token-secret',
+      accessExpiresAt: 1_798_000_000_000,
+      scope: 'openid profile email offline_access grok-cli:access api:access',
+    },
+  },
+];
 
 let dir = '';
 let storePath = '';
@@ -76,6 +124,28 @@ afterEach(() => {
 
 function writeProviders(providers: Record<string, unknown>): void {
   writeFileSync(providersPath, JSON.stringify(providers, null, 2));
+}
+
+function writeVersionOneStore(entries: Record<string, ProviderCredential>): void {
+  const encrypted = Object.fromEntries(
+    Object.entries(entries).map(([name, credential]) => [
+      name,
+      { ciphertext: testProtector.protect(JSON.stringify(credential)) },
+    ]),
+  );
+  writeFileSync(
+    storePath,
+    JSON.stringify({ version: 1, protector: testProtector.name, entries: encrypted }, null, 2),
+  );
+}
+
+function listWithVersionOneReader(): string[] {
+  const parsed = JSON.parse(readFileSync(storePath, 'utf8')) as {
+    readonly version: number;
+    readonly entries: Record<string, unknown>;
+  };
+  if (parsed.version !== 1) throw new CredentialStoreVersionError(parsed.version);
+  return Object.keys(parsed.entries);
 }
 
 function readProviders(): Record<string, Record<string, unknown>> {
@@ -160,7 +230,7 @@ describe('credential store', () => {
   it('refuses a newer store format and leaves the file exactly as it was', () => {
     writeFileSync(
       storePath,
-      JSON.stringify({ version: 2, protector: 'test-protector', entries: {} }),
+      JSON.stringify({ version: 3, protector: 'test-protector', entries: {} }),
     );
     const before = readFileSync(storePath, 'utf8');
     const store = createCredentialStore({ path: storePath, protector: testProtector });
@@ -178,6 +248,155 @@ describe('credential store', () => {
     });
 
     expect(() => restricted.read('openrouter')).toThrow(CredentialUnavailableError);
+  });
+
+  it('reads a version 1 store without rewriting it', () => {
+    writeVersionOneStore({ openrouter: OPENROUTER });
+    const before = readFileSync(storePath, 'utf8');
+    const store = createCredentialStore({ path: storePath, protector: testProtector });
+
+    expect(store.list()).toEqual(['openrouter']);
+    expect(store.read('openrouter')).toEqual(OPENROUTER);
+    expect(readFileSync(storePath, 'utf8')).toBe(before);
+  });
+
+  it('upgrades every version 1 entry only when the first credential is saved', () => {
+    writeVersionOneStore({ openrouter: OPENROUTER, custom: CUSTOM });
+    const store = createCredentialStore({ path: storePath, protector: testProtector });
+    const before = readFileSync(storePath, 'utf8');
+
+    expect(store.read('openrouter')).toEqual(OPENROUTER);
+    expect(readFileSync(storePath, 'utf8')).toBe(before);
+    store.save('kimi-profile', OAUTH_CREDENTIALS[2]!);
+
+    expect(JSON.parse(readFileSync(storePath, 'utf8'))).toMatchObject({ version: 2 });
+    expect(store.read('openrouter')).toEqual(OPENROUTER);
+    expect(store.read('custom')).toEqual(CUSTOM);
+    expect(store.read('kimi-profile')).toEqual(OAUTH_CREDENTIALS[2]);
+  });
+
+  it('upgrades a version 1 store on an explicit credential removal', () => {
+    writeVersionOneStore({ openrouter: OPENROUTER, custom: CUSTOM });
+    const store = createCredentialStore({ path: storePath, protector: testProtector });
+
+    store.remove('custom');
+
+    expect(JSON.parse(readFileSync(storePath, 'utf8'))).toMatchObject({ version: 2 });
+    expect(store.list()).toEqual(['openrouter']);
+    expect(store.read('openrouter')).toEqual(OPENROUTER);
+  });
+
+  it('preserves a version 1 credential named __proto__ during upgrade', () => {
+    const versionOneEntries = Object.create(null) as Record<string, ProviderCredential>;
+    versionOneEntries['__proto__'] = CUSTOM;
+    versionOneEntries.openrouter = OPENROUTER;
+    writeVersionOneStore(versionOneEntries);
+    const store = createCredentialStore({ path: storePath, protector: testProtector });
+
+    store.save('kimi-profile', OAUTH_CREDENTIALS[2]!);
+
+    expect(store.read('__proto__')).toEqual(CUSTOM);
+    expect(store.list()).toContain('__proto__');
+  });
+
+  it.each(OAUTH_CREDENTIALS)('round-trips a $provider OAuth token record without plaintext tokens', (credential) => {
+    const store = createCredentialStore({ path: storePath, protector: testProtector });
+    store.save(credential.provider, credential);
+
+    expect(store.read(credential.provider)).toEqual(credential);
+    expect(JSON.parse(readFileSync(storePath, 'utf8'))).toMatchObject({ version: 2 });
+    const saved = readFileSync(storePath, 'utf8');
+    expect(saved).not.toContain(credential.tokenRecord.accessToken);
+    expect(saved).not.toContain(credential.tokenRecord.refreshToken);
+  });
+
+  it('refuses an OAuth record that its provider decoder cannot validate', () => {
+    const store = createCredentialStore({ path: storePath, protector: testProtector });
+    const invalid = {
+      provider: 'kimi',
+      tokenRecord: { ...OAUTH_CREDENTIALS[2]!.tokenRecord, scope: 'wrong-scope' },
+    } as OAuthCredential;
+
+    expect(() => store.save('kimi-profile', invalid)).toThrow(CredentialUnavailableError);
+    expect(existsSync(storePath)).toBe(false);
+  });
+
+  it('preserves the original version 1 file when an entry cannot be converted', () => {
+    writeFileSync(
+      storePath,
+      JSON.stringify({
+        version: 1,
+        protector: testProtector.name,
+        entries: {
+          broken: { ciphertext: testProtector.protect(JSON.stringify({ apiKey: '' })) },
+        },
+      }),
+    );
+    const before = readFileSync(storePath, 'utf8');
+    const store = createCredentialStore({ path: storePath, protector: testProtector });
+
+    expect(() => store.save('custom', CUSTOM)).toThrow(CredentialUnavailableError);
+    expect(readFileSync(storePath, 'utf8')).toBe(before);
+  });
+
+  it('preserves the original version 1 file when migrated ciphertext fails verification', () => {
+    writeVersionOneStore({ openrouter: OPENROUTER });
+    const before = readFileSync(storePath, 'utf8');
+    const verificationFailure: SecretProtector = {
+      name: testProtector.name,
+      protect: (plain) => `v2:${Buffer.from(plain, 'utf8').toString('base64')}`,
+      unprotect: (cipher) => {
+        if (!cipher.startsWith('v2:')) return testProtector.unprotect(cipher);
+        const plain = Buffer.from(cipher.slice(3), 'base64').toString('utf8');
+        const credential = JSON.parse(plain) as ProviderCredential;
+        return JSON.stringify({ ...credential, apiKey: 'verification-mismatch' });
+      },
+    };
+    const store = createCredentialStore({ path: storePath, protector: verificationFailure });
+
+    expect(() => store.save('custom', CUSTOM)).toThrow(CredentialUnavailableError);
+    expect(readFileSync(storePath, 'utf8')).toBe(before);
+  });
+
+  it('simulates a version 1 reader refusing version 2 without rewriting it', () => {
+    const store = createCredentialStore({ path: storePath, protector: testProtector });
+    store.save('openrouter', OPENROUTER);
+    const before = readFileSync(storePath, 'utf8');
+
+    expect(() => listWithVersionOneReader()).toThrow(CredentialStoreVersionError);
+    expect(readFileSync(storePath, 'utf8')).toBe(before);
+  });
+});
+
+describe('provider metadata', () => {
+  it('keeps authKind as metadata and excludes access and refresh tokens', () => {
+    const credential = OAUTH_CREDENTIALS[2]!;
+    openCredentialStore().save('kimi-profile', credential);
+    const unsafeMetadata = {
+      'kimi-profile': {
+        name: 'Kimi',
+        provider: 'kimi',
+        authKind: 'oauth',
+        accessToken: credential.tokenRecord.accessToken,
+        refreshToken: credential.tokenRecord.refreshToken,
+        tokenRecord: credential.tokenRecord,
+      },
+      legacy: { name: 'Custom', provider: 'custom', ...CUSTOM },
+    } as unknown as Record<string, AiProviderConfig>;
+
+    saveAiProviders(unsafeMetadata);
+
+    const metadata = readFileSync(getAiProvidersPath(), 'utf8');
+    const stored = readFileSync(join(getJoyMediaDir(), 'credentials.json'), 'utf8');
+    expect(metadata).toContain('"authKind": "oauth"');
+    expect(metadata).not.toContain(credential.tokenRecord.accessToken);
+    expect(metadata).not.toContain(credential.tokenRecord.refreshToken);
+    expect(stored).not.toContain(credential.tokenRecord.accessToken);
+    expect(stored).not.toContain(credential.tokenRecord.refreshToken);
+    expect(loadAiProviders()['kimi-profile']).not.toHaveProperty('apiKey');
+    expect(loadAiProviders()['kimi-profile']?.authKind).toBe('oauth');
+    expect(loadAiProviders().legacy).toMatchObject({ apiKey: CUSTOM.apiKey });
+    expect(loadAiProviders().legacy?.authKind).toBeUndefined();
   });
 });
 
