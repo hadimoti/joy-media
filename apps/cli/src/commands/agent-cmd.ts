@@ -2,6 +2,8 @@
 import {
   AGENT_SLOT_IDS,
   AGENT_SLOT_LABELS,
+  CHATGPT_RESPONSES_BASE_URL,
+  MINIMAX_OAUTH_ENDPOINTS,
   defaultBaseUrl,
   evaluateEndpoint,
   findRegistryProvider,
@@ -10,6 +12,12 @@ import {
   parseAgentSlotId,
 } from '@joy-media/provider-sdk';
 import type { CliFlags } from '../cli.js';
+import {
+  isMiniMaxRegion,
+  isOAuthProfileProvider,
+  oauthTokenExpiry,
+  signInOAuthProfile,
+} from '../agent/oauth.js';
 import { clearAgentSlot, loadAgentSlot, saveAgentSlot } from '../agent/agent-slots.js';
 import { probeAgent, runJoyAgent } from '../agent/joy-agent.js';
 import { environmentKey, inferProviderType, isRetiredProvider } from '../agent/provider.js';
@@ -18,9 +26,11 @@ import {
   deleteAiProvider,
   loadAiProviders,
   loadCliConfig,
+  openCredentialStore,
   saveCliConfig,
   setAiProvider,
 } from '../utils/config.js';
+import { KIMI_CODE_BASE_URL, OAuthFlowError } from '@joy-media/provider-oauth';
 import {
   c,
   logError,
@@ -47,10 +57,120 @@ export interface AgentCommandFlags {
   baseUrl?: string | undefined;
 }
 
+const OAUTH_RISK_NOTICE =
+  'Signing in uses a third-party public app and may stop working or be deactivated by the provider at any time. An API key is the dependable way to connect.';
+
 /** A number from a flag. A blank value is NaN, so the slot rules refuse it instead of reading it as zero. */
 function numberFlag(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
   return value.trim() === '' ? Number.NaN : Number(value);
+}
+
+function oauthProfileBaseUrl(
+  provider: 'chatgpt' | 'minimax' | 'kimi' | 'xai',
+  region: 'global' | 'cn',
+): string | undefined {
+  if (provider === 'chatgpt') return CHATGPT_RESPONSES_BASE_URL;
+  if (provider === 'minimax') return MINIMAX_OAUTH_ENDPOINTS[region].inferenceBase;
+  if (provider === 'kimi') return KIMI_CODE_BASE_URL;
+  // The registry's xAI OAuth base remains a candidate until attended verification.
+  return undefined;
+}
+
+async function addOAuthProvider(name: string, flags: CliFlags): Promise<number> {
+  if (flags.baseUrl !== undefined) {
+    logError('--url cannot be combined with --oauth.');
+    return 1;
+  }
+  if (flags.apiKey !== undefined) {
+    logError('--api-key cannot be combined with --oauth.');
+    return 1;
+  }
+  if (!flags.provider) {
+    logError('--provider is required with --oauth.');
+    return 1;
+  }
+  if (!isOAuthProfileProvider(flags.provider)) {
+    logError(`Provider "${flags.provider}" does not offer OAuth sign-in.`);
+    return 1;
+  }
+  if (flags.region !== undefined && flags.provider !== 'minimax') {
+    logError('--region is supported only for MiniMax OAuth.');
+    return 1;
+  }
+  if (flags.region !== undefined && !isMiniMaxRegion(flags.region)) {
+    logError('--region must be "global" or "cn" for MiniMax OAuth.');
+    return 1;
+  }
+
+  const providers = loadAiProviders();
+  const previous = providers[name];
+  if (
+    previous !== undefined &&
+    (previous.authKind !== 'oauth' || previous.provider !== flags.provider)
+  ) {
+    logError(
+      `Provider profile "${name}" uses a different authentication method or provider; remove it before changing authentication.`,
+    );
+    return 1;
+  }
+
+  const region = flags.region === 'cn' ? 'cn' : 'global';
+  const model = flags.model ?? previous?.defaultModel;
+  // This exact notice is printed after every validation and before the sign-in flow can send a request.
+  console.error(OAUTH_RISK_NOTICE);
+  let credential;
+  try {
+    credential = await signInOAuthProfile({
+      profileId: name,
+      provider: flags.provider,
+      region,
+      onAuthorization: (url) => {
+        console.log(`Approval URL: ${url}`);
+        try {
+          const userCode = new URL(url).searchParams.get('user_code');
+          if (userCode) console.log(`User code: ${userCode}`);
+        } catch {
+          // The flow owns the approval URL; printing the original remains useful if parsing fails.
+        }
+        if (flags.provider === 'chatgpt') {
+          console.log(
+            'Open the URL in a browser on this same machine. A remote CLI with no browser on that machine cannot complete it.',
+          );
+        }
+      },
+    });
+  } catch (error) {
+    if (error instanceof OAuthFlowError) {
+      logError(error.message);
+      return error.code === 'CANCELLED' ? 130 : 1;
+    }
+    logError('OAuth sign-in failed. No profile was changed.');
+    return 1;
+  }
+
+  try {
+    openCredentialStore().save(name, credential);
+    setAiProvider(name, {
+      name,
+      provider: flags.provider,
+      authKind: 'oauth',
+      baseUrl: oauthProfileBaseUrl(flags.provider, region),
+      defaultModel: model,
+    });
+  } catch {
+    logError('OAuth credential could not be saved.');
+    return 1;
+  }
+
+  logSuccess(`Provider "${name}" configured successfully!`);
+  logStep('Provider', flags.provider);
+  logStep('Auth', `OAuth (${flags.provider})`);
+  if (model) logStep('Default Model', model);
+  if (flags.provider === 'xai') {
+    logStep('Inference', 'needs attended verification');
+  }
+  return 0;
 }
 
 export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {
@@ -76,10 +196,33 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
           const isActive = key === active || (p.name && p.name === active);
           const marker = isActive ? c('● [ACTIVE]', 'green') : c('○', 'dim');
           console.log(`  ${marker} ${c(key, 'bold')} (${p.provider ?? 'custom'})`);
-          logStep('  Base URL', p.baseUrl ?? 'default');
+          if (!(p.authKind === 'oauth' && p.provider === 'xai')) {
+            logStep('  Base URL', p.baseUrl ?? 'default');
+          }
           logStep('  Default Model', p.defaultModel ?? 'not-set');
-          // A key never appears in a listing, not even a part of one (PLAN-v4 §6d-1).
-          logStep('  API Key', p.apiKey ? 'set (hidden)' : 'none');
+          if (p.authKind === 'oauth') {
+            logStep('  Auth', `OAuth (${p.provider ?? 'unknown'})`);
+            let expiry = 'OAuth credential unavailable';
+            try {
+              const credential = openCredentialStore().read(key);
+              if (
+                credential !== undefined &&
+                'provider' in credential &&
+                credential.provider === p.provider
+              ) {
+                expiry = oauthTokenExpiry(credential);
+              }
+            } catch {
+              // A listing reports only whether the secret is readable, never the stored value.
+            }
+            logStep('  Access token', expiry);
+            if (p.provider === 'xai') {
+              logStep('  Inference', 'needs attended verification');
+            }
+          } else {
+            // A key never appears in a listing, not even a part of one (PLAN-v4 §6d-1).
+            logStep('  API Key', p.apiKey ? 'set (hidden)' : 'none');
+          }
           if (p.cachedModels && p.cachedModels.length > 0) {
             logStep('  Discovered Models', `${p.cachedModels.length} models cached`);
           }
@@ -95,6 +238,13 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
         logError(
           'Provider name required. Usage: joy-media agent provider add <name> --url <url> --api-key <key> [--model <model>]',
         );
+        return 1;
+      }
+      if (flags.oauth) {
+        return await addOAuthProvider(name, flags);
+      }
+      if (flags.region !== undefined) {
+        logError('--region requires --oauth.');
         return 1;
       }
       if (!flags.baseUrl) {

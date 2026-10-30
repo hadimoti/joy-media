@@ -22,6 +22,8 @@ export interface CliConfig {
   defaultModel?: string | undefined;
   customBaseUrl?: string | undefined;
   sqlitePath?: string | undefined;
+  /** ChatGPT's accepted host identity, generated once for this CLI installation. */
+  chatgptExtAgentHostId?: string | undefined;
   /** The two agent slots (PLAN-v4 §6d-1). A slot that is not saved is empty. */
   agentSlots?: Partial<Record<'workhorse' | 'creative', SavedAgentSlot>> | undefined;
 }

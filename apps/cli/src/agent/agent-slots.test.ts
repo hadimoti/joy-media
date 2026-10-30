@@ -12,7 +12,7 @@ import {
 import { runCli } from '../cli.js';
 import { saveCliConfig, setAiProvider } from '../utils/config.js';
 import { clearAgentSlot, loadAgentSlot, loadAgentSlots, saveAgentSlot } from './agent-slots.js';
-import { resolveByokConfig } from './provider.js';
+import { isRetiredProvider, resolveByokConfig } from './provider.js';
 
 const PROVIDER_SLOT_CASES = PROVIDER_REGISTRY.flatMap(({ id }) =>
   AGENT_SLOT_IDS.map((slotId) => ({ providerId: id, slotId })),
@@ -177,6 +177,13 @@ describe('agent slots in the CLI', () => {
       });
       expect(saveAgentSlot(slotId, { profileId, model }).ok).toBe(true);
       expect(loadAgentSlot(slotId)).toMatchObject({ profileId, model });
+
+      if (isRetiredProvider(providerId)) {
+        expect(() => resolveByokConfig({ slot: slotId })).toThrow(
+          `The ${providerId} provider was retired from JOY Media.`,
+        );
+        return;
+      }
 
       if (apiKeyPermitted) {
         expect(resolveByokConfig({ slot: slotId })).toMatchObject({
