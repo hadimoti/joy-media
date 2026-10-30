@@ -48,7 +48,6 @@ export function prepareChatGptResponses(input: {
   readonly accessToken: string;
   readonly modelId: string;
   readonly body: ChatGptCompletionBody;
-  readonly stream?: boolean;
 }): ChatGptPreparedCall {
   const { instructions, items } = responseInput(input.body.messages);
   const tools = (input.body.tools ?? []).map(responseTool);
@@ -61,14 +60,16 @@ export function prepareChatGptResponses(input: {
     ...(tools.length === 0 ? {} : { tools }),
     ...(toolChoice === undefined ? {} : { tool_choice: toolChoice }),
     store: false,
-    stream: input.stream ?? true,
+    // The ChatGPT Responses endpoint answers unstreamed requests with HTTP 400: "Stream must be set to true".
+    // Request SSE here and convert it to the caller's Chat Completions shape below.
+    stream: true,
   };
   return {
     method: 'POST',
     url: endpointUrl(CHATGPT_RESPONSES_BASE_URL, 'responses'),
     headers: {
       'content-type': 'application/json',
-      accept: (input.stream ?? true) ? 'text/event-stream' : 'application/json',
+      accept: 'text/event-stream',
       authorization: `Bearer ${input.accessToken}`,
       [JOY_TITLE_HEADER]: JOY_TITLE,
     },
@@ -171,7 +172,6 @@ export function createChatGptResponsesFetch(input: {
         accessToken: input.accessToken,
         modelId: input.modelId,
         body,
-        stream: body.stream === true,
       });
     } catch (error) {
       const message =

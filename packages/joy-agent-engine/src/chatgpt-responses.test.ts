@@ -162,6 +162,46 @@ describe('ChatGPT Responses engine bridge', () => {
     expect(stream).toContain('data: [DONE]');
   });
 
+  it('streams upstream for a non-streaming caller and returns Chat Completions JSON', async () => {
+    let upstreamInit: RequestInit | undefined;
+    const upstream = vi.fn<ChatGptFetch>(async (_input, init) => {
+      upstreamInit = init;
+      return new Response(
+        event({
+          type: 'response.completed',
+          response: {
+            output: [
+              {
+                type: 'message',
+                content: [{ type: 'output_text', text: 'The reply.' }],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'text/event-stream' } },
+      );
+    });
+    const fetch = createChatGptResponsesFetch({ accessToken: TOKEN, modelId: 'gpt-test', fetch: upstream });
+    const response = await fetch(`${CHATGPT_RESPONSES_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      body: JSON.stringify({
+        model: 'gpt-test',
+        stream: false,
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    await expect(response.json()).resolves.toMatchObject({
+      object: 'chat.completion',
+      choices: [{ message: { role: 'assistant', content: 'The reply.' }, finish_reason: 'stop' }],
+    });
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(upstreamInit?.body))).toMatchObject({ stream: true });
+    expect(new Headers(upstreamInit?.headers).get('accept')).toBe('text/event-stream');
+  });
+
   it('does not return partial text when a Responses stream ends or fails early', () => {
     expect(
       readChatGptStream(

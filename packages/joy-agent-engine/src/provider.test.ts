@@ -67,13 +67,14 @@ describe('hardened provider fetch', () => {
       accept: string | null;
       body: string;
     }> = [];
-    const responsesBody = JSON.stringify({
-      id: 'resp-local-fixture',
-      status: 'completed',
-      output: [
-        { type: 'message', content: [{ type: 'output_text', text: 'Hello from ChatGPT.' }] },
-      ],
-    });
+    const responsesBody = `data: ${JSON.stringify({
+      type: 'response.completed',
+      response: {
+        output: [
+          { type: 'message', content: [{ type: 'output_text', text: 'Hello from ChatGPT.' }] },
+        ],
+      },
+    })}\n\n`;
     const fetchImpl = vi.fn<JoyFetch>(async (input, init) => {
       calls.push({
         url: String(input),
@@ -83,7 +84,7 @@ describe('hardened provider fetch', () => {
       });
       return new Response(responsesBody, {
         status: 200,
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'text/event-stream' },
       });
     });
     const config = normalizeByokSessionConfig({
@@ -100,10 +101,10 @@ describe('hardened provider fetch', () => {
     expect(calls[0]).toMatchObject({
       url: `${CHATGPT_RESPONSES_BASE_URL}/responses`,
       authorization: `Bearer ${token}`,
-      accept: 'application/json',
+      accept: 'text/event-stream',
     });
     const request = JSON.parse(calls[0]!.body) as Record<string, unknown>;
-    expect(request).toMatchObject({ model: 'gpt-test', store: false, stream: false });
+    expect(request).toMatchObject({ model: 'gpt-test', store: false, stream: true });
     expect(request.input).toEqual([
       { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Say hello.' }] },
     ]);
