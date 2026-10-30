@@ -13,6 +13,7 @@ export const IPC_CHANNELS = [
   'desktop.provider-profile.delete',
   'desktop.provider-profile.later',
   'desktop.provider-profile.sign-in',
+  'desktop.provider-profile.sign-out',
   'desktop.provider.test',
   'desktop.provider.models',
   'desktop.agent.request',

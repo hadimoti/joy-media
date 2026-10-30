@@ -35,6 +35,51 @@ describe('provider registry', () => {
     expect(apis.kimi).toBe('chat-completions');
   });
 
+  it('keeps the ChatGPT API and sign-in routes while adding xAI, DeepSeek, and Kilo', () => {
+    expect(REGISTRY_PROVIDER_IDS).toEqual([
+      'openai',
+      'grok',
+      'claude',
+      'minimax',
+      'gemini',
+      'kimi',
+      'openrouter',
+      'chatgpt',
+      'xai',
+      'deepseek',
+      'kilo',
+    ]);
+    expect(findRegistryProvider('openai')?.auth.methods).toEqual(['api-key']);
+    expect(findRegistryProvider('chatgpt')?.auth.methods).toEqual(['subscription-sign-in']);
+    expect(findRegistryProvider('chatgpt')?.signInOnly).toBe(true);
+    expect(findRegistryProvider('claude')?.api).toBe('anthropic-messages');
+    expect(findRegistryProvider('minimax')?.auth).toMatchObject({ gated: true, unverified: true });
+    expect(findRegistryProvider('kimi')?.auth).toMatchObject({ gated: true, unverified: true });
+  });
+
+  it('registers exact D22 API and OAuth bases that pass the endpoint policy', () => {
+    const bases = [
+      ['openai', 'https://api.openai.com/v1'],
+      ['kimi', 'https://api.moonshot.ai/v1'],
+      ['minimax', 'https://api.minimax.io/v1'],
+      ['xai', 'https://api.x.ai/v1'],
+      ['xai', 'https://cli-chat-proxy.grok.com/v1'],
+      ['kimi', 'https://api.kimi.ai/coding/v1'],
+      ['deepseek', 'https://api.deepseek.com'],
+      ['kilo', 'https://ai-gateway.kilo.ai/api/v1'],
+    ] as const;
+    for (const [provider, baseUrl] of bases) {
+      expect(findRegistryRegion(provider, baseUrl)?.baseUrl).toBe(baseUrl);
+      expect(evaluateEndpoint(provider, baseUrl)).toMatchObject({
+        allowed: true,
+        kind: 'registry',
+      });
+    }
+    expect(defaultBaseUrl('xai')).toBe('https://api.x.ai/v1');
+    expect(defaultBaseUrl('deepseek')).toBe('https://api.deepseek.com');
+    expect(defaultBaseUrl('kilo')).toBe('https://ai-gateway.kilo.ai/api/v1');
+  });
+
   it('offers ChatGPT for sign-in only, over the Responses API at its own origin', () => {
     const chatgpt = findRegistryProvider('chatgpt');
     expect(chatgpt?.api).toBe('chatgpt-responses');
@@ -50,12 +95,17 @@ describe('provider registry', () => {
     expect(findRegistryRegion('kimi', 'https://api.moonshot.cn/v1/')?.id).toBe('china');
     expect(findRegistryRegion('kimi', 'https://api.moonshot.ai/v1')?.id).toBe('international');
     expect(findRegistryRegion('kimi', 'https://api.moonshot.ai/v2')).toBeUndefined();
+    expect(findRegistryRegion('kimi', 'https://api.kimi.ai/coding/v1')?.id).toBe('code-international');
+    expect(evaluateEndpoint('kimi', 'https://api.kimi.ai/coding/v1')).toMatchObject({
+      allowed: true,
+      kind: 'registry',
+    });
   });
 
   it('gives a registry provider its first region as the default, and no default to any other id', () => {
     expect(defaultBaseUrl('openrouter')).toBe('https://openrouter.ai/api/v1');
     expect(defaultBaseUrl('minimax')).toBe('https://api.minimax.io/v1');
-    expect(defaultBaseUrl('kilo')).toBeUndefined();
+    expect(defaultBaseUrl('kilo')).toBe('https://ai-gateway.kilo.ai/api/v1');
     expect(defaultBaseUrl(CUSTOM_PROVIDER_ID)).toBeUndefined();
   });
 
@@ -76,37 +126,55 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     }
   });
 
-  it('permits ChatGPT and MiniMax sign-in, and hides each while its row is gated', () => {
+  it('keeps permitted sign-in methods separate from gated generic auth methods', () => {
     const withSignIn = PROVIDER_REGISTRY.filter((provider) =>
       provider.auth.methods.includes('subscription-sign-in'),
     ).map((provider) => provider.id);
-    expect(withSignIn).toEqual(['minimax', 'chatgpt']);
+    expect(withSignIn).toEqual(['minimax', 'kimi', 'chatgpt', 'xai']);
     expect(permittedAuthMethods('chatgpt')).toEqual(['subscription-sign-in']);
     expect(isAuthGated('chatgpt')).toBe(true);
     expect(offeredAuthMethods('chatgpt')).toEqual([]);
     expect(permittedAuthMethods('minimax')).toEqual(['api-key', 'subscription-sign-in']);
     expect(isAuthGated('minimax')).toBe(true);
     expect(offeredAuthMethods('minimax')).toEqual([]);
+    expect(permittedAuthMethods('kimi')).toEqual(['api-key', 'subscription-sign-in']);
+    expect(isAuthGated('kimi')).toBe(true);
+    expect(offeredAuthMethods('kimi')).toEqual([]);
+    expect(permittedAuthMethods('xai')).toEqual(['api-key', 'subscription-sign-in']);
+    expect(isSignInProvider('xai')).toBe(true);
+    expect(findRegistryProvider('xai')?.auth.unverified).toBe(true);
+    expect(offeredAuthMethods('xai')).toEqual([]);
   });
 
-  it('lists ChatGPT and MiniMax on the sign-in surface under D20', () => {
+  it('lists the four owner-selected OAuth providers on the sign-in surface', () => {
     // The registry lists them in its own order; the settings panel decides the order of its buttons.
-    expect(signInProviders()).toEqual(['minimax', 'chatgpt']);
+    expect(signInProviders()).toEqual(['minimax', 'kimi', 'chatgpt', 'xai']);
     expect(isSignInProvider('chatgpt')).toBe(true);
+    expect(isSignInProvider('kimi')).toBe(true);
     expect(isSignInProvider('minimax')).toBe(true);
+    expect(isSignInProvider('xai')).toBe(true);
   });
 
   it('never offers a sign-in for a provider that is set up with an API key', () => {
     for (const provider of PROVIDER_REGISTRY) {
-      if (provider.id === 'chatgpt' || provider.id === 'minimax') continue;
+      if (
+        provider.id === 'chatgpt' ||
+        provider.id === 'kimi' ||
+        provider.id === 'minimax' ||
+        provider.id === 'xai'
+      )
+        continue;
       expect(isSignInProvider(provider.id), provider.id).toBe(false);
     }
     expect(isSignInProvider('openrouter')).toBe(false);
+    expect(isSignInProvider('claude')).toBe(false);
+    expect(isSignInProvider('gemini')).toBe(false);
+    expect(isSignInProvider('deepseek')).toBe(false);
     expect(isSignInProvider(CUSTOM_PROVIDER_ID)).toBe(false);
     expect(isSignInProvider('kilo')).toBe(false);
   });
 
-  it('offers an API key to every provider except ChatGPT, which signs in', () => {
+  it('offers an API key to all providers that use APIs, including Kimi alongside OAuth', () => {
     for (const provider of PROVIDER_REGISTRY) {
       const expected = provider.id !== 'chatgpt';
       expect(provider.auth.methods.includes('api-key'), provider.id).toBe(expected);
@@ -127,16 +195,18 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     const unverified = PROVIDER_REGISTRY.filter(
       (provider) => provider.auth.unverified === true,
     ).map((provider) => provider.id);
-    expect(unverified).toEqual(['minimax']);
+    expect(unverified).toEqual(['minimax', 'kimi', 'xai']);
   });
 
   it('permits a key or nothing for a custom endpoint, and nothing for an unknown provider', () => {
     expect(CUSTOM_PROVIDER_AUTH.methods).toEqual(['api-key', 'none']);
     expect(permittedAuthMethods(CUSTOM_PROVIDER_ID)).toEqual(['api-key', 'none']);
     expect(offeredAuthMethods(CUSTOM_PROVIDER_ID)).toEqual(['api-key', 'none']);
-    expect(permittedAuthMethods('kilo')).toEqual([]);
-    expect(offeredAuthMethods('kilo')).toEqual([]);
-    expect(isAuthMethodPermitted('kilo', 'api-key')).toBe(false);
+    expect(permittedAuthMethods('not-a-provider')).toEqual([]);
+    expect(offeredAuthMethods('not-a-provider')).toEqual([]);
+    expect(isAuthMethodPermitted('not-a-provider', 'api-key')).toBe(false);
+    expect(permittedAuthMethods('deepseek')).toEqual(['api-key']);
+    expect(permittedAuthMethods('kilo')).toEqual(['api-key']);
   });
 });
 

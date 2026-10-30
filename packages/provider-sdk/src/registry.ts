@@ -19,6 +19,9 @@ export const REGISTRY_PROVIDER_IDS = [
   'kimi',
   'openrouter',
   'chatgpt',
+  'xai',
+  'deepseek',
+  'kilo',
 ] as const;
 export type RegistryProviderId = (typeof REGISTRY_PROVIDER_IDS)[number];
 
@@ -48,7 +51,8 @@ export type ProviderAuthMethod = 'api-key' | 'subscription-sign-in' | 'none';
  * One row of the §6d-1 table: the authentication a provider permits, with the source that says so.
  *
  * The facts come from the PLAN-v4 §6d-1 table (research of 2026-10-29). A row that is not confirmed is marked
- * `unverified`, and a row that stays hidden until the owner has what it needs is marked `gated`.
+ * `unverified`, and a provider whose generic auth-method selection is gated is marked `gated`; a dedicated
+ * sign-in surface may still use a separate setup path.
  */
 export interface ProviderAuthRule {
   /** The authentication methods this provider permits. Never empty. */
@@ -57,7 +61,7 @@ export interface ProviderAuthRule {
   readonly source: string;
   /** The date the source was read. */
   readonly sourceDate: string;
-  /** True while the row stays hidden: the owner has not registered the app yet (PLAN-v4 §6d). */
+  /** True when generic auth-method selection is gated for this provider (PLAN-v4 §6d); dedicated sign-in flows may use separate setup paths. */
   readonly gated?: true;
   /** True when the row is a research gap: the fact is not confirmed. */
   readonly unverified?: true;
@@ -65,7 +69,14 @@ export interface ProviderAuthRule {
   readonly note: string;
 }
 
-export type ProviderRegionId = 'international' | 'china';
+export type ProviderRegionId =
+  | 'international'
+  | 'china'
+  | 'code-international'
+  | 'oauth-international';
+
+/** The Grok Build CLI proxy is only a candidate for xAI OAuth inference and needs attended verification. Source: https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md. */
+export const XAI_OAUTH_INFERENCE_BASE_URL = 'https://cli-chat-proxy.grok.com/v1';
 
 export interface ProviderRegion {
   readonly id: ProviderRegionId;
@@ -160,11 +171,11 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     auth: {
       methods: ['api-key', 'subscription-sign-in'],
       source:
-        "PLAN-v4 §6d-1 table, row 'MiniMax': the MiniMax platform docs. Coding Plan keys (sk-cp-) are documented for MiniMax's own listed tools, and JOY Media is not one of them",
-      sourceDate: '2026-10-29',
+        "PLAN-v4 §6d-1 table, row 'MiniMax': MiniMax platform docs list its own tools for Coding Plan keys (sk-cp-) but do not establish JOY Media's commercial eligibility",
+      sourceDate: '2026-10-30',
       gated: true,
       unverified: true,
-      note: 'An API key remains the normal path. D20 permits device-code sign-in as a second option, gated until JOY Media registers its own client_id (an owner action). UNVERIFIED: whether a Coding Plan key (sk-cp-) may be used by JOY Media remains a separate question; MiniMax must confirm it in writing.',
+      note: 'MiniMax documents API-key use, but JOY Media\'s eligibility for customer-supplied Coding Plan (sk-cp-) and M Plan API keys remains unverified, so generic auth-method selection stays gated. This metadata gate does not disable the desktop API-key entry form or CLI MiniMax-key profile path, and it does not authorize customer-key use. D20 also permits device-code sign-in; the OpenClaw public client is the default until JOY registers its own configurable client ID.',
     },
     regions: [
       {
@@ -209,11 +220,13 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     label: 'Kimi (Moonshot AI)',
     api: 'chat-completions',
     auth: {
-      methods: ['api-key'],
+      methods: ['api-key', 'subscription-sign-in'],
       source:
-        "PLAN-v4 §6d-1 table, row 'Kimi (Moonshot)': the Kimi API Platform quickstart, https://platform.kimi.ai/docs/get-your-api-key (read 2026-10-29)",
-      sourceDate: '2026-10-29',
-      note: 'An API key only. The key is created in the Kimi API Platform console, on the API Keys page, and is sent as Authorization: Bearer <key>. The page offers no third-party OAuth.',
+        "PLAN-v4 D21 owner route (2026-10-30), plus MoonshotAI's first-party Kimi Code CLI device-OAuth implementation",
+      sourceDate: '2026-10-30',
+      gated: true,
+      unverified: true,
+      note: 'The owner-selected local route is Kimi Code OAuth; sign-in and model listing were observed, while inference is not yet verified. The separate Moonshot Platform API-key regions remain available.',
     },
     regions: [
       {
@@ -229,6 +242,13 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
         baseUrl: 'https://api.moonshot.cn/v1',
         keyUrl: 'https://platform.kimi.com/console/api-keys',
         docsUrl: 'https://platform.kimi.com/docs/get-api-key',
+      },
+      {
+        id: 'code-international',
+        label: 'Kimi Code (International)',
+        baseUrl: 'https://api.kimi.ai/coding/v1',
+        keyUrl: 'https://www.kimi.ai/code',
+        docsUrl: 'https://www.kimi.com/code/docs/en/',
       },
     ],
   },
@@ -264,7 +284,7 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
         "PLAN-v4 §6d-1 table, row 'ChatGPT plan': the OpenAI sign-in-with-ChatGPT terms. A paid or hosted app needs OpenAI clearance",
       sourceDate: '2026-10-29',
       gated: true,
-      note: 'The supported OpenAI sign-in flow for a ChatGPT plan. Gated: the option stays hidden until the owner registers the app with OpenAI, and the flow refuses with NOT_CONFIGURED. §6d-3 makes that registration dynamic.',
+      note: 'The supported OpenAI sign-in flow for a ChatGPT plan. Generic auth-method selection remains gated, but the dedicated desktop sign-in panel offers ChatGPT and uses SIWC dynamic client registration when chatGptClientId is undefined (PLAN-v4 §6d-3).',
     },
     regions: [
       {
@@ -273,6 +293,79 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
         baseUrl: 'https://api.openai.com/v1',
         keyUrl: 'https://chatgpt.com',
         docsUrl: 'https://developers.openai.com',
+      },
+    ],
+  },
+  {
+    id: 'xai',
+    label: 'xAI (Grok)',
+    api: 'chat-completions',
+    auth: {
+      methods: ['api-key', 'subscription-sign-in'],
+      source:
+        'Owner decision D22 (2026-10-30), xAI API reference https://docs.x.ai/docs/api-reference, and Grok Build authentication guide https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md',
+      sourceDate: '2026-10-30',
+      gated: true,
+      unverified: true,
+      note: 'The owner selected the Grok CLI public-client device flow as the secondary route. The OAuth inference base and the account\'s model entitlements still need attended verification, so generic auth-method selection remains gated.',
+    },
+    regions: [
+      {
+        id: INTERNATIONAL,
+        label: 'International',
+        baseUrl: 'https://api.x.ai/v1',
+        keyUrl: 'https://console.x.ai',
+        docsUrl: 'https://docs.x.ai/docs/api-reference',
+      },
+      {
+        id: 'oauth-international',
+        label: 'OAuth inference (Grok CLI proxy)',
+        baseUrl: XAI_OAUTH_INFERENCE_BASE_URL,
+        keyUrl: 'https://console.x.ai',
+        docsUrl:
+          'https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md',
+      },
+    ],
+  },
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    api: 'chat-completions',
+    auth: {
+      methods: ['api-key'],
+      source:
+        'D22 follow-up (2026-10-30), DeepSeek OpenAI-compatible integration guide https://api-docs.deepseek.com/quick_start/agent_integrations/oh_my_pi/',
+      sourceDate: '2026-10-30',
+      note: 'OpenAI-compatible API-key setup uses the provider base URL without a /v1 suffix.',
+    },
+    regions: [
+      {
+        id: INTERNATIONAL,
+        label: 'International',
+        baseUrl: 'https://api.deepseek.com',
+        keyUrl: 'https://platform.deepseek.com/api_keys',
+        docsUrl: 'https://api-docs.deepseek.com/quick_start/agent_integrations/oh_my_pi/',
+      },
+    ],
+  },
+  {
+    id: 'kilo',
+    label: 'Kilo Gateway',
+    api: 'chat-completions',
+    auth: {
+      methods: ['api-key'],
+      source:
+        'D22 follow-up (2026-10-30), Kilo Gateway API reference https://kilo.ai/docs/gateway/api-reference',
+      sourceDate: '2026-10-30',
+      note: 'The Kilo Gateway uses an API key with its OpenAI-compatible gateway base URL.',
+    },
+    regions: [
+      {
+        id: INTERNATIONAL,
+        label: 'International',
+        baseUrl: 'https://ai-gateway.kilo.ai/api/v1',
+        keyUrl: 'https://kilo.ai',
+        docsUrl: 'https://kilo.ai/docs/gateway/api-reference',
       },
     ],
   },
@@ -305,15 +398,15 @@ export function isAuthMethodPermitted(provider: string, method: ProviderAuthMeth
   return permittedAuthMethods(provider).includes(method);
 }
 
-/** True while the provider's row stays hidden: the owner has not registered the app yet (PLAN-v4 §6d). */
+/** True when generic auth-method selection is gated for this provider (PLAN-v4 §6d). */
 export function isAuthGated(provider: string): boolean {
   if (isCustomProviderId(provider)) return false;
   return findRegistryProvider(provider)?.auth.gated === true;
 }
 
 /**
- * The authentication a provider offers right now: its permitted methods, unless the row is gated. A gated provider
- * offers nothing, so the option stays hidden (PLAN-v4 §6d-1 rule 5, §6d).
+ * The methods shown by generic auth-method selection: permitted methods unless the provider is auth-gated.
+ * A dedicated provider sign-in surface may still list that provider and enforce its own setup in the sign-in flow.
  */
 export function offeredAuthMethods(provider: string): readonly ProviderAuthMethod[] {
   if (isAuthGated(provider)) return [];
@@ -321,12 +414,13 @@ export function offeredAuthMethods(provider: string): readonly ProviderAuthMetho
 }
 
 /**
- * The registry providers that permit a subscription sign-in (PLAN-v4 §6d-1 rule 5, D20). Under D20 that is ChatGPT,
- * and MiniMax once JOY Media has registered its own client ID.
+ * The registry providers that permit subscription sign-in under the owner-selected local routes: ChatGPT, Kimi Code,
+ * MiniMax, and xAI. The desktop panel runs each provider's dedicated flow; generic profile auth selection remains
+ * separately gated where the provider row says so.
  *
- * The sign-in surface is built from this list, so a provider that uses an API key never offers a sign-in. The list
- * reads the *permitted* methods, not the offered ones: a gated provider keeps its place here, because the gate is the
- * provider's own registration state and the flow itself refuses it.
+ * The sign-in surface is built from this list, so API-key-only providers do not offer a sign-in. It reads the
+ * *permitted* methods, not `offeredAuthMethods()`: a provider may appear here while its generic auth methods remain
+ * gated for profile setup.
  */
 export function signInProviders(): readonly RegistryProviderId[] {
   return PROVIDER_REGISTRY.filter((provider) =>

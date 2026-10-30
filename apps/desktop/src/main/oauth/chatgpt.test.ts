@@ -6,6 +6,7 @@ import {
   buildChatGptAuthUrl,
   CHATGPT_AUTHORIZE_URL,
   CHATGPT_CALLBACK_PATH,
+  CHATGPT_DISCOVERY_URL,
   CHATGPT_ISSUER,
   CHATGPT_JWKS_URL,
   CHATGPT_REQUIRED_SCOPE,
@@ -18,6 +19,7 @@ import {
   isExtAgentHostId,
   newExtAgentHostId,
   refreshChatGptTokens,
+  revokeChatGptRefreshToken,
   signInWithChatGpt,
   verifyIdToken,
 } from './chatgpt.js';
@@ -601,5 +603,82 @@ describe('the requests a ChatGPT sign-in makes', () => {
     expect(form?.get('client_id')).toBe(record.clientId);
     expect(form?.get('resource')).toBe('https://api.openai.com/v1');
     expect(form?.has('scope')).toBe(false);
+  });
+});
+
+describe('revokeChatGptRefreshToken', () => {
+  it('discovers the issuer revocation endpoint and sends the stored refresh token with its hint', async () => {
+    const calls: { readonly url: string; readonly init: RequestInit }[] = [];
+    const fetch: FetchLike = async (url, init) => {
+      calls.push({ url, init });
+      if (url === CHATGPT_DISCOVERY_URL) {
+        return jsonReply({
+          issuer: CHATGPT_ISSUER,
+          revocation_endpoint: `${CHATGPT_ISSUER}/oauth/revoke`,
+        });
+      }
+      return new Response(null, { status: 200 });
+    };
+    const record = recordAt(1_000);
+
+    await expect(revokeChatGptRefreshToken({ record, fetch })).resolves.toBeUndefined();
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({
+      url: CHATGPT_DISCOVERY_URL,
+      init: { method: 'GET', redirect: 'manual' },
+    });
+    expect(calls[1]?.url).toBe(`${CHATGPT_ISSUER}/oauth/revoke`);
+    expect(calls[1]?.init).toMatchObject({ method: 'POST', redirect: 'manual' });
+    const form = new URLSearchParams(String(calls[1]?.init.body));
+    expect(form.get('client_id')).toBe(record.clientId);
+    expect(form.get('token')).toBe(record.refreshToken);
+    expect(form.get('token_type_hint')).toBe('refresh_token');
+  });
+
+  it.each([
+    [
+      'an issuer mismatch',
+      { issuer: 'https://attacker.example', revocation_endpoint: 'https://attacker.example/revoke' },
+    ],
+    [
+      'a cross-origin revocation endpoint',
+      { issuer: CHATGPT_ISSUER, revocation_endpoint: 'https://attacker.example/revoke' },
+    ],
+    [
+      'an insecure revocation endpoint',
+      { issuer: CHATGPT_ISSUER, revocation_endpoint: 'http://auth.openai.com/revoke' },
+    ],
+  ])('refuses %s before sending a token', async (_case, discovery) => {
+    const calls: string[] = [];
+    const fetch: FetchLike = async (url) => {
+      calls.push(url);
+      return jsonReply(discovery);
+    };
+
+    await expect(revokeChatGptRefreshToken({ record: recordAt(1_000), fetch })).rejects.toMatchObject({
+      code: 'REVOCATION_FAILED',
+    });
+    expect(calls).toEqual([CHATGPT_DISCOVERY_URL]);
+  });
+
+  it('fails safely on a redirected or rejected revocation response', async () => {
+    const fetch: FetchLike = async (url) => {
+      if (url === CHATGPT_DISCOVERY_URL) {
+        return jsonReply({
+          issuer: CHATGPT_ISSUER,
+          revocation_endpoint: `${CHATGPT_ISSUER}/oauth/revoke`,
+        });
+      }
+      return new Response('refresh-token-should-not-be-reported', {
+        status: 503,
+        headers: { location: 'https://attacker.example/collect' },
+      });
+    };
+
+    await expect(revokeChatGptRefreshToken({ record: recordAt(1_000), fetch })).rejects.toMatchObject({
+      code: 'REVOCATION_FAILED',
+      message: expect.not.stringContaining('refresh-token-should-not-be-reported'),
+    });
   });
 });

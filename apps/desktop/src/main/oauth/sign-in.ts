@@ -1,5 +1,6 @@
 import {
   findRegistryProvider,
+  getOAuthClient,
   signInProviders,
   MINIMAX_OAUTH_ENDPOINTS,
   type MiniMaxRegion,
@@ -24,6 +25,18 @@ import {
   signInWithMiniMax,
   type MiniMaxTokenRecord,
 } from './minimax.js';
+import {
+  XAI_OAUTH_INFERENCE_BASE_URL,
+  encodeXaiTokenRecord,
+  signInWithXai,
+  type XaiTokenRecord,
+} from './xai.js';
+import {
+  KIMI_CODE_BASE_URL,
+  encodeKimiTokenRecord,
+  signInWithKimiCode,
+  type KimiTokenRecord,
+} from './kimi.js';
 import { OAuthFlowError } from './errors.js';
 import { MAX_CATALOG_CHARS, type FetchLike, replyText } from './http.js';
 
@@ -31,8 +44,8 @@ import { MAX_CATALOG_CHARS, type FetchLike, replyText } from './http.js';
 export const INSTALL_ID_SETTING = 'chatgpt.ext_agent_host_id';
 
 /**
- * A provider the renderer may ask to sign in to. The registry decides which ones may be signed in to (PLAN-v4 §6d-1
- * rule 5, D20): under D20 that is ChatGPT, and MiniMax once JOY Media has registered its own client ID.
+ * A provider the renderer may ask to sign in to. The registry reflects the owner's local, per-user route decision:
+ * ChatGPT, Kimi Code, and MiniMax use their dedicated desktop sign-in flows; all other providers use APIs.
  */
 export type SignInProvider = RegistryProviderId;
 
@@ -44,9 +57,14 @@ export interface SignInResult {
   readonly secret: string;
 }
 
-/** Validated per-request context passed by the desktop main process. */
+/** Main-process-only identity used to reauthorize an existing ChatGPT profile. */
 export interface ProviderSignInContext {
+  /** The selected MiniMax account region for this sign-in, defaulted by the validated IPC request. */
   readonly minimaxRegion?: MiniMaxRegion;
+  readonly savedChatGptAccount?: {
+    readonly clientId: string;
+    readonly accountId: string;
+  };
 }
 
 export interface ProviderSignInDeps {
@@ -57,6 +75,8 @@ export interface ProviderSignInDeps {
   readonly chatGptClientId: string | undefined;
   /** JOY Media's own registered MiniMax client ID. Undefined until the owner registers it. */
   readonly minimaxClientId: string | undefined;
+  /** Reads local OAuth client overrides from app settings. Production injects the local database setting reader. */
+  readonly getSetting?: (key: string) => string | undefined;
   /** The MiniMax account region (S5). International unless the owner picks China. */
   readonly minimaxRegion?: MiniMaxRegion;
   /** This install's ChatGPT ID, from loadOrCreateInstallId. */
@@ -82,7 +102,8 @@ export function createProviderSignIn(
       );
     }
     if (provider === 'minimax') {
-      if (deps.minimaxClientId === undefined || deps.minimaxClientId.trim().length === 0) {
+      const clientId = configuredOAuthClientId('minimax');
+      if (clientId === undefined || clientId.trim().length === 0) {
         throw new OAuthFlowError(
           'NOT_CONFIGURED',
           "MiniMax sign-in needs JOY Media's registered client ID.",
@@ -90,7 +111,7 @@ export function createProviderSignIn(
       }
       const region = context?.minimaxRegion ?? deps.minimaxRegion ?? 'global';
       const record = await signInWithMiniMax({
-        clientId: deps.minimaxClientId,
+        clientId,
         region,
         openExternal: deps.openExternal,
         fetch: deps.fetch,
@@ -105,6 +126,38 @@ export function createProviderSignIn(
         secret: encodeMiniMaxTokenRecord(record),
       };
     }
+    if (provider === 'xai') {
+      const clientId = configuredOAuthClientId('xai');
+      const record = await signInWithXai({
+        ...(clientId === undefined ? {} : { clientId }),
+        openExternal: deps.openExternal,
+        fetch: deps.fetch,
+        now: deps.now,
+      });
+      const modelId = await firstXaiModel(record, deps.fetch);
+      return {
+        provider,
+        baseUrl: XAI_OAUTH_INFERENCE_BASE_URL,
+        modelId,
+        secret: encodeXaiTokenRecord(record),
+      };
+    }
+    if (provider === 'kimi') {
+      const clientId = configuredOAuthClientId('kimi');
+      const record = await signInWithKimiCode({
+        ...(clientId === undefined ? {} : { clientId }),
+        openExternal: deps.openExternal,
+        fetch: deps.fetch,
+        now: deps.now,
+      });
+      const modelId = await firstKimiCodeModel(record, deps.fetch);
+      return {
+        provider,
+        baseUrl: KIMI_CODE_BASE_URL,
+        modelId,
+        secret: encodeKimiTokenRecord(record),
+      };
+    }
     if (provider !== 'chatgpt') {
       throw new OAuthFlowError(
         'NOT_CONFIGURED',
@@ -112,7 +165,8 @@ export function createProviderSignIn(
       );
     }
     const record = await signInWithChatGpt({
-      issuedClientId: deps.chatGptClientId,
+      issuedClientId:
+        context?.savedChatGptAccount?.clientId ?? configuredOAuthClientId('chatgpt'),
       extAgentHostId: deps.installId(),
       openExternal: deps.openExternal,
       fetch: deps.fetch,
@@ -127,6 +181,18 @@ export function createProviderSignIn(
       secret: encodeTokenRecord(record),
     };
   };
+
+  /** Local app settings override the public OAuth client IDs recorded in the provider SDK. */
+  function configuredOAuthClientId(
+    provider: 'chatgpt' | 'minimax' | 'kimi' | 'xai',
+  ): string | undefined {
+    if (deps.getSetting === undefined) {
+      if (provider === 'minimax') return deps.minimaxClientId;
+      if (provider === 'chatgpt') return deps.chatGptClientId;
+    }
+    const client = getOAuthClient(provider, deps.getSetting?.(`oauth.client_id.${provider}`));
+    return client?.clientId;
+  }
 }
 
 /** The name a provider is shown under. */
@@ -197,6 +263,50 @@ async function firstMiniMaxModel(
       'EXCHANGE_FAILED',
       'MiniMax lists no usable model for this account.',
     );
+  }
+  return first.id;
+}
+
+/** The first usable model xAI lists for this account; token values can never become model IDs. */
+async function firstXaiModel(record: XaiTokenRecord, fetch: FetchLike): Promise<string> {
+  let models: ReturnType<typeof parseChatModels>;
+  try {
+    const response = await fetch(`${XAI_OAUTH_INFERENCE_BASE_URL}/models`, {
+      method: 'GET',
+      headers: { accept: 'application/json', authorization: `Bearer ${record.accessToken}` },
+      redirect: 'manual',
+    });
+    if (!response.ok) throw new Error('model list request failed');
+    models = parseChatModels(await replyText(response, MAX_CATALOG_CHARS));
+  } catch {
+    throw new OAuthFlowError('EXCHANGE_FAILED', 'xAI lists no usable model for this account.');
+  }
+  const tokens = [record.accessToken, record.refreshToken];
+  const first = models.find((model) => !tokens.some((token) => holdsCredential(model.id, token)));
+  if (first === undefined) {
+    throw new OAuthFlowError('EXCHANGE_FAILED', 'xAI lists no usable model for this account.');
+  }
+  return first.id;
+}
+
+/** The first Kimi Code model listed for the signed-in account; token values can never become model IDs. */
+async function firstKimiCodeModel(record: KimiTokenRecord, fetch: FetchLike): Promise<string> {
+  let models: ReturnType<typeof parseChatModels>;
+  try {
+    const response = await fetch(`${KIMI_CODE_BASE_URL}/models`, {
+      method: 'GET',
+      headers: { accept: 'application/json', authorization: `Bearer ${record.accessToken}` },
+      redirect: 'manual',
+    });
+    if (!response.ok) throw new Error('model list request failed');
+    models = parseChatModels(await replyText(response, MAX_CATALOG_CHARS));
+  } catch {
+    throw new OAuthFlowError('EXCHANGE_FAILED', 'Kimi lists no usable model for this account.');
+  }
+  const tokens = [record.accessToken, record.refreshToken];
+  const first = models.find((model) => !tokens.some((token) => holdsCredential(model.id, token)));
+  if (first === undefined) {
+    throw new OAuthFlowError('EXCHANGE_FAILED', 'Kimi lists no usable model for this account.');
   }
   return first.id;
 }

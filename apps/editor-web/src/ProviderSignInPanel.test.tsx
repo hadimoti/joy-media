@@ -30,12 +30,13 @@ describe('ProviderSignInPanel', () => {
     expect(renderToStaticMarkup(<ProviderSignInPanel onSignedIn={() => undefined} />)).toBe('');
   });
 
-  it('offers ChatGPT and MiniMax, both labelled as previews, in the desktop app', () => {
+  it('offers ChatGPT, Kimi, and MiniMax as previews in the desktop app', () => {
     global.window = { joyDesktop: {} };
     const markup = renderToStaticMarkup(<ProviderSignInPanel onSignedIn={() => undefined} />);
     expect(markup).toContain('Sign in with ChatGPT');
+    expect(markup).toContain('Sign in with Kimi');
     expect(markup).toContain('Sign in with MiniMax');
-    expect(markup.match(/\(Preview\)/g)).toHaveLength(2);
+    expect(markup.match(/\(Preview\)/g)).toHaveLength(3);
   });
 
   it('never offers OpenRouter, which is set up with an API key under D20', () => {
@@ -44,7 +45,7 @@ describe('ProviderSignInPanel', () => {
     expect(markup).not.toContain('OpenRouter');
   });
 
-  it('defaults to Global, sends the selected region only for MiniMax, and leaves ChatGPT unchanged', async () => {
+  it('sends region only for MiniMax and leaves ChatGPT and Kimi sign-in requests unchanged', async () => {
     const invoke = vi.fn().mockResolvedValue({
       id: 'profile-1',
       provider: 'minimax',
@@ -90,6 +91,17 @@ describe('ProviderSignInPanel', () => {
     });
     expect(invoke).toHaveBeenLastCalledWith('desktop.provider-profile.sign-in', {
       provider: 'chatgpt',
+    });
+
+    const kimiButton = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Sign in with Kimi'),
+    );
+    expect(kimiButton).toBeDefined();
+    await act(async () => {
+      kimiButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(invoke).toHaveBeenLastCalledWith('desktop.provider-profile.sign-in', {
+      provider: 'kimi',
     });
   });
 });

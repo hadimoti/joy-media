@@ -166,6 +166,11 @@ export async function signInDesktopProviderProfile(request: {
   return data as DesktopProviderProfile;
 }
 
+/** Revokes a saved ChatGPT authorization and removes its local profile on success. */
+export async function signOutDesktopProviderProfile(id: string): Promise<void> {
+  await requireBridge().invoke('desktop.provider-profile.sign-out', { id });
+}
+
 /**
  * Probes the provider profile connectivity in the desktop host without exposing the key.
  */

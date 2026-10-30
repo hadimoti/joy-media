@@ -11,6 +11,7 @@ import {
   isExtAgentHostId,
 } from './chatgpt.js';
 import { decodeMiniMaxTokenRecord } from './minimax.js';
+import { decodeKimiTokenRecord, KIMI_CODE_BASE_URL } from './kimi.js';
 import type { FetchLike } from './http.js';
 import { createProviderSignIn, INSTALL_ID_SETTING, loadOrCreateInstallId } from './sign-in.js';
 
@@ -233,6 +234,79 @@ describe('createProviderSignIn', () => {
     ]);
   });
 
+  it('signs in to Kimi Code and starts the profile on its first listed model', async () => {
+    const now = Date.UTC(2026, 9, 30);
+    let openedUrl = '';
+    let releaseOpen: () => void = () => undefined;
+    const opened = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    const requests: { readonly url: string; readonly init: RequestInit }[] = [];
+    const fetch: FetchLike = async (url, init) => {
+      requests.push({ url, init });
+      if (url.endsWith('/api/oauth/device_authorization')) {
+        return json({
+          user_code: 'KIMI-USER-CODE',
+          device_code: 'private-device-code',
+          verification_uri_complete: 'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+          expires_in: 120,
+          interval: 1,
+        });
+      }
+      if (url.endsWith('/api/oauth/token')) {
+        const body = new URLSearchParams(String(init.body));
+        expect(body.get('device_code')).toBe('private-device-code');
+        return json({
+          access_token: 'kimi-access-token',
+          refresh_token: 'kimi-refresh-token',
+          expires_in: 3600,
+          scope: 'kimi-code',
+          token_type: 'Bearer',
+        });
+      }
+      if (url === `${KIMI_CODE_BASE_URL}/models`) {
+        expect(new Headers(init.headers).get('authorization')).toBe('Bearer kimi-access-token');
+        return json({ data: [{ id: 'kimi-code-model' }, { id: 'kimi-code-model-2' }] });
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const signIn = createProviderSignIn({
+      openExternal: (url) => {
+        openedUrl = url;
+        releaseOpen();
+      },
+      fetch,
+      now: () => now,
+      chatGptClientId: undefined,
+      minimaxClientId: undefined,
+      installId: () => HOST_ID,
+    });
+    const pending = signIn('kimi');
+    void pending.catch(releaseOpen);
+
+    await opened;
+    const result = await pending;
+
+    expect(openedUrl).toBe(
+      'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+    );
+    expect(result).toMatchObject({
+      provider: 'kimi',
+      baseUrl: KIMI_CODE_BASE_URL,
+      modelId: 'kimi-code-model',
+    });
+    expect(decodeKimiTokenRecord(result.secret)).toMatchObject({
+      accessToken: 'kimi-access-token',
+      refreshToken: 'kimi-refresh-token',
+      scope: 'kimi-code',
+    });
+    expect(requests.map((request) => request.url)).toEqual([
+      'https://auth.kimi.ai/api/oauth/device_authorization',
+      'https://auth.kimi.ai/api/oauth/token',
+      `${KIMI_CODE_BASE_URL}/models`,
+    ]);
+  });
+
   it('refuses an empty MiniMax model list with the account-safe message', async () => {
     const now = Date.UTC(2026, 9, 30);
     vi.useFakeTimers({ now });
@@ -358,6 +432,53 @@ describe('createProviderSignIn', () => {
       accountId: 'acct-1',
       accessToken: 'at-1',
       refreshToken: 'rt-1',
+    });
+  });
+
+  it('reauthorizes a saved ChatGPT account with its client ID instead of registering another client', async () => {
+    let authUrl = '';
+    const fetch: FetchLike = async (url, init) => {
+      if (url === CHATGPT_JWKS_URL) return json({ keys: [JWK] });
+      if (url === CHATGPT_TOKEN_URL) {
+        const nonce = new URL(authUrl).searchParams.get('nonce') ?? '';
+        const form = new URLSearchParams(String(init.body));
+        expect(form.get('client_id')).toBe(CLIENT_ID);
+        return json({
+          access_token: 'at-reauthorized',
+          refresh_token: 'rt-reauthorized',
+          id_token: signedIdToken(nonce),
+          expires_in: 3600,
+          scope: CHATGPT_SCOPE,
+        });
+      }
+      if (url === `${CHATGPT_RESPONSES_BASE_URL}/models`) {
+        return json({ models: [{ slug: 'gpt-reauthorized', visibility: 'list' }] });
+      }
+      throw new Error(`unexpected request to ${url}`);
+    };
+    const signIn = createProviderSignIn({
+      openExternal: async (url) => {
+        authUrl = url;
+        await returnFromBrowser(url, 'redirect_uri', (state) => `code=reauthorize-code&state=${state}`);
+      },
+      fetch,
+      now: Date.now,
+      chatGptClientId: undefined,
+      minimaxClientId: undefined,
+      installId: () => HOST_ID,
+      chatGptPort: 0,
+    });
+
+    const result = await signIn('chatgpt', {
+      savedChatGptAccount: { clientId: CLIENT_ID, accountId: 'acct-1' },
+    });
+
+    expect(new URL(authUrl).searchParams.get('client_id')).toBe(CLIENT_ID);
+    expect(result.modelId).toBe('gpt-reauthorized');
+    expect(decodeTokenRecord(result.secret)).toMatchObject({
+      clientId: CLIENT_ID,
+      accountId: 'acct-1',
+      refreshToken: 'rt-reauthorized',
     });
   });
 

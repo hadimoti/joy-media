@@ -10,6 +10,7 @@ import { LocalDatabase } from '../store/local-database.js';
 import { createMemorySecretStore, findRegistryProvider } from '@joy-media/provider-sdk';
 import { createProviderBroker } from './providers/provider-broker.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
+import { encodeTokenRecord, type ChatGptTokenRecord } from './oauth/chatgpt.js';
 
 function deps() {
   const fileRegistry = createFileRegistry(() => 'ref-1');
@@ -61,6 +62,36 @@ function deps() {
     now: () => 'T0',
     newId: () => `id-${++idCount}`,
   };
+}
+
+function chatGptRecord(overrides: Partial<ChatGptTokenRecord> = {}): ChatGptTokenRecord {
+  return {
+    version: 1,
+    clientId: 'chatgpt-client-1',
+    accountId: 'chatgpt-account-1',
+    accessToken: 'access-1',
+    refreshToken: 'refresh-1',
+    accessExpiresAt: Date.now() + 60_000,
+    ...overrides,
+  };
+}
+
+async function storeChatGptProfile(
+  d: ReturnType<typeof deps>,
+  record: ChatGptTokenRecord,
+): Promise<{ readonly id: string; readonly secretHandleId: string }> {
+  const profile = {
+    id: 'chatgpt-profile-1',
+    provider: 'chatgpt',
+    baseUrl: 'https://api.openai.com/v1',
+    modelId: 'gpt-4o-mini',
+    secretHandleId: 'chatgpt-secret-1',
+    createdAt: 'T0',
+    updatedAt: 'T0',
+  };
+  await d.secretStore.set(profile.secretHandleId, encodeTokenRecord(record));
+  d.localDatabase.saveProviderProfile(profile);
+  return { id: profile.id, secretHandleId: profile.secretHandleId };
 }
 
 describe('IPC dispatch', () => {
@@ -364,7 +395,8 @@ describe('IPC dispatch', () => {
 
   it('provider-profile.delete removes both the profile and its secret', async () => {
     const d = deps();
-    const handlers = createIpcHandlers(d);
+    const providerSignOut = vi.fn(async () => undefined);
+    const handlers = createIpcHandlers({ ...d, providerSignOut });
     const created = await dispatchIpcRequest(handlers, {
       origin: 'joy-media-app://renderer',
       channel: 'desktop.provider-profile.save',
@@ -384,6 +416,137 @@ describe('IPC dispatch', () => {
     expect(result.ok).toBe(true);
     expect(d.localDatabase.getProviderProfile(profile.id)).toBeUndefined();
     expect(await d.secretStore.get(profile.secretHandleId)).toBeNull();
+    expect(providerSignOut).not.toHaveBeenCalled();
+  });
+
+  it('ChatGPT sign-out revokes first, then deletes the saved profile and secret', async () => {
+    const d = deps();
+    const record = chatGptRecord();
+    const profile = await storeChatGptProfile(d, record);
+    const providerSignOut = vi.fn(async () => {
+      expect(d.localDatabase.getProviderProfile(profile.id)).toBeDefined();
+      expect(await d.secretStore.get(profile.secretHandleId)).toBe(encodeTokenRecord(record));
+    });
+    const handlers = createIpcHandlers({ ...d, providerSignOut });
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.sign-out',
+      payload: { id: profile.id },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(providerSignOut).toHaveBeenCalledWith(record);
+    expect(d.localDatabase.getProviderProfile(profile.id)).toBeUndefined();
+    expect(await d.secretStore.get(profile.secretHandleId)).toBeNull();
+  });
+
+  it('ChatGPT sign-out preserves the profile and secret when remote revocation fails', async () => {
+    const d = deps();
+    const record = chatGptRecord();
+    const profile = await storeChatGptProfile(d, record);
+    const providerSignOut = vi.fn(async () => {
+      throw new Error('private provider response');
+    });
+    const handlers = createIpcHandlers({ ...d, providerSignOut });
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.sign-out',
+      payload: { id: profile.id },
+    });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(providerSignOut).toHaveBeenCalledWith(record);
+    expect((result as { error?: string }).error).toContain('could not confirm sign-out');
+    expect(JSON.stringify(result)).not.toContain('private provider response');
+    expect(d.localDatabase.getProviderProfile(profile.id)).toBeDefined();
+    expect(await d.secretStore.get(profile.secretHandleId)).toBe(encodeTokenRecord(record));
+  });
+
+  it('reauthorizes a saved ChatGPT profile with its client and account identity, and replaces its secret', async () => {
+    const d = deps();
+    const record = chatGptRecord();
+    const profile = await storeChatGptProfile(d, record);
+    const replacement = chatGptRecord({ accessToken: 'access-2', refreshToken: 'refresh-2' });
+    const providerSignIn = vi.fn(async () => ({
+      provider: 'chatgpt' as const,
+      baseUrl: 'https://api.openai.com/v1',
+      modelId: 'gpt-4.1',
+      secret: encodeTokenRecord(replacement),
+    }));
+    const handlers = createIpcHandlers({ ...d, providerSignIn });
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.sign-in',
+      payload: { provider: 'chatgpt', id: profile.id },
+    });
+
+    expect(result).toMatchObject({ ok: true, data: { id: profile.id, provider: 'chatgpt' } });
+    expect(providerSignIn).toHaveBeenCalledWith('chatgpt', {
+      savedChatGptAccount: { clientId: record.clientId, accountId: record.accountId },
+    });
+    expect(await d.secretStore.get(profile.secretHandleId)).not.toBe(encodeTokenRecord(record));
+    expect(d.localDatabase.getProviderProfile(profile.id)?.modelId).toBe('gpt-4.1');
+  });
+
+  it('rejects a different ChatGPT account during reauthorization and revokes the new grant', async () => {
+    const d = deps();
+    const record = chatGptRecord();
+    const profile = await storeChatGptProfile(d, record);
+    const wrongAccount = chatGptRecord({ accountId: 'different-account', refreshToken: 'refresh-new' });
+    const providerSignIn = vi.fn(async () => ({
+      provider: 'chatgpt' as const,
+      baseUrl: 'https://api.openai.com/v1',
+      modelId: 'gpt-other',
+      secret: encodeTokenRecord(wrongAccount),
+    }));
+    const providerSignOut = vi.fn(async () => undefined);
+    const handlers = createIpcHandlers({ ...d, providerSignIn, providerSignOut });
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.sign-in',
+      payload: { provider: 'chatgpt', id: profile.id },
+    });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(providerSignOut).toHaveBeenCalledWith(wrongAccount);
+    expect(d.localDatabase.getProviderProfile(profile.id)?.modelId).toBe('gpt-4o-mini');
+    expect(await d.secretStore.get(profile.secretHandleId)).toBe(encodeTokenRecord(record));
+  });
+
+  it('rejects a different ChatGPT client during reauthorization and revokes the new grant', async () => {
+    const d = deps();
+    const record = chatGptRecord();
+    const profile = await storeChatGptProfile(d, record);
+    const unexpectedClient = chatGptRecord({
+      clientId: 'unexpected-client-id',
+      refreshToken: 'refresh-new',
+    });
+    const providerSignIn = vi.fn(async () => ({
+      provider: 'chatgpt' as const,
+      baseUrl: 'https://api.openai.com/v1',
+      modelId: 'gpt-other',
+      secret: encodeTokenRecord(unexpectedClient),
+    }));
+    const providerSignOut = vi.fn(async () => undefined);
+    const handlers = createIpcHandlers({ ...d, providerSignIn, providerSignOut });
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.sign-in',
+      payload: { provider: 'chatgpt', id: profile.id },
+    });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(providerSignIn).toHaveBeenCalledWith('chatgpt', {
+      savedChatGptAccount: { clientId: record.clientId, accountId: record.accountId },
+    });
+    expect(providerSignOut).toHaveBeenCalledWith(unexpectedClient);
+    expect(d.localDatabase.getProviderProfile(profile.id)?.modelId).toBe('gpt-4o-mini');
+    expect(await d.secretStore.get(profile.secretHandleId)).toBe(encodeTokenRecord(record));
   });
 
   it('desktop.provider.test probes a saved profile and never returns its key', async () => {

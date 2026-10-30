@@ -117,6 +117,7 @@ export {
   CUSTOM_PROVIDER_ID,
   PROVIDER_REGISTRY,
   REGISTRY_PROVIDER_IDS,
+  XAI_OAUTH_INFERENCE_BASE_URL,
   defaultBaseUrl,
   endpointUrl,
   evaluateEndpoint,
@@ -133,6 +134,8 @@ export {
   permittedAuthMethods,
   signInProviders,
 } from './registry.js';
+export type { OAuthClient, OAuthClientProviderId } from './oauth-clients.js';
+export { getOAuthClient } from './oauth-clients.js';
 
 // Re-export the two general-purpose agent slots (D17, PLAN-v4 §6d-1)
 export type {

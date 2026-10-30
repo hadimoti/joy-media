@@ -17,6 +17,9 @@ export type OAuthErrorCode =
   | 'MISSING_SCOPE'
   | 'ID_TOKEN_INVALID'
   | 'SIGN_IN_REQUIRED'
+  | 'REVOCATION_FAILED'
+  | 'ACCOUNT_MISMATCH'
+  | 'CLIENT_MISMATCH'
   | 'HOST_ID_INVALID';
 
 export class OAuthFlowError extends Error {

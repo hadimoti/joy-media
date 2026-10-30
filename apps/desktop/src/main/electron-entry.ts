@@ -51,6 +51,7 @@ import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { createProviderBroker } from './providers/provider-broker.js';
 import { createProviderSignIn, loadOrCreateInstallId } from './oauth/sign-in.js';
+import { revokeChatGptRefreshToken } from './oauth/chatgpt.js';
 import { createWorkerCompletion } from './providers/worker-completion.js';
 import { checkProfileCredentials } from './profile-credential-check.js';
 
@@ -171,10 +172,13 @@ if (!app.requestSingleInstanceLock()) {
       now: () => Date.now(),
       // No saved client: each ChatGPT sign-in registers one with ChatGPT (SIWC dynamic registration, PLAN-v4 §6d).
       chatGptClientId: undefined,
-      // JOY Media's own registered MiniMax client ID; it stays undefined until the owner registers it.
+      // Retained for compatibility with older sign-in callers; production reads OAuth client IDs from local settings.
       minimaxClientId: undefined,
+      getSetting: (key) => localDatabase.getSetting(key),
       installId: () => loadOrCreateInstallId(localDatabase),
     }),
+    providerSignOut: (record) =>
+      revokeChatGptRefreshToken({ record, fetch: (url, init) => fetch(url, init) }),
     handleWindowControl: (action) => {
       const win =
         BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];

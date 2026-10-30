@@ -54,6 +54,20 @@ import {
   type MiniMaxTokenKeeper,
   type MiniMaxTokenRecord,
 } from '../oauth/minimax.js';
+import {
+  createXaiTokenKeeper,
+  decodeXaiTokenRecord,
+  encodeXaiTokenRecord,
+  type XaiTokenKeeper,
+  type XaiTokenRecord,
+} from '../oauth/xai.js';
+import {
+  createKimiTokenKeeper,
+  decodeKimiTokenRecord,
+  encodeKimiTokenRecord,
+  type KimiTokenKeeper,
+  type KimiTokenRecord,
+} from '../oauth/kimi.js';
 import { OAuthFlowError } from '../oauth/errors.js';
 
 export { endpointBindingDigest };
@@ -194,7 +208,7 @@ interface Endpoint {
   readonly apiKey: string | undefined;
   /** For ChatGPT: the account, and the secret handle its token is stored under. */
   readonly chatGpt?: { readonly accountId: string; readonly handleId: string };
-  /** Secrets a reply must never carry besides the key: a ChatGPT or MiniMax refresh token. */
+  /** Secrets a reply must never carry besides the key, including OAuth refresh and replaced access tokens. */
   readonly screened?: readonly string[];
 }
 
@@ -269,6 +283,56 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
       deps.store.rebindSecretVersion?.(profileId, deps.store.secretVersion(handleId));
     },
   });
+  // An xAI OAuth record is used only for xAI profiles; a plain xAI key remains a normal API key.
+  const xaiTokens: XaiTokenKeeper = createXaiTokenKeeper({
+    fetch: deps.fetch,
+    now: nowMs,
+    save: async (profileId, handleId, record) => {
+      const profile = deps.store.getProfile(profileId);
+      if (profile === undefined) {
+        throw new BrokerError('PROFILE_NOT_FOUND', 'Unknown provider profile');
+      }
+      if (profile.secretHandleId !== handleId) {
+        throw new BrokerError(
+          'CREDENTIAL_UNAVAILABLE',
+          'The xAI sign-in changed during this request. Send it again.',
+        );
+      }
+      await deps.secrets.set(handleId, encodeXaiTokenRecord(record));
+      if (deps.store.getProfile(profileId)?.secretHandleId !== handleId) {
+        throw new BrokerError(
+          'CREDENTIAL_UNAVAILABLE',
+          'The xAI sign-in changed during this request. Send it again.',
+        );
+      }
+      deps.store.rebindSecretVersion?.(profileId, deps.store.secretVersion(handleId));
+    },
+  });
+  // A Kimi Code OAuth record is used only for Kimi Code profiles; Moonshot Platform API keys remain plain strings.
+  const kimiTokens: KimiTokenKeeper = createKimiTokenKeeper({
+    fetch: deps.fetch,
+    now: nowMs,
+    save: async (profileId, handleId, record) => {
+      const profile = deps.store.getProfile(profileId);
+      if (profile === undefined) {
+        throw new BrokerError('PROFILE_NOT_FOUND', 'Unknown provider profile');
+      }
+      if (profile.secretHandleId !== handleId) {
+        throw new BrokerError(
+          'CREDENTIAL_UNAVAILABLE',
+          'The Kimi sign-in changed during this request. Send it again.',
+        );
+      }
+      await deps.secrets.set(handleId, encodeKimiTokenRecord(record));
+      if (deps.store.getProfile(profileId)?.secretHandleId !== handleId) {
+        throw new BrokerError(
+          'CREDENTIAL_UNAVAILABLE',
+          'The Kimi sign-in changed during this request. Send it again.',
+        );
+      }
+      deps.store.rebindSecretVersion?.(profileId, deps.store.secretVersion(handleId));
+    },
+  });
   const chatGptCatalog = createChatGptCatalog();
 
   /**
@@ -324,6 +388,50 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         'SIGN_IN_REQUIRED',
         'The MiniMax sign-in could not be saved. Sign in with MiniMax again.',
       );
+    }
+  }
+
+  /** Refreshes an xAI token record near expiry and refuses a record it cannot save atomically. */
+  async function xaiRecord(
+    profileId: string,
+    handleId: string,
+    record: XaiTokenRecord,
+  ): Promise<XaiTokenRecord> {
+    try {
+      return await xaiTokens.current(profileId, handleId, record);
+    } catch (error) {
+      if (error instanceof BrokerError) throw error;
+      if (error instanceof OAuthFlowError && error.code === 'SIGN_IN_REQUIRED') {
+        deps.store.markCredentialUnavailable(profileId);
+        throw new BrokerError('SIGN_IN_REQUIRED', 'xAI needs a new sign-in.');
+      }
+      if (error instanceof OAuthFlowError) {
+        throw new BrokerError('PROVIDER_HTTP_ERROR', error.message);
+      }
+      deps.store.markCredentialUnavailable(profileId);
+      throw new BrokerError('SIGN_IN_REQUIRED', 'The xAI sign-in could not be saved. Sign in again.');
+    }
+  }
+
+  /** Refreshes a Kimi token record near expiry and refuses a record it cannot save atomically. */
+  async function kimiRecord(
+    profileId: string,
+    handleId: string,
+    record: KimiTokenRecord,
+  ): Promise<KimiTokenRecord> {
+    try {
+      return await kimiTokens.current(profileId, handleId, record);
+    } catch (error) {
+      if (error instanceof BrokerError) throw error;
+      if (error instanceof OAuthFlowError && error.code === 'SIGN_IN_REQUIRED') {
+        deps.store.markCredentialUnavailable(profileId);
+        throw new BrokerError('SIGN_IN_REQUIRED', 'Kimi needs a new sign-in.');
+      }
+      if (error instanceof OAuthFlowError) {
+        throw new BrokerError('PROVIDER_HTTP_ERROR', error.message);
+      }
+      deps.store.markCredentialUnavailable(profileId);
+      throw new BrokerError('SIGN_IN_REQUIRED', 'The Kimi sign-in could not be saved. Sign in again.');
     }
   }
 
@@ -431,6 +539,48 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
           screened: [
             savedRecord.refreshToken,
             savedRecord.accessToken,
+            record.accessToken,
+            record.refreshToken,
+          ],
+        };
+      }
+    }
+    if (profile.provider === 'xai' && stored !== null) {
+      const savedRecord = decodeXaiTokenRecord(stored);
+      if (savedRecord !== undefined) {
+        const record = await xaiRecord(profile.id, profile.secretHandleId, savedRecord);
+        return {
+          ...makeEndpoint(
+            profile.id,
+            profile.provider,
+            profile.baseUrl,
+            profile.modelId,
+            record.accessToken,
+          ),
+          screened: [
+            savedRecord.accessToken,
+            savedRecord.refreshToken,
+            record.accessToken,
+            record.refreshToken,
+          ],
+        };
+      }
+    }
+    if (profile.provider === 'kimi' && stored !== null) {
+      const savedRecord = decodeKimiTokenRecord(stored);
+      if (savedRecord !== undefined) {
+        const record = await kimiRecord(profile.id, profile.secretHandleId, savedRecord);
+        return {
+          ...makeEndpoint(
+            profile.id,
+            profile.provider,
+            profile.baseUrl,
+            profile.modelId,
+            record.accessToken,
+          ),
+          screened: [
+            savedRecord.accessToken,
+            savedRecord.refreshToken,
             record.accessToken,
             record.refreshToken,
           ],

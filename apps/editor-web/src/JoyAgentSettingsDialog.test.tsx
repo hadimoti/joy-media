@@ -1961,4 +1961,99 @@ describe('JOY Agent Settings desktop profile persistence', () => {
       expect(invoke).not.toHaveBeenCalledWith(channel, expect.anything());
     }
   });
+
+  it('reauthorizes a saved ChatGPT profile in place with its profile ID', async () => {
+    let stored = [
+      {
+        id: 'chatgpt-profile-1',
+        provider: 'chatgpt',
+        baseUrl: 'https://api.openai.com/v1',
+        modelId: 'gpt-4o-mini',
+        createdAt: '2026-10-29T00:00:00.000Z',
+        updatedAt: '2026-10-29T00:00:00.000Z',
+      },
+    ];
+    const invoke = vi.fn().mockImplementation(async (channel: string, payload?: unknown) => {
+      if (channel === 'desktop.provider-profile.list') return stored;
+      if (channel === 'desktop.provider-profile.sign-in') {
+        expect(payload).toEqual({ provider: 'chatgpt', id: 'chatgpt-profile-1' });
+        stored = [{ ...stored[0]!, modelId: 'gpt-4.1', updatedAt: '2026-10-30T00:00:00.000Z' }];
+        return stored[0];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.sign-in'],
+      invoke,
+    };
+    const rendered = await render(client());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      buttonByText(rendered, 'Reauthorize').click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.sign-in', {
+      provider: 'chatgpt',
+      id: 'chatgpt-profile-1',
+    });
+    expect(rendered.textContent).toContain('gpt-4.1');
+  });
+
+  it('keeps a ChatGPT profile after revocation fails when local-only removal is declined', async () => {
+    let stored: readonly Record<string, unknown>[] = [
+      {
+        id: 'chatgpt-profile-1',
+        provider: 'chatgpt',
+        baseUrl: 'https://api.openai.com/v1',
+        modelId: 'gpt-4o-mini',
+        createdAt: '2026-10-29T00:00:00.000Z',
+        updatedAt: '2026-10-29T00:00:00.000Z',
+      },
+    ];
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return stored;
+      if (channel === 'desktop.provider-profile.sign-out') {
+        throw new Error('ChatGPT could not confirm sign-out. The saved connection was kept.');
+      }
+      if (channel === 'desktop.provider-profile.delete') {
+        stored = [];
+        return undefined;
+      }
+      return undefined;
+    });
+    const confirm = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false);
+    vi.stubGlobal('confirm', confirm);
+    window.joyDesktop = {
+      channels: [
+        'desktop.provider-profile.list',
+        'desktop.provider-profile.sign-out',
+        'desktop.provider-profile.delete',
+      ],
+      invoke,
+    };
+    const rendered = await render(client());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      buttonByText(rendered, 'Sign out & revoke').click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.sign-out', {
+      id: 'chatgpt-profile-1',
+    });
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(String(confirm.mock.calls[1]?.[0])).toContain('does not revoke');
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.delete', {
+      id: 'chatgpt-profile-1',
+    });
+    expect(rendered.textContent).toContain('ChatGPT could not confirm sign-out');
+    expect(rendered.textContent).toContain('gpt-4o-mini');
+  });
 });

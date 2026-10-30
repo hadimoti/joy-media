@@ -18,6 +18,7 @@ import { clearAgentSlotsForProfile, readAgentSlots, writeAgentSlot } from '../st
 import { resolveSlotRequest } from './agent-slot-request.js';
 import { AgentRequestRegistry } from './agent-requests.js';
 import { OAuthFlowError } from './oauth/errors.js';
+import { decodeTokenRecord, type ChatGptTokenRecord } from './oauth/chatgpt.js';
 import type { ProviderSignInContext, SignInProvider, SignInResult } from './oauth/sign-in.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import {
@@ -74,6 +75,8 @@ export interface IpcHandlerDeps {
     provider: SignInProvider,
     context?: ProviderSignInContext,
   ) => Promise<SignInResult>;
+  /** Revokes a ChatGPT refresh token. Credentials stay in the main process. */
+  readonly providerSignOut?: (record: ChatGptTokenRecord) => Promise<void>;
   readonly handleWindowControl?: (
     action: 'minimize' | 'maximize' | 'close' | 'is-maximized',
   ) => Promise<boolean | void> | boolean | void;
@@ -103,22 +106,84 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (deps.providerSignIn === undefined) {
         return { ok: false, error: 'Sign-in is not available in this build' };
       }
+      let savedChatGptRecord: ChatGptTokenRecord | undefined;
       // A sign-in can only update a profile of the same provider, so it never changes what a profile is.
       if (request.id !== undefined) {
         const existing = deps.localDatabase.getProviderProfile(request.id);
         if (existing === undefined || existing.provider !== request.provider) {
           return { ok: false, error: 'That profile cannot be signed in again' };
         }
+        if (request.provider === 'chatgpt') {
+          try {
+            const stored = await deps.secretStore.get(existing.secretHandleId);
+            savedChatGptRecord = stored === null ? undefined : decodeTokenRecord(stored);
+          } catch {
+            return { ok: false, error: 'The saved ChatGPT connection could not be read.' };
+          }
+          if (savedChatGptRecord === undefined) {
+            return {
+              ok: false,
+              error:
+                'The saved ChatGPT connection cannot be reauthorized; remove it locally and sign in again.',
+            };
+          }
+        }
       }
       try {
-        const signedIn =
+        const context: ProviderSignInContext | undefined =
           request.provider === 'minimax'
-            ? await deps.providerSignIn(request.provider, { minimaxRegion: request.region ?? 'global' })
-            : await deps.providerSignIn(request.provider);
+            ? { minimaxRegion: request.region ?? 'global' }
+            : savedChatGptRecord === undefined
+              ? undefined
+              : {
+                  savedChatGptAccount: {
+                    clientId: savedChatGptRecord.clientId,
+                    accountId: savedChatGptRecord.accountId,
+                  },
+                };
+        const signedIn =
+          context === undefined
+            ? await deps.providerSignIn(request.provider)
+            : await deps.providerSignIn(request.provider, context);
         // The result must name the provider that was asked for, and that provider must permit a sign-in. A runner that
         // answered with another provider would otherwise save a profile for a provider that is set up with an API key.
         if (signedIn.provider !== request.provider || !isSignInProvider(signedIn.provider)) {
-          return { ok: false, error: 'The sign-in did not return a provider that can be signed in to' };
+          return {
+            ok: false,
+            error: 'The sign-in did not return a provider that can be signed in to',
+          };
+        }
+        if (savedChatGptRecord !== undefined) {
+          const replacement = decodeTokenRecord(signedIn.secret);
+          if (replacement === undefined) {
+            return {
+              ok: false,
+              error:
+                'ChatGPT did not return a valid replacement authorization. The saved connection was kept.',
+            };
+          }
+          if (
+            replacement.accountId !== savedChatGptRecord.accountId ||
+            replacement.clientId !== savedChatGptRecord.clientId
+          ) {
+            const accountMismatch = replacement.accountId !== savedChatGptRecord.accountId;
+            try {
+              if (deps.providerSignOut === undefined) throw new Error('revocation unavailable');
+              await deps.providerSignOut(replacement);
+            } catch {
+              return {
+                ok: false,
+                error:
+                  'ChatGPT returned an authorization that did not match the saved account. The saved connection was kept, but JOY Media could not revoke the new grant; remove it in ChatGPT settings.',
+              };
+            }
+            throw new OAuthFlowError(
+              accountMismatch ? 'ACCOUNT_MISMATCH' : 'CLIENT_MISMATCH',
+              accountMismatch
+                ? 'ChatGPT returned a different account. The new grant was revoked and the saved connection was kept.'
+                : 'ChatGPT returned a different client. The new grant was revoked and the saved connection was kept.',
+            );
+          }
         }
         // The result is saved through the profile route, so it is checked and bound like any other save.
         return await handlers['desktop.provider-profile.save']({
@@ -334,6 +399,51 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       const existing = deps.localDatabase.getProviderProfile(id);
       if (existing === undefined) return { ok: false, error: 'Unknown provider profile id' };
       await deps.secretStore.delete(existing.secretHandleId);
+      deps.localDatabase.deleteProviderProfile(id);
+      // A slot that named the profile is left without one, so it cannot run until the owner picks another.
+      clearAgentSlotsForProfile(deps.localDatabase, id);
+      return { ok: true };
+    },
+    'desktop.provider-profile.sign-out': async (payload): Promise<IpcResult> => {
+      const id = asProfileId(payload);
+      if (id === undefined) return { ok: false, error: 'Invalid profile id' };
+      const existing = deps.localDatabase.getProviderProfile(id);
+      if (existing === undefined) return { ok: false, error: 'Unknown provider profile id' };
+      if (existing.provider !== 'chatgpt') {
+        return { ok: false, error: 'Remote sign-out is only available for ChatGPT profiles.' };
+      }
+      if (deps.providerSignOut === undefined) {
+        return { ok: false, error: 'ChatGPT sign-out is not available in this build.' };
+      }
+      let record: ChatGptTokenRecord | undefined;
+      try {
+        const stored = await deps.secretStore.get(existing.secretHandleId);
+        record = stored === null ? undefined : decodeTokenRecord(stored);
+      } catch {
+        return { ok: false, error: 'The saved ChatGPT connection could not be read.' };
+      }
+      if (record === undefined) {
+        return {
+          ok: false,
+          error: 'This profile has no valid ChatGPT authorization to revoke. It remains saved.',
+        };
+      }
+      try {
+        await deps.providerSignOut(record);
+      } catch {
+        return {
+          ok: false,
+          error: 'ChatGPT could not confirm sign-out. The saved connection was kept.',
+        };
+      }
+      try {
+        await deps.secretStore.delete(existing.secretHandleId);
+      } catch {
+        return {
+          ok: false,
+          error: 'ChatGPT access was revoked, but the local connection could not be removed.',
+        };
+      }
       deps.localDatabase.deleteProviderProfile(id);
       // A slot that named the profile is left without one, so it cannot run until the owner picks another.
       clearAgentSlotsForProfile(deps.localDatabase, id);

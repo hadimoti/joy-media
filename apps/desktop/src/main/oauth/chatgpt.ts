@@ -16,6 +16,11 @@ import { createPkcePair, randomToken } from './pkce.js';
  * The ChatGPT sign-in endpoints, from the issuer's OpenID discovery document (PLAN-v4 §6d; checked 2026-10-29).
  */
 export { CHATGPT_AUTHORIZE_URL, CHATGPT_ISSUER, CHATGPT_JWKS_URL, CHATGPT_TOKEN_URL };
+/** The OIDC document from which the current sign-out endpoint is read. */
+export const CHATGPT_DISCOVERY_URL = new URL(
+  '.well-known/openid-configuration',
+  `${CHATGPT_ISSUER}/`,
+).toString();
 /**
  * The scope a ChatGPT sign-in must be granted (PLAN-v4 §6d). The discovery document does not list it, so the owner's
  * attended sign-in is what confirms it.
@@ -250,6 +255,79 @@ export async function refreshChatGptTokens(input: {
   };
   await input.save(next);
   return next;
+}
+
+/** Revokes a saved ChatGPT refresh token through the issuer's advertised OIDC endpoint. */
+export async function revokeChatGptRefreshToken(input: {
+  readonly record: ChatGptTokenRecord;
+  readonly fetch: FetchLike;
+}): Promise<void> {
+  if (input.record.clientId.trim().length === 0 || input.record.refreshToken.trim().length === 0) {
+    throw revocationFailed();
+  }
+
+  let endpoint: string;
+  try {
+    const discoveryResponse = await input.fetch(CHATGPT_DISCOVERY_URL, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      redirect: 'manual',
+    });
+    if (!discoveryResponse.ok) throw revocationFailed();
+    const discovery = parseReplyObject(await replyText(discoveryResponse));
+    if (discovery?.issuer !== CHATGPT_ISSUER) throw revocationFailed();
+    endpoint = safeRevocationEndpoint(discovery.revocation_endpoint);
+  } catch {
+    throw revocationFailed();
+  }
+
+  try {
+    const response = await input.fetch(
+      endpoint,
+      {
+        method: 'POST',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: input.record.clientId,
+          token: input.record.refreshToken,
+          token_type_hint: 'refresh_token',
+        }).toString(),
+        redirect: 'manual',
+      },
+    );
+    if (!response.ok) throw revocationFailed();
+  } catch {
+    throw revocationFailed();
+  }
+}
+
+function safeRevocationEndpoint(value: unknown): string {
+  if (typeof value !== 'string') throw revocationFailed();
+  let endpoint: URL;
+  try {
+    endpoint = new URL(value);
+  } catch {
+    throw revocationFailed();
+  }
+  const issuer = new URL(CHATGPT_ISSUER);
+  if (
+    endpoint.protocol !== 'https:' ||
+    endpoint.origin !== issuer.origin ||
+    endpoint.username !== '' ||
+    endpoint.password !== '' ||
+    endpoint.search !== '' ||
+    endpoint.hash !== ''
+  ) {
+    throw revocationFailed();
+  }
+  return endpoint.toString();
+}
+
+function revocationFailed(): OAuthFlowError {
+  return new OAuthFlowError('REVOCATION_FAILED', 'ChatGPT could not confirm sign-out.');
 }
 
 /**

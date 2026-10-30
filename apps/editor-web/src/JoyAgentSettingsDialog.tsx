@@ -24,6 +24,8 @@ import {
   saveDesktopProviderProfile,
   listDesktopProviderProfiles,
   deleteDesktopProviderProfile,
+  signInDesktopProviderProfile,
+  signOutDesktopProviderProfile,
   fetchDesktopProviderModels,
   type DesktopProviderProfile,
 } from './desktop-client.js';
@@ -290,6 +292,7 @@ export function JoyAgentSettingsDialog({
   const [connectionName, setConnectionName] = useState('');
   const [customDisclosure, setCustomDisclosure] = useState(false);
   const [working, setWorking] = useState(false);
+  const [profileActionId, setProfileActionId] = useState<string | undefined>();
   const [connectionStatus, setConnectionStatus] = useState(status);
   const [connectionNotice, setConnectionNotice] = useState<AgentSettingsNotice | undefined>();
 
@@ -864,15 +867,95 @@ export function JoyAgentSettingsDialog({
     }
   };
 
-  const removeProfile = async (profId: string) => {
+  const removeProfile = async (profile: DesktopProviderProfileState) => {
     if (!isDesktopHost()) return;
+    if (
+      profile.provider === 'chatgpt' &&
+      !window.confirm(
+        'Remove this ChatGPT connection from JOY Media without revoking its authorization? This does not revoke access in ChatGPT.',
+      )
+    ) {
+      return;
+    }
     try {
-      await deleteDesktopProviderProfile(profId);
+      await deleteDesktopProviderProfile(profile.id);
       // The read clears a chosen profile that the list no longer shows. A failed read leaves it chosen until the next
       // successful read clears it, and connect waits for a successful read, so nothing is saved beside the stale choice.
       await loadProfiles();
     } catch (err) {
       console.warn('Failed to delete provider profile:', err);
+      const message = err instanceof Error ? err.message : 'Could not remove the saved profile.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+    }
+  };
+
+  const reauthorizeChatGptProfile = async (profile: DesktopProviderProfileState) => {
+    if (!isDesktopHost() || profile.provider !== 'chatgpt' || profileActionId !== undefined) return;
+    setProfileActionId(profile.id);
+    setConnectionNotice(undefined);
+    try {
+      await signInDesktopProviderProfile({ provider: 'chatgpt', id: profile.id });
+      await loadProfiles();
+      const message = 'ChatGPT connection reauthorized.';
+      setConnectionNotice({ kind: 'success', message });
+      onNotice?.(message, 'success');
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'ChatGPT reauthorization did not complete.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+    } finally {
+      setProfileActionId(undefined);
+    }
+  };
+
+  const signOutChatGptProfile = async (profile: DesktopProviderProfileState) => {
+    if (
+      !isDesktopHost() ||
+      profile.provider !== 'chatgpt' ||
+      profileActionId !== undefined ||
+      !window.confirm(
+        'Sign out of this ChatGPT connection and revoke its saved authorization? JOY Media will remove the saved profile after ChatGPT confirms revocation.',
+      )
+    ) {
+      return;
+    }
+    setProfileActionId(profile.id);
+    setConnectionNotice(undefined);
+    try {
+      await signOutDesktopProviderProfile(profile.id);
+      await loadProfiles();
+      const message = 'ChatGPT authorization revoked and the saved connection was removed.';
+      setConnectionNotice({ kind: 'success', message });
+      onNotice?.(message, 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'ChatGPT could not confirm sign-out.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      if (
+        !window.confirm(
+          `${message}\n\nRemove this connection from JOY Media locally without revoking it? This does not revoke access in ChatGPT.`,
+        )
+      ) {
+        return;
+      }
+      try {
+        await deleteDesktopProviderProfile(profile.id);
+        await loadProfiles();
+        const localMessage = 'ChatGPT connection removed locally. This did not revoke access in ChatGPT.';
+        setConnectionNotice({ kind: 'info', message: localMessage });
+        onNotice?.(localMessage, 'info');
+      } catch (removeError) {
+        const localError =
+          removeError instanceof Error
+            ? removeError.message
+            : 'Could not remove the saved profile locally.';
+        setConnectionNotice({ kind: 'error', message: localError });
+        onNotice?.(localError, 'error');
+      }
+    } finally {
+      setProfileActionId(undefined);
     }
   };
 
@@ -1100,7 +1183,14 @@ export function JoyAgentSettingsDialog({
                                   </span>
                                 )}
                             </div>
-                            <div style={{ display: 'flex', gap: '6px' }}>
+                            <div
+                              style={{
+                                display: 'flex',
+                                gap: '6px',
+                                flexWrap: 'wrap',
+                                justifyContent: 'flex-end',
+                              }}
+                            >
                               {disabledLegacy ? (
                                 <button
                                   type="button"
@@ -1115,15 +1205,41 @@ export function JoyAgentSettingsDialog({
                                   <button
                                     type="button"
                                     className="joy-btn-secondary joy-btn-sm"
-                                    disabled={working}
+                                    disabled={working || profileActionId !== undefined}
                                     onClick={() => void connectSavedProfile(prof)}
                                   >
                                     Use
                                   </button>
+                                  {prof.provider === 'chatgpt' && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="joy-btn-secondary joy-btn-sm"
+                                        disabled={working || profileActionId !== undefined}
+                                        onClick={() => void reauthorizeChatGptProfile(prof)}
+                                      >
+                                        {profileActionId === prof.id ? 'Working…' : 'Reauthorize'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="joy-btn-danger joy-btn-sm"
+                                        disabled={working || profileActionId !== undefined}
+                                        onClick={() => void signOutChatGptProfile(prof)}
+                                      >
+                                        Sign out &amp; revoke
+                                      </button>
+                                    </>
+                                  )}
                                   <button
                                     type="button"
                                     className="joy-btn-danger joy-btn-sm"
-                                    onClick={() => void removeProfile(prof.id)}
+                                    disabled={profileActionId !== undefined}
+                                    onClick={() => void removeProfile(prof)}
+                                    aria-label={
+                                      prof.provider === 'chatgpt'
+                                        ? 'Remove ChatGPT profile locally'
+                                        : `Remove ${prof.name || prof.provider} profile`
+                                    }
                                   >
                                     ✕
                                   </button>

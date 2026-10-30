@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createMemorySecretStore } from '@joy-media/provider-sdk';
 import {
+  encodeKimiTokenRecord,
+  KIMI_CODE_CLIENT_ID,
+  type KimiTokenRecord,
+} from '../oauth/kimi.js';
+import {
   createProviderBroker,
   endpointBindingDigest,
   MAX_AGENT_REQUEST_BYTES,
@@ -40,6 +45,7 @@ function harness(
     keys?: Record<string, string>;
     resolveHost?: (host: string) => Promise<readonly string[]>;
     timeoutMs?: { complete?: number; control?: number };
+    now?: () => number;
   } = {},
 ) {
   const sent: { url: string; init: RequestInit }[] = [];
@@ -65,8 +71,9 @@ function harness(
     resolveHost:
       options.resolveHost ?? (async (host) => (host === 'localhost' ? ['127.0.0.1'] : [])),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    ...(options.now === undefined ? {} : { now: options.now }),
   });
-  return { broker, sent, unavailable };
+  return { broker, sent, unavailable, secrets };
 }
 
 function headerOf(init: RequestInit, name: string): string | null {
@@ -97,6 +104,84 @@ describe('provider broker: profile checks', () => {
     expect(sent[0]?.init.redirect).toBe('manual');
     const body = JSON.parse(String(sent[0]?.init.body)) as Record<string, unknown>;
     expect(body).toMatchObject({ model: 'openai/gpt-4o-mini', stream: false, temperature: 0.2 });
+  });
+
+  it('uses Kimi Code OAuth for coding endpoints and keeps Moonshot API keys on their own endpoint', async () => {
+    const now = Date.UTC(2026, 9, 30);
+    const profile = bound('kimi-oauth', 'kimi', 'https://api.kimi.ai/coding/v1', 'kimi-code-model');
+    const record: KimiTokenRecord = {
+      version: 1,
+      clientId: KIMI_CODE_CLIENT_ID,
+      accessToken: 'kimi-access-secret',
+      refreshToken: 'kimi-refresh-secret',
+      accessExpiresAt: now + 3_600_000,
+      scope: 'kimi-code',
+    };
+    const { broker, sent } = harness({
+      profiles: [profile],
+      keys: { [profile.secretHandleId]: encodeKimiTokenRecord(record) },
+      now: () => now,
+      reply: () => jsonReply({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }),
+    });
+
+    expect((await broker.complete({ profileId: profile.id, body: CHAT_BODY })).ok).toBe(true);
+    expect(sent[0]?.url).toBe('https://api.kimi.ai/coding/v1/chat/completions');
+    expect(headerOf(sent[0]!.init, 'authorization')).toBe('Bearer kimi-access-secret');
+
+    const apiProfile = bound('kimi-api', 'kimi', 'https://api.moonshot.ai/v1', 'kimi-api-model');
+    const api = harness({
+      profiles: [apiProfile],
+      keys: { [apiProfile.secretHandleId]: 'kimi-platform-api-key' },
+    });
+    expect((await api.broker.complete({ profileId: apiProfile.id, body: CHAT_BODY })).ok).toBe(true);
+    expect(api.sent[0]?.url).toBe('https://api.moonshot.ai/v1/chat/completions');
+    expect(headerOf(api.sent[0]!.init, 'authorization')).toBe('Bearer kimi-platform-api-key');
+  });
+
+  it('refreshes Kimi OAuth just before expiry and refuses a reply carrying either saved token', async () => {
+    const now = Date.UTC(2026, 9, 30);
+    const profile = bound('kimi-refresh', 'kimi', 'https://api.kimi.ai/coding/v1', 'kimi-code-model');
+    const record: KimiTokenRecord = {
+      version: 1,
+      clientId: KIMI_CODE_CLIENT_ID,
+      accessToken: 'kimi-old-access',
+      refreshToken: 'kimi-old-refresh',
+      accessExpiresAt: now + 1,
+      scope: 'kimi-code',
+    };
+    const { broker, sent, secrets } = harness({
+      profiles: [profile],
+      keys: { [profile.secretHandleId]: encodeKimiTokenRecord(record) },
+      now: () => now,
+      reply: (url) => {
+        if (url === 'https://api.kimi.ai/coding/v1/chat/completions') {
+          return jsonReply({ choices: [{ message: { role: 'assistant', content: 'kimi-new-access kimi-new-refresh' } }] });
+        }
+        if (url === 'https://auth.kimi.ai/api/oauth/token') {
+          return jsonReply({
+            access_token: 'kimi-new-access',
+            refresh_token: 'kimi-new-refresh',
+            expires_in: 3600,
+            scope: 'kimi-code',
+          });
+        }
+        throw new Error(`unexpected request to ${url}`);
+      },
+    });
+
+    const result = await broker.complete({ profileId: profile.id, body: CHAT_BODY });
+
+    expect(result).toMatchObject({ ok: false, code: 'PROVIDER_INCOMPATIBLE' });
+    expect(JSON.stringify(result)).not.toContain('kimi-new-access');
+    expect(JSON.stringify(result)).not.toContain('kimi-new-refresh');
+    expect(sent.map((request) => request.url)).toEqual([
+      'https://auth.kimi.ai/api/oauth/token',
+      'https://api.kimi.ai/coding/v1/chat/completions',
+    ]);
+    expect(JSON.parse((await secrets.get(profile.secretHandleId)) ?? '{}')).toMatchObject({
+      accessToken: 'kimi-new-access',
+      refreshToken: 'kimi-new-refresh',
+    });
   });
 
   it('drops every field the caller is not allowed to choose', async () => {
