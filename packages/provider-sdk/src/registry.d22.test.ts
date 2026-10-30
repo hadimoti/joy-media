@@ -28,7 +28,8 @@ describe('D22 provider routes', () => {
       'api-key',
       'subscription-sign-in',
     ]);
-    expect(findRegistryProvider('xai')?.auth).toMatchObject({ gated: true, unverified: true });
+    expect(findRegistryProvider('xai')?.auth.gated).toBeUndefined();
+    expect(findRegistryProvider('xai')?.auth.unverified).toBeUndefined();
     expect(signInProviders()).toEqual(['minimax', 'kimi', 'chatgpt', 'xai']);
   });
 

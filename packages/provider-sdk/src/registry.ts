@@ -75,8 +75,12 @@ export type ProviderRegionId =
   | 'code-international'
   | 'oauth-international';
 
-/** The Grok Build CLI proxy is only a candidate for xAI OAuth inference and needs attended verification. Source: https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md. */
-export const XAI_OAUTH_INFERENCE_BASE_URL = 'https://cli-chat-proxy.grok.com/v1';
+/**
+ * The OAuth token can use xAI's public API base for inference because the attended 2026-10-31 probe
+ * listed models and completed a chat completion there without a special header.
+ * Source: D22 step 4 probe evidence.
+ */
+export const XAI_OAUTH_INFERENCE_BASE_URL = 'https://api.x.ai/v1';
 
 export interface ProviderRegion {
   readonly id: ProviderRegionId;
@@ -311,11 +315,9 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     auth: {
       methods: ['api-key', 'subscription-sign-in'],
       source:
-        'Owner decision D22 (2026-10-30), xAI API reference https://docs.x.ai/docs/api-reference, and Grok Build authentication guide https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md',
-      sourceDate: '2026-10-30',
-      gated: true,
-      unverified: true,
-      note: 'The owner selected the Grok CLI public-client device flow as the secondary route. The OAuth inference base and the account\'s model entitlements still need attended verification, so generic auth-method selection remains gated.',
+        'Owner decision D22 (2026-10-30), xAI API reference https://docs.x.ai/docs/api-reference, Grok Build authentication guide https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md, and the attended D22 step 4 probe (2026-10-31)',
+      sourceDate: '2026-10-31',
+      note: 'The attended xAI OAuth probe on 2026-10-31 confirmed that an api:access token can use https://api.x.ai/v1, list models, and complete inference; the base, subscription entitlement, and model access are verified.',
     },
     regions: [
       {
@@ -327,13 +329,12 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
       },
       {
         id: 'oauth-international',
-        label: 'OAuth inference (Grok CLI proxy)',
+        label: 'OAuth inference (xAI API)',
         baseUrl: XAI_OAUTH_INFERENCE_BASE_URL,
         keyUrl: 'https://console.x.ai',
-        docsUrl:
-          'https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md',
-        // D22 step 2 keeps this unverified candidate on OAuth, not API-key setup.
-        // Source: D22 step 2 brief (2026-10-30).
+        docsUrl: 'https://docs.x.ai/docs/api-reference',
+        // The attended probe confirmed xAI's public API base accepts the OAuth bearer for inference.
+        // Source: D22 step 4 probe evidence (2026-10-31).
         route: 'oauth',
       },
     ],

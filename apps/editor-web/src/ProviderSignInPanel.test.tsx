@@ -197,6 +197,7 @@ describe('ProviderSignInPanel', () => {
     const xaiKeyRoute = route('xAI', 'API-key');
     expect(xaiKeyRoute.textContent).not.toContain('https://cli-chat-proxy.grok.com/v1');
     expect(xaiKeyRoute.querySelector('select')).toBeNull();
+    expect(xaiKeyRoute.querySelectorAll('input[readonly]')).toHaveLength(1);
   });
 
   it('sends MiniMax China only to MiniMax and leaves other sign-in requests without a region', async () => {

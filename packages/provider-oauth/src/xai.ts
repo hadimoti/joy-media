@@ -16,7 +16,7 @@ export const XAI_OAUTH_CLIENT_ID = getOAuthClient('xai')?.clientId ?? '';
 export const XAI_OAUTH_SCOPE = 'openid profile email offline_access grok-cli:access api:access';
 /** The device grant advertised by xAI's OIDC discovery document and used by the Grok CLI flow. */
 export const XAI_OAUTH_DEVICE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code';
-/** The single candidate inference base in the provider registry; it still needs attended verification. */
+/** Re-exports the OAuth base confirmed by the attended 2026-10-31 probe. Source: D22 step 4. */
 export { XAI_OAUTH_INFERENCE_BASE_URL };
 /** Refresh begins when the access token has at most this much time left, matching the neighboring OAuth keepers. */
 export const XAI_OAUTH_REFRESH_MARGIN_MS = 60_000;

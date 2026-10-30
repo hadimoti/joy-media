@@ -130,7 +130,7 @@ describe('xAI device OAuth', () => {
       DEVICE_ENDPOINT,
       TOKEN_ENDPOINT,
     ]);
-    expect(XAI_OAUTH_INFERENCE_BASE_URL).toBe('https://cli-chat-proxy.grok.com/v1');
+    expect(XAI_OAUTH_INFERENCE_BASE_URL).toBe('https://api.x.ai/v1');
   });
 
   it.each([

@@ -4,6 +4,7 @@ import {
   CUSTOM_PROVIDER_ID,
   PROVIDER_REGISTRY,
   REGISTRY_PROVIDER_IDS,
+  XAI_OAUTH_INFERENCE_BASE_URL,
   defaultBaseUrl,
   endpointUrl,
   evaluateEndpoint,
@@ -63,7 +64,6 @@ describe('provider registry', () => {
       ['kimi', 'https://api.moonshot.ai/v1'],
       ['minimax', 'https://api.minimax.io/v1'],
       ['xai', 'https://api.x.ai/v1'],
-      ['xai', 'https://cli-chat-proxy.grok.com/v1'],
       ['kimi', 'https://api.kimi.ai/coding/v1'],
       ['deepseek', 'https://api.deepseek.com'],
       ['kilo', 'https://ai-gateway.kilo.ai/api/v1'],
@@ -78,6 +78,21 @@ describe('provider registry', () => {
     expect(defaultBaseUrl('xai')).toBe('https://api.x.ai/v1');
     expect(defaultBaseUrl('deepseek')).toBe('https://api.deepseek.com');
     expect(defaultBaseUrl('kilo')).toBe('https://ai-gateway.kilo.ai/api/v1');
+  });
+
+  it('uses the verified xAI base for both routes and resolves the API-key region first', () => {
+    const xai = findRegistryProvider('xai');
+    expect(XAI_OAUTH_INFERENCE_BASE_URL).toBe('https://api.x.ai/v1');
+    expect(xai?.regions.map(({ id, baseUrl }) => [id, baseUrl])).toEqual([
+      ['international', 'https://api.x.ai/v1'],
+      ['oauth-international', 'https://api.x.ai/v1'],
+    ]);
+    expect(xai?.regions[1]).toMatchObject({
+      label: 'OAuth inference (xAI API)',
+      docsUrl: 'https://docs.x.ai/docs/api-reference',
+      route: 'oauth',
+    });
+    expect(findRegistryRegion('xai', 'https://api.x.ai/v1')?.id).toBe('international');
   });
 
   it('offers ChatGPT for sign-in only, over the Responses API at its own origin', () => {
@@ -142,8 +157,11 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     expect(offeredAuthMethods('kimi')).toEqual([]);
     expect(permittedAuthMethods('xai')).toEqual(['api-key', 'subscription-sign-in']);
     expect(isSignInProvider('xai')).toBe(true);
-    expect(findRegistryProvider('xai')?.auth.unverified).toBe(true);
-    expect(offeredAuthMethods('xai')).toEqual([]);
+    const xaiAuth = findRegistryProvider('xai')?.auth;
+    expect(xaiAuth?.gated).toBeUndefined();
+    expect(xaiAuth?.unverified).toBeUndefined();
+    expect(xaiAuth?.note).toMatch(/base.*entitlement.*model access/i);
+    expect(offeredAuthMethods('xai')).toEqual(['api-key', 'subscription-sign-in']);
   });
 
   it('lists the four owner-selected OAuth providers on the sign-in surface', () => {
@@ -195,7 +213,7 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     const unverified = PROVIDER_REGISTRY.filter(
       (provider) => provider.auth.unverified === true,
     ).map((provider) => provider.id);
-    expect(unverified).toEqual(['minimax', 'kimi', 'xai']);
+    expect(unverified).toEqual(['minimax', 'kimi']);
   });
 
   it('permits a key or nothing for a custom endpoint, and nothing for an unknown provider', () => {
