@@ -18,6 +18,10 @@ export const MINIMAX_POLL_INTERVAL_MS = 2_000;
 export const MINIMAX_ACCESS_TOKEN_REFRESH_MARGIN_MS = 60_000;
 /** The longest one MiniMax request may take before it is given up on, so a stalled request cannot outlive the flow. */
 export const MINIMAX_REQUEST_TIMEOUT_MS = 30_000;
+/** Values below this are relative expiry durations in seconds. */
+const MINIMAX_RELATIVE_EXPIRY_SECONDS_THRESHOLD = 1_000_000_000;
+/** Values below this after the relative-duration threshold are absolute epoch seconds. */
+const MINIMAX_ABSOLUTE_EXPIRY_MS_THRESHOLD = 1_000_000_000_000;
 
 /**
  * MiniMax also documents an Anthropic Messages OAuth endpoint for each region (PLAN-v4 §6d). It is not implemented
@@ -439,7 +443,9 @@ function tokenRecordFromReply(
 
 function tokenExpiry(value: unknown, now: number): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined;
-  return value >= 1_000_000_000 ? value : now + value * 1000;
+  if (value < MINIMAX_RELATIVE_EXPIRY_SECONDS_THRESHOLD) return now + value * 1000;
+  if (value < MINIMAX_ABSOLUTE_EXPIRY_MS_THRESHOLD) return value * 1000;
+  return value;
 }
 
 function stringOf(reply: Record<string, unknown>, name: string): string {

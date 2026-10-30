@@ -327,6 +327,31 @@ describe('MiniMax device-code sign-in', () => {
     });
   });
 
+  it('reads an absolute expiry expressed as epoch seconds', async () => {
+    vi.useFakeTimers({ now: NOW });
+    const gate = openedGate();
+    const accessExpiresAt = Math.floor((NOW + 7_200_000) / 1000) * 1000;
+    const fetch: FetchLike = async (url, init) => {
+      if (url.endsWith('/device/code')) {
+        const state = new URLSearchParams(String(init.body)).get('state') ?? '';
+        return deviceReply(state);
+      }
+      return json({
+        status: 'success',
+        access_token: ACCESS_TOKEN,
+        refresh_token: REFRESH_TOKEN,
+        expired_in: accessExpiresAt / 1000,
+      });
+    };
+    const pending = signInWithMiniMax(signInOptions(fetch, (url) => gate.open(url)));
+
+    await gate.promise;
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(MINIMAX_POLL_INTERVAL_MS);
+
+    await expect(pending).resolves.toMatchObject({ accessExpiresAt });
+  });
+
   it('refuses an unreadable token reply', async () => {
     vi.useFakeTimers({ now: NOW });
     const gate = openedGate();
