@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createHardenedFetch } from './provider.js';
+import { generateText } from 'ai';
+import { createHardenedFetch, createJoyAgentProvider } from './provider.js';
+import { normalizeByokSessionConfig } from './provider-config.js';
 import type { JoyFetch } from './provider.js';
 
 function response(body: string, init?: ResponseInit): Response {
@@ -11,6 +13,51 @@ function response(body: string, init?: ResponseInit): Response {
 }
 
 describe('hardened provider fetch', () => {
+  it('sends a typed OAuth bearer token without reading an API-key fallback', async () => {
+    const token = 'oauth-access-token';
+    const fallbackKey = 'api-key-fallback-secret';
+    const savedOpenAiKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = fallbackKey;
+    const fetchImpl = vi.fn<JoyFetch>(async (input, init) => {
+      expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${token}`);
+      expect(String(init?.headers)).not.toContain(fallbackKey);
+      return response(
+        JSON.stringify({
+          id: 'chatcmpl-local',
+          object: 'chat.completion',
+          created: 1,
+          model: 'MiniMax-M2.1',
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: 'ok' },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+      );
+    });
+
+    try {
+      const config = normalizeByokSessionConfig({
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.minimax.io/v1',
+        modelId: 'MiniMax-M2.1',
+        auth: { kind: 'bearer-token', token },
+        consentToPublicEndpoint: true,
+      });
+      const { model } = createJoyAgentProvider(config, fetchImpl);
+      const result = await generateText({ model, prompt: 'hello', maxRetries: 0 });
+
+      expect(result.text).toBe('ok');
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      if (savedOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = savedOpenAiKey;
+    }
+  });
+
   it('pins origin and safe request options', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(response('{}')) as unknown as JoyFetch;
     const fetcher = createHardenedFetch('https://provider.example/v1', fetchImpl);

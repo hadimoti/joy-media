@@ -9,6 +9,25 @@ import {
 const key = 'session-key';
 
 describe('BYOK provider configuration', () => {
+  it('keeps OAuth bearer credentials as a typed auth variant', () => {
+    const config = normalizeByokSessionConfig({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.minimax.io/v1',
+      modelId: 'MiniMax-M2.1',
+      auth: { kind: 'bearer-token', token: 'oauth-access-token' },
+      consentToPublicEndpoint: true,
+    });
+
+    expect(config).toMatchObject({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.minimax.io/v1',
+      modelId: 'MiniMax-M2.1',
+      auth: { kind: 'bearer-token', token: 'oauth-access-token' },
+    });
+    expect('apiKey' in config).toBe(false);
+    expect(JSON.stringify(safeByokSessionStatus(config))).not.toContain('oauth-access-token');
+  });
+
   it.each(['joy-hosted', 'kilo'] as const)('refuses the retired %s profile', (provider) => {
     expect(() => normalizeByokSessionConfig({ provider, modelId: 'model', apiKey: key })).toThrow(
       'JOY_AGENT_PROVIDER_CONFIG_INVALID',

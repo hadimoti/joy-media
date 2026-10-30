@@ -12,7 +12,7 @@ import { CliJoyAgentToolBridge, type StagedOperationsSummary } from './bridge.js
 import { loadAgentSlot } from './agent-slots.js';
 import {
   createModelFromConfig,
-  resolveByokConfig,
+  resolveAgentConfig,
   type ResolveProviderOptions,
 } from './provider.js';
 
@@ -41,7 +41,7 @@ export interface RunAgentOutput {
 export async function probeAgent(
   providerOptions?: ResolveProviderOptions,
 ): Promise<{ capability: string; provider: string; modelId: string }> {
-  const config = resolveByokConfig(providerOptions);
+  const config = await resolveAgentConfig(providerOptions);
   const model = createModelFromConfig(config);
   const bridge = new CliJoyAgentToolBridge(
     {
@@ -85,7 +85,7 @@ export async function probeAgent(
 }
 
 export async function runJoyAgent(options: RunAgentOptions): Promise<RunAgentOutput> {
-  const config = resolveByokConfig(options.providerOptions);
+  const config = await resolveAgentConfig(options.providerOptions);
   const model = createModelFromConfig(config);
 
   const bridge = new CliJoyAgentToolBridge(

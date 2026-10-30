@@ -9,11 +9,31 @@ export type JoyProviderMode =
   | 'kilo'
   | 'custom';
 
-export interface ByokSessionConfig {
+interface ByokSessionConfigFields {
   readonly provider: JoyProviderMode;
   readonly baseUrl: string;
   readonly modelId: string;
-  readonly apiKey: string;
+}
+
+/** API keys and OAuth bearer tokens remain distinct through the engine transport (D22 step 3 design §8). */
+export interface ByokBearerTokenAuth {
+  readonly kind: 'bearer-token';
+  readonly token: string;
+}
+
+export type ByokSessionConfig = ByokSessionConfigFields &
+  (
+    | { readonly apiKey: string; readonly auth?: never }
+    | { readonly apiKey?: never; readonly auth: ByokBearerTokenAuth }
+  );
+
+export interface ByokSessionConfigInput {
+  readonly provider?: JoyProviderMode | undefined;
+  readonly baseUrl?: string | undefined;
+  readonly modelId?: string | undefined;
+  readonly apiKey?: string | undefined;
+  readonly auth?: ByokBearerTokenAuth | undefined;
+  readonly consentToPublicEndpoint?: boolean | undefined;
 }
 
 export interface ByokSessionStatus {
@@ -33,13 +53,23 @@ export class ProviderConfigError extends Error {
 
 const MAX_MODEL_ID_LENGTH = 256;
 const MAX_API_KEY_LENGTH = 512;
+const MAX_BEARER_TOKEN_LENGTH = 16_384;
 
 export function normalizeByokSessionConfig(
-  input: Readonly<Partial<ByokSessionConfig> & { readonly consentToPublicEndpoint?: boolean }>,
+  input: Readonly<ByokSessionConfigInput>,
 ): ByokSessionConfig {
   const provider = input.provider;
   const modelId = typeof input.modelId === 'string' ? input.modelId.trim() : '';
   const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+  const bearerToken = input.auth?.kind === 'bearer-token' ? input.auth.token.trim() : '';
+  const hasApiKey =
+    input.auth === undefined && apiKey.length > 0 && apiKey.length <= MAX_API_KEY_LENGTH;
+  const hasBearerToken =
+    input.auth?.kind === 'bearer-token' &&
+    input.apiKey === undefined &&
+    bearerToken.length > 0 &&
+    bearerToken.length <= MAX_BEARER_TOKEN_LENGTH &&
+    provider === 'openai-compatible';
   // joy-hosted and kilo are retired legacy profiles, so they are refused here (PLAN-v4 §9a).
   if (
     (provider !== 'openrouter' &&
@@ -48,8 +78,7 @@ export function normalizeByokSessionConfig(
       provider !== 'custom') ||
     modelId.length === 0 ||
     modelId.length > MAX_MODEL_ID_LENGTH ||
-    apiKey.length === 0 ||
-    apiKey.length > MAX_API_KEY_LENGTH
+    (!hasApiKey && !hasBearerToken)
   ) {
     throw new ProviderConfigError();
   }
@@ -62,6 +91,7 @@ export function normalizeByokSessionConfig(
     ) {
       throw new ProviderConfigError();
     }
+    if (!hasApiKey) throw new ProviderConfigError();
     return Object.freeze({ provider, baseUrl: OPENROUTER_BASE_URL, modelId, apiKey });
   }
 
@@ -71,7 +101,14 @@ export function normalizeByokSessionConfig(
       : normalizeCustomBaseUrl(input.baseUrl, {
           consentToPublicEndpoint: input.consentToPublicEndpoint === true,
         });
-  return Object.freeze({ provider, baseUrl, modelId, apiKey });
+  return hasBearerToken
+    ? Object.freeze({
+        provider,
+        baseUrl,
+        modelId,
+        auth: { kind: 'bearer-token' as const, token: bearerToken },
+      })
+    : Object.freeze({ provider, baseUrl, modelId, apiKey });
 }
 
 function normalizeAnthropicBaseUrl(value: unknown): string {

@@ -10,14 +10,24 @@ import {
   findRegistryProvider,
   findRegistryRegion,
   isAuthMethodPermitted,
+  MINIMAX_OAUTH_ENDPOINTS,
   isAgentSlotConfigured,
   isCustomProviderId,
   REGISTRY_PROVIDER_IDS,
   type AgentSlotId,
 } from '@joy-media/provider-sdk';
+import { KIMI_CODE_BASE_URL } from '@joy-media/provider-oauth';
 import type { LanguageModel } from 'ai';
+import { isOAuthProfileProvider } from './oauth.js';
+import {
+  getDefaultOAuthTokenManager,
+  OAuthProfileLockTimeoutError,
+  OAuthRefreshFailedError,
+  type OAuthTokenManager,
+} from './oauth-runtime.js';
 import { loadAgentSlot } from './agent-slots.js';
 import { loadAiProviders, loadCliConfig } from '../utils/config.js';
+import type { OAuthCredential } from '../utils/credential-store.js';
 
 export interface ResolveProviderOptions {
   readonly provider?: string | undefined;
@@ -85,6 +95,9 @@ export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSes
   }
   refuseRetired(name);
   const profile = aiProviders[name];
+  if (profile?.authKind === 'oauth') {
+    throw new Error(`Provider profile "${name}" requires OAuth-aware agent resolution.`);
+  }
 
   // 2. The provider type: the saved one, or the registry provider with the same name.
   const type = profile?.provider ?? name;
@@ -154,6 +167,83 @@ export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSes
     // The provider-specific allowlist above authorizes registry URLs. The engine's generic chat-completions mode
     // validates the same URL as a custom endpoint, so carry this already-checked registry verdict through.
     consentToPublicEndpoint: consented || verdict.kind === 'registry',
+  });
+}
+
+/** Resolves a selected OAuth profile and refreshes it before model access (D22 step 3 design §6). */
+export async function resolveAgentConfig(
+  options: ResolveProviderOptions = {},
+  tokenManager: OAuthTokenManager = getDefaultOAuthTokenManager(),
+): Promise<ByokSessionConfig> {
+  const cliConfig = loadCliConfig();
+  const aiProviders = loadAiProviders();
+  const slot = options.slot === undefined ? undefined : loadAgentSlot(options.slot);
+  if (slot !== undefined && options.provider !== undefined) {
+    throw new Error('Choose either an agent slot or a provider, not both.');
+  }
+  if (slot !== undefined && !isAgentSlotConfigured(slot)) {
+    throw new Error(
+      `The ${slot.label} slot has no profile or model. Set them with: joy-media agent slot set ${slot.id} --profile <name> --model <id>`,
+    );
+  }
+  const name =
+    slot?.profileId ?? options.provider ?? cliConfig.activeProvider ?? environmentDefault();
+  if (name === undefined) {
+    throw new Error(
+      'No provider is set. Choose one with: joy-media agent provider use <name>, or set an agent slot.',
+    );
+  }
+  const profile = aiProviders[name];
+  if (profile?.authKind !== 'oauth') return resolveByokConfig(options);
+
+  refuseRetired(name);
+  const type = profile.provider ?? name;
+  refuseRetired(type);
+  if (!isOAuthProfileProvider(type)) {
+    throw new Error(`OAuth profile "${name}" has no supported provider route.`);
+  }
+  if (options.apiKey !== undefined) {
+    throw new Error(`OAuth profile "${name}" cannot use --api-key.`);
+  }
+  if (options.baseUrl !== undefined || cliConfig.customBaseUrl !== undefined) {
+    throw new Error(`OAuth profile "${name}" uses its registered provider base URL.`);
+  }
+
+  const modelId = options.model ?? slot?.model ?? cliConfig.defaultModel ?? profile.defaultModel;
+  if (modelId === undefined || modelId.trim().length === 0) {
+    throw new Error(
+      `No model is set for "${name}". Choose one with: joy-media agent model set <id>`,
+    );
+  }
+  if (type === 'xai') {
+    throw new Error('Inference: needs attended verification for xAI OAuth.');
+  }
+  if (type === 'chatgpt') {
+    throw new Error('ChatGPT Responses support is not available in the CLI yet.');
+  }
+
+  let credential: OAuthCredential;
+  try {
+    credential = await tokenManager.current(name, type as OAuthCredential['provider']);
+  } catch (error) {
+    if (error instanceof OAuthProfileLockTimeoutError) throw error;
+    throw new OAuthRefreshFailedError(name, type as OAuthCredential['provider']);
+  }
+
+  const baseUrl =
+    credential.provider === 'minimax'
+      ? MINIMAX_OAUTH_ENDPOINTS[credential.tokenRecord.region].inferenceBase
+      : KIMI_CODE_BASE_URL;
+  const verdict = evaluateEndpoint(type, baseUrl);
+  if (!verdict.allowed) {
+    throw new Error(`The base URL of OAuth profile "${name}" is refused: ${verdict.reason}`);
+  }
+  return normalizeByokSessionConfig({
+    provider: engineMode(type),
+    baseUrl,
+    modelId,
+    auth: { kind: 'bearer-token', token: credential.tokenRecord.accessToken },
+    consentToPublicEndpoint: verdict.kind === 'registry',
   });
 }
 

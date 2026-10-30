@@ -4,6 +4,14 @@ import { OAuthFlowError } from './errors.js';
 /** The `fetch` the sign-in flows use. It is injected, so tests never reach a real provider. */
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
+/** A CLI can present device authorization without changing the provider flow (D22 step 3 design §7). */
+export interface OAuthAuthorizationPresentation {
+  readonly url: string;
+  readonly userCode?: string;
+  /** Epoch milliseconds from the provider's device-code response. */
+  readonly expiresAt?: number;
+}
+
 /** The largest token or key-set reply a sign-in reads. Each is a few kilobytes, so a longer one is refused. */
 const MAX_REPLY_CHARS = 64 * 1024;
 /**

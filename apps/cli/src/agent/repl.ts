@@ -3,8 +3,12 @@ import * as readline from 'node:readline/promises';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { compileLook, editorialClean } from '@joy-media/motion-core';
 import type { AgentSlot } from '@joy-media/provider-sdk';
-import { c, logInfo, logSuccess, logWarn, printBanner, printTable } from '../utils/logger.js';
+import { c, logError, logInfo, logSuccess, logWarn, printBanner, printTable } from '../utils/logger.js';
 import { saveProject } from '../utils/project-loader.js';
+import {
+  OAuthProfileLockTimeoutError,
+  OAuthRefreshFailedError,
+} from './oauth-runtime.js';
 import { loadAgentSlots } from './agent-slots.js';
 import { runJoyAgent } from './joy-agent.js';
 import type { ResolveProviderOptions } from './provider.js';
@@ -192,7 +196,11 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
           }
         }
       } catch (err) {
-        logWarn(`Joy Agent run error: ${String(err)}`);
+        if (err instanceof OAuthRefreshFailedError || err instanceof OAuthProfileLockTimeoutError) {
+          logError(err.message);
+        } else {
+          logWarn(`Joy Agent run error: ${String(err)}`);
+        }
       }
       console.log();
     }

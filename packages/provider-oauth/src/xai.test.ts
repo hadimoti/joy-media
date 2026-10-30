@@ -67,6 +67,7 @@ describe('xAI device OAuth', () => {
   it('discovers trusted endpoints, opens the approval page, and polls with the configured public client', async () => {
     const requests: { readonly url: string; readonly init: RequestInit }[] = [];
     let openedUrl = '';
+    const presentations: { readonly url: string; readonly userCode?: string; readonly expiresAt?: number }[] = [];
     const fetch: FetchLike = async (url, init) => {
       requests.push({ url, init });
       if (url === XAI_OAUTH_DISCOVERY_URL) return discovery();
@@ -104,9 +105,17 @@ describe('xAI device OAuth', () => {
       fetch,
       now: () => NOW,
       pollIntervalMs: 1_000,
+      onAuthorization: (presentation) => presentations.push(presentation),
     });
 
     expect(openedUrl).toBe('https://accounts.x.ai/oauth2/device?user_code=TEST-CODE');
+    expect(presentations).toEqual([
+      {
+        url: openedUrl,
+        userCode: 'TEST-CODE',
+        expiresAt: NOW + 120_000,
+      },
+    ]);
     expect(record).toMatchObject({
       version: 1,
       clientId: CLIENT_ID,
@@ -218,12 +227,13 @@ describe('xAI device OAuth', () => {
   it('slows the poll interval after slow_down', async () => {
     vi.useFakeTimers({ now: NOW });
     let polls = 0;
+    const onSlowDown = vi.fn();
     const fetch: FetchLike = async (url) => {
       if (url === XAI_OAUTH_DISCOVERY_URL) return discovery();
       if (url === DEVICE_ENDPOINT) return deviceReply();
       if (url === TOKEN_ENDPOINT) {
         polls += 1;
-        return polls === 1
+        return polls <= 2
           ? json({ error: 'slow_down' }, 400)
           : json({ access_token: 'test-access-token', refresh_token: 'test-refresh-token', expires_in: 3600 });
       }
@@ -235,6 +245,7 @@ describe('xAI device OAuth', () => {
       fetch,
       now: Date.now,
       pollIntervalMs: 1_000,
+      onSlowDown,
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -242,8 +253,14 @@ describe('xAI device OAuth', () => {
     await vi.advanceTimersByTimeAsync(5_999);
     expect(polls).toBe(1);
     await vi.advanceTimersByTimeAsync(1);
-    await expect(pending).resolves.toMatchObject({ accessToken: 'test-access-token' });
     expect(polls).toBe(2);
+    expect(onSlowDown).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10_999);
+    expect(polls).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toMatchObject({ accessToken: 'test-access-token' });
+    expect(polls).toBe(3);
+    expect(onSlowDown).toHaveBeenCalledTimes(1);
   });
 
   it('turns an expired device code into a fixed timeout error', async () => {

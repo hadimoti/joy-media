@@ -9,10 +9,7 @@ import {
   signInWithKimiCode,
   signInWithMiniMax,
   signInWithXai,
-  type ChatGptTokenRecord,
-  type KimiTokenRecord,
-  type MiniMaxTokenRecord,
-  type XaiTokenRecord,
+  type OAuthAuthorizationPresentation,
 } from '@joy-media/provider-oauth';
 import { loadCliConfig, openCredentialStore, saveCliConfig } from '../utils/config.js';
 import type { OAuthCredential } from '../utils/credential-store.js';
@@ -23,8 +20,9 @@ export interface OAuthProfileSignInInput {
   readonly profileId: string;
   readonly provider: OAuthProfileProvider;
   readonly region: MiniMaxRegion;
-  /** The CLI presents this URL in the terminal and never launches a browser. */
-  readonly onAuthorization: (url: string) => void;
+  /** The CLI presents device-code fields in the terminal and never launches a browser. */
+  readonly onAuthorization: (presentation: OAuthAuthorizationPresentation) => void;
+  readonly onSlowDown?: () => void;
 }
 
 /** Runs one shared provider flow without opening a browser or writing its token. */
@@ -34,7 +32,8 @@ export async function signInOAuthProfile(
   const client = getOAuthClient(input.provider);
   const fetchFromProvider = (url: string, init: RequestInit): Promise<Response> =>
     globalThis.fetch(url, init);
-  const openExternal = (url: string): void => input.onAuthorization(url);
+  const openChatGptAuthorization = (url: string): void => input.onAuthorization({ url });
+  const doNotOpenBrowser = (): void => undefined;
   const now = (): number => Date.now();
 
   switch (input.provider) {
@@ -52,7 +51,7 @@ export async function signInOAuthProfile(
       const tokenRecord = await signInWithChatGpt({
         issuedClientId,
         extAgentHostId,
-        openExternal,
+        openExternal: openChatGptAuthorization,
         fetch: fetchFromProvider,
         now,
       });
@@ -65,16 +64,19 @@ export async function signInOAuthProfile(
       const tokenRecord = await signInWithMiniMax({
         clientId: client.clientId,
         region: input.region,
-        openExternal,
+        openExternal: doNotOpenBrowser,
+        onAuthorization: input.onAuthorization,
         fetch: fetchFromProvider,
         now,
       });
       return { provider: 'minimax', tokenRecord };
     }
     case 'kimi': {
-      const tokenRecord: KimiTokenRecord = await signInWithKimiCode({
+      const tokenRecord = await signInWithKimiCode({
         ...(client?.clientId === undefined ? {} : { clientId: client.clientId }),
-        openExternal,
+        openExternal: doNotOpenBrowser,
+        onAuthorization: input.onAuthorization,
+        ...(input.onSlowDown === undefined ? {} : { onSlowDown: input.onSlowDown }),
         fetch: fetchFromProvider,
         now,
       });
@@ -82,9 +84,11 @@ export async function signInOAuthProfile(
     }
     case 'xai': {
       // The shared registry still marks xAI's route and account access unverified; saving is pending only.
-      const tokenRecord: XaiTokenRecord = await signInWithXai({
+      const tokenRecord = await signInWithXai({
         ...(client?.clientId === undefined ? {} : { clientId: client.clientId }),
-        openExternal,
+        openExternal: doNotOpenBrowser,
+        onAuthorization: input.onAuthorization,
+        ...(input.onSlowDown === undefined ? {} : { onSlowDown: input.onSlowDown }),
         fetch: fetchFromProvider,
         now,
       });
@@ -107,9 +111,3 @@ export function oauthTokenExpiry(credential: OAuthCredential, now = Date.now()):
   const minutes = Math.floor((expiresAt - now) / 60_000);
   return `expires in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
 }
-
-export type OAuthTokenRecord =
-  | ChatGptTokenRecord
-  | MiniMaxTokenRecord
-  | KimiTokenRecord
-  | XaiTokenRecord;

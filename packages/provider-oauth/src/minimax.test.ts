@@ -186,6 +186,7 @@ describe('MiniMax device-code sign-in', () => {
     vi.useFakeTimers({ now: NOW });
     const gate = openedGate();
     const openExternal = vi.fn((url: string) => gate.open(url));
+    const presentations: { readonly url: string; readonly userCode?: string; readonly expiresAt?: number }[] = [];
     const sent: { readonly url: string; readonly init: RequestInit }[] = [];
     const fetch: FetchLike = async (url, init) => {
       sent.push({ url, init });
@@ -201,7 +202,11 @@ describe('MiniMax device-code sign-in', () => {
         resource_url: 'https://api.minimax.io/v1',
       });
     };
-    const pending = signInWithMiniMax(signInOptions(fetch, openExternal));
+    const pending = signInWithMiniMax(
+      signInOptions(fetch, openExternal, {
+        onAuthorization: (presentation) => presentations.push(presentation),
+      }),
+    );
 
     await gate.promise;
     await flushMicrotasks();
@@ -212,6 +217,13 @@ describe('MiniMax device-code sign-in', () => {
     expect(openExternal).toHaveBeenCalledWith(
       'https://platform.minimax.io/oauth-authorize?from=server&user_code=USER-CODE-42',
     );
+    expect(presentations).toEqual([
+      {
+        url: 'https://platform.minimax.io/oauth-authorize?from=server&user_code=USER-CODE-42',
+        userCode: USER_CODE,
+        expiresAt: NOW + 60_000,
+      },
+    ]);
     expect(sent).toHaveLength(2);
     const tokenRequest = sent[1];
     expect(tokenRequest?.url).toBe('https://account.minimax.io/oauth2/token');

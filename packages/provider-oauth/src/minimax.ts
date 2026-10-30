@@ -5,7 +5,12 @@ import {
 } from '@joy-media/provider-sdk';
 import { isRecord } from './is-record.js';
 import { OAuthFlowError } from './errors.js';
-import { type FetchLike, parseReplyObject, replyText } from './http.js';
+import {
+  type FetchLike,
+  parseReplyObject,
+  replyText,
+  type OAuthAuthorizationPresentation,
+} from './http.js';
 import { createPkcePair, randomToken } from './pkce.js';
 
 /** The MiniMax device-code scope (PLAN-v4 §6d). */
@@ -57,6 +62,8 @@ export interface MiniMaxSignInOptions {
   /** Injected so tests never reach a provider. */
   readonly fetch: FetchLike;
   readonly now: () => number;
+  /** Optional terminal presentation; desktop keeps using openExternal unchanged (D22 step 3 design §7). */
+  readonly onAuthorization?: (presentation: OAuthAuthorizationPresentation) => void;
   /** Raises the minimum polling interval when supplied. */
   readonly pollIntervalMs?: number;
   /** Caps the device code's own expiry deadline when supplied. */
@@ -118,10 +125,20 @@ export async function signInWithMiniMax(
   assertClientId(options.clientId);
   const requestedAt = options.now();
   const deviceCode = await requestMiniMaxDeviceCode(options);
+  const approvalUrl = approvalUrlFor(deviceCode.verificationUri, deviceCode.userCode);
   try {
-    await options.openExternal(approvalUrlFor(deviceCode.verificationUri, deviceCode.userCode));
+    await options.openExternal(approvalUrl);
   } catch {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'MiniMax approval page could not be opened.');
+  }
+  try {
+    options.onAuthorization?.({
+      url: approvalUrl,
+      userCode: deviceCode.userCode,
+      expiresAt: deviceCode.expiresAtMs,
+    });
+  } catch {
+    // Terminal presentation is observational, so a local output error cannot change MiniMax's polling flow (D22 step 3 design §7).
   }
 
   const configuredInterval = options.pollIntervalMs;

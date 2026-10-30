@@ -1,6 +1,5 @@
 import { endpointUrl } from '@joy-media/provider-sdk';
 import { JOY_AGENT_ERROR_CODES } from './contracts.js';
-import type { ByokSessionConfig } from './provider-config.js';
 
 export const ANTHROPIC_VERSION = '2023-06-01';
 const DEFAULT_MAX_TOKENS = 4096;
@@ -49,7 +48,7 @@ export function transformAnthropicRequestBody(input: Record<string, unknown>): R
 
 /** Rewrites the OpenAI-compatible SDK transport to Anthropic Messages and maps the response back for that SDK. */
 export function createAnthropicMessagesFetch(
-  config: Pick<ByokSessionConfig, 'baseUrl' | 'apiKey' | 'modelId'>,
+  config: { readonly baseUrl: string; readonly apiKey: string; readonly modelId: string },
   fetchImpl: FetchLike,
 ): FetchLike {
   return async (input, init = {}) => {

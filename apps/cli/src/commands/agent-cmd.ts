@@ -1,4 +1,4 @@
-/* global console */
+/* global console, process */
 import {
   AGENT_SLOT_IDS,
   AGENT_SLOT_LABELS,
@@ -21,6 +21,11 @@ import {
 import { clearAgentSlot, loadAgentSlot, saveAgentSlot } from '../agent/agent-slots.js';
 import { probeAgent, runJoyAgent } from '../agent/joy-agent.js';
 import { environmentKey, inferProviderType, isRetiredProvider } from '../agent/provider.js';
+import {
+  getDefaultOAuthTokenManager,
+  OAuthProfileLockTimeoutError,
+  OAuthRefreshFailedError,
+} from '../agent/oauth-runtime.js';
 import { startAgentRepl } from '../agent/repl.js';
 import {
   deleteAiProvider,
@@ -31,6 +36,7 @@ import {
   setAiProvider,
 } from '../utils/config.js';
 import { KIMI_CODE_BASE_URL, OAuthFlowError } from '@joy-media/provider-oauth';
+import type { OAuthCredential } from '../utils/credential-store.js';
 import {
   c,
   logError,
@@ -119,34 +125,50 @@ async function addOAuthProvider(name: string, flags: CliFlags): Promise<number> 
   const model = flags.model ?? previous?.defaultModel;
   // This exact notice is printed after every validation and before the sign-in flow can send a request.
   console.error(OAUTH_RISK_NOTICE);
+  let approvalStatusShown = false;
   let credential;
   try {
     credential = await signInOAuthProfile({
       profileId: name,
       provider: flags.provider,
       region,
-      onAuthorization: (url) => {
+      onAuthorization: ({ url, userCode, expiresAt }) => {
         console.log(`Approval URL: ${url}`);
-        try {
-          const userCode = new URL(url).searchParams.get('user_code');
-          if (userCode) console.log(`User code: ${userCode}`);
-        } catch {
-          // The flow owns the approval URL; printing the original remains useful if parsing fails.
+        if (userCode) console.log(`User code: ${userCode}`);
+        if (expiresAt !== undefined && Number.isFinite(expiresAt)) {
+          console.log(`Code expires at: ${new Date(expiresAt).toISOString()}`);
         }
         if (flags.provider === 'chatgpt') {
           console.log(
             'Open the URL in a browser on this same machine. A remote CLI with no browser on that machine cannot complete it.',
           );
+        } else {
+          process.stdout.write('Waiting for approval. Press Ctrl+C to cancel.');
+          approvalStatusShown = true;
         }
+      },
+      onSlowDown: () => {
+        process.stdout.write(
+          '\rWaiting for approval; the provider asked us to slow down. Press Ctrl+C to cancel.',
+        );
+        approvalStatusShown = true;
       },
     });
   } catch (error) {
     if (error instanceof OAuthFlowError) {
-      logError(error.message);
+      const message =
+        error.code === 'TIMEOUT'
+          ? 'The sign-in code expired. Run the OAuth add command again'
+          : error.code === 'ACCESS_DENIED'
+            ? 'Sign-in was denied.'
+            : error.message;
+      logError(message);
       return error.code === 'CANCELLED' ? 130 : 1;
     }
     logError('OAuth sign-in failed. No profile was changed.');
     return 1;
+  } finally {
+    if (approvalStatusShown) console.log();
   }
 
   try {
@@ -171,6 +193,74 @@ async function addOAuthProvider(name: string, flags: CliFlags): Promise<number> 
     logStep('Inference', 'needs attended verification');
   }
   return 0;
+}
+
+async function listOAuthModels(
+  profileId: string,
+  profile: NonNullable<ReturnType<typeof loadAiProviders>[string]>,
+): Promise<number> {
+  const provider = profile.provider;
+  if (provider === 'xai') {
+    logError('Inference: needs attended verification for xAI OAuth.');
+    return 1;
+  }
+  if (provider === 'chatgpt') {
+    logError('ChatGPT Responses model listing is not available in the CLI yet.');
+    return 1;
+  }
+  if (provider !== 'kimi' && provider !== 'minimax') {
+    logError(`OAuth profile "${profileId}" has no supported model-list route.`);
+    return 1;
+  }
+
+  let credential: OAuthCredential;
+  try {
+    credential = await getDefaultOAuthTokenManager().current(profileId, provider);
+  } catch (error) {
+    if (error instanceof OAuthProfileLockTimeoutError) {
+      logError(error.message);
+    } else {
+      logError(new OAuthRefreshFailedError(profileId, provider).message);
+    }
+    return 1;
+  }
+
+  const baseUrl =
+    credential.provider === 'minimax'
+      ? MINIMAX_OAUTH_ENDPOINTS[credential.tokenRecord.region].inferenceBase
+      : KIMI_CODE_BASE_URL;
+  printBanner();
+  logInfo(`Fetching models from ${c(baseUrl, 'bold')}...`);
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${credential.tokenRecord.accessToken}`,
+      },
+    });
+    if (!response.ok) throw new Error('model list request failed');
+    const json = (await response.json()) as { data?: unknown };
+    const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+    const modelIds = raw
+      .map((item: { id?: string } | string) => (typeof item === 'string' ? item : item.id))
+      .filter((id): id is string =>
+        typeof id === 'string' &&
+        id.length > 0 &&
+        ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some((token) =>
+          id.includes(token),
+        ),
+      );
+
+    console.log(`\n  ${c(`Discovered ${modelIds.length} models:`, 'bold')}\n`);
+    for (const id of modelIds) console.log(`  • ${id}`);
+    console.log();
+    setAiProvider(profileId, { ...profile, cachedModels: modelIds });
+    return 0;
+  } catch {
+    logError(`Failed to fetch models for OAuth profile "${profileId}".`);
+    return 1;
+  }
 }
 
 export async function handleAgentCommand(args: string[], flags: CliFlags): Promise<number> {
@@ -387,6 +477,15 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       );
       return 1;
     }
+    if (providerConfig?.authKind === 'oauth') {
+      if (flags.baseUrl !== undefined || flags.apiKey !== undefined) {
+        logError(
+          `OAuth profile "${targetProviderName}" cannot be combined with --url or --api-key.`,
+        );
+        return 1;
+      }
+      return await listOAuthModels(targetProviderName, providerConfig);
+    }
 
     let baseUrl = flags.baseUrl ?? providerConfig?.baseUrl;
     let apiKey = flags.apiKey ?? providerConfig?.apiKey;
@@ -474,7 +573,11 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       logStep('Capability', c(res.capability, res.capability === 'tool-loop' ? 'green' : 'yellow'));
       return 0;
     } catch (err) {
-      logError(`Probe failed: ${String(err)}`);
+      if (err instanceof OAuthRefreshFailedError || err instanceof OAuthProfileLockTimeoutError) {
+        logError(err.message);
+      } else {
+        logError(`Probe failed: ${String(err)}`);
+      }
       return 1;
     }
   }
@@ -658,7 +761,11 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
 
       return 0;
     } catch (err) {
-      logError(`Joy Agent execution failed: ${String(err)}`);
+      if (err instanceof OAuthRefreshFailedError || err instanceof OAuthProfileLockTimeoutError) {
+        logError(err.message);
+      } else {
+        logError(`Joy Agent execution failed: ${String(err)}`);
+      }
       return 1;
     }
   }

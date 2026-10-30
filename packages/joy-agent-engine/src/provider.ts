@@ -4,7 +4,11 @@ import {
   createAnthropicMessagesFetch,
   transformAnthropicRequestBody,
 } from './anthropic-messages.js';
-import type { ByokSessionConfig, ByokSessionStatus } from './provider-config.js';
+import {
+  ProviderConfigError,
+  type ByokSessionConfig,
+  type ByokSessionStatus,
+} from './provider-config.js';
 import { safeByokSessionStatus } from './provider-config.js';
 
 export const DEFAULT_PROVIDER_RESPONSE_BYTES = 2_097_152;
@@ -89,13 +93,21 @@ export function createJoyAgentProvider(
 ): { readonly model: LanguageModel; readonly status: ByokSessionStatus } {
   const hardenedFetch = createHardenedFetch(config.baseUrl, fetchImpl);
   const isAnthropic = config.provider === 'anthropic-messages';
+  const apiKey = 'apiKey' in config ? config.apiKey : undefined;
+  if (isAnthropic && apiKey === undefined) throw new ProviderConfigError();
   const providerFetch = isAnthropic
-    ? createAnthropicMessagesFetch(config, hardenedFetch)
+    ? createAnthropicMessagesFetch(
+        { baseUrl: config.baseUrl, modelId: config.modelId, apiKey: apiKey! },
+        hardenedFetch,
+      )
     : hardenedFetch;
   const provider = createOpenAICompatible({
     name: 'joy-byok',
     baseURL: config.baseUrl,
-    ...(isAnthropic ? {} : { apiKey: config.apiKey }),
+    ...(!isAnthropic && apiKey !== undefined ? { apiKey } : {}),
+    ...(config.auth?.kind === 'bearer-token'
+      ? { headers: { Authorization: `Bearer ${config.auth.token}` } }
+      : {}),
     fetch: providerFetch,
     includeUsage: true,
     ...(isAnthropic ? { transformRequestBody: transformAnthropicRequestBody } : {}),

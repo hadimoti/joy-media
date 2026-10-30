@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../cli.js';
+import { resolveAgentConfig } from '../agent/provider.js';
+import type { OAuthCredential } from '../utils/credential-store.js';
 import {
   loadAiProviders,
   loadCliConfig,
@@ -65,6 +67,7 @@ describe('the CLI provider listing', () => {
     expect(output).not.toContain(SECRET);
     expect(output).not.toContain(SECRET.slice(0, 4));
     expect(output).not.toContain(SECRET.slice(-4));
+    expect(signInOAuthProfileMock).not.toHaveBeenCalled();
   });
 });
 
@@ -73,6 +76,7 @@ describe('OAuth provider profiles', () => {
   let printed: string[] = [];
   let errors: string[] = [];
   let order: string[] = [];
+  let terminalWrites: string[] = [];
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'joy-oauth-profile-'));
@@ -81,6 +85,7 @@ describe('OAuth provider profiles', () => {
     printed = [];
     errors = [];
     order = [];
+    terminalWrites = [];
     signInOAuthProfileMock.mockReset();
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
       const text = args.map(String).join(' ');
@@ -95,7 +100,10 @@ describe('OAuth provider profiles', () => {
       errors.push(text);
       order.push(`stderr:${text}`);
     });
-    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      terminalWrites.push(String(chunk));
+      return true;
+    });
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       throw new Error('The OAuth profile command must not discover models.');
     });
@@ -113,11 +121,22 @@ describe('OAuth provider profiles', () => {
   it('creates a Kimi OAuth profile after the one approved notice and keeps tokens out of output', async () => {
     const accessToken = 'kimi-access-secret-for-cli-test';
     const refreshToken = 'kimi-refresh-secret-for-cli-test';
+    const expiresAt = Date.UTC(2026, 10, 1, 12);
     signInOAuthProfileMock.mockImplementation(async (input: {
-      readonly onAuthorization: (url: string) => void;
+      readonly onAuthorization: (presentation: {
+        readonly url: string;
+        readonly userCode: string;
+        readonly expiresAt: number;
+      }) => void;
+      readonly onSlowDown?: () => void;
     }) => {
       order.push('sign-in');
-      input.onAuthorization('https://www.kimi.ai/code/authorize_device?user_code=KIMI-CODE-TEST');
+      input.onAuthorization({
+        url: 'https://www.kimi.ai/code/authorize_device?user_code=KIMI-CODE-TEST',
+        userCode: 'KIMI-CODE-TEST',
+        expiresAt,
+      });
+      input.onSlowDown?.();
       return {
         provider: 'kimi',
         tokenRecord: {
@@ -151,6 +170,11 @@ describe('OAuth provider profiles', () => {
     expect(order.indexOf(`stderr:${notice}`)).toBeLessThan(order.indexOf('sign-in'));
     expect(printed.join('\n')).toContain('Approval URL: https://www.kimi.ai/code/authorize_device?user_code=KIMI-CODE-TEST');
     expect(printed.join('\n')).toContain('User code: KIMI-CODE-TEST');
+    expect(printed.join('\n')).toContain(`Code expires at: ${new Date(expiresAt).toISOString()}`);
+    expect(terminalWrites).toEqual([
+      'Waiting for approval. Press Ctrl+C to cancel.',
+      '\rWaiting for approval; the provider asked us to slow down. Press Ctrl+C to cancel.',
+    ]);
     expect(printed.join('\n')).toContain('Provider "kimi-profile" configured successfully');
     expect(printed.join('\n')).toContain('Auth: OAuth (kimi)');
     expect(printed.join('\n')).toContain('kimi-code-model');
@@ -326,9 +350,9 @@ describe('OAuth provider profiles', () => {
   it('explains the ChatGPT loopback and remote-machine limitation without launching a browser', async () => {
     const authorizationUrl = 'https://auth.openai.com/api/accounts/authorize?state=cli-test';
     signInOAuthProfileMock.mockImplementation(async (input: {
-      readonly onAuthorization: (url: string) => void;
+      readonly onAuthorization: (presentation: { readonly url: string }) => void;
     }) => {
-      input.onAuthorization(authorizationUrl);
+      input.onAuthorization({ url: authorizationUrl });
       return {
         provider: 'chatgpt',
         tokenRecord: {
@@ -388,7 +412,203 @@ describe('OAuth provider profiles', () => {
     expect(output).not.toContain('cli-chat-proxy.grok.com');
     expect(output).not.toContain('xai-access-secret');
     expect(output).not.toContain('xai-refresh-secret');
+    expect(output).not.toContain('xai-access');
+    expect(output).not.toContain('xai-refresh');
+    expect(output).not.toContain('ess-secret');
+    expect(output).not.toContain('esh-secret');
     expect(output).not.toContain('API Key');
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+  });
+
+  it('lists models with a Kimi bearer token from the OAuth profile', async () => {
+    const accessToken = 'kimi-model-list-access-token';
+    setAiProvider('kimi-profile', {
+      name: 'kimi-profile',
+      provider: 'kimi',
+      authKind: 'oauth',
+      baseUrl: 'https://api.kimi.ai/coding/v1',
+      defaultModel: 'kimi-model',
+    });
+    openCredentialStore().save('kimi-profile', {
+      provider: 'kimi',
+      tokenRecord: {
+        version: 1,
+        clientId: 'kimi-client-test',
+        accessToken,
+        refreshToken: 'kimi-model-list-refresh-token',
+        accessExpiresAt: Date.now() + 3_600_000,
+        scope: 'kimi-code',
+      },
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: 'kimi-code-model' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    expect(await runCli(['agent', 'models', 'kimi-profile'])).toBe(0);
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
+    expect(url).toBe('https://api.kimi.ai/coding/v1/models');
+    expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${accessToken}`);
+    expect(printed.join('\n')).toContain('kimi-code-model');
+  });
+
+  it('resolves a saved OAuth profile to a typed bearer token and rejects API-key override', async () => {
+    const accessToken = 'kimi-chat-access-token';
+    setAiProvider('kimi-profile', {
+      name: 'kimi-profile',
+      provider: 'kimi',
+      authKind: 'oauth',
+      baseUrl: 'https://api.kimi.ai/coding/v1',
+      defaultModel: 'kimi-code-model',
+    });
+    openCredentialStore().save('kimi-profile', {
+      provider: 'kimi',
+      tokenRecord: {
+        version: 1,
+        clientId: 'kimi-client-test',
+        accessToken,
+        refreshToken: 'kimi-chat-refresh-token',
+        accessExpiresAt: Date.now() + 3_600_000,
+        scope: 'kimi-code',
+      },
+    });
+
+    const config = await resolveAgentConfig({ provider: 'kimi-profile' });
+
+    expect(config).toMatchObject({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.kimi.ai/coding/v1',
+      modelId: 'kimi-code-model',
+      auth: { kind: 'bearer-token', token: accessToken },
+    });
+    expect('apiKey' in config).toBe(false);
+    await expect(
+      resolveAgentConfig({ provider: 'kimi-profile', apiKey: 'api-key-override-must-not-be-used' }),
+    ).rejects.toThrow('cannot use --api-key');
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+  });
+
+  it('stores a rotated token before making the OAuth model-list request', async () => {
+    const expired: OAuthCredential = {
+      provider: 'kimi',
+      tokenRecord: {
+        version: 1,
+        clientId: 'kimi-client-test',
+        accessToken: 'kimi-before-refresh-access',
+        refreshToken: 'kimi-before-refresh-token',
+        accessExpiresAt: Date.now() + 1_000,
+        scope: 'kimi-code',
+      },
+    };
+    setAiProvider('kimi-profile', {
+      name: 'kimi-profile',
+      provider: 'kimi',
+      authKind: 'oauth',
+      baseUrl: 'https://api.kimi.ai/coding/v1',
+      defaultModel: 'kimi-model',
+    });
+    openCredentialStore().save('kimi-profile', expired);
+    const calls: Array<{ url: string; authorization: string | null }> = [];
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      calls.push({
+        url,
+        authorization: new Headers(init?.headers).get('authorization'),
+      });
+      if (url.includes('/api/oauth/token')) {
+        return new Response(
+          JSON.stringify({
+            access_token: 'kimi-after-refresh-access',
+            refresh_token: 'kimi-after-refresh-token',
+            expires_in: 1800,
+            scope: 'kimi-code',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ data: [{ id: 'kimi-code-model' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    expect(await runCli(['agent', 'models', 'kimi-profile'])).toBe(0);
+    expect(calls).toEqual([
+      expect.objectContaining({ url: expect.stringContaining('/api/oauth/token') }),
+      {
+        url: 'https://api.kimi.ai/coding/v1/models',
+        authorization: 'Bearer kimi-after-refresh-access',
+      },
+    ]);
+    expect(openCredentialStore().read('kimi-profile')).toMatchObject({
+      provider: 'kimi',
+      tokenRecord: {
+        accessToken: 'kimi-after-refresh-access',
+        refreshToken: 'kimi-after-refresh-token',
+      },
+    });
+  });
+
+  it('does not request models or fall back to a key when OAuth refresh fails', async () => {
+    const expired: OAuthCredential = {
+      provider: 'kimi',
+      tokenRecord: {
+        version: 1,
+        clientId: 'kimi-client-test',
+        accessToken: 'kimi-expired-access-token',
+        refreshToken: 'kimi-expired-refresh-token',
+        accessExpiresAt: Date.now() + 1_000,
+        scope: 'kimi-code',
+      },
+    };
+    setAiProvider('kimi-profile', {
+      name: 'kimi-profile',
+      provider: 'kimi',
+      authKind: 'oauth',
+      baseUrl: 'https://api.kimi.ai/coding/v1',
+      defaultModel: 'kimi-model',
+    });
+    openCredentialStore().save('kimi-profile', expired);
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid_grant', detail: 'provider-body-secret' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    expect(await runCli(['agent', 'models', 'kimi-profile'])).toBe(1);
+    const message =
+      'OAuth refresh failed for kimi-profile. No provider request was sent. Reauthorize with: joy-media agent provider add kimi-profile --provider kimi --oauth.';
+    expect(errors[0]).toBe(`✖ ${message}`);
+    expect(errors.join('\n')).not.toContain('provider-body-secret');
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(globalThis.fetch).mock.calls[0]?.[0])).toContain('/api/oauth/token');
+    expect(String(vi.mocked(globalThis.fetch).mock.calls[0]?.[0])).not.toContain('/models');
+    expect(openCredentialStore().read('kimi-profile')).toEqual(expired);
+  });
+
+  it('blocks model listing for a pending xAI OAuth profile before any provider request', async () => {
+    setAiProvider('xai-profile', {
+      name: 'xai-profile',
+      provider: 'xai',
+      authKind: 'oauth',
+    });
+    openCredentialStore().save('xai-profile', {
+      provider: 'xai',
+      tokenRecord: {
+        version: 1,
+        clientId: 'xai-client-test',
+        accessToken: 'xai-access-test',
+        refreshToken: 'xai-refresh-test',
+        accessExpiresAt: Date.now() + 3_600_000,
+        scope: 'openid profile api:access',
+      },
+    });
+
+    expect(await runCli(['agent', 'models', 'xai-profile'])).toBe(1);
+    expect(errors.join('\n')).toContain('Inference: needs attended verification');
     expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
   });
 });

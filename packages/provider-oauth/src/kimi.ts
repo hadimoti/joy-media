@@ -1,7 +1,12 @@
 import { isRecord } from './is-record.js';
 import { getOAuthClient } from '@joy-media/provider-sdk';
 import { OAuthFlowError } from './errors.js';
-import { type FetchLike, parseReplyObject, replyText } from './http.js';
+import {
+  type FetchLike,
+  parseReplyObject,
+  replyText,
+  type OAuthAuthorizationPresentation,
+} from './http.js';
 
 /** The public Kimi Code client comes from the provider SDK's OAuth client table. */
 export const KIMI_CODE_CLIENT_ID = getOAuthClient('kimi')?.clientId ?? '';
@@ -40,6 +45,10 @@ export interface KimiCodeSignInOptions {
   /** Injected so tests never reach Kimi. */
   readonly fetch: FetchLike;
   readonly now: () => number;
+  /** Optional terminal presentation; desktop keeps using openExternal unchanged (D22 step 3 design §7). */
+  readonly onAuthorization?: (presentation: OAuthAuthorizationPresentation) => void;
+  /** Reports the first slow_down status without changing the provider's polling interval. */
+  readonly onSlowDown?: () => void;
   readonly pollIntervalMs?: number;
   readonly timeoutMs?: number;
 }
@@ -87,6 +96,15 @@ export async function signInWithKimiCode(
   } catch {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'Kimi approval page could not be opened.');
   }
+  try {
+    options.onAuthorization?.({
+      url: device.approvalUrl,
+      userCode: device.userCode,
+      expiresAt: device.expiresAt,
+    });
+  } catch {
+    // Terminal presentation is observational, so a local output error cannot change Kimi's polling flow (D22 step 3 design §7).
+  }
 
   const configuredInterval = options.pollIntervalMs;
   let intervalMs = Math.max(
@@ -104,6 +122,7 @@ export async function signInWithKimiCode(
   const deadline = Math.min(device.expiresAt, requestedAt + flowTimeout);
   const endpoint = `${KIMI_CODE_OAUTH_HOST}/api/oauth/token`;
   let pollImmediately = true;
+  let slowDownReported = false;
 
   while (true) {
     const remaining = deadline - options.now();
@@ -141,6 +160,14 @@ export async function signInWithKimiCode(
     const error = nonEmptyString(reply.error);
     if (error === 'authorization_pending') continue;
     if (error === 'slow_down') {
+      if (!slowDownReported) {
+        try {
+          options.onSlowDown?.();
+        } catch {
+          // The status callback cannot alter the server's required slow_down polling interval (D22 step 3 design §7).
+        }
+      }
+      slowDownReported = true;
       intervalMs += 5_000;
       continue;
     }

@@ -41,6 +41,7 @@ describe('Kimi Code device OAuth', () => {
     const now = Date.UTC(2026, 9, 30);
     const requests: { readonly url: string; readonly init: RequestInit }[] = [];
     let openedUrl = '';
+    const presentations: { readonly url: string; readonly userCode?: string; readonly expiresAt?: number }[] = [];
     let releaseOpen: () => void = () => undefined;
     const opened = new Promise<void>((resolve) => {
       releaseOpen = resolve;
@@ -85,6 +86,7 @@ describe('Kimi Code device OAuth', () => {
       fetch,
       now: () => now,
       pollIntervalMs: 1_000,
+      onAuthorization: (presentation) => presentations.push(presentation),
     });
     await opened;
     const record = await pending;
@@ -92,6 +94,13 @@ describe('Kimi Code device OAuth', () => {
     expect(openedUrl).toBe(
       'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
     );
+    expect(presentations).toEqual([
+      {
+        url: openedUrl,
+        userCode: 'KIMI-USER-CODE',
+        expiresAt: now + 120_000,
+      },
+    ]);
     expect(record).toMatchObject({
       version: 1,
       clientId: KIMI_CODE_CLIENT_ID,

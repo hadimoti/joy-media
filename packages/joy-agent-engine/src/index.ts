@@ -37,7 +37,12 @@ export {
   isJoyAgentErrorCode,
   toSafeJoyAgentError,
 } from './redaction.js';
-export type { ByokSessionConfig, ByokSessionStatus } from './provider-config.js';
+export type {
+  ByokBearerTokenAuth,
+  ByokSessionConfig,
+  ByokSessionConfigInput,
+  ByokSessionStatus,
+} from './provider-config.js';
 export {
   OPENROUTER_BASE_URL,
   ProviderConfigError,
