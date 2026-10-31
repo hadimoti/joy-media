@@ -202,6 +202,7 @@ await writeFile(resolve(standaloneDir, 'uninstall.cmd'), uninstallCmd, 'utf8');
 
 // 4. Create Distributable Releases Directory and Package
 console.log('4. Creating distributable zip release...');
+await rm(releasesDir, { recursive: true, force: true });
 await mkdir(releasesDir, { recursive: true });
 
 const version = '1.0.0';
@@ -244,15 +245,18 @@ console.log(
 );
 console.log(`SHA256: ${zipSha256}`);
 
-// 5. Generate SHA256SUMS.txt and release manifest
+// 5. Stage the release payload and write its manifest and checksums
 const cliSha256 = await computeSha256(
   resolve(standaloneDir, 'resources', 'app', 'cli', 'joy-media-bundle.mjs'),
 );
-let sha256SumsContent = `${zipSha256}  ${releaseZipName}\n${exeSha256}  joy-media.exe\n${cliSha256}  joy-media-bundle.mjs\n`;
+await cp(targetExe, resolve(releasesDir, 'joy-media.exe'));
+await cp(
+  resolve(standaloneDir, 'resources', 'app', 'cli', 'joy-media-bundle.mjs'),
+  resolve(releasesDir, 'joy-media-bundle.mjs'),
+);
 if (workerSha256) {
-  sha256SumsContent += `${workerSha256}  joy-worker.exe\n`;
+  await cp(workerExe, resolve(releasesDir, 'joy-worker.exe'));
 }
-await writeFile(resolve(releasesDir, 'SHA256SUMS.txt'), sha256SumsContent, 'utf8');
 
 const releaseManifest = {
   name: 'joy-media',
@@ -314,6 +318,21 @@ await writeFile(
   JSON.stringify(releaseManifest, null, 2) + '\n',
   'utf8',
 );
+
+const checksumsResult = spawnSync(
+  process.execPath,
+  [
+    '--experimental-strip-types',
+    resolve(repoRoot, 'tooling', 'release', 'src', 'checksums.ts'),
+    'write',
+    '--dir',
+    releasesDir,
+  ],
+  { cwd: repoRoot, stdio: 'inherit', env: process.env },
+);
+if (checksumsResult.status !== 0) {
+  throw new Error('checksums.ts write failed with status ' + checksumsResult.status);
+}
 
 console.log('=== Installer & Portable Packaging Complete ===');
 console.log(`Artifacts available at: ${releasesDir}`);
