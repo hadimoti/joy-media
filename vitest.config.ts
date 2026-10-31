@@ -40,7 +40,7 @@ export default defineConfig({
       '@joy-media/joy-agent-engine': pkg('./packages/joy-agent-engine/src/index.ts'),
       '@joy-media/cli': pkg('./apps/cli/src/index.ts'),
       '@joy-media/export-core': pkg('./packages/export-core/src/index.ts'),
-      '@joy-media/api': pkg('./apps/api/src/index.ts'),
+      '@joy-media/test-control-plane': pkg('./packages/test-control-plane/src/index.ts'),
       '@joy-media/property-system': pkg('./packages/property-system/src/index.ts'),
       '@joy-media/timeline-engine': pkg('./packages/timeline-engine/src/index.ts'),
       '@joy-media/provider-sdk': pkg('./packages/provider-sdk/src/index.ts'),

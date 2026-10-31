@@ -315,9 +315,6 @@ importers:
         specifier: ^1.62.1
         version: 1.62.1
     devDependencies:
-      '@joy-media/api':
-        specifier: workspace:*
-        version: link:../api
       '@joy-media/commands':
         specifier: workspace:*
         version: link:../../packages/commands
@@ -327,6 +324,9 @@ importers:
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../../packages/project-schema
+      '@joy-media/test-control-plane':
+        specifier: workspace:*
+        version: link:../../packages/test-control-plane
       '@joy-media/test-fixtures':
         specifier: workspace:*
         version: link:../../packages/test-fixtures
@@ -579,6 +579,22 @@ importers:
       pixi.js:
         specifier: ^8.19.0
         version: 8.19.0
+
+  packages/test-control-plane:
+    dependencies:
+      '@joy-media/export-core':
+        specifier: workspace:*
+        version: link:../export-core
+      '@joy-media/job-protocol':
+        specifier: workspace:*
+        version: link:../job-protocol
+      '@joy-media/project-schema':
+        specifier: workspace:*
+        version: link:../project-schema
+    devDependencies:
+      tsx:
+        specifier: ^4.23.11
+        version: 4.23.11
 
   packages/test-fixtures:
     dependencies:

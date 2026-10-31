@@ -18,6 +18,7 @@
     { "path": "packages/property-system" },
     { "path": "packages/timeline-engine" },
     { "path": "packages/provider-oauth" },
+    { "path": "packages/test-control-plane" },
     { "path": "apps/worker" },
     { "path": "apps/api" },
     { "path": "apps/editor-web" },

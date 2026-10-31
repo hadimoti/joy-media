@@ -1,0 +1,430 @@
+/**
+ * Project Document Sync Request Validation - WP-37 S4 Phase 5-A
+ *
+ * Strict browser-to-server write envelope validation for project document sync.
+ * Validates envelope structure, revision CAS constraints, payload size, and
+ * JoyProjectV1 document validity. Forbids projectId, owner, and any server-only fields.
+ */
+
+import type {
+  JoyProjectV1,
+  LookInstancesDocument,
+  ProjectDiagnostic,
+} from '@joy-media/project-schema';
+import { validateJoyProjectV1, validateLookInstancesDocument } from '@joy-media/project-schema';
+import type { ProjectRevisionId, ProjectId } from '@joy-media/project-schema';
+
+export type { ProjectId, ProjectRevisionId, JoyProjectV1 };
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Maximum serialized JSON payload size in bytes (10 MiB). */
+export const MAX_PROJECT_DOCUMENT_SYNC_BYTES = 10 * 1024 * 1024;
+
+/** Sentinel revision ID indicating no previous document exists for a project. */
+export const INITIAL_REVISION: ProjectRevisionId = '';
+
+// ============================================================================
+// Error Types
+// ============================================================================
+
+/** Typed error categories for project document sync request validation. */
+export type ProjectDocumentSyncValidationErrorCode =
+  | 'invalid-request'
+  | 'forbidden-field'
+  | 'missing-field'
+  | 'revision-mismatch'
+  | 'payload-too-large'
+  | 'invalid-document';
+
+export interface ProjectDocumentSyncValidationError {
+  readonly code: ProjectDocumentSyncValidationErrorCode;
+  readonly message: string;
+  readonly path?: string;
+}
+
+export interface ProjectDocumentSyncValidationSuccess {
+  readonly valid: true;
+  readonly envelope: ProjectDocumentSyncEnvelope;
+  readonly errors: readonly [];
+}
+
+export interface ProjectDocumentSyncValidationFailure {
+  readonly valid: false;
+  readonly errors: readonly ProjectDocumentSyncValidationError[];
+}
+
+export type ProjectDocumentSyncValidationResult =
+  ProjectDocumentSyncValidationSuccess | ProjectDocumentSyncValidationFailure;
+
+// ============================================================================
+// Envelope Types
+// ============================================================================
+
+/**
+ * Strict browser-to-server write envelope for project document sync.
+ * Contains only: baseRevisionId, revisionId, document
+ * Project ID comes from URL path, owner from server auth - neither in envelope.
+ */
+export interface ProjectDocumentSyncEnvelope {
+  /**
+   * The base revision ID for compare-and-swap.
+   * Must be INITIAL_REVISION ('') for first write.
+   */
+  readonly baseRevisionId: ProjectRevisionId;
+
+  /**
+   * The new revision ID to store.
+   * Must be a non-empty string.
+   */
+  readonly revisionId: ProjectRevisionId;
+
+  /**
+   * The JoyProjectV1 document to store.
+   * Must pass validateJoyProjectV1. document.id is the canonical editor-document ID
+   * and is allowed to differ from the owner-scoped control-plane project ID in the URL path.
+   */
+  readonly document: JoyProjectV1;
+
+  /**
+   * The canonical Look Instances document (R2 / GAP 1a). Optional: when absent
+   * the server carries the previous revision's value forward (omission is never
+   * deletion). An explicit `{ id, schemaVersion: 1, instances: {} }` persists an
+   * intentional "all Looks detached" state.
+   */
+  readonly lookInstances?: LookInstancesDocument;
+}
+
+// ============================================================================
+// Forbidden Field Names
+// ============================================================================
+
+/**
+ * Fields that must never appear in the sync envelope.
+ * These are server-only concerns determined from URL path and auth.
+ */
+const FORBIDDEN_TOP_LEVEL_FIELDS = new Set([
+  'projectId',
+  'ownerId',
+  'owner',
+  'userId',
+  'user',
+  'auth',
+  'authentication',
+  'token',
+  'apiKey',
+  'secret',
+  'password',
+  'credential',
+  'command',
+  'action',
+  'execute',
+  'apply',
+  'run',
+  'job',
+  'approval',
+  'plan',
+  'step',
+  'write',
+  'mutate',
+  'update',
+  'delete',
+  'create',
+  'persist',
+  'cache',
+  'provider',
+  'model',
+  'adapter',
+]);
+
+/**
+ * Required top-level fields in the sync envelope - all must be present.
+ */
+const REQUIRED_TOP_LEVEL_FIELDS = new Set(['baseRevisionId', 'revisionId', 'document']);
+
+/** Optional top-level fields the envelope may also carry (R2 / GAP 1a). */
+const OPTIONAL_TOP_LEVEL_FIELDS = new Set(['lookInstances']);
+
+/**
+ * Every top-level field the envelope may contain - required plus optional.
+ */
+const ALLOWED_TOP_LEVEL_FIELDS = new Set([
+  ...REQUIRED_TOP_LEVEL_FIELDS,
+  ...OPTIONAL_TOP_LEVEL_FIELDS,
+]);
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Estimate the size of a JSON-serializable object in bytes.
+ */
+function estimateJsonSize(obj: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(obj), 'utf8');
+  } catch {
+    return Infinity;
+  }
+}
+
+/**
+ * Check for forbidden top-level field names.
+ */
+function checkForbiddenFields(obj: Record<string, unknown>): string[] {
+  const forbidden: string[] = [];
+  for (const key of Object.keys(obj)) {
+    if (FORBIDDEN_TOP_LEVEL_FIELDS.has(key)) {
+      forbidden.push(key);
+    }
+  }
+  return forbidden;
+}
+
+/**
+ * Check for unknown top-level field names.
+ */
+function checkUnknownFields(obj: Record<string, unknown>): string[] {
+  const unknown: string[] = [];
+  for (const key of Object.keys(obj)) {
+    if (!ALLOWED_TOP_LEVEL_FIELDS.has(key)) {
+      unknown.push(key);
+    }
+  }
+  return unknown;
+}
+
+// ============================================================================
+// Main Validation Function
+// ============================================================================
+
+/**
+ * Validate a browser-to-server project document sync request envelope.
+ *
+ * Checks:
+ * - Input is a non-null object
+ * - Exact top-level fields (baseRevisionId, revisionId, document) - no more, no less
+ * - No forbidden field names (projectId, ownerId, server-only fields)
+ * - baseRevisionId is either INITIAL_REVISION ('') or a non-empty string
+ * - revisionId is a non-empty string
+ * - document is a valid JoyProjectV1 (via validateJoyProjectV1)
+ * - document.id is a non-empty string (canonical editor-document ID, independent of URL path)
+ * - Total serialized payload size <= 10 MiB
+ * - Input is not mutated
+ *
+ * @param envelope - The raw request envelope from the browser
+ * @param expectedProjectId - The projectId extracted from the URL path
+ * @returns Validation result with typed errors if any, or the validated envelope on success
+ */
+export function validateProjectDocumentSyncRequest(
+  envelope: unknown,
+  _expectedProjectId: ProjectId,
+): ProjectDocumentSyncValidationResult {
+  const errors: ProjectDocumentSyncValidationError[] = [];
+
+  // Must be a non-null object
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) {
+    return {
+      valid: false,
+      errors: Object.freeze([
+        {
+          code: 'invalid-request',
+          message: 'Request envelope must be a non-null object',
+        },
+      ]),
+    };
+  }
+
+  const env = envelope as Record<string, unknown>;
+
+  // Check for forbidden top-level fields
+  const forbiddenFields = checkForbiddenFields(env);
+  if (forbiddenFields.length > 0) {
+    errors.push({
+      code: 'forbidden-field',
+      message: `Request envelope contains forbidden fields: ${forbiddenFields.join(', ')}`,
+    });
+  }
+
+  // Check for unknown top-level fields (strict: must be exactly the allowed fields)
+  const unknownFields = checkUnknownFields(env);
+  if (unknownFields.length > 0) {
+    errors.push({
+      code: 'invalid-request',
+      message: `Request envelope contains unknown fields: ${unknownFields.join(', ')}`,
+    });
+  }
+
+  // Check for missing required fields
+  const missingFields: string[] = [];
+  for (const field of REQUIRED_TOP_LEVEL_FIELDS) {
+    if (!(field in env)) {
+      missingFields.push(field);
+    }
+  }
+  if (missingFields.length > 0) {
+    errors.push({
+      code: 'missing-field',
+      message: `Request envelope is missing required fields: ${missingFields.join(', ')}`,
+    });
+  }
+
+  // If we have structural errors (forbidden, unknown, or missing fields), return early
+  if (errors.length > 0) {
+    return { valid: false, errors: Object.freeze(errors.slice()) };
+  }
+
+  // At this point we know the envelope has exactly the right fields
+  // Now validate each field's value and build typed envelope
+
+  // Validate baseRevisionId
+  const baseRevisionIdValue = env.baseRevisionId;
+  if (typeof baseRevisionIdValue !== 'string') {
+    errors.push({
+      code: 'invalid-request',
+      message: 'baseRevisionId must be a string',
+      path: 'baseRevisionId',
+    });
+  } else if (baseRevisionIdValue !== INITIAL_REVISION && baseRevisionIdValue.length === 0) {
+    errors.push({
+      code: 'revision-mismatch',
+      message:
+        'baseRevisionId must be either INITIAL_REVISION (empty string) or a non-empty string',
+      path: 'baseRevisionId',
+    });
+  }
+
+  // Validate revisionId
+  const revisionIdValue = env.revisionId;
+  if (typeof revisionIdValue !== 'string') {
+    errors.push({
+      code: 'invalid-request',
+      message: 'revisionId must be a string',
+      path: 'revisionId',
+    });
+  } else if (revisionIdValue.length === 0) {
+    errors.push({
+      code: 'revision-mismatch',
+      message: 'revisionId must be a non-empty string',
+      path: 'revisionId',
+    });
+  }
+
+  // Validate document exists
+  const documentValue = env.document;
+  if (documentValue === undefined || documentValue === null) {
+    errors.push({
+      code: 'invalid-request',
+      message: 'document is required',
+      path: 'document',
+    });
+  } else if (typeof documentValue !== 'object' || Array.isArray(documentValue)) {
+    errors.push({
+      code: 'invalid-request',
+      message: 'document must be a non-null object',
+      path: 'document',
+    });
+  } else {
+    const doc = documentValue as JoyProjectV1;
+
+    // Check document.id exists and is a non-empty string
+    if (typeof doc.id !== 'string') {
+      errors.push({
+        code: 'invalid-document',
+        message: 'document.id must be a string',
+        path: 'document.id',
+      });
+    } else if (doc.id.length === 0) {
+      errors.push({
+        code: 'invalid-document',
+        message: 'document.id must be a non-empty string',
+        path: 'document.id',
+      });
+    }
+
+    // Check document is valid JoyProjectV1
+    const diagnostics: ProjectDiagnostic[] = validateJoyProjectV1(doc);
+    if (diagnostics.length > 0) {
+      errors.push({
+        code: 'invalid-document',
+        message: `document is not a valid JoyProjectV1: ${diagnostics.length} diagnostic(s)`,
+        path: 'document',
+      });
+    }
+
+    // Check payload size
+    const size = estimateJsonSize(envelope);
+    if (size > MAX_PROJECT_DOCUMENT_SYNC_BYTES) {
+      errors.push({
+        code: 'payload-too-large',
+        message: `Request payload must be <= ${MAX_PROJECT_DOCUMENT_SYNC_BYTES} bytes, estimated ${size}`,
+      });
+    }
+  }
+
+  // Validate the optional lookInstances document (R2 / GAP 1a). Absent is a
+  // legacy / visual-only save; a present value is structurally validated here
+  // and re-checked (schema + caps + binding consistency) by the store.
+  const hasLookInstances = 'lookInstances' in env;
+  if (hasLookInstances) {
+    const lookDiagnostics = validateLookInstancesDocument(env.lookInstances, 'lookInstances');
+    if (lookDiagnostics.length > 0) {
+      errors.push({
+        code: 'invalid-document',
+        message: `lookInstances is not a valid Look Instances document: ${lookDiagnostics.length} diagnostic(s)`,
+        path: 'lookInstances',
+      });
+    }
+  }
+
+  // If we have any errors, return failure
+  if (errors.length > 0) {
+    return { valid: false, errors: Object.freeze(errors.slice()) };
+  }
+
+  // All validations passed - return success with typed envelope
+  return {
+    valid: true,
+    envelope: {
+      baseRevisionId: baseRevisionIdValue as ProjectRevisionId,
+      revisionId: revisionIdValue as ProjectRevisionId,
+      document: documentValue as JoyProjectV1,
+      ...(hasLookInstances ? { lookInstances: env.lookInstances as LookInstancesDocument } : {}),
+    },
+    errors: Object.freeze([] as const),
+  };
+}
+
+// ============================================================================
+// Type Guard
+// ============================================================================
+
+/**
+ * Type guard that checks if a validation result is a success.
+ */
+export function isProjectDocumentSyncValidationSuccess(
+  result: ProjectDocumentSyncValidationResult,
+): result is ProjectDocumentSyncValidationSuccess {
+  return result.valid === true;
+}
+
+/**
+ * Type guard that checks if a validation result is a failure.
+ */
+export function isProjectDocumentSyncValidationFailure(
+  result: ProjectDocumentSyncValidationResult,
+): result is ProjectDocumentSyncValidationFailure {
+  return result.valid === false;
+}
+
+/**
+ * @deprecated Use isProjectDocumentSyncValidationSuccess with validateProjectDocumentSyncRequest instead.
+ */
+export function isValidProjectDocumentSyncEnvelope(
+  envelope: unknown,
+  expectedProjectId: ProjectId,
+): boolean {
+  return validateProjectDocumentSyncRequest(envelope, expectedProjectId).valid;
+}

@@ -3,7 +3,7 @@
   "compilerOptions": { "rootDir": "src", "outDir": "dist", "lib": ["ES2022", "DOM"] },
   "include": ["src"],
   "references": [
-    { "path": "../api" },
+    { "path": "../../packages/test-control-plane" },
     { "path": "../../packages/export-core" },
     { "path": "../../packages/job-protocol" },
     { "path": "../../packages/commands" },

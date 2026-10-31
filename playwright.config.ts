@@ -99,7 +99,8 @@ export default defineConfig({
     process.env.PLAYWRIGHT_BASE_URL === undefined
       ? [
           {
-            command: 'pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts',
+            command:
+              'pnpm --filter @joy-media/test-control-plane exec tsx ../../tooling/e2e-server.ts',
             url: `${e2eApiUrl}/health`,
             reuseExistingServer: !process.env.CI,
             timeout: 120_000,

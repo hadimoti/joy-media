@@ -1,24 +1,19 @@
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { IncomingMessage } from 'node:http';
-import { newDb } from 'pg-mem';
-import type { Pool } from 'pg';
 import { executeLeasedExport, type ExportJobPayload } from '../apps/worker/src/export-job.js';
 // Use the checked-in implementation directly so acceptance cannot silently
 // exercise stale or missing generated package output on a clean runner.
 import { verifyExport } from '../packages/export-core/src/index.ts';
-import { createControlPlaneHttpServer, LocalControlPlane } from '../apps/api/src/index.js';
-import type { ApiAuthentication } from '../apps/api/src/http-server.js';
-import type { MediaAuthApi, MediaAuthMethod } from '../apps/api/src/media-auth.js';
-import { AccountService } from '../apps/api/src/account-service.js';
-import { createEd25519EntitlementSigner } from '../apps/api/src/entitlement-signing.js';
-import type {
-  MediaAssetRecord,
-  PrivateObjectDescriptor,
-  PrivateObjectStore,
-} from '../apps/api/src/index.js';
+import {
+  createControlPlaneHttpServer,
+  LocalControlPlane,
+  type ApiAuthentication,
+  type MediaAssetRecord,
+  type PrivateObjectDescriptor,
+  type PrivateObjectStore,
+} from '../packages/test-control-plane/src/index.js';
 
 /** Test-only owner/session. This file is never imported by production builds. */
 export const E2E_TOKEN = 'joy-media-e2e-token';
@@ -45,78 +40,9 @@ class MemoryPrivateObjectStore implements PrivateObjectStore {
   }
 }
 
-class TestMediaAuth implements MediaAuthApi {
-  async requestOtp(_contact: string, _method: MediaAuthMethod): Promise<{ message: string }> {
-    return { message: 'Test OTP requested.' };
-  }
-
-  async verifyOtp(_contact: string, _method: MediaAuthMethod, _code: string): Promise<string> {
-    return E2E_TOKEN;
-  }
-
-  async logout(_token: string): Promise<void> {}
-
-  async authenticate(request: IncomingMessage): Promise<{ readonly id: string } | undefined> {
-    return bearer(request) === E2E_TOKEN ? { id: E2E_OWNER } : undefined;
-  }
-
-  async sessionProfile(request: IncomingMessage): Promise<
-    | {
-        readonly contact: string;
-        readonly method: MediaAuthMethod;
-        readonly displayName: string;
-        readonly avatarAvailable: false;
-      }
-    | undefined
-  > {
-    if (bearer(request) !== E2E_TOKEN) return undefined;
-    return {
-      contact: E2E_OWNER,
-      method: 'gmail',
-      displayName: 'JOY E2E',
-      avatarAvailable: false,
-    };
-  }
-
-  async avatarBytes(_request: IncomingMessage): Promise<undefined> {
-    return undefined;
-  }
-}
-
 const authentication: ApiAuthentication = {
   authenticate: (request) => (bearer(request) === E2E_TOKEN ? { id: E2E_OWNER } : undefined),
 };
-
-// Wave 4 added POST /v1/devices, /v1/account/subscription, /v1/entitlements/refresh —
-// the editor-web app calls /v1/devices on every session probe, and a missing
-// account service makes it return 503 ACCOUNT_SERVICE_UNCONFIGURED, which then
-// bleeds into journey tests' http-error telemetry. Spin up a tiny pg-mem-backed
-// AccountService so the route is reachable in the same shape the production
-// HTTP test harness uses (see http-server-account-routes.test.ts).
-function createE2EAccountPool(): Pool {
-  const database = newDb();
-  const adapter = database.adapters.createPg();
-  return new adapter.Pool() as Pool;
-}
-
-async function createE2EAccountService(): Promise<AccountService> {
-  const pool = createE2EAccountPool();
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS account_devices (
-      id text PRIMARY KEY, owner_id text NOT NULL, display_name text NOT NULL,
-      created_at timestamptz NOT NULL, revoked_at timestamptz
-    );
-    CREATE TABLE IF NOT EXISTS account_subscriptions (
-      owner_id text PRIMARY KEY, plan text NOT NULL, status text NOT NULL,
-      current_period_end timestamptz, updated_at timestamptz NOT NULL
-    );
-  `);
-  const { privateKey } = generateKeyPairSync('ed25519');
-  const signer = createEd25519EntitlementSigner(
-    privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
-  );
-  return new AccountService({ pool, signer });
-}
 
 const controlPlane = new LocalControlPlane();
 const objectStore = new MemoryPrivateObjectStore();
@@ -132,50 +58,36 @@ let e2eWorkerStopped = false;
 controlPlane.pairWorker({ id: E2E_OWNER }, E2E_WORKER_ID);
 controlPlane.helloWorker(E2E_WORKER_ID, ['render.export']);
 
-// Wave 4 added POST /v1/devices, /v1/account/subscription, /v1/entitlements/refresh —
-// the editor-web app calls /v1/devices on every session probe, and a missing
-// account service makes it return 503 ACCOUNT_SERVICE_UNCONFIGURED, which then
-// bleeds into journey tests' http-error telemetry. Resolve a tiny pg-mem-backed
-// AccountService first so the route is reachable before the server is built
-// (see createE2EAccountService for the schema bootstrap).
-createE2EAccountService().then((account) => {
-  const server = createControlPlaneHttpServer({
-    controlPlane,
-    authentication,
-    mediaAuth: new TestMediaAuth(),
-    privateObjectStore: objectStore,
-    // The browser suite intentionally exercises dozens of flows with one
-    // disposable owner/IP. Abuse protection is covered by the API transport
-    // tests; keep this deterministic harness from turning a long suite into a
-    // cascade of unrelated 429s.
-    rateLimit: { maxRequests: 100_000 },
-    queryObservability: true,
-    account,
-  });
-
-  const e2eWorkerPromise = runE2eRenderWorker();
-
-  server.listen(Number(process.env.JOY_MEDIA_E2E_API_PORT ?? 4174), '127.0.0.1');
-  server.once('listening', () => {
-    const address = server.address();
-    if (address === null || typeof address === 'string') {
-      process.stderr.write('E2E API failed to bind\n');
-      process.exitCode = 1;
-      return;
-    }
-    process.stdout.write(`JOY_MEDIA_E2E_API_READY http://127.0.0.1:${address.port}\n`);
-  });
-
-  const shutdown = () => {
-    e2eWorkerStopped = true;
-    server.close();
-    void e2eWorkerPromise.finally(() =>
-      rmSync(e2eWorkerDirectory, { recursive: true, force: true }),
-    );
-  };
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
+// This local job fixture intentionally omits the deleted account surface. The
+// editor's legacy session probe may receive 404 for /v1/devices until P6 removes it.
+const server = createControlPlaneHttpServer({
+  controlPlane,
+  authentication,
+  // The browser suite intentionally exercises dozens of flows with one
+  // disposable owner/IP. Keep this fixture deterministic across the long suite.
+  rateLimit: { maxRequests: 100_000 },
 });
+
+const e2eWorkerPromise = runE2eRenderWorker();
+
+server.listen(Number(process.env.JOY_MEDIA_E2E_API_PORT ?? 4174), '127.0.0.1');
+server.once('listening', () => {
+  const address = server.address();
+  if (address === null || typeof address === 'string') {
+    process.stderr.write('E2E API failed to bind\n');
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write(`JOY_MEDIA_E2E_API_READY http://127.0.0.1:${address.port}\n`);
+});
+
+const shutdown = () => {
+  e2eWorkerStopped = true;
+  server.close();
+  void e2eWorkerPromise.finally(() => rmSync(e2eWorkerDirectory, { recursive: true, force: true }));
+};
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);
 
 async function runE2eRenderWorker(): Promise<void> {
   let lastHelloAt = 0;

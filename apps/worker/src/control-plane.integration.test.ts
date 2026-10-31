@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { LocalControlPlane } from '@joy-media/api';
+import { LocalControlPlane } from '@joy-media/test-control-plane';
 import { renderFixture, verifyExport } from '@joy-media/export-core';
 import { executeLeasedExport } from './export-job.js';
 describe('Worker/control-plane export integration', () => {

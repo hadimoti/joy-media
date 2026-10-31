@@ -1,0 +1,30 @@
+{
+  "name": "@joy-media/test-control-plane",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./private-object-store": {
+      "types": "./dist/private-object-store.d.ts",
+      "default": "./dist/private-object-store.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/export-core": "workspace:*",
+    "@joy-media/job-protocol": "workspace:*",
+    "@joy-media/project-schema": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.11"
+  }
+}
