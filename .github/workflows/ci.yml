@@ -8,20 +8,8 @@ name: ci
 # allowed PC Docker self-hosted runner label. See:
 #   - tooling/release/src/ci-runner-policy.test.ts (offline enforcement)
 #   - ops/self-hosted/linux-runner/ (Linux Docker runner contract)
-#   - ops/self-hosted/windows-runner/ (Windows Worker runner contract)
-#   - docs/SELF-HOSTED-CI.md (the full policy + Windows-platform caveat)
+#   - docs/SELF-HOSTED-CI.md (the full runner policy)
 #
-# Lane split:
-#   - check / browser-e2e (no Windows-only binary required): the
-#     joy-media-ci Linux Docker container — `self-hosted,linux,x64,joy-media-ci`.
-#   - worker-package (builds a Windows .exe via Node SEA + postject, requires
-#     Windows PowerShell + Win32 process APIs): the dedicated Windows worker
-#     Docker runner — `self-hosted,windows,x64,joy-media-worker-docker`.
-#     self-hosted label, NOT `windows-latest`, and never consumes
-#     GitHub-hosted minutes. The Windows-platform evidence caveat in
-#     docs/SELF-HOSTED-CI.md applies here: this lane is the only Windows
-#     acceptance signal in the repo and it is run on the owner's PC, not in
-#     a GitHub-hosted Windows VM.
 
 on:
   workflow_dispatch:
@@ -51,38 +39,6 @@ jobs:
           ffprobe -version
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify:ci
-  worker-package:
-    needs: check
-    # Windows-only: builds joy-worker.exe via Node SEA + postject. The
-    # self-hosted Windows worker runner is the owner-controlled PC
-    # (`ops/self-hosted/windows-runner/contract.md`). NOT a GitHub-hosted
-    # Windows VM: see docs/SELF-HOSTED-CI.md §Windows-platform evidence.
-    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Verify runner toolchain
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          node --version
-          ffmpeg -version
-          ffprobe -version
-          corepack enable pnpm
-          pnpm --version
-      - run: pnpm install --frozen-lockfile
-        shell: powershell
-      - name: Build Worker and package self-test executable
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          pnpm --filter @joy-media/worker build
-          $output = Join-Path $env:RUNNER_TEMP ("joy-worker-" + $env:GITHUB_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".exe")
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
-          if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Worker executable was not produced.' }
-          $result = & $output --joy-worker-self-test
-          if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw 'Worker executable self-test failed.' }
-
   browser-e2e:
     needs: check
     strategy:

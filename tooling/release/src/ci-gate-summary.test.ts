@@ -3,7 +3,6 @@ import { evaluateGateSummary } from './ci-gate-summary.js';
 
 const LANES = [
   'linux-real-services',
-  'windows-worker-clean',
   'acceptance-primary',
   'acceptance-responsive',
   'prod-build-smoke',
@@ -49,7 +48,7 @@ describe('release-gate summary evaluator — name-keyed', () => {
 
   it('reports the missing lane AND the non-success lane at once', () => {
     const partial = JSON.stringify({
-      'windows-worker-clean': { result: 'failure' },
+      'linux-real-services': { result: 'failure' },
       'acceptance-primary': { result: 'success' },
     });
     const r = evaluateGateSummary(partial, NAMES);

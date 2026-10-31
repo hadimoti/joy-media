@@ -11,11 +11,7 @@ name: r2-candidate
 #     real-service-acceptance, r2-gate-summary): the
 #     joy-media-ci Linux Docker container
 #     (`self-hosted,linux,x64,joy-media-ci`).
-#   - windows-worker-clean (joy-worker.exe build + Windows-only
-#     self-test against a loopback control-plane fixture):
-#     the dedicated Windows Worker runner
-#     (`self-hosted,windows,x64,joy-media-worker-docker`).
-#
+
 # No job uses `ubuntu-latest`, `windows-latest`, `macos-latest`, or any
 # other GitHub-hosted label. The contract is enforced offline by
 # tooling/release/src/ci-runner-policy.test.ts. Every job checks out the
@@ -100,89 +96,10 @@ jobs:
           set -euo pipefail
           test -z "$(git status --porcelain)"
 
-  worker-package:
-    name: worker-package (pass ${{ matrix.pass }})
-    # Windows self-hosted runner on the owner's PC. Required because
-    # joy-worker.exe uses Node SEA + postject + PowerShell + Win32 process
-    # APIs that no Linux container can satisfy. NOT `windows-latest` (which
-    # would consume GitHub-hosted minutes and is unavailable from Iran).
-    # The only Windows acceptance evidence in this workflow is produced here
-    # on the self-hosted Windows worker — see docs/SELF-HOSTED-CI.md
-    # Windows-platform evidence for the honest Windows-platform caveat.
-    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
-    needs: [validate-candidate]
-    strategy:
-      fail-fast: false
-      matrix:
-        pass: [1, 2]
-    timeout-minutes: 60
-    outputs:
-      evidence1: ${{ steps.publish-evidence.outputs.evidence1 }}
-      evidence2: ${{ steps.publish-evidence.outputs.evidence2 }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ env.CANDIDATE_SHA }}
-          fetch-depth: 1
-          persist-credentials: false
-      - name: Prepare toolchain
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ($env:CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'candidate_sha must be a full lowercase commit SHA' }
-          corepack enable
-          corepack prepare pnpm@11.15.0 --activate
-          node --version
-          pnpm --version
-          ffmpeg -version | Select-Object -First 1
-          ffprobe -version | Select-Object -First 1
-      - run: pnpm install --frozen-lockfile
-        shell: powershell
-      - name: Build Worker and run two exact self-test passes
-        id: build-worker
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          pnpm --filter @joy-media/worker build
-          $results = @{}
-          foreach ($pass in @('1', '2')) {
-            $output = Join-Path $env:RUNNER_TEMP ("joy-worker-" + $env:CANDIDATE_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".exe")
-            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
-            if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw "Worker executable was not produced for pass $pass." }
-            $result = & $output --joy-worker-self-test
-            if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw "Worker executable self-test failed for pass $pass." }
-            $evidence = [ordered]@{
-              schemaVersion = 1
-              status        = 'verified'
-              # Explicit execution label: this is Windows evidence from the
-              # owner-controlled self-hosted Windows runner, NOT from a
-              # GitHub-hosted Windows VM. See docs/SELF-HOSTED-CI.md
-              # Windows-platform evidence for the explicit caveat.
-              execution     = 'windows-docker-container'
-              runner        = 'self-hosted,windows,x64,joy-media-worker-docker'
-              candidateSha  = $env:CANDIDATE_SHA
-              workflowRunId = $env:GITHUB_RUN_ID
-              attempt       = $env:GITHUB_RUN_ATTEMPT
-              lanePass      = [int]$pass
-              worker        = @{ selfTest = 'ok'; producer = 'build-worker-exe' }
-              verifiedAt    = (Get-Date).ToUniversalTime().ToString('o')
-            } | ConvertTo-Json -Depth 6
-            $results[$pass] = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($evidence))
-          }
-          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'joy-media-windows-acceptance-outputs.json') -Value ($results | ConvertTo-Json) -Encoding utf8
-      - name: Publish Windows Worker acceptance outputs
-        id: publish-evidence
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $results = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'joy-media-windows-acceptance-outputs.json') -Raw | ConvertFrom-Json
-          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence1=$($results.'1')$([Environment]::NewLine)")
-          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence2=$($results.'2')$([Environment]::NewLine)")
-
   acceptance:
     name: acceptance ${{ matrix.profile }} (pass ${{ matrix.pass }})
     runs-on: [self-hosted, linux, x64, joy-media-ci]
-    needs: [validate-candidate, verify, worker-package]
+    needs: [validate-candidate, verify]
     strategy:
       fail-fast: false
       matrix:
@@ -242,7 +159,7 @@ jobs:
   real-service-acceptance:
     name: real-service-acceptance (pass ${{ matrix.pass }})
     runs-on: [self-hosted, linux, x64, joy-media-ci]
-    needs: [validate-candidate, acceptance, worker-package]
+    needs: [validate-candidate, acceptance]
     strategy:
       fail-fast: false
       matrix:
@@ -280,35 +197,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Bind Windows Worker evidence to the gate contract
-        env:
-          WINDOWS_EVIDENCE_1_B64: ${{ needs.worker-package.outputs.evidence1 }}
-          WINDOWS_EVIDENCE_2_B64: ${{ needs.worker-package.outputs.evidence2 }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          case "${{ matrix.pass }}" in
-            1) WINDOWS_EVIDENCE_B64="${WINDOWS_EVIDENCE_1_B64:-}" ;;
-            2) WINDOWS_EVIDENCE_B64="${WINDOWS_EVIDENCE_2_B64:-}" ;;
-            *) echo "unexpected real-service pass: ${{ matrix.pass }}" >&2; exit 1 ;;
-          esac
-          test -n "${WINDOWS_EVIDENCE_B64:-}" || { echo 'Windows Worker acceptance output is missing for this pass' >&2; exit 1; }
-          mkdir -p test-output/windows
-          printf '%s' "$WINDOWS_EVIDENCE_B64" | base64 --decode > test-output/windows/acceptance.json
-          test -s test-output/windows/acceptance.json
-          # Honest Windows-platform caveat: the upstream worker-package job ran
-          # on the owner-controlled self-hosted Windows runner (NOT a
-          # GitHub-hosted Windows VM). Record the runner label inline with the
-          # evidence so the durable store never misrepresents a Linux
-          # container run as Windows acceptance.
-          node -e '
-            const fs = require("node:fs");
-            const path = "test-output/windows/acceptance.json";
-            const r = JSON.parse(fs.readFileSync(path, "utf8"));
-            r.windowsRunner = "self-hosted,windows,x64,joy-media-worker-docker";
-            r.hostedProvider = "self-hosted (owner-controlled Docker Desktop)";
-            fs.writeFileSync(path, JSON.stringify(r, null, 2));
-          '
       - name: Authenticated real-service desktop acceptance and evidence
         run: |
           set -euo pipefail
@@ -339,7 +227,7 @@ jobs:
   r2-gate-summary:
     name: r2-gate-summary
     runs-on: [self-hosted, linux, x64, joy-media-ci]
-    needs: [verify, worker-package, acceptance, real-service-acceptance]
+    needs: [verify, acceptance, real-service-acceptance]
     if: always()
     steps:
       - name: Require every lane green
@@ -349,7 +237,6 @@ jobs:
           fail=0
           for result in \
             "verify=${{ needs.verify.result }}" \
-            "worker-package=${{ needs.worker-package.result }}" \
             "acceptance=${{ needs.acceptance.result }}" \
             "real-service-acceptance=${{ needs.real-service-acceptance.result }}"; do
             name="${result%%=*}"

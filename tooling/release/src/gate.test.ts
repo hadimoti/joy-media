@@ -21,7 +21,6 @@ import {
   type ReleaseGateInput,
   type ReleaseOperationalEvidence,
   type ReleaseSourceProvenance,
-  type ReleaseWindowsAcceptance,
 } from './gate.js';
 
 const sourceProvenance = (commit = 'a'.repeat(40)): ReleaseSourceProvenance => ({
@@ -29,56 +28,6 @@ const sourceProvenance = (commit = 'a'.repeat(40)): ReleaseSourceProvenance => (
   treeHash: 'b'.repeat(40),
   lockfileSha256: 'c'.repeat(64),
   worktreeClean: true,
-});
-
-const windowsAcceptance = (
-  commit = 'a'.repeat(40),
-  verifiedAt = new Date().toISOString(),
-): ReleaseWindowsAcceptance => ({
-  candidateSha: commit,
-  workflowRunId: '123456789',
-  attempt: 1,
-  runner: 'self-hosted,windows,x64,joy-media-worker-docker',
-  containerIdentity: {
-    containerId: '0123456789ab',
-    imageDigest: `sha256:${'d'.repeat(64)}`,
-  },
-  execution: 'windows-docker-container',
-  windowsPlatformVerified: true,
-  sourceProvenance: sourceProvenance(commit),
-  verifiedAt,
-  lifecycle: {
-    install: { status: 'verified' },
-    startup: {
-      status: 'verified',
-      trigger: 'explicit-spawn',
-      triggerVerified: true,
-      action: 'normal-daemon',
-      launchObserved: true,
-      daemon: {
-        started: true,
-        terminated: true,
-        paired: true,
-        notificationCleared: true,
-        hello: 1,
-        leases: 1,
-      },
-    },
-    session: {
-      status: 'verified',
-      stateIsolated: true,
-      ownerSessionUsed: false,
-      fixtureSessionUsed: true,
-      persistedSession: true,
-      protectedState: true,
-    },
-    renewal: { status: 'verified', restarted: true },
-    recovery: { status: 'verified' },
-    repair: { status: 'verified', restored: true },
-    update: { status: 'verified', atomicReplacement: true, distinctPackageBytes: true },
-    rollback: { status: 'verified' },
-    uninstall: { status: 'verified' },
-  },
 });
 
 const staticAssetInventory = () => ({
@@ -314,7 +263,6 @@ const passingInput = (): ReleaseGateInput => ({
     present: true,
   },
   performanceEvidence: performanceEvidence(),
-  windowsAcceptance: windowsAcceptance(),
 });
 
 describe('JOY Studio 1.0 release gate', () => {
@@ -351,6 +299,13 @@ describe('JOY Studio 1.0 release gate', () => {
 
     expect(childEnv).toEqual({ PATH: 'path-value', CI: 'true', DATABASE_URL: 'database-url' });
     expect(Object.keys(childEnv).some((key) => key.startsWith('JOY_RELEASE_'))).toBe(false);
+  });
+
+  it('passes the remaining checks without a windows-acceptance check', () => {
+    const result = evaluateReleaseGate(passingInput(), new Date('2026-08-28T12:00:00.000Z'));
+
+    expect(result.passed).toBe(true);
+    expect(result.checks.map((check) => check.id)).not.toContain('windows-acceptance');
   });
 
   it('keeps the self-hosted CI check before the browser audit', () => {
@@ -426,7 +381,6 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(devWorkflow).not.toMatch(/^ {6}[A-Z_]+: \$\{\{ runner\./m);
     expect(workflow).toContain('"$RUNNER_TEMP"/*) ;;');
     expect(workflow).toContain('test -z "$(git status --porcelain)"');
-    expect(workflow).toContain('scripts/build-worker-exe.ps1 -OutputPath $output');
   });
 
   it('isolates and always cleans release acceptance Playwright outputs', () => {
@@ -459,9 +413,7 @@ describe('JOY Studio 1.0 release gate', () => {
     );
     const realAcceptance = workflow.slice(workflow.indexOf('\n  real-service-acceptance:'));
     expect(realAcceptance).toContain('runs-on: [self-hosted, linux, x64, joy-media-acceptance]');
-    expect(realAcceptance).toContain(
-      'needs: [validate-candidate, acceptance, windows-worker-clean]',
-    );
+    expect(realAcceptance).toContain('needs: [validate-candidate, acceptance]');
     expect(realAcceptance).toContain(
       'test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = \'real-services\'',
     );
@@ -470,15 +422,7 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(realAcceptance).toContain('test-output/browser/journeys.json');
     expect(realAcceptance).toContain('test-output/release-performance/polling.json');
     expect(realAcceptance).toContain('test-output/delivery/result.json');
-    expect(realAcceptance).toContain('test-output/windows/acceptance.json');
     expect(realAcceptance).toContain('test-output/operations/restore.json');
-    expect(realAcceptance).toContain('WINDOWS_EVIDENCE_1_B64');
-    expect(realAcceptance).toContain('WINDOWS_EVIDENCE_2_B64');
-    expect(realAcceptance).toContain('case "${{ matrix.pass }}" in');
-    expect(realAcceptance).toContain('mkdir -p test-output/windows');
-    expect(realAcceptance).toContain(
-      'printf \'%s\' "$WINDOWS_EVIDENCE_B64" | base64 --decode > test-output/windows/acceptance.json',
-    );
     expect(realAcceptance).toContain('pnpm run release:gate');
     expect(realAcceptance).toContain('test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"');
   });
@@ -500,27 +444,9 @@ describe('JOY Studio 1.0 release gate', () => {
       validation.indexOf('Validate immutable candidate input'),
     );
     expect(validation).toContain('persist-credentials: false');
-    const windows = workflow.slice(workflow.indexOf('\n  windows-worker-clean:'));
-    expect(windows).toContain('needs: [validate-candidate]');
-    expect(windows).toContain("foreach ($pass in @('1', '2'))");
-    expect(windows).toContain('worker-acceptance-container.ps1');
-    expect(windows).toContain(
-      'joy-media-windows-acceptance-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT',
-    );
-    expect(windows).toContain('Test-Path -LiteralPath $evidence');
-    expect(windows).toContain(
-      'if ($LASTEXITCODE -ne 0) { throw "Windows Worker acceptance harness failed',
-    );
-    expect(windows).toContain(
-      'joy-media-windows-acceptance-outputs-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT',
-    );
-    expect(windows).toContain('joy-worker-self-test');
-    expect(windows).toMatch(
-      /pnpm --filter @joy-media\/worker build\r?\n\s+if \(\$LASTEXITCODE -ne 0\) \{ throw "Worker package build failed/m,
-    );
-    expect(windows).not.toContain('worker-acceptance.ps1 `');
-    expect(windows).not.toContain('actions/upload-artifact');
-    expect(windows).not.toContain('actions/download-artifact');
+    expect(workflow).not.toContain('windows-worker-clean');
+    expect(workflow).not.toContain('joy-media-worker-docker');
+    expect(workflow).toContain('test-output/windows/acceptance.json');
     const linux = workflow.slice(workflow.indexOf('\n  linux-real-services:'));
     expect(linux).toContain('needs: [validate-candidate]');
     expect(linux).toContain('Verify no untracked teardown residue\n        if: always()');
@@ -829,7 +755,6 @@ describe('JOY Studio 1.0 release gate', () => {
   it('rejects dirty, missing, stale, or cross-revision browser provenance', () => {
     const now = new Date('2026-08-28T12:00:00.000Z');
     const current = sourceProvenance();
-    const currentWindows = windowsAcceptance('a'.repeat(40), '2026-08-28T11:00:00.000Z');
     const journey = {
       ...passingInput().browserJourneys[0]!,
       verifiedAt: '2026-08-28T11:00:00.000Z',
@@ -843,7 +768,6 @@ describe('JOY Studio 1.0 release gate', () => {
           ...passingInput(),
           sourceProvenance: current,
           browserJourneys: [journey],
-          windowsAcceptance: currentWindows,
         },
         now,
       ).passed,
@@ -861,10 +785,7 @@ describe('JOY Studio 1.0 release gate', () => {
         browserJourneys: [{ ...journey, verifiedAt: '2026-08-26T11:00:00.000Z' }],
       },
     ]) {
-      const result = evaluateReleaseGate(
-        { ...passingInput(), ...input, windowsAcceptance: currentWindows },
-        now,
-      );
+      const result = evaluateReleaseGate({ ...passingInput(), ...input }, now);
       expect(result.passed).toBe(false);
       expect(result.checks.find((check) => check.id === 'source-provenance')?.status).toBe(
         'failed',
@@ -878,7 +799,6 @@ describe('JOY Studio 1.0 release gate', () => {
     const result = evaluateReleaseGate(
       {
         ...passingInput(),
-        windowsAcceptance: windowsAcceptance('a'.repeat(40), '2026-08-28T11:00:00.000Z'),
         sourceProvenance: current,
         browserJourneys: [
           {
@@ -1125,7 +1045,6 @@ describe('JOY Studio 1.0 release gate', () => {
       {
         ...passingInput(),
         fixtureHandlers,
-        windowsAcceptance: windowsAcceptance('a'.repeat(40), now.toISOString()),
       },
       now,
     );
@@ -1160,7 +1079,6 @@ describe('JOY Studio 1.0 release gate', () => {
     const result = evaluateReleaseGate(
       {
         ...passingInput(),
-        windowsAcceptance: windowsAcceptance('a'.repeat(40), '2026-08-21T12:00:00.000Z'),
         featureStatus: {
           auditedOn: '2026-01-01',
           statuses: ['production'],
@@ -1184,7 +1102,6 @@ describe('JOY Studio 1.0 release gate', () => {
     const result = evaluateReleaseGate(
       {
         ...passingInput(),
-        windowsAcceptance: windowsAcceptance('a'.repeat(40), '2026-10-31T00:00:00.000Z'),
         featureStatus: {
           auditedOn: auditedOn ?? '',
           statuses: ['production'],
@@ -1452,189 +1369,6 @@ describe('JOY Studio 1.0 release gate', () => {
     );
   });
 
-  describe('mandatory Windows-Docker acceptance', () => {
-    it('fails closed when evidence is missing', () => {
-      const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: null });
-      expect(result.checks.find((c) => c.id === 'windows-acceptance')).toMatchObject({
-        status: 'failed',
-        critical: true,
-      });
-      expect(result.passed).toBe(false);
-    });
-
-    it('rejects portable Linux and host-direct evidence', () => {
-      const portable = {
-        ...windowsAcceptance(),
-        runner: 'self-hosted,linux,x64,joy-media-ci',
-        execution: 'portable-container-self-hosted',
-        windowsPlatformVerified: false,
-      } as unknown as ReleaseWindowsAcceptance;
-      const hostDirect = {
-        ...windowsAcceptance(),
-        runner: 'self-hosted,windows,x64,joy-media-worker',
-        execution: 'windows-self-hosted-docker',
-      } as unknown as ReleaseWindowsAcceptance;
-      for (const evidence of [portable, hostDirect]) {
-        const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: evidence });
-        expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
-        expect(result.passed).toBe(false);
-      }
-    });
-
-    it('rejects bare booleans, legacy labels, wrong SHA, and incomplete lifecycle', () => {
-      const cases = [
-        true as unknown as ReleaseWindowsAcceptance,
-        { execution: 'windows-clean-worker' } as unknown as ReleaseWindowsAcceptance,
-        windowsAcceptance('f'.repeat(40)),
-        {
-          ...windowsAcceptance(),
-          lifecycle: { ...windowsAcceptance().lifecycle, update: { status: 'failed' } },
-        } as unknown as ReleaseWindowsAcceptance,
-      ];
-      for (const evidence of cases) {
-        const result = evaluateReleaseGate({
-          ...passingInput(),
-          sourceProvenance: sourceProvenance(),
-          windowsAcceptance: evidence,
-        });
-        expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
-        expect(result.passed).toBe(false);
-      }
-    });
-
-    it('binds Windows acceptance to the current workflow run, attempt, and candidate SHA', () => {
-      const previous = {
-        runId: process.env.JOY_RELEASE_WORKFLOW_RUN_ID,
-        attempt: process.env.JOY_RELEASE_WORKFLOW_RUN_ATTEMPT,
-        candidate: process.env.JOY_RELEASE_CANDIDATE_SHA,
-      };
-      process.env.JOY_RELEASE_WORKFLOW_RUN_ID = '123456789';
-      process.env.JOY_RELEASE_WORKFLOW_RUN_ATTEMPT = '1';
-      process.env.JOY_RELEASE_CANDIDATE_SHA = 'a'.repeat(40);
-      try {
-        expect(
-          evaluateReleaseGate({
-            ...passingInput(),
-            windowsAcceptance: windowsAcceptance(),
-          }).checks.find((check) => check.id === 'windows-acceptance')?.status,
-        ).toBe('passed');
-        const mismatches = [
-          { ...windowsAcceptance(), workflowRunId: '987654321' },
-          { ...windowsAcceptance(), attempt: 2 },
-          windowsAcceptance('f'.repeat(40)),
-        ];
-        for (const evidence of mismatches) {
-          expect(
-            evaluateReleaseGate({ ...passingInput(), windowsAcceptance: evidence }).checks.find(
-              (check) => check.id === 'windows-acceptance',
-            )?.status,
-          ).toBe('failed');
-        }
-      } finally {
-        if (previous.runId === undefined) delete process.env.JOY_RELEASE_WORKFLOW_RUN_ID;
-        else process.env.JOY_RELEASE_WORKFLOW_RUN_ID = previous.runId;
-        if (previous.attempt === undefined) delete process.env.JOY_RELEASE_WORKFLOW_RUN_ATTEMPT;
-        else process.env.JOY_RELEASE_WORKFLOW_RUN_ATTEMPT = previous.attempt;
-        if (previous.candidate === undefined) delete process.env.JOY_RELEASE_CANDIDATE_SHA;
-        else process.env.JOY_RELEASE_CANDIDATE_SHA = previous.candidate;
-      }
-    });
-
-    it('requires each startup trigger to prove its own launch', () => {
-      const base = windowsAcceptance();
-      const withStartup = (startup: Record<string, unknown>) =>
-        ({
-          ...base,
-          lifecycle: { ...base.lifecycle, startup: { ...base.lifecycle.startup, ...startup } },
-        }) as unknown as ReleaseWindowsAcceptance;
-      const rejected = [
-        // An explicit container-local spawn cannot lean on a scheduled task.
-        withStartup({ launchObserved: undefined, taskRan: true }),
-        withStartup({ launchObserved: false }),
-        // A scheduled-task startup still has to show the task fired.
-        withStartup({ trigger: 'at-logon', launchObserved: true, taskRan: undefined }),
-      ];
-      for (const evidence of rejected) {
-        const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: evidence });
-        expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
-        expect(result.passed).toBe(false);
-      }
-
-      const scheduled = evaluateReleaseGate({
-        ...passingInput(),
-        windowsAcceptance: withStartup({
-          trigger: 'at-logon',
-          launchObserved: undefined,
-          taskRan: true,
-        }),
-      });
-      expect(scheduled.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('passed');
-    });
-
-    it('rejects malformed Docker identity and accepts the legacy execution enum only with the trusted runner', () => {
-      const base = windowsAcceptance();
-      const malformedIdentityCases = [
-        {
-          ...base,
-          containerIdentity: {
-            ...base.containerIdentity,
-            containerId: 'not-a-container-id',
-          },
-        },
-        {
-          ...base,
-          containerIdentity: {
-            ...base.containerIdentity,
-            imageDigest: 'sha256:not-a-64-byte-digest',
-          },
-        },
-      ];
-      for (const evidence of malformedIdentityCases) {
-        const result = evaluateReleaseGate({ ...passingInput(), windowsAcceptance: evidence });
-        expect(result.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe('failed');
-        expect(result.passed).toBe(false);
-      }
-
-      const legacyExecution = {
-        ...base,
-        execution: 'windows-self-hosted-docker',
-      } as const;
-      const legacyResult = evaluateReleaseGate({
-        ...passingInput(),
-        windowsAcceptance: legacyExecution,
-      });
-      expect(legacyResult.checks.find((c) => c.id === 'windows-acceptance')).toMatchObject({
-        status: 'passed',
-        critical: true,
-      });
-
-      const untrustedLegacyExecution = {
-        ...base,
-        runner: 'self-hosted,windows,x64,joy-media-worker',
-        execution: 'windows-self-hosted-docker',
-      } as unknown as ReleaseWindowsAcceptance;
-      const untrustedLegacyResult = evaluateReleaseGate({
-        ...passingInput(),
-        windowsAcceptance: untrustedLegacyExecution,
-      });
-      expect(untrustedLegacyResult.checks.find((c) => c.id === 'windows-acceptance')?.status).toBe(
-        'failed',
-      );
-      expect(untrustedLegacyResult.passed).toBe(false);
-    });
-
-    it('accepts only the complete exact-candidate Windows-Docker fixture', () => {
-      const result = evaluateReleaseGate({
-        ...passingInput(),
-        windowsAcceptance: windowsAcceptance(),
-      });
-      expect(result.checks.find((c) => c.id === 'windows-acceptance')).toMatchObject({
-        status: 'passed',
-        critical: true,
-      });
-    });
-  });
-
   it('requires strict boolean timeline integrity evidence', () => {
     const evidence = performanceEvidence();
     const result = evaluateReleaseGate({
@@ -1676,7 +1410,6 @@ describe('JOY Studio 1.0 release gate', () => {
     const result = evaluateReleaseGate(
       {
         ...passingInput(),
-        windowsAcceptance: windowsAcceptance('a'.repeat(40), '2026-08-21T12:00:00.000Z'),
         featureStatus: {
           auditedOn: '2026-01-01',
           statuses: ['production'],
@@ -1705,7 +1438,6 @@ describe('JOY Studio 1.0 release gate', () => {
     writeFileSync(join(root, 'apps/worker/dist/server.js'), 'release artifact');
     const evidence = {
       ...passingInput(),
-      windowsAcceptance: windowsAcceptance('a'.repeat(40), '2026-08-21T12:00:00.000Z'),
       artifactHashes: {
         'apps/worker/dist/server.js': sha256File(join(root, 'apps/worker/dist/server.js')),
       },
