@@ -575,6 +575,8 @@ function responseContentLengthExceedsLimit(response: Response): boolean {
 const PROVIDER_REJECTION_CODES: ReadonlySet<unknown> = new Set([
   'AUTH_FAILED',
   'JOY_AGENT_AUTH_FAILED',
+  'BILLING_REQUIRED',
+  'JOY_AGENT_BILLING_REQUIRED',
   'PROVIDER_HTTP_ERROR',
   'PROVIDER_INCOMPATIBLE',
   'JOY_AGENT_PROVIDER_INCOMPATIBLE',

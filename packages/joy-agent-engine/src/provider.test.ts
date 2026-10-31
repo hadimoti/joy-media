@@ -3,7 +3,7 @@ import { generateText, streamText } from 'ai';
 import { createHardenedFetch, createJoyAgentProvider } from './provider.js';
 import { normalizeByokSessionConfig } from './provider-config.js';
 import type { JoyFetch } from './provider.js';
-import { CHATGPT_RESPONSES_BASE_URL } from '@joy-media/provider-sdk';
+import { CHATGPT_RESPONSES_BASE_URL, getProviderThinkingMode } from '@joy-media/provider-sdk';
 
 function response(body: string, init?: ResponseInit): Response {
   return new Response(body, {
@@ -14,6 +14,63 @@ function response(body: string, init?: ResponseInit): Response {
 }
 
 describe('hardened provider fetch', () => {
+  it.each([
+    {
+      registryProvider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      thinkingMode: 'disabled',
+    },
+    {
+      registryProvider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      thinkingMode: undefined,
+    },
+  ] as const)(
+    'sends only registry-declared thinking settings for $registryProvider',
+    async ({ registryProvider, baseUrl, thinkingMode }) => {
+      const sentBodies: Record<string, unknown>[] = [];
+      const fetchImpl = vi.fn<JoyFetch>(async (_input, init) => {
+        sentBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return response(
+          JSON.stringify({
+            id: 'chatcmpl-local',
+            object: 'chat.completion',
+            created: 1,
+            model: 'fixture-model',
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: 'ok' },
+                finish_reason: 'stop',
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        );
+      });
+      const registryThinkingMode = getProviderThinkingMode(registryProvider);
+      expect(registryThinkingMode).toBe(thinkingMode);
+      const config = normalizeByokSessionConfig({
+        provider: 'openai-compatible',
+        baseUrl,
+        modelId: 'fixture-model',
+        apiKey: 'sk-test-not-a-real-key',
+        consentToPublicEndpoint: true,
+        ...(registryThinkingMode === undefined ? {} : { thinkingMode: registryThinkingMode }),
+      });
+      const { model } = createJoyAgentProvider(config, fetchImpl);
+
+      await generateText({ model, prompt: 'Say hello.', maxRetries: 0 });
+
+      expect(sentBodies).toHaveLength(1);
+      if (registryProvider === 'deepseek') {
+        expect(sentBodies[0]).toHaveProperty('thinking', { type: 'disabled' });
+      } else {
+        expect(sentBodies[0]).not.toHaveProperty('thinking');
+      }
+    },
+  );
+
   it('sends a typed OAuth bearer token without reading an API-key fallback', async () => {
     const token = 'oauth-access-token';
     const fallbackKey = 'api-key-fallback-secret';

@@ -98,6 +98,7 @@ const COMPLETE_TIMEOUT_MS = 120_000;
 const CONTROL_TIMEOUT_MS = 30_000;
 /** The placeholder the editor sends for a keyless local model. It is never a real key. */
 const NO_KEY_PLACEHOLDER = 'not-provided';
+const BILLING_REQUIRED_MESSAGE = 'The provider account needs credit to complete this request.';
 
 export type BrokerErrorCode =
   | 'PROFILE_NOT_FOUND'
@@ -108,6 +109,7 @@ export type BrokerErrorCode =
   | 'REQUEST_INVALID'
   | 'REQUEST_TOO_LARGE'
   | 'AUTH_FAILED'
+  | 'BILLING_REQUIRED'
   | 'REDIRECT_REFUSED'
   | 'PROVIDER_HTTP_ERROR'
   | 'PROVIDER_INCOMPATIBLE'
@@ -1149,6 +1151,7 @@ function prepareCompletion(
       });
     }
     return prepareChatCompletion({
+      provider: endpoint.provider,
       baseUrl: endpoint.baseUrl,
       apiKey: endpoint.apiKey,
       modelId: endpoint.modelId,
@@ -1218,6 +1221,9 @@ async function send(
         'AUTH_FAILED',
         `The provider rejected the credentials (HTTP ${response.status}).`,
       );
+    }
+    if (response.status === 402) {
+      throw new BrokerError('BILLING_REQUIRED', BILLING_REQUIRED_MESSAGE);
     }
     if (!response.ok) {
       throw new BrokerError(
@@ -1343,6 +1349,8 @@ function probeErrorCode(code: BrokerErrorCode): DirectProviderErrorCode {
     case 'CREDENTIAL_UNAVAILABLE':
     case 'SIGN_IN_REQUIRED':
       return 'AUTH_FAILED';
+    case 'BILLING_REQUIRED':
+      return 'BILLING_REQUIRED';
     case 'TIMEOUT':
       return 'TIMEOUT';
     case 'NETWORK_ERROR':

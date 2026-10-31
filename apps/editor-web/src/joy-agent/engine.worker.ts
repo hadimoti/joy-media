@@ -741,6 +741,7 @@ async function callProvider(
 /** Maps the broker's codes onto the engine's error codes. Anything unknown is a network failure. */
 function providerErrorCode(code: string): JoyAgentErrorCode {
   if (code === 'AUTH_FAILED' || code === 'CREDENTIAL_UNAVAILABLE') return 'JOY_AGENT_AUTH_FAILED';
+  if (code === 'BILLING_REQUIRED') return 'JOY_AGENT_BILLING_REQUIRED';
   if (code === 'TIMEOUT') return 'JOY_AGENT_TIMEOUT';
   if (code === 'RESPONSE_TOO_LARGE' || code === 'JOY_AGENT_RESPONSE_TOO_LARGE') {
     return 'JOY_AGENT_RESPONSE_TOO_LARGE';
@@ -915,12 +916,14 @@ async function testConnection(): Promise<void> {
           ? 'Connection timed out'
           : errorCode === 'JOY_AGENT_AUTH_FAILED'
             ? 'Provider authentication failed'
-            : errorCode === 'JOY_AGENT_RESPONSE_TOO_LARGE'
-              ? 'Provider response too large'
-              : errorCode === 'JOY_AGENT_PROVIDER_INCOMPATIBLE' &&
-                  error instanceof JoyAgentWorkerError
-                ? error.message.slice(0, 180)
-                : 'CORS or network error',
+            : errorCode === 'JOY_AGENT_BILLING_REQUIRED'
+              ? 'The provider account needs credit to complete this request.'
+              : errorCode === 'JOY_AGENT_RESPONSE_TOO_LARGE'
+                ? 'Provider response too large'
+                : errorCode === 'JOY_AGENT_PROVIDER_INCOMPATIBLE' &&
+                    error instanceof JoyAgentWorkerError
+                  ? error.message.slice(0, 180)
+                  : 'CORS or network error',
       ),
     });
   }
@@ -1306,6 +1309,9 @@ function failureMessage(
   }
   const code = classifyError(error);
   if (code === 'JOY_AGENT_AUTH_FAILED') return { code, message: 'Provider authentication failed' };
+  if (code === 'JOY_AGENT_BILLING_REQUIRED') {
+    return { code, message: 'The provider account needs credit to complete this request.' };
+  }
   if (code === 'JOY_AGENT_RESPONSE_TOO_LARGE')
     return { code, message: 'Provider response too large' };
   if (code === 'JOY_AGENT_TIMEOUT') return { code, message: 'Provider request timed out' };

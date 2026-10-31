@@ -165,8 +165,13 @@ async function mountedWorker(
           code:
             response.status === 401 || response.status === 403
               ? 'AUTH_FAILED'
-              : 'PROVIDER_HTTP_ERROR',
-          message: 'The provider returned an error.',
+              : response.status === 402
+                ? 'BILLING_REQUIRED'
+                : 'PROVIDER_HTTP_ERROR',
+          message:
+            response.status === 402
+              ? 'The provider account needs credit to complete this request.'
+              : 'The provider returned an error.',
         };
     receive?.({
       data: {
@@ -358,6 +363,33 @@ describe('JOY Agent Engine Worker V2', () => {
     expect(planOnlyRequest.tool_choice).toBeUndefined();
     expect(JSON.stringify(worker.output)).not.toContain('fixture-only');
     expect(bodies).toHaveLength(0);
+  });
+
+  it('maps a provider billing failure to a safe, actionable run event', async () => {
+    const worker = await mountedWorker(
+      structuredProvider(() => new Response('Insufficient Balance', { status: 402 })),
+    );
+    await verifyStructuredConnection(worker);
+
+    run(worker, {
+      runId: 'billing-required',
+      prompt: 'Prepare a brief.',
+      mode: 'plan-only',
+    });
+    await waitForRunFinished(worker, 'billing-required', 1);
+
+    expect(worker.output).toContainEqual(
+      expect.objectContaining({
+        type: 'event',
+        event: expect.objectContaining({
+          runId: 'billing-required',
+          phase: 'failed',
+          errorCode: 'JOY_AGENT_BILLING_REQUIRED',
+          message: 'The provider account needs credit to complete this request.',
+        }),
+      }),
+    );
+    expect(JSON.stringify(worker.output)).not.toContain('Insufficient Balance');
   });
 
   it('asks for the continuation token in the probe itself, and forces no named tool', async () => {

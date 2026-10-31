@@ -10,6 +10,7 @@ import {
   evaluateEndpoint,
   findRegistryProvider,
   findRegistryRegion,
+  getProviderThinkingMode,
   isAuthGated,
   isAuthMethodPermitted,
   isSignInProvider,
@@ -75,6 +76,22 @@ describe('provider registry', () => {
     }
     expect(defaultBaseUrl('xai')).toBe('https://api.x.ai/v1');
     expect(defaultBaseUrl('deepseek')).toBe('https://api.deepseek.com');
+  });
+
+  it('disables DeepSeek thinking from its documented request setting only', () => {
+    const deepseek = findRegistryProvider('deepseek');
+    expect(deepseek?.requestSettings?.thinkingMode).toMatchObject({
+      value: 'disabled',
+      source: expect.stringContaining('https://api-docs.deepseek.com/guides/thinking_mode'),
+      sourceDate: '2026-10-31',
+    });
+    expect(getProviderThinkingMode('deepseek')).toBe('disabled');
+    expect(
+      PROVIDER_REGISTRY.filter((provider) => provider.id !== 'deepseek').every(
+        (provider) => getProviderThinkingMode(provider.id) === undefined,
+      ),
+    ).toBe(true);
+    expect(getProviderThinkingMode('openai-compatible')).toBeUndefined();
   });
 
   it('uses the verified xAI base for both routes and resolves the API-key region first', () => {

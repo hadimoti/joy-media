@@ -186,11 +186,13 @@ describe('agent slots in the CLI', () => {
       }
 
       if (apiKeyPermitted) {
-        expect(resolveByokConfig({ slot: slotId })).toMatchObject({
+        const resolved = resolveByokConfig({ slot: slotId });
+        expect(resolved).toMatchObject({
           baseUrl: region.baseUrl,
           modelId: model,
           apiKey,
         });
+        expect(resolved.thinkingMode).toBe(providerId === 'deepseek' ? 'disabled' : undefined);
       } else {
         expect(provider.auth.methods).toContain('subscription-sign-in');
         expect(provider.auth.gated).toBe(true);

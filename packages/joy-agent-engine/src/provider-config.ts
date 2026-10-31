@@ -2,6 +2,7 @@ import {
   CHATGPT_RESPONSES_BASE_URL,
   evaluateEndpoint,
   OPENROUTER_BASE_URL,
+  type ProviderThinkingMode,
 } from '@joy-media/provider-sdk';
 import type { JoyAgentCapability } from './contracts.js';
 
@@ -18,6 +19,7 @@ interface ByokSessionConfigFields {
   readonly provider: JoyProviderMode;
   readonly baseUrl: string;
   readonly modelId: string;
+  readonly thinkingMode?: ProviderThinkingMode;
 }
 
 /** API keys and OAuth bearer tokens remain distinct through the engine transport (D22 step 3 design §8). */
@@ -36,6 +38,7 @@ export interface ByokSessionConfigInput {
   readonly provider?: JoyProviderMode | undefined;
   readonly baseUrl?: string | undefined;
   readonly modelId?: string | undefined;
+  readonly thinkingMode?: ProviderThinkingMode | undefined;
   readonly apiKey?: string | undefined;
   readonly auth?: ByokBearerTokenAuth | undefined;
   readonly consentToPublicEndpoint?: boolean | undefined;
@@ -67,6 +70,10 @@ export function normalizeByokSessionConfig(
   const modelId = typeof input.modelId === 'string' ? input.modelId.trim() : '';
   const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
   const bearerToken = input.auth?.kind === 'bearer-token' ? input.auth.token.trim() : '';
+  if (input.thinkingMode !== undefined && input.thinkingMode !== 'disabled') {
+    throw new ProviderConfigError();
+  }
+  const thinkingMode = provider === 'openai-compatible' ? input.thinkingMode : undefined;
   const hasApiKey =
     input.auth === undefined && apiKey.length > 0 && apiKey.length <= MAX_API_KEY_LENGTH;
   const hasBearerToken =
@@ -128,9 +135,16 @@ export function normalizeByokSessionConfig(
         provider,
         baseUrl,
         modelId,
+        ...(thinkingMode === undefined ? {} : { thinkingMode }),
         auth: { kind: 'bearer-token' as const, token: bearerToken },
       })
-    : Object.freeze({ provider, baseUrl, modelId, apiKey });
+    : Object.freeze({
+        provider,
+        baseUrl,
+        modelId,
+        ...(thinkingMode === undefined ? {} : { thinkingMode }),
+        apiKey,
+      });
 }
 
 function normalizeAnthropicBaseUrl(value: unknown): string {

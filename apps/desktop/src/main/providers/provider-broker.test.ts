@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createMemorySecretStore } from '@joy-media/provider-sdk';
+import { createMemorySecretStore, PROVIDER_REGISTRY } from '@joy-media/provider-sdk';
 import {
   encodeKimiTokenRecord,
   KIMI_CODE_CLIENT_ID,
@@ -85,6 +85,34 @@ const CHAT_BODY = { messages: [{ role: 'user', content: 'hi' }], temperature: 0.
 const READ_FILE = [{ type: 'function', function: { name: 'read_file', parameters: {} } }];
 
 describe('provider broker: profile checks', () => {
+  it.each(PROVIDER_REGISTRY.filter((provider) => provider.api === 'chat-completions'))(
+    'adds only registry-declared thinking settings for $id',
+    async (provider) => {
+      const profile = bound(
+        `thinking-${provider.id}`,
+        provider.id,
+        provider.regions[0].baseUrl,
+        'fixture-model',
+      );
+      const { broker, sent } = harness({
+        profiles: [profile],
+        keys: { [profile.secretHandleId]: KEY },
+        reply: () => jsonReply({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }),
+      });
+
+      expect(await broker.complete({ profileId: profile.id, body: CHAT_BODY })).toMatchObject({
+        ok: true,
+      });
+
+      const request = JSON.parse(String(sent[0]?.init.body)) as Record<string, unknown>;
+      if (provider.id === 'deepseek') {
+        expect(request).toHaveProperty('thinking', { type: 'disabled' });
+      } else {
+        expect(request).not.toHaveProperty('thinking');
+      }
+    },
+  );
+
   it('sends a chat request to the registry origin with the key, X-Title and the stored model', async () => {
     const p = bound('p1', 'openrouter', 'https://openrouter.ai/api/v1', 'openai/gpt-4o-mini');
     const { broker, sent } = harness({
@@ -434,6 +462,36 @@ describe('provider broker: replies and failures', () => {
     });
   });
 
+  it('reports a billing failure with an actionable message', async () => {
+    const profile = bound('p1', 'deepseek', 'https://api.deepseek.com');
+    const { broker } = harness({
+      profiles: [profile],
+      keys: { [profile.secretHandleId]: KEY },
+      reply: () => new Response('Insufficient Balance', { status: 402 }),
+    });
+
+    expect(await broker.complete({ profileId: profile.id, body: CHAT_BODY })).toEqual({
+      ok: false,
+      code: 'BILLING_REQUIRED',
+      message: 'The provider account needs credit to complete this request.',
+    });
+  });
+
+  it('keeps HTTP 500 classified as a provider HTTP error', async () => {
+    const profile = bound('p1', 'openai', 'https://api.openai.com/v1');
+    const { broker } = harness({
+      profiles: [profile],
+      keys: { [profile.secretHandleId]: KEY },
+      reply: () => new Response('server error', { status: 500 }),
+    });
+
+    expect(await broker.complete({ profileId: profile.id, body: CHAT_BODY })).toEqual({
+      ok: false,
+      code: 'PROVIDER_HTTP_ERROR',
+      message: 'The provider returned HTTP 500.',
+    });
+  });
+
   it('refuses a reply larger than the limit, announced or streamed', async () => {
     const p = bound('p1', 'grok', 'https://api.x.ai/v1');
     const announced = harness({
@@ -670,6 +728,22 @@ describe('provider broker: probe and model lists', () => {
       ok: false,
       modelId: '',
       errorCode: 'PROVIDER_INCOMPATIBLE',
+    });
+  });
+
+  it('maps a billing failure through the settings probe report', async () => {
+    const profile = bound('p1', 'deepseek', 'https://api.deepseek.com', 'fixture-model');
+    const { broker } = harness({
+      profiles: [profile],
+      keys: { [profile.secretHandleId]: KEY },
+      reply: () => new Response('Insufficient Balance', { status: 402 }),
+    });
+
+    expect(await broker.probe(profile.id)).toEqual({
+      ok: false,
+      modelId: 'fixture-model',
+      errorCode: 'BILLING_REQUIRED',
+      message: 'The provider account needs credit to complete this request.',
     });
   });
 

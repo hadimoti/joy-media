@@ -51,20 +51,31 @@ function project(value: unknown, seen: WeakSet<object>, depth: number): unknown 
 
 export function classifyJoyAgentError(error: unknown): JoyAgentErrorCode {
   const message = error instanceof Error ? error.message : String(error);
-  const normalized = message.toLowerCase();
+  const normalized = `${message}\n${providerResponseBody(error)}`.toLowerCase();
   const safeCode = JOY_AGENT_ERROR_CODES.find((code) => normalized.includes(code.toLowerCase()));
   if (safeCode !== undefined) return safeCode;
+  const status = providerStatus(error);
   if (normalized.includes('abort') || normalized.includes('cancel')) return 'JOY_AGENT_ABORTED';
   if (normalized.includes('timeout') || normalized.includes('timed out'))
     return 'JOY_AGENT_TIMEOUT';
-  if (normalized.includes('cors') || normalized.includes('network') || normalized.includes('fetch'))
-    return 'JOY_AGENT_CORS_OR_NETWORK';
   if (
+    status === 401 ||
+    status === 403 ||
     normalized.includes('401') ||
     normalized.includes('403') ||
     normalized.includes('unauthorized')
   )
     return 'JOY_AGENT_AUTH_FAILED';
+  if (
+    status === 402 ||
+    normalized.includes('402') ||
+    normalized.includes('payment required') ||
+    normalized.includes('insufficient balance')
+  ) {
+    return 'JOY_AGENT_BILLING_REQUIRED';
+  }
+  if (normalized.includes('cors') || normalized.includes('network') || normalized.includes('fetch'))
+    return 'JOY_AGENT_CORS_OR_NETWORK';
   if (normalized.includes('too large') || normalized.includes('oversize'))
     return 'JOY_AGENT_RESPONSE_TOO_LARGE';
   if (normalized.includes('tool')) return 'JOY_AGENT_INVALID_TOOL';
@@ -81,6 +92,7 @@ export function toSafeJoyAgentError(error: unknown): JoyAgentSafeError {
       [
         'JOY_AGENT_ABORTED',
         'JOY_AGENT_AUTH_FAILED',
+        'JOY_AGENT_BILLING_REQUIRED',
         'JOY_AGENT_INVALID_TOOL',
         'JOY_AGENT_INVALID_PROPOSAL',
         'JOY_AGENT_STALE_REVISION',
@@ -88,6 +100,35 @@ export function toSafeJoyAgentError(error: unknown): JoyAgentSafeError {
       ] as readonly JoyAgentErrorCode[]
     ).includes(code),
   };
+}
+
+/** A safe CLI message for the classified error, without provider response data. */
+export function joyAgentErrorMessage(code: JoyAgentErrorCode): string {
+  return code === 'JOY_AGENT_BILLING_REQUIRED'
+    ? 'The provider account needs credit to complete this request.'
+    : code;
+}
+
+function providerStatus(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  try {
+    const record = error as { readonly status?: unknown; readonly statusCode?: unknown };
+    const value = record.statusCode ?? record.status;
+    if (typeof value === 'number') return value;
+    return typeof value === 'string' && /^\d{3}$/.test(value) ? Number(value) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function providerResponseBody(error: unknown): string {
+  if (typeof error !== 'object' || error === null) return '';
+  try {
+    const value = (error as { readonly responseBody?: unknown }).responseBody;
+    return typeof value === 'string' ? value.slice(0, 4096) : '';
+  } catch {
+    return '';
+  }
 }
 
 export function isJoyAgentErrorCode(value: unknown): value is JoyAgentErrorCode {

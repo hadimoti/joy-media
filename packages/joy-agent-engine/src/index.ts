@@ -44,6 +44,7 @@ export {
   redactUnknownValue,
   classifyJoyAgentError,
   isJoyAgentErrorCode,
+  joyAgentErrorMessage,
   toSafeJoyAgentError,
 } from './redaction.js';
 export type {

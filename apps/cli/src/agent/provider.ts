@@ -10,6 +10,7 @@ import {
   evaluateEndpoint,
   findRegistryProvider,
   findRegistryRegion,
+  getProviderThinkingMode,
   isAuthMethodPermitted,
   MINIMAX_OAUTH_ENDPOINTS,
   XAI_OAUTH_INFERENCE_BASE_URL,
@@ -161,11 +162,15 @@ export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSes
     );
   }
 
+  // Request behavior follows the registry provider id before the engine mode collapses it to openai-compatible.
+  const thinkingMode = getProviderThinkingMode(type);
+
   return normalizeByokSessionConfig({
     provider: engineMode(type),
     baseUrl,
     modelId,
     apiKey: apiKey ?? 'not-provided',
+    ...(thinkingMode === undefined ? {} : { thinkingMode }),
     // The provider-specific allowlist above authorizes registry URLs. The engine's generic chat-completions mode
     // validates the same URL as a custom endpoint, so carry this already-checked registry verdict through.
     consentToPublicEndpoint: consented || verdict.kind === 'registry',

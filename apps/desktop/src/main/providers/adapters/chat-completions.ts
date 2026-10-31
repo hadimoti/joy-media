@@ -3,13 +3,14 @@
  * and a custom endpoint all speak this format. It builds the request and reads the model list.
  * It performs no I/O; the broker sends the request.
  */
-import { endpointUrl } from '@joy-media/provider-sdk';
+import { endpointUrl, getProviderThinkingMode } from '@joy-media/provider-sdk';
 import type { CompletionBody } from '../request-body.js';
 import { isRecord } from '../request-body.js';
 import type { PreparedCall, ModelEntry } from './types.js';
 import { JOY_TITLE_HEADER, JOY_TITLE } from './types.js';
 
 export function prepareChatCompletion(input: {
+  readonly provider: string;
   readonly baseUrl: string;
   readonly apiKey: string | undefined;
   readonly modelId: string;
@@ -22,8 +23,10 @@ export function prepareChatCompletion(input: {
   const { max_tokens: maxTokens, messages, ...rest } = input.body;
   const limitKey = input.tokenLimitKey ?? 'max_tokens';
   const carry = input.extraContentFor;
+  const thinkingMode = getProviderThinkingMode(input.provider);
   const payload = {
     ...rest,
+    ...(thinkingMode === 'disabled' ? { thinking: { type: 'disabled' } } : {}),
     messages:
       carry === undefined
         ? messages

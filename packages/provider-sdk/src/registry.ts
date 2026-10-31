@@ -46,6 +46,8 @@ export type ProviderApi = 'chat-completions' | 'anthropic-messages' | 'chatgpt-r
  */
 export type ProviderAuthMethod = 'api-key' | 'subscription-sign-in' | 'none';
 
+export type ProviderThinkingMode = 'disabled';
+
 /**
  * One row of the §6d-1 table: the authentication a provider permits, with the source that says so.
  *
@@ -105,6 +107,14 @@ export interface RegistryProvider {
   readonly signInOnly?: true;
   /** The authentication this provider permits, with its source and date (PLAN-v4 §6d-1). */
   readonly auth: ProviderAuthRule;
+  /** Request behavior confirmed by the provider's documentation, with its source and date. */
+  readonly requestSettings?: {
+    readonly thinkingMode?: {
+      readonly value: ProviderThinkingMode;
+      readonly source: string;
+      readonly sourceDate: string;
+    };
+  };
 }
 
 const INTERNATIONAL = 'international';
@@ -349,6 +359,15 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
       sourceDate: '2026-10-30',
       note: 'OpenAI-compatible API-key setup uses the provider base URL without a /v1 suffix.',
     },
+    requestSettings: {
+      // DeepSeek enables thinking by default, and JOY's capability probes use named and follow-up tool choices.
+      // Source: DeepSeek thinking-mode guide https://api-docs.deepseek.com/guides/thinking_mode (2026-10-31).
+      thinkingMode: {
+        value: 'disabled',
+        source: 'DeepSeek thinking-mode guide https://api-docs.deepseek.com/guides/thinking_mode',
+        sourceDate: '2026-10-31',
+      },
+    },
     regions: [
       {
         id: INTERNATIONAL,
@@ -363,6 +382,11 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
 
 export function findRegistryProvider(id: string): RegistryProvider | undefined {
   return PROVIDER_REGISTRY.find((provider) => provider.id === id);
+}
+
+/** The thinking mode a registry provider requires for chat completions, if its documented row specifies one. */
+export function getProviderThinkingMode(provider: string): ProviderThinkingMode | undefined {
+  return findRegistryProvider(provider)?.requestSettings?.thinkingMode?.value;
 }
 
 /**

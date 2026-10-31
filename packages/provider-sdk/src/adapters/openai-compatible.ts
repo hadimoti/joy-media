@@ -15,7 +15,12 @@
 /** Loosely mirrors `apps/editor-web/src/joy-agent/protocol.ts`'s `JoyAgentErrorCode` for the
  * subset relevant to a connectivity probe, without importing from an app into this package. */
 export type DirectProviderErrorCode =
-  'AUTH_FAILED' | 'NETWORK_ERROR' | 'TIMEOUT' | 'RESPONSE_TOO_LARGE' | 'PROVIDER_INCOMPATIBLE';
+  | 'AUTH_FAILED'
+  | 'BILLING_REQUIRED'
+  | 'NETWORK_ERROR'
+  | 'TIMEOUT'
+  | 'RESPONSE_TOO_LARGE'
+  | 'PROVIDER_INCOMPATIBLE';
 
 export interface DirectProviderProbeRequest {
   readonly baseUrl: string;
@@ -91,6 +96,14 @@ export async function probeOpenAiCompatibleProvider(
         modelId: request.modelId,
         errorCode: 'AUTH_FAILED',
         message: `provider rejected credentials (HTTP ${response.status})`,
+      };
+    }
+    if (response.status === 402) {
+      return {
+        ok: false,
+        modelId: request.modelId,
+        errorCode: 'BILLING_REQUIRED',
+        message: 'The provider account needs credit to complete this request.',
       };
     }
     if (!response.ok) {

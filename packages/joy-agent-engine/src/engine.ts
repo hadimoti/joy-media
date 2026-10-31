@@ -16,7 +16,7 @@ import {
   type JoyAgentRunRequest,
 } from './contracts.js';
 import { DEFAULT_JOY_AGENT_LIMITS, clampJoyAgentLimits, type JoyAgentLimits } from './limits.js';
-import { toSafeJoyAgentError } from './redaction.js';
+import { joyAgentErrorMessage, toSafeJoyAgentError } from './redaction.js';
 import { createJoyAgentTools, type JoyAgentToolBridge } from './tools.js';
 
 export const JOY_AGENT_INSTRUCTIONS = [
@@ -183,7 +183,7 @@ export class JoyAgentEngine {
     } catch (error) {
       const safe = toSafeJoyAgentError(error);
       emit({ type: 'failed', code: safe.code, retryable: safe.retryable });
-      throw new Error(safe.code);
+      throw new Error(joyAgentErrorMessage(safe.code));
     }
   }
 

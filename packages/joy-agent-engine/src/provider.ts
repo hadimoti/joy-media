@@ -121,10 +121,18 @@ export function createJoyAgentProvider(
       : {}),
     fetch: providerFetch,
     includeUsage: true,
-    ...(isAnthropic ? { transformRequestBody: transformAnthropicRequestBody } : {}),
+    ...(isAnthropic
+      ? { transformRequestBody: transformAnthropicRequestBody }
+      : config.provider === 'openai-compatible' && config.thinkingMode === 'disabled'
+        ? { transformRequestBody: transformThinkingOffRequestBody }
+        : {}),
   });
   return {
     model: provider(config.modelId),
     status: safeByokSessionStatus(config),
   };
+}
+
+function transformThinkingOffRequestBody(input: Record<string, unknown>): Record<string, unknown> {
+  return { ...input, thinking: { type: 'disabled' } };
 }
