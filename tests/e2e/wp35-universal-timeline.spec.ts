@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
   authenticate,
+  installMediaImportBridge,
   openPanel,
   openReferenceWorkspace,
   openTimelineShowcaseWorkspace,
@@ -8,7 +9,10 @@ import {
 } from './wp29-r5-harness.js';
 
 test.describe('WP-35 universal timeline closeout', () => {
-  test.beforeEach(async ({ page }) => authenticate(page));
+  test.beforeEach(async ({ page }) => {
+    await installMediaImportBridge(page);
+    await authenticate(page);
+  });
 
   test('imports a valid GLTF, previews it, and inserts a durable rendered layer', async ({
     page,

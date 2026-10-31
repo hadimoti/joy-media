@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { expect, test, type Download, type Page, type TestInfo } from '@playwright/test';
 import {
   authenticate,
+  installMediaImportBridge,
   MEDIA_FIXTURE_DIR,
   importMediaFixture,
   openPanel,
@@ -1583,6 +1584,7 @@ test.describe('JOY R2 P3 shipping browser export matrix', () => {
     await mkdir(GALLERY_ROOT, { recursive: true });
 
     try {
+      await installMediaImportBridge(page);
       await authenticate(page);
       for (const pack of LOOK_PACKS) {
         for (const preset of PRESETS) {

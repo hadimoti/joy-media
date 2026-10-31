@@ -3,6 +3,7 @@ import {
   MEDIA_FIXTURE_DIR,
   authenticate,
   importMediaFixture,
+  installMediaImportBridge,
   openDisposableWorkspace,
   openPanel,
   recordEvidence,
@@ -11,7 +12,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 test.describe('WP-29 R5 batch A — file bridge', () => {
-  test.beforeEach(async ({ page }) => authenticate(page));
+  test.beforeEach(async ({ page }) => {
+    await installMediaImportBridge(page);
+    await authenticate(page);
+  });
 
   test('[R5 CASE-15] imports PNG and JPEG through the real file input', async ({
     page,

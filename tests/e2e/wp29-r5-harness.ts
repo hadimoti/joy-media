@@ -13,9 +13,16 @@ import {
   featureActivationRoute,
   featureTool,
 } from '../../apps/editor-web/src/feature-architecture.js';
+import { installJoyDesktopBridge } from './support/joy-desktop-bridge.js';
+import { createMediaHandlers } from './support/media-handlers.js';
 
 export const E2E_TOKEN = 'joy-media-e2e-token';
 export const MEDIA_FIXTURE_DIR = join(process.cwd(), 'packages/test-fixtures/media');
+
+/** Installs the local media import seam for an opted-in browser spec, before navigation. */
+export async function installMediaImportBridge(page: Page): Promise<void> {
+  await installJoyDesktopBridge(page, [createMediaHandlers()]);
+}
 
 export type R5Verdict =
   'PASS' | 'PASS-FIXTURE' | 'FAIL' | 'FLAKY' | 'BLOCKED-CONSENT' | 'BLOCKED-INTEGRATION';

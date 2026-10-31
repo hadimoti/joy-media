@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   MEDIA_FIXTURE_DIR,
   authenticate,
+  installMediaImportBridge,
   openDisposableWorkspace,
   openPanel,
 } from './wp29-r5-harness.js';
@@ -64,7 +65,10 @@ async function cleanup(page: Page): Promise<void> {
 }
 
 test.describe('WP-30 animated timeline export', () => {
-  test.beforeEach(async ({ page }) => authenticate(page));
+  test.beforeEach(async ({ page }) => {
+    await installMediaImportBridge(page);
+    await authenticate(page);
+  });
 
   test('exports a placed animated GIF and retains a verified download', async ({ page }, info) => {
     test.setTimeout(180_000);

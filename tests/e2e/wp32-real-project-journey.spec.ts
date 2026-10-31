@@ -6,6 +6,7 @@ import { expect, test, type Download, type Page } from '@playwright/test';
 import {
   MEDIA_FIXTURE_DIR,
   authenticate,
+  installMediaImportBridge,
   openDisposableWorkspace,
   openPanel,
 } from './wp29-r5-harness.js';
@@ -186,7 +187,10 @@ async function runCheckpoint(
 }
 
 test.describe('WP-32 real-project workflow acceptance', () => {
-  test.beforeEach(async ({ page }) => authenticate(page));
+  test.beforeEach(async ({ page }) => {
+    await installMediaImportBridge(page);
+    await authenticate(page);
+  });
 
   test('completes the disposable-project journey from import through verified export', async ({
     page,

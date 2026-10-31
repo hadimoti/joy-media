@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   authenticate,
   importMediaFixture,
+  installMediaImportBridge,
   openDisposableWorkspace,
   openPanel,
   recordEvidence,
@@ -60,7 +61,10 @@ async function pairThumbnailWorker(page: Page, assetId: string) {
 }
 
 test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
-  test.beforeEach(async ({ page }) => authenticate(page));
+  test.beforeEach(async ({ page }) => {
+    await installMediaImportBridge(page);
+    await authenticate(page);
+  });
 
   test('[R5 CASE-24] AI and bulk-delete actions target only selected media', async ({
     page,

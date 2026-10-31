@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import {
   authenticate,
+  installMediaImportBridge,
   MEDIA_FIXTURE_DIR,
   openDisposableWorkspace,
   openPanel,
@@ -177,7 +178,10 @@ async function returnProtocolFixtureResult(
 }
 
 test.describe('WP-29 R2 — Worker result insertion browser closeout', () => {
-  test.beforeEach(async ({ page }) => authenticate(page));
+  test.beforeEach(async ({ page }) => {
+    await installMediaImportBridge(page);
+    await authenticate(page);
+  });
 
   test('pairs in UI and applies one verified protocol-fixture result with reversible history', async ({
     page,
