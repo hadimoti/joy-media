@@ -374,11 +374,20 @@ describe('ChatGPT token usage', () => {
   it.each([
     ['a string where a count belongs', { input_tokens: 'many', output_tokens: 2 }],
     ['a negative count', { input_tokens: 9, output_tokens: -3 }],
+    ['a fractional count', { input_tokens: 9.5, output_tokens: 2 }],
     ['no count on one side', { input_tokens: 9 }],
   ])('does not trust a count with %s', (_name, usage) => {
     const outcome = readChatGptStream(sseOf(completedWithUsage(usage)));
     if (outcome.kind !== 'completed') throw new Error('expected a completed reply');
     expect(outcome.usage).toBeUndefined();
+  });
+
+  it('does not trust a fractional total, and counts the total from the sides', () => {
+    const outcome = readChatGptStream(
+      sseOf(completedWithUsage({ input_tokens: 9, output_tokens: 2, total_tokens: 11.5 })),
+    );
+    if (outcome.kind !== 'completed') throw new Error('expected a completed reply');
+    expect(outcome.usage).toEqual({ promptTokens: 9, completionTokens: 2, totalTokens: 11 });
   });
 });
 

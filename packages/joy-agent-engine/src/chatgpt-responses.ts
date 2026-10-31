@@ -607,9 +607,11 @@ function usageOf(response: Record<string, unknown>): ChatGptUsage | undefined {
   return { promptTokens, completionTokens, totalTokens };
 }
 
-/** A count the server reported: a finite number of tokens, never a negative one. */
+/** A count the server reported: a whole number of tokens, never a negative one. */
 function countOf(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  if (!Number.isInteger(value) || value < 0) return undefined;
+  return value;
 }
 
 /** The count in the Chat Completions shape the engine reads, the same shape the Anthropic bridge emits. */
