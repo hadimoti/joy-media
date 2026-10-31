@@ -5,11 +5,15 @@ import {
   installFakeOpenAIProvider,
   scanForSentinel,
 } from './fixtures/fake-openai-provider.js';
+import { installJoyProviderHost } from './support/provider-profile-handlers.js';
 
 const SENTINEL = 'JOY_E2E_BYOK_SENTINEL_DO_NOT_PERSIST';
 
 test.describe('built-in JOY Agent BYOK security envelope', () => {
   test.beforeEach(async ({ page }) => {
+    // The JOY Code connect path needs the desktop host: it saves a provider profile there and
+    // the model call is brokered by it. The bridge is installed before the page navigates.
+    await installJoyProviderHost(page);
     await authenticate(page);
     await openReferenceWorkspace(page);
     await openPanel(page, 'Joy Code');
@@ -63,14 +67,19 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
   });
 
   test('reports a bounded provider timeout without retaining the key', async ({ page }) => {
-    test.setTimeout(40_000);
+    // The Worker bounds one provider call at 45s, so the slow answer has to outlast that bound
+    // for the timeout to be the product's and not the test's.
+    test.setTimeout(90_000);
     await page.unroute('https://joy-agent-fixture.example/**');
-    const provider = await installFakeOpenAIProvider(page, { mode: 'slow', delayMs: 16_000 });
-    const dialog = await configureJoyAgent(page, `${SENTINEL}-timeout`, { allowFailure: true });
+    const provider = await installFakeOpenAIProvider(page, { mode: 'slow', delayMs: 50_000 });
+    const dialog = await configureJoyAgent(page, `${SENTINEL}-timeout`, {
+      allowFailure: true,
+      noticeTimeoutMs: 60_000,
+    });
     const failureNotice = dialog.getByRole('alert');
     await expect(failureNotice).toHaveCount(1);
     await expect(failureNotice).toContainText(/Connection failed:.*Connection timed out/, {
-      timeout: 20_000,
+      timeout: 60_000,
     });
     expect(provider.authorizationSeen).toBe(true);
     expect(await scanForSentinel(page, `${SENTINEL}-timeout`)).toEqual([]);

@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
 import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
+import { installJoyProviderHost } from './support/provider-profile-handlers.js';
 
 const TITLE_AND_KEYFRAME_PROPOSAL = {
   summary: 'Create and animate a title',
@@ -32,6 +33,9 @@ const TITLE_AND_KEYFRAME_PROPOSAL = {
 } as const;
 
 async function openJoyCode(page: Page): Promise<void> {
+  // The JOY Code connect path needs the desktop host: it saves a provider profile there and the
+  // model call is brokered by it. The bridge is installed before the page navigates.
+  await installJoyProviderHost(page);
   await authenticate(page);
   await openReferenceWorkspace(page);
   await openPanel(page, 'Joy Code');

@@ -8,6 +8,7 @@ import {
   openPanel,
 } from './wp29-r5-harness.js';
 import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
+import { installJoyProviderHost } from './support/provider-profile-handlers.js';
 
 const ROUGH_CUT_PROPOSAL = {
   summary: 'Trim the intro clip for a tighter rough cut',
@@ -283,6 +284,7 @@ test.describe('JOY Live Director creative recipes', () => {
   test('runs Build Rough Cut through the real Worker: staged change, approve, one Undo', async ({
     page,
   }) => {
+    await installJoyProviderHost(page);
     await authenticate(page);
     const clipId = await openImportedVideoWorkspace(
       page,
@@ -339,6 +341,7 @@ test.describe('JOY Live Director creative recipes', () => {
   });
 
   test('revokes the recipe when image review is cancelled before transfer', async ({ page }) => {
+    await installJoyProviderHost(page);
     await authenticate(page);
     await openImportedVideoWorkspace(page, `JOY-E2E-CANCEL-${test.info().parallelIndex}`);
     await openPanel(page, 'Joy Code');
@@ -382,6 +385,7 @@ test.describe('JOY Live Director creative recipes', () => {
   });
 
   test('blocks a provider that skips source observation before validation', async ({ page }) => {
+    await installJoyProviderHost(page);
     await authenticate(page);
     await openDisposableWorkspace(page, `JOY-E2E-SKIP-${test.info().parallelIndex}`);
     await openPanel(page, 'Joy Code');

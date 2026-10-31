@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
 import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
+import { installJoyProviderHost } from './support/provider-profile-handlers.js';
 import {
   allowExpectedProjectAssetListMisses,
   assertBrowserAudit,
@@ -187,6 +188,7 @@ test.describe('JOY Living Looks', () => {
   test('matches the Edit composer while keeping Looks controls reachable without overflow', async ({
     page,
   }) => {
+    await installJoyProviderHost(page);
     await authenticate(page);
     await openReferenceWorkspace(page);
     await openPanel(page, 'Joy Code');
