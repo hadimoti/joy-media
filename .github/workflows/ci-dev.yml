@@ -15,9 +15,6 @@ name: ci-dev
 #
 # RUNNER POLICY (self-hosted only — no GitHub-hosted minutes/billing):
 #   - static-and-unit / browser: joy-media-ci Linux Docker container
-#   - worker-package:            joy-media-worker-docker Windows Docker runner
-#     (Windows-only because Node SEA + postject + PowerShell are required to
-#     produce joy-worker.exe; see docs/SELF-HOSTED-CI.md §Windows-platform)
 #   - development-verification-summary: joy-media-ci Linux Docker container
 # No job uses ubuntu-latest / windows-latest / macos-latest. The contract is
 # enforced offline by tooling/release/src/ci-runner-policy.test.ts.
@@ -60,38 +57,6 @@ jobs:
         run: pnpm run verify:ci
       - name: harness unit tests (cross-platform subset — POSIX cases run on the Linux release gate)
         run: pnpm run test:harness
-
-  worker-package:
-    name: Worker package build + self-test (development verification)
-    needs: static-and-unit
-    # Windows-only by necessity (joy-worker.exe via Node SEA + postject + PowerShell).
-    # Self-hosted Windows runner on the owner's PC. NOT a GitHub-hosted Windows
-    # VM: see docs/SELF-HOSTED-CI.md §Windows-platform evidence.
-    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Verify runner toolchain
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          node --version
-          corepack enable pnpm
-          pnpm --version
-          ffmpeg -version
-          ffprobe -version
-      - run: pnpm install --frozen-lockfile
-        shell: powershell
-      - name: Build Worker and package self-test executable
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          pnpm --filter @joy-media/worker build
-          $output = Join-Path $env:RUNNER_TEMP ("joy-worker-" + $env:GITHUB_SHA + "-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".exe")
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $output
-          if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Worker executable was not produced.' }
-          $result = & $output --joy-worker-self-test
-          if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw 'Worker executable self-test failed.' }
 
   browser:
     name: browser suite (development verification) — ${{ matrix.label }}
@@ -166,7 +131,7 @@ jobs:
 
   development-verification-summary:
     name: development verification summary (NOT release approval)
-    needs: [static-and-unit, worker-package, browser]
+    needs: [static-and-unit, browser]
     if: always()
     runs-on: [self-hosted, linux, x64, joy-media-ci]
     steps:
@@ -179,5 +144,5 @@ jobs:
           set -euo pipefail
           # Structured, name-keyed evaluation (shared with release-candidate-v2).
           node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$NEEDS_JSON" \
-            'static-and-unit,worker-package,browser'
+            'static-and-unit,browser'
           echo 'development verification passed — this is NOT a release approval'

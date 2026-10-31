@@ -12,28 +12,16 @@ contract is enforced offline by
 
 ## Self-hosted runner inventory
 
-All runners are provisioned on the owner-controlled Windows PC inside Docker.
-The PC keeps two independent local Docker daemons online so the Windows and
-Linux lanes do not require switching Docker Desktop engines:
+The active self-hosted runners are Linux Docker containers hosted by the owner-controlled PC. The Windows-Docker runner was retired in P5 because its isolated Windows lane and acceptance evidence producer are no longer part of the release plan. The Linux lanes remain available through WSL2 Ubuntu-24.04 Docker Engine.
 
-- Docker Desktop's Windows-container engine owns `joy-media-worker-docker`.
-- Ubuntu-24.04 WSL2's Docker Engine owns `joy-media-ci-linux` and
-  `joy-media-ci-acceptance`.
+| Runner                    | Labels                                       | Where it runs                                                   | Source of truth                                                     |
+| ------------------------- | -------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `joy-media-ci-linux`      | `self-hosted,linux,x64,joy-media-ci`         | PC WSL2 Docker Linux container (`ops/self-hosted/linux-runner`) | `ops/self-hosted/linux-runner/{Dockerfile,entrypoint.sh,README.md}` |
+| `joy-media-ci-acceptance` | `self-hosted,linux,x64,joy-media-acceptance` | PC WSL2 Docker Linux container (separate runner volume)         | `ops/self-hosted/acceptance-runner/README.md`                       |
 
-The Windows-container contract remains under
-`ops/self-hosted/windows-runner/Dockerfile.windows` and the Linux-container
-contract under `ops/self-hosted/linux-runner/`:
-
-| Runner                    | Labels                                            | Where it runs                                                   | Source of truth                                                             |
-| ------------------------- | ------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `joy-media-ci-linux`      | `self-hosted,linux,x64,joy-media-ci`              | PC WSL2 Docker Linux container (`ops/self-hosted/linux-runner`) | `ops/self-hosted/linux-runner/{Dockerfile,entrypoint.sh,README.md}`         |
-| `joy-media-ci-acceptance` | `self-hosted,linux,x64,joy-media-acceptance`      | PC WSL2 Docker Linux container (separate runner volume)         | `ops/self-hosted/acceptance-runner/README.md`                               |
-| `joy-media-worker-docker` | `self-hosted,windows,x64,joy-media-worker-docker` | PC Docker Windows-container (`Dockerfile.windows`)              | `ops/self-hosted/windows-runner/{Dockerfile.windows,contract.md,README.md}` |
-
-No runner registration token is committed, logged, or persisted inside
-a long-running container — both `entrypoint.sh` (Linux) and
-`windows-runner-entrypoint.ps1` (Windows) accept the token only at
-`--configure-only` time and refuse to write it anywhere.
+No runner registration token is committed, logged, or persisted inside a
+long-running container. The Linux `entrypoint.sh` accepts the token only at
+`--configure-only` time and refuses to write it anywhere.
 
 ## Current runners
 
@@ -45,10 +33,7 @@ a long-running container — both `entrypoint.sh` (Linux) and
   `11.15.0`, FFmpeg/FFprobe, PostgreSQL client, MinIO `mc`, and the
   system libraries required by headless Chromium; all downloaded
   binaries are hash-verified.
-- Windows Docker runner (`joy-media-worker-docker`): the
-  `ops/self-hosted/windows-runner/Dockerfile.windows` contract. It is the
-  only Windows label permitted in workflows and uses the container-local
-  `worker-acceptance-container.ps1` harness.
+- The Windows-Docker runner and its Windows acceptance lane were retired in P5.
 
 ## Workflow policy
 
@@ -62,9 +47,8 @@ The runner policy is enforced by two offline test suites:
   is not declared under `ops/self-hosted/`, fails this test before any
   CI minute is consumed.
 - `tooling/release/src/ci-runner-contract.test.ts` locks down the
-  Dockerfile / entrypoint / registration-token handling for both the
-  Linux (`ops/self-hosted/linux-runner/`) and the Windows-container
-  (`ops/self-hosted/windows-runner/`) contracts: digest-pinned base
+  Dockerfile / entrypoint / registration-token handling for the Linux
+  (`ops/self-hosted/linux-runner/`) contract: digest-pinned base
   images, SHA-256-pinned runner / Node / MinIO binaries, the dedicated
   non-login runner user, the absence of any path that would echo or
   persist `RUNNER_TOKEN`, and the explicit
@@ -86,14 +70,10 @@ Run `pnpm run release:gate` locally only when the orchestrator has already recor
 source-bound browser evidence for that exact revision; a clean checkout cannot manufacture that
 authenticated evidence.
 
-The push workflow currently has three jobs:
+The push workflow currently has two jobs:
 
 1. `check` runs typecheck, lint, tests, builds, and the production dependency audit.
-2. `worker-package` builds `@joy-media/worker`, packages a temporary `joy-worker.exe`, and runs
-   `--joy-worker-self-test`. The output is placed in the runner temp directory so it cannot collide
-   with the owner's headless Worker binary; this is a package smoke test, not the clean-profile
-   release lane.
-3. `browser-e2e` builds the app and runs the three desktop Playwright projects serially on the trusted runner.
+2. `browser-e2e` builds the app and runs the three desktop Playwright projects serially on the trusted Linux runner.
 
 The source-bound `pnpm run release:gate` is intentionally run by the orchestrator only after
 authenticated live-browser evidence has been recorded for the exact candidate revision. It is not
@@ -149,40 +129,26 @@ It is configured for the isolated real-services lane with
 `JOY_MEDIA_CI_ACCEPTANCE_WORKER=disposable`, and the executable
 `ops/self-hosted/linux-runner/real-service-acceptance.sh` command. Its database
 and MinIO settings are runner-local only; it has no OpenCLI profile, owner
-cookies, or production credentials. The last local runtime check recorded both
-Linux runners online and idle alongside the Windows Docker runner; this is an
-observation, not a durable state guarantee. WSL2 may stop an idle distribution,
+cookies, or production credentials. A local runtime check recorded the Linux
+runners online and idle; this is an observation, not a durable state guarantee.
+WSL2 may stop an idle distribution,
 so the operator must verify `wsl -l -v`, the Docker daemon, and the GitHub
 runner inventory immediately before dispatching a gate.
 
 ## Release-candidate lanes
 
-The closure plan requires a separate, manually dispatched release workflow before promotion. It
-must run twice on the exact candidate SHA and use repository-scoped runners with these labels:
+The closure plan requires a separate, manually dispatched release workflow before promotion. It runs twice on the exact candidate SHA and uses repository-scoped Linux Docker runners:
 
-- `self-hosted`, `linux`, `x64`, `joy-media-ci`: isolated Linux real-services lane (PostgreSQL 17,
-  S3-compatible storage, migrations, tenant/project isolation, queue/lease/cleanup, provider
-  idempotency, export, and rollback compatibility).
-- `self-hosted`, `windows`, `x64`, `joy-media-worker-docker`: clean-profile Worker/package lane.
-  The container-local acceptance script launches the normal hidden daemon against a unique
-  loopback control-plane fixture, verifies pairing/hello/lease traffic and protected state, then
-  bounds process-tree termination before teardown. It never calls the host scheduler or host
-  process table; the fixture is explicitly test-only.
-- An isolated acceptance runner: disposable API/editor services plus a disposable Worker identity.
-  Any automated browser uses fixture credentials only and never receives the owner's cookies or
-  OpenCLI profile `cefd9k77`.
+- `self-hosted`, `linux`, `x64`, `joy-media-ci`: isolated Linux real-services lane (PostgreSQL 17, S3-compatible storage, migrations, tenant/project isolation, queue/lease/cleanup, provider idempotency, export, and rollback compatibility).
+- An isolated acceptance runner: disposable API/editor services plus a disposable Worker identity. Automated browser checks use fixture credentials only and never receive the owner's cookies or OpenCLI profile.
 
-The current PC inventory has the two Linux Docker runners and the Windows Docker
-runner described above. There is no host-direct fallback and no VPS runner
-fallback; if either local daemon or its labeled container is unavailable, the
-workflow queues/fails rather than consuming a different runner.
+The current PC inventory has two Linux Docker runners. The Windows-Docker runner was retired in P5 because its isolated Windows lane and evidence producer were removed. There is no host-direct fallback and no VPS runner fallback; if a local daemon or its labeled container is unavailable, the workflow queues/fails rather than consuming a different runner.
 
 The manually dispatched `.github/workflows/release-candidate.yml` is the executable contract for
 those lanes. Supply the full candidate SHA; it runs two exact passes for each lane. The Linux
 runner must provide `JOY_MEDIA_CI_DATABASE_URL`, `JOY_MEDIA_CI_S3_HEALTHCHECK_URL`, and an
 executable `JOY_MEDIA_CI_RELEASE_COMMAND` that creates a unique PostgreSQL/S3 namespace and
-unconditionally tears it down. The clean Windows runner must set
-`JOY_MEDIA_CI_WORKER_PROFILE=clean`; the acceptance runner must set
+unconditionally tears it down. The acceptance runner must set
 `JOY_MEDIA_CI_ACCEPTANCE_PROFILE=real-services`,
 `JOY_MEDIA_CI_ACCEPTANCE_WORKER=disposable`, and must not expose
 `JOY_MEDIA_OPENCLI_PROFILE`.
@@ -197,7 +163,8 @@ on the isolated acceptance runner. That job is deliberately fail-closed: it requ
 services/Worker state, exercise all seven desktop profiles, run the bounded performance observer,
 and emit only redacted, candidate-bound evidence at
 `test-output/browser/journeys.json`, `test-output/release-performance/{polling,effects-soak,timeline-integrity,editor}.json`,
-`test-output/delivery/result.json`, `test-output/windows/acceptance.json`, and
+`test-output/delivery/result.json`, `test-output/windows/acceptance.json` (the separate
+operational Worker lifecycle evidence), and
 `test-output/operations/restore.json`. The job then runs `pnpm run release:gate` against that
 evidence, so a green fixture matrix cannot be mistaken for real-service release proof. The
 acceptance harness must never use `JOY_MEDIA_OPENCLI_PROFILE`, owner cookies, production
@@ -213,35 +180,9 @@ canary, and rollback.
 The workflow does not upload GitHub artifacts by default: artifact storage is separate from runner
 minutes. If a release lane later uploads evidence, it must be the minimal sanitized set above.
 
-## Windows-platform evidence — container boundary
+## Windows-platform acceptance was retired in P5
 
-JOY Media's Windows gate requires a Windows platform plus the Node SEA Worker
-package. That evidence is now produced inside the owner-controlled Docker
-Windows-container boundary. The accepted harness is
-`worker-acceptance-container.ps1`; it uses explicit process spawning and
-container-local observations and never treats host scheduler or host process
-table access as proof.
-
-- The release-candidate / r2-candidate `windows-worker-clean` /
-  `worker-package` jobs target `self-hosted,windows,x64,joy-media-worker-docker`,
-  which is an owner-controlled Docker Windows container. It is NEVER
-  `windows-latest` and never consumes a GitHub-hosted Windows VM minute.
-- The `windows-worker-clean` evidence record the gate binds from
-  (`test-output/windows/acceptance.json`) is tagged in-source with
-  `runner: "self-hosted,windows,x64,joy-media-worker-docker"` and
-  `execution: "windows-docker-container"`. The durable evidence store
-  and the source-bound release gate (`pnpm run release:gate`) bind those
-  tags before accepting the record. A Linux-container run that somehow
-  produced a `test-output/windows/acceptance.json` will fail the runner
-  label check before it can claim Windows acceptance.
-- `ops/self-hosted/windows-runner/contract.md` is the executable Docker
-  registration and evidence contract. The old host-direct
-  `worker-acceptance.ps1` path is retained only as historical source and is
-  not referenced by any workflow.
-
-In short: the JOY-Media release gate's only Windows acceptance signal
-comes from the owner-controlled Windows Docker runner. There is no
-Linux-container or host-direct evidence ever presented as Windows acceptance.
+P5 retired the Windows-Docker runner and the `windows-acceptance` release-gate check with it. The release workflows no longer schedule Windows runner jobs or require Windows-platform evidence. The separate `evidence.windows` field remains part of operational real-service lifecycle evidence; it describes the Worker lifecycle and is not Windows-platform acceptance.
 
 ## v2 release-candidate self-hosted CI
 
@@ -250,7 +191,7 @@ dispatched manually with a full 40-character candidate SHA. It runs the same lan
 described above, but encodes the clean-state repeat explicitly as two in-workflow passes per
 matrix lane and restructures the browser viewport matrix so each pass stays inside its lane's
 timeout budget. It depends on the same `self-hosted` runners (`joy-media-ci`,
-`joy-media-worker-docker`, `joy-media-acceptance`) and on the same runner-local env vars
+`joy-media-acceptance`) and on the same runner-local env vars
 (`JOY_MEDIA_CI_RELEASE_COMMAND`, `JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND`,
 `JOY_MEDIA_CI_EVIDENCE_ROOT`).
 
@@ -299,7 +240,7 @@ GitHub artifact quota being repaired.
 
 ## Re-registering a runner
 
-If the Docker image or runner volume is replaced, create a short-lived registration token with GitHub CLI (do not save it in the repository) and follow `ops/self-hosted/windows-runner/contract.md`. A native runner directory must not be used: the old host-direct label is retired.
+If the Docker image or runner volume is replaced, create a short-lived registration token with GitHub CLI (do not save it in the repository) and follow `ops/self-hosted/linux-runner/README.md`. A native runner directory must not be used: the old host-direct label is retired.
 
 ```powershell
 gh api --method POST repos/hadimoti/joy-media/actions/runners/registration-token
@@ -311,10 +252,9 @@ Registration tokens expire quickly and must not be committed or pasted into issu
 
 ```powershell
 gh api repos/hadimoti/joy-media/actions/runners --jq '.runners[] | {name,os,status,busy,labels:[.labels[].name]}'
-docker ps --filter name=joy-media-worker-docker
 ```
 
-The runner must be `online` before pushing a release commit. If it is offline, repair the runner or run the checks locally; do not switch CI to the production VPS.
+The Linux runner must be `online` before dispatching a release workflow. If it is offline, repair the runner or run the checks locally; do not switch CI to the production VPS.
 
 ## Latest verified runs
 
@@ -344,13 +284,12 @@ tests, build, and production audit), ran the real Postgres migration smoke,
 created and removed a DNS-safe MinIO bucket, uploaded candidate provenance, and
 finished with a clean checkout. At that time the two Windows jobs were queued
 because no accepted Docker Windows runner existed; the run was cancelled and
-acceptance did not start. This is retained as historical Linux evidence only;
-it is not Windows-Docker proof. The current `joy-media-worker-docker` contract
-supersedes that historical partial evidence.
+acceptance did not start. This is historical Linux evidence only; the
+Windows-Docker lane was retired in P5.
 
 The earlier self-hosted run `33282484240` passed on `main` at commit
 `c514e5efdc24080e042450499eab75c74aebef81`: `check`, `browser-e2e`
 (`desktop-minimum`, `desktop-primary`, and `desktop-compact`), and
-`worker-package` all completed successfully. This confirms the Windows
-source/browser/package lane is operational; it does not substitute for the
-release-candidate clean-profile Worker or acceptance lanes described above.
+`worker-package` all completed successfully before P5 retired that Windows
+package lane. The run is historical and does not describe the current runner
+inventory.

@@ -66,13 +66,12 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(workflow).toContain('pnpm run release:gate');
   });
 
-  it('declares 14 job instances across both passes', () => {
+  it('declares 13 job instances across both passes', () => {
     const jobKeys = Array.from(workflow.matchAll(/^\s{2}([a-z0-9-]+):$/gm), (m) => m[1]);
     const uniqueKeys = [...new Set(jobKeys)];
     expect(uniqueKeys).toEqual([
       'validate-candidate',
       'linux-real-services',
-      'windows-worker-clean',
       'acceptance-primary',
       'acceptance-responsive',
       'prod-build-smoke',
@@ -86,9 +85,9 @@ describe('v2 release-candidate artifact upload policy', () => {
     const matrixPasses = workflow.match(/pass:\s*\[1,\s*2\]/g) ?? [];
     expect(matrixPasses.length).toBe(5);
     expect(matrixPasses.length * 2).toBe(10);
-    // 4 single-instance jobs (validate-candidate, windows-worker-clean,
-    // prod-build-smoke, gate-summary). 10 + 4 = 14 job instances total.
-    expect(matrixPasses.length * 2 + 4).toBe(14);
+    // 3 single-instance jobs (validate-candidate, prod-build-smoke,
+    // gate-summary). 10 + 3 = 13 job instances total.
+    expect(matrixPasses.length * 2 + 3).toBe(13);
   });
 
   it('runs both passes for every matrix lane', () => {
