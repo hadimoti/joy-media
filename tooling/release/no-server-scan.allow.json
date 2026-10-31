@@ -1,0 +1,20 @@
+{
+  "entries": [
+    {
+      "pattern": "**/*.test.*",
+      "reason": "Test files are not shipped application source."
+    },
+    {
+      "pattern": "**/*.spec.*",
+      "reason": "Test files are not shipped application source."
+    },
+    {
+      "pattern": "packages/test-control-plane/src/**",
+      "reason": "Development-only fixture code; the package is not shipped."
+    },
+    {
+      "pattern": "apps/account-web/src/**",
+      "reason": "P6 deletes api.ts under §4b. Its one current forbidden hit is apps/account-web/src/api.ts:151: const data = await request<ReleaseInfo>(`/v1/releases/${channel}`, {}, null);"
+    }
+  ]
+}

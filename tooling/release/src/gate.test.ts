@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -14,6 +14,7 @@ import {
   REQUIRED_EFFECT_MOTION_PREVIEW_COUNT,
   REQUIRED_JOURNEY_ID,
   sha256File,
+  verifyDeploymentManifests,
   verifyRequiredEditorStaticAssets,
   verifyBrowserJourneyEvidence,
   writeReleaseEvidence,
@@ -645,6 +646,42 @@ describe('JOY Studio 1.0 release gate', () => {
     );
     expect(config.match(/try_files \$uri =404;/gu)).toHaveLength(2);
     expect(config.match(/try_files \$uri \$uri\/ \/index\.html;/gu)).toHaveLength(1);
+  });
+
+  it('verifies the retained deployment files and README markers', () => {
+    const repositoryRoot = resolve(import.meta.dirname, '../../..');
+    expect(verifyDeploymentManifests(repositoryRoot)).toEqual([]);
+
+    const missingFileRoot = mkdtempSync(join(tmpdir(), 'joy-release-deploy-missing-'));
+    try {
+      mkdirSync(join(missingFileRoot, 'deploy'), { recursive: true });
+      const missingFileErrors = verifyDeploymentManifests(missingFileRoot);
+      expect(missingFileErrors).toContain('missing file: deploy/joy-media.nginx.conf');
+    } finally {
+      rmSync(missingFileRoot, { recursive: true, force: true });
+    }
+
+    const missingMarkersRoot = mkdtempSync(join(tmpdir(), 'joy-release-deploy-markers-'));
+    try {
+      mkdirSync(join(missingMarkersRoot, 'deploy'), { recursive: true });
+      writeFileSync(join(missingMarkersRoot, 'deploy/README.md'), '');
+      const missingMarkers = verifyDeploymentManifests(missingMarkersRoot);
+      expect(missingMarkers).toEqual(
+        expect.arrayContaining([
+          'deploy/README.md missing: Retained deployment assets',
+          'deploy/README.md missing: apply-nginx-cutover.sh',
+          'deploy/README.md missing: joy-media-account-web.nginx.conf',
+          'deploy/README.md missing: joy-media-cutover-nginx-boundary.md',
+          'deploy/README.md missing: joy-media.nginx.conf',
+          'deploy/README.md missing: joy-media-rollback.sh',
+          'deploy/README.md missing: joy-media-rollback.test.sh',
+          'deploy/README.md missing: P6',
+          'deploy/README.md missing: P8',
+        ]),
+      );
+    } finally {
+      rmSync(missingMarkersRoot, { recursive: true, force: true });
+    }
   });
 
   it('requires deployment manifests and rollback markers in release evidence', () => {

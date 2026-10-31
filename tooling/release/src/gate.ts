@@ -1649,10 +1649,8 @@ function isHtmlFallback(value: Buffer): boolean {
 export function verifyDeploymentManifests(root: string): readonly string[] {
   const errors: string[] = [];
   const nginxPath = join(root, 'deploy/joy-media.nginx.conf');
-  const overridePath = join(root, 'deploy/joy-media-api.override.conf');
   const readmePath = join(root, 'deploy/README.md');
   const rollbackPath = join(root, 'deploy/joy-media-rollback.sh');
-  const releaseIdentityPath = join(root, 'deploy/joy-media-release-identity.sh');
 
   const nginx = requiredFileText(nginxPath, 'deploy/joy-media.nginx.conf', errors);
   if (nginx !== undefined) {
@@ -1669,48 +1667,20 @@ export function verifyDeploymentManifests(root: string): readonly string[] {
     }
   }
 
-  const override = requiredFileText(overridePath, 'deploy/joy-media-api.override.conf', errors);
-  if (override !== undefined) {
-    for (const marker of [
-      'WorkingDirectory=/opt/joy-media/releases/current-api',
-      'EnvironmentFile=/etc/joy-media/api.env',
-    ]) {
-      if (!override.includes(marker))
-        errors.push(`deploy/joy-media-api.override.conf missing: ${marker}`);
-    }
-  }
-
   const readme = requiredFileText(readmePath, 'deploy/README.md', errors);
   if (readme !== undefined) {
     for (const marker of [
-      'current-api',
-      'web',
-      '/opt/joy-media/web-releases/',
-      'release-identity.env',
-      'joy-media-release-identity.sh write',
-      'systemctl restart joy-media@api',
-      'Back up the database',
+      'Retained deployment assets',
+      'apply-nginx-cutover.sh',
+      'joy-media-account-web.nginx.conf',
+      'joy-media-cutover-nginx-boundary.md',
+      'joy-media.nginx.conf',
+      'joy-media-rollback.sh',
+      'joy-media-rollback.test.sh',
+      'P6',
+      'P8',
     ]) {
       if (!readme.includes(marker)) errors.push(`deploy/README.md missing: ${marker}`);
-    }
-  }
-
-  const releaseIdentity = requiredFileText(
-    releaseIdentityPath,
-    'deploy/joy-media-release-identity.sh',
-    errors,
-  );
-  if (releaseIdentity !== undefined) {
-    for (const marker of [
-      'JOY_MEDIA_RELEASE_COMMIT_SHA',
-      'JOY_MEDIA_RELEASE_TREE_HASH',
-      'JOY_MEDIA_RELEASE_LOCKFILE_SHA256',
-      'JOY_MEDIA_RELEASE_SCHEMA_VERSION',
-      'write_release_identity_file',
-      'merge_release_identity_into_env',
-    ]) {
-      if (!releaseIdentity.includes(marker))
-        errors.push(`deploy/joy-media-release-identity.sh missing: ${marker}`);
     }
   }
 
