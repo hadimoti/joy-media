@@ -216,6 +216,12 @@ const completed = (output: unknown[]): Record<string, unknown> => ({
   response: { output },
 });
 
+/** The Responses event of a finished reply, with the count the server reported. */
+const completedWithUsage = (usage: unknown): Record<string, unknown> => ({
+  type: 'response.completed',
+  response: { output: [message('Hello')], usage },
+});
+
 describe('ChatGPT stream', () => {
   it('completes only on response.completed, as the Chat Completions JSON the engine reads', () => {
     const outcome = readChatGptStream(
@@ -331,6 +337,49 @@ describe('ChatGPT stream', () => {
       });
     },
   );
+});
+
+describe('ChatGPT token usage', () => {
+  it('reads the count of the finished reply into the outcome', () => {
+    const outcome = readChatGptStream(
+      sseOf(completedWithUsage({ input_tokens: 9, output_tokens: 2, total_tokens: 11 })),
+    );
+    expect(outcome.kind).toBe('completed');
+    if (outcome.kind !== 'completed') return;
+    expect(outcome.usage).toEqual({ promptTokens: 9, completionTokens: 2, totalTokens: 11 });
+  });
+
+  it('computes the total when the reply reports no total', () => {
+    const outcome = readChatGptStream(
+      sseOf(completedWithUsage({ input_tokens: 9, output_tokens: 2 })),
+    );
+    if (outcome.kind !== 'completed') throw new Error('expected a completed reply');
+    expect(outcome.usage).toEqual({ promptTokens: 9, completionTokens: 2, totalTokens: 11 });
+  });
+
+  it('reads the count from the prompt and completion names too', () => {
+    const outcome = readChatGptStream(
+      sseOf(completedWithUsage({ prompt_tokens: 7, completion_tokens: 3 })),
+    );
+    if (outcome.kind !== 'completed') throw new Error('expected a completed reply');
+    expect(outcome.usage).toEqual({ promptTokens: 7, completionTokens: 3, totalTokens: 10 });
+  });
+
+  it('leaves the count absent when the reply carries none', () => {
+    const outcome = readChatGptStream(sseOf(completed([message('Hello')])));
+    if (outcome.kind !== 'completed') throw new Error('expected a completed reply');
+    expect(outcome.usage).toBeUndefined();
+  });
+
+  it.each([
+    ['a string where a count belongs', { input_tokens: 'many', output_tokens: 2 }],
+    ['a negative count', { input_tokens: 9, output_tokens: -3 }],
+    ['no count on one side', { input_tokens: 9 }],
+  ])('does not trust a count with %s', (_name, usage) => {
+    const outcome = readChatGptStream(sseOf(completedWithUsage(usage)));
+    if (outcome.kind !== 'completed') throw new Error('expected a completed reply');
+    expect(outcome.usage).toBeUndefined();
+  });
 });
 
 describe('ChatGPT model list', () => {

@@ -30,8 +30,22 @@ export interface ChatGptCompletionBody {
   readonly stream?: boolean;
 }
 
+/**
+ * The token count of one ChatGPT reply, as the Responses API reports it. It is absent when the reply carries no
+ * count: a count is never invented, so the engine's own zero fallback decides what an absent number means.
+ */
+export interface ChatGptUsage {
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly totalTokens: number;
+}
+
 export type ChatGptOutcome =
-  | { readonly kind: 'completed'; readonly completion: string }
+  | {
+      readonly kind: 'completed';
+      readonly completion: string;
+      readonly usage?: ChatGptUsage;
+    }
   | { readonly kind: 'incomplete'; readonly reason: string; readonly partialText: string }
   | { readonly kind: 'failed'; readonly code: string }
   | { readonly kind: 'plan-limit'; readonly partialText: string; readonly incomplete: true }
@@ -93,7 +107,12 @@ export function readChatGptStream(text: string): ChatGptOutcome {
         const response = isRecord(event.response) ? event.response : {};
         const output = Array.isArray(response.output) ? response.output : [];
         const items = output.length > 0 ? output : streamedItems;
-        return { kind: 'completed', completion: completionOf(items, partialText) };
+        const usage = usageOf(response);
+        return {
+          kind: 'completed',
+          completion: completionOf(items, partialText),
+          ...(usage === undefined ? {} : { usage }),
+        };
       }
       case 'response.incomplete':
         return { kind: 'incomplete', reason: reasonOf(event), partialText };
@@ -255,6 +274,8 @@ function chatCompletionStream(outcome: ChatGptOutcome, modelId: string): Respons
         finish_reason: choice.finish_reason === 'tool_calls' ? 'tool_calls' : 'stop',
       },
     ],
+    // The count rides on the last chunk, in the shape the Anthropic bridge emits, so the engine reads it there.
+    ...(completion.usage === undefined ? {} : { usage: chatCompletionUsage(completion.usage) }),
   };
   return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, {
     status: 200,
@@ -276,21 +297,26 @@ function chatCompletionJson(outcome: ChatGptOutcome, modelId: string): Response 
       choices: [
         { index: 0, message: completion.message, finish_reason: completion.choice.finish_reason },
       ],
+      // The count sits at the top of a non-streaming reply, under the same rule as the streamed one.
+      ...(completion.usage === undefined ? {} : { usage: chatCompletionUsage(completion.usage) }),
     }),
     { status: 200, headers: { 'content-type': 'application/json' } },
   );
 }
 
-function completionFields(
-  outcome: ChatGptOutcome,
-):
-  | { readonly choice: Record<string, unknown>; readonly message: Record<string, unknown> }
+function completionFields(outcome: ChatGptOutcome):
+  | {
+      readonly choice: Record<string, unknown>;
+      readonly message: Record<string, unknown>;
+      readonly usage: ChatGptUsage | undefined;
+    }
   | undefined {
   if (outcome.kind !== 'completed') return undefined;
   const choices = parseObject(outcome.completion)?.choices;
   const choice = Array.isArray(choices) && isRecord(choices[0]) ? choices[0] : undefined;
   const message = choice !== undefined && isRecord(choice.message) ? choice.message : undefined;
-  return choice === undefined || message === undefined ? undefined : { choice, message };
+  if (choice === undefined || message === undefined) return undefined;
+  return { choice, message, usage: outcome.usage };
 }
 
 function outcomeFailure(outcome: ChatGptOutcome): Response | undefined {
@@ -562,6 +588,37 @@ function completionOf(items: readonly unknown[], partialText: string): string {
   return JSON.stringify({
     choices: [{ message, finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop' }],
   });
+}
+
+/**
+ * The token count of a finished reply, read from the `usage` object the terminal event carries beside its output.
+ * The input side comes from `input_tokens`, or from `prompt_tokens`; the output side from `output_tokens`, or from
+ * `completion_tokens`. A value that is not a count is not trusted, so it is left out rather than believed. A reply
+ * that carries no trustworthy count on a side has no count at all: no zero is invented for a side the server did not
+ * report, and the engine's own zero fallback decides what an absent number means.
+ */
+function usageOf(response: Record<string, unknown>): ChatGptUsage | undefined {
+  const usage = isRecord(response.usage) ? response.usage : undefined;
+  if (usage === undefined) return undefined;
+  const promptTokens = countOf(usage.input_tokens) ?? countOf(usage.prompt_tokens);
+  const completionTokens = countOf(usage.output_tokens) ?? countOf(usage.completion_tokens);
+  if (promptTokens === undefined || completionTokens === undefined) return undefined;
+  const totalTokens = countOf(usage.total_tokens) ?? promptTokens + completionTokens;
+  return { promptTokens, completionTokens, totalTokens };
+}
+
+/** A count the server reported: a finite number of tokens, never a negative one. */
+function countOf(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** The count in the Chat Completions shape the engine reads, the same shape the Anthropic bridge emits. */
+function chatCompletionUsage(usage: ChatGptUsage): Record<string, number> {
+  return {
+    prompt_tokens: usage.promptTokens,
+    completion_tokens: usage.completionTokens,
+    total_tokens: usage.totalTokens,
+  };
 }
 
 function eventsOf(text: string): Record<string, unknown>[] {

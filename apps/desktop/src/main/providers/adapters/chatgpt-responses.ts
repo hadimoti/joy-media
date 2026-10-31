@@ -30,9 +30,23 @@ export const PLAN_LIMIT_CODES: ReadonlySet<string> = new Set([
 const ALLOWED_TOOL_TYPES: ReadonlySet<string> = new Set(['function', 'custom']);
 const TOOL_CHOICE_WORDS: ReadonlySet<string> = new Set(['auto', 'none', 'required']);
 
+/**
+ * The token count of one ChatGPT reply, as the Responses API reports it. It is absent when the reply carries no
+ * count: a count is never invented, so no zero is fabricated for a side the server did not report (PLAN-v4 §6d).
+ */
+export interface ChatGptUsage {
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly totalTokens: number;
+}
+
 /** How one ChatGPT stream ended. Success is only `completed` (PLAN-v4 §6d). */
 export type ChatGptOutcome =
-  | { readonly kind: 'completed'; readonly completion: string }
+  | {
+      readonly kind: 'completed';
+      readonly completion: string;
+      readonly usage?: ChatGptUsage;
+    }
   | { readonly kind: 'incomplete'; readonly reason: string; readonly partialText: string }
   | { readonly kind: 'failed'; readonly code: string }
   | { readonly kind: 'plan-limit'; readonly partialText: string; readonly incomplete: true }
@@ -93,7 +107,15 @@ export function readChatGptStream(text: string): ChatGptOutcome {
         const response = isRecord(event.response) ? event.response : {};
         const output = Array.isArray(response.output) ? response.output : [];
         const items = output.length > 0 ? output : streamedItems;
-        return { kind: 'completed', completion: completionOf(items, partialText) };
+        // The count is read here so this adapter and the engine bridge agree on what a read produces. The broker
+        // drops it at the Worker boundary on purpose (PLAN-v4 §6b): the provider envelope, and the usage inside it,
+        // never reach the Worker. That drop is deliberate — do not "fix" it here.
+        const usage = usageOf(response);
+        return {
+          kind: 'completed',
+          completion: completionOf(items, partialText),
+          ...(usage === undefined ? {} : { usage }),
+        };
       }
       case 'response.incomplete':
         return { kind: 'incomplete', reason: reasonOf(event), partialText };
@@ -392,6 +414,28 @@ function completionOf(items: readonly unknown[], partialText: string): string {
   return JSON.stringify({
     choices: [{ message, finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop' }],
   });
+}
+
+/**
+ * The token count of a finished reply, read from the `usage` object the terminal event carries beside its output.
+ * The input side comes from `input_tokens`, or from `prompt_tokens`; the output side from `output_tokens`, or from
+ * `completion_tokens`. A value that is not a count is not trusted, so it is left out rather than believed. A reply
+ * that carries no trustworthy count on a side has no count at all: no zero is invented for a side the server did not
+ * report (PLAN-v4 §6d).
+ */
+function usageOf(response: Record<string, unknown>): ChatGptUsage | undefined {
+  const usage = isRecord(response.usage) ? response.usage : undefined;
+  if (usage === undefined) return undefined;
+  const promptTokens = countOf(usage.input_tokens) ?? countOf(usage.prompt_tokens);
+  const completionTokens = countOf(usage.output_tokens) ?? countOf(usage.completion_tokens);
+  if (promptTokens === undefined || completionTokens === undefined) return undefined;
+  const totalTokens = countOf(usage.total_tokens) ?? promptTokens + completionTokens;
+  return { promptTokens, completionTokens, totalTokens };
+}
+
+/** A count the server reported: a finite number of tokens, never a negative one. */
+function countOf(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 /** The data of each SSE event, parsed. A block that is not JSON is skipped. */

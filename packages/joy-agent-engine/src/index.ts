@@ -39,6 +39,7 @@ export {
   type ChatGptModelEntry,
   type ChatGptOutcome,
   type ChatGptPreparedCall,
+  type ChatGptUsage,
 } from './chatgpt-responses.js';
 export {
   redactUnknownValue,
