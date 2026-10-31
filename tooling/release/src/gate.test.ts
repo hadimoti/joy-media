@@ -483,59 +483,6 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(realAcceptance).toContain('test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"');
   });
 
-  it('binds real-service export acceptance to a disposable Worker', () => {
-    const harness = readFileSync(
-      resolve(
-        import.meta.dirname,
-        '../../../ops/self-hosted/linux-runner/real-service-acceptance.mjs',
-      ),
-      'utf8',
-    );
-    expect(harness).toContain(
-      "new URL('../../../apps/worker/dist/export-job.js', import.meta.url).href",
-    );
-    expect(harness).toContain('await controlPlane.pairWorker({ id: owner }, realWorkerId)');
-    expect(harness).toContain("await controlPlane.helloWorker(realWorkerId, ['render.export']");
-    expect(harness).toContain('runRealServiceExportWorker(');
-    expect(harness).toContain('runLeasedExportWithHeartbeats(');
-    expect(harness).toContain('controlPlane.heartbeat(');
-    expect(harness).toContain("kind: 'render.export'");
-    expect(harness).toContain("availability: 'available-cloud'");
-  });
-
-  it('keeps delivery recovery non-leaseable and bounded while proving cancel/retry', () => {
-    const harness = readFileSync(
-      resolve(
-        import.meta.dirname,
-        '../../../ops/self-hosted/linux-runner/real-service-acceptance.mjs',
-      ),
-      'utf8',
-    );
-    expect(harness).toContain('assetId: reimportAssetId');
-    expect(harness).toContain("type: 'asset.thumbnail'");
-    expect(harness).toContain('const controller = new globalThis.AbortController()');
-    expect(harness).toContain('setTimeout(() => controller.abort(), pollRequestTimeoutMs)');
-    expect(harness).toContain("cancelPollError = 'job-missing'");
-    expect(harness).toContain("cancelPollError = 'malformed-jobs'");
-    expect(harness).toContain('cancelPollError = `terminal-${cancelSettledState}`');
-    expect(harness).toContain('pollRequestTimeoutMs: DELIVERY_CANCEL_POLL_REQUEST_TIMEOUT_MS');
-    expect(harness).toContain("deliveryRecovery.retriedState !== 'queued'");
-  });
-
-  it('wires AccountService with an ephemeral signer into real-service HTTP server', () => {
-    const harness = readFileSync(
-      resolve(
-        import.meta.dirname,
-        '../../../ops/self-hosted/linux-runner/real-service-acceptance.mjs',
-      ),
-      'utf8',
-    );
-    expect(harness).toContain("generateKeyPairSync('ed25519')");
-    expect(harness).toContain('createEd25519EntitlementSigner(');
-    expect(harness).toContain('account: new AccountService({ pool, signer })');
-    expect(harness).toContain('entitlementPublicKeyPem: signer.publicKeyPem');
-  });
-
   it('validates the checked-out candidate and always checks Worker teardown', () => {
     const workflow = readFileSync(
       resolve(import.meta.dirname, '../../../.github/workflows/release-candidate.yml'),
@@ -682,12 +629,43 @@ describe('JOY Studio 1.0 release gate', () => {
     } finally {
       rmSync(missingMarkersRoot, { recursive: true, force: true });
     }
+
+    const missingKeptMarkersRoot = mkdtempSync(join(tmpdir(), 'joy-release-deploy-kept-markers-'));
+    try {
+      const repositoryDeploy = resolve(import.meta.dirname, '../../../deploy');
+      const deployFixture = join(missingKeptMarkersRoot, 'deploy');
+      mkdirSync(deployFixture, { recursive: true });
+
+      const nginx = readFileSync(join(repositoryDeploy, 'joy-media.nginx.conf'), 'utf8');
+      const rollback = readFileSync(join(repositoryDeploy, 'joy-media-rollback.sh'), 'utf8');
+      const readme = readFileSync(join(repositoryDeploy, 'README.md'), 'utf8');
+      writeFileSync(
+        join(deployFixture, 'joy-media.nginx.conf'),
+        nginx.replace('location = /live {', ''),
+      );
+      writeFileSync(
+        join(deployFixture, 'joy-media-rollback.sh'),
+        rollback.replaceAll('merge_release_identity_into_env', ''),
+      );
+      writeFileSync(join(deployFixture, 'README.md'), readme);
+
+      expect(verifyDeploymentManifests(missingKeptMarkersRoot)).toEqual(
+        expect.arrayContaining([
+          'deploy/joy-media.nginx.conf missing: location = /live {',
+          'deploy/joy-media-rollback.sh missing: merge_release_identity_into_env',
+        ]),
+      );
+    } finally {
+      rmSync(missingKeptMarkersRoot, { recursive: true, force: true });
+    }
   });
 
   it('requires deployment manifests and rollback markers in release evidence', () => {
     const result = evaluateReleaseGate({
       ...passingInput(),
-      deploymentManifests: ['deploy/README.md missing: systemctl restart joy-media@api'],
+      deploymentManifests: [
+        'deploy/joy-media-rollback.sh missing: merge_release_identity_into_env',
+      ],
     });
 
     expect(result.passed).toBe(false);
@@ -1049,7 +1027,7 @@ describe('JOY Studio 1.0 release gate', () => {
   it('rejects dirty generated artifacts', () => {
     const result = evaluateReleaseGate({
       ...passingInput(),
-      dirtyGeneratedArtifacts: ['apps/api/dist/server.js'],
+      dirtyGeneratedArtifacts: ['apps/worker/dist/server.js'],
     });
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'generated-artifacts')?.status).toBe(
@@ -1084,7 +1062,7 @@ describe('JOY Studio 1.0 release gate', () => {
   it('rejects fixture handlers in production registries', () => {
     const result = evaluateReleaseGate({
       ...passingInput(),
-      fixtureHandlers: ['apps/api/src/server.ts: fixture handler'],
+      fixtureHandlers: ['apps/worker/src/server.ts: fixture handler'],
     });
     expect(result.passed).toBe(false);
     expect(result.checks.find((check) => check.id === 'fixture-registries')?.status).toBe('failed');
@@ -1096,13 +1074,13 @@ describe('JOY Studio 1.0 release gate', () => {
     ['fixture enqueue path', "await client.enqueueFixture('project', 'fixture-thumbnail-id');"],
   ])('rejects %s in production source', (_description, source) => {
     const root = mkdtempSync(join(tmpdir(), 'joy-release-fixture-root-'));
-    const sourceDirectory = join(root, 'apps/api/src');
+    const sourceDirectory = join(root, 'apps/worker/src');
     mkdirSync(sourceDirectory, { recursive: true });
     writeFileSync(join(sourceDirectory, 'control-plane.ts'), source);
 
     const fixtureHandlers = findProductionFixtureRegistrations(root);
     expect(fixtureHandlers).toHaveLength(1);
-    expect(fixtureHandlers[0]?.replaceAll('\\', '/')).toBe('apps/api/src/control-plane.ts:1');
+    expect(fixtureHandlers[0]?.replaceAll('\\', '/')).toBe('apps/worker/src/control-plane.ts:1');
 
     const result = evaluateReleaseGate({ ...passingInput(), fixtureHandlers });
     expect(result.passed).toBe(false);
@@ -1111,10 +1089,10 @@ describe('JOY Studio 1.0 release gate', () => {
 
   it('ignores fixture comments, declarations, and dist output', () => {
     const root = mkdtempSync(join(tmpdir(), 'joy-release-fixture-ignore-root-'));
-    mkdirSync(join(root, 'apps/api/src'), { recursive: true });
-    mkdirSync(join(root, 'apps/api/dist'), { recursive: true });
+    mkdirSync(join(root, 'apps/worker/src'), { recursive: true });
+    mkdirSync(join(root, 'apps/worker/dist'), { recursive: true });
     writeFileSync(
-      join(root, 'apps/api/src/control-plane.ts'),
+      join(root, 'apps/worker/src/control-plane.ts'),
       [
         '/** fixture.thumbnail is a transport kind, not a registration. */',
         'export interface FixtureReceipt {',
@@ -1123,7 +1101,7 @@ describe('JOY Studio 1.0 release gate', () => {
       ].join('\n'),
     );
     writeFileSync(
-      join(root, 'apps/api/dist/control-plane.d.ts'),
+      join(root, 'apps/worker/dist/control-plane.d.ts'),
       "export interface FixtureReceipt { readonly kind: 'fixture.thumbnail'; }",
     );
 
@@ -1132,7 +1110,7 @@ describe('JOY Studio 1.0 release gate', () => {
 
   it('preserves fixture registrations in test-only source files', () => {
     const root = mkdtempSync(join(tmpdir(), 'joy-release-test-fixture-root-'));
-    const sourceDirectory = join(root, 'apps/api/src');
+    const sourceDirectory = join(root, 'apps/worker/src');
     mkdirSync(sourceDirectory, { recursive: true });
     writeFileSync(
       join(sourceDirectory, 'control-plane.test.ts'),
@@ -1723,18 +1701,18 @@ describe('JOY Studio 1.0 release gate', () => {
   it('writes machine-readable report, manifest, SBOM, asset hashes, and static inventory', () => {
     const root = mkdtempSync(join(tmpdir(), 'joy-release-root-'));
     const output = mkdtempSync(join(tmpdir(), 'joy-release-gate-'));
-    mkdirSync(join(root, 'apps/api/dist'), { recursive: true });
-    writeFileSync(join(root, 'apps/api/dist/server.js'), 'release artifact');
+    mkdirSync(join(root, 'apps/worker/dist'), { recursive: true });
+    writeFileSync(join(root, 'apps/worker/dist/server.js'), 'release artifact');
     const evidence = {
       ...passingInput(),
       windowsAcceptance: windowsAcceptance('a'.repeat(40), '2026-08-21T12:00:00.000Z'),
       artifactHashes: {
-        'apps/api/dist/server.js': sha256File(join(root, 'apps/api/dist/server.js')),
+        'apps/worker/dist/server.js': sha256File(join(root, 'apps/worker/dist/server.js')),
       },
       manifest: {
         schemaVersion: 1,
         artifacts: {
-          'apps/api/dist/server.js': sha256File(join(root, 'apps/api/dist/server.js')),
+          'apps/worker/dist/server.js': sha256File(join(root, 'apps/worker/dist/server.js')),
         },
       },
       sbom: {
@@ -1765,19 +1743,19 @@ describe('JOY Studio 1.0 release gate', () => {
   it('rejects a source-bound manifest from a different commit', () => {
     const root = mkdtempSync(join(tmpdir(), 'joy-release-source-root-'));
     const output = mkdtempSync(join(tmpdir(), 'joy-release-source-gate-'));
-    mkdirSync(join(root, 'apps/api/dist'), { recursive: true });
-    writeFileSync(join(root, 'apps/api/dist/server.js'), 'release artifact');
+    mkdirSync(join(root, 'apps/worker/dist'), { recursive: true });
+    writeFileSync(join(root, 'apps/worker/dist/server.js'), 'release artifact');
     const current = sourceProvenance();
-    const artifactHash = sha256File(join(root, 'apps/api/dist/server.js'));
+    const artifactHash = sha256File(join(root, 'apps/worker/dist/server.js'));
     const evidence = {
       ...passingInput(),
       sourceProvenance: current,
       browserJourneys: [{ ...passingInput().browserJourneys[0]!, sourceProvenance: current }],
-      artifactHashes: { 'apps/api/dist/server.js': artifactHash },
+      artifactHashes: { 'apps/worker/dist/server.js': artifactHash },
       manifest: {
         schemaVersion: 2,
         sourceProvenance: sourceProvenance('d'.repeat(40)),
-        artifacts: { 'apps/api/dist/server.js': artifactHash },
+        artifacts: { 'apps/worker/dist/server.js': artifactHash },
       },
       sbom: {
         bomFormat: 'cyclonedx',
@@ -1793,10 +1771,10 @@ describe('JOY Studio 1.0 release gate', () => {
   it('reports a dirty source-bound checkout as a failed gate', () => {
     const root = mkdtempSync(join(tmpdir(), 'joy-release-dirty-root-'));
     const output = mkdtempSync(join(tmpdir(), 'joy-release-dirty-gate-'));
-    mkdirSync(join(root, 'apps/api/dist'), { recursive: true });
-    writeFileSync(join(root, 'apps/api/dist/server.js'), 'release artifact');
+    mkdirSync(join(root, 'apps/worker/dist'), { recursive: true });
+    writeFileSync(join(root, 'apps/worker/dist/server.js'), 'release artifact');
     const dirtySource = { ...sourceProvenance(), worktreeClean: false };
-    const artifactHash = sha256File(join(root, 'apps/api/dist/server.js'));
+    const artifactHash = sha256File(join(root, 'apps/worker/dist/server.js'));
     const evidence = {
       ...passingInput(),
       sourceProvenance: dirtySource,
@@ -1807,11 +1785,11 @@ describe('JOY Studio 1.0 release gate', () => {
           sourceProvenance: dirtySource,
         },
       ],
-      artifactHashes: { 'apps/api/dist/server.js': artifactHash },
+      artifactHashes: { 'apps/worker/dist/server.js': artifactHash },
       manifest: {
         schemaVersion: 2,
         sourceProvenance: dirtySource,
-        artifacts: { 'apps/api/dist/server.js': artifactHash },
+        artifacts: { 'apps/worker/dist/server.js': artifactHash },
       },
       sbom: {
         bomFormat: 'cyclonedx',

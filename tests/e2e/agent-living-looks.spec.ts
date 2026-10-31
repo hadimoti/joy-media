@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
 import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
 import {
-  allowExpectedAssetFixtureMisses,
+  allowExpectedProjectAssetListMisses,
   assertBrowserAudit,
   setupBrowserAudit,
 } from './helpers/browser-console-audit.js';
@@ -14,30 +14,18 @@ import {
  * Approve applies it, one Undo restores it.
  */
 test.describe('JOY Living Looks', () => {
-  const LOOKS_ASSET_MISS_MAP: Record<
-    string,
-    {
-      original: number | { min: number; max: number };
-      cloud?: number | { min: number; max: number };
-    }
-  > = {
-    'keeps the Looks setup in one owned viewport': { original: 2 },
-    'renders the five shipping packs and runs one through approve + Undo': { original: 7 },
-    'matches the Edit composer while keeping Looks controls reachable without overflow': {
-      original: { min: 1, max: 2 },
-      cloud: 2,
-    },
-    'shows an unavailable pack honestly when the editor lacks a capability': { original: 2 },
-    'a saved Look survives reload and can be reopened, adjusted, and detached (GAP 1b/1c)': {
-      original: { min: 11, max: 12 },
-      cloud: 11,
-    },
-  };
+  const LOOKS_PROJECT_ASSET_LIST_MISS_TESTS = new Set([
+    'keeps the Looks setup in one owned viewport',
+    'renders the five shipping packs and runs one through approve + Undo',
+    'matches the Edit composer while keeping Looks controls reachable without overflow',
+    'shows an unavailable pack honestly when the editor lacks a capability',
+    'a saved Look survives reload and can be reopened, adjusted, and detached (GAP 1b/1c)',
+  ]);
 
   test.beforeEach(({ page }, testInfo) => {
     setupBrowserAudit(page);
-    const config = LOOKS_ASSET_MISS_MAP[testInfo.title];
-    if (config != null) allowExpectedAssetFixtureMisses(page, config.original, config.cloud);
+    if (LOOKS_PROJECT_ASSET_LIST_MISS_TESTS.has(testInfo.title))
+      allowExpectedProjectAssetListMisses(page);
   });
 
   test.afterEach(async ({ page }, testInfo) => {

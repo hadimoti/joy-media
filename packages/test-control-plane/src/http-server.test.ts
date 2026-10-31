@@ -1,4 +1,5 @@
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -20,6 +21,7 @@ import {
   MAX_PROJECT_DOCUMENT_SYNC_BYTES,
 } from './project-document-sync-request-validation.js';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
+import type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
 
 const servers: Server[] = [];
 const SHA256 = 'a'.repeat(64);
@@ -51,7 +53,220 @@ describe('control-plane HTTP transport', () => {
       body: { error: { code: 'AUTH_REQUIRED' } },
     });
   });
+
+  it('downloads a leased source asset through the Worker source route', async () => {
+    const workerJob = await createLeasedWorkerJob();
+    const response = await fetch(
+      `${workerJob.origin}/v1/workers/${workerJob.workerId}/jobs/${workerJob.jobId}/source`,
+      {
+        headers: {
+          authorization: `Bearer ${workerJob.workerToken}`,
+          'x-joy-lease-token': workerJob.leaseToken,
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(workerJob.sourceBytes);
+  });
+
+  it('uploads a derivative with 201 and keeps its object key stable for an exact retry', async () => {
+    const workerJob = await createLeasedWorkerJob();
+    const derivativeBytes = new Uint8Array([9, 8, 7, 6]);
+    const sha256 = createHash('sha256').update(derivativeBytes).digest('hex');
+    const headers = {
+      authorization: `Bearer ${workerJob.workerToken}`,
+      'content-type': 'video/mp4',
+      'x-joy-asset-id': 'worker-source',
+      'x-joy-sha256': sha256,
+      'x-joy-bytes': String(derivativeBytes.byteLength),
+      'x-joy-derivative-kind': 'proxy',
+      'x-joy-width': '64',
+      'x-joy-height': '36',
+      'x-joy-duration-us': '100000',
+      'x-joy-lease-token': workerJob.leaseToken,
+    };
+
+    const upload = async () =>
+      fetch(
+        `${workerJob.origin}/v1/workers/${workerJob.workerId}/jobs/${workerJob.jobId}/derivative`,
+        {
+          method: 'POST',
+          headers,
+          body: derivativeBytes.buffer.slice(
+            derivativeBytes.byteOffset,
+            derivativeBytes.byteOffset + derivativeBytes.byteLength,
+          ) as ArrayBuffer,
+        },
+      );
+
+    const first = await upload();
+    const firstBody = await first.json();
+    expect(first.status).toBe(201);
+    expect(firstBody).toMatchObject({ data: { assetId: 'worker-source' } });
+    const derivativeRefs = [...workerJob.objects.keys()].filter((ref) => ref !== 'source-object');
+    expect(derivativeRefs).toHaveLength(1);
+
+    const retry = await upload();
+    expect(retry.status).toBe(201);
+    expect([...workerJob.objects.keys()].filter((ref) => ref !== 'source-object')).toEqual(
+      derivativeRefs,
+    );
+  });
+
+  it('rejects a derivative with a mismatched byte length or missing lease token', async () => {
+    const workerJob = await createLeasedWorkerJob();
+    const derivativeBytes = new Uint8Array([9, 8, 7]);
+    const sha256 = createHash('sha256').update(derivativeBytes).digest('hex');
+    const headers = {
+      authorization: `Bearer ${workerJob.workerToken}`,
+      'content-type': 'video/mp4',
+      'x-joy-asset-id': 'worker-source',
+      'x-joy-sha256': sha256,
+      'x-joy-bytes': '4',
+      'x-joy-derivative-kind': 'proxy',
+      'x-joy-width': '64',
+      'x-joy-height': '36',
+      'x-joy-duration-us': '100000',
+      'x-joy-lease-token': workerJob.leaseToken,
+    };
+    const post = (requestHeaders: Record<string, string>) =>
+      fetch(
+        `${workerJob.origin}/v1/workers/${workerJob.workerId}/jobs/${workerJob.jobId}/derivative`,
+        {
+          method: 'POST',
+          headers: requestHeaders,
+          body: derivativeBytes.buffer.slice(
+            derivativeBytes.byteOffset,
+            derivativeBytes.byteOffset + derivativeBytes.byteLength,
+          ) as ArrayBuffer,
+        },
+      );
+
+    const wrongLength = await post(headers);
+    expect(wrongLength.status).toBe(400);
+    expect(await wrongLength.json()).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+
+    const { 'x-joy-lease-token': _leaseToken, ...missingLeaseHeaders } = headers;
+    const missingLease = await post({ ...missingLeaseHeaders, 'x-joy-bytes': '3' });
+    expect(missingLease.status).toBe(400);
+    expect(await missingLease.json()).toMatchObject({ error: { code: 'REQUEST_INVALID' } });
+  });
+
+  it('reports an unavailable private store for Worker source and derivative routes', async () => {
+    const workerJob = await createLeasedWorkerJob({ withStore: false });
+    const source = await fetch(
+      `${workerJob.origin}/v1/workers/${workerJob.workerId}/jobs/${workerJob.jobId}/source`,
+      {
+        headers: {
+          authorization: `Bearer ${workerJob.workerToken}`,
+          'x-joy-lease-token': workerJob.leaseToken,
+        },
+      },
+    );
+    expect(source.status).toBe(503);
+    expect(await source.json()).toMatchObject({
+      error: { code: 'PRIVATE_STORE_UNAVAILABLE' },
+    });
+
+    const derivative = await fetch(
+      `${workerJob.origin}/v1/workers/${workerJob.workerId}/jobs/${workerJob.jobId}/derivative`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${workerJob.workerToken}` },
+        body: new Uint8Array([1]),
+      },
+    );
+    expect(derivative.status).toBe(503);
+    expect(await derivative.json()).toMatchObject({
+      error: { code: 'PRIVATE_STORE_UNAVAILABLE' },
+    });
+  });
 });
+
+async function createLeasedWorkerJob(options: { readonly withStore?: boolean } = {}) {
+  const owner = { id: 'owner-1' };
+  const projectId = 'worker-project';
+  const workerId = 'worker-1';
+  const jobId = 'worker-job';
+  const pairingCode = 'worker-pairing-code';
+  const controlPlane = new LocalControlPlane();
+  const sourceBytes = new Uint8Array([1, 2, 3, 4]);
+  const sourceSha256 = createHash('sha256').update(sourceBytes).digest('hex');
+  const objects = new Map<string, { descriptor: PrivateObjectDescriptor; bytes: Uint8Array }>();
+  const store: PrivateObjectStore = {
+    async put(descriptor, bytes) {
+      objects.set(descriptor.ref, { descriptor, bytes: new Uint8Array(bytes) });
+    },
+    async get(descriptor) {
+      const object = objects.get(descriptor.ref);
+      if (object === undefined) throw new Error('test object is missing');
+      return new Uint8Array(object.bytes);
+    },
+    async remove(ref) {
+      objects.delete(ref);
+    },
+  };
+  await controlPlane.createProject(owner, projectId, 'Worker route fixture');
+  await controlPlane.registerAsset(owner, projectId, {
+    id: 'worker-source',
+    kind: 'video',
+    displayName: 'source.mp4',
+    sha256: sourceSha256,
+    bytes: sourceBytes.byteLength,
+    descriptor: { mimeType: 'video/mp4', width: 64, height: 36, durationUs: 100_000 },
+    locations: [{ kind: 'private-object', ref: 'source-object' }],
+  });
+  if (options.withStore !== false) {
+    await store.put(
+      {
+        ref: 'source-object',
+        sha256: sourceSha256,
+        bytes: sourceBytes.byteLength,
+        mimeType: 'video/mp4',
+      },
+      sourceBytes,
+    );
+  }
+  const origin = await start(
+    { authenticate: () => owner },
+    options.withStore === false ? undefined : store,
+    undefined,
+    controlPlane,
+  );
+  await request(origin, 'POST', '/v1/worker-pair/offers', { workerId, pairingCode });
+  await request(origin, 'POST', `/v1/workers/${workerId}/pair`, { pairingCode });
+  const claim = await request(origin, 'POST', '/v1/worker-pair/claim', { workerId, pairingCode });
+  const workerToken = (claim.body as { data: { sessionToken: string } }).data.sessionToken;
+  await controlPlane.helloWorker(workerId, ['render.export']);
+  const now = Date.now();
+  await controlPlane.enqueue(owner, jobId, projectId, 'render.export', now, 'worker-source', {
+    schemaVersion: 1,
+    producer: 'browser-staged-preview-export',
+    frameCount: 3,
+    manifest: {
+      projectId,
+      revision: 0,
+      width: 64,
+      height: 36,
+      frameRate: 30,
+      durationUs: 100_000,
+      preset: 'reels-1080',
+    },
+  });
+  const lease = await controlPlane.lease(workerId, now + 1);
+  if (lease === undefined || lease.leaseToken === undefined)
+    throw new Error('worker job was not leased');
+  return {
+    origin,
+    workerId,
+    jobId,
+    workerToken,
+    leaseToken: lease.leaseToken,
+    sourceBytes,
+    objects,
+  };
+}
 
 function validProjectDocumentSyncEnvelope(
   projectId: string,
@@ -94,7 +309,7 @@ function validProjectDocumentSyncEnvelope(
 
 async function start(
   authentication: ApiAuthentication,
-  _privateObjectStore?: unknown,
+  privateObjectStore?: PrivateObjectStore,
   _mistral?: unknown,
   controlPlane: ControlPlane = new LocalControlPlane(),
   _audioDenoise?: unknown,
@@ -106,6 +321,7 @@ async function start(
   const server = createControlPlaneHttpServer({
     controlPlane,
     authentication,
+    ...(privateObjectStore === undefined ? {} : { privateObjectStore }),
     ...(rateLimit === undefined ? {} : { rateLimit }),
     ...(clientAddressResolver === undefined ? {} : { clientAddressResolver }),
   });

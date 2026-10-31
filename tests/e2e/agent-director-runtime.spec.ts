@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
 import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
 import {
-  allowExpectedAssetFixtureMisses,
+  allowExpectedProjectAssetListMisses,
   assertBrowserAudit,
   setupBrowserAudit,
 } from './helpers/browser-console-audit.js';
@@ -50,18 +50,18 @@ async function requestPreview(page: Page, prompt: string): Promise<void> {
 }
 
 test.describe('JOY Live Director runtime boundary', () => {
-  const DIRECTOR_ASSET_MISS_MAP: Record<string, number> = {
-    'cancellation rejects a delayed provider reply before it can stage a preview': 2,
-    'proves the provider handshake, repairs only through the canonical host, and requires approval': 9,
-    'invalidates a real Worker preview when its revision becomes stale': 5,
-    'clearing a model connection terminalizes an in-flight run without reviving a preview': 2,
-    'reports a provider adapter failure without suggesting an edit was applied': 2,
-  };
+  const DIRECTOR_PROJECT_ASSET_LIST_MISS_TESTS = new Set([
+    'cancellation rejects a delayed provider reply before it can stage a preview',
+    'proves the provider handshake, repairs only through the canonical host, and requires approval',
+    'invalidates a real Worker preview when its revision becomes stale',
+    'clearing a model connection terminalizes an in-flight run without reviving a preview',
+    'reports a provider adapter failure without suggesting an edit was applied',
+  ]);
 
   test.beforeEach(({ page }, testInfo) => {
     setupBrowserAudit(page);
-    const count = DIRECTOR_ASSET_MISS_MAP[testInfo.title];
-    if (count != null) allowExpectedAssetFixtureMisses(page, count);
+    if (DIRECTOR_PROJECT_ASSET_LIST_MISS_TESTS.has(testInfo.title))
+      allowExpectedProjectAssetListMisses(page);
   });
 
   test.afterEach(async ({ page }, testInfo) => {

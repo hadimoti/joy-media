@@ -106,28 +106,12 @@ export function allowExpectedHttpResponse(
   state.expectedHttpResponses.push({ ...expected, expectedCount: count, matchedCount: 0 });
 }
 
-export function allowExpectedAssetFixtureMisses(
-  page: Page,
-  original: number | CountRange,
-  cloud?: number | CountRange,
-): void {
+export function allowExpectedProjectAssetListMisses(page: Page): void {
   allowExpectedHttpResponse(page, {
     status: 409,
     pathname: /^\/api\/v1\/projects\/[^/]+\/assets$/,
     code: 'PROJECT_NOT_FOUND',
     count: 6,
-  });
-  allowExpectedHttpResponse(page, {
-    status: 409,
-    pathname: /^\/api\/v1\/projects\/[^/]+\/assets\/[^/]+\/original$/,
-    code: 'ASSET_NOT_FOUND',
-    count: original,
-  });
-  allowExpectedHttpResponse(page, {
-    status: 409,
-    pathname: /^\/api\/v1\/library\/cloud-assets\/[^/]+\/content$/,
-    code: 'ASSET_NOT_FOUND',
-    count: cloud ?? original,
   });
 }
 

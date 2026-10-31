@@ -209,9 +209,6 @@ test.describe('native stock video library', () => {
         }),
       });
     });
-    await page.route('**/api/v1/library/cloud-assets', async (route) => {
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [] }) });
-    });
     await page.route('**/api/v1/library/stock-videos/*/poster', async (route) => {
       const id = route.request().url().split('/').at(-2);
       if (id === stockFixtureId('nature', 'stock-portrait-2') && stockMode === 'poster-failure') {

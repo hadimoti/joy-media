@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Retired on this local-only branch under PLAN-v4 §8b; lane-list migration is deferred until after the forward merge.
+
 candidate_sha=${1:-}
 run_id=${2:-}
 run_attempt=${3:-}

@@ -159,12 +159,13 @@ test_dry_run_leaves_state_untouched() {
 
 test_missing_release_identity_fails_closed() {
   setup_fixture
-  local before_env
+  local before_env rollback_output
   before_env="$(cat "$API_ENV_FILE")"
   rm -f "$API_ROOT/release-a/release-identity.env"
-  if run_rollback --dry-run "$API_ROOT/release-a" "$WEB_ROOT/web-a"; then
+  if rollback_output="$(run_rollback --dry-run "$API_ROOT/release-a" "$WEB_ROOT/web-a" 2>&1)"; then
     fail "missing release identity should fail"
   fi
+  [[ "$rollback_output" == *"release identity file missing: $API_ROOT/release-a/release-identity.env"* ]] || fail "missing identity error should name its path"
   assert_eq "$before_env" "$(cat "$API_ENV_FILE")" "missing release identity should not rewrite api env"
   [[ ! -e "$CURRENT_API_LINK" ]] || fail "missing release identity should not create api link"
   [[ ! -e "$CURRENT_WEB_LINK" ]] || fail "missing release identity should not create web link"
@@ -176,7 +177,7 @@ test_missing_release_identity_fails_closed() {
 
 test_invalid_release_identity_fails_closed() {
   setup_fixture
-  local before_env
+  local before_env rollback_output
   before_env="$(cat "$API_ENV_FILE")"
   cat >"$API_ROOT/release-a/release-identity.env" <<'EOF'
 JOY_MEDIA_RELEASE_COMMIT_SHA=not-a-sha
@@ -184,15 +185,26 @@ JOY_MEDIA_RELEASE_TREE_HASH=1111111111111111111111111111111111111111
 JOY_MEDIA_RELEASE_LOCKFILE_SHA256=2222222222222222222222222222222222222222222222222222222222222222
 JOY_MEDIA_RELEASE_SCHEMA_VERSION=3
 EOF
-  if run_rollback --apply "$API_ROOT/release-a" "$WEB_ROOT/web-a"; then
+  if rollback_output="$(run_rollback --apply "$API_ROOT/release-a" "$WEB_ROOT/web-a" 2>&1)"; then
     fail "invalid release identity should fail"
   fi
+  [[ "$rollback_output" == *"invalid JOY_MEDIA_RELEASE_COMMIT_SHA value: not-a-sha"* ]] || fail "invalid identity error should name its rejected value"
   assert_eq "$before_env" "$(cat "$API_ENV_FILE")" "invalid release identity should not rewrite api env"
   [[ ! -e "$CURRENT_API_LINK" ]] || fail "invalid release identity should not create api link"
   [[ ! -e "$CURRENT_WEB_LINK" ]] || fail "invalid release identity should not create web link"
   if [[ -f "$LOG_DIR/commands.log" ]]; then
     fail "invalid release identity should not call external commands"
   fi
+  rm -rf "$FIXTURE_ROOT"
+}
+
+test_merge_creates_missing_destination_directory() {
+  setup_fixture
+  local destination="$FIXTURE_ROOT/new/nested/api.env"
+  source <(sed '/^MODE="dry-run"/,$d' "$ROLLBACK_SCRIPT")
+  merge_release_identity_into_env "$API_ENV_FILE" "$API_ROOT/release-a/release-identity.env" "$destination"
+  [[ -f "$destination" ]] || fail "merge should create its destination directory and file"
+  assert_contains "JOY_MEDIA_RELEASE_SCHEMA_VERSION=3" "$destination"
   rm -rf "$FIXTURE_ROOT"
 }
 
@@ -224,5 +236,6 @@ test_apply_switches_symlinks_and_release_identity
 test_dry_run_leaves_state_untouched
 test_missing_release_identity_fails_closed
 test_invalid_release_identity_fails_closed
+test_merge_creates_missing_destination_directory
 test_failed_restart_restores_previous_state
 echo "PASS: joy-media rollback rehearsal"

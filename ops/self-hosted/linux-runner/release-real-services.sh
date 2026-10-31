@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Retired on this local-only branch under PLAN-v4 §8b; lane-list migration is deferred until after the forward merge.
+
 candidate_sha=${1:-}
 run_id=${2:-}
 run_attempt=${3:-}
@@ -41,7 +43,7 @@ trap cleanup EXIT
 
 psql "$JOY_MEDIA_CI_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE SCHEMA \"$schema\"" >/dev/null
 
-# Run the real migration code inside the unique PostgreSQL schema.
+# The retired smoke entrypoint exits here with its PLAN-v4 §8b notice.
 export PGOPTIONS="-c search_path=$schema,public"
 node ops/self-hosted/linux-runner/real-service-smoke.mjs
 unset PGOPTIONS

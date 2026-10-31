@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import type { IncomingMessage } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { executeLeasedExport, type ExportJobPayload } from '../apps/worker/src/export-job.js';
@@ -9,36 +10,15 @@ import { verifyExport } from '../packages/export-core/src/index.ts';
 import {
   createControlPlaneHttpServer,
   LocalControlPlane,
+  MemoryPrivateObjectStore,
   type ApiAuthentication,
   type MediaAssetRecord,
   type PrivateObjectDescriptor,
-  type PrivateObjectStore,
 } from '../packages/test-control-plane/src/index.js';
 
 /** Test-only owner/session. This file is never imported by production builds. */
 export const E2E_TOKEN = 'joy-media-e2e-token';
 export const E2E_OWNER = 'e2e-owner@example.test';
-
-class MemoryPrivateObjectStore implements PrivateObjectStore {
-  readonly #objects = new Map<
-    string,
-    { readonly descriptor: PrivateObjectDescriptor; readonly bytes: Uint8Array }
-  >();
-
-  async put(descriptor: PrivateObjectDescriptor, bytes: Uint8Array): Promise<void> {
-    this.#objects.set(descriptor.ref, { descriptor, bytes: new Uint8Array(bytes) });
-  }
-
-  async get(descriptor: PrivateObjectDescriptor): Promise<Uint8Array> {
-    const object = this.#objects.get(descriptor.ref);
-    if (object === undefined) throw new Error(`test object ${descriptor.ref} is missing`);
-    return new Uint8Array(object.bytes);
-  }
-
-  async remove(ref: string): Promise<void> {
-    this.#objects.delete(ref);
-  }
-}
 
 const authentication: ApiAuthentication = {
   authenticate: (request) => (bearer(request) === E2E_TOKEN ? { id: E2E_OWNER } : undefined),
@@ -58,11 +38,11 @@ let e2eWorkerStopped = false;
 controlPlane.pairWorker({ id: E2E_OWNER }, E2E_WORKER_ID);
 controlPlane.helloWorker(E2E_WORKER_ID, ['render.export']);
 
-// This local job fixture intentionally omits the deleted account surface. The
-// editor's legacy session probe may receive 404 for /v1/devices until P6 removes it.
+// This fixture intentionally omits the deleted account surface.
 const server = createControlPlaneHttpServer({
   controlPlane,
   authentication,
+  privateObjectStore: objectStore,
   // The browser suite intentionally exercises dozens of flows with one
   // disposable owner/IP. Keep this fixture deterministic across the long suite.
   rateLimit: { maxRequests: 100_000 },

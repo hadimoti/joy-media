@@ -27,6 +27,7 @@ import {
   isProjectDocumentSyncValidationSuccess,
 } from './project-document-sync-request-validation.js';
 import { createClientAddressResolver, type ClientAddressResolver } from './client-address.js';
+import type { PrivateObjectStore } from './private-object-store.js';
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
@@ -39,6 +40,7 @@ export interface ApiAuthentication {
 export interface ControlPlaneHttpServerOptions {
   readonly controlPlane: ControlPlane;
   readonly authentication: ApiAuthentication;
+  readonly privateObjectStore?: PrivateObjectStore;
   readonly gpuPreview?: GpuPreviewTransport;
   readonly rateLimit?: {
     readonly windowMs?: number;
@@ -159,6 +161,10 @@ async function route(
   const workerHeartbeat = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/heartbeat$/.exec(url.pathname);
   const workerComplete = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/complete$/.exec(url.pathname);
   const workerFail = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/fail$/.exec(url.pathname);
+  const workerDerivativeUpload = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/derivative$/.exec(
+    url.pathname,
+  );
+  const workerSource = /^\/v1\/workers\/([^/]+)\/jobs\/([^/]+)\/source$/.exec(url.pathname);
   const workerPreviewNext = /^\/v1\/workers\/([^/]+)\/preview\/next$/.exec(url.pathname);
   const workerPreviewComplete = /^\/v1\/workers\/([^/]+)\/preview\/frames\/([^/]+)\/([0-9]+)$/.exec(
     url.pathname,
@@ -170,9 +176,10 @@ async function route(
         workerHeartbeat !== null ||
         workerComplete !== null ||
         workerFail !== null ||
+        workerDerivativeUpload !== null ||
         workerPreviewNext !== null ||
         workerPreviewComplete !== null)) ||
-    (request.method === 'GET' && workerPreviewNext !== null);
+    (request.method === 'GET' && (workerPreviewNext !== null || workerSource !== null));
   if (workerRoute) {
     const workerId =
       workerLease?.[1] ??
@@ -180,6 +187,8 @@ async function route(
       workerHeartbeat?.[1] ??
       workerComplete?.[1] ??
       workerFail?.[1] ??
+      workerDerivativeUpload?.[1] ??
+      workerSource?.[1] ??
       workerPreviewNext?.[1] ??
       workerPreviewComplete?.[1];
     const authenticatedWorker = await options.controlPlane.authenticateWorker(
@@ -187,6 +196,113 @@ async function route(
     );
     if (workerId === undefined || authenticatedWorker !== workerId)
       throw new ControlPlaneError('WORKER_SESSION_REQUIRED', 'worker session required');
+
+    if (workerDerivativeUpload !== null) {
+      const store = options.privateObjectStore;
+      if (store === undefined)
+        throw new ControlPlaneError(
+          'PRIVATE_STORE_UNAVAILABLE',
+          'private media storage is unavailable',
+        );
+      const bytes = await readBytes(request, 512 * 1024 * 1024);
+      const receipt = workerDerivativeHeaders(request);
+      if (bytes.byteLength !== receipt.bytes)
+        throw new ControlPlaneError(
+          'REQUEST_INVALID',
+          'derivative byte length does not match receipt',
+        );
+      const jobId = decodeURIComponent(workerDerivativeUpload[2]!);
+      // Keep the object key stable for an exact retry, but include every
+      // integrity field so a conflicting retry cannot overwrite an object
+      // referenced by a prior registration.
+      const ref = workerDerivativeObjectRef(jobId, receipt.leaseToken, receipt);
+      await store.put(
+        {
+          ref,
+          sha256: receipt.sha256,
+          bytes: receipt.bytes,
+          mimeType: receipt.descriptor.mimeType,
+        },
+        bytes,
+      );
+      try {
+        const derivative = await options.controlPlane.registerWorkerCloudDerivative(
+          decodeURIComponent(workerId),
+          jobId,
+          {
+            id: `derivative-${jobId}`,
+            assetId: receipt.assetId,
+            kind: receipt.kind,
+            profile:
+              receipt.kind === 'thumbnail'
+                ? 'jpeg-640'
+                : receipt.kind === 'proxy'
+                  ? 'joy-export-h264-aac'
+                  : receipt.kind === 'mask'
+                    ? receipt.descriptor.mimeType === 'video/webm'
+                      ? 'tracked-alpha-webm-v1'
+                      : 'alpha-matte-png-v1'
+                    : receipt.kind === 'upscale'
+                      ? 'ai-upscale-v1'
+                      : 'audio-processed',
+            sha256: receipt.sha256,
+            bytes: receipt.bytes,
+            descriptor: receipt.descriptor,
+            availability: 'available-cloud',
+            locations: [{ kind: 'private-object', ref }],
+          },
+          undefined,
+          receipt.leaseToken,
+        );
+        respondJson(response, 201, { data: derivativeForBrowser(derivative) });
+        return;
+      } catch (error) {
+        // Remove only the object written by this attempt. Prefix cleanup could
+        // delete a valid result from a previous generation.
+        try {
+          await store.remove(ref);
+        } catch (cleanupError) {
+          throw new ControlPlaneError(
+            'DERIVATIVE_CLEANUP_FAILED',
+            cleanupError instanceof Error ? cleanupError.message.slice(0, 200) : 'cleanup failed',
+          );
+        }
+        throw error;
+      }
+    }
+    if (workerSource !== null) {
+      const store = options.privateObjectStore;
+      if (store === undefined)
+        throw new ControlPlaneError(
+          'PRIVATE_STORE_UNAVAILABLE',
+          'private media storage is unavailable',
+        );
+      const jobId = decodeURIComponent(workerSource[2]!);
+      const leaseToken = requiredHeader(request, 'x-joy-lease-token');
+      const asset = await options.controlPlane.workerJobAsset(
+        decodeURIComponent(workerId),
+        jobId,
+        Date.now(),
+        leaseToken,
+      );
+      const location = asset.locations.find((candidate) => candidate.kind === 'private-object');
+      if (location === undefined) throw new ControlPlaneError('ASSET_UNAVAILABLE', asset.id);
+      const bytes = await store.get({
+        ref: location.ref,
+        sha256: asset.sha256,
+        bytes: asset.bytes,
+        mimeType: asset.descriptor.mimeType,
+      });
+      response.writeHead(200, {
+        'content-type': asset.descriptor.mimeType,
+        'content-length': String(bytes.byteLength),
+        'cache-control': 'private, no-store',
+        'cross-origin-resource-policy': 'same-origin',
+        'x-content-type-options': 'nosniff',
+      });
+      response.end(Buffer.from(bytes));
+      return;
+    }
 
     if (workerLease !== null) {
       const body = await readJson(request, maxJsonBodyBytes);
@@ -732,10 +848,30 @@ async function readJson(
   }
 }
 
+async function readBytes(request: IncomingMessage, maximumBytes: number): Promise<Uint8Array> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of request) {
+    const bytes = Buffer.from(chunk);
+    length += bytes.length;
+    if (length > maximumBytes)
+      throw new ControlPlaneError('REQUEST_INVALID', 'upload exceeds the size limit');
+    chunks.push(bytes);
+  }
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
 function requiredString(body: Record<string, unknown>, field: string): string {
   const value = body[field];
   if (typeof value !== 'string' || value.length === 0)
     throw new ControlPlaneError('REQUEST_INVALID', `${field} must be a non-empty string`);
+  return value;
+}
+
+function requiredHeader(request: IncomingMessage, name: string): string {
+  const value = request.headers[name];
+  if (typeof value !== 'string' || value.length === 0)
+    throw new ControlPlaneError('REQUEST_INVALID', `${name} header is required`);
   return value;
 }
 
@@ -1251,7 +1387,9 @@ function respondError(response: ServerResponse, error: unknown): void {
             ? 429
             : error.code === 'PROVIDER_OPERATION_NOT_FOUND'
               ? 404
-              : error.code === 'PROJECT_DOCUMENT_STORE_UNAVAILABLE'
+              : error.code === 'PROJECT_DOCUMENT_STORE_UNAVAILABLE' ||
+                  error.code === 'PRIVATE_STORE_UNAVAILABLE' ||
+                  error.code === 'DERIVATIVE_CLEANUP_FAILED'
                 ? 503
                 : error.code.startsWith('PAIRING_')
                   ? 403
@@ -1270,6 +1408,174 @@ function bearerToken(request: IncomingMessage): string | undefined {
 function workerSessionHash(request: IncomingMessage): string {
   const token = bearerToken(request);
   return token === undefined ? '' : secretHash(token);
+}
+
+function workerDerivativeObjectRef(
+  jobId: string,
+  leaseToken: string,
+  result: {
+    readonly assetId: string;
+    readonly kind: string;
+    readonly sha256: string;
+    readonly bytes: number;
+    readonly descriptor: {
+      readonly mimeType: string;
+      readonly width?: number;
+      readonly height?: number;
+      readonly durationUs?: number;
+    };
+  },
+): string {
+  const jobDigest = createHash('sha256').update(jobId).digest('hex').slice(0, 32);
+  const leaseDigest = createHash('sha256').update(leaseToken).digest('hex').slice(0, 24);
+  const kind =
+    result.kind === 'asset.thumbnail'
+      ? 'thumbnail'
+      : result.kind === 'audio.ml-denoise'
+        ? 'audio'
+        : result.kind === 'mask.image' || result.kind === 'mask.video'
+          ? 'mask'
+          : result.kind === 'upscale.image' || result.kind === 'upscale.video'
+            ? 'upscale'
+            : result.kind;
+  const metadataDigest = createHash('sha256')
+    .update(
+      JSON.stringify({
+        assetId: result.assetId,
+        kind,
+        sha256: result.sha256,
+        bytes: result.bytes,
+        mimeType: result.descriptor.mimeType,
+        width: result.descriptor.width ?? null,
+        height: result.descriptor.height ?? null,
+        durationUs: result.descriptor.durationUs ?? null,
+      }),
+    )
+    .digest('hex')
+    .slice(0, 32);
+  return `derivative-${jobDigest}-${leaseDigest}-${metadataDigest}`;
+}
+
+function workerDerivativeHeaders(request: IncomingMessage): {
+  readonly assetId: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly kind: 'thumbnail' | 'proxy' | 'audio' | 'mask' | 'upscale';
+  readonly leaseToken: string;
+  readonly descriptor: {
+    readonly mimeType: string;
+    readonly width?: number;
+    readonly height?: number;
+    readonly durationUs?: number;
+  };
+} {
+  const assetId = requiredHeader(request, 'x-joy-asset-id');
+  const sha256 = requiredHeader(request, 'x-joy-sha256');
+  const bytes = Number(requiredHeader(request, 'x-joy-bytes'));
+  const mimeType = requiredHeader(request, 'content-type');
+  const widthHeader = request.headers['x-joy-width'];
+  const heightHeader = request.headers['x-joy-height'];
+  const durationHeader = request.headers['x-joy-duration-us'];
+  const declaredKind = request.headers['x-joy-derivative-kind'];
+  const leaseToken = requiredHeader(request, 'x-joy-lease-token');
+  const width = widthHeader === undefined ? undefined : Number(widthHeader);
+  const height = heightHeader === undefined ? undefined : Number(heightHeader);
+  const durationUs = durationHeader === undefined ? undefined : Number(durationHeader);
+  const isThumbnail =
+    declaredKind === undefined ? mimeType === 'image/jpeg' : declaredKind === 'thumbnail';
+  const isMask = declaredKind === 'mask';
+  const isProxy = declaredKind === 'proxy';
+  const isUpscale = declaredKind === 'upscale';
+  const declaredKindValid =
+    declaredKind === undefined ||
+    declaredKind === 'thumbnail' ||
+    declaredKind === 'proxy' ||
+    declaredKind === 'audio' ||
+    declaredKind === 'mask' ||
+    declaredKind === 'upscale';
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(assetId) ||
+    !/^[a-f0-9]{64}$/.test(sha256) ||
+    !Number.isSafeInteger(bytes) ||
+    bytes <= 0 ||
+    !declaredKindValid ||
+    (isThumbnail &&
+      (mimeType !== 'image/jpeg' ||
+        width === undefined ||
+        !Number.isSafeInteger(width) ||
+        width <= 0 ||
+        height === undefined ||
+        !Number.isSafeInteger(height) ||
+        height <= 0)) ||
+    (isMask &&
+      (width === undefined ||
+        !Number.isSafeInteger(width) ||
+        width <= 0 ||
+        height === undefined ||
+        !Number.isSafeInteger(height) ||
+        height <= 0 ||
+        (mimeType === 'video/webm' &&
+          (durationUs === undefined || !Number.isSafeInteger(durationUs) || durationUs <= 0)))) ||
+    (isProxy &&
+      (mimeType !== 'video/mp4' ||
+        width === undefined ||
+        !Number.isSafeInteger(width) ||
+        width <= 0 ||
+        height === undefined ||
+        !Number.isSafeInteger(height) ||
+        height <= 0 ||
+        durationUs === undefined ||
+        !Number.isSafeInteger(durationUs) ||
+        durationUs <= 0)) ||
+    (isUpscale && !['image/png', 'image/jpeg', 'video/mp4', 'video/webm'].includes(mimeType)) ||
+    (!isThumbnail &&
+      !isMask &&
+      !isProxy &&
+      !isUpscale &&
+      !/^audio\/[a-z0-9.+-]+$/i.test(mimeType)) ||
+    (isMask && mimeType !== 'image/png' && mimeType !== 'video/webm') ||
+    (isUpscale &&
+      ((mimeType.startsWith('image/') &&
+        (width === undefined ||
+          !Number.isSafeInteger(width) ||
+          width <= 0 ||
+          height === undefined ||
+          !Number.isSafeInteger(height) ||
+          height <= 0)) ||
+        (mimeType.startsWith('video/') &&
+          (width === undefined ||
+            !Number.isSafeInteger(width) ||
+            width <= 0 ||
+            height === undefined ||
+            !Number.isSafeInteger(height) ||
+            height <= 0 ||
+            durationUs === undefined ||
+            !Number.isSafeInteger(durationUs) ||
+            durationUs <= 0)))) ||
+    (durationUs !== undefined && (!Number.isSafeInteger(durationUs) || durationUs < 0))
+  )
+    throw new ControlPlaneError('REQUEST_INVALID', 'derivative upload headers are invalid');
+  return {
+    assetId,
+    sha256,
+    bytes,
+    kind: isThumbnail
+      ? 'thumbnail'
+      : isMask
+        ? 'mask'
+        : isProxy
+          ? 'proxy'
+          : isUpscale
+            ? 'upscale'
+            : 'audio',
+    leaseToken,
+    descriptor: {
+      mimeType,
+      ...(width === undefined ? {} : { width }),
+      ...(height === undefined ? {} : { height }),
+      ...(durationUs === undefined ? {} : { durationUs }),
+    },
+  };
 }
 
 function secretHash(value: string): string {

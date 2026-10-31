@@ -23,4 +23,8 @@ export {
   type ApiAuthentication,
   type ControlPlaneHttpServerOptions,
 } from './http-server.js';
-export type { PrivateObjectDescriptor, PrivateObjectStore } from './private-object-store.js';
+export {
+  MemoryPrivateObjectStore,
+  type PrivateObjectDescriptor,
+  type PrivateObjectStore,
+} from './private-object-store.js';

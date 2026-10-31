@@ -1,7 +1,7 @@
 import type { Page, Response, TestInfo } from '@playwright/test';
 import { describe, expect, it } from 'vitest';
 import {
-  allowExpectedAssetFixtureMisses,
+  allowExpectedProjectAssetListMisses,
   allowExpectedHttpResponse,
   assertBrowserAudit,
   type CountRange,
@@ -135,30 +135,31 @@ describe('browser console HTTP conflict audit', () => {
     });
   });
 
-  it('allowExpectedAssetFixtureMisses with range on original and exact on cloud rejects when cloud count is unmet', async () => {
+  it('allows the six missing project asset-list requests still used by the control plane', async () => {
     const { page, emit } = createAuditPage();
     setupBrowserAudit(page);
-
-    allowExpectedAssetFixtureMisses(page, { min: 1, max: 2 }, 2);
+    allowExpectedProjectAssetListMisses(page);
 
     // Emit the required six project-list conflicts
     for (let i = 0; i < 6; i++) {
       emit('response', conflict('/api/v1/projects/project-1/assets', 'PROJECT_NOT_FOUND'));
     }
+    await expect(assertBrowserAudit(page, testInfo)).resolves.toBeUndefined();
+  });
 
-    // Emit one original ASSET_NOT_FOUND (within range [1,2])
+  it('does not treat removed original or cloud-content routes as expected fixture misses', async () => {
+    const { page, emit } = createAuditPage();
+    setupBrowserAudit(page);
+    allowExpectedProjectAssetListMisses(page);
+    for (let i = 0; i < 6; i++) {
+      emit('response', conflict('/api/v1/projects/project-1/assets', 'PROJECT_NOT_FOUND'));
+    }
     emit(
       'response',
       conflict('/api/v1/projects/project-1/assets/asset-1/original', 'ASSET_NOT_FOUND'),
     );
-
-    // Emit only one cloud-content ASSET_NOT_FOUND — cloud expects exactly 2,
-    // so a single hit must produce an unmet-expected failure.
     emit('response', conflict('/api/v1/library/cloud-assets/asset-1/content', 'ASSET_NOT_FOUND'));
-
-    await expect(assertBrowserAudit(page, testInfo)).rejects.toThrow(
-      /Expected HTTP errors missing/,
-    );
+    await expect(assertBrowserAudit(page, testInfo)).rejects.toThrow(/Unexpected HTTP errors/);
   });
 
   it('does not broadly ignore a known 409 code at an unregistered endpoint', async () => {

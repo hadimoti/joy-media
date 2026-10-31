@@ -1444,7 +1444,6 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
   const fontAssets = scanFontAssets(root);
   const artifacts = [
     'apps/editor-web/dist',
-    'apps/api/dist',
     'apps/worker/dist',
     'test-output/release-performance',
     // Operational acceptance records are release artifacts too. Hash them in
@@ -1822,7 +1821,7 @@ function dirtyGeneratedArtifacts(root: string): readonly string[] {
   const git = process.platform === 'win32' ? 'git.exe' : 'git';
   const result = spawnSync(
     git,
-    ['status', '--porcelain', '--', 'apps/editor-web/dist', 'apps/api/dist', 'apps/worker/dist'],
+    ['status', '--porcelain', '--', 'apps/editor-web/dist', 'apps/worker/dist'],
     {
       cwd: root,
       encoding: 'utf8',

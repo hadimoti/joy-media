@@ -460,7 +460,7 @@ jobs:
           # against the shipped artifact. The dev-server-only white-box decoder
           # specs stay in acceptance-primary / real-service-acceptance.
           pnpm exec playwright test \
-            tests/e2e/authenticated-smoke.spec.ts \
+            tests/e2e/control-plane-smoke.spec.ts \
             tests/e2e/wp32-real-project-journey.spec.ts \
             tests/e2e/wp30-animated-timeline-export.spec.ts \
             tests/e2e/golden-path.spec.ts \
