@@ -13,7 +13,7 @@
       "reason": "Development-only fixture code; the package is not shipped."
     },
     {
-      "pattern": "apps/account-web/src/**",
+      "pattern": "apps/account-web/src/api.ts",
       "reason": "P6 deletes api.ts under §4b. Its one current forbidden hit is apps/account-web/src/api.ts:151: const data = await request<ReleaseInfo>(`/v1/releases/${channel}`, {}, null);"
     }
   ]

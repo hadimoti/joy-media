@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -41,7 +41,7 @@ function createAllowList(path = allowListPath): void {
       reason: 'This package contains development-only fixture code and is not shipped.',
     },
     {
-      pattern: 'apps/account-web/src/**',
+      pattern: 'apps/account-web/src/api.ts',
       reason:
         'P6 implements PLAN-v4 §4b and deletes api.ts; its one current hit is /v1/releases/' +
         '$' +
@@ -156,6 +156,45 @@ describe('no-server-scan.ts source scope', () => {
     expect(result.output).toMatch(
       /Scanned [1-9]\d* source text files and 1 packaged text files; 0 hits\./,
     );
+  });
+
+  it('reports a forbidden string planted in a copy of apps/account-web/src/LandingHero.tsx', () => {
+    const repositoryRoot = resolve(import.meta.dirname, '../../..');
+    const committedAllowList = resolve(repositoryRoot, 'tooling/release/no-server-scan.allow.json');
+    const landingHeroSource = readFileSync(
+      resolve(repositoryRoot, 'apps/account-web/src/LandingHero.tsx'),
+      'utf8',
+    );
+
+    writeSource(
+      'apps/account-web/src/LandingHero.tsx',
+      landingHeroSource + "\nconst route = 'joyst.ir/api';\n",
+    );
+    writeSource(
+      'apps/account-web/src/api.ts',
+      'const data = await request<ReleaseInfo>(`/v1/releases/${channel}`, {}, null);\n',
+    );
+    writeSource('packages/example/src/ready.ts', 'export const ready = true;\n');
+
+    const result = runScan(committedAllowList);
+
+    expect(result.status).not.toBe(0);
+    expect(result.output).toMatch(/apps\/account-web\/src\/LandingHero\.tsx:\d+: .*joyst\.ir\/api/);
+    expect(result.output).not.toContain('apps/account-web/src/api.ts:');
+  });
+
+  it('pins the committed allow-list patterns so a widened entry fails the suite', () => {
+    const repositoryRoot = resolve(import.meta.dirname, '../../..');
+    const committedAllowList = JSON.parse(
+      readFileSync(resolve(repositoryRoot, 'tooling/release/no-server-scan.allow.json'), 'utf8'),
+    ) as { entries: readonly { pattern: string }[] };
+
+    expect(committedAllowList.entries.map((entry) => entry.pattern)).toEqual([
+      '**/*.test.*',
+      '**/*.spec.*',
+      'packages/test-control-plane/src/**',
+      'apps/account-web/src/api.ts',
+    ]);
   });
 
   it('excludes test files through the allow-list', () => {
