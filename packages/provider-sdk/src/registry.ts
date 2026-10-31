@@ -278,7 +278,7 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     auth: {
       methods: ['api-key'],
       source:
-        "PLAN-v4 §6d-1 table, row 'OpenRouter': §6d, and owner decision D20 (2026-10-29): sign-in is offered to ChatGPT and MiniMax only",
+        "PLAN-v4 §6d-1 table, row 'OpenRouter': §6d, and owner decision D20 (2026-10-29): sign-in is offered to ChatGPT and MiniMax only. D23 (2026-10-31) supersedes that: the sign-in set is ChatGPT, Kimi and xAI",
       sourceDate: '2026-10-29',
       note: 'An API key (BYOK) only, on the OpenAI-compatible /api/v1 base URL. D20 withdrew the §6d PKCE sign-in, which was removed from the app; the key comes from the OpenRouter console. OpenRouter is optional and never a default.',
     },
