@@ -5,6 +5,7 @@ import type { Download } from '@playwright/test';
 import { expect, test } from '@playwright/test';
 import {
   authenticate,
+  installMediaImportBridge,
   MEDIA_FIXTURE_DIR,
   openDisposableWorkspace,
   openPanel,
@@ -97,7 +98,10 @@ async function openProcesses(page: Parameters<typeof authenticate>[0]): Promise<
 }
 
 test.describe('WP-29 export recovery acceptance', () => {
-  test.beforeEach(async ({ page }) => authenticate(page));
+  test.beforeEach(async ({ page }) => {
+    await installMediaImportBridge(page);
+    await authenticate(page);
+  });
 
   test('reload, same-operation retry, cancel, and durable re-download preserve one verified output', async ({
     page,

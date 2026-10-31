@@ -6,6 +6,7 @@ import {
   E2E_TOKEN,
   MEDIA_FIXTURE_DIR,
   authenticate,
+  installMediaImportBridge,
   openDisposableWorkspace,
   openPanel,
   recordEvidence,
@@ -175,6 +176,7 @@ async function routeTranscriptionFixture(
 
 test.describe('WP-29 R5 batch C — captions', () => {
   test.beforeEach(async ({ page }) => {
+    await installMediaImportBridge(page);
     await authenticate(page);
   });
 

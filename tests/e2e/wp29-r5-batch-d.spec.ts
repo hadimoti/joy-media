@@ -4,6 +4,7 @@ import {
   blockCase,
   E2E_TOKEN,
   importMediaFixture,
+  installMediaImportBridge,
   installDeterministicCloudDenoiseProvider,
   openDisposableWorkspace,
   openPanel,
@@ -138,7 +139,10 @@ async function offerAndPairWorker(
 }
 
 test.describe('WP-29 R5 batch D — Worker and audio execution routes', () => {
-  test.beforeEach(async ({ page }) => authenticate(page));
+  test.beforeEach(async ({ page }) => {
+    await installMediaImportBridge(page);
+    await authenticate(page);
+  });
 
   test('[R5 CASE-63] pairs and inspects a capability-specific connected Worker', async ({
     page,
