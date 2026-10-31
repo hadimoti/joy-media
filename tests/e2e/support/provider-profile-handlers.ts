@@ -27,6 +27,12 @@ import {
  *  - `desktop.agent.request` / `.cancel`: the provider broker. The request is sent from the page
  *    itself, so the Playwright route installed by the fake provider fixture is the one that answers
  *    it, and the broker's answers carry the desktop's own failure codes.
+ *
+ * What this does not reproduce. The desktop's endpoint policy, its provider-specific request
+ * shapes (every call here is an OpenAI-style chat completion), its slot list (`desktop.agent-slots
+ * .list` answers empty), and its request validation beyond the binding check. The desktop broker has
+ * its own tests for those. The agent specs check how the editor uses a reply, not how the broker
+ * validates a request.
  */
 
 /** The placeholder the editor sends for a keyless local model. It is never a real key. */
@@ -64,6 +70,21 @@ interface StoredProfile {
 /** The base URL as the editor and the broker compare it. */
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, '');
+}
+
+/** The desktop accepts a keyless profile only on a loopback endpoint (evaluateEndpoint). */
+function isLoopbackUrl(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname;
+    return (
+      host === 'localhost' ||
+      host.endsWith('.localhost') ||
+      host === '127.0.0.1' ||
+      host === '[::1]'
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -145,15 +166,24 @@ export function createProviderProfileStore(): ProviderProfileStore {
     save: (request) => {
       const timestamp = new Date().toISOString();
       const existing = request.id === undefined ? undefined : profiles.get(request.id);
+      if (request.id !== undefined && existing === undefined)
+        throw new Error('Unknown provider profile id');
+      // The desktop's rules (ipc-handlers.ts, save; PLAN-v4 §6c). A keyless save keeps the stored
+      // key only while the profile keeps its provider and its endpoint.
+      if (
+        existing !== undefined &&
+        request.apiKey === undefined &&
+        (existing.profile.provider !== request.provider ||
+          normalizeBaseUrl(existing.profile.baseUrl) !== normalizeBaseUrl(request.baseUrl))
+      )
+        throw new Error('Enter the key again to change the endpoint');
+      if (existing === undefined && request.apiKey === undefined && !isLoopbackUrl(request.baseUrl))
+        throw new Error('An API key is required for this endpoint');
       const id = existing?.profile.id ?? `e2e-provider-profile-${(sequence += 1)}`;
-      const apiKey = request.apiKey;
-      // A keyless save keeps the key the profile already had, and a profile without one stays
-      // unbound: only a saved key makes a profile usable on its own.
-      const savedKey =
-        apiKey === undefined || apiKey === '' || apiKey === KEYLESS_KEY_PLACEHOLDER
-          ? undefined
-          : apiKey;
-      const secret = savedKey ?? existing?.secret;
+      // A saved key is the profile's secret. A keyless local model saves the placeholder, which the
+      // desktop stores the same way, so its profile reads as bound.
+      const secret =
+        request.apiKey ?? (existing === undefined ? KEYLESS_KEY_PLACEHOLDER : existing.secret);
       const profile: DesktopProviderProfile = {
         id,
         ...(request.name === undefined ? {} : { name: request.name }),
@@ -203,14 +233,17 @@ type ProviderCallOutcome =
       readonly bytes: number;
     }
   | { readonly kind: 'redirect' }
+  | { readonly kind: 'too-large' }
   | { readonly kind: 'unreachable' }
   | { readonly kind: 'timeout' };
 
 interface ProviderCallInput {
   readonly requestId: string;
   readonly url: string;
-  readonly key: string;
+  /** Absent for a keyless local model: the desktop sends no Authorization header then. */
+  readonly key: string | undefined;
   readonly body: unknown;
+  readonly maxBytes: number;
 }
 
 /**
@@ -240,7 +273,7 @@ async function callProviderFromPage(
             method: 'POST',
             headers: {
               'content-type': 'application/json',
-              authorization: `Bearer ${call.key}`,
+              ...(call.key === undefined ? {} : { authorization: `Bearer ${call.key}` }),
             },
             body: JSON.stringify(call.body ?? {}),
             // A redirect is refused rather than followed, as the desktop broker does.
@@ -249,13 +282,36 @@ async function callProviderFromPage(
           });
           if (response.type === 'opaqueredirect' || response.status === 0)
             return { kind: 'redirect' as const };
-          const buffer = await response.arrayBuffer();
+          // The desktop refuses a reply that declares more than its bound, and stops reading one
+          // that grows past it. The harness reads the same way, so a long reply costs no more.
+          const declared = Number(response.headers.get('content-length') ?? Number.NaN);
+          if (Number.isFinite(declared) && declared > call.maxBytes)
+            return { kind: 'too-large' as const };
+          const chunks: Uint8Array[] = [];
+          let bytes = 0;
+          const reader = response.body?.getReader();
+          while (reader !== undefined) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            bytes += value.byteLength;
+            if (bytes > call.maxBytes) {
+              await reader.cancel();
+              return { kind: 'too-large' as const };
+            }
+            chunks.push(value);
+          }
+          const buffer = new Uint8Array(bytes);
+          let offset = 0;
+          for (const chunk of chunks) {
+            buffer.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
           return {
             kind: 'reply' as const,
             status: response.status,
             ok: response.ok,
             text: new TextDecoder().decode(buffer),
-            bytes: buffer.byteLength,
+            bytes,
           };
         } catch {
           return { kind: 'unreachable' as const };
@@ -329,8 +385,9 @@ export function createProviderBrokerHandler(
       {
         requestId: request.requestId,
         url: `${profile.baseUrl.replace(/\/+$/, '')}/chat/completions`,
-        key: secret,
+        key: secret === KEYLESS_KEY_PLACEHOLDER ? undefined : secret,
         body: request.body,
+        maxBytes: MAX_RESPONSE_BYTES,
       },
       timeoutMs,
     );
@@ -352,6 +409,12 @@ export function createProviderBrokerHandler(
         code: 'NETWORK_ERROR',
         message: 'The provider could not be reached.',
       };
+    if (outcome.kind === 'too-large')
+      return {
+        ok: false,
+        code: 'RESPONSE_TOO_LARGE',
+        message: 'The provider reply is larger than 4 MiB.',
+      };
     if (outcome.status === 401 || outcome.status === 403)
       return {
         ok: false,
@@ -369,12 +432,6 @@ export function createProviderBrokerHandler(
         ok: false,
         code: 'PROVIDER_HTTP_ERROR',
         message: `The provider returned HTTP ${outcome.status}.`,
-      };
-    if (outcome.bytes > MAX_RESPONSE_BYTES)
-      return {
-        ok: false,
-        code: 'RESPONSE_TOO_LARGE',
-        message: 'The provider reply is larger than 4 MiB.',
       };
     return { ok: true, text: outcome.text };
   };

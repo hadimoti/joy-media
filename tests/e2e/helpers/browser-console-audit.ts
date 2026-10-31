@@ -21,11 +21,18 @@ interface AuditedHttpError {
   code?: string;
 }
 
+interface ExpectedConsoleError {
+  pattern: RegExp;
+  expectedCount: number;
+  matchedCount: number;
+}
+
 interface AuditState {
   consoleErrors: string[];
   pageErrors: string[];
   httpErrors: AuditedHttpError[];
   expectedHttpResponses: ExpectedHttpResponse[];
+  expectedConsoleErrors: ExpectedConsoleError[];
   pendingBodyReads: Promise<void>[];
 }
 
@@ -37,6 +44,7 @@ export function setupBrowserAudit(page: Page): void {
     pageErrors: [],
     httpErrors: [],
     expectedHttpResponses: [],
+    expectedConsoleErrors: [],
     pendingBodyReads: [],
   };
   stateByPage.set(page, state);
@@ -106,6 +114,24 @@ export function allowExpectedHttpResponse(
   state.expectedHttpResponses.push({ ...expected, expectedCount: count, matchedCount: 0 });
 }
 
+/**
+ * Allows exactly `count` browser console errors that the test itself causes, such as the network
+ * failure a test produces by aborting a route on purpose. Any other error still fails the audit,
+ * and so does an expected error that never appears.
+ */
+export function allowExpectedConsoleError(
+  page: Page,
+  expected: { pattern: RegExp; count?: number },
+): void {
+  const state = stateByPage.get(page);
+  if (!state) throw new Error('setupBrowserAudit was not called for this page');
+  state.expectedConsoleErrors.push({
+    pattern: expected.pattern,
+    expectedCount: expected.count ?? 1,
+    matchedCount: 0,
+  });
+}
+
 export function allowExpectedProjectAssetListMisses(page: Page): void {
   allowExpectedHttpResponse(page, {
     status: 409,
@@ -170,14 +196,31 @@ export async function assertBrowserAudit(page: Page, testInfo: TestInfo): Promis
     );
 
   const nonSandboxPageErrors = state.pageErrors.filter((e) => e !== SANDBOX_STORAGE_ERROR);
-  const actionableConsoleErrors = state.consoleErrors.filter(
-    (message) => !HTTP_STATUS_CONSOLE_ERROR.test(message),
-  );
+  const unexpectedConsoleErrors: string[] = [];
+  for (const message of state.consoleErrors) {
+    if (HTTP_STATUS_CONSOLE_ERROR.test(message)) continue;
+    const expected = state.expectedConsoleErrors.find(
+      (candidate) =>
+        candidate.pattern.test(message) && candidate.matchedCount < candidate.expectedCount,
+    );
+    if (expected) expected.matchedCount += 1;
+    else unexpectedConsoleErrors.push(message);
+  }
+  const unmetExpectedConsoleErrors = state.expectedConsoleErrors
+    .filter((expected) => expected.matchedCount !== expected.expectedCount)
+    .map(
+      (expected) =>
+        `${expected.pattern.toString()}: expected ${expected.expectedCount}, observed ${expected.matchedCount}`,
+    );
 
   expect(unexpectedHttpErrors, `Unexpected HTTP errors during ${testInfo.title}`).toEqual([]);
   expect(unmetExpectedHttpErrors, `Expected HTTP errors missing during ${testInfo.title}`).toEqual(
     [],
   );
-  expect(actionableConsoleErrors, `Browser console errors during ${testInfo.title}`).toEqual([]);
+  expect(
+    unmetExpectedConsoleErrors,
+    `Expected console errors missing during ${testInfo.title}`,
+  ).toEqual([]);
+  expect(unexpectedConsoleErrors, `Browser console errors during ${testInfo.title}`).toEqual([]);
   expect(nonSandboxPageErrors, `Browser page errors during ${testInfo.title}`).toEqual([]);
 }

@@ -2,11 +2,7 @@ import { expect, test } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
 import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
 import { installJoyProviderHost } from './support/provider-profile-handlers.js';
-import {
-  allowExpectedProjectAssetListMisses,
-  assertBrowserAudit,
-  setupBrowserAudit,
-} from './helpers/browser-console-audit.js';
+import { assertBrowserAudit, setupBrowserAudit } from './helpers/browser-console-audit.js';
 
 /**
  * R2 L2 browser coverage: the Living Looks capability in Joy Code renders the
@@ -15,18 +11,8 @@ import {
  * Approve applies it, one Undo restores it.
  */
 test.describe('JOY Living Looks', () => {
-  const LOOKS_PROJECT_ASSET_LIST_MISS_TESTS = new Set([
-    'keeps the Looks setup in one owned viewport',
-    'renders the five shipping packs and runs one through approve + Undo',
-    'matches the Edit composer while keeping Looks controls reachable without overflow',
-    'shows an unavailable pack honestly when the editor lacks a capability',
-    'a saved Look survives reload and can be reopened, adjusted, and detached (GAP 1b/1c)',
-  ]);
-
-  test.beforeEach(({ page }, testInfo) => {
+  test.beforeEach(({ page }) => {
     setupBrowserAudit(page);
-    if (LOOKS_PROJECT_ASSET_LIST_MISS_TESTS.has(testInfo.title))
-      allowExpectedProjectAssetListMisses(page);
   });
 
   test.afterEach(async ({ page }, testInfo) => {

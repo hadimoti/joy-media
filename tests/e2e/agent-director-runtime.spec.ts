@@ -3,7 +3,7 @@ import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harne
 import { configureJoyAgent, installFakeOpenAIProvider } from './fixtures/fake-openai-provider.js';
 import { installJoyProviderHost } from './support/provider-profile-handlers.js';
 import {
-  allowExpectedProjectAssetListMisses,
+  allowExpectedConsoleError,
   assertBrowserAudit,
   setupBrowserAudit,
 } from './helpers/browser-console-audit.js';
@@ -54,18 +54,8 @@ async function requestPreview(page: Page, prompt: string): Promise<void> {
 }
 
 test.describe('JOY Live Director runtime boundary', () => {
-  const DIRECTOR_PROJECT_ASSET_LIST_MISS_TESTS = new Set([
-    'cancellation rejects a delayed provider reply before it can stage a preview',
-    'proves the provider handshake, repairs only through the canonical host, and requires approval',
-    'invalidates a real Worker preview when its revision becomes stale',
-    'clearing a model connection terminalizes an in-flight run without reviving a preview',
-    'reports a provider adapter failure without suggesting an edit was applied',
-  ]);
-
-  test.beforeEach(({ page }, testInfo) => {
+  test.beforeEach(({ page }) => {
     setupBrowserAudit(page);
-    if (DIRECTOR_PROJECT_ASSET_LIST_MISS_TESTS.has(testInfo.title))
-      allowExpectedProjectAssetListMisses(page);
   });
 
   test.afterEach(async ({ page }, testInfo) => {
@@ -178,6 +168,8 @@ test.describe('JOY Live Director runtime boundary', () => {
         await route.abort('failed');
       }
     });
+    // The provider call is aborted on purpose, so the browser reports exactly one network failure.
+    allowExpectedConsoleError(page, { pattern: /^Failed to load resource: net::ERR_FAILED$/ });
 
     const canonicalClipCount = await page.locator('.timeline-clip').count();
     const composer = page.getByLabel('Message Joy Code');
