@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getJoyMediaHome } from './joy-media-home.js';
 
@@ -36,11 +37,40 @@ describe('getJoyMediaHome', () => {
     expect(getJoyMediaHome()).toBe(configuredHome);
   });
 
-  it('defaults to the existing per-user directory when unset or blank', () => {
-    delete process.env.JOY_MEDIA_HOME;
-    expect(getJoyMediaHome()).toBe(join(homedir(), '.joy-media'));
+  it('resolves a relative JOY_MEDIA_HOME against the current working directory', () => {
+    process.env.JOY_MEDIA_HOME = 'relative-home/../configured-home';
 
-    process.env.JOY_MEDIA_HOME = '   ';
-    expect(getJoyMediaHome()).toBe(join(homedir(), '.joy-media'));
+    expect(getJoyMediaHome()).toBe(resolve(process.cwd(), 'relative-home/../configured-home'));
+  });
+
+  it('defaults to os.homedir() in a fresh process when unset or blank', () => {
+    const moduleUrl = new URL('./joy-media-home.ts', import.meta.url).href;
+    const script = [
+      "import { homedir } from 'node:os';",
+      "import { join } from 'node:path';",
+      `import { getJoyMediaHome } from ${JSON.stringify(moduleUrl)};`,
+      "process.stdout.write(JSON.stringify({ home: getJoyMediaHome(), expected: join(homedir(), '.joy-media') }));",
+    ].join('\n');
+    const runInFreshProcess = (configuredHome?: string) => {
+      const childEnvironment = { ...process.env };
+      if (configuredHome === undefined) delete childEnvironment.JOY_MEDIA_HOME;
+      else childEnvironment.JOY_MEDIA_HOME = configuredHome;
+
+      const result = spawnSync(
+        process.execPath,
+        ['--experimental-strip-types', '--input-type=module', '-e', script],
+        { encoding: 'utf8', env: childEnvironment },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      return JSON.parse(result.stdout) as { home: string; expected: string };
+    };
+
+    const defaultResult = runInFreshProcess();
+    expect(defaultResult.expected).toBe(join(temporaryRoot, '.joy-media'));
+    expect(defaultResult.home).toBe(defaultResult.expected);
+
+    const blankResult = runInFreshProcess('   ');
+    expect(blankResult.expected).toBe(join(temporaryRoot, '.joy-media'));
+    expect(blankResult.home).toBe(blankResult.expected);
   });
 });

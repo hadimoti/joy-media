@@ -16,7 +16,8 @@ if "%JOY_MEDIA_WORKER_LOCAL_TOKEN%"=="" (
   echo JOY_MEDIA_WORKER_LOCAL_TOKEN is not set. The JOY Media desktop app supplies it with the loopback address.
   exit /b 1
 )
-if "%JOY_MEDIA_HOME%"=="" set "JOY_MEDIA_HOME=%USERPROFILE%\.joy-media"
+if not defined JOY_MEDIA_HOME set "JOY_MEDIA_HOME=%USERPROFILE%\.joy-media"
+if "%JOY_MEDIA_HOME: =%"=="" set "JOY_MEDIA_HOME=%USERPROFILE%\.joy-media"
 if "%JOY_MEDIA_WORKER_STATE_PATH%"=="" set "JOY_MEDIA_WORKER_STATE_PATH=%JOY_MEDIA_HOME%\worker-state.json"
 if not exist "%JOY_MEDIA_HOME%\logs" mkdir "%JOY_MEDIA_HOME%\logs"
 set "JOY_MEDIA_LOCAL_COMFY_URL=http://127.0.0.1:8188"

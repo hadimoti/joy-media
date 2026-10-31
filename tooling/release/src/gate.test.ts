@@ -1198,6 +1198,29 @@ describe('JOY Studio 1.0 release gate', () => {
     expect(result.checks.find((check) => check.id === 'feature-status')?.status).toBe('failed');
   });
 
+  it('accepts the feature-status audit recorded in the workspace for the 2026-10-31 check', () => {
+    const featureStatusText = readFileSync(resolve(process.cwd(), FEATURE_STATUS_PATH), 'utf8');
+    const auditedOn = featureStatusText.match(
+      /Audited against current source on (\d{4}-\d{2}-\d{2})/u,
+    )?.[1];
+    expect(auditedOn).toBe('2026-10-31');
+
+    const result = evaluateReleaseGate(
+      {
+        ...passingInput(),
+        windowsAcceptance: windowsAcceptance('a'.repeat(40), '2026-10-31T00:00:00.000Z'),
+        featureStatus: {
+          auditedOn: auditedOn ?? '',
+          statuses: ['production'],
+          sourcePath: FEATURE_STATUS_PATH,
+          present: true,
+        },
+      },
+      new Date('2026-10-31T00:00:00.000Z'),
+    );
+    expect(result.checks.find((check) => check.id === 'feature-status')?.status).toBe('passed');
+  });
+
   it('requires complete operational evidence when a real workspace supplies it', () => {
     const passed = evaluateReleaseGate({
       ...passingInput(),

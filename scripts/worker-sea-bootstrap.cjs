@@ -41,9 +41,10 @@ const workerRoot =
 const entryPoint =
   process.env.JOY_MEDIA_WORKER_ENTRYPOINT?.trim() ||
   join(workerRoot, 'apps', 'worker', 'dist', 'index.js');
-const joyMediaHome =
+const joyMediaHome = resolve(
   process.env.JOY_MEDIA_HOME?.trim() ||
-  join(process.env.USERPROFILE || process.env.HOME || workerRoot, '.joy-media');
+    join(process.env.USERPROFILE || process.env.HOME || workerRoot, '.joy-media'),
+);
 const statePath =
   process.env.JOY_MEDIA_WORKER_STATE_PATH?.trim() || join(joyMediaHome, 'worker-state.json');
 // No remote default: the desktop app supplies the loopback job API address (PLAN-v4 D19).
@@ -92,6 +93,7 @@ singleton.listen(singletonPipe, () => {
     env: {
       ...process.env,
       JOY_MEDIA_API_URL: apiUrl,
+      JOY_MEDIA_HOME: joyMediaHome,
       JOY_MEDIA_WORKER_STATE_PATH: statePath,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
