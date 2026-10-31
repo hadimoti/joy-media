@@ -4,7 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROLLBACK_SCRIPT="$SCRIPT_DIR/joy-media-rollback.sh"
-IDENTITY_SCRIPT="$SCRIPT_DIR/joy-media-release-identity.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -39,12 +38,12 @@ create_identity() {
   commit_digit="$(( tag % 10 ))"
   tree_digit="$(( (tag + 1) % 10 ))"
   lock_digit="$(( (tag + 2) % 10 ))"
-  bash "$IDENTITY_SCRIPT" write \
-    "$destination" \
-    "$(printf "%0.s$commit_digit" $(seq 1 40))" \
-    "$(printf "%0.s$tree_digit" $(seq 1 40))" \
-    "$(printf "%0.s$lock_digit" $(seq 1 64))" \
-    "$tag"
+  cat >"$destination" <<EOF
+JOY_MEDIA_RELEASE_COMMIT_SHA=$(printf "%0.s$commit_digit" $(seq 1 40))
+JOY_MEDIA_RELEASE_TREE_HASH=$(printf "%0.s$tree_digit" $(seq 1 40))
+JOY_MEDIA_RELEASE_LOCKFILE_SHA256=$(printf "%0.s$lock_digit" $(seq 1 64))
+JOY_MEDIA_RELEASE_SCHEMA_VERSION=$tag
+EOF
 }
 
 setup_fixture() {

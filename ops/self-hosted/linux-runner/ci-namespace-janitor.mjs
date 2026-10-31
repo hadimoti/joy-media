@@ -32,10 +32,8 @@ import { createRequire } from 'node:module';
 
 import { classifyRun, isSweepable } from './ci-namespace-classify.mjs';
 
-// `pg` is a dependency of @joy-media/api; resolve it from that package's
-// context (the same pattern real-service-acceptance.mjs uses) so this script
-// finds it regardless of the pnpm layout under ops/self-hosted/.
-const nodeRequire = createRequire(new URL('../../../apps/api/package.json', import.meta.url));
+// `pg` is a root development dependency used by local CI maintenance tools.
+const nodeRequire = createRequire(new URL('../../../package.json', import.meta.url));
 const { Pool } = nodeRequire('pg');
 
 const SWEEP = process.argv.includes('--sweep') && process.env.JOY_MEDIA_CI_JANITOR_SWEEP === '1';

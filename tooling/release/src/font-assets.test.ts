@@ -31,7 +31,6 @@ const runtimeTextExtensions = new Set([
 ]);
 const runtimeSourceRoots = [
   'apps/editor-web/src',
-  'apps/api/src',
   'apps/worker/src',
   'packages/project-schema/src',
   'packages/visual-object-renderer/src',
@@ -39,7 +38,6 @@ const runtimeSourceRoots = [
 ] as const;
 const runtimeDistRoots = [
   'apps/editor-web/dist',
-  'apps/api/dist',
   'apps/worker/dist',
   'packages/project-schema/dist',
   'packages/visual-object-renderer/dist',

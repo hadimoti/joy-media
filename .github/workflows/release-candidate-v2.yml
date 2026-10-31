@@ -446,7 +446,7 @@ jobs:
           export PLAYWRIGHT_BASE_URL="http://127.0.0.1:${web_port}"
           # Each server is its own process group (setsid) so teardown can signal
           # the whole tree by pgid — no `pkill -f` sweeping other jobs.
-          setsid pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts >"$PW_PID_DIR/api.log" 2>&1 &
+          setsid pnpm --filter @joy-media/test-control-plane exec tsx ../../tooling/e2e-server.ts >"$PW_PID_DIR/api.log" 2>&1 &
           echo $! > "$PW_PID_DIR/api.pid"
           setsid pnpm --filter @joy-media/editor-web exec vite preview --host 127.0.0.1 --port "$web_port" --strictPort >"$PW_PID_DIR/web.log" 2>&1 &
           echo $! > "$PW_PID_DIR/web.pid"

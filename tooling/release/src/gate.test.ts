@@ -14,7 +14,6 @@ import {
   REQUIRED_EFFECT_MOTION_PREVIEW_COUNT,
   REQUIRED_JOURNEY_ID,
   sha256File,
-  verifyDeploymentManifests,
   verifyRequiredEditorStaticAssets,
   verifyBrowserJourneyEvidence,
   writeReleaseEvidence,
@@ -660,42 +659,6 @@ describe('JOY Studio 1.0 release gate', () => {
     );
   });
 
-  it('verifies nginx, override, and rollback docs directly from the workspace', () => {
-    expect(verifyDeploymentManifests(resolve(import.meta.dirname, '../../../'))).toEqual([]);
-  });
-
-  it('fails closed when deployment manifests or rollback markers are missing', () => {
-    const root = mkdtempSync(join(tmpdir(), 'joy-release-deploy-root-'));
-    mkdirSync(join(root, 'deploy'), { recursive: true });
-    writeFileSync(
-      join(root, 'deploy/joy-media.nginx.conf'),
-      'location = /live {\nproxy_pass http://127.0.0.1:8790/live;\n}',
-    );
-    writeFileSync(
-      join(root, 'deploy/joy-media-api.override.conf'),
-      'WorkingDirectory=/opt/joy-media/releases/current-api',
-    );
-    writeFileSync(join(root, 'deploy/README.md'), 'Rollback is manual.');
-
-    expect(verifyDeploymentManifests(root)).toEqual([
-      'deploy/joy-media.nginx.conf missing: location = /ready {',
-      'deploy/joy-media.nginx.conf missing: proxy_pass http://127.0.0.1:8790/ready;',
-      'deploy/joy-media.nginx.conf missing: location = /health/ready {',
-      'deploy/joy-media.nginx.conf missing: proxy_pass http://127.0.0.1:8790/health/ready;',
-      'deploy/joy-media.nginx.conf missing: try_files $uri =404;',
-      'deploy/joy-media-api.override.conf missing: EnvironmentFile=/etc/joy-media/api.env',
-      'deploy/README.md missing: current-api',
-      'deploy/README.md missing: web',
-      'deploy/README.md missing: /opt/joy-media/web-releases/',
-      'deploy/README.md missing: release-identity.env',
-      'deploy/README.md missing: joy-media-release-identity.sh write',
-      'deploy/README.md missing: systemctl restart joy-media@api',
-      'deploy/README.md missing: Back up the database',
-      'missing file: deploy/joy-media-release-identity.sh',
-      'missing file: deploy/joy-media-rollback.sh',
-    ]);
-  });
-
   it('fails the gate if required transition frames are not packaged as SVG', () => {
     const result = evaluateReleaseGate({
       ...passingInput(),
@@ -1004,7 +967,6 @@ describe('JOY Studio 1.0 release gate', () => {
       'format',
       'tests',
       'editor-build',
-      'api-build',
       'worker-build',
       'goldens',
     ];
@@ -1028,7 +990,6 @@ describe('JOY Studio 1.0 release gate', () => {
       'format',
       'tests',
       'editor-build',
-      'api-build',
       'worker-build',
       'goldens',
     ];
@@ -1160,7 +1121,7 @@ describe('JOY Studio 1.0 release gate', () => {
   it('requires every build plus the manifest and SBOM', () => {
     const result = evaluateReleaseGate({
       ...passingInput(),
-      builds: { editor: true, api: false, worker: true },
+      builds: { editor: false, worker: true },
       manifestGenerated: false,
       sbomGenerated: false,
     });

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 // checkout where no compiled font-assets.js sibling exists yet.
 import { scanFontAssets } from './font-assets.ts';
 
-export const REQUIRED_BUILD_IDS = ['editor', 'api', 'worker'] as const;
+export const REQUIRED_BUILD_IDS = ['editor', 'worker'] as const;
 export const REQUIRED_JOURNEY_ID = 'authenticated-editor-1.0' as const;
 export const RELEASE_STATUS_MAX_AGE_DAYS = 45;
 export const RELEASE_EVIDENCE_MAX_AGE_HOURS = 24;
@@ -282,7 +282,6 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
     'format',
     'tests',
     'editor-build',
-    'api-build',
     'worker-build',
     'goldens',
   ];
@@ -1754,7 +1753,6 @@ export const RELEASE_COMMANDS: readonly [string, readonly string[]][] = [
   ['lint', ['lint']],
   ['format', ['format:check']],
   ['editor-build', ['--filter', '@joy-media/editor-web', 'build']],
-  ['api-build', ['--filter', '@joy-media/api', 'build']],
   ['worker-build', ['--filter', '@joy-media/worker', 'build']],
   ['tests', ['test']],
   ['goldens', ['exec', 'vitest', 'run', 'tooling/golden-render/src']],
