@@ -103,6 +103,31 @@ describe('checksums.ts verify', () => {
   });
 });
 
+describe('checksums.ts chunked hashing', () => {
+  it.each([
+    ['3 MiB, larger than the hash chunk', 3 * 1024 * 1024],
+    ['2 MiB, an exact multiple of the hash chunk', 2 * 1024 * 1024],
+    ['4 MiB, an exact multiple of the hash chunk', 4 * 1024 * 1024],
+  ])('hashes a %s payload file to the same digest as a single-buffer hash', (_size, bytes) => {
+    const payload = Buffer.alloc(bytes);
+    for (let index = 0; index < bytes; index += 1) payload[index] = index % 251;
+    writeFileSync(join(stagingDir, 'joy-media.zip'), payload);
+
+    const expectedHash = createHash('sha256').update(payload).digest('hex');
+
+    const writeResult = runChecksums('write', stagingDir);
+    expect(writeResult.status).toBe(0);
+    expect(writeResult.output).toContain('wrote SHA256SUMS.txt for 1 payload file');
+    expect(readFileSync(join(stagingDir, 'SHA256SUMS.txt'), 'utf8')).toBe(
+      expectedHash + '  joy-media.zip\n',
+    );
+
+    const verifyResult = runChecksums('verify', stagingDir);
+    expect(verifyResult.status).toBe(0);
+    expect(verifyResult.output).toContain('verified 1 payload file');
+  });
+});
+
 describe('checksums.ts write', () => {
   it('writes hashes for every payload file except SHA256SUMS.txt itself', () => {
     writeFileSync(join(stagingDir, 'joy-media.zip'), 'archive bytes', 'utf8');

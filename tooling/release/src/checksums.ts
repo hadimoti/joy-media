@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,8 +17,24 @@ interface ChecksumEntry {
   readonly line: number;
 }
 
+// Payload files can be gigabyte-sized archives, so hashing streams the file
+// through one fixed buffer instead of holding it all in memory.
+const HASH_CHUNK_SIZE = 1024 * 1024;
+
 function sha256(filePath: string): string {
-  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(HASH_CHUNK_SIZE);
+  const fileDescriptor = openSync(filePath, 'r');
+  try {
+    let bytesRead = readSync(fileDescriptor, buffer, 0, HASH_CHUNK_SIZE, null);
+    while (bytesRead > 0) {
+      hash.update(buffer.subarray(0, bytesRead));
+      bytesRead = readSync(fileDescriptor, buffer, 0, HASH_CHUNK_SIZE, null);
+    }
+  } finally {
+    closeSync(fileDescriptor);
+  }
+  return hash.digest('hex');
 }
 
 function payloadNames(directory: string): { readonly names: string[]; readonly errors: string[] } {
