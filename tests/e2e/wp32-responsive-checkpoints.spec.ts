@@ -70,11 +70,9 @@ test.describe('WP-32 responsive workflow checkpoints', () => {
     const firstMenuitem = menu.getByRole('menuitem').first();
     await expect(firstMenuitem).toBeVisible();
     await expect(firstMenuitem).toBeFocused();
-    // Walk the File menu with the keyboard to the plain "Export" action. The
-    // menu order is Account & Workstation… / Projects Library… / Import Editable
-    // Project… / Export Editable Project… / Export, so "Export" needs an
-    // exact-name match after four ArrowDown presses.
-    await page.keyboard.press('ArrowDown');
+    // The File menu opens focused on its first entry. That first entry is
+    // "Projects Library…", so "Export" needs an exact-name match after three
+    // ArrowDown presses.
     await expect(
       page.getByRole('menuitem', { name: 'Projects Library…', exact: true }),
     ).toBeFocused();

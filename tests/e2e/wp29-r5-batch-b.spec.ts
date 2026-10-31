@@ -9,33 +9,31 @@ import {
 test.describe('WP-29 R5 batch B — shell and timeline gestures', () => {
   test.beforeEach(async ({ page }) => authenticate(page));
 
-  test('[R5 CASE-10] sign-out confirmation can be cancelled without losing the session', async ({
-    page,
-  }, testInfo) => {
-    await openReferenceWorkspace(page);
-    await page.getByRole('button', { name: 'Joy Studio account' }).click();
-    await expect(page.getByRole('region', { name: 'Joy Studio account' })).toContainText('JOY E2E');
-    page.once('dialog', async (dialog) => {
-      expect(dialog.type()).toBe('confirm');
-      expect(dialog.message()).toContain('Sign out of JOY Studio?');
-      await dialog.dismiss();
-    });
-    await page.getByRole('button', { name: 'Sign out' }).click();
-    await expect(page.locator('.timeline-panel')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Joy Studio account' })).toHaveAttribute(
-      'title',
-      /Signed in/,
-    );
-    expect(await page.evaluate(() => localStorage.getItem('joy-media-session-token'))).toBeTruthy();
-    await recordEvidence(testInfo, {
-      caseId: 10,
-      functional: 'PASS',
-      uiA11y: 'PASS',
-      expected:
-        'Sign out asks for confirmation and cancellation keeps the authenticated workspace.',
-      actual: 'The native confirmation was dismissed; the workspace and session remained intact.',
-    });
-  });
+  // R5 CASE-10 ("sign-out confirmation can be cancelled without losing the
+  // session") is retired here. PLAN-v4 §11a P1 removed sign-in from the app,
+  // and the removal is in the integrated tree:
+  //   - commit a37448a3 "feat(editor): run without sign-in, stock video,
+  //     cloud catalog or remote services (P1, partial)" deleted
+  //     apps/editor-web/src/LoginGate.tsx and apps/editor-web/src/
+  //     DesktopAccountModal.tsx and the account dropdown that carried the
+  //     "Joy Studio account" trigger, the "JOY Studio account" region and
+  //     the "Sign out of JOY Studio?" confirm.
+  //   - apps/editor-web/src/app-menu.ts:79-83 lists the File menu as
+  //     Projects Library… / Import Editable Project… / Export Editable
+  //     Project… / Export, and apps/editor-web/src/app-menu.test.ts:21-25
+  //     asserts that file.account and file.signOut are absent.
+  //   - A grep of apps/editor-web/src for "Sign out of JOY Studio" and
+  //     "Joy Studio account" returns no product source; the only remaining
+  //     "Sign out" is the ChatGPT provider-profile "Sign out & revoke"
+  //     action in JoyAgentSettingsDialog.tsx:1233, which is a different
+  //     feature (revoking one saved ChatGPT OAuth profile, not ending a
+  //     JOY Studio session).
+  // A browser probe confirmed the product exposes no such control: with a
+  // workspace open there are zero elements whose text contains
+  // "sign out" or "account", and zero elements with an account-ish
+  // aria-label.
+  // There is no longer a sign-out control to click, so the test is removed
+  // rather than left as a skip or weakened to a no-op.
 
   test('[R5 CASE-32] pointer drag moves a clip onto a different track', async ({
     page,

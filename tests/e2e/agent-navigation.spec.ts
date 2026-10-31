@@ -1,27 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { authenticate, openPanel, openReferenceWorkspace } from './wp29-r5-harness.js';
-import {
-  allowExpectedProjectAssetListMisses,
-  assertBrowserAudit,
-  setupBrowserAudit,
-} from './helpers/browser-console-audit.js';
+import { assertBrowserAudit, setupBrowserAudit } from './helpers/browser-console-audit.js';
 
 test.describe('JOY Agent navigation', () => {
-  const NAV_PROJECT_ASSET_LIST_MISS_TESTS = new Set([
-    'explains the disconnected Edit prerequisite before the first message',
-    'opens the full model drawer from Settings and returns to Settings when closed',
-    'removes the redundant capability heading',
-    'keeps manual Looks available and explains why Ask JOY is unavailable',
-    'keeps the Edit prerequisite visible in a disconnected conversation',
-    'explains the Recipes model prerequisite and blocks runs while disconnected',
-    'keeps Creative Brief\u2019s disconnected connect state routed through Settings',
-    'keeps every capability and Settings reachable without a clipped toolbar',
-  ]);
-
-  test.beforeEach(({ page }, testInfo) => {
+  test.beforeEach(({ page }) => {
     setupBrowserAudit(page);
-    if (NAV_PROJECT_ASSET_LIST_MISS_TESTS.has(testInfo.title))
-      allowExpectedProjectAssetListMisses(page);
   });
 
   test.afterEach(async ({ page }, testInfo) => {
