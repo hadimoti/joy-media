@@ -340,12 +340,26 @@ describe('ChatGPT token usage', () => {
   it.each([
     ['a string where a count belongs', { input_tokens: 'many', output_tokens: 2 }],
     ['a negative count', { input_tokens: 9, output_tokens: -3 }],
+    ['a fractional count', { input_tokens: 9.5, output_tokens: 2 }],
     ['no count on one side', { input_tokens: 9 }],
   ])('does not trust a count with %s', async (_name, usage) => {
     const { status, body } = await chatCompletionOf(completedWithUsage(usage), true);
 
     expect(status).toBe(200);
     expect(chunksOf(body)[0]).not.toHaveProperty('usage');
+  });
+
+  it('does not trust a fractional total, and counts the total from the sides', async () => {
+    const { body } = await chatCompletionOf(
+      completedWithUsage({ input_tokens: 9, output_tokens: 2, total_tokens: 11.5 }),
+      true,
+    );
+
+    expect(chunksOf(body)[0]?.usage).toEqual({
+      prompt_tokens: 9,
+      completion_tokens: 2,
+      total_tokens: 11,
+    });
   });
 
   it('carries the count on the non-streaming reply, under the same rule', async () => {
