@@ -1,4 +1,5 @@
 /* global console, process */
+import { CLI_VERSION } from '../version.js';
 
 export const colors = {
   reset: '\x1b[0m',
@@ -30,7 +31,7 @@ export function printBanner(): void {
   console.log(
     `${c('  ██████╗  ██████╗ ██╗   ██╗', 'magenta')}` +
       `  ${c('JOY MEDIA CLI', 'bold')}` +
-      ` ${c('v1.0.0', 'dim')}`,
+      ` ${c(`v${CLI_VERSION}`, 'dim')}`,
   );
   console.log(
     `${c('  ╚══████╗██╔═══██╗╚██╗ ██╔╝', 'magenta')}` +

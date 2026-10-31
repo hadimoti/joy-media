@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path "$PSScriptRoot\..\..\..").Path
 $distReleases = Join-Path $repoRoot "apps\desktop\dist\releases"
-$zipPath = Join-Path $distReleases "joy-media-windows-x64-v1.0.0.zip"
+$zipPath = Join-Path $distReleases "joy-media-windows-x64-v1.1.0.zip"
 $outExe = Join-Path $distReleases "joy-media-setup.exe"
 $srcCs = Join-Path $PSScriptRoot "Setup.cs"
 
