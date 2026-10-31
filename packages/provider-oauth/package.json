@@ -14,10 +14,6 @@
       "types": "./dist/chatgpt.d.ts",
       "default": "./dist/chatgpt.js"
     },
-    "./minimax.js": {
-      "types": "./dist/minimax.d.ts",
-      "default": "./dist/minimax.js"
-    },
     "./kimi.js": {
       "types": "./dist/kimi.d.ts",
       "default": "./dist/kimi.js"

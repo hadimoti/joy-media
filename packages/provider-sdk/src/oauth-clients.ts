@@ -1,5 +1,5 @@
 /** An OAuth provider whose public client ID can be replaced through app settings. */
-export type OAuthClientProviderId = 'chatgpt' | 'minimax' | 'kimi' | 'xai';
+export type OAuthClientProviderId = 'chatgpt' | 'kimi' | 'xai';
 
 /** One provider's default OAuth client and the source for that public client identity. */
 export interface OAuthClient {
@@ -12,12 +12,6 @@ const OAUTH_CLIENTS: Readonly<Record<OAuthClientProviderId, OAuthClient>> = {
   chatgpt: {
     clientId: undefined,
     source: 'OpenAI Sign in with ChatGPT dynamic client registration (PLAN-v4 §6d-3).',
-    configurable: true,
-  },
-  minimax: {
-    clientId: '78257093-7e40-4613-99e0-527b14b39113',
-    source:
-      'OpenClaw public client, confirmed in the D22 step 1 brief and MiniMax OAuth retest checkpoint at session-handoff/mcode-p4b/p4b-checkpoint-2026-10-30-minimax-oauth-retest.md.',
     configurable: true,
   },
   kimi: {

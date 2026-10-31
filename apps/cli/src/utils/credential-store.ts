@@ -3,13 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import {
   decodeKimiTokenRecord,
-  decodeMiniMaxTokenRecord,
   decodeTokenRecord,
   decodeXaiTokenRecord,
   isRecord,
   type ChatGptTokenRecord,
   type KimiTokenRecord,
-  type MiniMaxTokenRecord,
   type XaiTokenRecord,
 } from '@joy-media/provider-oauth';
 import type { SecretProtector } from './dpapi-protector.js';
@@ -27,10 +25,9 @@ export interface ProviderCredential {
   readonly defaultModel?: string;
 }
 
-/** OAuth records are provider-tagged and checked by the shared flow decoders (D22 step 3 design, §5). */
+/** OAuth records are provider-tagged and checked by the shared flow decoders. */
 export type OAuthCredential =
   | { readonly provider: 'chatgpt'; readonly tokenRecord: ChatGptTokenRecord }
-  | { readonly provider: 'minimax'; readonly tokenRecord: MiniMaxTokenRecord }
   | { readonly provider: 'kimi'; readonly tokenRecord: KimiTokenRecord }
   | { readonly provider: 'xai'; readonly tokenRecord: XaiTokenRecord };
 
@@ -126,10 +123,6 @@ function parseOAuthCredential(value: Record<string, unknown>): OAuthCredential |
       const tokenRecord = decodeTokenRecord(serialized);
       return tokenRecord === undefined ? undefined : { provider: 'chatgpt', tokenRecord };
     }
-    case 'minimax': {
-      const tokenRecord = decodeMiniMaxTokenRecord(serialized);
-      return tokenRecord === undefined ? undefined : { provider: 'minimax', tokenRecord };
-    }
     case 'kimi': {
       const tokenRecord = decodeKimiTokenRecord(serialized);
       return tokenRecord === undefined ? undefined : { provider: 'kimi', tokenRecord };
@@ -148,6 +141,11 @@ function parseStoredCredential(value: unknown): StoredCredential | undefined {
     return parseOAuthCredential(value);
   }
   return parseCredential(value);
+}
+
+/** A MiniMax-tagged token record belongs to the OAuth route removed by D23. */
+function isRemovedMiniMaxOAuthCredential(value: unknown): boolean {
+  return isRecord(value) && value.provider === 'minimax' && 'tokenRecord' in value;
 }
 
 /**
@@ -198,9 +196,20 @@ export function createCredentialStore(options: {
     } catch {
       throw new CredentialUnavailableError(name, 'the protector could not decrypt it');
     }
+    let value: unknown;
+    try {
+      value = JSON.parse(plain);
+    } catch {
+      throw new CredentialUnavailableError(name, 'the stored value is malformed');
+    }
+    if (version === 2 && isRemovedMiniMaxOAuthCredential(value)) {
+      throw new CredentialUnavailableError(
+        name,
+        'this profile used MiniMax OAuth, which was removed by D23; add a MiniMax API key',
+      );
+    }
     let credential: StoredCredential | undefined;
     try {
-      const value: unknown = JSON.parse(plain);
       credential = version === 1 ? parseCredential(value) : parseStoredCredential(value);
     } catch {
       throw new CredentialUnavailableError(name, 'the stored value is malformed');

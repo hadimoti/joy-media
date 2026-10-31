@@ -229,32 +229,8 @@ describe('OAuth provider profiles', () => {
         message: '--provider',
       },
       {
-        args: [
-          'agent',
-          'provider',
-          'add',
-          'bad-region',
-          '--provider',
-          'minimax',
-          '--oauth',
-          '--region',
-          'us',
-        ],
-        message: '--region',
-      },
-      {
-        args: [
-          'agent',
-          'provider',
-          'add',
-          'wrong-provider-region',
-          '--provider',
-          'kimi',
-          '--oauth',
-          '--region',
-          'global',
-        ],
-        message: '--region',
+        args: ['agent', 'provider', 'add', 'minimax-profile', '--provider', 'minimax', '--oauth'],
+        message: 'Provider "minimax" does not offer OAuth sign-in.',
       },
       {
         args: [
@@ -293,6 +269,25 @@ describe('OAuth provider profiles', () => {
     }
     expect(signInOAuthProfileMock).not.toHaveBeenCalled();
     expect(errors.join('\n')).not.toContain('third-party public app');
+  });
+
+  it('no longer accepts the MiniMax-only --region flag', async () => {
+    expect(
+      await runCli([
+        'agent',
+        'provider',
+        'add',
+        'region-removed',
+        '--provider',
+        'kimi',
+        '--oauth',
+        '--region',
+        'global',
+      ]),
+    ).toBe(2);
+
+    expect(errors.join('\n')).toContain('Unknown option: --region');
+    expect(signInOAuthProfileMock).not.toHaveBeenCalled();
   });
 
   it('reauthorizes the same OAuth provider and stores the replacement only after sign-in', async () => {

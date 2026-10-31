@@ -32,7 +32,7 @@ describe('D22 provider routes', () => {
     ]);
     expect(findRegistryProvider('xai')?.auth.gated).toBeUndefined();
     expect(findRegistryProvider('xai')?.auth.unverified).toBeUndefined();
-    expect(signInProviders()).toEqual(['minimax', 'kimi', 'chatgpt', 'xai']);
+    expect(signInProviders()).toEqual(['kimi', 'chatgpt', 'xai']);
   });
 
   it('registers DeepSeek and leaves Kilo unregistered until its fixed integration is verified', () => {

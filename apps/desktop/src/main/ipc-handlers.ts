@@ -29,7 +29,6 @@ import {
   type AgentSlot,
   type AgentSlotId,
   type AgentSlotResult,
-  type MiniMaxRegion,
 } from '@joy-media/provider-sdk';
 import { evaluateEndpoint, normalizeBaseUrl } from '@joy-media/provider-sdk';
 import type { SecretStore } from '@joy-media/provider-sdk';
@@ -131,16 +130,14 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       }
       try {
         const context: ProviderSignInContext | undefined =
-          request.provider === 'minimax'
-            ? { minimaxRegion: request.region ?? 'global' }
-            : savedChatGptRecord === undefined
-              ? undefined
-              : {
-                  savedChatGptAccount: {
-                    clientId: savedChatGptRecord.clientId,
-                    accountId: savedChatGptRecord.accountId,
-                  },
-                };
+          savedChatGptRecord === undefined
+            ? undefined
+            : {
+                savedChatGptAccount: {
+                  clientId: savedChatGptRecord.clientId,
+                  accountId: savedChatGptRecord.accountId,
+                },
+              };
         const signedIn =
           context === undefined
             ? await deps.providerSignIn(request.provider)
@@ -673,7 +670,7 @@ function asJobId(value: unknown): string | undefined {
 /** The provider to sign in to, and the saved profile to update, when there is one. */
 function asSignInRequest(
   value: unknown,
-): { readonly provider: SignInProvider; readonly id?: string; readonly region?: MiniMaxRegion } | undefined {
+): { readonly provider: SignInProvider; readonly id?: string } | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
   const provider = candidate['provider'];
@@ -683,15 +680,6 @@ function asSignInRequest(
   const id = candidate['id'];
   if (id !== undefined && (typeof id !== 'string' || id.length === 0)) return undefined;
   const hasRegion = Object.prototype.hasOwnProperty.call(candidate, 'region');
-  const region = candidate['region'];
-  if (provider === 'minimax') {
-    if (region !== undefined && region !== 'global' && region !== 'cn') return undefined;
-    return {
-      provider,
-      ...(typeof id === 'string' ? { id } : {}),
-      region: region === 'cn' ? 'cn' : 'global',
-    };
-  }
   if (hasRegion) return undefined;
   return { provider, ...(typeof id === 'string' ? { id } : {}) };
 }

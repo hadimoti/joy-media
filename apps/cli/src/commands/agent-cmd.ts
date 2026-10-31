@@ -3,7 +3,6 @@ import {
   AGENT_SLOT_IDS,
   AGENT_SLOT_LABELS,
   CHATGPT_RESPONSES_BASE_URL,
-  MINIMAX_OAUTH_ENDPOINTS,
   XAI_OAUTH_INFERENCE_BASE_URL,
   defaultBaseUrl,
   evaluateEndpoint,
@@ -15,7 +14,6 @@ import {
 import { prepareChatGptModels, readChatGptModels } from '@joy-media/joy-agent-engine';
 import type { CliFlags } from '../cli.js';
 import {
-  isMiniMaxRegion,
   isOAuthProfileProvider,
   oauthTokenExpiry,
   signInOAuthProfile,
@@ -75,11 +73,9 @@ function numberFlag(value: string | undefined): number | undefined {
 }
 
 function oauthProfileBaseUrl(
-  provider: 'chatgpt' | 'minimax' | 'kimi' | 'xai',
-  region: 'global' | 'cn',
+  provider: 'chatgpt' | 'kimi' | 'xai',
 ): string | undefined {
   if (provider === 'chatgpt') return CHATGPT_RESPONSES_BASE_URL;
-  if (provider === 'minimax') return MINIMAX_OAUTH_ENDPOINTS[region].inferenceBase;
   if (provider === 'kimi') return KIMI_CODE_BASE_URL;
   return XAI_OAUTH_INFERENCE_BASE_URL;
 }
@@ -101,15 +97,6 @@ async function addOAuthProvider(name: string, flags: CliFlags): Promise<number> 
     logError(`Provider "${flags.provider}" does not offer OAuth sign-in.`);
     return 1;
   }
-  if (flags.region !== undefined && flags.provider !== 'minimax') {
-    logError('--region is supported only for MiniMax OAuth.');
-    return 1;
-  }
-  if (flags.region !== undefined && !isMiniMaxRegion(flags.region)) {
-    logError('--region must be "global" or "cn" for MiniMax OAuth.');
-    return 1;
-  }
-
   const providers = loadAiProviders();
   const previous = providers[name];
   if (
@@ -122,7 +109,6 @@ async function addOAuthProvider(name: string, flags: CliFlags): Promise<number> 
     return 1;
   }
 
-  const region = flags.region === 'cn' ? 'cn' : 'global';
   const model = flags.model ?? previous?.defaultModel;
   // This exact notice is printed after every validation and before the sign-in flow can send a request.
   console.error(OAUTH_RISK_NOTICE);
@@ -132,7 +118,6 @@ async function addOAuthProvider(name: string, flags: CliFlags): Promise<number> 
     credential = await signInOAuthProfile({
       profileId: name,
       provider: flags.provider,
-      region,
       onAuthorization: ({ url, userCode, expiresAt }) => {
         console.log(`Approval URL: ${url}`);
         if (userCode) console.log(`User code: ${userCode}`);
@@ -178,7 +163,7 @@ async function addOAuthProvider(name: string, flags: CliFlags): Promise<number> 
       name,
       provider: flags.provider,
       authKind: 'oauth',
-      baseUrl: oauthProfileBaseUrl(flags.provider, region),
+      baseUrl: oauthProfileBaseUrl(flags.provider),
       defaultModel: model,
     });
   } catch {
@@ -198,7 +183,7 @@ async function listOAuthModels(
   profile: NonNullable<ReturnType<typeof loadAiProviders>[string]>,
 ): Promise<number> {
   const provider = profile.provider;
-  if (provider !== 'chatgpt' && provider !== 'kimi' && provider !== 'minimax' && provider !== 'xai') {
+  if (provider !== 'chatgpt' && provider !== 'kimi' && provider !== 'xai') {
     logError(`OAuth profile "${profileId}" has no supported model-list route.`);
     return 1;
   }
@@ -218,11 +203,9 @@ async function listOAuthModels(
   const baseUrl =
     credential.provider === 'chatgpt'
       ? CHATGPT_RESPONSES_BASE_URL
-      : credential.provider === 'minimax'
-        ? MINIMAX_OAUTH_ENDPOINTS[credential.tokenRecord.region].inferenceBase
-        : credential.provider === 'xai'
-          ? XAI_OAUTH_INFERENCE_BASE_URL
-          : KIMI_CODE_BASE_URL;
+      : credential.provider === 'xai'
+        ? XAI_OAUTH_INFERENCE_BASE_URL
+        : KIMI_CODE_BASE_URL;
   printBanner();
   logInfo(`Fetching models from ${c(baseUrl, 'bold')}...`);
   try {
@@ -353,10 +336,6 @@ export async function handleAgentCommand(args: string[], flags: CliFlags): Promi
       }
       if (flags.oauth) {
         return await addOAuthProvider(name, flags);
-      }
-      if (flags.region !== undefined) {
-        logError('--region requires --oauth.');
-        return 1;
       }
       if (!flags.baseUrl) {
         logError('Base URL required. Specify --url <url>');

@@ -1,5 +1,4 @@
 export * from './chatgpt.js';
-export * from './minimax.js';
 export * from './kimi.js';
 export * from './xai.js';
 export * from './errors.js';

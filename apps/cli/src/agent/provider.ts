@@ -12,7 +12,6 @@ import {
   findRegistryRegion,
   getProviderThinkingMode,
   isAuthMethodPermitted,
-  MINIMAX_OAUTH_ENDPOINTS,
   XAI_OAUTH_INFERENCE_BASE_URL,
   isAgentSlotConfigured,
   isCustomProviderId,
@@ -243,11 +242,7 @@ export async function resolveAgentConfig(
   }
 
   const baseUrl =
-    credential.provider === 'minimax'
-      ? MINIMAX_OAUTH_ENDPOINTS[credential.tokenRecord.region].inferenceBase
-      : credential.provider === 'xai'
-        ? XAI_OAUTH_INFERENCE_BASE_URL
-        : KIMI_CODE_BASE_URL;
+    credential.provider === 'xai' ? XAI_OAUTH_INFERENCE_BASE_URL : KIMI_CODE_BASE_URL;
   const verdict = evaluateEndpoint(type, baseUrl);
   if (!verdict.allowed) {
     throw new Error(`The base URL of OAuth profile "${name}" is refused: ${verdict.reason}`);

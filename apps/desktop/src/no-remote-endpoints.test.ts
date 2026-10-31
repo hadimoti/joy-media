@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 // not name any remote endpoint: no JOY host, no remote API base, and no remote URL other
 // than the loopback development origins. A provider's origins live in the provider SDK and
 // are imported by name, so this scan sees the desktop's own text only. It does not judge the
-// sign-in flows' runtime traffic: a provider sign-in (ChatGPT, MiniMax) reaches its own
+// sign-in flows' runtime traffic: a provider sign-in (ChatGPT, Kimi, xAI) reaches its own
 // origin by design (PLAN-v4 §6d).
 
 const here = path.dirname(fileURLToPath(import.meta.url));

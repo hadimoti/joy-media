@@ -172,8 +172,6 @@ if (!app.requestSingleInstanceLock()) {
       now: () => Date.now(),
       // No saved client: each ChatGPT sign-in registers one with ChatGPT (SIWC dynamic registration, PLAN-v4 §6d).
       chatGptClientId: undefined,
-      // Retained for compatibility with older sign-in callers; production reads OAuth client IDs from local settings.
-      minimaxClientId: undefined,
       getSetting: (key) => localDatabase.getSetting(key),
       installId: () => loadOrCreateInstallId(localDatabase),
     }),

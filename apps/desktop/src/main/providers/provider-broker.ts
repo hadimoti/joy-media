@@ -48,13 +48,6 @@ import {
   type ChatGptTokenRecord,
 } from '../oauth/chatgpt.js';
 import {
-  createMiniMaxTokenKeeper,
-  decodeMiniMaxTokenRecord,
-  encodeMiniMaxTokenRecord,
-  type MiniMaxTokenKeeper,
-  type MiniMaxTokenRecord,
-} from '../oauth/minimax.js';
-import {
   createXaiTokenKeeper,
   decodeXaiTokenRecord,
   encodeXaiTokenRecord,
@@ -260,31 +253,6 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
       deps.store.rebindSecretVersion?.(profileId, deps.store.secretVersion(handleId));
     },
   });
-  // MiniMax's OAuth record is used only for MiniMax profiles; a plain MiniMax key remains a normal API key.
-  const minimaxTokens: MiniMaxTokenKeeper = createMiniMaxTokenKeeper({
-    fetch: deps.fetch,
-    now: nowMs,
-    save: async (profileId, handleId, record) => {
-      const profile = deps.store.getProfile(profileId);
-      if (profile === undefined) {
-        throw new BrokerError('PROFILE_NOT_FOUND', 'Unknown provider profile');
-      }
-      if (profile.secretHandleId !== handleId) {
-        throw new BrokerError(
-          'CREDENTIAL_UNAVAILABLE',
-          'The MiniMax sign-in changed during this request. Send it again.',
-        );
-      }
-      await deps.secrets.set(handleId, encodeMiniMaxTokenRecord(record));
-      if (deps.store.getProfile(profileId)?.secretHandleId !== handleId) {
-        throw new BrokerError(
-          'CREDENTIAL_UNAVAILABLE',
-          'The MiniMax sign-in changed during this request. Send it again.',
-        );
-      }
-      deps.store.rebindSecretVersion?.(profileId, deps.store.secretVersion(handleId));
-    },
-  });
   // An xAI OAuth record is used only for xAI profiles; a plain xAI key remains a normal API key.
   const xaiTokens: XaiTokenKeeper = createXaiTokenKeeper({
     fetch: deps.fetch,
@@ -368,27 +336,6 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
       throw new BrokerError(
         'SIGN_IN_REQUIRED',
         'The new ChatGPT sign-in could not be saved. Sign in with ChatGPT again.',
-      );
-    }
-  }
-
-  /** Refreshes a MiniMax token record near expiry and refuses a record it cannot save atomically. */
-  async function miniMaxRecord(
-    profileId: string,
-    handleId: string,
-    record: MiniMaxTokenRecord,
-  ): Promise<MiniMaxTokenRecord> {
-    try {
-      return await minimaxTokens.current(profileId, handleId, record);
-    } catch (error) {
-      if (error instanceof BrokerError) throw error;
-      if (error instanceof OAuthFlowError) {
-        throw new BrokerError('PROVIDER_HTTP_ERROR', error.message);
-      }
-      deps.store.markCredentialUnavailable(profileId);
-      throw new BrokerError(
-        'SIGN_IN_REQUIRED',
-        'The MiniMax sign-in could not be saved. Sign in with MiniMax again.',
       );
     }
   }
@@ -526,27 +473,6 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         screened: [record.refreshToken],
       };
     }
-    if (profile.provider === 'minimax' && stored !== null) {
-      const savedRecord = decodeMiniMaxTokenRecord(stored);
-      if (savedRecord !== undefined) {
-        const record = await miniMaxRecord(profile.id, profile.secretHandleId, savedRecord);
-        return {
-          ...makeEndpoint(
-            profile.id,
-            profile.provider,
-            profile.baseUrl,
-            profile.modelId,
-            record.accessToken,
-          ),
-          screened: [
-            savedRecord.refreshToken,
-            savedRecord.accessToken,
-            record.accessToken,
-            record.refreshToken,
-          ],
-        };
-      }
-    }
     if (profile.provider === 'xai' && stored !== null) {
       const savedRecord = decodeXaiTokenRecord(stored);
       if (savedRecord !== undefined) {
@@ -589,7 +515,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         };
       }
     }
-    const apiKey = usableKey(stored);
+    const apiKey = usableKey(stored, profile.provider);
     if (apiKey === undefined && verdict.kind === 'registry') {
       throw new BrokerError('CREDENTIAL_UNAVAILABLE', 'The provider key is no longer available');
     }
@@ -604,7 +530,13 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     const hostname = new URL(draft.baseUrl).hostname;
     if (verdict.kind === 'loopback') await assertLoopbackHost(hostname, resolveHost);
     if (verdict.kind === 'public') await assertPublicHost(hostname, resolveHost);
-    return makeEndpoint('', draft.provider, draft.baseUrl, '', usableKey(draft.apiKey));
+    return makeEndpoint(
+      '',
+      draft.provider,
+      draft.baseUrl,
+      '',
+      usableKey(draft.apiKey, draft.provider),
+    );
   }
 
   async function run(
@@ -1064,11 +996,40 @@ function modelRefused(text: string): boolean {
   return isRecord(message) && typeof message.refusal === 'string' && message.refusal.length > 0;
 }
 
-/** A keyless local model sends no credential. Any other value is a key, sent as given. */
-function usableKey(value: string | null | undefined): string | undefined {
+/** A keyless local model sends no credential; a retired MiniMax token record is never sent as a key. */
+function usableKey(value: string | null | undefined, provider: string): string | undefined {
   if (value === null || value === undefined) return undefined;
   if (value.length === 0 || value === NO_KEY_PLACEHOLDER) return undefined;
+  if (provider === 'minimax' && isMiniMaxOAuthTokenRecord(value)) {
+    throw new BrokerError(
+      'CREDENTIAL_UNAVAILABLE',
+      'MiniMax OAuth was removed by D23. Add a MiniMax API key to use this profile.',
+    );
+  }
   return value;
+}
+
+/** A legacy MiniMax secret has the OAuth record shape; recognizing it prevents a raw JSON bearer. */
+function isMiniMaxOAuthTokenRecord(value: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return false;
+  }
+  return (
+    isRecord(parsed) &&
+    parsed.version === 1 &&
+    typeof parsed.clientId === 'string' &&
+    parsed.clientId.length > 0 &&
+    (parsed.region === 'global' || parsed.region === 'cn') &&
+    typeof parsed.accessToken === 'string' &&
+    parsed.accessToken.length > 0 &&
+    typeof parsed.refreshToken === 'string' &&
+    parsed.refreshToken.length > 0 &&
+    typeof parsed.accessExpiresAt === 'number' &&
+    Number.isFinite(parsed.accessExpiresAt)
+  );
 }
 
 /** A model id travels inside a JSON body, so it must pass the same rule a listed model id passes. */

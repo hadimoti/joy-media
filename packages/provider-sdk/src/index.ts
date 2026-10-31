@@ -176,11 +176,8 @@ export {
   CHATGPT_JWKS_URL,
   CHATGPT_RESPONSES_BASE_URL,
   CHATGPT_TOKEN_URL,
-  MINIMAX_OAUTH_ENDPOINTS,
-  MINIMAX_OAUTH_SCOPE,
   OPENROUTER_BASE_URL,
 } from './sign-in-endpoints.js';
-export type { MiniMaxRegion } from './sign-in-endpoints.js';
 
 // ===== V1 Backward Compatibility =====
 

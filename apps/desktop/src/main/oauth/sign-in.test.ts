@@ -1,6 +1,5 @@
 import { createSign, generateKeyPairSync } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MINIMAX_OAUTH_ENDPOINTS } from '@joy-media/provider-sdk';
 import { CHATGPT_RESPONSES_BASE_URL } from '../providers/adapters/chatgpt-responses.js';
 import {
   CHATGPT_ISSUER,
@@ -10,7 +9,6 @@ import {
   decodeTokenRecord,
   isExtAgentHostId,
 } from './chatgpt.js';
-import { decodeMiniMaxTokenRecord } from './minimax.js';
 import { decodeKimiTokenRecord, KIMI_CODE_BASE_URL } from './kimi.js';
 import type { FetchLike } from './http.js';
 import { createProviderSignIn, INSTALL_ID_SETTING, loadOrCreateInstallId } from './sign-in.js';
@@ -119,7 +117,6 @@ describe('createProviderSignIn', () => {
       fetch: fetchStub,
       now: Date.now,
       chatGptClientId: undefined,
-      minimaxClientId: undefined,
       installId: () => HOST_ID,
     });
     await expect(signIn('openrouter')).rejects.toMatchObject({
@@ -130,108 +127,23 @@ describe('createProviderSignIn', () => {
     expect(fetchStub).not.toHaveBeenCalled();
   });
 
-  it.each([undefined, '', '  '])(
-    'refuses MiniMax before a request or browser opens when the registered client ID is %j',
-    async (minimaxClientId) => {
-      const openExternal = vi.fn();
-      const fetch = vi.fn<FetchLike>();
-      const signIn = createProviderSignIn({
-        openExternal,
-        fetch,
-        now: Date.now,
-        chatGptClientId: undefined,
-        minimaxClientId,
-        installId: () => HOST_ID,
-      });
-
-      await expect(signIn('minimax')).rejects.toMatchObject({
-        code: 'NOT_CONFIGURED',
-        message: "MiniMax sign-in needs JOY Media's registered client ID.",
-      });
-      expect(openExternal).not.toHaveBeenCalled();
-      expect(fetch).not.toHaveBeenCalled();
-    },
-  );
-
-  it('signs in to MiniMax and uses the selected region base and first listed model', async () => {
-    const now = Date.UTC(2026, 9, 30);
-    vi.useFakeTimers({ now });
-    let openedUrl = '';
-    let releaseOpen: () => void = () => undefined;
-    const opened = new Promise<void>((resolve) => {
-      releaseOpen = resolve;
-    });
-    const requests: { readonly url: string; readonly init: RequestInit }[] = [];
-    const fetch: FetchLike = async (url, init) => {
-      requests.push({ url, init });
-      if (url.endsWith('/oauth2/device/code')) {
-        const state = new URLSearchParams(String(init.body)).get('state') ?? '';
-        return json({
-          user_code: 'MINIMAX-USER-CODE',
-          verification_uri: 'https://platform.minimaxi.com/oauth-authorize?from=server',
-          expired_in: now + 60_000,
-          state,
-        });
-      }
-      if (url.endsWith('/oauth2/token')) {
-        return json({
-          status: 'success',
-          access_token: 'minimax-access',
-          refresh_token: 'minimax-refresh',
-          expired_in: 3_600,
-        });
-      }
-      if (url === `${MINIMAX_OAUTH_ENDPOINTS.cn.inferenceBase}/models`) {
-        expect(new Headers(init.headers).get('authorization')).toBe('Bearer minimax-access');
-        return json({
-          data: [
-            { id: 'minimax-access' },
-            { id: 'minimax-refresh' },
-            { id: 'MiniMax-M2.1' },
-            { id: 'MiniMax-M2' },
-          ],
-        });
-      }
-      throw new Error(`unexpected request to ${url}`);
-    };
+  it('refuses MiniMax OAuth after D23 without making a token request', async () => {
+    const openExternal = vi.fn();
+    const fetch = vi.fn<FetchLike>();
     const signIn = createProviderSignIn({
-      openExternal: (url) => {
-        openedUrl = url;
-        releaseOpen();
-      },
+      openExternal,
       fetch,
       now: Date.now,
       chatGptClientId: undefined,
-      minimaxClientId: CLIENT_ID,
       installId: () => HOST_ID,
     });
-    const pending = signIn('minimax', { minimaxRegion: 'cn' });
 
-    await opened;
-    await Promise.resolve();
-    await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(2_000);
-    const result = await pending;
-
-    expect(openedUrl).toBe(
-      'https://platform.minimaxi.com/oauth-authorize?from=server&user_code=MINIMAX-USER-CODE',
-    );
-    expect(result).toMatchObject({
-      provider: 'minimax',
-      baseUrl: 'https://api.minimax.cn/v1',
-      modelId: 'MiniMax-M2.1',
+    await expect(signIn('minimax')).rejects.toMatchObject({
+      code: 'NOT_CONFIGURED',
+      message: 'MiniMax is set up with an API key and does not offer a sign-in.',
     });
-    expect(decodeMiniMaxTokenRecord(result.secret)).toMatchObject({
-      clientId: CLIENT_ID,
-      region: 'cn',
-      accessToken: 'minimax-access',
-      refreshToken: 'minimax-refresh',
-    });
-    expect(requests.map((request) => request.url)).toEqual([
-      'https://account.minimaxi.com/oauth2/device/code',
-      'https://account.minimaxi.com/oauth2/token',
-      'https://api.minimax.cn/v1/models',
-    ]);
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('signs in to Kimi Code and starts the profile on its first listed model', async () => {
@@ -278,7 +190,6 @@ describe('createProviderSignIn', () => {
       fetch,
       now: () => now,
       chatGptClientId: undefined,
-      minimaxClientId: undefined,
       installId: () => HOST_ID,
     });
     const pending = signIn('kimi');
@@ -307,58 +218,6 @@ describe('createProviderSignIn', () => {
     ]);
   });
 
-  it('refuses an empty MiniMax model list with the account-safe message', async () => {
-    const now = Date.UTC(2026, 9, 30);
-    vi.useFakeTimers({ now });
-    let releaseOpen: () => void = () => undefined;
-    const opened = new Promise<void>((resolve) => {
-      releaseOpen = resolve;
-    });
-    const fetch: FetchLike = async (url, init) => {
-      if (url.endsWith('/oauth2/device/code')) {
-        const state = new URLSearchParams(String(init.body)).get('state') ?? '';
-        return json({
-          user_code: 'MINIMAX-USER-CODE',
-          verification_uri: 'https://platform.minimax.io/oauth-authorize',
-          expired_in: now + 60_000,
-          state,
-        });
-      }
-      if (url.endsWith('/oauth2/token')) {
-        return json({
-          status: 'success',
-          access_token: 'minimax-access',
-          refresh_token: 'minimax-refresh',
-          expired_in: 3_600,
-        });
-      }
-      return json({ data: [] });
-    };
-    const signIn = createProviderSignIn({
-      openExternal: () => releaseOpen(),
-      fetch,
-      now: Date.now,
-      chatGptClientId: undefined,
-      minimaxClientId: CLIENT_ID,
-      installId: () => HOST_ID,
-    });
-    const pending = signIn('minimax');
-    const outcome = pending.then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-
-    await opened;
-    await Promise.resolve();
-    await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(2_000);
-
-    expect(await outcome).toMatchObject({
-      code: 'EXCHANGE_FAILED',
-      message: 'MiniMax lists no usable model for this account.',
-    });
-  });
-
   it('starts a ChatGPT registration when no client is saved, and ends when the person declines', async () => {
     let authUrl = '';
     const openExternal = vi.fn(async (url: string) => {
@@ -374,7 +233,6 @@ describe('createProviderSignIn', () => {
       fetch: vi.fn(),
       now: Date.now,
       chatGptClientId: undefined,
-      minimaxClientId: undefined,
       installId: () => HOST_ID,
       chatGptPort: 0,
     });
@@ -417,7 +275,6 @@ describe('createProviderSignIn', () => {
       fetch: fetchStub,
       now: Date.now,
       chatGptClientId: CLIENT_ID,
-      minimaxClientId: undefined,
       installId: () => HOST_ID,
       chatGptPort: 0,
     });
@@ -464,7 +321,6 @@ describe('createProviderSignIn', () => {
       fetch,
       now: Date.now,
       chatGptClientId: undefined,
-      minimaxClientId: undefined,
       installId: () => HOST_ID,
       chatGptPort: 0,
     });
@@ -509,7 +365,6 @@ describe('createProviderSignIn', () => {
       fetch: fetchStub,
       now: Date.now,
       chatGptClientId: CLIENT_ID,
-      minimaxClientId: undefined,
       installId: () => HOST_ID,
       chatGptPort: 0,
     });
@@ -540,7 +395,6 @@ describe('createProviderSignIn', () => {
       fetch: fetchStub,
       now: Date.now,
       chatGptClientId: CLIENT_ID,
-      minimaxClientId: undefined,
       installId: () => HOST_ID,
       chatGptPort: 0,
     });
@@ -573,7 +427,6 @@ describe('createProviderSignIn', () => {
         fetch: fetchStub,
         now: Date.now,
         chatGptClientId: CLIENT_ID,
-        minimaxClientId: undefined,
         installId: () => HOST_ID,
         chatGptPort: 0,
       });
@@ -610,7 +463,6 @@ describe('createProviderSignIn', () => {
         fetch: fetchStub,
         now: Date.now,
         chatGptClientId: CLIENT_ID,
-        minimaxClientId: undefined,
         installId: () => HOST_ID,
         chatGptPort: 0,
       });

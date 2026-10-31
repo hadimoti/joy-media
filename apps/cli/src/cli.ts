@@ -54,8 +54,6 @@ export interface CliFlags {
   acceptPublicEndpoint?: boolean | undefined;
   /** Explicitly chooses an OAuth provider flow for `agent provider add`. */
   oauth: boolean;
-  /** The MiniMax OAuth account region for `agent provider add`. */
-  region: string | undefined;
   /** Settings of a slot, for `agent slot set`. Validated by the slot rules, not here. */
   temperature?: string | undefined;
   maxOutputTokens?: string | undefined;
@@ -119,7 +117,6 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     slot: typeof v.slot === 'string' ? v.slot : undefined,
     acceptPublicEndpoint: Boolean(v['accept-public-endpoint']),
     oauth: Boolean(v.oauth),
-    region: typeof v.region === 'string' ? v.region : undefined,
     profile: typeof v.profile === 'string' ? v.profile : undefined,
     instructions: typeof v.instructions === 'string' ? v.instructions : undefined,
     temperature: typeof v.temperature === 'string' ? v.temperature : undefined,
@@ -174,7 +171,6 @@ export async function runCli(argv: string[]): Promise<number> {
         slot: { type: 'string' },
         'accept-public-endpoint': { type: 'boolean', default: false },
         oauth: { type: 'boolean', default: false },
-        region: { type: 'string' },
         profile: { type: 'string' },
         instructions: { type: 'string' },
         temperature: { type: 'string' },
@@ -211,6 +207,11 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 
   const { values, positionals } = parsedArgs;
+
+  if (Object.hasOwn(values, 'region')) {
+    logError('Unknown option: --region');
+    return 2;
+  }
 
   if (values.version) {
     console.log('JOY Media CLI v1.0.0');

@@ -1,25 +1,22 @@
 import {
   getOAuthClient,
   signInProviders,
-  type MiniMaxRegion,
 } from '@joy-media/provider-sdk';
 import {
   newExtAgentHostId,
   signInWithChatGpt,
   signInWithKimiCode,
-  signInWithMiniMax,
   signInWithXai,
   type OAuthAuthorizationPresentation,
 } from '@joy-media/provider-oauth';
 import { loadCliConfig, openCredentialStore, saveCliConfig } from '../utils/config.js';
 import type { OAuthCredential } from '../utils/credential-store.js';
 
-export type OAuthProfileProvider = 'chatgpt' | 'minimax' | 'kimi' | 'xai';
+export type OAuthProfileProvider = 'chatgpt' | 'kimi' | 'xai';
 
 export interface OAuthProfileSignInInput {
   readonly profileId: string;
   readonly provider: OAuthProfileProvider;
-  readonly region: MiniMaxRegion;
   /** The CLI presents device-code fields in the terminal and never launches a browser. */
   readonly onAuthorization: (presentation: OAuthAuthorizationPresentation) => void;
   readonly onSlowDown?: () => void;
@@ -57,20 +54,6 @@ export async function signInOAuthProfile(
       });
       return { provider: 'chatgpt', tokenRecord };
     }
-    case 'minimax': {
-      if (client?.clientId === undefined) {
-        throw new Error('MiniMax OAuth is not configured in this build.');
-      }
-      const tokenRecord = await signInWithMiniMax({
-        clientId: client.clientId,
-        region: input.region,
-        openExternal: doNotOpenBrowser,
-        onAuthorization: input.onAuthorization,
-        fetch: fetchFromProvider,
-        now,
-      });
-      return { provider: 'minimax', tokenRecord };
-    }
     case 'kimi': {
       const tokenRecord = await signInWithKimiCode({
         ...(client?.clientId === undefined ? {} : { clientId: client.clientId }),
@@ -100,10 +83,6 @@ export async function signInOAuthProfile(
 
 export function isOAuthProfileProvider(provider: string): provider is OAuthProfileProvider {
   return signInProviders().includes(provider as OAuthProfileProvider);
-}
-
-export function isMiniMaxRegion(region: string | undefined): region is MiniMaxRegion {
-  return region === 'global' || region === 'cn';
 }
 
 export function oauthTokenExpiry(credential: OAuthCredential, now = Date.now()): string {

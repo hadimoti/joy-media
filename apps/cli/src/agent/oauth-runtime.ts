@@ -12,10 +12,8 @@ import {
   ACCESS_TOKEN_REFRESH_MARGIN_MS,
   createChatGptTokenKeeper,
   createKimiTokenKeeper,
-  createMiniMaxTokenKeeper,
   createXaiTokenKeeper,
   KIMI_CODE_REFRESH_MARGIN_MS,
-  MINIMAX_ACCESS_TOKEN_REFRESH_MARGIN_MS,
   XAI_OAUTH_REFRESH_MARGIN_MS,
   type FetchLike,
 } from '@joy-media/provider-oauth';
@@ -152,11 +150,6 @@ export function createOAuthTokenManager(
     save: (profileId, handleId, tokenRecord) =>
       save(profileId, 'chatgpt', handleId, tokenRecord),
   });
-  const miniMaxKeeper = createMiniMaxTokenKeeper({
-    fetch: dependencies.fetch,
-    now: dependencies.now,
-    save: (profileId, handleId, tokenRecord) => save(profileId, 'minimax', handleId, tokenRecord),
-  });
   const kimiKeeper = createKimiTokenKeeper({
     fetch: dependencies.fetch,
     now: dependencies.now,
@@ -189,15 +182,6 @@ export function createOAuthTokenManager(
             return {
               provider: 'chatgpt',
               tokenRecord: await chatGptKeeper.current(
-                profileId,
-                handleId,
-                latest.tokenRecord,
-              ),
-            };
-          case 'minimax':
-            return {
-              provider: 'minimax',
-              tokenRecord: await miniMaxKeeper.current(
                 profileId,
                 handleId,
                 latest.tokenRecord,
@@ -258,8 +242,6 @@ function refreshMargin(credential: OAuthCredential): number {
   switch (credential.provider) {
     case 'chatgpt':
       return ACCESS_TOKEN_REFRESH_MARGIN_MS;
-    case 'minimax':
-      return MINIMAX_ACCESS_TOKEN_REFRESH_MARGIN_MS;
     case 'kimi':
       return KIMI_CODE_REFRESH_MARGIN_MS;
     case 'xai':

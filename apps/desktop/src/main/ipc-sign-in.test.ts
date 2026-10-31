@@ -77,63 +77,7 @@ describe('desktop.provider-profile.sign-in', () => {
     expect(await secretStore.get(profile?.secretHandleId ?? '')).toBe(CHATGPT_SECRET);
   });
 
-  it('forwards the selected MiniMax region to the main-process sign-in flow', async () => {
-    const providerSignIn = vi.fn(async (): Promise<SignInResult> => ({
-      provider: 'minimax',
-      baseUrl: 'https://api.minimax.io/v1',
-      modelId: 'MiniMax-M2',
-      secret: 'minimax-secret',
-    }));
-    const { handlers } = harness(providerSignIn);
-
-    const result = await dispatchIpcRequest(handlers, {
-      origin: ORIGIN,
-      channel: 'desktop.provider-profile.sign-in',
-      payload: { provider: 'minimax', region: 'cn' },
-    });
-
-    expect(result.ok).toBe(true);
-    expect(providerSignIn).toHaveBeenCalledWith('minimax', { minimaxRegion: 'cn' });
-  });
-
-  it('defaults a MiniMax sign-in with no region to Global', async () => {
-    const providerSignIn = vi.fn(async (): Promise<SignInResult> => ({
-      provider: 'minimax',
-      baseUrl: 'https://api.minimax.io/v1',
-      modelId: 'MiniMax-M2',
-      secret: 'minimax-secret',
-    }));
-    const { handlers } = harness(providerSignIn);
-
-    const result = await dispatchIpcRequest(handlers, {
-      origin: ORIGIN,
-      channel: 'desktop.provider-profile.sign-in',
-      payload: { provider: 'minimax' },
-    });
-
-    expect(result.ok).toBe(true);
-    expect(providerSignIn).toHaveBeenCalledWith('minimax', { minimaxRegion: 'global' });
-  });
-
-  it.each(['us', 1, null])(
-    'rejects unsupported MiniMax region %j before sign-in or profile writes',
-    async (region) => {
-      const providerSignIn = vi.fn();
-      const { handlers, localDatabase } = harness(providerSignIn);
-
-      const result = await dispatchIpcRequest(handlers, {
-        origin: ORIGIN,
-        channel: 'desktop.provider-profile.sign-in',
-        payload: { provider: 'minimax', region },
-      });
-
-      expect(result).toMatchObject({ ok: false, error: 'Invalid sign-in request' });
-      expect(providerSignIn).not.toHaveBeenCalled();
-      expect(localDatabase.listProviderProfiles()).toHaveLength(0);
-    },
-  );
-
-  it('rejects a region on non-MiniMax sign-in requests before sign-in starts', async () => {
+  it('rejects a removed region field on sign-in requests before sign-in starts', async () => {
     const providerSignIn = vi.fn();
     const { handlers, localDatabase } = harness(providerSignIn);
 
@@ -148,18 +92,21 @@ describe('desktop.provider-profile.sign-in', () => {
     expect(localDatabase.listProviderProfiles()).toHaveLength(0);
   });
 
-  it('refuses a provider that is set up with an API key, such as OpenRouter, before any sign-in starts', async () => {
-    const providerSignIn = vi.fn();
-    const { handlers, localDatabase } = harness(providerSignIn);
-    const result = await dispatchIpcRequest(handlers, {
-      origin: ORIGIN,
-      channel: 'desktop.provider-profile.sign-in',
-      payload: { provider: 'openrouter' },
-    });
-    expect(result).toMatchObject({ ok: false, error: 'Invalid sign-in request' });
-    expect(providerSignIn).not.toHaveBeenCalled();
-    expect(localDatabase.listProviderProfiles()).toHaveLength(0);
-  });
+  it.each(['openrouter', 'minimax'])(
+    'refuses the API-key provider %s before any sign-in starts',
+    async (provider) => {
+      const providerSignIn = vi.fn();
+      const { handlers, localDatabase } = harness(providerSignIn);
+      const result = await dispatchIpcRequest(handlers, {
+        origin: ORIGIN,
+        channel: 'desktop.provider-profile.sign-in',
+        payload: { provider },
+      });
+      expect(result).toMatchObject({ ok: false, error: 'Invalid sign-in request' });
+      expect(providerSignIn).not.toHaveBeenCalled();
+      expect(localDatabase.listProviderProfiles()).toHaveLength(0);
+    },
+  );
 
   it('refuses a sign-in result that names another provider, and saves nothing', async () => {
     const providerSignIn = vi.fn(async (): Promise<SignInResult> => ({

@@ -54,7 +54,12 @@ describe('provider registry', () => {
     expect(findRegistryProvider('chatgpt')?.auth.methods).toEqual(['subscription-sign-in']);
     expect(findRegistryProvider('chatgpt')?.signInOnly).toBe(true);
     expect(findRegistryProvider('claude')?.api).toBe('anthropic-messages');
-    expect(findRegistryProvider('minimax')?.auth).toMatchObject({ gated: true, unverified: true });
+    expect(findRegistryProvider('minimax')?.auth).toMatchObject({
+      methods: ['api-key'],
+      sourceDate: '2026-10-31',
+    });
+    expect(findRegistryProvider('minimax')?.auth.gated).toBeUndefined();
+    expect(findRegistryProvider('minimax')?.auth.unverified).toBeUndefined();
     expect(findRegistryProvider('kimi')?.auth).toMatchObject({ gated: true, unverified: true });
   });
 
@@ -63,6 +68,7 @@ describe('provider registry', () => {
       ['openai', 'https://api.openai.com/v1'],
       ['kimi', 'https://api.moonshot.ai/v1'],
       ['minimax', 'https://api.minimax.io/v1'],
+      ['minimax', 'https://api.minimax.cn/v1'],
       ['xai', 'https://api.x.ai/v1'],
       ['kimi', 'https://api.kimi.ai/coding/v1'],
       ['deepseek', 'https://api.deepseek.com'],
@@ -159,13 +165,13 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     const withSignIn = PROVIDER_REGISTRY.filter((provider) =>
       provider.auth.methods.includes('subscription-sign-in'),
     ).map((provider) => provider.id);
-    expect(withSignIn).toEqual(['minimax', 'kimi', 'chatgpt', 'xai']);
+    expect(withSignIn).toEqual(['kimi', 'chatgpt', 'xai']);
     expect(permittedAuthMethods('chatgpt')).toEqual(['subscription-sign-in']);
     expect(isAuthGated('chatgpt')).toBe(true);
     expect(offeredAuthMethods('chatgpt')).toEqual([]);
-    expect(permittedAuthMethods('minimax')).toEqual(['api-key', 'subscription-sign-in']);
-    expect(isAuthGated('minimax')).toBe(true);
-    expect(offeredAuthMethods('minimax')).toEqual([]);
+    expect(permittedAuthMethods('minimax')).toEqual(['api-key']);
+    expect(isAuthGated('minimax')).toBe(false);
+    expect(offeredAuthMethods('minimax')).toEqual(['api-key']);
     expect(permittedAuthMethods('kimi')).toEqual(['api-key', 'subscription-sign-in']);
     expect(isAuthGated('kimi')).toBe(true);
     expect(offeredAuthMethods('kimi')).toEqual([]);
@@ -178,12 +184,12 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     expect(offeredAuthMethods('xai')).toEqual(['api-key', 'subscription-sign-in']);
   });
 
-  it('lists the four owner-selected OAuth providers on the sign-in surface', () => {
+  it('lists only ChatGPT, Kimi and xAI on the sign-in surface', () => {
     // The registry lists them in its own order; the settings panel decides the order of its buttons.
-    expect(signInProviders()).toEqual(['minimax', 'kimi', 'chatgpt', 'xai']);
+    expect(signInProviders()).toEqual(['kimi', 'chatgpt', 'xai']);
     expect(isSignInProvider('chatgpt')).toBe(true);
     expect(isSignInProvider('kimi')).toBe(true);
-    expect(isSignInProvider('minimax')).toBe(true);
+    expect(isSignInProvider('minimax')).toBe(false);
     expect(isSignInProvider('xai')).toBe(true);
   });
 
@@ -192,7 +198,6 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
       if (
         provider.id === 'chatgpt' ||
         provider.id === 'kimi' ||
-        provider.id === 'minimax' ||
         provider.id === 'xai'
       )
         continue;
@@ -214,20 +219,21 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     }
   });
 
-  it('keeps MiniMax API-key eligibility separate from its unverified Coding Plan key question', () => {
+  it('records MiniMax API-key approval under D23 and clears its eligibility gate', () => {
     const minimax = PROVIDER_REGISTRY.find((provider) => provider.id === 'minimax');
-    expect(minimax?.auth.methods).toEqual(['api-key', 'subscription-sign-in']);
-    expect(minimax?.auth.gated).toBe(true);
-    expect(minimax?.auth.unverified).toBe(true);
-    expect(minimax?.auth.note).toContain('JOY Media');
-    expect(minimax?.auth.note).toContain('sk-cp-');
+    expect(minimax?.auth.methods).toEqual(['api-key']);
+    expect(minimax?.auth.gated).toBeUndefined();
+    expect(minimax?.auth.unverified).toBeUndefined();
+    expect(minimax?.auth.source).toContain('D23');
+    expect(minimax?.auth.note).toContain('2026-10-31');
+    expect(minimax?.auth.note).toContain('M Plan');
   });
 
   it('marks the rows the plan leaves unverified as unverified', () => {
     const unverified = PROVIDER_REGISTRY.filter(
       (provider) => provider.auth.unverified === true,
     ).map((provider) => provider.id);
-    expect(unverified).toEqual(['minimax', 'kimi']);
+    expect(unverified).toEqual(['kimi']);
   });
 
   it('permits a key or nothing for a custom endpoint, and nothing for an unknown provider', () => {

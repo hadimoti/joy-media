@@ -103,7 +103,6 @@ describe('Kimi Code configurable client ID', () => {
       fetch,
       now: () => NOW,
       chatGptClientId: undefined,
-      minimaxClientId: undefined,
       getSetting: (key) => (key === 'oauth.client_id.kimi' ? ` ${CLIENT_ID} ` : undefined),
       installId: () => 'urn:uuid:550e8400-e29b-41d4-a716-446655440000',
     });

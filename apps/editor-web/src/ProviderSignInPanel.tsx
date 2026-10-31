@@ -2,7 +2,6 @@ import { useRef, useState } from 'react';
 import {
   findRegistryProvider,
   signInProviders,
-  type MiniMaxRegion,
   type ProviderRegion,
   type ProviderRegionId,
   type RegistryProvider,
@@ -19,13 +18,12 @@ import {
 const OAUTH_RISK_NOTICE =
   'Signing in uses a third-party public app and may stop working or be deactivated by the provider at any time. An API key is the dependable way to connect.';
 
-/** D22 step 2 brief order for the provider accordions. Source: D22 step 2 brief (2026-10-30). */
-const ORDER: readonly RegistryProviderId[] = ['chatgpt', 'minimax', 'kimi', 'xai'];
+/** D23 sign-in provider order follows the existing settings panel order. */
+const ORDER: readonly RegistryProviderId[] = ['chatgpt', 'kimi', 'xai'];
 
 const LABELS: Partial<Record<RegistryProviderId, string>> = {
   chatgpt: 'ChatGPT',
   kimi: 'Kimi',
-  minimax: 'MiniMax',
   xai: 'xAI',
 };
 
@@ -49,8 +47,8 @@ function providerLabel(provider: RegistryProviderId): string {
 }
 
 /**
- * Offers the four D22 provider accordions. API-key routes use the desktop profile broker; OAuth actions use the
- * desktop's provider-specific sign-in flow. Source: D22 step 2 brief (2026-10-30).
+ * Offers the three D23 sign-in provider accordions. API-key routes use the desktop profile broker; OAuth actions use
+ * the desktop's provider-specific sign-in flow.
  */
 export function ProviderSignInPanel({
   onSignedIn,
@@ -70,14 +68,11 @@ export function ProviderSignInPanel({
 
   if (!isDesktopHost()) return null;
 
-  const signIn = async (target: RegistryProviderId, region: MiniMaxRegion): Promise<void> => {
+  const signIn = async (target: RegistryProviderId): Promise<void> => {
     setBusy(target);
     setSignInStatus(undefined);
     try {
-      const profile = await signInDesktopProviderProfile({
-        provider: target,
-        ...(target === 'minimax' ? { region } : {}),
-      });
+      const profile = await signInDesktopProviderProfile({ provider: target });
       onSignedIn(profile);
       setSignInStatus({ provider: target, message: 'Signed in to ' + providerLabel(target) + '.' });
     } catch (error) {
@@ -102,7 +97,7 @@ export function ProviderSignInPanel({
           signInBusy={busy === provider.id}
           signInDisabled={busy !== undefined}
           signInMessage={signInStatus?.provider === provider.id ? signInStatus.message : undefined}
-          onSignIn={(region) => void signIn(provider.id, region)}
+          onSignIn={() => void signIn(provider.id)}
           onSaved={onSaved}
         />
       ))}
@@ -122,14 +117,13 @@ function ProviderRouteAccordion({
   readonly signInBusy: boolean;
   readonly signInDisabled: boolean;
   readonly signInMessage?: string | undefined;
-  readonly onSignIn: (region: MiniMaxRegion) => void;
+  readonly onSignIn: () => void;
   readonly onSaved?: ((profile: DesktopProviderProfile) => void) | undefined;
 }) {
   const label = providerLabel(provider.id);
   const regions = apiKeyRegions(provider);
   const [open, setOpen] = useState(false);
   const [apiKeyRegionId, setApiKeyRegionId] = useState<ProviderRegionId | undefined>(regions[0]?.id);
-  const [miniMaxRegion, setMiniMaxRegion] = useState<MiniMaxRegion>('global');
   const [modelId, setModelId] = useState('');
   const [saving, setSaving] = useState(false);
   const [apiKeyMessage, setApiKeyMessage] = useState<string | undefined>(undefined);
@@ -297,29 +291,11 @@ function ProviderRouteAccordion({
 
           <section className="joy-provider-route" aria-label={label + ' OAuth route'}>
             <h4 className="joy-provider-route-title">OAuth sign-in route (Secondary)</h4>
-            {provider.id === 'minimax' && (
-              <div className="joy-settings-field">
-                <label>
-                  <span>MiniMax account region</span>
-                  <select
-                    aria-label="MiniMax account region"
-                    disabled={signInDisabled}
-                    value={miniMaxRegion}
-                    onChange={(event) =>
-                      setMiniMaxRegion(event.currentTarget.value as MiniMaxRegion)
-                    }
-                  >
-                    <option value="global">Global (International)</option>
-                    <option value="cn">China</option>
-                  </select>
-                </label>
-              </div>
-            )}
             <button
               type="button"
               className="joy-btn-secondary"
               disabled={signInDisabled || saving}
-              onClick={() => onSignIn(miniMaxRegion)}
+              onClick={onSignIn}
             >
               Sign in with {label}
               {signInBusy ? '…' : ''}

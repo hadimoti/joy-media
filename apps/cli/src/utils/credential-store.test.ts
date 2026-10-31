@@ -42,6 +42,11 @@ const CUSTOM: ProviderCredential = {
   baseUrl: 'http://127.0.0.1:1234/v1',
   defaultModel: 'local-model',
 };
+const MINIMAX_API_KEY: ProviderCredential = {
+  apiKey: 'sk-cp-test-not-a-real-key',
+  baseUrl: 'https://api.minimax.io/v1',
+  defaultModel: 'MiniMax-M3.1-Flash',
+};
 const OAUTH_CREDENTIALS: readonly OAuthCredential[] = [
   {
     provider: 'chatgpt',
@@ -51,17 +56,6 @@ const OAUTH_CREDENTIALS: readonly OAuthCredential[] = [
       accountId: 'chatgpt-test-account',
       accessToken: 'chatgpt-access-token-secret',
       refreshToken: 'chatgpt-refresh-token-secret',
-      accessExpiresAt: 1_798_000_000_000,
-    },
-  },
-  {
-    provider: 'minimax',
-    tokenRecord: {
-      version: 1,
-      clientId: 'minimax-test-client',
-      region: 'global',
-      accessToken: 'minimax-access-token-secret',
-      refreshToken: 'minimax-refresh-token-secret',
       accessExpiresAt: 1_798_000_000_000,
     },
   },
@@ -160,6 +154,15 @@ describe('credential store', () => {
     expect(store.read('openrouter')).toEqual(OPENROUTER);
     expect(store.list()).toEqual(['openrouter']);
     expect(readFileSync(storePath, 'utf8')).not.toContain(OPENROUTER.apiKey);
+  });
+
+  it('keeps MiniMax API-key profiles in the existing version 2 credential format', () => {
+    const store = createCredentialStore({ path: storePath, protector: testProtector });
+    store.save('minimax-mplan-test', MINIMAX_API_KEY);
+
+    expect(store.read('minimax-mplan-test')).toEqual(MINIMAX_API_KEY);
+    expect(JSON.parse(readFileSync(storePath, 'utf8'))).toMatchObject({ version: 2 });
+    expect(readFileSync(storePath, 'utf8')).not.toContain(MINIMAX_API_KEY.apiKey);
   });
 
   it('keeps two profile keys separate when one of their agent bindings is cleared', () => {
@@ -267,12 +270,12 @@ describe('credential store', () => {
 
     expect(store.read('openrouter')).toEqual(OPENROUTER);
     expect(readFileSync(storePath, 'utf8')).toBe(before);
-    store.save('kimi-profile', OAUTH_CREDENTIALS[2]!);
+    store.save('kimi-profile', OAUTH_CREDENTIALS[1]!);
 
     expect(JSON.parse(readFileSync(storePath, 'utf8'))).toMatchObject({ version: 2 });
     expect(store.read('openrouter')).toEqual(OPENROUTER);
     expect(store.read('custom')).toEqual(CUSTOM);
-    expect(store.read('kimi-profile')).toEqual(OAUTH_CREDENTIALS[2]);
+    expect(store.read('kimi-profile')).toEqual(OAUTH_CREDENTIALS[1]);
   });
 
   it('upgrades a version 1 store on an explicit credential removal', () => {
@@ -293,7 +296,7 @@ describe('credential store', () => {
     writeVersionOneStore(versionOneEntries);
     const store = createCredentialStore({ path: storePath, protector: testProtector });
 
-    store.save('kimi-profile', OAUTH_CREDENTIALS[2]!);
+    store.save('kimi-profile', OAUTH_CREDENTIALS[1]!);
 
     expect(store.read('__proto__')).toEqual(CUSTOM);
     expect(store.list()).toContain('__proto__');
@@ -310,11 +313,50 @@ describe('credential store', () => {
     expect(saved).not.toContain(credential.tokenRecord.refreshToken);
   });
 
+  it('reports a stored MiniMax OAuth record as removed by D23 and asks for an API key', () => {
+    const oldCredential = {
+      provider: 'minimax',
+      tokenRecord: {
+        version: 1,
+        clientId: 'test-client-id',
+        region: 'global',
+        accessToken: 'test-access-token',
+        refreshToken: 'test-refresh-token',
+        accessExpiresAt: 1_798_000_000_000,
+      },
+    };
+    writeFileSync(
+      storePath,
+      JSON.stringify({
+        version: 2,
+        protector: testProtector.name,
+        entries: {
+          'minimax-profile': {
+            ciphertext: testProtector.protect(JSON.stringify(oldCredential)),
+          },
+        },
+      }),
+    );
+    const store = createCredentialStore({ path: storePath, protector: testProtector });
+
+    let failure: unknown;
+    try {
+      store.read('minimax-profile');
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(CredentialUnavailableError);
+    expect(failure).toBeInstanceOf(Error);
+    if (!(failure instanceof Error)) throw new Error('Expected the old credential to be refused');
+    expect(failure.message).toMatch(/MiniMax OAuth.*D23.*API key/i);
+  });
+
   it('refuses an OAuth record that its provider decoder cannot validate', () => {
     const store = createCredentialStore({ path: storePath, protector: testProtector });
     const invalid = {
       provider: 'kimi',
-      tokenRecord: { ...OAUTH_CREDENTIALS[2]!.tokenRecord, scope: 'wrong-scope' },
+      tokenRecord: { ...OAUTH_CREDENTIALS[1]!.tokenRecord, scope: 'wrong-scope' },
     } as OAuthCredential;
 
     expect(() => store.save('kimi-profile', invalid)).toThrow(CredentialUnavailableError);
@@ -370,7 +412,7 @@ describe('credential store', () => {
 
 describe('provider metadata', () => {
   it('keeps authKind as metadata and excludes access and refresh tokens', () => {
-    const credential = OAUTH_CREDENTIALS[2]!;
+    const credential = OAUTH_CREDENTIALS[1]!;
     openCredentialStore().save('kimi-profile', credential);
     const unsafeMetadata = {
       'kimi-profile': {

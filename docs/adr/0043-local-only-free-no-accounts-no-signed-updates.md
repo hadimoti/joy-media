@@ -18,10 +18,11 @@ records the decisions. It does not repeat the plan's removal lists.
    [ADR-0016](./0016-shared-joy-identity-boundary.md) and [ADR-0017 (independent media login)](./0017-independent-media-login.md)
    are superseded. Google is reached with a Gemini API key only: no Antigravity sign-in and no Gemini OAuth.
 3. **Provider credentials belong to the user.** The desktop app keeps each secret with Windows DPAPI through safeStorage. Provider
-   credentials go through the main-process broker (D10), and Workers hold none. ChatGPT uses a sign-in; OpenRouter, Grok, MiniMax
-   and Kimi use API keys, and Kimi and MiniMax offer a region choice (S5). This sentence was written against D2 and was updated
-   on 2026-10-30: owner decision D20 superseded D2, and sign-in is now offered to ChatGPT and MiniMax only, with every other
-   provider, OpenRouter included, set up with an API key. Kilo is removed from the app, the engine, the SDK, the CLI, the admin
+   credentials go through the main-process broker (D10), and Workers hold none. ChatGPT is sign-in-only; Kimi and xAI offer
+   sign-in alongside API-key routes. OpenRouter and Grok use API keys. MiniMax uses an API key with International and China
+   base URLs; Kimi offers a region choice (S5).
+   This sentence was written against D2, then updated under D20 and D22; owner decision D23 on 2026-10-31 removes MiniMax
+   OAuth and leaves ChatGPT, Kimi and xAI as the sign-in providers. Kilo is removed from the app, the engine, the SDK, the CLI, the admin
    panel and joy-vps residue (I1). Kilo in the code-server workspace is not touched.
 4. **Local models.** Loopback endpoints (127.0.0.1 or localhost) are allowed, with a warning for each URL and no key (D8). IPv6
    loopback is refused (S4).

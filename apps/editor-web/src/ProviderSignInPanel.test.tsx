@@ -97,12 +97,11 @@ describe('ProviderSignInPanel', () => {
     expect(renderToStaticMarkup(<ProviderSignInPanel onSignedIn={() => undefined} />)).toBe('');
   });
 
-  it('shows four provider accordions in the D22 order and no API-key-only provider', () => {
+  it('shows only the three OAuth provider accordions and no API-key-only provider', () => {
     global.window = { joyDesktop: {} };
     const markup = renderToStaticMarkup(<ProviderSignInPanel onSignedIn={() => undefined} />);
     const headers = [
       'Toggle ChatGPT connection routes',
-      'Toggle MiniMax connection routes',
       'Toggle Kimi connection routes',
       'Toggle xAI connection routes',
     ];
@@ -110,6 +109,7 @@ describe('ProviderSignInPanel', () => {
 
     expect(positions.every((position) => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((first, second) => first - second));
+    expect(markup).not.toContain('MiniMax');
     expect(markup).not.toContain('OpenRouter');
     expect(markup).not.toContain('DeepSeek');
   });
@@ -119,7 +119,7 @@ describe('ProviderSignInPanel', () => {
     await mount();
 
     const triggers = [...container.querySelectorAll<HTMLButtonElement>('.joy-accordion-trigger')];
-    expect(triggers).toHaveLength(4);
+    expect(triggers).toHaveLength(3);
 
     for (const trigger of triggers) await act(async () => trigger.click());
 
@@ -134,7 +134,7 @@ describe('ProviderSignInPanel', () => {
     installDesktopBridge();
     await mount();
 
-    for (const provider of ['ChatGPT', 'MiniMax', 'Kimi', 'xAI']) {
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) {
       await openAccordion(provider);
       const signInRoute = route(provider, 'OAuth');
       const card = signInRoute.closest('.joy-accordion-item');
@@ -154,22 +154,20 @@ describe('ProviderSignInPanel', () => {
       [...container.querySelectorAll('p')].filter(
         (paragraph) => paragraph.textContent === RISK_NOTICE,
       ),
-    ).toHaveLength(4);
+    ).toHaveLength(3);
   });
 
   it('uses only API-key regions for the primary route and keeps OAuth-only bases out of it', async () => {
     installDesktopBridge();
     await mount();
 
-    for (const provider of ['ChatGPT', 'MiniMax', 'Kimi', 'xAI']) await openAccordion(provider);
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) await openAccordion(provider);
 
     const expectedBases = [
-      ['MiniMax', 'https://api.minimax.io/v1'],
       ['Kimi', 'https://api.moonshot.ai/v1'],
       ['xAI', 'https://api.x.ai/v1'],
     ] as const;
     const expectedKeyUrls = {
-      MiniMax: 'https://platform.minimax.io',
       Kimi: 'https://platform.kimi.ai/console/api-keys',
       xAI: 'https://console.x.ai',
     };
@@ -200,40 +198,6 @@ describe('ProviderSignInPanel', () => {
     expect(xaiKeyRoute.querySelectorAll('input[readonly]')).toHaveLength(1);
   });
 
-  it('sends MiniMax China only to MiniMax and leaves other sign-in requests without a region', async () => {
-    const invoke = installDesktopBridge();
-    await mount();
-
-    for (const provider of ['ChatGPT', 'MiniMax', 'Kimi', 'xAI']) {
-      await openAccordion(provider);
-      if (provider === 'MiniMax') {
-        const region = route(provider, 'OAuth').querySelector<HTMLSelectElement>(
-          'select[aria-label="MiniMax account region"]',
-        );
-        if (region === null) throw new Error('Expected MiniMax sign-in region selector');
-        region.value = 'cn';
-        await act(async () => region.dispatchEvent(new Event('change', { bubbles: true })));
-      }
-      const button = route(provider, 'OAuth').querySelector('button');
-      if (button === null) throw new Error('Expected ' + provider + ' sign-in button');
-      await act(async () => button.click());
-    }
-
-    expect(invoke).toHaveBeenNthCalledWith(1, 'desktop.provider-profile.sign-in', {
-      provider: 'chatgpt',
-    });
-    expect(invoke).toHaveBeenNthCalledWith(2, 'desktop.provider-profile.sign-in', {
-      provider: 'minimax',
-      region: 'cn',
-    });
-    expect(invoke).toHaveBeenNthCalledWith(3, 'desktop.provider-profile.sign-in', {
-      provider: 'kimi',
-    });
-    expect(invoke).toHaveBeenNthCalledWith(4, 'desktop.provider-profile.sign-in', {
-      provider: 'xai',
-    });
-  });
-
   it('saves the selected provider and region through the desktop bridge without logging the key', async () => {
     const invoke = installDesktopBridge();
     const onSaved = vi.fn();
@@ -246,13 +210,6 @@ describe('ProviderSignInPanel', () => {
       readonly baseUrl: string;
       readonly modelId: string;
     }[] = [
-      {
-        provider: 'MiniMax',
-        id: 'minimax',
-        region: 'china',
-        baseUrl: 'https://api.minimax.cn/v1',
-        modelId: 'MiniMax-M2',
-      },
       {
         provider: 'Kimi',
         id: 'kimi',
@@ -308,7 +265,7 @@ describe('ProviderSignInPanel', () => {
       expect(key.value).toBe('');
     }
 
-    expect(onSaved).toHaveBeenCalledTimes(3);
+    expect(onSaved).toHaveBeenCalledTimes(2);
     expect(container.textContent).not.toContain('secret-test-key');
     expect(consoleLog).not.toHaveBeenCalled();
   });

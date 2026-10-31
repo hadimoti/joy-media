@@ -187,13 +187,11 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     label: 'MiniMax',
     api: 'chat-completions',
     auth: {
-      methods: ['api-key', 'subscription-sign-in'],
+      methods: ['api-key'],
       source:
-        "PLAN-v4 §6d-1 table, row 'MiniMax': MiniMax platform docs list its own tools for Coding Plan keys (sk-cp-) but do not establish JOY Media's commercial eligibility",
-      sourceDate: '2026-10-30',
-      gated: true,
-      unverified: true,
-      note: 'MiniMax documents API-key use, but JOY Media\'s eligibility for customer-supplied Coding Plan (sk-cp-) and M Plan API keys remains unverified, so generic auth-method selection stays gated. This metadata gate does not disable the desktop API-key entry form or CLI MiniMax-key profile path, and it does not authorize customer-key use. D20 also permits device-code sign-in; the OpenClaw public client is the default until JOY registers its own configurable client ID.',
+        'Owner decision D23 (2026-10-31), following MiniMax\'s written approval of per-user M Plan API-key use through JOY Media.',
+      sourceDate: '2026-10-31',
+      note: 'D23 (2026-10-31) makes MiniMax API-key only: the owner confirmed in writing that MiniMax approved per-user local use of the M Plan subscription key, and the CLI and desktop broker both returned nine models and a successful answer against the registered International endpoint. OAuth is no longer offered because the API-key route is proven.',
     },
     regions: [
       {
@@ -428,8 +426,8 @@ export function offeredAuthMethods(provider: string): readonly ProviderAuthMetho
 }
 
 /**
- * The registry providers that permit subscription sign-in under the owner-selected local routes: ChatGPT, Kimi Code,
- * MiniMax, and xAI. The desktop panel runs each provider's dedicated flow; generic profile auth selection remains
+ * The registry providers that permit subscription sign-in under the owner-selected local routes: ChatGPT, Kimi,
+ * and xAI. The desktop panel runs each provider's dedicated flow; generic profile auth selection remains
  * separately gated where the provider row says so.
  *
  * The sign-in surface is built from this list, so API-key-only providers do not offer a sign-in. It reads the
