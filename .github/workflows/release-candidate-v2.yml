@@ -455,6 +455,7 @@ jobs:
             test-output/release-performance/timeline-integrity.json \
             test-output/release-performance/editor.json \
             test-output/delivery/result.json \
+            test-output/windows/acceptance.json \
             test-output/operations/restore.json \
             test-output/ci-janitor/inventory.json; do
             test -s "$required" || { echo "required real-service evidence is missing: $required" >&2; exit 1; }
