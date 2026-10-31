@@ -19,31 +19,42 @@ import { createMediaHandlers, type MediaHandlers } from './support/media-handler
 export const E2E_TOKEN = 'joy-media-e2e-token';
 export const MEDIA_FIXTURE_DIR = join(process.cwd(), 'packages/test-fixtures/media');
 
-/** The desktop hosts this spec file started, so no Worker or job API outlives a test. */
-const startedMediaHarnesses = new Set<MediaHandlers>();
+/** Desktop hosts this file started that no test has asked to stop yet. */
+const liveMediaHosts = new Set<MediaHandlers>();
+/** Stops still in flight. The test teardown waits for every one, so none outlives its test. */
+const pendingMediaStops = new Set<Promise<void>>();
+
+function stopMediaHost(host: MediaHandlers): void {
+  liveMediaHosts.delete(host);
+  const stopping: Promise<void> = host
+    .stop()
+    .catch((error: unknown) => {
+      console.warn(`[wp29-r5-harness] stopping the desktop host failed: ${String(error)}`);
+    })
+    .finally(() => {
+      pendingMediaStops.delete(stopping);
+    });
+  pendingMediaStops.add(stopping);
+}
 
 /**
  * Installs the real desktop media host for an opted-in browser spec, before navigation.
  *
  * The host is the desktop's own media channel, job stack and Worker process (see
- * `tests/e2e/support/desktop-job-harness.ts`). It is started per test and stopped when the
- * test ends, so no Worker process or loopback API is left behind.
+ * `tests/e2e/support/desktop-job-harness.ts`). It is started per test. It stops when the test
+ * ends, or when its page closes early, and the test teardown waits for the stop to finish, so no
+ * Worker process or loopback API is left behind.
  */
 export async function installMediaImportBridge(page: Page): Promise<void> {
-  const harness = await createMediaHandlers();
-  startedMediaHarnesses.add(harness);
-  await installJoyDesktopBridge(page, [harness.handler]);
-  page.once('close', () => {
-    startedMediaHarnesses.delete(harness);
-    void harness.stop();
-  });
+  const host = await createMediaHandlers();
+  liveMediaHosts.add(host);
+  page.once('close', () => stopMediaHost(host));
+  await installJoyDesktopBridge(page, [host.handler]);
 }
 
 test.afterEach(async () => {
-  for (const harness of [...startedMediaHarnesses]) {
-    startedMediaHarnesses.delete(harness);
-    await harness.stop();
-  }
+  for (const host of [...liveMediaHosts]) stopMediaHost(host);
+  await Promise.all([...pendingMediaStops]);
 });
 
 export type R5Verdict =

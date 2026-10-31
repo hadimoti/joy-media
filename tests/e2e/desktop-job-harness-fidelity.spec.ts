@@ -5,39 +5,19 @@ import { expect, test } from '@playwright/test';
 import { startDesktopJobHarness, type DesktopJobHarness } from './support/desktop-job-harness.js';
 
 /**
- * The four fidelity gaps Kimi found in the in-memory media bridge.
+ * Checks the desktop stores behind the media channel, through the harness, for three of the four
+ * gaps Kimi found in the in-memory media bridge: the document revision check, the look instances
+ * kept on a write that omits them, and the upload checksum and length.
+ *
+ * The fourth gap, the catalog descriptor, has no test here. The in-memory bridge and the first
+ * harness both rebuilt the catalog from registrations, which the desktop does not do. Listing
+ * registered local assets is a product gap, so pinning the harness's stand-in down would hide it.
  *
  * Each test drives the real desktop host (tests/e2e/support/desktop-job-harness.ts) over the
- * channels the editor uses, and checks that the desktop's own stores answer.
+ * channels the editor uses.
  */
 
 const MEDIA_FIXTURE_DIR = join(process.cwd(), 'packages/test-fixtures/media');
-
-interface CatalogEntry {
-  readonly id: string;
-  readonly kind: string;
-  readonly displayName: string;
-  readonly sha256: string;
-  readonly bytes: number;
-  readonly descriptor: {
-    readonly mimeType: string;
-    readonly durationUs?: number;
-    readonly width?: number;
-    readonly height?: number;
-    readonly animation?: {
-      readonly frameCount: number;
-      readonly cycleDurationUs: number;
-      readonly loopCount: number;
-      readonly hasAlpha: boolean;
-    };
-  };
-}
-
-interface Catalog {
-  readonly version: number;
-  readonly counts: { readonly total: number; readonly audio: number; readonly image: number };
-  readonly assets: readonly CatalogEntry[];
-}
 
 async function answer<T>(
   harness: DesktopJobHarness,
@@ -57,33 +37,6 @@ test.describe('desktop job harness fidelity', () => {
 
   test.afterEach(async () => {
     await harness.stop();
-  });
-
-  test('gap 1: a catalog entry keeps the duration, size and animation of the stored original', async () => {
-    const bytes = await readFile(join(MEDIA_FIXTURE_DIR, 'animated.gif'));
-    const sha256 = createHash('sha256').update(bytes).digest('hex');
-    await answer(harness, 'desktop.media.asset.register', {
-      id: 'gap1-animated-gif',
-      kind: 'image',
-      displayName: 'animated.gif',
-      sha256,
-      bytes: bytes.byteLength,
-    });
-    await answer(harness, 'desktop.media.asset.upload-original', {
-      assetId: 'gap1-animated-gif',
-      bytes,
-    });
-
-    const catalog = await answer<Catalog>(harness, 'desktop.asset-library.get-catalog');
-    expect(catalog.counts.total).toBe(1);
-    const entry = catalog.assets[0];
-    expect(entry?.descriptor.mimeType).toBe('image/gif');
-    // The real facts of the fixture, read out of the stored original.
-    expect(entry?.descriptor.width).toBe(160);
-    expect(entry?.descriptor.height).toBe(96);
-    expect(entry?.descriptor.animation?.frameCount).toBeGreaterThan(1);
-    expect(entry?.descriptor.durationUs).toBe(entry?.descriptor.animation?.cycleDurationUs);
-    expect(entry?.descriptor.durationUs).toBeGreaterThan(0);
   });
 
   test('gap 2: a document write on a stale revision is a conflict, not a silent save', async () => {
@@ -175,7 +128,9 @@ test.describe('desktop job harness fidelity', () => {
     ).rejects.toThrow(/size/i);
   });
 
-  test('the harness runs a real Worker job through the desktop job stack', async () => {
+  test('the Worker process says hello through the desktop job stack', async () => {
+    // No job is submitted here. This only shows the real Worker process registers with the job
+    // store. Running a job end to end is covered by the worker-dependent media specs.
     const workers = await answer<readonly { workerId: string; capabilities: string[] }[]>(
       harness,
       'desktop.media.workers.list',
