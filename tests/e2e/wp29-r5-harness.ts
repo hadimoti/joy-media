@@ -14,15 +14,37 @@ import {
   featureTool,
 } from '../../apps/editor-web/src/feature-architecture.js';
 import { installJoyDesktopBridge } from './support/joy-desktop-bridge.js';
-import { createMediaHandlers } from './support/media-handlers.js';
+import { createMediaHandlers, type MediaHandlers } from './support/media-handlers.js';
 
 export const E2E_TOKEN = 'joy-media-e2e-token';
 export const MEDIA_FIXTURE_DIR = join(process.cwd(), 'packages/test-fixtures/media');
 
-/** Installs the local media import seam for an opted-in browser spec, before navigation. */
+/** The desktop hosts this spec file started, so no Worker or job API outlives a test. */
+const startedMediaHarnesses = new Set<MediaHandlers>();
+
+/**
+ * Installs the real desktop media host for an opted-in browser spec, before navigation.
+ *
+ * The host is the desktop's own media channel, job stack and Worker process (see
+ * `tests/e2e/support/desktop-job-harness.ts`). It is started per test and stopped when the
+ * test ends, so no Worker process or loopback API is left behind.
+ */
 export async function installMediaImportBridge(page: Page): Promise<void> {
-  await installJoyDesktopBridge(page, [createMediaHandlers()]);
+  const harness = await createMediaHandlers();
+  startedMediaHarnesses.add(harness);
+  await installJoyDesktopBridge(page, [harness.handler]);
+  page.once('close', () => {
+    startedMediaHarnesses.delete(harness);
+    void harness.stop();
+  });
 }
+
+test.afterEach(async () => {
+  for (const harness of [...startedMediaHarnesses]) {
+    startedMediaHarnesses.delete(harness);
+    await harness.stop();
+  }
+});
 
 export type R5Verdict =
   'PASS' | 'PASS-FIXTURE' | 'FAIL' | 'FLAKY' | 'BLOCKED-CONSENT' | 'BLOCKED-INTEGRATION';
