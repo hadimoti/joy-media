@@ -6,12 +6,6 @@ import { dirname, join, resolve } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
 const LINUX_DIR = join(REPO_ROOT, 'ops', 'self-hosted', 'linux-runner');
-const RELEASE_WORKFLOW = safeRead(
-  join(REPO_ROOT, '.github', 'workflows', 'release-candidate-v2.yml'),
-);
-const RELEASE_WORKFLOW_V1 = safeRead(
-  join(REPO_ROOT, '.github', 'workflows', 'release-candidate.yml'),
-);
 
 function safeRead(p: string): string {
   if (!statSyncSafe(p)) return '';

@@ -167,8 +167,8 @@ function readSelfHostedRunnerLabels(): ReadonlyArray<readonly string[]> {
     for (const m of body.matchAll(/`\s*(self-hosted,[^`\n]+?)\s*`/g)) candidates.push(m[1]);
     for (const raw of candidates) {
       const tokens = raw
-        .replace(/[`'|]/g, '')
-        .split(/[\s,]+/)
+        .replace(/[`'"|]/g, '')
+        .split(/[,\s]+/)
         .filter(Boolean);
       if (tokens.length === 0 || tokens[0] !== 'self-hosted') continue;
       declared.push(normalizeTuple(tokens));
