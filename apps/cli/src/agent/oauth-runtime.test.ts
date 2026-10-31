@@ -4,10 +4,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CHATGPT_TOKEN_URL } from '@joy-media/provider-oauth';
 import type { SecretProtector } from '../utils/dpapi-protector.js';
-import {
-  createCredentialStore,
-  type OAuthCredential,
-} from '../utils/credential-store.js';
+import { createCredentialStore, type OAuthCredential } from '../utils/credential-store.js';
 import {
   createOAuthTokenManager,
   oauthProfileLockPath,
@@ -32,7 +29,11 @@ const protector: SecretProtector = {
   protect: (plain) => Buffer.from(plain, 'utf8').toString('base64'),
   unprotect: (ciphertext) => Buffer.from(ciphertext, 'base64').toString('utf8'),
 };
-const savedEnvironment = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+const savedEnvironment = {
+  HOME: process.env.HOME,
+  USERPROFILE: process.env.USERPROFILE,
+  JOY_MEDIA_HOME: process.env.JOY_MEDIA_HOME,
+};
 
 describe('CLI OAuth token manager', () => {
   let home = '';
@@ -43,6 +44,7 @@ describe('CLI OAuth token manager', () => {
     storePath = join(home, '.joy-media', 'credentials.json');
     process.env.HOME = home;
     process.env.USERPROFILE = home;
+    process.env.JOY_MEDIA_HOME = join(home, '.joy-media');
   });
 
   afterEach(() => {
@@ -165,11 +167,12 @@ describe('CLI OAuth token manager', () => {
   it('leaves the stored token unchanged when refresh fails', async () => {
     const store = createCredentialStore({ path: storePath, protector });
     store.save(KIMI_PROFILE, KIMI_CREDENTIAL);
-    const fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ error: 'invalid_grant', secret: 'provider-body-secret' }), {
-        status: 401,
-        headers: { 'content-type': 'application/json' },
-      }),
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: 'invalid_grant', secret: 'provider-body-secret' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        }),
     );
     const manager = createOAuthTokenManager({ store: () => store, fetch, now: () => NOW });
 

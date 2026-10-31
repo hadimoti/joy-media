@@ -61,11 +61,7 @@ export interface XaiTokenKeeperDeps {
 }
 
 export interface XaiTokenKeeper {
-  current(
-    profileId: string,
-    handleId: string,
-    record: XaiTokenRecord,
-  ): Promise<XaiTokenRecord>;
+  current(profileId: string, handleId: string, record: XaiTokenRecord): Promise<XaiTokenRecord>;
 }
 
 interface FormReply {
@@ -208,7 +204,11 @@ export async function refreshXaiTokens(input: {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'xAI could not refresh this sign-in.');
   }
   const error = nonEmptyString(reply.error);
-  if (error === 'invalid_grant' || result.response.status === 401 || result.response.status === 403) {
+  if (
+    error === 'invalid_grant' ||
+    result.response.status === 401 ||
+    result.response.status === 403
+  ) {
     throw new OAuthFlowError('SIGN_IN_REQUIRED', 'Sign in with xAI again.');
   }
   if (!result.response.ok || typeof reply.access_token !== 'string') {
@@ -303,14 +303,20 @@ async function discoverEndpoints(fetch: FetchLike): Promise<XaiEndpoints> {
         signal: controller.signal,
       });
     } catch {
-      throw new OAuthFlowError('EXCHANGE_FAILED', 'xAI authorization service could not be reached.');
+      throw new OAuthFlowError(
+        'EXCHANGE_FAILED',
+        'xAI authorization service could not be reached.',
+      );
     }
     const reply = parseReplyObject(await replyText(response));
     if (!response.ok || reply === undefined) {
       throw new OAuthFlowError('EXCHANGE_FAILED', 'xAI returned an unreadable discovery reply.');
     }
     if (reply.issuer !== XAI_OAUTH_ISSUER) {
-      throw new OAuthFlowError('REDIRECT_REFUSED', 'xAI returned an untrusted authorization issuer.');
+      throw new OAuthFlowError(
+        'REDIRECT_REFUSED',
+        'xAI returned an untrusted authorization issuer.',
+      );
     }
     const deviceAuthorizationEndpoint = trustedXaiEndpoint(reply.device_authorization_endpoint);
     const tokenEndpoint = trustedXaiEndpoint(reply.token_endpoint);
@@ -393,10 +399,16 @@ function trustedXaiEndpoint(value: unknown): string {
   try {
     url = new URL(value);
   } catch {
-    throw new OAuthFlowError('REDIRECT_REFUSED', 'xAI returned an untrusted authorization endpoint.');
+    throw new OAuthFlowError(
+      'REDIRECT_REFUSED',
+      'xAI returned an untrusted authorization endpoint.',
+    );
   }
   if (!isTrustedXaiUrl(url, false)) {
-    throw new OAuthFlowError('REDIRECT_REFUSED', 'xAI returned an untrusted authorization endpoint.');
+    throw new OAuthFlowError(
+      'REDIRECT_REFUSED',
+      'xAI returned an untrusted authorization endpoint.',
+    );
   }
   return url.toString();
 }
@@ -435,7 +447,10 @@ async function postForm(
         signal: controller.signal,
       });
     } catch {
-      throw new OAuthFlowError('EXCHANGE_FAILED', 'xAI authorization service could not be reached.');
+      throw new OAuthFlowError(
+        'EXCHANGE_FAILED',
+        'xAI authorization service could not be reached.',
+      );
     }
     return { response, reply: parseReplyObject(await replyText(response)) };
   } finally {
@@ -467,7 +482,8 @@ function tokenExpiry(value: unknown, now: number): number | undefined {
 }
 
 function positiveNumber(value: unknown): number | undefined {
-  const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  const numeric =
+    typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
   return Number.isFinite(numeric) && numeric > 0 ? numeric : undefined;
 }
 

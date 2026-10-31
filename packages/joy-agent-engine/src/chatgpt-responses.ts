@@ -248,7 +248,13 @@ function chatCompletionStream(outcome: ChatGptOutcome, modelId: string): Respons
     object: 'chat.completion.chunk',
     created: Math.floor(Date.now() / 1000),
     model: modelId,
-    choices: [{ index: 0, delta, finish_reason: choice.finish_reason === 'tool_calls' ? 'tool_calls' : 'stop' }],
+    choices: [
+      {
+        index: 0,
+        delta,
+        finish_reason: choice.finish_reason === 'tool_calls' ? 'tool_calls' : 'stop',
+      },
+    ],
   };
   return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, {
     status: 200,
@@ -267,7 +273,9 @@ function chatCompletionJson(outcome: ChatGptOutcome, modelId: string): Response 
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
       model: modelId,
-      choices: [{ index: 0, message: completion.message, finish_reason: completion.choice.finish_reason }],
+      choices: [
+        { index: 0, message: completion.message, finish_reason: completion.choice.finish_reason },
+      ],
     }),
     { status: 200, headers: { 'content-type': 'application/json' } },
   );
@@ -275,7 +283,9 @@ function chatCompletionJson(outcome: ChatGptOutcome, modelId: string): Response 
 
 function completionFields(
   outcome: ChatGptOutcome,
-): { readonly choice: Record<string, unknown>; readonly message: Record<string, unknown> } | undefined {
+):
+  | { readonly choice: Record<string, unknown>; readonly message: Record<string, unknown> }
+  | undefined {
   if (outcome.kind !== 'completed') return undefined;
   const choices = parseObject(outcome.completion)?.choices;
   const choice = Array.isArray(choices) && isRecord(choices[0]) ? choices[0] : undefined;
@@ -288,7 +298,10 @@ function outcomeFailure(outcome: ChatGptOutcome): Response | undefined {
     case 'completed':
       return undefined;
     case 'plan-limit':
-      return errorResponse(429, 'ChatGPT plan limit reached. You can switch to an API-key profile.');
+      return errorResponse(
+        429,
+        'ChatGPT plan limit reached. You can switch to an API-key profile.',
+      );
     case 'incomplete':
       return errorResponse(502, 'The ChatGPT reply stopped before it finished.');
     case 'interrupted':
@@ -321,9 +334,9 @@ function errorResponse(status: number, message: string): Response {
   });
 }
 
-function parseCompletionBody(value: BodyInit | null | undefined):
-  | (ChatGptCompletionBody & { readonly model: string })
-  | undefined {
+function parseCompletionBody(
+  value: BodyInit | null | undefined,
+): (ChatGptCompletionBody & { readonly model: string }) | undefined {
   if (typeof value !== 'string') return undefined;
   const parsed = parseObject(value);
   if (
@@ -413,7 +426,9 @@ function userPart(part: unknown): Record<string, unknown> {
     const file = fileFields(part.file);
     if (file !== undefined) return { type: 'input_file', ...file };
   }
-  throw refused('This kind of input cannot be sent with ChatGPT sign-in. Text, images and files can.');
+  throw refused(
+    'This kind of input cannot be sent with ChatGPT sign-in. Text, images and files can.',
+  );
 }
 
 function fileFields(file: Record<string, unknown>): Record<string, string> | undefined {
@@ -427,10 +442,16 @@ function fileFields(file: Record<string, unknown>): Record<string, string> | und
 
 function assistantItems(message: Record<string, unknown>): Record<string, unknown>[] {
   const items: Record<string, unknown>[] = [];
-  const text = message.content === undefined || message.content === null ? '' : textOf(message.content);
+  const text =
+    message.content === undefined || message.content === null ? '' : textOf(message.content);
   if (text.length > 0) items.push({ type: 'message', role: 'assistant', content: text });
   for (const call of toolCallsOf(message.tool_calls)) {
-    items.push({ type: 'function_call', call_id: call.id, name: call.name, arguments: call.arguments });
+    items.push({
+      type: 'function_call',
+      call_id: call.id,
+      name: call.name,
+      arguments: call.arguments,
+    });
   }
   return items;
 }

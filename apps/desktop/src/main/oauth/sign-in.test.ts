@@ -160,7 +160,8 @@ describe('createProviderSignIn', () => {
         return json({
           user_code: 'KIMI-USER-CODE',
           device_code: 'private-device-code',
-          verification_uri_complete: 'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+          verification_uri_complete:
+            'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
           expires_in: 120,
           interval: 1,
         });
@@ -198,9 +199,7 @@ describe('createProviderSignIn', () => {
     await opened;
     const result = await pending;
 
-    expect(openedUrl).toBe(
-      'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
-    );
+    expect(openedUrl).toBe('https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE');
     expect(result).toMatchObject({
       provider: 'kimi',
       baseUrl: KIMI_CODE_BASE_URL,
@@ -316,7 +315,11 @@ describe('createProviderSignIn', () => {
     const signIn = createProviderSignIn({
       openExternal: async (url) => {
         authUrl = url;
-        await returnFromBrowser(url, 'redirect_uri', (state) => `code=reauthorize-code&state=${state}`);
+        await returnFromBrowser(
+          url,
+          'redirect_uri',
+          (state) => `code=reauthorize-code&state=${state}`,
+        );
       },
       fetch,
       now: Date.now,

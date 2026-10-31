@@ -123,7 +123,9 @@ function ProviderRouteAccordion({
   const label = providerLabel(provider.id);
   const regions = apiKeyRegions(provider);
   const [open, setOpen] = useState(false);
-  const [apiKeyRegionId, setApiKeyRegionId] = useState<ProviderRegionId | undefined>(regions[0]?.id);
+  const [apiKeyRegionId, setApiKeyRegionId] = useState<ProviderRegionId | undefined>(
+    regions[0]?.id,
+  );
   const [modelId, setModelId] = useState('');
   const [saving, setSaving] = useState(false);
   const [apiKeyMessage, setApiKeyMessage] = useState<string | undefined>(undefined);
@@ -192,8 +194,8 @@ function ProviderRouteAccordion({
             <h4 className="joy-provider-route-title">API key route (Primary)</h4>
             {selectedRegion === undefined ? (
               <p>
-                No API-key endpoint is registered for this provider. OpenAI API keys remain under the separate OpenAI
-                provider.
+                No API-key endpoint is registered for this provider. OpenAI API keys remain under
+                the separate OpenAI provider.
               </p>
             ) : (
               <div className="joy-settings-form-grid">

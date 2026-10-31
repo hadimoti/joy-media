@@ -308,6 +308,9 @@ importers:
       '@joy-media/job-protocol':
         specifier: workspace:*
         version: link:../../packages/job-protocol
+      '@joy-media/project-persistence':
+        specifier: workspace:*
+        version: link:../../packages/project-persistence
       playwright-core:
         specifier: ^1.62.1
         version: 1.62.1
@@ -321,9 +324,6 @@ importers:
       '@joy-media/playback-engine':
         specifier: workspace:*
         version: link:../../packages/playback-engine
-      '@joy-media/project-persistence':
-        specifier: workspace:*
-        version: link:../../packages/project-persistence
       '@joy-media/project-schema':
         specifier: workspace:*
         version: link:../../packages/project-schema

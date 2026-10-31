@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import type * as nodeFs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,7 +22,7 @@ import {
   getDeviceIdentity,
   localAssetSourcesFromEnvironment,
 } from './runtime.js';
-import type { UnsupportedWorkerJobError } from './runtime.js';
+import type { RealThumbnailReceipt, UnsupportedWorkerJobError } from './runtime.js';
 import { ffmpegFilterPath, gpuDerivativeLocalRef, rnnoiseFilter } from './local-gpu.js';
 
 // Counts reads of the legacy provider file, which the Worker must never open. Every call passes through unchanged.
@@ -34,6 +35,49 @@ vi.mock('node:fs', async (importOriginal) => {
 // test`, not the repo root) so this fixture resolves the same way from any invocation.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 describe('Worker runtime', () => {
+  const originalJoyMediaHome = process.env.JOY_MEDIA_HOME;
+  let isolatedJoyMediaHome = '';
+
+  beforeEach(() => {
+    isolatedJoyMediaHome = mkdtempSync(join(tmpdir(), 'joy-worker-home-'));
+    process.env.JOY_MEDIA_HOME = isolatedJoyMediaHome;
+  });
+
+  afterEach(() => {
+    if (originalJoyMediaHome === undefined) delete process.env.JOY_MEDIA_HOME;
+    else process.env.JOY_MEDIA_HOME = originalJoyMediaHome;
+    rmSync(isolatedJoyMediaHome, { recursive: true, force: true });
+  });
+
+  it('uses JOY_MEDIA_HOME for default state and derivative paths', () => {
+    const identity = { workerId: 'home-worker', createdAt: '2026-01-01T00:00:00.000Z' };
+    new JsonFileWorkerStore().save(identity);
+    expect(existsSync(join(isolatedJoyMediaHome, 'worker-state.json'))).toBe(true);
+
+    const derivativeDirectory = join(isolatedJoyMediaHome, 'derivatives');
+    const localRef = 'thumb-home-worker';
+    const bytes = Buffer.from('test thumbnail bytes');
+    mkdirSync(derivativeDirectory, { recursive: true });
+    writeFileSync(join(derivativeDirectory, `${localRef}.jpg`), bytes);
+    const receipt: RealThumbnailReceipt = {
+      kind: 'asset.thumbnail',
+      assetId: 'asset-home-worker',
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      bytes: bytes.length,
+      localRef,
+      descriptor: { mimeType: 'image/jpeg', width: 1, height: 1 },
+    };
+    const runtime = new WorkerRuntime(identity, {
+      ffmpeg: false,
+      ffprobe: false,
+      comfy: false,
+      mlDenoise: false,
+      aiBroker: false,
+    });
+
+    expect(runtime.readDerivative(receipt)).toEqual(bytes);
+  });
+
   it('fails closed before invoking the unsupported OpenRouter text job', async () => {
     const runtime = new WorkerRuntime(
       { workerId: 'provider-worker', createdAt: '2026-01-01T00:00:00.000Z' },

@@ -71,10 +71,7 @@ export interface ProviderAuthRule {
 }
 
 export type ProviderRegionId =
-  | 'international'
-  | 'china'
-  | 'code-international'
-  | 'oauth-international';
+  'international' | 'china' | 'code-international' | 'oauth-international';
 
 /**
  * The OAuth token can use xAI's public API base for inference because the attended 2026-10-31 probe
@@ -189,7 +186,7 @@ export const PROVIDER_REGISTRY: readonly RegistryProvider[] = [
     auth: {
       methods: ['api-key'],
       source:
-        'Owner decision D23 (2026-10-31), following MiniMax\'s written approval of per-user M Plan API-key use through JOY Media.',
+        "Owner decision D23 (2026-10-31), following MiniMax's written approval of per-user M Plan API-key use through JOY Media.",
       sourceDate: '2026-10-31',
       note: 'D23 (2026-10-31) makes MiniMax API-key only: the owner confirmed in writing that MiniMax approved per-user local use of the M Plan subscription key, and the CLI and desktop broker both returned nine models and a successful answer against the registered International endpoint. OAuth is no longer offered because the API-key route is proven.',
     },

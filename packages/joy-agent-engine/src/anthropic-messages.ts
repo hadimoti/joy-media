@@ -16,7 +16,9 @@ type AnthropicMessage = { readonly role: 'user' | 'assistant'; readonly content:
  * The OpenAI-compatible provider supplies this callback the same normalized request the desktop adapter consumes.
  * Convert it to Anthropic's Messages request while explicitly selecting only the fields the adapter supports.
  */
-export function transformAnthropicRequestBody(input: Record<string, unknown>): Record<string, unknown> {
+export function transformAnthropicRequestBody(
+  input: Record<string, unknown>,
+): Record<string, unknown> {
   const inputMessages = Array.isArray(input.messages) ? input.messages : [];
   const { system, messages } = toAnthropicMessages(inputMessages);
   const tools = Array.isArray(input.tools)
@@ -39,9 +41,7 @@ export function transformAnthropicRequestBody(input: Record<string, unknown>): R
     ...(typeof input.temperature === 'number'
       ? { temperature: Math.min(input.temperature, 1) }
       : {}),
-    ...(tools.length === 0
-      ? {}
-      : { tools, tool_choice: toToolChoice(input.tool_choice) }),
+    ...(tools.length === 0 ? {} : { tools, tool_choice: toToolChoice(input.tool_choice) }),
     ...(input.stream === true ? { stream: true } : {}),
   };
 }
@@ -153,9 +153,7 @@ export function anthropicReplyToOpenAICompletion(text: string, modelId: string):
     content: textParts.length > 0 ? textParts.join('') : toolCalls.length > 0 ? null : '',
     ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }),
   };
-  const usage = isRecord(parsed.usage)
-    ? usageOf(parsed.usage)
-    : undefined;
+  const usage = isRecord(parsed.usage) ? usageOf(parsed.usage) : undefined;
 
   return JSON.stringify({
     id: typeof parsed.id === 'string' ? parsed.id : 'anthropic',
@@ -307,7 +305,6 @@ function usageOf(usage: Record<string, unknown>): Record<string, number> {
   return { prompt_tokens: input, completion_tokens: output, total_tokens: input + output };
 }
 
-
 function jsonErrorResponse(status: number, code: string): Response {
   return new Response(JSON.stringify({ error: { message: code } }), {
     status,
@@ -373,11 +370,12 @@ function translateAnthropicEventStream(
       choices,
       ...(usage === undefined ? {} : { usage }),
     });
-  const emitText = (controller: ReadableStreamDefaultController<Uint8Array>, text: string): void => {
+  const emitText = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    text: string,
+  ): void => {
     if (text.length === 0) return;
-    controller.enqueue(
-      chunk([{ index: 0, delta: { content: text }, finish_reason: null }]),
-    );
+    controller.enqueue(chunk([{ index: 0, delta: { content: text }, finish_reason: null }]));
   };
   const totalUsage = (): Record<string, number> => ({
     prompt_tokens: inputTokens,
@@ -500,10 +498,7 @@ function translateAnthropicEventStream(
             const redactor = textRedactors.get(providerIndex) ?? new SecretStreamRedactor(apiKey);
             textRedactors.set(providerIndex, redactor);
             emitText(controller, redactor.push(delta.text));
-          } else if (
-            delta.type === 'input_json_delta' &&
-            typeof delta.partial_json === 'string'
-          ) {
+          } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
             const redactor = toolRedactors.get(providerIndex) ?? new SecretStreamRedactor(apiKey);
             toolRedactors.set(providerIndex, redactor);
             const toolIndex = toolIndices.get(providerIndex);

@@ -946,7 +946,8 @@ export function JoyAgentSettingsDialog({
       try {
         await deleteDesktopProviderProfile(profile.id);
         await loadProfiles();
-        const localMessage = 'ChatGPT connection removed locally. This did not revoke access in ChatGPT.';
+        const localMessage =
+          'ChatGPT connection removed locally. This did not revoke access in ChatGPT.';
         setConnectionNotice({ kind: 'info', message: localMessage });
         onNotice?.(localMessage, 'info');
       } catch (removeError) {

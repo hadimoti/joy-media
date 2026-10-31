@@ -358,7 +358,10 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         throw new BrokerError('PROVIDER_HTTP_ERROR', error.message);
       }
       deps.store.markCredentialUnavailable(profileId);
-      throw new BrokerError('SIGN_IN_REQUIRED', 'The xAI sign-in could not be saved. Sign in again.');
+      throw new BrokerError(
+        'SIGN_IN_REQUIRED',
+        'The xAI sign-in could not be saved. Sign in again.',
+      );
     }
   }
 
@@ -380,7 +383,10 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
         throw new BrokerError('PROVIDER_HTTP_ERROR', error.message);
       }
       deps.store.markCredentialUnavailable(profileId);
-      throw new BrokerError('SIGN_IN_REQUIRED', 'The Kimi sign-in could not be saved. Sign in again.');
+      throw new BrokerError(
+        'SIGN_IN_REQUIRED',
+        'The Kimi sign-in could not be saved. Sign in again.',
+      );
     }
   }
 

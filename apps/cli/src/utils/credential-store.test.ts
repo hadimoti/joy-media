@@ -89,6 +89,7 @@ let providersPath = '';
 const originalEnvironment = {
   HOME: process.env.HOME,
   USERPROFILE: process.env.USERPROFILE,
+  JOY_MEDIA_HOME: process.env.JOY_MEDIA_HOME,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
 };
@@ -97,6 +98,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'joy-credentials-'));
   process.env.HOME = dir;
   process.env.USERPROFILE = dir;
+  process.env.JOY_MEDIA_HOME = join(dir, '.joy-media');
   delete process.env.OPENROUTER_API_KEY;
   delete process.env.OPENAI_API_KEY;
   storePath = join(dir, 'credentials.json');
@@ -108,12 +110,22 @@ afterEach(() => {
   else process.env.HOME = originalEnvironment.HOME;
   if (originalEnvironment.USERPROFILE === undefined) delete process.env.USERPROFILE;
   else process.env.USERPROFILE = originalEnvironment.USERPROFILE;
-  if (originalEnvironment.OPENROUTER_API_KEY === undefined)
-    delete process.env.OPENROUTER_API_KEY;
+  if (originalEnvironment.JOY_MEDIA_HOME === undefined) delete process.env.JOY_MEDIA_HOME;
+  else process.env.JOY_MEDIA_HOME = originalEnvironment.JOY_MEDIA_HOME;
+  if (originalEnvironment.OPENROUTER_API_KEY === undefined) delete process.env.OPENROUTER_API_KEY;
   else process.env.OPENROUTER_API_KEY = originalEnvironment.OPENROUTER_API_KEY;
   if (originalEnvironment.OPENAI_API_KEY === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = originalEnvironment.OPENAI_API_KEY;
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe('JOY Media home resolution', () => {
+  it('uses JOY_MEDIA_HOME when set', () => {
+    const override = join(dir, 'custom-joy-media-home');
+    process.env.JOY_MEDIA_HOME = override;
+
+    expect(getJoyMediaDir()).toBe(override);
+  });
 });
 
 function writeProviders(providers: Record<string, unknown>): void {
@@ -302,16 +314,19 @@ describe('credential store', () => {
     expect(store.list()).toContain('__proto__');
   });
 
-  it.each(OAUTH_CREDENTIALS)('round-trips a $provider OAuth token record without plaintext tokens', (credential) => {
-    const store = createCredentialStore({ path: storePath, protector: testProtector });
-    store.save(credential.provider, credential);
+  it.each(OAUTH_CREDENTIALS)(
+    'round-trips a $provider OAuth token record without plaintext tokens',
+    (credential) => {
+      const store = createCredentialStore({ path: storePath, protector: testProtector });
+      store.save(credential.provider, credential);
 
-    expect(store.read(credential.provider)).toEqual(credential);
-    expect(JSON.parse(readFileSync(storePath, 'utf8'))).toMatchObject({ version: 2 });
-    const saved = readFileSync(storePath, 'utf8');
-    expect(saved).not.toContain(credential.tokenRecord.accessToken);
-    expect(saved).not.toContain(credential.tokenRecord.refreshToken);
-  });
+      expect(store.read(credential.provider)).toEqual(credential);
+      expect(JSON.parse(readFileSync(storePath, 'utf8'))).toMatchObject({ version: 2 });
+      const saved = readFileSync(storePath, 'utf8');
+      expect(saved).not.toContain(credential.tokenRecord.accessToken);
+      expect(saved).not.toContain(credential.tokenRecord.refreshToken);
+    },
+  );
 
   it('reports a stored MiniMax OAuth record as removed by D23 and asks for an API key', () => {
     const oldCredential = {
@@ -411,6 +426,7 @@ describe('credential store', () => {
 });
 
 describe('provider metadata', () => {
+  // This path invokes several real Windows DPAPI subprocesses; allow for full-suite CPU load.
   it('keeps authKind as metadata and excludes access and refresh tokens', () => {
     const credential = OAUTH_CREDENTIALS[1]!;
     openCredentialStore().save('kimi-profile', credential);
@@ -439,7 +455,7 @@ describe('provider metadata', () => {
     expect(loadAiProviders()['kimi-profile']?.authKind).toBe('oauth');
     expect(loadAiProviders().legacy).toMatchObject({ apiKey: CUSTOM.apiKey });
     expect(loadAiProviders().legacy?.authKind).toBeUndefined();
-  });
+  }, 15_000);
 });
 
 describe('provider migration', () => {

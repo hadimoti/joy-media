@@ -11,13 +11,13 @@
   "dependencies": {
     "@joy-media/export-core": "workspace:*",
     "@joy-media/job-protocol": "workspace:*",
+    "@joy-media/project-persistence": "workspace:*",
     "playwright-core": "^1.62.1"
   },
   "devDependencies": {
     "@joy-media/api": "workspace:*",
     "@joy-media/commands": "workspace:*",
     "@joy-media/playback-engine": "workspace:*",
-    "@joy-media/project-persistence": "workspace:*",
     "@joy-media/project-schema": "workspace:*",
     "@joy-media/test-fixtures": "workspace:*",
     "tsx": "^4.23.11"

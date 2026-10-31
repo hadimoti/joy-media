@@ -495,7 +495,10 @@ describe('IPC dispatch', () => {
     const d = deps();
     const record = chatGptRecord();
     const profile = await storeChatGptProfile(d, record);
-    const wrongAccount = chatGptRecord({ accountId: 'different-account', refreshToken: 'refresh-new' });
+    const wrongAccount = chatGptRecord({
+      accountId: 'different-account',
+      refreshToken: 'refresh-new',
+    });
     const providerSignIn = vi.fn(async () => ({
       provider: 'chatgpt' as const,
       baseUrl: 'https://api.openai.com/v1',

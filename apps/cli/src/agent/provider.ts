@@ -241,8 +241,7 @@ export async function resolveAgentConfig(
     });
   }
 
-  const baseUrl =
-    credential.provider === 'xai' ? XAI_OAUTH_INFERENCE_BASE_URL : KIMI_CODE_BASE_URL;
+  const baseUrl = credential.provider === 'xai' ? XAI_OAUTH_INFERENCE_BASE_URL : KIMI_CODE_BASE_URL;
   const verdict = evaluateEndpoint(type, baseUrl);
   if (!verdict.allowed) {
     throw new Error(`The base URL of OAuth profile "${name}" is refused: ${verdict.reason}`);

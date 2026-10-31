@@ -41,13 +41,11 @@ const workerRoot =
 const entryPoint =
   process.env.JOY_MEDIA_WORKER_ENTRYPOINT?.trim() ||
   join(workerRoot, 'apps', 'worker', 'dist', 'index.js');
+const joyMediaHome =
+  process.env.JOY_MEDIA_HOME?.trim() ||
+  join(process.env.USERPROFILE || process.env.HOME || workerRoot, '.joy-media');
 const statePath =
-  process.env.JOY_MEDIA_WORKER_STATE_PATH?.trim() ||
-  join(
-    process.env.USERPROFILE || process.env.HOME || workerRoot,
-    '.joy-media',
-    'worker-state.json',
-  );
+  process.env.JOY_MEDIA_WORKER_STATE_PATH?.trim() || join(joyMediaHome, 'worker-state.json');
 // No remote default: the desktop app supplies the loopback job API address (PLAN-v4 D19).
 const apiUrl = process.env.JOY_MEDIA_API_URL?.trim() || '';
 const loopbackApi = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})\/?$/.exec(apiUrl);
@@ -56,7 +54,9 @@ if (apiUrl.length === 0)
     'JOY_MEDIA_API_URL is required: set it to http://127.0.0.1:<port> from the JOY Media desktop app',
   );
 if (loopbackApi === null || Number(loopbackApi[1]) > 65535)
-  throw new Error('JOY_MEDIA_API_URL must be http://127.0.0.1:<port>; remote addresses are refused');
+  throw new Error(
+    'JOY_MEDIA_API_URL must be http://127.0.0.1:<port>; remote addresses are refused',
+  );
 if (!existsSync(entryPoint)) throw new Error(`Worker entrypoint not found: ${entryPoint}`);
 
 const stateDirectory = dirname(statePath);

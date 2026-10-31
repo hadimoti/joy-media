@@ -18,9 +18,13 @@ if (-not $loopbackApi.Success -or [int]$loopbackApi.Groups[1].Value -gt 65535) {
     throw 'JOY_MEDIA_API_URL must be http://127.0.0.1:<port>; remote addresses are refused.'
 }
 
+if ([string]::IsNullOrWhiteSpace($env:JOY_MEDIA_HOME)) {
+    $env:JOY_MEDIA_HOME = Join-Path $env:USERPROFILE '.joy-media'
+}
+
 if ([string]::IsNullOrWhiteSpace($StatePath)) {
     $StatePath = if ([string]::IsNullOrWhiteSpace($env:JOY_MEDIA_WORKER_STATE_PATH)) {
-        Join-Path $env:USERPROFILE '.joy-media\worker-state.json'
+        Join-Path $env:JOY_MEDIA_HOME 'worker-state.json'
     } else {
         $env:JOY_MEDIA_WORKER_STATE_PATH
     }

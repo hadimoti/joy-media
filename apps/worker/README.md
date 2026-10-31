@@ -13,8 +13,9 @@
 The desktop app starts this Worker and supplies `JOY_MEDIA_API_URL=http://127.0.0.1:<port>`,
 the loopback address of its local job API, and a per-run `JOY_MEDIA_WORKER_LOCAL_TOKEN`.
 Any other control-plane address is refused before the Worker reads or writes state.
-The state file at `~/.joy-media/worker-state.json` (override with `JOY_MEDIA_WORKER_STATE_PATH`)
-keeps only the device identity. The per-run token lives in memory and is never written.
+The state file defaults to `~/.joy-media/worker-state.json`; set `JOY_MEDIA_HOME` to move the
+application data directory, or use `JOY_MEDIA_WORKER_STATE_PATH` to override the state file path.
+The file keeps only the device identity. The per-run token lives in memory and is never written.
 Older pairing fields in that file are ignored and kept. AI text jobs go through the desktop
 broker, which holds the profile and the key. The Worker holds no provider key and reads no
 provider file. The current fixture job writes a deterministic 1×1 PPM only in its private job

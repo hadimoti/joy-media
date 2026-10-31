@@ -13,11 +13,7 @@ import {
 } from '@joy-media/provider-sdk';
 import { prepareChatGptModels, readChatGptModels } from '@joy-media/joy-agent-engine';
 import type { CliFlags } from '../cli.js';
-import {
-  isOAuthProfileProvider,
-  oauthTokenExpiry,
-  signInOAuthProfile,
-} from '../agent/oauth.js';
+import { isOAuthProfileProvider, oauthTokenExpiry, signInOAuthProfile } from '../agent/oauth.js';
 import { clearAgentSlot, loadAgentSlot, saveAgentSlot } from '../agent/agent-slots.js';
 import { probeAgent, runJoyAgent } from '../agent/joy-agent.js';
 import { environmentKey, inferProviderType, isRetiredProvider } from '../agent/provider.js';
@@ -72,9 +68,7 @@ function numberFlag(value: string | undefined): number | undefined {
   return value.trim() === '' ? Number.NaN : Number(value);
 }
 
-function oauthProfileBaseUrl(
-  provider: 'chatgpt' | 'kimi' | 'xai',
-): string | undefined {
+function oauthProfileBaseUrl(provider: 'chatgpt' | 'kimi' | 'xai'): string | undefined {
   if (provider === 'chatgpt') return CHATGPT_RESPONSES_BASE_URL;
   if (provider === 'kimi') return KIMI_CODE_BASE_URL;
   return XAI_OAUTH_INFERENCE_BASE_URL;
@@ -235,10 +229,11 @@ async function listOAuthModels(
       credential.provider === 'chatgpt'
         ? (await readChatGptModels(await response.text()))
             .map((model) => model.id)
-            .filter((id) =>
-              ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some(
-                (token) => id.includes(token),
-              ),
+            .filter(
+              (id) =>
+                ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some(
+                  (token) => id.includes(token),
+                ),
             )
         : await readOAuthModelIds(response, credential);
 
@@ -261,12 +256,13 @@ async function readOAuthModelIds(
   const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
   return raw
     .map((item: { id?: string } | string) => (typeof item === 'string' ? item : item.id))
-    .filter((id): id is string =>
-      typeof id === 'string' &&
-      id.length > 0 &&
-      ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some((token) =>
-        id.includes(token),
-      ),
+    .filter(
+      (id): id is string =>
+        typeof id === 'string' &&
+        id.length > 0 &&
+        ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some((token) =>
+          id.includes(token),
+        ),
     );
 }
 

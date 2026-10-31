@@ -41,7 +41,11 @@ describe('Kimi Code device OAuth', () => {
     const now = Date.UTC(2026, 9, 30);
     const requests: { readonly url: string; readonly init: RequestInit }[] = [];
     let openedUrl = '';
-    const presentations: { readonly url: string; readonly userCode?: string; readonly expiresAt?: number }[] = [];
+    const presentations: {
+      readonly url: string;
+      readonly userCode?: string;
+      readonly expiresAt?: number;
+    }[] = [];
     let releaseOpen: () => void = () => undefined;
     const opened = new Promise<void>((resolve) => {
       releaseOpen = resolve;
@@ -54,7 +58,8 @@ describe('Kimi Code device OAuth', () => {
         return json({
           user_code: 'KIMI-USER-CODE',
           device_code: 'private-device-code',
-          verification_uri_complete: 'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+          verification_uri_complete:
+            'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
           expires_in: 120,
           interval: 1,
         });
@@ -91,9 +96,7 @@ describe('Kimi Code device OAuth', () => {
     await opened;
     const record = await pending;
 
-    expect(openedUrl).toBe(
-      'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
-    );
+    expect(openedUrl).toBe('https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE');
     expect(presentations).toEqual([
       {
         url: openedUrl,
@@ -126,7 +129,8 @@ describe('Kimi Code device OAuth', () => {
         return json({
           user_code: 'KIMI-USER-CODE',
           device_code: 'private-device-code',
-          verification_uri_complete: 'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+          verification_uri_complete:
+            'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
           expires_in: 120,
           interval: 1,
         });
@@ -173,9 +177,9 @@ describe('Kimi Code device OAuth', () => {
       });
     const openExternal = vi.fn();
 
-    await expect(
-      signInWithKimiCode({ openExternal, fetch, now: Date.now }),
-    ).rejects.toMatchObject({ code: 'REDIRECT_REFUSED' });
+    await expect(signInWithKimiCode({ openExternal, fetch, now: Date.now })).rejects.toMatchObject({
+      code: 'REDIRECT_REFUSED',
+    });
     expect(openExternal).not.toHaveBeenCalled();
   });
 
@@ -186,7 +190,8 @@ describe('Kimi Code device OAuth', () => {
       return json({
         user_code: 'KIMI-USER-CODE',
         device_code: 'private-device-code',
-        verification_uri_complete: 'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+        verification_uri_complete:
+          'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
         expires_in: 120,
         interval: 1,
       });
@@ -214,7 +219,8 @@ describe('Kimi Code device OAuth', () => {
         ? json({
             user_code: 'KIMI-USER-CODE',
             device_code: 'private-device-code',
-            verification_uri_complete: 'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
+            verification_uri_complete:
+              'https://www.kimi.ai/code/authorize_device?user_code=KIMI-USER-CODE',
             expires_in: 120,
             interval: 1,
           })
@@ -246,11 +252,11 @@ describe('Kimi Code token records', () => {
   it('round-trips records for a configured public client and rejects malformed expiry', () => {
     expect(decodeKimiTokenRecord(encodeKimiTokenRecord(RECORD))).toEqual(RECORD);
     expect(
-      decodeKimiTokenRecord(
-        JSON.stringify({ ...RECORD, clientId: 'different-public-client' }),
-      ),
+      decodeKimiTokenRecord(JSON.stringify({ ...RECORD, clientId: 'different-public-client' })),
     ).toMatchObject({ clientId: 'different-public-client' });
-    expect(decodeKimiTokenRecord(JSON.stringify({ ...RECORD, accessExpiresAt: Infinity }))).toBeUndefined();
+    expect(
+      decodeKimiTokenRecord(JSON.stringify({ ...RECORD, accessExpiresAt: Infinity })),
+    ).toBeUndefined();
   });
 
   it('rotates and saves the complete token record during refresh', async () => {

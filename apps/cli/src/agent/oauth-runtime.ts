@@ -1,12 +1,5 @@
 import { createHash } from 'node:crypto';
-import {
-  closeSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   ACCESS_TOKEN_REFRESH_MARGIN_MS,
@@ -113,7 +106,10 @@ export interface OAuthTokenManagerDependencies {
 }
 
 export interface OAuthTokenManager {
-  current(profileId: string, expectedProvider: OAuthCredential['provider']): Promise<OAuthCredential>;
+  current(
+    profileId: string,
+    expectedProvider: OAuthCredential['provider'],
+  ): Promise<OAuthCredential>;
 }
 
 export function createOAuthTokenManager(
@@ -147,8 +143,7 @@ export function createOAuthTokenManager(
   const chatGptKeeper = createChatGptTokenKeeper({
     fetch: dependencies.fetch,
     now: dependencies.now,
-    save: (profileId, handleId, tokenRecord) =>
-      save(profileId, 'chatgpt', handleId, tokenRecord),
+    save: (profileId, handleId, tokenRecord) => save(profileId, 'chatgpt', handleId, tokenRecord),
   });
   const kimiKeeper = createKimiTokenKeeper({
     fetch: dependencies.fetch,
@@ -181,11 +176,7 @@ export function createOAuthTokenManager(
           case 'chatgpt':
             return {
               provider: 'chatgpt',
-              tokenRecord: await chatGptKeeper.current(
-                profileId,
-                handleId,
-                latest.tokenRecord,
-              ),
+              tokenRecord: await chatGptKeeper.current(profileId, handleId, latest.tokenRecord),
             };
           case 'kimi':
             return {
@@ -250,9 +241,7 @@ function refreshMargin(credential: OAuthCredential): number {
 }
 
 function recordHandle(credential: OAuthCredential): string {
-  return createHash('sha256')
-    .update(JSON.stringify(credential), 'utf8')
-    .digest('hex');
+  return createHash('sha256').update(JSON.stringify(credential), 'utf8').digest('hex');
 }
 
 interface LockOwner {

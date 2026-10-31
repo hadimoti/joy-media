@@ -196,7 +196,11 @@ describe('xAI device OAuth', () => {
         polls += 1;
         return polls === 1
           ? json({ error: 'authorization_pending' }, 400)
-          : json({ access_token: 'test-access-token', refresh_token: 'test-refresh-token', expires_in: 3600 });
+          : json({
+              access_token: 'test-access-token',
+              refresh_token: 'test-refresh-token',
+              expires_in: 3600,
+            });
       }
       throw new Error(`unexpected request to ${url}`);
     };
@@ -225,7 +229,11 @@ describe('xAI device OAuth', () => {
         polls += 1;
         return polls === 1
           ? json({ error: 'slow_down' }, 400)
-          : json({ access_token: 'test-access-token', refresh_token: 'test-refresh-token', expires_in: 3600 });
+          : json({
+              access_token: 'test-access-token',
+              refresh_token: 'test-refresh-token',
+              expires_in: 3600,
+            });
       }
       throw new Error(`unexpected request to ${url}`);
     };
@@ -279,7 +287,9 @@ describe('xAI OAuth token records', () => {
   it('round-trips a token record and rejects malformed data', () => {
     expect(decodeXaiTokenRecord(encodeXaiTokenRecord(RECORD))).toEqual(RECORD);
     expect(decodeXaiTokenRecord('{')).toBeUndefined();
-    expect(decodeXaiTokenRecord(JSON.stringify({ ...RECORD, accessExpiresAt: Infinity }))).toBeUndefined();
+    expect(
+      decodeXaiTokenRecord(JSON.stringify({ ...RECORD, accessExpiresAt: Infinity })),
+    ).toBeUndefined();
   });
 
   it('refreshes with the saved refresh token and keeps it when the server omits rotation', async () => {
@@ -325,7 +335,11 @@ describe('xAI OAuth token records', () => {
         return discovered;
       }
       if (url === TOKEN_ENDPOINT) {
-        return json({ access_token: 'test-rotated-access', refresh_token: 'test-rotated-refresh', expires_in: 1800 });
+        return json({
+          access_token: 'test-rotated-access',
+          refresh_token: 'test-rotated-refresh',
+          expires_in: 1800,
+        });
       }
       throw new Error(`unexpected request to ${url}`);
     };

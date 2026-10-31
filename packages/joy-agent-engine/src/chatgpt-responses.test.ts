@@ -128,7 +128,11 @@ describe('ChatGPT Responses engine bridge', () => {
         { status: 200, headers: { 'content-type': 'text/event-stream' } },
       );
     });
-    const fetch = createChatGptResponsesFetch({ accessToken: TOKEN, modelId: 'gpt-test', fetch: upstream });
+    const fetch = createChatGptResponsesFetch({
+      accessToken: TOKEN,
+      modelId: 'gpt-test',
+      fetch: upstream,
+    });
     const response = await fetch(`${CHATGPT_RESPONSES_BASE_URL}/chat/completions`, {
       method: 'POST',
       body: JSON.stringify({
@@ -181,7 +185,11 @@ describe('ChatGPT Responses engine bridge', () => {
         { status: 200, headers: { 'content-type': 'text/event-stream' } },
       );
     });
-    const fetch = createChatGptResponsesFetch({ accessToken: TOKEN, modelId: 'gpt-test', fetch: upstream });
+    const fetch = createChatGptResponsesFetch({
+      accessToken: TOKEN,
+      modelId: 'gpt-test',
+      fetch: upstream,
+    });
     const response = await fetch(`${CHATGPT_RESPONSES_BASE_URL}/chat/completions`, {
       method: 'POST',
       body: JSON.stringify({
@@ -204,9 +212,7 @@ describe('ChatGPT Responses engine bridge', () => {
 
   it('does not return partial text when a Responses stream ends or fails early', () => {
     expect(
-      readChatGptStream(
-        event({ type: 'response.output_text.delta', delta: 'partial' }),
-      ),
+      readChatGptStream(event({ type: 'response.output_text.delta', delta: 'partial' })),
     ).toEqual({ kind: 'interrupted', partialText: 'partial' });
     expect(
       readChatGptStream(

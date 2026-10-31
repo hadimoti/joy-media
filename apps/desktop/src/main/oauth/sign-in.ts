@@ -125,8 +125,7 @@ export function createProviderSignIn(
       );
     }
     const record = await signInWithChatGpt({
-      issuedClientId:
-        context?.savedChatGptAccount?.clientId ?? configuredOAuthClientId('chatgpt'),
+      issuedClientId: context?.savedChatGptAccount?.clientId ?? configuredOAuthClientId('chatgpt'),
       extAgentHostId: deps.installId(),
       openExternal: deps.openExternal,
       fetch: deps.fetch,
@@ -143,9 +142,7 @@ export function createProviderSignIn(
   };
 
   /** Local app settings override the public OAuth client IDs recorded in the provider SDK. */
-  function configuredOAuthClientId(
-    provider: 'chatgpt' | 'kimi' | 'xai',
-  ): string | undefined {
+  function configuredOAuthClientId(provider: 'chatgpt' | 'kimi' | 'xai'): string | undefined {
     if (deps.getSetting === undefined) {
       if (provider === 'chatgpt') return deps.chatGptClientId;
     }

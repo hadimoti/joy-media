@@ -1,7 +1,7 @@
 /* global process */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getJoyMediaHome } from '@joy-media/project-persistence/joy-media-home';
 import {
   createCredentialStore,
   migrateProviderFile,
@@ -42,7 +42,7 @@ export interface AiProviderConfig {
 }
 
 export function getJoyMediaDir(): string {
-  const dir = join(homedir(), '.joy-media');
+  const dir = getJoyMediaHome();
   if (!existsSync(dir)) {
     try {
       mkdirSync(dir, { recursive: true });

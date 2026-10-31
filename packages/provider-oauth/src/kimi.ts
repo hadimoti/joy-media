@@ -61,11 +61,7 @@ export interface KimiTokenKeeperDeps {
 }
 
 export interface KimiTokenKeeper {
-  current(
-    profileId: string,
-    handleId: string,
-    record: KimiTokenRecord,
-  ): Promise<KimiTokenRecord>;
+  current(profileId: string, handleId: string, record: KimiTokenRecord): Promise<KimiTokenRecord>;
 }
 
 interface FormReply {
@@ -82,9 +78,7 @@ interface KimiDeviceCode {
 }
 
 /** Runs Kimi Code's attended device-code flow and returns a record for the local secret store. */
-export async function signInWithKimiCode(
-  options: KimiCodeSignInOptions,
-): Promise<KimiTokenRecord> {
+export async function signInWithKimiCode(options: KimiCodeSignInOptions): Promise<KimiTokenRecord> {
   const clientId = nonEmptyString(options.clientId) ?? KIMI_CODE_CLIENT_ID;
   if (clientId.length === 0) {
     throw new OAuthFlowError('NOT_CONFIGURED', 'Kimi sign-in needs an OAuth client ID.');
@@ -204,7 +198,11 @@ export async function refreshKimiCodeTokens(input: {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'Kimi could not refresh this sign-in.');
   }
   const error = nonEmptyString(reply.error);
-  if (error === 'invalid_grant' || result.response.status === 401 || result.response.status === 403) {
+  if (
+    error === 'invalid_grant' ||
+    result.response.status === 401 ||
+    result.response.status === 403
+  ) {
     throw new OAuthFlowError('SIGN_IN_REQUIRED', 'Sign in with Kimi again.');
   }
   if (!result.response.ok || typeof reply.access_token !== 'string') {
@@ -291,7 +289,10 @@ export function decodeKimiTokenRecord(text: string): KimiTokenRecord | undefined
   };
 }
 
-async function requestDeviceCode(options: KimiCodeSignInOptions, clientId: string): Promise<KimiDeviceCode> {
+async function requestDeviceCode(
+  options: KimiCodeSignInOptions,
+  clientId: string,
+): Promise<KimiDeviceCode> {
   const requestedAt = options.now();
   const result = await postForm(
     options.fetch,
@@ -418,7 +419,8 @@ function tokenExpiry(value: unknown, now: number): number | undefined {
 }
 
 function positiveNumber(value: unknown): number | undefined {
-  const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  const numeric =
+    typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
   return Number.isFinite(numeric) && numeric > 0 ? numeric : undefined;
 }
 

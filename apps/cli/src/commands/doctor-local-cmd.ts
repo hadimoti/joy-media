@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getJoyMediaHome } from '@joy-media/project-persistence/joy-media-home';
 import { resolveByokConfig } from '../agent/provider.js';
 import { getDefaultSqlitePath } from '../utils/config.js';
 import { c, logError, logSuccess, logWarn, printBanner } from '../utils/logger.js';
@@ -42,7 +43,7 @@ export async function handleDoctorLocalCommand(): Promise<number> {
   }
 
   const driveTypes = readDriveTypes();
-  const joyMediaDir = join(homedir(), '.joy-media');
+  const joyMediaDir = getJoyMediaHome();
   // The database and provider checks read configuration, so they run only when every file they read is local.
   const configLocal = [
     joyMediaDir,
@@ -84,10 +85,10 @@ export async function handleDoctorLocalCommand(): Promise<number> {
     const venvsReady = pythons.filter((python) => existsSync(python)).length;
     if (venvsReady === venvs.length) {
       logSuccess(
-        `Local AI Venvs: All ${venvsReady}/${venvs.length} environments ready in ~/.joy-media`,
+        `Local AI Venvs: All ${venvsReady}/${venvs.length} environments ready in ${joyMediaDir}`,
       );
     } else {
-      logWarn(`Local AI Venvs: ${venvsReady}/${venvs.length} ready in ~/.joy-media`);
+      logWarn(`Local AI Venvs: ${venvsReady}/${venvs.length} ready in ${joyMediaDir}`);
     }
   }
 

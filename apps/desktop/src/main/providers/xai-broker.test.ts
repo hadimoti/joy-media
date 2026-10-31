@@ -19,7 +19,12 @@ const NOW = Date.UTC(2026, 9, 30);
 const TOKEN_ENDPOINT = 'https://auth.x.ai/oauth2/token';
 const CHAT_BODY = { messages: [{ role: 'user', content: 'hi' }] };
 
-function bound(id: string, provider: string, baseUrl: string, modelId = 'grok-test-model'): BrokerProfile {
+function bound(
+  id: string,
+  provider: string,
+  baseUrl: string,
+  modelId = 'grok-test-model',
+): BrokerProfile {
   const url = new URL(baseUrl);
   return {
     id,
@@ -64,7 +69,9 @@ describe('provider broker: xAI credentials', () => {
       }
       if (url === TOKEN_ENDPOINT) {
         expect(new URLSearchParams(String(init.body)).get('grant_type')).toBe('refresh_token');
-        expect(new URLSearchParams(String(init.body)).get('refresh_token')).toBe('test-old-refresh-token');
+        expect(new URLSearchParams(String(init.body)).get('refresh_token')).toBe(
+          'test-old-refresh-token',
+        );
         return jsonReply({
           access_token: 'test-new-access-token',
           refresh_token: 'test-new-refresh-token',

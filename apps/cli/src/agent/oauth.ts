@@ -1,7 +1,4 @@
-import {
-  getOAuthClient,
-  signInProviders,
-} from '@joy-media/provider-sdk';
+import { getOAuthClient, signInProviders } from '@joy-media/provider-sdk';
 import {
   newExtAgentHostId,
   signInWithChatGpt,
@@ -23,9 +20,7 @@ export interface OAuthProfileSignInInput {
 }
 
 /** Runs one shared provider flow without opening a browser or writing its token. */
-export async function signInOAuthProfile(
-  input: OAuthProfileSignInInput,
-): Promise<OAuthCredential> {
+export async function signInOAuthProfile(input: OAuthProfileSignInInput): Promise<OAuthCredential> {
   const client = getOAuthClient(input.provider);
   const fetchFromProvider = (url: string, init: RequestInit): Promise<Response> =>
     globalThis.fetch(url, init);

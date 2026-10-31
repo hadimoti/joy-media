@@ -16,6 +16,7 @@ import { resolveByokConfig } from './provider.js';
 const savedEnvironment = {
   HOME: process.env.HOME,
   USERPROFILE: process.env.USERPROFILE,
+  JOY_MEDIA_HOME: process.env.JOY_MEDIA_HOME,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
 };
@@ -27,6 +28,7 @@ describe('first CLI install without an OpenRouter profile or key', () => {
     home = mkdtempSync(join(tmpdir(), 'joy-no-openrouter-install-'));
     process.env.HOME = home;
     process.env.USERPROFILE = home;
+    process.env.JOY_MEDIA_HOME = join(home, '.joy-media');
     delete process.env.OPENROUTER_API_KEY;
     delete process.env.OPENAI_API_KEY;
   });

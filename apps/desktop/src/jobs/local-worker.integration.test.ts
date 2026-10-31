@@ -140,6 +140,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       env: {
         ...localWorkerEnv(process.env, { apiEnv: api.workerEnv, workerRoot: join(dir, 'worker') }),
         ...observedEnv(),
+        JOY_MEDIA_HOME: join(dir, 'joy-media-home'),
         ...extraEnv,
       },
       stdio: ['ignore', 'pipe', 'pipe'],

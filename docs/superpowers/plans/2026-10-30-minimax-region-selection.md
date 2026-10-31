@@ -31,6 +31,7 @@
 ### Task 1: Validate and route the MiniMax region in the main process
 
 **Files:**
+
 - Modify: `apps/desktop/src/main/ipc-handlers.ts`
 - Modify: `apps/desktop/src/main/oauth/sign-in.ts`
 - Test: `apps/desktop/src/main/ipc-sign-in.test.ts`
@@ -38,6 +39,7 @@
 - Test: `apps/desktop/src/main/oauth/sign-in.test.ts`
 
 **Interfaces:**
+
 - `ProviderSignInContext` adds optional `minimaxRegion: MiniMaxRegion`.
 - `desktop.provider-profile.sign-in` accepts optional `region` only for `provider: 'minimax'`; absent region resolves to `global`.
 
@@ -51,12 +53,14 @@
 ### Task 2: Expose the region choice in the desktop sign-in panel
 
 **Files:**
+
 - Modify: `apps/editor-web/src/ProviderSignInPanel.tsx`
 - Modify: `apps/editor-web/src/desktop-client.ts`
 - Test: `apps/editor-web/src/ProviderSignInPanel.test.tsx`
 - Test: `apps/editor-web/src/JoyAgentSettingsDialog.test.tsx`
 
 **Interfaces:**
+
 - `signInDesktopProviderProfile` accepts `region?: MiniMaxRegion`.
 - The panel labels the selector `MiniMax account region`; options are `Global (International)` (`global`) and `China` (`cn`).
 

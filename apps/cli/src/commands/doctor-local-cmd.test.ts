@@ -29,7 +29,13 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
-const SAVED_ENV = ['HOME', 'USERPROFILE', 'JOY_MODELS_DIR', 'JOY_MEDIA_SQLITE_PATH'];
+const SAVED_ENV = [
+  'HOME',
+  'USERPROFILE',
+  'JOY_MEDIA_HOME',
+  'JOY_MODELS_DIR',
+  'JOY_MEDIA_SQLITE_PATH',
+];
 let saved: Record<string, string | undefined> = {};
 let home = '';
 
@@ -68,6 +74,8 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'joy-local-check-'));
   process.env.HOME = home;
   process.env.USERPROFILE = home;
+  process.env.JOY_MEDIA_HOME = join(home, '.joy-media');
+  process.env.JOY_MODELS_DIR = join(home, 'JOY', 'models');
   vi.clearAllMocks();
   vi.mocked(spawnSync).mockImplementation(((_file: string, args: readonly string[]) => ({
     status: 0,

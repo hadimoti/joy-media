@@ -130,7 +130,9 @@ describe('provider registry', () => {
     expect(findRegistryRegion('kimi', 'https://api.moonshot.cn/v1/')?.id).toBe('china');
     expect(findRegistryRegion('kimi', 'https://api.moonshot.ai/v1')?.id).toBe('international');
     expect(findRegistryRegion('kimi', 'https://api.moonshot.ai/v2')).toBeUndefined();
-    expect(findRegistryRegion('kimi', 'https://api.kimi.ai/coding/v1')?.id).toBe('code-international');
+    expect(findRegistryRegion('kimi', 'https://api.kimi.ai/coding/v1')?.id).toBe(
+      'code-international',
+    );
     expect(evaluateEndpoint('kimi', 'https://api.kimi.ai/coding/v1')).toMatchObject({
       allowed: true,
       kind: 'registry',
@@ -195,12 +197,7 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
 
   it('never offers a sign-in for a provider that is set up with an API key', () => {
     for (const provider of PROVIDER_REGISTRY) {
-      if (
-        provider.id === 'chatgpt' ||
-        provider.id === 'kimi' ||
-        provider.id === 'xai'
-      )
-        continue;
+      if (provider.id === 'chatgpt' || provider.id === 'kimi' || provider.id === 'xai') continue;
       expect(isSignInProvider(provider.id), provider.id).toBe(false);
     }
     expect(isSignInProvider('openrouter')).toBe(false);

@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getJoyMediaHome } from '@joy-media/project-persistence/joy-media-home';
 import type { CliFlags } from '../cli.js';
 import { FlagValidationError, NUMERIC_RANGES } from '../utils/flags.js';
 import {
@@ -25,7 +26,7 @@ export async function handleWorkerCommand(args: string[], flags: CliFlags): Prom
   const sub = args[0] ?? 'status';
 
   const modelsDir = process.env.JOY_MODELS_DIR ?? join(homedir(), 'JOY', 'models');
-  const joyMediaDir = join(homedir(), '.joy-media');
+  const joyMediaDir = getJoyMediaHome();
 
   if (sub === 'status') {
     printBanner();
@@ -52,7 +53,7 @@ export async function handleWorkerCommand(args: string[], flags: CliFlags): Prom
     logStep('Primary GPU', c(gpuName, gpuName.includes('NVIDIA') ? 'green' : 'yellow'));
 
     // 2. Python Venvs
-    console.log(`\n  ${c('Isolated AI Environments (.joy-media):', 'bold')}`);
+    console.log(`\n  ${c(`Isolated AI Environments (${joyMediaDir}):`, 'bold')}`);
     const venvs = [
       { name: 'RealESRGAN (Upscaling)', dir: 'venv-realesrgan' },
       { name: 'BiRefNet (Background Removal)', dir: 'venv-birefnet' },

@@ -282,22 +282,19 @@ export async function revokeChatGptRefreshToken(input: {
   }
 
   try {
-    const response = await input.fetch(
-      endpoint,
-      {
-        method: 'POST',
-        headers: {
-          accept: 'application/json',
-          'content-type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          client_id: input.record.clientId,
-          token: input.record.refreshToken,
-          token_type_hint: 'refresh_token',
-        }).toString(),
-        redirect: 'manual',
+    const response = await input.fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/x-www-form-urlencoded',
       },
-    );
+      body: new URLSearchParams({
+        client_id: input.record.clientId,
+        token: input.record.refreshToken,
+        token_type_hint: 'refresh_token',
+      }).toString(),
+      redirect: 'manual',
+    });
     if (!response.ok) throw revocationFailed();
   } catch {
     throw revocationFailed();

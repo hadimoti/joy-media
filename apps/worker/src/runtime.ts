@@ -7,13 +7,14 @@ import {
   writeFileSync,
   mkdtempSync,
 } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { WorkerCapability, WorkerHello, WorkerModelInventory } from '@joy-media/job-protocol';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
+import { getJoyMediaHome } from '@joy-media/project-persistence/joy-media-home';
 import {
   readGpuDerivative,
   runAudioMlDenoiseJob,
@@ -53,7 +54,7 @@ export interface IdentityStore {
  * session fields that older builds stored are neither read nor deleted: `save` carries them over unchanged.
  */
 export class JsonFileWorkerStore implements IdentityStore {
-  constructor(private readonly path = join(homedir(), '.joy-media', 'worker-state.json')) {}
+  constructor(private readonly path = join(getJoyMediaHome(), 'worker-state.json')) {}
 
   load(): DeviceIdentity | undefined {
     const identity = this.read().identity;
@@ -297,7 +298,7 @@ export class WorkerRuntime {
       if (options.cancelled()) return { state: 'canceled' };
       const payload = exportJobPayload(job.payload);
       const derivativeDirectory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+        this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       const tempDir = mkdtempSync(join(tmpdir(), `joy-media-export-${job.id}-`));
       const sourcePath = join(tempDir, 'source.mp4');
       const outputPath = join(tempDir, 'export.mp4');
@@ -361,7 +362,7 @@ export class WorkerRuntime {
       if (sourcePath === undefined)
         throw new Error('local source unavailable for asset ' + job.assetId);
       const derivativeDirectory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+        this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       this.log.write('job ' + job.id + ' started (' + job.type + ')');
       try {
         const result = await runUpscaleJob({
@@ -395,7 +396,7 @@ export class WorkerRuntime {
       if (sourcePath === undefined)
         throw new Error(`local source unavailable for asset ${job.assetId}`);
       const derivativeDirectory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+        this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       this.log.write(`job ${job.id} started (${job.type})`);
       try {
         const result = await runMaskingJob({
@@ -423,7 +424,7 @@ export class WorkerRuntime {
       if (!this.tools.comfy) throw new Error('ComfyUI is not enabled on this Worker');
       if (options.cancelled()) return { state: 'canceled' };
       const derivativeDirectory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+        this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       this.log.write(`job ${job.id} started (image.comfy)`);
       try {
         const sourcePath =
@@ -450,7 +451,7 @@ export class WorkerRuntime {
       if (!this.tools.mlDenoise) throw new Error('ML denoise is not enabled on this Worker');
       if (options.cancelled()) return { state: 'canceled' };
       const derivativeDirectory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+        this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       this.log.write(`job ${job.id} started (audio.ml-denoise)`);
       try {
         const sourcePath =
@@ -550,7 +551,7 @@ export class WorkerRuntime {
       const sha256 = createHash('sha256').update(bytes).digest('hex');
       const localRef = `thumb-${job.id}-${sha256.slice(0, 16)}`;
       const derivativeDirectory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+        this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       mkdirSync(derivativeDirectory, { recursive: true });
       const finalOutput = join(derivativeDirectory, `${localRef}.jpg`);
       rmSync(finalOutput, { force: true });
@@ -625,23 +626,19 @@ export class WorkerRuntime {
   /** Reads a retained derivative only after re-checking its receipt integrity. */
   readDerivative(result: WorkerDerivativeReceipt): Uint8Array {
     if (result.kind === 'mask.image' || result.kind === 'mask.video') {
-      const directory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      const directory = this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       return readMaskDerivative(directory, result);
     }
     if (result.kind === 'upscale.image' || result.kind === 'upscale.video') {
-      const directory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      const directory = this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       return readUpscaleDerivative(directory, result);
     }
     if (result.kind === 'image.comfy' || result.kind === 'audio.ml-denoise') {
-      const directory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      const directory = this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       return readGpuDerivative(directory, result);
     }
     if (result.kind === 'render.export') {
-      const directory =
-        this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+      const directory = this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
       const bytes = readFileSync(join(directory, `${result.localRef}.mp4`));
       if (
         bytes.length !== result.bytes ||
@@ -656,8 +653,7 @@ export class WorkerRuntime {
     }
     if (!/^thumb-[A-Za-z0-9._-]{1,110}$/.test(result.localRef!))
       throw new Error('derivative local reference is invalid');
-    const directory =
-      this.options.derivativeDirectory ?? join(homedir(), '.joy-media', 'derivatives');
+    const directory = this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
     const bytes = readFileSync(join(directory, `${result.localRef!}.jpg`));
     if (
       bytes.length !== result.bytes ||

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './cli.js';
@@ -14,6 +14,26 @@ import {
 } from './utils/project-loader.js';
 
 describe('JOY Media CLI (@joy-media/cli)', () => {
+  const savedEnvironment = {
+    JOY_MEDIA_HOME: process.env.JOY_MEDIA_HOME,
+    JOY_MODELS_DIR: process.env.JOY_MODELS_DIR,
+  };
+  let isolatedHome = '';
+
+  beforeEach(() => {
+    isolatedHome = mkdtempSync(join(tmpdir(), 'joy-cli-home-'));
+    process.env.JOY_MEDIA_HOME = join(isolatedHome, '.joy-media');
+    process.env.JOY_MODELS_DIR = join(isolatedHome, 'models');
+  });
+
+  afterEach(() => {
+    if (savedEnvironment.JOY_MEDIA_HOME === undefined) delete process.env.JOY_MEDIA_HOME;
+    else process.env.JOY_MEDIA_HOME = savedEnvironment.JOY_MEDIA_HOME;
+    if (savedEnvironment.JOY_MODELS_DIR === undefined) delete process.env.JOY_MODELS_DIR;
+    else process.env.JOY_MODELS_DIR = savedEnvironment.JOY_MODELS_DIR;
+    rmSync(isolatedHome, { recursive: true, force: true });
+  });
+
   it('prints help guide on help command and exits 0', async () => {
     const code = await runCli(['help']);
     expect(code).toBe(0);

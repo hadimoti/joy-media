@@ -29,7 +29,8 @@ describe('Kimi Code configurable client ID', () => {
         return json({
           user_code: 'TEST-CODE',
           device_code: 'test-device-code',
-          verification_uri_complete: 'https://www.kimi.ai/code/authorize_device?user_code=TEST-CODE',
+          verification_uri_complete:
+            'https://www.kimi.ai/code/authorize_device?user_code=TEST-CODE',
           expires_in: 120,
           interval: 1,
         });
@@ -81,7 +82,8 @@ describe('Kimi Code configurable client ID', () => {
         return json({
           user_code: 'TEST-CODE',
           device_code: 'test-device-code',
-          verification_uri_complete: 'https://www.kimi.ai/code/authorize_device?user_code=TEST-CODE',
+          verification_uri_complete:
+            'https://www.kimi.ai/code/authorize_device?user_code=TEST-CODE',
           expires_in: 120,
           interval: 1,
         });
@@ -95,7 +97,8 @@ describe('Kimi Code configurable client ID', () => {
           scope: 'kimi-code',
         });
       }
-      if (url === `${KIMI_CODE_BASE_URL}/models`) return json({ data: [{ id: 'kimi-code-model' }] });
+      if (url === `${KIMI_CODE_BASE_URL}/models`)
+        return json({ data: [{ id: 'kimi-code-model' }] });
       throw new Error(`unexpected request to ${url}`);
     };
     const signIn = createProviderSignIn({

@@ -33,6 +33,9 @@ export default defineConfig({
       '@joy-media/project-persistence/browser': pkg(
         './packages/project-persistence/src/browser.ts',
       ),
+      '@joy-media/project-persistence/joy-media-home': pkg(
+        './packages/project-persistence/src/joy-media-home.ts',
+      ),
       '@joy-media/project-persistence': pkg('./packages/project-persistence/src/index.ts'),
       '@joy-media/joy-agent-engine': pkg('./packages/joy-agent-engine/src/index.ts'),
       '@joy-media/cli': pkg('./apps/cli/src/index.ts'),
@@ -64,6 +67,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Bound file parallelism so Windows DPAPI and filesystem checks stay within their test timeouts.
+    maxWorkers: 8,
     include: [
       '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
       'tests/e2e/helpers/browser-console-audit.unit.ts',

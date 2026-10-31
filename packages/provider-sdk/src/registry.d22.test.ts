@@ -12,10 +12,12 @@ import {
 describe('D22 provider routes', () => {
   it('marks OAuth-only bases separately from API-key regions', () => {
     expect(
-      findRegistryProvider('kimi')?.regions.find((region) => region.id === 'code-international')?.route,
+      findRegistryProvider('kimi')?.regions.find((region) => region.id === 'code-international')
+        ?.route,
     ).toBe('oauth');
     expect(
-      findRegistryProvider('xai')?.regions.find((region) => region.id === 'oauth-international')?.route,
+      findRegistryProvider('xai')?.regions.find((region) => region.id === 'oauth-international')
+        ?.route,
     ).toBe('oauth');
     expect(findRegistryRegion('kimi', 'https://api.moonshot.ai/v1')?.route).toBeUndefined();
     expect(findRegistryRegion('xai', 'https://api.x.ai/v1')?.route).toBeUndefined();
@@ -26,10 +28,7 @@ describe('D22 provider routes', () => {
       expect(findRegistryRegion('xai', baseUrl)?.baseUrl).toBe(baseUrl);
       expect(evaluateEndpoint('xai', baseUrl)).toMatchObject({ allowed: true, kind: 'registry' });
     }
-    expect(findRegistryProvider('xai')?.auth.methods).toEqual([
-      'api-key',
-      'subscription-sign-in',
-    ]);
+    expect(findRegistryProvider('xai')?.auth.methods).toEqual(['api-key', 'subscription-sign-in']);
     expect(findRegistryProvider('xai')?.auth.gated).toBeUndefined();
     expect(findRegistryProvider('xai')?.auth.unverified).toBeUndefined();
     expect(signInProviders()).toEqual(['kimi', 'chatgpt', 'xai']);
@@ -39,7 +38,10 @@ describe('D22 provider routes', () => {
     const routes = [['deepseek', 'https://api.deepseek.com']] as const;
     for (const [provider, baseUrl] of routes) {
       expect(findRegistryRegion(provider, baseUrl)?.baseUrl).toBe(baseUrl);
-      expect(evaluateEndpoint(provider, baseUrl)).toMatchObject({ allowed: true, kind: 'registry' });
+      expect(evaluateEndpoint(provider, baseUrl)).toMatchObject({
+        allowed: true,
+        kind: 'registry',
+      });
       expect(findRegistryProvider(provider)?.auth.methods).toEqual(['api-key']);
       expect(signInProviders()).not.toContain(provider);
     }

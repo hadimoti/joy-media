@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createMemorySecretStore, PROVIDER_REGISTRY } from '@joy-media/provider-sdk';
-import {
-  encodeKimiTokenRecord,
-  KIMI_CODE_CLIENT_ID,
-  type KimiTokenRecord,
-} from '../oauth/kimi.js';
+import { encodeKimiTokenRecord, KIMI_CODE_CLIENT_ID, type KimiTokenRecord } from '../oauth/kimi.js';
 import {
   createProviderBroker,
   endpointBindingDigest,
@@ -161,14 +157,21 @@ describe('provider broker: profile checks', () => {
       profiles: [apiProfile],
       keys: { [apiProfile.secretHandleId]: 'kimi-platform-api-key' },
     });
-    expect((await api.broker.complete({ profileId: apiProfile.id, body: CHAT_BODY })).ok).toBe(true);
+    expect((await api.broker.complete({ profileId: apiProfile.id, body: CHAT_BODY })).ok).toBe(
+      true,
+    );
     expect(api.sent[0]?.url).toBe('https://api.moonshot.ai/v1/chat/completions');
     expect(headerOf(api.sent[0]!.init, 'authorization')).toBe('Bearer kimi-platform-api-key');
   });
 
   it('refreshes Kimi OAuth just before expiry and refuses a reply carrying either saved token', async () => {
     const now = Date.UTC(2026, 9, 30);
-    const profile = bound('kimi-refresh', 'kimi', 'https://api.kimi.ai/coding/v1', 'kimi-code-model');
+    const profile = bound(
+      'kimi-refresh',
+      'kimi',
+      'https://api.kimi.ai/coding/v1',
+      'kimi-code-model',
+    );
     const record: KimiTokenRecord = {
       version: 1,
       clientId: KIMI_CODE_CLIENT_ID,
@@ -183,7 +186,11 @@ describe('provider broker: profile checks', () => {
       now: () => now,
       reply: (url) => {
         if (url === 'https://api.kimi.ai/coding/v1/chat/completions') {
-          return jsonReply({ choices: [{ message: { role: 'assistant', content: 'kimi-new-access kimi-new-refresh' } }] });
+          return jsonReply({
+            choices: [
+              { message: { role: 'assistant', content: 'kimi-new-access kimi-new-refresh' } },
+            ],
+          });
         }
         if (url === 'https://auth.kimi.ai/api/oauth/token') {
           return jsonReply({

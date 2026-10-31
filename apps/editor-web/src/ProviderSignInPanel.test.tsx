@@ -30,8 +30,9 @@ describe('ProviderSignInPanel', () => {
   });
 
   function installDesktopBridge() {
-    const invoke = vi.fn().mockImplementation(
-      async (channel: string, request?: { provider?: string }) => {
+    const invoke = vi
+      .fn()
+      .mockImplementation(async (channel: string, request?: { provider?: string }) => {
         if (channel === 'desktop.provider-profile.sign-in') {
           return {
             id: 'profile-' + (request?.provider ?? 'unknown'),
@@ -49,8 +50,7 @@ describe('ProviderSignInPanel', () => {
           };
         }
         return undefined;
-      },
-    );
+      });
     global.window = {
       joyDesktop: {
         channels: ['desktop.provider-profile.sign-in', 'desktop.provider-profile.save'],
@@ -188,9 +188,10 @@ describe('ProviderSignInPanel', () => {
     const kimiRegionSelect = kimiKeyRoute.querySelector<HTMLSelectElement>(
       'select[aria-label="Kimi API key region"]',
     );
-    expect(
-      [...(kimiRegionSelect?.options ?? [])].map((option) => option.value),
-    ).toEqual(['international', 'china']);
+    expect([...(kimiRegionSelect?.options ?? [])].map((option) => option.value)).toEqual([
+      'international',
+      'china',
+    ]);
 
     const xaiKeyRoute = route('xAI', 'API-key');
     expect(xaiKeyRoute.textContent).not.toContain('https://cli-chat-proxy.grok.com/v1');
@@ -287,9 +288,6 @@ describe('ProviderSignInPanel', () => {
     await act(async () => save.click());
 
     expect(route('Kimi', 'API-key').textContent).toContain('Enter a model ID before saving.');
-    expect(invoke).not.toHaveBeenCalledWith(
-      'desktop.provider-profile.save',
-      expect.anything(),
-    );
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
   });
 });

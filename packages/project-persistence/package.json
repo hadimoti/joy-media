@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./joy-media-home": {
+      "types": "./dist/joy-media-home.d.ts",
+      "default": "./dist/joy-media-home.js"
+    },
     "./browser": {
       "types": "./dist/browser.d.ts",
       "default": "./dist/browser.js"

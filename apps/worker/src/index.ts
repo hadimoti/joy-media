@@ -9,8 +9,8 @@ import {
 } from './runtime.js';
 import { createLocalSessionStore, workerApiUrl } from './local-session.js';
 import { GpuPreviewHost } from './gpu-preview-host.js';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getJoyMediaHome } from '@joy-media/project-persistence/joy-media-home';
 
 // Checked first: a Worker that names a remote control plane stops before it reads or writes any state.
 const apiUrl = workerApiUrl(process.env.JOY_MEDIA_API_URL);
@@ -25,7 +25,7 @@ if (localToken === undefined)
   throw new Error('JOY_MEDIA_WORKER_LOCAL_TOKEN is required with JOY_MEDIA_API_URL');
 
 const configuredStatePath = process.env.JOY_MEDIA_WORKER_STATE_PATH?.trim();
-const statePath = configuredStatePath || join(homedir(), '.joy-media', 'worker-state.json');
+const statePath = configuredStatePath || join(getJoyMediaHome(), 'worker-state.json');
 const store = new JsonFileWorkerStore(statePath);
 const identity = getDeviceIdentity(store);
 const sources = localAssetSourcesFromEnvironment(process.env.JOY_MEDIA_LOCAL_ASSETS_JSON);

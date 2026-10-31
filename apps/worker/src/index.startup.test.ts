@@ -27,7 +27,12 @@ function startWorker(env: Record<string, string>): {
       ['--import', 'tsx', join(workerRoot, 'src', 'index.ts')],
       {
         cwd: workerRoot,
-        env: { ...inherited, JOY_MEDIA_WORKER_STATE_PATH: statePath, ...env },
+        env: {
+          ...inherited,
+          JOY_MEDIA_HOME: join(scratch, 'joy-media-home'),
+          JOY_MEDIA_WORKER_STATE_PATH: statePath,
+          ...env,
+        },
         encoding: 'utf8',
         timeout: 120_000,
       },

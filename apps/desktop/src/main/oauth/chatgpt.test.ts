@@ -639,7 +639,10 @@ describe('revokeChatGptRefreshToken', () => {
   it.each([
     [
       'an issuer mismatch',
-      { issuer: 'https://attacker.example', revocation_endpoint: 'https://attacker.example/revoke' },
+      {
+        issuer: 'https://attacker.example',
+        revocation_endpoint: 'https://attacker.example/revoke',
+      },
     ],
     [
       'a cross-origin revocation endpoint',
@@ -656,7 +659,9 @@ describe('revokeChatGptRefreshToken', () => {
       return jsonReply(discovery);
     };
 
-    await expect(revokeChatGptRefreshToken({ record: recordAt(1_000), fetch })).rejects.toMatchObject({
+    await expect(
+      revokeChatGptRefreshToken({ record: recordAt(1_000), fetch }),
+    ).rejects.toMatchObject({
       code: 'REVOCATION_FAILED',
     });
     expect(calls).toEqual([CHATGPT_DISCOVERY_URL]);
@@ -676,7 +681,9 @@ describe('revokeChatGptRefreshToken', () => {
       });
     };
 
-    await expect(revokeChatGptRefreshToken({ record: recordAt(1_000), fetch })).rejects.toMatchObject({
+    await expect(
+      revokeChatGptRefreshToken({ record: recordAt(1_000), fetch }),
+    ).rejects.toMatchObject({
       code: 'REVOCATION_FAILED',
       message: expect.not.stringContaining('refresh-token-should-not-be-reported'),
     });

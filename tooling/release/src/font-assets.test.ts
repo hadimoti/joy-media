@@ -122,11 +122,18 @@ describe('editor font redistribution gate', () => {
       }
     });
     expect(present).toEqual([]);
+    expect(existsSync(loginGateCss)).toBe(false);
 
     const html = readFileSync(`${editorRoot}index.html`, 'utf8');
     expect(html).not.toMatch(/fontiran|modam|content-fonts\.css/i);
-    expect(readFileSync(loginGateCss, 'utf8')).not.toMatch(knownFontMarkers);
+    expect(html).not.toMatch(/login-gate\.css/i);
+    expect(readFileSync(mainEntry, 'utf8')).not.toMatch(/login-gate\.css/i);
     expect(readFileSync(mainEntry, 'utf8')).not.toMatch(knownFontMarkers);
+    for (const path of runtimeFiles([...runtimeSourceRoots, ...runtimeDistRoots])) {
+      expect(readFileSync(path, 'utf8'), relative(repositoryRoot, path)).not.toMatch(
+        /login-gate\.css/i,
+      );
+    }
 
     const publicFontFiles = walkFiles(publicRoot).filter((path) =>
       shippedFontExtensions.has(extname(path).toLowerCase()),
@@ -171,7 +178,13 @@ describe('editor font redistribution gate', () => {
   it('regresses the retired RooyinFree login paths explicitly', () => {
     expect(existsSync(`${publicRoot}fonts/RooyinFree-Regular.woff2`)).toBe(false);
     expect(existsSync(`${publicRoot}fonts/RooyinFree-Bold.woff2`)).toBe(false);
-    expect(readFileSync(loginGateCss, 'utf8')).not.toMatch(/RooyinFree|Rooyin|\/fonts\//i);
+    expect(existsSync(loginGateCss)).toBe(false);
+    const retiredLoginFontPath = /(?:\/|\\)fonts[\\/]RooyinFree-(?:Regular|Bold)\.woff2/i;
+    for (const path of runtimeFiles([...runtimeSourceRoots, ...runtimeDistRoots])) {
+      expect(readFileSync(path, 'utf8'), relative(repositoryRoot, path)).not.toMatch(
+        retiredLoginFontPath,
+      );
+    }
   });
 
   it('scans the final Vite artifact for ownership markers when it exists', () => {

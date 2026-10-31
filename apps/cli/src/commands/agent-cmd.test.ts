@@ -22,7 +22,11 @@ vi.mock('../agent/oauth.js', async (importOriginal) => ({
 const SECRET = 'sk-or-cli-secret-0123456789abcdef';
 
 /** Each test runs against its own home directory, so the owner's real configuration is never read or written. */
-const savedEnvironment = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+const savedEnvironment = {
+  HOME: process.env.HOME,
+  USERPROFILE: process.env.USERPROFILE,
+  JOY_MEDIA_HOME: process.env.JOY_MEDIA_HOME,
+};
 
 describe('the CLI provider listing', () => {
   let home = '';
@@ -32,6 +36,7 @@ describe('the CLI provider listing', () => {
     home = mkdtempSync(join(tmpdir(), 'joy-provider-list-'));
     process.env.HOME = home;
     process.env.USERPROFILE = home;
+    process.env.JOY_MEDIA_HOME = join(home, '.joy-media');
     printed = [];
     const record = (...args: unknown[]): void => {
       printed.push(args.map(String).join(' '));
@@ -82,6 +87,7 @@ describe('OAuth provider profiles', () => {
     home = mkdtempSync(join(tmpdir(), 'joy-oauth-profile-'));
     process.env.HOME = home;
     process.env.USERPROFILE = home;
+    process.env.JOY_MEDIA_HOME = join(home, '.joy-media');
     printed = [];
     errors = [];
     order = [];
@@ -122,33 +128,35 @@ describe('OAuth provider profiles', () => {
     const accessToken = 'kimi-access-secret-for-cli-test';
     const refreshToken = 'kimi-refresh-secret-for-cli-test';
     const expiresAt = Date.UTC(2026, 10, 1, 12);
-    signInOAuthProfileMock.mockImplementation(async (input: {
-      readonly onAuthorization: (presentation: {
-        readonly url: string;
-        readonly userCode: string;
-        readonly expiresAt: number;
-      }) => void;
-      readonly onSlowDown?: () => void;
-    }) => {
-      order.push('sign-in');
-      input.onAuthorization({
-        url: 'https://www.kimi.ai/code/authorize_device?user_code=KIMI-CODE-TEST',
-        userCode: 'KIMI-CODE-TEST',
-        expiresAt,
-      });
-      input.onSlowDown?.();
-      return {
-        provider: 'kimi',
-        tokenRecord: {
-          version: 1,
-          clientId: 'kimi-client-test',
-          accessToken,
-          refreshToken,
-          accessExpiresAt: Date.now() + 3_600_000,
-          scope: 'kimi-code',
-        },
-      };
-    });
+    signInOAuthProfileMock.mockImplementation(
+      async (input: {
+        readonly onAuthorization: (presentation: {
+          readonly url: string;
+          readonly userCode: string;
+          readonly expiresAt: number;
+        }) => void;
+        readonly onSlowDown?: () => void;
+      }) => {
+        order.push('sign-in');
+        input.onAuthorization({
+          url: 'https://www.kimi.ai/code/authorize_device?user_code=KIMI-CODE-TEST',
+          userCode: 'KIMI-CODE-TEST',
+          expiresAt,
+        });
+        input.onSlowDown?.();
+        return {
+          provider: 'kimi',
+          tokenRecord: {
+            version: 1,
+            clientId: 'kimi-client-test',
+            accessToken,
+            refreshToken,
+            accessExpiresAt: Date.now() + 3_600_000,
+            scope: 'kimi-code',
+          },
+        };
+      },
+    );
 
     const code = await runCli([
       'agent',
@@ -168,7 +176,9 @@ describe('OAuth provider profiles', () => {
       'Signing in uses a third-party public app and may stop working or be deactivated by the provider at any time. An API key is the dependable way to connect.';
     expect(errors).toEqual([notice]);
     expect(order.indexOf(`stderr:${notice}`)).toBeLessThan(order.indexOf('sign-in'));
-    expect(printed.join('\n')).toContain('Approval URL: https://www.kimi.ai/code/authorize_device?user_code=KIMI-CODE-TEST');
+    expect(printed.join('\n')).toContain(
+      'Approval URL: https://www.kimi.ai/code/authorize_device?user_code=KIMI-CODE-TEST',
+    );
     expect(printed.join('\n')).toContain('User code: KIMI-CODE-TEST');
     expect(printed.join('\n')).toContain(`Code expires at: ${new Date(expiresAt).toISOString()}`);
     expect(terminalWrites).toEqual([
@@ -355,15 +365,7 @@ describe('OAuth provider profiles', () => {
     });
 
     expect(
-      await runCli([
-        'agent',
-        'provider',
-        'add',
-        'existing-key',
-        '--provider',
-        'kimi',
-        '--oauth',
-      ]),
+      await runCli(['agent', 'provider', 'add', 'existing-key', '--provider', 'kimi', '--oauth']),
     ).toBe(1);
     expect(errors.join('\n')).toContain('remove it before changing authentication');
     expect(signInOAuthProfileMock).not.toHaveBeenCalled();
@@ -372,22 +374,24 @@ describe('OAuth provider profiles', () => {
 
   it('explains the ChatGPT loopback and remote-machine limitation without launching a browser', async () => {
     const authorizationUrl = 'https://auth.openai.com/api/accounts/authorize?state=cli-test';
-    signInOAuthProfileMock.mockImplementation(async (input: {
-      readonly onAuthorization: (presentation: { readonly url: string }) => void;
-    }) => {
-      input.onAuthorization({ url: authorizationUrl });
-      return {
-        provider: 'chatgpt',
-        tokenRecord: {
-          version: 1,
-          clientId: 'chatgpt-client-test',
-          accountId: 'account-test',
-          accessToken: 'chatgpt-access-secret',
-          refreshToken: 'chatgpt-refresh-secret',
-          accessExpiresAt: Date.now() + 3_600_000,
-        },
-      };
-    });
+    signInOAuthProfileMock.mockImplementation(
+      async (input: {
+        readonly onAuthorization: (presentation: { readonly url: string }) => void;
+      }) => {
+        input.onAuthorization({ url: authorizationUrl });
+        return {
+          provider: 'chatgpt',
+          tokenRecord: {
+            version: 1,
+            clientId: 'chatgpt-client-test',
+            accountId: 'account-test',
+            accessToken: 'chatgpt-access-secret',
+            refreshToken: 'chatgpt-refresh-secret',
+            accessExpiresAt: Date.now() + 3_600_000,
+          },
+        };
+      },
+    );
 
     expect(
       await runCli([
