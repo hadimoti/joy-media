@@ -241,3 +241,146 @@ describe('ChatGPT Responses engine bridge', () => {
     ).toEqual([{ id: 'gpt-visible', name: 'Visible model' }]);
   });
 });
+
+/** The Responses event of a finished reply, with the count the server reported. */
+function completedWithUsage(usage: unknown): string {
+  return event({
+    type: 'response.completed',
+    response: {
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'The reply.' }] }],
+      usage,
+    },
+  });
+}
+
+/** The Chat Completions the bridge answers with, for one Responses event stream. */
+async function chatCompletionOf(
+  responsesStream: string,
+  stream: boolean,
+): Promise<{ readonly status: number; readonly body: string }> {
+  const fetch = createChatGptResponsesFetch({
+    accessToken: TOKEN,
+    modelId: 'gpt-test',
+    fetch: async () =>
+      new Response(responsesStream, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+  });
+  const response = await fetch(`${CHATGPT_RESPONSES_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    body: JSON.stringify({
+      model: 'gpt-test',
+      stream,
+      messages: [{ role: 'user', content: 'hello' }],
+    }),
+  });
+  return { status: response.status, body: await response.text() };
+}
+
+/** The chunks of a converted Chat Completions stream, in order. */
+function chunksOf(stream: string): Record<string, unknown>[] {
+  return stream
+    .split('\n')
+    .filter((line) => line.startsWith('data: ') && !line.includes('[DONE]'))
+    .map((line) => JSON.parse(line.slice('data: '.length)) as Record<string, unknown>);
+}
+
+describe('ChatGPT token usage', () => {
+  it('carries the count of the reply on the last chunk of the converted stream', async () => {
+    const { status, body } = await chatCompletionOf(
+      completedWithUsage({ input_tokens: 9, output_tokens: 2, total_tokens: 11 }),
+      true,
+    );
+
+    expect(status).toBe(200);
+    const chunks = chunksOf(body);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.usage).toEqual({
+      prompt_tokens: 9,
+      completion_tokens: 2,
+      total_tokens: 11,
+    });
+    expect(body.trimEnd().endsWith('data: [DONE]')).toBe(true);
+  });
+
+  it('computes the total when the reply reports no total', async () => {
+    const { body } = await chatCompletionOf(
+      completedWithUsage({ input_tokens: 9, output_tokens: 2 }),
+      true,
+    );
+
+    expect(chunksOf(body)[0]?.usage).toEqual({
+      prompt_tokens: 9,
+      completion_tokens: 2,
+      total_tokens: 11,
+    });
+  });
+
+  it('reads the count from the prompt and completion names too', async () => {
+    const { body } = await chatCompletionOf(
+      completedWithUsage({ prompt_tokens: 7, completion_tokens: 3 }),
+      true,
+    );
+
+    expect(chunksOf(body)[0]?.usage).toEqual({
+      prompt_tokens: 7,
+      completion_tokens: 3,
+      total_tokens: 10,
+    });
+  });
+
+  it('leaves the count out when the reply carries none', async () => {
+    const { status, body } = await chatCompletionOf(completedWithUsage(undefined), true);
+
+    expect(status).toBe(200);
+    expect(chunksOf(body)[0]).not.toHaveProperty('usage');
+  });
+
+  it.each([
+    ['a string where a count belongs', { input_tokens: 'many', output_tokens: 2 }],
+    ['a negative count', { input_tokens: 9, output_tokens: -3 }],
+    ['no count on one side', { input_tokens: 9 }],
+  ])('does not trust a count with %s', async (_name, usage) => {
+    const { status, body } = await chatCompletionOf(completedWithUsage(usage), true);
+
+    expect(status).toBe(200);
+    expect(chunksOf(body)[0]).not.toHaveProperty('usage');
+  });
+
+  it('carries the count on the non-streaming reply, under the same rule', async () => {
+    const { status, body } = await chatCompletionOf(
+      completedWithUsage({ input_tokens: 9, output_tokens: 2, total_tokens: 11 }),
+      false,
+    );
+
+    expect(status).toBe(200);
+    expect(JSON.parse(body)).toMatchObject({
+      object: 'chat.completion',
+      usage: { prompt_tokens: 9, completion_tokens: 2, total_tokens: 11 },
+    });
+  });
+
+  it('leaves the count out of the non-streaming reply when the reply carries none', async () => {
+    const { body } = await chatCompletionOf(completedWithUsage(undefined), false);
+
+    expect(JSON.parse(body)).not.toHaveProperty('usage');
+  });
+
+  it('reads the count into the outcome, and leaves it absent when there is none', () => {
+    const withUsage = readChatGptStream(
+      completedWithUsage({ input_tokens: 9, output_tokens: 2, total_tokens: 11 }),
+    );
+    expect(withUsage.kind).toBe('completed');
+    if (withUsage.kind !== 'completed') return;
+    expect(withUsage.usage).toEqual({
+      promptTokens: 9,
+      completionTokens: 2,
+      totalTokens: 11,
+    });
+
+    const withoutUsage = readChatGptStream(completedWithUsage(undefined));
+    if (withoutUsage.kind !== 'completed') throw new Error('expected a completed reply');
+    expect(withoutUsage.usage).toBeUndefined();
+  });
+});

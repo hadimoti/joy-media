@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MockLanguageModelV3 } from 'ai/test';
 import { composeAgentInstructions, JoyAgentEngine, probeJoyAgentModel } from './engine.js';
 import type { JoyAgentRunRequest } from './contracts.js';
 import type { JoyAgentToolBridge } from './tools.js';
+import { createJoyAgentProvider, type JoyFetch } from './provider.js';
+import { normalizeByokSessionConfig } from './provider-config.js';
 
 const request: JoyAgentRunRequest = {
   runId: 'run-1',
@@ -108,6 +110,71 @@ describe('JOY Agent bounded model loop', () => {
     expect(engine.getLimits().maxSteps).toBe(DEFAULT_LIMITS.maxSteps);
     expect(engine.getLimits().maxToolCalls).toBe(4);
     expect(engine.getLimits().maxOutputTokens).toBe(128);
+  });
+
+  it('reports the token count of a ChatGPT reply in its usage event', async () => {
+    const events: unknown[] = [];
+    const fetchImpl = vi.fn<JoyFetch>(
+      async () =>
+        new Response(
+          `data: ${JSON.stringify({
+            type: 'response.completed',
+            response: {
+              output: [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }],
+              usage: { input_tokens: 9, output_tokens: 2, total_tokens: 11 },
+            },
+          })}\n\n`,
+          { status: 200, headers: { 'content-type': 'text/event-stream' } },
+        ),
+    );
+    const config = normalizeByokSessionConfig({
+      provider: 'chatgpt-responses',
+      modelId: 'gpt-test',
+      auth: { kind: 'bearer-token', token: 'chatgpt-access-token' },
+    });
+    const { model } = createJoyAgentProvider(config, fetchImpl);
+    const engine = new JoyAgentEngine({
+      model,
+      bridge,
+      onEvent: (event) => events.push(event),
+    });
+
+    await engine.run(request);
+
+    const usage = events.find((event) => (event as { type: string }).type === 'usage');
+    expect(usage).toMatchObject({ inputTokens: 9, outputTokens: 2, totalTokens: 11 });
+  });
+
+  it('reports no count for a ChatGPT reply that carries none', async () => {
+    const events: unknown[] = [];
+    const fetchImpl = vi.fn<JoyFetch>(
+      async () =>
+        new Response(
+          `data: ${JSON.stringify({
+            type: 'response.completed',
+            response: {
+              output: [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }],
+            },
+          })}\n\n`,
+          { status: 200, headers: { 'content-type': 'text/event-stream' } },
+        ),
+    );
+    const config = normalizeByokSessionConfig({
+      provider: 'chatgpt-responses',
+      modelId: 'gpt-test',
+      auth: { kind: 'bearer-token', token: 'chatgpt-access-token' },
+    });
+    const { model } = createJoyAgentProvider(config, fetchImpl);
+    const engine = new JoyAgentEngine({
+      model,
+      bridge,
+      onEvent: (event) => events.push(event),
+    });
+
+    await engine.run(request);
+
+    const usage = events.find((event) => (event as { type: string }).type === 'usage');
+    expect(usage).toMatchObject({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
 });
 
