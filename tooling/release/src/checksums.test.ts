@@ -105,7 +105,8 @@ describe('checksums.ts verify', () => {
 
 describe('checksums.ts chunked hashing', () => {
   it.each([
-    ['3 MiB, larger than the hash chunk', 3 * 1024 * 1024],
+    ['123 bytes, shorter than one hash chunk', 123],
+    ['3 MiB plus 123 bytes, a partial final hash chunk', 3 * 1024 * 1024 + 123],
     ['2 MiB, an exact multiple of the hash chunk', 2 * 1024 * 1024],
     ['4 MiB, an exact multiple of the hash chunk', 4 * 1024 * 1024],
   ])('hashes a %s payload file to the same digest as a single-buffer hash', (_size, bytes) => {
