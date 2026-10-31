@@ -488,9 +488,10 @@ export async function installFakeOpenAIProvider(
         contentType: 'application/json',
         body,
       });
-    } catch {
-      // The page may close while a slow answer is still on its way. The aborted route is not a
-      // provider failure, so it is not reported as one.
+    } catch (error) {
+      // The page may close while a slow answer is still on its way. Only that closed or aborted
+      // route is ignored; any other failure to answer is a fixture fault, and it must surface.
+      if (!/closed|aborted|Target page|context or browser/i.test(String(error))) throw error;
     }
   });
   return {
