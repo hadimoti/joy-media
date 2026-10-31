@@ -102,15 +102,37 @@ function messagesOf(requestBody: Readonly<Record<string, unknown>>): readonly Pr
     : [];
 }
 
+/**
+ * The capability probe is recognised by the product-owned `joy_probe` tool it offers and by the
+ * instruction that asks for exactly one call. The Worker asks with an automatic tool choice, so a
+ * forced named tool choice is not part of the request and must not be required to spot the probe.
+ * A request that already carries the probe result is the continuation, not the probe.
+ */
 function isForcedProbe(requestBody: Readonly<Record<string, unknown>>): boolean {
   const choice = requestBody.tool_choice;
-  if (choice === null || typeof choice !== 'object' || Array.isArray(choice)) return false;
-  const functionValue = (choice as Readonly<Record<string, unknown>>).function;
-  return (
-    functionValue !== null &&
-    typeof functionValue === 'object' &&
-    !Array.isArray(functionValue) &&
-    (functionValue as Readonly<Record<string, unknown>>).name === 'joy_probe'
+  if (choice !== null && typeof choice === 'object' && !Array.isArray(choice)) {
+    const functionValue = (choice as Readonly<Record<string, unknown>>).function;
+    if (
+      functionValue !== null &&
+      typeof functionValue === 'object' &&
+      !Array.isArray(functionValue) &&
+      (functionValue as Readonly<Record<string, unknown>>).name === 'joy_probe'
+    )
+      return true;
+  }
+  if (!Array.isArray(requestBody.tools)) return false;
+  const offersProbeTool = requestBody.tools.some((tool) => {
+    if (tool === null || typeof tool !== 'object' || Array.isArray(tool)) return false;
+    const fn = (tool as Readonly<Record<string, unknown>>).function;
+    return fn !== null && typeof fn === 'object' && !Array.isArray(fn) && fn.name === 'joy_probe';
+  });
+  if (!offersProbeTool) return false;
+  const messages = messagesOf(requestBody);
+  if (messages.some((message) => message.role === 'tool')) return false;
+  return messages.some(
+    (message) =>
+      typeof message.content === 'string' &&
+      message.content.includes('Use the joy_probe tool exactly once'),
   );
 }
 
@@ -459,12 +481,17 @@ export async function installFakeOpenAIProvider(
     } else {
       body = responseBody(requestBody, options);
     }
-    await route.fulfill({
-      status: 200,
-      headers: CORS_HEADERS,
-      contentType: 'application/json',
-      body,
-    });
+    try {
+      await route.fulfill({
+        status: 200,
+        headers: CORS_HEADERS,
+        contentType: 'application/json',
+        body,
+      });
+    } catch {
+      // The page may close while a slow answer is still on its way. The aborted route is not a
+      // provider failure, so it is not reported as one.
+    }
   });
   return {
     get requests() {
@@ -487,7 +514,12 @@ export async function installFakeOpenAIProvider(
 export async function configureJoyAgent(
   page: Page,
   apiKey: string,
-  options: { readonly modelId?: string; readonly allowFailure?: boolean } = {},
+  options: {
+    readonly modelId?: string;
+    readonly allowFailure?: boolean;
+    /** How long the connection notice may take. A provider bound longer than this needs more. */
+    readonly noticeTimeoutMs?: number;
+  } = {},
 ): Promise<Locator> {
   await page.locator('.app-menu-trigger').filter({ hasText: 'Joy Code' }).click();
   await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
@@ -521,7 +553,7 @@ export async function configureJoyAgent(
       ]
     : ['Tool loop ready', 'Plan-only ready'];
   await expect(dialog.getByText(new RegExp(expectedConnectionNotice.join('|')))).toBeVisible({
-    timeout: 20_000,
+    timeout: options.noticeTimeoutMs ?? 20_000,
   });
   if (!options.allowFailure) await expect(dialog.getByText(/Connected successfully/)).toBeVisible();
   await expect(dialog.getByLabel('API Secret Key')).toHaveValue('');
