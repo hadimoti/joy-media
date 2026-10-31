@@ -189,7 +189,7 @@ namespace JoyMedia.Setup
                         string exePath = Path.Combine(installPath, "joy-media.exe");
                         string uninstallCmd = Path.Combine(installPath, "uninstall.cmd");
                         key.SetValue("DisplayName", "JOY Media", RegistryValueKind.String);
-                        key.SetValue("DisplayVersion", "1.0.0", RegistryValueKind.String);
+                        key.SetValue("DisplayVersion", "1.1.0", RegistryValueKind.String);
                         key.SetValue("Publisher", "JOY Team", RegistryValueKind.String);
                         key.SetValue("DisplayIcon", exePath, RegistryValueKind.String);
                         key.SetValue("InstallLocation", installPath, RegistryValueKind.String);
@@ -228,7 +228,7 @@ namespace JoyMedia.Setup
 
             titleLabel = new Label
             {
-                Text = "JOY Media v1.0.0",
+                Text = "JOY Media v1.1.0",
                 Font = new Font("Segoe UI", 16, FontStyle.Bold),
                 ForeColor = Color.FromArgb(0, 210, 255),
                 Location = new Point(24, 20),

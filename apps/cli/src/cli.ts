@@ -16,6 +16,7 @@ import {
   parseIntFlag,
 } from './utils/flags.js';
 import { c, logError, logWarn, printBanner } from './utils/logger.js';
+import { CLI_VERSION } from './version.js';
 
 export interface CliFlags {
   project: string | undefined;
@@ -214,7 +215,7 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 
   if (values.version) {
-    console.log('JOY Media CLI v1.0.0');
+    console.log(`JOY Media CLI v${CLI_VERSION}`);
     return 0;
   }
 
