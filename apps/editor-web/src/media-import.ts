@@ -96,7 +96,9 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
   let generatedAssetId =
     explicitAssetId === undefined ? idsByProject?.get(options.projectId) : undefined;
   if (explicitAssetId === undefined && generatedAssetId === undefined) {
-    generatedAssetId = (options.createAssetId ?? createImportedAssetId)();
+    generatedAssetId = options.createAssetId
+      ? options.createAssetId()
+      : createImportedAssetId(sha256);
     idsByProject ??= new Map<string, string>();
     idsByProject.set(options.projectId, generatedAssetId);
     generatedAssetIdsByFile.set(file, idsByProject);
@@ -147,11 +149,9 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
   return uploaded;
 }
 
-export function createImportedAssetId(): string {
-  const randomUuid = globalThis.crypto.randomUUID?.();
-  if (randomUuid !== undefined) return `media-${randomUuid}`;
-  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
-  return `media-${hex(bytes)}`;
+/** Content-addressed IDs are shared with the asset library. */
+export function createImportedAssetId(sha256: string): string {
+  return `joylib-${sha256}`;
 }
 
 export function normalizedMimeType(file: Pick<File, 'name' | 'type'>): string {
