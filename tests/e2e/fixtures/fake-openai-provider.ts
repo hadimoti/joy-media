@@ -64,6 +64,8 @@ export interface FakeOpenAIProviderContext {
 
 export interface FakeOpenAIProviderProbe {
   readonly requests: number;
+  /** Requests whose body carries an image part (`image_url`): the only path that sends media. */
+  readonly imageRequests: number;
   readonly authorizationSeen: boolean;
   readonly requestUrls: readonly string[];
   readonly stages: readonly FakeProviderRequestStage[];
@@ -422,6 +424,7 @@ export async function installFakeOpenAIProvider(
   options: FakeOpenAIProviderOptions = {},
 ): Promise<FakeOpenAIProviderProbe> {
   let requests = 0;
+  let imageRequests = 0;
   let authorizationSeen = false;
   const requestUrls: string[] = [];
   const stages: FakeProviderRequestStage[] = [];
@@ -463,6 +466,7 @@ export async function installFakeOpenAIProvider(
     } catch {
       /* malformed request bodies are answered with an invalid provider result */
     }
+    if (JSON.stringify(requestBody).includes('"image_url"')) imageRequests += 1;
     const stage = requestStage(requestBody);
     stages.push(stage);
     if (stage === 'structured-validate') contexts.push(contextFromRequest(requestBody));
@@ -497,6 +501,9 @@ export async function installFakeOpenAIProvider(
   return {
     get requests() {
       return requests;
+    },
+    get imageRequests() {
+      return imageRequests;
     },
     get authorizationSeen() {
       return authorizationSeen;
