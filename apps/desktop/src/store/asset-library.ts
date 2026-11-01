@@ -51,6 +51,16 @@ function isNotFound(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }
 
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath);
+    return true;
+  } catch (error) {
+    if (isNotFound(error)) return false;
+    throw error;
+  }
+}
+
 async function acquireLock(
   lockPath: string,
   lockWaitMs: number,
@@ -145,6 +155,27 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
         lockPath = `${catalogPath}.lock`;
         ownerToken = randomUUID();
         await mkdir(directory, { recursive: true });
+        await mkdir(path.dirname(target), { recursive: true });
+        // The media is staged before the lock so a slow copy cannot hold it, but a
+        // content-addressed file that is already stored is kept: rename() replaces its
+        // destination, so renaming over it would rewrite stored bytes and fails
+        // outright on Windows while that file is open elsewhere.
+        if (!(await pathExists(target))) {
+          const mediaTemporaryPath = `${target}.${process.pid}.${randomUUID()}.tmp`;
+          temporaryPath = mediaTemporaryPath;
+          await copyFile(registration.storedPath, mediaTemporaryPath, constants.COPYFILE_EXCL);
+          try {
+            await rename(mediaTemporaryPath, target);
+            temporaryPath = undefined;
+          } catch (error) {
+            // The rename failed, so the media is only staged when another writer put the
+            // same content-addressed file there first; keep the file that is there.
+            const staged = await pathExists(target).catch(() => false);
+            if (!staged) throw error;
+            await unlink(mediaTemporaryPath).catch(() => undefined);
+            temporaryPath = undefined;
+          }
+        }
         locked = await acquireLock(
           lockPath,
           lockWaitMs,
@@ -203,13 +234,6 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
                 if (!isAlreadyExists(error)) throw error;
               }
             }
-            await mkdir(path.dirname(target), { recursive: true });
-            try {
-              await copyFile(registration.storedPath, target, constants.COPYFILE_EXCL);
-            } catch (error) {
-              if (!isAlreadyExists(error)) throw error;
-            }
-
             const entry: LibraryEntry = {
               id,
               projectId: '',
