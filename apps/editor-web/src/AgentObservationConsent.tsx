@@ -74,16 +74,18 @@ const availabilityCopy: Readonly<
 > = {
   ready: {
     title: 'Ready for your decision',
-    description: 'Nothing has been shared. Allowing this review is the next explicit step.',
+    description:
+      'No image samples have been shared. Allowing this review is the next explicit step.',
   },
   probing: {
     title: 'Checking availability',
     description:
-      'JOY is checking whether the selected model can accept this scope. Nothing has been shared.',
+      'JOY is checking whether the selected model can accept this scope. No image samples have been shared.',
   },
   unavailable: {
     title: 'Review unavailable',
-    description: 'The selected model cannot accept this scope right now. Nothing has been shared.',
+    description:
+      'The selected model cannot accept this scope right now. No image samples have been shared.',
   },
 };
 
@@ -300,7 +302,7 @@ export function AgentObservationConsent({
         aria-label="Agent observation review unavailable"
       >
         <h2>Observation review unavailable</h2>
-        <p>The review details were not safe to display. Nothing has been shared.</p>
+        <p>The review details were not safe to display. No image samples have been shared.</p>
       </section>
     );
   }
@@ -353,7 +355,9 @@ export function AgentObservationConsent({
       </header>
 
       <p id={descriptionId} className="agent-observation-consent__intro">
-        This is a scoped, one-time review. This screen does not send media or store credentials.
+        This is a scoped, one-time review. This screen does not send media or store credentials.{' '}
+        This Joy Code request already sent project ids, asset names, counts and media observation
+        details to your configured provider. Allow adds only the listed image samples.
       </p>
 
       <dl className="agent-observation-consent__scope" aria-label="Observation review scope">

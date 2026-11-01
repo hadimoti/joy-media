@@ -3795,6 +3795,11 @@ export function AgentPanel({
                   {observationReviewDisplay.evidenceCount === 1 ? '' : 's'} to your configured model
                   only after you review and allow the exact scope. No video or audio is sent.
                 </p>
+                <p>
+                  This Joy Code request already sent project ids, asset names, counts and media
+                  observation details to your configured provider. Allow adds only the listed image
+                  samples.
+                </p>
                 {(observationReviewUi.status === 'idle' ||
                   observationReviewUi.status === 'failed') && (
                   <div className="joy-code-plan-actions">

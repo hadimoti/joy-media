@@ -1,6 +1,16 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
-import { access, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -132,6 +142,29 @@ describe('createAssetLibrary', () => {
     expect(await readFile(mediaPath, 'utf8')).toBe('keep this media');
   });
 
+  it('removes every catalog entry with the requested id', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const id = `joylib-${'d'.repeat(64)}`;
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      path.join(directory, 'catalog.json'),
+      JSON.stringify({
+        version: 1,
+        assets: [{ id, kind: 'image' }, { id, kind: 'image' }, { id: 'other' }],
+      }),
+    );
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: () => undefined },
+    });
+
+    await expect(library.removeEntry(id)).resolves.toEqual({ removed: true });
+    expect(JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8')).assets).toEqual(
+      [{ id: 'other' }],
+    );
+  });
+
   it('returns removed after the catalog rename even when lock cleanup fails', async () => {
     const root = await temporaryDirectory();
     const directory = path.join(root, 'library');
@@ -185,6 +218,57 @@ describe('createAssetLibrary', () => {
     );
     expect(await exists(directory)).toBe(false);
   });
+
+  it.each([42, { toString: () => `joylib-${'a'.repeat(64)}` }])(
+    'rejects a non-string id (%j) with the validation error',
+    async (id) => {
+      const root = await temporaryDirectory();
+      const directory = path.join(root, 'library');
+      const library = createAssetLibrary({
+        directory: () => directory,
+        registrations: { get: () => undefined },
+      });
+
+      await expect(library.removeEntry(id as string)).rejects.toThrow(
+        /Invalid asset library entry id/,
+      );
+      expect(await exists(directory)).toBe(false);
+    },
+  );
+
+  it.each(['write', 'rename'] as const)(
+    'leaves the original catalog unchanged and cleans up after a catalog %s failure',
+    async (failure) => {
+      const root = await temporaryDirectory();
+      const directory = path.join(root, 'library');
+      const id = `joylib-${'e'.repeat(64)}`;
+      const catalogPath = path.join(directory, 'catalog.json');
+      const originalCatalog = Buffer.from(JSON.stringify({ version: 1, assets: [{ id }] }));
+      await mkdir(directory, { recursive: true });
+      await writeFile(catalogPath, originalCatalog);
+      const library = createAssetLibrary({
+        directory: () => directory,
+        registrations: { get: () => undefined },
+        ...(failure === 'write'
+          ? {
+              writeCatalogTemporaryFile: async (filePath: string, data: string) => {
+                await writeFile(filePath, data);
+                throw new Error('catalog write failed');
+              },
+            }
+          : {
+              renameCatalogTemporaryFile: async () => {
+                throw new Error('catalog rename failed');
+              },
+            }),
+      });
+
+      await expect(library.removeEntry(id)).rejects.toThrow(`catalog ${failure} failed`);
+      expect(await readFile(catalogPath)).toEqual(originalCatalog);
+      expect(await exists(`${catalogPath}.lock`)).toBe(false);
+      expect((await readdir(directory)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    },
+  );
 
   it('uses the catalog lock when removing an entry', async () => {
     const root = await temporaryDirectory();

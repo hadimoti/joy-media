@@ -20,6 +20,12 @@ interface AssetLibraryOptions {
   readonly writeOwnerToken?: (handle: FileHandle, token: string) => Promise<void>;
   /** Test seam for simulating catalog lock cleanup failures. */
   readonly unlinkLock?: (lockPath: string) => Promise<void>;
+  /** Test seams for simulating catalog persistence failures. */
+  readonly writeCatalogTemporaryFile?: (filePath: string, data: string) => Promise<void>;
+  readonly renameCatalogTemporaryFile?: (
+    temporaryPath: string,
+    catalogPath: string,
+  ) => Promise<void>;
 }
 
 interface LibraryEntry {
@@ -309,7 +315,12 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
       );
     },
     async removeEntry(id) {
-      if (!LIBRARY_ENTRY_ID_PATTERN.test(id) || id.includes('..') || /[\\/]/.test(id)) {
+      if (
+        typeof id !== 'string' ||
+        !LIBRARY_ENTRY_ID_PATTERN.test(id) ||
+        id.includes('..') ||
+        /[\\/]/.test(id)
+      ) {
         throw new Error(
           'Invalid asset library entry id: expected joylib- followed by 64 lowercase hexadecimal characters',
         );
@@ -356,14 +367,15 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
           }
         }
 
-        const index = catalog.assets.findIndex(
+        const assets = catalog.assets.filter(
           (entry) =>
-            typeof entry === 'object' &&
-            entry !== null &&
-            (entry as Record<string, unknown>).id === id,
+            !(
+              typeof entry === 'object' &&
+              entry !== null &&
+              (entry as Record<string, unknown>).id === id
+            ),
         );
-        if (index >= 0) {
-          const assets = catalog.assets.filter((_, entryIndex) => entryIndex !== index);
+        if (assets.length !== catalog.assets.length) {
           const counts = {
             total: assets.length,
             audio: assets.filter(
@@ -386,8 +398,10 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
             ).length,
           };
           temporaryPath = `${catalogPath}.${process.pid}.${randomUUID()}.tmp`;
-          await writeFile(temporaryPath, JSON.stringify({ ...catalog, assets, counts }, null, 2));
-          await rename(temporaryPath, catalogPath);
+          await (
+            options.writeCatalogTemporaryFile ?? ((filePath, data) => writeFile(filePath, data))
+          )(temporaryPath, JSON.stringify({ ...catalog, assets, counts }, null, 2));
+          await (options.renameCatalogTemporaryFile ?? rename)(temporaryPath, catalogPath);
           temporaryPath = undefined;
           removed = true;
         }

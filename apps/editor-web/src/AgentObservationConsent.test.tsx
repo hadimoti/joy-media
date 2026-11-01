@@ -68,7 +68,7 @@ describe('AgentObservationConsent', () => {
     );
 
     expect(markup).toContain('data-agent-observation-consent="invalid"');
-    expect(markup).toContain('Nothing has been shared.');
+    expect(markup).toContain('No image samples have been shared.');
     expect(markup).not.toContain(privateFields.apiKey);
     expect(markup).not.toContain(privateFields.endpoint);
     expect(markup).not.toContain(privateFields.sourceUrl);
@@ -96,6 +96,9 @@ describe('AgentObservationConsent', () => {
       'Ready for your decision',
     );
     expect(rendered.querySelector('a')?.getAttribute('href')).toBe('https://openrouter.ai/privacy');
+    expect(rendered.textContent).toContain(
+      'This Joy Code request already sent project ids, asset names, counts and media observation details to your configured provider. Allow adds only the listed image samples.',
+    );
     expect(rendered.textContent).toContain(
       'Your provider may charge for or retain request logs under its own policy.',
     );
@@ -149,7 +152,7 @@ describe('AgentObservationConsent', () => {
     const buttons = container.querySelectorAll<HTMLButtonElement>('button');
     expect(buttons[0]?.disabled).toBe(true);
     expect(container.textContent).toContain('Checking availability');
-    expect(container.textContent).toContain('Nothing has been shared.');
+    expect(container.textContent).toContain('No image samples have been shared.');
     expect(container.textContent).toContain('Unavailable — check provider pricing');
 
     await act(async () => {
