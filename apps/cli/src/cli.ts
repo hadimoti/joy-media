@@ -1,6 +1,7 @@
 /* global console, process */
 import { parseArgs } from 'node:util';
 import { handleAgentCommand } from './commands/agent-cmd.js';
+import { handleAssetsCommand } from './commands/assets-cmd.js';
 import { handleBenchmarkCommand } from './commands/benchmark-cmd.js';
 import { handleDoctorCommand } from './commands/doctor-cmd.js';
 import { handleDoctorLocalCommand } from './commands/doctor-local-cmd.js';
@@ -58,6 +59,8 @@ export interface CliFlags {
   /** Settings of a slot, for `agent slot set`. Validated by the slot rules, not here. */
   temperature?: string | undefined;
   maxOutputTokens?: string | undefined;
+  kind?: string | undefined;
+  library?: string | undefined;
 }
 
 export function printHelp(): void {
@@ -70,6 +73,7 @@ export function printHelp(): void {
   console.log(
     `    ${c('project', 'cyan')} [list|create|show|export]  Local SQLite project management`,
   );
+  console.log(`    ${c('assets', 'cyan')} [list|show|path]         Read-only asset library lookup`);
   console.log(
     `    ${c('timeline', 'cyan')} [add-clip|split|trim]     Direct scriptable timeline operations`,
   );
@@ -89,6 +93,10 @@ export function printHelp(): void {
     `    ${c('doctor-local', 'cyan')}                      Explicit local check: models, environments, provider settings`,
   );
   console.log(`    ${c('help', 'cyan')}                              Show this help guide\n`);
+  console.log(`  ${c('Asset Commands:', 'bold')}`);
+  console.log(`    joy-media assets list [--kind image|audio|video] [--json] [--library <dir>]`);
+  console.log(`    joy-media assets show <id> [--json] [--library <dir>]`);
+  console.log(`    joy-media assets path <id> [--library <dir>]\n`);
   console.log(`  ${c('Examples:', 'bold')}`);
   console.log(
     `    ${c('joy-media agent chat', 'dim')}                          # Launch interactive Joy Agent REPL`,
@@ -98,6 +106,9 @@ export function printHelp(): void {
   );
   console.log(
     `    ${c('joy-media project list', 'dim')}                        # List all desktop projects`,
+  );
+  console.log(
+    `    ${c('joy-media assets list --kind image --json', 'dim')}     # Find image assets`,
   );
   console.log(
     `    ${c('joy-media worker status', 'dim')}                       # Check RTX GPU and models`,
@@ -153,6 +164,8 @@ function parseFlags(rawValues: Record<string, unknown>): CliFlags {
     json: Boolean(v.json),
     system: Boolean(v.system),
     'media-engine': Boolean(v['media-engine']),
+    kind: typeof v.kind === 'string' ? v.kind : undefined,
+    library: typeof v.library === 'string' ? v.library : undefined,
   };
 }
 
@@ -195,6 +208,8 @@ export async function runCli(argv: string[]): Promise<number> {
         preset: { type: 'string' },
         out: { type: 'string' },
         concurrency: { type: 'string' },
+        kind: { type: 'string' },
+        library: { type: 'string' },
         json: { type: 'boolean', default: false },
         system: { type: 'boolean', default: false },
         'media-engine': { type: 'boolean', default: false },
@@ -239,6 +254,9 @@ export async function runCli(argv: string[]): Promise<number> {
     }
     throw err;
   }
+
+  // Asset lookups are read-only and must not run the legacy provider migration.
+  if (command === 'assets') return await handleAssetsCommand(subArgs, flags);
 
   try {
     // Keys still in the plaintext provider file move to the credential store on the first start (PLAN-v4 §9c).
