@@ -206,7 +206,8 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
     const placedClip = page.locator('.timeline-clip[data-clip-id]').first();
     await expect(placedClip).toHaveCount(1);
     await expect(placedClip).toHaveClass(/timeline-clip--video/);
-    await expect(placedClip).toHaveAttribute('data-clip-id', /^clip-media-/);
+    // Library asset ids include the SHA-256 in the placed clip id.
+    await expect(placedClip).toHaveAttribute('data-clip-id', /^clip-joylib-[0-9a-f]{64}-\d+$/);
     await recordEvidence(testInfo, {
       caseId: 25,
       functional: 'PASS',

@@ -36,6 +36,19 @@ export interface JoyDesktopBridgeOptions {
   readonly channels?: readonly string[];
 }
 
+function encodeBridgeAnswer(value: unknown): unknown {
+  if (value instanceof Uint8Array) {
+    return { __joyBytesBase64: Buffer.from(value).toString('base64') };
+  }
+  if (Array.isArray(value)) return value.map(encodeBridgeAnswer);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [key, encodeBridgeAnswer(nested)]),
+    );
+  }
+  return value;
+}
+
 export async function installJoyDesktopBridge(
   page: Page,
   handlers: readonly ChannelHandler[],
@@ -48,7 +61,7 @@ export async function installJoyDesktopBridge(
     calls.push({ channel, payload });
     for (const handler of handlers) {
       const answer = await handler(channel, payload);
-      if (answer !== UNHANDLED) return answer;
+      if (answer !== UNHANDLED) return encodeBridgeAnswer(answer);
     }
     throw new Error(`joyDesktop e2e bridge has no handler for channel ${channel}`);
   });
@@ -58,9 +71,28 @@ export async function installJoyDesktopBridge(
       __joyDesktopInvoke: (channel: string, payload?: unknown) => Promise<unknown>;
       joyDesktop?: unknown;
     };
+    function decodeBridgeAnswer(value: unknown): unknown {
+      if (Array.isArray(value)) return value.map(decodeBridgeAnswer);
+      if (value !== null && typeof value === 'object') {
+        const encodedBytes = (value as { __joyBytesBase64?: unknown }).__joyBytesBase64;
+        if (typeof encodedBytes === 'string') {
+          const binary = atob(encodedBytes);
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+          }
+          return bytes;
+        }
+        return Object.fromEntries(
+          Object.entries(value).map(([key, nested]) => [key, decodeBridgeAnswer(nested)]),
+        );
+      }
+      return value;
+    }
     host.joyDesktop = {
       channels: advertised,
-      invoke: (channel: string, payload?: unknown) => host.__joyDesktopInvoke(channel, payload),
+      invoke: async (channel: string, payload?: unknown) =>
+        decodeBridgeAnswer(await host.__joyDesktopInvoke(channel, payload)),
     };
   }, channels);
 
