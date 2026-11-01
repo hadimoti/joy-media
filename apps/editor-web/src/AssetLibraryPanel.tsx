@@ -58,6 +58,10 @@ import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import { ASSET_CATEGORY_ICONS, assetCollectionIconUrl } from './asset-library-icons.js';
 import { JOY_MEDIA_ASSET_DND } from './TimelinePanel.js';
 import {
+  summarizeBulkDeleteOutcomes,
+  type BulkDeleteOutcome,
+} from './asset-library-bulk-delete.js';
+import {
   loadEditorUiPreferences,
   saveEditorUiPreferences,
   type UiPreferenceStorage,
@@ -113,16 +117,6 @@ export function withAssetTimelineTimeout<T>(
       },
     );
   });
-}
-
-export function formatBulkDeleteStatus(
-  deleted: number,
-  selected: number,
-  failed: number,
-  firstError: string | undefined,
-): string {
-  const summary = `Deleted ${deleted} of ${selected} selected media items.`;
-  return failed > 0 ? `${summary} ${failed} failed: ${firstError ?? 'Unknown error'}.` : summary;
 }
 
 /**
@@ -653,27 +647,22 @@ export function AssetLibraryPanel({
     if (targets.length === 0) return;
     const ok = window.confirm(`Delete ${targets.length} selected media item(s) from the catalog?`);
     if (!ok) return;
-    const outcomes: Array<{
-      readonly assetId: string;
-      readonly outcome: 'removed' | 'already-absent' | 'failed';
-      readonly error?: string;
-    }> = [];
+    const outcomes: BulkDeleteOutcome[] = [];
     for (const { asset } of targets) {
       try {
         const result = await client.deleteAsset(asset.projectId || projectId, asset.id);
         outcomes.push({
           assetId: asset.id,
-          outcome: result.removed ? 'removed' : 'already-absent',
+          outcome: result.removed ? 'removed' : 'absent',
         });
       } catch (error) {
-        outcomes.push({ assetId: asset.id, outcome: 'failed', error: message(error) });
+        outcomes.push({ assetId: asset.id, outcome: 'failed', message: message(error) });
       }
     }
-    const failures = outcomes.filter((result) => result.outcome === 'failed');
-    const deleted = outcomes.filter((result) => result.outcome === 'removed').length;
-    setSelectedAssetIds(new Set(failures.map((result) => result.assetId)));
+    const summary = summarizeBulkDeleteOutcomes(outcomes);
+    setSelectedAssetIds(new Set(summary.failedIds));
     await refresh();
-    setStatus(formatBulkDeleteStatus(deleted, targets.length, failures.length, failures[0]?.error));
+    setStatus(summary.status);
   }, [client, projectId, refresh, selectedAssetIds, visible]);
 
   const visibleIds = useMemo(() => rendered.map(({ asset }) => asset.id), [rendered]);

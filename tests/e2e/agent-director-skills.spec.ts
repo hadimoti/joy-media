@@ -320,6 +320,11 @@ test.describe('JOY Live Director creative recipes', () => {
     await reviewCard.getByRole('button', { name: 'Review image scope', exact: true }).click();
     const consent = page.getByRole('region', { name: 'Review what JOY may share' });
     await expect(consent).toBeVisible();
+    await expect(
+      consent.getByText(
+        'This Joy Code request already sent project ids, asset names, counts and media observation details to your configured provider. Allow adds only the listed image samples.',
+      ),
+    ).toBeVisible();
     await expect(consent.getByText('fixture/joy-agent')).toBeVisible();
     await expect(consent.getByText('source')).toBeVisible();
     await expect.poll(() => provider.imageRequests).toBe(imageRequestsBeforeConsent);

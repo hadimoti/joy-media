@@ -119,11 +119,9 @@ describe('AssetLibraryPanel successful import contract', () => {
       panelSource.indexOf('const visibleIds = useMemo'),
     );
 
-    expect(bulkDelete).toContain("'removed' | 'already-absent' | 'failed'");
-    expect(bulkDelete).toContain("outcome: 'failed', error: message(error)");
-    expect(bulkDelete).toContain(
-      'setSelectedAssetIds(new Set(failures.map((result) => result.assetId)))',
-    );
+    expect(bulkDelete).toContain('summarizeBulkDeleteOutcomes(outcomes)');
+    expect(bulkDelete).toContain('setSelectedAssetIds(new Set(summary.failedIds))');
+    expect(bulkDelete).toContain('setStatus(summary.status)');
   });
 
   it('reports a real All count alongside media-specific category counts', () => {
