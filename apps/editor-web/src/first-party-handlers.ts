@@ -203,13 +203,12 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           }
           const preferSpectral = args.method === 'spectral' || strength >= 0.75;
           if (preferSpectral) {
-            // Browser ports cannot shell ffmpeg; spectral runs on the API/Worker adapter.
+            // Browser ports cannot shell ffmpeg, and the local build has no spectral adapter yet.
             return {
               source: args.source,
-              method: 'ffmpeg-afftdn',
+              method: 'unavailable',
               strength,
-              deferredEndpoint: '/v1/providers/audio/denoise',
-              note: 'Spectral afftdn denoise needs ffmpeg on the API or Worker and is not ML denoise.',
+              note: 'Spectral afftdn denoise is not available in this build.',
             };
           }
           // Local noise-gate DSP (not ML denoise). Strength maps to gate threshold.
@@ -292,21 +291,17 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
               dataLeavesDevice: false,
               retentionDisclosure:
                 'Speech is synthesized locally with Piper ONNX and never leaves this host.',
-              deferredEndpoint: '/v1/providers/speech/synthesize',
-              deferredBody: { engine: 'piper' },
               requiresConsent: isCloned,
             };
           }
+          // The online voice service sits behind the removed remote API, so this build refuses it.
           return {
             voiceOver: args.text,
             voiceId: isCloned ? args.voiceId : stockVoice,
-            method: 'edge-tts',
-            dataLeavesDevice: true,
-            retentionDisclosure:
-              'Text is sent to the online Microsoft Edge TTS service for speech.',
-            deferredEndpoint: '/v1/providers/speech/synthesize',
-            deferredBody: { engine: 'edge-tts' },
-            requiresConsent: isCloned,
+            method: 'unavailable',
+            dataLeavesDevice: false,
+            retentionDisclosure: 'Online speech synthesis is not available in this build.',
+            requiresConsent: false,
           };
         },
         translate: (args: { readonly text: string; readonly targetLanguage: string }) => ({

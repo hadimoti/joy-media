@@ -1,0 +1,49 @@
+{
+  "name": "@joy-media/provider-oauth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./chatgpt.js": {
+      "types": "./dist/chatgpt.d.ts",
+      "default": "./dist/chatgpt.js"
+    },
+    "./kimi.js": {
+      "types": "./dist/kimi.d.ts",
+      "default": "./dist/kimi.js"
+    },
+    "./xai.js": {
+      "types": "./dist/xai.d.ts",
+      "default": "./dist/xai.js"
+    },
+    "./errors.js": {
+      "types": "./dist/errors.d.ts",
+      "default": "./dist/errors.js"
+    },
+    "./http.js": {
+      "types": "./dist/http.d.ts",
+      "default": "./dist/http.js"
+    },
+    "./pkce.js": {
+      "types": "./dist/pkce.d.ts",
+      "default": "./dist/pkce.js"
+    },
+    "./loopback.js": {
+      "types": "./dist/loopback.d.ts",
+      "default": "./dist/loopback.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@joy-media/provider-sdk": "workspace:*"
+  }
+}

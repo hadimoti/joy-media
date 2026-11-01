@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus, JoyProviderMode } from './joy-agent/protocol.js';
+import { sessionProviderFor } from './joy-agent/provider-call.js';
+import { PROVIDER_REGISTRY, type RegistryProviderId } from '@joy-media/provider-sdk';
 import { CloseIcon, PlusIcon, CheckIcon } from './icons.js';
 import {
   isDesktopHost,
   saveDesktopProviderProfile,
   listDesktopProviderProfiles,
   deleteDesktopProviderProfile,
-  beginDesktopProviderSession,
   fetchDesktopProviderModels,
   type DesktopProviderProfile,
 } from './desktop-client.js';
@@ -29,17 +30,32 @@ export interface ModelDrawerProps {
   readonly onNotice?: ((message: string, kind: 'info' | 'success' | 'error') => void) | undefined;
 }
 
-type ProviderType = 'kilo' | 'openrouter' | 'openai-compatible' | 'custom';
+type ProviderType = 'openrouter' | 'openai-compatible' | 'custom' | RegistryProviderId;
+type DesktopProviderProfileState = DesktopProviderProfile & {
+  readonly state?: 'active' | 'disabled-legacy' | 'credential-unavailable';
+  readonly decision?: 'later';
+};
+
+function isDisabledLegacyProfile(profile: DesktopProviderProfileState): boolean {
+  return profile.state === 'disabled-legacy';
+}
+
+function isSupportedProviderProfile(profile: DesktopProviderProfileState): boolean {
+  return (
+    profile.provider === 'openrouter' ||
+    profile.provider === 'openai-compatible' ||
+    profile.provider === 'custom'
+  );
+}
 
 const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
-  kilo: 'https://api.kilo.ai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
   'openai-compatible': '',
   custom: '',
-};
+  ...Object.fromEntries(PROVIDER_REGISTRY.map((item) => [item.id, item.regions[0]?.baseUrl ?? ''])),
+} as Record<ProviderType, string>;
 
-const COMMON_MODEL_PRESETS: Record<ProviderType, readonly string[]> = {
-  kilo: ['minimax/minimax-m3', 'kilo-auto/efficient', 'kilo-auto/free'],
+const COMMON_MODEL_PRESETS: Partial<Record<ProviderType, readonly string[]>> = {
   openrouter: [
     'openrouter/free',
     'openrouter/auto',
@@ -72,17 +88,17 @@ export function ModelDrawer({
   onStatusChange,
   onNotice,
 }: ModelDrawerProps) {
-  const [profiles, setProfiles] = useState<readonly DesktopProviderProfile[]>([]);
+  const [profiles, setProfiles] = useState<readonly DesktopProviderProfileState[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [refreshingProfileId, setRefreshingProfileId] = useState<string | undefined>(undefined);
 
   // New Connection Form State
   const [newName, setNewName] = useState('');
-  const [newProvider, setNewProvider] = useState<ProviderType>('kilo');
-  const [newBaseUrl, setNewBaseUrl] = useState(PROVIDER_DEFAULT_URLS.kilo);
+  const [newProvider, setNewProvider] = useState<ProviderType>('openrouter');
+  const [newBaseUrl, setNewBaseUrl] = useState(PROVIDER_DEFAULT_URLS.openrouter);
   const [newApiKey, setNewApiKey] = useState('');
-  const [newSelectedModel, setNewSelectedModel] = useState('minimax/minimax-m3');
+  const [newSelectedModel, setNewSelectedModel] = useState('openrouter/free');
   const [discoveredModels, setDiscoveredModels] = useState<readonly string[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
@@ -108,7 +124,7 @@ export function ModelDrawer({
   const refreshProfiles = async () => {
     if (!isDesktopHost()) return;
     try {
-      const list = await listDesktopProviderProfiles();
+      const list = (await listDesktopProviderProfiles()) as readonly DesktopProviderProfileState[];
       if (mountedRef.current) {
         setProfiles(list);
       }
@@ -139,7 +155,7 @@ export function ModelDrawer({
     setNewProvider(type);
     setCustomAcknowledged(false);
     setNewBaseUrl(PROVIDER_DEFAULT_URLS[type]);
-    const presets = COMMON_MODEL_PRESETS[type];
+    const presets = COMMON_MODEL_PRESETS[type] ?? [];
     if (presets.length > 0 && presets[0] !== undefined) {
       setNewSelectedModel(presets[0]);
     }
@@ -163,6 +179,7 @@ export function ModelDrawer({
     setDiscoveryError(null);
     try {
       const models = await fetchDesktopProviderModels({
+        provider: newProvider,
         baseUrl: newBaseUrl.trim(),
         apiKey: newApiKey.trim() || undefined,
       });
@@ -226,12 +243,16 @@ export function ModelDrawer({
       }
 
       if (engineClient) {
+        const sessionProvider = sessionProviderFor(newProvider);
+        if (sessionProvider === undefined) {
+          throw new Error('This provider is not available in this build');
+        }
         configurationFailed = true;
         const nextStatus = await engineClient.configure({
-          provider: newProvider,
+          provider: sessionProvider,
           baseUrl: newBaseUrl.trim(),
           modelId: newSelectedModel.trim(),
-          apiKey: newApiKey.trim(),
+          profileId: saved.id,
         });
         configurationFailed = false;
         onStatusChange?.(nextStatus);
@@ -258,7 +279,8 @@ export function ModelDrawer({
     }
   };
 
-  const handleSelectModel = async (profile: DesktopProviderProfile, modelId: string) => {
+  const handleSelectModel = async (profile: DesktopProviderProfileState, modelId: string) => {
+    if (isDisabledLegacyProfile(profile) || !isSupportedProviderProfile(profile)) return;
     if (
       requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
       !requireCustomEndpointAcknowledgement({
@@ -273,14 +295,7 @@ export function ModelDrawer({
     }
     let configurationFailed = false;
     try {
-      let apiKey = '';
-      if (isDesktopHost()) {
-        const session = (await beginDesktopProviderSession(profile.id)) as
-          { apiKey?: string } | undefined;
-        apiKey = session?.apiKey ?? '';
-      }
-
-      // Re-check consent after the vault await, before the key is sent.
+      // Consent is re-checked before the session is configured. The key stays in the main process.
       if (
         requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
         !requireCustomEndpointAcknowledgement({
@@ -294,12 +309,16 @@ export function ModelDrawer({
       }
 
       if (engineClient) {
+        const sessionProvider = sessionProviderFor(profile.provider);
+        if (sessionProvider === undefined) {
+          throw new Error('This provider is not available in this build');
+        }
         configurationFailed = true;
         const nextStatus = await engineClient.configure({
-          provider: profile.provider as JoyProviderMode,
+          provider: sessionProvider,
           baseUrl: profile.baseUrl,
           modelId,
-          apiKey,
+          profileId: profile.id,
         });
         configurationFailed = false;
         onStatusChange?.(nextStatus);
@@ -327,7 +346,8 @@ export function ModelDrawer({
     }
   };
 
-  const handleRefreshProfileModels = async (profile: DesktopProviderProfile) => {
+  const handleRefreshProfileModels = async (profile: DesktopProviderProfileState) => {
+    if (isDisabledLegacyProfile(profile) || !isSupportedProviderProfile(profile)) return;
     if (
       requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
       !requireCustomEndpointAcknowledgement({
@@ -342,19 +362,8 @@ export function ModelDrawer({
     }
     setRefreshingProfileId(profile.id);
     try {
-      let apiKey = '';
-      if (isDesktopHost()) {
-        const session = (await beginDesktopProviderSession(profile.id)) as
-          { apiKey?: string } | undefined;
-        apiKey = session?.apiKey ?? '';
-      }
-
       assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
-      const models = await fetchDesktopProviderModels({
-        id: profile.id,
-        baseUrl: profile.baseUrl,
-        apiKey: apiKey || undefined,
-      });
+      const models = await fetchDesktopProviderModels({ id: profile.id });
 
       const modelIds = models.map((m) => m.id);
       if (modelIds.length > 0) {
@@ -384,7 +393,8 @@ export function ModelDrawer({
     }
   };
 
-  const handleDeleteProfile = async (profile: DesktopProviderProfile) => {
+  const handleDeleteProfile = async (profile: DesktopProviderProfileState) => {
+    if (isDisabledLegacyProfile(profile)) return;
     if (!window.confirm(`Delete provider connection "${profile.name || profile.provider}"?`)) {
       return;
     }
@@ -395,6 +405,20 @@ export function ModelDrawer({
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       onNotice?.(`Failed to delete profile: ${msg}`, 'error');
+    }
+  };
+
+  const deferLegacyProfile = async (profile: DesktopProviderProfileState) => {
+    if (!isDesktopHost() || !isDisabledLegacyProfile(profile) || profile.decision === 'later')
+      return;
+    try {
+      await window.joyDesktop?.invoke('desktop.provider-profile.later', { id: profile.id });
+      await refreshProfiles();
+    } catch (error) {
+      onNotice?.(
+        `Failed to defer legacy profile: ${error instanceof Error ? error.message : String(error)}`,
+        'error',
+      );
     }
   };
 
@@ -476,8 +500,14 @@ export function ModelDrawer({
                     value={newProvider}
                     onChange={(e) => handleProviderTypeChange(e.target.value as ProviderType)}
                   >
-                    <option value="kilo">Kilo Gateway</option>
                     <option value="openrouter">OpenRouter</option>
+                    {PROVIDER_REGISTRY.filter(
+                      (item) => item.id !== 'openrouter' && item.signInOnly !== true,
+                    ).map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
                     <option value="openai-compatible">OpenAI-Compatible</option>
                     <option value="custom">Custom Endpoint (S3 / Proxy)</option>
                   </select>
@@ -487,7 +517,7 @@ export function ModelDrawer({
                   <input
                     id="md-connection-name"
                     type="text"
-                    placeholder="e.g. My Kilo Gateway"
+                    placeholder="e.g. My OpenRouter connection"
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
                   />
@@ -499,7 +529,7 @@ export function ModelDrawer({
                 <input
                   id="md-base-url"
                   type="text"
-                  placeholder="https://api.kilo.ai/v1"
+                  placeholder="https://..."
                   value={newBaseUrl}
                   onChange={(e) => {
                     setNewBaseUrl(e.target.value);
@@ -585,7 +615,7 @@ export function ModelDrawer({
                 <input
                   id="md-selected-model"
                   type="text"
-                  placeholder="e.g. minimax/minimax-m3, kilo-auto/efficient"
+                  placeholder="e.g. openrouter/auto, gpt-4o-mini"
                   value={newSelectedModel}
                   onChange={(e) => setNewSelectedModel(e.target.value)}
                 />
@@ -633,12 +663,14 @@ export function ModelDrawer({
             {filteredProfiles.length === 0 && (
               <div className="model-drawer-empty-hint">
                 {profiles.length === 0
-                  ? 'No external API providers configured yet. Click "+ Add API" above to connect Kilo, OpenRouter, or custom endpoints.'
+                  ? 'No external API providers configured yet. Click "+ Add API" above to connect OpenRouter or a custom endpoint.'
                   : 'No models or providers match your search filter.'}
               </div>
             )}
 
             {filteredProfiles.map((profile) => {
+              const disabledLegacy = isDisabledLegacyProfile(profile);
+              const unsupported = !isSupportedProviderProfile(profile);
               const isActiveProvider =
                 status?.provider === profile.provider &&
                 (status?.modelId === profile.modelId ||
@@ -652,6 +684,45 @@ export function ModelDrawer({
               const filteredModels = query
                 ? modelsToShow.filter((m) => m.toLowerCase().includes(query))
                 : modelsToShow;
+
+              if (disabledLegacy || unsupported) {
+                return (
+                  <div
+                    key={profile.id}
+                    className={`model-drawer-provider-card is-disabled-legacy ${disabledLegacy ? 'is-legacy' : ''}`}
+                    data-profile-state={profile.state ?? 'active'}
+                  >
+                    <div className="model-drawer-provider-header">
+                      <div className="model-drawer-provider-info">
+                        <strong>{profile.name || profile.provider}</strong>
+                        <span className="model-drawer-provider-tag">{profile.provider}</span>
+                        <span className="model-drawer-legacy-status">
+                          {disabledLegacy
+                            ? 'Disabled legacy profile'
+                            : 'Unsupported provider profile'}
+                        </span>
+                      </div>
+                      {disabledLegacy && (
+                        <button
+                          type="button"
+                          className="model-drawer-provider-btn"
+                          onClick={() => void deferLegacyProfile(profile)}
+                          disabled={profile.decision === 'later'}
+                        >
+                          Later
+                        </button>
+                      )}
+                    </div>
+                    <div className="model-drawer-models-list" aria-disabled="true">
+                      {filteredModels.map((modelId) => (
+                        <div key={modelId} className="model-drawer-model-item is-disabled">
+                          <span className="model-drawer-model-name">{modelId}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
 
               return (
                 <div

@@ -221,7 +221,6 @@ async function start(): Promise<void> {
           : mediaAuth.authenticate(request),
     },
     mediaAuth,
-    account,
     releases,
     entitlementPublicKeyPem: entitlementSigner.publicKeyPem,
     hostedRouteRetirement,

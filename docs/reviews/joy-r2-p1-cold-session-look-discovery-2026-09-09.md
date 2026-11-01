@@ -45,15 +45,15 @@ with the existing revision/lease/approval/compound-Undo machinery unchanged.
 | Implementer session                  | Claude Code (`claude-sonnet-5`), single interactive session                                  |
 | UTC interval                         | ~2026-09-09T19:49Z – ~2026-09-09T20:15Z                                                      |
 | Branch                               | `codex/joy-r2-p1-discovery-20260909T194904Z`                                                 |
-| Worktree                             | `C:\Users\HadiMoti\joy-r2-p1-20260909T194904Z`                                               |
+| Worktree                             | `<owner-profile>\joy-r2-p1-20260909T194904Z`                                                 |
 | Accepted parent (base)               | `d0d5cad2cd9904c1716c3b30eeb3b02f9a2e41fd` / tree `3d02abdfa61e20a4665ab08db4659e9a87fe4717` |
 | Application baseline beneath P0 docs | `d01770b1eafeb10f9cc0386ca3122d8314a4ee90`                                                   |
-| Evidence root (P1, new)              | `C:\Users\HadiMoti\Desktop\joy-r2-p1-evidence-20260909T194904Z\`                             |
+| Evidence root (P1, new)              | `<owner-profile>\Desktop\joy-r2-p1-evidence-20260909T194904Z\`                               |
 | Push state                           | **not pushed** (local scoped commit only)                                                    |
 
 Concurrent work preserved — untouched, not copied/adopted/run/staged:
 
-- `C:\Users\HadiMoti\.config\superpowers\worktrees\joy-media\joy-live-director\apps\editor-web\src\looks-encoded-sample-acceptance.test.ts`
+- `<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director\apps\editor-web\src\looks-encoded-sample-acceptance.test.ts`
   (untracked in that worktree; absent from this tree by construction).
 - P0 evidence roots `…\joy-r2-p0-evidence-20260909T185139Z\` and
   `…\joy-r2-p0-r1-evidence-20260909T192442Z\` — not read for write, unchanged.
@@ -321,14 +321,14 @@ regression.
 
 ### 7.4 Toolchain provenance
 
-| Tool       | Version  | Path                                               |
-| ---------- | -------- | -------------------------------------------------- |
-| node       | v22.22.3 | `C:\Users\HadiMoti\AppData\Local\hermes\node\node` |
-| pnpm       | 11.15.0  | `C:\Users\HadiMoti\AppData\Local\hermes\node\pnpm` |
-| vitest     | 3.2.7    | worktree `node_modules` (isolated install)         |
-| typescript | 5.9.3    | worktree `node_modules`                            |
-| eslint     | 9.39.5   | worktree `node_modules`                            |
-| prettier   | 3.9.6    | worktree `node_modules`                            |
+| Tool       | Version  | Path                                             |
+| ---------- | -------- | ------------------------------------------------ |
+| node       | v22.22.3 | `<owner-profile>\AppData\Local\hermes\node\node` |
+| pnpm       | 11.15.0  | `<owner-profile>\AppData\Local\hermes\node\pnpm` |
+| vitest     | 3.2.7    | worktree `node_modules` (isolated install)       |
+| typescript | 5.9.3    | worktree `node_modules`                          |
+| eslint     | 9.39.5   | worktree `node_modules`                          |
+| prettier   | 3.9.6    | worktree `node_modules`                          |
 
 ---
 

@@ -38,7 +38,19 @@ describe('agent chat with piped stdin (real binary)', () => {
   let projectId: string;
   const chat = (input: string, extra: string[] = []) =>
     env.run(
-      ['agent', 'chat', '--project', projectId, '--url', mock.url, '--api-key', KEY, ...extra],
+      [
+        'agent',
+        'chat',
+        '--project',
+        projectId,
+        '--url',
+        mock.url,
+        '--api-key',
+        KEY,
+        '--model',
+        'mock/chat',
+        ...extra,
+      ],
       { input },
     );
   const project = () => readProjects(env.sb).find((p) => p.id === projectId)!;
@@ -144,20 +156,19 @@ describe('agent chat without a configured provider or project', () => {
     env.cleanup();
   });
 
-  it('warns about the missing key up front, keeps slash commands working', async () => {
+  it('refuses chat without a configured provider', async () => {
     const r = await env.run(['agent', 'chat'], {
       input: '/project\nsplit the first clip\n/exit\n',
     });
-    expect(r.code, describeRun(r)).toBe(0);
-    expect(r.out).toMatch(/No API key configured for provider "openrouter"/);
-    expect(r.out).toMatch(/Title: Default Project/);
+    expect(r.code, describeRun(r)).toBe(2);
+    expect(r.err).toMatch(/No provider is set/);
   });
 
-  it('/save on the scratch project writes the real database, not ./in-memory', async () => {
+  it('refuses /save when no provider is configured', async () => {
     const r = await env.run(['agent', 'chat'], { input: '/save\n' });
-    expect(r.code, describeRun(r)).toBe(0);
-    expect(r.out).toMatch(/Project saved at revision 1/);
+    expect(r.code, describeRun(r)).toBe(2);
+    expect(r.err).toMatch(/No provider is set/);
     expect(readdirSync(env.sb.cwd)).toEqual([]);
-    expect(readProjects(env.sb).map((p) => p.payload.title)).toEqual(['Default Project']);
+    expect(readProjects(env.sb)).toEqual([]);
   });
 });

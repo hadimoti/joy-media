@@ -464,6 +464,122 @@
   gap: 12px;
 }
 
+.joy-provider-route {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.joy-provider-route-accordions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.joy-provider-route + .joy-provider-route {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 12px;
+}
+
+.joy-provider-route-title {
+  margin: 0;
+  color: #e5e7eb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.joy-provider-risk-notice {
+  margin: 0;
+  color: #c7c9d0;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* Provider sign-in stack: centered, on the editor's gray tokens (DESIGN.md §1, §3a). Scoped so the
+   other dialog accordions keep their own styling. Amber is not used at rest (DESIGN.md §1a). */
+.joy-provider-route-accordions {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  gap: 8px;
+}
+
+.joy-provider-route-accordions .joy-accordion-item {
+  background: var(--joy-bg-raised);
+  border: 1px solid var(--joy-border);
+  border-radius: var(--joy-radius-inner);
+  box-shadow: none;
+}
+
+.joy-provider-route-accordions .joy-accordion-item.is-open {
+  background: var(--joy-bg-raised);
+  border-color: var(--joy-border-hover);
+  box-shadow: none;
+}
+
+.joy-provider-route-accordions .joy-accordion-trigger {
+  justify-content: center;
+  gap: 12px;
+  color: var(--joy-text);
+}
+
+.joy-provider-route-accordions .joy-accordion-trigger:hover {
+  background: var(--joy-bg-hover);
+}
+
+.joy-provider-route-accordions .joy-accordion-trigger-title {
+  color: var(--joy-text);
+  font-size: var(--joy-type-md);
+}
+
+.joy-provider-route-accordions .joy-accordion-tag {
+  background: var(--joy-bg-control);
+  border-color: var(--joy-border-strong);
+  color: var(--joy-text-muted);
+}
+
+.joy-provider-route-accordions .joy-accordion-chevron,
+.joy-provider-route-accordions .joy-accordion-item.is-open .joy-accordion-chevron {
+  color: var(--joy-text-faint);
+}
+
+.joy-provider-route-accordions .joy-accordion-content {
+  align-items: center;
+  text-align: center;
+  background: var(--joy-bg-panel);
+  border-top: 1px solid var(--joy-border-subtle);
+}
+
+.joy-provider-route-accordions .joy-accordion-content .joy-accordion-item {
+  background: var(--joy-bg-inset);
+  border-color: var(--joy-border);
+}
+
+.joy-provider-route-accordions .joy-provider-route,
+.joy-provider-route-accordions .joy-provider-route-title {
+  align-items: center;
+  text-align: center;
+  color: var(--joy-text);
+}
+
+.joy-provider-route-accordions .joy-provider-route + .joy-provider-route {
+  border-top-color: var(--joy-border-subtle);
+}
+
+.joy-provider-route-accordions .joy-provider-risk-notice {
+  max-width: 52ch;
+  margin: 0 auto;
+  color: var(--joy-text-muted);
+  text-align: center;
+}
+
+.joy-provider-route-accordions .joy-settings-form-grid input,
+.joy-provider-route-accordions .joy-settings-form-grid select {
+  background: var(--joy-bg-input);
+  border-color: var(--joy-border-strong);
+  color: var(--joy-text);
+}
+
 /* Forms in Accordions */
 .joy-settings-form-grid {
   display: grid;

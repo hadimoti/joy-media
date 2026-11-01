@@ -95,6 +95,20 @@ export default tseslint.config(
     },
   },
   {
+    // The read observer is a CommonJS preload that the local worker test loads with NODE_OPTIONS --require, so it is
+    // plain Node code: require and process are its only globals.
+    files: ['apps/desktop/src/jobs/read-observer.cjs'],
+    languageOptions: {
+      globals: {
+        require: 'readonly',
+        process: 'readonly',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
+  {
     files: ['**/*.{spec,test}.{js,jsx,ts,tsx,mjs,cjs}'],
     rules: {
       'no-restricted-properties': 'off',

@@ -33,6 +33,8 @@ describe('agent run against a provider that stalls (real binary)', () => {
     mock.url,
     '--api-key',
     KEY,
+    '--model',
+    'mock/resilience',
   ];
 
   beforeAll(async () => {

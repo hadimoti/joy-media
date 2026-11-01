@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { findRegistryProvider } from '@joy-media/provider-sdk';
 import { DEFAULT_AGENT_POLICY } from './agent-policy-settings.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
@@ -83,6 +84,20 @@ async function selectCustomPreset(rendered: HTMLElement): Promise<void> {
   });
 }
 
+/**
+ * No provider is preselected (PLAN-v4 §6d-1 rule 3), so a test that connects picks one first, as the owner does.
+ */
+async function chooseProvider(rendered: HTMLElement, provider: string): Promise<void> {
+  await act(async () => {
+    const select = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find((candidate) =>
+      [...candidate.options].some((option) => option.value === 'openrouter'),
+    );
+    if (select === undefined) throw new Error('Expected provider select dropdown');
+    select.value = provider;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
 function setInputValue(input: HTMLInputElement, value: string): void {
   const nativeValueSetter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
@@ -110,10 +125,56 @@ function countLeafTextMatches(rendered: HTMLElement, expression: RegExp): number
   ).length;
 }
 
+/**
+ * The desktop host, as the connection tests need it: a save returns the profile id, and the list shows what was saved,
+ * so the read after a save finds the profile. The key is never part of the list.
+ */
+function installDesktopBridge(): void {
+  let stored: readonly Record<string, unknown>[] = [];
+  window.joyDesktop = {
+    channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+    invoke: vi.fn().mockImplementation(async (channel: string, payload?: unknown) => {
+      if (channel === 'desktop.provider-profile.list') return stored;
+      if (channel === 'desktop.provider-profile.save') {
+        const input = payload as Record<string, unknown>;
+        const saved = {
+          id: 'prof-test',
+          ...input,
+          createdAt: '2026-10-28T00:00:00.000Z',
+          updatedAt: '2026-10-28T00:00:00.000Z',
+        };
+        stored = [
+          {
+            id: 'prof-test',
+            provider: input.provider,
+            name: input.name,
+            baseUrl: input.baseUrl,
+            modelId: input.modelId,
+            bound: true,
+            createdAt: saved.createdAt,
+            updatedAt: saved.updatedAt,
+          },
+        ];
+        return saved;
+      }
+      return undefined;
+    }),
+  } as unknown as NonNullable<typeof window.joyDesktop>;
+}
+
 describe('JOY Agent Settings connection status', () => {
+  beforeEach(() => {
+    installDesktopBridge();
+  });
+  afterEach(() => {
+    delete (window as { joyDesktop?: unknown }).joyDesktop;
+  });
+
   async function connectWithKey(rendered: HTMLElement): Promise<HTMLInputElement> {
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');
+    // The form preselects no provider, so the owner picks one before connecting.
+    await chooseProvider(rendered, 'openrouter');
     await act(async () => {
       setInputValue(key, 'connection-test-key');
       buttonByText(rendered, 'Connect model').click();
@@ -122,176 +183,51 @@ describe('JOY Agent Settings connection status', () => {
     return key;
   }
 
-  it('sends separate Dual-Brain credentials only to their matching provider', async () => {
+  it('offers API-key providers without retired provider or account-plan prompts', async () => {
+    const rendered = await render(client());
+    await selectCustomPreset(rendered);
+
+    const providerSelect = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find(
+      (select) => [...select.options].some((option) => option.value === 'openrouter'),
+    );
+    expect(providerSelect).toBeTruthy();
+    const options = [...(providerSelect?.options ?? [])].map((option) => option.value);
+    expect(options).toEqual(expect.arrayContaining(['openrouter', 'openai-compatible']));
+    expect(options).toEqual(
+      expect.arrayContaining(['openai', 'claude', 'gemini', 'deepseek', 'minimax']),
+    );
+    expect(options).not.toContain('kilo');
+    expect(options).not.toContain('grok');
+    expect(options).not.toContain('kimi');
+    expect(options).not.toContain('xai');
+    expect(providerSelect?.closest('.joy-settings-form-grid')?.textContent).not.toContain(
+      'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.',
+    );
+    expect(options).not.toContain('joy-hosted');
+    expect(rendered.textContent).not.toMatch(/Joy Pro|Sign In with JOY Account|quota|plan limits/i);
+  });
+
+  it('preselects no provider, and refuses to connect until the owner chooses one', async () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
-    const fields = [...rendered.querySelectorAll<HTMLInputElement>('input[type="password"]')];
-    expect(fields).toHaveLength(2);
-    expect(rendered.textContent).toContain('OpenRouter API key');
-    expect(rendered.textContent).toContain('Kilo API key');
-    setInputValue(fields[0]!, 'openrouter-only-key');
-    setInputValue(fields[1]!, 'kilo-only-key');
+    await selectCustomPreset(rendered);
+
+    const providerSelect = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find(
+      (select) => [...select.options].some((option) => option.value === 'openrouter'),
+    );
+    // No provider is preselected, and OpenRouter is never a default (PLAN-v4 §6d-1 rule 3).
+    expect(providerSelect?.value).toBe('');
+    expect(
+      rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]')?.value,
+    ).toBe('');
 
     await act(async () => {
       buttonByText(rendered, 'Connect model').click();
       await Promise.resolve();
     });
 
-    const config = vi.mocked(engineClient.configure).mock.calls[0]?.[0];
-    expect(config).toMatchObject({
-      mode: 'dual-brain',
-      workhorse: { provider: 'openrouter', apiKey: 'openrouter-only-key' },
-      creative: { provider: 'kilo', apiKey: 'kilo-only-key' },
-    });
-    expect(config && 'workhorse' in config ? config.workhorse.apiKey : '').not.toBe(
-      'kilo-only-key',
-    );
-    expect(config && 'creative' in config ? config.creative.apiKey : '').not.toBe(
-      'openrouter-only-key',
-    );
-    expect(fields.map((field) => field.value)).toEqual(['', '']);
-  });
-
-  it.each(['openrouter', 'kilo'] as const)(
-    'never uses the saved key of a %s profile bound to a non-trusted URL in Dual-Brain',
-    async (untrustedProvider) => {
-      const openRouterBaseUrl =
-        untrustedProvider === 'openrouter'
-          ? 'https://openrouter.ai.evil.example/api/v1'
-          : 'https://openrouter.ai/api/v1';
-      const kiloBaseUrl =
-        untrustedProvider === 'kilo' ? 'https://custom-kilo.example/v1' : 'https://api.kilo.ai/v1';
-      const invoke = vi.fn().mockImplementation(async (channel: string, args?: { id?: string }) => {
-        if (channel === 'desktop.provider-profile.list') {
-          return [
-            {
-              id: 'dual-openrouter',
-              provider: 'openrouter',
-              name: 'OpenRouter',
-              baseUrl: openRouterBaseUrl,
-              modelId: 'openrouter/free',
-              createdAt: '2026-09-15T00:00:00.000Z',
-              updatedAt: '2026-09-15T00:00:00.000Z',
-            },
-            {
-              id: 'dual-kilo',
-              provider: 'kilo',
-              name: 'Kilo',
-              baseUrl: kiloBaseUrl,
-              modelId: 'kilo-auto/efficient',
-              createdAt: '2026-09-15T00:00:00.000Z',
-              updatedAt: '2026-09-15T00:00:00.000Z',
-            },
-          ];
-        }
-        if (channel === 'desktop.provider-profile.begin-session') {
-          return { apiKey: `saved-${args?.id}-key` };
-        }
-        return undefined;
-      });
-      window.joyDesktop = {
-        channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
-        invoke,
-      };
-      const engineClient = client();
-      const rendered = await render(engineClient, undefined);
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      await act(async () => {
-        buttonByText(rendered, 'Dual-Brain Studio').click();
-      });
-      await act(async () => {
-        buttonByText(rendered, 'Connect model').click();
-        await Promise.resolve();
-      });
-      const untrustedId = untrustedProvider === 'openrouter' ? 'dual-openrouter' : 'dual-kilo';
-      // The vault is never asked for the key of a profile bound to another URL,
-      // and that key never reaches the fixed trusted Dual-Brain endpoint.
-      expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.begin-session', {
-        id: untrustedId,
-      });
-      for (const [config] of vi.mocked(engineClient.configure).mock.calls) {
-        expect(JSON.stringify(config)).not.toContain(`saved-${untrustedId}-key`);
-      }
-    },
-  );
-
-  it('reports a partial Dual-Brain connection as an error and names the unusable brain', async () => {
-    const engineClient = client({
-      testConnection: vi.fn().mockResolvedValue({
-        provider: 'dual-brain',
-        modelId: 'openrouter/free + kilo-auto/efficient',
-        capability: 'incompatible',
-        dualBrain: {
-          workhorse: {
-            provider: 'openrouter',
-            modelId: 'openrouter/free',
-            capability: 'tool-loop',
-          },
-          creative: {
-            provider: 'kilo',
-            modelId: 'kilo-auto/efficient',
-            capability: 'incompatible',
-            message: 'Kilo refused partial-status-key',
-          },
-        },
-      }),
-    });
-    const rendered = await render(engineClient, undefined);
-    const fields = [...rendered.querySelectorAll<HTMLInputElement>('input[type="password"]')];
-    setInputValue(fields[0]!, 'openrouter-partial-key');
-    setInputValue(fields[1]!, 'partial-status-key');
-
-    await act(async () => {
-      buttonByText(rendered, 'Connect model').click();
-      await Promise.resolve();
-    });
-
-    expect(rendered.querySelector('[role="alert"]')?.textContent).toContain(
-      'Dual-Brain partially connected. OpenRouter: tool-loop; Kilo: incompatible (Kilo refused [redacted]). Tool-loop readiness requires both brains.',
-    );
-    expect(rendered.textContent).not.toContain('are live.');
-    expect(rendered.textContent).not.toContain('partial-status-key');
-  });
-
-  it('replaces the connected status when Dual-Brain configuration throws', async () => {
-    const onStatusChange = vi.fn();
-    const engineClient = client({
-      configure: vi.fn().mockRejectedValue(new Error('setup failed')),
-    });
-    container = document.createElement('div');
-    document.body.append(container);
-    root = createRoot(container);
-    await act(async () => {
-      root?.render(
-        <JoyAgentSettingsDialog
-          policy={DEFAULT_AGENT_POLICY}
-          onPolicyChange={vi.fn()}
-          engineClient={engineClient}
-          status={readyStatus}
-          onStatusChange={onStatusChange}
-          onClose={vi.fn()}
-        />,
-      );
-    });
-    const rendered = container;
-    const fields = [...rendered.querySelectorAll<HTMLInputElement>('input[type="password"]')];
-    await act(async () => {
-      setInputValue(fields[0]!, 'or-key');
-      setInputValue(fields[1]!, 'kilo-key');
-      buttonByText(rendered, 'Connect model').click();
-      await Promise.resolve();
-    });
-    expect(onStatusChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'dual-brain',
-        capability: 'incompatible',
-        message: 'setup failed',
-      }),
-    );
-    expect(rendered.querySelector('[role="status"]')?.textContent).toContain('Connection failed');
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('Choose a provider before connecting.');
   });
 
   it('shows tool-loop readiness and the connection notice in the dialog', async () => {
@@ -371,6 +307,7 @@ describe('JOY Agent Settings connection status', () => {
   });
 
   it('refuses model discovery in the browser build without sending the key', async () => {
+    delete (window as { joyDesktop?: unknown }).joyDesktop;
     const privateKey = 'browser-discovery-key';
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -395,16 +332,17 @@ describe('JOY Agent Settings connection status', () => {
   it('redacts the API key from desktop model discovery errors', async () => {
     const privateKey = 'discovery-test-key';
     const invoke = vi.fn((channel: string) =>
-      channel === 'desktop.provider-profile.fetch-models'
+      channel === 'desktop.provider.models'
         ? Promise.reject(new Error(`Provider rejected key ${privateKey}`))
         : Promise.resolve([]),
     );
     window.joyDesktop = {
-      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.fetch-models'],
+      channels: ['desktop.provider-profile.list', 'desktop.provider.models'],
       invoke,
     } as unknown as NonNullable<typeof window.joyDesktop>;
     const rendered = await render(client(), undefined);
     await selectCustomPreset(rendered);
+    await chooseProvider(rendered, 'openrouter');
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     const openDrawer = rendered.querySelector<HTMLButtonElement>('.joy-settings-text-btn');
     if (key === null || openDrawer === null) {
@@ -423,10 +361,19 @@ describe('JOY Agent Settings connection status', () => {
 });
 
 describe('JOY Agent Settings media capability probe', () => {
+  beforeEach(() => {
+    installDesktopBridge();
+  });
+  afterEach(() => {
+    delete (window as { joyDesktop?: unknown }).joyDesktop;
+  });
+
   it('does not probe on mount or connection test, then explicitly sends the check and preserves the connection success notice', async () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
     await selectCustomPreset(rendered);
+    // The form preselects no provider, so the owner picks one before connecting.
+    await chooseProvider(rendered, 'openrouter');
     const probe = vi.mocked(engineClient.probeMediaCapabilities);
     const configure = vi.mocked(engineClient.configure);
     const testConnection = vi.mocked(engineClient.testConnection);
@@ -569,8 +516,10 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     'I understand that custom endpoints may log requests according to their own policy.';
 
   function providerSelect(rendered: HTMLElement): HTMLSelectElement {
-    const select = rendered.querySelector<HTMLSelectElement>('select');
-    if (select === null) throw new Error('Expected provider select dropdown');
+    const select = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find((candidate) =>
+      [...candidate.options].some((option) => option.value === 'openrouter'),
+    );
+    if (select === undefined) throw new Error('Expected provider select dropdown');
     return select;
   }
 
@@ -688,7 +637,7 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
   it('blocks OpenRouter-labeled custom model discovery before sending an entered key', async () => {
     const invoke = vi.fn().mockResolvedValue([]);
     window.joyDesktop = {
-      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.fetch-models'],
+      channels: ['desktop.provider-profile.list', 'desktop.provider.models'],
       invoke,
     };
     const rendered = await render(client(), undefined);
@@ -716,105 +665,16 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
       await Promise.resolve();
     });
 
-    expect(invoke).not.toHaveBeenCalledWith(
-      'desktop.provider-profile.fetch-models',
-      expect.anything(),
-    );
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider.models', expect.anything());
     expect(rendered.textContent).toContain(
       'Enter the custom-provider acknowledgement before discovering models.',
     );
   });
 
-  it('blocks a saved custom profile before retrieving its key until acknowledged', async () => {
-    const invoke = vi.fn().mockImplementation(async (channel: string) => {
-      if (channel === 'desktop.provider-profile.list') {
-        return [
-          {
-            id: 'custom-prof-1',
-            provider: 'openrouter',
-            name: 'OpenRouter custom endpoint',
-            baseUrl: 'https://other.example/api/v1',
-            modelId: 'private-model',
-            createdAt: '2026-09-15T00:00:00.000Z',
-            updatedAt: '2026-09-15T00:00:00.000Z',
-          },
-        ];
-      }
-      return undefined;
-    });
-    window.joyDesktop = {
-      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
-      invoke,
-    };
+  it('requires acknowledgement before connecting a custom endpoint', async () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      buttonByText(rendered, 'Use').click();
-      await Promise.resolve();
-    });
-
-    expect(invoke).not.toHaveBeenCalledWith(
-      'desktop.provider-profile.begin-session',
-      expect.anything(),
-    );
-    expect(engineClient.configure).not.toHaveBeenCalled();
-    expect(rendered.textContent).toContain(
-      'Enter the custom-provider acknowledgement before connecting.',
-    );
-    expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeNull();
-  });
-
-  it('publishes a failed status when configuring a saved profile throws', async () => {
-    const invoke = vi.fn().mockImplementation(async (channel: string) => {
-      if (channel === 'desktop.provider-profile.list')
-        return [
-          {
-            id: 'openrouter-trusted',
-            provider: 'openrouter',
-            name: 'OpenRouter',
-            baseUrl: 'https://openrouter.ai/api/v1',
-            modelId: 'openrouter/auto',
-            createdAt: '2026-09-15T00:00:00.000Z',
-            updatedAt: '2026-09-15T00:00:00.000Z',
-          },
-        ];
-      if (channel === 'desktop.provider-profile.begin-session') return { apiKey: 'saved-secret' };
-      return undefined;
-    });
-    window.joyDesktop = {
-      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.begin-session'],
-      invoke,
-    };
-    const onStatusChange = vi.fn();
-    const engineClient = client({
-      configure: vi.fn().mockRejectedValue(new Error('configure failed')),
-    });
-    const rendered = await render(engineClient, readyStatus, onStatusChange);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    await act(async () => {
-      buttonByText(rendered, 'Use').click();
-      await Promise.resolve();
-    });
-    expect(onStatusChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'openrouter',
-        capability: 'incompatible',
-      }),
-    );
-  });
-
-  it('requires acknowledgement when a custom provider is selected from the dual-brain default', async () => {
-    const engineClient = client();
-    const rendered = await render(engineClient, undefined);
-    const dualBrainPreset = buttonByText(rendered, 'Dual-Brain Studio');
-    expect(dualBrainPreset.className).toContain('is-active');
-
+    await selectCustomPreset(rendered);
     await changeProvider(rendered, 'openai-compatible');
     expect(buttonByText(rendered, 'Custom BYOK').className).toContain('is-active');
 
@@ -850,6 +710,1108 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     await changeProvider(rendered, 'openai-compatible');
     expect(rendered.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(false);
   });
+
+  it('reconnects a keyed local profile with its key field empty, without saving a second profile', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    // The list reflects what was saved, as the desktop host reports it.
+    let stored: readonly unknown[] = [];
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return stored;
+      if (channel === 'desktop.provider-profile.save') {
+        stored = [savedLocal];
+        return savedLocal;
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await selectCustomPreset(rendered);
+    await changeProvider(rendered, 'openai-compatible');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    const model = rendered.querySelector<HTMLInputElement>('input[placeholder="provider/model"]');
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!baseUrl || !model || !key || !consent)
+      throw new Error('Expected the custom endpoint fields');
+    await act(async () => {
+      setInputValue(baseUrl, 'http://127.0.0.1:1234/v1');
+      setInputValue(model, 'llama3');
+      setInputValue(key, 'local-key');
+      consent.click();
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+    const saves = () =>
+      invoke.mock.calls.filter(([channel]) => channel === 'desktop.provider-profile.save');
+    expect(saves()).toHaveLength(1);
+
+    // Connect again with the key field empty: the saved profile is used, and nothing else is saved.
+    const keyAgain = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    await act(async () => {
+      if (keyAgain) setInputValue(keyAgain, '');
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(saves()).toHaveLength(1);
+    expect(engineClient.configure).toHaveBeenLastCalledWith(
+      expect.objectContaining({ profileId: 'prof-local' }),
+    );
+  });
+
+  it('clears a key typed for one provider when the provider changes', async () => {
+    const invoke = vi.fn().mockResolvedValue([]);
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider.models'],
+      invoke,
+    };
+    const rendered = await render(client(), undefined);
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-or-typed-for-openrouter');
+    });
+
+    await changeProvider(rendered, 'openai-compatible');
+
+    expect(rendered.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
+  });
+
+  it('does not send a key typed for one endpoint to another endpoint', async () => {
+    const invoke = vi.fn().mockResolvedValue([]);
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider.models'],
+      invoke,
+    };
+    const rendered = await render(client(), undefined);
+    // The acknowledgement permits discovery to reach the key-scope guard. Source: custom-endpoint-acknowledgement.ts.
+    const firstEndpoint = 'http://127.0.0.1:1234/v1';
+    const otherEndpoint = 'http://127.0.0.1:9999/v1';
+    await changeProvider(rendered, 'openai-compatible');
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    if (key === null || baseUrl === null) throw new Error('Expected key and endpoint fields');
+    await act(async () => setInputValue(baseUrl, firstEndpoint));
+    await act(async () => setInputValue(key, 'custom-key-for-the-first-endpoint'));
+    await act(async () => setInputValue(baseUrl, otherEndpoint));
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (consent === null) throw new Error('Expected custom endpoint acknowledgement');
+    await act(async () => consent.click());
+
+    await act(async () => {
+      const drawer = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Discovered Models Drawer'),
+      );
+      drawer?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      const discover = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Discover Models'),
+      );
+      discover?.click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider.models', expect.anything());
+    expect(rendered.textContent).toContain(
+      'The key was entered for a different provider or endpoint. Enter it again.',
+    );
+  });
+
+  it('discovers models with the stored key of the bound profile for this endpoint, by its id', async () => {
+    const saved = {
+      id: 'prof-or-saved',
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/free',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: true,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return [saved];
+      if (channel === 'desktop.provider.models') return [];
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider.models'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const rendered = await render(client(), undefined);
+
+    await act(async () => {
+      const drawer = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Discovered Models Drawer'),
+      );
+      drawer?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      const discover = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Discover Models'),
+      );
+      discover?.click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider.models', { id: 'prof-or-saved' });
+  });
+
+  it('asks for the key again before discovering with an endpoint whose key is not confirmed', async () => {
+    const saved = {
+      id: 'prof-or-unbound',
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/free',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: false,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return [saved];
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider.models'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const rendered = await render(client(), undefined);
+
+    await act(async () => {
+      const drawer = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Discovered Models Drawer'),
+      );
+      drawer?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      const discover = [...rendered.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Discover Models'),
+      );
+      discover?.click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider.models', expect.anything());
+    expect(rendered.textContent).toContain('Enter the API key again to confirm this endpoint.');
+  });
+
+  it('shows an unconfirmed custom profile in the form, and a key entered there updates that profile', async () => {
+    const legacy = {
+      id: 'prof-custom',
+      provider: 'custom',
+      name: 'Local model',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: false,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return [legacy];
+      if (channel === 'desktop.provider-profile.save') return { ...legacy, bound: true };
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    await act(async () => {
+      buttonByText(rendered, 'Use').click();
+      await Promise.resolve();
+    });
+
+    expect(
+      rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]')?.value,
+    ).toBe('http://127.0.0.1:1234/v1');
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (key === null || consent === null) throw new Error('Expected key and endpoint fields');
+    await act(async () => {
+      setInputValue(key, 'local-key');
+      consent.click();
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith(
+      'desktop.provider-profile.save',
+      expect.objectContaining({ id: 'prof-custom', apiKey: 'local-key' }),
+    );
+  });
+});
+
+describe('JOY Agent Settings saved profile connect', () => {
+  it('connects a saved profile by its id, and the dialog never reads its key', async () => {
+    const savedProfile = {
+      id: 'prof-or-saved',
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/free',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: true,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return [savedProfile];
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    await act(async () => {
+      buttonByText(rendered, 'Use').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).toHaveBeenCalledWith({
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/free',
+      profileId: 'prof-or-saved',
+    });
+    expect(invoke).not.toHaveBeenCalledWith(
+      'desktop.provider-profile.begin-session',
+      expect.anything(),
+    );
+    expect(JSON.stringify(vi.mocked(engineClient.configure).mock.calls)).not.toContain('apiKey');
+  });
+
+  it('records the consent a card confirms for the profile that card names, not another on the same endpoint', async () => {
+    const endpoint = 'http://127.0.0.1:1234/v1';
+    const shared = {
+      provider: 'custom',
+      baseUrl: endpoint,
+      modelId: 'llama3',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: true,
+    };
+    const first = { ...shared, id: 'prof-first', name: 'First' };
+    const second = { ...shared, id: 'prof-second', name: 'Second', modelId: 'qwen3' };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return [first, second];
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const useButtonFor = (name: string): HTMLButtonElement => {
+      const card = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent?.trim() === name,
+      );
+      const use = [...(card?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (button) => button.textContent?.trim() === 'Use',
+      );
+      if (use === undefined) throw new Error(`Expected a Use button on ${name}`);
+      return use;
+    };
+
+    await act(async () => {
+      useButtonFor('Second').click();
+      await Promise.resolve();
+    });
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('Acknowledge this custom endpoint before connecting.');
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (consent === null) throw new Error('Expected the endpoint consent');
+    await act(async () => {
+      consent.click();
+    });
+    await act(async () => {
+      useButtonFor('Second').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).toHaveBeenCalledTimes(1);
+    expect(engineClient.configure).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: endpoint, modelId: 'qwen3', profileId: 'prof-second' }),
+    );
+  });
+
+  it('saves a new profile when the endpoint is edited away from the chosen one, and leaves the other profile alone', async () => {
+    const [international, china] = findRegistryProvider('minimax')?.regions ?? [];
+    if (international === undefined || china === undefined) throw new Error('Expected two regions');
+    const base = {
+      provider: 'minimax',
+      modelId: 'MiniMax-M2',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: true,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        return [
+          { ...base, id: 'prof-intl', name: 'International', baseUrl: international.baseUrl },
+          { ...base, id: 'prof-china', name: 'China', baseUrl: china.baseUrl },
+        ];
+      }
+      if (channel === 'desktop.provider-profile.save') {
+        return { ...base, id: 'prof-new', name: 'New', baseUrl: china.baseUrl };
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const useFor = (name: string): HTMLButtonElement => {
+      const card = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent?.trim() === name,
+      );
+      const use = [...(card?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (button) => button.textContent?.trim() === 'Use',
+      );
+      if (use === undefined) throw new Error(`Expected a Use button on ${name}`);
+      return use;
+    };
+
+    await act(async () => {
+      useFor('International').click();
+      await Promise.resolve();
+    });
+    expect(engineClient.configure).toHaveBeenCalledWith(
+      expect.objectContaining({ profileId: 'prof-intl' }),
+    );
+    const regionSelect = [...rendered.querySelectorAll('label')]
+      .find((label) => label.textContent?.includes('Region'))
+      ?.querySelector('select');
+    if (regionSelect === undefined || regionSelect === null) {
+      throw new Error('Expected the region select');
+    }
+    await act(async () => {
+      regionSelect.value = china.id;
+      regionSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-typed-for-china');
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    const saves = invoke.mock.calls.filter(
+      ([channel]) => channel === 'desktop.provider-profile.save',
+    );
+    expect(saves).toHaveLength(1);
+    expect(saves[0]?.[1]).toEqual(
+      expect.objectContaining({ provider: 'minimax', apiKey: 'sk-typed-for-china' }),
+    );
+    expect((saves[0]?.[1] as { id?: unknown }).id).toBeUndefined();
+  });
+
+  /** Lets pending reads and the state they set settle, as the dialog's own reads do. */
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  /** Fills the form for a local OpenAI-compatible endpoint with a typed key, and the consent the endpoint needs. */
+  async function fillLocalEndpoint(rendered: HTMLElement): Promise<void> {
+    await selectCustomPreset(rendered);
+    const select = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find((candidate) =>
+      [...candidate.options].some((option) => option.value === 'openai-compatible'),
+    );
+    if (select === undefined) throw new Error('Expected the provider select');
+    await act(async () => {
+      select.value = 'openai-compatible';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const baseUrl = rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]');
+    const model = rendered.querySelector<HTMLInputElement>('input[placeholder="provider/model"]');
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!baseUrl || !model || !key || !consent)
+      throw new Error('Expected the custom endpoint fields');
+    await act(async () => {
+      setInputValue(baseUrl, 'http://127.0.0.1:1234/v1');
+      setInputValue(model, 'llama3');
+      setInputValue(key, 'local-key');
+      consent.click();
+    });
+  }
+
+  it('does not connect when the saved profile cannot be read back after it is saved', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    let reads = 0;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        if (reads === 1) return [];
+        throw new Error('profile store unavailable');
+      }
+      if (channel === 'desktop.provider-profile.save') return savedLocal;
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    await fillLocalEndpoint(rendered);
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('could not be read back');
+  });
+
+  it('ignores a saved-profile read that finishes after a newer read started', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    const old = {
+      id: 'prof-old',
+      provider: 'custom',
+      baseUrl: 'http://10.0.0.5:8080/v1',
+      modelId: 'old-model',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    let reads = 0;
+    let releaseRemovalRead: ((list: readonly unknown[]) => void) | undefined;
+    let finishSave: ((profile: unknown) => void) | undefined;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // The read at mount lists the old profile. The read the removal starts is held until the test releases it,
+        // so it finishes after the read the save starts. The reads after that list the saved profile.
+        if (reads === 1) return [old];
+        if (reads === 2) {
+          return new Promise<readonly unknown[]>((resolve) => {
+            releaseRemovalRead = resolve;
+          });
+        }
+        return [savedLocal];
+      }
+      if (channel === 'desktop.provider-profile.save') {
+        return new Promise((resolve) => {
+          finishSave = resolve;
+        });
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: [
+        'desktop.provider-profile.list',
+        'desktop.provider-profile.save',
+        'desktop.provider-profile.delete',
+      ],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    await fillLocalEndpoint(rendered);
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+    const removeOld = [...rendered.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === '✕',
+    );
+    if (removeOld === undefined) throw new Error('Expected the remove button of the old profile');
+    await act(async () => {
+      removeOld.click();
+    });
+    await settle();
+    await act(async () => {
+      finishSave?.(savedLocal);
+    });
+    await settle();
+    await act(async () => {
+      releaseRemovalRead?.([old]);
+    });
+    await settle();
+
+    // The saved profile is still the chosen one, so connecting again with the key field empty uses it. Its
+    // acknowledgement is given again: the checkbox is unticked and ticked, which records it for the saved profile.
+    const consent = rendered.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (consent === null) throw new Error('Expected the custom-provider acknowledgement');
+    await act(async () => {
+      consent.click();
+    });
+    await act(async () => {
+      consent.click();
+    });
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+
+    const connected = vi
+      .mocked(engineClient.configure)
+      .mock.calls.map(([config]) => (config as { profileId?: unknown }).profileId);
+    expect(connected).toEqual(['prof-local', 'prof-local']);
+  });
+
+  it('does not connect when the saved profile is missing from the list read back after the save', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      // Every read succeeds, and none of them lists the profile that was just saved.
+      if (channel === 'desktop.provider-profile.list') return [];
+      if (channel === 'desktop.provider-profile.save') return savedLocal;
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    await fillLocalEndpoint(rendered);
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('could not be read back');
+  });
+
+  it('does not connect when the saved profile is read back unbound', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    let reads = 0;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // The read at mount is empty. The read after the save lists the profile, but not bound to its key.
+        return reads === 1 ? [] : [{ ...savedLocal, bound: false }];
+      }
+      if (channel === 'desktop.provider-profile.save') return savedLocal;
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    await fillLocalEndpoint(rendered);
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('could not be read back');
+  });
+
+  it('does not connect when the saved profile is read back at another endpoint', async () => {
+    const savedLocal = {
+      id: 'prof-local',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'llama3',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    };
+    let reads = 0;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // The read after the save lists the profile at an endpoint other than the one that was saved.
+        return reads === 1 ? [] : [{ ...savedLocal, baseUrl: 'http://127.0.0.1:9999/v1' }];
+      }
+      if (channel === 'desktop.provider-profile.save') return savedLocal;
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.save'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    await fillLocalEndpoint(rendered);
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+    });
+    await settle();
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('could not be read back');
+  });
+
+  it('does not carry a typed key onto another profile when the chosen profile leaves the list without its own delete', async () => {
+    const profile = (id: string, name: string, provider: string, baseUrl: string) => ({
+      id,
+      name,
+      provider,
+      baseUrl,
+      modelId: 'grok-model',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    });
+    const alpha = profile('prof-alpha', 'Alpha', 'grok', 'https://api.x.ai/v1');
+    const bravo = profile('prof-bravo', 'Bravo', 'grok', 'https://api.x.ai/v1');
+    const charlie = profile('prof-charlie', 'Charlie', 'custom', 'http://127.0.0.1:9999/v1');
+    let reads = 0;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // Alpha has left the store without its own delete. The read after Charlie's deletion lists only Bravo.
+        return reads === 1 ? [alpha, bravo, charlie] : [bravo];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: [
+        'desktop.provider-profile.list',
+        'desktop.provider-profile.save',
+        'desktop.provider-profile.delete',
+      ],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    const cardButton = (name: string, text: string): HTMLButtonElement => {
+      const card = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent?.trim() === name,
+      );
+      const button = [...(card?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (candidate) => candidate.textContent?.trim() === text,
+      );
+      if (button === undefined) throw new Error(`Expected ${text} on ${name}`);
+      return button;
+    };
+    const press = async (button: HTMLButtonElement): Promise<void> => {
+      await act(async () => {
+        button.click();
+      });
+      await settle();
+    };
+
+    // Alpha is chosen, so the form describes its endpoint, and a key is typed there.
+    await press(cardButton('Alpha', 'Use'));
+    const configuredForAlpha = vi.mocked(engineClient.configure).mock.calls.length;
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-replacement');
+    });
+
+    await press(cardButton('Charlie', '✕'));
+    await press(buttonByText(rendered, 'Connect model'));
+
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(vi.mocked(engineClient.configure).mock.calls).toHaveLength(configuredForAlpha);
+  });
+
+  it('does not carry a typed key onto another profile on the same endpoint when the chosen profile is deleted', async () => {
+    const profile = (id: string, name: string) => ({
+      id,
+      name,
+      provider: 'grok',
+      baseUrl: 'https://api.x.ai/v1',
+      modelId: 'grok-model',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    });
+    const alpha = profile('prof-alpha', 'Alpha');
+    const bravo = profile('prof-bravo', 'Bravo');
+    let reads = 0;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // After Alpha is deleted, Bravo is the only profile on the same endpoint.
+        return reads === 1 ? [alpha, bravo] : [bravo];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: [
+        'desktop.provider-profile.list',
+        'desktop.provider-profile.save',
+        'desktop.provider-profile.delete',
+      ],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    const cardButton = (name: string, text: string): HTMLButtonElement => {
+      const card = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent?.trim() === name,
+      );
+      const button = [...(card?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (candidate) => candidate.textContent?.trim() === text,
+      );
+      if (button === undefined) throw new Error(`Expected ${text} on ${name}`);
+      return button;
+    };
+    const press = async (button: HTMLButtonElement): Promise<void> => {
+      await act(async () => {
+        button.click();
+      });
+      await settle();
+    };
+
+    // Alpha is chosen, so the form describes its endpoint, and a key is typed there.
+    await press(cardButton('Alpha', 'Use'));
+    const configuredForAlpha = vi.mocked(engineClient.configure).mock.calls.length;
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-replacement');
+    });
+
+    await press(cardButton('Alpha', '✕'));
+    await press(buttonByText(rendered, 'Connect model'));
+
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(vi.mocked(engineClient.configure).mock.calls).toHaveLength(configuredForAlpha);
+  });
+
+  it('does not carry a typed key onto another profile when the read after the chosen profile is deleted fails', async () => {
+    const profile = (id: string, name: string, provider: string, baseUrl: string) => ({
+      id,
+      name,
+      provider,
+      baseUrl,
+      modelId: 'grok-model',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    });
+    const alpha = profile('prof-alpha', 'Alpha', 'grok', 'https://api.x.ai/v1');
+    const bravo = profile('prof-bravo', 'Bravo', 'grok', 'https://api.x.ai/v1');
+    const charlie = profile('prof-charlie', 'Charlie', 'custom', 'http://127.0.0.1:9999/v1');
+    let reads = 0;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // The read that confirms Alpha's deletion fails. The read after Charlie's deletion lists only Bravo.
+        if (reads === 2) throw new Error('The profile list is unavailable.');
+        return reads === 1 ? [alpha, bravo, charlie] : [bravo];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: [
+        'desktop.provider-profile.list',
+        'desktop.provider-profile.save',
+        'desktop.provider-profile.delete',
+      ],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    const cardButton = (name: string, text: string): HTMLButtonElement => {
+      const card = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent?.trim() === name,
+      );
+      const button = [...(card?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+        (candidate) => candidate.textContent?.trim() === text,
+      );
+      if (button === undefined) throw new Error(`Expected ${text} on ${name}`);
+      return button;
+    };
+    const press = async (button: HTMLButtonElement): Promise<void> => {
+      await act(async () => {
+        button.click();
+      });
+      await settle();
+    };
+
+    // Alpha is chosen, so the form describes its endpoint, and a key is typed there.
+    await press(cardButton('Alpha', 'Use'));
+    const configuredForAlpha = vi.mocked(engineClient.configure).mock.calls.length;
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-replacement');
+    });
+
+    // Alpha's removal read fails. Charlie's deletion reads the list again, and Alpha is gone from it.
+    await press(cardButton('Alpha', '✕'));
+    await press(cardButton('Charlie', '✕'));
+    expect(rendered.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
+    await press(buttonByText(rendered, 'Connect model'));
+
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(vi.mocked(engineClient.configure).mock.calls).toHaveLength(configuredForAlpha);
+  });
+
+  it('keeps the profile chosen while an older removal read was still pending', async () => {
+    const profile = (id: string, name: string) => ({
+      id,
+      name,
+      provider: 'grok',
+      baseUrl: 'https://api.x.ai/v1',
+      modelId: 'grok-model',
+      createdAt: '2026-10-28T00:00:00.000Z',
+      updatedAt: '2026-10-28T00:00:00.000Z',
+      bound: true,
+    });
+    const alpha = profile('prof-alpha', 'Alpha');
+    const bravo = profile('prof-bravo', 'Bravo');
+    const charlie = profile('prof-charlie', 'Charlie');
+    let reads = 0;
+    let releaseAlphaRemovalRead: ((list: readonly unknown[]) => void) | undefined;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        reads += 1;
+        // The read at mount lists all three. The read that starts the removal of Alpha is held until the test
+        // releases it. The read that follows the removal of Charlie lists only Bravo, and finishes first.
+        if (reads === 1) return [alpha, bravo, charlie];
+        if (reads === 2) {
+          return new Promise<readonly unknown[]>((resolve) => {
+            releaseAlphaRemovalRead = resolve;
+          });
+        }
+        return [bravo];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.delete'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    await settle();
+    const card = (name: string): HTMLElement => {
+      const found = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+        (candidate) => candidate.querySelector('strong')?.textContent?.trim() === name,
+      );
+      if (found === undefined) throw new Error(`Expected a card for ${name}`);
+      return found;
+    };
+    const cardButton = (name: string, text: string): HTMLButtonElement => {
+      const button = [...card(name).querySelectorAll<HTMLButtonElement>('button')].find(
+        (candidate) => candidate.textContent?.trim() === text,
+      );
+      if (button === undefined) throw new Error(`Expected ${text} on ${name}`);
+      return button;
+    };
+    const press = async (button: HTMLButtonElement): Promise<void> => {
+      await act(async () => {
+        button.click();
+      });
+      await settle();
+    };
+
+    await press(cardButton('Alpha', 'Use'));
+    await press(cardButton('Alpha', '✕'));
+    await press(cardButton('Charlie', '✕'));
+    await press(cardButton('Bravo', 'Use'));
+    await act(async () => {
+      releaseAlphaRemovalRead?.([alpha, bravo, charlie]);
+    });
+    await settle();
+
+    expect(
+      rendered.querySelector('.joy-settings-provider-card.is-active strong')?.textContent?.trim(),
+    ).toBe('Bravo');
+  });
+
+  it('refuses to connect a typed key while the saved profiles are still loading', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return new Promise(() => undefined);
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-typed-while-loading');
+    });
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(rendered.textContent).toContain('The saved profiles are still loading.');
+  });
+
+  it('refuses to connect a typed key until the saved profiles have been read, so it cannot save beside them', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') throw new Error('profile store unavailable');
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+    const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
+    if (key === null) throw new Error('Expected API key field');
+    await act(async () => {
+      setInputValue(key, 'sk-typed-while-unread');
+    });
+
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.save', expect.anything());
+    expect(rendered.textContent).toContain('The saved profiles could not be read.');
+  });
+
+  it('does not pick one of several saved profiles on the same endpoint when the dialog opens', async () => {
+    const shared = {
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/free',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: true,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        return [
+          { ...shared, id: 'prof-work', name: 'Work' },
+          { ...shared, id: 'prof-personal', name: 'Personal' },
+        ];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    expect(rendered.querySelectorAll('.joy-settings-provider-card.is-active')).toHaveLength(0);
+    // The owner picks OpenRouter, so the form describes the endpoint the two saved profiles share.
+    await chooseProvider(rendered, 'openrouter');
+    await act(async () => {
+      buttonByText(rendered, 'Connect model').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain('Choose one in the list first.');
+  });
+
+  it('asks for the key again, and does not connect, when its key is not confirmed for the endpoint', async () => {
+    const savedProfile = {
+      id: 'prof-or-unbound',
+      provider: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      modelId: 'openrouter/free',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      bound: false,
+    };
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return [savedProfile];
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list'],
+      invoke,
+    } as unknown as NonNullable<typeof window.joyDesktop>;
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    expect(rendered.textContent).toContain('Enter the key again to confirm this endpoint.');
+    await act(async () => {
+      buttonByText(rendered, 'Use').click();
+      await Promise.resolve();
+    });
+
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(rendered.textContent).toContain(
+      'Enter the API key again to confirm this endpoint, then connect.',
+    );
+  });
 });
 
 describe('JOY Agent Settings desktop profile persistence', () => {
@@ -881,6 +1843,31 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     expect(rendered.textContent).toContain('(Saved in desktop vault)');
   });
 
+  it('asks for the key again when a saved profile key cannot be read', async () => {
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') {
+        return [
+          {
+            id: 'prof-or-unreadable',
+            provider: 'openrouter',
+            baseUrl: 'https://openrouter.ai/api/v1',
+            modelId: 'anthropic/claude-3.5-sonnet',
+            createdAt: '2026-09-15T00:00:00.000Z',
+            updatedAt: '2026-09-15T00:00:00.000Z',
+            state: 'credential-unavailable',
+          },
+        ];
+      }
+      return undefined;
+    });
+    window.joyDesktop = { channels: ['desktop.provider-profile.list'], invoke };
+    const engineClient = client();
+    const rendered = await render(engineClient, undefined);
+
+    expect(rendered.textContent).toContain('Saved key could not be read. Enter it again.');
+    expect(rendered.textContent).not.toContain('(Saved in desktop vault)');
+  });
+
   it('saves profile to desktop DPAPI when user connects with a key', async () => {
     const savedProfile = {
       id: 'prof-or-1',
@@ -902,6 +1889,8 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     const engineClient = client();
     const rendered = await render(engineClient, undefined);
     await selectCustomPreset(rendered);
+    // The form preselects no provider, so the owner picks one before connecting.
+    await chooseProvider(rendered, 'openrouter');
 
     const key = rendered.querySelector<HTMLInputElement>('input[type="password"]');
     if (key === null) throw new Error('Expected API key field');
@@ -919,65 +1908,160 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     });
   });
 
-  it('uses saved profile key when connecting with blank key field', async () => {
+  it('shows legacy profiles as disabled and defers them without provider operations', async () => {
+    let decision: 'later' | undefined;
+    const legacyProfile = {
+      id: 'legacy-kilo-profile',
+      provider: 'kilo',
+      name: 'Old Kilo profile',
+      baseUrl: 'https://api.kilo.ai/v1',
+      modelId: 'retired-model',
+      createdAt: '2026-09-15T00:00:00.000Z',
+      updatedAt: '2026-09-15T00:00:00.000Z',
+      state: 'disabled-legacy',
+    };
     const invoke = vi.fn().mockImplementation(async (channel: string) => {
       if (channel === 'desktop.provider-profile.list') {
-        return [
-          {
-            id: 'prof-or-1',
-            provider: 'openrouter',
-            baseUrl: 'https://openrouter.ai/api/v1',
-            modelId: 'anthropic/claude-3.5-sonnet',
-            createdAt: '2026-09-15T00:00:00.000Z',
-            updatedAt: '2026-09-15T00:00:00.000Z',
-          },
-        ];
+        return [{ ...legacyProfile, ...(decision === undefined ? {} : { decision }) }];
       }
-      if (channel === 'desktop.provider-profile.begin-session') {
-        return {
-          provider: 'openrouter',
-          baseUrl: 'https://openrouter.ai/api/v1',
-          modelId: 'anthropic/claude-3.5-sonnet',
-          apiKey: 'sk-or-saved-vault-key',
-        };
-      }
-      if (channel === 'desktop.provider-profile.save') {
-        return {
-          id: 'prof-or-1',
-          provider: 'openrouter',
-          baseUrl: 'https://openrouter.ai/api/v1',
-          modelId: 'anthropic/claude-3.5-sonnet',
-          createdAt: '2026-09-15T00:00:00.000Z',
-          updatedAt: '2026-09-15T00:00:00.000Z',
-        };
+      if (channel === 'desktop.provider-profile.later') {
+        decision = 'later';
+        return { ok: true };
       }
       return undefined;
     });
     window.joyDesktop = {
-      channels: [
-        'desktop.provider-profile.list',
-        'desktop.provider-profile.begin-session',
-        'desktop.provider-profile.save',
-      ],
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.later'],
       invoke,
     };
     const engineClient = client();
-    const rendered = await render(engineClient, undefined);
-    await selectCustomPreset(rendered);
-
+    const rendered = await render(engineClient);
     await act(async () => {
-      buttonByText(rendered, 'Connect model').click();
       await Promise.resolve();
     });
 
-    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.begin-session', {
-      id: 'prof-or-1',
+    const card = [...rendered.querySelectorAll<HTMLElement>('.joy-settings-provider-card')].find(
+      (candidate) => candidate.textContent?.includes('Old Kilo profile'),
+    );
+    expect(card?.textContent).toContain('Disabled legacy profile');
+    expect(
+      [...(card?.querySelectorAll('button') ?? [])].map((button) => button.textContent?.trim()),
+    ).toEqual(['Later']);
+
+    await act(async () => {
+      [...(card?.querySelectorAll('button') ?? [])]
+        .find((button) => button.textContent?.trim() === 'Later')
+        ?.click();
+      await Promise.resolve();
     });
-    expect(engineClient.configure).toHaveBeenCalledWith({
-      provider: 'openrouter',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      modelId: 'anthropic/claude-3.5-sonnet',
-      apiKey: 'sk-or-saved-vault-key',
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.later', {
+      id: 'legacy-kilo-profile',
     });
+    expect(engineClient.configure).not.toHaveBeenCalled();
+    expect(engineClient.testConnection).not.toHaveBeenCalled();
+    for (const channel of [
+      'desktop.provider-profile.begin-session',
+      'desktop.provider.test',
+      'desktop.provider.models',
+      'desktop.provider-profile.save',
+    ]) {
+      expect(invoke).not.toHaveBeenCalledWith(channel, expect.anything());
+    }
+  });
+
+  it('reauthorizes a saved ChatGPT profile in place with its profile ID', async () => {
+    let stored = [
+      {
+        id: 'chatgpt-profile-1',
+        provider: 'chatgpt',
+        baseUrl: 'https://api.openai.com/v1',
+        modelId: 'gpt-4o-mini',
+        createdAt: '2026-10-29T00:00:00.000Z',
+        updatedAt: '2026-10-29T00:00:00.000Z',
+      },
+    ];
+    const invoke = vi.fn().mockImplementation(async (channel: string, payload?: unknown) => {
+      if (channel === 'desktop.provider-profile.list') return stored;
+      if (channel === 'desktop.provider-profile.sign-in') {
+        expect(payload).toEqual({ provider: 'chatgpt', id: 'chatgpt-profile-1' });
+        stored = [{ ...stored[0]!, modelId: 'gpt-4.1', updatedAt: '2026-10-30T00:00:00.000Z' }];
+        return stored[0];
+      }
+      return undefined;
+    });
+    window.joyDesktop = {
+      channels: ['desktop.provider-profile.list', 'desktop.provider-profile.sign-in'],
+      invoke,
+    };
+    const rendered = await render(client());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      buttonByText(rendered, 'Reauthorize').click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.sign-in', {
+      provider: 'chatgpt',
+      id: 'chatgpt-profile-1',
+    });
+    expect(rendered.textContent).toContain('gpt-4.1');
+  });
+
+  it('keeps a ChatGPT profile after revocation fails when local-only removal is declined', async () => {
+    let stored: readonly Record<string, unknown>[] = [
+      {
+        id: 'chatgpt-profile-1',
+        provider: 'chatgpt',
+        baseUrl: 'https://api.openai.com/v1',
+        modelId: 'gpt-4o-mini',
+        createdAt: '2026-10-29T00:00:00.000Z',
+        updatedAt: '2026-10-29T00:00:00.000Z',
+      },
+    ];
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.list') return stored;
+      if (channel === 'desktop.provider-profile.sign-out') {
+        throw new Error('ChatGPT could not confirm sign-out. The saved connection was kept.');
+      }
+      if (channel === 'desktop.provider-profile.delete') {
+        stored = [];
+        return undefined;
+      }
+      return undefined;
+    });
+    const confirm = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false);
+    vi.stubGlobal('confirm', confirm);
+    window.joyDesktop = {
+      channels: [
+        'desktop.provider-profile.list',
+        'desktop.provider-profile.sign-out',
+        'desktop.provider-profile.delete',
+      ],
+      invoke,
+    };
+    const rendered = await render(client());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      buttonByText(rendered, 'Sign out & revoke').click();
+      await Promise.resolve();
+    });
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.sign-out', {
+      id: 'chatgpt-profile-1',
+    });
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(String(confirm.mock.calls[1]?.[0])).toContain('does not revoke');
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.delete', {
+      id: 'chatgpt-profile-1',
+    });
+    expect(rendered.textContent).toContain('ChatGPT could not confirm sign-out');
+    expect(rendered.textContent).toContain('gpt-4o-mini');
   });
 });

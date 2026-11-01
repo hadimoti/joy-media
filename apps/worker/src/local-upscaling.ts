@@ -56,9 +56,20 @@ export function upscalingAvailabilityFromEnvironment(
       runner,
       modelId: env.JOY_MEDIA_UPSCALE_IMAGE_MODEL?.trim() || 'realesrgan-x4plus',
       modelVersion: env.JOY_MEDIA_UPSCALE_IMAGE_MODEL_VERSION?.trim() || 'unqualified',
-      modelReady: modelPath.length > 0 && existsSync(modelPath),
+      modelReady: modelIsPinned(modelPath, env.JOY_MEDIA_REAL_ESRGAN_MODEL_SHA256),
     },
   };
+}
+
+/**
+ * A model is ready only when its file exists and its SHA-256 equals the digest the Worker was configured
+ * with. A missing or malformed pin refuses the model, so a file nobody pinned is never run.
+ */
+export function modelIsPinned(modelPath: string, pinnedSha256: string | undefined): boolean {
+  const pin = pinnedSha256?.trim().toLowerCase() ?? '';
+  if (modelPath.length === 0 || !/^[0-9a-f]{64}$/u.test(pin) || !existsSync(modelPath))
+    return false;
+  return createHash('sha256').update(readFileSync(modelPath)).digest('hex') === pin;
 }
 
 export async function runUpscaleJob(options: {

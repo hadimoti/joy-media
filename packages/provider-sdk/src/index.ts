@@ -100,6 +100,64 @@ export { createSynthesisAuditLog } from './synthesis-audit.js';
 // Re-export BYOK provider-profile validation (JOY Media desktop migration, wave 3)
 export type { ByokProvider, ProviderProfileInput, ValidationIssue } from './validation.js';
 export { BYOK_PROVIDERS, validateProviderProfileInput } from './validation.js';
+export type {
+  ProviderApi,
+  ProviderAuthMethod,
+  ProviderAuthRule,
+  ProviderRegion,
+  ProviderRegionId,
+  ProviderThinkingMode,
+  RegistryProvider,
+  RegistryProviderId,
+  EndpointOptions,
+  EndpointVerdict,
+} from './registry.js';
+export {
+  CUSTOM_PROVIDER_ALIAS,
+  CUSTOM_PROVIDER_AUTH,
+  CUSTOM_PROVIDER_ID,
+  PROVIDER_REGISTRY,
+  REGISTRY_PROVIDER_IDS,
+  XAI_OAUTH_INFERENCE_BASE_URL,
+  defaultBaseUrl,
+  endpointUrl,
+  evaluateEndpoint,
+  findRegistryProvider,
+  findRegistryRegion,
+  getProviderThinkingMode,
+  isAuthGated,
+  isAuthMethodPermitted,
+  isCustomProviderId,
+  isLoopbackHostname,
+  isPrivateOrInternalHost,
+  isSignInProvider,
+  normalizeBaseUrl,
+  offeredAuthMethods,
+  permittedAuthMethods,
+  signInProviders,
+} from './registry.js';
+export type { OAuthClient, OAuthClientProviderId } from './oauth-clients.js';
+export { getOAuthClient } from './oauth-clients.js';
+
+// Re-export the two general-purpose agent slots (D17, PLAN-v4 §6d-1)
+export type {
+  AgentSlot,
+  AgentSlotDraft,
+  AgentSlotId,
+  AgentSlotIssue,
+  AgentSlotResult,
+  AgentSlotSettings,
+} from './agent-slots.js';
+export {
+  AGENT_SLOT_IDS,
+  AGENT_SLOT_LABELS,
+  AGENT_SLOT_LIMITS,
+  agentSlotDraft,
+  emptyAgentSlot,
+  isAgentSlotConfigured,
+  parseAgentSlotId,
+  validateAgentSlot,
+} from './agent-slots.js';
 
 // Re-export the direct-provider capability probe adapter (wave 3)
 export type {
@@ -110,6 +168,16 @@ export type {
   FetchResponseLike,
 } from './adapters/openai-compatible.js';
 export { probeOpenAiCompatibleProvider } from './adapters/openai-compatible.js';
+
+// Re-export the fixed sign-in origins (PLAN-v4 §5, §6d), so the desktop names no remote host itself.
+export {
+  CHATGPT_AUTHORIZE_URL,
+  CHATGPT_ISSUER,
+  CHATGPT_JWKS_URL,
+  CHATGPT_RESPONSES_BASE_URL,
+  CHATGPT_TOKEN_URL,
+  OPENROUTER_BASE_URL,
+} from './sign-in-endpoints.js';
 
 // ===== V1 Backward Compatibility =====
 

@@ -119,8 +119,8 @@ joy-media-index                                    [NEW - Index]
 
 ## Deployed Releases
 
-- Editor: 733f584 at /opt/joy-media/web-releases/editor-web-20260816T233403Z-733f584-wp36-color-render-final
-- API: wp35-final-api-20260816T200008Z-07ecbe1 at /opt/joy-media/releases/wp35-final-api-20260816T200008Z-07ecbe1
+- Editor: 733f584 at <server-path>/joy-media/web-releases/editor-web-20260816T233403Z-733f584-wp36-color-render-final
+- API: wp35-final-api-20260816T200008Z-07ecbe1 at <server-path>/joy-media/releases/wp35-final-api-20260816T200008Z-07ecbe1
 
 ## Open Work
 
@@ -131,7 +131,7 @@ joy-media-index                                    [NEW - Index]
 ## Service Health
 
 - API: active (running) on 127.0.0.1:8790
-- GBrain: active (running) on 10.250.99.1:3131, version 0.42.59.0
+- GBrain: active (running) on <host-ip>:3131, version 0.42.59+0
 
 ## Links
 
@@ -204,14 +204,14 @@ joy-media-index                                    [NEW - Index]
 
 - WP-36: 733f584 — Managed universal track deck + color labels
   - evidence: joy-media-wp36-summary
-  - artifact: /opt/joy-media/web-releases/editor-web-20260816T233403Z-733f584-wp36-color-render-final
+  - artifact: <server-path>/joy-media/web-releases/editor-web-20260816T233403Z-733f584-wp36-color-render-final
 
 - WP-35: 5273e34 — Universal timeline + GPU preview
   - evidence: (link to WP-35 evidence)
-  - artifact: /opt/joy-media/web-releases/editor-web-20260816T213059Z-1298c17-wp35-ruler-surface
+  - artifact: <server-path>/joy-media/web-releases/editor-web-20260816T213059Z-1298c17-wp35-ruler-surface
 
 - WP-34: 630c8ad — Universal animation + editor IA
-  - artifact: /opt/joy-media/web-releases/editor-web-20260814T...
+  - artifact: <server-path>/joy-media/web-releases/editor-web-20260814T...
 
 ## Rollback Targets
 
@@ -292,7 +292,7 @@ Replace manual Add/Delete Track with adaptive two-family deck.
 ## Artifacts
 
 - Source commit: 733f584
-- Editor artifact: /opt/joy-media/web-releases/editor-web-20260816T233403Z-733f584-wp36-color-render-final
+- Editor artifact: <server-path>/joy-media/web-releases/editor-web-20260816T233403Z-733f584-wp36-color-render-final
 
 ## Evidence Chunks (Linked)
 

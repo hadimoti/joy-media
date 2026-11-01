@@ -37,6 +37,11 @@ describe('agent provider add: model discovery against the endpoint', () => {
     env.run(['agent', 'provider', 'add', name, '--url', mock.url, '--api-key', KEY, ...extra]);
   const stored = (name: string): StoredProvider =>
     readJoyConfig<ProviderFile>(env.sb, 'ai-providers.json')[name]!;
+  const credentials = (): Record<string, { ciphertext: string }> =>
+    readJoyConfig<{ entries: Record<string, { ciphertext: string }> }>(
+      env.sb,
+      'credentials.json',
+    ).entries;
 
   beforeAll(async () => {
     mock = await startMockLlm();
@@ -89,7 +94,9 @@ describe('agent provider add: model discovery against the endpoint', () => {
       const r = await add('flaky');
       expect(r.code, describeRun(r)).toBe(0);
       expect(r.out).toMatch(warning);
-      expect(stored('flaky').apiKey).toBe(KEY);
+      expect(stored('flaky').apiKey).toBeUndefined();
+      expect(credentials()).toHaveProperty('flaky');
+      expect(readFileSync(join(env.sb.joyDir, 'ai-providers.json'), 'utf8')).not.toContain(KEY);
       expect(stored('flaky').cachedModels).toBeUndefined();
     });
   }
@@ -132,6 +139,11 @@ describe('agent provider lifecycle', () => {
   const add = (name: string, ...extra: string[]) =>
     env.run(['agent', 'provider', 'add', name, '--url', mock.url, '--api-key', KEY, ...extra]);
   const providerFile = (): ProviderFile => readJoyConfig<ProviderFile>(env.sb, 'ai-providers.json');
+  const credentials = (): Record<string, { ciphertext: string }> =>
+    readJoyConfig<{ entries: Record<string, { ciphertext: string }> }>(
+      env.sb,
+      'credentials.json',
+    ).entries;
 
   beforeAll(async () => {
     mock = await startMockLlm();
@@ -150,6 +162,9 @@ describe('agent provider lifecycle', () => {
 
   it('add -> list -> use -> remove the active provider: what is active afterwards is stated', async () => {
     expect((await add('studio')).code).toBe(0);
+    expect(providerFile().studio?.apiKey).toBeUndefined();
+    expect(credentials()).toHaveProperty('studio');
+    expect(readFileSync(join(env.sb.joyDir, 'ai-providers.json'), 'utf8')).not.toContain(KEY);
 
     const list = await env.run(['agent', 'provider', 'list']);
     expect(list.code, describeRun(list)).toBe(0);
@@ -166,6 +181,7 @@ describe('agent provider lifecycle', () => {
     const rm = await env.run(['agent', 'provider', 'remove', 'studio']);
     expect(rm.code, describeRun(rm)).toBe(0);
     expect(rm.out).toMatch(/was the active provider/);
+    expect(credentials()).not.toHaveProperty('studio');
     // The removed provider's model must not linger as the global default.
     expect(readJoyConfig(env.sb, 'cli-config.json')).toEqual({});
 
@@ -173,7 +189,7 @@ describe('agent provider lifecycle', () => {
     expect(cfg.code, describeRun(cfg)).toBe(0);
     expect(cfg.json()).toMatchObject({
       activeProvider: null,
-      effective: { provider: 'openrouter', model: 'openrouter/auto', apiKey: null },
+      effective: null,
     });
   });
 
@@ -295,6 +311,8 @@ describe('agent provider lifecycle', () => {
 describe('config files are never silently destroyed', () => {
   let mock: MockLlmServer;
   let env: AgentSandbox;
+  const credentials = (): Record<string, unknown> =>
+    readJoyConfig<{ entries: Record<string, unknown> }>(env.sb, 'credentials.json').entries;
 
   beforeAll(async () => {
     mock = await startMockLlm();
@@ -365,6 +383,7 @@ describe('config files are never silently destroyed', () => {
     for (const r of runs) expect(r.code, describeRun(r)).toBe(0);
     const names = Object.keys(readJoyConfig<ProviderFile>(env.sb, 'ai-providers.json')).sort();
     expect(names).toEqual(Array.from({ length: count }, (_, i) => `p${i}`).sort());
+    expect(Object.keys(credentials()).sort()).toEqual(names.sort());
     expect(statSync(join(env.sb.joyDir, 'ai-providers.json')).size).toBeGreaterThan(0);
   });
 });

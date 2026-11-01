@@ -31,9 +31,12 @@ interface LayerElementProps {
   readonly onTextEditEnd: (layerId: MotionLayerId) => void;
 }
 
-function assetUrl(assetId: string | undefined): string {
-  if (!assetId) return '';
-  return `/v1/library/cloud-assets/${encodeURIComponent(assetId)}/content`;
+/**
+ * Asset layers have no URL in the local build. The remote library route is gone, and the local
+ * media resolver is not wired into this canvas yet.
+ */
+function assetUrl(_assetId: string | undefined): string {
+  return '';
 }
 
 function bgToCSS(background: MotionSceneDocument['background']): string {

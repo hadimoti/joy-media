@@ -1,108 +1,114 @@
-import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import type { BrowserWorker } from './control-plane-client.js';
+// @vitest-environment jsdom
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  queueWorkerReadiness,
-  workerAudioDenoiseOperationId,
-  workerResultWasApplied,
-} from './JobsPanel.js';
+  BrowserControlPlaneClient,
+  type BrowserJob,
+  type BrowserWorker,
+} from './control-plane-client.js';
+import { JobsPanel } from './JobsPanel.js';
 
-const panelSource = readFileSync(new URL('./JobsPanel.tsx', import.meta.url), 'utf8');
+// jsdom runs transform the module URL to http, so the source is read through Vite instead.
+const panelSource = import.meta.glob('./JobsPanel.tsx', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+})['./JobsPanel.tsx'] as string;
 
-describe('JobsPanel R2 pairing and exactly-once contract', () => {
-  it('treats applied terminal states as non-reviewable', () => {
-    expect(workerResultWasApplied('applied')).toBe(true);
-    expect(workerResultWasApplied('completed')).toBe(true);
-    expect(workerResultWasApplied('review')).toBe(false);
-    expect(workerResultWasApplied(undefined)).toBe(false);
+describe('JobsPanel in the local build', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    container?.remove();
+    root = undefined;
+    container = undefined;
+    vi.restoreAllMocks();
   });
 
-  it('scopes stable Worker job IDs to the owning project', () => {
-    expect(workerAudioDenoiseOperationId('project-a', 'asset-1')).toBe(
-      'audio-denoise-project-a-asset-1',
-    );
-    expect(workerAudioDenoiseOperationId('project-a', 'asset-1')).not.toBe(
-      workerAudioDenoiseOperationId('project-b', 'asset-1'),
-    );
+  async function renderPanel(projectId: string): Promise<HTMLDivElement> {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(createElement(JobsPanel, { projectId, projectTitle: 'Project' }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    return container;
+  }
+
+  it('registers each project once, then polls its jobs on every refresh', async () => {
+    const ensureProject = vi
+      .spyOn(BrowserControlPlaneClient.prototype, 'ensureProject')
+      .mockResolvedValue();
+    const jobs = vi.spyOn(BrowserControlPlaneClient.prototype, 'jobs').mockResolvedValue([]);
+    vi.spyOn(BrowserControlPlaneClient.prototype, 'workers').mockResolvedValue([]);
+    const panel = await renderPanel('project-a');
+
+    await act(async () => {
+      panel.querySelector<HTMLButtonElement>('[aria-label="Refresh jobs"]')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(ensureProject).toHaveBeenCalledTimes(1);
+    expect(ensureProject).toHaveBeenCalledWith('project-a', 'Project');
+    expect(jobs.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(jobs.mock.calls.every(([projectId]) => projectId === 'project-a')).toBe(true);
   });
 
-  it('uses guarded form submission and preserves action feedback across refreshes', () => {
+  it('keeps the action feedback that the panel shows across refreshes', () => {
     expect(panelSource).toContain('const [connectionStatus, setConnectionStatus]');
     expect(panelSource).toContain('note={status ?? connectionStatus}');
-    expect(panelSource).toContain('if (pairBusyRef.current) return;');
-    expect(panelSource).toContain('onSubmit={(event) => {');
-    expect(panelSource).toContain("{pairBusy ? 'Approving…' : 'Approve'}");
-    expect(panelSource).toContain('connected successfully.');
-    expect(panelSource).toContain('no restart is');
   });
 
-  it('bootstraps each project once before polling jobs and never reuses a previous project state', () => {
-    expect(panelSource).toMatch(/if \(projectScopeReady\) \{\s+setJobs\(nextJobs\);/);
-    expect(panelSource).toContain("projectId.startsWith('project-')");
-    expect(panelSource).toContain('const projectInitialized = initializedProjectId === projectId;');
-    expect(panelSource).toContain(
-      'if (!projectInitialized) await client.ensureProject(projectId, projectTitle);',
+  it('keeps local Worker status and Queue, and omits pairing and revocation controls', async () => {
+    vi.spyOn(BrowserControlPlaneClient.prototype, 'workers').mockResolvedValue([
+      worker({ lastSeenAt: Date.now() }),
+    ]);
+    vi.spyOn(BrowserControlPlaneClient.prototype, 'ensureProject').mockResolvedValue();
+    vi.spyOn(BrowserControlPlaneClient.prototype, 'jobs').mockResolvedValue([]);
+    const panel = await renderPanel('project-a');
+
+    const tabs = Array.from(panel.querySelectorAll('[role="tab"]')).map((tab) =>
+      tab.textContent?.trim(),
     );
-    expect(panelSource).toContain(
-      'setInitializedProjectId(projectMissing ? undefined : projectId);',
-    );
-    expect(panelSource).toContain(
-      'setConnectionStatus(projectJobStatus(projectMissing, nextWorkers));',
-    );
+    expect(tabs).toEqual(['Workers', 'Queue']);
+    expect(panel.querySelector('[aria-label="One-time pairing code"]')).toBeNull();
+    expect(panel.querySelector('[aria-label="Revoke Worker worker-1"]')).toBeNull();
+    expect(panel.textContent).toContain('worker-1');
+    expect(panel.textContent).toContain('connected');
   });
 
-  it('never reconstructs a ledger key from an asset after review has completed', () => {
-    expect(panelSource).toContain("operationLedger.finish(job.id, 'review'");
-    expect(panelSource).toContain('if (operationLedger.get(job.id) === undefined)');
-    expect(panelSource).toContain("operationLedger?.finish(review.jobId, 'applied'");
-    expect(panelSource).toContain("operationLedger?.finish(review.jobId, 'cancelled'");
-    expect(panelSource).not.toContain('finish(`audio-denoise-${review.sourceAssetId}`');
-  });
+  it('offers no denoise, thumbnail or retry action for a failed render job', async () => {
+    vi.spyOn(BrowserControlPlaneClient.prototype, 'workers').mockResolvedValue([]);
+    vi.spyOn(BrowserControlPlaneClient.prototype, 'ensureProject').mockResolvedValue();
+    const failed: BrowserJob = {
+      id: 'job-1',
+      projectId: 'project-a',
+      type: 'render.export',
+      state: 'failed',
+      progress: 0,
+      cancelRequested: false,
+      error: 'render failed',
+    };
+    vi.spyOn(BrowserControlPlaneClient.prototype, 'jobs').mockResolvedValue([failed]);
+    const panel = await renderPanel('project-a');
 
-  it('queues thumbnails only for the selected real media asset', () => {
-    expect(panelSource).toContain('thumbnailAssetId');
-    expect(panelSource).toContain('await client.associateAsset(projectId, thumbnailAssetId);');
-    expect(panelSource).toContain('client.enqueueAssetThumbnail');
-    expect(panelSource).not.toContain('enqueueFixture');
-  });
-
-  it('requires one connected Worker to have both the capability and selected source', () => {
-    const readiness = queueWorkerReadiness(
-      [
-        worker({ id: 'worker-capability-only', localAssetIds: ['another-asset'] }),
-        worker({ id: 'worker-ready', localAssetIds: ['asset-1'] }),
-      ],
-      'audio.ml-denoise',
-      'asset-1',
+    const queueTab = Array.from(panel.querySelectorAll<HTMLElement>('[role="tab"]')).find(
+      (tab) => tab.textContent?.trim() === 'Queue',
     );
-
-    expect(readiness).toMatchObject({ kind: 'ready', worker: { id: 'worker-ready' } });
-    expect(
-      queueWorkerReadiness(
-        [worker({ id: 'worker-capability-only', localAssetIds: ['another-asset'] })],
-        'audio.ml-denoise',
-        'asset-1',
-      ),
-    ).toEqual({
-      kind: 'source-unavailable',
-      reason: 'No connected capable Worker has this media source locally yet.',
+    await act(async () => {
+      queueTab?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(
-      queueWorkerReadiness([worker({ capabilities: [] })], 'audio.ml-denoise', 'asset-1'),
-    ).toEqual({
-      kind: 'missing-capability',
-      reason: 'No connected Worker advertises audio.ml-denoise.',
-    });
-    expect(panelSource).toContain('const queueReadiness = useMemo(');
-    expect(panelSource).toContain("if (queueReadiness.kind !== 'ready')");
-    expect(panelSource).toContain('queueUnavailableReason !== undefined');
-  });
 
-  it('associates audio sources before queueing a project-scoped Worker operation', () => {
-    expect(panelSource).toContain('await client.associateAsset(projectId, audioAssetId);');
-    expect(panelSource).toContain(
-      "client.enqueueWorkerGeneration(projectId, jobId, 'audio.ml-denoise', audioAssetId)",
-    );
+    expect(panel.querySelector('[data-job-id="job-1"]')).not.toBeNull();
+    expect(panel.querySelector('[aria-label="Retry job job-1"]')).toBeNull();
+    expect(panel.querySelector('[aria-label="Run audio denoise"]')).toBeNull();
+    expect(panel.querySelector('[aria-label="Queue thumbnail derivative"]')).toBeNull();
   });
 });
 
@@ -111,7 +117,7 @@ function worker(input: Partial<BrowserWorker>): BrowserWorker {
     id: 'worker-1',
     paired: true,
     revoked: false,
-    capabilities: ['audio.ml-denoise'],
+    capabilities: ['render.export'],
     lastSeenAt: Date.now(),
     ...input,
   };

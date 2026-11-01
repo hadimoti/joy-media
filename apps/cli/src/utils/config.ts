@@ -12,17 +12,39 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import {
+  createCredentialStore,
+  migrateProviderFile,
+  type CredentialStore,
+} from './credential-store.js';
+import { createDpapiProtector, createRestrictedFileProtector } from './dpapi-protector.js';
+
+/** One agent slot as the config file keeps it. Nothing here is secret: the key stays in the credential store. */
+export interface SavedAgentSlot {
+  profileId?: string | undefined;
+  model?: string | undefined;
+  instructions?: string | undefined;
+  settings?: { temperature?: number | undefined; maxOutputTokens?: number | undefined } | undefined;
+}
 
 export interface CliConfig {
   activeProvider?: string | undefined;
   defaultModel?: string | undefined;
   customBaseUrl?: string | undefined;
   sqlitePath?: string | undefined;
+  /** ChatGPT's accepted host identity, generated once for this CLI installation. */
+  chatgptExtAgentHostId?: string | undefined;
+  /** The two agent slots (PLAN-v4 §6d-1). A slot that is not saved is empty. */
+  agentSlots?: Partial<Record<'workhorse' | 'creative', SavedAgentSlot>> | undefined;
 }
 
 export interface AiProviderConfig {
+  /** The public endpoint the owner consented to, as origin and base path (S8). A changed endpoint needs consent again. */
+  endpointConsent?: string | undefined;
   name?: string | undefined;
   provider?: string | undefined;
+  /** Older profile metadata without this field remains on the API-key route (D22 step 3 design, §11). */
+  authKind?: 'api-key' | 'oauth' | undefined;
   apiKey?: string | undefined;
   baseUrl?: string | undefined;
   defaultModel?: string | undefined;
@@ -128,8 +150,8 @@ const LOCK_WAIT_MS = 15_000;
  * Serialise read-modify-write cycles on the config files across processes
  * (AI agents happily run several `joy-media agent provider add` at once).
  */
-function withConfigLock<T>(fn: () => T): T {
-  const lock = join(getJoyMediaDir(), '.config.lock');
+function withNamedLock<T>(name: string, fn: () => T): T {
+  const lock = join(getJoyMediaDir(), name);
   const deadline = Date.now() + LOCK_WAIT_MS;
   for (;;) {
     try {
@@ -159,6 +181,14 @@ function withConfigLock<T>(fn: () => T): T {
   }
 }
 
+function withConfigLock<T>(fn: () => T): T {
+  return withNamedLock('.config.lock', fn);
+}
+
+function withCredentialLock<T>(fn: () => T): T {
+  return withNamedLock('.credentials.lock', fn);
+}
+
 /** @throws ConfigFileError when the file exists but is corrupt. */
 export function loadCliConfig(): CliConfig {
   return (readJsonObject(getCliConfigPath()) ?? {}) as CliConfig;
@@ -177,39 +207,120 @@ export function updateCliConfig(mutate: (current: CliConfig) => CliConfig): CliC
   });
 }
 
+/** The CLI credential store, opened with the protector for this platform (PLAN-v4 §6b). */
+export function openCredentialStore(): CredentialStore {
+  const store = createCredentialStore({
+    path: join(getJoyMediaDir(), 'credentials.json'),
+    protector:
+      process.platform === 'win32' ? createDpapiProtector() : createRestrictedFileProtector(),
+  });
+  return {
+    list: () => store.list(),
+    read: (name) => store.read(name),
+    save: (name, credential) => withCredentialLock(() => store.save(name, credential)),
+    remove: (name) => withCredentialLock(() => store.remove(name)),
+  };
+}
+
 /**
- * Stored providers (with API keys), keyed by name, as a null-prototype map.
- * @throws ConfigFileError when the file exists but is corrupt.
+ * Moves any plaintext API key from ai-providers.json into the credential store (PLAN-v4 §6b, §9a). It does
+ * nothing when the file is absent, so an ordinary start pays no cost.
+ */
+export function migrateLegacyProviders(): void {
+  withConfigLock(() => {
+    const path = getAiProvidersPath();
+    if (readJsonObject(path) === undefined) return;
+    migrateProviderFile({ providersPath: path, store: openCredentialStore() });
+  });
+}
+
+/**
+ * The providers, with each API key read from the credential store. ai-providers.json holds only the
+ * non-secret fields. A key that cannot be read is left out, and nothing is written back.
  */
 export function loadAiProviders(): Record<string, AiProviderConfig> {
   const path = getAiProvidersPath();
-  const providers = readJsonObject(path);
-  if (providers === undefined) return Object.create(null) as Record<string, AiProviderConfig>;
+  const rawProviders = readJsonObject(path);
+  if (rawProviders === undefined) return Object.create(null) as Record<string, AiProviderConfig>;
   // Self-heal installs that stored keys world-readable before this fix.
   makePrivate(getJoyMediaDir(), PRIVATE_DIR_MODE);
   makePrivate(path, PRIVATE_FILE_MODE);
-  return providers as Record<string, AiProviderConfig>;
+  const providers = rawProviders as Record<string, AiProviderConfig>;
+  let store: CredentialStore | undefined;
+  for (const [name, entry] of Object.entries(providers)) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    if (entry.apiKey !== undefined || entry.authKind === 'oauth') continue;
+    store ??= openCredentialStore();
+    try {
+      const credential = store.read(name);
+      if (credential !== undefined && 'apiKey' in credential) {
+        providers[name] = {
+          ...entry,
+          apiKey: credential.apiKey,
+          baseUrl: entry.baseUrl ?? credential.baseUrl,
+          defaultModel: entry.defaultModel ?? credential.defaultModel,
+        };
+      }
+    } catch {
+      // The key is unavailable: the provider is listed without it. Nothing is written back.
+    }
+  }
+  return providers;
 }
 
-export function saveAiProviders(providers: Record<string, AiProviderConfig>): void {
+function loadAiProviderMetadata(): Record<string, AiProviderConfig> {
+  const rawProviders = readJsonObject(getAiProvidersPath());
+  return rawProviders === undefined
+    ? (Object.create(null) as Record<string, AiProviderConfig>)
+    : (rawProviders as Record<string, AiProviderConfig>);
+}
+
+/** Writes only non-secret provider metadata with an atomic replacement. */
+function saveAiProviderMetadata(providers: Record<string, AiProviderConfig>): void {
+  const path = getAiProvidersPath();
+  const metadata = Object.create(null) as Record<string, AiProviderConfig>;
+  for (const [name, entry] of Object.entries(providers)) {
+    metadata[name] = {
+      endpointConsent: entry.endpointConsent,
+      name: entry.name,
+      provider: entry.provider,
+      authKind: entry.authKind,
+      baseUrl: entry.baseUrl,
+      defaultModel: entry.defaultModel,
+      cachedModels: entry.cachedModels,
+    };
+  }
   makePrivate(getJoyMediaDir(), PRIVATE_DIR_MODE);
-  writeFileAtomic(
-    getAiProvidersPath(),
-    `${JSON.stringify({ ...providers }, null, 2)}\n`,
-    PRIVATE_FILE_MODE,
-  );
+  writeFileAtomic(path, `${JSON.stringify(metadata, null, 2)}\n`, PRIVATE_FILE_MODE);
+}
+
+function saveProviderCredential(name: string, entry: AiProviderConfig): void {
+  if (entry.apiKey === undefined || entry.apiKey.length === 0) return;
+  openCredentialStore().save(name, {
+    apiKey: entry.apiKey,
+    ...(entry.baseUrl === undefined ? {} : { baseUrl: entry.baseUrl }),
+    ...(entry.defaultModel === undefined ? {} : { defaultModel: entry.defaultModel }),
+  });
+}
+
+/** Writes provider metadata atomically and keeps each API key in the credential store. */
+export function saveAiProviders(providers: Record<string, AiProviderConfig>): void {
+  saveAiProviderMetadata(providers);
+  for (const [name, entry] of Object.entries(providers)) saveProviderCredential(name, entry);
 }
 
 /** Locked read-modify-write of `ai-providers.json`. */
 export function updateAiProviders<T>(
   mutate: (providers: Record<string, AiProviderConfig>) => T,
 ): T {
-  return withConfigLock(() => {
-    const providers = loadAiProviders();
+  const update = withConfigLock(() => {
+    const providers = loadAiProviderMetadata();
     const result = mutate(providers);
-    saveAiProviders(providers);
-    return result;
+    saveAiProviderMetadata(providers);
+    return { result, after: { ...providers } };
   });
+  for (const [name, entry] of Object.entries(update.after)) saveProviderCredential(name, entry);
+  return update.result;
 }
 
 export function hasAiProvider(providers: Record<string, AiProviderConfig>, name: string): boolean {
@@ -223,13 +334,18 @@ export function setAiProvider(name: string, config: AiProviderConfig): void {
 }
 
 export function deleteAiProvider(name: string): boolean {
-  return withConfigLock(() => {
-    const providers = loadAiProviders();
+  const removed = withConfigLock(() => {
+    const providers = loadAiProviderMetadata();
     if (!hasAiProvider(providers, name)) return false;
     delete providers[name];
-    saveAiProviders(providers);
+    saveAiProviderMetadata(providers);
     return true;
   });
+  // The key leaves the store too. The store file is not created just to forget a key.
+  if (removed && existsSync(join(getJoyMediaDir(), 'credentials.json'))) {
+    openCredentialStore().remove(name);
+  }
+  return removed;
 }
 
 export function getDefaultSqlitePath(): string {

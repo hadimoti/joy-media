@@ -1,7 +1,7 @@
 # JOY Live Director — WIP state capture
 
 Recorded: 2026-09-06 (continuation session, Claude implementer)
-Worktree: `C:\Users\HadiMoti\.config\superpowers\worktrees\joy-media\joy-live-director`
+Worktree: `<owner-profile>\.config\superpowers\worktrees\joy-media\joy-live-director`
 Branch: `codex/joy-live-director` · HEAD `92018ca9` · base tree `52e6bf03…`
 
 ## Why this record exists
@@ -28,7 +28,7 @@ here until the WIP is fully committed on `codex/joy-live-director`.
 
 ## Local `main` fast-forward
 
-`C:\Users\HadiMoti\joy-media` `main` was 39 commits behind `github/main` / `vps/main`
+`<owner-profile>\joy-media` `main` was 39 commits behind `github/main` / `vps/main`
 (0 divergent). Fast-forwarded to `6a6a336c` ("fix: harden JOY agent foundation path"), the
 reviewed foundation release that is live in production. No content change; safe FF only.
 

@@ -1,7 +1,9 @@
-/* global console, process */
+﻿/* global console, process */
 import { handleAgentCommand } from './commands/agent-cmd.js';
 import { handleBenchmarkCommand } from './commands/benchmark-cmd.js';
 import { handleDoctorCommand } from './commands/doctor-cmd.js';
+import { handleDoctorLocalCommand } from './commands/doctor-local-cmd.js';
+import { ConfigFileError, migrateLegacyProviders } from './utils/config.js';
 import { handleProjectCommand } from './commands/project-cmd.js';
 import { handleRenderCommand } from './commands/render-cmd.js';
 import { handleTimelineCommand } from './commands/timeline-cmd.js';
@@ -46,6 +48,13 @@ export interface CliFlags {
   json: boolean;
   system: boolean;
   'media-engine': boolean;
+  slot?: string | undefined;
+  acceptPublicEndpoint?: boolean | undefined;
+  oauth: boolean;
+  profile?: string | undefined;
+  instructions?: string | undefined;
+  temperature?: string | undefined;
+  maxOutputTokens?: string | undefined;
 }
 
 /**
@@ -83,6 +92,13 @@ export const CLI_OPTIONS = {
   concurrency: { type: 'string', numeric: true },
   system: { type: 'boolean' },
   'media-engine': { type: 'boolean' },
+  slot: { type: 'string' },
+  'accept-public-endpoint': { type: 'boolean' },
+  oauth: { type: 'boolean' },
+  profile: { type: 'string' },
+  instructions: { type: 'string' },
+  temperature: { type: 'string' },
+  'max-output-tokens': { type: 'string' },
 } as const satisfies Record<string, CliOptionSpec>;
 
 interface CommandHelp {
@@ -197,6 +213,11 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       'JOY_MODELS_DIR overrides the model weights directory.',
     ],
   },
+  'doctor-local': {
+    summary: 'Explicit local checks for models, environments, and provider settings',
+    usage: 'joy-media doctor-local [--json]',
+    options: [['--json', 'Machine-readable output']],
+  },
   help: {
     summary: 'Show help for the CLI or one command',
     usage: 'joy-media help [command]',
@@ -229,6 +250,9 @@ export function printHelp(): void {
   );
   console.log(
     `    ${c('doctor', 'cyan')} [--json]                            System health check & diagnostics`,
+  );
+  console.log(
+    `    ${c('doctor-local', 'cyan')}                      Explicit local checks: models, environments, provider settings`,
   );
   console.log(
     `    ${c('help', 'cyan')} [command]                             Show this help guide or a command's help\n`,
@@ -320,6 +344,13 @@ function parseFlags(v: Record<string, string | boolean | undefined>): CliFlags {
     json: v.json === true,
     system: v.system === true,
     'media-engine': v['media-engine'] === true,
+    slot: str('slot'),
+    acceptPublicEndpoint: v['accept-public-endpoint'] === true,
+    oauth: v.oauth === true,
+    profile: str('profile'),
+    instructions: str('instructions'),
+    temperature: str('temperature'),
+    maxOutputTokens: str('max-output-tokens'),
   };
 }
 
@@ -405,6 +436,14 @@ async function dispatch(argv: string[]): Promise<number> {
   setMachineOutput(values.json === true);
   const [command, ...subArgs] = positionals;
 
+  if (command === 'agent') {
+    try {
+      migrateLegacyProviders();
+    } catch (err) {
+      if (!(err instanceof ConfigFileError)) throw err;
+    }
+  }
+
   if (parsed.version) {
     if (values.json === true) printJson({ name: 'joy-media', version: CLI_VERSION });
     else console.log(`JOY Media CLI v${CLI_VERSION}`);
@@ -460,6 +499,8 @@ async function dispatch(argv: string[]): Promise<number> {
         return await handleBenchmarkCommand(subArgs, flags);
       case 'doctor':
         return await handleDoctorCommand(subArgs, flags);
+      case 'doctor-local':
+        return await handleDoctorLocalCommand();
       case 'help': {
         const target = subArgs[0];
         if (flags.json) {

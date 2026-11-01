@@ -118,24 +118,6 @@ try {
       results.workerStatusAfterStartError = e.message;
     }
 
-    try {
-      results.updateCheck = await bridge.invoke('desktop.check-for-update', {
-        subscriptionActive: true,
-        manifest: {
-          signature: 'dummy-offline-test-signature',
-          payload: {
-            channel: 'stable',
-            version: '1.0.0',
-            downloadUrl:
-              'https://github.com/hadimoti/joy-media/releases/download/v1.0.0-desktop/joy-media-windows-x64-v1.0.0.zip',
-            sha256: '4fab742dfb598b02609fa288f4668216ab96693d1d495018f520db828771f698',
-          },
-        },
-      });
-    } catch (e) {
-      results.updateCheckError = e.message;
-    }
-
     return {
       available: true,
       channels: bridge.channels,

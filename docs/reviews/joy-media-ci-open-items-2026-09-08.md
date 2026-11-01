@@ -300,8 +300,8 @@ blockers that are **not** in the teardown / repetition / coverage changes:
    `joy-media-ci-evidence-store-2026-09-08.md`,
    `joy-media-ci-artifact-inventory-2026-09-08.md`):
    (a) provision the evidence store — **recommended: a host bind mount
-   `/srv/joy-media-ci/evidence → /opt/ci-evidence` (`chown 1001:1001`, `chmod
-750`)** on the `joy-media-ci-acceptance` runner, `JOY_MEDIA_CI_EVIDENCE_ROOT=/opt/ci-evidence`.
+   `<server-path>/joy-media-ci/evidence → <server-path>/ci-evidence` (`chown 1001:1001`, `chmod
+750`)** on the `joy-media-ci-acceptance` runner, `JOY_MEDIA_CI_EVIDENCE_ROOT=<server-path>/ci-evidence`.
    A bind mount survives container recreation, `config.sh --replace`, and
    `docker volume rm`; a dir under the runner volume survives only the first two.
    924 GB free on `/dev/sdd`; ~1 MB/gate-run.

@@ -6,7 +6,8 @@ import { isAllowedIpcRequest } from './ipc.js';
 import { canSubmitWorkerJob, normalizeStartupPreference } from './worker-status.js';
 describe('desktop shell boundaries', () => {
   it('allows only explicit editor origins and IPC channels', () => {
-    expect(isAllowedEditorOrigin('https://joyst.ir')).toBe(true);
+    expect(isAllowedEditorOrigin('joy-media-app://renderer')).toBe(true);
+    expect(isAllowedEditorOrigin('https://joyst.ir')).toBe(false);
     expect(isAllowedEditorOrigin('https://evil.example')).toBe(false);
     expect(
       isAllowedIpcRequest({ origin: 'http://localhost:5173', channel: 'desktop.worker-status' }),
@@ -14,9 +15,15 @@ describe('desktop shell boundaries', () => {
     expect(() =>
       isAllowedIpcRequest({ origin: 'https://evil.example', channel: 'desktop.worker-status' }),
     ).toThrow();
-    expect(isAllowedIpcRequest({ origin: 'https://joyst.ir', channel: 'desktop.execute' })).toBe(
-      false,
-    );
+    expect(
+      isAllowedIpcRequest({ origin: 'joy-media-app://renderer', channel: 'desktop.execute' }),
+    ).toBe(false);
+    expect(
+      isAllowedIpcRequest({
+        origin: 'joy-media-app://renderer',
+        channel: 'desktop.check-for-update',
+      }),
+    ).toBe(false);
   });
   it('keeps paths behind revocable opaque references', () => {
     const files = createFileBoundary(() => 'local-1');

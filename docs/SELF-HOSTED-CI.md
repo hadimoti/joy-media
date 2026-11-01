@@ -268,10 +268,10 @@ re-verifies every file against the manifest, and is required to satisfy the
 `Verify retained evidence` step in addition to any teardown check. The durable store is
 authoritative evidence regardless of platform artifact state.
 
-### Local preservation at `H:\VPS-DATA`
+### Local preservation at `<owner-drive>\VPS-DATA`
 
-The v2 evidence directory is mirrored to a local Windows host at `H:\VPS-DATA` (the operator's
-preservation path on the same Windows host the runner sits on). `H:\VPS-DATA` holds the
+The v2 evidence directory is mirrored to a local Windows host at `<owner-drive>\VPS-DATA` (the operator's
+preservation path on the same Windows host the runner sits on). `<owner-drive>\VPS-DATA` holds the
 durable evidence across runs so the operator can inspect, hand off, or rotate evidence
 without leaving the Windows host. The mirror is a copy, not a substitute for the runner's
 authoritative `JOY_MEDIA_CI_EVIDENCE_ROOT`.

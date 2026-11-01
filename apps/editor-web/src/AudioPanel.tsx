@@ -154,6 +154,17 @@ export function selectConnectedAudioWorker(
   );
 }
 
+export function selectAudioReasoningProvider(
+  providers: readonly BrowserReasoningProvider[],
+): BrowserReasoningProvider | undefined {
+  return providers.find(
+    (provider) =>
+      provider.providerId !== 'joy-hosted' &&
+      provider.providerId !== 'kilo' &&
+      (provider.state === 'healthy' || provider.state === 'configured'),
+  );
+}
+
 function AudioWorkflowStepIcon({
   capabilityId,
 }: {
@@ -381,9 +392,7 @@ export function AudioPanel({
     : hasRecentPairedWorker
       ? 'Missing audio.ml-denoise'
       : 'Disconnected';
-  const remoteProvider = providers.find(
-    (provider) => provider.state === 'healthy' || provider.state === 'configured',
-  );
+  const remoteProvider = selectAudioReasoningProvider(providers);
   const remoteProviderLabel = remoteProvider === undefined ? 'Unavailable' : 'Online';
   const browserDspReady = selectedScope.clipIds.length > 0 && onRunBrowserDsp !== undefined;
   const localRunReady =

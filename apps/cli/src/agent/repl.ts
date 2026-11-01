@@ -2,8 +2,14 @@
 import * as readline from 'node:readline/promises';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import { compileLook, editorialClean } from '@joy-media/motion-core';
-import { c, logInfo, logSuccess, logWarn, printBanner, printTable } from '../utils/logger.js';
+import type { AgentSlot } from '@joy-media/provider-sdk';
+import { c, logError, logInfo, logSuccess, logWarn, printBanner, printTable } from '../utils/logger.js';
 import { saveProject } from '../utils/project-loader.js';
+import {
+  OAuthProfileLockTimeoutError,
+  OAuthRefreshFailedError,
+} from './oauth-runtime.js';
+import { loadAgentSlots } from './agent-slots.js';
 import { describeOperation, runJoyAgent } from './joy-agent.js';
 import type { ResolveProviderOptions } from './provider.js';
 
@@ -20,21 +26,15 @@ export interface DualBrainStatus {
   readonly creative: { readonly name: string; readonly provider: string; readonly model: string };
 }
 
-export const DUAL_BRAIN_STATUS: DualBrainStatus = {
-  workhorse: {
-    name: 'Workhorse',
-    provider: 'openrouter',
-    model: 'openrouter/free',
-  },
-  creative: {
-    name: 'Creative Brain',
-    provider: 'kilo',
-    model: 'kilo-auto/efficient',
-  },
-};
-
+/** The two slots as the REPL shows them. A slot with no profile or model reads as "not set": nothing is bound. */
 export function describeDualBrain(): DualBrainStatus {
-  return DUAL_BRAIN_STATUS;
+  const slots = loadAgentSlots();
+  const describe = (slot: AgentSlot) => ({
+    name: slot.label,
+    provider: slot.profileId ?? 'not set',
+    model: slot.model ?? 'not set',
+  });
+  return { workhorse: describe(slots.workhorse), creative: describe(slots.creative) };
 }
 
 export async function startAgentRepl(options: ReplOptions): Promise<void> {
@@ -237,7 +237,11 @@ export async function startAgentRepl(options: ReplOptions): Promise<void> {
           }
         }
       } catch (err) {
-        logWarn(`Joy Agent run error: ${err instanceof Error ? err.message : String(err)}`);
+        if (err instanceof OAuthRefreshFailedError || err instanceof OAuthProfileLockTimeoutError) {
+          logError(err.message);
+        } else {
+          logWarn(`Joy Agent run error: ${String(err)}`);
+        }
       }
       console.log();
     }
@@ -375,8 +379,9 @@ function splitClipInProject(
 }
 
 function printDualBrainStatus(): void {
-  const w = DUAL_BRAIN_STATUS.workhorse;
-  const c2 = DUAL_BRAIN_STATUS.creative;
+  const status = describeDualBrain();
+  const w = status.workhorse;
+  const c2 = status.creative;
   console.log(
     `\n  ${c('Dual-Brain:', 'bold')} ${c('Active', 'green')}  ${c('Workhorse', 'cyan')}=${w.provider}/${c(w.model, 'magenta')}  ${c('Creative', 'cyan')}=${c2.provider}/${c(c2.model, 'magenta')}\n`,
   );

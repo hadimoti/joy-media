@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@joy-media/agent-tools": "workspace:*",
+    "@joy-media/provider-sdk": "workspace:*",
     "@ai-sdk/openai-compatible": "3.0.43",
     "ai": "7.0.92",
     "zod": "4.1.8"

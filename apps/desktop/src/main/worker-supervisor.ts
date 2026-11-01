@@ -10,7 +10,7 @@ export interface SupervisedChild {
 export type SpawnFn = (
   command: string,
   args: readonly string[],
-  options: { readonly cwd?: string },
+  options: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv },
 ) => SupervisedChild;
 
 export interface WorkerSupervisorOptions {
@@ -18,11 +18,18 @@ export interface WorkerSupervisorOptions {
   readonly command: string;
   readonly args?: readonly string[];
   readonly cwd?: string;
+  /**
+   * Environment for each spawn, read at spawn time. The local route needs it, because the
+   * loopback URL and token exist only after the local job API has started (see localWorkerEnv).
+   */
+  readonly env?: () => NodeJS.ProcessEnv | undefined;
   /** Consecutive crash-restarts allowed before the worker is marked degraded. Default 3. */
   readonly maxRestarts?: number;
   /** Schedules a restart attempt; overridable so tests can run synchronously. */
   readonly scheduleRestart?: (run: () => void, delayMs: number) => void;
   readonly restartDelayMs?: number;
+  /** A run that lasted this long was healthy: its crash does not use up the restart budget. Default 60 s. */
+  readonly stableRunMs?: number;
   readonly now?: () => string;
   readonly workerId?: () => string;
 }
@@ -37,6 +44,7 @@ export interface WorkerSupervisor {
 
 const DEFAULT_MAX_RESTARTS = 3;
 const DEFAULT_RESTART_DELAY_MS = 1000;
+const DEFAULT_STABLE_RUN_MS = 60_000;
 
 export function createWorkerSupervisor(options: WorkerSupervisorOptions): WorkerSupervisor {
   const {
@@ -44,11 +52,13 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     command,
     args = [],
     cwd,
+    env,
     maxRestarts = DEFAULT_MAX_RESTARTS,
     scheduleRestart = (run, delayMs) => {
       setTimeout(run, delayMs);
     },
     restartDelayMs = DEFAULT_RESTART_DELAY_MS,
+    stableRunMs = DEFAULT_STABLE_RUN_MS,
     now = () => new Date().toISOString(),
     workerId = () => crypto.randomUUID(),
   } = options;
@@ -57,49 +67,88 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
   let connection: WorkerConnection = 'unknown';
   let currentWorkerId: string | undefined;
   let lastSeenAt: string | undefined;
+  let lastError: string | undefined;
   let restarts = 0;
   let stopRequested = false;
+  let spawnedAtMs = 0;
+  // The automatic restart that is waiting for its delay, if any. Stopping the Worker cancels it.
+  let pendingRestart: { cancelled: boolean } | undefined;
 
   function spawnChild(): void {
     stopRequested = false;
     connection = 'starting';
+    lastError = undefined;
     currentWorkerId = workerId();
-    const proc = spawn(command, args, cwd === undefined ? {} : { cwd });
-    child = proc;
-    proc.once('error', () => {
-      handleExit();
+    const childEnv = env?.();
+    const proc = spawn(command, args, {
+      ...(cwd === undefined ? {} : { cwd }),
+      ...(childEnv === undefined ? {} : { env: childEnv }),
     });
-    proc.once('exit', () => {
-      handleExit();
+    child = proc;
+    spawnedAtMs = Date.parse(now());
+    proc.once('error', (error) => {
+      handleExit(proc, `Worker could not run: ${error.message}`);
+    });
+    proc.once('exit', (code, signal) => {
+      handleExit(
+        proc,
+        signal === null
+          ? `Worker exited with code ${code ?? 'unknown'}`
+          : `Worker was stopped by ${signal}`,
+      );
     });
     connection = 'online';
     lastSeenAt = now();
   }
 
-  function handleExit(): void {
+  /**
+   * Restarts a crashed Worker a bounded number of times, with growing delays. Each later attempt waits
+   * twice as long as the one before. The crash reason is kept, so the desktop can show it. After the
+   * last attempt the Worker stays degraded until the owner asks for a retry with `start()`.
+   */
+  function handleExit(exited: SupervisedChild, reason: string): void {
+    // Node can report one failure as both an error and an exit. Only the first report counts.
+    if (child !== exited) return;
     child = undefined;
     if (stopRequested) {
       connection = 'offline';
       return;
     }
+    // A run that lasted long enough was healthy, so its crash starts a new budget.
+    if (Date.parse(now()) - spawnedAtMs >= stableRunMs) restarts = 0;
+    lastError = reason;
     if (restarts >= maxRestarts) {
       connection = 'degraded';
       return;
     }
     restarts += 1;
     connection = 'starting';
-    scheduleRestart(() => spawnChild(), restartDelayMs);
+    const attempt = { cancelled: false };
+    pendingRestart = attempt;
+    scheduleRestart(
+      () => {
+        if (attempt.cancelled) return;
+        pendingRestart = undefined;
+        spawnChild();
+      },
+      restartDelayMs * 2 ** (restarts - 1),
+    );
   }
 
   return {
     start() {
-      if (child !== undefined) return;
+      // A restart that is already waiting will start the Worker, so a second spawn now would leak a child.
+      if (child !== undefined || pendingRestart !== undefined) return;
       restarts = 0;
       spawnChild();
     },
     stop(killTimeoutMs = 5000) {
       stopRequested = true;
       connection = 'stopping';
+      if (pendingRestart !== undefined) {
+        pendingRestart.cancelled = true;
+        pendingRestart = undefined;
+      }
       if (child === undefined) {
         connection = 'offline';
         return;
@@ -116,6 +165,7 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
         ...(currentWorkerId !== undefined ? { workerId: currentWorkerId } : {}),
         capabilities: [],
         ...(lastSeenAt !== undefined ? { lastSeenAt } : {}),
+        ...(lastError !== undefined ? { lastError } : {}),
       };
     },
   };

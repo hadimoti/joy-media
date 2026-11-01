@@ -6,7 +6,7 @@
 **Prerequisites:** WP-31, WP-32, WP-33  
 **Orchestrator:** GPT  
 **Primary patch executor:** Mistral Vibe in isolated local worktrees  
-**VPS-only executor:** Hermes in `/opt/joy-media/repo`  
+**VPS-only executor:** Hermes in `<server-path>/joy-media/repo`  
 **Execution mode:** Vibe-first, lights-out capable, no routine user-input requests  
 **Production:** `https://joyst.ir/` through the existing immutable editor-release workflow
 
@@ -664,7 +664,7 @@ The recovery ladder must never delete user data, weaken assertions, update golde
 - One packet uses one branch/worktree and produces one reviewable commit.
 - Branch naming: `vibe/wp34-<packet>-<slug>`; `hermes/wp34-<packet>-<slug>` is reserved for an explicitly logged VPS-only repair.
 - Vibe always works in a dedicated worktree. Hermes works only in the canonical VPS source checkout after verifying it matches the approved base SHA.
-- Never edit `/opt/joy-media/web-releases/*`, the active `web` symlink target, or any live artifact directly.
+- Never edit `<server-path>/joy-media/web-releases/*`, the active `web` symlink target, or any live artifact directly.
 - Never force-push, reset away user work, or stage unrelated files.
 - GPT does not cherry-pick implementation itself. After acceptance, GPT dispatches a constrained Vibe integration action to cherry-pick the accepted commit onto `vibe/wp34-integration`, run the packet's smoke test, and report the resulting SHA.
 - Deploy only an integration commit that is present on the approved remote and has passed the phase gate.
@@ -694,7 +694,7 @@ In lights-out mode, “return to GPT” never means “ask the user.” GPT appl
 
 ### 10.7 Unattended Vibe invocation
 
-Vibe is installed at `C:\Users\HadiMoti\.local\bin\vibe.exe` and supports programmatic mode, isolated worktrees, auto-approval, turn/token/price limits, resumable sessions, and JSON output.
+Vibe is installed at `<owner-profile>\.local\bin\vibe.exe` and supports programmatic mode, isolated worktrees, auto-approval, turn/token/price limits, resumable sessions, and JSON output.
 
 GPT materializes the worker packet into a prompt string and invokes the equivalent of:
 
@@ -702,7 +702,7 @@ GPT materializes the worker packet into a prompt string and invokes the equivale
 vibe -p $packetPrompt `
   --agent auto-approve `
   --trust `
-  --workdir C:\Users\HadiMoti\joy-vps\joy-media-fix `
+  --workdir <owner-profile>\joy-vps\joy-media-fix `
   --worktree "wp34-XX-slug" `
   --max-turns $packetTurns `
   --max-price $packetPrice `

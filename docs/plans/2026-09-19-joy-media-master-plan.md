@@ -1,6 +1,6 @@
 # Master Implementation Plan: JOY Media Desktop Pivot, Web Retirement & Repo Polish
 
-This comprehensive plan addresses the owner's four core goals, integrating all verified facts from [BRIEF.md](file:///C:/Users/HadiMoti/joy-media/docs/BRIEF-2026-09-19.md), repository Git state, and live VPS control-plane telemetry.
+This comprehensive plan addresses the owner's four core goals, integrating all verified facts from [BRIEF.md](file:///<owner-profile>/joy-media/docs/BRIEF-2026-09-19.md), repository Git state, and live VPS control-plane telemetry.
 
 ---
 
@@ -10,7 +10,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
   - Desktop executable installed at `%LOCALAPPDATA%\Programs\JOY Media\joy-media.exe`.
   - Local database is SQLite with WAL at `%APPDATA%\@joy-media\desktop\joy-media.sqlite3`.
   - Local media worker (`joy-worker.exe`) embeds Real-ESRGAN, DeepFilterNet, and BiRefNet.
-  - Local asset catalog at `H:\VPS-DATA\joy-media-assets` accessed via `joy-asset://` protocol.
+  - Local asset catalog at `<owner-drive>\VPS-DATA\joy-media-assets` accessed via `joy-asset://` protocol.
   - The Sweden VPS (`joyst.ir`) is reduced to a lean control plane (OTP auth, subscriptions, installer downloads, release metadata, and the Joy Model AI Gateway).
 - **Authentication**: "Gmail login" in the JOY system is **email OTP verification** (`apps/api/src/media-auth.ts`, `media-mailer.ts`), not Google OAuth. The `LoginGate.tsx` component already exists and implements Gmail/Telegram OTP input.
 - **Git & Deployment Drift**:
@@ -104,7 +104,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
 - **File**: `deploy/joy-media-account-web.nginx.conf` [NEW]
 - **Context**: Fail-closed retirement of legacy editor endpoints and edge narrowing on `joyst.ir`.
 - **Action**:
-  1. Set retirement env vars in `/etc/joy-media/api.env`:
+  1. Set retirement env vars in `<server-path>/joy-media/api.env`:
      ```bash
      JOY_MEDIA_RETIRE_PROJECT_ROUTES=true
      JOY_MEDIA_RETIRE_MEDIA_LIBRARY_ROUTES=true
@@ -112,7 +112,7 @@ This comprehensive plan addresses the owner's four core goals, integrating all v
      JOY_MEDIA_LEGACY_EDITOR_RETIRED=true
      ```
   2. Deploy `joy-media-account-web.nginx.conf`:
-     - Point root to `/opt/joy-media/account-web/dist`.
+     - Point root to `<server-path>/joy-media/account-web/dist`.
      - Narrow `/api/` proxy to `/v1/(auth|devices|account|entitlements|releases|billing|agent)`.
      - Return 404 at edge for any other `/api/*` paths.
 - **Verification**: `curl -s -o /dev/null -w "%{http_code}" https://joyst.ir/api/v1/projects` (expects 404/410).

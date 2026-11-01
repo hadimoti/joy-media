@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +31,35 @@ describe('local upscaling runner', () => {
       },
     });
     expect(upscalingAvailabilityFromEnvironment({})).toEqual({});
+  });
+
+  it('readies a model only while its file matches the SHA-256 it was pinned to', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'joy-upscale-model-'));
+    const modelPath = join(directory, 'realesrgan-x4plus.pth');
+    try {
+      writeFileSync(modelPath, 'model weights fixture');
+      const digest = createHash('sha256').update('model weights fixture').digest('hex');
+      const readiness = (pin: string | undefined): boolean | undefined =>
+        upscalingAvailabilityFromEnvironment({
+          JOY_MEDIA_UPSCALE_IMAGE_RUNNER: '/opt/joy/realesrgan.py',
+          JOY_MEDIA_UPSCALE_IMAGE_PYTHON: '/opt/joy/venv/bin/python',
+          JOY_MEDIA_REAL_ESRGAN_MODEL: modelPath,
+          ...(pin === undefined ? {} : { JOY_MEDIA_REAL_ESRGAN_MODEL_SHA256: pin }),
+        }).image?.modelReady;
+
+      expect(readiness(digest)).toBe(true);
+      expect(readiness(digest.toUpperCase()), 'a pin in upper case names the same digest').toBe(
+        true,
+      );
+      expect(readiness(undefined), 'a model with no pin is never run').toBe(false);
+      expect(readiness('not-a-digest'), 'a malformed pin is refused').toBe(false);
+      expect(readiness('0'.repeat(64)), 'a model with another digest is refused').toBe(false);
+
+      writeFileSync(modelPath, 'swapped weights');
+      expect(readiness(digest), 'a file swapped after pinning is refused').toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('runs a private image request, verifies the output, and keeps only an opaque receipt', async () => {

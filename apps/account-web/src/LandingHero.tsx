@@ -3,10 +3,9 @@ import type { ReleaseInfo } from './api.js';
 
 interface LandingHeroProps {
   readonly release: ReleaseInfo | null;
-  readonly onOpenLogin: () => void;
 }
 
-export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNode {
+export function LandingHero({ release }: LandingHeroProps): ReactNode {
   return (
     <div className="landing-container">
       {/* Top Navbar */}
@@ -21,9 +20,6 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
           <a href="#features">Features</a>
           <a href="#architecture">Architecture</a>
           <a href="#specs">Specifications</a>
-          <button type="button" className="landing-nav-login-btn" onClick={onOpenLogin}>
-            Sign In / Account
-          </button>
         </nav>
       </header>
 
@@ -66,10 +62,6 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
             </svg>
             Download for Windows (x64)
           </a>
-
-          <button type="button" className="landing-btn-secondary" onClick={onOpenLogin}>
-            Manage Account & Devices →
-          </button>
         </div>
 
         <div className="landing-hero-meta">
@@ -278,10 +270,6 @@ export function LandingHero({ release, onOpenLogin }: LandingHeroProps): ReactNo
             <strong>JOY Media</strong> · Desktop Video Editor & Creative AI Studio
           </div>
           <div className="landing-footer-links">
-            <button type="button" className="footer-link-btn" onClick={onOpenLogin}>
-              Account Portal
-            </button>
-            <span className="dot-sep">•</span>
             <span>Private Preview</span>
             <span className="dot-sep">•</span>
             <span>© {new Date().getFullYear()} JOY Team</span>

@@ -3,7 +3,7 @@
 **Owner:** Luna  
 **Status:** **FINISHED** — timeline closeout, paired GPU Worker, browser/resource evidence, immutable deployment, and GBrain complete
 **Prepared:** 2026-08-16  
-**Repository:** `C:\Users\HadiMoti\joy-vps\joy-media-fix`  
+**Repository:** `<owner-profile>\joy-vps\joy-media-fix`  
 **Target branch:** current working branch; do not discard or overwrite the existing uncommitted WP-35 work
 
 ## Execution result — 2026-08-16
@@ -36,8 +36,8 @@ WP-35 may be marked complete only when:
 
 This document supersedes the implementation sequence in the two source plans below while preserving their valid requirements:
 
-- `C:\Users\HadiMoti\joy-vps\joy-media-fix\plan\WP-35-remaining-universal-timeline-gpu-preview.md`
-- `C:\Users\HadiMoti\Downloads\JOY Media Timeline — Box Selection - Marquee Selection.md`
+- `<owner-profile>\joy-vps\joy-media-fix\plan\WP-35-remaining-universal-timeline-gpu-preview.md`
+- `<owner-profile>\Downloads\JOY Media Timeline — Box Selection - Marquee Selection.md`
 
 ## 2. Audited starting point
 

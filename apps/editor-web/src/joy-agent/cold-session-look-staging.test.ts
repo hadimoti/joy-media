@@ -557,7 +557,7 @@ describe('P1-R2 — staging from reopened host context, user rejection, cancella
       provider: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
       modelId: 'model',
-      apiKey: 'session-key',
+      profileId: 'profile-test',
     });
 
     // The host map and the run-scoped deps match the production wiring: a

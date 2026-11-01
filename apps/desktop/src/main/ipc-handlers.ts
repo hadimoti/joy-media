@@ -13,9 +13,31 @@ import type {
   MediaKind,
   ProviderProfile,
 } from '../store/local-database.js';
-import { validateProviderProfileInput } from '@joy-media/provider-sdk';
-import type { DirectProviderProbeReport, SecretStore } from '@joy-media/provider-sdk';
-import type { AutoUpdateDecision, SignedReleaseManifest } from './auto-update-policy.js';
+import { LEGACY_PROVIDER_IDS } from '../store/migrations.js';
+import { clearAgentSlotsForProfile, readAgentSlots, writeAgentSlot } from '../store/agent-slots.js';
+import { resolveSlotRequest } from './agent-slot-request.js';
+import { AgentRequestRegistry } from './agent-requests.js';
+import { OAuthFlowError } from './oauth/errors.js';
+import { decodeTokenRecord, type ChatGptTokenRecord } from './oauth/chatgpt.js';
+import type { ProviderSignInContext, SignInProvider, SignInResult } from './oauth/sign-in.js';
+import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
+import {
+  isAgentSlotConfigured,
+  isSignInProvider,
+  parseAgentSlotId,
+  validateProviderProfileInput,
+  type AgentSlot,
+  type AgentSlotId,
+  type AgentSlotResult,
+} from '@joy-media/provider-sdk';
+import { evaluateEndpoint, normalizeBaseUrl } from '@joy-media/provider-sdk';
+import type { SecretStore } from '@joy-media/provider-sdk';
+import {
+  endpointBindingDigest,
+  publicEndpointConfirmed,
+  type ProviderBroker,
+  type ProviderDraft,
+} from './providers/provider-broker.js';
 
 /** Native "select a file" prompt, injected so main-process wiring stays unit-testable. */
 export type ShowOpenDialog = () => Promise<{
@@ -31,37 +53,29 @@ export type ProbeMedia = (path: string) => Promise<{
   readonly kind: MediaKind;
 }>;
 
-/** Runs the host-side direct-provider connectivity probe (never exposes the key to the
- * renderer). Injected — see main/electron-entry.ts for the real wiring to
- * provider-sdk's `probeOpenAiCompatibleProvider` + global `fetch`. */
-export type ProbeProvider = (request: {
-  readonly baseUrl: string;
-  readonly apiKey: string;
-  readonly modelId: string;
-}) => Promise<DirectProviderProbeReport>;
-
-/** Evaluates a release manifest the renderer already fetched from the public
- * `GET /v1/releases/:channel` route against the pinned release-signing public key and the
- * running app's own version. Injected so the two pieces of trust material a compromised
- * renderer must never be able to supply itself — the pinned public key and the app's real
- * running version (`app.getVersion()`) — stay main-process-only; see main/electron-entry.ts
- * for the real wiring to `../auto-update-policy.js`'s `evaluateAutoUpdate`. This never
- * downloads or installs anything — see that module's own doc comment. */
-export type CheckForUpdate = (request: {
-  readonly manifest: SignedReleaseManifest;
-  readonly subscriptionActive: boolean;
-}) => AutoUpdateDecision;
-
 export interface IpcHandlerDeps {
   readonly fileRegistry: FileRegistry;
   readonly workerSupervisor: WorkerSupervisor;
+  /** The provider calls in progress. The entry point shares it with the window, which ends them on reload. */
+  readonly agentRequests?: AgentRequestRegistry;
+  /** The `desktop.media.*` handlers (media-channel.ts). Absent means every media call is refused. */
+  readonly mediaChannel?: Readonly<
+    Record<MediaChannel, (payload: unknown) => MediaResult | Promise<MediaResult>>
+  >;
   readonly showOpenDialog: ShowOpenDialog;
   readonly showOpenDirectoryDialog?: ShowOpenDialog;
   readonly localDatabase: LocalDatabase;
   readonly probeMedia: ProbeMedia;
   readonly secretStore: SecretStore;
-  readonly probeProvider: ProbeProvider;
-  readonly checkForUpdate: CheckForUpdate;
+  /** Every provider call goes through the broker (providers/provider-broker.ts). */
+  readonly providerBroker: ProviderBroker;
+  /** Runs a sign-in (oauth/sign-in.ts). Absent means sign-in is refused. The result is saved as a profile. */
+  readonly providerSignIn?: (
+    provider: SignInProvider,
+    context?: ProviderSignInContext,
+  ) => Promise<SignInResult>;
+  /** Revokes a ChatGPT refresh token. Credentials stay in the main process. */
+  readonly providerSignOut?: (record: ChatGptTokenRecord) => Promise<void>;
   readonly handleWindowControl?: (
     action: 'minimize' | 'maximize' | 'close' | 'is-maximized',
   ) => Promise<boolean | void> | boolean | void;
@@ -81,8 +95,108 @@ export type IpcHandler = (payload: unknown) => Promise<IpcResult> | IpcResult;
 export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcHandler> {
   const now = deps.now ?? (() => new Date().toISOString());
   const newId = deps.newId ?? (() => crypto.randomUUID());
+  const agentRequests = deps.agentRequests ?? new AgentRequestRegistry();
 
-  return {
+  const handlers: Record<IpcChannel, IpcHandler> = {
+    ...mediaChannelTable(deps.mediaChannel),
+    'desktop.provider-profile.sign-in': async (payload): Promise<IpcResult> => {
+      const request = asSignInRequest(payload);
+      if (request === undefined) return { ok: false, error: 'Invalid sign-in request' };
+      if (deps.providerSignIn === undefined) {
+        return { ok: false, error: 'Sign-in is not available in this build' };
+      }
+      let savedChatGptRecord: ChatGptTokenRecord | undefined;
+      // A sign-in can only update a profile of the same provider, so it never changes what a profile is.
+      if (request.id !== undefined) {
+        const existing = deps.localDatabase.getProviderProfile(request.id);
+        if (existing === undefined || existing.provider !== request.provider) {
+          return { ok: false, error: 'That profile cannot be signed in again' };
+        }
+        if (request.provider === 'chatgpt') {
+          try {
+            const stored = await deps.secretStore.get(existing.secretHandleId);
+            savedChatGptRecord = stored === null ? undefined : decodeTokenRecord(stored);
+          } catch {
+            return { ok: false, error: 'The saved ChatGPT connection could not be read.' };
+          }
+          if (savedChatGptRecord === undefined) {
+            return {
+              ok: false,
+              error:
+                'The saved ChatGPT connection cannot be reauthorized; remove it locally and sign in again.',
+            };
+          }
+        }
+      }
+      try {
+        const context: ProviderSignInContext | undefined =
+          savedChatGptRecord === undefined
+            ? undefined
+            : {
+                savedChatGptAccount: {
+                  clientId: savedChatGptRecord.clientId,
+                  accountId: savedChatGptRecord.accountId,
+                },
+              };
+        const signedIn =
+          context === undefined
+            ? await deps.providerSignIn(request.provider)
+            : await deps.providerSignIn(request.provider, context);
+        // The result must name the provider that was asked for, and that provider must permit a sign-in. A runner that
+        // answered with another provider would otherwise save a profile for a provider that is set up with an API key.
+        if (signedIn.provider !== request.provider || !isSignInProvider(signedIn.provider)) {
+          return {
+            ok: false,
+            error: 'The sign-in did not return a provider that can be signed in to',
+          };
+        }
+        if (savedChatGptRecord !== undefined) {
+          const replacement = decodeTokenRecord(signedIn.secret);
+          if (replacement === undefined) {
+            return {
+              ok: false,
+              error:
+                'ChatGPT did not return a valid replacement authorization. The saved connection was kept.',
+            };
+          }
+          if (
+            replacement.accountId !== savedChatGptRecord.accountId ||
+            replacement.clientId !== savedChatGptRecord.clientId
+          ) {
+            const accountMismatch = replacement.accountId !== savedChatGptRecord.accountId;
+            try {
+              if (deps.providerSignOut === undefined) throw new Error('revocation unavailable');
+              await deps.providerSignOut(replacement);
+            } catch {
+              return {
+                ok: false,
+                error:
+                  'ChatGPT returned an authorization that did not match the saved account. The saved connection was kept, but JOY Media could not revoke the new grant; remove it in ChatGPT settings.',
+              };
+            }
+            throw new OAuthFlowError(
+              accountMismatch ? 'ACCOUNT_MISMATCH' : 'CLIENT_MISMATCH',
+              accountMismatch
+                ? 'ChatGPT returned a different account. The new grant was revoked and the saved connection was kept.'
+                : 'ChatGPT returned a different client. The new grant was revoked and the saved connection was kept.',
+            );
+          }
+        }
+        // The result is saved through the profile route, so it is checked and bound like any other save.
+        return await handlers['desktop.provider-profile.save']({
+          ...(request.id === undefined ? {} : { id: request.id }),
+          provider: signedIn.provider,
+          baseUrl: signedIn.baseUrl,
+          modelId: signedIn.modelId,
+          apiKey: signedIn.secret,
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof OAuthFlowError ? error.message : 'The sign-in did not complete.',
+        };
+      }
+    },
     'desktop.select-file': async () => {
       const result = await deps.showOpenDialog();
       if (result.canceled || result.path === undefined) return { ok: true, data: undefined };
@@ -118,6 +232,11 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       }
     },
     'desktop.worker-status': (): IpcResult => ({ ok: true, data: deps.workerSupervisor.status() }),
+    // The owner's manual retry after the bounded automatic attempts are used up. It starts a new budget.
+    'desktop.worker-retry': (): IpcResult => {
+      deps.workerSupervisor.start();
+      return { ok: true, data: deps.workerSupervisor.status() };
+    },
     'desktop.startup-preference': (payload): IpcResult => {
       const preference = normalizeStartupPreference(payload);
       if (preference === 'start-worker') deps.workerSupervisor.start();
@@ -154,26 +273,62 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (issues.length > 0) {
         return { ok: false, error: issues.map((issue) => issue.message).join('; ') };
       }
+      // v1.1.0 no longer offers these providers, so nothing new can be saved under them.
+      if (LEGACY_PROVIDER_IDS.includes(request.provider)) {
+        return { ok: false, error: 'This provider is no longer offered in v1.1.0' };
+      }
 
       const timestamp = now();
       let id = request.id;
       let secretHandleId: string;
       let createdAt: string;
+      let existing: ProviderProfile | undefined;
       if (id !== undefined) {
-        const existing = deps.localDatabase.getProviderProfile(id);
+        existing = deps.localDatabase.getProviderProfile(id);
         if (existing === undefined) return { ok: false, error: 'Unknown provider profile id' };
-        secretHandleId = existing.secretHandleId;
+        // The stored key may stay only while it still belongs to this exact endpoint (PLAN-v4 §6c).
+        if (
+          request.apiKey === undefined &&
+          (existing.provider !== request.provider ||
+            normalizeBaseUrl(existing.baseUrl) !== normalizeBaseUrl(request.baseUrl))
+        ) {
+          return { ok: false, error: 'Enter the key again to change the endpoint' };
+        }
+        // A new key gets a new handle. Until the profile points at it, the saved profile keeps its
+        // old handle, so a key is never paired with the wrong endpoint (PLAN-v4 §6c).
+        secretHandleId = request.apiKey === undefined ? existing.secretHandleId : newId();
         createdAt = existing.createdAt;
       } else {
         id = newId();
         secretHandleId = newId();
         createdAt = timestamp;
       }
+      // Whether this save writes a handle the profile does not hold yet.
+      const freshHandle = secretHandleId !== existing?.secretHandleId;
 
-      // The key is written to OS-protected storage before the (secret-free) profile metadata
-      // is saved, so a crash between the two calls never leaves a profile pointing at a
-      // handle that was never actually written.
-      await deps.secretStore.set(secretHandleId, request.apiKey);
+      // Validation already refused any URL the policy would not allow, so the verdict is allowed here.
+      const verdict = evaluateEndpoint(request.provider, request.baseUrl, {
+        consentToPublicEndpoint: request.acknowledgedPublicEndpoint === true,
+      });
+      if (!verdict.allowed) return { ok: false, error: verdict.reason };
+
+      // The key is written to OS-protected storage before the (secret-free) profile metadata is
+      // saved, so a crash between the two calls never leaves a profile pointing at a handle that was
+      // never actually written.
+      if (request.apiKey !== undefined) {
+        await deps.secretStore.set(secretHandleId, request.apiKey);
+      } else if (existing === undefined) {
+        // A keyless local model stores the placeholder, so its profile still reads as present.
+        if (verdict.kind !== 'loopback') {
+          return { ok: false, error: 'An API key is required for this endpoint' };
+        }
+        await deps.secretStore.set(secretHandleId, 'not-provided');
+      }
+
+      // A saved key keeps the binding it has. A key written now, or a new profile, is bound to this
+      // endpoint and to the version of the key just written (PLAN-v4 §6c). A keyless save therefore
+      // never binds a key that was never confirmed for this endpoint.
+      const rebinds = request.apiKey !== undefined || existing === undefined;
       const profile: ProviderProfile = {
         id,
         ...(request.name !== undefined ? { name: request.name } : {}),
@@ -182,16 +337,59 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         modelId: request.modelId,
         ...(request.cachedModels !== undefined ? { cachedModels: request.cachedModels } : {}),
         secretHandleId,
+        bindingDigest: rebinds
+          ? endpointBindingDigest(id, verdict.origin, verdict.basePath)
+          : existing?.bindingDigest,
+        bindingSecretDigest: rebinds
+          ? deps.localDatabase.secretVersion(secretHandleId)
+          : existing?.bindingSecretDigest,
         createdAt,
         updatedAt: timestamp,
       };
-      deps.localDatabase.saveProviderProfile(profile);
-      return { ok: true, data: profile };
+      try {
+        deps.localDatabase.saveProviderProfile(profile);
+      } catch (error) {
+        // The profile still points at its old key, so the key this save wrote is removed.
+        if (freshHandle) await deps.secretStore.delete(secretHandleId).catch(() => undefined);
+        throw error;
+      }
+      // The old key goes only now, after the profile points at the new one.
+      if (existing !== undefined && freshHandle) {
+        await deps.secretStore.delete(existing.secretHandleId).catch(() => undefined);
+      }
+      // A key saved again makes the profile usable again, without waiting for a restart.
+      deps.localDatabase.clearProfileCredentialUnavailable(id);
+      const versionOf = (handleId: string): string => deps.localDatabase.secretVersion(handleId);
+      return { ok: true, data: listedProfile(profile, isBound(profile, versionOf)) };
     },
-    'desktop.provider-profile.list': (): IpcResult => ({
-      ok: true,
-      data: deps.localDatabase.listProviderProfiles(),
-    }),
+    'desktop.provider-profile.list': (): IpcResult => {
+      // Metadata only: no key, and no field that could carry one.
+      const states = new Map(deps.localDatabase.listProfileStates().map((s) => [s.profileId, s]));
+      const versionOf = (handleId: string): string => deps.localDatabase.secretVersion(handleId);
+      return {
+        ok: true,
+        data: deps.localDatabase.listProviderProfiles().map((profile) => {
+          const state = states.get(profile.id);
+          return {
+            ...listedProfile(profile, isBound(profile, versionOf)),
+            state: state?.state ?? 'active',
+            ...(state?.decision === undefined ? {} : { decision: state.decision }),
+          };
+        }),
+      };
+    },
+    'desktop.provider-profile.later': (payload): IpcResult => {
+      const id = asProfileId(payload);
+      if (id === undefined) return { ok: false, error: 'Invalid profile id' };
+      const profile = deps.localDatabase.getProviderProfile(id);
+      if (profile === undefined) return { ok: false, error: 'Unknown provider profile id' };
+      // "Later" only applies to a legacy profile. Any other profile is left alone.
+      if (!LEGACY_PROVIDER_IDS.includes(profile.provider)) {
+        return { ok: false, error: 'Only a legacy profile can be deferred' };
+      }
+      deps.localDatabase.recordProfileLater(id);
+      return { ok: true };
+    },
     'desktop.provider-profile.delete': async (payload): Promise<IpcResult> => {
       const id = asProfileId(payload);
       if (id === undefined) return { ok: false, error: 'Invalid profile id' };
@@ -199,106 +397,138 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       if (existing === undefined) return { ok: false, error: 'Unknown provider profile id' };
       await deps.secretStore.delete(existing.secretHandleId);
       deps.localDatabase.deleteProviderProfile(id);
+      // A slot that named the profile is left without one, so it cannot run until the owner picks another.
+      clearAgentSlotsForProfile(deps.localDatabase, id);
       return { ok: true };
     },
-    'desktop.provider-profile.begin-session': async (payload): Promise<IpcResult> => {
+    'desktop.provider-profile.sign-out': async (payload): Promise<IpcResult> => {
       const id = asProfileId(payload);
       if (id === undefined) return { ok: false, error: 'Invalid profile id' };
-      const profile = deps.localDatabase.getProviderProfile(id);
-      if (profile === undefined) return { ok: false, error: 'Unknown provider profile id' };
-      const apiKey = await deps.secretStore.get(profile.secretHandleId);
-      if (apiKey === null) return { ok: false, error: 'Provider key is no longer available' };
-      // Volatile, one-time handoff: the caller must discard this plaintext key when the
-      // session ends and never persist or log it — mirrors
-      // apps/editor-web/src/joy-agent/byok-session.ts's forgetByokConfig semantics for the
-      // existing manual-entry BYOK flow this is designed to slot into.
-      return {
-        ok: true,
-        data: {
-          provider: profile.provider,
-          baseUrl: profile.baseUrl,
-          modelId: profile.modelId,
-          apiKey,
-        },
-      };
-    },
-    'desktop.provider-profile.test': async (payload): Promise<IpcResult> => {
-      const id = asProfileId(payload);
-      if (id === undefined) return { ok: false, error: 'Invalid profile id' };
-      const profile = deps.localDatabase.getProviderProfile(id);
-      if (profile === undefined) return { ok: false, error: 'Unknown provider profile id' };
-      const apiKey = await deps.secretStore.get(profile.secretHandleId);
-      if (apiKey === null) return { ok: false, error: 'Provider key is no longer available' };
-      // The key is used for exactly this one probe call and never returned to the caller —
-      // `report` is the redacted shape documented in provider-sdk's openai-compatible adapter.
-      const report = await deps.probeProvider({
-        baseUrl: profile.baseUrl,
-        apiKey,
-        modelId: profile.modelId,
-      });
-      return { ok: true, data: report };
-    },
-    'desktop.provider-profile.fetch-models': async (payload): Promise<IpcResult> => {
+      const existing = deps.localDatabase.getProviderProfile(id);
+      if (existing === undefined) return { ok: false, error: 'Unknown provider profile id' };
+      if (existing.provider !== 'chatgpt') {
+        return { ok: false, error: 'Remote sign-out is only available for ChatGPT profiles.' };
+      }
+      if (deps.providerSignOut === undefined) {
+        return { ok: false, error: 'ChatGPT sign-out is not available in this build.' };
+      }
+      let record: ChatGptTokenRecord | undefined;
       try {
-        const p = (payload && typeof payload === 'object' ? payload : {}) as {
-          id?: string;
-          baseUrl?: string;
-          apiKey?: string;
+        const stored = await deps.secretStore.get(existing.secretHandleId);
+        record = stored === null ? undefined : decodeTokenRecord(stored);
+      } catch {
+        return { ok: false, error: 'The saved ChatGPT connection could not be read.' };
+      }
+      if (record === undefined) {
+        return {
+          ok: false,
+          error: 'This profile has no valid ChatGPT authorization to revoke. It remains saved.',
         };
-        let baseUrl = typeof p.baseUrl === 'string' ? p.baseUrl.trim() : '';
-        let apiKey = typeof p.apiKey === 'string' ? p.apiKey.trim() : '';
-        if (p.id) {
-          const profile = deps.localDatabase.getProviderProfile(p.id);
-          if (!profile) return { ok: false, error: 'Unknown provider profile' };
-          baseUrl = profile.baseUrl;
-          const storedKey = await deps.secretStore.get(profile.secretHandleId);
-          if (storedKey) {
-            apiKey = storedKey;
-          }
-        }
-        if (!baseUrl) return { ok: false, error: 'Base URL required' };
-        const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
-        const endpoint = `${normalizedBaseUrl}/models`;
-        const headers: Record<string, string> = {};
-        if (apiKey && apiKey !== 'not-provided') {
-          headers['Authorization'] = `Bearer ${apiKey}`;
-        }
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 10000);
-        const res = await fetch(endpoint, {
-          headers,
+      }
+      try {
+        await deps.providerSignOut(record);
+      } catch {
+        return {
+          ok: false,
+          error: 'ChatGPT could not confirm sign-out. The saved connection was kept.',
+        };
+      }
+      try {
+        await deps.secretStore.delete(existing.secretHandleId);
+      } catch {
+        return {
+          ok: false,
+          error: 'ChatGPT access was revoked, but the local connection could not be removed.',
+        };
+      }
+      deps.localDatabase.deleteProviderProfile(id);
+      // A slot that named the profile is left without one, so it cannot run until the owner picks another.
+      clearAgentSlotsForProfile(deps.localDatabase, id);
+      return { ok: true };
+    },
+    'desktop.provider.test': async (payload): Promise<IpcResult> => {
+      const id = asProfileId(payload);
+      if (id === undefined) return { ok: false, error: 'Invalid profile id' };
+      // The broker reads the key for this one probe, and the report it returns is redacted.
+      return { ok: true, data: await deps.providerBroker.probe(id) };
+    },
+    'desktop.provider.models': async (payload): Promise<IpcResult> => {
+      const source = asModelSource(payload);
+      if (source === undefined) return { ok: false, error: 'Invalid model source' };
+      const result = await deps.providerBroker.listModels(source);
+      return result.ok ? { ok: true, data: result.data } : { ok: false, error: result.message };
+    },
+    'desktop.agent.request': async (payload): Promise<IpcResult> => {
+      const request = asAgentRequest(payload);
+      if (request === undefined) return { ok: false, error: 'Invalid agent request' };
+      // A slot request takes its profile, model and instructions from the stored slot (D17), not from the renderer.
+      const target: TargetResult =
+        request.kind === 'slot'
+          ? slotTarget(deps.localDatabase, request.slot, request.body)
+          : request.slot !== undefined
+            ? slotBoundTarget(deps.localDatabase, request.slot, request)
+            : {
+                ok: true,
+                value: {
+                  profileId: request.profileId,
+                  baseUrl: request.baseUrl,
+                  body: request.body,
+                  ...(request.modelId === undefined ? {} : { modelId: request.modelId }),
+                },
+              };
+      if (!target.ok) return { ok: false, error: target.error };
+      const { requestId } = request;
+      // Every call has an id the renderer can cancel. An id already in use is refused, not shared.
+      const controller = agentRequests.begin(requestId);
+      if (controller === undefined) {
+        return { ok: false, error: 'That agent request id is already in use' };
+      }
+      try {
+        // A refusal is data, not a handler error, so the renderer keeps the broker's code.
+        const result = await deps.providerBroker.complete({
+          ...target.value,
           signal: controller.signal,
         });
-        clearTimeout(timer);
-        if (!res.ok) {
-          const errText = await res.text().catch(() => '');
-          return {
-            ok: false,
-            error: `Provider returned status ${res.status}: ${errText.slice(0, 100)}`,
-          };
-        }
-        const json = (await res.json()) as { data?: unknown };
-        const rawList = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
-        const models = rawList
-          .map((item) => {
-            if (typeof item === 'string') return { id: item, name: item };
-            if (item && typeof item === 'object') {
-              const id = (item as { id?: string }).id || '';
-              const name = (item as { name?: string }).name || id;
-              return { id, name };
-            }
-            return null;
-          })
-          .filter((m): m is { id: string; name: string } => Boolean(m && m.id));
-        return { ok: true, data: models };
-      } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        return {
+          ok: true,
+          data: result.ok
+            ? { ok: true, text: result.data.text }
+            : { ok: false, code: result.code, message: result.message },
+        };
+      } finally {
+        agentRequests.finish(requestId, controller);
       }
     },
-    'desktop.check-for-update': (payload): IpcResult => {
-      const request = asCheckForUpdateRequest(payload);
-      if (request === undefined) return { ok: false, error: 'Invalid update check request' };
-      return { ok: true, data: deps.checkForUpdate(request) };
+    'desktop.agent-slots.list': (): IpcResult => ({
+      ok: true,
+      data: readAgentSlots(deps.localDatabase).map((slot) =>
+        describeSlot(deps.localDatabase, slot),
+      ),
+    }),
+    'desktop.agent-slots.save': (payload): IpcResult => {
+      const save = asAgentSlotSave(payload);
+      if (save === undefined) return { ok: false, error: 'Invalid agent slot' };
+      const profileId = profileIdOf(save.draft);
+      if (profileId !== undefined) {
+        const profile = deps.localDatabase.getProviderProfile(profileId);
+        if (profile === undefined) return { ok: false, error: 'Unknown provider profile id' };
+        if (LEGACY_PROVIDER_IDS.includes(profile.provider)) {
+          return { ok: false, error: 'A retired profile cannot be used by an agent slot' };
+        }
+      }
+      const result = writeAgentSlot(deps.localDatabase, save.slot, save.draft);
+      if (!result.ok) return { ok: false, error: slotIssueMessage(result) };
+      return { ok: true, data: describeSlot(deps.localDatabase, result.slot) };
+    },
+    'desktop.agent.cancel': (payload): IpcResult => {
+      const requestId = asAgentRequestId(
+        typeof payload === 'object' && payload !== null
+          ? (payload as Record<string, unknown>)['requestId']
+          : undefined,
+      );
+      if (requestId === undefined) return { ok: false, error: 'Invalid agent request id' };
+      agentRequests.cancel(requestId);
+      return { ok: true, data: undefined };
     },
     'desktop.window-minimize': async () => {
       await deps.handleWindowControl?.('minimize');
@@ -370,6 +600,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
       }
     },
   };
+  return handlers;
 }
 
 /**
@@ -396,7 +627,14 @@ export async function dispatchIpcRequest(
   if (!safeIsAllowedIpcRequest(request)) {
     return { ok: false, error: `Blocked IPC request: ${request.channel}` };
   }
-  return handlers[request.channel](request.payload);
+  try {
+    return await handlers[request.channel](request.payload);
+  } catch (error) {
+    // A thrown message can carry a file path, so the renderer gets a fixed message. The detail
+    // stays in the main process log.
+    console.error(`[joy-desktop] IPC ${request.channel} failed`, error);
+    return { ok: false, error: 'The request failed' };
+  }
 }
 
 function asOpaqueFileRef(value: unknown): OpaqueFileRef | undefined {
@@ -429,10 +667,243 @@ function asJobId(value: unknown): string | undefined {
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
 }
 
+/** The provider to sign in to, and the saved profile to update, when there is one. */
+function asSignInRequest(
+  value: unknown,
+): { readonly provider: SignInProvider; readonly id?: string } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const provider = candidate['provider'];
+  // The registry decides which providers may be signed in to (PLAN-v4 §6d-1 rule 5, D20). A provider that is set up
+  // with an API key, such as OpenRouter, is not one of them.
+  if (typeof provider !== 'string' || !isSignInProvider(provider)) return undefined;
+  const id = candidate['id'];
+  if (id !== undefined && (typeof id !== 'string' || id.length === 0)) return undefined;
+  const hasRegion = Object.prototype.hasOwnProperty.call(candidate, 'region');
+  if (hasRegion) return undefined;
+  return { provider, ...(typeof id === 'string' ? { id } : {}) };
+}
+
 function asProfileId(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = (value as { id?: unknown }).id;
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
+}
+
+/**
+ * A profile the renderer may connect without its key being entered again: its key is confirmed for the
+ * endpoint the record now holds, and that key is still the one confirmed (PLAN-v4 §6c).
+ */
+function isBound(profile: ProviderProfile, versionOf: (handleId: string) => string): boolean {
+  if (profile.bindingDigest === undefined || profile.bindingSecretDigest === undefined)
+    return false;
+  const verdict = evaluateEndpoint(profile.provider, profile.baseUrl, {
+    consentToPublicEndpoint: publicEndpointConfirmed(profile),
+  });
+  if (!verdict.allowed) return false;
+  return (
+    profile.bindingDigest === endpointBindingDigest(profile.id, verdict.origin, verdict.basePath) &&
+    profile.bindingSecretDigest === versionOf(profile.secretHandleId)
+  );
+}
+
+/** The profile as the renderer sees it: the binding digests stay in the main process. */
+function listedProfile(
+  profile: ProviderProfile,
+  bound: boolean,
+): Omit<ProviderProfile, 'bindingDigest' | 'bindingSecretDigest'> & { readonly bound: boolean } {
+  const {
+    bindingDigest: _bindingDigest,
+    bindingSecretDigest: _bindingSecretDigest,
+    ...visible
+  } = profile;
+  return { ...visible, bound };
+}
+
+/** A saved profile by id, or an unsaved draft. A draft's key is used for this one call only. */
+function asModelSource(
+  value: unknown,
+): { profileId: string } | { draft: ProviderDraft } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (candidate['draft'] !== undefined) {
+    const draft = candidate['draft'];
+    if (typeof draft !== 'object' || draft === null) return undefined;
+    const fields = draft as Record<string, unknown>;
+    if (
+      typeof fields['provider'] !== 'string' ||
+      typeof fields['baseUrl'] !== 'string' ||
+      typeof fields['apiKey'] !== 'string'
+    ) {
+      return undefined;
+    }
+    return {
+      draft: {
+        provider: fields['provider'],
+        baseUrl: fields['baseUrl'],
+        apiKey: fields['apiKey'],
+        ...(fields['acknowledgedPublicEndpoint'] === true
+          ? { acknowledgedPublicEndpoint: true }
+          : {}),
+      },
+    };
+  }
+  const id = asProfileId(value);
+  return id === undefined ? undefined : { profileId: id };
+}
+
+/** A provider call: either a saved profile named directly (the editor's session), or an agent slot (D17). */
+type AgentRequestInput =
+  | {
+      readonly kind: 'profile';
+      readonly requestId: string;
+      readonly profileId: string;
+      readonly baseUrl: string;
+      readonly modelId?: string;
+      /** The slot the renderer's session runs in, when there is one. The main process checks the request against it. */
+      readonly slot?: AgentSlotId;
+      readonly body: unknown;
+    }
+  | {
+      readonly kind: 'slot';
+      readonly requestId: string;
+      readonly slot: AgentSlotId;
+      readonly body: unknown;
+    };
+
+function asAgentRequest(value: unknown): AgentRequestInput | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const requestId = asAgentRequestId(candidate['requestId']);
+  if (requestId === undefined) return undefined;
+  // A request with no profile names only its slot. A request with a profile may also name its slot (checked below).
+  if (candidate['slot'] !== undefined && candidate['profileId'] === undefined) {
+    const slot = parseAgentSlotId(candidate['slot']);
+    return slot === undefined
+      ? undefined
+      : { kind: 'slot', requestId, slot, body: candidate['body'] };
+  }
+  const profileId = candidate['profileId'];
+  const baseUrl = candidate['baseUrl'];
+  if (typeof profileId !== 'string' || profileId.length === 0) return undefined;
+  if (typeof baseUrl !== 'string' || baseUrl.length === 0 || baseUrl.length > 2048)
+    return undefined;
+  const modelId = candidate['modelId'];
+  const slot = candidate['slot'];
+  const parsedSlot = slot === undefined ? undefined : parseAgentSlotId(slot);
+  if (slot !== undefined && parsedSlot === undefined) return undefined;
+  return {
+    kind: 'profile',
+    profileId,
+    baseUrl,
+    body: candidate['body'],
+    ...(typeof modelId === 'string' ? { modelId } : {}),
+    ...(parsedSlot === undefined ? {} : { slot: parsedSlot }),
+    requestId,
+  };
+}
+
+interface BrokerTarget {
+  readonly profileId: string;
+  readonly baseUrl: string;
+  readonly modelId?: string;
+  readonly body: unknown;
+}
+
+type TargetResult =
+  | { readonly ok: true; readonly value: BrokerTarget }
+  | { readonly ok: false; readonly error: string };
+
+/** The profile, model and body a slot request sends. The profile must be saved and must not be a retired one. */
+function slotTarget(store: LocalDatabase, slot: AgentSlotId, body: unknown): TargetResult {
+  const resolved = resolveSlotRequest(store, slot, body);
+  if (!resolved.ok) return resolved;
+  const profile = store.getProviderProfile(resolved.profileId);
+  if (profile === undefined)
+    return { ok: false, error: 'The profile of this agent slot was removed' };
+  if (LEGACY_PROVIDER_IDS.includes(profile.provider)) {
+    return { ok: false, error: 'The profile of this agent slot is retired' };
+  }
+  return {
+    ok: true,
+    value: {
+      profileId: resolved.profileId,
+      baseUrl: profile.baseUrl,
+      modelId: resolved.modelId,
+      body: resolved.body,
+    },
+  };
+}
+
+/** A profile request that names its slot: the request must use the slot's profile and model, and the slot's instructions apply. */
+function slotBoundTarget(
+  store: LocalDatabase,
+  slot: AgentSlotId,
+  request: {
+    readonly profileId: string;
+    readonly baseUrl: string;
+    readonly modelId?: string;
+    readonly body: unknown;
+  },
+): TargetResult {
+  const resolved = resolveSlotRequest(store, slot, request.body);
+  if (!resolved.ok) return resolved;
+  if (resolved.profileId !== request.profileId || resolved.modelId !== request.modelId) {
+    return { ok: false, error: 'The request does not match its agent slot' };
+  }
+  return {
+    ok: true,
+    value: {
+      profileId: request.profileId,
+      baseUrl: request.baseUrl,
+      modelId: resolved.modelId,
+      body: resolved.body,
+    },
+  };
+}
+
+function describeSlot(store: LocalDatabase, slot: AgentSlot) {
+  const profile =
+    slot.profileId === undefined ? undefined : store.getProviderProfile(slot.profileId);
+  return {
+    id: slot.id,
+    label: slot.label,
+    profileId: slot.profileId ?? null,
+    profileName: profile?.name ?? profile?.id ?? null,
+    profileProvider: profile?.provider ?? null,
+    model: slot.model ?? null,
+    instructions: slot.instructions,
+    settings: slot.settings,
+    ready:
+      isAgentSlotConfigured(slot) &&
+      profile !== undefined &&
+      !LEGACY_PROVIDER_IDS.includes(profile.provider),
+  };
+}
+
+function asAgentSlotSave(value: unknown): { slot: AgentSlotId; draft: unknown } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const slot = parseAgentSlotId(candidate['id']);
+  return slot === undefined ? undefined : { slot, draft: candidate['draft'] };
+}
+
+/** The profile a draft names, trimmed, or undefined when the draft names none. */
+function profileIdOf(draft: unknown): string | undefined {
+  if (typeof draft !== 'object' || draft === null) return undefined;
+  const profileId = (draft as Record<string, unknown>)['profileId'];
+  if (typeof profileId !== 'string' || profileId.trim().length === 0) return undefined;
+  return profileId.trim();
+}
+
+function slotIssueMessage(result: Extract<AgentSlotResult, { ok: false }>): string {
+  const where = result.field === undefined ? '' : ` (${result.field})`;
+  return `The agent slot was not saved: ${result.issue}${where}.`;
+}
+
+/** A cancellable call's id: short, and only letters, digits, dashes and underscores. */
+function asAgentRequestId(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : undefined;
 }
 
 interface SaveProviderProfileRequest {
@@ -442,7 +913,10 @@ interface SaveProviderProfileRequest {
   readonly baseUrl: string;
   readonly modelId: string;
   readonly cachedModels?: readonly string[];
-  readonly apiKey: string;
+  /** Omitted to keep the stored key. Allowed only while the endpoint is unchanged. */
+  readonly apiKey?: string | undefined;
+  /** The owner has confirmed this public custom endpoint (S8). */
+  readonly acknowledgedPublicEndpoint?: boolean | undefined;
 }
 
 function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileRequest | undefined {
@@ -451,7 +925,9 @@ function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileReques
   if (typeof candidate['provider'] !== 'string') return undefined;
   if (typeof candidate['baseUrl'] !== 'string') return undefined;
   if (typeof candidate['modelId'] !== 'string') return undefined;
-  if (typeof candidate['apiKey'] !== 'string' || candidate['apiKey'].length === 0) return undefined;
+  const apiKey = candidate['apiKey'];
+  const keyOmitted = apiKey === undefined || apiKey === '';
+  if (!keyOmitted && typeof apiKey !== 'string') return undefined;
   if (candidate['id'] !== undefined && typeof candidate['id'] !== 'string') return undefined;
   return {
     ...(candidate['id'] !== undefined ? { id: candidate['id'] as string } : {}),
@@ -464,39 +940,21 @@ function asSaveProviderProfileRequest(value: unknown): SaveProviderProfileReques
           cachedModels: candidate['cachedModels'].filter((m): m is string => typeof m === 'string'),
         }
       : {}),
-    apiKey: candidate['apiKey'],
+    ...(candidate['acknowledgedPublicEndpoint'] === true
+      ? { acknowledgedPublicEndpoint: true }
+      : {}),
+    ...(keyOmitted ? {} : { apiKey: apiKey as string }),
   };
 }
 
-function asCheckForUpdateRequest(
-  value: unknown,
-): { manifest: SignedReleaseManifest; subscriptionActive: boolean } | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const candidate = value as Record<string, unknown>;
-  const manifest = candidate['manifest'];
-  if (typeof candidate['subscriptionActive'] !== 'boolean') return undefined;
-  if (typeof manifest !== 'object' || manifest === null) return undefined;
-  const manifestCandidate = manifest as Record<string, unknown>;
-  const payload = manifestCandidate['payload'];
-  if (typeof manifestCandidate['signature'] !== 'string') return undefined;
-  if (typeof payload !== 'object' || payload === null) return undefined;
-  const payloadCandidate = payload as Record<string, unknown>;
-  if (payloadCandidate['channel'] !== 'stable' && payloadCandidate['channel'] !== 'beta') {
-    return undefined;
-  }
-  if (typeof payloadCandidate['version'] !== 'string') return undefined;
-  if (typeof payloadCandidate['downloadUrl'] !== 'string') return undefined;
-  if (typeof payloadCandidate['sha256'] !== 'string') return undefined;
-  if (
-    payloadCandidate['minSupportedVersion'] !== undefined &&
-    typeof payloadCandidate['minSupportedVersion'] !== 'string'
-  ) {
-    return undefined;
-  }
-  return {
-    manifest: manifest as SignedReleaseManifest,
-    subscriptionActive: candidate['subscriptionActive'],
-  };
+/** Every `desktop.media.*` channel, refused when no media handlers were supplied. */
+function mediaChannelTable(
+  handlers: IpcHandlerDeps['mediaChannel'],
+): Record<MediaChannel, IpcHandler> {
+  const refused: IpcHandler = () => ({ ok: false, error: 'Media channel is not available' });
+  return Object.fromEntries(
+    MEDIA_CHANNELS.map((channel) => [channel, handlers?.[channel] ?? refused]),
+  ) as Record<MediaChannel, IpcHandler>;
 }
 
 export type { WorkerStatus };

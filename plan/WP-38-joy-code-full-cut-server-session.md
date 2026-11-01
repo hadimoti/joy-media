@@ -14,7 +14,7 @@
 
 **Authoring date:** 2026-08-20
 
-**Canonical repository:** C:/Users/HadiMoti/joy-vps/joy-media-fix
+**Canonical repository:** <owner-profile>/joy-vps/joy-media-fix
 
 **Measured starting revision:** 8f7d3b9, clean detached checkout with origin/main at the same reviewed WP-37 descendant. Before implementation, switch or fast-forward to the real main branch without rewriting history.
 
@@ -1036,12 +1036,12 @@ This task changes live state. Execute only after the local gate, clean push, exa
 
 **VPS rules:**
 
-- JOY Media lives at /opt/joy-media/repo and its immutable release paths.
+- JOY Media lives at <server-path>/joy-media/repo and its immutable release paths.
 - Do not use the joy-vps scripts/sync-to-live.sh; that deploys the bot/webapp sibling.
 - Never edit a live release directory.
 - Never read or print the Hermes .env key.
-- Reuse /etc/credstore.encrypted/openrouter-api-key and the existing systemd credential mount.
-- Add only non-secret JOY_MEDIA_JOY_CODE_RUNTIME_* values to /etc/joy-media/api.env, mode 0600.
+- Reuse <server-path>/credstore.encrypted/openrouter-api-key and the existing systemd credential mount.
+- Add only non-secret JOY_MEDIA_JOY_CODE_RUNTIME_* values to <server-path>/joy-media/api.env, mode 0600.
 
 **Preflight:**
 

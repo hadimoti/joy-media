@@ -1,12 +1,47 @@
+import {
+  CHATGPT_RESPONSES_BASE_URL,
+  evaluateEndpoint,
+  OPENROUTER_BASE_URL,
+  type ProviderThinkingMode,
+} from '@joy-media/provider-sdk';
 import type { JoyAgentCapability } from './contracts.js';
 
-export type JoyProviderMode = 'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom';
+export type JoyProviderMode =
+  | 'joy-hosted'
+  | 'chatgpt-responses'
+  | 'openrouter'
+  | 'openai-compatible'
+  | 'anthropic-messages'
+  | 'kilo'
+  | 'custom';
 
-export interface ByokSessionConfig {
+interface ByokSessionConfigFields {
   readonly provider: JoyProviderMode;
   readonly baseUrl: string;
   readonly modelId: string;
-  readonly apiKey: string;
+  readonly thinkingMode?: ProviderThinkingMode;
+}
+
+/** API keys and OAuth bearer tokens remain distinct through the engine transport (D22 step 3 design §8). */
+export interface ByokBearerTokenAuth {
+  readonly kind: 'bearer-token';
+  readonly token: string;
+}
+
+export type ByokSessionConfig = ByokSessionConfigFields &
+  (
+    | { readonly apiKey: string; readonly auth?: never }
+    | { readonly apiKey?: never; readonly auth: ByokBearerTokenAuth }
+  );
+
+export interface ByokSessionConfigInput {
+  readonly provider?: JoyProviderMode | undefined;
+  readonly baseUrl?: string | undefined;
+  readonly modelId?: string | undefined;
+  readonly thinkingMode?: ProviderThinkingMode | undefined;
+  readonly apiKey?: string | undefined;
+  readonly auth?: ByokBearerTokenAuth | undefined;
+  readonly consentToPublicEndpoint?: boolean | undefined;
 }
 
 export interface ByokSessionStatus {
@@ -24,37 +59,41 @@ export class ProviderConfigError extends Error {
   }
 }
 
-const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-export const DEFAULT_JOY_HOSTED_BASE_URL = 'https://joyst.ir/api/v1/agent';
 const MAX_MODEL_ID_LENGTH = 256;
 const MAX_API_KEY_LENGTH = 512;
+const MAX_BEARER_TOKEN_LENGTH = 16_384;
 
 export function normalizeByokSessionConfig(
-  input: Readonly<Partial<ByokSessionConfig>>,
+  input: Readonly<ByokSessionConfigInput>,
 ): ByokSessionConfig {
   const provider = input.provider;
   const modelId = typeof input.modelId === 'string' ? input.modelId.trim() : '';
   const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+  const bearerToken = input.auth?.kind === 'bearer-token' ? input.auth.token.trim() : '';
+  if (input.thinkingMode !== undefined && input.thinkingMode !== 'disabled') {
+    throw new ProviderConfigError();
+  }
+  const thinkingMode = provider === 'openai-compatible' ? input.thinkingMode : undefined;
+  const hasApiKey =
+    input.auth === undefined && apiKey.length > 0 && apiKey.length <= MAX_API_KEY_LENGTH;
+  const hasBearerToken =
+    input.auth?.kind === 'bearer-token' &&
+    input.apiKey === undefined &&
+    bearerToken.length > 0 &&
+    bearerToken.length <= MAX_BEARER_TOKEN_LENGTH &&
+    (provider === 'openai-compatible' || provider === 'chatgpt-responses');
+  // joy-hosted and kilo are retired legacy profiles, so they are refused here (PLAN-v4 §9a).
   if (
-    (provider !== 'joy-hosted' &&
-      provider !== 'openrouter' &&
+    (provider !== 'openrouter' &&
+      provider !== 'chatgpt-responses' &&
       provider !== 'openai-compatible' &&
-      provider !== 'kilo' &&
+      provider !== 'anthropic-messages' &&
       provider !== 'custom') ||
     modelId.length === 0 ||
     modelId.length > MAX_MODEL_ID_LENGTH ||
-    apiKey.length === 0 ||
-    apiKey.length > MAX_API_KEY_LENGTH
+    (!hasApiKey && !hasBearerToken)
   ) {
     throw new ProviderConfigError();
-  }
-
-  if (provider === 'joy-hosted') {
-    const baseUrl =
-      input.baseUrl === undefined || input.baseUrl.trim().length === 0
-        ? DEFAULT_JOY_HOSTED_BASE_URL
-        : normalizeCustomBaseUrl(input.baseUrl);
-    return Object.freeze({ provider, baseUrl, modelId, apiKey });
   }
 
   if (provider === 'openrouter') {
@@ -65,11 +104,55 @@ export function normalizeByokSessionConfig(
     ) {
       throw new ProviderConfigError();
     }
+    if (!hasApiKey) throw new ProviderConfigError();
     return Object.freeze({ provider, baseUrl: OPENROUTER_BASE_URL, modelId, apiKey });
   }
 
-  const baseUrl = normalizeCustomBaseUrl(input.baseUrl);
-  return Object.freeze({ provider, baseUrl, modelId, apiKey });
+  if (provider === 'chatgpt-responses') {
+    if (
+      !hasBearerToken ||
+      input.apiKey !== undefined ||
+      (input.baseUrl !== undefined && input.baseUrl !== CHATGPT_RESPONSES_BASE_URL)
+    ) {
+      throw new ProviderConfigError();
+    }
+    return Object.freeze({
+      provider,
+      baseUrl: CHATGPT_RESPONSES_BASE_URL,
+      modelId,
+      auth: { kind: 'bearer-token' as const, token: bearerToken },
+    });
+  }
+
+  const baseUrl =
+    provider === 'anthropic-messages'
+      ? normalizeAnthropicBaseUrl(input.baseUrl)
+      : normalizeCustomBaseUrl(input.baseUrl, {
+          consentToPublicEndpoint: input.consentToPublicEndpoint === true,
+        });
+  return hasBearerToken
+    ? Object.freeze({
+        provider,
+        baseUrl,
+        modelId,
+        ...(thinkingMode === undefined ? {} : { thinkingMode }),
+        auth: { kind: 'bearer-token' as const, token: bearerToken },
+      })
+    : Object.freeze({
+        provider,
+        baseUrl,
+        modelId,
+        ...(thinkingMode === undefined ? {} : { thinkingMode }),
+        apiKey,
+      });
+}
+
+function normalizeAnthropicBaseUrl(value: unknown): string {
+  if (typeof value !== 'string') throw new ProviderConfigError();
+  const url = value.trim();
+  const verdict = evaluateEndpoint('claude', url);
+  if (!verdict.allowed) throw new ProviderConfigError();
+  return verdict.origin + verdict.basePath;
 }
 
 export function safeByokSessionStatus(
@@ -79,83 +162,25 @@ export function safeByokSessionStatus(
   return Object.freeze({ provider: config.provider, modelId: config.modelId, capability });
 }
 
-export function normalizeCustomBaseUrl(value: unknown): string {
+/**
+ * The base URL of a user-configured endpoint. The rule is the registry's endpoint policy (`evaluateEndpoint`), which
+ * the desktop broker applies too: a loopback server is allowed, and a public endpoint is allowed only with the owner's
+ * consent (S8). A base URL that already names the completion path is refused as well.
+ */
+export function normalizeCustomBaseUrl(
+  value: unknown,
+  options: { readonly consentToPublicEndpoint?: boolean } = {},
+): string {
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > 2048) {
     throw new ProviderConfigError();
   }
-  const candidate = value.trim();
-  let url: URL;
-  try {
-    url = new URL(candidate);
-  } catch {
+  const verdict = evaluateEndpoint('custom', value.trim(), {
+    consentToPublicEndpoint: options.consentToPublicEndpoint === true,
+  });
+  if (!verdict.allowed || verdict.basePath.toLowerCase().endsWith('/chat/completions')) {
     throw new ProviderConfigError();
   }
-  if (
-    url.protocol !== 'https:' ||
-    url.username !== '' ||
-    url.password !== '' ||
-    url.search !== '' ||
-    url.hash !== '' ||
-    url.pathname.toLowerCase().endsWith('/chat/completions') ||
-    !isPublicWebHost(url.hostname)
-  ) {
-    throw new ProviderConfigError();
-  }
-  const pathname = url.pathname.replace(/\/$/, '');
-  return `${url.origin}${pathname}`;
-}
-
-function isPublicWebHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
-  if (host === 'localhost' || host.endsWith('.localhost') || host === 'ip6-localhost') return false;
-  if (host === 'metadata.google.internal' || host === 'metadata') return false;
-  if (isPrivateIpv4(host) || isPrivateIpv6(host) || isMappedPrivateIpv4(host)) return false;
-  return true;
-}
-
-function isPrivateIpv4(host: string): boolean {
-  const parts = host.split('.');
-  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return false;
-  const numbers = parts.map(Number);
-  if (numbers.some((part) => part > 255)) return false;
-  const first = numbers[0] ?? -1;
-  const second = numbers[1] ?? -1;
-  return (
-    first === 10 ||
-    first === 127 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168) ||
-    first === 0
-  );
-}
-
-function isPrivateIpv6(host: string): boolean {
-  return (
-    host === '::1' ||
-    host === '::' ||
-    host.startsWith('fe80:') ||
-    host.startsWith('fc') ||
-    host.startsWith('fd') ||
-    host.endsWith('.internal')
-  );
-}
-
-/** IPv4-mapped IPv6 literals inherit the IPv4 private-range blocklist. */
-function isMappedPrivateIpv4(host: string): boolean {
-  const compressed = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
-  if (compressed?.[1] !== undefined && compressed[2] !== undefined) {
-    const high = Number.parseInt(compressed[1], 16);
-    const low = Number.parseInt(compressed[2], 16);
-    return isPrivateIpv4(`${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`);
-  }
-  const groups = host.split(':');
-  if (groups.length !== 8 || groups[5]?.toLowerCase() !== 'ffff') return false;
-  const high = Number.parseInt(groups[6] ?? '', 16);
-  const low = Number.parseInt(groups[7] ?? '', 16);
-  if (!Number.isInteger(high) || !Number.isInteger(low) || high > 0xffff || low > 0xffff)
-    return false;
-  return isPrivateIpv4(`${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`);
+  return `${verdict.origin}${verdict.basePath}`;
 }
 
 export { OPENROUTER_BASE_URL };

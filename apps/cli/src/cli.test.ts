@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from './cli.js';
 import { CliJoyAgentToolBridge } from './agent/bridge.js';
 import { resolveByokConfig } from './agent/provider.js';
+import { loadAiProviders } from './utils/config.js';
 import {
   createDefaultProject,
   listProjects,
@@ -13,36 +14,28 @@ import {
 } from './utils/project-loader.js';
 
 describe('JOY Media CLI (@joy-media/cli)', () => {
+  let homeDir: string;
+
+  beforeEach(() => {
+    homeDir = mkdtempSync(join(tmpdir(), 'joy-cli-test-home-'));
+    vi.stubEnv('USERPROFILE', homeDir);
+    vi.stubEnv('HOME', homeDir);
+    vi.stubEnv('APPDATA', join(homeDir, 'AppData', 'Roaming'));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(homeDir, { recursive: true, force: true });
+  });
   it('prints help guide on help command and exits 0', async () => {
     const code = await runCli(['help']);
     expect(code).toBe(0);
   });
 
   it('runs doctor command successfully', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'joy-cli-doctor-test-'));
-    vi.stubEnv('USERPROFILE', home);
-    vi.stubEnv('APPDATA', join(home, 'AppData', 'Roaming'));
     vi.stubEnv('JOY_MEDIA_EDGE_URL', 'off');
-    for (const key of [
-      'KILO_API_KEY',
-      'OPENROUTER_API_KEY',
-      'OPENAI_API_KEY',
-      'ANTHROPIC_API_KEY',
-      'XAI_API_KEY',
-      'GEMINI_API_KEY',
-      'GOOGLE_API_KEY',
-      'ARK_API_KEY',
-      'BYTEPLUS_API_KEY',
-    ]) {
-      vi.stubEnv(key, '');
-    }
-    try {
-      const code = await runCli(['doctor']);
-      expect(code).toBe(0);
-    } finally {
-      vi.unstubAllEnvs();
-      rmSync(home, { recursive: true, force: true });
-    }
+    const code = await runCli(['doctor']);
+    expect(code).toBe(0);
   });
 
   it('normalizes BYOK provider configuration', () => {
@@ -271,59 +264,104 @@ describe('JOY Media CLI (@joy-media/cli)', () => {
   });
 
   describe('Multi-API Provider & Model Configuration Commands', () => {
-    it('supports adding, listing, selecting, and removing providers via CLI', async () => {
-      const home = mkdtempSync(join(tmpdir(), 'joy-cli-provider-test-'));
-      const discover = vi.fn(async () =>
-        Response.json({ data: [{ id: 'minimax/minimax-m3' }] }, { status: 200 }),
+    beforeEach(() => {
+      // Adding a provider reads its model list. The test answers that list here, so no DNS lookup is made.
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ data: [{ id: 'gateway/model-a' }] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
       );
-      vi.stubEnv('USERPROFILE', home);
-      vi.stubEnv('APPDATA', join(home, 'AppData', 'Roaming'));
-      vi.stubGlobal('fetch', discover);
+    });
 
-      try {
-        // 1. Add provider
-        const addCode = await runCli([
-          'agent',
-          'provider',
-          'add',
-          'kilo-test',
-          '--url',
-          'https://api.kilo.ai/api/gateway/v1',
-          '--api-key',
-          'kilo-test-key-999',
-          '--model',
-          'minimax/minimax-m3',
-        ]);
-        expect(addCode).toBe(0);
-        expect(discover).toHaveBeenCalledTimes(1);
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
 
-        // 2. List providers
-        const listCode = await runCli(['agent', 'provider', 'list']);
-        expect(listCode).toBe(0);
+    it('supports adding, listing, selecting, and removing providers via CLI', async () => {
+      // 1. Add provider
+      const addCode = await runCli([
+        'agent',
+        'provider',
+        'add',
+        'gateway-test',
+        '--url',
+        'http://127.0.0.1:1234/v1',
+        '--api-key',
+        'gateway-test-key-999',
+        '--model',
+        'gateway/model-a',
+      ]);
+      expect(addCode).toBe(0);
+      expect(fetch).toHaveBeenCalledTimes(1);
 
-        // 3. Use provider
-        const useCode = await runCli(['agent', 'provider', 'use', 'kilo-test']);
-        expect(useCode).toBe(0);
+      // 2. List providers
+      const listCode = await runCli(['agent', 'provider', 'list']);
+      expect(listCode).toBe(0);
 
-        // 4. Set default model
-        const modelSetCode = await runCli(['agent', 'model', 'set', 'kilo-auto/efficient']);
-        expect(modelSetCode).toBe(0);
+      // 3. Use provider
+      const useCode = await runCli(['agent', 'provider', 'use', 'gateway-test']);
+      expect(useCode).toBe(0);
 
-        // 5. Verify resolution with active provider
-        const resolved = resolveByokConfig();
-        expect(resolved.provider).toBe('kilo');
-        expect(resolved.baseUrl).toBe('https://api.kilo.ai/api/gateway/v1');
-        expect(resolved.apiKey).toBe('kilo-test-key-999');
-        expect(resolved.modelId).toBe('kilo-auto/efficient');
+      // 4. Set default model
+      const modelSetCode = await runCli(['agent', 'model', 'set', 'gateway/model-b']);
+      expect(modelSetCode).toBe(0);
 
-        // 6. Remove provider
-        const removeCode = await runCli(['agent', 'provider', 'remove', 'kilo-test']);
-        expect(removeCode).toBe(0);
-      } finally {
-        vi.unstubAllGlobals();
-        vi.unstubAllEnvs();
-        rmSync(home, { recursive: true, force: true });
-      }
+      // 5. Verify resolution with active provider
+      const resolved = resolveByokConfig();
+      expect(resolved.provider).toBe('custom');
+      expect(resolved.baseUrl).toBe('http://127.0.0.1:1234/v1');
+      expect(resolved.apiKey).toBe('gateway-test-key-999');
+      expect(resolved.modelId).toBe('gateway/model-b');
+
+      // 6. Remove provider
+      const removeCode = await runCli(['agent', 'provider', 'remove', 'gateway-test']);
+      expect(removeCode).toBe(0);
     }, 15000);
+
+    it('refuses a public custom endpoint until S8 is confirmed, and saves nothing', async () => {
+      const code = await runCli([
+        'agent',
+        'provider',
+        'add',
+        'public-test',
+        '--url',
+        'https://gateway.example.test/v1',
+        '--api-key',
+        'public-test-key-999',
+      ]);
+      expect(code).toBe(1);
+      expect(loadAiProviders()['public-test']).toBeUndefined();
+    });
+
+    it('saves a public custom endpoint only with the owner consent (S8)', async () => {
+      const args = [
+        'agent',
+        'provider',
+        'add',
+        'consented-test',
+        '--url',
+        'https://consent.example.test/v1',
+        '--api-key',
+        'consented-test-key-999',
+        '--model',
+        'consented/model',
+      ];
+      expect(await runCli(args)).toBe(1);
+      expect(await runCli([...args, '--accept-public-endpoint'])).toBe(0);
+      expect(
+        resolveByokConfig({ provider: 'consented-test', model: 'consented/model' }),
+      ).toMatchObject({
+        provider: 'custom',
+        baseUrl: 'https://consent.example.test/v1',
+        modelId: 'consented/model',
+      });
+      expect(await runCli(['agent', 'provider', 'remove', 'consented-test'])).toBe(0);
+    });
+
+    it('refuses the retired Kilo profile instead of routing requests to it', () => {
+      expect(() => resolveByokConfig({ provider: 'kilo' })).toThrow('retired from JOY Media');
+    });
   });
 });

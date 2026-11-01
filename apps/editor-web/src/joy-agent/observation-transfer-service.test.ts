@@ -5,9 +5,12 @@ import {
 } from '../media-observation/evidence-store.js';
 import {
   createMultimodalTransport,
-  type MultimodalFetch,
   type ObservationEvidencePayload,
 } from './multimodal-transport.js';
+import {
+  providerCallFromFetch,
+  type FakeProviderFetch,
+} from './multimodal-provider-call.test-fixture.js';
 import {
   issueObservationConsent,
   type ObservationConsent,
@@ -94,7 +97,7 @@ function request(
       provider: 'openrouter',
       baseUrl: 'https://provider.example/v1',
       modelId: scope.modelId,
-      apiKey: 'PRIVATE_BYOK_KEY',
+      profileId: 'profile-saved',
     },
     authority: scope,
     range: { domain: 'source', startUs: 0, endUs: 500_000 },
@@ -118,10 +121,10 @@ describe('observation transfer service', () => {
   it('stays unusable until the UI host explicitly grants an issued consent', async () => {
     const scope = authority();
     const { store, lookup } = createManifest(scope);
-    const fetcher = vi.fn(async () => providerSuccess()) as unknown as MultimodalFetch;
+    const fetcher = vi.fn(async () => providerSuccess()) as unknown as FakeProviderFetch;
     const resolver = { resolve: vi.fn(async () => [evidence()]) };
     const service = createObservationTransferService({
-      transport: createMultimodalTransport({ fetch: fetcher }),
+      transport: createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) }),
       evidenceStore: store,
       evidenceResolver: resolver,
       currentAuthority: () => scope,
@@ -137,10 +140,10 @@ describe('observation transfer service', () => {
   it('records submitted and reviewed opaque frame identities only after a successful response', async () => {
     const scope = authority();
     const { store, lookup } = createManifest(scope);
-    const fetcher = vi.fn(async () => providerSuccess()) as unknown as MultimodalFetch;
+    const fetcher = vi.fn(async () => providerSuccess()) as unknown as FakeProviderFetch;
     const resolver = { resolve: vi.fn(async () => [evidence()]) };
     const service = createObservationTransferService({
-      transport: createMultimodalTransport({ fetch: fetcher }),
+      transport: createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) }),
       evidenceStore: store,
       evidenceResolver: resolver,
       currentAuthority: () => scope,
@@ -169,10 +172,10 @@ describe('observation transfer service', () => {
     const scope = authority();
     let currentAuthority = scope;
     const { store, lookup } = createManifest(scope);
-    const fetcher = vi.fn(async () => providerSuccess()) as unknown as MultimodalFetch;
+    const fetcher = vi.fn(async () => providerSuccess()) as unknown as FakeProviderFetch;
     const resolver = { resolve: vi.fn(async () => [evidence()]) };
     const service = createObservationTransferService({
-      transport: createMultimodalTransport({ fetch: fetcher }),
+      transport: createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) }),
       evidenceStore: store,
       evidenceResolver: resolver,
       currentAuthority: () => currentAuthority,
@@ -191,12 +194,12 @@ describe('observation transfer service', () => {
   it('rejects resolver overreach, modality changes, and oversize payloads before direct fetch', async () => {
     const scope = authority();
     const { store, lookup } = createManifest(scope);
-    const fetcher = vi.fn(async () => providerSuccess()) as unknown as MultimodalFetch;
+    const fetcher = vi.fn(async () => providerSuccess()) as unknown as FakeProviderFetch;
     const resolver = {
       resolve: vi.fn(async () => [evidence(), evidence(new Uint8Array([4]), 'unapproved-frame')]),
     };
     const service = createObservationTransferService({
-      transport: createMultimodalTransport({ fetch: fetcher }),
+      transport: createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) }),
       evidenceStore: store,
       evidenceResolver: resolver,
       currentAuthority: () => scope,
@@ -212,7 +215,7 @@ describe('observation transfer service', () => {
     const modalityScope = authority({ run: { runId: 'run-2', epoch: 1 } });
     const modalityManifest = createManifest(modalityScope);
     const modalityService = createObservationTransferService({
-      transport: createMultimodalTransport({ fetch: fetcher }),
+      transport: createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) }),
       evidenceStore: modalityManifest.store,
       evidenceResolver: {
         resolve: async () => [
@@ -244,7 +247,7 @@ describe('observation transfer service', () => {
     const oversizeScope = authority({ run: { runId: 'run-3', epoch: 1 } });
     const oversizeManifest = createManifest(oversizeScope);
     const oversizeServiceWithScope = createObservationTransferService({
-      transport: createMultimodalTransport({ fetch: fetcher }),
+      transport: createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) }),
       evidenceStore: oversizeManifest.store,
       evidenceResolver: oversizeResolver,
       currentAuthority: () => oversizeScope,
@@ -262,7 +265,7 @@ describe('observation transfer service', () => {
   it('cancels resolver work, revokes the one-time grant, and starts no later provider request', async () => {
     const scope = authority();
     const { store, lookup } = createManifest(scope);
-    const fetcher = vi.fn(async () => providerSuccess()) as unknown as MultimodalFetch;
+    const fetcher = vi.fn(async () => providerSuccess()) as unknown as FakeProviderFetch;
     const resolver = {
       resolve: vi.fn(
         ({ signal }: ObservationTransferEvidenceResolverRequest) =>
@@ -272,7 +275,7 @@ describe('observation transfer service', () => {
       ),
     };
     const service = createObservationTransferService({
-      transport: createMultimodalTransport({ fetch: fetcher }),
+      transport: createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) }),
       evidenceStore: store,
       evidenceResolver: resolver,
       currentAuthority: () => scope,
@@ -296,9 +299,9 @@ describe('observation transfer service', () => {
     const { store, lookup } = createManifest(scope);
     const fetcher = vi.fn(
       async () => new Response('PRIVATE_PROVIDER_FAILURE_BODY', { status: 500 }),
-    ) as unknown as MultimodalFetch;
+    ) as unknown as FakeProviderFetch;
     const service = createObservationTransferService({
-      transport: createMultimodalTransport({ fetch: fetcher }),
+      transport: createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) }),
       evidenceStore: store,
       evidenceResolver: { resolve: async () => [evidence()] },
       currentAuthority: () => scope,
@@ -320,9 +323,9 @@ describe('observation transfer service', () => {
     const { store, lookup } = createManifest(scope);
     const fetcher = vi.fn(async () =>
       providerSuccess('PRIVATE_RAW_FRAME_CANARY_DO_NOT_RETURN'),
-    ) as unknown as MultimodalFetch;
+    ) as unknown as FakeProviderFetch;
     const service = createObservationTransferService({
-      transport: createMultimodalTransport({ fetch: fetcher }),
+      transport: createMultimodalTransport({ providerCall: providerCallFromFetch(fetcher) }),
       evidenceStore: store,
       evidenceResolver: {
         resolve: async () => [

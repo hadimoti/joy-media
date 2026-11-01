@@ -5,31 +5,42 @@ import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type {
   ByokSessionStatus,
-  DualBrainConfig,
   JoyAgentMediaCapabilityReport,
   JoyAgentMediaCapabilityState,
 } from './joy-agent/protocol.js';
 import { CloseIcon } from './icons.js';
+import { AgentSlotsSection } from './AgentSlotsSection.js';
+import type { DesktopAgentSlot } from './desktop-client.js';
+import { sessionProviderFor } from './joy-agent/provider-call.js';
+import {
+  evaluateEndpoint,
+  findRegistryProvider,
+  PROVIDER_REGISTRY,
+  signInProviders,
+  type ProviderRegionId,
+  type RegistryProviderId,
+} from '@joy-media/provider-sdk';
 import {
   isDesktopHost,
   saveDesktopProviderProfile,
   listDesktopProviderProfiles,
   deleteDesktopProviderProfile,
+  signInDesktopProviderProfile,
+  signOutDesktopProviderProfile,
   fetchDesktopProviderModels,
-  beginDesktopProviderSession,
   type DesktopProviderProfile,
 } from './desktop-client.js';
-import { getStoredMediaToken } from './media-session.js';
-import { DesktopAccountModal } from './DesktopAccountModal.js';
 import {
   acknowledgeCustomEndpoint,
   revokeCustomEndpointAcknowledgementsForUrl,
   assertCustomEndpointConsentHolds,
+  isCustomEndpointAcknowledged,
   isCustomEndpointProvider,
   normalizeProviderBaseUrl,
   requiresCustomEndpointConsent,
   requireCustomEndpointAcknowledgement,
 } from './custom-endpoint-acknowledgement.js';
+import { ProviderSignInPanel } from './ProviderSignInPanel.js';
 import './JoyAgentSettingsDialog.css';
 
 export type JoyAgentSettingsTab =
@@ -39,6 +50,77 @@ type AgentSettingsNotice = {
   readonly kind: 'info' | 'success' | 'error';
   readonly message: string;
 };
+
+type DesktopProviderProfileState = DesktopProviderProfile & {
+  readonly state?: 'active' | 'disabled-legacy' | 'credential-unavailable';
+  readonly decision?: 'later';
+};
+
+/** A saved profile cannot connect until the local provider broker ships (PLAN-v4 P2). */
+/** The provider the dialog can connect: OpenRouter, a registry provider, or a custom endpoint. */
+type DialogProvider = 'openrouter' | 'openai-compatible' | RegistryProviderId;
+
+const SIGN_IN_PROVIDER_IDS = new Set(signInProviders());
+
+/** The engine runs every registry provider on the chat transport, so its status names that transport. */
+function statusProviderFor(provider: DialogProvider): 'openrouter' | 'openai-compatible' {
+  return provider === 'openrouter' ? 'openrouter' : 'openai-compatible';
+}
+
+/** A local endpoint with no key: the one case in which a profile is saved without a key (PLAN-v4 D8). */
+function isKeylessLocalEndpoint(baseUrl: string): boolean {
+  const verdict = evaluateEndpoint('openai-compatible', baseUrl);
+  return verdict.allowed && verdict.kind === 'loopback';
+}
+
+/** The dialog provider a saved profile is listed under. A custom endpoint is the openai-compatible choice. */
+function dialogProviderFor(profileProvider: string): DialogProvider | undefined {
+  if (isCustomEndpointProvider(profileProvider)) return 'openai-compatible';
+  if (profileProvider === 'openrouter') return 'openrouter';
+  return findRegistryProvider(profileProvider) === undefined
+    ? undefined
+    : (profileProvider as RegistryProviderId);
+}
+
+/** A saved profile that is the connection the form describes: the same provider and endpoint. */
+function profileDescribesForm(
+  profile: DesktopProviderProfileState,
+  provider: DialogProvider | '',
+  normalizedBaseUrl: string,
+): boolean {
+  if (profile.state === 'disabled-legacy' || !profile.id) return false;
+  // No provider is chosen, so the form describes no saved profile.
+  if (provider === '') return false;
+  const sameProvider =
+    provider === 'openai-compatible'
+      ? isCustomEndpointProvider(profile.provider)
+      : profile.provider === provider;
+  return sameProvider && normalizeProviderBaseUrl(profile.baseUrl) === normalizedBaseUrl;
+}
+
+/** A key belongs to one provider and endpoint. A key typed for another one is never sent there. */
+function keyScopeFor(provider: DialogProvider | '', baseUrl: string): string {
+  return `${provider}|${normalizeProviderBaseUrl(baseUrl)}`;
+}
+
+/** How long the saved-profile list may take. A read that is still pending after this is treated as unreadable. */
+const PROFILE_LIST_TIMEOUT_MS = 15_000;
+
+/** Rejects when the promise has not settled in time, so a read that never returns cannot leave the dialog waiting. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('The saved profiles did not load in time.')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** A saved profile's stored key may be used as it is: the key is confirmed for its endpoint and readable. */
+function canUseStoredKey(profile: DesktopProviderProfileState | undefined): boolean {
+  return (
+    profile !== undefined && profile.bound === true && profile.state !== 'credential-unavailable'
+  );
+}
 
 const MODES: Readonly<Record<AgentExecutionMode, string>> = {
   'suggest-only': 'Suggest only',
@@ -134,10 +216,14 @@ export function JoyAgentSettingsDialog({
   readonly initialTab?: JoyAgentSettingsTab;
 }) {
   const keyRef = useRef<HTMLInputElement>(null);
-  const openRouterKeyRef = useRef<HTMLInputElement>(null);
-  const kiloKeyRef = useRef<HTMLInputElement>(null);
+  // The provider and endpoint in force when the key was typed. A key is never sent to another one.
+  const keyScopeRef = useRef<string | undefined>(undefined);
+  // The profile the user chose, kept across refreshes of the list.
+  const selectedProfileIdRef = useRef<string | undefined>(undefined);
   const mountedRef = useRef(true);
   const mediaProbeEpochRef = useRef(0);
+  // The number of the latest read of the saved profiles. Only that read may change the list, the selection or readiness.
+  const profileReadRef = useRef(0);
 
   const [activeTab, setActiveTab] = useState<JoyAgentSettingsTab>(initialTab);
 
@@ -155,58 +241,107 @@ export function JoyAgentSettingsDialog({
     'diag-health': true,
   });
 
+  /** Runs the agent in one slot: the session takes the slot's profile and model, and the slot's instructions. */
+  const useAgentSlot = async (
+    slot: DesktopAgentSlot,
+    profile: DesktopProviderProfile,
+  ): Promise<void> => {
+    const sessionProvider = sessionProviderFor(profile.provider);
+    if (sessionProvider === undefined || slot.model === null) {
+      throw new Error('This agent slot cannot run yet. Save it with a profile and a model.');
+    }
+    assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
+    setWorking(true);
+    setConnectionNotice(undefined);
+    try {
+      await engineClient.configure({
+        provider: sessionProvider,
+        baseUrl: profile.baseUrl,
+        modelId: slot.model,
+        profileId: profile.id,
+        slot: slot.id,
+      });
+      const next = await engineClient.testConnection();
+      setConnectionStatus(next);
+      onStatusChange?.(next);
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const toggleAccordion = (id: string) => {
     setOpenAccordions((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const [provider, setProvider] = useState<
-    'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible'
-  >(
-    status?.provider === 'joy-hosted' ||
-      status?.provider === 'openai-compatible' ||
-      status?.provider === 'kilo'
-      ? status.provider
-      : 'openrouter',
+  // No provider is preselected, and OpenRouter is never a default (PLAN-v4 §6d-1 rule 3). A new connection
+  // starts with nothing chosen; a session that is already connected keeps the provider it has.
+  const [provider, setProvider] = useState<DialogProvider | ''>(
+    status === undefined
+      ? ''
+      : status.provider === 'openai-compatible'
+        ? 'openai-compatible'
+        : 'openrouter',
   );
   const [baseUrl, setBaseUrl] = useState(
-    status?.provider === 'openai-compatible'
+    status === undefined
       ? ''
-      : status?.provider === 'joy-hosted'
-        ? 'https://joyst.ir/api/v1/agent'
-        : status?.provider === 'kilo'
-          ? 'https://api.kilo.ai/v1'
-          : 'https://openrouter.ai/api/v1',
+      : status.provider === 'openai-compatible'
+        ? ''
+        : 'https://openrouter.ai/api/v1',
   );
   const [modelId, setModelId] = useState(
-    status?.modelId ||
-      (status?.provider === 'joy-hosted' ? 'minimax/minimax-m3' : 'openrouter/auto'),
+    status === undefined ? '' : status.modelId || 'openrouter/auto',
   );
   const [connectionName, setConnectionName] = useState('');
   const [customDisclosure, setCustomDisclosure] = useState(false);
   const [working, setWorking] = useState(false);
-  const [studioPreset, setStudioPreset] = useState<'dual-brain' | 'joy-hosted' | 'custom'>(
-    status?.provider === 'dual-brain'
-      ? 'dual-brain'
-      : status?.provider === 'joy-hosted'
-        ? 'joy-hosted'
-        : status?.provider === 'openai-compatible'
-          ? 'custom'
-          : 'dual-brain',
-  );
+  const [profileActionId, setProfileActionId] = useState<string | undefined>();
   const [connectionStatus, setConnectionStatus] = useState(status);
   const [connectionNotice, setConnectionNotice] = useState<AgentSettingsNotice | undefined>();
 
   // Multi-profile state
-  const [profiles, setProfiles] = useState<readonly DesktopProviderProfile[]>([]);
-  const [savedProfile, setSavedProfile] = useState<DesktopProviderProfile | undefined>(undefined);
-  const [hasSavedKey, setHasSavedKey] = useState(false);
+  const [profiles, setProfiles] = useState<readonly DesktopProviderProfileState[]>([]);
+  const [savedProfile, setSavedProfile] = useState<DesktopProviderProfileState | undefined>(
+    undefined,
+  );
+  // The saved profiles are read when the dialog opens. Until they are read, the form cannot tell which saved
+  // profile its endpoint belongs to, so connect and discovery wait for the read, and refuse when it fails.
+  const [profilesReady, setProfilesReady] = useState(() => !isDesktopHost());
+  const [profilesUnreadable, setProfilesUnreadable] = useState(false);
+  // The saved profiles for the endpoint the form describes. The profile the user chose among them is the
+  // one used. When several share the endpoint and none is chosen, the endpoint is ambiguous: nothing connects.
+  const describingProfiles = profiles.filter((p) =>
+    profileDescribesForm(p, provider, normalizeProviderBaseUrl(baseUrl)),
+  );
+  const chosenDescribingProfile = describingProfiles.find((p) => p.id === savedProfile?.id);
+  // Once a profile is chosen, only that profile can match. Editing the endpoint away from it leaves the form
+  // matching nothing, so a key typed there saves a new profile rather than updating another saved one.
+  const matchedProfile =
+    savedProfile === undefined && describingProfiles.length === 1
+      ? describingProfiles[0]
+      : chosenDescribingProfile;
+  const endpointAmbiguous = describingProfiles.length > 1 && chosenDescribingProfile === undefined;
+  const profilesNotReadyMessage = profilesUnreadable
+    ? 'The saved profiles could not be read. Close and reopen settings to try again.'
+    : 'The saved profiles are still loading.';
+  // Whether any saved profile exists that the form does not describe. Named in the messages below.
+  const hasOtherSavedProfiles = profiles.some(
+    (p) => p.id !== undefined && p.state !== 'disabled-legacy',
+  );
+  const selectProfile = (profile: DesktopProviderProfileState | undefined) => {
+    selectedProfileIdRef.current = profile?.id;
+    setSavedProfile(profile);
+  };
+  const clearTypedKey = () => {
+    if (keyRef.current) keyRef.current.value = '';
+    keyScopeRef.current = undefined;
+  };
 
   // Dynamic model discovery & Drawer state
   const [discoveredModels, setDiscoveredModels] = useState<readonly string[]>([]);
   const [modelFilter, setModelFilter] = useState('');
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
-  const [accountModalOpen, setAccountModalOpen] = useState(false);
 
   // Media capability probe state
   const [mediaCapabilities, setMediaCapabilities] = useState<
@@ -223,24 +358,62 @@ export function JoyAgentSettingsDialog({
     };
   }, []);
 
-  const loadProfiles = async () => {
-    if (!isDesktopHost()) return;
+  /**
+   * Reads the saved profiles. Resolves to the list when this read is the latest and has succeeded, and to undefined
+   * otherwise.
+   */
+  const loadProfiles = async (): Promise<readonly DesktopProviderProfileState[] | undefined> => {
+    if (!isDesktopHost()) return [];
+    // A read that started earlier and finishes later must not put back a list that is out of date.
+    const read = ++profileReadRef.current;
+    // Each read starts from unknown: no saved profile is used until this read has succeeded.
+    setProfilesReady(false);
     try {
-      const list = await listDesktopProviderProfiles();
-      if (!mountedRef.current) return;
+      const list = (await withTimeout(
+        listDesktopProviderProfiles(),
+        PROFILE_LIST_TIMEOUT_MS,
+      )) as readonly DesktopProviderProfileState[];
+      if (!mountedRef.current || read !== profileReadRef.current) return undefined;
       setProfiles(list);
-      const openRouterProfile = list.find((p) => p.provider === 'openrouter');
+      setProfilesReady(true);
+      setProfilesUnreadable(false);
+      // A profile the user chose stays chosen, and is refreshed from the list.
+      const chosenId = selectedProfileIdRef.current;
+      if (chosenId !== undefined) {
+        const chosen = list.find((p) => p.id === chosenId);
+        setSavedProfile(chosen);
+        if (chosen === undefined) {
+          // However the chosen profile left the list, the form that described it is cleared too. Only refs and setters
+          // are used here, so this function depends on stable values only.
+          selectedProfileIdRef.current = undefined;
+          if (keyRef.current) keyRef.current.value = '';
+          keyScopeRef.current = undefined;
+          setBaseUrl('');
+          setModelId('');
+          setConnectionName('');
+        }
+        return list;
+      }
+      // Shown by default only when it is the one OpenRouter profile. With several on the same endpoint, the user
+      // chooses one (the form refuses to connect until then), so no profile is picked for them.
+      const openRouterProfiles = list.filter(
+        (p) => p.provider === 'openrouter' && p.state !== 'disabled-legacy',
+      );
+      const openRouterProfile = openRouterProfiles.length === 1 ? openRouterProfiles[0] : undefined;
       if (openRouterProfile) {
+        // Written out here, not through selectProfile, so this effect depends on stable setters only.
+        selectedProfileIdRef.current = openRouterProfile.id;
         setSavedProfile(openRouterProfile);
-        setHasSavedKey(true);
-        setStudioPreset('custom');
         setModelId(openRouterProfile.modelId);
         setBaseUrl(openRouterProfile.baseUrl);
         setProvider('openrouter');
         setCustomDisclosure(false);
       }
+      return list;
     } catch {
-      /* Ignore profile read error in background */
+      // A failed read that is no longer the latest says nothing about the list the user now sees.
+      if (read === profileReadRef.current) setProfilesUnreadable(true);
+      return undefined;
     }
   };
 
@@ -271,27 +444,19 @@ export function JoyAgentSettingsDialog({
     onClose();
   };
 
-  const handleProviderChange = (
-    next: 'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible',
-  ) => {
+  const [region, setRegion] = useState<ProviderRegionId>('international');
+  const handleProviderChange = (next: DialogProvider) => {
+    clearTypedKey();
     setProvider(next);
-    if (next === 'openai-compatible') setStudioPreset('custom');
+    setRegion('international');
     setCustomDisclosure(false);
     setConnectionNotice(undefined);
     setDiscoveryError(null);
     if (next === 'openrouter') {
       setBaseUrl('https://openrouter.ai/api/v1');
-      if (!modelId || modelId === 'minimax/minimax-m3' || modelId === 'kilo-auto/efficient') {
-        setModelId('openrouter/auto');
-      }
-    } else if (next === 'kilo') {
-      setBaseUrl('https://api.kilo.ai/v1');
-      if (!modelId || modelId === 'openrouter/auto') {
-        setModelId('kilo-auto/efficient');
-      }
-    } else if (next === 'joy-hosted') {
-      setBaseUrl('https://joyst.ir/api/v1/agent');
-      setModelId('minimax/minimax-m3');
+      if (!modelId) setModelId('openrouter/auto');
+    } else if (findRegistryProvider(next) !== undefined) {
+      setBaseUrl(findRegistryProvider(next)?.regions[0]?.baseUrl ?? '');
     } else {
       setBaseUrl('');
     }
@@ -305,12 +470,22 @@ export function JoyAgentSettingsDialog({
       return;
     }
     const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
-    const matchingSavedProfile =
-      savedProfile &&
-      savedProfile.provider === (provider === 'openai-compatible' ? 'custom' : provider) &&
-      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl
-        ? savedProfile
-        : undefined;
+    if (!profilesReady) {
+      setDiscoveryError(profilesNotReadyMessage);
+      return;
+    }
+    // No provider is preselected, so there is nothing to discover until the owner chooses one.
+    if (provider === '') {
+      setDiscoveryError('Choose a provider before discovering models.');
+      return;
+    }
+    if (endpointAmbiguous) {
+      setDiscoveryError(
+        'More than one saved profile uses this endpoint. Choose one in the list first.',
+      );
+      return;
+    }
+    const matchingSavedProfile = matchedProfile;
     if (
       requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
       !requireCustomEndpointAcknowledgement({
@@ -327,13 +502,38 @@ export function JoyAgentSettingsDialog({
       setDiscoveryError('Please enter a Base URL before discovering models');
       return;
     }
+    if (key && keyScopeRef.current !== keyScopeFor(provider, normalizedBaseUrl)) {
+      clearTypedKey();
+      setDiscoveryError(
+        'The key was entered for a different provider or endpoint. Enter it again.',
+      );
+      return;
+    }
+    // Without a typed key, the saved profile for this endpoint lends its stored key, by its id. A profile
+    // whose key is not confirmed for this endpoint asks for the key again first.
+    if (!key && matchingSavedProfile !== undefined && !canUseStoredKey(matchingSavedProfile)) {
+      setDiscoveryError('Enter the API key again to confirm this endpoint.');
+      return;
+    }
+    const storedKeyProfileId =
+      !key && canUseStoredKey(matchingSavedProfile) ? matchingSavedProfile?.id : undefined;
     setIsDiscovering(true);
     setDiscoveryError(null);
     try {
       const models = await fetchDesktopProviderModels({
+        ...(requiresCustomEndpointConsent(provider, normalizedBaseUrl)
+          ? {
+              acknowledgedPublicEndpoint: isCustomEndpointAcknowledged({
+                provider: 'custom',
+                baseUrl: normalizedBaseUrl,
+                profileId: storedKeyProfileId,
+              }),
+            }
+          : {}),
         provider: provider === 'openai-compatible' ? 'custom' : provider,
         baseUrl: normalizedBaseUrl,
         ...(key ? { apiKey: key } : {}),
+        ...(storedKeyProfileId === undefined ? {} : { id: storedKeyProfileId }),
       });
       if (!mountedRef.current) return;
       const modelIds = models.map((m) => m.id).filter(Boolean);
@@ -343,13 +543,7 @@ export function JoyAgentSettingsDialog({
         setOpenAccordions((prev) => ({ ...prev, 'models-drawer': true }));
         if (!modelIds.includes(modelId)) {
           const prefer =
-            modelIds.find(
-              (m) =>
-                m.includes('minimax') ||
-                m.includes('efficient') ||
-                m.includes('auto') ||
-                m.includes('claude'),
-            ) || modelIds[0];
+            modelIds.find((m) => m.includes('auto') || m.includes('claude')) || modelIds[0];
           if (prefer) {
             setModelId(prefer);
           }
@@ -368,157 +562,112 @@ export function JoyAgentSettingsDialog({
     }
   };
 
-  const connectDualBrain = async () => {
-    if (working) return;
-    invalidateMediaProbe();
+  /** Shows a saved profile in the form: its endpoint, model and name, and the saved profile it stands for. */
+  const showProfileInForm = (profile: DesktopProviderProfileState) => {
+    const next = dialogProviderFor(profile.provider);
+    selectProfile(profile);
+    if (next !== undefined) {
+      setProvider(next);
+      const normalizedUrl = normalizeProviderBaseUrl(profile.baseUrl);
+      setRegion(
+        findRegistryProvider(next)?.regions.find(
+          (item) => normalizeProviderBaseUrl(item.baseUrl) === normalizedUrl,
+        )?.id ?? 'international',
+      );
+    }
+    setBaseUrl(profile.baseUrl);
+    setModelId(profile.modelId);
+    setConnectionName(profile.name ?? '');
+    clearTypedKey();
+  };
+
+  /** Shows a saved profile whose key must be entered again, so the key typed there confirms it. */
+  const selectProfileIntoForm = (profile: DesktopProviderProfileState) => {
+    showProfileInForm(profile);
+    setCustomDisclosure(false);
+    const message = 'Enter the API key again to confirm this endpoint, then connect.';
+    setConnectionNotice({ kind: 'error', message });
+    onNotice?.(message, 'error');
+  };
+
+  /** Connects a saved profile by its id. The key is never read here: the main process holds it. */
+  const connectSavedProfile = async (profile: DesktopProviderProfileState) => {
+    // A profile whose stored key cannot be used is shown in the form, so its key is entered again.
+    if (!canUseStoredKey(profile)) {
+      selectProfileIntoForm(profile);
+      return;
+    }
+    // A saved profile is used only once the saved-profile list is known, as connect and discovery require.
+    if (!profilesReady) {
+      setConnectionNotice({ kind: 'error', message: profilesNotReadyMessage });
+      onNotice?.(profilesNotReadyMessage, 'error');
+      return;
+    }
+    if (working || engineClient === undefined || engineClient === null) return;
+    const sessionProvider = sessionProviderFor(profile.provider);
+    if (sessionProvider === undefined) return;
+    // The form and the selection name the profile being connected, so both point at the same profile.
+    showProfileInForm(profile);
+    if (
+      requiresCustomEndpointConsent(profile.provider, profile.baseUrl) &&
+      !requireCustomEndpointAcknowledgement({
+        provider: 'custom',
+        baseUrl: profile.baseUrl,
+        profileId: profile.id,
+      })
+    ) {
+      setConnectionNotice({
+        kind: 'error',
+        message: 'Acknowledge this custom endpoint before connecting.',
+      });
+      return;
+    }
     setWorking(true);
     setConnectionNotice(undefined);
-    setDiscoveryError(null);
-    let openRouterKey = '';
-    let kiloKey = '';
     try {
-      openRouterKey = openRouterKeyRef.current?.value.trim() ?? '';
-      kiloKey = kiloKeyRef.current?.value.trim() ?? '';
-
-      // Dual-Brain always sends each key to the provider's fixed trusted
-      // endpoint, so a saved key may only come from a profile saved for exactly
-      // that endpoint; a profile with any other URL is never used here.
-      const openRouterProf = profiles.find(
-        (p) =>
-          p.provider === 'openrouter' && !requiresCustomEndpointConsent('openrouter', p.baseUrl),
-      );
-      if (!openRouterKey && openRouterProf) {
-        try {
-          const session = (await beginDesktopProviderSession(openRouterProf.id)) as
-            { apiKey?: string } | undefined;
-          if (session?.apiKey) openRouterKey = session.apiKey;
-        } catch {
-          /* ignore */
-        }
-      }
-
-      const kiloProf = profiles.find(
-        (p) => p.provider === 'kilo' && !requiresCustomEndpointConsent('kilo', p.baseUrl),
-      );
-      if (!kiloKey && kiloProf) {
-        try {
-          const session = (await beginDesktopProviderSession(kiloProf.id)) as
-            { apiKey?: string } | undefined;
-          if (session?.apiKey) kiloKey = session.apiKey;
-        } catch {
-          /* ignore */
-        }
-      }
-
-      const dualConfig: DualBrainConfig = {
-        mode: 'dual-brain',
-        workhorse: {
-          provider: 'openrouter',
-          baseUrl: 'https://openrouter.ai/api/v1',
-          modelId: 'openrouter/free',
-          apiKey: openRouterKey,
-        },
-        creative: {
-          provider: 'kilo',
-          baseUrl: 'https://api.kilo.ai/v1',
-          modelId: 'kilo-auto/efficient',
-          apiKey: kiloKey,
-        },
-      };
-
-      await engineClient.configure(dualConfig);
+      assertCustomEndpointConsentHolds(profile.provider, profile.baseUrl, profile.id);
+      await engineClient.configure({
+        provider: sessionProvider,
+        baseUrl: profile.baseUrl,
+        modelId: profile.modelId,
+        profileId: profile.id,
+      });
       const next = await engineClient.testConnection();
-      const redactedStatus = next.dualBrain
-        ? {
-            ...next,
-            dualBrain: {
-              workhorse: {
-                ...next.dualBrain.workhorse,
-                ...(next.dualBrain.workhorse.message
-                  ? {
-                      message: redactProviderError(next.dualBrain.workhorse.message, openRouterKey),
-                    }
-                  : {}),
-              },
-              creative: {
-                ...next.dualBrain.creative,
-                ...(next.dualBrain.creative.message
-                  ? { message: redactProviderError(next.dualBrain.creative.message, kiloKey) }
-                  : {}),
-              },
-            },
-          }
-        : {
-            ...next,
-            capability: 'incompatible' as const,
-            message: 'Dual-Brain provider status was incomplete.',
-          };
-      const workhorse = redactedStatus.dualBrain?.workhorse;
-      const creative = redactedStatus.dualBrain?.creative;
-      const bothUsable =
-        workhorse?.capability === 'tool-loop' && creative?.capability === 'tool-loop';
-      const bothFailed =
-        workhorse?.capability === 'incompatible' && creative?.capability === 'incompatible';
-      const noProviderStatuses = !workhorse && !creative;
-      let capability: ByokSessionStatus['capability'] = 'untested';
-      if (bothUsable) capability = 'tool-loop';
-      else if (
-        bothFailed ||
-        !workhorse ||
-        !creative ||
-        workhorse.capability === 'incompatible' ||
-        creative.capability === 'incompatible'
-      ) {
-        capability = 'incompatible';
-      } else if (workhorse.capability === 'plan-only' && creative.capability === 'plan-only') {
-        capability = 'plan-only';
-      }
-      const safeStatus = { ...redactedStatus, capability };
-      setConnectionStatus(safeStatus);
-      onStatusChange?.(safeStatus);
-      const message = bothUsable
-        ? 'Dual-Brain Studio connected! Model 1 Workhorse (openrouter/free) & Model 2 Creative Brain (kilo-auto/efficient) are live.'
-        : bothFailed || noProviderStatuses
-          ? `Dual-Brain connection failed. OpenRouter: ${redactProviderError(workhorse?.message ?? 'unavailable', openRouterKey)} Kilo: ${redactProviderError(creative?.message ?? 'unavailable', kiloKey)}`
-          : `Dual-Brain partially connected. OpenRouter: ${workhorse?.capability ?? 'unavailable'}${workhorse?.message ? ` (${workhorse.message})` : ''}; Kilo: ${creative?.capability ?? 'unavailable'}${creative?.message ? ` (${creative.message})` : ''}. Tool-loop readiness requires both brains.`;
-      const kind = bothUsable ? 'success' : 'error';
-      setConnectionNotice({ kind, message });
-      onNotice?.(message, kind);
-    } catch (error) {
-      const rawMessage =
-        error instanceof Error ? error.message : 'Unable to connect Dual-Brain Studio';
-      const safeMessage = redactProviderError(
-        redactProviderError(rawMessage, openRouterKey),
-        kiloKey,
-      );
-      const failedStatus: ByokSessionStatus = {
-        provider: 'dual-brain',
-        modelId: 'openrouter/free + kilo-auto/efficient',
-        capability: 'incompatible',
-        message: safeMessage,
-      };
-      setConnectionStatus(failedStatus);
-      onStatusChange?.(failedStatus);
-      setConnectionNotice({ kind: 'error', message: safeMessage });
-      onNotice?.(safeMessage, 'error');
+      setConnectionStatus(next);
+      onStatusChange?.(next);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'The connection failed.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
     } finally {
-      if (openRouterKeyRef.current) openRouterKeyRef.current.value = '';
-      if (kiloKeyRef.current) kiloKeyRef.current.value = '';
-      if (mountedRef.current) setWorking(false);
+      setWorking(false);
     }
   };
 
   const connect = async () => {
     if (working) return;
     const normalizedBaseUrl = normalizeProviderBaseUrl(baseUrl);
-    const matchingSavedProfile =
-      savedProfile &&
-      (provider === 'openai-compatible'
-        ? isCustomEndpointProvider(savedProfile.provider)
-        : savedProfile.provider === provider) &&
-      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl
-        ? savedProfile
-        : undefined;
+    if (!profilesReady) {
+      setConnectionNotice({ kind: 'error', message: profilesNotReadyMessage });
+      onNotice?.(profilesNotReadyMessage, 'error');
+      return;
+    }
+    if (endpointAmbiguous) {
+      const message =
+        'More than one saved profile uses this endpoint. Choose one in the list first.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      return;
+    }
+    // No provider is preselected, so there is nothing to connect until the owner chooses one. This is
+    // checked after the saved-profile refusals, so their message is the one the owner sees.
+    if (provider === '') {
+      const message = 'Choose a provider before connecting.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      return;
+    }
+    const matchingSavedProfile = matchedProfile;
     if (
       requiresCustomEndpointConsent(provider, normalizedBaseUrl) &&
       !requireCustomEndpointAcknowledgement({
@@ -532,50 +681,39 @@ export function JoyAgentSettingsDialog({
       onNotice?.(message, 'error');
       return;
     }
-    if (studioPreset === 'dual-brain' && provider !== 'openai-compatible') {
-      void connectDualBrain();
-      return;
-    }
     invalidateMediaProbe();
     setWorking(true);
     setConnectionNotice(undefined);
     setDiscoveryError(null);
 
-    let key = keyRef.current?.value.trim() ?? '';
-    const normalizedModelId = modelId.trim();
-    const savedProfileMatches = Boolean(
-      savedProfile &&
-      savedProfile.id &&
-      (provider === 'openai-compatible'
-        ? isCustomEndpointProvider(savedProfile.provider)
-        : savedProfile.provider === provider) &&
-      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalizedBaseUrl,
-    );
-    if (
-      provider !== 'joy-hosted' &&
-      !key &&
-      hasSavedKey &&
-      savedProfile?.id &&
-      savedProfileMatches
-    ) {
-      try {
-        const session = (await beginDesktopProviderSession(savedProfile.id)) as
-          { apiKey?: string; baseUrl?: string; modelId?: string } | undefined;
-        if (session?.apiKey) {
-          key = session.apiKey;
-        }
-      } catch {
-        /* proceed to validation */
-      }
+    const key = keyRef.current?.value.trim() ?? '';
+    if (key !== '' && keyScopeRef.current !== keyScopeFor(provider, normalizedBaseUrl)) {
+      clearTypedKey();
+      setWorking(false);
+      const message = 'The key was entered for a different provider or endpoint. Enter it again.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      return;
     }
+    const keylessLocal = isKeylessLocalEndpoint(normalizedBaseUrl);
+    const normalizedModelId = modelId.trim();
+    const savedProfileMatches = matchingSavedProfile !== undefined;
+    // The profile for this endpoint connects by its id, so its key stays in the main process. That needs
+    // the key to be confirmed for this endpoint; otherwise the key is entered again.
+    const reuseSavedProfile = !key && canUseStoredKey(matchingSavedProfile);
+    // A new local model with no saved profile for this endpoint is saved with no key (PLAN-v4 D8).
+    const keylessNew = keylessLocal && !savedProfileMatches;
+    let profileId: string | undefined = reuseSavedProfile ? matchingSavedProfile?.id : undefined;
 
     if (provider === 'openai-compatible') {
       const missing: string[] = [];
-      if (!key)
+      if (!key && !reuseSavedProfile && !keylessNew)
         missing.push(
-          savedProfile?.id && !savedProfileMatches
-            ? 'a new API key because the saved key belongs to a different provider or endpoint'
-            : 'an API key',
+          savedProfileMatches
+            ? 'the API key again to confirm this endpoint'
+            : hasOtherSavedProfiles
+              ? 'a new API key because the saved key belongs to a different provider or endpoint'
+              : 'an API key',
         );
       if (!normalizedModelId) missing.push('a model ID');
       if (!normalizedBaseUrl) missing.push('a base URL');
@@ -597,9 +735,10 @@ export function JoyAgentSettingsDialog({
       }
     }
 
-    if (provider !== 'joy-hosted' && !key) {
-      const message =
-        savedProfile?.id && !savedProfileMatches
+    if (!key && !reuseSavedProfile && !keylessNew) {
+      const message = savedProfileMatches
+        ? 'Enter the API key again to confirm this endpoint.'
+        : hasOtherSavedProfiles
           ? 'The saved API key belongs to a different provider or endpoint. Enter a new API key to connect.'
           : 'API key is required.';
       setConnectionNotice({ kind: 'error', message });
@@ -623,34 +762,55 @@ export function JoyAgentSettingsDialog({
     }
 
     try {
-      if (isDesktopHost() && provider !== 'joy-hosted' && key) {
+      if (isDesktopHost() && (key || keylessNew)) {
         const saved = await saveDesktopProviderProfile({
+          // A key typed for the saved endpoint updates that profile in place: one profile per connection.
+          ...(key && matchingSavedProfile !== undefined ? { id: matchingSavedProfile.id } : {}),
           provider: provider === 'openai-compatible' ? 'custom' : provider,
           name: connectionName.trim() || undefined,
           baseUrl: normalizedBaseUrl,
           modelId: normalizedModelId,
+          ...(requiresCustomEndpointConsent(provider, normalizedBaseUrl)
+            ? {
+                // The owner's acknowledgement of this public custom endpoint (S8).
+                acknowledgedPublicEndpoint: isCustomEndpointAcknowledged({
+                  provider: 'custom',
+                  baseUrl: normalizedBaseUrl,
+                  profileId: matchingSavedProfile?.id,
+                }),
+              }
+            : {}),
           apiKey: key,
         });
         if (saved) {
-          setSavedProfile(saved);
-          setHasSavedKey(true);
-          await loadProfiles();
+          profileId = saved.id;
+          selectProfile(saved);
+          // The connection waits for a list that shows the saved profile as it was saved: bound when a key was typed, at
+          // the endpoint that was saved. Otherwise nothing connects.
+          const readBack = await loadProfiles();
+          const listed = readBack?.find((profile) => profile.id === saved.id);
+          if (
+            listed === undefined ||
+            (key !== '' && listed.bound !== true) ||
+            normalizeProviderBaseUrl(listed.baseUrl) !== normalizedBaseUrl
+          ) {
+            throw new Error('The saved profile could not be read back. Try connecting again.');
+          }
         }
       }
 
-      let sessionKey = key;
-      if (provider === 'joy-hosted') {
-        const mediaToken =
-          typeof window !== 'undefined' ? getStoredMediaToken(window.localStorage) : undefined;
-        sessionKey = mediaToken ?? 'joy-hosted-default';
+      assertCustomEndpointConsentHolds(provider, normalizedBaseUrl, matchingSavedProfile?.id);
+      const sessionProvider = sessionProviderFor(
+        provider === 'openai-compatible' ? 'custom' : provider,
+      );
+      if (sessionProvider === undefined || profileId === undefined) {
+        throw new Error('This connection could not be saved in the desktop app.');
       }
-
-      assertCustomEndpointConsentHolds(provider, normalizedBaseUrl, savedProfile?.id);
       await engineClient.configure({
-        provider,
+        provider: sessionProvider,
         baseUrl: normalizedBaseUrl,
         modelId: normalizedModelId,
-        apiKey: sessionKey,
+        profileId,
       });
 
       const next = await engineClient.testConnection();
@@ -681,13 +841,13 @@ export function JoyAgentSettingsDialog({
       const safeMessage = redactProviderError(rawMessage, key);
       const message = `Connection failed: ${safeMessage}`;
       setConnectionStatus({
-        provider,
+        provider: statusProviderFor(provider),
         modelId: normalizedModelId,
         capability: 'incompatible',
         message: safeMessage,
       });
       onStatusChange?.({
-        provider,
+        provider: statusProviderFor(provider),
         modelId: normalizedModelId,
         capability: 'incompatible',
         message: safeMessage,
@@ -695,107 +855,110 @@ export function JoyAgentSettingsDialog({
       setConnectionNotice({ kind: 'error', message });
       onNotice?.(message, 'error');
     } finally {
-      if (keyRef.current) keyRef.current.value = '';
+      clearTypedKey();
       setWorking(false);
     }
   };
 
-  const connectProfile = async (prof: DesktopProviderProfile) => {
-    if (working) return;
+  const deferLegacyProfile = async (prof: DesktopProviderProfileState) => {
+    if (!isDesktopHost() || prof.state !== 'disabled-legacy' || prof.decision === 'later') return;
+    try {
+      await window.joyDesktop?.invoke('desktop.provider-profile.later', { id: prof.id });
+      await loadProfiles();
+    } catch (error) {
+      console.warn('Failed to defer legacy provider profile:', error);
+    }
+  };
+
+  const removeProfile = async (profile: DesktopProviderProfileState) => {
+    if (!isDesktopHost()) return;
     if (
-      requiresCustomEndpointConsent(prof.provider, prof.baseUrl) &&
-      !requireCustomEndpointAcknowledgement({
-        provider: 'custom',
-        baseUrl: prof.baseUrl,
-        profileId: prof.id,
-      })
+      profile.provider === 'chatgpt' &&
+      !window.confirm(
+        'Remove this ChatGPT connection from JOY Media without revoking its authorization? This does not revoke access in ChatGPT.',
+      )
     ) {
-      setProvider(
-        isCustomEndpointProvider(prof.provider)
-          ? 'openai-compatible'
-          : (prof.provider as 'openrouter' | 'kilo' | 'joy-hosted'),
-      );
-      setStudioPreset('custom');
-      setBaseUrl(prof.baseUrl);
-      setSavedProfile(prof);
-      setModelId(prof.modelId);
-      const message = 'Enter the custom-provider acknowledgement before connecting.';
-      setConnectionNotice({ kind: 'error', message });
-      onNotice?.(message, 'error');
       return;
     }
-    setWorking(true);
-    let key = '';
-    let configurationFailed = false;
     try {
-      const session = (await beginDesktopProviderSession(prof.id)) as
-        { apiKey?: string; baseUrl?: string; modelId?: string; provider?: string } | undefined;
-      key = session?.apiKey || '';
-      const resolvedProvider = (
-        isCustomEndpointProvider(prof.provider) ? 'openai-compatible' : prof.provider
-      ) as 'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible';
-      setProvider(resolvedProvider);
-      setBaseUrl(prof.baseUrl);
-      setModelId(prof.modelId);
-      setSavedProfile(prof);
-      setHasSavedKey(Boolean(key));
-
-      assertCustomEndpointConsentHolds(prof.provider, prof.baseUrl, prof.id);
-      configurationFailed = true;
-      await engineClient.configure({
-        provider: resolvedProvider,
-        baseUrl: prof.baseUrl.replace(/\/$/, ''),
-        modelId: prof.modelId,
-        apiKey: key,
-      });
-      // configure() has already replaced the previous client, so a later
-      // testConnection() rejection must also publish a failed status.
-      const next = await engineClient.testConnection();
-      const safeStatus =
-        next.capability === 'incompatible'
-          ? { ...next, message: redactProviderError(next.message ?? 'Connection failed', key) }
-          : next;
-      setConnectionStatus(safeStatus);
-      onStatusChange?.(safeStatus);
-      const kind = next.capability === 'incompatible' ? 'error' : 'success';
-      const message =
-        next.capability === 'incompatible'
-          ? `Connection failed: ${safeStatus.message}`
-          : `Connected to ${prof.name || prof.provider}: ${prof.modelId}`;
-      setConnectionNotice({ kind, message });
-      onNotice?.(message, kind);
+      await deleteDesktopProviderProfile(profile.id);
+      // The read clears a chosen profile that the list no longer shows. A failed read leaves it chosen until the next
+      // successful read clears it, and connect waits for a successful read, so nothing is saved beside the stale choice.
+      await loadProfiles();
     } catch (err) {
-      const message = redactProviderError(
-        err instanceof Error ? err.message : 'Failed to switch provider',
-        key,
-      );
-      if (configurationFailed) {
-        const failedStatus: ByokSessionStatus = {
-          provider: prof.provider as ByokSessionStatus['provider'],
-          modelId: prof.modelId,
-          capability: 'incompatible',
-          message,
-        };
-        setConnectionStatus(failedStatus);
-        onStatusChange?.(failedStatus);
-      }
+      console.warn('Failed to delete provider profile:', err);
+      const message = err instanceof Error ? err.message : 'Could not remove the saved profile.';
       setConnectionNotice({ kind: 'error', message });
-    } finally {
-      setWorking(false);
+      onNotice?.(message, 'error');
     }
   };
 
-  const removeProfile = async (profId: string) => {
-    if (!isDesktopHost()) return;
+  const reauthorizeChatGptProfile = async (profile: DesktopProviderProfileState) => {
+    if (!isDesktopHost() || profile.provider !== 'chatgpt' || profileActionId !== undefined) return;
+    setProfileActionId(profile.id);
+    setConnectionNotice(undefined);
     try {
-      await deleteDesktopProviderProfile(profId);
+      await signInDesktopProviderProfile({ provider: 'chatgpt', id: profile.id });
       await loadProfiles();
-      if (savedProfile?.id === profId) {
-        setSavedProfile(undefined);
-        setHasSavedKey(false);
-      }
+      const message = 'ChatGPT connection reauthorized.';
+      setConnectionNotice({ kind: 'success', message });
+      onNotice?.(message, 'success');
     } catch (err) {
-      console.warn('Failed to delete provider profile:', err);
+      const message =
+        err instanceof Error ? err.message : 'ChatGPT reauthorization did not complete.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+    } finally {
+      setProfileActionId(undefined);
+    }
+  };
+
+  const signOutChatGptProfile = async (profile: DesktopProviderProfileState) => {
+    if (
+      !isDesktopHost() ||
+      profile.provider !== 'chatgpt' ||
+      profileActionId !== undefined ||
+      !window.confirm(
+        'Sign out of this ChatGPT connection and revoke its saved authorization? JOY Media will remove the saved profile after ChatGPT confirms revocation.',
+      )
+    ) {
+      return;
+    }
+    setProfileActionId(profile.id);
+    setConnectionNotice(undefined);
+    try {
+      await signOutDesktopProviderProfile(profile.id);
+      await loadProfiles();
+      const message = 'ChatGPT authorization revoked and the saved connection was removed.';
+      setConnectionNotice({ kind: 'success', message });
+      onNotice?.(message, 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'ChatGPT could not confirm sign-out.';
+      setConnectionNotice({ kind: 'error', message });
+      onNotice?.(message, 'error');
+      if (
+        !window.confirm(
+          `${message}\n\nRemove this connection from JOY Media locally without revoking it? This does not revoke access in ChatGPT.`,
+        )
+      ) {
+        return;
+      }
+      try {
+        await deleteDesktopProviderProfile(profile.id);
+        await loadProfiles();
+        const localMessage = 'ChatGPT connection removed locally. This did not revoke access in ChatGPT.';
+        setConnectionNotice({ kind: 'info', message: localMessage });
+        onNotice?.(localMessage, 'info');
+      } catch (removeError) {
+        const localError =
+          removeError instanceof Error
+            ? removeError.message
+            : 'Could not remove the saved profile locally.';
+        setConnectionNotice({ kind: 'error', message: localError });
+        onNotice?.(localError, 'error');
+      }
+    } finally {
+      setProfileActionId(undefined);
     }
   };
 
@@ -848,9 +1011,7 @@ export function JoyAgentSettingsDialog({
     const message = 'Connection cleared. Your API key was removed from this page session.';
     setConnectionNotice({ kind: 'info', message });
     onNotice?.(message, 'info');
-    if (keyRef.current) keyRef.current.value = '';
-    if (openRouterKeyRef.current) openRouterKeyRef.current.value = '';
-    if (kiloKeyRef.current) kiloKeyRef.current.value = '';
+    clearTypedKey();
   };
 
   const filteredDiscoveredModels = discoveredModels.filter((m) =>
@@ -918,6 +1079,9 @@ export function JoyAgentSettingsDialog({
             </div>
 
             {/* TAB 1: AI MODELS & APIS */}
+            {activeTab === 'models' ? (
+              <AgentSlotsSection profiles={profiles} onUseSlot={useAgentSlot} />
+            ) : null}
             {activeTab === 'models' && (
               <div className="joy-accordion">
                 {onOpenModelDrawer && (
@@ -931,34 +1095,11 @@ export function JoyAgentSettingsDialog({
                 )}
                 {/* Studio Presets Picker */}
                 <div className="joy-studio-preset-bar">
-                  <button
-                    type="button"
-                    className={`joy-preset-tab ${studioPreset === 'dual-brain' ? 'is-active' : ''}`}
-                    onClick={() => {
-                      setStudioPreset('dual-brain');
-                      setProvider('openrouter');
-                      setBaseUrl('https://openrouter.ai/api/v1');
-                      setModelId('openrouter/free');
-                    }}
-                  >
-                    <span className="joy-preset-icon">⚡</span>
-                    <div className="joy-preset-text">
-                      <strong>Dual-Brain Studio</strong>
-                      <span>Model 1 Workhorse (free) + Model 2 Creative (kilo-auto)</span>
-                    </div>
-                    <span className="joy-preset-tag">Recommended</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`joy-preset-tab ${studioPreset === 'custom' ? 'is-active' : ''}`}
-                    onClick={() => {
-                      setStudioPreset('custom');
-                    }}
-                  >
+                  <button type="button" className="joy-preset-tab is-active">
                     <span className="joy-preset-icon">🛠️</span>
                     <div className="joy-preset-text">
                       <strong>Custom BYOK</strong>
-                      <span>Single provider link (OpenRouter, Kilo, OpenAI)</span>
+                      <span>One API-key provider (OpenRouter or a custom endpoint)</span>
                     </div>
                   </button>
                 </div>
@@ -982,28 +1123,6 @@ export function JoyAgentSettingsDialog({
                               ? 'Connection failed. See the details below.'
                               : 'Configure an API endpoint below to connect JOY Code.'}
                       </span>
-                      {connectionStatus?.dualBrain && (
-                        <div className="joy-settings-dual-brain-banner">
-                          <div className="joy-dual-brain-chip">
-                            <span className="joy-chip-label">🧠 Model 1 (Workhorse):</span>
-                            <span className="joy-chip-val">
-                              {connectionStatus.dualBrain.workhorse.modelId}
-                            </span>
-                            <span className="joy-chip-badge">
-                              {connectionStatus.dualBrain.workhorse.capability}
-                            </span>
-                          </div>
-                          <div className="joy-dual-brain-chip">
-                            <span className="joy-chip-label">🎨 Model 2 (Creative Brain):</span>
-                            <span className="joy-chip-val">
-                              {connectionStatus.dualBrain.creative.modelId}
-                            </span>
-                            <span className="joy-chip-badge">
-                              {connectionStatus.dualBrain.creative.capability}
-                            </span>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </div>
                   {connectionStatus?.modelId && (
@@ -1020,34 +1139,101 @@ export function JoyAgentSettingsDialog({
                       <span>Saved Vault Profiles ({profiles.length})</span>
                     </div>
                     <div className="joy-settings-vault-profiles-grid">
-                      {profiles.map((prof) => (
-                        <div
-                          key={prof.id}
-                          className={`joy-settings-provider-card ${savedProfile?.id === prof.id ? 'is-active' : ''}`}
-                        >
-                          <div className="joy-settings-provider-meta">
-                            <strong>{prof.name || prof.provider}</strong>
-                            <span>{displayModelId(prof.modelId)}</span>
-                          </div>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button
-                              type="button"
-                              className="joy-btn-secondary joy-btn-sm"
-                              onClick={() => void connectProfile(prof)}
-                              disabled={working}
+                      {profiles.map((prof) => {
+                        const disabledLegacy = prof.state === 'disabled-legacy';
+                        return (
+                          <div
+                            key={prof.id}
+                            data-profile-state={prof.state ?? 'active'}
+                            className={`joy-settings-provider-card ${savedProfile?.id === prof.id ? 'is-active' : ''} ${disabledLegacy ? 'is-disabled-legacy' : ''}`}
+                          >
+                            <div className="joy-settings-provider-meta">
+                              <strong>{prof.name || prof.provider}</strong>
+                              <span>{displayModelId(prof.modelId)}</span>
+                              {disabledLegacy && (
+                                <span className="joy-settings-legacy-status">
+                                  Disabled legacy profile
+                                </span>
+                              )}
+                              {prof.state === 'credential-unavailable' && (
+                                <span className="joy-settings-legacy-status">
+                                  Saved key could not be read. Enter it again.
+                                </span>
+                              )}
+                              {prof.bound === false &&
+                                !disabledLegacy &&
+                                prof.state !== 'credential-unavailable' && (
+                                  <span className="joy-settings-legacy-status">
+                                    Enter the key again to confirm this endpoint.
+                                  </span>
+                                )}
+                            </div>
+                            <div
+                              style={{
+                                display: 'flex',
+                                gap: '6px',
+                                flexWrap: 'wrap',
+                                justifyContent: 'flex-end',
+                              }}
                             >
-                              Use
-                            </button>
-                            <button
-                              type="button"
-                              className="joy-btn-danger joy-btn-sm"
-                              onClick={() => void removeProfile(prof.id)}
-                            >
-                              ✕
-                            </button>
+                              {disabledLegacy ? (
+                                <button
+                                  type="button"
+                                  className="joy-btn-secondary joy-btn-sm"
+                                  onClick={() => void deferLegacyProfile(prof)}
+                                  disabled={working || prof.decision === 'later'}
+                                >
+                                  Later
+                                </button>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="joy-btn-secondary joy-btn-sm"
+                                    disabled={working || profileActionId !== undefined}
+                                    onClick={() => void connectSavedProfile(prof)}
+                                  >
+                                    Use
+                                  </button>
+                                  {prof.provider === 'chatgpt' && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="joy-btn-secondary joy-btn-sm"
+                                        disabled={working || profileActionId !== undefined}
+                                        onClick={() => void reauthorizeChatGptProfile(prof)}
+                                      >
+                                        {profileActionId === prof.id ? 'Working…' : 'Reauthorize'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="joy-btn-danger joy-btn-sm"
+                                        disabled={working || profileActionId !== undefined}
+                                        onClick={() => void signOutChatGptProfile(prof)}
+                                      >
+                                        Sign out &amp; revoke
+                                      </button>
+                                    </>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="joy-btn-danger joy-btn-sm"
+                                    disabled={profileActionId !== undefined}
+                                    onClick={() => void removeProfile(prof)}
+                                    aria-label={
+                                      prof.provider === 'chatgpt'
+                                        ? 'Remove ChatGPT profile locally'
+                                        : `Remove ${prof.name || prof.provider} profile`
+                                    }
+                                  >
+                                    ✕
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -1068,13 +1254,11 @@ export function JoyAgentSettingsDialog({
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-tag">
-                        {provider === 'joy-hosted'
-                          ? 'JOY Pro AI'
-                          : provider === 'kilo'
-                            ? 'Kilo Gateway'
-                            : provider === 'openrouter'
-                              ? 'OpenRouter'
-                              : 'Custom Endpoint'}
+                        {provider === ''
+                          ? 'No provider'
+                          : provider === 'openrouter'
+                            ? 'OpenRouter'
+                            : 'Custom Endpoint'}
                       </span>
                       <span className="joy-accordion-chevron">▾</span>
                     </div>
@@ -1082,6 +1266,10 @@ export function JoyAgentSettingsDialog({
 
                   {openAccordions['models-endpoint'] && (
                     <div className="joy-accordion-content">
+                      <ProviderSignInPanel
+                        onSignedIn={() => void loadProfiles()}
+                        onSaved={() => void loadProfiles()}
+                      />
                       <div className="joy-settings-form-grid">
                         <div className="joy-settings-field">
                           <label>
@@ -1089,20 +1277,62 @@ export function JoyAgentSettingsDialog({
                             <select
                               value={provider}
                               onChange={(e) =>
-                                handleProviderChange(
-                                  e.target.value as
-                                    'joy-hosted' | 'openrouter' | 'kilo' | 'openai-compatible',
-                                )
+                                handleProviderChange(e.target.value as DialogProvider)
                               }
                             >
+                              <option value="" disabled>
+                                Choose a provider
+                              </option>
                               <option value="openrouter">OpenRouter (BYOK)</option>
-                              <option value="kilo">Kilo Gateway (api.kilo.ai)</option>
+                              {/* The legacy Grok row uses xAI's API route, whose key entry lives in the xAI accordion.
+                                  Source: D22 step 2 brief (2026-10-30) and registry rows `grok`/`xai`. */}
+                              {PROVIDER_REGISTRY.filter(
+                                (item) =>
+                                  item.id !== 'openrouter' &&
+                                  item.id !== 'grok' &&
+                                  !SIGN_IN_PROVIDER_IDS.has(item.id) &&
+                                  item.signInOnly !== true,
+                              ).map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.label}
+                                </option>
+                              ))}
                               <option value="openai-compatible">
                                 Custom S3 / OpenAI Compatible
                               </option>
-                              <option value="joy-hosted">Joy Model (Built-in Pro AI)</option>
                             </select>
                           </label>
+                          {(findRegistryProvider(provider)?.regions.length ?? 0) > 1 && (
+                            <label>
+                              <span>Region</span>
+                              <select
+                                value={region}
+                                onChange={(e) => {
+                                  const next = findRegistryProvider(provider)?.regions.find(
+                                    (item) => item.id === e.target.value,
+                                  );
+                                  if (next === undefined) return;
+                                  clearTypedKey();
+                                  setRegion(next.id);
+                                  setBaseUrl(next.baseUrl);
+                                }}
+                              >
+                                {findRegistryProvider(provider)?.regions.map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                          {findRegistryProvider(provider) !== undefined && (
+                            <small>
+                              Get a key at{' '}
+                              {findRegistryProvider(provider)?.regions.find(
+                                (item) => item.id === region,
+                              )?.keyUrl ?? ''}
+                            </small>
+                          )}
                         </div>
 
                         <div className="joy-settings-field">
@@ -1110,7 +1340,7 @@ export function JoyAgentSettingsDialog({
                             <span>Connection Profile Name (Optional)</span>
                             <input
                               type="text"
-                              placeholder="e.g. My Kilo Fast, Local Ollama"
+                              placeholder="e.g. My OpenRouter, Local Ollama"
                               value={connectionName}
                               onChange={(e) => setConnectionName(e.target.value)}
                             />
@@ -1132,97 +1362,42 @@ export function JoyAgentSettingsDialog({
                           </label>
                         </div>
 
-                        {provider === 'joy-hosted' ? (
-                          <div className="joy-settings-field-full joy-settings-pro-card">
-                            <p style={{ margin: 0, fontSize: '13px', color: '#ffb020' }}>
-                              ⚡ Included with your active JOY Pro subscription.
-                            </p>
-                            <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#888' }}>
-                              Uses authenticated secure reverse-proxy via joyst.ir. No secret key
-                              required.
-                            </p>
-                            {typeof window !== 'undefined' &&
-                            !getStoredMediaToken(window.localStorage) ? (
-                              <div style={{ marginTop: '10px' }}>
-                                <button
-                                  type="button"
-                                  className="joy-settings-text-btn"
-                                  style={{
-                                    padding: '6px 12px',
-                                    background: 'linear-gradient(135deg, #00d2ff, #0077ff)',
-                                    border: 'none',
-                                    borderRadius: '6px',
-                                    color: '#ffffff',
-                                    fontSize: '12px',
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                  }}
-                                  onClick={() => setAccountModalOpen(true)}
-                                >
-                                  🔑 Sign In with JOY Account to Activate
-                                </button>
-                              </div>
-                            ) : (
-                              <p
-                                style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#10b981' }}
-                              >
-                                ✓ JOY Account session linked
-                              </p>
-                            )}
-                          </div>
-                        ) : studioPreset === 'dual-brain' && provider !== 'openai-compatible' ? (
-                          <div className="joy-settings-field-full joy-settings-field">
-                            <label>
-                              <span>OpenRouter API key</span>
-                              <input
-                                ref={openRouterKeyRef}
-                                type="password"
-                                autoComplete="off"
-                                spellCheck={false}
-                              />
-                            </label>
-                            <label>
-                              <span>Kilo API key</span>
-                              <input
-                                ref={kiloKeyRef}
-                                type="password"
-                                autoComplete="off"
-                                spellCheck={false}
-                              />
-                            </label>
-                            <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
-                              Each key is sent only to its matching provider.
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="joy-settings-field-full joy-settings-field">
-                            <label>
-                              <span>API Secret Key</span>
-                              <input
-                                ref={keyRef}
-                                type="password"
-                                placeholder={
-                                  hasSavedKey
-                                    ? '•••••••••••••••• (Leave blank to keep saved)'
-                                    : 'sk-...'
-                                }
-                                defaultValue=""
-                                autoComplete="off"
-                                spellCheck={false}
-                              />
-                            </label>
-                            {hasSavedKey && (
+                        <div className="joy-settings-field-full joy-settings-field">
+                          <label>
+                            <span>API Secret Key</span>
+                            <input
+                              ref={keyRef}
+                              type="password"
+                              placeholder={
+                                canUseStoredKey(matchedProfile)
+                                  ? '•••••••••••••••• (Leave blank to keep saved)'
+                                  : 'sk-...'
+                              }
+                              defaultValue=""
+                              autoComplete="off"
+                              spellCheck={false}
+                              onChange={(event) => {
+                                // The scope is the endpoint in force when the key was started. Later edits keep
+                                // it, so an endpoint edited in between cannot take the key over. An empty field
+                                // starts afresh.
+                                if (event.target.value === '') keyScopeRef.current = undefined;
+                                else if (keyScopeRef.current === undefined)
+                                  keyScopeRef.current = keyScopeFor(provider, baseUrl);
+                              }}
+                            />
+                          </label>
+                          {matchedProfile !== undefined &&
+                            matchedProfile.state !== 'credential-unavailable' && (
                               <span
                                 style={{ fontSize: '11px', color: '#10b981', marginTop: '2px' }}
                               >
                                 (Saved in desktop vault)
                               </span>
                             )}
-                            <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
-                              🔒 Keys are encrypted via Windows DPAPI and never logged or proxied.
-                            </span>
-                          </div>
-                        )}
+                          <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
+                            🔒 Keys are encrypted via Windows DPAPI and never logged or proxied.
+                          </span>
+                        </div>
 
                         {requiresCustomEndpointConsent(provider, baseUrl) && (
                           <div className="joy-settings-field-full joy-settings-field">
@@ -1246,26 +1421,12 @@ export function JoyAgentSettingsDialog({
                                   }
                                   if (checked) {
                                     const normalized = normalizeProviderBaseUrl(baseUrl);
-                                    const providerProfile = profiles.find(
-                                      (profile) =>
-                                        profile.provider ===
-                                          (provider === 'openai-compatible'
-                                            ? 'custom'
-                                            : provider) &&
-                                        normalizeProviderBaseUrl(profile.baseUrl) === normalized,
-                                    );
-                                    const exactProfile =
-                                      providerProfile ??
-                                      (savedProfile &&
-                                      savedProfile.provider ===
-                                        (provider === 'openai-compatible' ? 'custom' : provider) &&
-                                      normalizeProviderBaseUrl(savedProfile.baseUrl) === normalized
-                                        ? savedProfile
-                                        : undefined);
+                                    // The acknowledgement belongs to the saved profile the form chose, not to
+                                    // another profile that happens to share this endpoint.
                                     acknowledgeCustomEndpoint({
                                       provider: 'custom',
                                       baseUrl: normalized,
-                                      profileId: exactProfile?.id,
+                                      profileId: matchedProfile?.id,
                                     });
                                   }
                                 }}
@@ -1288,22 +1449,20 @@ export function JoyAgentSettingsDialog({
                               }}
                             >
                               <span>Model ID (User Editable)</span>
-                              {provider !== 'joy-hosted' && (
-                                <button
-                                  type="button"
-                                  className="joy-settings-text-btn"
-                                  onClick={() => {
-                                    toggleAccordion('models-drawer');
-                                    if (discoveredModels.length === 0) {
-                                      void discoverModels();
-                                    }
-                                  }}
-                                >
-                                  {openAccordions['models-drawer']
-                                    ? '▲ Hide Model Drawer'
-                                    : '⚡ Open Model Drawer ▾'}
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                className="joy-settings-text-btn"
+                                onClick={() => {
+                                  toggleAccordion('models-drawer');
+                                  if (discoveredModels.length === 0) {
+                                    void discoverModels();
+                                  }
+                                }}
+                              >
+                                {openAccordions['models-drawer']
+                                  ? '▲ Hide Model Drawer'
+                                  : '⚡ Open Model Drawer ▾'}
+                              </button>
                             </div>
                             <div className="joy-settings-input-with-action">
                               <input
@@ -1313,17 +1472,15 @@ export function JoyAgentSettingsDialog({
                                 value={modelId}
                                 onChange={(e) => setModelId(e.target.value)}
                               />
-                              {provider !== 'joy-hosted' && (
-                                <button
-                                  type="button"
-                                  className="joy-btn-secondary"
-                                  onClick={() => void discoverModels()}
-                                  disabled={isDiscovering || working}
-                                  title="Discover models behind API endpoint"
-                                >
-                                  {isDiscovering ? '🔍 Scanning…' : '🔍 Discover Models'}
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                className="joy-btn-secondary"
+                                onClick={() => void discoverModels()}
+                                disabled={isDiscovering || working}
+                                title="Discover models behind API endpoint"
+                              >
+                                {isDiscovering ? '🔍 Scanning…' : '🔍 Discover Models'}
+                              </button>
                             </div>
                           </label>
                         </div>
@@ -1366,142 +1523,126 @@ export function JoyAgentSettingsDialog({
                 </div>
 
                 {/* ACCORDION 2: Discovered Models Palette / Selection Drawer */}
-                {provider !== 'joy-hosted' && (
-                  <div
-                    className={`joy-accordion-item joy-model-drawer-item ${openAccordions['models-drawer'] ? 'is-open' : ''}`}
+                <div
+                  className={`joy-accordion-item joy-model-drawer-item ${openAccordions['models-drawer'] ? 'is-open' : ''}`}
+                >
+                  <button
+                    type="button"
+                    className="joy-accordion-trigger"
+                    onClick={() => toggleAccordion('models-drawer')}
+                    aria-expanded={openAccordions['models-drawer']}
                   >
-                    <button
-                      type="button"
-                      className="joy-accordion-trigger"
-                      onClick={() => toggleAccordion('models-drawer')}
-                      aria-expanded={openAccordions['models-drawer']}
-                    >
-                      <div className="joy-accordion-trigger-title">
-                        <span className="joy-accordion-icon">🎨</span>
-                        <span>Discovered Models Drawer</span>
-                      </div>
-                      <div className="joy-accordion-trigger-meta">
-                        {discoveredModels.length > 0 ? (
-                          <span className="joy-accordion-tag is-success">
-                            ✓ {discoveredModels.length} Models Ready
-                          </span>
-                        ) : (
-                          <span className="joy-accordion-tag">Click to Resolve</span>
-                        )}
-                        <span className="joy-accordion-chevron">▾</span>
-                      </div>
-                    </button>
+                    <div className="joy-accordion-trigger-title">
+                      <span className="joy-accordion-icon">🎨</span>
+                      <span>Discovered Models Drawer</span>
+                    </div>
+                    <div className="joy-accordion-trigger-meta">
+                      {discoveredModels.length > 0 ? (
+                        <span className="joy-accordion-tag is-success">
+                          ✓ {discoveredModels.length} Models Ready
+                        </span>
+                      ) : (
+                        <span className="joy-accordion-tag">Click to Resolve</span>
+                      )}
+                      <span className="joy-accordion-chevron">▾</span>
+                    </div>
+                  </button>
 
-                    {openAccordions['models-drawer'] && (
-                      <div className="joy-accordion-content joy-model-drawer-content">
-                        <div className="joy-model-drawer-header">
-                          <p className="joy-model-drawer-hint">
-                            Select a discovered model chip to populate the Model ID, or filter by
-                            keyword:
-                          </p>
-                          <div style={{ display: 'flex', gap: '8px' }}>
+                  {openAccordions['models-drawer'] && (
+                    <div className="joy-accordion-content joy-model-drawer-content">
+                      <div className="joy-model-drawer-header">
+                        <p className="joy-model-drawer-hint">
+                          Select a discovered model chip to populate the Model ID, or filter by
+                          keyword:
+                        </p>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            type="button"
+                            className="joy-btn-secondary joy-btn-sm"
+                            onClick={() => void discoverModels()}
+                            disabled={isDiscovering || working}
+                          >
+                            {isDiscovering ? 'Refreshing…' : '🔄 Refresh Models'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {discoveryError && (
+                        <div
+                          className="joy-settings-notice is-error"
+                          style={{ marginBottom: '10px' }}
+                        >
+                          {discoveryError}
+                        </div>
+                      )}
+
+                      <div className="joy-model-drawer-search">
+                        <input
+                          type="text"
+                          placeholder="Filter models (e.g. free, sonnet, 4o)..."
+                          value={modelFilter}
+                          onChange={(e) => setModelFilter(e.target.value)}
+                        />
+                      </div>
+
+                      {/* Quick Filter Tag Buttons */}
+                      <div className="joy-model-drawer-tags">
+                        <button
+                          type="button"
+                          className={`joy-model-tag ${modelFilter === '' ? 'is-active' : ''}`}
+                          onClick={() => setModelFilter('')}
+                        >
+                          All
+                        </button>
+                        <button
+                          type="button"
+                          className={`joy-model-tag ${modelFilter === 'free' ? 'is-active' : ''}`}
+                          onClick={() => setModelFilter('free')}
+                        >
+                          Free
+                        </button>
+                        <button
+                          type="button"
+                          className={`joy-model-tag ${modelFilter === 'claude' ? 'is-active' : ''}`}
+                          onClick={() => setModelFilter('claude')}
+                        >
+                          Claude
+                        </button>
+                        <button
+                          type="button"
+                          className={`joy-model-tag ${modelFilter === 'gpt' ? 'is-active' : ''}`}
+                          onClick={() => setModelFilter('gpt')}
+                        >
+                          GPT
+                        </button>
+                      </div>
+
+                      {/* Interactive Model Chips Grid */}
+                      <div className="joy-settings-model-chips">
+                        {filteredDiscoveredModels.length > 0 ? (
+                          filteredDiscoveredModels.slice(0, 80).map((m) => (
                             <button
+                              key={m}
                               type="button"
-                              className="joy-btn-secondary joy-btn-sm"
-                              onClick={() => void discoverModels()}
-                              disabled={isDiscovering || working}
+                              className={`joy-settings-model-chip ${modelId === m ? 'is-selected' : ''}`}
+                              onClick={() => setModelId(m)}
                             >
-                              {isDiscovering ? 'Refreshing…' : '🔄 Refresh Models'}
+                              {m}
                             </button>
-                          </div>
-                        </div>
-
-                        {discoveryError && (
-                          <div
-                            className="joy-settings-notice is-error"
-                            style={{ marginBottom: '10px' }}
-                          >
-                            {discoveryError}
+                          ))
+                        ) : (
+                          <div className="joy-model-drawer-empty">
+                            {isDiscovering
+                              ? 'Scanning endpoint for available models...'
+                              : discoveredModels.length === 0
+                                ? 'No models discovered yet. Enter Base URL and API Key above, then click "Discover Models".'
+                                : 'No models matching current filter.'}
                           </div>
                         )}
-
-                        <div className="joy-model-drawer-search">
-                          <input
-                            type="text"
-                            placeholder="Filter models (e.g. minimax, efficient, free, sonnet, 4o)..."
-                            value={modelFilter}
-                            onChange={(e) => setModelFilter(e.target.value)}
-                          />
-                        </div>
-
-                        {/* Quick Filter Tag Buttons */}
-                        <div className="joy-model-drawer-tags">
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === '' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('')}
-                          >
-                            All
-                          </button>
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === 'minimax' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('minimax')}
-                          >
-                            MiniMax / M3
-                          </button>
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === 'efficient' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('efficient')}
-                          >
-                            Efficient
-                          </button>
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === 'free' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('free')}
-                          >
-                            Free
-                          </button>
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === 'claude' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('claude')}
-                          >
-                            Claude
-                          </button>
-                          <button
-                            type="button"
-                            className={`joy-model-tag ${modelFilter === 'gpt' ? 'is-active' : ''}`}
-                            onClick={() => setModelFilter('gpt')}
-                          >
-                            GPT
-                          </button>
-                        </div>
-
-                        {/* Interactive Model Chips Grid */}
-                        <div className="joy-settings-model-chips">
-                          {filteredDiscoveredModels.length > 0 ? (
-                            filteredDiscoveredModels.slice(0, 80).map((m) => (
-                              <button
-                                key={m}
-                                type="button"
-                                className={`joy-settings-model-chip ${modelId === m ? 'is-selected' : ''}`}
-                                onClick={() => setModelId(m)}
-                              >
-                                {m}
-                              </button>
-                            ))
-                          ) : (
-                            <div className="joy-model-drawer-empty">
-                              {isDiscovering
-                                ? 'Scanning endpoint for available models...'
-                                : discoveredModels.length === 0
-                                  ? 'No models discovered yet. Enter Base URL and API Key above, then click "Discover Models".'
-                                  : 'No models matching current filter.'}
-                            </div>
-                          )}
-                        </div>
                       </div>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  )}
+                </div>
 
                 {/* ACCORDION 3: Synthetic Media Capability Diagnostics */}
                 <div
@@ -1927,16 +2068,6 @@ export function JoyAgentSettingsDialog({
           </button>
         </footer>
       </section>
-      <DesktopAccountModal
-        isOpen={accountModalOpen}
-        onClose={() => setAccountModalOpen(false)}
-        onSuccess={() => {
-          setConnectionNotice({
-            kind: 'info',
-            message: 'JOY Account linked successfully! Joy Model is now ready to use.',
-          });
-        }}
-      />
     </div>
   );
 }

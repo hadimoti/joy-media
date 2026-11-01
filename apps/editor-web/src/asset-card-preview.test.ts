@@ -1,15 +1,18 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { resolveAssetThumb, type AssetThumbResult } from './asset-card-preview.js';
 import type { BrowserAsset, BrowserDerivative } from './control-plane-client.js';
 import type { AuthorizedDerivativeResolver } from './asset-resolver.js';
 import type { OpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 
+const previewSource = readFileSync(new URL('./asset-card-preview.ts', import.meta.url), 'utf8');
+
 /**
  * Regression guard for JOY-002: asset preview buttons were `disabled` for any
  * asset without a formal derivative, and `openPreview` required a derivative —
- * so cloud-only / OPFS-only images could never be previewed. `resolveAssetThumb`
- * must fall back across derivative -> OPFS original -> shared cloud original and
- * return `none` (not throw) when nothing is available.
+ * so locally imported / OPFS-only images could never be previewed.
+ * `resolveAssetThumb` must fall back from derivatives to the OPFS original and
+ * return `none` (not throw) when nothing local is available.
  */
 const IMAGE: BrowserAsset = {
   id: 'img-1',
@@ -57,6 +60,12 @@ function fakeOriginal(blob: Blob | undefined): OpfsOriginalAssetCache {
 }
 
 describe('resolveAssetThumb fallback chain', () => {
+  it('keeps card preview resolution local to derivatives and OPFS originals', () => {
+    expect(previewSource).not.toContain('fetchCloudOriginal');
+    expect(previewSource).not.toContain('cloudBacked');
+    expect(previewSource).not.toContain("source: 'cloud'");
+  });
+
   it('uses the derivative when it resolves available-local', async () => {
     const resolver = fakeResolver({
       state: 'available-local',
@@ -69,7 +78,6 @@ describe('resolveAssetThumb fallback chain', () => {
       projectId: 'prj-1',
       resolver,
       originalCache: fakeOriginal(undefined),
-      fetchCloudOriginal: vi.fn(),
     });
     expect(result.source).toBe('derivative');
     expect(result.url).toBe('blob:dv');
@@ -84,84 +92,20 @@ describe('resolveAssetThumb fallback chain', () => {
       projectId: 'prj-1',
       resolver: fakeResolver({ state: 'unavailable' }),
       originalCache: fakeOriginal(original),
-      fetchCloudOriginal: vi.fn(),
     });
     expect(result.source).toBe('opfs');
-    expect(result.hasOpfsOriginal).toBe(true);
   });
 
-  it('falls back to the shared cloud original for a cloud-backed image when nothing local exists', async () => {
-    const result = await resolveAssetThumb({
-      asset: { ...IMAGE, cloudBacked: true },
-      derivatives: [],
-      projectId: 'prj-1',
-      resolver: fakeResolver({ state: 'unavailable' }),
-      originalCache: fakeOriginal(undefined),
-      fetchCloudOriginal: vi.fn().mockResolvedValue(new Blob([], { type: 'image/png' })),
-    });
-    expect(result.source).toBe('cloud');
-  });
-
-  it('keeps a GIF image descriptor when cloud storage reports a generic MIME type', async () => {
-    const gif = {
-      ...IMAGE,
-      id: 'gif-1',
-      displayName: 'animated.gif',
-      descriptor: { mimeType: 'image/gif' },
-      cloudBacked: true,
-    };
-    const result = await resolveAssetThumb({
-      asset: gif,
-      derivatives: [],
-      projectId: 'prj-1',
-      resolver: fakeResolver({ state: 'unavailable' }),
-      originalCache: fakeOriginal(undefined),
-      fetchCloudOriginal: vi
-        .fn()
-        .mockResolvedValue(new Blob([], { type: 'application/octet-stream' })),
-    });
-    expect(result).toMatchObject({ source: 'cloud', mimeType: 'image/gif' });
-  });
-
-  it('falls back to the shared cloud original for cloud-backed videos when nothing local exists', async () => {
-    const result = await resolveAssetThumb({
-      asset: { ...VIDEO, cloudBacked: true },
-      derivatives: [],
-      projectId: 'prj-1',
-      resolver: fakeResolver({ state: 'unavailable' }),
-      originalCache: fakeOriginal(undefined),
-      fetchCloudOriginal: vi.fn().mockResolvedValue(new Blob([], { type: 'video/mp4' })),
-    });
-    expect(result.source).toBe('cloud');
-    expect(result.mimeType).toBe('video/mp4');
-  });
-
-  it('returns none (no throw) when no source is available', async () => {
+  it('returns none when no local source is available', async () => {
     const result = await resolveAssetThumb({
       asset: IMAGE,
       derivatives: [],
       projectId: 'prj-1',
       resolver: fakeResolver({ state: 'unavailable' }),
       originalCache: fakeOriginal(undefined),
-      fetchCloudOriginal: vi.fn().mockRejectedValue(new Error('unreachable')),
     });
     expect(result.source).toBe('none');
     expect(result.url).toBeUndefined();
-  });
-
-  it('does not probe remote storage for an asset that is not cloud-backed', async () => {
-    const fetchCloudOriginal = vi.fn();
-    await expect(
-      resolveAssetThumb({
-        asset: IMAGE,
-        derivatives: [],
-        projectId: 'prj-1',
-        resolver: fakeResolver({ state: 'unavailable' }),
-        originalCache: fakeOriginal(undefined),
-        fetchCloudOriginal,
-      }),
-    ).resolves.toMatchObject({ source: 'none' });
-    expect(fetchCloudOriginal).not.toHaveBeenCalled();
   });
 
   it('falls back to OPFS original when the derivative resolver throws', async () => {
@@ -173,7 +117,6 @@ describe('resolveAssetThumb fallback chain', () => {
       projectId: 'prj-1',
       resolver,
       originalCache: fakeOriginal(original),
-      fetchCloudOriginal: vi.fn(),
     });
     expect(result.source).toBe('opfs');
   });

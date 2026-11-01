@@ -3,18 +3,19 @@ param(
     [string]$ApiUrl,
     [string]$StatePath,
     [string]$WorkerExecutable,
-    [string]$WorkerPipe,
-    [switch]$TestMode
+    [string]$WorkerPipe
 )
 
 $ErrorActionPreference = 'Stop'
 
+# No remote default: the desktop app supplies the loopback job API address (PLAN-v4 D19).
+if ([string]::IsNullOrWhiteSpace($ApiUrl)) { $ApiUrl = $env:JOY_MEDIA_API_URL }
 if ([string]::IsNullOrWhiteSpace($ApiUrl)) {
-    $ApiUrl = if ([string]::IsNullOrWhiteSpace($env:JOY_MEDIA_API_URL)) {
-        'https://joyst.ir/api'
-    } else {
-        $env:JOY_MEDIA_API_URL
-    }
+    throw 'JOY_MEDIA_API_URL is required: set it to http://127.0.0.1:<port> from the JOY Media desktop app.'
+}
+$loopbackApi = [regex]::Match($ApiUrl, '^http://127\.0\.0\.1:([1-9][0-9]{0,4})/?$')
+if (-not $loopbackApi.Success -or [int]$loopbackApi.Groups[1].Value -gt 65535) {
+    throw 'JOY_MEDIA_API_URL must be http://127.0.0.1:<port>; remote addresses are refused.'
 }
 
 if ([string]::IsNullOrWhiteSpace($StatePath)) {
@@ -23,15 +24,6 @@ if ([string]::IsNullOrWhiteSpace($StatePath)) {
     } else {
         $env:JOY_MEDIA_WORKER_STATE_PATH
     }
-}
-
-$parsedApiUrl = [Uri]$ApiUrl
-$localTestApi =
-    $parsedApiUrl.Scheme -eq 'http' -and
-    @('127.0.0.1', 'localhost', '::1') -contains $parsedApiUrl.DnsSafeHost -and
-    ($TestMode.IsPresent -or $env:JOY_MEDIA_WORKER_TEST_MODE -eq '1')
-if (($parsedApiUrl.Scheme -ne 'https' -and -not $localTestApi) -or [string]::IsNullOrWhiteSpace($parsedApiUrl.Host)) {
-    throw 'ApiUrl must be an HTTPS URL.'
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -51,7 +43,6 @@ New-Item -ItemType Directory -Force -Path $stateDirectory, (Split-Path -Parent $
 $env:JOY_MEDIA_API_URL = $ApiUrl
 $env:JOY_MEDIA_WORKER_STATE_PATH = $StatePath
 $env:JOY_MEDIA_WORKER_ROOT = $repoRoot
-if ($localTestApi) { $env:JOY_MEDIA_WORKER_TEST_MODE = '1' }
 if (-not [string]::IsNullOrWhiteSpace($WorkerPipe)) { $env:JOY_MEDIA_WORKER_PIPE = $WorkerPipe }
 Set-Location -LiteralPath $repoRoot
 

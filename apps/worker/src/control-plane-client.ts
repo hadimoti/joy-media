@@ -1,10 +1,8 @@
-import { randomBytes } from 'node:crypto';
 import type { DeviceIdentity } from './runtime.js';
 import type { GpuPreviewFrameRequest, GpuPreviewFrameResponse } from '@joy-media/job-protocol';
 
 export interface WorkerSessionStore {
   loadWorkerSession(): string | undefined;
-  saveWorkerSession(sessionToken: string): void;
   clearWorkerSession(): void;
 }
 
@@ -28,8 +26,7 @@ export interface WorkerJobResult {
     | 'mask.image'
     | 'mask.video'
     | 'text'
-    | 'image'
-    | 'video';
+    | 'image';
   readonly assetId?: string;
   readonly sha256?: string;
   readonly bytes?: number;
@@ -57,9 +54,9 @@ export interface WorkerControlPlaneClientOptions {
 }
 
 /**
- * Signals that the persisted Worker session is no longer usable. The daemon
- * must stop so its supervisor can restart it through the pairing flow instead
- * of polling forever with an empty session.
+ * Signals that the Worker's session token was refused. The daemon must stop, so
+ * the desktop app's supervisor can start it again with a fresh token instead of
+ * polling forever with a rejected one.
  */
 export class WorkerSessionExpiredError extends Error {
   constructor() {
@@ -79,6 +76,12 @@ export class WorkerRequestTimeoutError extends Error {
   }
 }
 
+/**
+ * The desktop allows a chat reply 120 s (the broker's own limit). The Worker waits a little longer, so
+ * the desktop's timeout is the one that is reported, and the provider call is not left running.
+ */
+const AI_COMPLETE_TIMEOUT_MS = 130_000;
+
 /** Outbound-only Worker client. It never holds a JOY user session or password. */
 export class WorkerControlPlaneClient {
   readonly #fetch: typeof fetch;
@@ -90,33 +93,6 @@ export class WorkerControlPlaneClient {
     if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs < 100 || requestTimeoutMs > 120_000)
       throw new Error('Worker request timeout must be between 100ms and 120000ms');
     this.#requestTimeoutMs = Math.round(requestTimeoutMs);
-  }
-
-  static createPairingCode(): string {
-    return randomBytes(24).toString('base64url');
-  }
-
-  async publishPairingOffer(pairingCode: string): Promise<number> {
-    const result = await this.request('/v1/worker-pair/offers', {
-      workerId: this.options.identity.workerId,
-      pairingCode,
-    });
-    return requiredNumber(result, 'expiresAt');
-  }
-
-  /** Returns undefined until the signed-in JOY user approves the pairing code. */
-  async claimPairing(pairingCode: string): Promise<boolean> {
-    const response = await this.request(
-      '/v1/worker-pair/claim',
-      {
-        workerId: this.options.identity.workerId,
-        pairingCode,
-      },
-      false,
-    );
-    if (response === undefined) return false;
-    this.options.sessionStore.saveWorkerSession(requiredString(response, 'sessionToken'));
-    return true;
   }
 
   async lease(durationMs = 30_000): Promise<LeasedJob | undefined> {
@@ -269,6 +245,28 @@ export class WorkerControlPlaneClient {
     if (!response.ok) throw new Error(`Worker derivative upload failed (${response.status})`);
   }
 
+  /**
+   * One AI completion on a job this Worker holds (PLAN-v4 §6b). The desktop takes the profile from
+   * the job and returns only the reply text, so this Worker never sees a key, a URL or a profile.
+   */
+  async completeAi(
+    jobId: string,
+    leaseToken: string,
+    input: {
+      readonly messages: readonly unknown[];
+      readonly params?: Readonly<Record<string, unknown>>;
+    },
+  ): Promise<string> {
+    const result = await this.authenticatedRequest(
+      `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/ai/complete`,
+      { jobId, leaseToken, messages: input.messages, params: input.params ?? {} },
+      AI_COMPLETE_TIMEOUT_MS,
+    );
+    const text = isRecord(result) ? result['text'] : undefined;
+    if (typeof text !== 'string') throw new Error('The desktop returned an unreadable AI reply');
+    return text;
+  }
+
   async fail(jobId: string, error: string, leaseToken?: string): Promise<void> {
     await this.authenticatedRequest(
       `/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/fail`,
@@ -279,10 +277,11 @@ export class WorkerControlPlaneClient {
   private async authenticatedRequest(
     pathname: string,
     body: Record<string, unknown>,
+    timeoutMs?: number,
   ): Promise<unknown> {
     const sessionToken = this.options.sessionStore.loadWorkerSession();
     if (sessionToken === undefined) throw new Error('Worker is not paired');
-    const response = await this.fetchJson(pathname, body, sessionToken);
+    const response = await this.fetchJson(pathname, body, sessionToken, timeoutMs);
     if (response.status === 401) {
       this.options.sessionStore.clearWorkerSession();
       throw new WorkerSessionExpiredError();
@@ -308,6 +307,7 @@ export class WorkerControlPlaneClient {
     pathname: string,
     body: Record<string, unknown>,
     sessionToken?: string,
+    timeoutMs?: number,
   ): Promise<{ readonly ok: boolean; readonly status: number; readonly body: unknown }> {
     const url = `${this.options.apiUrl.replace(/\/$/, '')}${pathname}`;
     const responseBody = await this.runTimedRequest(
@@ -333,6 +333,7 @@ export class WorkerControlPlaneClient {
         }
         return { response: result, raw: await result.text() };
       },
+      timeoutMs,
     );
     const response = responseBody.response;
     // Authentication failures are actionable even when an upstream proxy
@@ -359,8 +360,10 @@ export class WorkerControlPlaneClient {
     input: RequestInfo | URL,
     init: RequestInit | undefined,
     consume: (response: Response) => Promise<T>,
+    timeoutMs?: number,
   ): Promise<T> {
     const url = String(input);
+    const deadlineMs = timeoutMs ?? this.#requestTimeoutMs;
     const controller = new AbortController();
     const callerSignal = init?.signal ?? undefined;
     const abortFromCaller = (): void => controller.abort();
@@ -372,9 +375,9 @@ export class WorkerControlPlaneClient {
     try {
       const timeout = new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(() => {
-          reject(new WorkerRequestTimeoutError(url, this.#requestTimeoutMs));
+          reject(new WorkerRequestTimeoutError(url, deadlineMs));
           controller.abort();
-        }, this.#requestTimeoutMs);
+        }, deadlineMs);
       });
       return await Promise.race([
         this.#fetch(input, { ...init, signal: controller.signal }).then(consume),
@@ -389,12 +392,6 @@ export class WorkerControlPlaneClient {
 
 function requiredString(value: unknown, field: string): string {
   if (!isRecord(value) || typeof value[field] !== 'string')
-    throw new Error(`Invalid Worker response: ${field}`);
-  return value[field];
-}
-
-function requiredNumber(value: unknown, field: string): number {
-  if (!isRecord(value) || typeof value[field] !== 'number')
     throw new Error(`Invalid Worker response: ${field}`);
   return value[field];
 }

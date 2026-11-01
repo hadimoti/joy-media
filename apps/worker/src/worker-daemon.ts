@@ -119,8 +119,8 @@ export class WorkerDaemon {
       } catch (error) {
         // A revoked/expired session cannot recover through the current loop:
         // the session store has already been cleared by the client, so keep
-        // polling would only produce an endless "not paired" loop. Exit and
-        // let the service supervisor restart through the pairing flow.
+        // polling would only produce an endless "not authorized" loop. Exit so
+        // the desktop app's supervisor can start the Worker again with a fresh token.
         if (error instanceof WorkerSessionExpiredError) throw error;
         const message = error instanceof Error ? error.message : 'unknown Worker failure';
         this.runtime.log.write(`Worker job failed: ${message.slice(0, 240)}`);

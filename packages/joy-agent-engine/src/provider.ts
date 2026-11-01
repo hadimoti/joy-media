@@ -1,6 +1,15 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { LanguageModel } from 'ai';
-import type { ByokSessionConfig, ByokSessionStatus } from './provider-config.js';
+import { createChatGptResponsesFetch } from './chatgpt-responses.js';
+import {
+  createAnthropicMessagesFetch,
+  transformAnthropicRequestBody,
+} from './anthropic-messages.js';
+import {
+  ProviderConfigError,
+  type ByokSessionConfig,
+  type ByokSessionStatus,
+} from './provider-config.js';
 import { safeByokSessionStatus } from './provider-config.js';
 
 export const DEFAULT_PROVIDER_RESPONSE_BYTES = 2_097_152;
@@ -83,15 +92,47 @@ export function createJoyAgentProvider(
   config: ByokSessionConfig,
   fetchImpl?: JoyFetch,
 ): { readonly model: LanguageModel; readonly status: ByokSessionStatus } {
+  const hardenedFetch = createHardenedFetch(config.baseUrl, fetchImpl);
+  const isAnthropic = config.provider === 'anthropic-messages';
+  const apiKey = 'apiKey' in config ? config.apiKey : undefined;
+  if (isAnthropic && apiKey === undefined) throw new ProviderConfigError();
+  let providerFetch: JoyFetch;
+  if (config.provider === 'chatgpt-responses') {
+    if (config.auth?.kind !== 'bearer-token') throw new ProviderConfigError();
+    providerFetch = createChatGptResponsesFetch({
+      accessToken: config.auth.token,
+      modelId: config.modelId,
+      fetch: hardenedFetch,
+    });
+  } else if (isAnthropic) {
+    providerFetch = createAnthropicMessagesFetch(
+      { baseUrl: config.baseUrl, modelId: config.modelId, apiKey: apiKey! },
+      hardenedFetch,
+    );
+  } else {
+    providerFetch = hardenedFetch;
+  }
   const provider = createOpenAICompatible({
     name: 'joy-byok',
     baseURL: config.baseUrl,
-    apiKey: config.apiKey,
-    fetch: createHardenedFetch(config.baseUrl, fetchImpl),
+    ...(!isAnthropic && apiKey !== undefined ? { apiKey } : {}),
+    ...(config.auth?.kind === 'bearer-token'
+      ? { headers: { Authorization: `Bearer ${config.auth.token}` } }
+      : {}),
+    fetch: providerFetch,
     includeUsage: true,
+    ...(isAnthropic
+      ? { transformRequestBody: transformAnthropicRequestBody }
+      : config.provider === 'openai-compatible' && config.thinkingMode === 'disabled'
+        ? { transformRequestBody: transformThinkingOffRequestBody }
+        : {}),
   });
   return {
     model: provider(config.modelId),
     status: safeByokSessionStatus(config),
   };
+}
+
+function transformThinkingOffRequestBody(input: Record<string, unknown>): Record<string, unknown> {
+  return { ...input, thinking: { type: 'disabled' } };
 }

@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  checkForDesktopUpdate,
   getDesktopWorkerStatus,
+  retryDesktopWorker,
   isDesktopHost,
   selectDesktopFile,
   saveDesktopProviderProfile,
   listDesktopProviderProfiles,
   deleteDesktopProviderProfile,
-  beginDesktopProviderSession,
+  requestAgentCompletion,
   testDesktopProviderProfile,
   getDesktopAssetLibrarySettings,
   setDesktopAssetLibraryDirectory,
@@ -16,7 +16,6 @@ import {
   resetDesktopAssetLibraryDirectory,
   getDesktopAssetLibraryCatalog,
   resolveDesktopAssetUrl,
-  type DesktopUpdateCheckRequest,
   type SaveDesktopProviderProfileRequest,
   type DesktopProviderProfile,
 } from './desktop-client.js';
@@ -57,6 +56,22 @@ describe('getDesktopWorkerStatus', () => {
   });
 });
 
+describe('retryDesktopWorker', () => {
+  it('invokes desktop.worker-retry with no payload and returns the status it reports', async () => {
+    const status = {
+      connection: 'starting' as const,
+      capabilities: [],
+      lastError: 'Worker exited with code 137',
+    };
+    const invoke = vi.fn().mockResolvedValue(status);
+    window.joyDesktop = { channels: ['desktop.worker-retry'], invoke };
+
+    await expect(retryDesktopWorker()).resolves.toEqual(status);
+    expect(invoke).toHaveBeenCalledWith('desktop.worker-retry');
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('selectDesktopFile', () => {
   it('rejects outside the desktop host', async () => {
     await expect(selectDesktopFile()).rejects.toThrow('unavailable outside the desktop host');
@@ -76,36 +91,6 @@ describe('selectDesktopFile', () => {
     window.joyDesktop = { channels: ['desktop.select-file'], invoke };
 
     await expect(selectDesktopFile()).resolves.toBeUndefined();
-  });
-});
-
-describe('checkForDesktopUpdate', () => {
-  const request: DesktopUpdateCheckRequest = {
-    manifest: {
-      payload: {
-        channel: 'stable',
-        version: '1.2.3',
-        downloadUrl: 'https://joyst.ir/releases/1.2.3.exe',
-        sha256: 'a'.repeat(64),
-      },
-      signature: 'sig',
-    },
-    subscriptionActive: true,
-  };
-
-  it('rejects outside the desktop host', async () => {
-    await expect(checkForDesktopUpdate(request)).rejects.toThrow(
-      'unavailable outside the desktop host',
-    );
-  });
-
-  it('forwards the manifest and subscription flag to desktop.check-for-update', async () => {
-    const decision = { status: 'current' as const, reason: 'not-newer' as const };
-    const invoke = vi.fn().mockResolvedValue(decision);
-    window.joyDesktop = { channels: ['desktop.check-for-update'], invoke };
-
-    await expect(checkForDesktopUpdate(request)).resolves.toEqual(decision);
-    expect(invoke).toHaveBeenCalledWith('desktop.check-for-update', request);
   });
 });
 
@@ -182,28 +167,6 @@ describe('deleteDesktopProviderProfile', () => {
   });
 });
 
-describe('beginDesktopProviderSession', () => {
-  it('rejects outside the desktop host', async () => {
-    await expect(beginDesktopProviderSession('prof-1')).rejects.toThrow(
-      'unavailable outside the desktop host',
-    );
-  });
-
-  it('invokes desktop.provider-profile.begin-session with the profile id and returns session config', async () => {
-    const sessionData = {
-      provider: 'openrouter',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      modelId: 'anthropic/claude-3.5-sonnet',
-      apiKey: 'sk-or-session-key',
-    };
-    const invoke = vi.fn().mockResolvedValue(sessionData);
-    window.joyDesktop = { channels: ['desktop.provider-profile.begin-session'], invoke };
-
-    await expect(beginDesktopProviderSession('prof-1')).resolves.toEqual(sessionData);
-    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.begin-session', { id: 'prof-1' });
-  });
-});
-
 describe('testDesktopProviderProfile', () => {
   it('rejects outside the desktop host', async () => {
     await expect(testDesktopProviderProfile('prof-1')).rejects.toThrow(
@@ -211,17 +174,17 @@ describe('testDesktopProviderProfile', () => {
     );
   });
 
-  it('invokes desktop.provider-profile.test with the profile id and returns the probe report', async () => {
+  it('invokes desktop.provider.test with the profile id and returns the probe report', async () => {
     const probeReport = {
       modelId: 'anthropic/claude-3.5-sonnet',
       capability: 'tool-loop',
       status: 'ok',
     };
     const invoke = vi.fn().mockResolvedValue(probeReport);
-    window.joyDesktop = { channels: ['desktop.provider-profile.test'], invoke };
+    window.joyDesktop = { channels: ['desktop.provider.test'], invoke };
 
     await expect(testDesktopProviderProfile('prof-1')).resolves.toEqual(probeReport);
-    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.test', { id: 'prof-1' });
+    expect(invoke).toHaveBeenCalledWith('desktop.provider.test', { id: 'prof-1' });
   });
 });
 
@@ -305,5 +268,130 @@ describe('asset library helpers', () => {
     expect(resolveDesktopAssetUrl('joy-asset://library/audio/test.wav')).toBe(
       'joy-asset://library/audio/test.wav',
     );
+  });
+});
+
+describe('requestAgentCompletion', () => {
+  const request = {
+    profileId: 'prof-1',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    modelId: 'openai/gpt-4o-mini',
+    body: { messages: [{ role: 'user', content: 'hi' }] },
+  };
+
+  it('sends the request to the broker and returns the reply text', async () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true, text: '{"choices":[]}' });
+    window.joyDesktop = { channels: ['desktop.agent.request'], invoke };
+
+    await expect(requestAgentCompletion(request)).resolves.toBe('{"choices":[]}');
+    expect(invoke).toHaveBeenCalledWith('desktop.agent.request', {
+      ...request,
+      requestId: expect.stringMatching(/^agent-[0-9a-f-]{36}$/),
+    });
+  });
+
+  it('rejects with the broker code and message when the broker refuses', async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      ok: false,
+      code: 'BINDING_MISMATCH',
+      message: 'Save this profile again to confirm its endpoint.',
+    });
+    window.joyDesktop = { channels: ['desktop.agent.request'], invoke };
+
+    await expect(requestAgentCompletion(request)).rejects.toMatchObject({
+      code: 'BINDING_MISMATCH',
+      message: 'Save this profile again to confirm its endpoint.',
+    });
+  });
+
+  it('refuses outside the desktop host without sending anything', async () => {
+    delete (window as { joyDesktop?: unknown }).joyDesktop;
+
+    await expect(requestAgentCompletion(request)).rejects.toThrow(
+      'unavailable outside the desktop host',
+    );
+  });
+
+  it('cancels the desktop call when the caller aborts, and sends no signal across the bridge', async () => {
+    let finish: ((reply: unknown) => void) | undefined;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.agent.request') {
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      }
+      if (channel === 'desktop.agent.cancel') {
+        // The desktop answers a cancelled call promptly, as the broker does.
+        finish?.({ ok: false, code: 'NETWORK_ERROR', message: 'The request was cancelled.' });
+      }
+      return undefined;
+    });
+    window.joyDesktop = { channels: ['desktop.agent.request', 'desktop.agent.cancel'], invoke };
+    const controller = new AbortController();
+
+    const pending = requestAgentCompletion({ ...request, signal: controller.signal });
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('desktop.agent.request', expect.anything()),
+    );
+    const sent = invoke.mock.calls.find(
+      ([channel]) => channel === 'desktop.agent.request',
+    )?.[1] as {
+      requestId: string;
+    };
+    expect(sent).not.toHaveProperty('signal');
+    controller.abort();
+
+    expect(invoke).toHaveBeenCalledWith('desktop.agent.cancel', { requestId: sent.requestId });
+    await expect(pending).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+  });
+
+  it('gives every call its own request id, so an old page cannot match a new call', async () => {
+    const invoke = vi.fn().mockResolvedValue({ ok: true, text: '{"choices":[]}' });
+    window.joyDesktop = { channels: ['desktop.agent.request'], invoke };
+
+    await requestAgentCompletion(request);
+    await requestAgentCompletion(request);
+
+    const ids = invoke.mock.calls.map(
+      ([, payload]) => (payload as { requestId: string }).requestId,
+    );
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('does not return a reply that arrives after the caller aborted', async () => {
+    let reply: ((value: unknown) => void) | undefined;
+    const invoke = vi.fn().mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.agent.request') {
+        return new Promise((resolve) => {
+          reply = resolve;
+        });
+      }
+      return undefined;
+    });
+    window.joyDesktop = { channels: ['desktop.agent.request', 'desktop.agent.cancel'], invoke };
+    const controller = new AbortController();
+
+    const pending = requestAgentCompletion({ ...request, signal: controller.signal });
+    await vi.waitFor(() => expect(reply).toBeDefined());
+    controller.abort();
+    // The desktop's reply loses the race with the abort, so the caller never sees its text.
+    reply?.({ ok: true, text: 'a reply that arrived too late' });
+
+    await expect(pending).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+  });
+
+  it('starts no desktop call for a request that is already cancelled', async () => {
+    const invoke = vi.fn();
+    window.joyDesktop = { channels: ['desktop.agent.request'], invoke };
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      requestAgentCompletion({ ...request, signal: controller.signal }),
+    ).rejects.toMatchObject({
+      code: 'NETWORK_ERROR',
+    });
+    expect(invoke).not.toHaveBeenCalled();
   });
 });

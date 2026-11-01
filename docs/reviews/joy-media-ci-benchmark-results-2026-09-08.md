@@ -216,7 +216,7 @@ the idle runner; **pass 2's structured evidence was permanently lost**.
 _Fix (`45022c7c`)_:
 
 - `retain-evidence.sh` now **requires** a persistent root
-  (`$JOY_MEDIA_CI_EVIDENCE_ROOT`, e.g. `/opt/actions-runner/ci-evidence`)
+  (`$JOY_MEDIA_CI_EVIDENCE_ROOT`, e.g. `<server-path>/actions-runner/ci-evidence`)
   **outside the checkout and `_work`/`_temp`**, refuses a path inside any of
   them, writes `MANIFEST.sha256` + `MANIFEST.json`, persists to
   `<root>/<candidateSha>/<run>-<attempt>-p<pass>/`, and **re-verifies every file

@@ -166,7 +166,6 @@ try {
     }),
     secretStore: fakeSecretStore,
     probeProvider: async () => ({ ok: true }),
-    checkForUpdate: () => ({ status: 'current', reason: 'not-newer' }),
   });
 
   const ALLOWED_ORIGIN = 'http://localhost:5173';

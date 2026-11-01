@@ -3,14 +3,14 @@
 - **Owner:** Luna
 - **Status:** **IMPLEMENTED, TESTED, AND DEPLOYED**
 - **Prepared:** 2026-08-17
-- **Local repository:** `C:\Users\HadiMoti\joy-vps\joy-media-fix`
-- **VPS repository:** `/opt/joy-media/repo`
-- **Production root:** `/opt/joy-media`
+- **Local repository:** `<owner-profile>\joy-vps\joy-media-fix`
+- **VPS repository:** `<server-path>/joy-media/repo`
+- **Production root:** `<server-path>/joy-media`
 - **User-specified reference URL:** `https://joyst.ir/?deploy=9996c0e`
-- **Immutable reference artifact:** `9996c0e` / `/opt/joy-media/web-releases/editor-web-20260816T221547Z-9996c0e-wp35-transparent-gutter`
+- **Immutable reference artifact:** `9996c0e` / `<server-path>/joy-media/web-releases/editor-web-20260816T221547Z-9996c0e-wp35-transparent-gutter`
 - **Implementation base when this plan was prepared:** `c2b9e334752e952496ff6e6a50967290a9561eac`
 - **Final implementation commit:** `733f584f18b45ae789ca8360e7e4b3637fe3e3f1`
-- **Active immutable release:** `/opt/joy-media/web-releases/editor-web-20260816T233403Z-733f584-wp36-color-render-final`
+- **Active immutable release:** `<server-path>/joy-media/web-releases/editor-web-20260816T233403Z-733f584-wp36-color-render-final`
 - **Verification:** full Vitest `336 passed files, 2268 passed tests, 2 skipped`; typecheck, lint, Prettier, build, nginx config, public API health, and authenticated browser smoke passed.
 - **GBrain:** page `joy-media-wp36-managed-universal-track-deck-color-labels-2026-08-17` created through the live GBrain API and visible in the Admin GBrain Pages view (73 pages).
 
@@ -32,12 +32,12 @@ This is a model-and-interaction correction, not a cosmetic patch. Luna must not 
 
 ## 2. Baseline rule — honor `9996c0e` without mistaking the query string for a release pin
 
-The user explicitly selected `https://joyst.ir/?deploy=9996c0e`. JOY currently uses `?deploy=` as a cache-buster; it does **not** pin nginx to an old immutable release. The public URL may therefore serve whatever `/opt/joy-media/web` currently targets. The real immutable `9996c0e` baseline is the retained release directory and its recorded hashes. It is the visual/behavioral reference, not the Git commit to check out for implementation.
+The user explicitly selected `https://joyst.ir/?deploy=9996c0e`. JOY currently uses `?deploy=` as a cache-buster; it does **not** pin nginx to an old immutable release. The public URL may therefore serve whatever `<server-path>/joy-media/web` currently targets. The real immutable `9996c0e` baseline is the retained release directory and its recorded hashes. It is the visual/behavioral reference, not the Git commit to check out for implementation.
 
 Luna must:
 
 1. open and record the user-specified public URL, including the actual asset names/hashes it serves at that moment;
-2. inspect the retained `9996c0e` artifact directly from `/opt/joy-media/web-releases/editor-web-20260816T221547Z-9996c0e-wp35-transparent-gutter`, served through an isolated local/staging origin when interactive evidence is needed;
+2. inspect the retained `9996c0e` artifact directly from `<server-path>/joy-media/web-releases/editor-web-20260816T221547Z-9996c0e-wp35-transparent-gutter`, served through an isolated local/staging origin when interactive evidence is needed;
 3. implement forward from the current canonical branch;
 4. preserve the transparent `.timeline-scrub-gutter` behavior introduced by `9996c0e`;
 5. preserve the later `52e4619` removal of the per-header trash button;
@@ -508,7 +508,7 @@ Tasks:
 3. Run responsive QA at the existing 1613×1066 evidence viewport, a narrow supported viewport, 200% zoom, and 400% zoom.
 4. Test LTR Timeline geometry while surrounding UI uses both English and Persian/RTL copy.
 5. Prove keyboard-only use and screen-reader names for targets, locks, visibility, solo, and color palette.
-6. Commit in reviewable phases, push without rewriting history, and fast-forward `/opt/joy-media/repo` to the exact green product SHA.
+6. Commit in reviewable phases, push without rewriting history, and fast-forward `<server-path>/joy-media/repo` to the exact green product SHA.
 7. Create immutable editor/API releases only for artifacts affected by the final build graph. Do not edit live release directories.
 8. Build and test the mandatory forward-compatible rollback reader described in section 12 against real WP-36 browser-local journals before enabling writes, including `timeline.reorderTracks` and universal-kind ambiguity diagnostics.
 9. Retain rollback releases, take the required pre-deploy database/project snapshot, run `nginx -t`, service/API health, public asset/hash parity, and signed-in public QA.
@@ -621,7 +621,7 @@ This compatibility artifact—not `9996c0e`—is the mandatory rollback target a
 - No color change to source assets, Monitor, Export, thumbnails, or generated media.
 - No rewrite of legacy IDs/names on project open.
 - No GPU Worker, preview-quality, ruler, playhead, or Monitor-footer redesign.
-- No direct edits to `/opt/joy-media/web`, immutable release directories, or other live artifacts.
+- No direct edits to `<server-path>/joy-media/web`, immutable release directories, or other live artifacts.
 
 ## 14. Commit and handoff sequence
 

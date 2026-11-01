@@ -27,15 +27,6 @@ import {
 } from './project-catalog.js';
 import { seedsForCatalogEntry } from './project-factory.js';
 import { removeJoyCodeThreads } from './joy-code-history.js';
-import { BrowserControlPlaneClient } from './control-plane-client.js';
-import { getStoredMediaToken } from './media-session.js';
-import type { MediaSessionStorage } from './media-session.js';
-import { probeJoySession } from './identity.js';
-import {
-  getControlPlaneProjectBinding,
-  removeControlPlaneProjectBinding,
-  upsertControlPlaneProjectBinding,
-} from './project-control-plane.js';
 
 export interface ProjectDocumentBundle {
   readonly timeline: SpikeProject;
@@ -63,28 +54,7 @@ export async function renameProject(
   entry: ProjectCatalogEntry,
   title: string,
 ): Promise<ProjectCatalogEntry> {
-  const cleanTitle = requireTitle(title);
-  const remote = await openRemoteProject(storage, entry);
-  if (remote === undefined) return renameLocalProject(storage, entry, cleanTitle);
-  const updated = await remote.client.renameProject(
-    remote.binding.controlPlaneProjectId,
-    cleanTitle,
-    remote.project.revision,
-  );
-  try {
-    const local = renameLocalProject(storage, entry, cleanTitle);
-    upsertControlPlaneProjectBinding(
-      storage,
-      bindingFromMetadata(remote.binding, updated),
-      remote.ownerKey,
-    );
-    return local;
-  } catch (error) {
-    await remote.client
-      .renameProject(remote.binding.controlPlaneProjectId, remote.project.title, updated.revision)
-      .catch(() => undefined);
-    throw error;
-  }
+  return renameLocalProject(storage, entry, title);
 }
 
 export async function duplicateProject(
@@ -92,101 +62,28 @@ export async function duplicateProject(
   entry: ProjectCatalogEntry,
   title: string,
 ): Promise<ProjectCatalogEntry> {
-  const cleanTitle = requireTitle(title);
-  const remote = await openRemoteProject(storage, entry);
-  if (remote === undefined) return duplicateLocalProject(storage, entry, cleanTitle);
-  const remoteId = createProjectId('project');
-  const duplicated = await remote.client.duplicateProject(
-    remote.binding.controlPlaneProjectId,
-    remoteId,
-    cleanTitle,
-    remote.project.revision,
-  );
-  try {
-    const local = duplicateLocalProject(storage, entry, cleanTitle, {
-      assetIdMap: duplicated.assetIdMap,
-      derivativeIdMap: duplicated.derivativeIdMap,
-    });
-    upsertControlPlaneProjectBinding(
-      storage,
-      {
-        editorProjectId: local.id,
-        controlPlaneProjectId: duplicated.project.id,
-        title: cleanTitle,
-        revision: duplicated.project.revision,
-      },
-      remote.ownerKey,
-    );
-    return local;
-  } catch (error) {
-    await remote.client
-      .trashProject(duplicated.project.id, duplicated.project.revision)
-      .then((trashed) => remote.client.deleteProject(duplicated.project.id).catch(() => trashed))
-      .catch(() => undefined);
-    throw error;
-  }
+  return duplicateLocalProject(storage, entry, title);
 }
 
 export async function trashProject(
   storage: BrowserKeyValueStore,
   entry: ProjectCatalogEntry,
 ): Promise<void> {
-  const remote = await openRemoteProject(storage, entry);
-  if (remote === undefined) return trashLocalProject(storage, entry);
-  const trashed = await remote.client.trashProject(
-    remote.binding.controlPlaneProjectId,
-    remote.project.revision,
-  );
-  try {
-    trashLocalProject(storage, entry);
-    upsertControlPlaneProjectBinding(
-      storage,
-      bindingFromMetadata(remote.binding, trashed),
-      remote.ownerKey,
-    );
-  } catch (error) {
-    await remote.client
-      .restoreProject(remote.binding.controlPlaneProjectId, trashed.revision)
-      .catch(() => undefined);
-    throw error;
-  }
+  trashLocalProject(storage, entry);
 }
 
 export async function restoreProject(
   storage: BrowserKeyValueStore,
   entry: ProjectCatalogEntry,
 ): Promise<void> {
-  const remote = await openRemoteProject(storage, entry);
-  if (remote === undefined) return restoreLocalProject(storage, entry);
-  const restored = await remote.client.restoreProject(
-    remote.binding.controlPlaneProjectId,
-    remote.project.revision,
-  );
   restoreLocalProject(storage, entry);
-  upsertControlPlaneProjectBinding(
-    storage,
-    bindingFromMetadata(remote.binding, restored),
-    remote.ownerKey,
-  );
 }
 
 export async function purgeProject(
   storage: BrowserKeyValueStore,
   entry: ProjectCatalogEntry,
 ): Promise<void> {
-  const remote = await openRemoteProject(storage, entry);
-  if (remote !== undefined) {
-    const remoteProject =
-      remote.project.trashedAt === undefined
-        ? await remote.client.trashProject(
-            remote.binding.controlPlaneProjectId,
-            remote.project.revision,
-          )
-        : remote.project;
-    await remote.client.deleteProject(remoteProject.id);
-  }
   purgeLocalProject(storage, entry);
-  if (remote !== undefined) removeControlPlaneProjectBinding(storage, entry.id, remote.ownerKey);
 }
 
 export function renameLocalProject(
@@ -348,44 +245,4 @@ function remapJson<T>(value: T, replacements: Readonly<Record<string, string>>):
     return result as T;
   }
   return value;
-}
-
-interface RemoteProjectContext {
-  readonly client: BrowserControlPlaneClient;
-  readonly binding: NonNullable<ReturnType<typeof getControlPlaneProjectBinding>>;
-  readonly project: Awaited<ReturnType<BrowserControlPlaneClient['project']>>;
-  readonly ownerKey: string;
-}
-
-async function openRemoteProject(
-  storage: BrowserKeyValueStore,
-  entry: ProjectCatalogEntry,
-): Promise<RemoteProjectContext | undefined> {
-  const sessionStorage = storage as BrowserKeyValueStore & MediaSessionStorage;
-  if (getStoredMediaToken(sessionStorage) === undefined) return undefined;
-  const session = await probeJoySession(sessionStorage);
-  const ownerKey = session.kind === 'ready' ? (session.subject ?? 'signed-in') : 'signed-in';
-  const client = new BrowserControlPlaneClient();
-  const binding = getControlPlaneProjectBinding(storage, entry.id, ownerKey);
-  if (binding === undefined) return undefined;
-  await client.ensureProject(binding.controlPlaneProjectId, entry.title);
-  const project = await client.project(binding.controlPlaneProjectId);
-  upsertControlPlaneProjectBinding(storage, bindingFromMetadata(binding, project), ownerKey);
-  return {
-    client,
-    binding,
-    project,
-    ownerKey,
-  };
-}
-
-function bindingFromMetadata(
-  binding: NonNullable<ReturnType<typeof getControlPlaneProjectBinding>>,
-  project: { readonly title: string; readonly revision: number; readonly trashedAt?: number },
-): NonNullable<ReturnType<typeof getControlPlaneProjectBinding>> {
-  const { trashedAt, ...rest } = binding;
-  void trashedAt;
-  return project.trashedAt === undefined
-    ? { ...rest, title: project.title, revision: project.revision }
-    : { ...rest, title: project.title, revision: project.revision, trashedAt: project.trashedAt };
 }

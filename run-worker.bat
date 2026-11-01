@@ -3,8 +3,19 @@ setlocal
 REM Set Joy Media Worker environment variables
 set "JOY_MEDIA_WORKER_ROOT=%~dp0"
 cd /d "%JOY_MEDIA_WORKER_ROOT%"
-REM Canonical standalone JOY Media control plane. media.joyteam.ir is a redirect only.
-set "JOY_MEDIA_API_URL=https://joyst.ir/api"
+REM The desktop app supplies the loopback job API and a per-run token. This launcher has no remote default.
+if "%JOY_MEDIA_API_URL%"=="" (
+  echo JOY_MEDIA_API_URL is not set. Set it to http://127.0.0.1:PORT, the loopback address of the JOY Media desktop app.
+  exit /b 1
+)
+if /i not "%JOY_MEDIA_API_URL:~0,17%"=="http://127.0.0.1:" (
+  echo JOY_MEDIA_API_URL must be http://127.0.0.1:PORT. Remote addresses are refused.
+  exit /b 1
+)
+if "%JOY_MEDIA_WORKER_LOCAL_TOKEN%"=="" (
+  echo JOY_MEDIA_WORKER_LOCAL_TOKEN is not set. The JOY Media desktop app supplies it with the loopback address.
+  exit /b 1
+)
 set "JOY_MEDIA_WORKER_STATE_PATH=%USERPROFILE%\.joy-media\worker-state.json"
 if not exist "%USERPROFILE%\.joy-media\logs" mkdir "%USERPROFILE%\.joy-media\logs"
 set "JOY_MEDIA_LOCAL_COMFY_URL=http://127.0.0.1:8188"

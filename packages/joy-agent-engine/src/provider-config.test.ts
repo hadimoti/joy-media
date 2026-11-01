@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CHATGPT_RESPONSES_BASE_URL } from '@joy-media/provider-sdk';
 import {
   normalizeByokSessionConfig,
   normalizeCustomBaseUrl,
@@ -9,6 +10,61 @@ import {
 const key = 'session-key';
 
 describe('BYOK provider configuration', () => {
+  it('keeps OAuth bearer credentials as a typed auth variant', () => {
+    const config = normalizeByokSessionConfig({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.minimax.io/v1',
+      modelId: 'MiniMax-M2.1',
+      auth: { kind: 'bearer-token', token: 'oauth-access-token' },
+      consentToPublicEndpoint: true,
+    });
+
+    expect(config).toMatchObject({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.minimax.io/v1',
+      modelId: 'MiniMax-M2.1',
+      auth: { kind: 'bearer-token', token: 'oauth-access-token' },
+    });
+    expect('apiKey' in config).toBe(false);
+    expect(JSON.stringify(safeByokSessionStatus(config))).not.toContain('oauth-access-token');
+  });
+
+  it('accepts a ChatGPT Responses profile only with bearer auth at the fixed Responses base', () => {
+    const config = normalizeByokSessionConfig({
+      provider: 'chatgpt-responses',
+      baseUrl: CHATGPT_RESPONSES_BASE_URL,
+      modelId: 'gpt-test',
+      auth: { kind: 'bearer-token', token: 'chatgpt-access-token' },
+    });
+    expect(config).toEqual({
+      provider: 'chatgpt-responses',
+      baseUrl: CHATGPT_RESPONSES_BASE_URL,
+      modelId: 'gpt-test',
+      auth: { kind: 'bearer-token', token: 'chatgpt-access-token' },
+    });
+    expect(() =>
+      normalizeByokSessionConfig({
+        provider: 'chatgpt-responses',
+        baseUrl: 'https://other.example/v1',
+        modelId: 'gpt-test',
+        auth: { kind: 'bearer-token', token: 'chatgpt-access-token' },
+      }),
+    ).toThrow('JOY_AGENT_PROVIDER_CONFIG_INVALID');
+    expect(() =>
+      normalizeByokSessionConfig({
+        provider: 'chatgpt-responses',
+        modelId: 'gpt-test',
+        apiKey: key,
+      }),
+    ).toThrow('JOY_AGENT_PROVIDER_CONFIG_INVALID');
+  });
+
+  it.each(['joy-hosted', 'kilo'] as const)('refuses the retired %s profile', (provider) => {
+    expect(() => normalizeByokSessionConfig({ provider, modelId: 'model', apiKey: key })).toThrow(
+      'JOY_AGENT_PROVIDER_CONFIG_INVALID',
+    );
+  });
+
   it('normalizes the OpenRouter preset and returns secret-free status', () => {
     const config = normalizeByokSessionConfig({
       provider: 'openrouter',
@@ -25,11 +81,17 @@ describe('BYOK provider configuration', () => {
     expect(JSON.stringify(safeByokSessionStatus(config))).not.toContain(key);
   });
 
-  it('accepts a custom HTTPS base URL but not a completion endpoint', () => {
-    expect(normalizeCustomBaseUrl('https://provider.example/v1/')).toBe(
-      'https://provider.example/v1',
+  it('accepts a loopback endpoint for a local AI server, over http or https', () => {
+    expect(normalizeCustomBaseUrl('http://127.0.0.1:1234/v1/')).toBe('http://127.0.0.1:1234/v1');
+    expect(normalizeCustomBaseUrl('http://localhost:1234/v1')).toBe('http://localhost:1234/v1');
+    expect(normalizeCustomBaseUrl('https://localhost/v1')).toBe('https://localhost/v1');
+  });
+
+  it('refuses a public endpoint until S8 is confirmed, and a completion endpoint', () => {
+    expect(() => normalizeCustomBaseUrl('https://provider.example/v1')).toThrow(
+      'JOY_AGENT_PROVIDER_CONFIG_INVALID',
     );
-    expect(() => normalizeCustomBaseUrl('https://provider.example/v1/chat/completions')).toThrow(
+    expect(() => normalizeCustomBaseUrl('http://127.0.0.1:1234/v1/chat/completions')).toThrow(
       'JOY_AGENT_PROVIDER_CONFIG_INVALID',
     );
   });
@@ -39,14 +101,12 @@ describe('BYOK provider configuration', () => {
     'https://user:pass@provider.example/v1',
     'https://provider.example/v1?token=secret',
     'https://provider.example/v1#fragment',
-    'https://localhost/v1',
-    'https://127.0.0.1/v1',
-    'https://[::ffff:7f00:1]/v1',
-    'https://[::1]/v1',
     'https://169.254.169.254/v1',
     'https://192.168.1.1/v1',
     'https://10.0.0.4/v1',
-  ])('rejects unsafe public-web URL %s', (url) => {
+    'http://[::1]:1234/v1',
+    'https://[::ffff:7f00:1]/v1',
+  ])('rejects unsafe custom URL %s', (url) => {
     expect(() => normalizeCustomBaseUrl(url)).toThrow('JOY_AGENT_PROVIDER_CONFIG_INVALID');
   });
 
@@ -60,5 +120,28 @@ describe('BYOK provider configuration', () => {
     expect(() =>
       normalizeByokSessionConfig({ provider: 'openrouter', modelId: 'm'.repeat(257), apiKey: key }),
     ).toThrow();
+  });
+});
+
+describe('a public custom endpoint in the engine (S8)', () => {
+  it('accepts a public https endpoint only with the owner consent', () => {
+    expect(
+      normalizeCustomBaseUrl('https://provider.example/v1/', { consentToPublicEndpoint: true }),
+    ).toBe('https://provider.example/v1');
+    expect(
+      normalizeByokSessionConfig({
+        provider: 'custom',
+        baseUrl: 'https://provider.example/v1',
+        modelId: 'model',
+        apiKey: key,
+        consentToPublicEndpoint: true,
+      }).baseUrl,
+    ).toBe('https://provider.example/v1');
+  });
+
+  it('refuses a private address even with the owner consent', () => {
+    expect(() =>
+      normalizeCustomBaseUrl('https://192.168.1.1/v1', { consentToPublicEndpoint: true }),
+    ).toThrow('JOY_AGENT_PROVIDER_CONFIG_INVALID');
   });
 });

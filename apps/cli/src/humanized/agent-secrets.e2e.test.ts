@@ -81,7 +81,11 @@ describe('API keys at rest', () => {
       expect(r.code, describeRun(r)).toBe(0);
       expect(modeOf(path).toString(8)).toBe('600');
       expect(modeOf(env.sb.joyDir).toString(8)).toBe('700');
-      expect(readJoyConfig(env.sb, 'ai-providers.json')).toMatchObject({ old: { apiKey: KEY } });
+      expect(readJoyConfig<Record<string, { apiKey?: string }>>(env.sb, 'ai-providers.json').old?.apiKey)
+        .toBeUndefined();
+      expect(
+        readJoyConfig<{ entries: Record<string, unknown> }>(env.sb, 'credentials.json').entries,
+      ).toHaveProperty('old');
     },
   );
 
@@ -95,11 +99,23 @@ describe('API keys at rest', () => {
     const projectId = await createProject(env.sb, 'Env');
     mock.script(text('ok'));
     const run = await env.run(
-      ['agent', 'run', 'x', '--project', projectId, '--provider', 'openrouter', '--url', mock.url],
+      [
+        'agent',
+        'run',
+        'x',
+        '--project',
+        projectId,
+        '--provider',
+        'custom',
+        '--url',
+        mock.url,
+        '--model',
+        'mock/env-key',
+      ],
       { env: { OPENROUTER_API_KEY: envKey } },
     );
     expect(run.code, describeRun(run)).toBe(0);
-    expect(mock.chatRequests[0]?.headers.authorization).toBe(`Bearer ${envKey}`);
+    expect(mock.chatRequests[0]?.headers.authorization).toBeUndefined();
     for (const file of readTree(env.sb.home)) {
       expect(file.content, file.path).not.toContain(envKey);
     }
@@ -158,7 +174,13 @@ describe('API keys never appear in output', () => {
       expect(r.code, describeRun(r)).toBe(0);
     }
     const list = outputs.find((r) => r.args.includes('list') && r.args.includes('--json'))!;
-    expect(list.json()).toMatchObject({ providers: [{ apiKey: `****${KEY.slice(-4)}` }] });
+    expect(list.json()).toMatchObject({ providers: [{ apiKeySet: true }] });
+    expect(outputs.find((r) => r.args.includes('list') && !r.args.includes('--json'))?.out).toContain(
+      'API Key: set (hidden)',
+    );
+    expect(
+      readJoyConfig<Record<string, { apiKey?: string }>>(env.sb, 'ai-providers.json').p?.apiKey,
+    ).toBeUndefined();
 
     mock.script(toolCalls(probeToolCall));
     expect((await run(['agent', 'probe'], debug)).code).toBe(0);
@@ -175,7 +197,16 @@ describe('API keys never appear in output', () => {
 
   it('on every failure path (401, 500, malformed, debug mode)', async () => {
     const debug = { JOY_CLI_DEBUG: '1' };
-    const provider = ['--url', mock.url, '--api-key', KEY];
+    const provider = [
+      '--provider',
+      'custom',
+      '--url',
+      mock.url,
+      '--api-key',
+      KEY,
+      '--model',
+      'mock/failure',
+    ];
     for (const reply of [
       httpError(401, { error: { message: `bad key ${KEY}` } }),
       httpError(500),
@@ -194,11 +225,32 @@ describe('API keys never appear in output', () => {
     expect(discovery.code).toBe(0);
   });
 
+  it('refuses an OpenRouter profile on a loopback URL without sending a request', async () => {
+    const r = await run([
+      'agent',
+      'run',
+      'x',
+      '--project',
+      projectId,
+      '--provider',
+      'openrouter',
+      '--url',
+      mock.url,
+      '--api-key',
+      KEY,
+      '--model',
+      'mock/refused',
+    ]);
+    expect(r.code, describeRun(r)).toBe(2);
+    expect(r.err).toMatch(/base URL.*refused/i);
+    expect(mock.requests).toHaveLength(0);
+  });
+
   it('a short key is fully masked in `provider list` (no first-4/last-4 reveal)', async () => {
     const short = 'sk-short';
     await run(['agent', 'provider', 'add', 's', '--url', mock.url, '--api-key', short]);
     const list = await run(['agent', 'provider', 'list']);
-    expect(list.out).toMatch(/API Key: \*\*\*\*\n/);
+    expect(list.out).toMatch(/API Key: set \(hidden\)/);
     expect(list.all).not.toContain(short);
     // The old mask printed `${key.slice(0, 4)}...${key.slice(-4)}`, i.e. the whole key.
     expect(list.all).not.toContain('sk-s...hort');
@@ -255,15 +307,32 @@ describe('--api-key - reads the key from stdin (keeps it out of argv / ps)', () 
     );
     expect(add.code, describeRun(add)).toBe(0);
     expect(
-      readJoyConfig<Record<string, { apiKey: string }>>(env.sb, 'ai-providers.json').p?.apiKey,
-    ).toBe(KEY);
+      readJoyConfig<Record<string, { apiKey?: string }>>(env.sb, 'ai-providers.json').p?.apiKey,
+    ).toBeUndefined();
+    expect(
+      readJoyConfig<{ entries: Record<string, unknown> }>(env.sb, 'credentials.json').entries,
+    ).toHaveProperty('p');
     expect(mock.modelRequests[0]?.headers.authorization).toBe(`Bearer ${KEY}`);
 
     const projectId = await createProject(env.sb, 'Stdin');
     const other = fakeKey('other');
     mock.script(text('ok'));
     const r = await env.run(
-      ['agent', 'run', 'x', '--project', projectId, '--url', mock.url, '--api-key', '-'],
+      [
+        'agent',
+        'run',
+        'x',
+        '--project',
+        projectId,
+        '--provider',
+        'custom',
+        '--url',
+        mock.url,
+        '--model',
+        'mock/stdin',
+        '--api-key',
+        '-',
+      ],
       { input: other },
     );
     expect(r.code, describeRun(r)).toBe(0);

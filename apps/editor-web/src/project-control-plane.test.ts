@@ -116,26 +116,8 @@ describe('control-plane project binding', () => {
     ).toMatchObject({ controlPlaneProjectId: 'project-recovered-project' });
   });
 
-  it('reopens the same owner-scoped job history through the persisted binding', async () => {
+  it('reopens the same binding, and the local client lists no remote history for it', async () => {
     const storage = memoryStorage();
-    const requests: string[] = [];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input: RequestInfo | URL) => {
-      const url = String(input);
-      requests.push(url);
-      return json(200, {
-        data: [
-          {
-            id: 'job-1',
-            projectId: 'project-opaque-project-1',
-            type: 'export.video',
-            state: 'queued',
-            progress: 0,
-            cancelRequested: false,
-          },
-        ],
-      });
-    };
     const first = getOrCreateControlPlaneProjectBinding(
       storage,
       { id: 'local-edit-1', title: 'Campaign cut' },
@@ -146,21 +128,10 @@ describe('control-plane project binding', () => {
       { id: 'local-edit-1', title: 'Campaign cut' },
       () => 'must-not-be-used',
     );
-    try {
-      const client = new BrowserControlPlaneClient(
-        'https://media.joyteam.ir/api',
-        () => 'joy-session-token',
-      );
-      await expect(client.jobs(reopened.controlPlaneProjectId)).resolves.toMatchObject([
-        { id: 'job-1', state: 'queued' },
-      ]);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
     expect(reopened.controlPlaneProjectId).toBe(first.controlPlaneProjectId);
-    expect(requests).toContain(
-      `https://media.joyteam.ir/api/v1/projects/${first.controlPlaneProjectId}/jobs`,
-    );
+    const bridge = { invoke: async () => [] };
+    const client = new BrowserControlPlaneClient(bridge);
+    await expect(client.jobs(reopened.controlPlaneProjectId)).resolves.toEqual([]);
   });
 
   it('round-trips the documentRevisionId through binding persistence', () => {

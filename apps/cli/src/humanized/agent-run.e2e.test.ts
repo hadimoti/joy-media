@@ -358,7 +358,14 @@ describe('agent run (real binary, mock LLM)', () => {
 describe('agent run: which project, and where it is saved', () => {
   let mock: MockLlmServer;
   let env: AgentSandbox;
-  const provider = (): string[] => ['--url', mock.url, '--api-key', KEY];
+  const provider = (): string[] => [
+    '--url',
+    mock.url,
+    '--api-key',
+    KEY,
+    '--model',
+    'mock/editor',
+  ];
 
   beforeAll(async () => {
     mock = await startMockLlm();

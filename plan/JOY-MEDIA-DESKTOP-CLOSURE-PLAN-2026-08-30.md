@@ -2,7 +2,7 @@
 
 - Date: 2026-08-30
 - Status: **IMPLEMENTATION IN PROGRESS; PRODUCT NO-GO pending exact-candidate external evidence**
-- Repository: `C:\Users\HadiMoti\joy-media` only; not `joy-vps` or `hadipc-agent`.
+- Repository: `<owner-profile>\joy-media` only; not `joy-vps` or `hadipc-agent`.
 - Audited source: `bd0439e3e2e3811b5e65cd09f046a62e651debd8` (clean before these planning files).
 - Public `/ready` during this audit reported the same SHA, schema 4, and healthy readiness checks.
 - Deliverable now: diagnosis, implementation ledger, and an exact-candidate release handoff. Source changes are implemented on the candidate branch, but this document does not treat local/fixture evidence as production acceptance.
@@ -30,9 +30,9 @@ Read this plan with `DESIGN.md`, `plan/JOY-MEDIA-FINAL-PRODUCT-CLOSURE-2026-08-2
 
 Operational authority was reconciled against:
 
-- `C:\Users\HadiMoti\Desktop\HadiPc-Agents\AGENT-ORCHESTRATOR-HANDOFF.md` and `dsh-details.md`.
-- `C:\Users\HadiMoti\Desktop\VPS-AGENT-BRIEF.md`.
-- `C:\Users\HadiMoti\Desktop\gbrain-pc\plans\superplane-professional-advisory-pipeline-2026-08-30.md`.
+- `<owner-profile>\Desktop\HadiPc-Agents\AGENT-ORCHESTRATOR-HANDOFF.md` and `dsh-details.md`.
+- `<owner-profile>\Desktop\VPS-AGENT-BRIEF.md`.
+- `<owner-profile>\Desktop\gbrain-pc\plans\superplane-professional-advisory-pipeline-2026-08-30.md`.
 - Authenticated VPS Gbrain pages `joy-vps-agent-brief`, `ops/superplane-professional-pipeline-2026-08-30`, and the existing JOY Media release record.
 
 At execution start, rerun the PC start gate and query those VPS pages for changes. The live VPS Gbrain service is authoritative; the Desktop `gbrain` Git mirror is pull-only. Do not change agent-stack infrastructure, Gbrain versions, or unrelated VPS services as part of this product plan.
@@ -338,6 +338,6 @@ Before declaring that goal complete:
 - Reviewed product changes are committed to main, pushed to the intended JOY Media remotes, deployed as the tested immutable candidate, and pass origin/public/browser/canary/rollback-readiness gates.
 - Full Windows-app claims are backed by that separate package's evidence, not just Worker connectivity.
 - Update dated release/plan/docs facts without erasing historical limitations. Do not falsely certify older stale artifacts.
-- Primary writes only confirmed redacted facts through VPS Gbrain MCP, reads back, runs `C:\Users\HadiMoti\Desktop\gbrain-pc\scripts\Invoke-VpsGbrainExport.ps1` with **no arguments**, then records the verified export SHA in a redacted PC receipt and runs `Publish-PcReceipt.ps1` for that receipt. Never hand-edit/push the Desktop VPS mirror; export/push failure is sync-pending, not a reason to roll back live facts.
+- Primary writes only confirmed redacted facts through VPS Gbrain MCP, reads back, runs `<owner-profile>\Desktop\gbrain-pc\scripts\Invoke-VpsGbrainExport.ps1` with **no arguments**, then records the verified export SHA in a redacted PC receipt and runs `Publish-PcReceipt.ps1` for that receipt. Never hand-edit/push the Desktop VPS mirror; export/push failure is sync-pending, not a reason to roll back live facts.
 
 Use `plan/JOY-MEDIA-DESKTOP-CLOSURE-GOAL-2026-08-30.md` as the bounded next-goal instruction. Do not start another plan execution or agent-stack rollout merely because this document exists.

@@ -166,7 +166,7 @@ the signed-in smoke below.
 - VPS repository was fast-forwarded to `43c5521`; the worktree and all three refs
   (`HEAD`, `origin/main`, and `vps-local/main`) were clean and equal before the
   switch.
-- PostgreSQL backup: `/opt/joy-media/data/backups/joymedia-pre-wp30-20260811T171614Z.sql.gz`.
+- PostgreSQL backup: `<server-path>/joy-media/data/backups/joymedia-pre-wp30-20260811T171614Z.sql.gz`.
   SHA-256: `b0778b6befdfb2a217f39261a6efa991247d779ba14309c1ab4cc5e3ba3a6d26`.
   The backup was readable and the schema-only dump check passed.
 - Staged API health passed on the isolated port, then the managed API/editor

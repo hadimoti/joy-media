@@ -76,11 +76,11 @@ silently reported as a pass.
 ## Historical slice deployment evidence
 
 - Candidate: `ccdb031` pushed to `origin/main`.
-- API release: `/opt/joy-media/releases/ccdb031-wp29-closeout-api`.
-- Editor release: `/opt/joy-media/releases/editor-web-20260810-ccdb031-wp29-closeout`.
+- API release: `<server-path>/joy-media/releases/ccdb031-wp29-closeout-api`.
+- Editor release: `<server-path>/joy-media/releases/editor-web-20260810-ccdb031-wp29-closeout`.
 - Rollback releases retained: `e02f646-wp29-reliability-api` and
   `editor-web-20260810-035553-e02f646-wp29-reliability`.
-- Database backup: `/opt/joy-media/data/backups/joymedia-pre-ccdb031-20260810T052857Z.sql.gz`.
+- Database backup: `<server-path>/joy-media/data/backups/joymedia-pre-ccdb031-20260810T052857Z.sql.gz`.
 - Post-cutover local health, public index hash parity, and `nginx -t` passed;
   authenticated API health remains protected as expected.
 - GBrain pages `joy-media-state` and

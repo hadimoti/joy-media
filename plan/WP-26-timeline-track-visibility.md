@@ -15,7 +15,7 @@ when `HEAD`, `origin/main`, and `vps-local/main` matched product commit
 `5f917b1fca674a909188d0212e07d3ab44d71d86`. The subsequent docs-only closeout
 may advance repo refs; the immutable live product remains built from that
 product commit and is deployed immutably at
-`/opt/joy-media/releases/editor-web-20260809-133945-5f917b1-track-visibility`.
+`<server-path>/joy-media/releases/editor-web-20260809-133945-5f917b1-track-visibility`.
 The live symlink resolves to that release. Local/public index SHA-256 is
 `a9c4ddcf67e449edbb413a813245bfdb9e417fa26b153426bcbc68fedd403746`; CSS
 `index-CvLlghVu.css` SHA-256 is

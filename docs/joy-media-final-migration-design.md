@@ -1,7 +1,7 @@
 # JOY Media final migration — Wave 0 design
 
 Status: wave 0 complete. Written by the Claude Code implementation lead in worktree
-`C:\Users\HadiMoti\joy-media-final-migration` (branch `codex/joy-media-final-migration-20260914`),
+`<owner-profile>\joy-media-final-migration` (branch `codex/joy-media-final-migration-20260914`),
 2026-09-14. No secrets read or written. No deploy, restart, retirement, or payment action taken.
 
 ## 1. What already exists vs. what the brief assumes

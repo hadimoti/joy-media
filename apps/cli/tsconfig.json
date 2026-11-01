@@ -11,6 +11,8 @@
     { "path": "../../packages/project-persistence" },
     { "path": "../../packages/commands" },
     { "path": "../../packages/agent-tools" },
-    { "path": "../../packages/motion-core" }
+    { "path": "../../packages/motion-core" },
+    { "path": "../../packages/provider-sdk" },
+    { "path": "../../packages/provider-oauth" }
   ]
 }

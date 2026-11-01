@@ -16,90 +16,56 @@ const stubMediaAuth = {
 };
 
 describe('WorkerControlPlaneClient', () => {
-  it('uses a Worker-only session after the owner approves a pairing offer', async () => {
-    const requests: Array<{ readonly pathname: string; readonly authorization?: string }> = [];
-    let session: string | undefined;
+  it('asks the desktop for one AI completion on a held job and returns only the reply text', async () => {
+    const requests: { url: string; body: unknown; auth: string | null }[] = [];
     const client = new WorkerControlPlaneClient({
-      apiUrl: 'https://media.joyteam.ir/',
-      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      apiUrl: 'http://127.0.0.1:4000',
+      identity: { workerId: 'worker-1', createdAt: '2026-10-28T00:00:00.000Z' },
       sessionStore: {
-        loadWorkerSession: () => session,
-        saveWorkerSession: (value) => {
-          session = value;
-        },
-        clearWorkerSession: () => {
-          session = undefined;
-        },
-      },
-      fetch: async (input, init) => {
-        const url = new URL(String(input));
-        const authorization = new Headers(init?.headers).get('authorization') ?? undefined;
-        requests.push({
-          pathname: url.pathname,
-          ...(authorization === undefined ? {} : { authorization }),
-        });
-        if (url.pathname === '/v1/worker-pair/offers')
-          return response(201, { data: { workerId: 'worker-1', expiresAt: 1_700_000_300_000 } });
-        if (url.pathname === '/v1/worker-pair/claim')
-          return response(201, {
-            data: {
-              workerId: 'worker-1',
-              expiresAt: 1_700_000_300_000,
-              sessionToken: 'worker-session',
-            },
-          });
-        if (url.pathname.endsWith('/leases'))
-          return response(200, {
-            data: {
-              id: 'job-1',
-              projectId: 'project-1',
-              type: 'asset.thumbnail',
-              leaseToken: 'lease-1',
-            },
-          });
-        if (url.pathname.endsWith('/complete')) return response(200, { data: { id: 'job-1' } });
-        return response(404, { error: {} });
-      },
-    });
-
-    await expect(client.publishPairingOffer('pairing-code')).resolves.toBe(1_700_000_300_000);
-    await expect(client.claimPairing('pairing-code')).resolves.toBe(true);
-    await expect(client.lease()).resolves.toEqual({
-      id: 'job-1',
-      projectId: 'project-1',
-      type: 'asset.thumbnail',
-      leaseToken: 'lease-1',
-    });
-    await client.complete('job-1', realThumbnailReceipt());
-
-    expect(requests).toEqual([
-      { pathname: '/v1/worker-pair/offers' },
-      { pathname: '/v1/worker-pair/claim' },
-      { pathname: '/v1/workers/worker-1/leases', authorization: 'Bearer worker-session' },
-      {
-        pathname: '/v1/workers/worker-1/jobs/job-1/complete',
-        authorization: 'Bearer worker-session',
-      },
-    ]);
-  });
-
-  it('does not save a session until the pairing offer is approved', async () => {
-    let saved = false;
-    const client = new WorkerControlPlaneClient({
-      apiUrl: 'https://media.joyteam.ir',
-      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
-      sessionStore: {
-        loadWorkerSession: () => undefined,
-        saveWorkerSession: () => {
-          saved = true;
-        },
+        loadWorkerSession: () => 'local-token',
         clearWorkerSession: () => undefined,
       },
-      fetch: async () => response(403, { error: { code: 'PAIRING_CLAIM_DENIED' } }),
+      fetch: async (input, init) => {
+        requests.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body)),
+          auth: new Headers(init?.headers).get('authorization'),
+        });
+        return response(200, { data: { text: '{"choices":[]}' } });
+      },
     });
 
-    await expect(client.claimPairing('pairing-code')).resolves.toBe(false);
-    expect(saved).toBe(false);
+    const text = await client.completeAi('job-1', 'lease-1', {
+      messages: [{ role: 'user', content: 'hi' }],
+      params: { temperature: 0.2 },
+    });
+
+    expect(text).toBe('{"choices":[]}');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe('http://127.0.0.1:4000/v1/workers/worker-1/ai/complete');
+    expect(requests[0]?.auth).toBe('Bearer local-token');
+    expect(requests[0]?.body).toEqual({
+      jobId: 'job-1',
+      leaseToken: 'lease-1',
+      messages: [{ role: 'user', content: 'hi' }],
+      params: { temperature: 0.2 },
+    });
+  });
+
+  it('refuses an AI reply that carries no text', async () => {
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'http://127.0.0.1:4000',
+      identity: { workerId: 'worker-1', createdAt: '2026-10-28T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => 'local-token',
+        clearWorkerSession: () => undefined,
+      },
+      fetch: async () => response(200, { data: { unexpected: true } }),
+    });
+
+    await expect(client.completeAi('job-1', 'lease-1', { messages: [] })).rejects.toThrow(
+      'The desktop returned an unreadable AI reply',
+    );
   });
 
   it('clears a revoked Worker session after a 401 response', async () => {
@@ -109,7 +75,6 @@ describe('WorkerControlPlaneClient', () => {
       identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
       sessionStore: {
         loadWorkerSession: () => session,
-        saveWorkerSession: () => undefined,
         clearWorkerSession: () => {
           session = undefined;
         },
@@ -128,7 +93,6 @@ describe('WorkerControlPlaneClient', () => {
       identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
       sessionStore: {
         loadWorkerSession: () => session,
-        saveWorkerSession: () => undefined,
         clearWorkerSession: () => {
           session = undefined;
         },
@@ -151,7 +115,6 @@ describe('WorkerControlPlaneClient', () => {
       identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
       sessionStore: {
         loadWorkerSession: () => 'worker-session',
-        saveWorkerSession: () => undefined,
         clearWorkerSession: () => undefined,
       },
       requestTimeoutMs: 100,
@@ -177,13 +140,37 @@ describe('WorkerControlPlaneClient', () => {
       identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
       sessionStore: {
         loadWorkerSession: () => 'worker-session',
-        saveWorkerSession: () => undefined,
         clearWorkerSession: () => undefined,
       },
       requestTimeoutMs: 100,
       fetch: async () => new Response(new ReadableStream<Uint8Array>()),
     });
 
+    await expect(client.lease()).rejects.toMatchObject({
+      name: 'WorkerRequestTimeoutError',
+      timeoutMs: 100,
+    } satisfies Partial<WorkerRequestTimeoutError>);
+  });
+
+  it('gives an AI completion a longer deadline than a control call, so the desktop reports its own timeout', async () => {
+    const client = new WorkerControlPlaneClient({
+      apiUrl: 'https://media.joyteam.ir',
+      identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
+      sessionStore: {
+        loadWorkerSession: () => 'worker-session',
+        clearWorkerSession: () => undefined,
+      },
+      requestTimeoutMs: 100,
+      fetch: async () => {
+        // Slower than the control deadline, and well within the AI deadline.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return response(200, { data: { text: 'a slow reply' } });
+      },
+    });
+
+    await expect(client.completeAi('job-1', 'lease-1', { messages: [] })).resolves.toBe(
+      'a slow reply',
+    );
     await expect(client.lease()).rejects.toMatchObject({
       name: 'WorkerRequestTimeoutError',
       timeoutMs: 100,
@@ -198,96 +185,11 @@ describe('WorkerControlPlaneClient', () => {
           identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
           sessionStore: {
             loadWorkerSession: () => undefined,
-            saveWorkerSession: () => undefined,
             clearWorkerSession: () => undefined,
           },
           requestTimeoutMs: 0,
         }),
     ).toThrow('Worker request timeout must be between 100ms and 120000ms');
-  });
-
-  it('pairs and completes a job over the real versioned HTTP transport', async () => {
-    const objects = new Set<string>();
-    const server = createControlPlaneHttpServer({
-      controlPlane: new LocalControlPlane(),
-      authentication: { authenticate: () => ({ id: 'joy-user-1' }) },
-      mediaAuth: stubMediaAuth,
-      privateObjectStore: {
-        put: async (descriptor) => {
-          objects.add(descriptor.ref);
-        },
-        get: async (descriptor) => {
-          if (!objects.has(descriptor.ref)) throw new Error('private object missing');
-          return new Uint8Array(1024);
-        },
-        remove: async (ref) => {
-          objects.delete(ref);
-        },
-      },
-    });
-    server.listen(0, '127.0.0.1');
-    await once(server, 'listening');
-    try {
-      const address = server.address();
-      if (address === null || typeof address === 'string')
-        throw new Error('test API did not bind TCP');
-      const apiUrl = `http://127.0.0.1:${address.port}`;
-      let session: string | undefined;
-      const client = new WorkerControlPlaneClient({
-        apiUrl,
-        identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
-        sessionStore: {
-          loadWorkerSession: () => session,
-          saveWorkerSession: (value) => {
-            session = value;
-          },
-          clearWorkerSession: () => {
-            session = undefined;
-          },
-        },
-      });
-      const pairingCode = 'pairing-code';
-      await client.publishPairingOffer(pairingCode);
-      expect(
-        await post(apiUrl, '/v1/workers/worker-1/pair', { pairingCode }, 'joy-assertion'),
-      ).toMatchObject({ status: 200 });
-      expect(await client.claimPairing(pairingCode)).toBe(true);
-      await client.hello(['asset.thumbnail'], ['asset-1']);
-      await post(apiUrl, '/v1/projects', { id: 'project-1', title: 'Reference' }, 'joy-assertion');
-      await post(
-        apiUrl,
-        '/v1/projects/project-1/assets',
-        {
-          id: 'asset-1',
-          kind: 'video',
-          displayName: 'clip.mp4',
-          sha256: 'a'.repeat(64),
-          bytes: 1024,
-          descriptor: { mimeType: 'video/mp4', durationUs: 1_000_000, width: 320, height: 180 },
-          locations: [{ kind: 'opfs-cache', ref: 'opfs-a1' }],
-        },
-        'joy-assertion',
-      );
-      await post(
-        apiUrl,
-        '/v1/projects/project-1/jobs',
-        { id: 'job-1', type: 'asset.thumbnail', assetId: 'asset-1' },
-        'joy-assertion',
-      );
-      const lease = await client.lease();
-      expect(lease).toMatchObject({ id: 'job-1' });
-      await client.uploadDerivative(
-        'job-1',
-        realThumbnailReceipt(),
-        new Uint8Array(1024),
-        lease?.leaseToken,
-      );
-      await expect(
-        client.complete('job-1', realThumbnailReceipt(), lease?.leaseToken),
-      ).resolves.toBeUndefined();
-    } finally {
-      await close(server);
-    }
   });
 
   it('downloads the staged job source with the Worker lease token', async () => {
@@ -298,7 +200,6 @@ describe('WorkerControlPlaneClient', () => {
       identity: { workerId: 'worker-1', createdAt: '2026-07-22T00:00:00.000Z' },
       sessionStore: {
         loadWorkerSession: () => 'worker-session',
-        saveWorkerSession: () => undefined,
         clearWorkerSession: () => undefined,
       },
       fetch: async (input, init) => {

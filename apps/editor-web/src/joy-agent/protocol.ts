@@ -1,9 +1,18 @@
+import type { AgentSlotId } from '@joy-media/provider-sdk';
 import type { HostRpcWireMessage } from './host-rpc.js';
 import {
   isJoyAgentHostToolName,
   JOY_AGENT_HOST_TOOL_NAMES,
   type JoyAgentHostToolName,
 } from './host-tool-contract.js';
+import { jsonUtf8Size } from './json-bytes.js';
+
+/**
+ * The deadline of one provider call in a connection test, and the number of calls a test makes. The
+ * engine worker enforces the first and the engine client's watchdog is sized from both.
+ */
+export const PROVIDER_CONNECTION_CALL_TIMEOUT_MS = 45_000;
+export const CONNECTION_TEST_CALLS = 3;
 
 /**
  * Public main-thread/Worker transport version. V2 deliberately removes the
@@ -47,6 +56,7 @@ export type JoyAgentErrorCode =
   | 'JOY_AGENT_TIMEOUT'
   | 'JOY_AGENT_CORS_OR_NETWORK'
   | 'JOY_AGENT_AUTH_FAILED'
+  | 'JOY_AGENT_BILLING_REQUIRED'
   | 'JOY_AGENT_RESPONSE_TOO_LARGE'
   | 'JOY_AGENT_INVALID_TOOL'
   | 'JOY_AGENT_INVALID_PROPOSAL'
@@ -54,43 +64,44 @@ export type JoyAgentErrorCode =
   | 'JOY_AGENT_PROVIDER_INCOMPATIBLE';
 
 export type JoyAgentProvider =
-  'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom' | 'dual-brain';
+  'joy-hosted' | 'openrouter' | 'openai-compatible' | 'kilo' | 'custom';
 
-export type JoyProviderMode = Exclude<JoyAgentProvider, 'dual-brain'>;
+/** The providers this build runs. The other IDs stay in JoyAgentProvider for the legacy-profile reader. */
+export type JoyProviderMode = 'openrouter' | 'openai-compatible' | 'custom';
 
+const SUPPORTED_PROVIDER_IDS: readonly string[] = ['openrouter', 'openai-compatible', 'custom'];
+
+/** A configure call refuses any provider this build does not run (PLAN-v4 §4a). */
+export function isSupportedProvider(provider: unknown): provider is JoyProviderMode {
+  return typeof provider === 'string' && SUPPORTED_PROVIDER_IDS.includes(provider);
+}
+
+/**
+ * The model connection the engine runs on. It names a saved profile, and the main process holds
+ * that profile's key (PLAN-v4 §6a, §6b). No key and no URL cross into this side.
+ */
+/**
+ * The saved profile whose key the main process holds. The key itself never reaches this side.
+ */
 export interface ByokSessionConfig {
   readonly provider: JoyProviderMode;
   readonly baseUrl: string;
   readonly modelId: string;
-  /** Volatile only: never present in a Worker event or host RPC envelope. */
-  readonly apiKey: string;
+  readonly profileId: string;
+  /** The agent slot the session runs in, when it runs in one. It stays on the main thread; the Worker never sees it. */
+  readonly slot?: AgentSlotId | undefined;
 }
 
-export interface DualBrainConfig {
-  readonly mode: 'dual-brain';
-  readonly workhorse: ByokSessionConfig;
-  readonly creative: ByokSessionConfig;
-}
-
-export function isDualBrainConfig(config: unknown): config is DualBrainConfig {
-  return (
-    typeof config === 'object' &&
-    config !== null &&
-    (config as Record<string, unknown>).mode === 'dual-brain' &&
-    typeof (config as Record<string, unknown>).workhorse === 'object' &&
-    typeof (config as Record<string, unknown>).creative === 'object'
-  );
-}
+/** The outcome of one provider call the main process made through the broker. */
+export type ProviderCallResult =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly code: string; readonly message: string };
 
 export interface ByokSessionStatus {
   readonly provider: JoyAgentProvider;
   readonly modelId: string;
   readonly capability: 'untested' | 'tool-loop' | 'plan-only' | 'incompatible';
   readonly message?: string;
-  readonly dualBrain?: {
-    readonly workhorse: ByokSessionStatus;
-    readonly creative: ByokSessionStatus;
-  };
 }
 
 /**
@@ -177,6 +188,13 @@ export interface JoyAgentSafeEvent {
 export type MainToWorkerMessage =
   | {
       readonly protocolVersion: typeof JOY_AGENT_PROTOCOL_VERSION;
+      /** The answer to a `provider-request`, matched by requestId. */
+      readonly type: 'provider-response';
+      readonly requestId: string;
+      readonly result: ProviderCallResult;
+    }
+  | {
+      readonly protocolVersion: typeof JOY_AGENT_PROTOCOL_VERSION;
       readonly type: 'configure';
       readonly config: ByokSessionConfig;
     }
@@ -207,6 +225,23 @@ export type MainToWorkerMessage =
     };
 
 export type WorkerToMainMessage =
+  | {
+      readonly protocolVersion: typeof JOY_AGENT_PROTOCOL_VERSION;
+      /** One model call. The main process sends it through the broker and answers with a `provider-response`. */
+      readonly type: 'provider-request';
+      readonly requestId: string;
+      readonly profileId: string;
+      /** The URL the user saw. The broker refuses the call unless it equals the saved profile's. */
+      readonly baseUrl: string;
+      readonly modelId: string;
+      readonly body: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly protocolVersion: typeof JOY_AGENT_PROTOCOL_VERSION;
+      /** The Worker no longer wants this call's reply. The main process ends the call and sends nothing back. */
+      readonly type: 'provider-cancel';
+      readonly requestId: string;
+    }
   | {
       readonly protocolVersion: typeof JOY_AGENT_PROTOCOL_VERSION;
       readonly type: 'run-finished';
@@ -272,6 +307,7 @@ const ERROR_CODES: ReadonlySet<string> = new Set([
   'JOY_AGENT_TIMEOUT',
   'JOY_AGENT_CORS_OR_NETWORK',
   'JOY_AGENT_AUTH_FAILED',
+  'JOY_AGENT_BILLING_REQUIRED',
   'JOY_AGENT_RESPONSE_TOO_LARGE',
   'JOY_AGENT_INVALID_TOOL',
   'JOY_AGENT_INVALID_PROPOSAL',
@@ -371,10 +407,20 @@ function isSafeConfig(value: unknown): value is ByokSessionConfig {
     value.baseUrl.length > 0 &&
     value.baseUrl.length <= 2_048 &&
     isSafePublicModelId(value.modelId) &&
-    typeof value.apiKey === 'string' &&
-    value.apiKey.length > 0 &&
-    value.apiKey.length <= 4_096 &&
-    exactKeys(value, ['provider', 'baseUrl', 'modelId', 'apiKey'])
+    typeof value.profileId === 'string' &&
+    OPAQUE_ID.test(value.profileId) &&
+    exactKeys(value, ['provider', 'baseUrl', 'modelId', 'profileId'])
+  );
+}
+
+function isProviderCallResult(value: unknown): value is ProviderCallResult {
+  if (!isRecord(value)) return false;
+  if (value.ok === true) return exactKeys(value, ['ok', 'text']) && typeof value.text === 'string';
+  return (
+    value.ok === false &&
+    exactKeys(value, ['ok', 'code', 'message']) &&
+    typeof value.code === 'string' &&
+    typeof value.message === 'string'
   );
 }
 
@@ -530,6 +576,13 @@ export function isMainToWorkerMessage(value: unknown): value is MainToWorkerMess
   if (!isRecord(value) || value.protocolVersion !== JOY_AGENT_PROTOCOL_VERSION) return false;
   if (value.type === 'configure')
     return exactKeys(value, ['protocolVersion', 'type', 'config']) && isSafeConfig(value.config);
+  if (value.type === 'provider-response')
+    return (
+      exactKeys(value, ['protocolVersion', 'type', 'requestId', 'result']) &&
+      typeof value.requestId === 'string' &&
+      OPAQUE_ID.test(value.requestId) &&
+      isProviderCallResult(value.result)
+    );
   if (value.type === 'test' || value.type === 'dispose')
     return exactKeys(value, ['protocolVersion', 'type']);
   if (value.type === 'probe-media-capabilities')
@@ -598,8 +651,46 @@ export function isMainToWorkerMessage(value: unknown): value is MainToWorkerMess
  * The client turns a version rejection into an actionable reload/reconnect
  * failure instead of coercing a stale cached Worker message.
  */
+/**
+ * The broker is the size authority. This bound only stops a body no legal batch could reach, and it
+ * counts UTF-8 bytes, not characters: a body of Chinese text is three bytes a character.
+ */
+const MAX_PROVIDER_BODY_BYTES = 32 * 1024 * 1024;
+
+function isBoundedBody(body: Record<string, unknown>): boolean {
+  return jsonUtf8Size(body, MAX_PROVIDER_BODY_BYTES) !== undefined;
+}
+
 export function isWorkerToMainMessage(value: unknown): value is WorkerToMainMessage {
   if (!isRecord(value) || value.protocolVersion !== JOY_AGENT_PROTOCOL_VERSION) return false;
+  if (value.type === 'provider-request')
+    return (
+      exactKeys(value, [
+        'protocolVersion',
+        'type',
+        'requestId',
+        'profileId',
+        'baseUrl',
+        'modelId',
+        'body',
+      ]) &&
+      typeof value.requestId === 'string' &&
+      OPAQUE_ID.test(value.requestId) &&
+      typeof value.profileId === 'string' &&
+      OPAQUE_ID.test(value.profileId) &&
+      typeof value.baseUrl === 'string' &&
+      value.baseUrl.length > 0 &&
+      value.baseUrl.length <= 2_048 &&
+      isSafePublicModelId(value.modelId) &&
+      isRecord(value.body) &&
+      isBoundedBody(value.body)
+    );
+  if (value.type === 'provider-cancel')
+    return (
+      exactKeys(value, ['protocolVersion', 'type', 'requestId']) &&
+      typeof value.requestId === 'string' &&
+      OPAQUE_ID.test(value.requestId)
+    );
   if (value.type === 'event') {
     const event = value.event;
     if (

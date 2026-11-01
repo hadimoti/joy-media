@@ -32,12 +32,27 @@ export {
 export type { JoyAgentLimits } from './limits.js';
 export { DEFAULT_JOY_AGENT_LIMITS, clampJoyAgentLimits } from './limits.js';
 export {
+  createChatGptResponsesFetch,
+  prepareChatGptModels,
+  readChatGptModels,
+  type ChatGptFetch,
+  type ChatGptModelEntry,
+  type ChatGptOutcome,
+  type ChatGptPreparedCall,
+} from './chatgpt-responses.js';
+export {
   redactUnknownValue,
   classifyJoyAgentError,
   isJoyAgentErrorCode,
+  joyAgentErrorMessage,
   toSafeJoyAgentError,
 } from './redaction.js';
-export type { ByokSessionConfig, ByokSessionStatus } from './provider-config.js';
+export type {
+  ByokBearerTokenAuth,
+  ByokSessionConfig,
+  ByokSessionConfigInput,
+  ByokSessionStatus,
+} from './provider-config.js';
 export {
   OPENROUTER_BASE_URL,
   ProviderConfigError,
@@ -66,10 +81,12 @@ export {
   validateOperationDependencies,
 } from './tools.js';
 export {
+  composeAgentInstructions,
   JOY_AGENT_INSTRUCTIONS,
   JoyAgentEngine,
   probeJoyAgentModel,
   type JoyAgentEngineOptions,
   type JoyAgentProbeResult,
   type JoyAgentRunResult,
+  type JoyAgentSlotSettings,
 } from './engine.js';

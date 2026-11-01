@@ -1,5 +1,19 @@
-/* global process, fetch, AbortSignal, TextDecoder */
+﻿/* global process, fetch, AbortSignal, TextDecoder */
 import type { CliFlags } from '../cli.js';
+import {
+  AGENT_SLOT_IDS,
+  AGENT_SLOT_LABELS,
+  CHATGPT_RESPONSES_BASE_URL,
+  XAI_OAUTH_INFERENCE_BASE_URL,
+  evaluateEndpoint,
+  findRegistryProvider,
+  isAgentSlotConfigured,
+  isCustomProviderId,
+  parseAgentSlotId,
+} from '@joy-media/provider-sdk';
+import { prepareChatGptModels, readChatGptModels } from '@joy-media/joy-agent-engine';
+import { isOAuthProfileProvider, oauthTokenExpiry, signInOAuthProfile } from '../agent/oauth.js';
+import { clearAgentSlot, loadAgentSlot, saveAgentSlot } from '../agent/agent-slots.js';
 import {
   AgentRunError,
   describeOperation,
@@ -7,16 +21,22 @@ import {
   runJoyAgent,
   type RunAgentOutput,
 } from '../agent/joy-agent.js';
-import { createAgentOutput, maskSecret, type AgentOutput } from '../agent/output.js';
+import { createAgentOutput, type AgentOutput } from '../agent/output.js';
 import {
   AgentConfigError,
-  BUILTIN_PROVIDERS,
+  inferProviderType,
+  isRetiredProvider,
   normalizeCliBaseUrl,
-  resolveByokConfig,
+  resolveAgentConfig,
   resolveProviderSettings,
   type ResolveProviderOptions,
   type ResolvedProviderSettings,
 } from '../agent/provider.js';
+import {
+  getDefaultOAuthTokenManager,
+  OAuthProfileLockTimeoutError,
+  OAuthRefreshFailedError,
+} from '../agent/oauth-runtime.js';
 import { startAgentRepl } from '../agent/repl.js';
 import {
   ConfigFileError,
@@ -25,11 +45,15 @@ import {
   hasAiProvider,
   loadAiProviders,
   loadCliConfig,
+  openCredentialStore,
+  setAiProvider,
   updateAiProviders,
   updateCliConfig,
   type AiProviderConfig,
   type CliConfig,
 } from '../utils/config.js';
+import { KIMI_CODE_BASE_URL as OAUTH_KIMI_CODE_BASE_URL, OAuthFlowError } from '@joy-media/provider-oauth';
+import type { OAuthCredential } from '../utils/credential-store.js';
 import { c } from '../utils/logger.js';
 import {
   createDefaultProject,
@@ -57,6 +81,151 @@ const PROVIDER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const DISCOVERY_TIMEOUT_MS = 10_000;
 const DISCOVERY_MAX_BYTES = 8 * 1024 * 1024;
 const MAX_CACHED_MODELS = 5_000;
+const OAUTH_RISK_NOTICE =
+  'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
+
+function numberFlag(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  return value.trim() === '' ? Number.NaN : Number(value);
+}
+
+function oauthProfileBaseUrl(provider: 'chatgpt' | 'kimi' | 'xai'): string {
+  if (provider === 'chatgpt') return CHATGPT_RESPONSES_BASE_URL;
+  if (provider === 'kimi') return OAUTH_KIMI_CODE_BASE_URL;
+  return XAI_OAUTH_INFERENCE_BASE_URL;
+}
+
+async function addOAuthProvider(
+  name: string,
+  flags: CliFlags,
+  out: AgentOutput,
+): Promise<number> {
+  if (flags.baseUrl !== undefined) throw failure('--url cannot be combined with --oauth.');
+  if (flags.apiKey !== undefined) throw failure('--api-key cannot be combined with --oauth.');
+  if (!flags.provider) throw failure('--provider is required with --oauth.');
+    if (!isOAuthProfileProvider(flags.provider)) {
+    throw failure(`Provider "${flags.provider}" does not offer OAuth sign-in.`);
+  }
+  const previous = loadAiProviders()[name];
+  if (previous !== undefined && (previous.authKind !== 'oauth' || previous.provider !== flags.provider)) {
+    throw failure(`Provider profile "${name}" uses a different authentication method or provider; remove it before changing authentication.`);
+  }
+  const model = flags.model ?? previous?.defaultModel;
+  console.error(OAUTH_RISK_NOTICE);
+  let approvalStatusShown = false;
+  let credential: OAuthCredential;
+  try {
+    credential = await signInOAuthProfile({
+      profileId: name,
+      provider: flags.provider,
+      onAuthorization: ({ url, userCode, expiresAt }) => {
+        out.line(`Approval URL: ${url}`);
+        if (userCode) out.line(`User code: ${userCode}`);
+        if (expiresAt !== undefined && Number.isFinite(expiresAt)) {
+          out.line(`Code expires at: ${new Date(expiresAt).toISOString()}`);
+        }
+        if (flags.provider === 'chatgpt') {
+          out.line('Open the URL in a browser on this same machine. A remote CLI with no browser on that machine cannot complete it.');
+        } else {
+          out.line('Waiting for approval. Press Ctrl+C to cancel.');
+          approvalStatusShown = true;
+        }
+      },
+      onSlowDown: () => {
+        out.line('Waiting for approval; the provider asked us to slow down. Press Ctrl+C to cancel.');
+        approvalStatusShown = true;
+      },
+    });
+  } catch (error) {
+    if (error instanceof OAuthFlowError) {
+      const message = error.code === 'TIMEOUT'
+        ? 'The sign-in code expired. Run the OAuth add command again.'
+        : error.code === 'ACCESS_DENIED' ? 'Sign-in was denied.' : error.message;
+      throw error.code === 'CANCELLED' ? new AgentCommandError(message, 130, error.code) : failure(message, error.code);
+    }
+    throw failure('OAuth sign-in failed. No profile was changed.');
+  } finally {
+    if (approvalStatusShown) out.line();
+  }
+  try {
+    openCredentialStore().save(name, credential);
+    setAiProvider(name, {
+      name,
+      provider: flags.provider,
+      authKind: 'oauth',
+      baseUrl: oauthProfileBaseUrl(flags.provider),
+      defaultModel: model,
+    });
+  } catch {
+    throw failure('OAuth credential could not be saved.');
+  }
+  out.success(`Provider "${name}" configured successfully!`);
+  out.step('Provider', flags.provider);
+  out.step('Auth', `OAuth (${flags.provider})`);
+  if (model) out.step('Default Model', model);
+  out.result({ ok: true, name, provider: flags.provider, authKind: 'oauth', defaultModel: model ?? null });
+  return 0;
+}
+
+async function listOAuthModels(
+  profileId: string,
+  profile: AiProviderConfig,
+  out: AgentOutput,
+): Promise<number> {
+  const provider = profile.provider;
+  if (provider !== 'chatgpt' && provider !== 'kimi' && provider !== 'xai') {
+    throw failure(`OAuth profile "${profileId}" has no supported model-list route.`);
+  }
+  let credential: OAuthCredential;
+  try {
+    credential = await getDefaultOAuthTokenManager().current(profileId, provider);
+  } catch (error) {
+    if (error instanceof OAuthProfileLockTimeoutError) throw failure(error.message);
+    throw failure(new OAuthRefreshFailedError(profileId, provider).message);
+  }
+  const baseUrl = oauthProfileBaseUrl(provider);
+  out.banner();
+  out.info(`Fetching models from ${c(baseUrl, 'bold')}...`);
+  try {
+    const chatGptRequest = provider === 'chatgpt'
+      ? prepareChatGptModels({ accessToken: credential.tokenRecord.accessToken })
+      : undefined;
+    const response = await fetch(
+      chatGptRequest?.url ?? `${baseUrl.replace(/\/+$/, '')}/models`,
+      chatGptRequest === undefined
+        ? {
+            method: 'GET',
+            headers: { accept: 'application/json', authorization: `Bearer ${credential.tokenRecord.accessToken}` },
+          }
+        : { method: chatGptRequest.method, headers: chatGptRequest.headers, credentials: 'omit', redirect: 'error' },
+    );
+    if (!response.ok) throw new Error('model list request failed');
+    const modelIds = provider === 'chatgpt'
+      ? (await readChatGptModels(await response.text())).map((model) => model.id).filter((id) =>
+          ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some((token) => id.includes(token)),
+        )
+      : await readOAuthModelIds(response, credential);
+    out.line(`\n  ${c(`Discovered ${modelIds.length} models:`, 'bold')}\n`);
+    for (const id of modelIds) out.line(`  • ${id}`);
+    out.line();
+    updateAiProviders((providers) => {
+      if (hasAiProvider(providers, profileId)) providers[profileId] = { ...providers[profileId], cachedModels: modelIds };
+    });
+    out.result({ ok: true, provider: profileId, models: modelIds });
+    return 0;
+  } catch {
+    throw failure(`Failed to fetch models for OAuth profile "${profileId}".`);
+  }
+}
+
+async function readOAuthModelIds(response: Response, credential: OAuthCredential): Promise<string[]> {
+  const json = (await response.json()) as { data?: unknown };
+  const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+  return raw
+    .map((item: { id?: string } | string) => (typeof item === 'string' ? item : item.id))
+    .filter((id): id is string => typeof id === 'string' && id.length > 0 &&
+      ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some((token) => id.includes(token)));
+}
 
 /** A command-level failure with its exit status and a stable machine code. */
 class AgentCommandError extends Error {
@@ -101,6 +270,9 @@ function reportFailure(error: unknown, out: AgentOutput): number {
     exitCode = EXIT_FAILURE;
     code = error.code;
     httpStatus = error.httpStatus;
+  } else if (error instanceof OAuthRefreshFailedError || error instanceof OAuthProfileLockTimeoutError) {
+    exitCode = EXIT_FAILURE;
+    code = error.name;
   } else {
     throw error;
   }
@@ -126,6 +298,8 @@ async function dispatch(args: string[], flags: CliFlags, out: AgentOutput): Prom
       return handleProbe(flags, out);
     case 'config':
       return handleConfig(flags, out);
+    case 'slot':
+      return handleSlot(args, flags, out);
     case 'chat':
       if (args.length === 0 && !process.stdin.isTTY) {
         throw usage('agent chat needs a TTY when no script is piped to stdin.');
@@ -136,7 +310,7 @@ async function dispatch(args: string[], flags: CliFlags, out: AgentOutput): Prom
     default:
       out.error(`Unknown agent subcommand: ${sub}`);
       out.line(
-        `Available: ${c('chat', 'cyan')}, ${c('run', 'cyan')}, ${c('probe', 'cyan')}, ${c('config', 'cyan')}, ${c('provider', 'cyan')}, ${c('model', 'cyan')}, ${c('models', 'cyan')}`,
+        `Available: ${c('chat', 'cyan')}, ${c('run', 'cyan')}, ${c('probe', 'cyan')}, ${c('config', 'cyan')}, ${c('provider', 'cyan')}, ${c('model', 'cyan')}, ${c('models', 'cyan')}, ${c('slot', 'cyan')}`,
       );
       out.result({
         ok: false,
@@ -144,6 +318,61 @@ async function dispatch(args: string[], flags: CliFlags, out: AgentOutput): Prom
       });
       return EXIT_FAILURE;
   }
+}
+
+function handleSlot(args: string[], flags: CliFlags, out: AgentOutput): number {
+  const action = args[1] ?? 'list';
+  if (action === 'list') {
+    const providers = loadAiProviders();
+    const slots = AGENT_SLOT_IDS.map((id) => {
+      const slot = loadAgentSlot(id);
+      const saved = slot.profileId === undefined ? undefined : providers[slot.profileId];
+      return {
+        ...slot,
+        state: !isAgentSlotConfigured(slot) ? 'not set' : saved === undefined ? 'profile missing' : 'ready',
+      };
+    });
+    out.result({ slots });
+    if (out.json) return 0;
+    for (const slot of slots) {
+      out.line(`  ${c(slot.label, 'cyan')} (${slot.id}): ${slot.state}`);
+      out.line(`    Profile: ${slot.profileId ?? 'not set'}   Model: ${slot.model ?? 'not set'}`);
+      out.line(`    Instructions: ${slot.instructions === '' ? 'none' : `${slot.instructions.length} characters`}`);
+      const settings = Object.entries(slot.settings).map(([name, value]) => `${name}=${String(value)}`).join(', ');
+      out.line(`    Settings: ${settings === '' ? 'defaults' : settings}`);
+    }
+    return 0;
+  }
+  const id = parseAgentSlotId(args[2]);
+  if (id === undefined) throw failure('Choose a slot: workhorse or creative. Usage: joy-media agent slot <list|set|clear> <workhorse|creative>');
+  if (action === 'clear') {
+    clearAgentSlot(id);
+    out.success(`${AGENT_SLOT_LABELS[id]} cleared.`);
+    out.result({ ok: true, cleared: id });
+    return 0;
+  }
+  if (action === 'set') {
+    if (flags.profile !== undefined && loadAiProviders()[flags.profile] === undefined) {
+      throw failure(`No saved provider named "${flags.profile}". Add it first with: joy-media agent provider add ${flags.profile} --url <url>`);
+    }
+    const current = loadAgentSlot(id);
+    const result = saveAgentSlot(id, {
+      profileId: flags.profile ?? current.profileId,
+      model: flags.model ?? current.model,
+      instructions: flags.instructions ?? current.instructions,
+      settings: {
+        temperature: numberFlag(flags.temperature) ?? current.settings.temperature,
+        maxOutputTokens: numberFlag(flags.maxOutputTokens) ?? current.settings.maxOutputTokens,
+      },
+    });
+    if (!result.ok) throw failure(`The slot was not saved: ${result.issue}${result.field === undefined ? '' : ` (${result.field})`}.`);
+    out.success(`${result.slot.label} saved.`);
+    out.step('Profile', result.slot.profileId ?? 'not set');
+    out.step('Model', result.slot.model ?? 'not set');
+    out.result({ ok: true, slot: result.slot });
+    return 0;
+  }
+  throw failure(`Unknown slot action "${action}". Available actions: list, set, clear`, 'UNKNOWN_SUBCOMMAND');
 }
 
 // ---------------------------------------------------------------------------
@@ -173,11 +402,16 @@ async function resolveApiKeyFlag(flags: CliFlags): Promise<string | undefined> {
 }
 
 async function providerOptionsFrom(flags: CliFlags): Promise<ResolveProviderOptions> {
+  const slot = flags.slot === undefined ? undefined : parseAgentSlotId(flags.slot);
+  if (flags.slot !== undefined && slot === undefined) {
+    throw usage('--slot must be "workhorse" or "creative".');
+  }
   return {
     provider: flags.provider,
     model: flags.model,
     apiKey: await resolveApiKeyFlag(flags),
     baseUrl: flags.baseUrl,
+    slot,
   };
 }
 
@@ -186,17 +420,11 @@ async function providerOptionsFrom(flags: CliFlags): Promise<ResolveProviderOpti
 // ---------------------------------------------------------------------------
 
 function isKnownProvider(providers: Record<string, AiProviderConfig>, name: string): boolean {
-  return (
-    hasAiProvider(providers, name) || Object.prototype.hasOwnProperty.call(BUILTIN_PROVIDERS, name)
-  );
+  return hasAiProvider(providers, name) || findRegistryProvider(name) !== undefined;
 }
 
 function providerType(baseUrl: string, explicit: string | undefined): string {
-  if (explicit) return explicit;
-  const host = new URL(baseUrl).hostname.toLowerCase();
-  if (host === 'openrouter.ai') return 'openrouter';
-  if (host === 'kilo.ai' || host.endsWith('.kilo.ai')) return 'kilo';
-  return 'custom';
+  return explicit ?? inferProviderType(baseUrl);
 }
 
 async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput): Promise<number> {
@@ -207,14 +435,29 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
     const active = loadCliConfig().activeProvider;
     const entries = Object.keys(providers).map((name) => {
       const p = providers[name]!;
+      const oauthExpiry =
+        p.authKind === 'oauth'
+          ? (() => {
+              try {
+                const credential = openCredentialStore().read(name);
+                return credential !== undefined && 'provider' in credential && credential.provider === p.provider
+                  ? oauthTokenExpiry(credential)
+                  : 'OAuth credential unavailable';
+              } catch {
+                return 'OAuth credential unavailable';
+              }
+            })()
+          : undefined;
       return {
         name,
         provider: p.provider ?? 'custom',
-        baseUrl: p.baseUrl ?? null,
+        baseUrl: p.authKind === 'oauth' && p.provider === 'xai' ? null : p.baseUrl ?? null,
         defaultModel: p.defaultModel ?? null,
-        apiKey: maskSecret(p.apiKey),
+        apiKeySet: Boolean(p.apiKey),
+        authKind: p.authKind ?? 'api-key',
         cachedModelCount: p.cachedModels?.length ?? 0,
         active: name === active,
+        ...(oauthExpiry === undefined ? {} : { expiresAt: oauthExpiry }),
       };
     });
     out.result({ activeProvider: active ?? null, providers: entries });
@@ -231,16 +474,19 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
       out.line(`  ${marker} ${c(entry.name, 'bold')} (${entry.provider})`);
       out.step('  Base URL', entry.baseUrl ?? 'default');
       out.step('  Default Model', entry.defaultModel ?? 'not-set');
-      out.step('  API Key', entry.apiKey ?? 'none');
+      if (entry.authKind === 'oauth') {
+        out.step('  Auth', `OAuth (${entry.provider})`);
+        out.step('  Access token', entry.expiresAt ?? 'OAuth credential unavailable');
+      } else {
+        out.step('  API Key', entry.apiKeySet ? 'set (hidden)' : 'none');
+      }
       if (entry.cachedModelCount > 0) {
         out.step('  Discovered Models', `${entry.cachedModelCount} models cached`);
       }
       out.line();
     }
     if (!active) {
-      out.info(
-        'No provider selected; runs use the built-in default (see "joy-media agent config").',
-      );
+      out.info('No provider selected. Configure a provider with "joy-media agent provider add".');
     }
     return 0;
   }
@@ -257,8 +503,28 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
         `Invalid provider name "${name}": use 1-64 letters, digits, ".", "_" or "-", starting with a letter or digit.`,
       );
     }
+    if (flags.oauth) return await addOAuthProvider(name, flags, out);
     if (!flags.baseUrl) throw usage('Base URL required. Specify --url <url>');
     const { url: baseUrl } = normalizeCliBaseUrl(flags.baseUrl);
+    const type = providerType(baseUrl, flags.provider);
+    if (isRetiredProvider(type)) {
+      throw failure(`The ${type} provider was retired from JOY Media. Add another provider instead.`);
+    }
+    if (findRegistryProvider(type) === undefined && !isCustomProviderId(type)) {
+      throw failure(`Unknown provider type "${type}". Use a registry provider id or "custom".`);
+    }
+    const verdict = evaluateEndpoint(type, baseUrl, {
+      consentToPublicEndpoint: flags.acceptPublicEndpoint === true,
+    });
+    if (!verdict.allowed) {
+      const hint =
+        verdict.code === 'CONSENT_REQUIRED'
+          ? ' To use a public endpoint, add --accept-public-endpoint after reading what it receives.'
+          : '';
+      throw failure(`The base URL is refused: ${verdict.reason}${hint}`);
+    }
+    const endpointConsent =
+      verdict.kind === 'public' ? `${verdict.origin}${verdict.basePath}` : undefined;
     const apiKey = await resolveApiKeyFlag(flags);
 
     const discovery = await discoverModels(baseUrl, apiKey);
@@ -273,13 +539,14 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
       out.warn(`Model discovery skipped: ${discovery.problem}. The provider is saved anyway.`);
     }
 
-    const defaultModel = flags.model ?? cachedModels?.[0] ?? 'minimax/minimax-m3';
+    const defaultModel = flags.model ?? cachedModels?.[0];
     const entry: AiProviderConfig = {
       name,
-      provider: providerType(baseUrl, flags.provider),
+      provider: type,
       baseUrl,
+      ...(endpointConsent ? { endpointConsent } : {}),
       ...(apiKey ? { apiKey } : {}),
-      defaultModel,
+      ...(defaultModel ? { defaultModel } : {}),
       ...(cachedModels ? { cachedModels } : {}),
     };
     const replaced = updateAiProviders((providers) => {
@@ -294,8 +561,8 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
         : `Provider "${name}" configured successfully!`,
     );
     out.step('Base URL', baseUrl);
-    out.step('Default Model', defaultModel);
-    out.step('API Key', maskSecret(apiKey) ?? 'none');
+    if (defaultModel) out.step('Default Model', defaultModel);
+    out.step('API Key', apiKey ? 'set (hidden)' : 'none');
     out.result({
       ok: true,
       replaced,
@@ -304,7 +571,7 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
         provider: entry.provider,
         baseUrl,
         defaultModel,
-        apiKey: maskSecret(apiKey),
+        apiKeySet: Boolean(apiKey),
         cachedModelCount: cachedModels?.length ?? 0,
       },
     });
@@ -314,7 +581,13 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
   if (action === 'use') {
     const name = args[2] ?? flags.name;
     if (!name) throw usage('Provider name required. Usage: joy-media agent provider use <name>');
+    if (isRetiredProvider(name)) {
+      throw failure(`The ${name} provider was retired from JOY Media. Choose another provider.`);
+    }
     const providers = loadAiProviders();
+    if (providers[name]?.provider !== undefined && isRetiredProvider(providers[name]!.provider!)) {
+      throw failure(`The ${providers[name]!.provider} provider was retired from JOY Media. Choose another provider.`);
+    }
     if (!isKnownProvider(providers, name)) {
       throw failure(
         `Unknown provider "${name}". Run "joy-media agent provider list" to see available providers.`,
@@ -355,7 +628,7 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
     out.success(`Provider "${name}" removed.`);
     if (wasActive) {
       out.warn(
-        'It was the active provider; no provider is selected now, so runs fall back to the built-in default. ' +
+        'It was the active provider; no provider is selected now. ' +
           'Pick one with "joy-media agent provider use <name>".',
       );
     }
@@ -470,8 +743,22 @@ async function discoverModels(baseUrl: string, apiKey: string | undefined): Prom
 }
 
 async function handleModels(args: string[], flags: CliFlags, out: AgentOutput): Promise<number> {
+  const target = args[1] ?? flags.provider ?? loadCliConfig().activeProvider;
+  if (target !== undefined && isRetiredProvider(target)) {
+    throw failure(`The ${target} provider was retired from JOY Media. Choose another provider.`);
+  }
+  const profile = target === undefined ? undefined : loadAiProviders()[target];
+  if (profile?.provider !== undefined && isRetiredProvider(profile.provider)) {
+    throw failure(`The ${profile.provider} provider was retired from JOY Media. Choose another provider.`);
+  }
+  if (target !== undefined && profile?.authKind === 'oauth') {
+    if (flags.baseUrl !== undefined || flags.apiKey !== undefined) {
+      throw failure(`OAuth profile "${target}" cannot be combined with --url or --api-key.`);
+    }
+    return await listOAuthModels(target, profile, out);
+  }
   const settings = resolveProviderSettings({
-    provider: args[1] ?? flags.provider,
+    provider: target,
     baseUrl: flags.baseUrl,
     apiKey: await resolveApiKeyFlag(flags),
   });
@@ -481,18 +768,23 @@ async function handleModels(args: string[], flags: CliFlags, out: AgentOutput): 
   if (!discovery.ok) {
     throw failure(`Failed to fetch models: ${discovery.problem}.`, 'DISCOVERY_FAILED');
   }
+  const apiKey = settings.apiKey;
+  const modelIds =
+    apiKey === undefined || apiKey.length === 0
+      ? discovery.ids
+      : discovery.ids.filter((id) => !id.includes(apiKey));
   out.line(`\n  ${c(`Discovered ${discovery.listed} models:`, 'bold')}\n`);
-  for (const id of discovery.ids) out.line(`  • ${id}`);
+  for (const id of modelIds) out.line(`  • ${id}`);
   out.line();
   updateAiProviders((providers) => {
     if (hasAiProvider(providers, settings.providerName)) {
       providers[settings.providerName] = {
         ...providers[settings.providerName],
-        cachedModels: discovery.ids,
+        cachedModels: modelIds,
       };
     }
   });
-  out.result({ ok: true, provider: settings.providerName, models: discovery.ids });
+  out.result({ ok: true, provider: settings.providerName, models: modelIds });
   return 0;
 }
 
@@ -519,7 +811,7 @@ function effectiveJson(resolved: ReturnType<typeof tryResolve>): unknown {
     kind: s.kind,
     baseUrl: s.baseUrl,
     model: s.modelId,
-    apiKey: maskSecret(s.apiKey),
+    apiKeySet: Boolean(s.apiKey),
     apiKeySource: s.apiKeySource,
     local: s.local,
   };
@@ -592,7 +884,7 @@ async function handleConfig(flags: CliFlags, out: AgentOutput): Promise<number> 
     out.step(
       'API Key',
       s.apiKey
-        ? `${maskSecret(s.apiKey)} (from ${s.apiKeySource})`
+        ? 'set (hidden)'
         : s.local
           ? 'none (local endpoint)'
           : 'MISSING',
@@ -603,7 +895,7 @@ async function handleConfig(flags: CliFlags, out: AgentOutput): Promise<number> 
 
 async function handleProbe(flags: CliFlags, out: AgentOutput): Promise<number> {
   const options = await providerOptionsFrom(flags);
-  resolveByokConfig(options); // fail fast, before the banner and any network traffic
+  await resolveAgentConfig(options); // fail fast, before the banner and any network traffic
   out.banner();
   out.info('Probing LLM provider capabilities...');
   const res = await probeAgent(options);
@@ -686,13 +978,12 @@ async function handleChat(flags: CliFlags): Promise<number> {
     model: flags.model,
     apiKey: flags.apiKey,
     baseUrl: flags.baseUrl,
+    slot: flags.slot === undefined ? undefined : parseAgentSlotId(flags.slot),
   };
-  try {
-    resolveByokConfig(providerOptions);
-  } catch (error) {
-    if (!(error instanceof AgentConfigError)) throw error;
-    out.warn(`${error.message} Slash commands still work; agent prompts will fail.`);
+  if (flags.slot !== undefined && providerOptions.slot === undefined) {
+    throw usage('--slot must be "workhorse" or "creative".');
   }
+  await resolveAgentConfig(providerOptions);
   const projectInfo = resolveTargetProject(flags, out);
   if (flags.model) {
     out.line();
@@ -724,7 +1015,7 @@ async function handleRun(args: string[], flags: CliFlags, out: AgentOutput): Pro
 
   const providerOptions = await providerOptionsFrom(flags);
   // Fail fast and locally on a bad / missing provider configuration.
-  resolveByokConfig(providerOptions);
+  await resolveAgentConfig(providerOptions);
 
   const projectInfo = resolveTargetProject(flags, out);
   out.banner();

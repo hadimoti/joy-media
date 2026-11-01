@@ -83,51 +83,39 @@ Instead, this wave adds the desktop-host-side substrate that engine can be wired
   fails closed on an unsupported provider, empty model id, or insecure base URL (`https://`
   only, except `http://` to a loopback host for local OpenAI-compatible servers).
 - **IPC surface** (`ipc-handlers.ts`): `desktop.provider-profile.save` (validates, then writes
-  the key to `safeStorage` before writing profile metadata — so a crash between the two never
+  the key to `safeStorage` before writing profile metadata, so a crash between the two never
   leaves a profile pointing at a handle that was never written), `.list` (metadata only),
-  `.delete` (removes both the profile and its secret), `.begin-session` (a **volatile, one-time**
-  plaintext handoff of a `ByokSessionConfig`-shaped object — the same shape and volatility
-  contract `apps/editor-web/src/joy-agent/byok-session.ts`'s `forgetByokConfig` already
-  enforces for manually-entered keys today), and `.test` (runs
+  `.delete` (removes both the profile and its secret), `.test` (runs
   `@joy-media/provider-sdk`'s `probeOpenAiCompatibleProvider` host-side with the resolved key
-  and returns only a redacted report — the key never reaches the renderer for a connectivity
-  test).
+  and returns only a redacted report), and `.fetch-models`. v1.1.0 (P1) removes `.begin-session`
+  and the update check. P2 reroutes `.test` and `.fetch-models` through the broker (PLAN-v4 §6a, §6c).
 
-**Explicitly deferred:** no renderer-side code calls any of these five channels yet.
-`apps/editor-web`'s BYOK UI still works exactly as it does today (manual key entry each
-session); wiring it to call `desktop.provider-profile.begin-session` instead — and building a
-profile-management UI — is future work, same honesty pattern as wave 2's deferred items.
+## Local-only build (v1.1.0, P1)
 
-## Auto-update policy check (wave 7)
+v1.1.0 is local-only: no accounts, no sign-in, no plan or subscription UI, no remote endpoints,
+and no update check (ADR-0043; PLAN-v4 §4a). The packaged app opens and exports offline.
 
-`main/auto-update-policy.ts`'s `evaluateAutoUpdate` is a pure, network-free gate (active
-subscription, pinned public key, Ed25519 signature over `apps/api/src/release-signing.ts`'s
-canonical payload, HTTPS `joyst.ir` allow-list, SHA-256 shape, semver compare, downgrade and
-minimum-version checks) — it decides whether a manifest is trustworthy and newer, never fetches
-or installs anything itself. `desktop.check-for-update` is the IPC channel that gives it a real
-caller: the renderer fetches a `SignedReleaseManifest` from the public `GET /v1/releases/:channel`
-route and its own subscription state from `GET /v1/account/subscription` (both existing wave 4
-routes), then calls this channel with `{ manifest, subscriptionActive }`. The two pieces of trust
-material a compromised renderer must never be able to supply — the pinned release-signing public
-key (`JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY`, a public key, not a secret) and the app's actual
-running version (`app.getVersion()`) — are resolved only in `electron-entry.ts`, never accepted
-from the IPC payload.
+- Removed: the update check (`desktop.check-for-update`), the auto-update policy module, the
+  `.begin-session` handoff, and every remote base URL and joyst.ir origin.
+- Kept: the staged install, the kept-previous version, and the data snapshot.
+- Legacy provider profiles (`kilo`, `joy-hosted`) stay on disk and are shown as disabled
+  (PLAN-v4 §9a). "Later" keeps them. "Delete" removes one after an explicit confirmation.
 
-**Explicitly deferred:** no renderer-side code calls `desktop.check-for-update` yet, and nothing
-downloads or installs the update artifact even when the decision is `status: 'update'` — a
-download/install pipeline (and where its progress surfaces in the UI) is separate follow-up work
-this channel only makes possible. `JOY_MEDIA_RELEASE_SIGNING_PUBLIC_KEY` is not set in any
-deployment today, so the channel always returns `{status: 'blocked', reason:
-'release-key-unconfigured'}` until the owner pins the real key alongside provisioning
-`apps/api`'s `joy-media-release-signing-key` credential (see `release-signing.ts`'s module doc).
+## Worker startup (v1.1.0, P4)
+
+- The Worker starts when JOY Media starts and stops when it quits. Normal desktop use needs no manual Worker start.
+- There is no Windows sign-in autostart.
+- A Worker that stops on its own restarts up to three times, after 1, 2 and 4 seconds. A run that lasted at least 60 seconds counts as healthy and starts a new budget.
+- When the automatic restarts are used up, the Jobs panel's Workers tab shows the stopped Worker, its last error, and a Retry button. Retry calls `desktop.worker-retry`.
+- The GPU preview host starts only with `JOY_MEDIA_WORKER_GPU_PREVIEW=1`. It is an explicit local capability and is not advertised otherwise.
 
 ## Boundaries
 
-- **Editor origin:** only the configured JOY production origin and explicit loopback development origins may request the bridge. Unknown origins are rejected before IPC dispatch.
+- **Editor origin:** only the packaged renderer origin (`joy-media-app://renderer`) and the loopback development origins may request the bridge. Unknown origins are rejected before IPC dispatch.
 - **IPC:** only the versioned channels in `src/ipc.ts` are exposed. Requests carry opaque IDs and structured data; there is no arbitrary command, shell, or path channel. `ipc-handlers.ts`'s `dispatchIpcRequest` re-validates origin + channel on every call before a handler ever runs.
 - **Files:** native selection is represented by an opaque `local-file` reference. The raw path never crosses the renderer boundary — `main/file-registry.ts` is the only place the real path is resolvable, and only from main-process code (Worker supervision, media ingest), never from preload or the renderer. Derivatives must be explicitly requested by reference and kind.
 - **Deep links:** only `joy://open/project/<UUID>` is accepted. Credentials, arbitrary hosts, and arbitrary paths are rejected.
-- **Worker:** `main/worker-supervisor.ts` supervises the Worker as a child process (spawn, crash-restart with a cap, graceful SIGTERM/SIGKILL stop) and reports lifecycle/status and startup preference only. The Worker remains the owner of probing, hashing, and derivative generation; project mutation stays in the editor command path. Wave 2 adds a local job queue (see below) that tracks a derivative request's lifecycle; it does not yet dispatch that job to the Worker over a real protocol.
+- **Worker:** `main/worker-supervisor.ts` runs the Worker as a child process. It starts with the app, restarts a crash up to three times with doubling delays, and stops on quit (SIGTERM, then SIGKILL). The Worker takes jobs only through the loopback job API (`src/jobs/local-job-api.ts`), which needs a per-run token. The Worker refuses any control-plane address other than `http://127.0.0.1:<port>`. The Worker remains the owner of probing, hashing, and derivative generation; project mutation stays in the editor command path.
 - **Window:** `BrowserWindow` is created with `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`, `nodeIntegrationInWorker: false`, `webviewTag: false` (`main/window.ts`'s `buildSecureWebPreferences`), a denied `setWindowOpenHandler`, and a denied default permission-request handler. The packaged renderer loads from a privileged custom scheme (`joy-media-app://renderer/`) rather than `file://`, so it keeps a normal secure-context origin; dev loads the Vite dev server at `http://localhost:5173`, which is in the `origin-policy.ts` allow-list.
 - **Shutdown:** `main/shutdown.ts` stops the Worker before flushing pending state on `before-quit`, `window-all-closed`, `SIGINT`, and `SIGTERM`, and is idempotent if multiple signals arrive.
 

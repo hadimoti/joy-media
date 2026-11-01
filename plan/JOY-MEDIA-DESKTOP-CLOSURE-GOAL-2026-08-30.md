@@ -6,7 +6,7 @@ Copy the text below into the next `/goal` instruction:
 
 ---
 
-Complete `C:\Users\HadiMoti\joy-media\plan\JOY-MEDIA-DESKTOP-CLOSURE-PLAN-2026-08-30.md` in the standalone JOY Media repository `C:\Users\HadiMoti\joy-media`, not joy-vps. Read its entire plan, DESIGN.md, the referenced HadiPC/VPS operating documentation and current authenticated VPS Gbrain facts. Reconcile the actual current Git/live baseline before editing; do not replay fixes already present or restart a completed prior goal.
+Complete `<owner-profile>\joy-media\plan\JOY-MEDIA-DESKTOP-CLOSURE-PLAN-2026-08-30.md` in the standalone JOY Media repository `<owner-profile>\joy-media`, not joy-vps. Read its entire plan, DESIGN.md, the referenced HadiPC/VPS operating documentation and current authenticated VPS Gbrain facts. Reconcile the actual current Git/live baseline before editing; do not replay fixes already present or restart a completed prior goal.
 
 The outcome is a secure, durable, desktop-class JOY Media application with all in-contract UI/function/backend/Worker/delivery findings closed, independently reviewed and tested, committed to main, pushed to the documented JOY Media remotes, deployed at joyst.ir/www.joyst.ir, and verified against the exact release. Include the separate Windows application milestone before claiming the Windows app is finished. “No bugs left” means no known open in-contract defect and complete passing acceptance evidence, not an unsupported absolute guarantee.
 

@@ -1,3 +1,9 @@
+import {
+  evaluateEndpoint,
+  type AgentSlotId,
+  type RegistryProviderId,
+} from '@joy-media/provider-sdk';
+import { ProviderCallError, type ProviderCallRequest } from './joy-agent/provider-call.js';
 /**
  * Typed helpers for the desktop host bridge (`window.joyDesktop`), injected by
  * `apps/desktop/src/preload/preload.cjs` via `contextBridge.exposeInMainWorld` when
@@ -36,6 +42,8 @@ export interface DesktopWorkerStatus {
   readonly workerId?: string;
   readonly capabilities: readonly string[];
   readonly lastSeenAt?: string;
+  /** Why the Worker stopped on its own. Shown with a retry action once the automatic restarts are used up. */
+  readonly lastError?: string;
 }
 
 /** Mirrors apps/desktop/src/file-boundary.ts's `OpaqueFileRef`. */
@@ -45,67 +53,10 @@ export interface DesktopFileSelection {
   readonly displayName: string;
 }
 
-/** Mirrors apps/desktop/src/main/auto-update-policy.ts's `ReleaseManifestPayload`. */
-export interface DesktopReleaseManifestPayload {
-  readonly channel: 'stable' | 'beta';
-  readonly version: string;
-  readonly downloadUrl: string;
-  readonly sha256: string;
-  readonly minSupportedVersion?: string;
-}
-
-/** Mirrors apps/desktop/src/main/auto-update-policy.ts's `SignedReleaseManifest`. The renderer
- * is the one that fetches this from the existing public `GET /v1/releases/:channel` route;
- * this helper only forwards it to the main process for verification. */
-export interface DesktopSignedReleaseManifest {
-  readonly payload: DesktopReleaseManifestPayload;
-  readonly signature: string;
-}
-
-export interface DesktopUpdateCheckRequest {
-  readonly manifest: DesktopSignedReleaseManifest;
-  readonly subscriptionActive: boolean;
-}
-
-export type DesktopUpdateBlockReason =
-  | 'subscription-required'
-  | 'release-key-unconfigured'
-  | 'manifest-invalid'
-  | 'signature-invalid'
-  | 'download-url-invalid'
-  | 'not-newer';
-
-/** Mirrors apps/desktop/src/main/auto-update-policy.ts's `AutoUpdateDecision`. */
-export type DesktopUpdateDecision =
-  | { readonly status: 'blocked'; readonly reason: DesktopUpdateBlockReason }
-  | { readonly status: 'current'; readonly reason: 'not-newer' }
-  | {
-      readonly status: 'update';
-      readonly manifest: DesktopSignedReleaseManifest;
-      readonly forced: boolean;
-      readonly autoDownload: boolean;
-    };
-
-export const DEFAULT_JOY_REMOTE_API_BASE = 'https://joyst.ir/api';
-
 /** True only inside the Electron desktop shell. Safe to call from any environment, including
  * server-side rendering, where `window` itself may not exist. */
 export function isDesktopHost(): boolean {
   return typeof window !== 'undefined' && window.joyDesktop !== undefined;
-}
-
-/** Resolves the base URL for VPS backend requests. Inside desktop host, targets https://joyst.ir/api. */
-export function getRemoteApiBaseUrl(): string {
-  if (
-    typeof window !== 'undefined' &&
-    (window as unknown as Record<string, unknown>).__JOY_MEDIA_API_BASE__
-  ) {
-    return (window as unknown as Record<string, unknown>).__JOY_MEDIA_API_BASE__ as string;
-  }
-  if (isDesktopHost()) {
-    return DEFAULT_JOY_REMOTE_API_BASE;
-  }
-  return '/api';
 }
 
 function requireBridge(): DesktopJoyBridge {
@@ -115,23 +66,15 @@ function requireBridge(): DesktopJoyBridge {
   return window.joyDesktop;
 }
 
-/**
- * Forwards a manifest the caller already fetched from `GET /v1/releases/:channel`, plus the
- * caller's own `GET /v1/account/subscription` result, to the main process's
- * `desktop.check-for-update` handler. The main process alone supplies the pinned
- * release-signing public key and the running app version, so a compromised renderer can never
- * inject either — this call cannot download or install anything by itself.
- */
-export async function checkForDesktopUpdate(
-  request: DesktopUpdateCheckRequest,
-): Promise<DesktopUpdateDecision> {
-  const data = await requireBridge().invoke('desktop.check-for-update', request);
-  return data as DesktopUpdateDecision;
-}
-
 /** Reads the desktop Worker supervisor's current status via `desktop.worker-status`. */
 export async function getDesktopWorkerStatus(): Promise<DesktopWorkerStatus> {
   const data = await requireBridge().invoke('desktop.worker-status');
+  return data as DesktopWorkerStatus;
+}
+
+/** Starts the desktop's Worker again, after its automatic restarts are used up, via `desktop.worker-retry`. */
+export async function retryDesktopWorker(): Promise<DesktopWorkerStatus> {
+  const data = await requireBridge().invoke('desktop.worker-retry');
   return data as DesktopWorkerStatus;
 }
 
@@ -153,9 +96,13 @@ export interface DesktopProviderProfile {
   readonly cachedModels?: readonly string[] | undefined;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** False until the saved key is confirmed for this endpoint. Such a profile asks for its key again. */
+  readonly bound?: boolean | undefined;
 }
 
 export interface SaveDesktopProviderProfileRequest {
+  /** The owner has confirmed this public custom endpoint (S8). */
+  readonly acknowledgedPublicEndpoint?: boolean | undefined;
   readonly id?: string | undefined;
   readonly name?: string | undefined;
   readonly provider: string;
@@ -176,7 +123,16 @@ export interface DiscoveredModel {
 export async function saveDesktopProviderProfile(
   request: SaveDesktopProviderProfileRequest,
 ): Promise<DesktopProviderProfile> {
-  const data = await requireBridge().invoke('desktop.provider-profile.save', request);
+  // A new profile for a local endpoint may be saved with no key (PLAN-v4 D8). It is stored with the
+  // placeholder, so the profile still reads as having a key. An existing profile is left alone.
+  const keyless = request.apiKey === undefined || request.apiKey === '';
+  const verdict = evaluateEndpoint(request.provider, request.baseUrl, {
+    consentToPublicEndpoint: request.acknowledgedPublicEndpoint === true,
+  });
+  const local = verdict.allowed && verdict.kind === 'loopback';
+  const payload =
+    request.id === undefined && keyless && local ? { ...request, apiKey: 'not-provided' } : request;
+  const data = await requireBridge().invoke('desktop.provider-profile.save', payload);
   return data as DesktopProviderProfile;
 }
 
@@ -196,18 +152,28 @@ export async function deleteDesktopProviderProfile(id: string): Promise<void> {
 }
 
 /**
- * Hands back the decrypted provider session configuration for a single session.
+ * Signs in to a provider in the desktop app, and saves the profile it makes. The key or token stays in the
+ * desktop: the reply is the saved profile, which holds no secret (PLAN-v4 §6b, §6d). The registry decides which
+ * providers may be signed in to (PLAN-v4 §6d-1 rule 5, D20).
  */
-export async function beginDesktopProviderSession(id: string): Promise<unknown> {
-  const data = await requireBridge().invoke('desktop.provider-profile.begin-session', { id });
-  return data;
+export async function signInDesktopProviderProfile(request: {
+  readonly provider: RegistryProviderId;
+  readonly id?: string | undefined;
+}): Promise<DesktopProviderProfile> {
+  const data = await requireBridge().invoke('desktop.provider-profile.sign-in', request);
+  return data as DesktopProviderProfile;
+}
+
+/** Revokes a saved ChatGPT authorization and removes its local profile on success. */
+export async function signOutDesktopProviderProfile(id: string): Promise<void> {
+  await requireBridge().invoke('desktop.provider-profile.sign-out', { id });
 }
 
 /**
  * Probes the provider profile connectivity in the desktop host without exposing the key.
  */
 export async function testDesktopProviderProfile(id: string): Promise<unknown> {
-  const data = await requireBridge().invoke('desktop.provider-profile.test', { id });
+  const data = await requireBridge().invoke('desktop.provider.test', { id });
   return data;
 }
 
@@ -215,41 +181,105 @@ export async function testDesktopProviderProfile(id: string): Promise<unknown> {
  * Discovers models available behind an API endpoint (via desktop bridge if available, or direct fetch in browser).
  */
 export async function fetchDesktopProviderModels(request: {
+  /** The owner has confirmed this public custom endpoint (S8). */
+  readonly acknowledgedPublicEndpoint?: boolean | undefined;
   id?: string | undefined;
   baseUrl?: string | undefined;
   apiKey?: string | undefined;
   provider?: string | undefined;
 }): Promise<readonly DiscoveredModel[]> {
-  if (isDesktopHost()) {
-    const data = await requireBridge().invoke('desktop.provider-profile.fetch-models', request);
-    return (data as readonly DiscoveredModel[]) ?? [];
+  if (!isDesktopHost()) throw new Error('Model lists are available in the desktop app only');
+  const payload =
+    request.id === undefined || request.id.length === 0
+      ? {
+          draft: {
+            provider: request.provider ?? '',
+            baseUrl: request.baseUrl ?? '',
+            apiKey: request.apiKey ?? '',
+          },
+        }
+      : { id: request.id };
+  const data = await requireBridge().invoke('desktop.provider.models', payload);
+  return (data as readonly DiscoveredModel[]) ?? [];
+}
+
+/**
+ * One model call through the desktop broker. The key never reaches this side (PLAN-v4 §6a). A call that
+ * is aborted here is cancelled in the desktop as well, so the provider request it began is not left running.
+ */
+export async function requestAgentCompletion(request: ProviderCallRequest): Promise<string> {
+  const bridge = requireBridge();
+  const { signal, ...payload } = request;
+  if (signal?.aborted) throw new ProviderCallError('NETWORK_ERROR', 'The request was cancelled.');
+  // A random id per call: a counter restarts on every reload, and an old page's id could then match a new call.
+  const requestId = `agent-${crypto.randomUUID()}`;
+  const cancel = (): void => {
+    void bridge.invoke('desktop.agent.cancel', { requestId }).catch(() => undefined);
+  };
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    const data = (await bridge.invoke('desktop.agent.request', { ...payload, requestId })) as
+      | {
+          readonly ok?: unknown;
+          readonly text?: unknown;
+          readonly code?: unknown;
+          readonly message?: unknown;
+        }
+      | undefined;
+    // A reply that lands after the caller aborted is not returned: the caller has stopped waiting for it.
+    if (signal?.aborted) throw new ProviderCallError('NETWORK_ERROR', 'The request was cancelled.');
+    if (data?.ok === true && typeof data.text === 'string') return data.text;
+    throw new ProviderCallError(
+      typeof data?.code === 'string' ? data.code : 'NETWORK_ERROR',
+      typeof data?.message === 'string' ? data.message : 'The provider request failed',
+    );
+  } finally {
+    signal?.removeEventListener('abort', cancel);
   }
-  if (!request.baseUrl) return [];
-  const normalizedBaseUrl = request.baseUrl.replace(/\/+$/, '');
-  const headers: Record<string, string> = {};
-  if (request.apiKey && request.apiKey !== 'not-provided') {
-    headers['Authorization'] = `Bearer ${request.apiKey}`;
-  }
-  const res = await fetch(`${normalizedBaseUrl}/models`, { headers });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = (await res.json()) as { data?: unknown };
-  const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
-  return raw
-    .map((item) => {
-      if (typeof item === 'string') return { id: item, name: item };
-      if (item && typeof item === 'object') {
-        const id = (item as { id?: string }).id || '';
-        const name = (item as { name?: string }).name || id;
-        return { id, name };
-      }
-      return null;
-    })
-    .filter((m): m is DiscoveredModel => Boolean(m && m.id));
 }
 
 /**
  * Minimizes the host application window.
  */
+/** One agent slot as the desktop reports it. The key stays in the desktop, and the profile is named, not sent. */
+export interface DesktopAgentSlot {
+  readonly id: AgentSlotId;
+  readonly label: string;
+  readonly profileId: string | null;
+  readonly profileName: string | null;
+  readonly profileProvider: string | null;
+  readonly model: string | null;
+  readonly instructions: string;
+  readonly settings: { readonly temperature?: number; readonly maxOutputTokens?: number };
+  /** True when the slot names a saved profile and a model, and that profile is not a retired one. */
+  readonly ready: boolean;
+}
+
+/** What the owner sets for a slot. An absent field is not set, and an empty draft empties the slot. */
+export interface DesktopAgentSlotDraft {
+  readonly profileId?: string | undefined;
+  readonly model?: string | undefined;
+  readonly instructions?: string | undefined;
+  readonly settings?:
+    | { readonly temperature?: number | undefined; readonly maxOutputTokens?: number | undefined }
+    | undefined;
+}
+
+/** Both agent slots, through `desktop.agent-slots.list`. */
+export async function listDesktopAgentSlots(): Promise<readonly DesktopAgentSlot[]> {
+  const data = await requireBridge().invoke('desktop.agent-slots.list');
+  return Array.isArray(data) ? (data as readonly DesktopAgentSlot[]) : [];
+}
+
+/** Saves one slot through `desktop.agent-slots.save`. The desktop refuses a draft that breaks the rules. */
+export async function saveDesktopAgentSlot(
+  id: AgentSlotId,
+  draft: DesktopAgentSlotDraft,
+): Promise<DesktopAgentSlot> {
+  const data = await requireBridge().invoke('desktop.agent-slots.save', { id, draft });
+  return data as DesktopAgentSlot;
+}
+
 export async function minimizeDesktopWindow(): Promise<void> {
   await requireBridge().invoke('desktop.window-minimize');
 }

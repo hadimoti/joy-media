@@ -31,11 +31,7 @@ interface DoctorJson {
 const CHECK_IDS = [
   'node',
   'sqlite',
-  'project-store',
   'gpu',
-  'models',
-  'venvs',
-  'agent-provider',
   'edge',
 ];
 
@@ -68,14 +64,11 @@ function installFakeVenv(venv: string, exitCode = 0): string {
 }
 
 describe('doctor on a machine without network, GPU or models', () => {
-  it('finishes, exits 0, lists what is missing and does not claim everything passed', async () => {
+  it('finishes, exits 0 and reports the configured edge failure', async () => {
     const r = await sb.run(['doctor'], { env: { JOY_MEDIA_EDGE_URL: await refusedUrl() } });
     expect(r.code, describeRun(r)).toBe(0);
     expect(r.stderr, describeRun(r)).toBe('');
-    expect(r.out).toMatch(/Production Edge: Unreachable \(offline-first mode active\)/);
-    expect(r.out).toMatch(/Local AI Venvs: 0\/4 ready/);
-    expect(r.out).toMatch(/Local Model Weights: Directory not found/);
-    expect(r.out).not.toMatch(/All (core system )?diagnostics passed/);
+    expect(r.out).toMatch(/Production Edge: Unreachable/);
     expect(r.out).toMatch(/Core checks passed with \d+ warning\(s\): .*edge/);
   });
 
@@ -95,17 +88,12 @@ describe('doctor on a machine without network, GPU or models', () => {
     }
   });
 
-  it('reports a healthy edge with its release identity', async () => {
-    const edge = await startServer((_req, res) => {
-      res.setHeader('content-type', 'application/json');
-      res.end(
-        JSON.stringify({ releaseIdentity: { commitSha: 'abcdef1234567890', schemaVersion: 9 } }),
-      );
-    });
+  it('reports a healthy edge', async () => {
+    const edge = await startServer((_req, res) => res.end('ok'));
     try {
       const r = await sb.run(['doctor'], { env: { JOY_MEDIA_EDGE_URL: edge.url } });
       expect(r.code, describeRun(r)).toBe(0);
-      expect(r.out).toMatch(/Production Edge: Connected \[release: abcdef12, schema: v9\]/);
+      expect(r.out).toMatch(/Production Edge: Connected/);
     } finally {
       await edge.close();
     }
@@ -128,7 +116,7 @@ describe('doctor on a machine without network, GPU or models', () => {
       });
       expect(check(rHtml.json<DoctorJson>(), 'edge')).toMatchObject({
         status: 'pass',
-        message: expect.stringMatching(/Connected \[release: live\]/),
+        message: 'Connected',
       });
     } finally {
       await down.close();
@@ -138,7 +126,25 @@ describe('doctor on a machine without network, GPU or models', () => {
 
   it('JOY_MEDIA_EDGE_URL=off skips the probe entirely', async () => {
     const r = await sb.run(['doctor', '--json'], { env: { JOY_MEDIA_EDGE_URL: 'off' } });
-    expect(check(r.json<DoctorJson>(), 'edge').status).toBe('skip');
+    expect(check(r.json<DoctorJson>(), 'edge')).toMatchObject({
+      status: 'skip',
+      message: 'not configured',
+    });
+  });
+
+  it('an unset edge URL makes no request and reports a skip', async () => {
+    const edge = await startServer();
+    try {
+      const r = await sb.run(['doctor', '--json']);
+      expect(r.code, describeRun(r)).toBe(0);
+      expect(check(r.json<DoctorJson>(), 'edge')).toMatchObject({
+        status: 'skip',
+        message: 'not configured',
+      });
+      expect(edge.hits()).toBe(0);
+    } finally {
+      await edge.close();
+    }
   });
 
   it('--json is exactly one document: ok, summary and checks[] with id/status/message', async () => {
@@ -176,33 +182,6 @@ describe('doctor on a machine without network, GPU or models', () => {
     expect(existsSync(marker)).toBe(false);
   });
 
-  it.skipIf(isWindows)('detects an NVIDIA GPU through nvidia-smi', async () => {
-    const fakeBin = sb.path('fake-bin');
-    writeExecutable(join(fakeBin, 'nvidia-smi'), 'echo "NVIDIA GeForce RTX 4090"');
-    const r = await sb.run(['doctor', '--json'], {
-      env: { JOY_MEDIA_EDGE_URL: 'off', PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}` },
-    });
-    expect(check(r.json<DoctorJson>(), 'gpu')).toMatchObject({
-      status: 'pass',
-      message: 'NVIDIA GeForce RTX 4090',
-    });
-  });
-
-  it.skipIf(isWindows)('recognises a POSIX venv layout (bin/python) and model files', async () => {
-    installFakeVenv('venv-realesrgan');
-    const models = sb.path('models');
-    mkdirSync(models);
-    writeFileSync(join(models, 'RealESRGAN_x4plus.pth'), 'weights');
-    const r = await sb.run(['doctor', '--json'], {
-      env: { JOY_MEDIA_EDGE_URL: 'off', JOY_MODELS_DIR: models },
-    });
-    const doc = r.json<DoctorJson>();
-    expect(check(doc, 'venvs').details).toMatchObject({ ready: 1, total: 4 });
-    expect(check(doc, 'models')).toMatchObject({
-      status: 'pass',
-      message: expect.stringMatching(/1 file/),
-    });
-  });
 });
 
 describe('worker status', () => {

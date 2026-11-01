@@ -49,6 +49,23 @@ describe('probeOpenAiCompatibleProvider', () => {
     expect(JSON.stringify(report)).not.toContain('sk-secret');
   });
 
+  it('maps a 402 to BILLING_REQUIRED without leaking the response body', async () => {
+    const responseBody = 'Insufficient Balance';
+    const fetchImpl = fakeFetch({ ok: false, status: 402, text: async () => responseBody });
+    const report = await probeOpenAiCompatibleProvider(
+      { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test-not-a-real-key', modelId: 'm' },
+      fetchImpl,
+    );
+
+    expect(report).toEqual({
+      ok: false,
+      modelId: 'm',
+      errorCode: 'BILLING_REQUIRED',
+      message: 'The provider account needs credit to complete this request.',
+    });
+    expect(JSON.stringify(report)).not.toContain(responseBody);
+  });
+
   it('maps a non-401/403 error status to PROVIDER_INCOMPATIBLE', async () => {
     const fetchImpl = fakeFetch({ ok: false, status: 500, text: async () => 'oops' });
     const report = await probeOpenAiCompatibleProvider(

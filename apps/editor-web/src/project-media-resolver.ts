@@ -29,10 +29,7 @@ export interface ProjectMediaResolverOptions {
   /** Project-scoped API calls wait until the authenticated owner is known. */
   readonly controlPlaneReady?: boolean;
   readonly project?: JoyProjectV1;
-  readonly client: Pick<
-    BrowserControlPlaneClient,
-    'assets' | 'originalBytes' | 'sharedCloudOriginalBytes'
-  >;
+  readonly client: Pick<BrowserControlPlaneClient, 'assets'>;
   readonly originalCache: Pick<OpfsOriginalAssetCache, 'get'>;
 }
 
@@ -156,69 +153,25 @@ export class ProjectMediaResolver {
     }
     this.#assertEpoch(epoch);
 
-    if (this.#options.controlPlaneReady === false) {
-      if (
-        REFERENCE_ASSET_IDS.has(assetId) &&
-        (descriptor === undefined || !/^[a-f0-9]{64}$/.test(descriptor.sha256))
-      ) {
-        return this.#remember(
-          assetId,
-          {
-            url: `/media/reference/${encodeURIComponent(assetId)}.mp4`,
-            mimeType: 'video/mp4',
-            source: 'reference',
-          },
-          epoch,
-        );
-      }
-      throw new Error('Authenticated media session is not ready');
-    }
-
-    try {
-      let cloud: Blob;
-      try {
-        cloud = await this.#options.client.originalBytes(this.#options.projectId, assetId);
-      } catch {
-        this.#assertEpoch(epoch);
-        // User-library assets can be placed on another project's timeline.
-        // They remain owner-authorized through the shared library endpoint.
-        cloud = await this.#options.client.sharedCloudOriginalBytes(assetId);
-      }
-      this.#assertEpoch(epoch);
-      if (!(await matchesDescriptor(cloud, descriptor)))
-        throw new Error(`owner media integrity check failed for ${assetId}`);
-      const source = this.#remember(
+    // The local build has no owner storage to fall back to: a media file that is not in the
+    // local cache is unavailable, and only the bundled reference clips resolve without it.
+    if (
+      REFERENCE_ASSET_IDS.has(assetId) &&
+      (descriptor === undefined || !/^[a-f0-9]{64}$/.test(descriptor.sha256))
+    ) {
+      return this.#remember(
         assetId,
         {
-          url: URL.createObjectURL(cloud),
-          mimeType: mediaMimeType(descriptor, cloud),
-          source: 'cloud',
+          url: `/media/reference/${encodeURIComponent(assetId)}.mp4`,
+          mimeType: 'video/mp4',
+          source: 'reference',
         },
         epoch,
       );
-      this.#rememberObservationSource(assetId, cloud, source, epoch);
-      return source;
-    } catch (error) {
-      this.#assertEpoch(epoch);
-      if (
-        REFERENCE_ASSET_IDS.has(assetId) &&
-        (descriptor === undefined || !/^[a-f0-9]{64}$/.test(descriptor.sha256))
-      ) {
-        return this.#remember(
-          assetId,
-          {
-            url: `/media/reference/${encodeURIComponent(assetId)}.mp4`,
-            mimeType: 'video/mp4',
-            source: 'reference',
-          },
-          epoch,
-        );
-      }
-      throw new Error(
-        `Media ${descriptor?.displayName ?? assetId} is unavailable in local cache and owner storage`,
-        { cause: error },
-      );
     }
+    throw new Error(
+      `Media ${descriptor?.displayName ?? assetId} is unavailable in the local cache`,
+    );
   }
 
   async #descriptor(assetId: string): Promise<BrowserAsset | undefined> {
