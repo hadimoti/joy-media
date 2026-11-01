@@ -12,6 +12,7 @@ export interface LocalAssetRegistration {
   readonly displayName: string;
   readonly sha256: string;
   readonly bytes: number;
+  readonly descriptor?: Readonly<Record<string, unknown>>;
 }
 
 export interface LocalAsset extends LocalAssetRegistration {
@@ -29,6 +30,7 @@ interface LocalAssetRow {
   readonly sha256: string;
   readonly bytes: number;
   readonly stored_path: string | null;
+  readonly descriptor_json: string | null;
 }
 
 export function ensureLocalAssetSchema(db: DatabaseSync): void {
@@ -43,6 +45,12 @@ export function ensureLocalAssetSchema(db: DatabaseSync): void {
        created_at TEXT NOT NULL
      )`,
   );
+  const columns = db.prepare('PRAGMA table_info(local_assets)').all() as {
+    readonly name: string;
+  }[];
+  if (!columns.some((column) => column.name === 'descriptor_json')) {
+    db.exec('ALTER TABLE local_assets ADD COLUMN descriptor_json TEXT');
+  }
 }
 
 export class SqliteLocalAssetStore {
@@ -60,17 +68,25 @@ export class SqliteLocalAssetStore {
     }
     this.db
       .prepare(
-        `INSERT INTO local_assets (asset_id, kind, display_name, sha256, bytes, stored_path, created_at)
-         VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+        `INSERT INTO local_assets (asset_id, kind, display_name, sha256, bytes, stored_path, created_at, descriptor_json)
+         VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
       )
-      .run(asset.id, asset.kind, asset.displayName, asset.sha256, asset.bytes, this.now());
+      .run(
+        asset.id,
+        asset.kind,
+        asset.displayName,
+        asset.sha256,
+        asset.bytes,
+        this.now(),
+        asset.descriptor === undefined ? null : JSON.stringify(asset.descriptor),
+      );
     return { kind: 'registered' };
   }
 
   get(assetId: string): LocalAsset | undefined {
     const row = this.db
       .prepare(
-        `SELECT asset_id, kind, display_name, sha256, bytes, stored_path
+        `SELECT asset_id, kind, display_name, sha256, bytes, stored_path, descriptor_json
            FROM local_assets WHERE asset_id = ?`,
       )
       .get(assetId) as LocalAssetRow | undefined;
@@ -81,6 +97,9 @@ export class SqliteLocalAssetStore {
       displayName: row.display_name,
       sha256: row.sha256,
       bytes: row.bytes,
+      ...(row.descriptor_json === null
+        ? {}
+        : { descriptor: JSON.parse(row.descriptor_json) as Readonly<Record<string, unknown>> }),
       ...(row.stored_path === null ? {} : { storedPath: row.stored_path }),
     };
   }

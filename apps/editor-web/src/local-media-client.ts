@@ -308,6 +308,7 @@ export class BrowserControlPlaneClient {
       displayName: asset.displayName,
       sha256: asset.sha256,
       bytes: asset.bytes,
+      descriptor: asset.descriptor,
     });
     const registered: BrowserAsset = {
       id: asset.id,
