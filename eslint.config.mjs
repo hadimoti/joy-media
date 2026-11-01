@@ -11,6 +11,7 @@ export default tseslint.config(
       '**/.agent/**',
       '**/.superpowers/**',
       '**/playwright-report/**',
+      '**/.wrangler/**',
       '**/test-results*/**',
       '**/test-output/**',
       '**/.claude/worktrees/**',

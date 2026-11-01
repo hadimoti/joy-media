@@ -129,9 +129,39 @@ jobs:
           done
           if (( $(git status --porcelain | wc -l) != 0 )); then git status --porcelain; throw 'browser audit left residue in the checkout'; fi
 
+  site-build:
+    name: landing site build and checks (development verification)
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
+    timeout-minutes: 25
+    env:
+      CI: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Verify runner toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          corepack enable pnpm
+          pnpm --version
+      - run: pnpm install --frozen-lockfile
+      - name: Build the static site (apps/site)
+        run: pnpm --filter @joy-media/site build
+      - name: Site source and build checks (vitest)
+        run: pnpm exec vitest run apps/site
+      - run: pnpm exec playwright install chromium
+      - name: Site runtime checks (Playwright against the wrangler Pages preview)
+        run: pnpm exec playwright test --config playwright.site.config.ts
+      - name: Verify no checkout residue
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if (( $(git status --porcelain | wc -l) != 0 )); then git status --porcelain; echo 'site checks left residue in the checkout' >&2; exit 1; fi
+
   development-verification-summary:
     name: development verification summary (NOT release approval)
-    needs: [static-and-unit, browser]
+    needs: [static-and-unit, browser, site-build]
     if: always()
     runs-on: [self-hosted, linux, x64, joy-media-ci]
     steps:
@@ -144,5 +174,5 @@ jobs:
           set -euo pipefail
           # Structured, name-keyed evaluation (shared with release-candidate-v2).
           node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$NEEDS_JSON" \
-            'static-and-unit,browser'
+            'static-and-unit,browser,site-build'
           echo 'development verification passed — this is NOT a release approval'
