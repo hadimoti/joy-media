@@ -1,10 +1,8 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { fetchUserSession, fetchLatestRelease, type UserSession, type ReleaseInfo } from './api.js';
+import { fetchLatestRelease, type ReleaseInfo } from './api.js';
 import { LandingHero } from './LandingHero.js';
-import { AccountLanding } from './AccountLanding.js';
 
 export function App(): ReactNode {
-  const [user, setUser] = useState<UserSession | null>(null);
   const [release, setRelease] = useState<ReleaseInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -13,15 +11,11 @@ export function App(): ReactNode {
 
     async function init() {
       try {
-        const [sessionData, releaseData] = await Promise.all([
-          fetchUserSession(),
-          fetchLatestRelease('stable'),
-        ]);
+        const releaseData = await fetchLatestRelease('stable');
         if (!active) return;
-        setUser(sessionData);
         setRelease(releaseData);
       } catch (err) {
-        console.error('Failed to initialize session or release data:', err);
+        console.error('Failed to load release data:', err);
       } finally {
         if (active) setLoading(false);
       }
@@ -51,13 +45,5 @@ export function App(): ReactNode {
     );
   }
 
-  return (
-    <>
-      {user ? (
-        <AccountLanding user={user} release={release} onLogout={() => setUser(null)} />
-      ) : (
-        <LandingHero release={release} />
-      )}
-    </>
-  );
+  return <LandingHero release={release} />;
 }
