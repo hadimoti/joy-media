@@ -165,7 +165,7 @@ describe('OAuth provider profiles', () => {
     expect(code).toBe(0);
     expect(signInOAuthProfileMock).toHaveBeenCalledTimes(1);
     const notice =
-      'Signing in uses a third-party public app and may stop working or be deactivated by the provider at any time. An API key is the dependable way to connect.';
+      'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
     expect(errors).toEqual([notice]);
     expect(order.indexOf(`stderr:${notice}`)).toBeLessThan(order.indexOf('sign-in'));
     expect(printed.join('\n')).toContain('Approval URL: https://www.kimi.ai/code/authorize_device?user_code=KIMI-CODE-TEST');

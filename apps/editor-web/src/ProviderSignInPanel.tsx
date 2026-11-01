@@ -14,9 +14,9 @@ import {
   type DesktopProviderProfile,
 } from './desktop-client.js';
 
-/** Owner-approved wording for every OAuth route. Source: D22 step 2 brief (2026-10-30). */
+/** Owner wording for every OAuth route, reworded 2026-11-01 to say the route may be disabled and the API key is better. */
 const OAUTH_RISK_NOTICE =
-  'Signing in uses a third-party public app and may stop working or be deactivated by the provider at any time. An API key is the dependable way to connect.';
+  'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
 
 /** D23 sign-in provider order follows the existing settings panel order. */
 const ORDER: readonly RegistryProviderId[] = ['chatgpt', 'kimi', 'xai'];

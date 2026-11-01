@@ -64,7 +64,7 @@ export interface AgentCommandFlags {
 }
 
 const OAUTH_RISK_NOTICE =
-  'Signing in uses a third-party public app and may stop working or be deactivated by the provider at any time. An API key is the dependable way to connect.';
+  'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
 
 /** A number from a flag. A blank value is NaN, so the slot rules refuse it instead of reading it as zero. */
 function numberFlag(value: string | undefined): number | undefined {

@@ -8,7 +8,7 @@ import { ProviderSignInPanel } from './ProviderSignInPanel.js';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const RISK_NOTICE =
-  'Signing in uses a third-party public app and may stop working or be deactivated by the provider at any time. An API key is the dependable way to connect.';
+  'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
 
 describe('ProviderSignInPanel', () => {
   const global = globalThis as { window?: unknown };
