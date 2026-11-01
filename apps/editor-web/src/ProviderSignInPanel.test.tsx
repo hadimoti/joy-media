@@ -7,6 +7,9 @@ import { ProviderSignInPanel } from './ProviderSignInPanel.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const RISK_NOTICE =
+  'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
+
 describe('ProviderSignInPanel', () => {
   const global = globalThis as { window?: unknown };
   const originalWindow = global.window;
@@ -57,10 +60,10 @@ describe('ProviderSignInPanel', () => {
     return invoke;
   }
 
-  async function mount(onSaved = vi.fn()): Promise<void> {
+  async function mount(onSignedIn = vi.fn(), onSaved = vi.fn()): Promise<void> {
     root = createRoot(container);
     await act(async () => {
-      root?.render(<ProviderSignInPanel onSaved={onSaved} />);
+      root?.render(<ProviderSignInPanel onSignedIn={onSignedIn} onSaved={onSaved} />);
     });
   }
 
@@ -72,11 +75,19 @@ describe('ProviderSignInPanel', () => {
     await act(async () => button.click());
   }
 
-  function route(provider: string): HTMLElement {
-    const element = container.querySelector<HTMLElement>(
-      'section[aria-label="' + provider + ' API-key route"]',
+  async function openSignInRoute(provider: string): Promise<void> {
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle ' + provider + ' sign-in route"]',
     );
-    if (element === null) throw new Error('Expected ' + provider + ' API-key route');
+    if (button === null) throw new Error('Expected ' + provider + ' sign-in route accordion');
+    await act(async () => button.click());
+  }
+
+  function route(provider: string, name: 'API-key' | 'OAuth'): HTMLElement {
+    const element = container.querySelector<HTMLElement>(
+      'section[aria-label="' + provider + ' ' + name + ' route"]',
+    );
+    if (element === null) throw new Error('Expected ' + provider + ' ' + name + ' route');
     return element;
   }
 
@@ -91,12 +102,12 @@ describe('ProviderSignInPanel', () => {
 
   it('renders nothing outside the desktop app', () => {
     global.window = undefined;
-    expect(renderToStaticMarkup(<ProviderSignInPanel />)).toBe('');
+    expect(renderToStaticMarkup(<ProviderSignInPanel onSignedIn={() => undefined} />)).toBe('');
   });
 
-  it('shows only the three provider accordions and no API-key-only provider', () => {
+  it('shows only the three OAuth provider accordions and no API-key-only provider', () => {
     global.window = { joyDesktop: {} };
-    const markup = renderToStaticMarkup(<ProviderSignInPanel />);
+    const markup = renderToStaticMarkup(<ProviderSignInPanel onSignedIn={() => undefined} />);
     const headers = [
       'Toggle ChatGPT connection routes',
       'Toggle Kimi connection routes',
@@ -127,16 +138,52 @@ describe('ProviderSignInPanel', () => {
     }
   });
 
-  it('offers only the API-key route and no OAuth sign-in', async () => {
+  it('keeps the sign-in route in a secondary accordion that starts closed', async () => {
+    installDesktopBridge();
+    await mount();
+    await openAccordion('xAI');
+
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle xAI sign-in route"]',
+    );
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(trigger?.textContent).toContain('Sign-in route (Secondary)');
+    expect(container.textContent).not.toContain('Sign in with xAI');
+    expect(container.textContent).not.toContain(RISK_NOTICE);
+
+    await openSignInRoute('xAI');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain(RISK_NOTICE);
+  });
+
+  it('renders the same approved notice directly below each sign-in button', async () => {
     installDesktopBridge();
     await mount();
 
-    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) await openAccordion(provider);
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) {
+      await openAccordion(provider);
+      await openSignInRoute(provider);
+      const signInRoute = route(provider, 'OAuth');
+      const card = container
+        .querySelector('button[aria-label="Toggle ' + provider + ' connection routes"]')
+        ?.closest('.joy-accordion-item');
+      const button = signInRoute.querySelector('button');
+      expect(button?.textContent?.trim()).toBe('Sign in with ' + provider);
+      expect(button?.nextElementSibling?.tagName).toBe('P');
+      expect(button?.nextElementSibling?.textContent).toBe(RISK_NOTICE);
+      expect(
+        [...(card?.querySelectorAll('section[aria-label$="route"]') ?? [])].map((section) =>
+          section.getAttribute('aria-label'),
+        ),
+      ).toEqual([provider + ' API-key route', provider + ' OAuth route']);
+      expect(route(provider, 'API-key').textContent).not.toContain(RISK_NOTICE);
+    }
 
-    expect(container.textContent).not.toContain('Sign in with');
-    expect(container.querySelector('button[aria-label*="sign-in route"]')).toBeNull();
-    expect(container.textContent).not.toContain('Sign-in route (Secondary)');
-    expect(container.querySelector('section[aria-label$="OAuth route"]')).toBeNull();
+    expect(
+      [...container.querySelectorAll('p')].filter(
+        (paragraph) => paragraph.textContent === RISK_NOTICE,
+      ),
+    ).toHaveLength(3);
   });
 
   it('uses only API-key regions for the primary route and keeps OAuth-only bases out of it', async () => {
@@ -155,17 +202,17 @@ describe('ProviderSignInPanel', () => {
     };
     for (const [provider, baseUrl] of expectedBases) {
       expect(
-        route(provider).querySelector<HTMLInputElement>('input[readonly]')?.value,
+        route(provider, 'API-key').querySelector<HTMLInputElement>('input[readonly]')?.value,
       ).toBe(baseUrl);
-      const keyLink = route(provider).querySelector<HTMLAnchorElement>('a');
+      const keyLink = route(provider, 'API-key').querySelector<HTMLAnchorElement>('a');
       expect(keyLink?.getAttribute('href')).toBe(expectedKeyUrls[provider]);
       expect(keyLink?.target).toBe('_blank');
     }
 
-    const chatGptKeyRoute = route('ChatGPT');
+    const chatGptKeyRoute = route('ChatGPT', 'API-key');
     expect(chatGptKeyRoute.querySelector('input[type="password"]')).toBeNull();
 
-    const kimiKeyRoute = route('Kimi');
+    const kimiKeyRoute = route('Kimi', 'API-key');
     expect(kimiKeyRoute.textContent).not.toContain('https://api.kimi.ai/coding/v1');
     const kimiRegionSelect = kimiKeyRoute.querySelector<HTMLSelectElement>(
       'select[aria-label="Kimi API key region"]',
@@ -174,7 +221,7 @@ describe('ProviderSignInPanel', () => {
       [...(kimiRegionSelect?.options ?? [])].map((option) => option.value),
     ).toEqual(['international', 'china']);
 
-    const xaiKeyRoute = route('xAI');
+    const xaiKeyRoute = route('xAI', 'API-key');
     expect(xaiKeyRoute.textContent).not.toContain('https://cli-chat-proxy.grok.com/v1');
     expect(xaiKeyRoute.querySelector('select')).toBeNull();
     expect(xaiKeyRoute.querySelectorAll('input[readonly]')).toHaveLength(1);
@@ -184,7 +231,7 @@ describe('ProviderSignInPanel', () => {
     const invoke = installDesktopBridge();
     const onSaved = vi.fn();
     const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    await mount(onSaved);
+    await mount(vi.fn(), onSaved);
     const cases: readonly {
       readonly provider: string;
       readonly id: string;
@@ -210,7 +257,7 @@ describe('ProviderSignInPanel', () => {
       const item = cases[index]!;
       await openAccordion(item.provider);
       if (item.region !== undefined) {
-        const region = route(item.provider).querySelector<HTMLSelectElement>(
+        const region = route(item.provider, 'API-key').querySelector<HTMLSelectElement>(
           'select[aria-label="' + item.provider + ' API key region"]',
         );
         if (region === null) throw new Error('Expected ' + item.provider + ' API key region');
@@ -218,13 +265,13 @@ describe('ProviderSignInPanel', () => {
         await act(async () => region.dispatchEvent(new Event('change', { bubbles: true })));
       }
 
-      const key = route(item.provider).querySelector<HTMLInputElement>(
+      const key = route(item.provider, 'API-key').querySelector<HTMLInputElement>(
         'input[aria-label="' + item.provider + ' API key"]',
       );
-      const model = route(item.provider).querySelector<HTMLInputElement>(
+      const model = route(item.provider, 'API-key').querySelector<HTMLInputElement>(
         'input[aria-label="' + item.provider + ' Model ID"]',
       );
-      const save = [...route(item.provider).querySelectorAll('button')].find(
+      const save = [...route(item.provider, 'API-key').querySelectorAll('button')].find(
         (button) => button.textContent?.trim() === 'Save API key',
       );
       if (key === null || model === null || save === undefined)
@@ -257,10 +304,10 @@ describe('ProviderSignInPanel', () => {
     await mount();
     await openAccordion('Kimi');
 
-    const key = route('Kimi').querySelector<HTMLInputElement>(
+    const key = route('Kimi', 'API-key').querySelector<HTMLInputElement>(
       'input[aria-label="Kimi API key"]',
     );
-    const save = [...route('Kimi').querySelectorAll('button')].find(
+    const save = [...route('Kimi', 'API-key').querySelectorAll('button')].find(
       (button) => button.textContent?.trim() === 'Save API key',
     );
     if (key === null || save === undefined) throw new Error('Expected Kimi key form');
@@ -268,7 +315,7 @@ describe('ProviderSignInPanel', () => {
 
     await act(async () => save.click());
 
-    expect(route('Kimi').textContent).toContain('Enter a model ID before saving.');
+    expect(route('Kimi', 'API-key').textContent).toContain('Enter a model ID before saving.');
     expect(invoke).not.toHaveBeenCalledWith(
       'desktop.provider-profile.save',
       expect.anything(),
