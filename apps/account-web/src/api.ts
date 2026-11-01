@@ -93,35 +93,6 @@ async function request<T>(
   return json.data !== undefined ? json.data : json;
 }
 
-export async function requestOtp(contact: string, method: 'gmail' | 'telegram'): Promise<string> {
-  const data = await request<{ message?: string }>(
-    '/v1/auth/request-otp',
-    {
-      method: 'POST',
-      body: JSON.stringify({ contact, method }),
-    },
-    null,
-  );
-  return data?.message || 'Verification code sent.';
-}
-
-export async function verifyOtp(
-  contact: string,
-  method: 'gmail' | 'telegram',
-  code: string,
-): Promise<string> {
-  const data = await request<{ token: string }>(
-    '/v1/auth/verify-otp',
-    {
-      method: 'POST',
-      body: JSON.stringify({ contact, method, code }),
-    },
-    null,
-  );
-  setSessionToken(data.token);
-  return data.token;
-}
-
 export async function fetchUserSession(): Promise<UserSession | null> {
   const token = getSessionToken();
   if (!token) return null;

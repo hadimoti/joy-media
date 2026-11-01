@@ -2,12 +2,10 @@ import { useState, useEffect, type ReactNode } from 'react';
 import { fetchUserSession, fetchLatestRelease, type UserSession, type ReleaseInfo } from './api.js';
 import { LandingHero } from './LandingHero.js';
 import { AccountLanding } from './AccountLanding.js';
-import { LoginCard } from './LoginCard.js';
 
 export function App(): ReactNode {
   const [user, setUser] = useState<UserSession | null>(null);
   const [release, setRelease] = useState<ReleaseInfo | null>(null);
-  const [loginOpen, setLoginOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -35,17 +33,6 @@ export function App(): ReactNode {
     };
   }, []);
 
-  const handleLoginSuccess = async () => {
-    try {
-      const refreshed = await fetchUserSession();
-      setUser(refreshed);
-    } catch (err) {
-      console.error('Failed to refresh user session after login:', err);
-    } finally {
-      setLoginOpen(false);
-    }
-  };
-
   if (loading) {
     return (
       <div
@@ -69,14 +56,8 @@ export function App(): ReactNode {
       {user ? (
         <AccountLanding user={user} release={release} onLogout={() => setUser(null)} />
       ) : (
-        <LandingHero release={release} onOpenLogin={() => setLoginOpen(true)} />
+        <LandingHero release={release} />
       )}
-
-      <LoginCard
-        isOpen={loginOpen}
-        onClose={() => setLoginOpen(false)}
-        onSuccess={handleLoginSuccess}
-      />
     </>
   );
 }
