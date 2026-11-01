@@ -968,20 +968,6 @@ export function JoyAgentSettingsDialog({
                   </button>
                   <button
                     type="button"
-                    className={`joy-preset-tab ${studioPreset === 'joy-hosted' ? 'is-active' : ''}`}
-                    onClick={() => {
-                      setStudioPreset('joy-hosted');
-                      handleProviderChange('joy-hosted');
-                    }}
-                  >
-                    <span className="joy-preset-icon">💎</span>
-                    <div className="joy-preset-text">
-                      <strong>Joy Hosted Pro Gateway</strong>
-                      <span>Keyless Sweden VPS Proxy (minimax/minimax-m3)</span>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
                     className={`joy-preset-tab ${studioPreset === 'custom' ? 'is-active' : ''}`}
                     onClick={() => {
                       setStudioPreset('custom');
