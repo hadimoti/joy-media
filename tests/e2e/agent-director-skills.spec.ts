@@ -314,17 +314,23 @@ test.describe('JOY Live Director creative recipes', () => {
 
     const reviewCard = page.getByRole('region', { name: 'Optional image evidence review' });
     await expect(reviewCard).toBeVisible({ timeout: 40_000 });
-    const requestsBeforeConsent = provider.requests;
+    // Media is what consent guards. Text-only agent turns may continue while the review waits,
+    // so the check counts image-bearing provider requests, not every request.
+    const imageRequestsBeforeConsent = provider.imageRequests;
     await reviewCard.getByRole('button', { name: 'Review image scope', exact: true }).click();
     const consent = page.getByRole('region', { name: 'Review what JOY may share' });
     await expect(consent).toBeVisible();
     await expect(consent.getByText('fixture/joy-agent')).toBeVisible();
     await expect(consent.getByText('source')).toBeVisible();
-    await expect.poll(() => provider.requests).toBe(requestsBeforeConsent);
+    await expect.poll(() => provider.imageRequests).toBe(imageRequestsBeforeConsent);
     await consent.getByRole('button', { name: 'Allow this review', exact: true }).click();
     await expect(reviewCard).toHaveAttribute('data-observation-review-status', 'reviewed', {
       timeout: 40_000,
     });
+    // The image transfer is what consent allows, so it must reach the provider after Allow.
+    await expect
+      .poll(() => provider.imageRequests, { timeout: 40_000 })
+      .toBeGreaterThan(imageRequestsBeforeConsent);
 
     const preview = page.getByRole('region', { name: 'JOY Agent live proposal' });
     await expect(preview).toBeVisible({ timeout: 40_000 });
