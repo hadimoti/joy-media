@@ -5,6 +5,7 @@ packages:
 allowBuilds:
   electron: true
   esbuild: true
+  workerd: true
 overrides:
   '@xmldom/xmldom': 0.8.15
   undici: 7.29.1
