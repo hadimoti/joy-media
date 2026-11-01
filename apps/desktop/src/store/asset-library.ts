@@ -145,6 +145,18 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
         lockPath = `${catalogPath}.lock`;
         ownerToken = randomUUID();
         await mkdir(directory, { recursive: true });
+        await mkdir(path.dirname(target), { recursive: true });
+        const mediaTemporaryPath = `${target}.${process.pid}.${randomUUID()}.tmp`;
+        temporaryPath = mediaTemporaryPath;
+        await copyFile(registration.storedPath, mediaTemporaryPath, constants.COPYFILE_EXCL);
+        try {
+          await rename(mediaTemporaryPath, target);
+          temporaryPath = undefined;
+        } catch (error) {
+          if (!isAlreadyExists(error)) throw error;
+          await unlink(mediaTemporaryPath).catch(() => undefined);
+          temporaryPath = undefined;
+        }
         locked = await acquireLock(
           lockPath,
           lockWaitMs,
@@ -203,13 +215,6 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
                 if (!isAlreadyExists(error)) throw error;
               }
             }
-            await mkdir(path.dirname(target), { recursive: true });
-            try {
-              await copyFile(registration.storedPath, target, constants.COPYFILE_EXCL);
-            } catch (error) {
-              if (!isAlreadyExists(error)) throw error;
-            }
-
             const entry: LibraryEntry = {
               id,
               projectId: '',

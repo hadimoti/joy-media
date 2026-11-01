@@ -126,6 +126,24 @@ describe('createAssetLibrary', () => {
     expect(await exists(path.join(directory, 'catalog.json.lock'))).toBe(false);
   });
 
+  it('does not reference a missing original when the copy fails', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const asset = registration();
+    const missingOriginal = { ...asset, storedPath: path.join(root, 'missing-original.bin') };
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: () => missingOriginal },
+    });
+
+    expect(await library.addAsset(asset.id)).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/^The asset library could not be updated: /),
+    });
+    expect(await exists(path.join(directory, 'catalog.json'))).toBe(false);
+    expect(await exists(path.join(directory, 'catalog.json.lock'))).toBe(false);
+  });
+
   it('places audio files in audio', async () => {
     const root = await temporaryDirectory();
     const directory = path.join(root, 'library');
@@ -152,7 +170,7 @@ describe('createAssetLibrary', () => {
     expect((await library.addAsset(asset.id)).ok).toBe(false);
     expect(await readFile(path.join(directory, 'catalog.json'))).toEqual(invalidCatalog);
     expect(await exists(path.join(directory, 'catalog.json.joy-media-backup'))).toBe(false);
-    expect(await exists(path.join(directory, `images/joylib-${asset.sha256}`))).toBe(false);
+    expect(await exists(path.join(directory, `images/joylib-${asset.sha256}`))).toBe(true);
   });
 
   it('times out on a fresh lock and removes its own lock file', async () => {
@@ -173,6 +191,28 @@ describe('createAssetLibrary', () => {
     });
     expect(await exists(path.join(directory, 'catalog.json'))).toBe(false);
     expect(await exists(path.join(directory, 'catalog.json.lock'))).toBe(true);
+  });
+
+  it('copies the original before taking the lock', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const asset = await writeOriginal(root, registration());
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, 'catalog.json.lock'), 'held');
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: () => asset },
+      lockWaitMs: 20,
+    });
+    const id = `joylib-${asset.sha256}`;
+    const targetPath = path.join(directory, 'images', id);
+
+    expect(await library.addAsset(asset.id)).toEqual({
+      ok: false,
+      error: 'The asset library is busy. Try the import again.',
+    });
+    expect(await exists(targetPath)).toBe(true);
+    expect(await exists(path.join(directory, 'catalog.json'))).toBe(false);
   });
 
   it('leaves a partial lock token after a write failure until it is stale', async () => {
