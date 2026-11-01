@@ -123,6 +123,7 @@ function ProviderRouteAccordion({
   const label = providerLabel(provider.id);
   const regions = apiKeyRegions(provider);
   const [open, setOpen] = useState(false);
+  const [signInOpen, setSignInOpen] = useState(false);
   const [apiKeyRegionId, setApiKeyRegionId] = useState<ProviderRegionId | undefined>(regions[0]?.id);
   const [modelId, setModelId] = useState('');
   const [saving, setSaving] = useState(false);
@@ -289,20 +290,39 @@ function ProviderRouteAccordion({
             )}
           </section>
 
-          <section className="joy-provider-route" aria-label={label + ' OAuth route'}>
-            <h4 className="joy-provider-route-title">OAuth sign-in route (Secondary)</h4>
+          <div className={'joy-accordion-item' + (signInOpen ? ' is-open' : '')}>
             <button
               type="button"
-              className="joy-btn-secondary"
-              disabled={signInDisabled || saving}
-              onClick={onSignIn}
+              className="joy-accordion-trigger"
+              aria-label={'Toggle ' + label + ' sign-in route'}
+              aria-expanded={signInOpen}
+              aria-controls={'joy-provider-oauth-' + provider.id}
+              onClick={() => setSignInOpen((previous) => !previous)}
             >
-              Sign in with {label}
-              {signInBusy ? '…' : ''}
+              <span className="joy-accordion-trigger-title">Sign-in route (Secondary)</span>
+              <span className="joy-accordion-trigger-meta">
+                <span className="joy-accordion-chevron">▾</span>
+              </span>
             </button>
-            <p className="joy-provider-risk-notice">{OAUTH_RISK_NOTICE}</p>
-            {signInMessage !== undefined && <p role="status">{signInMessage}</p>}
-          </section>
+
+            {signInOpen && (
+              <div id={'joy-provider-oauth-' + provider.id} className="joy-accordion-content">
+                <section className="joy-provider-route" aria-label={label + ' OAuth route'}>
+                  <button
+                    type="button"
+                    className="joy-btn-secondary"
+                    disabled={signInDisabled || saving}
+                    onClick={onSignIn}
+                  >
+                    Sign in with {label}
+                    {signInBusy ? '…' : ''}
+                  </button>
+                  <p className="joy-provider-risk-notice">{OAUTH_RISK_NOTICE}</p>
+                  {signInMessage !== undefined && <p role="status">{signInMessage}</p>}
+                </section>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
