@@ -63,13 +63,12 @@ function fakeMediaAuth(): MediaAuthApi {
   };
 }
 
-async function start(usdcCheckout?: UsdcCheckoutApi, account?: AccountApi): Promise<string> {
+async function start(usdcCheckout?: UsdcCheckoutApi): Promise<string> {
   const server = createControlPlaneHttpServer({
     controlPlane: new LocalControlPlane(),
     authentication: { authenticate: () => undefined },
     mediaAuth: fakeMediaAuth(),
     ...(usdcCheckout === undefined ? {} : { usdcCheckout }),
-    ...(account === undefined ? {} : { account }),
   });
   servers.push(server);
   server.listen(0, '127.0.0.1');
@@ -401,16 +400,14 @@ describe('USDC checkout end-to-end: confirmation activates the subscription the 
       },
     });
 
-    const origin = await start(usdcCheckout, account);
+    const origin = await start(usdcCheckout);
     const authHeader = { authorization: `Bearer token:${OWNER}` };
 
     // Subscription starts out unselected/unpaid.
-    expect(
-      await request(origin, 'GET', '/v1/account/subscription', undefined, authHeader),
-    ).toMatchObject({ status: 200, body: { data: { plan: 'none', status: 'none' } } });
+    expect(await account.getSubscription(OWNER)).toMatchObject({ plan: 'none', status: 'none' });
 
     // The owner picks the monthly plan (pending, not yet active) ...
-    await request(origin, 'POST', '/v1/account/subscription', { plan: 'monthly' }, authHeader);
+    await account.selectPlan(OWNER, 'monthly');
 
     // ... creates a USDC invoice for it ...
     const createResult = await request(
@@ -438,25 +435,13 @@ describe('USDC checkout end-to-end: confirmation activates the subscription the 
     expect(activateSubscription).toHaveBeenCalledTimes(1);
     expect(activateSubscription).toHaveBeenCalledWith(OWNER, expectedPeriodEnd);
 
-    // The subscription route now independently reports the subscription as active, with the
+    // The account service now independently reports the subscription as active, with the
     // exact period end the monthly plan implies.
-    const subscriptionResult = await request(
-      origin,
-      'GET',
-      '/v1/account/subscription',
-      undefined,
-      authHeader,
-    );
-    expect(subscriptionResult).toMatchObject({
-      status: 200,
-      body: {
-        data: {
-          ownerId: OWNER,
-          plan: 'monthly',
-          status: 'active',
-          currentPeriodEnd: expectedPeriodEnd,
-        },
-      },
+    expect(await account.getSubscription(OWNER)).toMatchObject({
+      ownerId: OWNER,
+      plan: 'monthly',
+      status: 'active',
+      currentPeriodEnd: expectedPeriodEnd,
     });
   });
 });

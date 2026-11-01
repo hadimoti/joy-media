@@ -19,7 +19,6 @@ import {
   DisabledMediaAuth,
   MediaAuthError,
   type MediaAuthApi,
-  type MediaAuthMethod,
 } from './media-auth.js';
 import {
   createRuntimeMistralProviderRegistry,
@@ -28,6 +27,7 @@ import {
 } from './mistral-provider.js';
 import type { PrivateObjectStore } from './private-object-store.js';
 import type { JoyModelGateway } from './joy-model-gateway.js';
+import { AccountServiceError } from './account-service.js';
 import { remuxBrowserMp4Bytes } from './export-remux.js';
 import { MAX_DENOISE_JSON_BYTES } from './spectral-denoise.js';
 import {
@@ -64,7 +64,6 @@ import {
   isRetiredHostedRoute,
   type HostedRouteRetirementFlags,
 } from './hosted-route-retirement.js';
-import { AccountServiceError, DisabledAccountService, type AccountApi } from './account-service.js';
 import {
   DisabledReleaseMetadataService,
   ReleaseMetadataError,
@@ -111,9 +110,6 @@ export interface ControlPlaneHttpServerOptions {
   readonly controlPlane: ControlPlane;
   readonly authentication: ApiAuthentication;
   readonly mediaAuth?: MediaAuthApi;
-  /** Device registration, subscriptions, and signed entitlement issuance (wave 4). Identity
-   * here is always the mediaAuth actor id, same as /v1/auth/*. */
-  readonly account?: AccountApi;
   /** Public read model backing GET /v1/releases/:channel; no auth required. */
   readonly releases?: ReleaseMetadataApi;
   /** SPKI PEM served at GET /v1/entitlements/public-key so the desktop client can pin the
@@ -169,7 +165,6 @@ export function createControlPlaneHttpServer(options: ControlPlaneHttpServerOpti
       options.audioDenoise ??
       new SpectralDenoiseService(new MemorySpectralDenoiseInvocationLedger()),
     gpuPreview: options.gpuPreview ?? new GpuPreviewTransport(options.controlPlane),
-    account: options.account ?? new DisabledAccountService(),
     releases: options.releases ?? new DisabledReleaseMetadataService(),
     entitlementPublicKeyPem: options.entitlementPublicKeyPem ?? '',
     hostedRouteRetirement: options.hostedRouteRetirement ?? ALL_HOSTED_ROUTE_RETIREMENT_DISABLED,
@@ -215,7 +210,6 @@ async function route(
     readonly mediaAuth: MediaAuthApi;
     readonly audioDenoise: SpectralDenoiseService;
     readonly gpuPreview: GpuPreviewTransport;
-    readonly account: AccountApi;
     readonly releases: ReleaseMetadataApi;
     readonly entitlementPublicKeyPem: string;
     readonly hostedRouteRetirement: HostedRouteRetirementFlags;
@@ -564,59 +558,6 @@ async function route(
     return;
   }
 
-  if (request.method === 'POST' && url.pathname === '/v1/auth/request-otp') {
-    const body = await readJson(request, maxJsonBodyBytes);
-    const data = await options.mediaAuth.requestOtp(
-      requiredString(body, 'contact'),
-      requiredAuthMethod(body),
-      request,
-    );
-    respondJson(response, 200, { data });
-    return;
-  }
-
-  if (request.method === 'POST' && url.pathname === '/v1/auth/verify-otp') {
-    const body = await readJson(request, maxJsonBodyBytes);
-    const token = await options.mediaAuth.verifyOtp(
-      requiredString(body, 'contact'),
-      requiredAuthMethod(body),
-      requiredString(body, 'code'),
-    );
-    respondJson(response, 200, { data: { token } });
-    return;
-  }
-
-  if (request.method === 'POST' && url.pathname === '/v1/auth/logout') {
-    const token = bearerToken(request);
-    if (token !== undefined) await options.mediaAuth.logout(token);
-    respondJson(response, 200, { data: { ok: true } });
-    return;
-  }
-
-  if (request.method === 'GET' && url.pathname === '/v1/auth/session') {
-    const profile = await options.mediaAuth.sessionProfile(request);
-    if (profile === undefined)
-      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
-    respondJson(response, 200, { data: profile });
-    return;
-  }
-
-  if (request.method === 'GET' && url.pathname === '/v1/auth/avatar') {
-    const avatar = await options.mediaAuth.avatarBytes(request);
-    if (avatar === undefined) {
-      response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ error: { code: 'AVATAR_NOT_FOUND', message: 'no avatar' } }));
-      return;
-    }
-    response.writeHead(200, {
-      'content-type': avatar.mimeType,
-      'cache-control': 'private, max-age=3600',
-      'content-length': avatar.bytes.length,
-    });
-    response.end(avatar.bytes);
-    return;
-  }
-
   // Public — release metadata backs the installer/download page and the desktop app's own
   // update check; it carries no credential or customer data (wave 4).
   const releaseMatch = /^\/v1\/releases\/(stable|beta)$/.exec(url.pathname);
@@ -640,76 +581,6 @@ async function route(
   // without needing a login first (wave 4).
   if (request.method === 'GET' && url.pathname === '/v1/entitlements/public-key') {
     respondJson(response, 200, { data: { publicKeyPem: options.entitlementPublicKeyPem } });
-    return;
-  }
-
-  // Device registration, subscriptions, and entitlement issuance are all keyed by the
-  // mediaAuth actor (OTP identity), same domain as /v1/auth/* above — not the legacy
-  // `options.authentication` actor the project/worker/job routes below use (wave 4).
-  if (request.method === 'POST' && url.pathname === '/v1/devices') {
-    const mediaActor = await options.mediaAuth.authenticate(request);
-    if (mediaActor === undefined)
-      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
-    const body = await readJson(request, maxJsonBodyBytes);
-    const device = await options.account.registerDevice(
-      mediaActor.id,
-      requiredString(body, 'displayName'),
-    );
-    respondJson(response, 201, { data: device });
-    return;
-  }
-
-  if (request.method === 'GET' && url.pathname === '/v1/devices') {
-    const mediaActor = await options.mediaAuth.authenticate(request);
-    if (mediaActor === undefined)
-      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
-    respondNoStoreJson(response, 200, { data: await options.account.listDevices(mediaActor.id) });
-    return;
-  }
-
-  const revokeDeviceMatch = /^\/v1\/devices\/([^/]+)\/revoke$/.exec(url.pathname);
-  if (request.method === 'POST' && revokeDeviceMatch !== null) {
-    const mediaActor = await options.mediaAuth.authenticate(request);
-    if (mediaActor === undefined)
-      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
-    await options.account.revokeDevice(mediaActor.id, decodeURIComponent(revokeDeviceMatch[1]!));
-    respondJson(response, 200, { data: { ok: true } });
-    return;
-  }
-
-  if (request.method === 'GET' && url.pathname === '/v1/account/subscription') {
-    const mediaActor = await options.mediaAuth.authenticate(request);
-    if (mediaActor === undefined)
-      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
-    respondNoStoreJson(response, 200, {
-      data: await options.account.getSubscription(mediaActor.id),
-    });
-    return;
-  }
-
-  if (request.method === 'POST' && url.pathname === '/v1/account/subscription') {
-    const mediaActor = await options.mediaAuth.authenticate(request);
-    if (mediaActor === undefined)
-      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
-    const body = await readJson(request, maxJsonBodyBytes);
-    const plan = requiredString(body, 'plan');
-    if (plan !== 'monthly' && plan !== 'yearly') {
-      throw new ControlPlaneError('REQUEST_INVALID', 'plan must be "monthly" or "yearly"');
-    }
-    respondJson(response, 200, { data: await options.account.selectPlan(mediaActor.id, plan) });
-    return;
-  }
-
-  if (request.method === 'POST' && url.pathname === '/v1/entitlements/refresh') {
-    const mediaActor = await options.mediaAuth.authenticate(request);
-    if (mediaActor === undefined)
-      throw new ControlPlaneError('AUTH_REQUIRED', 'authentication required');
-    const body = await readJson(request, maxJsonBodyBytes);
-    const entitlement = await options.account.issueEntitlement(
-      mediaActor.id,
-      requiredString(body, 'deviceId'),
-    );
-    respondNoStoreJson(response, 200, { data: entitlement });
     return;
   }
 
@@ -1902,13 +1773,6 @@ async function readBytes(request: IncomingMessage, maximumBytes: number): Promis
     chunks.push(bytes);
   }
   return new Uint8Array(Buffer.concat(chunks));
-}
-
-function requiredAuthMethod(body: Record<string, unknown>): MediaAuthMethod {
-  const value = body.method;
-  if (value !== 'gmail' && value !== 'telegram')
-    throw new ControlPlaneError('REQUEST_INVALID', 'method must be gmail or telegram');
-  return value;
 }
 
 function requiredString(body: Record<string, unknown>, field: string): string {
