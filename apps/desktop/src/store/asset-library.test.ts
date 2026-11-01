@@ -215,6 +215,26 @@ describe('createAssetLibrary', () => {
     expect(await exists(path.join(directory, 'catalog.json'))).toBe(false);
   });
 
+  it('keeps the media file that is already stored when the same content is added again', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const asset = await writeOriginal(root, registration());
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: () => asset },
+    });
+    expect(await library.addAsset(asset.id)).toEqual({ ok: true });
+
+    const targetPath = path.join(directory, 'images', `joylib-${asset.sha256}`);
+    await writeFile(targetPath, 'the bytes that are already stored');
+
+    expect(await library.addAsset(asset.id)).toEqual({ ok: true });
+    expect(await readFile(targetPath, 'utf8')).toBe('the bytes that are already stored');
+    expect(
+      JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8')).assets,
+    ).toHaveLength(1);
+  });
+
   it('leaves a partial lock token after a write failure until it is stale', async () => {
     const root = await temporaryDirectory();
     const directory = path.join(root, 'library');
