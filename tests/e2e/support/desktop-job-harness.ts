@@ -44,6 +44,8 @@ const DEFAULT_WORKER_ENTRY = join(REPO_ROOT, 'apps', 'worker', 'dist', 'index.js
 export interface DesktopJobHarnessOptions {
   /** The Worker build to run. Defaults to `apps/worker/dist/index.js`. */
   readonly workerEntry?: string;
+  /** Optional loopback Whisper endpoint used by caption transcription tests. */
+  readonly whisper?: { readonly endpoint: string | undefined };
   /**
    * Extra environment for the Worker. The route the harness owns (the API URL, its token, the
    * Worker state paths and `JOY_MEDIA_HOME`) is applied last and cannot be overridden.
@@ -154,6 +156,16 @@ export async function startDesktopJobHarness(
         directory: () => database.getAssetLibraryDirectory(),
         registrations: database.localAssets,
       }),
+      ...(options.whisper === undefined
+        ? {}
+        : {
+            whisper: {
+              getEndpoint: () =>
+                options.whisper.endpoint === undefined
+                  ? undefined
+                  : { endpoint: options.whisper.endpoint, modelId: 'local-whisper' },
+            },
+          }),
     });
 
     const api = await startLocalJobApi({
@@ -220,7 +232,12 @@ export async function startDesktopJobHarness(
     };
 
     const handler: ChannelHandler = async (channel, payload) => {
-      if (channel.startsWith('desktop.media.')) {
+      // Mirrors MEDIA_CHANNELS in apps/desktop/src/main/media-channel.ts, which the desktop routes
+      // through the same media table. The catalog-removal channel is one of them.
+      if (
+        channel.startsWith('desktop.media.') ||
+        channel === 'desktop.asset-library.remove-entry'
+      ) {
         const mediaHandler = media[channel as keyof typeof media];
         if (mediaHandler === undefined) return UNHANDLED;
         const result = await mediaHandler(payload);

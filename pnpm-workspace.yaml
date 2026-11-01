@@ -8,4 +8,5 @@ allowBuilds:
   workerd: true
 overrides:
   '@xmldom/xmldom': 0.8.15
-  undici: 7.29.1
+  undici: 7.30.1
+  zod: 4.6.6

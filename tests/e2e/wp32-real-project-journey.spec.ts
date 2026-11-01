@@ -112,7 +112,7 @@ async function readControlPlaneProjectId(page: Page): Promise<string | undefined
           Record<string, Readonly<Record<string, { readonly controlPlaneProjectId?: unknown }>>>
         >;
       };
-      const ownerBindings = bindings.bindingsByOwner?.['e2e-owner@example.test'];
+      const ownerBindings = bindings.bindingsByOwner?.['local'];
       const binding = ownerBindings?.[active.projectId];
       return typeof binding?.controlPlaneProjectId === 'string'
         ? binding.controlPlaneProjectId
@@ -121,51 +121,6 @@ async function readControlPlaneProjectId(page: Page): Promise<string | undefined
       return undefined;
     }
   });
-}
-
-async function cleanupExactDisposableProject(page: Page, projectId: string): Promise<void> {
-  await page.evaluate(async (id) => {
-    const headers = { authorization: 'Bearer joy-media-e2e-token' };
-    const assetsResponse = await fetch(`/api/v1/projects/${encodeURIComponent(id)}/assets`, {
-      headers,
-    });
-    if (!assetsResponse.ok && assetsResponse.status !== 404)
-      throw new Error(
-        `cleanup asset listing failed (${assetsResponse.status}): ${await assetsResponse.text()}`,
-      );
-    if (assetsResponse.ok) {
-      const payload = (await assetsResponse.json()) as {
-        readonly data?: readonly { readonly id: string }[];
-      };
-      for (const asset of payload.data ?? []) {
-        await fetch(
-          `/api/v1/projects/${encodeURIComponent(id)}/assets/${encodeURIComponent(asset.id)}`,
-          { method: 'DELETE', headers },
-        );
-      }
-    }
-    const projectResponse = await fetch(`/api/v1/projects/${encodeURIComponent(id)}`, { headers });
-    if (projectResponse.status === 404) return;
-    if (!projectResponse.ok)
-      throw new Error(`cleanup project lookup failed (${projectResponse.status})`);
-    const projectPayload = (await projectResponse.json()) as {
-      readonly data?: { readonly revision?: number };
-    };
-    const baseRevision = projectPayload.data?.revision;
-    if (typeof baseRevision !== 'number')
-      throw new Error('cleanup project revision is unavailable');
-    const trashResponse = await fetch(`/api/v1/projects/${encodeURIComponent(id)}/trash`, {
-      method: 'POST',
-      headers: { ...headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ baseRevision }),
-    });
-    if (!trashResponse.ok) throw new Error(`cleanup trash failed (${trashResponse.status})`);
-    const deleteResponse = await fetch(`/api/v1/projects/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers,
-    });
-    if (!deleteResponse.ok) throw new Error(`cleanup delete failed (${deleteResponse.status})`);
-  }, projectId);
 }
 
 async function runCheckpoint(
@@ -387,9 +342,6 @@ test.describe('WP-32 real-project workflow acceptance', () => {
         ),
         contentType: 'application/json',
       });
-      if (projectId !== undefined) {
-        await cleanupExactDisposableProject(page, projectId);
-      }
     }
 
     // First-party scene previews intentionally run in opaque, storage-free

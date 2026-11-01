@@ -1,5 +1,8 @@
 import { readFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { request as httpRequest, type IncomingMessage } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { ProviderUnavailableError, evaluateEndpoint } from '@joy-media/provider-sdk';
 import type { DispatchJob, JobDispatchStore } from '../jobs/job-dispatch.js';
 import type { CancelResult, JobOrchestrator, SubmitResult } from '../jobs/job-orchestrator.js';
 import type {
@@ -30,6 +33,8 @@ export type MediaResult = {
 };
 
 export const MEDIA_CHANNELS = [
+  'desktop.asset-library.remove-entry',
+  'desktop.media.speech.transcribe',
   'desktop.media.asset.register',
   'desktop.media.asset.upload-original',
   'desktop.media.project.document.get',
@@ -61,6 +66,9 @@ export interface MediaChannelDeps {
   readonly assets: LocalAssetPort;
   readonly originals: LocalOriginalWriter;
   readonly library?: AssetLibraryPort;
+  readonly whisper?: {
+    readonly getEndpoint: () => { readonly endpoint: string; readonly modelId: string } | undefined;
+  };
   /** Test seam for reading a derivative file. Defaults to the real filesystem. */
   readonly readDerivative?: (path: string) => Promise<Uint8Array>;
 }
@@ -71,7 +79,126 @@ const MAX_DOCUMENT_JSON_BYTES = 32 * 1024 * 1024;
 const MAX_REVISION_ID_LENGTH = 256;
 const MAX_DISPLAY_NAME_LENGTH = 255;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const ASSET_LIBRARY_ENTRY_ID_PATTERN = /^joylib-[a-f0-9]{64}$/;
 const ASSET_KIND_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+const SPEECH_LANGUAGES = ['fa-IR', 'en-US'] as const;
+const MAX_WHISPER_MEDIA_BYTES = 200 * 1024 * 1024;
+const MAX_WHISPER_RESPONSE_BYTES = 64 * 1024 * 1024;
+const WHISPER_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
+const WHISPER_UNAVAILABLE = 'The local Whisper server could not process the media.';
+const WHISPER_MEDIA_TOO_LARGE = 'Local Whisper media exceeds the 200 MB limit.';
+const WHISPER_RESPONSE_TOO_LARGE = 'The local Whisper server response exceeds the 64 MB limit.';
+
+function requestWhisper(
+  url: URL,
+  boundary: string,
+  body: readonly Buffer[],
+  bodyLength: number,
+): Promise<{ statusCode: number; body: Buffer; tooLarge: boolean }> {
+  let request: ReturnType<typeof httpRequest>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const requestPromise = new Promise<{ statusCode: number; body: Buffer; tooLarge: boolean }>(
+    (resolve, reject) => {
+      let settled = false;
+      let responseTooLarge = false;
+      const finish = (result: { statusCode: number; body: Buffer; tooLarge: boolean }) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+      const options = {
+        protocol: url.protocol,
+        hostname: '127.0.0.1',
+        ...(url.port.length > 0 ? { port: Number(url.port) } : {}),
+        ...(url.protocol === 'https:' && url.hostname === 'localhost'
+          ? { servername: 'localhost' }
+          : {}),
+        method: 'POST',
+        path: `${url.pathname.replace(/\/+$/, '')}/audio/transcriptions`,
+        headers: {
+          Host: url.host,
+          'content-type': `multipart/form-data; boundary=${boundary}`,
+          'content-length': String(bodyLength),
+        },
+      };
+      request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(
+        options,
+        (response: IncomingMessage) => {
+          response.on('error', (error) => {
+            if (!responseTooLarge) fail(error);
+          });
+          const statusCode = response.statusCode ?? 0;
+          if (statusCode >= 300 && statusCode < 400) {
+            request.destroy();
+            finish({ statusCode, body: Buffer.alloc(0), tooLarge: false });
+            return;
+          }
+          const contentLength = response.headers['content-length'];
+          if (contentLength !== undefined && Number(contentLength) > MAX_WHISPER_RESPONSE_BYTES) {
+            responseTooLarge = true;
+            request.destroy();
+            finish({ statusCode, body: Buffer.alloc(0), tooLarge: true });
+            return;
+          }
+          const chunks: Buffer[] = [];
+          let received = 0;
+          response.on('data', (chunk: Buffer | Uint8Array) => {
+            const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            received += bytes.byteLength;
+            if (received > MAX_WHISPER_RESPONSE_BYTES) {
+              responseTooLarge = true;
+              request.destroy();
+              finish({ statusCode, body: Buffer.alloc(0), tooLarge: true });
+              return;
+            }
+            chunks.push(bytes);
+          });
+          response.on('end', () =>
+            finish({ statusCode, body: Buffer.concat(chunks, received), tooLarge: false }),
+          );
+        },
+      );
+      request.on('error', (error) => {
+        if (responseTooLarge) return;
+        fail(error);
+      });
+
+      timer = setTimeout(
+        () => request.destroy(new Error('Local Whisper request timed out')),
+        WHISPER_REQUEST_TIMEOUT_MS,
+      );
+      void (async () => {
+        try {
+          for (const part of body) {
+            for (let offset = 0; offset < part.byteLength; offset += 64 * 1024) {
+              if (!request.write(part.subarray(offset, offset + 64 * 1024))) {
+                await new Promise<void>((resolveDrain, rejectDrain) => {
+                  request.once('drain', resolveDrain);
+                  request.once('error', rejectDrain);
+                });
+              }
+            }
+          }
+          request.end();
+        } catch (error) {
+          request.destroy(error instanceof Error ? error : new Error('Request body write failed'));
+        }
+      })();
+    },
+  );
+  return (async () => {
+    try {
+      return await requestPromise;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  })();
+}
 
 const NOT_AVAILABLE_YET =
   'This media operation is not available in this build yet; its local store is still being built';
@@ -261,7 +388,186 @@ export function createMediaChannelHandlers(
     );
   };
 
+  const removeLibraryEntry = async (payload: unknown): Promise<MediaResult> => {
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, error: 'Invalid asset library entry id' };
+    }
+    const id = (payload as Record<string, unknown>)['id'];
+    if (
+      typeof id !== 'string' ||
+      !ASSET_LIBRARY_ENTRY_ID_PATTERN.test(id) ||
+      id.includes('..') ||
+      /[\\/]/.test(id)
+    ) {
+      return {
+        ok: false,
+        error:
+          'Invalid asset library entry id: expected joylib- followed by 64 lowercase hexadecimal characters',
+      };
+    }
+    if (deps.library === undefined) {
+      return { ok: false, error: 'Asset library is not available in this build' };
+    }
+    try {
+      return { ok: true, data: await deps.library.removeEntry(id) };
+    } catch (error) {
+      console.error('Catalog removal failed', error);
+      const errorMessage = error instanceof Error ? error.message : undefined;
+      if (
+        errorMessage === 'The asset library is busy. Try the import again.' ||
+        errorMessage ===
+          'Invalid asset library entry id: expected joylib- followed by 64 lowercase hexadecimal characters'
+      ) {
+        return { ok: false, error: errorMessage };
+      }
+      return { ok: false, error: 'Catalog removal failed' };
+    }
+  };
+
   const notAvailable = (): MediaResult => ({ ok: false, error: NOT_AVAILABLE_YET });
+
+  const transcribeSpeech = async (payload: unknown): Promise<MediaResult> => {
+    const unavailable = (message: string): never => {
+      throw new ProviderUnavailableError(message);
+    };
+    if (deps.whisper === undefined) return unavailable('Local Whisper is not configured.');
+    if (!isPlainObject(payload)) return unavailable('Invalid local Whisper request.');
+    const language = payload['language'];
+    const mediaType = payload['mediaType'];
+    const rawMedia = payload['media'];
+    const media =
+      rawMedia instanceof Uint8Array
+        ? rawMedia
+        : rawMedia instanceof ArrayBuffer
+          ? new Uint8Array(rawMedia)
+          : undefined;
+    if (
+      typeof mediaType !== 'string' ||
+      !/^(audio|video)\/[^\s;\r\n]+(?:\s*;[^\r\n]*)?$/i.test(mediaType)
+    ) {
+      return unavailable('Local Whisper only accepts audio or video media.');
+    }
+    if (
+      !(SPEECH_LANGUAGES as readonly unknown[]).includes(language) ||
+      media === undefined ||
+      media.byteLength === 0
+    ) {
+      return unavailable('Invalid local Whisper request.');
+    }
+    if (media.byteLength > MAX_WHISPER_MEDIA_BYTES) return unavailable(WHISPER_MEDIA_TOO_LARGE);
+    const saved = deps.whisper.getEndpoint();
+    if (saved === undefined) return unavailable('Local Whisper is not configured.');
+    const { endpoint, modelId } = saved;
+    const verdict = evaluateEndpoint('custom', endpoint);
+    if (!verdict.allowed || verdict.kind !== 'loopback') {
+      return unavailable('The saved local Whisper endpoint was refused.');
+    }
+    const url = new URL(endpoint);
+    if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+      return unavailable('The saved local Whisper endpoint was refused.');
+    }
+
+    const boundary = `joy-whisper-${randomBytes(18).toString('hex')}`;
+    const fields = [
+      ['model', modelId],
+      ['language', language === 'fa-IR' ? 'fa' : 'en'],
+      ['response_format', 'verbose_json'],
+      ['timestamp_granularities[]', 'word'],
+    ] as const;
+    const prefix = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio"\r\nContent-Type: ${mediaType}\r\n\r\n`,
+    );
+    const fieldParts = fields.map(([name, value]) =>
+      Buffer.from(
+        `\r\n--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}`,
+      ),
+    );
+    const ending = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const body = [
+      prefix,
+      Buffer.from(media.buffer, media.byteOffset, media.byteLength),
+      ...fieldParts,
+      ending,
+    ];
+    const bodyLength = body.reduce((sum, part) => sum + part.length, 0);
+    let response: { statusCode: number; body: Buffer; tooLarge: boolean };
+    try {
+      response = await requestWhisper(url, boundary, body, bodyLength);
+    } catch {
+      return unavailable(WHISPER_UNAVAILABLE);
+    }
+    if (response.tooLarge) return unavailable(WHISPER_RESPONSE_TOO_LARGE);
+    if (response.statusCode >= 300 && response.statusCode < 400)
+      return unavailable(WHISPER_UNAVAILABLE);
+    if (response.statusCode < 200 || response.statusCode >= 300)
+      return unavailable(WHISPER_UNAVAILABLE);
+
+    let reply: unknown;
+    try {
+      reply = JSON.parse(response.body.toString('utf8')) as unknown;
+    } catch {
+      return unavailable('The local Whisper server returned an invalid reply.');
+    }
+    const candidates: unknown[] = [];
+    if (isPlainObject(reply)) {
+      if (Array.isArray(reply['words'])) candidates.push(...reply['words']);
+      if (Array.isArray(reply['segments'])) {
+        for (const segment of reply['segments']) {
+          if (isPlainObject(segment) && Array.isArray(segment['words'])) {
+            candidates.push(...segment['words']);
+          }
+        }
+      }
+    }
+    const words = candidates.flatMap((candidate) => {
+      if (!isPlainObject(candidate)) return [];
+      const text = candidate['word'] ?? candidate['text'];
+      const start = candidate['start'];
+      const end = candidate['end'];
+      if (
+        typeof text !== 'string' ||
+        text.trim().length === 0 ||
+        typeof start !== 'number' ||
+        !Number.isFinite(start) ||
+        start < 0 ||
+        typeof end !== 'number' ||
+        !Number.isFinite(end) ||
+        end < start ||
+        !Number.isSafeInteger(Math.round(start * 1_000_000)) ||
+        !Number.isSafeInteger(Math.round(end * 1_000_000))
+      ) {
+        return [];
+      }
+      const probability = candidate['probability'];
+      return [
+        {
+          text,
+          startUs: Math.round(start * 1_000_000),
+          endUs: Math.round(end * 1_000_000),
+          ...(typeof probability === 'number' &&
+          Number.isFinite(probability) &&
+          probability >= 0 &&
+          probability <= 1
+            ? { confidence: probability }
+            : {}),
+        },
+      ];
+    });
+    if (words.length === 0) return unavailable('The local Whisper reply has no timed words.');
+    return {
+      ok: true,
+      data: {
+        language,
+        words,
+        speakers: [],
+        provenance: {
+          providerId: 'joy.local-whisper',
+          modelId,
+          createdAt: new Date().toISOString(),
+        },
+      },
+    };
+  };
 
   const registerAsset = (payload: unknown): MediaResult => {
     const registration = asAssetRegistration(payload);
@@ -314,6 +620,8 @@ export function createMediaChannelHandlers(
   };
 
   return {
+    'desktop.asset-library.remove-entry': removeLibraryEntry,
+    'desktop.media.speech.transcribe': transcribeSpeech,
     'desktop.media.asset.register': registerAsset,
     'desktop.media.asset.upload-original': storeOriginal,
     'desktop.media.project.document.get': getDocument,

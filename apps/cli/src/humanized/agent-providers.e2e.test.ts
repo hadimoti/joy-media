@@ -38,10 +38,8 @@ describe('agent provider add: model discovery against the endpoint', () => {
   const stored = (name: string): StoredProvider =>
     readJoyConfig<ProviderFile>(env.sb, 'ai-providers.json')[name]!;
   const credentials = (): Record<string, { ciphertext: string }> =>
-    readJoyConfig<{ entries: Record<string, { ciphertext: string }> }>(
-      env.sb,
-      'credentials.json',
-    ).entries;
+    readJoyConfig<{ entries: Record<string, { ciphertext: string }> }>(env.sb, 'credentials.json')
+      .entries;
 
   beforeAll(async () => {
     mock = await startMockLlm();
@@ -140,10 +138,8 @@ describe('agent provider lifecycle', () => {
     env.run(['agent', 'provider', 'add', name, '--url', mock.url, '--api-key', KEY, ...extra]);
   const providerFile = (): ProviderFile => readJoyConfig<ProviderFile>(env.sb, 'ai-providers.json');
   const credentials = (): Record<string, { ciphertext: string }> =>
-    readJoyConfig<{ entries: Record<string, { ciphertext: string }> }>(
-      env.sb,
-      'credentials.json',
-    ).entries;
+    readJoyConfig<{ entries: Record<string, { ciphertext: string }> }>(env.sb, 'credentials.json')
+      .entries;
 
   beforeAll(async () => {
     mock = await startMockLlm();

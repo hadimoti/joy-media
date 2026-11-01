@@ -3,7 +3,6 @@ import { readFile, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import {
-  E2E_TOKEN,
   MEDIA_FIXTURE_DIR,
   authenticate,
   installMediaImportBridge,
@@ -12,6 +11,10 @@ import {
   recordEvidence,
   selectFirstTimelineClip,
 } from './wp29-r5-harness.js';
+import {
+  startLocalWhisperFixtureServer,
+  type LocalWhisperFixtureServer,
+} from './support/local-whisper-fixture.js';
 
 interface TranscriptionFixture {
   readonly language: string;
@@ -26,20 +29,13 @@ interface TranscriptionFixture {
   }[];
 }
 
-interface TranscriptionProbe {
-  requests: number;
-  language?: string;
-  authorization?: string;
-  contentType?: string;
-  bytes?: number;
-  failNext: boolean;
-}
-
 const readFileAsync = promisify(readFile);
 const fixtureDirectory = join(process.cwd(), 'apps/editor-web/src/fixtures');
 const englishFixture = JSON.parse(
   readFileSync(join(fixtureDirectory, 'transcription-en-US.json'), 'utf8'),
 ) as TranscriptionFixture;
+
+let whisperServer: LocalWhisperFixtureServer | undefined;
 const persianFixture = JSON.parse(
   readFileSync(join(fixtureDirectory, 'transcription-fa-IR.json'), 'utf8'),
 ) as TranscriptionFixture;
@@ -115,69 +111,39 @@ async function openVideoCaptionTrack(page: Page, title: string): Promise<void> {
   await expect(page.getByRole('button', { name: 'Generate English' })).toBeVisible();
 }
 
-async function routeTranscriptionFixture(
-  page: Page,
-  fixture: TranscriptionFixture,
-  responseDelayMs = 0,
-): Promise<{ readonly probe: TranscriptionProbe; readonly requestSeen: Promise<void> }> {
-  const probe: TranscriptionProbe = { requests: 0, failNext: false };
-  let markRequestSeen: (() => void) | undefined;
-  const requestSeen = new Promise<void>((resolve) => {
-    markRequestSeen = resolve;
-  });
-
-  await page.route('**/api/v1/providers/speech/transcribe?*', async (route) => {
-    const request = route.request();
-    const postData = request.postDataBuffer();
-    probe.requests += 1;
-    probe.language = new URL(request.url()).searchParams.get('language') ?? undefined;
-    probe.authorization = request.headers().authorization;
-    probe.contentType = request.headers()['content-type'];
-    probe.bytes = postData?.byteLength ?? 0;
-    markRequestSeen?.();
-    markRequestSeen = undefined;
-
-    if (probe.failNext) {
-      probe.failNext = false;
-      await route.fulfill({
-        status: 503,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          error: { code: 'PROVIDER_UNAVAILABLE', message: 'deterministic provider outage' },
-        }),
-      });
-      return;
-    }
-
-    if (responseDelayMs > 0)
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, responseDelayMs);
-      });
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        data: {
-          language: fixture.language,
-          words: fixture.words,
-          speakers: fixture.speakers,
-          provenance: {
-            providerId: 'joy.playwright-fixture',
-            modelId: fixture.modelId,
-            createdAt: '2026-08-11T00:00:00.000Z',
-          },
-        },
-      }),
-    });
-  });
-
-  return { probe, requestSeen };
-}
-
 test.describe('WP-29 R5 batch C — captions', () => {
-  test.beforeEach(async ({ page }) => {
-    await installMediaImportBridge(page);
+  test.beforeEach(async ({ page }, testInfo) => {
+    const isCaptionTranscriptionCase = /CASE-5[89]|CASE-60/.test(testInfo.title);
+    if (isCaptionTranscriptionCase) {
+      whisperServer = await startLocalWhisperFixtureServer({
+        fixtures: {
+          en: englishFixture,
+          fa: testInfo.title.includes('CASE-59')
+            ? {
+                ...persianFixture,
+                words: persianFixture.words.map((word, index, words) =>
+                  index === words.length - 1 ? { ...word, text: `${word.text}.` } : word,
+                ),
+              }
+            : persianFixture,
+        },
+        responseDelayMs: testInfo.title.includes('CASE-58') ? 350 : 0,
+      });
+    }
+    if (testInfo.title.includes('CASE-60')) {
+      await installMediaImportBridge(page, { whisper: { endpoint: undefined } });
+    } else if (whisperServer !== undefined) {
+      await installMediaImportBridge(page, { whisper: { endpoint: whisperServer.endpoint } });
+    } else {
+      await installMediaImportBridge(page);
+    }
     await authenticate(page);
+  });
+
+  test.afterEach(async () => {
+    const server = whisperServer;
+    whisperServer = undefined;
+    await server?.close();
   });
 
   test('[R5 CASE-53] reverts and deletes one caption with one-step recovery', async ({
@@ -384,12 +350,13 @@ test.describe('WP-29 R5 batch C — captions', () => {
   test('[R5 CASE-58] transcribes English media with progress, confidence, and error recovery', async ({
     page,
   }, testInfo) => {
-    const { probe, requestSeen } = await routeTranscriptionFixture(page, englishFixture, 350);
+    const server = whisperServer;
+    if (server === undefined) throw new Error('The local Whisper fixture server did not start');
     await openVideoCaptionTrack(page, `R5-58-${testInfo.project.name}`);
 
     const transcribeButton = page.getByRole('button', { name: 'Generate English' });
     await transcribeButton.click();
-    await requestSeen;
+    await expect.poll(() => server.requests.length).toBe(1);
     const progressVisible =
       (await transcribeButton.isDisabled()) ||
       (await page
@@ -398,7 +365,11 @@ test.describe('WP-29 R5 batch C — captions', () => {
         )
         .evaluateAll((elements) =>
           elements.some((element) => element.getClientRects().length > 0),
-        ));
+        )) ||
+      (await page
+        .getByText('Transcribing', { exact: false })
+        .isVisible()
+        .catch(() => false));
 
     await page.getByRole('tab', { name: 'Transcript' }).click();
     const source = page.locator('.captions-panel .caption-source').first();
@@ -406,22 +377,21 @@ test.describe('WP-29 R5 batch C — captions', () => {
     await expect(
       page.locator('.captions-panel .caption-warning[title^="Transcription confidence"]'),
     ).toHaveText('94%');
-    expect(probe).toMatchObject({
-      requests: 1,
-      language: 'en-US',
-      authorization: `Bearer ${E2E_TOKEN}`,
-      contentType: 'video/mp4',
-    });
-    expect(probe.bytes).toBeGreaterThan(0);
+    expect(server.requests).toHaveLength(1);
+    expect(server.requests[0]).toMatchObject({ language: 'en', fileBytes: expect.any(Number) });
+    expect(server.requests[0]!.fileBytes).toBeGreaterThan(0);
 
-    probe.failNext = true;
+    server.failNext = true;
     await page.getByRole('tab', { name: 'Generate' }).click();
     await page.getByRole('button', { name: 'Generate English' }).click();
+    await expect.poll(() => server.requests.length).toBe(2);
     await expect(page.locator('.captions-panel .joy-panel-note')).toContainText(
       'Live transcription could not process the selected media. You can continue editing captions manually.',
     );
     await page.getByRole('tab', { name: 'Transcript' }).click();
     await expect(source).toHaveValue('Welcome to the JOY Media studio');
+    expect(server.requests[1]).toMatchObject({ language: 'en', fileBytes: expect.any(Number) });
+    expect(server.requests[1]!.fileBytes).toBeGreaterThan(0);
 
     await recordEvidence(testInfo, {
       caseId: 58,
@@ -432,7 +402,8 @@ test.describe('WP-29 R5 batch C — captions', () => {
       actual: progressVisible
         ? 'A visible progress state preceded a fixture transcript; a second 503 left the result intact with recovery guidance.'
         : 'The deterministic transcript and 503 recovery worked, but no disabled/busy/progress state was exposed while the request was pending.',
-      fixture: 'apps/editor-web/src/fixtures/transcription-en-US.json via Playwright route',
+      fixture:
+        'apps/editor-web/src/fixtures/transcription-en-US.json via local Whisper HTTP server',
     });
     expect(
       progressVisible,
@@ -443,13 +414,8 @@ test.describe('WP-29 R5 batch C — captions', () => {
   test('[R5 CASE-59] transcribes Persian with RTL punctuation, confidence, and caption seek', async ({
     page,
   }, testInfo) => {
-    const fixture: TranscriptionFixture = {
-      ...persianFixture,
-      words: persianFixture.words.map((word, index, words) =>
-        index === words.length - 1 ? { ...word, text: `${word.text}.` } : word,
-      ),
-    };
-    const { probe } = await routeTranscriptionFixture(page, fixture);
+    const server = whisperServer;
+    if (server === undefined) throw new Error('The local Whisper fixture server did not start');
     await openVideoCaptionTrack(page, `R5-59-${testInfo.project.name}`);
     await page.getByRole('button', { name: 'Generate Persian' }).click();
     await page.getByRole('tab', { name: 'Transcript' }).click();
@@ -461,13 +427,9 @@ test.describe('WP-29 R5 batch C — captions', () => {
     await expect(section.locator('.caption-warning[title^="Transcription confidence"]')).toHaveText(
       '94%',
     );
-    expect(probe).toMatchObject({
-      requests: 1,
-      language: 'fa-IR',
-      authorization: `Bearer ${E2E_TOKEN}`,
-      contentType: 'video/mp4',
-    });
-    expect(probe.bytes).toBeGreaterThan(0);
+    expect(server.requests).toHaveLength(1);
+    expect(server.requests[0]).toMatchObject({ language: 'fa', fileBytes: expect.any(Number) });
+    expect(server.requests[0]!.fileBytes).toBeGreaterThan(0);
 
     const timeline = page.locator('.timeline-panel');
     await timeline.getByRole('button', { name: 'Forward one second' }).click();
@@ -491,5 +453,34 @@ test.describe('WP-29 R5 batch C — captions', () => {
     expect(computedDirection, 'Persian caption text must render with RTL base direction').toBe(
       'rtl',
     );
+  });
+
+  test('[R5 CASE-60] reports local Whisper unavailable without an endpoint or request', async ({
+    page,
+  }, testInfo) => {
+    const server = whisperServer;
+    if (server === undefined) throw new Error('The request recorder did not start');
+
+    await openVideoCaptionTrack(page, `R5-60-${testInfo.project.name}`);
+    await page.getByRole('button', { name: 'Generate English' }).click();
+    await expect(page.locator('.captions-panel .joy-panel-note')).toContainText(
+      'Local Whisper is not configured.',
+    );
+    await page.getByRole('tab', { name: 'Transcript' }).click();
+    await expect(page.locator('.captions-panel .caption-source')).toHaveCount(0);
+    expect(server.requests, 'No transcription request should reach the local server').toHaveLength(
+      0,
+    );
+
+    await recordEvidence(testInfo, {
+      caseId: 60,
+      functional: 'PASS',
+      uiA11y: 'PASS',
+      expected:
+        'Without a saved local Whisper endpoint, Generate English reports the unavailable note and adds no caption text or network request.',
+      actual:
+        'The channel reported Local Whisper is not configured, no caption source was inserted, and the request recorder remained empty.',
+      fixture: 'Local Whisper request recorder configured without an endpoint',
+    });
   });
 });

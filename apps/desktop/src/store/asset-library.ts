@@ -9,6 +9,7 @@ export interface AssetLibraryPort {
   addAsset(
     assetId: string,
   ): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
+  removeEntry(id: string): Promise<{ readonly removed: boolean }>;
 }
 
 interface AssetLibraryOptions {
@@ -17,6 +18,8 @@ interface AssetLibraryOptions {
   readonly lockWaitMs?: number;
   /** Test seam for simulating owner-token write failures. */
   readonly writeOwnerToken?: (handle: FileHandle, token: string) => Promise<void>;
+  /** Test seam for simulating catalog lock cleanup failures. */
+  readonly unlinkLock?: (lockPath: string) => Promise<void>;
 }
 
 interface LibraryEntry {
@@ -36,6 +39,7 @@ interface LibraryEntry {
 
 const BUSY_MESSAGE = 'The asset library is busy. Try the import again.';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const LIBRARY_ENTRY_ID_PATTERN = /^joylib-[a-f0-9]{64}$/;
 const STALE_LOCK_MS = 60_000;
 const LOCK_POLL_MS = 100;
 
@@ -303,6 +307,104 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
       return (
         result ?? { ok: false, error: `The asset library could not be updated: ${BUSY_MESSAGE}` }
       );
+    },
+    async removeEntry(id) {
+      if (!LIBRARY_ENTRY_ID_PATTERN.test(id) || id.includes('..') || /[\\/]/.test(id)) {
+        throw new Error(
+          'Invalid asset library entry id: expected joylib- followed by 64 lowercase hexadecimal characters',
+        );
+      }
+
+      const directory = options.directory();
+      const catalogPath = path.join(directory, 'catalog.json');
+      const lockPath = `${catalogPath}.lock`;
+      const ownerToken = randomUUID();
+      let locked = false;
+      let temporaryPath: string | undefined;
+      let removed = false;
+      let cleanupError: unknown;
+      try {
+        await mkdir(directory, { recursive: true });
+        locked = await acquireLock(
+          lockPath,
+          lockWaitMs,
+          ownerToken,
+          () => {
+            locked = true;
+          },
+          options.writeOwnerToken ?? ((handle, token) => handle.writeFile(token)),
+        );
+        if (!locked) throw new Error(BUSY_MESSAGE);
+
+        let catalog: Record<string, unknown> & { assets: unknown[] };
+        try {
+          const parsed: unknown = JSON.parse(await readFile(catalogPath, 'utf8'));
+          if (
+            typeof parsed !== 'object' ||
+            parsed === null ||
+            Array.isArray(parsed) ||
+            !Array.isArray((parsed as Record<string, unknown>).assets)
+          ) {
+            throw new Error('catalog.json does not contain an assets array');
+          }
+          catalog = parsed as Record<string, unknown> & { assets: unknown[] };
+        } catch (error) {
+          if (isNotFound(error)) {
+            catalog = { version: 1, assets: [] };
+          } else {
+            throw error;
+          }
+        }
+
+        const index = catalog.assets.findIndex(
+          (entry) =>
+            typeof entry === 'object' &&
+            entry !== null &&
+            (entry as Record<string, unknown>).id === id,
+        );
+        if (index >= 0) {
+          const assets = catalog.assets.filter((_, entryIndex) => entryIndex !== index);
+          const counts = {
+            total: assets.length,
+            audio: assets.filter(
+              (entry) =>
+                typeof entry === 'object' &&
+                entry !== null &&
+                (entry as Record<string, unknown>).kind === 'audio',
+            ).length,
+            image: assets.filter(
+              (entry) =>
+                typeof entry === 'object' &&
+                entry !== null &&
+                (entry as Record<string, unknown>).kind === 'image',
+            ).length,
+            video: assets.filter(
+              (entry) =>
+                typeof entry === 'object' &&
+                entry !== null &&
+                (entry as Record<string, unknown>).kind === 'video',
+            ).length,
+          };
+          temporaryPath = `${catalogPath}.${process.pid}.${randomUUID()}.tmp`;
+          await writeFile(temporaryPath, JSON.stringify({ ...catalog, assets, counts }, null, 2));
+          await rename(temporaryPath, catalogPath);
+          temporaryPath = undefined;
+          removed = true;
+        }
+      } finally {
+        if (temporaryPath !== undefined) await unlink(temporaryPath).catch(() => undefined);
+        if (locked) {
+          try {
+            if ((await readFile(lockPath, 'utf8')) === ownerToken) {
+              await (options.unlinkLock ?? unlink)(lockPath);
+            }
+          } catch (error) {
+            if (!isNotFound(error)) cleanupError = error;
+          }
+        }
+      }
+      if (cleanupError !== undefined && !removed) throw cleanupError;
+      return { removed };
     },
   };
 }

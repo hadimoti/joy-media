@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   authenticate,
+  createMediaImportHandler,
   MEDIA_FIXTURE_DIR,
   openDisposableWorkspace,
   openPanel,
@@ -284,7 +285,7 @@ test.describe('JOY Live Director creative recipes', () => {
   test('runs Build Rough Cut through the real Worker: staged change, approve, one Undo', async ({
     page,
   }) => {
-    await installJoyProviderHost(page);
+    await installJoyProviderHost(page, {}, [await createMediaImportHandler(page)]);
     await authenticate(page);
     const clipId = await openImportedVideoWorkspace(
       page,
@@ -341,7 +342,7 @@ test.describe('JOY Live Director creative recipes', () => {
   });
 
   test('revokes the recipe when image review is cancelled before transfer', async ({ page }) => {
-    await installJoyProviderHost(page);
+    await installJoyProviderHost(page, {}, [await createMediaImportHandler(page)]);
     await authenticate(page);
     await openImportedVideoWorkspace(page, `JOY-E2E-CANCEL-${test.info().parallelIndex}`);
     await openPanel(page, 'Joy Code');

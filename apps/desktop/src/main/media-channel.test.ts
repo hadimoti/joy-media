@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { ProviderUnavailableError } from '@joy-media/provider-sdk';
 import { join } from 'node:path';
 import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
@@ -16,7 +18,13 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function setup(library?: AssetLibraryPort) {
+function setup(
+  library?: AssetLibraryPort,
+  whisper?: {
+    endpoint?: string;
+    modelId?: string;
+  },
+) {
   const db = new LocalDatabase({ filePath: ':memory:', now: () => 'T0' });
   let ids = 0;
   const orchestrator = createJobOrchestrator({
@@ -34,8 +42,40 @@ function setup(library?: AssetLibraryPort) {
     assets: db.localAssets,
     originals: createLocalOriginalWriter({ directory: originalsDir, assets: db.localAssets }),
     ...(library === undefined ? {} : { library }),
+    ...(whisper === undefined
+      ? {}
+      : {
+          whisper: {
+            getEndpoint: () =>
+              whisper.endpoint === undefined
+                ? undefined
+                : { endpoint: whisper.endpoint, modelId: whisper.modelId ?? 'faster-whisper' },
+          },
+        }),
   });
   return { db, orchestrator, handlers };
+}
+
+function validWhisperPayload() {
+  return { language: 'en-US', media: new Uint8Array([1, 2, 3]), mediaType: 'audio/wav' };
+}
+
+async function listenWhisperServer(
+  handler: (request: IncomingMessage, response: ServerResponse) => void,
+): Promise<Server> {
+  const server = createServer(handler);
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  return server;
+}
+
+async function closeWhisperServer(server: Server): Promise<void> {
+  if (!server.listening) return;
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
 }
 
 const DOCUMENT = { schemaVersion: 1, clips: [] };
@@ -53,7 +93,304 @@ describe('publicJobError', () => {
 describe('desktop.media channels', () => {
   it('declares every media channel once', () => {
     expect(new Set(MEDIA_CHANNELS).size).toBe(MEDIA_CHANNELS.length);
-    expect(MEDIA_CHANNELS).toHaveLength(11);
+    expect(MEDIA_CHANNELS).toHaveLength(13);
+  });
+
+  it('connects localhost through 127.0.0.1 while preserving the Host header and saved model provenance', async () => {
+    const server = await listenWhisperServer((_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ words: [{ word: 'hello', start: 0.1, end: 0.4 }] }));
+    });
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('Missing test server address');
+      let host: string | undefined;
+      server.once('request', (request) => {
+        host = request.headers.host;
+      });
+      const { handlers } = setup(undefined, {
+        endpoint: `http://localhost:${address.port}/v1`,
+        modelId: 'whisper-large-v3',
+      });
+
+      await expect(
+        handlers['desktop.media.speech.transcribe']({
+          language: 'en-US',
+          media: new Uint8Array([1, 2, 3]),
+          mediaType: 'audio/wav',
+        }),
+      ).resolves.toMatchObject({
+        ok: true,
+        data: {
+          language: 'en-US',
+          words: [{ text: 'hello', startUs: 100_000, endUs: 400_000 }],
+          provenance: { modelId: 'whisper-large-v3' },
+        },
+      });
+      expect(host).toBe(`localhost:${address.port}`);
+    } finally {
+      await closeWhisperServer(server);
+    }
+  });
+
+  it.each([
+    ['unset', undefined],
+    ['IPv6 loopback', 'http://[::1]:1234/v1'],
+    ['public host', 'https://speech.example/v1'],
+    ['localhost subdomain that resolves to loopback', 'http://whisper.localhost:1234/v1'],
+    ['other name', 'http://speech.example:1234/v1'],
+  ])('refuses %s without making a request', async (_label, endpoint) => {
+    const server = await listenWhisperServer((_request, response) => response.end('{}'));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('Missing test server address');
+      let requestCount = 0;
+      server.on('request', () => requestCount++);
+      const { handlers } = setup(undefined, {
+        ...(endpoint === undefined ? {} : { endpoint }),
+      });
+      await expect(
+        handlers['desktop.media.speech.transcribe'](validWhisperPayload()),
+      ).rejects.toBeInstanceOf(ProviderUnavailableError);
+      expect(requestCount).toBe(0);
+    } finally {
+      await closeWhisperServer(server);
+    }
+  });
+
+  it('treats a redirect response as an error', async () => {
+    const server = await listenWhisperServer((_request, response) => {
+      response.writeHead(302, { location: '/other' }).end();
+    });
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('Missing test server address');
+      const { handlers } = setup(undefined, { endpoint: `http://127.0.0.1:${address.port}/v1` });
+      await expect(
+        handlers['desktop.media.speech.transcribe'](validWhisperPayload()),
+      ).rejects.toMatchObject({
+        message: 'The local Whisper server could not process the media.',
+      });
+    } finally {
+      await closeWhisperServer(server);
+    }
+  });
+
+  it('refuses oversized media before making a request', async () => {
+    const server = await listenWhisperServer((_request, response) => response.end('{}'));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('Missing test server address');
+      let requestCount = 0;
+      server.on('request', () => requestCount++);
+      const { handlers } = setup(undefined, { endpoint: `http://127.0.0.1:${address.port}/v1` });
+      await expect(
+        handlers['desktop.media.speech.transcribe']({
+          ...validWhisperPayload(),
+          media: new Uint8Array(200 * 1024 * 1024 + 1),
+        }),
+      ).rejects.toMatchObject({ message: 'Local Whisper media exceeds the 200 MB limit.' });
+      expect(requestCount).toBe(0);
+    } finally {
+      await closeWhisperServer(server);
+    }
+  });
+
+  it('refuses non-audio and non-video media types before making a request', async () => {
+    const server = await listenWhisperServer((_request, response) => response.end('{}'));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('Missing test server address');
+      let requestCount = 0;
+      server.on('request', () => requestCount++);
+      const { handlers } = setup(undefined, { endpoint: `http://127.0.0.1:${address.port}/v1` });
+      await expect(
+        handlers['desktop.media.speech.transcribe']({
+          ...validWhisperPayload(),
+          mediaType: 'image/png',
+        }),
+      ).rejects.toMatchObject({ message: 'Local Whisper only accepts audio or video media.' });
+      expect(requestCount).toBe(0);
+    } finally {
+      await closeWhisperServer(server);
+    }
+  });
+
+  it('cuts off a streamed response after 64 MB', async () => {
+    let closed = false;
+    let resolveClosed!: () => void;
+    const peerClosed = new Promise<void>((resolve) => {
+      resolveClosed = resolve;
+    });
+    const server = await listenWhisperServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.flushHeaders();
+      let sent = 0;
+      const chunk = Buffer.alloc(1024 * 1024, 0x20);
+      const interval = setInterval(() => {
+        sent++;
+        response.write(chunk);
+      }, 2);
+      response.on('close', () => {
+        clearInterval(interval);
+        closed = !response.writableEnded;
+        if (closed) resolveClosed();
+      });
+    });
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('Missing test server address');
+      const { handlers } = setup(undefined, { endpoint: `http://127.0.0.1:${address.port}/v1` });
+      await expect(
+        handlers['desktop.media.speech.transcribe'](validWhisperPayload()),
+      ).rejects.toMatchObject({
+        message: 'The local Whisper server response exceeds the 64 MB limit.',
+      });
+      await peerClosed;
+      expect(closed).toBe(true);
+    } finally {
+      await closeWhisperServer(server);
+    }
+  });
+
+  it('rejects a response whose Content-Length exceeds 64 MB', async () => {
+    let closed = false;
+    const server = await listenWhisperServer((_request, response) => {
+      response.on('close', () => {
+        closed = !response.writableEnded;
+      });
+      response.writeHead(200, { 'content-length': String(64 * 1024 * 1024 + 1) }).flushHeaders();
+    });
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('Missing test server address');
+      const { handlers } = setup(undefined, { endpoint: `http://127.0.0.1:${address.port}/v1` });
+      await expect(
+        handlers['desktop.media.speech.transcribe'](validWhisperPayload()),
+      ).rejects.toMatchObject({
+        message: 'The local Whisper server response exceeds the 64 MB limit.',
+      });
+      await vi.waitFor(() => expect(closed).toBe(true));
+    } finally {
+      await closeWhisperServer(server);
+    }
+  });
+
+  it('returns the fixed unavailable message when the request deadline expires', async () => {
+    const server = await listenWhisperServer(() => undefined);
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('Missing test server address');
+      const { handlers } = setup(undefined, { endpoint: `http://127.0.0.1:${address.port}/v1` });
+      const receivedRequest = new Promise<void>((resolve) =>
+        server.once('request', () => resolve()),
+      );
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const result = handlers['desktop.media.speech.transcribe'](validWhisperPayload());
+      const unavailable = expect(result).rejects.toMatchObject({
+        message: 'The local Whisper server could not process the media.',
+      });
+      await receivedRequest;
+      await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+      await unavailable;
+    } finally {
+      vi.useRealTimers();
+      await closeWhisperServer(server);
+    }
+  });
+
+  it('drops words with a negative start and refuses replies with no valid words', async () => {
+    const server = await listenWhisperServer((_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(
+        JSON.stringify({
+          words: [
+            { word: 'bad', start: -0.1, end: 0.2 },
+            { word: 'good', start: 0, end: 0.2, probability: 1.2 },
+          ],
+        }),
+      );
+    });
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('Missing test server address');
+      const { handlers } = setup(undefined, { endpoint: `http://127.0.0.1:${address.port}/v1` });
+      await expect(
+        handlers['desktop.media.speech.transcribe'](validWhisperPayload()),
+      ).resolves.toMatchObject({
+        data: { words: [{ text: 'good', startUs: 0, endUs: 200_000 }] },
+      });
+    } finally {
+      await closeWhisperServer(server);
+    }
+  });
+
+  it('refuses Whisper replies that do not include timed words', async () => {
+    const server = await listenWhisperServer((_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ text: 'hello' }));
+    });
+    try {
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('Missing test server address');
+      const { handlers } = setup(undefined, { endpoint: `http://127.0.0.1:${address.port}/v1` });
+      await expect(
+        handlers['desktop.media.speech.transcribe'](validWhisperPayload()),
+      ).rejects.toBeInstanceOf(ProviderUnavailableError);
+    } finally {
+      await closeWhisperServer(server);
+    }
+  });
+
+  it('validates catalog removal ids and passes valid ids through to the library', async () => {
+    const removeEntry = vi.fn(async () => ({ removed: true }));
+    const library: AssetLibraryPort = {
+      addAsset: async () => ({ ok: true }),
+      removeEntry,
+    };
+    const { handlers } = setup(library);
+    const id = `joylib-${'a'.repeat(64)}`;
+
+    await expect(handlers['desktop.asset-library.remove-entry']({ id })).resolves.toEqual({
+      ok: true,
+      data: { removed: true },
+    });
+    expect(removeEntry).toHaveBeenCalledWith(id);
+    await expect(
+      handlers['desktop.asset-library.remove-entry']({ id: '../catalog.json' }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/Invalid asset library entry id/),
+    });
+    expect(removeEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a fixed safe message and logs unexpected catalog removal errors', async () => {
+    const error = new Error('EACCES: C:\\private\\catalog.json.lock');
+    const removeEntry = vi.fn(async () => {
+      throw error;
+    });
+    const library: AssetLibraryPort = {
+      addAsset: async () => ({ ok: true }),
+      removeEntry,
+    };
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { handlers } = setup(library);
+
+    await expect(
+      handlers['desktop.asset-library.remove-entry']({ id: `joylib-${'d'.repeat(64)}` }),
+    ).resolves.toEqual({ ok: false, error: 'Catalog removal failed' });
+    expect(log).toHaveBeenCalledWith('Catalog removal failed', error);
   });
 
   it('refuses a render before the Worker has reported the capability', () => {
@@ -414,6 +751,9 @@ describe('desktop.media channels', () => {
       async addAsset(assetId) {
         addedId = assetId;
         return { ok: false, error: 'The asset library could not be updated: disk full' };
+      },
+      async removeEntry() {
+        return { removed: false };
       },
     });
     const bytes = Buffer.from('original-bytes');

@@ -115,6 +115,16 @@ export function withAssetTimelineTimeout<T>(
   });
 }
 
+export function formatBulkDeleteStatus(
+  deleted: number,
+  selected: number,
+  failed: number,
+  firstError: string | undefined,
+): string {
+  const summary = `Deleted ${deleted} of ${selected} selected media items.`;
+  return failed > 0 ? `${summary} ${failed} failed: ${firstError ?? 'Unknown error'}.` : summary;
+}
+
 /**
  * Asset discovery stays metadata-only. A preview is hydrated through the
  * authenticated API, verified, then cached in OPFS by AuthorizedDerivativeResolver.
@@ -595,7 +605,7 @@ export function AssetLibraryPanel({
       const ok = window.confirm(`Delete “${asset.displayName}” from the catalog?`);
       if (!ok) return;
       try {
-        await client.deleteAsset(asset.projectId || projectId, asset.id);
+        const result = await client.deleteAsset(asset.projectId || projectId, asset.id);
         setSelectedAssetIds((current) => {
           if (!current.has(asset.id)) return current;
           const next = new Set(current);
@@ -603,7 +613,11 @@ export function AssetLibraryPanel({
           return next;
         });
         await refresh();
-        setStatus(`${asset.displayName} deleted.`);
+        setStatus(
+          result.removed
+            ? `${asset.displayName} deleted.`
+            : `${asset.displayName} was already absent from the catalog.`,
+        );
       } catch (error) {
         setStatus(`Failed to delete media: ${message(error)}`);
       }
@@ -639,18 +653,27 @@ export function AssetLibraryPanel({
     if (targets.length === 0) return;
     const ok = window.confirm(`Delete ${targets.length} selected media item(s) from the catalog?`);
     if (!ok) return;
-    let deleted = 0;
+    const outcomes: Array<{
+      readonly assetId: string;
+      readonly outcome: 'removed' | 'already-absent' | 'failed';
+      readonly error?: string;
+    }> = [];
     for (const { asset } of targets) {
       try {
-        await client.deleteAsset(asset.projectId || projectId, asset.id);
-        deleted += 1;
-      } catch {
-        /* continue remaining */
+        const result = await client.deleteAsset(asset.projectId || projectId, asset.id);
+        outcomes.push({
+          assetId: asset.id,
+          outcome: result.removed ? 'removed' : 'already-absent',
+        });
+      } catch (error) {
+        outcomes.push({ assetId: asset.id, outcome: 'failed', error: message(error) });
       }
     }
-    setSelectedAssetIds(new Set());
+    const failures = outcomes.filter((result) => result.outcome === 'failed');
+    const deleted = outcomes.filter((result) => result.outcome === 'removed').length;
+    setSelectedAssetIds(new Set(failures.map((result) => result.assetId)));
     await refresh();
-    setStatus(`Deleted ${deleted} of ${targets.length} selected media items.`);
+    setStatus(formatBulkDeleteStatus(deleted, targets.length, failures.length, failures[0]?.error));
   }, [client, projectId, refresh, selectedAssetIds, visible]);
 
   const visibleIds = useMemo(() => rendered.map(({ asset }) => asset.id), [rendered]);

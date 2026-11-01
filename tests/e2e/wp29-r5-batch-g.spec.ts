@@ -19,9 +19,11 @@ test.describe('WP-29 R5 batch G — bulk assets and reload recovery', () => {
   }, testInfo) => {
     await openDisposableWorkspace(page, `R5-24-${testInfo.project.name}`);
     const imageName = `wp29-case24-${testInfo.project.name}-${Date.now()}.png`;
-    const untouchedImageName = `wp29-case24-untouched-${testInfo.project.name}-${Date.now()}.png`;
+    const untouchedImageName = `wp29-case24-untouched-${testInfo.project.name}-${Date.now()}.jpg`;
+    // Different bytes give a different content-addressed library id, so deleting one image
+    // cannot remove the other.
     await importMediaFixture(page, 'image.png', imageName);
-    await importMediaFixture(page, 'image.png', untouchedImageName);
+    await importMediaFixture(page, 'image.jpg', untouchedImageName);
     const card = page.locator('.asset-card', { hasText: imageName }).first();
     const assetId = await card.getAttribute('data-asset-id');
     expect(assetId).toBeTruthy();

@@ -13,7 +13,7 @@ import {
   featureActivationRoute,
   featureTool,
 } from '../../apps/editor-web/src/feature-architecture.js';
-import { installJoyDesktopBridge } from './support/joy-desktop-bridge.js';
+import { installJoyDesktopBridge, type ChannelHandler } from './support/joy-desktop-bridge.js';
 import { createMediaHandlers, type MediaHandlers } from './support/media-handlers.js';
 
 export const E2E_TOKEN = 'joy-media-e2e-token';
@@ -45,11 +45,25 @@ function stopMediaHost(host: MediaHandlers): void {
  * ends, or when its page closes early, and the test teardown waits for the stop to finish, so no
  * Worker process or loopback API is left behind.
  */
-export async function installMediaImportBridge(page: Page): Promise<void> {
-  const host = await createMediaHandlers();
+/**
+ * The same desktop media host as a channel handler, for a spec that installs one shared bridge
+ * (a page can take only one, so a spec that also needs another host passes this in).
+ */
+export async function createMediaImportHandler(
+  page: Page,
+  options?: { readonly whisper: { readonly endpoint: string | undefined } },
+): Promise<ChannelHandler> {
+  const host = await createMediaHandlers(options);
   liveMediaHosts.add(host);
   page.once('close', () => stopMediaHost(host));
-  await installJoyDesktopBridge(page, [host.handler]);
+  return host.handler;
+}
+
+export async function installMediaImportBridge(
+  page: Page,
+  options?: { readonly whisper: { readonly endpoint: string | undefined } },
+): Promise<void> {
+  await installJoyDesktopBridge(page, [await createMediaImportHandler(page, options)]);
 }
 
 test.afterEach(async () => {

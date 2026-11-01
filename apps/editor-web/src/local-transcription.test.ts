@@ -79,6 +79,32 @@ describe('transcribeReferenceCaption (live + fixture fallback)', () => {
     });
   });
 
+  it('never substitutes fixture words when selected media transcription fails', async () => {
+    const media = new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/wav' });
+    const client = {
+      async transcribeSpeech() {
+        throw new Error('local Whisper unavailable');
+      },
+    } as unknown as BrowserControlPlaneClient;
+
+    await expect(
+      transcribeReferenceCaption('caption-en', 'en-US', client, { media, mediaType: 'audio/wav' }),
+    ).rejects.toThrow('Live transcription could not process the selected media.');
+  });
+
+  it('surfaces the local Whisper configuration error for selected media', async () => {
+    const media = new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/wav' });
+    const client = {
+      async transcribeSpeech() {
+        throw new Error('Local Whisper is not configured.');
+      },
+    } as unknown as BrowserControlPlaneClient;
+
+    await expect(
+      transcribeReferenceCaption('caption-en', 'en-US', client, { media, mediaType: 'audio/wav' }),
+    ).rejects.toThrow('Local Whisper is not configured.');
+  });
+
   it('keeps ProviderUnavailableError typed for callers', () => {
     expect(ProviderUnavailableError.name).toBe('ProviderUnavailableError');
   });

@@ -456,6 +456,7 @@ export function createDesktopHostReadHandler(): ChannelHandler {
 export async function installJoyProviderHost(
   page: Page,
   options: JoyProviderHostOptions = {},
+  extraHandlers: readonly ChannelHandler[] = [],
 ): Promise<InstalledJoyDesktopBridge> {
   const store = createProviderProfileStore();
   return installJoyDesktopBridge(
@@ -463,6 +464,7 @@ export async function installJoyProviderHost(
     [
       createProviderProfileHandler(store),
       createProviderBrokerHandler(store, page, options),
+      ...extraHandlers,
       createDesktopHostReadHandler(),
     ],
     {

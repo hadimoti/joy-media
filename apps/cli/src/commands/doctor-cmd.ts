@@ -112,7 +112,12 @@ async function checkEdge(): Promise<DoctorCheck> {
     return { id: 'edge', label, status: 'warn', message: 'Invalid JOY_MEDIA_EDGE_URL' };
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { id: 'edge', label, status: 'warn', message: 'JOY_MEDIA_EDGE_URL must use HTTP or HTTPS' };
+    return {
+      id: 'edge',
+      label,
+      status: 'warn',
+      message: 'JOY_MEDIA_EDGE_URL must use HTTP or HTTPS',
+    };
   }
 
   const url = safeUrl(parsed);

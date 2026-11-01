@@ -71,10 +71,7 @@ export interface ProviderAuthRule {
 }
 
 export type ProviderRegionId =
-  | 'international'
-  | 'china'
-  | 'code-international'
-  | 'oauth-international';
+  'international' | 'china' | 'code-international' | 'oauth-international';
 
 /**
  * The OAuth token can use xAI's public API base for inference because the attended 2026-10-31 probe
