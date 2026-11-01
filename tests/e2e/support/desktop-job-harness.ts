@@ -9,6 +9,7 @@ import { startLocalJobApi } from '../../../apps/desktop/src/jobs/local-job-api.j
 import { localWorkerEnv } from '../../../apps/desktop/src/jobs/worker-env.js';
 import { createLocalOriginalWriter } from '../../../apps/desktop/src/main/local-originals.js';
 import { createMediaChannelHandlers } from '../../../apps/desktop/src/main/media-channel.js';
+import { createAssetLibrary } from '../../../apps/desktop/src/store/asset-library.js';
 import { LocalDatabase } from '../../../apps/desktop/src/store/local-database.js';
 import { UNHANDLED, type ChannelHandler } from './joy-desktop-bridge.js';
 
@@ -149,6 +150,10 @@ export async function startDesktopJobHarness(
       projectDocuments: database.projectDocuments,
       assets: database.localAssets,
       originals,
+      library: createAssetLibrary({
+        directory: () => database.getAssetLibraryDirectory(),
+        registrations: database.localAssets,
+      }),
     });
 
     const api = await startLocalJobApi({

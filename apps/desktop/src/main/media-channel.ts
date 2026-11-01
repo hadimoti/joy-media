@@ -6,6 +6,7 @@ import type {
   LocalAssetRegistration,
   LocalAssetRegistrationResult,
 } from '../store/local-assets.js';
+import type { AssetLibraryPort } from '../store/asset-library.js';
 import type {
   ProjectDocumentWrite,
   ProjectDocumentWriteResult,
@@ -59,6 +60,7 @@ export interface MediaChannelDeps {
   readonly projectDocuments: ProjectDocumentPort;
   readonly assets: LocalAssetPort;
   readonly originals: LocalOriginalWriter;
+  readonly library?: AssetLibraryPort;
   /** Test seam for reading a derivative file. Defaults to the real filesystem. */
   readonly readDerivative?: (path: string) => Promise<Uint8Array>;
 }
@@ -193,6 +195,7 @@ function asAssetRegistration(payload: unknown): LocalAssetRegistration | undefin
   const displayName = candidate['displayName'];
   const sha256 = candidate['sha256'];
   const bytes = candidate['bytes'];
+  const descriptor = candidate['descriptor'];
   if (id === undefined || typeof kind !== 'string' || !ASSET_KIND_PATTERN.test(kind)) {
     return undefined;
   }
@@ -202,7 +205,21 @@ function asAssetRegistration(payload: unknown): LocalAssetRegistration | undefin
   if (typeof sha256 !== 'string' || !SHA256_PATTERN.test(sha256)) return undefined;
   if (typeof bytes !== 'number' || !Number.isSafeInteger(bytes)) return undefined;
   if (bytes < 0 || bytes > MAX_LOCAL_ORIGINAL_BYTES) return undefined;
-  return { id, kind, displayName, sha256, bytes };
+  if (descriptor !== undefined && !isPlainObject(descriptor)) return undefined;
+  return {
+    id,
+    kind,
+    displayName,
+    sha256,
+    bytes,
+    ...(descriptor === undefined ? {} : { descriptor }),
+  };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 /** Says why an original is refused when it is above the local limit, so the editor can tell the user. */
@@ -263,9 +280,12 @@ export function createMediaChannelHandlers(
     const upload = asOriginalUpload(payload);
     if (upload === undefined) return { ok: false, error: 'Invalid media request' };
     const result = await deps.originals.storeOriginal(upload.assetId, upload.bytes);
-    return result.ok
-      ? { ok: true, data: { assetId: upload.assetId } }
-      : { ok: false, error: result.error };
+    if (!result.ok) return { ok: false, error: result.error };
+    if (deps.library !== undefined) {
+      const libraryResult = await deps.library.addAsset(upload.assetId);
+      if (!libraryResult.ok) return { ok: false, error: libraryResult.error };
+    }
+    return { ok: true, data: { assetId: upload.assetId } };
   };
 
   const getDocument = (payload: unknown): MediaResult => {

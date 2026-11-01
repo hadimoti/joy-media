@@ -8,6 +8,7 @@ import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import type { DispatchJob } from '../jobs/job-dispatch.js';
 import { createLocalOriginalWriter, MAX_LOCAL_ORIGINAL_BYTES } from './local-originals.js';
 import { createMediaChannelHandlers, MEDIA_CHANNELS, publicJobError } from './media-channel.js';
+import type { AssetLibraryPort } from '../store/asset-library.js';
 
 const tempDirs: string[] = [];
 
@@ -15,7 +16,7 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function setup() {
+function setup(library?: AssetLibraryPort) {
   const db = new LocalDatabase({ filePath: ':memory:', now: () => 'T0' });
   let ids = 0;
   const orchestrator = createJobOrchestrator({
@@ -32,6 +33,7 @@ function setup() {
     projectDocuments: db.projectDocuments,
     assets: db.localAssets,
     originals: createLocalOriginalWriter({ directory: originalsDir, assets: db.localAssets }),
+    ...(library === undefined ? {} : { library }),
   });
   return { db, orchestrator, handlers };
 }
@@ -356,6 +358,7 @@ describe('desktop.media channels', () => {
       displayName: 'clip.webm.stage',
       sha256,
       bytes: bytes.length,
+      descriptor: { mimeType: 'video/webm', durationUs: 1_000_000 },
     };
     expect(handlers['desktop.media.asset.register'](registration)).toEqual({
       ok: true,
@@ -382,6 +385,7 @@ describe('desktop.media channels', () => {
     expect(storedPath).toBeDefined();
     expect(readFileSync(storedPath!).equals(bytes)).toBe(true);
     expect(JSON.stringify(stored)).not.toContain(storedPath!);
+    expect(db.localAssets.get('asset-1')?.descriptor).toEqual(registration.descriptor);
 
     expect(
       await handlers['desktop.media.asset.upload-original']({
@@ -402,5 +406,29 @@ describe('desktop.media channels', () => {
       }),
     ).toEqual({ ok: false, error: 'Asset is not registered' });
     expect(existsSync(storedPath!)).toBe(true);
+  });
+
+  it('reports a library failure after storing the uploaded original', async () => {
+    let addedId: string | undefined;
+    const { handlers, db } = setup({
+      async addAsset(assetId) {
+        addedId = assetId;
+        return { ok: false, error: 'The asset library could not be updated: disk full' };
+      },
+    });
+    const bytes = Buffer.from('original-bytes');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    handlers['desktop.media.asset.register']({
+      id: 'asset-2',
+      kind: 'video',
+      displayName: 'clip.webm',
+      sha256,
+      bytes: bytes.length,
+    });
+    expect(
+      await handlers['desktop.media.asset.upload-original']({ assetId: 'asset-2', bytes }),
+    ).toEqual({ ok: false, error: 'The asset library could not be updated: disk full' });
+    expect(addedId).toBe('asset-2');
+    expect(db.localAssets.storedPath('asset-2')).toBeDefined();
   });
 });

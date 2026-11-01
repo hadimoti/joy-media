@@ -47,6 +47,7 @@ import { startLocalJobApi, type LocalJobApi } from '../jobs/local-job-api.js';
 import { localWorkerEnv } from '../jobs/worker-env.js';
 import { createLocalOriginalWriter } from './local-originals.js';
 import { createMediaChannelHandlers } from './media-channel.js';
+import { createAssetLibrary } from '../store/asset-library.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { createProviderBroker } from './providers/provider-broker.js';
@@ -142,6 +143,10 @@ if (!app.requestSingleInstanceLock()) {
       originals: createLocalOriginalWriter({
         directory: join(paths.mediaRoot, 'originals'),
         assets: localDatabase.localAssets,
+      }),
+      library: createAssetLibrary({
+        directory: () => localDatabase.getAssetLibraryDirectory(),
+        registrations: localDatabase.localAssets,
       }),
     }),
     probeMedia: async (path) => {

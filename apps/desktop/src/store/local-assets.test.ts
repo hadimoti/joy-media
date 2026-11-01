@@ -33,4 +33,27 @@ describe('SqliteLocalAssetStore', () => {
     expect(assets.storedPath('asset-1')).toBe('/media/originals/abc.bin');
     expect(assets.markStored('missing', '/media/originals/none.bin')).toBe(false);
   });
+
+  it('migrates a legacy table and round-trips the descriptor', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`CREATE TABLE local_assets (
+      asset_id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      sha256 TEXT NOT NULL,
+      bytes INTEGER NOT NULL,
+      stored_path TEXT,
+      created_at TEXT NOT NULL
+    )`);
+
+    ensureLocalAssetSchema(db);
+    const assets = new SqliteLocalAssetStore(db, () => 'T0');
+    const registration = {
+      ...REGISTRATION,
+      descriptor: { mimeType: 'image/png', width: 32, height: 24 },
+    };
+    expect(assets.register(registration)).toEqual({ kind: 'registered' });
+    expect(assets.get('asset-1')).toEqual(registration);
+    db.close();
+  });
 });
