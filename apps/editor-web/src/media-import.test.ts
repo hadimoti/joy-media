@@ -9,6 +9,37 @@ import {
 } from './media-import.js';
 
 describe('importMediaFile', () => {
+  it('uses the content-addressed asset ID for registration and the original cache by default', async () => {
+    const input = new File(['content-addressed bytes'], 'clip.mp4', { type: 'video/mp4' });
+    const sha256 = await digest(input);
+    const registered: BrowserAssetRegistration[] = [];
+    const client = {
+      ensureProject: vi.fn(async () => undefined),
+      registerAsset: vi.fn(async (_projectId: string, next: BrowserAssetRegistration) => {
+        registered.push(next);
+        return browserAsset(next);
+      }),
+      assets: vi.fn(async () => []),
+      uploadAssetOriginal: vi.fn(async (_projectId, asset) => asset),
+    } satisfies NonNullable<MediaImportOptions['client']>;
+    const cache = { put: vi.fn(async () => undefined) };
+
+    await importMediaFile({
+      projectId: 'project-1',
+      projectTitle: 'Project',
+      file: input,
+      client,
+      originalAssetCache: cache,
+      describeMedia: async () => ({ mimeType: 'video/mp4' }),
+    });
+
+    expect(registered[0]?.id).toBe(`joylib-${sha256}`);
+    expect(cache.put).toHaveBeenCalledWith(
+      { assetId: `joylib-${sha256}`, sha256, bytes: input.size, mimeType: 'video/mp4' },
+      input,
+    );
+  });
+
   it('verifies, registers, caches, and cloud-uploads the same original', async () => {
     const calls: string[] = [];
     let registration: BrowserAssetRegistration | undefined;
