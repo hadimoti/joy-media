@@ -202,6 +202,121 @@ describe('JOY Agent trusted host tool bridge', () => {
     });
   });
 
+  it('serves a paged, allowlisted library catalog', async () => {
+    const entries = [
+      {
+        id: 'library-1',
+        kind: 'video',
+        displayName: 'Launch clip',
+        bytes: 2048,
+        createdAt: 123,
+        absolutePath: 'C:/private/launch.mp4',
+        relativePath: 'video/launch.mp4',
+        sha256: 'secret-digest',
+        descriptor: {
+          mimeType: 'video/mp4',
+          width: 1920,
+          height: 1080,
+          durationUs: 4_000_000,
+          privateField: 'must-not-escape',
+        },
+      },
+      {
+        id: 'library-2',
+        kind: 'image',
+        displayName: 'Poster',
+        bytes: 512,
+        createdAt: 456,
+        descriptor: { width: Number.POSITIVE_INFINITY },
+      },
+    ];
+    const methods = createJoyAgentHostRpcMethods({
+      context: createJoyAgentPagedContext({ projectId: 'project-1', revision: 'revision-1' }),
+      prepareProposal: () => preparedResult(),
+      readLibraryCatalog: async () => entries,
+    });
+
+    const firstPage = (await invoke(methods, 'read_project_context', {
+      domain: 'library',
+      cursor: 0,
+      pageSize: 1,
+    })) as { items: Array<Record<string, unknown>>; [key: string]: unknown };
+    expect(firstPage).toEqual({
+      projectId: 'project-1',
+      revision: 'revision-1',
+      domain: 'library',
+      items: [
+        {
+          id: 'library-1',
+          kind: 'video',
+          displayName: 'Launch clip',
+          bytes: 2048,
+          createdAt: 123,
+          mimeType: 'video/mp4',
+          width: 1920,
+          height: 1080,
+          durationUs: 4_000_000,
+        },
+      ],
+      nextCursor: 1,
+    });
+    expect(firstPage.items[0]).not.toHaveProperty('absolutePath');
+    expect(firstPage.items[0]).not.toHaveProperty('relativePath');
+    expect(firstPage.items[0]).not.toHaveProperty('sha256');
+    const page = (await invoke(methods, 'read_project_context', {
+      domain: 'library',
+      cursor: 1,
+      pageSize: 1,
+    })) as { items: Array<Record<string, unknown>> };
+    expect(page.items).toEqual([
+      {
+        id: 'library-2',
+        kind: 'image',
+        displayName: 'Poster',
+        bytes: 512,
+        createdAt: 456,
+      },
+    ]);
+    expect(JSON.stringify(page)).not.toContain('absolutePath');
+    expect(JSON.stringify(page)).not.toContain('relativePath');
+    expect(JSON.stringify(page)).not.toContain('sha256');
+  });
+
+  it('returns an unavailable library page when no catalog reader is configured', async () => {
+    const methods = createJoyAgentHostRpcMethods({
+      context: createJoyAgentPagedContext({ projectId: 'project-1', revision: 'revision-1' }),
+      prepareProposal: () => preparedResult(),
+    });
+
+    await expect(
+      invoke(methods, 'read_project_context', { domain: 'library', cursor: 0, pageSize: 8 }),
+    ).resolves.toEqual({
+      projectId: 'project-1',
+      revision: 'revision-1',
+      domain: 'library',
+      items: [],
+      unavailable: true,
+    });
+  });
+
+  it('returns an unavailable library page when the catalog reader rejects', async () => {
+    const methods = createJoyAgentHostRpcMethods({
+      context: createJoyAgentPagedContext({ projectId: 'project-1', revision: 'revision-1' }),
+      prepareProposal: () => preparedResult(),
+      readLibraryCatalog: () => Promise.reject(new Error('catalog unavailable')),
+    });
+
+    await expect(
+      invoke(methods, 'read_project_context', { domain: 'library', cursor: 0, pageSize: 8 }),
+    ).resolves.toEqual({
+      projectId: 'project-1',
+      revision: 'revision-1',
+      domain: 'library',
+      items: [],
+      unavailable: true,
+    });
+  });
+
   it('returns a bounded overview and independently cloned pages', async () => {
     const source = {
       projectId: 'project-1',

@@ -60,7 +60,10 @@ import {
   createJoyAgentContextSnapshot,
   type JoyAgentContextSnapshotInput,
 } from './joy-agent/context-snapshot.js';
-import { createJoyAgentHostRpcMethodsForSnapshot } from './joy-agent/tool-bridge.js';
+import {
+  createJoyAgentHostRpcMethodsForSnapshot,
+  type JoyAgentLibraryEntry,
+} from './joy-agent/tool-bridge.js';
 import type { JoyAgentObservationAdapterFactory } from './joy-agent/observation-host-factory.js';
 import type {
   JoyAgentObservationHostBridge,
@@ -74,6 +77,7 @@ import {
 } from './joy-agent/observation-review-controller.js';
 import { createWorkerObservationReviewTransfer } from './joy-agent/worker-observation-transfer.js';
 import { MAX_PRIVATE_OBSERVATION_FIRST_RELEASE_BYTES } from './joy-agent/observation-transfer-port-protocol.js';
+import { getDesktopAssetLibraryCatalog } from './desktop-client.js';
 import type { ObservationTransferAuthority } from './joy-agent/observation-transfer-service.js';
 import { digestJoyAgentPolicy } from './joy-agent/prepared-change-store.js';
 import {
@@ -2093,6 +2097,10 @@ export function AgentPanel({
                           result.observationId,
                         );
                       },
+                  async () => {
+                    const catalog = await getDesktopAssetLibraryCatalog();
+                    return catalog.assets.map((asset) => asset as JoyAgentLibraryEntry);
+                  },
                 ),
                 allowedToolNames:
                   observationBridge === undefined

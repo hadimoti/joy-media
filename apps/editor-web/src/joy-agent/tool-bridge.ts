@@ -78,6 +78,7 @@ const HOST_CONTEXT_DOMAINS = [
   'visual-objects',
   'titles',
   'looks',
+  'library',
 ] as const;
 type HostContextDomain = (typeof HOST_CONTEXT_DOMAINS)[number];
 const MAX_HOST_PAGE_SIZE = 32;
@@ -298,6 +299,8 @@ export interface JoyAgentObservationToolAdapter {
 export interface JoyAgentHostToolBridgeOptions {
   /** Frozen, sanitized project facts retained only on the trusted main thread. */
   readonly context: JoyAgentPagedContext;
+  /** Read-only catalog supplied by the trusted desktop host. */
+  readonly readLibraryCatalog?: () => Promise<readonly JoyAgentLibraryEntry[]>;
   /**
    * The caller must use the canonical compiler and the session-owned prepared
    * change store. It returns display-safe opaque identities only.
@@ -328,6 +331,20 @@ export interface JoyAgentHostToolBridgeOptions {
     result: JoyAgentMediaObserveResult,
     authority: JoyAgentObservationToolAuthority,
   ) => void | Promise<void>;
+}
+
+export interface JoyAgentLibraryEntry {
+  readonly id: string;
+  readonly kind: string;
+  readonly displayName: string;
+  readonly bytes: number;
+  readonly createdAt: number;
+  readonly descriptor?: {
+    readonly mimeType?: string;
+    readonly width?: number;
+    readonly height?: number;
+    readonly durationUs?: number;
+  };
 }
 
 function isRecord(value: HostRpcJson): value is { readonly [key: string]: HostRpcJson } {
@@ -1143,6 +1160,44 @@ function pageForContext(
   };
 }
 
+async function pageForLibrary(
+  context: JoyAgentPagedContext,
+  input: ReturnType<typeof parseContextReadArgs>,
+  readLibraryCatalog: JoyAgentHostToolBridgeOptions['readLibraryCatalog'],
+): Promise<HostRpcJson> {
+  const projectId = context.snapshot.projectId;
+  const revision = context.snapshot.revision;
+  if (readLibraryCatalog === undefined)
+    return { projectId, revision, domain: 'library', items: [], unavailable: true };
+  try {
+    const entries = await readLibraryCatalog();
+    const records = entries.map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      displayName: entry.displayName,
+      bytes: entry.bytes,
+      createdAt: entry.createdAt,
+      ...(typeof entry.descriptor?.mimeType === 'string'
+        ? { mimeType: entry.descriptor.mimeType }
+        : {}),
+      ...(typeof entry.descriptor?.width === 'number' && Number.isFinite(entry.descriptor.width)
+        ? { width: entry.descriptor.width }
+        : {}),
+      ...(typeof entry.descriptor?.height === 'number' && Number.isFinite(entry.descriptor.height)
+        ? { height: entry.descriptor.height }
+        : {}),
+      ...(typeof entry.descriptor?.durationUs === 'number' &&
+      Number.isFinite(entry.descriptor.durationUs)
+        ? { durationUs: entry.descriptor.durationUs }
+        : {}),
+    }));
+    const page = nextPage(records as readonly HostRpcJson[], input.cursor, input.pageSize);
+    return { projectId, revision, domain: 'library', ...page };
+  } catch {
+    return { projectId, revision, domain: 'library', items: [], unavailable: true };
+  }
+}
+
 function parseContextPageResult(value: HostRpcJson): HostRpcJson {
   if (
     !isRecord(value) ||
@@ -1206,6 +1261,8 @@ export function createJoyAgentHostRpcMethods(
     parseArgs: parseContextReadArgs,
     execute: async (input, context) => {
       context.signal.throwIfAborted();
+      if (input.domain === 'library')
+        return pageForLibrary(options.context, input, options.readLibraryCatalog);
       return pageForContext(options.context, input);
     },
     parseResult: parseContextPageResult,
@@ -1383,11 +1440,13 @@ export function createJoyAgentHostRpcMethodsForSnapshot(
   prepareProposal: JoyAgentHostToolBridgeOptions['prepareProposal'],
   observation?: JoyAgentObservationToolAdapter,
   onObservationCompleted?: JoyAgentHostToolBridgeOptions['onObservationCompleted'],
+  readLibraryCatalog?: JoyAgentHostToolBridgeOptions['readLibraryCatalog'],
 ): HostRpcMethods {
   return createJoyAgentHostRpcMethods({
     context: createJoyAgentPagedContext(input),
     ...(prepareProposal === undefined ? {} : { prepareProposal }),
     ...(observation === undefined ? {} : { observation }),
     ...(onObservationCompleted === undefined ? {} : { onObservationCompleted }),
+    ...(readLibraryCatalog === undefined ? {} : { readLibraryCatalog }),
   });
 }
