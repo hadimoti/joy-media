@@ -1284,10 +1284,7 @@ export function JoyAgentSettingsDialog({
 
                   {openAccordions['models-endpoint'] && (
                     <div className="joy-accordion-content">
-                      <ProviderSignInPanel
-                        onSignedIn={() => void loadProfiles()}
-                        onSaved={() => void loadProfiles()}
-                      />
+                      <ProviderSignInPanel onSaved={() => void loadProfiles()} />
                       <div className="joy-settings-form-grid">
                         <div className="joy-settings-field">
                           <label>

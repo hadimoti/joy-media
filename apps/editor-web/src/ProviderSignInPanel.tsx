@@ -10,13 +10,8 @@ import {
 import {
   isDesktopHost,
   saveDesktopProviderProfile,
-  signInDesktopProviderProfile,
   type DesktopProviderProfile,
 } from './desktop-client.js';
-
-/** Owner wording for every OAuth route, reworded 2026-11-01 to say the route may be disabled and the API key is better. */
-const OAUTH_RISK_NOTICE =
-  'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
 
 /** D23 sign-in provider order follows the existing settings panel order. */
 const ORDER: readonly RegistryProviderId[] = ['chatgpt', 'kimi', 'xai'];
@@ -41,26 +36,20 @@ function apiKeyRegions(provider: RegistryProvider): readonly ProviderRegion[] {
   return provider.regions.filter((region) => region.route !== 'oauth');
 }
 
-/** The short D22 provider names used by the sign-in actions. Source: D22 step 2 brief (2026-10-30). */
+/** The short D22 provider names used by the provider accordions. Source: D22 step 2 brief (2026-10-30). */
 function providerLabel(provider: RegistryProviderId): string {
   return LABELS[provider] ?? findRegistryProvider(provider)?.label ?? provider;
 }
 
 /**
- * Offers the three D23 sign-in provider accordions. API-key routes use the desktop profile broker; OAuth actions use
- * the desktop's provider-specific sign-in flow.
+ * Offers the three D23 provider accordions. Each one connects through an API key, saved with the
+ * desktop profile broker. The OAuth sign-in route has been removed from the UI.
  */
 export function ProviderSignInPanel({
-  onSignedIn,
   onSaved,
 }: {
-  readonly onSignedIn: (profile: DesktopProviderProfile) => void;
   readonly onSaved?: (profile: DesktopProviderProfile) => void;
 }) {
-  const [busy, setBusy] = useState<RegistryProviderId | undefined>(undefined);
-  const [signInStatus, setSignInStatus] = useState<
-    { readonly provider: RegistryProviderId; readonly message: string } | undefined
-  >(undefined);
   const providers = [...signInProviders()]
     .sort((first, second) => rank(first) - rank(second))
     .map((provider) => findRegistryProvider(provider))
@@ -68,38 +57,10 @@ export function ProviderSignInPanel({
 
   if (!isDesktopHost()) return null;
 
-  const signIn = async (target: RegistryProviderId): Promise<void> => {
-    setBusy(target);
-    setSignInStatus(undefined);
-    try {
-      const profile = await signInDesktopProviderProfile({ provider: target });
-      onSignedIn(profile);
-      setSignInStatus({ provider: target, message: 'Signed in to ' + providerLabel(target) + '.' });
-    } catch (error) {
-      setSignInStatus({
-        provider: target,
-        message:
-          error instanceof Error
-            ? error.message
-            : 'The ' + providerLabel(target) + ' sign-in did not complete.',
-      });
-    } finally {
-      setBusy(undefined);
-    }
-  };
-
   return (
     <div className="joy-provider-route-accordions">
       {providers.map((provider) => (
-        <ProviderRouteAccordion
-          key={provider.id}
-          provider={provider}
-          signInBusy={busy === provider.id}
-          signInDisabled={busy !== undefined}
-          signInMessage={signInStatus?.provider === provider.id ? signInStatus.message : undefined}
-          onSignIn={() => void signIn(provider.id)}
-          onSaved={onSaved}
-        />
+        <ProviderRouteAccordion key={provider.id} provider={provider} onSaved={onSaved} />
       ))}
     </div>
   );
@@ -107,23 +68,14 @@ export function ProviderSignInPanel({
 
 function ProviderRouteAccordion({
   provider,
-  signInBusy,
-  signInDisabled,
-  signInMessage,
-  onSignIn,
   onSaved,
 }: {
   readonly provider: RegistryProvider;
-  readonly signInBusy: boolean;
-  readonly signInDisabled: boolean;
-  readonly signInMessage?: string | undefined;
-  readonly onSignIn: () => void;
   readonly onSaved?: ((profile: DesktopProviderProfile) => void) | undefined;
 }) {
   const label = providerLabel(provider.id);
   const regions = apiKeyRegions(provider);
   const [open, setOpen] = useState(false);
-  const [signInOpen, setSignInOpen] = useState(false);
   const [apiKeyRegionId, setApiKeyRegionId] = useState<ProviderRegionId | undefined>(regions[0]?.id);
   const [modelId, setModelId] = useState('');
   const [saving, setSaving] = useState(false);
@@ -181,7 +133,7 @@ function ProviderRouteAccordion({
         <span className="joy-accordion-trigger-title">{label}</span>
         <span className="joy-accordion-trigger-meta">
           <span className="joy-accordion-tag">
-            {regions.length > 0 ? 'API key + sign-in' : 'Sign-in only'}
+            {regions.length > 0 ? 'API key' : 'Not available here'}
           </span>
           <span className="joy-accordion-chevron">▾</span>
         </span>
@@ -190,7 +142,7 @@ function ProviderRouteAccordion({
       {open && (
         <div id={'joy-provider-routes-' + provider.id} className="joy-accordion-content">
           <section className="joy-provider-route" aria-label={label + ' API-key route'}>
-            <h4 className="joy-provider-route-title">API key route (Primary)</h4>
+            <h4 className="joy-provider-route-title">API key</h4>
             {selectedRegion === undefined ? (
               <p>
                 No API-key endpoint is registered for this provider. OpenAI API keys remain under the separate OpenAI
@@ -289,40 +241,6 @@ function ProviderRouteAccordion({
               </div>
             )}
           </section>
-
-          <div className={'joy-accordion-item' + (signInOpen ? ' is-open' : '')}>
-            <button
-              type="button"
-              className="joy-accordion-trigger"
-              aria-label={'Toggle ' + label + ' sign-in route'}
-              aria-expanded={signInOpen}
-              aria-controls={'joy-provider-oauth-' + provider.id}
-              onClick={() => setSignInOpen((previous) => !previous)}
-            >
-              <span className="joy-accordion-trigger-title">Sign-in route (Secondary)</span>
-              <span className="joy-accordion-trigger-meta">
-                <span className="joy-accordion-chevron">▾</span>
-              </span>
-            </button>
-
-            {signInOpen && (
-              <div id={'joy-provider-oauth-' + provider.id} className="joy-accordion-content">
-                <section className="joy-provider-route" aria-label={label + ' OAuth route'}>
-                  <button
-                    type="button"
-                    className="joy-btn-secondary"
-                    disabled={signInDisabled || saving}
-                    onClick={onSignIn}
-                  >
-                    Sign in with {label}
-                    {signInBusy ? '…' : ''}
-                  </button>
-                  <p className="joy-provider-risk-notice">{OAUTH_RISK_NOTICE}</p>
-                  {signInMessage !== undefined && <p role="status">{signInMessage}</p>}
-                </section>
-              </div>
-            )}
-          </div>
         </div>
       )}
     </div>
