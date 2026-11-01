@@ -16,15 +16,12 @@ import '@fontsource/noto-naskh-arabic/latin-ext-400.css';
 import '@fontsource/noto-naskh-arabic/latin-ext-700.css';
 import { App } from './App.js';
 import { EditorErrorBoundary } from './error-boundary.js';
-import { LoginGate } from './LoginGate.js';
 import { ProjectWriterGate } from './project-writer-gate.js';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <EditorErrorBoundary>
-      <LoginGate>
-        <ProjectWriterGate>{(writer) => <App writer={writer} />}</ProjectWriterGate>
-      </LoginGate>
+      <ProjectWriterGate>{(writer) => <App writer={writer} />}</ProjectWriterGate>
     </EditorErrorBoundary>
   </StrictMode>,
 );

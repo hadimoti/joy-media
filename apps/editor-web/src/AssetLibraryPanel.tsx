@@ -291,8 +291,8 @@ export function AssetLibraryPanel({
     const requestId = ++refreshSeqRef.current;
     const token = getStoredMediaToken(storage);
     if (!isDesktopHost() && token === undefined) {
-      // LoginGate keeps the editor mounted under the blur; don't wipe a prior
-      // catalog or treat "not signed in yet" as a hard failure.
+      // Without a stored token outside the desktop app, keep any prior catalog
+      // rather than treating "not signed in" as a hard failure.
       return;
     }
     try {
