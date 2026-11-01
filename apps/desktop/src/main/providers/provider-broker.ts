@@ -1285,9 +1285,9 @@ async function assertPublicHost(
   }
 }
 
-async function assertLoopbackHost(
+export async function assertLoopbackHost(
   hostname: string,
-  resolveHost: (name: string) => Promise<readonly string[]>,
+  resolveHost: (name: string) => Promise<readonly string[]> = defaultResolveHost,
 ): Promise<void> {
   if (hostname === '127.0.0.1') return;
   const addresses = await resolveHost(hostname);

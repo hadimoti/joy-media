@@ -103,6 +103,113 @@ describe('createAssetLibrary', () => {
     ).toHaveLength(1);
   });
 
+  it('removes a catalog entry without deleting its media file', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const asset = registration();
+    const id = `joylib-${asset.sha256}`;
+    const mediaPath = path.join(directory, 'images', id);
+    await mkdir(path.dirname(mediaPath), { recursive: true });
+    await writeFile(mediaPath, 'keep this media');
+    await writeFile(
+      path.join(directory, 'catalog.json'),
+      JSON.stringify({
+        version: 1,
+        counts: { total: 1, audio: 0, image: 1, video: 0 },
+        assets: [{ id, kind: 'image', relativePath: `images/${id}` }],
+      }),
+    );
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: () => undefined },
+    });
+
+    await expect(library.removeEntry(id)).resolves.toEqual({ removed: true });
+    expect(JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8'))).toMatchObject({
+      counts: { total: 0, audio: 0, image: 0, video: 0 },
+      assets: [],
+    });
+    expect(await readFile(mediaPath, 'utf8')).toBe('keep this media');
+  });
+
+  it('returns removed after the catalog rename even when lock cleanup fails', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const id = `joylib-${'c'.repeat(64)}`;
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      path.join(directory, 'catalog.json'),
+      JSON.stringify({ version: 1, assets: [{ id, kind: 'image' }] }),
+    );
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: () => undefined },
+      unlinkLock: async () => {
+        throw new Error('lock cleanup failed');
+      },
+    });
+
+    await expect(library.removeEntry(id)).resolves.toEqual({ removed: true });
+    expect(JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8')).assets).toEqual(
+      [],
+    );
+  });
+
+  it('returns removed false when the id is not in the catalog', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    await mkdir(directory, { recursive: true });
+    const catalog = JSON.stringify({ version: 1, assets: [] });
+    await writeFile(path.join(directory, 'catalog.json'), catalog);
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: () => undefined },
+    });
+
+    await expect(library.removeEntry(`joylib-${'a'.repeat(64)}`)).resolves.toEqual({
+      removed: false,
+    });
+    expect(await readFile(path.join(directory, 'catalog.json'), 'utf8')).toBe(catalog);
+  });
+
+  it('rejects an invalid id before touching the catalog or library directory', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: () => undefined },
+    });
+
+    await expect(library.removeEntry('../catalog.json')).rejects.toThrow(
+      /Invalid asset library entry id/,
+    );
+    expect(await exists(directory)).toBe(false);
+  });
+
+  it('uses the catalog lock when removing an entry', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const id = `joylib-${'b'.repeat(64)}`;
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      path.join(directory, 'catalog.json'),
+      JSON.stringify({ version: 1, assets: [{ id }] }),
+    );
+    const lockPath = path.join(directory, 'catalog.json.lock');
+    await writeFile(lockPath, 'held');
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: () => undefined },
+      lockWaitMs: 20,
+    });
+
+    await expect(library.removeEntry(id)).rejects.toThrow(/asset library is busy/i);
+    expect(await exists(lockPath)).toBe(true);
+    expect(
+      JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8')).assets,
+    ).toHaveLength(1);
+  });
+
   it.each([
     ['unknown id', undefined, false],
     ['no stored original', {}, false],

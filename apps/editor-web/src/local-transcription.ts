@@ -146,8 +146,15 @@ export async function transcribeReferenceCaption(
       speakers: live.speakers,
       provenance: live.provenance,
     });
-  } catch {
+  } catch (error) {
     if (options.media !== undefined) {
+      if (
+        error instanceof Error &&
+        (error.message === 'Local Whisper is not configured.' ||
+          error.message === 'The saved local Whisper endpoint was refused.')
+      ) {
+        throw new Error(error.message);
+      }
       throw new Error('Live transcription could not process the selected media.');
     }
     const provider = fixtureProvider(language);

@@ -597,7 +597,7 @@ function CaptionSlotEditor({
             <span className="caption-status-dot" aria-hidden="true" />
             <div>
               <strong>Local transcription</strong>
-              <span>Persian and English ready when the audio source is available.</span>
+              <span>Requires a local Whisper endpoint configured in provider settings.</span>
             </div>
           </div>
           <div className="caption-generate-actions">

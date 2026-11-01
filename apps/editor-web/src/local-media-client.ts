@@ -118,6 +118,9 @@ interface TrackedJob {
 const trackedJobs = new Map<string, TrackedJob>();
 const projectTitles = new Map<string, string>();
 const registeredAssets = new Map<string, BrowserAsset>();
+const LIBRARY_ASSET_ID_PATTERN = /^joylib-[a-f0-9]{64}$/;
+const MAX_LOCAL_WHISPER_MEDIA_BYTES = 200 * 1024 * 1024;
+const LOCAL_WHISPER_MEDIA_TOO_LARGE = 'Local Whisper media exceeds the 200 MB limit.';
 
 function defaultBridge(): DesktopMediaBridge {
   return {
@@ -335,11 +338,23 @@ export class BrowserControlPlaneClient {
     assetId: string,
   ): Promise<{
     readonly id: string;
+    readonly removed: boolean;
     readonly cloudObjectsPurged: number;
     readonly cloudObjectPurgeFailures: number;
   }> {
-    registeredAssets.delete(assetId);
-    return { id: assetId, cloudObjectsPurged: 0, cloudObjectPurgeFailures: 0 };
+    let removed: boolean;
+    if (LIBRARY_ASSET_ID_PATTERN.test(assetId)) {
+      const result = await call<{ readonly removed: boolean }>(
+        this.bridge,
+        'desktop.asset-library.remove-entry',
+        { id: assetId },
+      );
+      removed = result.removed;
+      registeredAssets.delete(assetId);
+    } else {
+      removed = registeredAssets.delete(assetId);
+    }
+    return { id: assetId, removed, cloudObjectsPurged: 0, cloudObjectPurgeFailures: 0 };
   }
 
   async uploadAssetOriginal(
@@ -594,14 +609,26 @@ export class BrowserControlPlaneClient {
   }
 
   async transcribeSpeech(
-    _language: string,
-    _options: {
+    language: string,
+    options: {
       readonly referenceAssetId?: string;
       readonly media?: Blob;
       readonly mediaType?: string;
     } = {},
   ): Promise<BrowserSpeechTranscript> {
-    throw notAvailable('Speech transcription');
+    if (options.media === undefined) throw notAvailable('Reference speech transcription');
+    if (options.media.size > MAX_LOCAL_WHISPER_MEDIA_BYTES)
+      throw new Error(LOCAL_WHISPER_MEDIA_TOO_LARGE);
+    const mediaType = options.mediaType ?? options.media.type ?? 'application/octet-stream';
+    if (!/^(audio|video)\/[^\s;\r\n]+(?:\s*;[^\r\n]*)?$/i.test(mediaType)) {
+      throw new Error('Local Whisper only accepts audio or video media.');
+    }
+    const media = new Uint8Array(await options.media.arrayBuffer());
+    return call<BrowserSpeechTranscript>(this.bridge, 'desktop.media.speech.transcribe', {
+      language,
+      media,
+      mediaType,
+    });
   }
 
   async synthesizeSpeech(_input: {

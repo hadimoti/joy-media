@@ -52,7 +52,10 @@ import {
   type AiProviderConfig,
   type CliConfig,
 } from '../utils/config.js';
-import { KIMI_CODE_BASE_URL as OAUTH_KIMI_CODE_BASE_URL, OAuthFlowError } from '@joy-media/provider-oauth';
+import {
+  KIMI_CODE_BASE_URL as OAUTH_KIMI_CODE_BASE_URL,
+  OAuthFlowError,
+} from '@joy-media/provider-oauth';
 import type { OAuthCredential } from '../utils/credential-store.js';
 import { c } from '../utils/logger.js';
 import {
@@ -95,20 +98,21 @@ function oauthProfileBaseUrl(provider: 'chatgpt' | 'kimi' | 'xai'): string {
   return XAI_OAUTH_INFERENCE_BASE_URL;
 }
 
-async function addOAuthProvider(
-  name: string,
-  flags: CliFlags,
-  out: AgentOutput,
-): Promise<number> {
+async function addOAuthProvider(name: string, flags: CliFlags, out: AgentOutput): Promise<number> {
   if (flags.baseUrl !== undefined) throw failure('--url cannot be combined with --oauth.');
   if (flags.apiKey !== undefined) throw failure('--api-key cannot be combined with --oauth.');
   if (!flags.provider) throw failure('--provider is required with --oauth.');
-    if (!isOAuthProfileProvider(flags.provider)) {
+  if (!isOAuthProfileProvider(flags.provider)) {
     throw failure(`Provider "${flags.provider}" does not offer OAuth sign-in.`);
   }
   const previous = loadAiProviders()[name];
-  if (previous !== undefined && (previous.authKind !== 'oauth' || previous.provider !== flags.provider)) {
-    throw failure(`Provider profile "${name}" uses a different authentication method or provider; remove it before changing authentication.`);
+  if (
+    previous !== undefined &&
+    (previous.authKind !== 'oauth' || previous.provider !== flags.provider)
+  ) {
+    throw failure(
+      `Provider profile "${name}" uses a different authentication method or provider; remove it before changing authentication.`,
+    );
   }
   const model = flags.model ?? previous?.defaultModel;
   console.error(OAUTH_RISK_NOTICE);
@@ -125,23 +129,32 @@ async function addOAuthProvider(
           out.line(`Code expires at: ${new Date(expiresAt).toISOString()}`);
         }
         if (flags.provider === 'chatgpt') {
-          out.line('Open the URL in a browser on this same machine. A remote CLI with no browser on that machine cannot complete it.');
+          out.line(
+            'Open the URL in a browser on this same machine. A remote CLI with no browser on that machine cannot complete it.',
+          );
         } else {
           out.line('Waiting for approval. Press Ctrl+C to cancel.');
           approvalStatusShown = true;
         }
       },
       onSlowDown: () => {
-        out.line('Waiting for approval; the provider asked us to slow down. Press Ctrl+C to cancel.');
+        out.line(
+          'Waiting for approval; the provider asked us to slow down. Press Ctrl+C to cancel.',
+        );
         approvalStatusShown = true;
       },
     });
   } catch (error) {
     if (error instanceof OAuthFlowError) {
-      const message = error.code === 'TIMEOUT'
-        ? 'The sign-in code expired. Run the OAuth add command again.'
-        : error.code === 'ACCESS_DENIED' ? 'Sign-in was denied.' : error.message;
-      throw error.code === 'CANCELLED' ? new AgentCommandError(message, 130, error.code) : failure(message, error.code);
+      const message =
+        error.code === 'TIMEOUT'
+          ? 'The sign-in code expired. Run the OAuth add command again.'
+          : error.code === 'ACCESS_DENIED'
+            ? 'Sign-in was denied.'
+            : error.message;
+      throw error.code === 'CANCELLED'
+        ? new AgentCommandError(message, 130, error.code)
+        : failure(message, error.code);
     }
     throw failure('OAuth sign-in failed. No profile was changed.');
   } finally {
@@ -163,7 +176,13 @@ async function addOAuthProvider(
   out.step('Provider', flags.provider);
   out.step('Auth', `OAuth (${flags.provider})`);
   if (model) out.step('Default Model', model);
-  out.result({ ok: true, name, provider: flags.provider, authKind: 'oauth', defaultModel: model ?? null });
+  out.result({
+    ok: true,
+    name,
+    provider: flags.provider,
+    authKind: 'oauth',
+    defaultModel: model ?? null,
+  });
   return 0;
 }
 
@@ -187,29 +206,45 @@ async function listOAuthModels(
   out.banner();
   out.info(`Fetching models from ${c(baseUrl, 'bold')}...`);
   try {
-    const chatGptRequest = provider === 'chatgpt'
-      ? prepareChatGptModels({ accessToken: credential.tokenRecord.accessToken })
-      : undefined;
+    const chatGptRequest =
+      provider === 'chatgpt'
+        ? prepareChatGptModels({ accessToken: credential.tokenRecord.accessToken })
+        : undefined;
     const response = await fetch(
       chatGptRequest?.url ?? `${baseUrl.replace(/\/+$/, '')}/models`,
       chatGptRequest === undefined
         ? {
             method: 'GET',
-            headers: { accept: 'application/json', authorization: `Bearer ${credential.tokenRecord.accessToken}` },
+            headers: {
+              accept: 'application/json',
+              authorization: `Bearer ${credential.tokenRecord.accessToken}`,
+            },
           }
-        : { method: chatGptRequest.method, headers: chatGptRequest.headers, credentials: 'omit', redirect: 'error' },
+        : {
+            method: chatGptRequest.method,
+            headers: chatGptRequest.headers,
+            credentials: 'omit',
+            redirect: 'error',
+          },
     );
     if (!response.ok) throw new Error('model list request failed');
-    const modelIds = provider === 'chatgpt'
-      ? (await readChatGptModels(await response.text())).map((model) => model.id).filter((id) =>
-          ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some((token) => id.includes(token)),
-        )
-      : await readOAuthModelIds(response, credential);
+    const modelIds =
+      provider === 'chatgpt'
+        ? (await readChatGptModels(await response.text()))
+            .map((model) => model.id)
+            .filter(
+              (id) =>
+                ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some(
+                  (token) => id.includes(token),
+                ),
+            )
+        : await readOAuthModelIds(response, credential);
     out.line(`\n  ${c(`Discovered ${modelIds.length} models:`, 'bold')}\n`);
     for (const id of modelIds) out.line(`  • ${id}`);
     out.line();
     updateAiProviders((providers) => {
-      if (hasAiProvider(providers, profileId)) providers[profileId] = { ...providers[profileId], cachedModels: modelIds };
+      if (hasAiProvider(providers, profileId))
+        providers[profileId] = { ...providers[profileId], cachedModels: modelIds };
     });
     out.result({ ok: true, provider: profileId, models: modelIds });
     return 0;
@@ -218,13 +253,22 @@ async function listOAuthModels(
   }
 }
 
-async function readOAuthModelIds(response: Response, credential: OAuthCredential): Promise<string[]> {
+async function readOAuthModelIds(
+  response: Response,
+  credential: OAuthCredential,
+): Promise<string[]> {
   const json = (await response.json()) as { data?: unknown };
   const raw = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
   return raw
     .map((item: { id?: string } | string) => (typeof item === 'string' ? item : item.id))
-    .filter((id): id is string => typeof id === 'string' && id.length > 0 &&
-      ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some((token) => id.includes(token)));
+    .filter(
+      (id): id is string =>
+        typeof id === 'string' &&
+        id.length > 0 &&
+        ![credential.tokenRecord.accessToken, credential.tokenRecord.refreshToken].some((token) =>
+          id.includes(token),
+        ),
+    );
 }
 
 /** A command-level failure with its exit status and a stable machine code. */
@@ -270,7 +314,10 @@ function reportFailure(error: unknown, out: AgentOutput): number {
     exitCode = EXIT_FAILURE;
     code = error.code;
     httpStatus = error.httpStatus;
-  } else if (error instanceof OAuthRefreshFailedError || error instanceof OAuthProfileLockTimeoutError) {
+  } else if (
+    error instanceof OAuthRefreshFailedError ||
+    error instanceof OAuthProfileLockTimeoutError
+  ) {
     exitCode = EXIT_FAILURE;
     code = error.name;
   } else {
@@ -329,7 +376,11 @@ function handleSlot(args: string[], flags: CliFlags, out: AgentOutput): number {
       const saved = slot.profileId === undefined ? undefined : providers[slot.profileId];
       return {
         ...slot,
-        state: !isAgentSlotConfigured(slot) ? 'not set' : saved === undefined ? 'profile missing' : 'ready',
+        state: !isAgentSlotConfigured(slot)
+          ? 'not set'
+          : saved === undefined
+            ? 'profile missing'
+            : 'ready',
       };
     });
     out.result({ slots });
@@ -337,14 +388,21 @@ function handleSlot(args: string[], flags: CliFlags, out: AgentOutput): number {
     for (const slot of slots) {
       out.line(`  ${c(slot.label, 'cyan')} (${slot.id}): ${slot.state}`);
       out.line(`    Profile: ${slot.profileId ?? 'not set'}   Model: ${slot.model ?? 'not set'}`);
-      out.line(`    Instructions: ${slot.instructions === '' ? 'none' : `${slot.instructions.length} characters`}`);
-      const settings = Object.entries(slot.settings).map(([name, value]) => `${name}=${String(value)}`).join(', ');
+      out.line(
+        `    Instructions: ${slot.instructions === '' ? 'none' : `${slot.instructions.length} characters`}`,
+      );
+      const settings = Object.entries(slot.settings)
+        .map(([name, value]) => `${name}=${String(value)}`)
+        .join(', ');
       out.line(`    Settings: ${settings === '' ? 'defaults' : settings}`);
     }
     return 0;
   }
   const id = parseAgentSlotId(args[2]);
-  if (id === undefined) throw failure('Choose a slot: workhorse or creative. Usage: joy-media agent slot <list|set|clear> <workhorse|creative>');
+  if (id === undefined)
+    throw failure(
+      'Choose a slot: workhorse or creative. Usage: joy-media agent slot <list|set|clear> <workhorse|creative>',
+    );
   if (action === 'clear') {
     clearAgentSlot(id);
     out.success(`${AGENT_SLOT_LABELS[id]} cleared.`);
@@ -353,7 +411,9 @@ function handleSlot(args: string[], flags: CliFlags, out: AgentOutput): number {
   }
   if (action === 'set') {
     if (flags.profile !== undefined && loadAiProviders()[flags.profile] === undefined) {
-      throw failure(`No saved provider named "${flags.profile}". Add it first with: joy-media agent provider add ${flags.profile} --url <url>`);
+      throw failure(
+        `No saved provider named "${flags.profile}". Add it first with: joy-media agent provider add ${flags.profile} --url <url>`,
+      );
     }
     const current = loadAgentSlot(id);
     const result = saveAgentSlot(id, {
@@ -365,14 +425,20 @@ function handleSlot(args: string[], flags: CliFlags, out: AgentOutput): number {
         maxOutputTokens: numberFlag(flags.maxOutputTokens) ?? current.settings.maxOutputTokens,
       },
     });
-    if (!result.ok) throw failure(`The slot was not saved: ${result.issue}${result.field === undefined ? '' : ` (${result.field})`}.`);
+    if (!result.ok)
+      throw failure(
+        `The slot was not saved: ${result.issue}${result.field === undefined ? '' : ` (${result.field})`}.`,
+      );
     out.success(`${result.slot.label} saved.`);
     out.step('Profile', result.slot.profileId ?? 'not set');
     out.step('Model', result.slot.model ?? 'not set');
     out.result({ ok: true, slot: result.slot });
     return 0;
   }
-  throw failure(`Unknown slot action "${action}". Available actions: list, set, clear`, 'UNKNOWN_SUBCOMMAND');
+  throw failure(
+    `Unknown slot action "${action}". Available actions: list, set, clear`,
+    'UNKNOWN_SUBCOMMAND',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -440,7 +506,9 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
           ? (() => {
               try {
                 const credential = openCredentialStore().read(name);
-                return credential !== undefined && 'provider' in credential && credential.provider === p.provider
+                return credential !== undefined &&
+                  'provider' in credential &&
+                  credential.provider === p.provider
                   ? oauthTokenExpiry(credential)
                   : 'OAuth credential unavailable';
               } catch {
@@ -451,7 +519,7 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
       return {
         name,
         provider: p.provider ?? 'custom',
-        baseUrl: p.authKind === 'oauth' && p.provider === 'xai' ? null : p.baseUrl ?? null,
+        baseUrl: p.authKind === 'oauth' && p.provider === 'xai' ? null : (p.baseUrl ?? null),
         defaultModel: p.defaultModel ?? null,
         apiKeySet: Boolean(p.apiKey),
         authKind: p.authKind ?? 'api-key',
@@ -508,7 +576,9 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
     const { url: baseUrl } = normalizeCliBaseUrl(flags.baseUrl);
     const type = providerType(baseUrl, flags.provider);
     if (isRetiredProvider(type)) {
-      throw failure(`The ${type} provider was retired from JOY Media. Add another provider instead.`);
+      throw failure(
+        `The ${type} provider was retired from JOY Media. Add another provider instead.`,
+      );
     }
     if (findRegistryProvider(type) === undefined && !isCustomProviderId(type)) {
       throw failure(`Unknown provider type "${type}". Use a registry provider id or "custom".`);
@@ -586,7 +656,9 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
     }
     const providers = loadAiProviders();
     if (providers[name]?.provider !== undefined && isRetiredProvider(providers[name]!.provider!)) {
-      throw failure(`The ${providers[name]!.provider} provider was retired from JOY Media. Choose another provider.`);
+      throw failure(
+        `The ${providers[name]!.provider} provider was retired from JOY Media. Choose another provider.`,
+      );
     }
     if (!isKnownProvider(providers, name)) {
       throw failure(
@@ -749,7 +821,9 @@ async function handleModels(args: string[], flags: CliFlags, out: AgentOutput): 
   }
   const profile = target === undefined ? undefined : loadAiProviders()[target];
   if (profile?.provider !== undefined && isRetiredProvider(profile.provider)) {
-    throw failure(`The ${profile.provider} provider was retired from JOY Media. Choose another provider.`);
+    throw failure(
+      `The ${profile.provider} provider was retired from JOY Media. Choose another provider.`,
+    );
   }
   if (target !== undefined && profile?.authKind === 'oauth') {
     if (flags.baseUrl !== undefined || flags.apiKey !== undefined) {
@@ -881,14 +955,7 @@ async function handleConfig(flags: CliFlags, out: AgentOutput): Promise<number> 
     out.step('Provider', `${s.providerName} (${s.kind})`);
     out.step('Base URL', s.baseUrl);
     out.step('Model', s.modelId);
-    out.step(
-      'API Key',
-      s.apiKey
-        ? 'set (hidden)'
-        : s.local
-          ? 'none (local endpoint)'
-          : 'MISSING',
-    );
+    out.step('API Key', s.apiKey ? 'set (hidden)' : s.local ? 'none (local endpoint)' : 'MISSING');
   }
   return 0;
 }

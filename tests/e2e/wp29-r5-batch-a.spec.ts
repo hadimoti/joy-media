@@ -22,17 +22,6 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
   }, testInfo) => {
     await openDisposableWorkspace(page, `R5-15-${testInfo.project.name}`);
     await openPanel(page, 'Assets');
-    await Promise.all([
-      page.waitForResponse((response) => response.url().includes('/api/v1/library/my-assets')),
-      page.getByRole('button', { name: 'Refresh assets' }).click(),
-    ]);
-    const imageSource = page.getByRole('button', {
-      name: 'Showing cloud bucket assets; switch to user assets',
-    });
-    if (await imageSource.isVisible()) await imageSource.click();
-    await expect(
-      page.getByRole('button', { name: 'Showing user assets; switch to cloud bucket assets' }),
-    ).toBeVisible();
     const fixturePrefix = `wp29-case15-${testInfo.project.name}-${Date.now()}`;
     const pngName = `${fixturePrefix}.png`;
     const jpegName = `${fixturePrefix}.jpg`;
@@ -118,17 +107,6 @@ test.describe('WP-29 R5 batch A — file bridge', () => {
   test('[R5 CASE-17] imports WAV and MP3 with audio categorization', async ({ page }, testInfo) => {
     await openDisposableWorkspace(page, `R5-17-${testInfo.project.name}`);
     await openPanel(page, 'Assets');
-    await Promise.all([
-      page.waitForResponse((response) => response.url().includes('/api/v1/library/my-assets')),
-      page.getByRole('button', { name: 'Refresh assets' }).click(),
-    ]);
-    const audioSource = page.getByRole('button', {
-      name: 'Showing cloud bucket assets; switch to user assets',
-    });
-    if (await audioSource.isVisible()) await audioSource.click();
-    await expect(
-      page.getByRole('button', { name: 'Showing user assets; switch to cloud bucket assets' }),
-    ).toBeVisible();
     await page.getByRole('tab', { name: /Audio, \d+ assets?/ }).click();
     const fixturePrefix = `wp29-case17-${testInfo.project.name}-${Date.now()}`;
     const wavName = `${fixturePrefix}.wav`;

@@ -36,7 +36,10 @@ test.describe('built-in JOY Agent BYOK security envelope', () => {
     await page.getByRole('menuitem', { name: 'Joy Code Settings…', exact: true }).click();
     const reopened = page.getByRole('dialog', { name: 'Joy Code Settings' });
     await reopened.getByRole('button', { name: 'Clear connection' }).click();
-    await expect(reopened.getByText('Not connected')).toBeVisible();
+    await expect(reopened.getByText('No Active Model Connected')).toBeVisible();
+    await expect(
+      reopened.getByText('Connection cleared. Your API key was removed from this page session.'),
+    ).toBeVisible();
     expect(await scanForSentinel(page, SENTINEL)).toEqual([]);
     await reopened.getByRole('button', { name: 'Done' }).click();
 

@@ -148,6 +148,19 @@ if (!app.requestSingleInstanceLock()) {
         directory: () => localDatabase.getAssetLibraryDirectory(),
         registrations: localDatabase.localAssets,
       }),
+      whisper: {
+        getEndpoint: () => {
+          const profile = localDatabase
+            .listProviderProfiles()
+            .find(
+              (candidate) =>
+                candidate.provider === 'custom' || candidate.provider === 'openai-compatible',
+            );
+          return profile === undefined
+            ? undefined
+            : { endpoint: profile.baseUrl, modelId: profile.modelId };
+        },
+      },
     }),
     probeMedia: async (path) => {
       const probe = await checksumFile(path);

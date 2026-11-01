@@ -113,6 +113,19 @@ describe('AssetLibraryPanel successful import contract', () => {
     expect(panelSource).not.toContain('cloud cleanup will need an operational retry');
   });
 
+  it('reports partial bulk-delete failures and keeps failed ids selected', () => {
+    const bulkDelete = panelSource.slice(
+      panelSource.indexOf('const bulkDelete = useCallback'),
+      panelSource.indexOf('const visibleIds = useMemo'),
+    );
+
+    expect(bulkDelete).toContain("'removed' | 'already-absent' | 'failed'");
+    expect(bulkDelete).toContain("outcome: 'failed', error: message(error)");
+    expect(bulkDelete).toContain(
+      'setSelectedAssetIds(new Set(failures.map((result) => result.assetId)))',
+    );
+  });
+
   it('reports a real All count alongside media-specific category counts', () => {
     expect(panelSource).toMatch(/entry\.id === 'all'\s*\?\s*sourceItems\.length/);
   });

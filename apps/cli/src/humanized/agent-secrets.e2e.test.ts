@@ -81,8 +81,9 @@ describe('API keys at rest', () => {
       expect(r.code, describeRun(r)).toBe(0);
       expect(modeOf(path).toString(8)).toBe('600');
       expect(modeOf(env.sb.joyDir).toString(8)).toBe('700');
-      expect(readJoyConfig<Record<string, { apiKey?: string }>>(env.sb, 'ai-providers.json').old?.apiKey)
-        .toBeUndefined();
+      expect(
+        readJoyConfig<Record<string, { apiKey?: string }>>(env.sb, 'ai-providers.json').old?.apiKey,
+      ).toBeUndefined();
       expect(
         readJoyConfig<{ entries: Record<string, unknown> }>(env.sb, 'credentials.json').entries,
       ).toHaveProperty('old');
@@ -175,9 +176,9 @@ describe('API keys never appear in output', () => {
     }
     const list = outputs.find((r) => r.args.includes('list') && r.args.includes('--json'))!;
     expect(list.json()).toMatchObject({ providers: [{ apiKeySet: true }] });
-    expect(outputs.find((r) => r.args.includes('list') && !r.args.includes('--json'))?.out).toContain(
-      'API Key: set (hidden)',
-    );
+    expect(
+      outputs.find((r) => r.args.includes('list') && !r.args.includes('--json'))?.out,
+    ).toContain('API Key: set (hidden)');
     expect(
       readJoyConfig<Record<string, { apiKey?: string }>>(env.sb, 'ai-providers.json').p?.apiKey,
     ).toBeUndefined();

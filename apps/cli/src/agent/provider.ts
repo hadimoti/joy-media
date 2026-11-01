@@ -280,7 +280,9 @@ function resolveProfile(options: ResolveProviderOptions = {}): ResolvedProfile {
     );
   }
   if (registered?.api === 'anthropic-messages' && !isAuthMethodPermitted(type, 'api-key')) {
-    throw new AgentConfigError(registered.label + ' does not permit API-key authentication in the CLI.');
+    throw new AgentConfigError(
+      registered.label + ' does not permit API-key authentication in the CLI.',
+    );
   }
   if (
     registered !== undefined &&
@@ -313,7 +315,10 @@ function resolveProfile(options: ResolveProviderOptions = {}): ResolvedProfile {
 
   // 5. The model: the option, the global default, or the profile's. There is no built-in model.
   const modelId =
-    options.model ?? slot?.model ?? (usingConfigured ? cliConfig.defaultModel : undefined) ?? profile?.defaultModel;
+    options.model ??
+    slot?.model ??
+    (usingConfigured ? cliConfig.defaultModel : undefined) ??
+    profile?.defaultModel;
   if (modelId === undefined || modelId.trim().length === 0) {
     throw new AgentConfigError(
       `No model is set for "${name}". Choose one with: joy-media agent model set <id>`,
@@ -331,13 +336,14 @@ function resolveProfile(options: ResolveProviderOptions = {}): ResolvedProfile {
       `No API key is saved for "${name}". Save one with: joy-media agent provider add ${name} --url <url> --api-key <key>`,
     );
   }
-  const apiKeySource = options.apiKey !== undefined
-    ? 'flag'
-    : envKey !== undefined
-      ? `env:${KEY_ENVIRONMENT[type]}`
-      : apiKey !== undefined
-        ? `provider:${name}`
-        : 'none';
+  const apiKeySource =
+    options.apiKey !== undefined
+      ? 'flag'
+      : envKey !== undefined
+        ? `env:${KEY_ENVIRONMENT[type]}`
+        : apiKey !== undefined
+          ? `provider:${name}`
+          : 'none';
   return {
     name,
     type,
@@ -397,7 +403,10 @@ export async function resolveAgentConfig(
   }
 
   const modelId =
-    options.model ?? slot?.model ?? (usingConfigured ? cliConfig.defaultModel : undefined) ?? profile.defaultModel;
+    options.model ??
+    slot?.model ??
+    (usingConfigured ? cliConfig.defaultModel : undefined) ??
+    profile.defaultModel;
   if (modelId === undefined || modelId.trim().length === 0) {
     throw new AgentConfigError(
       `No model is set for "${name}". Choose one with: joy-media agent model set <id>`,
@@ -429,7 +438,9 @@ export async function resolveAgentConfig(
   const baseUrl = credential.provider === 'xai' ? XAI_OAUTH_INFERENCE_BASE_URL : KIMI_CODE_BASE_URL;
   const verdict = evaluateEndpoint(type, baseUrl);
   if (!verdict.allowed) {
-    throw new AgentConfigError(`The base URL of OAuth profile "${name}" is refused: ${verdict.reason}`);
+    throw new AgentConfigError(
+      `The base URL of OAuth profile "${name}" is refused: ${verdict.reason}`,
+    );
   }
   return normalizeByokSessionConfig({
     provider: engineMode(type),
@@ -498,7 +509,9 @@ export function resolveByokConfig(options: ResolveProviderOptions = {}): ByokSes
   } catch (error) {
     if (error instanceof AgentConfigError) throw error;
     if (error instanceof ProviderConfigError) {
-      throw new AgentConfigError(`The endpoint for provider "${settings.providerName}" is not allowed.`);
+      throw new AgentConfigError(
+        `The endpoint for provider "${settings.providerName}" is not allowed.`,
+      );
     }
     throw new AgentConfigError('The provider configuration is invalid.');
   }

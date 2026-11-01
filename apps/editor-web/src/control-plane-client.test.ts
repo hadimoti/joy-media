@@ -22,6 +22,64 @@ function fakeBridge(answers: Record<string, unknown | ((payload: unknown) => unk
 }
 
 describe('BrowserControlPlaneClient on the local desktop channels', () => {
+  it('transcribes through the desktop bridge without calling fetch', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const media = new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/wav' });
+    const { bridge, calls } = fakeBridge({
+      'desktop.media.speech.transcribe': {
+        language: 'en-US',
+        words: [{ text: 'hello', startUs: 10, endUs: 20 }],
+        speakers: [],
+        provenance: { providerId: 'joy.local-whisper', modelId: 'local-whisper', createdAt: 'T0' },
+      },
+    });
+    const client = new BrowserControlPlaneClient(bridge);
+
+    await expect(
+      client.transcribeSpeech('en-US', { media, mediaType: 'audio/wav' }),
+    ).resolves.toMatchObject({
+      words: [{ text: 'hello', startUs: 10, endUs: 20 }],
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.channel).toBe('desktop.media.speech.transcribe');
+    expect(calls[0]?.payload).toMatchObject({
+      language: 'en-US',
+      media: new Uint8Array([1, 2, 3]),
+      mediaType: 'audio/wav',
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('refuses oversized Whisper blobs before buffering or calling the desktop bridge', async () => {
+    const arrayBuffer = vi.fn(async () => new ArrayBuffer(0));
+    const media = Object.create(Blob.prototype) as Blob;
+    Object.defineProperties(media, {
+      size: { value: 200 * 1024 * 1024 + 1 },
+      type: { value: 'audio/wav' },
+      arrayBuffer: { value: arrayBuffer },
+    });
+    const { bridge, calls } = fakeBridge({});
+    const client = new BrowserControlPlaneClient(bridge);
+
+    await expect(client.transcribeSpeech('en-US', { media })).rejects.toThrow(
+      'Local Whisper media exceeds the 200 MB limit.',
+    );
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('removes library assets through the catalog IPC channel and reports its result', async () => {
+    const id = `joylib-${'a'.repeat(64)}`;
+    const { bridge, calls } = fakeBridge({
+      'desktop.asset-library.remove-entry': { removed: false },
+    });
+    const client = new BrowserControlPlaneClient(bridge);
+
+    await expect(client.deleteAsset('project-1', id)).resolves.toMatchObject({ removed: false });
+    expect(calls).toEqual([{ channel: 'desktop.asset-library.remove-entry', payload: { id } }]);
+  });
+
   it('saves a project document and maps each outcome to the editor contract', async () => {
     const { bridge } = fakeBridge({
       'desktop.media.project.document.put': (payload: unknown) => {

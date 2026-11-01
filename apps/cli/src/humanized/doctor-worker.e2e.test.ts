@@ -28,12 +28,7 @@ interface DoctorJson {
   }>;
 }
 
-const CHECK_IDS = [
-  'node',
-  'sqlite',
-  'gpu',
-  'edge',
-];
+const CHECK_IDS = ['node', 'sqlite', 'gpu', 'edge'];
 
 let sb: Sandbox;
 beforeEach(() => {
@@ -181,7 +176,6 @@ describe('doctor on a machine without network, GPU or models', () => {
     expect(r.code, describeRun(r)).toBe(0);
     expect(existsSync(marker)).toBe(false);
   });
-
 });
 
 describe('worker status', () => {

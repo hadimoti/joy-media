@@ -255,7 +255,9 @@ export function printHelp(): void {
   console.log(
     `    ${c('project', 'cyan')} [list|create|show|export|import]   Local SQLite project management`,
   );
-  console.log(`    ${c('assets', 'cyan')} [list|show|path]                Read-only asset library lookup`);
+  console.log(
+    `    ${c('assets', 'cyan')} [list|show|path]                Read-only asset library lookup`,
+  );
   console.log(
     `    ${c('timeline', 'cyan')} [add-clip|split|trim|remove-clip] Direct scriptable timeline operations`,
   );
