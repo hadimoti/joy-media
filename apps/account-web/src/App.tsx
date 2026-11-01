@@ -1,13 +1,9 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { fetchUserSession, fetchLatestRelease, type UserSession, type ReleaseInfo } from './api.js';
+import { fetchLatestRelease, type ReleaseInfo } from './api.js';
 import { LandingHero } from './LandingHero.js';
-import { AccountLanding } from './AccountLanding.js';
-import { LoginCard } from './LoginCard.js';
 
 export function App(): ReactNode {
-  const [user, setUser] = useState<UserSession | null>(null);
   const [release, setRelease] = useState<ReleaseInfo | null>(null);
-  const [loginOpen, setLoginOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -15,15 +11,11 @@ export function App(): ReactNode {
 
     async function init() {
       try {
-        const [sessionData, releaseData] = await Promise.all([
-          fetchUserSession(),
-          fetchLatestRelease('stable'),
-        ]);
+        const releaseData = await fetchLatestRelease('stable');
         if (!active) return;
-        setUser(sessionData);
         setRelease(releaseData);
       } catch (err) {
-        console.error('Failed to initialize session or release data:', err);
+        console.error('Failed to load release data:', err);
       } finally {
         if (active) setLoading(false);
       }
@@ -34,17 +26,6 @@ export function App(): ReactNode {
       active = false;
     };
   }, []);
-
-  const handleLoginSuccess = async () => {
-    try {
-      const refreshed = await fetchUserSession();
-      setUser(refreshed);
-    } catch (err) {
-      console.error('Failed to refresh user session after login:', err);
-    } finally {
-      setLoginOpen(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -64,19 +45,5 @@ export function App(): ReactNode {
     );
   }
 
-  return (
-    <>
-      {user ? (
-        <AccountLanding user={user} release={release} onLogout={() => setUser(null)} />
-      ) : (
-        <LandingHero release={release} onOpenLogin={() => setLoginOpen(true)} />
-      )}
-
-      <LoginCard
-        isOpen={loginOpen}
-        onClose={() => setLoginOpen(false)}
-        onSuccess={handleLoginSuccess}
-      />
-    </>
-  );
+  return <LandingHero release={release} />;
 }

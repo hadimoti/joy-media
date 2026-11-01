@@ -1,0 +1,3420 @@
+diff --git a/apps/cli/src/commands/benchmark-cmd.test.ts b/apps/cli/src/commands/benchmark-cmd.test.ts
+index c232c64..7de7deb 100644
+--- a/apps/cli/src/commands/benchmark-cmd.test.ts
++++ b/apps/cli/src/commands/benchmark-cmd.test.ts
+@@ -1,7 +1,10 @@
+ import { describe, expect, it } from 'vitest';
++import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
+ import { Writable } from 'node:stream';
+ import { runCli } from '../cli.js';
+-import { runBenchmark } from './benchmark-cmd.js';
++import { perSecond, runBenchmark } from './benchmark-cmd.js';
+ 
+ class StringWritable extends Writable {
+   public chunks: Buffer[] = [];
+@@ -131,4 +134,89 @@ describe('joy benchmark (diagnostic & benchmark command)', () => {
+       expect(m.totalMs).toBeGreaterThanOrEqual(0);
+     }
+   });
++
++  it('only reports finite numbers, so nothing turns into null in JSON', async () => {
++    const capture = new StringWritable();
++    const result = await runBenchmark({ stdout: capture });
++    for (const m of result.measurements) {
++      for (const field of [m.value, m.iterations, m.totalMs, m.perOpMs ?? 0]) {
++        expect(Number.isFinite(field)).toBe(true);
++      }
++    }
++  });
++
++  it('compiles the Living Look for real instead of timing an instant rejection', async () => {
++    const capture = new StringWritable();
++    const result = await runBenchmark({ 'media-engine': true, stdout: capture });
++    const look = result.measurements.find((m) => m.name === 'living-look-compile');
++    expect(look?.failures).toBe(0);
++  });
++
++  it('gives each suite its own total time instead of the whole run for both', async () => {
++    const capture = new StringWritable();
++    const result = await runBenchmark({ json: true, stdout: capture });
++    const events = capture
++      .text()
++      .split('\n')
++      .filter((l) => l.trim().length > 0)
++      .map((l) => JSON.parse(l));
++    const complete = events[events.length - 1];
++    expect(complete.type).toBe('complete');
++    expect(result.summaries).toHaveLength(2);
++    const sumOfSuites = result.summaries.reduce((sum, s) => sum + s.totalMs, 0);
++    expect(sumOfSuites).toBeLessThanOrEqual(complete.totalMs + 0.01);
++    for (const summary of result.summaries) {
++      const own = summary.measurements.reduce((sum, m) => sum + m.totalMs, 0);
++      expect(summary.totalMs).toBeGreaterThanOrEqual(own - 0.01);
++    }
++  });
++});
++
++describe('perSecond', () => {
++  it('never returns Infinity or NaN, even for a loop too fast to time', () => {
++    expect(perSecond(1000, 0)).toBeGreaterThan(0);
++    expect(Number.isFinite(perSecond(1000, 0))).toBe(true);
++    expect(Number.isFinite(perSecond(1000, Number.NaN))).toBe(true);
++    expect(Number.isFinite(perSecond(1000, -3))).toBe(true);
++    expect(perSecond(1000, 500)).toBe(2000);
++  });
++});
++
++describe('benchmark scratch files', () => {
++  function withTmpdir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
++    const previous = process.env.TMPDIR;
++    const dir = mkdtempSync(join(tmpdir(), 'joy-bench-unit-'));
++    process.env.TMPDIR = dir;
++    return fn(dir).finally(() => {
++      if (previous === undefined) delete process.env.TMPDIR;
++      else process.env.TMPDIR = previous;
++      rmSync(dir, { recursive: true, force: true });
++    });
++  }
++
++  it('removes its scratch directories when it is done', async () => {
++    await withTmpdir(async (dir) => {
++      const result = await runBenchmark({ system: true, json: true, stdout: new StringWritable() });
++      expect(result.exitCode).toBe(0);
++      expect(readdirSync(dir)).toEqual([]);
++    });
++  });
++
++  it('ends the JSON stream with an error event and exit code 1 when scratch space is unusable', async () => {
++    await withTmpdir(async (dir) => {
++      const file = join(dir, 'a-file');
++      writeFileSync(file, 'x');
++      process.env.TMPDIR = join(file, 'nested');
++      const capture = new StringWritable();
++      const result = await runBenchmark({ system: true, json: true, stdout: capture });
++      expect(result.exitCode).toBe(1);
++      const lines = capture
++        .text()
++        .split('\n')
++        .filter((l) => l.trim().length > 0)
++        .map((l) => JSON.parse(l));
++      expect(lines[lines.length - 1]).toMatchObject({ type: 'error' });
++      expect(lines[lines.length - 1].message).toMatch(/Benchmark failed/);
++    });
++  });
+ });
+diff --git a/apps/cli/src/commands/benchmark-cmd.ts b/apps/cli/src/commands/benchmark-cmd.ts
+index d3f1a8b..105ccc6 100644
+--- a/apps/cli/src/commands/benchmark-cmd.ts
++++ b/apps/cli/src/commands/benchmark-cmd.ts
+@@ -1,4 +1,4 @@
+-/* global console, process */
++/* global console, process, performance */
+ /**
+  * Diagnostic & benchmark command.
+  *
+@@ -7,17 +7,23 @@
+  * `--system` benchmarks disk I/O, SQLite transaction throughput, and the
+  * Node.js heap. `--media-engine` benchmarks timeline scrub operations per
+  * second, clip collision resolution, and Living Look compile throughput. With
+- * no flags, both suites run. JSON output streams newline-delimited events
+- * (one event per measurement) plus a final summary event.
++ * no flags, both suites run. JSON output streams newline-delimited events: one
++ * `measurement` event as each measurement finishes, then one `summary` per
++ * suite and a final `complete` event. If the run fails, the stream ends with a
++ * single `error` event instead (and the exit code is 1).
++ *
++ * The suites are synthetic micro-benchmarks. Their absolute numbers vary from
++ * machine to machine and run to run; only their shape (names, units,
++ * iteration counts) is stable.
+  */
+-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
++import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { DatabaseSync } from 'node:sqlite';
+ import { compileLook, editorialClean } from '@joy-media/motion-core';
+ import type { CliFlags } from '../cli.js';
+ import { createDefaultProject } from '../utils/project-loader.js';
+-import { c, logInfo, logStep, logSuccess, printBanner } from '../utils/logger.js';
++import { c, logError, logInfo, logStep, logSuccess, printBanner } from '../utils/logger.js';
+ 
+ export interface BenchmarkCommandFlags {
+   system?: boolean | undefined;
+@@ -33,11 +39,14 @@ export interface BenchmarkMeasurement {
+   readonly iterations: number;
+   readonly totalMs: number;
+   readonly perOpMs?: number | undefined;
++  /** Iterations whose operation was rejected instead of completing (only reported by some benchmarks). */
++  readonly failures?: number | undefined;
+ }
+ 
+ export interface BenchmarkSummary {
+   readonly suite: 'system' | 'media-engine';
+   readonly measurementCount: number;
++  /** Wall-clock time spent in THIS suite (setup included). */
+   readonly totalMs: number;
+   readonly measurements: readonly BenchmarkMeasurement[];
+ }
+@@ -66,6 +75,59 @@ export async function handleBenchmarkCommand(args: string[], flags: CliFlags): P
+   return result.exitCode;
+ }
+ 
++// ─── Timing helpers ─────────────────────────────────────────────────────────
++
++/** Smallest elapsed time (ms) a rate is computed over, so a too-fast loop can never yield Infinity/NaN. */
++const MIN_ELAPSED_MS = 0.001;
++
++function now(): number {
++  return performance.now();
++}
++
++function round3(value: number): number {
++  return Math.round(value * 1000) / 1000;
++}
++
++/** `count` operations in `elapsedMs` as operations per second; always a finite number > 0. */
++export function perSecond(count: number, elapsedMs: number): number {
++  const ms = Number.isFinite(elapsedMs) && elapsedMs > MIN_ELAPSED_MS ? elapsedMs : MIN_ELAPSED_MS;
++  return round3(count / (ms / 1000));
++}
++
++function measurement(
++  fields: Omit<BenchmarkMeasurement, 'perOpMs' | 'totalMs'> & { readonly elapsedMs: number },
++): BenchmarkMeasurement {
++  const { elapsedMs, ...rest } = fields;
++  return {
++    ...rest,
++    totalMs: round3(elapsedMs),
++    // Per-op times are tiny (microseconds); keep 6 decimals so they don't round to 0.
++    perOpMs: Math.round((elapsedMs / fields.iterations) * 1_000_000) / 1_000_000,
++  };
++}
++
++/** Run `fn` in a private scratch directory that is always removed afterwards. */
++function withScratchDir<T>(prefix: string, fn: (dir: string) => T): T {
++  const base = tmpdir();
++  mkdirSync(base, { recursive: true });
++  // mkdtemp gives every run its own directory, so two benchmarks running at
++  // the same time (or in the same millisecond) can never trample each other.
++  const dir = mkdtempSync(join(base, `${prefix}-`));
++  try {
++    return fn(dir);
++  } finally {
++    try {
++      rmSync(dir, { recursive: true, force: true });
++    } catch {
++      // ignore on Windows transient locks
++    }
++  }
++}
++
++function errorMessage(err: unknown): string {
++  return err instanceof Error ? err.message || err.name : String(err);
++}
++
+ export async function runBenchmark(
+   options: BenchmarkCommandOptions = {},
+ ): Promise<BenchmarkCommandOutput> {
+@@ -74,7 +136,7 @@ export async function runBenchmark(
+   const runEngine = options['media-engine'] || (!options.system && !options['media-engine']);
+   const json = Boolean(options.json);
+ 
+-  const startedAt = Date.now();
++  const startedAt = now();
+ 
+   if (!json) {
+     printBanner();
+@@ -85,45 +147,62 @@ export async function runBenchmark(
+   }
+ 
+   const measurements: BenchmarkMeasurement[] = [];
++  const suiteMs = new Map<BenchmarkMeasurement['suite'], number>();
++
++  const runSuite = (
++    suite: BenchmarkMeasurement['suite'],
++    steps: ReadonlyArray<() => BenchmarkMeasurement>,
++  ): void => {
++    const suiteStartedAt = now();
++    for (const step of steps) {
++      const m = step();
++      measurements.push(m);
++      // Stream each result as soon as it exists so a watcher sees progress.
++      if (json) stdout.write(`${JSON.stringify({ type: 'measurement', ...m })}\n`);
++    }
++    suiteMs.set(suite, round3(now() - suiteStartedAt));
++  };
+ 
+-  if (runSystem) {
+-    measurements.push(benchmarkDiskRead());
+-    measurements.push(benchmarkDiskWrite());
+-    measurements.push(benchmarkSqliteTransactions());
+-    measurements.push(benchmarkHeapAllocation());
++  try {
++    if (runSystem) {
++      runSuite('system', [
++        benchmarkDiskRead,
++        benchmarkDiskWrite,
++        benchmarkSqliteTransactions,
++        benchmarkHeapAllocation,
++      ]);
++    }
++    if (runEngine) {
++      runSuite('media-engine', [
++        benchmarkTimelineScrub,
++        benchmarkClipCollisionResolution,
++        benchmarkLivingLookCompile,
++      ]);
++    }
++  } catch (err) {
++    const message = `Benchmark failed: ${errorMessage(err)}`;
++    logError(message);
++    if (json) {
++      stdout.write(`${JSON.stringify({ type: 'error', message, ts: new Date().toISOString() })}\n`);
++    }
++    return { exitCode: 1, summaries: [], measurements };
+   }
+ 
+-  if (runEngine) {
+-    measurements.push(benchmarkTimelineScrub());
+-    measurements.push(benchmarkClipCollisionResolution());
+-    measurements.push(benchmarkLivingLookCompile());
++  const totalMs = round3(now() - startedAt);
++
++  const summaries: BenchmarkSummary[] = [];
++  for (const suite of ['system', 'media-engine'] as const) {
++    if (!suiteMs.has(suite)) continue;
++    const own = measurements.filter((m) => m.suite === suite);
++    summaries.push({
++      suite,
++      measurementCount: own.length,
++      totalMs: suiteMs.get(suite) ?? 0,
++      measurements: own,
++    });
+   }
+ 
+-  const totalMs = Date.now() - startedAt;
+-
+-  const systemSummary: BenchmarkSummary | null = runSystem
+-    ? {
+-        suite: 'system',
+-        measurementCount: measurements.filter((m) => m.suite === 'system').length,
+-        totalMs,
+-        measurements: measurements.filter((m) => m.suite === 'system'),
+-      }
+-    : null;
+-  const engineSummary: BenchmarkSummary | null = runEngine
+-    ? {
+-        suite: 'media-engine',
+-        measurementCount: measurements.filter((m) => m.suite === 'media-engine').length,
+-        totalMs,
+-        measurements: measurements.filter((m) => m.suite === 'media-engine'),
+-      }
+-    : null;
+-
+-  const summaries = [systemSummary, engineSummary].filter((s): s is BenchmarkSummary => s !== null);
+-
+   if (json) {
+-    for (const m of measurements) {
+-      stdout.write(`${JSON.stringify({ type: 'measurement', ...m })}\n`);
+-    }
+     for (const summary of summaries) {
+       stdout.write(`${JSON.stringify({ type: 'summary', ...summary })}\n`);
+     }
+@@ -138,7 +217,9 @@ export async function runBenchmark(
+   } else {
+     printBenchmarkTables(summaries, stdout);
+     stdout.write('\n');
+-    logSuccess(`Benchmark complete in ${totalMs}ms — ${measurements.length} measurement(s).`);
++    logSuccess(
++      `Benchmark complete in ${Math.round(totalMs)}ms — ${measurements.length} measurement(s).`,
++    );
+   }
+ 
+   return {
+@@ -193,140 +274,115 @@ function formatNumber(value: number): string {
+ // ─── System Benchmarks ──────────────────────────────────────────────────────
+ 
+ function benchmarkDiskRead(): BenchmarkMeasurement {
+-  const tmpDir = join(tmpdir(), `joy-bench-read-${Date.now().toString(36)}`);
+-  mkdirSync(tmpDir, { recursive: true });
+-  const file = join(tmpDir, 'sample.bin');
+-  // 4 MiB scratch file
+-  const payload = Buffer.alloc(4 * 1024 * 1024, 0xa5);
+-  writeFileSync(file, payload);
+-
+-  const iterations = 64;
+-  const start = Date.now();
+-  let bytes = 0;
+-  for (let i = 0; i < iterations; i += 1) {
+-    const data = readFileSync(file);
+-    bytes += data.length;
+-    // Touch the data so the engine can't elide the read.
+-    if (data[0] !== payload[0]) throw new Error('corrupt');
+-  }
+-  const totalMs = Date.now() - start;
+-  const mbPerSec = bytes / (1024 * 1024) / (totalMs / 1000);
+-
+-  try {
+-    rmSync(tmpDir, { recursive: true, force: true });
+-  } catch {
+-    // ignore on Windows transient locks
+-  }
++  return withScratchDir('joy-bench-read', (tmpDir) => {
++    const file = join(tmpDir, 'sample.bin');
++    // 4 MiB scratch file
++    const payload = Buffer.alloc(4 * 1024 * 1024, 0xa5);
++    writeFileSync(file, payload);
+ 
+-  return {
+-    suite: 'system',
+-    name: 'disk-read-4MiB',
+-    unit: 'MB/sec',
+-    value: mbPerSec,
+-    iterations,
+-    totalMs,
+-    perOpMs: totalMs / iterations,
+-  };
++    const iterations = 64;
++    const start = now();
++    let bytes = 0;
++    for (let i = 0; i < iterations; i += 1) {
++      const data = readFileSync(file);
++      bytes += data.length;
++      // Touch the data so the engine can't elide the read.
++      if (data[0] !== payload[0]) throw new Error('corrupt');
++    }
++    const elapsedMs = now() - start;
++
++    return measurement({
++      suite: 'system',
++      name: 'disk-read-4MiB',
++      unit: 'MB/sec',
++      value: perSecond(bytes / (1024 * 1024), elapsedMs),
++      iterations,
++      elapsedMs,
++    });
++  });
+ }
+ 
+ function benchmarkDiskWrite(): BenchmarkMeasurement {
+-  const tmpDir = join(tmpdir(), `joy-bench-write-${Date.now().toString(36)}`);
+-  mkdirSync(tmpDir, { recursive: true });
+-  const file = join(tmpDir, 'sample.bin');
+-  const payload = Buffer.alloc(1024 * 1024, 0x5a);
+-
+-  const iterations = 32;
+-  const start = Date.now();
+-  let bytes = 0;
+-  for (let i = 0; i < iterations; i += 1) {
+-    writeFileSync(file, payload);
+-    bytes += payload.length;
+-  }
+-  const totalMs = Date.now() - start;
+-  const mbPerSec = bytes / (1024 * 1024) / (totalMs / 1000);
+-
+-  try {
+-    rmSync(tmpDir, { recursive: true, force: true });
+-  } catch {
+-    // ignore
+-  }
+-
+-  return {
+-    suite: 'system',
+-    name: 'disk-write-1MiB',
+-    unit: 'MB/sec',
+-    value: mbPerSec,
+-    iterations,
+-    totalMs,
+-    perOpMs: totalMs / iterations,
+-  };
++  return withScratchDir('joy-bench-write', (tmpDir) => {
++    const file = join(tmpDir, 'sample.bin');
++    const payload = Buffer.alloc(1024 * 1024, 0x5a);
++
++    const iterations = 32;
++    const start = now();
++    let bytes = 0;
++    for (let i = 0; i < iterations; i += 1) {
++      writeFileSync(file, payload);
++      bytes += payload.length;
++    }
++    const elapsedMs = now() - start;
++
++    return measurement({
++      suite: 'system',
++      name: 'disk-write-1MiB',
++      unit: 'MB/sec',
++      value: perSecond(bytes / (1024 * 1024), elapsedMs),
++      iterations,
++      elapsedMs,
++    });
++  });
+ }
+ 
+ function benchmarkSqliteTransactions(): BenchmarkMeasurement {
+-  const tmpDir = join(tmpdir(), `joy-bench-sqlite-${Date.now().toString(36)}`);
+-  mkdirSync(tmpDir, { recursive: true });
+-  const dbPath = join(tmpDir, 'bench.sqlite3');
+-
+-  const db = new DatabaseSync(dbPath);
+-  db.exec('PRAGMA journal_mode = WAL');
+-  db.exec('CREATE TABLE kv (k TEXT PRIMARY KEY, v INTEGER NOT NULL)');
+-  const insert = db.prepare(
+-    'INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v',
+-  );
+-
+-  const iterations = 5_000;
+-  const start = Date.now();
+-  db.exec('BEGIN');
+-  for (let i = 0; i < iterations; i += 1) {
+-    insert.run(`key-${i}`, i);
+-  }
+-  db.exec('COMMIT');
+-  const totalMs = Date.now() - start;
+-  db.close();
+-
+-  try {
+-    rmSync(tmpDir, { recursive: true, force: true });
+-  } catch {
+-    // ignore
+-  }
+-
+-  if (!existsSync(dbPath) && totalMs > 0) {
+-    // File deleted before sanity check — that's fine.
+-  }
+-  void statSync;
++  return withScratchDir('joy-bench-sqlite', (tmpDir) => {
++    const dbPath = join(tmpDir, 'bench.sqlite3');
++
++    const db = new DatabaseSync(dbPath);
++    const iterations = 5_000;
++    let elapsedMs: number;
++    try {
++      db.exec('PRAGMA journal_mode = WAL');
++      db.exec('CREATE TABLE kv (k TEXT PRIMARY KEY, v INTEGER NOT NULL)');
++      const insert = db.prepare(
++        'INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v',
++      );
++
++      const start = now();
++      db.exec('BEGIN');
++      for (let i = 0; i < iterations; i += 1) {
++        insert.run(`key-${i}`, i);
++      }
++      db.exec('COMMIT');
++      elapsedMs = now() - start;
++    } finally {
++      db.close();
++    }
+ 
+-  return {
+-    suite: 'system',
+-    name: 'sqlite-tx-throughput',
+-    unit: 'tx/sec',
+-    value: iterations / (totalMs / 1000),
+-    iterations,
+-    totalMs,
+-    perOpMs: totalMs / iterations,
+-  };
++    return measurement({
++      suite: 'system',
++      name: 'sqlite-tx-throughput',
++      unit: 'tx/sec',
++      value: perSecond(iterations, elapsedMs),
++      iterations,
++      elapsedMs,
++    });
++  });
+ }
+ 
+ function benchmarkHeapAllocation(): BenchmarkMeasurement {
+   const iterations = 50_000;
+   const payload = { id: 'x', data: [1, 2, 3, 4, 5] };
+-  const start = Date.now();
++  const start = now();
+   const arr: unknown[] = [];
+   for (let i = 0; i < iterations; i += 1) {
+     arr.push({ ...payload, i });
+   }
+-  const totalMs = Date.now() - start;
++  const elapsedMs = now() - start;
+   // Sanity: keep the array alive.
+   if (arr.length !== iterations) throw new Error('heap bench corrupted');
+ 
+-  return {
++  return measurement({
+     suite: 'system',
+     name: 'heap-allocation',
+     unit: 'allocs/sec',
+-    value: iterations / (totalMs / 1000),
++    value: perSecond(iterations, elapsedMs),
+     iterations,
+-    totalMs,
+-    perOpMs: totalMs / iterations,
+-  };
++    elapsedMs,
++  });
+ }
+ 
+ // ─── Media Engine Benchmarks ────────────────────────────────────────────────
+@@ -365,7 +421,7 @@ function benchmarkTimelineScrub(): BenchmarkMeasurement {
+   const stepUs = 16_667; // ~60fps scrub step
+   const iterations = Math.floor(durationUs / stepUs);
+ 
+-  const start = Date.now();
++  const start = now();
+   let active = 0;
+   for (let i = 0; i < iterations; i += 1) {
+     const tUs = i * stepUs;
+@@ -377,18 +433,17 @@ function benchmarkTimelineScrub(): BenchmarkMeasurement {
+       }
+     }
+   }
+-  const totalMs = Date.now() - start;
++  const elapsedMs = now() - start;
+   if (active < 0) throw new Error('bench corrupted');
+ 
+-  return {
++  return measurement({
+     suite: 'media-engine',
+     name: 'timeline-scrub',
+     unit: 'ops/sec',
+-    value: iterations / (totalMs / 1000),
++    value: perSecond(iterations, elapsedMs),
+     iterations,
+-    totalMs,
+-    perOpMs: totalMs / iterations,
+-  };
++    elapsedMs,
++  });
+ }
+ 
+ function benchmarkClipCollisionResolution(): BenchmarkMeasurement {
+@@ -404,7 +459,7 @@ function benchmarkClipCollisionResolution(): BenchmarkMeasurement {
+   }
+ 
+   const iterations = 200;
+-  const start = Date.now();
++  const start = now();
+   let resolved = 0;
+   for (let iter = 0; iter < iterations; iter += 1) {
+     const sorted = clips.slice().sort((a, b) => a.startUs - b.startUs);
+@@ -421,23 +476,28 @@ function benchmarkClipCollisionResolution(): BenchmarkMeasurement {
+     }
+     if (onTrackB < 0) throw new Error('collision bench corrupted');
+   }
+-  const totalMs = Date.now() - start;
++  const elapsedMs = now() - start;
+ 
+-  return {
++  return measurement({
+     suite: 'media-engine',
+     name: 'clip-collision-resolve',
+     unit: 'clips/sec',
+-    value: resolved / (totalMs / 1000),
++    value: perSecond(resolved, elapsedMs),
+     iterations: resolved,
+-    totalMs,
+-    perOpMs: totalMs / resolved,
+-  };
++    elapsedMs,
++  });
+ }
+ 
+ function benchmarkLivingLookCompile(): BenchmarkMeasurement {
+   const definition = editorialClean;
++  // Bind every slot the look declares. Without this `compileLook` rejects the
++  // input up front ("required slot is not bound") and the benchmark would time
++  // the cheap rejection path instead of a real compile.
++  const entityBindings: Record<string, string> = {};
++  for (const slot of definition.slots) entityBindings[slot.id] = `bench-${slot.id}`;
++
+   const iterations = 500;
+-  const start = Date.now();
++  const start = now();
+   let compiled = 0;
+   for (let i = 0; i < iterations; i += 1) {
+     const result = compileLook({
+@@ -446,7 +506,7 @@ function benchmarkLivingLookCompile(): BenchmarkMeasurement {
+       compositionId: 'root',
+       compositionDurationUs: 5_000_000,
+       format: 'portrait',
+-      entityBindings: {},
++      entityBindings,
+       controlValues: { energy: (i % 100) / 100 },
+       overriddenBindingIds: [],
+       resetBindingIds: [],
+@@ -454,21 +514,15 @@ function benchmarkLivingLookCompile(): BenchmarkMeasurement {
+     });
+     if (result.ok) compiled += 1;
+   }
+-  const totalMs = Date.now() - start;
+-  if (compiled < 0) throw new Error('bench corrupted');
+-
+-  // Report attempts per second so the metric stays positive even when
+-  // validation rejects lookups against unfilled slots. The success ratio
+-  // remains available in `iterations` (compiled) for callers that want it.
+-  const reportedIterations = iterations;
++  const elapsedMs = now() - start;
+ 
+-  return {
++  return measurement({
+     suite: 'media-engine',
+     name: 'living-look-compile',
+     unit: 'compiles/sec',
+-    value: reportedIterations / (totalMs / 1000),
+-    iterations: reportedIterations,
+-    totalMs,
+-    perOpMs: totalMs / reportedIterations,
+-  };
++    value: perSecond(iterations, elapsedMs),
++    iterations,
++    failures: iterations - compiled,
++    elapsedMs,
++  });
+ }
+diff --git a/apps/cli/src/commands/render-cmd.test.ts b/apps/cli/src/commands/render-cmd.test.ts
+index 9ef2779..a748888 100644
+--- a/apps/cli/src/commands/render-cmd.test.ts
++++ b/apps/cli/src/commands/render-cmd.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it } from 'vitest';
+-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
++import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { Writable } from 'node:stream';
+@@ -7,8 +7,12 @@ import { runCli } from '../cli.js';
+ import {
+   handleRenderCommand,
+   isRenderPresetId,
++  MANIFEST_ONLY_MESSAGE,
++  MAX_CLIP_DURATION_US,
++  planRender,
+   RENDER_PRESETS,
+   runHeadlessRender,
++  safeFileStem,
+ } from './render-cmd.js';
+ import { createDefaultProject, saveProject } from '../utils/project-loader.js';
+ 
+@@ -225,3 +229,302 @@ describe('joy render (headless batch render command)', () => {
+     }
+   });
+ });
++
++function planDoc(
++  tracks: Array<Record<string, unknown>>,
++  extra: { width?: number; height?: number; fps?: number } = {},
++): unknown {
++  return {
++    id: 'plan-doc',
++    title: 'Plan doc',
++    rootCompositionId: 'root',
++    compositions: {
++      root: {
++        id: 'root',
++        width: extra.width ?? 1080,
++        height: extra.height ?? 1920,
++        frameRate: { num: extra.fps ?? 30, den: 1 },
++        durationUs: 10_000_000,
++        tracks,
++      },
++    },
++  };
++}
++
++describe('planRender (pure planning of a project document)', () => {
++  const mp4 = RENDER_PRESETS.mp4;
++
++  it('allots round(duration x fps) frames, at least one, with contiguous first-frame offsets', () => {
++    const plan = planRender(
++      planDoc([
++        {
++          id: 't1',
++          clips: [
++            { id: 'tiny', startUs: 0, durationUs: 1_000 },
++            { id: 'half-up', startUs: 0, durationUs: 50_000 },
++            { id: 'second', startUs: 0, durationUs: 1_000_000 },
++          ],
++        },
++        { id: 't2', clips: [{ id: 'other-track', startUs: 0, durationUs: 2_000_000 }] },
++      ]),
++      mp4,
++    );
++    if (!plan.ok) throw new Error(plan.message);
++    expect(plan.clips.map((c) => [c.clipId, c.frames, c.firstFrame])).toEqual([
++      ['tiny', 1, 0],
++      ['half-up', 2, 1],
++      ['second', 30, 3],
++      ['other-track', 60, 33],
++    ]);
++    expect(plan.totalFrames).toBe(93);
++    expect(plan.warnings).toEqual([]);
++  });
++
++  it('skips disabled tracks and says so', () => {
++    const plan = planRender(
++      planDoc([
++        { id: 'off', enabled: false, clips: [{ id: 'ghost', durationUs: 1_000_000 }] },
++        { id: 'on', enabled: true, clips: [{ id: 'real', durationUs: 1_000_000 }] },
++      ]),
++      mp4,
++    );
++    if (!plan.ok) throw new Error(plan.message);
++    expect(plan.clips.map((c) => c.clipId)).toEqual(['real']);
++    expect(plan.warnings).toEqual(['Skipped disabled track "off" (1 clip(s)).']);
++  });
++
++  it('warns once when the composition differs from the preset shape or rate', () => {
++    const plan = planRender(
++      planDoc([{ id: 't', clips: [{ id: 'c', durationUs: 1_000_000 }] }], {
++        width: 1920,
++        height: 1080,
++        fps: 60,
++      }),
++      mp4,
++    );
++    if (!plan.ok) throw new Error(plan.message);
++    expect(plan.composition).toMatchObject({ width: 1920, height: 1080, fps: 60 });
++    expect(plan.warnings).toHaveLength(1);
++    expect(plan.warnings[0]).toMatch(/1920x1080 @ 60 fps.*1080x1920 @ 30 fps/);
++  });
++
++  it('refuses documents that are not projects instead of throwing', () => {
++    const cases: Array<[unknown, RegExp]> = [
++      [null, /not a JOY Media project/],
++      [[], /not a JOY Media project/],
++      [{ compositions: {}, rootCompositionId: 'root' }, /no "id"/],
++      [{ id: 'x', rootCompositionId: 'root' }, /compositions/],
++      [{ id: 'x', rootCompositionId: 'nope', compositions: { root: {} } }, /"nope"/],
++      [planDoc([{ clips: [] }]), /track #1 is missing its "id"/],
++      [
++        planDoc([{ id: 't', clips: [{ durationUs: 1 }] }]),
++        /clip #1 on track "t" is missing its "id"/,
++      ],
++    ];
++    for (const [doc, message] of cases) {
++      const plan = planRender(doc, mp4);
++      expect(plan.ok).toBe(false);
++      if (!plan.ok) expect(plan.message).toMatch(message);
++    }
++  });
++
++  it('refuses impossible clip durations (negative, text, missing, non-finite, over 24 h)', () => {
++    for (const durationUs of [-1, 'soon', null, undefined, Number.NaN, MAX_CLIP_DURATION_US + 1]) {
++      const plan = planRender(planDoc([{ id: 't', clips: [{ id: 'bad', durationUs }] }]), mp4);
++      expect(plan.ok, String(durationUs)).toBe(false);
++      if (!plan.ok)
++        expect(plan.message).toMatch(/clip "bad" on track "t" has an invalid durationUs/);
++    }
++    const edge = planRender(
++      planDoc([{ id: 't', clips: [{ id: 'max', durationUs: MAX_CLIP_DURATION_US }] }]),
++      mp4,
++    );
++    expect(edge.ok).toBe(true);
++  });
++});
++
++describe('safeFileStem', () => {
++  it('leaves ordinary project ids alone and defuses path tricks', () => {
++    expect(safeFileStem('proj-mv7zifcl')).toBe('proj-mv7zifcl');
++    expect(safeFileStem('v1.2_final')).toBe('v1.2_final');
++    expect(safeFileStem('../../escape')).not.toMatch(/[\\/]/);
++    expect(safeFileStem('../../escape').startsWith('.')).toBe(false);
++    expect(safeFileStem('..')).toBe('__');
++    expect(safeFileStem('a/b\\c:d')).toBe('a_b_c_d');
++    expect(safeFileStem('x'.repeat(500)).length).toBe(120);
++  });
++});
++
++describe('runHeadlessRender writes an honest, atomic, deterministic manifest', () => {
++  function timelineProject(id: string): ReturnType<typeof createDefaultProject> {
++    const project = createDefaultProject('Honest', { id });
++    const root = project.compositions['root'] as unknown as {
++      tracks: Array<{ id: string; clips: unknown[] }>;
++    };
++    root.tracks[0]!.clips.push(
++      { id: 'a', kind: 'video', assetId: 'x', startUs: 0, durationUs: 2_000_000, sourceInUs: 0 },
++      {
++        id: 'b',
++        kind: 'video',
++        assetId: 'x',
++        startUs: 2_000_000,
++        durationUs: 500_000,
++        sourceInUs: 0,
++      },
++    );
++    root.tracks[1]!.clips.push({
++      id: 'c',
++      kind: 'video',
++      assetId: 'x',
++      startUs: 0,
++      durationUs: 1_000_000,
++      sourceInUs: 0,
++    });
++    return project;
++  }
++
++  it('says no media was produced, in the result and in the manifest', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'joy-render-honest-'));
++    try {
++      const capture = new StringWritable();
++      const restore = redirectStdout(capture);
++      let result;
++      try {
++        result = await runHeadlessRender({
++          project: timelineProject('honest-1'),
++          preset: 'mp4',
++          outDir: dir,
++          concurrency: 2,
++          json: true,
++        });
++      } finally {
++        restore();
++      }
++      expect(result.exitCode).toBe(0);
++      expect(result.mediaProduced).toBe(false);
++      expect(result.manifestWritten).toBe(true);
++      expect(readdirSync(dir)).toEqual(['honest-1.mp4.manifest.json']);
++
++      const manifest = JSON.parse(readFileSync(result.artifactPath, 'utf8'));
++      expect(manifest).toMatchObject({
++        mediaProduced: false,
++        mediaFile: null,
++        note: MANIFEST_ONLY_MESSAGE,
++      });
++
++      const events = capture
++        .text()
++        .split('\n')
++        .filter((l) => l.trim().length > 0)
++        .map((l) => JSON.parse(l));
++      expect(events[events.length - 1]).toMatchObject({
++        type: 'complete',
++        mediaProduced: false,
++        manifestWritten: true,
++        message: MANIFEST_ONLY_MESSAGE,
++      });
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
++  it('plans identically at every concurrency (frame ranges never depend on worker order)', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'joy-render-conc-'));
++    try {
++      const plans: unknown[] = [];
++      for (const concurrency of [1, 3, 32]) {
++        const capture = new StringWritable();
++        const restore = redirectStdout(capture);
++        try {
++          const result = await runHeadlessRender({
++            project: timelineProject('conc-1'),
++            preset: 'mp4',
++            outDir: join(dir, String(concurrency)),
++            concurrency,
++            json: true,
++          });
++          const {
++            durationMs: _d,
++            renderedAt: _r,
++            ...rest
++          } = JSON.parse(readFileSync(result.artifactPath, 'utf8'));
++          plans.push(rest);
++        } finally {
++          restore();
++        }
++      }
++      expect(plans[1]).toEqual(plans[0]);
++      expect(plans[2]).toEqual(plans[0]);
++      const clips = (plans[0] as { clips: Array<{ frameRange: { first: number; last: number } }> })
++        .clips;
++      expect(clips.map((c) => [c.frameRange.first, c.frameRange.last])).toEqual([
++        [0, 59],
++        [60, 74],
++        [75, 104],
++      ]);
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
++  it('draws the progress bar only when asked, never in --json mode', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'joy-render-progress-'));
++    try {
++      const run = async (json: boolean, progress: boolean): Promise<string> => {
++        const capture = new StringWritable();
++        const restore = redirectStdout(capture);
++        try {
++          await runHeadlessRender({
++            project: timelineProject('progress-1'),
++            preset: 'mp4',
++            outDir: dir,
++            concurrency: 2,
++            json,
++            progress,
++          });
++        } finally {
++          restore();
++        }
++        return capture.text();
++      };
++      expect(await run(false, true)).toContain('\r');
++      expect(await run(false, false)).not.toContain('\r');
++      expect(await run(true, true)).not.toContain('\r');
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
++  it('fails before announcing any work when --out is a file, and leaves the file alone', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'joy-render-outfile-'));
++    const file = join(dir, 'not-a-dir');
++    writeFileSync(file, 'keep me', 'utf8');
++    try {
++      const capture = new StringWritable();
++      const restore = redirectStdout(capture);
++      let result;
++      try {
++        result = await runHeadlessRender({
++          project: timelineProject('outfile-1'),
++          preset: 'mp4',
++          outDir: file,
++          concurrency: 2,
++          json: true,
++        });
++      } finally {
++        restore();
++      }
++      expect(result.exitCode).toBe(1);
++      const events = capture
++        .text()
++        .split('\n')
++        .filter((l) => l.trim().length > 0)
++        .map((l) => JSON.parse(l));
++      expect(events.map((e) => e.type)).toEqual(['error']);
++      expect(events[0].code).toBe('output');
++      expect(readFileSync(file, 'utf8')).toBe('keep me');
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++});
+diff --git a/apps/cli/src/commands/render-cmd.ts b/apps/cli/src/commands/render-cmd.ts
+index 085c8ca..e5746f9 100644
+--- a/apps/cli/src/commands/render-cmd.ts
++++ b/apps/cli/src/commands/render-cmd.ts
+@@ -1,19 +1,33 @@
+-/* global console, process */
++/* global console, process, setImmediate */
+ /**
+  * Headless batch render command.
+  *
+  * `joy render --project <id|file.json> --preset <mp4|webm|prores> --out <dir>`
+  *
+- * Streams progress either as a deterministic progress bar (default, TTY) or as
+- * newline-delimited JSON events (when `--json` is passed). The render itself
+- * is a deterministic simulation that walks every clip of every track of the
+- * root composition, accumulating frames and emitting progress + a final
+- * per-render artifact manifest written to `<out>/<projectId>.<preset>.json`.
++ * IMPORTANT: this command does NOT encode video or audio. It walks every clip
++ * of every enabled track of the root composition, accumulates frame counts and
++ * emits progress, then writes a per-render *plan manifest* to
++ * `<out>/<projectId>.<ext>.manifest.json`. No media file is produced, and every
++ * human message and the final JSON event say so (`mediaProduced: false`).
++ *
++ * Streams progress either as a progress bar (human mode, TTY only) or as
++ * newline-delimited JSON events (`--json`). In `--json` mode stdout carries
++ * ONLY events, and the last event is always `complete` (exit 0) or `error`
++ * (exit non-zero).
+  */
+-import { mkdirSync, writeFileSync } from 'node:fs';
+-import { join } from 'node:path';
++import { randomBytes } from 'node:crypto';
++import {
++  accessSync,
++  constants,
++  mkdirSync,
++  renameSync,
++  rmSync,
++  statSync,
++  writeFileSync,
++} from 'node:fs';
++import { basename, dirname, join } from 'node:path';
+ import type { CliFlags } from '../cli.js';
+-import { parseIntFlag } from '../utils/flags.js';
++import { FlagValidationError, parseIntFlag } from '../utils/flags.js';
+ import {
+   c,
+   logError,
+@@ -78,6 +92,17 @@ export const RENDER_PRESETS: Readonly<Record<RenderPresetSpec['id'], RenderPrese
+   },
+ };
+ 
++/** Same ceiling `timeline add-clip --duration` enforces (24 h). */
++export const MAX_CLIP_DURATION_US = 86_400 * 1_000_000;
++
++/** Frames processed between yields to the event loop (keeps SIGINT/SIGTERM responsive). */
++const FRAMES_PER_SLICE = 262_144;
++
++export const MANIFEST_ONLY_MESSAGE =
++  'Manifest only - no video file written. This command records the render plan; it does not encode media.';
++export const NOTHING_RENDERED_MESSAGE =
++  'Nothing rendered - the project has no clips on enabled tracks. No manifest and no video file were written.';
++
+ export interface RenderClipEvent {
+   readonly type: 'clip';
+   readonly projectId: string;
+@@ -117,13 +142,26 @@ export interface RenderCompleteEvent {
+   readonly totalFrames: number;
+   readonly durationMs: number;
+   readonly ts: string;
++  /** Always `false`: this command writes a plan manifest, never a video/audio file. */
++  readonly mediaProduced: false;
++  /** `true` when `artifactPath` points at a manifest that was written. */
++  readonly manifestWritten: boolean;
++  /** Human-readable statement of what was (and was not) produced. */
++  readonly message: string;
++  /** Non-fatal findings (skipped tracks, preset/project mismatch, ...). */
++  readonly warnings: readonly string[];
+ }
+ 
++export type RenderErrorCode =
++  'usage' | 'project-load' | 'invalid-project' | 'output' | 'cancelled' | 'internal';
++
+ export interface RenderErrorEvent {
+   readonly type: 'error';
+   readonly projectId: string;
+   readonly message: string;
+   readonly ts: string;
++  /** Machine-readable failure category. */
++  readonly code?: RenderErrorCode;
+ }
+ 
+ export type RenderEvent =
+@@ -138,58 +176,91 @@ export interface RenderCommandResult {
+   readonly totalFrames: number;
+   readonly totalClips: number;
+   readonly durationMs: number;
++  readonly mediaProduced: false;
++  readonly manifestWritten: boolean;
++  readonly warnings: readonly string[];
+ }
+ 
+ export async function handleRenderCommand(args: string[], flags: CliFlags): Promise<number> {
+   void args;
+-
+-  const presetRaw = (flags.preset ?? 'mp4').toLowerCase();
+-  if (!isRenderPresetId(presetRaw)) {
+-    logError(`Unknown render preset "${presetRaw}". Available: mp4, webm, prores.`);
+-    return 2;
+-  }
+-  const preset = presetRaw as RenderPresetSpec['id'];
+-
+-  const outDir = flags.out ?? './renders';
+-  const concurrency =
+-    parseIntFlag('concurrency', flags.concurrency, {
+-      min: 1,
+-      max: 32,
+-      allowZero: false,
+-    }) ?? 2;
+   const json = Boolean(flags.json);
++  const projectHint = flags.project ?? '';
+ 
+-  if (!flags.project) {
+-    logError('Please specify target project via --project <id|file.json>');
+-    return 1;
+-  }
+-
+-  let projectInfo;
+   try {
+-    projectInfo = loadProject(flags.project, flags.sqlitePath);
++    const presetRaw = (flags.preset ?? 'mp4').toLowerCase();
++    if (!isRenderPresetId(presetRaw)) {
++      return failCommand(
++        json,
++        projectHint,
++        'usage',
++        `Unknown render preset "${presetRaw}". Available: mp4, webm, prores.`,
++        2,
++      );
++    }
++    const preset = presetRaw as RenderPresetSpec['id'];
++
++    const outDir = flags.out ?? './renders';
++    if (outDir.trim() === '') {
++      return failCommand(
++        json,
++        projectHint,
++        'usage',
++        '--out must be a directory path, but it was empty.',
++        2,
++      );
++    }
++    const concurrency =
++      parseIntFlag('concurrency', flags.concurrency, {
++        min: 1,
++        max: 32,
++        allowZero: false,
++      }) ?? 2;
++
++    if (!flags.project) {
++      // Kept at exit 1 (pinned by render-cmd.test.ts); `timeline` behaves the same way.
++      return failCommand(
++        json,
++        projectHint,
++        'usage',
++        'Please specify target project via --project <id|file.json>',
++        1,
++      );
++    }
++
++    let projectInfo;
++    try {
++      projectInfo = loadProject(flags.project, flags.sqlitePath);
++    } catch (err) {
++      return failCommand(
++        json,
++        flags.project,
++        'project-load',
++        `Cannot load project: ${errorMessage(err)}`,
++        1,
++      );
++    }
++
++    const result = await runHeadlessRender({
++      project: projectInfo.project,
++      preset,
++      outDir,
++      concurrency,
++      json,
++    });
++
++    return result.exitCode;
+   } catch (err) {
+-    if (!json) logError(`Cannot load project: ${String(err)}`);
+-    emitJson(
+-      {
+-        type: 'error',
+-        projectId: flags.project,
+-        message: String(err),
+-        ts: new Date().toISOString(),
+-      },
++    if (err instanceof FlagValidationError) {
++      return failCommand(json, projectHint, 'usage', err.message, 2);
++    }
++    return failCommand(
+       json,
++      projectHint,
++      'internal',
++      `Render failed unexpectedly: ${errorMessage(err)}`,
++      1,
+     );
+-    return 1;
+   }
+-
+-  const result = await runHeadlessRender({
+-    project: projectInfo.project,
+-    preset,
+-    outDir,
+-    concurrency,
+-    json,
+-  });
+-
+-  return result.exitCode;
+ }
+ 
+ export interface RunHeadlessRenderInput {
+@@ -198,272 +269,496 @@ export interface RunHeadlessRenderInput {
+   readonly outDir: string;
+   readonly concurrency: number;
+   readonly json: boolean;
++  /**
++   * Draw the live progress bar (human mode only). Defaults to "stdout is a
++   * terminal" so piped/redirected output is never spammed with `\r` frames.
++   */
++  readonly progress?: boolean | undefined;
++}
++
++// ---------------------------------------------------------------------------
++// Planning (pure, validates untrusted project documents)
++// ---------------------------------------------------------------------------
++
++export interface PlannedClip {
++  readonly trackId: string;
++  readonly trackName: string;
++  readonly clipId: string;
++  readonly startUs: number | null;
++  readonly durationUs: number;
++  readonly frames: number;
++  /** Index of this clip's first frame in the render's sequential frame stream. */
++  readonly firstFrame: number;
++}
++
++export interface PlanComposition {
++  readonly id: string;
++  readonly width: number | null;
++  readonly height: number | null;
++  readonly fps: number | null;
++  readonly durationUs: number | null;
++}
++
++export type RenderPlan =
++  | {
++      readonly ok: true;
++      readonly projectId: string;
++      readonly title: string;
++      readonly composition: PlanComposition;
++      readonly trackCount: number;
++      readonly clips: readonly PlannedClip[];
++      readonly totalFrames: number;
++      readonly warnings: readonly string[];
++    }
++  | { readonly ok: false; readonly message: string };
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null && !Array.isArray(value);
++}
++
++function finiteOrNull(value: unknown): number | null {
++  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+ }
+ 
++/**
++ * Turn a (possibly hand-written or agent-generated) project document into an
++ * ordered list of clips with frame counts. Never throws: structural problems
++ * come back as `{ ok: false, message }` so the caller can report them cleanly.
++ */
++export function planRender(project: unknown, presetSpec: RenderPresetSpec): RenderPlan {
++  if (!isRecord(project)) {
++    return {
++      ok: false,
++      message: 'The project document is not a JOY Media project (expected a JSON object).',
++    };
++  }
++  const projectId = project['id'];
++  if (typeof projectId !== 'string' || projectId.trim() === '') {
++    return {
++      ok: false,
++      message: 'The project document has no "id", so there is no safe name for the output files.',
++    };
++  }
++  const compositions = project['compositions'];
++  if (!isRecord(compositions)) {
++    return { ok: false, message: `Project "${projectId}" has no "compositions" object.` };
++  }
++  const rootId = project['rootCompositionId'];
++  const root = typeof rootId === 'string' ? compositions[rootId] : undefined;
++  if (!isRecord(root)) {
++    return {
++      ok: false,
++      message: `Project "${projectId}" has no root composition ${JSON.stringify(rootId)} (rootCompositionId does not match any composition).`,
++    };
++  }
++  const rawTracks = root['tracks'] ?? [];
++  if (!Array.isArray(rawTracks)) {
++    return {
++      ok: false,
++      message: `Project "${projectId}": root composition "tracks" is not a list.`,
++    };
++  }
++
++  const frameRate = isRecord(root['frameRate']) ? root['frameRate'] : undefined;
++  const num = finiteOrNull(frameRate?.['num']);
++  const den = finiteOrNull(frameRate?.['den']);
++  const composition: PlanComposition = {
++    id: String(rootId),
++    width: finiteOrNull(root['width']),
++    height: finiteOrNull(root['height']),
++    fps: num !== null && den !== null && den > 0 ? num / den : null,
++    durationUs: finiteOrNull(root['durationUs']),
++  };
++
++  const warnings: string[] = [];
++  const clips: PlannedClip[] = [];
++  let firstFrame = 0;
++
++  for (const [trackIndex, rawTrack] of rawTracks.entries()) {
++    if (!isRecord(rawTrack) || typeof rawTrack['id'] !== 'string') {
++      return {
++        ok: false,
++        message: `Project "${projectId}": track #${trackIndex + 1} is missing its "id".`,
++      };
++    }
++    const trackId = rawTrack['id'];
++    const trackName = typeof rawTrack['name'] === 'string' ? rawTrack['name'] : trackId;
++    const rawClips = rawTrack['clips'] ?? [];
++    if (!Array.isArray(rawClips)) {
++      return {
++        ok: false,
++        message: `Project "${projectId}": track "${trackId}" has a "clips" value that is not a list.`,
++      };
++    }
++    if (rawTrack['enabled'] === false) {
++      // Same rule the evaluator uses: a disabled track contributes nothing.
++      if (rawClips.length > 0) {
++        warnings.push(`Skipped disabled track "${trackId}" (${rawClips.length} clip(s)).`);
++      }
++      continue;
++    }
++    for (const [clipIndex, rawClip] of rawClips.entries()) {
++      if (!isRecord(rawClip) || typeof rawClip['id'] !== 'string') {
++        return {
++          ok: false,
++          message: `Project "${projectId}": clip #${clipIndex + 1} on track "${trackId}" is missing its "id".`,
++        };
++      }
++      const clipId = rawClip['id'];
++      const durationUs = rawClip['durationUs'];
++      if (
++        typeof durationUs !== 'number' ||
++        !Number.isFinite(durationUs) ||
++        durationUs < 0 ||
++        durationUs > MAX_CLIP_DURATION_US
++      ) {
++        return {
++          ok: false,
++          message:
++            `Project "${projectId}": clip "${clipId}" on track "${trackId}" has an invalid ` +
++            `durationUs (${JSON.stringify(durationUs)}); expected a number from 0 to ${MAX_CLIP_DURATION_US} (24 h).`,
++        };
++      }
++      const frames = Math.max(1, Math.round((durationUs / 1_000_000) * presetSpec.fps));
++      clips.push({
++        trackId,
++        trackName,
++        clipId,
++        startUs: finiteOrNull(rawClip['startUs']),
++        durationUs,
++        frames,
++        firstFrame,
++      });
++      firstFrame += frames;
++    }
++  }
++
++  const sizeDiffers =
++    composition.width !== null &&
++    composition.height !== null &&
++    (composition.width !== presetSpec.width || composition.height !== presetSpec.height);
++  const fpsDiffers = composition.fps !== null && Math.abs(composition.fps - presetSpec.fps) > 0.01;
++  if (clips.length > 0 && (sizeDiffers || fpsDiffers)) {
++    const fpsText = composition.fps === null ? '?' : String(Number(composition.fps.toFixed(3)));
++    warnings.push(
++      `Project composition is ${composition.width ?? '?'}x${composition.height ?? '?'} @ ${fpsText} fps, ` +
++        `but preset "${presetSpec.id}" is fixed at ${presetSpec.width}x${presetSpec.height} @ ${presetSpec.fps} fps; ` +
++        `frame counts use the preset rate.`,
++    );
++  }
++
++  return {
++    ok: true,
++    projectId,
++    title: typeof project['title'] === 'string' ? project['title'] : projectId,
++    composition,
++    trackCount: rawTracks.length,
++    clips,
++    totalFrames: firstFrame,
++    warnings,
++  };
++}
++
++/** Make a project id safe to use as a file name (no separators, no leading dots). */
++export function safeFileStem(id: string): string {
++  const cleaned = id
++    .replace(/[^A-Za-z0-9._-]/g, '_')
++    .replace(/^\.+/, (dots) => '_'.repeat(dots.length))
++    .slice(0, 120);
++  return cleaned === '' ? '_' : cleaned;
++}
++
++// ---------------------------------------------------------------------------
++// Execution
++// ---------------------------------------------------------------------------
++
+ export async function runHeadlessRender(
+   input: RunHeadlessRenderInput,
+ ): Promise<RenderCommandResult> {
+   const { project, preset, outDir, concurrency, json } = input;
++  const showProgress = !json && (input.progress ?? Boolean(process.stdout.isTTY));
+   const presetSpec = RENDER_PRESETS[preset];
+   const startedAt = Date.now();
++  const rawId = (project as { id?: unknown } | null | undefined)?.id;
++  const knownProjectId = typeof rawId === 'string' ? rawId : '';
++
++  const failure = (
++    code: RenderErrorCode,
++    message: string,
++    totalFrames = 0,
++    totalClips = 0,
++  ): RenderCommandResult => {
++    failCommand(json, knownProjectId, code, message, 1);
++    return {
++      exitCode: 1,
++      projectId: knownProjectId,
++      preset,
++      outDir,
++      artifactPath: '',
++      totalFrames,
++      totalClips,
++      durationMs: Date.now() - startedAt,
++      mediaProduced: false,
++      manifestWritten: false,
++      warnings: [],
++    };
++  };
+ 
+-  const root = project.compositions[project.rootCompositionId];
+-  const allClips: Array<{
+-    trackId: string;
+-    trackName: string;
+-    clipId: string;
+-    frames: number;
+-  }> = [];
++  const plan = planRender(project, presetSpec);
++  if (!plan.ok) return failure('invalid-project', plan.message);
+ 
+-  if (root) {
+-    for (const track of root.tracks ?? []) {
+-      for (const clip of track.clips ?? []) {
+-        const durationUs = typeof clip.durationUs === 'number' ? clip.durationUs : 0;
+-        const frames = Math.max(1, Math.round((durationUs / 1_000_000) * presetSpec.fps));
+-        allClips.push({
+-          trackId: track.id,
+-          trackName: track.name ?? track.id,
+-          clipId: clip.id,
+-          frames,
+-        });
+-      }
+-    }
++  const { clips: allClips, totalFrames } = plan;
++  const warnings = [...plan.warnings];
++  const totalClips = allClips.length;
++  const fileStem = safeFileStem(plan.projectId);
++  const manifestName = `${fileStem}.${presetSpec.extension}.manifest.json`;
++  if (fileStem !== plan.projectId) {
++    warnings.push(`Project id "${plan.projectId}" is not a safe file name; using "${fileStem}".`);
+   }
+ 
+-  const totalFrames = allClips.reduce((acc, c) => acc + c.frames, 0);
+-  const totalClips = allClips.length;
++  if (totalClips > 0) {
++    // Fail before doing any work (and before announcing `start`) if the
++    // destination can never be written.
++    const outputProblem = prepareOutputDir(outDir);
++    if (outputProblem) return failure('output', outputProblem, totalFrames, totalClips);
++  }
+ 
+   if (!json) {
+     printBanner();
+-    logInfo(`Headless batch render: ${c(project.title, 'bold')} (${project.id})`);
++    logInfo(`Headless render plan: ${c(plan.title, 'bold')} (${plan.projectId})`);
+     logStep('Preset', `${presetSpec.id} (${presetSpec.container}/${presetSpec.videoCodec})`);
+-    logStep('Output', join(outDir, `${project.id}.${presetSpec.extension}`));
++    logStep('Manifest', join(outDir, manifestName));
++    logStep('Media file', 'none - manifest only, this command does not encode video');
+     logStep('Concurrency', String(concurrency));
+-    logStep('Tracks', String(root?.tracks.length ?? 0));
++    logStep('Tracks', String(plan.trackCount));
+     logStep('Clips', String(totalClips));
+     logStep('Total Frames', String(totalFrames));
++    for (const warning of warnings) logWarn(warning);
+     console.log();
+   }
+ 
++  emitJson(
++    {
++      type: 'start',
++      projectId: plan.projectId,
++      title: plan.title,
++      preset,
++      outDir,
++      totalFrames,
++      totalClips,
++      concurrency,
++      ts: new Date().toISOString(),
++    },
++    json,
++  );
++
+   if (totalClips === 0) {
+-    if (!json) {
+-      logWarn('No clips to render. Project has tracks but no clips on the root composition.');
+-    }
+-    emitJson(
+-      {
+-        type: 'start',
+-        projectId: project.id,
+-        title: project.title,
+-        preset,
+-        outDir,
+-        totalFrames,
+-        totalClips,
+-        concurrency,
+-        ts: new Date().toISOString(),
+-      },
+-      json,
+-    );
++    const emptyWarnings = [...warnings, NOTHING_RENDERED_MESSAGE];
++    if (!json) logWarn(NOTHING_RENDERED_MESSAGE);
+     emitJson(
+       {
+         type: 'complete',
+-        projectId: project.id,
++        projectId: plan.projectId,
+         preset,
+         outDir,
+         artifactPath: '',
+         totalFrames,
+         durationMs: 0,
+         ts: new Date().toISOString(),
++        mediaProduced: false,
++        manifestWritten: false,
++        message: NOTHING_RENDERED_MESSAGE,
++        warnings: emptyWarnings,
+       },
+       json,
+     );
+     return {
+       exitCode: 0,
+-      projectId: project.id,
++      projectId: plan.projectId,
+       preset,
+       outDir,
+       artifactPath: '',
+       totalFrames: 0,
+       totalClips: 0,
+       durationMs: 0,
++      mediaProduced: false,
++      manifestWritten: false,
++      warnings: emptyWarnings,
+     };
+   }
+ 
+-  // Emit start
+-  emitJson(
+-    {
+-      type: 'start',
+-      projectId: project.id,
+-      title: project.title,
+-      preset,
+-      outDir,
+-      totalFrames,
+-      totalClips,
+-      concurrency,
+-      ts: new Date().toISOString(),
+-    },
+-    json,
+-  );
+-
+-  // Group clips by track, preserving order, for track-level events
+-  const groupedByTrack = new Map<
+-    string,
+-    { trackId: string; trackName: string; clipIds: string[]; frames: number[] }
+-  >();
++  // Track-level events, in timeline order, one per track that has clips.
++  const trackBuckets: Array<{
++    trackId: string;
++    trackName: string;
++    clipCount: number;
++  }> = [];
+   for (const clip of allClips) {
+-    let bucket = groupedByTrack.get(clip.trackId);
+-    if (!bucket) {
+-      bucket = { trackId: clip.trackId, trackName: clip.trackName, clipIds: [], frames: [] };
+-      groupedByTrack.set(clip.trackId, bucket);
++    const last = trackBuckets[trackBuckets.length - 1];
++    if (last && last.trackId === clip.trackId) {
++      last.clipCount += 1;
++    } else {
++      trackBuckets.push({ trackId: clip.trackId, trackName: clip.trackName, clipCount: 1 });
+     }
+-    bucket.clipIds.push(clip.clipId);
+-    bucket.frames.push(clip.frames);
+   }
+-
+-  const tracksOrdered = Array.from(groupedByTrack.values());
+-
+-  // Emit track events
+-  for (const trk of tracksOrdered) {
++  for (const trk of trackBuckets) {
+     emitJson(
+       {
+         type: 'track',
+-        projectId: project.id,
++        projectId: plan.projectId,
+         trackId: trk.trackId,
+         trackName: trk.trackName,
+-        clipCount: trk.clipIds.length,
++        clipCount: trk.clipCount,
+       },
+       json,
+     );
+   }
+ 
++  // Process clips with a concurrency-bounded async pool. `renderedFrames` is
++  // only a progress counter; each clip's `frameRange` was fixed at planning
++  // time (see PlannedClip.firstFrame), so the manifest does not depend on the
++  // order workers happen to finish in.
+   let renderedFrames = 0;
+-  const manifestClips: Array<{
+-    clipId: string;
+-    trackId: string;
+-    frames: number;
+-    frameRange: { first: number; last: number };
+-  }> = [];
+-
+-  // Process clips with a simple concurrency-bounded async pool
+-  const queue = allClips.slice();
++  let lastDrawnPercent = -1;
++  let framesSinceYield = 0;
++  let nextClip = 0;
++  const workerCount = Math.min(concurrency, totalClips);
+   const workers: Array<Promise<void>> = [];
+-  for (let w = 0; w < concurrency; w += 1) {
++  const stopWatchingSignals = announceCancellation(json, plan.projectId);
++  for (let w = 0; w < workerCount; w += 1) {
+     workers.push(
+       (async () => {
+-        while (queue.length > 0) {
+-          const next = queue.shift();
++        for (;;) {
++          const next = allClips[nextClip];
++          nextClip += 1;
+           if (!next) break;
+-          const clipStart = renderedFrames;
+           for (let f = 0; f < next.frames; f += 1) {
+-            // Deterministic per-frame work — keeps the bench reproducible.
+-            // A real engine would push pixels through ffmpeg; this is a
+-            // timing-accurate simulation of that work for CLI benchmarking.
++            // Deterministic per-frame work. A real engine would push pixels
++            // through an encoder here; this is a placeholder busy-step.
+             Math.sin(f * 0.001 + next.frames * 0.0001);
+             renderedFrames += 1;
+-            if (!json && totalFrames > 0 && renderedFrames % 25 === 0) {
+-              drawProgress(renderedFrames, totalFrames, 32);
++            framesSinceYield += 1;
++            if (showProgress) {
++              const percent = Math.floor((renderedFrames * 100) / totalFrames);
++              if (percent !== lastDrawnPercent) {
++                lastDrawnPercent = percent;
++                drawProgress(renderedFrames, totalFrames, 32);
++              }
++            }
++            if (framesSinceYield >= FRAMES_PER_SLICE) {
++              framesSinceYield = 0;
++              await yieldToEventLoop();
+             }
+           }
+-          const clipProgress = 1;
+           emitJson(
+             {
+               type: 'clip',
+-              projectId: project.id,
++              projectId: plan.projectId,
+               trackId: next.trackId,
+               clipId: next.clipId,
+-              progress: clipProgress,
++              progress: 1,
+               framesRendered: renderedFrames,
+               totalFrames,
+             },
+             json,
+           );
+-          manifestClips.push({
+-            clipId: next.clipId,
+-            trackId: next.trackId,
+-            frames: next.frames,
+-            frameRange: { first: clipStart, last: renderedFrames - 1 },
+-          });
+         }
+       })(),
+     );
+   }
+ 
+-  await Promise.all(workers);
++  try {
++    await Promise.all(workers);
++  } finally {
++    stopWatchingSignals();
++  }
+ 
+-  const finishedAt = Date.now();
+-  const durationMs = finishedAt - startedAt;
++  const durationMs = Date.now() - startedAt;
++  const artifactPath = join(outDir, manifestName);
++
++  const manifest = {
++    schemaVersion: 1,
++    format: 'joy-media-render-manifest',
++    mediaProduced: false,
++    mediaFile: null,
++    note: MANIFEST_ONLY_MESSAGE,
++    projectId: plan.projectId,
++    projectTitle: plan.title,
++    preset,
++    spec: presetSpec,
++    composition: plan.composition,
++    totalFrames,
++    totalClips,
++    durationMs,
++    renderedAt: new Date().toISOString(),
++    warnings,
++    // `frameRange` indexes the render's sequential frame stream (clips in
++    // track order, back to back): contiguous and never overlapping. It is
++    // not a timeline position; use `startUs`/`durationUs` for that.
++    clips: allClips.map((clip) => ({
++      clipId: clip.clipId,
++      trackId: clip.trackId,
++      frames: clip.frames,
++      frameRange: { first: clip.firstFrame, last: clip.firstFrame + clip.frames - 1 },
++      startUs: clip.startUs,
++      durationUs: clip.durationUs,
++    })),
++  };
+ 
+-  // Write artifact manifest
+-  let artifactPath = '';
+   try {
+-    mkdirSync(outDir, { recursive: true });
+-    artifactPath = join(outDir, `${project.id}.${presetSpec.extension}.manifest.json`);
+-    const manifest = {
+-      schemaVersion: 1,
+-      format: 'joy-media-render-manifest',
+-      projectId: project.id,
+-      projectTitle: project.title,
+-      preset,
+-      spec: presetSpec,
+-      totalFrames,
+-      totalClips,
+-      durationMs,
+-      renderedAt: new Date().toISOString(),
+-      clips: manifestClips,
+-    };
+-    writeFileSync(artifactPath, JSON.stringify(manifest, null, 2), 'utf8');
++    writeFileAtomic(artifactPath, `${JSON.stringify(manifest, null, 2)}\n`);
+   } catch (err) {
+-    emitJson(
+-      {
+-        type: 'error',
+-        projectId: project.id,
+-        message: `Failed to write render manifest: ${String(err)}`,
+-        ts: new Date().toISOString(),
+-      },
+-      json,
+-    );
+-    if (!json) logError(`Failed to write render manifest: ${String(err)}`);
+-    return {
+-      exitCode: 1,
+-      projectId: project.id,
+-      preset,
+-      outDir,
+-      artifactPath: '',
++    if (showProgress) process.stdout.write('\n');
++    return failure(
++      'output',
++      `Failed to write render manifest ${artifactPath}: ${errorMessage(err)}`,
+       totalFrames,
+       totalClips,
+-      durationMs,
+-    };
++    );
+   }
+ 
+   if (!json) {
+-    drawProgress(totalFrames, totalFrames, 32);
+-    process.stdout.write('\n\n');
+-    logSuccess(`Rendered ${totalClips} clip(s) / ${totalFrames} frame(s) in ${durationMs}ms.`);
+-    logStep('Artifact', artifactPath);
++    if (showProgress) {
++      drawProgress(totalFrames, totalFrames, 32);
++      process.stdout.write('\n\n');
++    }
++    logSuccess(
++      `Wrote render manifest for ${totalClips} clip(s) / ${totalFrames} frame(s) in ${durationMs}ms.`,
++    );
++    logWarn(MANIFEST_ONLY_MESSAGE);
++    logStep('Manifest', artifactPath);
+   }
+ 
+   emitJson(
+     {
+       type: 'complete',
+-      projectId: project.id,
++      projectId: plan.projectId,
+       preset,
+       outDir,
+       artifactPath,
+       totalFrames,
+       durationMs,
+       ts: new Date().toISOString(),
++      mediaProduced: false,
++      manifestWritten: true,
++      message: MANIFEST_ONLY_MESSAGE,
++      warnings,
+     },
+     json,
+   );
+ 
+   return {
+     exitCode: 0,
+-    projectId: project.id,
++    projectId: plan.projectId,
+     preset,
+     outDir,
+     artifactPath,
+     totalFrames,
+     totalClips,
+     durationMs,
++    mediaProduced: false,
++    manifestWritten: true,
++    warnings,
+   };
+ }
+ 
+@@ -475,11 +770,100 @@ export function describeRenderPreset(id: string): RenderPresetSpec | null {
+   return isRenderPresetId(id) ? RENDER_PRESETS[id] : null;
+ }
+ 
++function errorMessage(err: unknown): string {
++  return err instanceof Error ? err.message || err.name : String(err);
++}
++
++/**
++ * Report a failure the same way everywhere: one line on stderr for humans and,
++ * under `--json`, a terminal `error` event on stdout for machines.
++ */
++function failCommand(
++  json: boolean,
++  projectId: string,
++  code: RenderErrorCode,
++  message: string,
++  exitCode: number,
++): number {
++  logError(message);
++  emitJson({ type: 'error', projectId, message, ts: new Date().toISOString(), code }, json);
++  return exitCode;
++}
++
+ function emitJson(event: RenderEvent, json: boolean): void {
+   if (!json) return;
+   process.stdout.write(`${JSON.stringify(event)}\n`);
+ }
+ 
++/**
++ * While a render is running, make Ctrl-C / SIGTERM end the `--json` stream with
++ * a terminal `error` event. The listener is *prepended* so it writes before the
++ * process-wide handler in bin.ts flushes stdout and exits (130).
++ */
++function announceCancellation(json: boolean, projectId: string): () => void {
++  if (!json) return () => undefined;
++  let announced = false;
++  const onSignal = (signal: NodeJS.Signals): void => {
++    if (announced) return;
++    announced = true;
++    emitJson(
++      {
++        type: 'error',
++        projectId,
++        message: `Render cancelled by ${signal}; no manifest was written.`,
++        ts: new Date().toISOString(),
++        code: 'cancelled',
++      },
++      true,
++    );
++  };
++  process.prependListener('SIGINT', onSignal);
++  process.prependListener('SIGTERM', onSignal);
++  return () => {
++    process.off('SIGINT', onSignal);
++    process.off('SIGTERM', onSignal);
++  };
++}
++
++function yieldToEventLoop(): Promise<void> {
++  return new Promise<void>((resolve) => setImmediate(resolve));
++}
++
++/** Create `dir` if needed and check it is a writable directory. Returns a problem or null. */
++function prepareOutputDir(dir: string): string | null {
++  let existing: ReturnType<typeof statSync> | undefined;
++  try {
++    existing = statSync(dir);
++  } catch {
++    existing = undefined;
++  }
++  if (existing && !existing.isDirectory()) {
++    return `Output path "${dir}" exists and is not a directory. Pass --out <directory>.`;
++  }
++  try {
++    mkdirSync(dir, { recursive: true });
++    accessSync(dir, constants.W_OK);
++  } catch (err) {
++    return `Cannot use output directory "${dir}": ${errorMessage(err)}`;
++  }
++  return null;
++}
++
++/** Write via a sibling temp file + rename so readers never see a half-written manifest. */
++function writeFileAtomic(path: string, data: string): void {
++  const tmp = join(
++    dirname(path),
++    `.${basename(path)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`,
++  );
++  try {
++    writeFileSync(tmp, data, 'utf8');
++    renameSync(tmp, path);
++  } catch (err) {
++    rmSync(tmp, { force: true });
++    throw err;
++  }
++}
++
+ function drawProgress(current: number, total: number, width: number): void {
+   if (total <= 0) return;
+   const ratio = Math.min(1, Math.max(0, current / total));
+diff --git a/apps/cli/src/humanized/render-benchmark.e2e.test.ts b/apps/cli/src/humanized/render-benchmark.e2e.test.ts
+new file mode 100644
+index 0000000..84857db
+--- /dev/null
++++ b/apps/cli/src/humanized/render-benchmark.e2e.test.ts
+@@ -0,0 +1,1072 @@
++/**
++ * Humanized end-to-end scenarios for `joy-media render` and `joy-media benchmark`.
++ *
++ * Every test runs the REAL built binary in a throw-away HOME and asserts only what
++ * a person (or an AI agent in a tool loop) can observe: exit code, stdout, stderr
++ * and files on disk. No wall-clock thresholds, no network, no API keys.
++ *
++ * Product facts these tests pin down (see the report that came with them):
++ *  - `render` does NOT encode video. It writes a plan manifest and says so
++ *    (`mediaProduced: false`). Tests named "manifest only" guard that honesty.
++ *  - Tests wrapped in `it.fails(...)` document real bugs that live in files this
++ *    suite's owner may not edit (cli.ts, utils/*). They flip to red the moment the
++ *    bug is fixed, which is the cue to turn them into plain `it(...)`.
++ */
++import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
++import { resolve, sep } from 'node:path';
++import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
++import { createSandbox, describeRun, hasAnsi, type Sandbox } from './harness.js';
++import {
++  buildProjectViaCli,
++  eventsOfType,
++  expectedFrames,
++  expectNdjsonContract,
++  isDirectory,
++  listTree,
++  projectDoc,
++  readManifest,
++  runWithOpenStdin,
++  stableEvents,
++  stableManifest,
++  writeSandboxFile,
++  type BuiltProject,
++  type DocClip,
++  type RenderEventLine,
++} from './render-helpers.js';
++
++vi.setConfig({ testTimeout: 30_000, hookTimeout: 120_000 });
++
++let sb: Sandbox;
++/** A 3-clip reel built through the real CLI: 2.5 s + 1 s on Video 1, 0.5 s on Video 2. */
++let reel: BuiltProject;
++/** A project that exists in the store but has no clips. */
++let blank: BuiltProject;
++
++beforeAll(async () => {
++  sb = createSandbox('render-bench');
++  reel = await buildProjectViaCli(sb, 'Summer Reel', [
++    { durationSec: 2.5 },
++    { durationSec: 1, startSec: 2.5 },
++    { durationSec: 0.5, track: 'track-v2' },
++  ]);
++  blank = await buildProjectViaCli(sb, 'Blank Canvas');
++});
++afterAll(() => sb.cleanup());
++
++const manifestName = (id: string, ext = 'mp4'): string => `${id}.${ext}.manifest.json`;
++const nodeSqliteWarning = /ExperimentalWarning|--trace-warnings/;
++
++/** Render a hand-written project document and return what a user would see. */
++async function renderDoc(
++  name: string,
++  doc: unknown,
++  out: string,
++  extraArgs: readonly string[] = [],
++  options: { timeoutMs?: number } = {},
++) {
++  const file = writeSandboxFile(sb, name, doc);
++  return sb.run(['render', '--project', file, '--out', out, '--json', ...extraArgs], options);
++}
++
++// ===========================================================================
++// 1. The headline: render must not pretend it produced a video
++// ===========================================================================
++
++describe('a creator renders a finished timeline', () => {
++  it('is told plainly that only a manifest was written and no video file exists', async () => {
++    const r = await sb.run(['render', '--project', reel.id, '--out', 'honest']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toMatch(/manifest only/i);
++    expect(r.out).toMatch(/no video/i);
++    // Never claim a finished render, and never print a media path that does not exist.
++    expect(r.out).not.toMatch(/\bRendered\b/);
++    expect(r.out).not.toMatch(/\.(mp4|webm|mov)(?!\.manifest\.json)/);
++    // ...and the disk agrees: the manifest is the only thing in the folder.
++    expect(listTree(sb.path('honest'))).toEqual([manifestName(reel.id)]);
++  });
++
++  it('gets a manifest that itself says it is not a render', async () => {
++    const r = await sb.run(['render', '--project', reel.id, '--out', 'honest-manifest', '--json']);
++    expect(r.code, describeRun(r)).toBe(0);
++    const manifest = readManifest(sb.path('honest-manifest', manifestName(reel.id)));
++    expect(manifest.format).toBe('joy-media-render-manifest');
++    expect(manifest.mediaProduced).toBe(false);
++    expect(manifest.mediaFile).toBeNull();
++    expect(manifest.note).toMatch(/manifest only/i);
++  });
++
++  it('lets an AI agent tail the --json stream until it ends with an honest `complete`', async () => {
++    const r = await sb.run(['render', '--project', reel.id, '--out', 'agent-tail', '--json']);
++    const events = expectNdjsonContract(r, ['complete']);
++    const complete = events[events.length - 1]!;
++    expect(complete['mediaProduced']).toBe(false);
++    expect(complete['manifestWritten']).toBe(true);
++    expect(String(complete['message'])).toMatch(/manifest only/i);
++    expect(complete['warnings']).toEqual([]);
++    expect(existsSync(resolve(sb.cwd, String(complete['artifactPath'])))).toBe(true);
++    // Existing documented fields are all still there.
++    for (const field of ['projectId', 'preset', 'outDir', 'artifactPath', 'totalFrames', 'ts']) {
++      expect(complete, `complete.${field}`).toHaveProperty(field);
++    }
++    expect(typeof complete['durationMs']).toBe('number');
++  });
++
++  it('sees start, one track event per used track, one clip event per clip, then complete', async () => {
++    const r = await sb.run(['render', '--project', reel.id, '--out', 'agent-events', '--json']);
++    const events = expectNdjsonContract(r, ['complete']);
++    expect(events.map((e) => e.type)).toEqual([
++      'start',
++      'track',
++      'track',
++      'clip',
++      'clip',
++      'clip',
++      'complete',
++    ]);
++
++    const start = events[0]!;
++    expect(start).toMatchObject({
++      projectId: reel.id,
++      title: 'Summer Reel',
++      preset: 'mp4',
++      totalFrames: 120,
++      totalClips: 3,
++      concurrency: 2,
++    });
++
++    // The empty Audio 1 track is not announced; the two used ones are, in timeline order.
++    expect(eventsOfType(events, 'track')).toMatchObject([
++      { trackId: 'track-v1', trackName: 'Video 1', clipCount: 2 },
++      { trackId: 'track-v2', trackName: 'Video 2', clipCount: 1 },
++    ]);
++
++    const clips = eventsOfType(events, 'clip');
++    expect(clips.map((e) => e['clipId'])).toEqual(reel.clips.map((c) => c.id));
++    const progress = clips.map((e) => Number(e['framesRendered']));
++    expect(progress).toEqual([75, 105, 120]);
++    for (const clip of clips) expect(clip['progress']).toBe(1);
++  });
++
++  it('gets a manifest that matches the timeline they built, clip by clip', async () => {
++    const r = await sb.run(['render', '--project', reel.id, '--out', 'match-timeline', '--json']);
++    expect(r.code, describeRun(r)).toBe(0);
++    const manifest = readManifest(sb.path('match-timeline', manifestName(reel.id)));
++
++    expect(manifest).toMatchObject({
++      schemaVersion: 1,
++      projectId: reel.id,
++      projectTitle: 'Summer Reel',
++      preset: 'mp4',
++      totalClips: 3,
++      totalFrames: 120,
++    });
++    expect(manifest.spec).toMatchObject({
++      container: 'mp4',
++      videoCodec: 'h264',
++      audioCodec: 'aac',
++      width: 1080,
++      height: 1920,
++      fps: 30,
++      extension: 'mp4',
++    });
++    expect(manifest.composition).toMatchObject({ id: 'root', width: 1080, height: 1920, fps: 30 });
++    expect(manifest.warnings).toEqual([]);
++    expect(Number.isNaN(Date.parse(manifest.renderedAt))).toBe(false);
++
++    expect(manifest.clips).toHaveLength(reel.clips.length);
++    manifest.clips.forEach((entry, i) => {
++      const built = reel.clips[i]!;
++      const durationUs = Math.round(built.durationSec * 1_000_000);
++      expect(entry.clipId).toBe(built.id);
++      expect(entry.trackId).toBe(built.track);
++      expect(entry.durationUs).toBe(durationUs);
++      expect(entry.startUs).toBe(Math.round((built.startSec ?? 0) * 1_000_000));
++      expect(entry.frames).toBe(expectedFrames(durationUs));
++    });
++  });
++
++  it('gets frame ranges that are contiguous, never overlap and add up to totalFrames', async () => {
++    const r = await sb.run(['render', '--project', reel.id, '--out', 'ranges', '--json']);
++    expect(r.code, describeRun(r)).toBe(0);
++    const manifest = readManifest(sb.path('ranges', manifestName(reel.id)));
++    let expectedFirst = 0;
++    for (const clip of manifest.clips) {
++      expect(clip.frameRange.first).toBe(expectedFirst);
++      expect(clip.frameRange.last - clip.frameRange.first + 1).toBe(clip.frames);
++      expectedFirst = clip.frameRange.last + 1;
++    }
++    expect(expectedFirst).toBe(manifest.totalFrames);
++    expect(manifest.totalFrames).toBe(manifest.clips.reduce((sum, c) => sum + c.frames, 0));
++  });
++
++  for (const [preset, ext, container, video, audio] of [
++    ['mp4', 'mp4', 'mp4', 'h264', 'aac'],
++    ['webm', 'webm', 'webm', 'vp9', 'opus'],
++    ['prores', 'mov', 'mov', 'prores-ks', 'pcm-s24le'],
++  ] as const) {
++    it(`renders the ${preset} preset into a .${ext} manifest with the right codecs`, async () => {
++      const out = `preset-${preset}`;
++      const r = await sb.run([
++        'render',
++        '--project',
++        reel.id,
++        '--preset',
++        preset,
++        '--out',
++        out,
++        '--json',
++      ]);
++      const events = expectNdjsonContract(r, ['complete']);
++      expect(events[0]).toMatchObject({ type: 'start', preset });
++      expect(listTree(sb.path(out))).toEqual([manifestName(reel.id, ext)]);
++      const manifest = readManifest(sb.path(out, manifestName(reel.id, ext)));
++      expect(manifest.preset).toBe(preset);
++      expect(manifest.spec).toMatchObject({ container, videoCodec: video, audioCodec: audio });
++    });
++  }
++
++  it('can type the preset in capitals (MP4) and still get an mp4', async () => {
++    const r = await sb.run([
++      'render',
++      '--project',
++      reel.id,
++      '--preset',
++      'MP4',
++      '--out',
++      'caps',
++      '--json',
++    ]);
++    const events = expectNdjsonContract(r, ['complete']);
++    expect(events[0]).toMatchObject({ preset: 'mp4' });
++  });
++
++  it('is stopped with a usage error (exit 2) when the preset does not exist, and nothing is written', async () => {
++    const r = await sb.run([
++      'render',
++      '--project',
++      reel.id,
++      '--preset',
++      'avi',
++      '--out',
++      'bad-preset',
++      '--json',
++    ]);
++    expect(r.code, describeRun(r)).toBe(2);
++    const events = expectNdjsonContract(r, ['error']);
++    expect(events).toHaveLength(1);
++    expect(events[0]).toMatchObject({ type: 'error', code: 'usage' });
++    expect(String(events[0]!['message'])).toMatch(/avi/);
++    expect(String(events[0]!['message'])).toMatch(/mp4, webm, prores/);
++    expect(r.err).toMatch(/Unknown render preset "avi"/);
++    expect(existsSync(sb.path('bad-preset'))).toBe(false);
++  });
++});
++
++// ===========================================================================
++// 2. Where the output goes
++// ===========================================================================
++
++describe('a creator chooses where the output goes', () => {
++  it('renders into a folder that does not exist yet, creating every level', async () => {
++    const r = await sb.run(['render', '--project', reel.id, '--out', 'deep/new/folder', '--json']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(isDirectory(sb.path('deep', 'new', 'folder'))).toBe(true);
++    expect(listTree(sb.path('deep'))).toEqual([`new/folder/${manifestName(reel.id)}`]);
++  });
++
++  it('falls back to ./renders in the current folder when --out is omitted', async () => {
++    const r = await sb.run(['render', '--project', reel.id, '--json']);
++    const events = expectNdjsonContract(r, ['complete']);
++    expect(events[0]).toMatchObject({ outDir: './renders' });
++    expect(existsSync(sb.path('renders', manifestName(reel.id)))).toBe(true);
++  });
++
++  it('can render straight into the current folder with --out .', async () => {
++    const cwd = sb.path('here');
++    mkdirSync(cwd, { recursive: true });
++    const r = await sb.run(['render', '--project', reel.id, '--out', '.', '--json'], { cwd });
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(listTree(cwd)).toEqual([manifestName(reel.id)]);
++  });
++
++  it('is refused up front when --out is an existing file, before any work is announced', async () => {
++    const precious = writeSandboxFile(sb, 'precious.txt', 'do not touch');
++    const r = await sb.run(['render', '--project', reel.id, '--out', precious, '--json']);
++    expect(r.code, describeRun(r)).toBe(1);
++    const events = expectNdjsonContract(r, ['error']);
++    // Fail fast: no `start`, no clip events for work that could never be saved.
++    expect(events.map((e) => e.type)).toEqual(['error']);
++    expect(events[0]).toMatchObject({ code: 'output' });
++    expect(String(events[0]!['message'])).toMatch(/not a directory/i);
++    expect(readFileSync(precious, 'utf8')).toBe('do not touch');
++  });
++
++  it('is refused up front when --out sits underneath a file', async () => {
++    const blocker = writeSandboxFile(sb, 'blocker.txt', 'i am a file');
++    const r = await sb.run(['render', '--project', reel.id, '--out', `${blocker}/sub`, '--json']);
++    expect(r.code, describeRun(r)).toBe(1);
++    const events = expectNdjsonContract(r, ['error']);
++    expect(events.map((e) => e.type)).toEqual(['error']);
++    expect(events[0]).toMatchObject({ code: 'output' });
++    expect(readFileSync(blocker, 'utf8')).toBe('i am a file');
++  });
++
++  it('gets a usage error (exit 2) for an empty --out instead of a cryptic mkdir failure', async () => {
++    const r = await sb.run(['render', '--project', reel.id, '--out', '', '--json']);
++    expect(r.code, describeRun(r)).toBe(2);
++    const events = expectNdjsonContract(r, ['error']);
++    expect(events[0]).toMatchObject({ code: 'usage' });
++    expect(String(events[0]!['message'])).toMatch(/--out/);
++  });
++
++  it('overwrites a stale manifest from an earlier render with a fresh, valid one', async () => {
++    const dir = sb.path('overwrite');
++    mkdirSync(dir, { recursive: true });
++    writeFileSync(resolve(dir, manifestName(reel.id)), '{"stale": true', 'utf8'); // truncated junk
++    const r = await sb.run(['render', '--project', reel.id, '--out', 'overwrite', '--json']);
++    expect(r.code, describeRun(r)).toBe(0);
++    const manifest = readManifest(resolve(dir, manifestName(reel.id)));
++    expect(manifest.projectId).toBe(reel.id);
++    expect(listTree(dir)).toEqual([manifestName(reel.id)]); // no temp files left behind
++  });
++
++  it('keeps an earlier good manifest untouched when the new render fails', async () => {
++    const first = await sb.run(['render', '--project', reel.id, '--out', 'keep-good', '--json']);
++    expect(first.code, describeRun(first)).toBe(0);
++    const path = sb.path('keep-good', manifestName(reel.id));
++    const before = readFileSync(path, 'utf8');
++
++    // Same id, but the timeline is now corrupt: the render must fail and leave `before` alone.
++    const broken = projectDoc({
++      id: reel.id,
++      tracks: [{ id: 't1', clips: [{ id: 'bad', durationUs: -1 }] }],
++    });
++    const r = await renderDoc('keep-good.json', broken, 'keep-good');
++    expect(r.code, describeRun(r)).toBe(1);
++    expect(readFileSync(path, 'utf8')).toBe(before);
++    expect(listTree(sb.path('keep-good'))).toEqual([manifestName(reel.id)]);
++  });
++
++  it('does not leave a half-written artifact when the manifest path is blocked by a folder', async () => {
++    const blockedPath = sb.path('blocked', manifestName(reel.id));
++    mkdirSync(blockedPath, { recursive: true });
++    writeFileSync(resolve(blockedPath, 'keep.txt'), 'x', 'utf8');
++    const r = await sb.run(['render', '--project', reel.id, '--out', 'blocked', '--json']);
++    expect(r.code, describeRun(r)).toBe(1);
++    const events = expectNdjsonContract(r, ['error']);
++    expect(events[events.length - 1]).toMatchObject({ code: 'output' });
++    expect(listTree(sb.path('blocked'))).toEqual([`${manifestName(reel.id)}/keep.txt`]);
++  });
++
++  it('survives two renders of the same project into the same folder at the same time', async () => {
++    const [a, b] = await Promise.all([
++      sb.run(['render', '--project', reel.id, '--out', 'race', '--json']),
++      sb.run(['render', '--project', reel.id, '--out', 'race', '--json']),
++    ]);
++    expect(a.code, describeRun(a)).toBe(0);
++    expect(b.code, describeRun(b)).toBe(0);
++    expectNdjsonContract(a, ['complete']);
++    expectNdjsonContract(b, ['complete']);
++    // Whoever wrote last, the folder holds exactly one complete, parseable manifest.
++    expect(listTree(sb.path('race'))).toEqual([manifestName(reel.id)]);
++    const manifest = readManifest(sb.path('race', manifestName(reel.id)));
++    expect(manifest.totalFrames).toBe(120);
++    expect(manifest.clips).toHaveLength(3);
++  });
++
++  it('produces the same plan every time: rendering twice only differs in timestamps', async () => {
++    const first = await sb.run(['render', '--project', reel.id, '--out', 'again', '--json']);
++    const manifestA = readManifest(sb.path('again', manifestName(reel.id)));
++    const second = await sb.run(['render', '--project', reel.id, '--out', 'again', '--json']);
++    const manifestB = readManifest(sb.path('again', manifestName(reel.id)));
++    expect(stableManifest(manifestB)).toEqual(stableManifest(manifestA));
++    expect(stableEvents(expectNdjsonContract(second, ['complete']))).toEqual(
++      stableEvents(expectNdjsonContract(first, ['complete'])),
++    );
++  });
++
++  it('behaves the same through the single-file bundle as through the bin shim', async () => {
++    const viaBin = await sb.run(['render', '--project', reel.id, '--out', 'parity', '--json']);
++    const viaBundle = await sb.run(['render', '--project', reel.id, '--out', 'parity', '--json'], {
++      entry: 'bundle',
++    });
++    expect(viaBundle.code, describeRun(viaBundle)).toBe(0);
++    expect(stableEvents(expectNdjsonContract(viaBundle, ['complete']))).toEqual(
++      stableEvents(expectNdjsonContract(viaBin, ['complete'])),
++    );
++  });
++});
++
++// ===========================================================================
++// 3. Which project, and what is in it
++// ===========================================================================
++
++describe('a creator or agent points render at a project', () => {
++  it('is told the render of an empty project did nothing, instead of being congratulated', async () => {
++    const r = await sb.run(['render', '--project', blank.id, '--out', 'empty-human']);
++    expect(r.code, describeRun(r)).toBe(0); // existing, deliberate behaviour: an empty timeline is not a failure
++    expect(r.out).toMatch(/nothing rendered/i);
++    expect(r.out).toMatch(/no manifest/i);
++    expect(r.out).not.toMatch(/\bRendered\b/);
++    expect(r.out).not.toMatch(/Wrote render manifest/);
++    expect(existsSync(sb.path('empty-human'))).toBe(false);
++  });
++
++  it('gets an unmistakable `complete` for an empty project over --json: nothing written, nothing produced', async () => {
++    const r = await sb.run(['render', '--project', blank.id, '--out', 'empty-json', '--json']);
++    const events = expectNdjsonContract(r, ['complete']);
++    expect(events.map((e) => e.type)).toEqual(['start', 'complete']);
++    const complete = events[1]!;
++    expect(complete).toMatchObject({
++      artifactPath: '',
++      totalFrames: 0,
++      mediaProduced: false,
++      manifestWritten: false,
++    });
++    expect(String(complete['message'])).toMatch(/nothing rendered/i);
++    expect((complete['warnings'] as string[]).join(' ')).toMatch(/no clips/i);
++    expect(existsSync(sb.path('empty-json'))).toBe(false);
++  });
++
++  it('is told to name a project when --project is forgotten (exit 1, kept as is), with a JSON error for agents', async () => {
++    const human = await sb.run(['render']);
++    expect(human.code, describeRun(human)).toBe(1);
++    expect(human.out).toBe('');
++    expect(human.err).toMatch(/--project/);
++
++    const json = await sb.run(['render', '--json']);
++    expect(json.code, describeRun(json)).toBe(1);
++    const events = expectNdjsonContract(json, ['error']);
++    expect(events[0]).toMatchObject({ code: 'usage' });
++    expect(String(events[0]!['message'])).toMatch(/--project/);
++  });
++
++  it('is told which project could not be found, in the stream and on stderr', async () => {
++    const r = await sb.run(['render', '--project', 'proj-nope', '--json']);
++    expect(r.code, describeRun(r)).toBe(1);
++    const events = expectNdjsonContract(r, ['error']);
++    expect(events).toHaveLength(1);
++    expect(events[0]).toMatchObject({ code: 'project-load', projectId: 'proj-nope' });
++    expect(String(events[0]!['message'])).toMatch(/proj-nope/);
++    expect(r.err).toMatch(/proj-nope/);
++  });
++
++  it('renders a project exported to a .json file, the way an agent hands a project over', async () => {
++    const exported = await sb.run(['project', 'export', reel.id, '--output', 'handover.json']);
++    expect(exported.code, describeRun(exported)).toBe(0);
++    const r = await sb.run([
++      'render',
++      '--project',
++      'handover.json',
++      '--out',
++      'from-file',
++      '--json',
++    ]);
++    const events = expectNdjsonContract(r, ['complete']);
++    expect(events[0]).toMatchObject({ projectId: reel.id, totalFrames: 120, totalClips: 3 });
++  });
++
++  it('gets a clear error and no files for every kind of broken project file', async () => {
++    const broken: Array<[string, unknown, RegExp]> = [
++      ['not-json.json', 'this is not json', /./],
++      ['truncated.json', '{"id":"p","title":', /./],
++      ['json-null.json', 'null', /./],
++      ['json-array.json', '[]', /JOY Media project/],
++      [
++        'no-compositions.json',
++        { id: 'p-1', title: 'x', rootCompositionId: 'root' },
++        /compositions/,
++      ],
++      [
++        'bad-root.json',
++        projectDoc({ id: 'p-2', rootCompositionId: 'missing-root' }),
++        /missing-root/,
++      ],
++      ['no-id.json', projectDoc({ omitId: true }), /"id"/],
++    ];
++    const results = await Promise.all(
++      broken.map(([name, doc], i) => renderDoc(name, doc, `broken-${i}`)),
++    );
++    results.forEach((r, i) => {
++      const [name, , message] = broken[i]!;
++      expect(r.code, `${name}${describeRun(r)}`).toBe(1);
++      const events = expectNdjsonContract(r, ['error']);
++      expect(String(events[events.length - 1]!['message']), name).toMatch(message);
++      expect(r.err, `${name} must not dump a stack trace`).not.toMatch(/\n\s+at \S+/);
++      expect(existsSync(sb.path(`broken-${i}`)), `${name} must not create the output folder`).toBe(
++        false,
++      );
++    });
++  });
++
++  it('refuses clips with impossible durations by naming the clip, and never hangs', async () => {
++    const bad: Array<[string, unknown]> = [
++      ['negative', -5],
++      ['text', 'soon'],
++      ['null', null],
++      ['missing', undefined],
++      ['over-24h', 86_400_000_001],
++      ['absurd', 1e15],
++    ];
++    const results = await Promise.all(
++      bad.map(([label, durationUs], i) =>
++        renderDoc(
++          `bad-duration-${label}.json`,
++          projectDoc({ tracks: [{ id: 't1', clips: [{ id: `clip-${label}`, durationUs }] }] }),
++          `bad-duration-${i}`,
++          [],
++          { timeoutMs: 15_000 },
++        ),
++      ),
++    );
++    results.forEach((r, i) => {
++      const [label] = bad[i]!;
++      expect(r.timedOut, `${label} hung${describeRun(r)}`).toBe(false);
++      expect(r.code, `${label}${describeRun(r)}`).toBe(1);
++      const events = expectNdjsonContract(r, ['error']);
++      const message = String(events[events.length - 1]!['message']);
++      expect(message, label).toContain(`clip-${label}`);
++      expect(message, label).toMatch(/durationUs/);
++      expect(existsSync(sb.path(`bad-duration-${i}`)), label).toBe(false);
++    });
++  });
++
++  it('does not render a disabled track, and says it skipped it', async () => {
++    const r = await renderDoc(
++      'disabled-track.json',
++      projectDoc({
++        id: 'with-disabled',
++        tracks: [
++          { id: 'hidden', enabled: false, clips: [{ id: 'ghost', durationUs: 2_000_000 }] },
++          { id: 'shown', clips: [{ id: 'real', durationUs: 1_000_000 }] },
++        ],
++      }),
++      'disabled-out',
++    );
++    const events = expectNdjsonContract(r, ['complete']);
++    expect(events[0]).toMatchObject({ totalClips: 1, totalFrames: 30 });
++    expect(eventsOfType(events, 'clip').map((e) => e['clipId'])).toEqual(['real']);
++    const manifest = readManifest(sb.path('disabled-out', manifestName('with-disabled')));
++    expect(manifest.clips.map((c) => c.clipId)).toEqual(['real']);
++    expect(manifest.warnings.join(' ')).toMatch(/disabled track "hidden"/);
++  });
++
++  it('gets the same frame count for the same duration every time (rounding, minimum one frame)', async () => {
++    // [durationUs, frames at the preset\'s 30 fps]
++    const table: Array<[number, number]> = [
++      [1_000, 1], // 0.001 s: shorter than a frame still occupies one frame
++      [16_666, 1],
++      [16_667, 1],
++      [33_333, 1],
++      [50_000, 2], // exactly 1.5 frames rounds up
++      [1_000_000, 30],
++      [1_033_333, 31],
++      [2_500_000, 75],
++      [3_600_000_000, 108_000], // a one hour clip
++    ];
++    const clips: DocClip[] = table.map(([durationUs], i) => ({ id: `c${i}`, durationUs }));
++    const r = await renderDoc(
++      'frame-math.json',
++      projectDoc({ id: 'frame-math', tracks: [{ id: 't1', clips }] }),
++      'frame-math',
++    );
++    expectNdjsonContract(r, ['complete']);
++    const manifest = readManifest(sb.path('frame-math', manifestName('frame-math')));
++    expect(manifest.clips.map((c) => c.frames)).toEqual(table.map(([, frames]) => frames));
++    expect(manifest.totalFrames).toBe(table.reduce((sum, [, frames]) => sum + frames, 0));
++  });
++
++  it('is warned when the project runs at another frame rate or shape than the preset, and the manifest records both', async () => {
++    const cases: Array<[string, { num: number; den: number }, number, number, boolean]> = [
++      ['24fps', { num: 24, den: 1 }, 1080, 1920, true],
++      ['30fps', { num: 30, den: 1 }, 1080, 1920, false],
++      ['59.94fps', { num: 60_000, den: 1_001 }, 1080, 1920, true],
++      ['60fps', { num: 60, den: 1 }, 1080, 1920, true],
++      ['landscape', { num: 30, den: 1 }, 1920, 1080, true],
++    ];
++    const results = await Promise.all(
++      cases.map(([label, frameRate, width, height]) =>
++        renderDoc(
++          `shape-${label}.json`,
++          projectDoc({
++            id: `shape-${label}`,
++            frameRate,
++            width,
++            height,
++            tracks: [{ id: 't1', clips: [{ id: 'one-second', durationUs: 1_000_000 }] }],
++          }),
++          `shape-${label}`,
++        ),
++      ),
++    );
++    results.forEach((r, i) => {
++      const [label, frameRate, width, height, warns] = cases[i]!;
++      expectNdjsonContract(r, ['complete']);
++      const manifest = readManifest(sb.path(`shape-${label}`, manifestName(`shape-${label}`)));
++      // Today the preset's fixed 30 fps decides the frame count, whatever the project says...
++      expect(manifest.clips[0]!.frames, label).toBe(30);
++      // ...but the manifest records what the project actually was, and the user is told.
++      expect(manifest.composition.width, label).toBe(width);
++      expect(manifest.composition.height, label).toBe(height);
++      expect(manifest.composition.fps, label).toBeCloseTo(frameRate.num / frameRate.den, 6);
++      if (warns) expect(manifest.warnings.join(' '), label).toMatch(/fixed at 1080x1920 @ 30 fps/);
++      else expect(manifest.warnings, label).toEqual([]);
++    });
++  });
++
++  it('cannot be tricked by a project id into writing outside the output folder', async () => {
++    const jail = sb.path('jail');
++    mkdirSync(jail, { recursive: true });
++    const r = await renderDoc(
++      'hostile-id.json',
++      projectDoc({
++        id: '../../escape',
++        tracks: [{ id: 't1', clips: [{ id: 'a', durationUs: 1_000_000 }] }],
++      }),
++      'jail/out',
++    );
++    const events = expectNdjsonContract(r, ['complete']);
++    const complete = events[events.length - 1]!;
++    const written = resolve(sb.cwd, String(complete['artifactPath']));
++    expect(written.startsWith(resolve(sb.path('jail', 'out')) + sep), written).toBe(true);
++    expect(listTree(jail)).toHaveLength(1);
++    expect(listTree(jail)[0]!.startsWith('out/')).toBe(true);
++    expect(existsSync(sb.path('escape.mp4.manifest.json'))).toBe(false);
++    expect(readManifest(written).projectId).toBe('../../escape'); // traceability is kept
++    expect(readManifest(written).warnings.join(' ')).toMatch(/not a safe file name/);
++  });
++
++  it('gets a plain file name even when the project id has spaces and punctuation', async () => {
++    const r = await renderDoc(
++      'odd-id.json',
++      projectDoc({
++        id: 'my project: v2?',
++        tracks: [{ id: 't1', clips: [{ id: 'a', durationUs: 1_000_000 }] }],
++      }),
++      'odd-id',
++    );
++    expectNdjsonContract(r, ['complete']);
++    expect(listTree(sb.path('odd-id'))).toEqual(['my_project__v2_.mp4.manifest.json']);
++  });
++
++  it('copes with a project of five thousand clips', async () => {
++    const clips: DocClip[] = Array.from({ length: 5000 }, (_, i) => ({
++      id: `c${i}`,
++      startUs: i * 100_000,
++      durationUs: 100_000,
++    }));
++    const r = await renderDoc(
++      'many.json',
++      projectDoc({ id: 'many', tracks: [{ id: 't1', clips }] }),
++      'many',
++      [],
++      { timeoutMs: 25_000 },
++    );
++    const events = expectNdjsonContract(r, ['complete']);
++    expect(eventsOfType(events, 'clip')).toHaveLength(5000);
++    const manifest = readManifest(sb.path('many', manifestName('many')));
++    expect(manifest.totalClips).toBe(5000);
++    expect(manifest.totalFrames).toBe(15_000);
++    let next = 0;
++    for (const clip of manifest.clips) {
++      expect(clip.frameRange.first).toBe(next);
++      next = clip.frameRange.last + 1;
++    }
++    expect(next).toBe(15_000);
++  });
++
++  it('copes with a 24 hour clip without hanging (and does not stall the event loop forever)', async () => {
++    const r = await renderDoc(
++      'day-long.json',
++      projectDoc({
++        id: 'day-long',
++        tracks: [{ id: 't1', clips: [{ id: 'all-day', durationUs: 86_400_000_000 }] }],
++      }),
++      'day-long',
++      [],
++      { timeoutMs: 25_000 },
++    );
++    const events = expectNdjsonContract(r, ['complete']);
++    expect(events[0]).toMatchObject({ totalFrames: 2_592_000 });
++  });
++});
++
++// ===========================================================================
++// 4. --concurrency
++// ===========================================================================
++
++describe('a creator tunes --concurrency', () => {
++  const clips: DocClip[] = Array.from({ length: 40 }, (_, i) => ({
++    id: `c${i}`,
++    durationUs: ((i % 7) + 1) * 100_000,
++  }));
++  const doc = projectDoc({
++    id: 'pool',
++    tracks: [
++      { id: 'a', clips: clips.slice(0, 25) },
++      { id: 'b', clips: clips.slice(25) },
++    ],
++  });
++
++  it('accepts 1 and 32, reports the value back, and plans identically at every level', async () => {
++    const levels = [1, 2, 8, 32];
++    const results = await Promise.all(
++      levels.map((n) =>
++        renderDoc(`pool-${n}.json`, doc, `pool-${n}`, ['--concurrency', String(n)]),
++      ),
++    );
++    const manifests = results.map((r, i) => {
++      const events = expectNdjsonContract(r, ['complete']);
++      expect(events[0], `concurrency ${levels[i]}`).toMatchObject({ concurrency: levels[i] });
++      // progress counter only ever moves forward and ends at the total
++      const frames = eventsOfType(events, 'clip').map((e) => Number(e['framesRendered']));
++      expect([...frames].sort((x, y) => x - y)).toEqual(frames);
++      expect(frames[frames.length - 1]).toBe(Number(events[0]!['totalFrames']));
++      return readManifest(sb.path(`pool-${levels[i]}`, manifestName('pool')));
++    });
++    // Same project => same plan, no matter how many workers pulled clips off the queue.
++    for (const manifest of manifests) {
++      expect(stableManifest(manifest)).toEqual(stableManifest(manifests[0]!));
++      let next = 0;
++      for (const clip of manifest.clips) {
++        expect(clip.frameRange.first).toBe(next);
++        next = clip.frameRange.last + 1;
++      }
++      expect(next).toBe(manifest.totalFrames);
++    }
++  });
++
++  for (const bad of ['0', '33', 'abc', '2.5', '-1']) {
++    it(`is stopped with exit 2 and a message naming --concurrency for "${bad}"`, async () => {
++      const r = await sb.run([
++        'render',
++        '--project',
++        reel.id,
++        '--out',
++        `bad-conc`,
++        '--concurrency',
++        bad,
++      ]);
++      expect(r.code, describeRun(r)).toBe(2);
++      expect(r.err).toMatch(/--concurrency/);
++      expect(r.out).toBe('');
++      expect(existsSync(sb.path('bad-conc'))).toBe(false);
++    });
++  }
++});
++
++// ===========================================================================
++// 5. Process-level behaviour
++// ===========================================================================
++
++describe('render behaves like a well-mannered command line program', () => {
++  it('does not spam a log file with progress-bar redraws when output is not a terminal', async () => {
++    const r = await sb.run(['render', '--project', reel.id, '--out', 'no-tty']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.stdout.includes('\r')).toBe(false);
++    expect(hasAnsi(r.stdout)).toBe(false);
++    expect(hasAnsi(r.stderr)).toBe(false);
++    expect(r.stdout).not.toMatch(/[█░]{20,}/); // the 32-cell bar (the banner logo is only 6 wide)
++    expect(r.stdout).not.toMatch(/\d+\/\d+ frames/);
++  });
++
++  it('keeps --json stdout to JSON only: no banner, no ANSI, no progress bar, quiet stderr on success', async () => {
++    const r = await sb.run(['render', '--project', reel.id, '--out', 'pure-json', '--json']);
++    expectNdjsonContract(r, ['complete']);
++    expect(r.stdout).not.toMatch(/JOY MEDIA CLI/);
++    const noise = r.err
++      .split('\n')
++      .filter((line) => line.trim() !== '' && !nodeSqliteWarning.test(line));
++    expect(noise, `unexpected stderr on a successful run:\n${r.err}`).toEqual([]);
++  });
++
++  it('never waits for input on stdin', async () => {
++    const r = await runWithOpenStdin(sb, [
++      'render',
++      '--project',
++      reel.id,
++      '--out',
++      'stdin-open',
++      '--json',
++    ]);
++    expect(r.outcome).toBe('exited');
++    expect(r.code).toBe(0);
++    expect(r.stdout).toMatch(/"type":"complete"/);
++  });
++});
++
++describe('Ctrl-C during a long render', () => {
++  it('ends the run with exit 130, a terminal `cancelled` error event and no manifest', async () => {
++    const clips: DocClip[] = Array.from({ length: 1000 }, (_, i) => ({
++      id: `day-${i}`,
++      durationUs: 86_400_000_000,
++    }));
++    const file = writeSandboxFile(
++      sb,
++      'marathon-sigint.json',
++      projectDoc({ id: 'marathon', tracks: [{ id: 't1', clips }] }),
++    );
++    const r = await sb.run(['render', '--project', file, '--out', 'marathon-out', '--json'], {
++      signal: 'SIGINT',
++      signalAfterMs: 2_000,
++      timeoutMs: 15_000,
++    });
++    expect(r.timedOut, `a signal must interrupt the render${describeRun(r).slice(0, 600)}`).toBe(
++      false,
++    );
++    expect(r.code, describeRun(r).slice(0, 600)).toBe(130);
++    const events = expectNdjsonContract(r, ['error']);
++    expect(events[events.length - 1]).toMatchObject({ code: 'cancelled' });
++    expect(eventsOfType(events, 'complete')).toHaveLength(0);
++    expect(listTree(sb.path('marathon-out'))).toEqual([]);
++  });
++});
++
++// ===========================================================================
++// 6. Known bugs in files this suite does not own (it.fails => flips red when fixed)
++// ===========================================================================
++
++describe('known bugs outside render-cmd.ts (documented, expected to fail today)', () => {
++  it.fails(
++    'treats a forgotten value after --preset as a usage error instead of silently using mp4 [cli.ts]',
++    async () => {
++      const r = await sb.run(['render', '--project', reel.id, '--out', 'known-preset', '--preset']);
++      expect(r.code, describeRun(r)).toBe(2);
++    },
++  );
++
++  it.fails(
++    'rejects a misspelled flag (--prest webm) instead of silently ignoring it [cli.ts strict:false]',
++    async () => {
++      const r = await sb.run([
++        'render',
++        '--project',
++        reel.id,
++        '--out',
++        'known-typo',
++        '--prest',
++        'webm',
++      ]);
++      expect(r.code, describeRun(r)).toBe(2);
++    },
++  );
++
++  it.fails(
++    'rejects a misspelled benchmark flag (--sytem) instead of running everything [cli.ts strict:false]',
++    async () => {
++      const r = await sb.run(['benchmark', '--sytem', '--json']);
++      expect(r.code, describeRun(r)).toBe(2);
++    },
++  );
++
++  it.fails(
++    'ends the --json stream with an error event for an invalid --concurrency [cli.ts]',
++    async () => {
++      const r = await sb.run([
++        'render',
++        '--project',
++        reel.id,
++        '--out',
++        'known-conc',
++        '--concurrency',
++        '99',
++        '--json',
++      ]);
++      expect(r.code, describeRun(r)).toBe(2);
++      expectNdjsonContract(r, ['error']);
++    },
++  );
++
++  it.fails(
++    'describes the lower bound of --concurrency correctly (>= 1, not "> 1") [utils/flags.ts]',
++    async () => {
++      const r = await sb.run([
++        'render',
++        '--project',
++        reel.id,
++        '--out',
++        'known-msg',
++        '--concurrency',
++        '0',
++      ]);
++      expect(r.code, describeRun(r)).toBe(2);
++      expect(r.err).not.toMatch(/must be > 1\b/);
++    },
++  );
++
++  it.fails(
++    'finds a project by id even when a folder with the same name exists in the current directory [utils/project-loader.ts]',
++    async () => {
++      // Natural workflow: `render --project <id> --out <id>` creates ./<id>/, and the next
++      // `render --project <id>` then tries to read that folder as a JSON file (EISDIR).
++      const cwd = sb.path('shadow');
++      mkdirSync(cwd, { recursive: true });
++      const args = ['render', '--project', reel.id, '--out', reel.id, '--json'];
++      const first = await sb.run(args, { cwd });
++      expect(first.code, describeRun(first)).toBe(0);
++      const second = await sb.run(args, { cwd });
++      expect(second.code, describeRun(second)).toBe(0);
++    },
++  );
++});
++
++// ===========================================================================
++// 7. benchmark
++// ===========================================================================
++
++interface Measurement extends RenderEventLine {
++  suite: string;
++  name: string;
++  unit: string;
++  value: number;
++  iterations: number;
++  totalMs: number;
++  perOpMs: number;
++}
++interface Summary extends RenderEventLine {
++  suite: string;
++  measurementCount: number;
++  totalMs: number;
++  measurements: Measurement[];
++}
++
++const BENCHMARK_SHAPE: Array<[string, string, string, number]> = [
++  ['system', 'disk-read-4MiB', 'MB/sec', 64],
++  ['system', 'disk-write-1MiB', 'MB/sec', 32],
++  ['system', 'sqlite-tx-throughput', 'tx/sec', 5000],
++  ['system', 'heap-allocation', 'allocs/sec', 50_000],
++  ['media-engine', 'timeline-scrub', 'ops/sec', 599],
++  ['media-engine', 'clip-collision-resolve', 'clips/sec', 100_000],
++  ['media-engine', 'living-look-compile', 'compiles/sec', 500],
++];
++
++describe('an agent or creator benchmarks their machine', () => {
++  let fullA: ReturnType<typeof expectNdjsonContract>;
++  let fullB: ReturnType<typeof expectNdjsonContract>;
++
++  beforeAll(async () => {
++    const [a, b] = await Promise.all([
++      sb.run(['benchmark', '--json']),
++      sb.run(['benchmark', '--json']),
++    ]);
++    expect(a.code, describeRun(a)).toBe(0);
++    expect(b.code, describeRun(b)).toBe(0); // two benchmarks at once must not trample each other
++    fullA = expectNdjsonContract(a, ['complete']);
++    fullB = expectNdjsonContract(b, ['complete']);
++  });
++
++  it('streams every measurement, then one summary per suite, then complete', () => {
++    expect(fullA.map((e) => e.type)).toEqual([
++      ...Array(7).fill('measurement'),
++      'summary',
++      'summary',
++      'complete',
++    ]);
++    const complete = fullA[fullA.length - 1]!;
++    expect(complete).toMatchObject({ suites: ['system', 'media-engine'], measurementCount: 7 });
++  });
++
++  it('reports a stable shape: the same metrics, units and iteration counts on every run', () => {
++    const shape = (events: typeof fullA): unknown =>
++      eventsOfType(events, 'measurement').map((m) => [
++        m['suite'],
++        m['name'],
++        m['unit'],
++        m['iterations'],
++      ]);
++    expect(shape(fullA)).toEqual(BENCHMARK_SHAPE);
++    expect(shape(fullB)).toEqual(shape(fullA));
++  });
++
++  it('only ever reports real numbers: nothing is null, NaN or infinite once it has been through JSON', () => {
++    for (const m of eventsOfType(fullA, 'measurement') as Measurement[]) {
++      for (const field of ['value', 'iterations', 'totalMs', 'perOpMs'] as const) {
++        expect(Number.isFinite(m[field]), `${m.name}.${field} = ${String(m[field])}`).toBe(true);
++      }
++      expect(m.value, m.name).toBeGreaterThan(0);
++      expect(m.totalMs, m.name).toBeGreaterThanOrEqual(0);
++      expect(m.perOpMs, m.name).toBeGreaterThanOrEqual(0);
++    }
++  });
++
++  it('really compiles the Living Look instead of timing an instant rejection', () => {
++    const look = (eventsOfType(fullA, 'measurement') as Measurement[]).find(
++      (m) => m.name === 'living-look-compile',
++    )!;
++    expect(look['failures']).toBe(0);
++  });
++
++  it("times each suite separately: a suite total is its own time, not the whole run's", () => {
++    const summaries = eventsOfType(fullA, 'summary') as Summary[];
++    const complete = fullA[fullA.length - 1]!;
++    const measurements = eventsOfType(fullA, 'measurement') as Measurement[];
++    for (const summary of summaries) {
++      const own = measurements.filter((m) => m.suite === summary.suite);
++      expect(summary.measurementCount).toBe(own.length);
++      // A summary repeats its suite's measurements (minus the per-event `type` tag).
++      expect(summary.measurements).toEqual(own.map(({ type: _type, ...rest }) => rest));
++      expect(summary.totalMs).toBeGreaterThanOrEqual(
++        own.reduce((sum, m) => sum + m.totalMs, 0) - 0.01,
++      );
++      expect(summary.totalMs).toBeLessThanOrEqual(Number(complete['totalMs']) + 0.01);
++    }
++    // Two suites ran one after the other, so their times must add up to at most the whole run.
++    const sumOfSuites = summaries.reduce((sum, s) => sum + s.totalMs, 0);
++    expect(sumOfSuites).toBeLessThanOrEqual(Number(complete['totalMs']) + 0.01);
++  });
++
++  it('runs only the system suite for --system and only the engine suite for --media-engine', async () => {
++    const [system, engine] = await Promise.all([
++      sb.run(['benchmark', '--system', '--json']),
++      sb.run(['benchmark', '--media-engine', '--json']),
++    ]);
++    const systemEvents = expectNdjsonContract(system, ['complete']);
++    const engineEvents = expectNdjsonContract(engine, ['complete']);
++    expect(eventsOfType(systemEvents, 'measurement').map((m) => m['name'])).toEqual(
++      BENCHMARK_SHAPE.filter(([suite]) => suite === 'system').map(([, name]) => name),
++    );
++    expect(eventsOfType(engineEvents, 'measurement').map((m) => m['name'])).toEqual(
++      BENCHMARK_SHAPE.filter(([suite]) => suite === 'media-engine').map(([, name]) => name),
++    );
++    expect(systemEvents[systemEvents.length - 1]).toMatchObject({ suites: ['system'] });
++    expect(engineEvents[engineEvents.length - 1]).toMatchObject({ suites: ['media-engine'] });
++  });
++
++  it('prints readable tables without ANSI or redraws when piped', async () => {
++    const r = await sb.run(['benchmark']);
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(r.out).toContain('System Benchmarks');
++    expect(r.out).toContain('Media Engine Benchmarks');
++    for (const [, name] of BENCHMARK_SHAPE) expect(r.out).toContain(name);
++    expect(r.out).toMatch(/Benchmark complete in \d+ms — 7 measurement\(s\)/);
++    expect(hasAnsi(r.stdout)).toBe(false);
++    expect(r.stdout.includes('\r')).toBe(false);
++  });
++
++  it('leaves nothing behind in the temp folder', async () => {
++    const tmp = sb.path('bench-tmp');
++    mkdirSync(tmp, { recursive: true });
++    const r = await sb.run(['benchmark', '--system', '--json'], { env: { TMPDIR: tmp } });
++    expect(r.code, describeRun(r)).toBe(0);
++    expect(readdirSync(tmp)).toEqual([]);
++  });
++
++  it('fails loudly (exit 1, error event) when the system suite cannot get a scratch folder, while the engine suite still works', async () => {
++    const blocker = writeSandboxFile(sb, 'not-a-folder', 'x');
++    const env = { TMPDIR: `${blocker}/scratch` };
++    const system = await sb.run(['benchmark', '--system', '--json'], { env });
++    expect(system.code, describeRun(system)).toBe(1);
++    const events = expectNdjsonContract(system, ['error']);
++    expect(String(events[events.length - 1]!['message'])).toMatch(/benchmark failed/i);
++
++    const engine = await sb.run(['benchmark', '--media-engine', '--json'], { env });
++    expect(engine.code, describeRun(engine)).toBe(0);
++    expectNdjsonContract(engine, ['complete']);
++  });
++
++  it('never waits for input on stdin', async () => {
++    const r = await runWithOpenStdin(sb, ['benchmark', '--media-engine', '--json']);
++    expect(r.outcome).toBe('exited');
++    expect(r.code).toBe(0);
++  });
++});
+diff --git a/apps/cli/src/humanized/render-helpers.ts b/apps/cli/src/humanized/render-helpers.ts
+new file mode 100644
+index 0000000..5f56092
+--- /dev/null
++++ b/apps/cli/src/humanized/render-helpers.ts
+@@ -0,0 +1,359 @@
++/* global process, setTimeout, clearTimeout, Buffer */
++/**
++ * Scenario helpers for the `render` / `benchmark` humanized e2e tests.
++ *
++ * Everything here drives the REAL built binary through the shared black-box
++ * harness (`harness.ts`, which this file must not modify). Projects are built
++ * the way a person would: `project create` + `timeline add-clip` for the happy
++ * path, or a hand-written project JSON file when a test needs a shape the CLI
++ * will not produce (odd frame rates, hostile ids, corrupt durations).
++ */
++import { spawn } from 'node:child_process';
++import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
++import { dirname, join, relative } from 'node:path';
++import { expect } from 'vitest';
++import {
++  CLI_ROOT,
++  describeRun,
++  ensureCliBuilt,
++  hasAnsi,
++  type RunResult,
++  type Sandbox,
++} from './harness.js';
++
++// ---------------------------------------------------------------------------
++// Event + manifest shapes (loose on purpose: tests assert what a user sees)
++// ---------------------------------------------------------------------------
++
++export interface RenderEventLine {
++  type: string;
++  projectId?: string;
++  [key: string]: unknown;
++}
++
++export interface ManifestClip {
++  clipId: string;
++  trackId: string;
++  frames: number;
++  frameRange: { first: number; last: number };
++  startUs: number | null;
++  durationUs: number;
++}
++
++export interface RenderManifest {
++  schemaVersion: number;
++  format: string;
++  mediaProduced: boolean;
++  mediaFile: string | null;
++  note: string;
++  projectId: string;
++  projectTitle: string;
++  preset: string;
++  spec: {
++    id: string;
++    container: string;
++    videoCodec: string;
++    audioCodec: string;
++    width: number;
++    height: number;
++    fps: number;
++    extension: string;
++  };
++  composition: {
++    id: string;
++    width: number | null;
++    height: number | null;
++    fps: number | null;
++    durationUs: number | null;
++  };
++  totalFrames: number;
++  totalClips: number;
++  durationMs: number;
++  renderedAt: string;
++  warnings: string[];
++  clips: ManifestClip[];
++}
++
++// ---------------------------------------------------------------------------
++// Building projects
++// ---------------------------------------------------------------------------
++
++export interface TimelineClipSpec {
++  readonly durationSec: number;
++  /** Omit for "starts at 0" (`--start 0` is rejected by the CLI today). */
++  readonly startSec?: number;
++  /** Default `track-v1`. */
++  readonly track?: string;
++}
++
++export interface BuiltProject {
++  readonly id: string;
++  readonly title: string;
++  readonly clips: ReadonlyArray<TimelineClipSpec & { readonly id: string; readonly track: string }>;
++}
++
++function mustSucceed(result: RunResult, what: string): RunResult {
++  if (result.code !== 0) {
++    throw new Error(`setup step failed (${what}):${describeRun(result)}`);
++  }
++  return result;
++}
++
++/** `project create` + one `timeline add-clip` per clip, through the real CLI. */
++export async function buildProjectViaCli(
++  sb: Sandbox,
++  title: string,
++  clips: readonly TimelineClipSpec[] = [],
++): Promise<BuiltProject> {
++  const created = mustSucceed(await sb.run(['project', 'create', title]), 'project create');
++  const idMatch = /\((proj-[a-z0-9]+)\)/.exec(created.out);
++  if (!idMatch) throw new Error(`could not find a project id in:${describeRun(created)}`);
++  const id = idMatch[1]!;
++
++  const added: Array<TimelineClipSpec & { id: string; track: string }> = [];
++  for (const clip of clips) {
++    const track = clip.track ?? 'track-v1';
++    const args = [
++      'timeline',
++      'add-clip',
++      '--project',
++      id,
++      '--track',
++      track,
++      '--duration',
++      String(clip.durationSec),
++    ];
++    if (clip.startSec !== undefined) args.push('--start', String(clip.startSec));
++    const result = mustSucceed(await sb.run(args), `timeline add-clip ${JSON.stringify(clip)}`);
++    const clipMatch = /clip (clip-[a-z0-9]+)/.exec(result.out);
++    if (!clipMatch) throw new Error(`could not find a clip id in:${describeRun(result)}`);
++    added.push({ ...clip, id: clipMatch[1]!, track });
++  }
++  return { id, title, clips: added };
++}
++
++export interface DocClip {
++  readonly id: string;
++  readonly startUs?: number | undefined;
++  /** Anything goes: tests feed the renderer corrupt values on purpose. */
++  readonly durationUs?: unknown;
++}
++
++export interface DocTrack {
++  readonly id: string;
++  readonly name?: string;
++  readonly enabled?: boolean;
++  readonly family?: 'visual' | 'audio';
++  readonly clips: readonly DocClip[];
++}
++
++export interface ProjectDocOptions {
++  readonly id?: string;
++  /** Leave the project without any `id` (a hand-edited / truncated document). */
++  readonly omitId?: boolean;
++  readonly title?: string;
++  readonly width?: number;
++  readonly height?: number;
++  /** Frames per second as a rational, e.g. `{ num: 60000, den: 1001 }`. */
++  readonly frameRate?: { num: number; den: number };
++  readonly tracks?: readonly DocTrack[];
++  readonly rootCompositionId?: string;
++}
++
++/** A project document in the shape `joy-media project export` writes (loadable via `--project file.json`). */
++export function projectDoc(options: ProjectDocOptions = {}): Record<string, unknown> {
++  const doc: Record<string, unknown> = {
++    schemaVersion: 1,
++    title: options.title ?? 'Hand written project',
++    createdAt: '2026-01-01T00:00:00.000Z',
++    updatedAt: '2026-01-01T00:00:00.000Z',
++    rootCompositionId: options.rootCompositionId ?? 'root',
++    settings: { defaultLocale: 'en' },
++    compositions: {
++      root: {
++        id: 'root',
++        name: 'Main Composition',
++        width: options.width ?? 1080,
++        height: options.height ?? 1920,
++        pixelAspectRatio: { num: 1, den: 1 },
++        frameRate: options.frameRate ?? { num: 30, den: 1 },
++        durationUs: 10_000_000,
++        background: '#000000',
++        tracks: (options.tracks ?? []).map((track, order) => ({
++          id: track.id,
++          kind: 'video',
++          family: track.family ?? 'visual',
++          name: track.name ?? track.id,
++          order,
++          enabled: track.enabled ?? true,
++          locked: false,
++          clips: track.clips.map((clip) => ({
++            id: clip.id,
++            kind: 'video',
++            assetId: 'asset-default',
++            startUs: clip.startUs ?? 0,
++            durationUs: clip.durationUs,
++            sourceInUs: 0,
++          })),
++        })),
++      },
++    },
++    assets: {},
++    variables: {},
++    markers: [],
++    visualObjects: {},
++    captionDocuments: {},
++    pluginData: {},
++  };
++  if (!options.omitId) doc.id = options.id ?? 'hand-written';
++  return doc;
++}
++
++/** Write `content` (object => JSON) into the sandbox working directory; returns the absolute path. */
++export function writeSandboxFile(sb: Sandbox, name: string, content: unknown): string {
++  const path = sb.path(name);
++  mkdirSync(dirname(path), { recursive: true });
++  writeFileSync(path, typeof content === 'string' ? content : JSON.stringify(content), 'utf8');
++  return path;
++}
++
++// ---------------------------------------------------------------------------
++// Reading what a run produced
++// ---------------------------------------------------------------------------
++
++/** Every file under `dir` as sorted POSIX-style relative paths (`[]` if `dir` does not exist). */
++export function listTree(dir: string): string[] {
++  const found: string[] = [];
++  const walk = (current: string): void => {
++    let entries;
++    try {
++      entries = readdirSync(current, { withFileTypes: true });
++    } catch {
++      return;
++    }
++    for (const entry of entries) {
++      const full = join(current, entry.name);
++      if (entry.isDirectory()) walk(full);
++      else found.push(relative(dir, full).split('\\').join('/'));
++    }
++  };
++  walk(dir);
++  return found.sort();
++}
++
++export function isDirectory(path: string): boolean {
++  try {
++    return statSync(path).isDirectory();
++  } catch {
++    return false;
++  }
++}
++
++export function readManifest(path: string): RenderManifest {
++  return JSON.parse(readFileSync(path, 'utf8')) as RenderManifest;
++}
++
++/** A manifest minus the two fields that legitimately differ between identical renders. */
++export function stableManifest(
++  manifest: RenderManifest,
++): Omit<RenderManifest, 'durationMs' | 'renderedAt'> {
++  const { durationMs: _durationMs, renderedAt: _renderedAt, ...rest } = manifest;
++  return rest;
++}
++
++/** Events minus timestamps/timings, for "same render, same story" comparisons. */
++export function stableEvents(events: readonly RenderEventLine[]): unknown[] {
++  return events.map((event) => {
++    const { ts: _ts, durationMs: _durationMs, ...rest } = event;
++    return rest;
++  });
++}
++
++/** Frames the renderer allots a clip of `durationUs` at `fps` (at least one frame). */
++export function expectedFrames(durationUs: number, fps = 30): number {
++  return Math.max(1, Math.round((durationUs / 1_000_000) * fps));
++}
++
++// ---------------------------------------------------------------------------
++// The `--json` contract an AI agent depends on
++// ---------------------------------------------------------------------------
++
++/**
++ * Assert the NDJSON stream contract and return the parsed events:
++ * stdout is only JSON objects (one per line, no banner / ANSI / progress bar),
++ * every event has a `type`, the LAST event is `complete` or `error`, and the
++ * process exit code agrees with it (`complete` <=> 0).
++ */
++export function expectNdjsonContract(
++  result: RunResult,
++  terminal: readonly string[] = ['complete', 'error'],
++): RenderEventLine[] {
++  const where = describeRun(result);
++  expect(result.timedOut, `timed out${where}`).toBe(false);
++  expect(hasAnsi(result.stdout), `ANSI escape codes on stdout${where}`).toBe(false);
++  expect(result.stdout.includes('\r'), `carriage returns (progress bar) on stdout${where}`).toBe(
++    false,
++  );
++  for (const line of result.stdout.split('\n')) {
++    if (line.trim() === '') continue;
++    expect(line.trimStart().startsWith('{'), `non-JSON line on stdout: ${line}${where}`).toBe(true);
++  }
++  const events = result.ndjson<RenderEventLine>();
++  expect(events.length, `stdout has no events at all${where}`).toBeGreaterThan(0);
++  for (const event of events) {
++    expect(typeof event.type, `event without a type: ${JSON.stringify(event)}${where}`).toBe(
++      'string',
++    );
++  }
++  const last = events[events.length - 1]!;
++  expect(terminal, `last event is "${last.type}"${where}`).toContain(last.type);
++  if (last.type === 'complete') expect(result.code, where).toBe(0);
++  if (last.type === 'error') expect(result.code, where).not.toBe(0);
++  return events;
++}
++
++export function eventsOfType(events: readonly RenderEventLine[], type: string): RenderEventLine[] {
++  return events.filter((event) => event.type === type);
++}
++
++// ---------------------------------------------------------------------------
++// Things the shared harness cannot do (reported as harness limitations)
++// ---------------------------------------------------------------------------
++
++/**
++ * Run the CLI with stdin left OPEN (the harness always closes it immediately),
++ * to prove a command never waits for input. Resolves with the exit code, or
++ * `'hung'` if the process had to be killed after `timeoutMs`.
++ */
++export function runWithOpenStdin(
++  sb: Sandbox,
++  args: readonly string[],
++  timeoutMs = 20_000,
++): Promise<{ code: number | null; outcome: 'exited' | 'hung'; stdout: string }> {
++  ensureCliBuilt();
++  return new Promise((resolve, reject) => {
++    const child = spawn(process.execPath, [join(CLI_ROOT, 'bin', 'joy-media.mjs'), ...args], {
++      cwd: sb.cwd,
++      env: sb.env(),
++      stdio: ['pipe', 'pipe', 'pipe'],
++    });
++    const out: Buffer[] = [];
++    child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
++    child.stderr.on('data', () => undefined);
++    child.on('error', reject);
++    let hung = false;
++    const timer = setTimeout(() => {
++      hung = true;
++      child.kill('SIGKILL');
++    }, timeoutMs);
++    child.on('close', (code) => {
++      clearTimeout(timer);
++      resolve({
++        code,
++        outcome: hung ? 'hung' : 'exited',
++        stdout: Buffer.concat(out).toString('utf8'),
++      });
++    });
++    // Deliberately never write to or end `child.stdin`.
++  });
++}

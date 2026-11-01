@@ -283,7 +283,7 @@ export function createCredentialStore(options: {
 export interface MigrationOutcome {
   /** Keys now held encrypted, and removed from the plaintext file after the read-back. */
   readonly moved: readonly string[];
-  /** Legacy profiles that stay where they are, shown as disabled. */
+  /** Legacy profiles that remain listed as disabled. */
   readonly disabled: readonly string[];
   /** Keys that stay in the plaintext file, because the store could not confirm them. */
   readonly unavailable: readonly string[];

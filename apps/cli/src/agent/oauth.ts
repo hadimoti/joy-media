@@ -6,7 +6,7 @@ import {
   signInWithXai,
   type OAuthAuthorizationPresentation,
 } from '@joy-media/provider-oauth';
-import { loadCliConfig, openCredentialStore, saveCliConfig } from '../utils/config.js';
+import { loadCliConfig, openCredentialStore, updateCliConfig } from '../utils/config.js';
 import type { OAuthCredential } from '../utils/credential-store.js';
 
 export type OAuthProfileProvider = 'chatgpt' | 'kimi' | 'xai';
@@ -33,7 +33,7 @@ export async function signInOAuthProfile(input: OAuthProfileSignInInput): Promis
       const config = loadCliConfig();
       const extAgentHostId = config.chatgptExtAgentHostId ?? newExtAgentHostId();
       if (config.chatgptExtAgentHostId === undefined) {
-        saveCliConfig({ ...config, chatgptExtAgentHostId: extAgentHostId });
+        updateCliConfig((current) => ({ ...current, chatgptExtAgentHostId: extAgentHostId }));
       }
       const existing = openCredentialStore().read(input.profileId);
       const issuedClientId =

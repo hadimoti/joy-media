@@ -5,7 +5,7 @@ import {
   type AgentSlotId,
   type AgentSlotResult,
 } from '@joy-media/provider-sdk';
-import { loadCliConfig, saveCliConfig, type SavedAgentSlot } from '../utils/config.js';
+import { loadCliConfig, updateCliConfig, type SavedAgentSlot } from '../utils/config.js';
 
 /** One slot as the CLI reads it. A saved slot that no longer passes the rules reads as empty, so it cannot run. */
 export function loadAgentSlot(id: AgentSlotId): AgentSlot {
@@ -24,16 +24,19 @@ export function loadAgentSlots(): Readonly<Record<AgentSlotId, AgentSlot>> {
 export function saveAgentSlot(id: AgentSlotId, draft: unknown): AgentSlotResult {
   const result = validateAgentSlot(id, draft);
   if (!result.ok) return result;
-  const config = loadCliConfig();
-  saveCliConfig({ ...config, agentSlots: { ...config.agentSlots, [id]: toSaved(result.slot) } });
+  updateCliConfig((current) => ({
+    ...current,
+    agentSlots: { ...current.agentSlots, [id]: toSaved(result.slot) },
+  }));
   return result;
 }
 
 export function clearAgentSlot(id: AgentSlotId): void {
-  const config = loadCliConfig();
-  const agentSlots = { ...config.agentSlots };
-  delete agentSlots[id];
-  saveCliConfig({ ...config, agentSlots });
+  updateCliConfig((current) => {
+    const agentSlots = { ...current.agentSlots };
+    delete agentSlots[id];
+    return { ...current, agentSlots };
+  });
 }
 
 function toSaved(slot: AgentSlot): SavedAgentSlot {

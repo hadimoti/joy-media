@@ -31,11 +31,16 @@ describe('product version sources', () => {
     expect(loggerSource).toMatch(/\$\{c\(`v\$\{CLI_VERSION\}`, 'dim'\)\}/);
 
     const setupSource = readRepositoryFile('apps/desktop/installer/Setup.cs');
+    // The installer registers and displays one constant, so the test reads that constant.
+    expect(setupSource).toMatch(
+      /key\.SetValue\("DisplayVersion", InstallerEngine\.ProductVersion, RegistryValueKind\.String\);/,
+    );
+    expect(setupSource).toMatch(/Text = "JOY Media v" \+ InstallerEngine\.ProductVersion,/);
     const setupDisplayVersion = captureVersion(
       setupSource,
-      /key\.SetValue\("DisplayVersion", "([^"]+)", RegistryValueKind\.String\);/,
+      /public const string ProductVersion = "([^"]+)";/,
     );
-    const setupWindowVersion = captureVersion(setupSource, /Text = "JOY Media v([^"]+)"/);
+    const setupWindowVersion = setupDisplayVersion;
 
     const packagerSource = readRepositoryFile('apps/desktop/scripts/package-installer.mjs');
     const uninstallerDisplayVersion = captureVersion(
@@ -48,9 +53,13 @@ describe('product version sources', () => {
     );
 
     const installerBuildSource = readRepositoryFile('apps/desktop/installer/build-installer.ps1');
+    // The zip name uses the -Version parameter, whose default is the release version.
+    expect(installerBuildSource).toMatch(
+      /Join-Path \$distReleases "joy-media-windows-x64-v\$Version\.zip"/,
+    );
     const installerZipName = captureVersion(
       installerBuildSource,
-      /Join-Path \$distReleases "joy-media-windows-x64-v([^"]+)\.zip"/,
+      /\[string\]\$Version = "([^"]+)"/,
     );
 
     const versions = [

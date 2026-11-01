@@ -1,4 +1,4 @@
-/* global console, process */
+/* global process */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { getJoyMediaHome } from '@joy-media/project-persistence/joy-media-home';
 import { resolveByokConfig } from '../agent/provider.js';
 import { getDefaultSqlitePath } from '../utils/config.js';
-import { c, logError, logSuccess, logWarn, printBanner } from '../utils/logger.js';
+import { c, logError, logLine, logSuccess, logWarn, printBanner } from '../utils/logger.js';
 import { isLocalPath, parseDriveTypes } from '../utils/local-path.js';
 import { powershellOptions } from '../utils/windows-powershell.js';
 
@@ -35,7 +35,7 @@ function readDriveTypes(): Map<string, number> {
  */
 export async function handleDoctorLocalCommand(): Promise<number> {
   printBanner();
-  console.log(`  ${c('JOY Media Local Check (explicit)', 'bold')}\n`);
+  logLine(`  ${c('JOY Media Local Check (explicit)', 'bold')}\n`);
 
   if (process.platform !== 'win32') {
     logError('The local check inspects Windows drives. Nothing was read on this platform.');
@@ -113,7 +113,7 @@ export async function handleDoctorLocalCommand(): Promise<number> {
     }
   }
 
-  console.log();
+  logLine();
   logWarn(
     'Not detected by this check: a cloud placeholder that downloads on first read, and a link created between the check and the read.',
   );

@@ -5,6 +5,8 @@
 **Audit scope:** Candidate baseline, current-tree and history scans, integrated verification, production dependency remediation, and unsigned desktop staging review. Task 1 owner/legal decisions and whole-artifact rights review remain incomplete.
 **Document status:** Draft — implementation and verification evidence is recorded; release gates remain open.
 
+> **Superseded 2026-10-01.** The Gate B (desktop binary) status below was **PENDING** at audit time. The repository owner subsequently cleared Gate B for an unsigned v1.0.0 distribution; the authoritative gate table is now in [`docs/OPEN_SOURCE_RELEASE.md`](../OPEN_SOURCE_RELEASE.md). This document is retained as the point-in-time audit record. Follow-up items are tracked in [`docs/plans/2026-10-02-v1.0.1-plan.md`](../plans/2026-10-02-v1.0.1-plan.md).
+
 ---
 
 ## Candidate / Source State

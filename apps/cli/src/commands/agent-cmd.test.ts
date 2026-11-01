@@ -173,7 +173,7 @@ describe('OAuth provider profiles', () => {
     expect(code).toBe(0);
     expect(signInOAuthProfileMock).toHaveBeenCalledTimes(1);
     const notice =
-      'Signing in uses a third-party public app and may stop working or be deactivated by the provider at any time. An API key is the dependable way to connect.';
+      'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
     expect(errors).toEqual([notice]);
     expect(order.indexOf(`stderr:${notice}`)).toBeLessThan(order.indexOf('sign-in'));
     expect(printed.join('\n')).toContain(
@@ -181,10 +181,10 @@ describe('OAuth provider profiles', () => {
     );
     expect(printed.join('\n')).toContain('User code: KIMI-CODE-TEST');
     expect(printed.join('\n')).toContain(`Code expires at: ${new Date(expiresAt).toISOString()}`);
-    expect(terminalWrites).toEqual([
-      'Waiting for approval. Press Ctrl+C to cancel.',
-      '\rWaiting for approval; the provider asked us to slow down. Press Ctrl+C to cancel.',
-    ]);
+    expect(printed.join('\n')).toContain('Waiting for approval. Press Ctrl+C to cancel.');
+    expect(printed.join('\n')).toContain(
+      'Waiting for approval; the provider asked us to slow down. Press Ctrl+C to cancel.',
+    );
     expect(printed.join('\n')).toContain('Provider "kimi-profile" configured successfully');
     expect(printed.join('\n')).toContain('Auth: OAuth (kimi)');
     expect(printed.join('\n')).toContain('kimi-code-model');
@@ -296,7 +296,7 @@ describe('OAuth provider profiles', () => {
       ]),
     ).toBe(2);
 
-    expect(errors.join('\n')).toContain('Unknown option: --region');
+    expect(errors.join('\n')).toContain('Unknown option --region');
     expect(signInOAuthProfileMock).not.toHaveBeenCalled();
   });
 

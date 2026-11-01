@@ -8,7 +8,7 @@ import { ProviderSignInPanel } from './ProviderSignInPanel.js';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const RISK_NOTICE =
-  'Signing in uses a third-party public app and may stop working or be deactivated by the provider at any time. An API key is the dependable way to connect.';
+  'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
 
 describe('ProviderSignInPanel', () => {
   const global = globalThis as { window?: unknown };
@@ -75,6 +75,14 @@ describe('ProviderSignInPanel', () => {
     await act(async () => button.click());
   }
 
+  async function openSignInRoute(provider: string): Promise<void> {
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle ' + provider + ' sign-in route"]',
+    );
+    if (button === null) throw new Error('Expected ' + provider + ' sign-in route accordion');
+    await act(async () => button.click());
+  }
+
   function route(provider: string, name: 'API-key' | 'OAuth'): HTMLElement {
     const element = container.querySelector<HTMLElement>(
       'section[aria-label="' + provider + ' ' + name + ' route"]',
@@ -130,14 +138,35 @@ describe('ProviderSignInPanel', () => {
     }
   });
 
+  it('keeps the sign-in route in a secondary accordion that starts closed', async () => {
+    installDesktopBridge();
+    await mount();
+    await openAccordion('xAI');
+
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle xAI sign-in route"]',
+    );
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(trigger?.textContent).toContain('Sign-in route (Secondary)');
+    expect(container.textContent).not.toContain('Sign in with xAI');
+    expect(container.textContent).not.toContain(RISK_NOTICE);
+
+    await openSignInRoute('xAI');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain(RISK_NOTICE);
+  });
+
   it('renders the same approved notice directly below each sign-in button', async () => {
     installDesktopBridge();
     await mount();
 
     for (const provider of ['ChatGPT', 'Kimi', 'xAI']) {
       await openAccordion(provider);
+      await openSignInRoute(provider);
       const signInRoute = route(provider, 'OAuth');
-      const card = signInRoute.closest('.joy-accordion-item');
+      const card = container
+        .querySelector('button[aria-label="Toggle ' + provider + ' connection routes"]')
+        ?.closest('.joy-accordion-item');
       const button = signInRoute.querySelector('button');
       expect(button?.textContent?.trim()).toBe('Sign in with ' + provider);
       expect(button?.nextElementSibling?.tagName).toBe('P');

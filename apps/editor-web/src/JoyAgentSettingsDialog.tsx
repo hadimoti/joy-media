@@ -1068,24 +1068,6 @@ export function JoyAgentSettingsDialog({
                 </button>
               ))}
             </div>
-
-            <div className="joy-settings-sidebar-footer">
-              <div className="joy-settings-sidebar-status">
-                <span
-                  className={`joy-settings-sidebar-status-dot ${connectionStatus?.capability ? 'is-connected' : ''}`}
-                />
-                <div className="joy-settings-sidebar-status-text">
-                  <div className="joy-settings-sidebar-status-label">
-                    {connectionStatus?.capability ? 'Engine Online' : 'Offline'}
-                  </div>
-                  <div className="joy-settings-sidebar-status-sub">
-                    {connectionStatus?.capability
-                      ? `${connectionStatus.provider}: ${displayModelId(connectionStatus.modelId)}`
-                      : 'Not connected'}
-                  </div>
-                </div>
-              </div>
-            </div>
           </nav>
 
           {/* Right Main Panel (faq-theme accordion content) */}

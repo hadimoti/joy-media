@@ -69,6 +69,9 @@ export default defineConfig({
   test: {
     // Bound file parallelism so Windows DPAPI and filesystem checks stay within their test timeouts.
     maxWorkers: 8,
+    // The CLI e2e suites spawn real processes on Windows, so they need more than the 5 s default.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     include: [
       '{apps,packages,tooling}/**/src/**/*.test.{ts,tsx}',
       'tests/e2e/helpers/browser-console-audit.unit.ts',

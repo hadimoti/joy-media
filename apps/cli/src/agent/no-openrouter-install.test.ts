@@ -72,7 +72,7 @@ describe('first CLI install without an OpenRouter profile or key', () => {
       provider: 'custom',
       baseUrl: 'http://127.0.0.1:1234/v1',
       modelId: 'local-model',
-      apiKey: 'not-provided',
+      apiKey: '',
     });
 
     const providerPath = getAiProvidersPath();

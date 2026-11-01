@@ -185,14 +185,37 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Setup-JoyMedia.ps1
 `;
 
 const uninstallCmd = `@echo off
+cd /d "%TEMP%" || (
+    echo Error: Could not change to TEMP directory.
+    exit /b 1
+)
 echo Uninstalling JOY Media...
-set "INSTALL_DIR=%LOCALAPPDATA%\\Programs\\JOY Media"
+
+set "INSTALL_DIR=%~dp0"
+if "%INSTALL_DIR:~-1%" == "\\" set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
+
+if "%INSTALL_DIR%"=="" (
+    echo Error: Could not determine install directory.
+    exit /b 1
+)
+set "JOY_MEDIA_INSTALL_DIR=%INSTALL_DIR%"
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$target = $env:JOY_MEDIA_INSTALL_DIR; if ([string]::IsNullOrWhiteSpace($target) -or $target -match '^[a-zA-Z]:$') { exit 1 }; try { $full = [System.IO.Path]::GetFullPath($target); $root = [System.IO.Path]::GetPathRoot($full); if ($full.TrimEnd('\\') -ieq $root.TrimEnd('\\') -or ($env:SystemRoot -and $full.TrimEnd('\\') -ieq [System.IO.Path]::GetFullPath($env:SystemRoot).TrimEnd('\\')) -or -not (Test-Path -LiteralPath (Join-Path $full 'joy-media.exe') -PathType Leaf)) { exit 1 } } catch { exit 1 }" 2>nul
+if errorlevel 1 (
+    echo Error: Refusing to remove an invalid JOY Media install directory.
+    exit /b 1
+)
+
 del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\JOY Media.lnk" 2>nul
 del "%USERPROFILE%\\Desktop\\JOY Media.lnk" 2>nul
 reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\JoyMedia" /f 2>nul
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); if ($p) { $np = ($p -split ';' | Where-Object { $_ -ne '' -and $_ -ne '%INSTALL_DIR%' }) -join ';'; [Environment]::SetEnvironmentVariable('Path', $np, 'User') }" 2>nul
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); $target = $env:JOY_MEDIA_INSTALL_DIR.TrimEnd('\\'); if ($p) { $np = ($p -split ';' | Where-Object { $_ -ne '' -and $_.TrimEnd('\\') -ine $target }) -join ';'; [Environment]::SetEnvironmentVariable('Path', $np, 'User') }" 2>nul
+
 echo Cleaning application files...
-rmdir /s /q "%INSTALL_DIR%" 2>nul
+
+start /b "" powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$target = $env:JOY_MEDIA_INSTALL_DIR; if ([string]::IsNullOrWhiteSpace($target)) { exit 0 }; try { $full = [System.IO.Path]::GetFullPath($target); $root = [System.IO.Path]::GetPathRoot($full); if ($target -match '^[a-zA-Z]:$' -or $full.TrimEnd('\\') -ieq $root.TrimEnd('\\') -or ($env:SystemRoot -and $full.TrimEnd('\\') -ieq [System.IO.Path]::GetFullPath($env:SystemRoot).TrimEnd('\\')) -or -not (Test-Path -LiteralPath (Join-Path $full 'joy-media.exe') -PathType Leaf)) { exit 0 } } catch { exit 0 }; Start-Sleep -Seconds 2; $end = [datetime]::UtcNow.AddSeconds(30); while ([datetime]::UtcNow -lt $end -and (Test-Path -LiteralPath $full)) { try { Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction Stop; break } catch { Start-Sleep -Milliseconds 500 } }" 2>nul
+
 echo JOY Media has been uninstalled.
 `;
 

@@ -40,3 +40,6 @@ apps/desktop/renderer/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# Local scratch output (logs, probes); never release source.
+tmp/

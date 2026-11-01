@@ -56,7 +56,7 @@ describe('provider registry', () => {
     expect(findRegistryProvider('claude')?.api).toBe('anthropic-messages');
     expect(findRegistryProvider('minimax')?.auth).toMatchObject({
       methods: ['api-key'],
-      sourceDate: '2026-10-31',
+      sourceDate: '2026-11-01',
     });
     expect(findRegistryProvider('minimax')?.auth.gated).toBeUndefined();
     expect(findRegistryProvider('minimax')?.auth.unverified).toBeUndefined();
@@ -216,7 +216,7 @@ describe('permitted authentication (PLAN-v4 §6d-1)', () => {
     }
   });
 
-  it('records MiniMax API-key approval under D23 and clears its eligibility gate', () => {
+  it('records the D23 API-key decision and the closure of its eligibility gate', () => {
     const minimax = PROVIDER_REGISTRY.find((provider) => provider.id === 'minimax');
     expect(minimax?.auth.methods).toEqual(['api-key']);
     expect(minimax?.auth.gated).toBeUndefined();

@@ -201,7 +201,7 @@ describe('JOY Agent Settings connection status', () => {
     expect(options).not.toContain('kimi');
     expect(options).not.toContain('xai');
     expect(providerSelect?.closest('.joy-settings-form-grid')?.textContent).not.toContain(
-      'Signing in uses a third-party public app and may stop working or be deactivated by the provider at any time. An API key is the dependable way to connect.',
+      'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.',
     );
     expect(options).not.toContain('joy-hosted');
     expect(rendered.textContent).not.toMatch(/Joy Pro|Sign In with JOY Account|quota|plan limits/i);
