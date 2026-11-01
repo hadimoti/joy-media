@@ -332,6 +332,11 @@ describe('config files are never silently destroyed', () => {
   for (const [label, content] of [
     ['truncated JSON', `{"work": {"apiKey": "${KEY}", "baseUrl": "https://api.example.com/v1"`],
     ['a JSON array', '["not", "a", "map"]'],
+    ['a provider entry that is not an object', '{"work": null}'],
+    [
+      'a legacy key next to a malformed entry',
+      `{"legacy": {"apiKey": "${KEY}", "baseUrl": "https://api.example.com/v1"}, "bad": 7}`,
+    ],
   ] as const) {
     it(`ai-providers.json with ${label}: add/list/remove refuse (exit 1), file kept byte-for-byte`, async () => {
       const path = writeJoyConfig(env.sb, 'ai-providers.json', content);

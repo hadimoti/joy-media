@@ -229,7 +229,9 @@ export function openCredentialStore(): CredentialStore {
 export function migrateLegacyProviders(): void {
   withConfigLock(() => {
     const path = getAiProvidersPath();
-    if (readJsonObject(path) === undefined) return;
+    const providers = readJsonObject(path);
+    if (providers === undefined) return;
+    assertProviderEntries(path, providers);
     migrateProviderFile({ providersPath: path, store: openCredentialStore() });
   });
 }
@@ -245,10 +247,10 @@ export function loadAiProviders(): Record<string, AiProviderConfig> {
   // Self-heal installs that stored keys world-readable before this fix.
   makePrivate(getJoyMediaDir(), PRIVATE_DIR_MODE);
   makePrivate(path, PRIVATE_FILE_MODE);
+  assertProviderEntries(path, rawProviders);
   const providers = rawProviders as Record<string, AiProviderConfig>;
   let store: CredentialStore | undefined;
   for (const [name, entry] of Object.entries(providers)) {
-    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
     if (entry.apiKey !== undefined || entry.authKind === 'oauth') continue;
     store ??= openCredentialStore();
     try {
@@ -268,16 +270,34 @@ export function loadAiProviders(): Record<string, AiProviderConfig> {
   return providers;
 }
 
+/**
+ * Every provider entry must be a JSON object. A malformed entry throws instead of being skipped or
+ * rewritten, so a save can never replace a corrupt file with new content.
+ * @throws ConfigFileError when an entry is not an object.
+ */
+function assertProviderEntries(path: string, providers: Record<string, unknown>): void {
+  // The name is left out of the message: it can be any string, so it could carry a key.
+  for (const entry of Object.values(providers)) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ConfigFileError(path, 'not a JSON object (a provider entry is not one)');
+    }
+  }
+}
+
 function loadAiProviderMetadata(): Record<string, AiProviderConfig> {
-  const rawProviders = readJsonObject(getAiProvidersPath());
-  return rawProviders === undefined
-    ? (Object.create(null) as Record<string, AiProviderConfig>)
-    : (rawProviders as Record<string, AiProviderConfig>);
+  const path = getAiProvidersPath();
+  const rawProviders = readJsonObject(path);
+  if (rawProviders === undefined) return Object.create(null) as Record<string, AiProviderConfig>;
+  assertProviderEntries(path, rawProviders);
+  return rawProviders as Record<string, AiProviderConfig>;
 }
 
 /** Writes only non-secret provider metadata with an atomic replacement. */
 function saveAiProviderMetadata(providers: Record<string, AiProviderConfig>): void {
   const path = getAiProvidersPath();
+  // A corrupt file that is already on disk is never replaced by a save.
+  const existing = readJsonObject(path);
+  if (existing !== undefined) assertProviderEntries(path, existing);
   const metadata = Object.create(null) as Record<string, AiProviderConfig>;
   for (const [name, entry] of Object.entries(providers)) {
     metadata[name] = {
