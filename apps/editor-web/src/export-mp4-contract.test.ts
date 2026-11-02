@@ -64,9 +64,7 @@ describe('App MP4 export negotiation contract', () => {
 
   it('persists the export preset only after preload, Worker verification, and verified durable caching', () => {
     const preload = exportCallback.indexOf("'fetching authored audio bytes'");
-    const download = exportCallback.indexOf(
-      'const browserExportResult: BrowserExportResult = await downloadBrowserMp4',
-    );
+    const download = exportCallback.indexOf('let browserExportResult: BrowserExportResult;');
     const persistPreset = exportCallback.indexOf('session.synchronizeVisualProject({');
     const progress = exportCallback.indexOf('setExportProgress(1)', persistPreset);
     const durableCache = exportCallback.indexOf('cache.putVerified(entryId, exportResult.blob)');
@@ -92,6 +90,52 @@ describe('App MP4 export negotiation contract', () => {
     expect(exportCallback.slice(persistPreset, progress)).toContain(
       'exportPreset: activeExportPreset',
     );
+  });
+
+  it('encodes offline with the hardware encoder when it is available and keeps the recorder as the fallback', () => {
+    const detect = exportCallback.indexOf('detectOfflineMp4Capability({');
+    const recorderAudio = exportCallback.indexOf('recorderAudio = {');
+    const shared = exportCallback.indexOf('const encodeSource = {');
+    const offlineBranch = exportCallback.indexOf('if (offlineCapability.ok) {');
+    const offlineEncode = exportCallback.indexOf('exportOfflineMp4({', offlineBranch);
+    const recorderEncode = exportCallback.indexOf('downloadBrowserMp4({', offlineEncode);
+    const offlineSlice = exportCallback.slice(offlineBranch, recorderEncode);
+
+    for (const index of [
+      detect,
+      recorderAudio,
+      shared,
+      offlineBranch,
+      offlineEncode,
+      recorderEncode,
+    ])
+      expect(index).toBeGreaterThanOrEqual(0);
+    expect(detect).toBeLessThan(recorderAudio);
+    expect(recorderAudio).toBeLessThan(shared);
+    expect(shared).toBeLessThan(offlineBranch);
+    expect(offlineEncode).toBeLessThan(recorderEncode);
+    // The real-time audio graph is built only when the offline encoder is not available.
+    expect(
+      exportCallback.lastIndexOf('if (!offlineCapability.ok) {', recorderAudio),
+    ).toBeGreaterThan(detect);
+    // The offline branch feeds the offline mix to AAC and waits for fonts like the recorder does.
+    expect(offlineSlice).toMatch(
+      /createOfflineAacTrack\(\{\s*channelData: offlineAudio\.channelData/,
+    );
+    expect(offlineSlice).toContain('await waitForContentFonts(requiredFontFamilies)');
+    // A failed offline export is reported, not silently redone with the recorder, and nothing
+    // plays in real time on the offline path.
+    expect(offlineSlice).not.toMatch(/catch|downloadBrowserMp4/);
+    expect(offlineSlice).not.toMatch(/\.play\(\)|\.start\(0\)|setTimeout/);
+    // The shared frame path runs for both encoders, so it must not play or time anything either.
+    expect(exportCallback.slice(shared, offlineBranch)).not.toMatch(
+      /\.play\(\)|\.start\(0\)|setTimeout/,
+    );
+    // Both encoders get the same frames, paint function, cancellation signal and progress report.
+    const sharedSlice = exportCallback.slice(shared, offlineBranch);
+    expect(sharedSlice).toContain('paintFrame: async (index: number)');
+    expect(sharedSlice).toContain('signal: abortController.signal');
+    expect(sharedSlice).toContain('onProgress: (completed: number, total: number)');
   });
 
   it('records callback-time media drift before decode and canvas work', () => {
