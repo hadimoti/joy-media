@@ -383,6 +383,9 @@ if (!app.requestSingleInstanceLock()) {
       });
       const finishSmoke = () => {
         setTimeout(() => {
+          // `app.exit` skips the before-quit shutdown hooks. Stop the Worker here: a staged app
+          // has one, and left running it outlives the smoke and holds the caller's output pipes.
+          workerSupervisor.stop();
           if (failureReason) {
             console.error(`[joy-desktop] packaged renderer smoke failed: ${failureReason}`);
             app.exit(1);
