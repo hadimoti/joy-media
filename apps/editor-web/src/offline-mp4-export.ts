@@ -10,7 +10,7 @@
  * manifest frame rate, so a 10 minute timeline encodes in as long as the encoder needs.
  */
 
-import { BufferTarget, CanvasSource, Mp4OutputFormat, Output } from 'mediabunny';
+import { AppendOnlyStreamTarget, CanvasSource, Mp4OutputFormat, Output } from 'mediabunny';
 import type { VideoEncodingConfig } from 'mediabunny';
 import type {
   BrowserExportManifest,
@@ -81,8 +81,8 @@ export interface OfflineMp4ExportDeps {
   readonly Output?: typeof Output;
   /** Defaults to mediabunny's `Mp4OutputFormat`. */
   readonly Mp4OutputFormat?: typeof Mp4OutputFormat;
-  /** Defaults to mediabunny's `BufferTarget`. */
-  readonly BufferTarget?: typeof BufferTarget;
+  /** Defaults to mediabunny's `AppendOnlyStreamTarget`. */
+  readonly AppendOnlyStreamTarget?: typeof AppendOnlyStreamTarget;
   /** Defaults to mediabunny's `CanvasSource`. */
   readonly CanvasSource?: typeof CanvasSource;
   /**
@@ -280,6 +280,47 @@ function describeError(error: unknown): string {
   return String(error);
 }
 
+/** Collects the bytes the muxer writes as Blob parts. */
+export interface BlobSink {
+  /** The stream the muxer's target writes to. Every chunk becomes one Blob part. */
+  readonly writable: WritableStream<Uint8Array>;
+  /** The number of bytes written so far. */
+  readonly size: () => number;
+  /** One Blob made of every part, in the order they were written. */
+  readonly toBlob: (type: string) => Blob;
+  /** Drops every part and ignores anything written afterwards. */
+  readonly discard: () => void;
+}
+
+/**
+ * Collects what the muxer writes as Blob parts. Wrapping each fragment in a Blob as it arrives
+ * moves its bytes out of the script heap into the browser's blob storage, which can page out to
+ * disk. The final Blob only references those parts, so the file is never copied again. The
+ * previous in-memory target held the whole file in several script buffers at once, up to about
+ * four times its size at the end of a long export.
+ */
+export function createBlobSink(): BlobSink {
+  let parts: Blob[] = [];
+  let size = 0;
+  let discarded = false;
+  return {
+    writable: new WritableStream<Uint8Array>({
+      write(chunk) {
+        if (discarded) return;
+        parts.push(new Blob([chunk as Uint8Array<ArrayBuffer>]));
+        size += chunk.byteLength;
+      },
+    }),
+    size: () => size,
+    toBlob: (type) => new Blob(parts, { type }),
+    discard: () => {
+      discarded = true;
+      parts = [];
+      size = 0;
+    },
+  };
+}
+
 /**
  * Encodes every painted frame into an MP4, as fast as the encoder allows.
  *
@@ -304,7 +345,7 @@ export async function exportOfflineMp4(
 
   const OutputCtor = deps.Output ?? Output;
   const Mp4OutputFormatCtor = deps.Mp4OutputFormat ?? Mp4OutputFormat;
-  const BufferTargetCtor = deps.BufferTarget ?? BufferTarget;
+  const AppendOnlyStreamTargetCtor = deps.AppendOnlyStreamTarget ?? AppendOnlyStreamTarget;
   const CanvasSourceCtor = deps.CanvasSource ?? CanvasSource;
 
   const signal = source.signal;
@@ -323,12 +364,16 @@ export async function exportOfflineMp4(
   };
   signal?.addEventListener('abort', onAbort, { once: true });
 
-  const target = new BufferTargetCtor();
+  // A fragmented MP4 is written strictly front to back, one fragment at a time, so each fragment
+  // can go straight into blob storage and the muxer never holds more than the current fragment.
+  // It is the same container layout the real-time recorder produces (moov, moof fragments, mfra).
+  const sink = createBlobSink();
+  const target = new AppendOnlyStreamTargetCtor(sink.writable);
   let output: Output | undefined;
   let videoSource: CanvasSource | undefined;
   try {
     output = new OutputCtor({
-      format: new Mp4OutputFormatCtor({ fastStart: 'in-memory' }),
+      format: new Mp4OutputFormatCtor({ fastStart: 'fragmented' }),
       target,
     });
     videoSource = new CanvasSourceCtor(source.canvas, {
@@ -376,14 +421,14 @@ export async function exportOfflineMp4(
       inFlight,
       deps.cancelGraceMs ?? CANCEL_GRACE_MS,
     );
+    // Drop what was written so far; anything the muxer still writes after this is ignored.
+    sink.discard();
     throw error;
   } finally {
     signal?.removeEventListener('abort', onAbort);
   }
 
-  const buffer = target.buffer;
-  if (buffer === null) throw new Error('the MP4 target produced no buffer');
-  const blob = new Blob([buffer], { type: 'video/mp4' });
+  const blob = sink.toBlob('video/mp4');
   if (blob.size === 0) throw new Error('the offline MP4 export produced an empty file');
   return {
     frameCount,

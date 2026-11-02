@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Output } from 'mediabunny';
 import {
+  createBlobSink,
   detectOfflineMp4Capability,
   exportOfflineMp4,
   type OfflineAudioFeeder,
@@ -42,8 +43,10 @@ const state = {
   onFinish: undefined as (() => void) | undefined,
   /** Runs when `finalize()` is called. */
   onFinalize: undefined as (() => void) | undefined,
-  /** How many bytes the fake target reports once the output is finalized. */
+  /** How many bytes the fake output writes to its target when it is finalized. */
   targetBytes: 16,
+  /** When set, the fake output writes exactly these fragments instead of `targetBytes` zeros. */
+  fragments: undefined as Uint8Array[] | undefined,
 };
 
 class FakeVideoSource {
@@ -69,10 +72,8 @@ class FakeVideoSource {
   }
 }
 
-class FakeBufferTarget {
-  buffer: ArrayBuffer | null = null;
-
-  constructor() {
+class FakeAppendOnlyStreamTarget {
+  constructor(readonly writable: WritableStream<Uint8Array>) {
     state.log.push('target:new');
   }
 }
@@ -85,9 +86,9 @@ class FakeOutputFormat {
 
 class FakeOutput {
   readonly format: unknown;
-  readonly target: FakeBufferTarget;
+  readonly target: FakeAppendOnlyStreamTarget;
 
-  constructor(options: { readonly format: unknown; readonly target: FakeBufferTarget }) {
+  constructor(options: { readonly format: unknown; readonly target: FakeAppendOnlyStreamTarget }) {
     this.format = options.format;
     this.target = options.target;
     state.outputCreated += 1;
@@ -110,7 +111,12 @@ class FakeOutput {
     state.log.push('output:finalize');
     state.onFinalize?.();
     if (state.pendingFinalize !== undefined) await state.pendingFinalize.promise;
-    this.target.buffer = new ArrayBuffer(state.targetBytes);
+    // The real muxer writes the file to its target front to back; this does the same.
+    const writer = this.target.writable.getWriter();
+    const fragments =
+      state.fragments ?? (state.targetBytes > 0 ? [new Uint8Array(state.targetBytes)] : []);
+    for (const fragment of fragments) await writer.write(fragment);
+    await writer.close();
   }
 
   async cancel(): Promise<void> {
@@ -149,7 +155,7 @@ type Deps = Required<OfflineMp4ExportDeps>;
 const deps: Deps = {
   Output: FakeOutput as unknown as Deps['Output'],
   Mp4OutputFormat: FakeOutputFormat as unknown as Deps['Mp4OutputFormat'],
-  BufferTarget: FakeBufferTarget as unknown as Deps['BufferTarget'],
+  AppendOnlyStreamTarget: FakeAppendOnlyStreamTarget as unknown as Deps['AppendOnlyStreamTarget'],
   CanvasSource: FakeVideoSource as unknown as Deps['CanvasSource'],
   // Short, so a test that leaves a frame pending forever does not wait for the real grace period.
   cancelGraceMs: 25,
@@ -216,6 +222,7 @@ beforeEach(() => {
   state.onFinish = undefined;
   state.onFinalize = undefined;
   state.targetBytes = 16;
+  state.fragments = undefined;
 });
 
 describe('exportOfflineMp4', () => {
@@ -305,7 +312,8 @@ describe('exportOfflineMp4', () => {
       keyFrameInterval: 2,
     });
     expect(state.videoTrackMetadata).toEqual({ frameRate: 30 });
-    expect(state.formatOptions).toEqual({ fastStart: 'in-memory' });
+    // Written front to back, one fragment at a time, so no copy of the file builds up in memory.
+    expect(state.formatOptions).toEqual({ fastStart: 'fragmented' });
   });
 
   it('returns the encoded blob without downloading it', async () => {
@@ -515,6 +523,29 @@ describe('exportOfflineMp4', () => {
     expect(Date.now() - cancelledAt).toBeLessThan(1_000);
   });
 
+  it('drops a fragment the muxer writes after the export was cancelled, without an error', async () => {
+    // mediabunny cannot cancel a file that is already being finalized, so it may still write its
+    // last fragments after the export has returned. They must be dropped quietly: a write to a
+    // sink that rejected would surface as an unhandled rejection, which fails this test run.
+    const controller = new AbortController();
+    let finishFinalize!: () => void;
+    state.pendingFinalize = { promise: new Promise<void>((resolve) => (finishFinalize = resolve)) };
+    state.fragments = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5])];
+    const finalizeStarted = new Promise<void>((resolve) => {
+      state.onFinalize = () => resolve();
+    });
+    const source: OfflineMp4ExportSource = { ...baseSource(), signal: controller.signal };
+
+    const errorPromise = captureError(exportOfflineMp4(source, deps));
+    await finalizeStarted;
+    controller.abort();
+    expect(((await errorPromise) as DOMException).name).toBe('AbortError');
+
+    finishFinalize();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(state.outputFinalized).toBe(1);
+  });
+
   it('closes the video source after the audio finished and just before the file is written', async () => {
     const source: OfflineMp4ExportSource = { ...baseSource(), audio: new FakeAudioFeeder() };
     await exportOfflineMp4(source, deps);
@@ -564,10 +595,70 @@ describe('exportOfflineMp4', () => {
     expect(state.audioAborted).toBe(1);
   });
 
+  it('returns every fragment the muxer wrote, in order, as one blob', async () => {
+    state.fragments = [new Uint8Array([1, 2]), new Uint8Array([3]), new Uint8Array([4, 5, 6])];
+    const result = await exportOfflineMp4(baseSource(), deps);
+
+    expect(result.blob?.type).toBe('video/mp4');
+    expect(result.totalBytes).toBe(6);
+    expect(Array.from(new Uint8Array(await result.blob!.arrayBuffer()))).toEqual([
+      1, 2, 3, 4, 5, 6,
+    ]);
+  });
+
   it('reports an empty file instead of handing out an empty blob', async () => {
     state.targetBytes = 0;
     const error = await captureError(exportOfflineMp4(baseSource(), deps));
     expect((error as Error).message).toContain('empty file');
+  });
+});
+
+describe('createBlobSink', () => {
+  async function write(sink: ReturnType<typeof createBlobSink>, ...chunks: number[][]) {
+    const writer = sink.writable.getWriter();
+    for (const chunk of chunks) await writer.write(new Uint8Array(chunk));
+    writer.releaseLock();
+  }
+
+  it('keeps every chunk, in order, as parts of one blob', async () => {
+    const sink = createBlobSink();
+    await write(sink, [1, 2, 3], [4], [5, 6]);
+
+    expect(sink.size()).toBe(6);
+    const blob = sink.toBlob('video/mp4');
+    expect(blob.size).toBe(6);
+    expect(blob.type).toBe('video/mp4');
+    expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it('does not keep a view on the chunk it was given', async () => {
+    const sink = createBlobSink();
+    const chunk = new Uint8Array([7, 8, 9]);
+    await write(sink, [0]);
+    const writer = sink.writable.getWriter();
+    await writer.write(chunk);
+    chunk.fill(0);
+    writer.releaseLock();
+
+    expect(Array.from(new Uint8Array(await sink.toBlob('video/mp4').arrayBuffer()))).toEqual([
+      0, 7, 8, 9,
+    ]);
+  });
+
+  it('is empty before anything is written', () => {
+    const sink = createBlobSink();
+    expect(sink.size()).toBe(0);
+    expect(sink.toBlob('video/mp4').size).toBe(0);
+  });
+
+  it('drops what it holds on discard and ignores later writes', async () => {
+    const sink = createBlobSink();
+    await write(sink, [1, 2, 3]);
+    sink.discard();
+    await write(sink, [4, 5]);
+
+    expect(sink.size()).toBe(0);
+    expect(sink.toBlob('video/mp4').size).toBe(0);
   });
 });
 
