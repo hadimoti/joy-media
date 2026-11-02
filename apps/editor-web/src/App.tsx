@@ -222,6 +222,7 @@ import {
   type BrowserExportManifest,
   type BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
+import type { OfflineMp4Capability } from './offline-mp4-export.js';
 import { HtmlSceneSurfaceCache } from './html-scene-surfaces.js';
 import { waitForContentFonts } from './font-readiness.js';
 import { EMPTY_EDITOR_STATE, searchActions } from './editor-state.js';
@@ -4415,19 +4416,49 @@ function EditorWorkspace({
             },
           },
         );
-        const mixedAudioBuffer = createExportAudioBuffer(
-          audioContext,
-          offlineAudio.channelData,
-          audioSampleRate,
-        );
-        const mixedAudioSource = audioContext.createBufferSource();
-        activeMixedAudioSource = mixedAudioSource;
-        mixedAudioSource.buffer = mixedAudioBuffer;
-        mixedAudioSource.connect(audioDestination);
-        const exportAudioTrack = audioDestination.stream.getAudioTracks()[0];
-        if (exportAudioTrack === undefined)
-          throw new Error('Export audio mix did not produce a track');
-        activeExportAudioTrack = exportAudioTrack;
+        // Hardware H.264 and AAC through WebCodecs, encoded as fast as the encoder runs, when this
+        // browser can do it for this frame size and sample rate. Otherwise the real-time recorder
+        // below runs, exactly as before. The choice is made once, here.
+        let offlineCapability: OfflineMp4Capability;
+        try {
+          const { detectOfflineMp4Capability } = await import('./offline-mp4-export.js');
+          offlineCapability = await detectOfflineMp4Capability({
+            width,
+            height,
+            frameRate,
+            needsAudio: true,
+            audioSampleRate,
+          });
+        } catch (error) {
+          offlineCapability = {
+            ok: false,
+            reason: error instanceof Error ? error.message : String(error),
+          };
+        }
+        if (!offlineCapability.ok)
+          console.warn(
+            'Offline MP4 export is unavailable; using the real-time recorder.',
+            offlineCapability.reason,
+          );
+        // The real-time recorder plays the mix into a MediaStream; the offline encoder reads it directly.
+        let recorderAudio:
+          { readonly source: AudioBufferSourceNode; readonly track: MediaStreamTrack } | undefined;
+        if (!offlineCapability.ok) {
+          const mixedAudioBuffer = createExportAudioBuffer(
+            audioContext,
+            offlineAudio.channelData,
+            audioSampleRate,
+          );
+          const mixedAudioSource = audioContext.createBufferSource();
+          activeMixedAudioSource = mixedAudioSource;
+          mixedAudioSource.buffer = mixedAudioBuffer;
+          mixedAudioSource.connect(audioDestination);
+          const exportAudioTrack = audioDestination.stream.getAudioTracks()[0];
+          if (exportAudioTrack === undefined)
+            throw new Error('Export audio mix did not produce a track');
+          activeExportAudioTrack = exportAudioTrack;
+          recorderAudio = { source: mixedAudioSource, track: exportAudioTrack };
+        }
         const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
         activeRenderer = renderer;
         const recorderCanvas = document.createElement('canvas');
@@ -4444,40 +4475,28 @@ function EditorWorkspace({
         exportSceneCache = hasHtmlScenes ? new HtmlSceneSurfaceCache() : undefined;
         await audioContext.resume();
         setExportStatus(`Encoding ${totalFrames} preview-equivalent H.264/AAC frames…`);
-        const browserExportResult: BrowserExportResult = await downloadBrowserMp4({
+        const requiredFontFamilies = [
+          ...new Set(
+            Object.values(exportVisualProject.visualObjects)
+              .flatMap((object) =>
+                object.kind === 'text'
+                  ? [
+                      object.textStyle?.fontFamily ?? '',
+                      ...(object.textDocument?.blocks ?? []).flatMap((block) =>
+                        block.runs.map((run) => run.style?.fontFamily ?? ''),
+                      ),
+                    ]
+                  : [],
+              )
+              .filter((family) => family.length > 0),
+          ),
+        ];
+        // What both encoders share: the frames, how each one is painted, and how progress shows.
+        const encodeSource = {
           manifest,
           frameCount: totalFrames,
           canvas: recorderCanvas,
-          audioTrack: exportAudioTrack,
-          mimeType: selectedMimeType,
-          requiredFontFamilies: [
-            ...new Set(
-              Object.values(exportVisualProject.visualObjects)
-                .flatMap((object) =>
-                  object.kind === 'text'
-                    ? [
-                        object.textStyle?.fontFamily ?? '',
-                        ...(object.textDocument?.blocks ?? []).flatMap((block) =>
-                          block.runs.map((run) => run.style?.fontFamily ?? ''),
-                        ),
-                      ]
-                    : [],
-                )
-                .filter((family) => family.length > 0),
-            ),
-          ],
-          fontReadiness: waitForContentFonts,
-          onRecordingStart: () => {
-            mixedAudioSource.start(0);
-            mixedAudioStarted = true;
-            for (const media of exportMedia) {
-              if (media.video === undefined) continue;
-              const startVideo = () => void media.video?.play();
-              if (media.clip.startUs === 0) startVideo();
-              else startTimers.push(window.setTimeout(startVideo, media.clip.startUs / 1_000));
-            }
-          },
-          paintFrame: async (index) => {
+          paintFrame: async (index: number) => {
             const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
             // A clip that ended more than a second ago (past any transition that holds its last
             // frame) no longer needs its hardware decoder. Long projects would otherwise keep one
@@ -4613,7 +4632,7 @@ function EditorWorkspace({
             recorderContext.clearRect(0, 0, width, height);
             recorderContext.drawImage(renderer.canvas, 0, 0, width, height);
           },
-          onProgress: (completed, total) => {
+          onProgress: (completed: number, total: number) => {
             setExportProgress(0.05 + 0.93 * (completed / total));
             if (completed === total || completed % frameRate === 0)
               setExportStatus(
@@ -4621,9 +4640,50 @@ function EditorWorkspace({
               );
           },
           filename: exportFilename,
-          autoDownload: false,
           signal: abortController.signal,
-        });
+        };
+        // A failed offline export is reported, never silently redone with the recorder: the
+        // recorder is only used when the offline encoder was not available at the start.
+        let browserExportResult: BrowserExportResult;
+        if (offlineCapability.ok) {
+          const [{ exportOfflineMp4 }, { createOfflineAacTrack }] = await Promise.all([
+            import('./offline-mp4-export.js'),
+            import('./offline-aac-track.js'),
+          ]);
+          // The same font gate the recorder applies before its first frame.
+          await waitForContentFonts(requiredFontFamilies);
+          browserExportResult = await exportOfflineMp4({
+            ...encodeSource,
+            capability: offlineCapability,
+            audio: createOfflineAacTrack({
+              channelData: offlineAudio.channelData,
+              sampleRate: audioSampleRate,
+              durationUs,
+            }),
+          });
+        } else {
+          if (recorderAudio === undefined)
+            throw new Error('Export audio mix was not prepared for the recorder');
+          const { source: mixedAudioSource, track: exportAudioTrack } = recorderAudio;
+          browserExportResult = await downloadBrowserMp4({
+            ...encodeSource,
+            audioTrack: exportAudioTrack,
+            mimeType: selectedMimeType,
+            requiredFontFamilies,
+            fontReadiness: waitForContentFonts,
+            onRecordingStart: () => {
+              mixedAudioSource.start(0);
+              mixedAudioStarted = true;
+              for (const media of exportMedia) {
+                if (media.video === undefined) continue;
+                const startVideo = () => void media.video?.play();
+                if (media.clip.startUs === 0) startVideo();
+                else startTimers.push(window.setTimeout(startVideo, media.clip.startUs / 1_000));
+              }
+            },
+            autoDownload: false,
+          });
+        }
         if (browserExportResult.blob === undefined)
           throw new Error('Browser export did not produce a downloadable MP4');
         setExportStatus('Staging export for Worker verification…');

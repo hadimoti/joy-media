@@ -45,7 +45,7 @@ describe('App export recovery contract', () => {
   });
 
   it('threads one AbortSignal through encoding, Worker staging, and durable cache verification', () => {
-    const encode = exportCallback.indexOf('downloadBrowserMp4({');
+    const encode = exportCallback.indexOf('const encodeSource = {');
     const encodeSignal = exportCallback.indexOf('signal: abortController.signal', encode);
     const stage = exportCallback.indexOf(
       "setExportStatus('Staging export for Worker verification…')",
