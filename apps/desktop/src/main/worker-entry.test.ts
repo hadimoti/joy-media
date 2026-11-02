@@ -37,14 +37,33 @@ describe('resolveWorkerEntry', () => {
     expect(result).toEqual({ command: execPath, args: [unpackedEntry] });
   });
 
-  it('targets the packaged/unpacked standalone joy-worker.exe when present', () => {
+  it('targets the packaged/unpacked standalone joy-worker.exe when present, and tells it where the packaged script is', () => {
     const unpackedExe = join(mainDirname, '..', '..', 'worker', 'joy-worker.exe');
+    const unpackedWorkerRoot = join(mainDirname, '..', '..', 'worker');
     const result = resolveWorkerEntry({
       mainDirname,
       execPath,
       fileExists: (path) => path === unpackedExe,
     });
-    expect(result).toEqual({ command: unpackedExe, args: [] });
+    expect(result).toEqual({
+      command: unpackedExe,
+      args: [],
+      env: {
+        JOY_MEDIA_WORKER_ROOT: unpackedWorkerRoot,
+        JOY_MEDIA_WORKER_ENTRYPOINT: join(unpackedWorkerRoot, 'index.js'),
+        JOY_MEDIA_NODE_PATH: execPath,
+      },
+    });
+  });
+
+  it('adds no extra variables when it runs the packaged script directly', () => {
+    const unpackedEntry = join(mainDirname, '..', '..', 'worker', 'index.js');
+    const result = resolveWorkerEntry({
+      mainDirname,
+      execPath,
+      fileExists: (path) => path === unpackedEntry,
+    });
+    expect(result.env).toBeUndefined();
   });
 
   it('targets the repo-layout joy-worker.exe when dist/index.js is absent', () => {

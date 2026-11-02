@@ -5,6 +5,8 @@ import { join } from 'node:path';
 export interface WorkerEntryCommand {
   readonly command: string;
   readonly args: readonly string[];
+  /** Extra variables for this command, added to the Worker's environment at spawn. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 export interface ResolveWorkerEntryOptions {
@@ -44,7 +46,19 @@ export function resolveWorkerEntry(options: ResolveWorkerEntryOptions): WorkerEn
 
   const unpackedExe = join(mainDirname, '..', '..', 'worker', 'joy-worker.exe');
   if (fileExists(unpackedExe)) {
-    return { command: unpackedExe, args: [] };
+    // The launcher looks for the Worker script in the repository layout, and needs a Node to run it.
+    // In the packaged layout it is told where the sibling script is, and runs it with this Electron
+    // binary as Node (localWorkerEnv sets ELECTRON_RUN_AS_NODE for the Worker).
+    const unpackedWorkerRoot = join(mainDirname, '..', '..', 'worker');
+    return {
+      command: unpackedExe,
+      args: [],
+      env: {
+        JOY_MEDIA_WORKER_ROOT: unpackedWorkerRoot,
+        JOY_MEDIA_WORKER_ENTRYPOINT: join(unpackedWorkerRoot, 'index.js'),
+        JOY_MEDIA_NODE_PATH: execPath,
+      },
+    };
   }
 
   const unpackedEntry = join(mainDirname, '..', '..', 'worker', 'index.js');

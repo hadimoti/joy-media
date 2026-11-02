@@ -21,6 +21,10 @@ const requiredFiles = [
   'install.cmd',
   'uninstall.cmd',
   'resources/app/worker/joy-worker.exe',
+  // The packaged Worker script and the third-party package it imports at start. Without the package
+  // the Worker exits at start, and exports wait forever for it.
+  'resources/app/worker/index.js',
+  'resources/app/node_modules/playwright-core/package.json',
   'resources/app/cli/joy-media-bundle.mjs',
   'resources/app/renderer/index.html',
   'resources/app/dist/main/electron-entry.js',
@@ -42,10 +46,7 @@ const doctorResult = spawnSync(joyCmdPath, ['doctor'], {
 });
 assert.strictEqual(doctorResult.status, 0, `joy.cmd doctor failed: ${doctorResult.stderr}`);
 assert.ok(doctorResult.stdout.includes('JOY MEDIA CLI'), 'Doctor output missing banner');
-assert.ok(
-  doctorResult.stdout.includes('All core system diagnostics passed'),
-  'Doctor diagnostics failed',
-);
+assert.ok(doctorResult.stdout.includes('All diagnostics passed'), 'Doctor diagnostics failed');
 console.log('✔ Packaged CLI doctor passed cleanly.');
 
 console.log('3. Testing packaged CLI project list...');
@@ -134,20 +135,25 @@ try {
   writeFileSync(join(sandboxInstallDir, 'joy-media.exe'), 'sandbox-only');
 
   const originalPath = process.env.PATH;
-  const uninstallResult = spawnSync('cmd.exe', ['/d', '/c', 'uninstall.cmd'], {
-    cwd: sandboxInstallDir,
-    env: {
-      ...process.env,
-      LOCALAPPDATA: sandboxLocalAppData,
-      APPDATA: sandboxAppData,
-      USERPROFILE: sandboxUserProfile,
-      TEMP: tmpdir(),
-      TMP: tmpdir(),
+  // Full path: cmd does not search the current folder when NoDefaultCurrentDirectoryInExePath is set.
+  const uninstallResult = spawnSync(
+    'cmd.exe',
+    ['/d', '/c', join(sandboxInstallDir, 'uninstall.cmd')],
+    {
+      cwd: sandboxInstallDir,
+      env: {
+        ...process.env,
+        LOCALAPPDATA: sandboxLocalAppData,
+        APPDATA: sandboxAppData,
+        USERPROFILE: sandboxUserProfile,
+        TEMP: tmpdir(),
+        TMP: tmpdir(),
+      },
+      encoding: 'utf8',
+      timeout: 30000,
+      windowsHide: true,
     },
-    encoding: 'utf8',
-    timeout: 30000,
-    windowsHide: true,
-  });
+  );
   assert.strictEqual(
     uninstallResult.status,
     0,

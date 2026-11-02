@@ -17,3 +17,7 @@ Mediabunny 1.55.7 is used by the browser editor media decoders and is licensed u
 ## gl-transitions
 
 The editor includes vendored transition shaders from [gl-transitions/gl-transitions](https://github.com/gl-transitions/gl-transitions), licensed under the MIT License. See the complete [gl-transitions license](renderer/licenses/third-party/GL-TRANSITIONS-LICENSE).
+
+## playwright-core
+
+The Worker imports `playwright-core` 1.62.1 for its GPU preview host. It is licensed under the Apache License 2.0. See its [license](node_modules/playwright-core/LICENSE) and [third-party notices](node_modules/playwright-core/ThirdPartyNotices.txt).
