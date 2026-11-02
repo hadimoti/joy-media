@@ -1,11 +1,26 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  bareImportSpecifiers,
+  locateInstalledPackage,
   missingEntryPoints,
   packageEntryPoints,
+  packageNameOf,
   readWorkspacePackages,
+  thirdPartyDependencyNames,
+  thirdPartyRuntimeClosure,
+  unresolvedThirdPartyImports,
   unresolvedWorkspaceImports,
   workspaceDependencyNames,
   workspaceImportSpecifiers,
@@ -236,5 +251,128 @@ describe('the staged workspace packages of this repository', () => {
     ]) {
       expect(staged.has(name)).toBe(true);
     }
+  });
+
+  it('stage the third-party package that the Worker imports, and nothing else from the registry', async () => {
+    const packages = await readWorkspacePackages(repoRoot);
+    const owners = ['@joy-media/desktop', '@joy-media/worker'].map((name) => {
+      const found = packages.get(name);
+      if (found === undefined) throw new Error(`${name} is not a workspace package`);
+      return found;
+    });
+    // Needs `pnpm install`, as the packager does: the Worker's playwright-core must be found.
+    const closure = thirdPartyRuntimeClosure(owners, locateInstalledPackage);
+    expect(closure.map((entry) => entry.name)).toEqual(['playwright-core']);
+  });
+});
+
+describe('third-party runtime packages', () => {
+  it('lists the registry dependencies only, leaving out workspace packages and the Electron runtime', () => {
+    expect(
+      thirdPartyDependencyNames({
+        name: '@joy-media/worker',
+        dependencies: {
+          '@joy-media/export-core': 'workspace:*',
+          'playwright-core': '^1.62.1',
+          electron: '^44.3.0',
+        },
+        devDependencies: { vitest: '^3.2.7' },
+      }),
+    ).toEqual(['playwright-core']);
+  });
+
+  it('collects the third-party packages that the owners need, and the ones those pull in', () => {
+    const installed = new Map([
+      [
+        'playwright-core',
+        {
+          dir: '/store/playwright-core',
+          manifest: { name: 'playwright-core', dependencies: { 'some-helper': '^2.0.0' } },
+        },
+      ],
+      ['some-helper', { dir: '/store/some-helper', manifest: { name: 'some-helper' } }],
+    ]);
+    const owners = [
+      workspacePackage({
+        name: '@joy-media/worker',
+        dependencies: { 'playwright-core': '^1.0.0' },
+      }),
+    ];
+    const closure = thirdPartyRuntimeClosure(owners, (name) => installed.get(name));
+    expect(closure.map((entry) => entry.name)).toEqual(['playwright-core', 'some-helper']);
+    expect(closure[0]?.dir).toBe('/store/playwright-core');
+  });
+
+  it('fails when a third-party dependency has no installed copy, instead of skipping it', () => {
+    expect(() =>
+      thirdPartyRuntimeClosure(
+        [
+          workspacePackage({
+            name: '@joy-media/worker',
+            dependencies: { 'missing-lib': '^1.0.0' },
+          }),
+        ],
+        () => undefined,
+      ),
+    ).toThrow(/@joy-media\/worker depends on missing-lib, but no installed copy/);
+  });
+
+  it('finds an installed package in the nearest node_modules up the tree, and nothing else', () => {
+    const root = mkdtempSync(join(tmpdir(), 'joy-staging-'));
+    try {
+      const libDir = join(root, 'node_modules', 'lib-a');
+      mkdirSync(libDir, { recursive: true });
+      writeFileSync(
+        join(libDir, 'package.json'),
+        JSON.stringify({ name: 'lib-a', version: '1.0.0' }),
+      );
+      const nested = join(root, 'apps', 'worker');
+      mkdirSync(nested, { recursive: true });
+
+      const found = locateInstalledPackage('lib-a', nested);
+      expect(found?.manifest.name).toBe('lib-a');
+      expect(found?.dir).toBe(realpathSync(libDir));
+      expect(locateInstalledPackage('not-installed', nested)).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('bare imports', () => {
+  it('finds the bare specifiers of static, dynamic and CommonJS imports, and skips relative paths', () => {
+    expect(
+      bareImportSpecifiers(
+        [
+          "import { chromium } from 'playwright-core';",
+          "import { x } from './local.js';",
+          "const fs = require('node:fs');",
+          "const lazy = await import('@scope/lib/sub');",
+          "export * from '../up.js';",
+          "import 'side-effect';",
+        ].join('\n'),
+      ),
+    ).toEqual(['@scope/lib/sub', 'node:fs', 'playwright-core', 'side-effect']);
+  });
+
+  it('reports the packages that are neither built-ins, the runtime, nor staged', () => {
+    expect(
+      unresolvedThirdPartyImports(
+        [
+          '@joy-media/export-core',
+          'electron',
+          'fs/promises',
+          'node:sqlite',
+          'playwright-core',
+          'zod',
+        ],
+        ['playwright-core'],
+      ),
+    ).toEqual(['zod']);
+  });
+
+  it('names the package of a scoped or a plain specifier', () => {
+    expect(packageNameOf('@scope/name/sub/path')).toBe('@scope/name');
+    expect(packageNameOf('name/sub')).toBe('name');
   });
 });

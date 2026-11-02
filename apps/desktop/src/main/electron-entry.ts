@@ -110,7 +110,10 @@ if (!app.requestSingleInstanceLock()) {
     env: () =>
       localJobApi === undefined
         ? undefined
-        : localWorkerEnv(process.env, { apiEnv: localJobApi.workerEnv, workerRoot }),
+        : {
+            ...localWorkerEnv(process.env, { apiEnv: localJobApi.workerEnv, workerRoot }),
+            ...workerEntry.env,
+          },
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
   const providerBroker = createProviderBroker({

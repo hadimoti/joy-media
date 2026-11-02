@@ -2,8 +2,12 @@ import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
+  bareImportSpecifiers,
+  locateInstalledPackage,
   missingEntryPoints,
   readWorkspacePackages,
+  thirdPartyRuntimeClosure,
+  unresolvedThirdPartyImports,
   unresolvedWorkspaceImports,
   workspaceImportSpecifiers,
   workspaceRuntimeClosure,
@@ -156,13 +160,16 @@ async function assembleUnpacked() {
   // manifests (workspace-staging.mjs): a fixed list drifted and shipped an app that could not start.
   const unpackedNodeModules = resolve(unpackedDir, 'node_modules');
   const workspacePackages = await readWorkspacePackages(repoRoot);
-  const stagedRootManifests = ['@joy-media/desktop', '@joy-media/worker'].map((name) => {
+  const stagedRootPackages = ['@joy-media/desktop', '@joy-media/worker'].map((name) => {
     const workspacePackage = workspacePackages.get(name);
     if (workspacePackage === undefined)
       throw new Error(`Workspace package ${name} was not found under ${repoRoot}`);
-    return workspacePackage.manifest;
+    return workspacePackage;
   });
-  const stagedPackages = workspaceRuntimeClosure(stagedRootManifests, workspacePackages);
+  const stagedPackages = workspaceRuntimeClosure(
+    stagedRootPackages.map((workspacePackage) => workspacePackage.manifest),
+    workspacePackages,
+  );
   for (const workspacePackage of stagedPackages) {
     const dest = resolve(unpackedNodeModules, ...workspacePackage.name.split('/'));
     const distSrc = resolve(workspacePackage.dir, 'dist');
@@ -192,18 +199,43 @@ async function assembleUnpacked() {
       `${stagedPackages.map((workspacePackage) => workspacePackage.name).join(', ')}\n`,
   );
 
+  // The third-party packages that the staged code imports at runtime (the Worker's playwright-core),
+  // with their own third-party dependencies, copied from the installed pnpm store. The packaged app
+  // has no pnpm install of its own, so nothing else provides them. Without them the Worker exits at
+  // start, and an export waits forever for it.
+  const thirdPartyPackages = thirdPartyRuntimeClosure(
+    [...stagedRootPackages, ...stagedPackages],
+    locateInstalledPackage,
+  );
+  for (const thirdParty of thirdPartyPackages) {
+    const dest = resolve(unpackedNodeModules, ...thirdParty.name.split('/'));
+    await rm(dest, { recursive: true, force: true });
+    await mkdir(dirname(dest), { recursive: true });
+    await cp(thirdParty.dir, dest, { recursive: true, dereference: true });
+  }
+  process.stderr.write(
+    `Staged ${thirdPartyPackages.length} third-party runtime packages into ${unpackedNodeModules}: ` +
+      `${thirdPartyPackages.map((thirdParty) => thirdParty.name).join(', ')}\n`,
+  );
+
   // Every @joy-media import in the staged JavaScript must resolve inside the staged folder. Run
   // from inside the repository, Node finds a forgotten package by walking up to
-  // apps/desktop/node_modules, so only this check, not a launch, proves the staging.
+  // apps/desktop/node_modules, so only this check, not a launch, proves the staging. The same goes
+  // for every other package the staged JavaScript imports, which must be a built-in, the runtime's
+  // `electron`, or a third-party package staged above.
   const importedWorkspaceSpecifiers = new Set();
+  const importedBareSpecifiers = new Set();
   for (const folder of [
     resolve(unpackedDir, 'dist'),
     resolve(unpackedDir, 'worker'),
     resolve(unpackedNodeModules, '@joy-media'),
   ]) {
     for (const file of await listJavaScriptFiles(folder)) {
-      for (const specifier of workspaceImportSpecifiers(await readFile(file, 'utf8')))
+      const sourceText = await readFile(file, 'utf8');
+      for (const specifier of workspaceImportSpecifiers(sourceText))
         importedWorkspaceSpecifiers.add(specifier);
+      for (const specifier of bareImportSpecifiers(sourceText))
+        importedBareSpecifiers.add(specifier);
     }
   }
   const unresolvedImports = unresolvedWorkspaceImports(
@@ -214,6 +246,16 @@ async function assembleUnpacked() {
     throw new Error(
       `The staged app imports workspace packages that were not staged: ${unresolvedImports.join(', ')}. ` +
         'Declare each one under "dependencies" in the package.json of the app or package that imports it.',
+    );
+  }
+  const unresolvedBareImports = unresolvedThirdPartyImports(
+    [...importedBareSpecifiers].sort(),
+    thirdPartyPackages.map((thirdParty) => thirdParty.name),
+  );
+  if (unresolvedBareImports.length > 0) {
+    throw new Error(
+      `The staged app imports packages that were not staged: ${unresolvedBareImports.join(', ')}. ` +
+        'Declare each one under "dependencies" in the package.json of the app or package that imports it, then run pnpm install.',
     );
   }
 
