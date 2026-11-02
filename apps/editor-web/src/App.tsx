@@ -33,6 +33,7 @@ import {
   videoFrameNodeFromDecoded,
   withVideoFrameNode,
   withVideoFrameNodes,
+  type DecodedFrame,
   type HtmlMediaDecoder,
   type ImageDataLike,
   type MediaClock,
@@ -454,6 +455,7 @@ import type {
   FinalEncodedExportVerifier,
 } from './media-observation/render-verification.js';
 import { openOpfsExportCache } from './opfs-export-cache.js';
+import type { ExportFrameSource } from './export-frame-source.js';
 import {
   formatExportClipAssetFailure,
   loadDetachedVideo,
@@ -807,6 +809,43 @@ async function decodeStillFrame(sourceUrl: string): Promise<ImageDataLike> {
     return context.getImageData(0, 0, bitmap.width, bitmap.height);
   } finally {
     bitmap.close();
+  }
+}
+
+/**
+ * Opens a clip for forward-only decoding, or resolves `undefined` when it cannot be (unsupported
+ * codec, unreadable file, or a slow open) so the export keeps seeking a video element instead.
+ * Cancelling the export still rejects with its AbortError.
+ */
+async function openForwardExportFrameSource(
+  sourceUrl: string,
+  assetId: string,
+  signal: AbortSignal,
+): Promise<ExportFrameSource | undefined> {
+  let opening: Promise<ExportFrameSource | undefined> | undefined;
+  try {
+    return await runExportPreloadStage(
+      'loading detached video',
+      (stageSignal) => {
+        opening = (async () => {
+          // Loaded on demand: the decoder library is a separate chunk, as for media observation.
+          const { openExportFrameSource } = await import('./export-frame-source.js');
+          const response = await fetch(sourceUrl, { signal: stageSignal });
+          if (!response.ok) return undefined;
+          return openExportFrameSource(await response.blob(), assetId);
+        })();
+        return opening;
+      },
+      signal,
+    );
+  } catch (error) {
+    // An open that finishes after the stage gave up would otherwise keep its decoder alive.
+    void opening?.then(
+      (late) => late?.close(),
+      () => undefined,
+    );
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    return undefined;
   }
 }
 
@@ -3908,6 +3947,7 @@ function EditorWorkspace({
       const exportMediaCleanup: Array<{
         readonly video?: HTMLVideoElement;
         readonly animated?: AnimatedImageFrameSource;
+        readonly frameSource?: ExportFrameSource;
       }> = [];
       let activeExportAudioTrack: MediaStreamTrack | undefined;
       let operationStarted = false;
@@ -4140,10 +4180,22 @@ function EditorWorkspace({
         const audioContext = new AudioContext();
         activeAudioContext = audioContext;
         const audioDestination = audioContext.createMediaStreamDestination();
+        // Video elements opened late, for a clip whose forward-only source had to give up because
+        // its source times went backwards. Keyed by clip id.
+        const seekFallbacks = new Map<
+          string,
+          {
+            readonly video: HTMLVideoElement;
+            readonly decoder: ReturnType<typeof createHtmlMediaDecoder>;
+          }
+        >();
         const exportMedia: Array<{
           readonly clip: VideoClip;
           readonly video: HTMLVideoElement | undefined;
           readonly decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
+          /** Decodes the clip forward-only; set instead of `video` when the clip allows it. */
+          readonly frameSource: ExportFrameSource | undefined;
+          readonly sourceUrl: string | undefined;
           readonly stillFrame: ImageDataLike | undefined;
           readonly animatedFrameSource: AnimatedImageFrameSource | undefined;
           readonly audio: {
@@ -4169,6 +4221,7 @@ function EditorWorkspace({
           const assetKind = exportVisualProject.assets[clip.assetId]?.kind ?? 'video';
           let video: HTMLVideoElement | undefined;
           let decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
+          let frameSource: ExportFrameSource | undefined;
           let stillFrame: ImageDataLike | undefined;
           let animatedFrameSource: AnimatedImageFrameSource | undefined;
           try {
@@ -4192,17 +4245,33 @@ function EditorWorkspace({
                 }
                 abortController.signal.throwIfAborted();
               } else {
-                video = document.createElement('video');
-                activeMediaConsumersRef.current.add(video);
-                exportMediaCleanup.push({ video });
-                setExportStatus('Loading detached video…');
-                await loadDetachedVideo(video, source.url, abortController.signal);
-                setExportStatus('Seeking video…');
-                await seekExportDetachedVideo(video, clip.sourceInUs, abortController.signal);
-                const captureCanvas = document.createElement('canvas');
-                captureCanvas.width = 0;
-                captureCanvas.height = 0;
-                decoder = createHtmlMediaDecoder(video, captureCanvas);
+                // Decode forward once. Seeking a video element for every output frame makes the
+                // browser re-decode from the previous keyframe each time, which ran a four-minute
+                // clip at about half of real time. A reversed clip, or a reverse time remap, walks
+                // its source backwards, so it goes straight to the seeking path.
+                if (clip.reversed !== true && clip.timeRemap?.direction !== 'reverse') {
+                  setExportStatus('Opening video…');
+                  frameSource = await openForwardExportFrameSource(
+                    source.url,
+                    clip.assetId,
+                    abortController.signal,
+                  );
+                }
+                if (frameSource !== undefined) {
+                  exportMediaCleanup.push({ frameSource });
+                } else {
+                  video = document.createElement('video');
+                  activeMediaConsumersRef.current.add(video);
+                  exportMediaCleanup.push({ video });
+                  setExportStatus('Loading detached video…');
+                  await loadDetachedVideo(video, source.url, abortController.signal);
+                  setExportStatus('Seeking video…');
+                  await seekExportDetachedVideo(video, clip.sourceInUs, abortController.signal);
+                  const captureCanvas = document.createElement('canvas');
+                  captureCanvas.width = 0;
+                  captureCanvas.height = 0;
+                  decoder = createHtmlMediaDecoder(video, captureCanvas);
+                }
               }
             }
           } catch (error) {
@@ -4258,6 +4327,8 @@ function EditorWorkspace({
             clip,
             video,
             decoder,
+            frameSource,
+            sourceUrl: frameSource === undefined ? undefined : source.url,
             stillFrame,
             animatedFrameSource,
             audio: {
@@ -4272,6 +4343,28 @@ function EditorWorkspace({
             .filter((media) => visualClipIds.has(media.clip.id))
             .map((media) => [media.clip.id, media]),
         );
+        // For a clip decoded forward-only whose source times went backwards: stop the forward
+        // decoder and continue with a video element that is sought for each frame.
+        const openSeekFallback = async (
+          media: (typeof exportMedia)[number],
+        ): Promise<{
+          readonly video: HTMLVideoElement;
+          readonly decoder: ReturnType<typeof createHtmlMediaDecoder>;
+        }> => {
+          if (media.sourceUrl === undefined)
+            throw new Error(`Export media for ${media.clip.id} was not prepared`);
+          media.frameSource?.close();
+          const video = document.createElement('video');
+          activeMediaConsumersRef.current.add(video);
+          exportMediaCleanup.push({ video });
+          await loadDetachedVideo(video, media.sourceUrl, abortController.signal);
+          const captureCanvas = document.createElement('canvas');
+          captureCanvas.width = 0;
+          captureCanvas.height = 0;
+          const opened = { video, decoder: createHtmlMediaDecoder(video, captureCanvas) };
+          seekFallbacks.set(media.clip.id, opened);
+          return opened;
+        };
         const audioSampleRate = audioContext.sampleRate;
         const offlineAudio = renderOfflineAudio(
           exportMedia
@@ -4386,6 +4479,16 @@ function EditorWorkspace({
           },
           paintFrame: async (index) => {
             const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
+            // A clip that ended more than a second ago (past any transition that holds its last
+            // frame) no longer needs its hardware decoder. Long projects would otherwise keep one
+            // decoder open per clip until the export finishes.
+            for (const media of exportMedia) {
+              if (
+                media.frameSource !== undefined &&
+                timeUs > media.clip.startUs + media.clip.durationUs + 1_000_000
+              )
+                media.frameSource.release();
+            }
             const transition = activeTransitionAt(exportVisualProject, timeUs);
             const activeClips = activePreparedExportClipsAt(
               playableTimelineClips,
@@ -4442,13 +4545,26 @@ function EditorWorkspace({
                   },
                 );
               }
-              if (media.video === undefined || media.decoder === undefined)
-                throw new Error(`Export media for ${target.id} was not prepared`);
               const sourceUs = sourceTimeForTransitionSample(target, timeUs, transition);
-              setExportStatus('Seeking video…');
-              await seekExportDetachedVideo(media.video, sourceUs, abortController.signal);
               const token = index + 1;
-              const decoded = media.decoder.captureCurrentFrame(token);
+              let decoded: DecodedFrame | undefined;
+              let intrinsic = { width: 0, height: 0 };
+              if (media.frameSource !== undefined && !seekFallbacks.has(media.clip.id)) {
+                decoded = await media.frameSource.frameAt(sourceUs, token, abortController.signal);
+                if (decoded !== undefined) intrinsic = media.frameSource.size();
+              }
+              if (decoded === undefined) {
+                // Either the clip was prepared for seeking, or its source times went backwards
+                // (speed ramps, loops) and the forward decoder gave up on it.
+                const seeking =
+                  seekFallbacks.get(media.clip.id) ??
+                  (media.video !== undefined && media.decoder !== undefined
+                    ? { video: media.video, decoder: media.decoder }
+                    : await openSeekFallback(media));
+                await seekExportDetachedVideo(seeking.video, sourceUs, abortController.signal);
+                decoded = seeking.decoder.captureCurrentFrame(token);
+                intrinsic = { width: seeking.video.videoWidth, height: seeking.video.videoHeight };
+              }
               if (decoded.bitmap === undefined)
                 throw new Error(
                   `Export media frame ${index} for ${target.assetId} is not drawable`,
@@ -4457,10 +4573,7 @@ function EditorWorkspace({
               return videoFrameNodeFromDecoded(
                 videoClipSpecAt(exportVisualProject, exportTimelineProject, target, timeUs, height),
                 decoded,
-                {
-                  width: media.video.videoWidth,
-                  height: media.video.videoHeight,
-                },
+                intrinsic,
               );
             };
             const nodes: VideoFrameNode[] = [];
@@ -4825,6 +4938,7 @@ function EditorWorkspace({
             media.video?.removeAttribute('src');
             media.video?.load();
             media.animated?.dispose();
+            media.frameSource?.close();
           } catch {
             // Continue releasing renderer and audio resources.
           }
