@@ -1,12 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 /**
- * `test:smoke-packaged`: launches the real, compiled `dist/main/electron-entry.js` under a
- * real Electron binary with `NODE_ENV=production` and `--smoke`, and asserts (not just logs)
- * that it loaded `joy-media-app://renderer/index.html` and exited cleanly — the packaged-mode
+ * `test:smoke-packaged`: launches a copy of the staged `dist/joy-media-unpacked` folder from the
+ * temp directory, with its own node_modules as a packaged app has, under a real Electron binary
+ * with `NODE_ENV=production` and `--smoke`, and asserts (not just logs) that it loaded
+ * `joy-media-app://renderer/index.html` and exited cleanly — the packaged-mode
  * counterpart to the dev-mode `test:smoke` added in wave 9, which never awaited its `loadURL`
  * call. Requires `pnpm --filter @joy-media/desktop build` (compiles the main process and, via
  * `scripts/copy-static.mjs`, the preload `.cjs` bridge) and `pnpm --filter @joy-media/desktop
@@ -84,11 +85,24 @@ if (!existsSync(compiledMainEntry)) {
     const { mkdtempSync, rmSync } = await import('node:fs');
     const tempUserData = mkdtempSync(join(tmpdir(), 'joy-media-smoke-pkg-'));
     const electronPath = /** @type {string} */ (require('electron'));
-    const result = spawnSync(electronPath, ['.', '--smoke', `--user-data-dir=${tempUserData}`], {
-      cwd: desktopRoot,
-      env: { ...process.env, NODE_ENV: 'production' },
-      encoding: 'utf8',
-    });
+    // Launch a copy of the staged folder from outside the repository, not apps/desktop. Only the
+    // staged node_modules is what a packaged app has: apps/desktop, and any folder inside the
+    // repository, resolves workspace packages through the pnpm symlinks above it, so a package
+    // that the stager forgot would never fail there (provider-oauth shipped that way).
+    const stagedAppCopy = join(tempUserData, 'app');
+    cpSync(unpackedDir, stagedAppCopy, { recursive: true });
+    const result = spawnSync(
+      electronPath,
+      [stagedAppCopy, '--smoke', `--user-data-dir=${join(tempUserData, 'profile')}`],
+      {
+        cwd: stagedAppCopy,
+        env: { ...process.env, NODE_ENV: 'production' },
+        encoding: 'utf8',
+        // A main-process startup error opens a blocking dialog; fail the run instead of hanging.
+        timeout: 60_000,
+        killSignal: 'SIGKILL',
+      },
+    );
     try {
       rmSync(tempUserData, { recursive: true, force: true });
     } catch {

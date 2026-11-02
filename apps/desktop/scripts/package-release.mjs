@@ -1,6 +1,25 @@
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import {
+  missingEntryPoints,
+  readWorkspacePackages,
+  unresolvedWorkspaceImports,
+  workspaceImportSpecifiers,
+  workspaceRuntimeClosure,
+} from './workspace-staging.mjs';
+
+/** Every `.js`, `.mjs` and `.cjs` file under a folder, for the staged-import check below. */
+async function listJavaScriptFiles(dir) {
+  if (!existsSync(dir)) return [];
+  const files = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const path = resolve(dir, entry.name);
+    if (entry.isDirectory()) files.push(...(await listJavaScriptFiles(path)));
+    else if (/\.(?:js|mjs|cjs)$/.test(entry.name)) files.push(path);
+  }
+  return files;
+}
 
 /**
  * Release-plan gate for signed public releases (unchanged — see the `else` branch below). The
@@ -131,25 +150,72 @@ async function assembleUnpacked() {
     filter: (source) => !/\.test\.(js|d\.ts)(\.map)?$/.test(source.replaceAll('\\', '/')),
   });
 
-  // Stage internal workspace dependencies into node_modules so packaged runtime resolves them
-  // cleanly without relying on repository-root node_modules symlinks.
-  const unpackedNodeModules = resolve(unpackedDir, 'node_modules', '@joy-media');
-  await mkdir(unpackedNodeModules, { recursive: true });
-  for (const pkgName of ['provider-sdk', 'project-schema']) {
-    const pkgRoot = resolve(repoRoot, 'packages', pkgName);
-    const dest = resolve(unpackedNodeModules, pkgName);
+  // Stage the internal workspace packages that the desktop main process and the Worker import (and
+  // that those packages import, transitively) into node_modules, so the packaged runtime resolves
+  // them without repository-root node_modules symlinks. The list is derived from the package
+  // manifests (workspace-staging.mjs): a fixed list drifted and shipped an app that could not start.
+  const unpackedNodeModules = resolve(unpackedDir, 'node_modules');
+  const workspacePackages = await readWorkspacePackages(repoRoot);
+  const stagedRootManifests = ['@joy-media/desktop', '@joy-media/worker'].map((name) => {
+    const workspacePackage = workspacePackages.get(name);
+    if (workspacePackage === undefined)
+      throw new Error(`Workspace package ${name} was not found under ${repoRoot}`);
+    return workspacePackage.manifest;
+  });
+  const stagedPackages = workspaceRuntimeClosure(stagedRootManifests, workspacePackages);
+  for (const workspacePackage of stagedPackages) {
+    const dest = resolve(unpackedNodeModules, ...workspacePackage.name.split('/'));
+    const distSrc = resolve(workspacePackage.dir, 'dist');
+    if (!existsSync(distSrc)) {
+      throw new Error(
+        `${workspacePackage.name} has no dist folder at ${distSrc}. ` +
+          `Run 'pnpm --filter ${workspacePackage.name} build' before packaging.`,
+      );
+    }
     await rm(dest, { recursive: true, force: true });
     await mkdir(dest, { recursive: true });
-    await cp(resolve(pkgRoot, 'package.json'), resolve(dest, 'package.json'));
-    const distSrc = resolve(pkgRoot, 'dist');
-    if (existsSync(distSrc)) {
-      await cp(distSrc, resolve(dest, 'dist'), {
-        recursive: true,
-        filter: (source) => !/\.test\.(js|d\.ts)(\.map)?$/.test(source.replaceAll('\\', '/')),
-      });
+    await cp(resolve(workspacePackage.dir, 'package.json'), resolve(dest, 'package.json'));
+    await cp(distSrc, resolve(dest, 'dist'), {
+      recursive: true,
+      filter: (source) => !/\.test\.(js|d\.ts)(\.map)?$/.test(source.replaceAll('\\', '/')),
+    });
+    const missing = missingEntryPoints(workspacePackage.manifest, dest);
+    if (missing.length > 0) {
+      throw new Error(
+        `${workspacePackage.name} is missing ${missing.join(', ')} after staging. ` +
+          `Run 'pnpm --filter ${workspacePackage.name} build' before packaging.`,
+      );
     }
   }
-  process.stderr.write(`Staged workspace dependencies into ${unpackedNodeModules}\\n`);
+  process.stderr.write(
+    `Staged ${stagedPackages.length} workspace packages into ${unpackedNodeModules}: ` +
+      `${stagedPackages.map((workspacePackage) => workspacePackage.name).join(', ')}\n`,
+  );
+
+  // Every @joy-media import in the staged JavaScript must resolve inside the staged folder. Run
+  // from inside the repository, Node finds a forgotten package by walking up to
+  // apps/desktop/node_modules, so only this check, not a launch, proves the staging.
+  const importedWorkspaceSpecifiers = new Set();
+  for (const folder of [
+    resolve(unpackedDir, 'dist'),
+    resolve(unpackedDir, 'worker'),
+    resolve(unpackedNodeModules, '@joy-media'),
+  ]) {
+    for (const file of await listJavaScriptFiles(folder)) {
+      for (const specifier of workspaceImportSpecifiers(await readFile(file, 'utf8')))
+        importedWorkspaceSpecifiers.add(specifier);
+    }
+  }
+  const unresolvedImports = unresolvedWorkspaceImports(
+    [...importedWorkspaceSpecifiers].sort(),
+    stagedPackages,
+  );
+  if (unresolvedImports.length > 0) {
+    throw new Error(
+      `The staged app imports workspace packages that were not staged: ${unresolvedImports.join(', ')}. ` +
+        'Declare each one under "dependencies" in the package.json of the app or package that imports it.',
+    );
+  }
 
   // Preserve the project license and desktop-specific dependency notices in the unpacked package.
   await cp(resolve(repoRoot, 'LICENSE'), resolve(unpackedDir, 'LICENSE'));
