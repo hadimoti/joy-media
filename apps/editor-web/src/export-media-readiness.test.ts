@@ -57,6 +57,7 @@ describe('isExportDurationTimelineClip', () => {
 describe('hasRenderableExportMedia', () => {
   it.each([
     ['detached video', { video: {} }],
+    ['forward-only video frame source', { frameSource: {} }],
     ['static image', { stillFrame: {} }],
     ['animated image', { animatedFrameSource: {} }],
     ['video with decoded image fields', { video: {}, animatedFrameSource: {} }],

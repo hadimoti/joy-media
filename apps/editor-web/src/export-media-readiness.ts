@@ -54,6 +54,7 @@ export function isExportDurationTimelineClip(
 export interface PreparedExportMediaLike {
   readonly [key: string]: unknown;
   readonly video?: unknown;
+  readonly frameSource?: unknown;
   readonly stillFrame?: unknown;
   readonly animatedFrameSource?: unknown;
 }
@@ -61,6 +62,7 @@ export interface PreparedExportMediaLike {
 export function hasRenderableExportMedia(media: PreparedExportMediaLike): boolean {
   return (
     media.video !== undefined ||
+    media.frameSource !== undefined ||
     media.stillFrame !== undefined ||
     media.animatedFrameSource !== undefined
   );
