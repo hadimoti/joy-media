@@ -43,32 +43,86 @@ export function createExportAudioBuffer(
   return buffer;
 }
 
-/** Sample source time directly so trims, rate, reverse and end padding stay aligned. */
+/** Where a clip plays in its source, as the export mix reads it. */
+export interface ExportAudioClipTiming {
+  readonly sourceInUs: number;
+  readonly durationUs: number;
+  readonly playbackRate?: number;
+  readonly reversed?: boolean;
+}
+
+function exportAudioRate(playbackRate: number | undefined): number {
+  return Number.isFinite(playbackRate) && (playbackRate ?? 0) > 0 ? playbackRate! : 1;
+}
+
+/** Output frames one clip fills. */
+function exportAudioFrameCount(durationUs: number, outputSampleRate: number): number {
+  return Math.max(1, Math.ceil((durationUs * outputSampleRate) / 1_000_000));
+}
+
+/** Source sample position of one output frame. The window math shares this formula. */
+function exportAudioSourceSample(
+  clip: ExportAudioClipTiming,
+  index: number,
+  sourceSampleRate: number,
+  outputSampleRate: number,
+): number {
+  const rate = exportAudioRate(clip.playbackRate);
+  return (
+    (clip.sourceInUs * sourceSampleRate) / 1_000_000 +
+    ((clip.reversed ? -1 : 1) * index * rate * sourceSampleRate) / outputSampleRate
+  );
+}
+
+/**
+ * Sample source time directly so trims, rate, reverse and end padding stay aligned. The channels
+ * may be a window of the source that starts at `sourceFirstSample`; leave it 0 for the whole source.
+ */
 export function prepareExportAudioChannels(
   channels: readonly Float32Array[],
   sourceSampleRate: number,
   outputSampleRate: number,
-  clip: {
-    readonly sourceInUs: number;
-    readonly durationUs: number;
-    readonly playbackRate?: number;
-    readonly reversed?: boolean;
-  },
+  clip: ExportAudioClipTiming,
+  sourceFirstSample = 0,
 ): readonly Float32Array[] {
-  const rate =
-    Number.isFinite(clip.playbackRate) && (clip.playbackRate ?? 0) > 0 ? clip.playbackRate! : 1;
-  const length = Math.max(1, Math.ceil((clip.durationUs * outputSampleRate) / 1_000_000));
+  const length = exportAudioFrameCount(clip.durationUs, outputSampleRate);
   return channels.map((channel) =>
     Float32Array.from({ length }, (_, index) => {
-      const source =
-        (clip.sourceInUs * sourceSampleRate) / 1_000_000 +
-        ((clip.reversed ? -1 : 1) * index * rate * sourceSampleRate) / outputSampleRate;
-      if (source < 0 || source >= channel.length) return 0;
-      const before = Math.floor(source);
-      const fraction = source - before;
+      const source = exportAudioSourceSample(clip, index, sourceSampleRate, outputSampleRate);
+      const local = source - sourceFirstSample;
+      if (source < 0 || local < 0 || local >= channel.length) return 0;
+      const before = Math.floor(local);
+      const fraction = local - before;
       return channel[before]! * (1 - fraction) + (channel[before + 1] ?? 0) * fraction;
     }),
   );
+}
+
+/**
+ * The source samples `prepareExportAudioChannels` reads for a clip, with `endSample` exclusive.
+ * The margin covers the interpolation neighbours at both ends.
+ */
+export function exportAudioSourceWindow(
+  clip: ExportAudioClipTiming,
+  sourceSampleRate: number,
+  outputSampleRate: number,
+  margin = 2,
+): { readonly startSample: number; readonly endSample: number } {
+  const last = exportAudioFrameCount(clip.durationUs, outputSampleRate) - 1;
+  const first = exportAudioSourceSample(clip, 0, sourceSampleRate, outputSampleRate);
+  const end = exportAudioSourceSample(clip, last, sourceSampleRate, outputSampleRate);
+  return {
+    startSample: Math.max(0, Math.floor(Math.min(first, end)) - margin),
+    endSample: Math.floor(Math.max(first, end)) + 1 + margin,
+  };
+}
+
+/** One channel of silence, as long as the channels `prepareExportAudioChannels` returns. */
+export function silentExportAudioChannels(
+  clip: ExportAudioClipTiming,
+  outputSampleRate: number,
+): readonly Float32Array[] {
+  return [new Float32Array(exportAudioFrameCount(clip.durationUs, outputSampleRate))];
 }
 
 /** Allocate a mono AudioBuffer in the correct `(1, length, sampleRate)` order. */
