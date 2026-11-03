@@ -10,6 +10,8 @@ export interface ShutdownDeps {
   readonly onAppEvent: (event: 'before-quit' | 'window-all-closed', listener: () => void) => void;
   readonly onProcessSignal: (signal: 'SIGINT' | 'SIGTERM', listener: () => void) => void;
   readonly stopWorker: () => void;
+  /** Drops unfinished chunked uploads and their temporary files. */
+  readonly discardUploads: () => void | Promise<void>;
   readonly flush: () => void | Promise<void>;
   readonly quit: () => void;
   readonly platform?: NodeJS.Platform;
@@ -22,6 +24,7 @@ export function registerShutdownHooks(deps: ShutdownDeps): void {
     if (shutdownPromise === undefined) {
       shutdownPromise = (async () => {
         deps.stopWorker();
+        await deps.discardUploads();
         await deps.flush();
       })();
     }

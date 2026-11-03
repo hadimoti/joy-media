@@ -228,6 +228,147 @@ describe('BrowserControlPlaneClient on the local desktop channels', () => {
     expect((upload?.payload as { bytes: Uint8Array }).bytes).toEqual(new Uint8Array([1, 2, 3]));
   });
 
+  it('sends a large original in pieces, then asks the desktop to commit it', async () => {
+    const { bridge, calls } = fakeBridge({
+      'desktop.media.asset.upload-original-chunk': { assetId: 'asset-big' },
+      'desktop.media.asset.upload-original-finish': { assetId: 'asset-big' },
+    });
+    const client = new BrowserControlPlaneClient(bridge, { chunkedAboveBytes: 4, chunkBytes: 2 });
+    const progress: number[] = [];
+
+    await client.uploadAssetOriginal(
+      'project-big',
+      { id: 'asset-big', sha256: 'e'.repeat(64), bytes: 5, descriptor: { mimeType: 'video/mp4' } },
+      new Blob([new Uint8Array([1, 2, 3, 4, 5])]),
+      (ratio) => progress.push(ratio),
+    );
+
+    const pieces = calls.filter(
+      (call) => call.channel === 'desktop.media.asset.upload-original-chunk',
+    );
+    expect(pieces.map((call) => (call.payload as { offset: number }).offset)).toEqual([0, 2, 4]);
+    expect(pieces.map((call) => (call.payload as { bytes: Uint8Array }).bytes)).toEqual([
+      new Uint8Array([1, 2]),
+      new Uint8Array([3, 4]),
+      new Uint8Array([5]),
+    ]);
+    expect(calls.at(-1)?.channel).toBe('desktop.media.asset.upload-original-finish');
+    expect(calls.some((call) => call.channel === 'desktop.media.asset.upload-original')).toBe(
+      false,
+    );
+    expect(progress).toEqual([0.4, 0.8, 1, 1]);
+  });
+
+  it('asks the desktop to drop an unfinished upload when a piece fails', async () => {
+    const { bridge, calls } = fakeBridge({
+      'desktop.media.asset.upload-original-chunk': new Error('disk full'),
+      'desktop.media.asset.upload-original-abort': { assetId: 'asset-big' },
+    });
+    const client = new BrowserControlPlaneClient(bridge, { chunkedAboveBytes: 4, chunkBytes: 2 });
+
+    await expect(
+      client.uploadAssetOriginal(
+        'project-big',
+        {
+          id: 'asset-big',
+          sha256: 'e'.repeat(64),
+          bytes: 5,
+          descriptor: { mimeType: 'video/mp4' },
+        },
+        new Blob([new Uint8Array([1, 2, 3, 4, 5])]),
+      ),
+    ).rejects.toThrow('disk full');
+    expect(calls.at(-1)?.channel).toBe('desktop.media.asset.upload-original-abort');
+  });
+
+  it('still drops the upload when the final commit is refused', async () => {
+    const { bridge, calls } = fakeBridge({
+      'desktop.media.asset.upload-original-chunk': { assetId: 'asset-big' },
+      'desktop.media.asset.upload-original-finish': new Error('checksum mismatch'),
+      'desktop.media.asset.upload-original-abort': { assetId: 'asset-big' },
+    });
+    const client = new BrowserControlPlaneClient(bridge, { chunkedAboveBytes: 4, chunkBytes: 2 });
+
+    await expect(
+      client.uploadAssetOriginal(
+        'project-big',
+        {
+          id: 'asset-big',
+          sha256: 'e'.repeat(64),
+          bytes: 5,
+          descriptor: { mimeType: 'video/mp4' },
+        },
+        new Blob([new Uint8Array([1, 2, 3, 4, 5])]),
+      ),
+    ).rejects.toThrow('checksum mismatch');
+    expect(calls.at(-1)?.channel).toBe('desktop.media.asset.upload-original-abort');
+  });
+
+  it('reports the failed piece, not a failed abort, when both fail', async () => {
+    const { bridge } = fakeBridge({
+      'desktop.media.asset.upload-original-chunk': new Error('disk full'),
+      'desktop.media.asset.upload-original-abort': new Error('desktop is gone'),
+    });
+    const client = new BrowserControlPlaneClient(bridge, { chunkedAboveBytes: 4, chunkBytes: 2 });
+
+    await expect(
+      client.uploadAssetOriginal(
+        'project-big',
+        {
+          id: 'asset-big',
+          sha256: 'e'.repeat(64),
+          bytes: 5,
+          descriptor: { mimeType: 'video/mp4' },
+        },
+        new Blob([new Uint8Array([1, 2, 3, 4, 5])]),
+      ),
+    ).rejects.toThrow('disk full');
+  });
+
+  it('stops at the first failed piece and sends nothing after it', async () => {
+    const { bridge, calls } = fakeBridge({
+      'desktop.media.asset.upload-original-chunk': (payload: unknown) => {
+        if ((payload as { offset: number }).offset === 2) throw new Error('disk full');
+        return { assetId: 'asset-big' };
+      },
+      'desktop.media.asset.upload-original-abort': { assetId: 'asset-big' },
+    });
+    const client = new BrowserControlPlaneClient(bridge, { chunkedAboveBytes: 4, chunkBytes: 2 });
+
+    await expect(
+      client.uploadAssetOriginal(
+        'project-big',
+        {
+          id: 'asset-big',
+          sha256: 'e'.repeat(64),
+          bytes: 5,
+          descriptor: { mimeType: 'video/mp4' },
+        },
+        new Blob([new Uint8Array([1, 2, 3, 4, 5])]),
+      ),
+    ).rejects.toThrow('disk full');
+    expect(calls.map((call) => call.channel)).toEqual([
+      'desktop.media.asset.upload-original-chunk',
+      'desktop.media.asset.upload-original-chunk',
+      'desktop.media.asset.upload-original-abort',
+    ]);
+  });
+
+  it('sends a file of exactly the threshold size in one message', async () => {
+    const { bridge, calls } = fakeBridge({
+      'desktop.media.asset.upload-original': { assetId: 'asset-edge' },
+    });
+    const client = new BrowserControlPlaneClient(bridge, { chunkedAboveBytes: 4, chunkBytes: 2 });
+
+    await client.uploadAssetOriginal(
+      'project-edge',
+      { id: 'asset-edge', sha256: 'e'.repeat(64), bytes: 4, descriptor: { mimeType: 'video/mp4' } },
+      new Blob([new Uint8Array([1, 2, 3, 4])]),
+    );
+
+    expect(calls.map((call) => call.channel)).toEqual(['desktop.media.asset.upload-original']);
+  });
+
   it('lists the local worker from the desktop, with no pairing state', async () => {
     const { bridge } = fakeBridge({
       'desktop.media.workers.list': [

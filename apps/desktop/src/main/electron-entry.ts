@@ -134,6 +134,10 @@ if (!app.requestSingleInstanceLock()) {
   });
   // The provider calls in progress. A reload of the page ends them, since nothing will read their replies.
   const agentRequests = new AgentRequestRegistry();
+  const originals = createLocalOriginalWriter({
+    directory: join(paths.mediaRoot, 'originals'),
+    assets: localDatabase.localAssets,
+  });
   const ipcHandlers = createIpcHandlers({
     agentRequests,
     fileRegistry,
@@ -144,10 +148,7 @@ if (!app.requestSingleInstanceLock()) {
       jobStore: localDatabase.jobDispatch,
       projectDocuments: localDatabase.projectDocuments,
       assets: localDatabase.localAssets,
-      originals: createLocalOriginalWriter({
-        directory: join(paths.mediaRoot, 'originals'),
-        assets: localDatabase.localAssets,
-      }),
+      originals,
       library: createAssetLibrary({
         directory: () => localDatabase.getAssetLibraryDirectory(),
         registrations: localDatabase.localAssets,
@@ -435,6 +436,7 @@ if (!app.requestSingleInstanceLock()) {
       },
       onProcessSignal: (signalName, listener) => process.on(signalName, listener),
       stopWorker: () => workerSupervisor.stop(),
+      discardUploads: () => originals.abortAllOriginalUploads(),
       flush: () => {
         // SqliteProjectStore (packages/project-persistence's desktop subpath) is not yet
         // wired here: no IPC channel opens/saves a project through it yet (see
