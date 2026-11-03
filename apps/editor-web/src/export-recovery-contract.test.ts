@@ -120,7 +120,7 @@ describe('App export recovery contract', () => {
   });
 
   it('revalidates the immutable source immediately before committing export metadata', () => {
-    const digest = exportCallback.indexOf('const exportSha256 = await sha256Hex(');
+    const digest = exportCallback.indexOf('const exportSha256 = await sha256OfBlob(');
     const finalRevisionCheck = exportCallback.indexOf(
       'session.projectRevisionId !== sourceProjectRevisionId',
       digest,

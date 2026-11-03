@@ -1,5 +1,13 @@
 import { AudioSample, AudioSampleSource, type Output } from 'mediabunny';
 
+/**
+ * The AAC profile every offline export encodes its audio with: AAC-LC.
+ *
+ * It is pinned here rather than left to mediabunny. For a mix at 24 kHz or lower, mediabunny would
+ * pick a HE-AAC string that the capability probe never tested. The probe asks for this same string.
+ */
+export const OFFLINE_AAC_CODEC = 'mp4a.40.2';
+
 export interface OfflineAudioFeeder {
   /** Adds the audio track to `output`. Called once, before `output.start()`. */
   readonly attach: (output: Output) => void;
@@ -38,6 +46,7 @@ interface AudioSampleInitLike {
 export interface OfflineAacTrackDeps {
   readonly createAudioSampleSource: (config: {
     codec: 'aac';
+    fullCodecString: string;
     bitrate: number;
   }) => AudioSampleSourceLike;
   readonly createAudioSample: (init: AudioSampleInitLike) => AudioSampleLike;
@@ -83,6 +92,7 @@ export function createOfflineAacTrack(
 
   const source = deps.createAudioSampleSource({
     codec: 'aac',
+    fullCodecString: OFFLINE_AAC_CODEC,
     bitrate: options.bitrate ?? DEFAULT_BITRATE,
   });
   let nextSample = 0;

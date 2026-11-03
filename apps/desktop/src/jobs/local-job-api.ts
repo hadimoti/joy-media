@@ -17,7 +17,8 @@ const MAX_JSON_BYTES = 64 * 1024;
 export const MAX_AI_REQUEST_BYTES = 1024 * 1024;
 /** Largest reply the Worker route returns, with its JSON envelope counted (PLAN-v4 §6b). */
 export const MAX_AI_RESPONSE_BYTES = 4 * 1024 * 1024;
-const MAX_DERIVATIVE_BYTES = 64 * 1024 * 1024;
+/** The finished export comes back through this route, so it gets the same ceiling as an original. */
+const MAX_DERIVATIVE_BYTES = MAX_LOCAL_ORIGINAL_BYTES;
 /**
  * Largest source served over the loopback route. It is the registration limit, so every original
  * that registers can render. The source is read into memory on both sides, so a large file is a

@@ -17,6 +17,7 @@ import type {
   BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
 import { avcCodecString, selectAvcLevels, type AvcProfile } from './avc-level.js';
+import { OFFLINE_AAC_CODEC } from './offline-aac-track.js';
 
 /**
  * Implemented elsewhere (offline-aac-track.ts, another worker). Your code only calls it.
@@ -124,14 +125,19 @@ const CAPABILITY_QUERY_TIMEOUT_MS = 8_000;
 const CANCEL_GRACE_MS = 3_000;
 
 /** The AAC profile the export muxes audio as. */
-const AUDIO_CODEC = 'mp4a.40.2';
+const AUDIO_CODEC = OFFLINE_AAC_CODEC;
 const AUDIO_SAMPLE_RATE = 48_000;
 const AUDIO_CHANNEL_COUNT = 2;
 const AUDIO_BITRATE = 128_000;
 
-/** The bitrate bounds of the derived default. */
+/**
+ * The bitrate bounds of the derived default. The floor and the formula match the real-time recorder
+ * (`max(2 Mbps, width x height x frameRate)`), so an offline export encodes at the recorder's bit
+ * rate. The recorder has no ceiling; the offline export stops at the H.264 High profile limit of
+ * level 5.2 (300 Mbps).
+ */
 const MIN_BITRATE = 2_000_000;
-const MAX_BITRATE = 40_000_000;
+const MAX_BITRATE = 300_000_000;
 
 /** The profiles are tried in this order, best compression first. */
 const AVC_PROFILE_ORDER: readonly AvcProfile[] = ['high', 'main', 'constrainedBaseline'];
@@ -166,8 +172,9 @@ export async function detectOfflineMp4Capability(
       reason:
         'This browser has no WebCodecs video encoder, so it cannot export MP4 offline. Update to the latest Chrome.',
     };
-  const levels = selectAvcLevels(width, height, frameRate);
   for (const profile of AVC_PROFILE_ORDER) {
+    // The level has to cover the bit rate too, so a high bit rate moves the choice up a level.
+    const levels = selectAvcLevels(width, height, frameRate, bitrate, profile);
     for (const level of levels) {
       const codec = avcCodecString(profile, level);
       const outcome = await querySupport(() =>
@@ -268,9 +275,9 @@ async function querySupport(
   }
 }
 
-/** The bitrate used when the caller does not ask for one. */
+/** The bitrate used when the caller does not ask for one: the recorder's, within bounds. */
 function defaultOfflineMp4Bitrate(width: number, height: number, frameRate: number): number {
-  const raw = width * height * frameRate * 0.2;
+  const raw = width * height * frameRate;
   return Math.round(Math.min(Math.max(raw, MIN_BITRATE), MAX_BITRATE));
 }
 

@@ -682,7 +682,7 @@ describe('desktop.media channels', () => {
         sha256: 'a'.repeat(64),
         bytes: MAX_LOCAL_ORIGINAL_BYTES + 1,
       }),
-    ).toEqual({ ok: false, error: 'The original is larger than the 1 GiB local limit' });
+    ).toEqual({ ok: false, error: 'The original is larger than the 5 GiB local limit' });
   });
 
   it('registers an asset, and stores an original only when it matches the registration', async () => {
