@@ -333,7 +333,9 @@ export function createJobOrchestrator(options: JobOrchestratorOptions): JobOrche
         store.save({
           ...job,
           progress: Math.min(100, Math.max(0, Math.round(progress))),
-          leaseExpiresAt: leaseExpiry(DEFAULT_LEASE_MS),
+          // A long export moves large files through this process, and that can delay the next
+          // heartbeat well past 30 s. Each heartbeat renews the lease for the longest allowed window.
+          leaseExpiresAt: leaseExpiry(MAX_LEASE_MS),
           updatedAt: now(),
         });
         return { cancelRequested: job.cancelRequested };
