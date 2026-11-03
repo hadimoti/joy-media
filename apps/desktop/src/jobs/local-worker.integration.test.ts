@@ -1,11 +1,19 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createFileRegistry } from '../main/file-registry.js';
 import { LocalDatabase } from '../store/local-database.js';
 import type { DispatchJob } from './job-dispatch.js';
@@ -23,9 +31,11 @@ import { localWorkerEnv } from './worker-env.js';
  * stores the JPEG the Worker uploads.
  */
 
-// The Worker build sits beside this package, so it is located from this file, not from the cwd.
+// The Worker sits beside this package, so it is located from this file, not from the cwd.
 const workerDir = fileURLToPath(new URL('../../../worker/', import.meta.url));
-const workerEntry = join(workerDir, 'dist', 'index.js');
+// Set in beforeAll: the Worker is compiled into a folder that only this run uses, and that is what runs.
+let workerEntry = '';
+let privateWorkerDir = '';
 const tscEntry = fileURLToPath(
   new URL('../../../../node_modules/typescript/bin/tsc', import.meta.url),
 );
@@ -54,18 +64,50 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
   let sourceDelayMs = 0;
   let stopApiReads: () => void;
 
-  // The Worker runs from its build, so the build is brought up to date from its source before any test starts.
-  // An old build would otherwise pass or fail for reasons the current source does not have.
+  // The Worker runs from a build of its current source, made before any test starts, so an old build cannot
+  // pass or fail for reasons the source does not have. The packages it imports are shared with other suites,
+  // which read them while this one runs. So those are brought up to date without --force (only stale ones are
+  // rebuilt), and the Worker itself is compiled into a folder that only this run uses, with its build-info file.
   beforeAll(() => {
-    execFileSync(process.execPath, [tscEntry, '-b', '--force', workerDir], {
-      stdio: 'pipe',
-      timeout: 120_000,
-    });
+    const workerConfig = JSON.parse(readFileSync(join(workerDir, 'tsconfig.json'), 'utf8')) as {
+      references: { path: string }[];
+    };
+    execFileSync(
+      process.execPath,
+      [tscEntry, '-b', ...workerConfig.references.map((ref) => join(workerDir, ref.path))],
+      { stdio: 'pipe', timeout: 120_000 },
+    );
+    // A run that was killed (a crash, or a restart in the middle of a run) leaves its folder behind. Remove those
+    // first, so a stale copy of the Worker never ends up in the release, which copies this folder.
+    const distDir = join(workerDir, 'dist');
+    mkdirSync(distDir, { recursive: true });
+    for (const name of readdirSync(distDir)) {
+      if (name.startsWith('test-run-'))
+        rmSync(join(distDir, name), { recursive: true, force: true });
+    }
+    privateWorkerDir = mkdtempSync(join(distDir, 'test-run-'));
+    execFileSync(
+      process.execPath,
+      [
+        tscEntry,
+        '-p',
+        join(workerDir, 'tsconfig.json'),
+        '--outDir',
+        privateWorkerDir,
+        '--tsBuildInfoFile',
+        join(privateWorkerDir, 'tsconfig.tsbuildinfo'),
+      ],
+      { stdio: 'pipe', timeout: 120_000 },
+    );
+    workerEntry = join(privateWorkerDir, 'index.js');
   }, 150_000);
 
+  afterAll(() => {
+    if (privateWorkerDir) rmSync(privateWorkerDir, { recursive: true, force: true });
+  });
+
   beforeEach(async () => {
-    if (!existsSync(workerEntry))
-      throw new Error(`Worker build missing at ${workerEntry}; run tsc -b apps/worker first`);
+    if (!existsSync(workerEntry)) throw new Error(`Worker build missing at ${workerEntry}`);
     dir = mkdtempSync(join(tmpdir(), 'joy-local-worker-'));
     mkdirSync(join(dir, 'worker'), { recursive: true });
     videoPath = join(dir, 'clip.mp4');
