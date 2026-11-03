@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { SqliteLocalAssetStore } from '../store/local-assets.js';
 
 /** Largest original the editor may upload for a local render. */
-export const MAX_LOCAL_ORIGINAL_BYTES = 1024 * 1024 * 1024;
+export const MAX_LOCAL_ORIGINAL_BYTES = 5 * 1024 * 1024 * 1024;
 
 export type StoreOriginalResult =
   { readonly ok: true } | { readonly ok: false; readonly error: string };
