@@ -1,6 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { mkdir, rename, rm } from 'node:fs/promises';
+import { once } from 'node:events';
 import type { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { JobProtocolError, type JobOrchestrator } from './job-orchestrator.js';
@@ -283,20 +285,24 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
     if (extension === undefined) throw new JobProtocolError(422, 'unsupported derivative type');
     const expectedSha = headerValue(request, 'x-joy-sha256');
     const expectedBytes = Number(headerValue(request, 'x-joy-bytes'));
-    const bytes = await readBytes(request, MAX_DERIVATIVE_BYTES);
-    const sha256 = createHash('sha256').update(bytes).digest('hex');
-    if (bytes.length < 1 || bytes.length !== expectedBytes || sha256 !== expectedSha)
-      throw new JobProtocolError(422, 'derivative bytes do not match their digest');
-
     await mkdir(options.derivativeDirectory, { recursive: true });
+    // The body is written to a file as it arrives, so a long export is never held in memory.
+    const temporary = join(
+      options.derivativeDirectory,
+      `${jobId}-${randomBytes(6).toString('hex')}.tmp`,
+    );
+    const received = await receiveDerivative(request, temporary);
+    if (received.bytes < 1 || received.bytes !== expectedBytes || received.sha256 !== expectedSha) {
+      await rm(temporary, { force: true });
+      throw new JobProtocolError(422, 'derivative bytes do not match their digest');
+    }
+    const { sha256 } = received;
     const path = join(options.derivativeDirectory, `${jobId}-${sha256.slice(0, 16)}.${extension}`);
-    const temporary = `${path}.${randomBytes(6).toString('hex')}.tmp`;
-    await writeFile(temporary, bytes, { mode: 0o600 });
     try {
       await rename(temporary, path);
       orchestrator.recordDerivative(workerId, jobId, leaseToken, {
         sha256,
-        bytes: bytes.length,
+        bytes: received.bytes,
         mimeType,
         path,
       });
@@ -359,6 +365,35 @@ function decodeId(raw: string | undefined): string {
 function headerValue(request: IncomingMessage, name: string): string {
   const value = request.headers[name];
   return typeof value === 'string' ? value : '';
+}
+
+/**
+ * Writes a derivative body to `path` as it arrives, hashing it on the way, so the whole file never
+ * sits in memory. The caller checks the length and digest, and removes the file if they differ.
+ */
+async function receiveDerivative(
+  request: IncomingMessage,
+  path: string,
+): Promise<{ readonly sha256: string; readonly bytes: number }> {
+  const hash = createHash('sha256');
+  const file = createWriteStream(path, { mode: 0o600 });
+  let total = 0;
+  try {
+    for await (const chunk of request) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      total += buffer.length;
+      if (total > MAX_DERIVATIVE_BYTES) throw new JobProtocolError(422, 'payload is too large');
+      hash.update(buffer);
+      if (!file.write(buffer)) await once(file, 'drain');
+    }
+    file.end();
+    await once(file, 'finish');
+  } catch (error) {
+    file.destroy();
+    await rm(path, { force: true }).catch(() => undefined);
+    throw error;
+  }
+  return { sha256: hash.digest('hex'), bytes: total };
 }
 
 async function readBytes(

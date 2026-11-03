@@ -205,9 +205,9 @@ describe('WorkerDaemon', () => {
       uploadDerivative: async (
         _jobId: string,
         result: { readonly sha256: string; readonly bytes: number },
-        bytes: Uint8Array,
+        body: Uint8Array | { readonly bytes: number },
       ) => {
-        expect(bytes.byteLength).toBe(result.bytes);
+        expect(body instanceof Uint8Array ? body.byteLength : body.bytes).toBe(result.bytes);
         calls.push(`upload:${result.sha256.length}`);
       },
       complete: async (_jobId: string, result: { readonly sha256: string }) => {

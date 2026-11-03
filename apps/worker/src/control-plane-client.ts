@@ -1,9 +1,18 @@
+import { createReadStream, createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { DeviceIdentity } from './runtime.js';
 import type { GpuPreviewFrameRequest, GpuPreviewFrameResponse } from '@joy-media/job-protocol';
 
 export interface WorkerSessionStore {
   loadWorkerSession(): string | undefined;
   clearWorkerSession(): void;
+}
+
+/** A finished derivative that is sent from its file, so it is never held in memory whole. */
+export interface DerivativeFile {
+  readonly path: string;
+  readonly bytes: number;
 }
 
 export interface LeasedJob {
@@ -81,6 +90,8 @@ export class WorkerRequestTimeoutError extends Error {
  * the desktop's timeout is the one that is reported, and the provider call is not left running.
  */
 const AI_COMPLETE_TIMEOUT_MS = 130_000;
+/** Source and derivative transfers of a long export can take many minutes. */
+const TRANSFER_TIMEOUT_MS = 30 * 60_000;
 
 /** Outbound-only Worker client. It never holds a JOY user session or password. */
 export class WorkerControlPlaneClient {
@@ -167,7 +178,12 @@ export class WorkerControlPlaneClient {
     );
   }
 
-  async downloadJobAsset(jobId: string, leaseToken?: string): Promise<Uint8Array> {
+  /** Streams the staged source into `destinationPath`, so the whole file is never held in memory. */
+  async downloadJobAsset(
+    jobId: string,
+    leaseToken: string | undefined,
+    destinationPath: string,
+  ): Promise<void> {
     const sessionToken = this.options.sessionStore.loadWorkerSession();
     if (sessionToken === undefined) throw new Error('Worker is not paired');
     const response = await this.runTimedRequest(
@@ -181,21 +197,27 @@ export class WorkerControlPlaneClient {
           'user-agent': process.env.JOY_MEDIA_WORKER_USER_AGENT?.trim() || 'JOY-Media-Worker/0.1',
         },
       },
-      async (result) => ({ response: result, bytes: new Uint8Array(await result.arrayBuffer()) }),
+      async (result) => {
+        if (result.ok && result.body !== null)
+          await pipeline(
+            Readable.fromWeb(result.body as unknown as Parameters<typeof Readable.fromWeb>[0]),
+            createWriteStream(destinationPath, { mode: 0o600 }),
+          );
+        return result;
+      },
+      TRANSFER_TIMEOUT_MS,
     );
-    if (response.response.status === 401) {
+    if (response.status === 401) {
       this.options.sessionStore.clearWorkerSession();
       throw new WorkerSessionExpiredError();
     }
-    if (!response.response.ok)
-      throw new Error(`Worker source download failed (${response.response.status})`);
-    return response.bytes;
+    if (!response.ok) throw new Error(`Worker source download failed (${response.status})`);
   }
 
   async uploadDerivative(
     jobId: string,
     result: WorkerJobResult,
-    bytes: Uint8Array,
+    body: Uint8Array | DerivativeFile,
     leaseToken?: string,
   ): Promise<void> {
     const sessionToken = this.options.sessionStore.loadWorkerSession();
@@ -226,17 +248,17 @@ export class WorkerControlPlaneClient {
       headers['x-joy-height'] = String(result.descriptor.height);
     if (result.descriptor?.durationUs !== undefined)
       headers['x-joy-duration-us'] = String(result.descriptor.durationUs);
+    // A file is streamed from disk with its length announced; in-memory bytes are sent as before.
+    const payload =
+      body instanceof Uint8Array
+        ? (body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer)
+        : (Readable.toWeb(createReadStream(body.path)) as unknown as RequestInit['body']);
+    if (!(body instanceof Uint8Array)) headers['content-length'] = String(body.bytes);
     const response = await this.runTimedRequest(
       `${this.options.apiUrl.replace(/\/$/, '')}/v1/workers/${encodeURIComponent(this.options.identity.workerId)}/jobs/${encodeURIComponent(jobId)}/derivative`,
-      {
-        method: 'POST',
-        headers,
-        body: bytes.buffer.slice(
-          bytes.byteOffset,
-          bytes.byteOffset + bytes.byteLength,
-        ) as ArrayBuffer,
-      },
+      { method: 'POST', headers, body: payload, duplex: 'half' } as RequestInit,
       async (result) => result,
+      TRANSFER_TIMEOUT_MS,
     );
     if (response.status === 401) {
       this.options.sessionStore.clearWorkerSession();

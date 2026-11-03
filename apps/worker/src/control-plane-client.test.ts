@@ -1,6 +1,9 @@
 import type { Server } from 'node:http';
 import { once } from 'node:events';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createControlPlaneHttpServer, LocalControlPlane } from '@joy-media/test-control-plane';
 import { WorkerControlPlaneClient, WorkerSessionExpiredError } from './control-plane-client.js';
@@ -214,9 +217,9 @@ describe('WorkerControlPlaneClient', () => {
       },
     });
 
-    await expect(client.downloadJobAsset('job-1', 'lease-1')).resolves.toEqual(
-      new Uint8Array([1, 2, 3]),
-    );
+    const destination = join(mkdtempSync(join(tmpdir(), 'source-download-')), 'source.mp4');
+    await client.downloadJobAsset('job-1', 'lease-1', destination);
+    expect(new Uint8Array(readFileSync(destination))).toEqual(new Uint8Array([1, 2, 3]));
     expect(seenAuthorization).toBe('Bearer worker-session');
     expect(seenLeaseToken).toBe('lease-1');
   });

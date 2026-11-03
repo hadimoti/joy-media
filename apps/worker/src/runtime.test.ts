@@ -121,7 +121,7 @@ describe('Worker runtime', () => {
     const runtime = new WorkerRuntime(
       { workerId: 'provider-worker', createdAt: '2026-01-01T00:00:00.000Z' },
       detectMediaTools(() => true, { aiBroker: true }),
-      { downloadJobAsset: async () => new Uint8Array() },
+      { downloadJobAsset: async () => undefined },
     );
     const capabilities = runtime.hello('win32', 'x64').capabilities;
     expect(capabilities).not.toContain('video.runway');

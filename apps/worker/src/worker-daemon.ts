@@ -105,12 +105,12 @@ export class WorkerDaemon {
             result.result.kind === 'upscale.image' ||
             result.result.kind === 'upscale.video'
           ) {
-            await this.client.uploadDerivative(
-              job.id,
-              result.result,
-              this.runtime.readDerivative(result.result),
-              job.leaseToken,
-            );
+            // An export is sent from its file; the other derivatives are small enough to send as bytes.
+            const body =
+              result.result.kind === 'render.export'
+                ? await this.runtime.derivativeFile(result.result)
+                : this.runtime.readDerivative(result.result);
+            await this.client.uploadDerivative(job.id, result.result, body, job.leaseToken);
           }
           await this.client.complete(job.id, result.result, job.leaseToken);
         } else await this.client.fail(job.id, 'canceled', job.leaseToken);

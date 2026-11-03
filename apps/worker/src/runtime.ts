@@ -1,4 +1,5 @@
 import {
+  createReadStream,
   existsSync,
   mkdirSync,
   rmSync,
@@ -11,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import type { DerivativeFile } from './control-plane-client.js';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { WorkerCapability, WorkerHello, WorkerModelInventory } from '@joy-media/job-protocol';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
@@ -227,7 +229,11 @@ export class WorkerRuntime {
       readonly sources?: LocalAssetSourceRegistry;
       readonly derivativeDirectory?: string;
       readonly gpuPreviewAvailable?: boolean;
-      readonly downloadJobAsset?: (jobId: string, leaseToken?: string) => Promise<Uint8Array>;
+      readonly downloadJobAsset?: (
+        jobId: string,
+        leaseToken: string | undefined,
+        destinationPath: string,
+      ) => Promise<void>;
       readonly completeAi?: BrokerCompletion;
     } = {},
   ) {}
@@ -305,8 +311,7 @@ export class WorkerRuntime {
       this.log.write(`job ${job.id} started (render.export)`);
       try {
         await options.progress(5);
-        const sourceBytes = await this.options.downloadJobAsset(job.id, job.leaseToken);
-        writeFileSync(sourcePath, Buffer.from(sourceBytes), { mode: 0o600 });
+        await this.options.downloadJobAsset(job.id, job.leaseToken, sourcePath);
         await options.progress(40);
         executeLeasedExport(
           { complete: () => undefined },
@@ -317,9 +322,8 @@ export class WorkerRuntime {
           job.leaseToken,
         );
         await options.progress(80);
-        const bytes = readFileSync(outputPath);
-        if (bytes.length < 1) throw new Error('render.export output is empty');
-        const sha256 = createHash('sha256').update(bytes).digest('hex');
+        const { sha256, bytes } = await hashFile(outputPath);
+        if (bytes < 1) throw new Error('render.export output is empty');
         const localRef = `export-${job.id}-${sha256.slice(0, 16)}`;
         mkdirSync(derivativeDirectory, { recursive: true });
         const finalOutput = join(derivativeDirectory, `${localRef}.mp4`);
@@ -335,7 +339,7 @@ export class WorkerRuntime {
             kind: 'render.export',
             assetId: job.assetId,
             sha256,
-            bytes: bytes.length,
+            bytes,
             localRef,
             descriptor: {
               mimeType: 'video/mp4',
@@ -582,7 +586,7 @@ export class WorkerRuntime {
     const download = this.options.downloadJobAsset;
     if (download === undefined) throw new Error('no source downloader is configured');
     const path = join(tempDir, 'source');
-    writeFileSync(path, Buffer.from(await download(jobId, leaseToken)), { mode: 0o600 });
+    await download(jobId, leaseToken, path);
     return path;
   }
 
@@ -621,6 +625,21 @@ export class WorkerRuntime {
 
   localAssetIds(): readonly string[] {
     return this.options.sources?.assetIds() ?? [];
+  }
+
+  /**
+   * Re-checks a retained export by reading it in pieces, and returns its path for upload. An export
+   * can be far larger than memory, so it is never read into a single buffer here.
+   */
+  async derivativeFile(result: WorkerDerivativeReceipt): Promise<DerivativeFile> {
+    if (result.kind !== 'render.export')
+      throw new Error('only export derivatives are sent from a file');
+    const directory = this.options.derivativeDirectory ?? join(getJoyMediaHome(), 'derivatives');
+    const path = join(directory, `${result.localRef}.mp4`);
+    const hashed = await hashFile(path);
+    if (hashed.bytes !== result.bytes || hashed.sha256 !== result.sha256)
+      throw new Error('retained export derivative integrity check failed');
+    return { path, bytes: hashed.bytes };
   }
 
   /** Reads a retained derivative only after re-checking its receipt integrity. */
@@ -662,6 +681,19 @@ export class WorkerRuntime {
       throw new Error('retained derivative integrity check failed');
     return bytes;
   }
+}
+
+/** SHA-256 and length of a file, read in pieces so a long export is never held in memory. */
+async function hashFile(
+  path: string,
+): Promise<{ readonly sha256: string; readonly bytes: number }> {
+  const hash = createHash('sha256');
+  let bytes = 0;
+  for await (const chunk of createReadStream(path)) {
+    hash.update(chunk);
+    bytes += chunk.length;
+  }
+  return { sha256: hash.digest('hex'), bytes };
 }
 
 function mlDenoiseRunnable(): boolean {

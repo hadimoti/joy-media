@@ -298,8 +298,9 @@ describe('Worker/control-plane export integration', () => {
     try {
       const lease = await client.lease();
       expect(lease).toMatchObject({ id: jobId, assetId: 'source-http' });
-      const downloaded = await client.downloadJobAsset(jobId, lease!.leaseToken);
-      expect(downloaded).toEqual(sourceBytes);
+      const sourcePath = join(mkdtempSync(join(tmpdir(), 'source-download-')), 'source.mp4');
+      await client.downloadJobAsset(jobId, lease!.leaseToken, sourcePath);
+      expect(new Uint8Array(readFileSync(sourcePath))).toEqual(new Uint8Array(sourceBytes));
 
       const derivativeBytes = new Uint8Array([9, 8, 7, 6]);
       const sha256 = createHash('sha256').update(derivativeBytes).digest('hex');
