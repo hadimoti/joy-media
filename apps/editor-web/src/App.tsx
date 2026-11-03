@@ -4634,7 +4634,10 @@ function EditorWorkspace({
             recorderContext.drawImage(renderer.canvas, 0, 0, width, height);
           },
           onProgress: (completed: number, total: number) => {
-            setExportProgress(0.05 + 0.93 * (completed / total));
+            // A React update on every frame re-renders the whole editor and slows the encode loop,
+            // so the bar moves once a second (with the status line) and on the last frame.
+            if (completed === total || completed % frameRate === 0)
+              setExportProgress(0.05 + 0.93 * (completed / total));
             if (completed === total || completed % frameRate === 0)
               setExportStatus(
                 `Encoding preview-equivalent H.264/AAC… ${completed}/${total} frames`,
