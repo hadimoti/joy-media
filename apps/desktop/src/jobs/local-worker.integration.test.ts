@@ -1,6 +1,14 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -59,7 +67,7 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
   // The Worker runs from a build of its current source, made before any test starts, so an old build cannot
   // pass or fail for reasons the source does not have. The packages it imports are shared with other suites,
   // which read them while this one runs. So those are brought up to date without --force (only stale ones are
-  // rebuilt), and the Worker itself is compiled into a folder that only this run uses.
+  // rebuilt), and the Worker itself is compiled into a folder that only this run uses, with its build-info file.
   beforeAll(() => {
     const workerConfig = JSON.parse(readFileSync(join(workerDir, 'tsconfig.json'), 'utf8')) as {
       references: { path: string }[];
@@ -69,11 +77,26 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       [tscEntry, '-b', ...workerConfig.references.map((ref) => join(workerDir, ref.path))],
       { stdio: 'pipe', timeout: 120_000 },
     );
-    mkdirSync(join(workerDir, 'dist'), { recursive: true });
-    privateWorkerDir = mkdtempSync(join(workerDir, 'dist', 'test-run-'));
+    // A run that was killed (a crash, or a restart in the middle of a run) leaves its folder behind. Remove those
+    // first, so a stale copy of the Worker never ends up in the release, which copies this folder.
+    const distDir = join(workerDir, 'dist');
+    mkdirSync(distDir, { recursive: true });
+    for (const name of readdirSync(distDir)) {
+      if (name.startsWith('test-run-'))
+        rmSync(join(distDir, name), { recursive: true, force: true });
+    }
+    privateWorkerDir = mkdtempSync(join(distDir, 'test-run-'));
     execFileSync(
       process.execPath,
-      [tscEntry, '-p', join(workerDir, 'tsconfig.json'), '--outDir', privateWorkerDir],
+      [
+        tscEntry,
+        '-p',
+        join(workerDir, 'tsconfig.json'),
+        '--outDir',
+        privateWorkerDir,
+        '--tsBuildInfoFile',
+        join(privateWorkerDir, 'tsconfig.tsbuildinfo'),
+      ],
       { stdio: 'pipe', timeout: 120_000 },
     );
     workerEntry = join(privateWorkerDir, 'index.js');
