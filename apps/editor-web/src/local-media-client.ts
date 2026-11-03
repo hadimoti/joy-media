@@ -221,8 +221,25 @@ function toBrowserDerivative(tracked: TrackedJob, job: DesktopJobView): BrowserD
   };
 }
 
+/**
+ * Originals above `chunkedAboveBytes` are sent in pieces of `chunkBytes`, one desktop message each,
+ * so no single message has to carry the whole file.
+ */
+export interface OriginalUploadLimits {
+  readonly chunkedAboveBytes: number;
+  readonly chunkBytes: number;
+}
+
+const DEFAULT_ORIGINAL_UPLOAD_LIMITS: OriginalUploadLimits = {
+  chunkedAboveBytes: 64 * 1024 * 1024,
+  chunkBytes: 8 * 1024 * 1024,
+};
+
 export class BrowserControlPlaneClient {
-  constructor(private readonly bridge: DesktopMediaBridge = defaultBridge()) {}
+  constructor(
+    private readonly bridge: DesktopMediaBridge = defaultBridge(),
+    private readonly uploads: OriginalUploadLimits = DEFAULT_ORIGINAL_UPLOAD_LIMITS,
+  ) {}
 
   async workers(): Promise<readonly BrowserWorker[]> {
     const workers = await call<readonly DesktopWorkerView[]>(
@@ -363,8 +380,12 @@ export class BrowserControlPlaneClient {
     file: Blob,
     onProgress?: (ratio: number) => void,
   ): Promise<BrowserAsset> {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    await call(this.bridge, 'desktop.media.asset.upload-original', { assetId: asset.id, bytes });
+    if (file.size > this.uploads.chunkedAboveBytes) {
+      await this.uploadOriginalInChunks(asset.id, file, onProgress);
+    } else {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      await call(this.bridge, 'desktop.media.asset.upload-original', { assetId: asset.id, bytes });
+    }
     onProgress?.(1);
     return (
       registeredAssets.get(asset.id) ?? {
@@ -379,6 +400,34 @@ export class BrowserControlPlaneClient {
         cloudBacked: false,
       }
     );
+  }
+
+  /** Sends a large original in pieces, then asks the desktop to check and commit the whole file. */
+  private async uploadOriginalInChunks(
+    assetId: string,
+    file: Blob,
+    onProgress?: (ratio: number) => void,
+  ): Promise<void> {
+    try {
+      let offset = 0;
+      while (offset < file.size) {
+        const end = Math.min(file.size, offset + this.uploads.chunkBytes);
+        const bytes = new Uint8Array(await file.slice(offset, end).arrayBuffer());
+        await call(this.bridge, 'desktop.media.asset.upload-original-chunk', {
+          assetId,
+          offset,
+          bytes,
+        });
+        offset = end;
+        onProgress?.(offset / file.size);
+      }
+      await call(this.bridge, 'desktop.media.asset.upload-original-finish', { assetId });
+    } catch (error) {
+      await call(this.bridge, 'desktop.media.asset.upload-original-abort', { assetId }).catch(
+        () => undefined,
+      );
+      throw error;
+    }
   }
 
   async originalBytes(_projectId: string, _assetId: string): Promise<Blob> {

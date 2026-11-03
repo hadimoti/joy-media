@@ -8,7 +8,11 @@ import { join } from 'node:path';
 import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from '../jobs/job-orchestrator.js';
 import type { DispatchJob } from '../jobs/job-dispatch.js';
-import { createLocalOriginalWriter, MAX_LOCAL_ORIGINAL_BYTES } from './local-originals.js';
+import {
+  createLocalOriginalWriter,
+  MAX_LOCAL_ORIGINAL_BYTES,
+  MAX_ORIGINAL_CHUNK_BYTES,
+} from './local-originals.js';
 import { createMediaChannelHandlers, MEDIA_CHANNELS, publicJobError } from './media-channel.js';
 import type { AssetLibraryPort } from '../store/asset-library.js';
 
@@ -93,7 +97,10 @@ describe('publicJobError', () => {
 describe('desktop.media channels', () => {
   it('declares every media channel once', () => {
     expect(new Set(MEDIA_CHANNELS).size).toBe(MEDIA_CHANNELS.length);
-    expect(MEDIA_CHANNELS).toHaveLength(13);
+    expect(MEDIA_CHANNELS).toHaveLength(16);
+    expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-chunk');
+    expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-finish');
+    expect(MEDIA_CHANNELS).toContain('desktop.media.asset.upload-original-abort');
   });
 
   it('connects localhost through 127.0.0.1 while preserving the Host header and saved model provenance', async () => {
@@ -683,6 +690,112 @@ describe('desktop.media channels', () => {
         bytes: MAX_LOCAL_ORIGINAL_BYTES + 1,
       }),
     ).toEqual({ ok: false, error: 'The original is larger than the 5 GiB local limit' });
+  });
+
+  it('stores an original sent in pieces only when the finished file matches the registration', async () => {
+    const { db, handlers } = setup();
+    const bytes = Buffer.from('chunked-original-bytes');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    const registration = {
+      id: 'asset-chunked',
+      kind: 'video',
+      displayName: 'clip.webm.stage',
+      sha256,
+      bytes: bytes.length,
+      descriptor: { mimeType: 'video/webm' },
+    };
+    expect(handlers['desktop.media.asset.register'](registration)).toEqual({
+      ok: true,
+      data: { id: 'asset-chunked' },
+    });
+
+    expect(
+      await handlers['desktop.media.asset.upload-original-chunk']({
+        assetId: 'asset-chunked',
+        offset: 3,
+        bytes: new Uint8Array(bytes.subarray(3)),
+      }),
+    ).toEqual({ ok: false, error: 'Original upload is out of order' });
+    expect(
+      await handlers['desktop.media.asset.upload-original-chunk']({
+        assetId: 'asset-chunked',
+        offset: 0,
+        bytes: new Uint8Array(bytes.subarray(0, 8)),
+      }),
+    ).toEqual({ ok: true, data: { assetId: 'asset-chunked' } });
+    expect(
+      await handlers['desktop.media.asset.upload-original-chunk']({
+        assetId: 'asset-chunked',
+        offset: 8,
+        bytes: new Uint8Array(bytes.subarray(8)),
+      }),
+    ).toEqual({ ok: true, data: { assetId: 'asset-chunked' } });
+    expect(
+      await handlers['desktop.media.asset.upload-original-finish']({ assetId: 'asset-chunked' }),
+    ).toEqual({ ok: true, data: { assetId: 'asset-chunked' } });
+
+    const storedPath = db.localAssets.storedPath('asset-chunked');
+    expect(storedPath).toBeDefined();
+    expect(readFileSync(storedPath!).equals(bytes)).toBe(true);
+  });
+
+  it('refuses a malformed chunk or finish request before it reaches the disk', async () => {
+    const { handlers } = setup();
+    expect(
+      await handlers['desktop.media.asset.upload-original-chunk']({
+        assetId: 'asset-1',
+        offset: -1,
+        bytes: new Uint8Array(1),
+      }),
+    ).toEqual({ ok: false, error: 'Invalid media request' });
+    expect(await handlers['desktop.media.asset.upload-original-finish']({})).toEqual({
+      ok: false,
+      error: 'Invalid media request',
+    });
+  });
+
+  it('refuses a piece above the one-message limit, or one whose offset is not a whole number', async () => {
+    const { handlers } = setup();
+    expect(
+      await handlers['desktop.media.asset.upload-original-chunk']({
+        assetId: 'asset-1',
+        offset: 0,
+        bytes: new Uint8Array(MAX_ORIGINAL_CHUNK_BYTES + 1),
+      }),
+    ).toEqual({ ok: false, error: 'Invalid media request' });
+    expect(
+      await handlers['desktop.media.asset.upload-original-chunk']({
+        assetId: 'asset-1',
+        offset: 1.5,
+        bytes: new Uint8Array(1),
+      }),
+    ).toEqual({ ok: false, error: 'Invalid media request' });
+  });
+
+  it('drops an unfinished upload when the renderer aborts it, so it cannot be finished', async () => {
+    const { handlers } = setup();
+    const bytes = Buffer.from('aborted-original-bytes');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    handlers['desktop.media.asset.register']({
+      id: 'asset-aborted',
+      kind: 'video',
+      displayName: 'clip.webm.stage',
+      sha256,
+      bytes: bytes.length,
+      descriptor: { mimeType: 'video/webm' },
+    });
+    await handlers['desktop.media.asset.upload-original-chunk']({
+      assetId: 'asset-aborted',
+      offset: 0,
+      bytes: new Uint8Array(bytes.subarray(0, 8)),
+    });
+
+    expect(
+      await handlers['desktop.media.asset.upload-original-abort']({ assetId: 'asset-aborted' }),
+    ).toEqual({ ok: true, data: { assetId: 'asset-aborted' } });
+    expect(
+      await handlers['desktop.media.asset.upload-original-finish']({ assetId: 'asset-aborted' }),
+    ).toEqual({ ok: false, error: 'Original upload is incomplete' });
   });
 
   it('registers an asset, and stores an original only when it matches the registration', async () => {

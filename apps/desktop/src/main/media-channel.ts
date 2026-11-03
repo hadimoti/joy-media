@@ -15,7 +15,11 @@ import type {
   ProjectDocumentWriteResult,
   StoredProjectDocument,
 } from '../store/project-documents.js';
-import { MAX_LOCAL_ORIGINAL_BYTES, type LocalOriginalWriter } from './local-originals.js';
+import {
+  MAX_LOCAL_ORIGINAL_BYTES,
+  MAX_ORIGINAL_CHUNK_BYTES,
+  type LocalOriginalWriter,
+} from './local-originals.js';
 
 /**
  * The `desktop.media.*` channels (PLAN-v4 §6i). The editor reaches the local host through these,
@@ -37,6 +41,9 @@ export const MEDIA_CHANNELS = [
   'desktop.media.speech.transcribe',
   'desktop.media.asset.register',
   'desktop.media.asset.upload-original',
+  'desktop.media.asset.upload-original-chunk',
+  'desktop.media.asset.upload-original-finish',
+  'desktop.media.asset.upload-original-abort',
   'desktop.media.project.document.get',
   'desktop.media.project.document.put',
   'desktop.media.render.enqueue',
@@ -370,6 +377,32 @@ function asOriginalUpload(payload: unknown): { assetId: string; bytes: Uint8Arra
   return { assetId, bytes };
 }
 
+/** One piece of a chunked upload: which asset, where the piece starts in the file, and its bytes. */
+function asOriginalChunk(
+  payload: unknown,
+): { assetId: string; offset: number; bytes: Uint8Array } | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  const candidate = payload as Record<string, unknown>;
+  const assetId = asId(candidate['assetId']);
+  const offset = candidate['offset'];
+  const raw = candidate['bytes'];
+  if (assetId === undefined || typeof offset !== 'number' || !Number.isSafeInteger(offset)) {
+    return undefined;
+  }
+  if (offset < 0) return undefined;
+  const bytes =
+    raw instanceof Uint8Array ? raw : raw instanceof ArrayBuffer ? new Uint8Array(raw) : undefined;
+  if (bytes === undefined || bytes.byteLength > MAX_ORIGINAL_CHUNK_BYTES) return undefined;
+  return { assetId, offset, bytes };
+}
+
+/** A request about one chunked upload, identified by its asset. */
+function asAssetRequest(payload: unknown): { assetId: string } | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  const assetId = asId((payload as Record<string, unknown>)['assetId']);
+  return assetId === undefined ? undefined : { assetId };
+}
+
 export function createMediaChannelHandlers(
   deps: MediaChannelDeps,
 ): Readonly<Record<MediaChannel, (payload: unknown) => MediaResult | Promise<MediaResult>>> {
@@ -594,6 +627,37 @@ export function createMediaChannelHandlers(
     return { ok: true, data: { assetId: upload.assetId } };
   };
 
+  const appendOriginalChunk = async (payload: unknown): Promise<MediaResult> => {
+    const chunk = asOriginalChunk(payload);
+    if (chunk === undefined) return { ok: false, error: 'Invalid media request' };
+    const result = await deps.originals.appendOriginalChunk(
+      chunk.assetId,
+      chunk.offset,
+      chunk.bytes,
+    );
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, data: { assetId: chunk.assetId } };
+  };
+
+  const finishOriginalUpload = async (payload: unknown): Promise<MediaResult> => {
+    const request = asAssetRequest(payload);
+    if (request === undefined) return { ok: false, error: 'Invalid media request' };
+    const result = await deps.originals.finishOriginalUpload(request.assetId);
+    if (!result.ok) return { ok: false, error: result.error };
+    if (deps.library !== undefined) {
+      const libraryResult = await deps.library.addAsset(request.assetId);
+      if (!libraryResult.ok) return { ok: false, error: libraryResult.error };
+    }
+    return { ok: true, data: { assetId: request.assetId } };
+  };
+
+  const abortOriginalUpload = async (payload: unknown): Promise<MediaResult> => {
+    const request = asAssetRequest(payload);
+    if (request === undefined) return { ok: false, error: 'Invalid media request' };
+    await deps.originals.abortOriginalUpload(request.assetId);
+    return { ok: true, data: { assetId: request.assetId } };
+  };
+
   const getDocument = (payload: unknown): MediaResult => {
     const request = asDocumentRead(payload);
     if (request === undefined) return { ok: false, error: 'Invalid media request' };
@@ -624,6 +688,9 @@ export function createMediaChannelHandlers(
     'desktop.media.speech.transcribe': transcribeSpeech,
     'desktop.media.asset.register': registerAsset,
     'desktop.media.asset.upload-original': storeOriginal,
+    'desktop.media.asset.upload-original-chunk': appendOriginalChunk,
+    'desktop.media.asset.upload-original-finish': finishOriginalUpload,
+    'desktop.media.asset.upload-original-abort': abortOriginalUpload,
     'desktop.media.project.document.get': getDocument,
     'desktop.media.project.document.put': putDocument,
     'desktop.media.preview.frame': notAvailable,
