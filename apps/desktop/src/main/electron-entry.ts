@@ -23,7 +23,7 @@ import {
 } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path, { dirname, join } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseProjectDeepLink } from '../deep-link.js';
 import { createFileRegistry } from './file-registry.js';
@@ -274,7 +274,7 @@ if (!app.requestSingleInstanceLock()) {
         orchestrator: jobOrchestrator,
         derivativeDirectory: join(paths.mediaRoot, 'derivatives'),
         sourceSize: async (refId) => statSync(resolveSourcePath(refId)).size,
-        readSource: async (refId) => readFileSync(resolveSourcePath(refId)),
+        openSource: (refId) => createReadStream(resolveSourcePath(refId)),
         onWarning: (message) => console.warn(message),
         completeAi: createWorkerCompletion(providerBroker),
       });

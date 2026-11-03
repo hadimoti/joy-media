@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import type { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { JobProtocolError, type JobOrchestrator } from './job-orchestrator.js';
 import { MAX_LOCAL_ORIGINAL_BYTES } from '../main/local-originals.js';
@@ -40,8 +41,11 @@ export interface LocalJobApiOptions {
   readonly derivativeDirectory: string;
   /** Size in bytes of a registered local file, checked before any read. */
   readonly sourceSize: (refId: string) => Promise<number>;
-  /** Reads the bytes of a registered local file. The main process resolves the path, never the Worker. */
-  readonly readSource: (refId: string) => Promise<Uint8Array>;
+  /**
+   * Opens a registered local file as a stream, so the bytes go to the Worker as they are read and
+   * the whole file is never held in memory. The main process resolves the path, never the Worker.
+   */
+  readonly openSource: (refId: string) => Readable;
   readonly maxSourceBytes?: number;
   readonly onWarning?: (message: string) => void;
   /**
@@ -163,15 +167,17 @@ export async function startLocalJobApi(options: LocalJobApiOptions): Promise<Loc
         headerValue(request, 'x-joy-lease-token'),
       );
       const limit = options.maxSourceBytes ?? MAX_LOCAL_SOURCE_BYTES;
-      if ((await options.sourceSize(job.refId)) > limit)
+      const size = await options.sourceSize(job.refId);
+      if (size > limit)
         throw new JobProtocolError(413, 'source is larger than the local route allows');
-      const bytes = await options.readSource(job.refId);
+      const source = options.openSource(job.refId);
       response.writeHead(200, {
         'content-type': 'application/octet-stream',
-        'content-length': bytes.byteLength,
+        'content-length': size,
         'cache-control': 'no-store',
       });
-      response.end(bytes);
+      source.on('error', () => response.destroy());
+      source.pipe(response);
       return;
     }
     if (action === 'derivative' && method === 'POST') {

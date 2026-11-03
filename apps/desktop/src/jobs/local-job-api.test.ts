@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LocalDatabase } from '../store/local-database.js';
 import { createJobOrchestrator } from './job-orchestrator.js';
@@ -43,9 +44,9 @@ describe('local job API', () => {
       orchestrator: createJobOrchestrator({ store: database.jobDispatch }),
       derivativeDirectory,
       sourceSize: async () => reportedSourceSize,
-      readSource: async (refId) => {
+      openSource: (refId) => {
         if (refId !== 'ref-1') throw new Error('unknown ref');
-        return SOURCE;
+        return Readable.from([Buffer.from(SOURCE)]);
       },
       completeAi: async (request) => {
         aiRequests.push(request);
@@ -209,8 +210,11 @@ describe('local job API', () => {
     const response = await call(`/v1/workers/${WORKER}/jobs/job-http/source`, {
       headers: { 'x-joy-lease-token': leased.leaseToken },
     });
+    // The route streams the bytes it has, and announces the registered size. This test's reported
+    // size is larger than the test bytes, so it checks the announced length, not the body.
     expect(response.status).toBe(200);
-    expect(Buffer.from(await response.arrayBuffer())).toEqual(SOURCE);
+    expect(response.headers.get('content-length')).toBe(String(MAX_LOCAL_SOURCE_BYTES));
+    await response.body?.cancel();
   });
 
   it('rejects a derivative whose bytes do not match the reported digest and stores nothing', async () => {

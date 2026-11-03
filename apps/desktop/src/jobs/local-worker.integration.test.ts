@@ -12,6 +12,7 @@ import {
 import { readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createFileRegistry } from '../main/file-registry.js';
@@ -141,15 +142,18 @@ describe('local Worker route (real worker process, real FFmpeg)', () => {
       sourceSize: async (refId) =>
         (await stat(apiRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: refId })))
           .size,
-      readSource: async (refId) => {
-        // Holds the source read open for a while so a test can cancel a job that is genuinely running.
-        if (sourceDelayMs > 0) await new Promise((done) => setTimeout(done, sourceDelayMs));
-        // A read held past the end of its test belongs to a closed API and its removed files.
-        if (apiStopped) return new Uint8Array();
-        return readFile(
-          apiRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: refId }),
-        );
-      },
+      openSource: (refId) =>
+        Readable.from(
+          (async function* () {
+            // Holds the source read open for a while so a test can cancel a job that is genuinely running.
+            if (sourceDelayMs > 0) await new Promise((done) => setTimeout(done, sourceDelayMs));
+            // A read held past the end of its test belongs to a closed API and its removed files.
+            if (apiStopped) return;
+            yield await readFile(
+              apiRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: refId }),
+            );
+          })(),
+        ),
       onWarning: (message) => console.warn(message),
     });
     sourceDelayMs = 0;
