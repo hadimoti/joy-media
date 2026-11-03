@@ -456,6 +456,7 @@ import type {
   FinalEncodedExportVerifier,
 } from './media-observation/render-verification.js';
 import { openOpfsExportCache } from './opfs-export-cache.js';
+import { sha256OfBlob } from './blob-sha256.js';
 import type { ExportFrameSource } from './export-frame-source.js';
 import {
   formatExportClipAssetFailure,
@@ -4687,9 +4688,9 @@ function EditorWorkspace({
         if (browserExportResult.blob === undefined)
           throw new Error('Browser export did not produce a downloadable MP4');
         setExportStatus('Staging export for Worker verification…');
-        const stagedBytes = new Uint8Array(await browserExportResult.blob.arrayBuffer());
-        abortController.signal.throwIfAborted();
-        const stagedSha256 = await sha256Hex(stagedBytes);
+        // Hashed in slices: the staged file is never copied into script memory as one buffer.
+        const stagedBlob = browserExportResult.blob;
+        const stagedSha256 = await sha256OfBlob(stagedBlob, { signal: abortController.signal });
         abortController.signal.throwIfAborted();
         const stagedMimeType = canonicalStagedExportMimeType(browserExportResult.mimeType);
         stagedExportAssetId = `export-source-${attemptKey}`;
@@ -4720,7 +4721,7 @@ function EditorWorkspace({
             kind: 'video',
             displayName: `${exportFilename}.stage`,
             sha256: stagedSha256,
-            bytes: stagedBytes.byteLength,
+            bytes: stagedBlob.size,
             descriptor: {
               mimeType: stagedMimeType,
               width,
@@ -4865,7 +4866,7 @@ function EditorWorkspace({
           cache.putVerified(entryId, exportResult.blob),
         );
         abortController.signal.throwIfAborted();
-        const exportSha256 = await sha256Hex(new Uint8Array(await durableBlob.arrayBuffer()));
+        const exportSha256 = await sha256OfBlob(durableBlob, { signal: abortController.signal });
         abortController.signal.throwIfAborted();
         if (
           session.projectRevisionId !== sourceProjectRevisionId ||

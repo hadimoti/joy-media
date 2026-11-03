@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createOfflineAacTrack, type OfflineAacTrackDeps } from './offline-aac-track.js';
+import {
+  createOfflineAacTrack,
+  OFFLINE_AAC_CODEC,
+  type OfflineAacTrackDeps,
+} from './offline-aac-track.js';
 import type { Output } from 'mediabunny';
 
 interface CapturedSample {
@@ -38,7 +42,11 @@ function makeHarness(options?: {
       };
     },
     createAudioSampleSource: (config) => {
-      expect(config).toEqual({ codec: 'aac', bitrate: 128_000 });
+      expect(config).toEqual({
+        codec: 'aac',
+        fullCodecString: OFFLINE_AAC_CODEC,
+        bitrate: 128_000,
+      });
       const source: FakeSource = {
         adds: [],
         closeCount: 0,
@@ -301,6 +309,24 @@ describe('createOfflineAacTrack', () => {
     };
     createOfflineAacTrack({ channelData: [], sampleRate: 1, durationUs: 0, bitrate: 64_000 }, deps);
 
-    expect(sourceFactory).toHaveBeenCalledWith({ codec: 'aac', bitrate: 64_000 });
+    expect(sourceFactory).toHaveBeenCalledWith({
+      codec: 'aac',
+      fullCodecString: OFFLINE_AAC_CODEC,
+      bitrate: 64_000,
+    });
+  });
+
+  it('pins AAC-LC at a low sample rate, the same codec the capability probe asks for', () => {
+    const sourceFactory = vi.fn(() => ({ add: async () => undefined, close: () => undefined }));
+    const deps: OfflineAacTrackDeps = {
+      createAudioSample: () => ({ close: () => undefined }),
+      createAudioSampleSource: sourceFactory,
+    };
+    createOfflineAacTrack({ channelData: [], sampleRate: 16_000, durationUs: 0 }, deps);
+
+    expect(OFFLINE_AAC_CODEC).toBe('mp4a.40.2');
+    expect(sourceFactory).toHaveBeenCalledWith(
+      expect.objectContaining({ codec: 'aac', fullCodecString: 'mp4a.40.2' }),
+    );
   });
 });

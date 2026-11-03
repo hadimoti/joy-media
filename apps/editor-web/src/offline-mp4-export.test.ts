@@ -671,18 +671,18 @@ describe('detectOfflineMp4Capability', () => {
       videoEncoder: {
         isConfigSupported: async (config) => {
           queried.push(config.codec);
-          return { supported: config.codec === 'avc1.640028' };
+          return { supported: config.codec === 'avc1.640029' };
         },
       },
     });
 
     expect(capability).toEqual({
       ok: true,
-      codec: 'avc1.640028',
+      codec: 'avc1.640029',
       hardwareAcceleration: 'prefer-hardware',
-      bitrate: 12_441_600,
+      bitrate: 62_208_000,
     });
-    expect(queried[0]).toBe('avc1.640028');
+    expect(queried[0]).toBe('avc1.640029');
   });
 
   it('asks for the hardware encoder', async () => {
@@ -697,24 +697,45 @@ describe('detectOfflineMp4Capability', () => {
     });
 
     expect(configs[0]).toMatchObject({
-      codec: 'avc1.640028',
+      codec: 'avc1.640029',
       width: 1920,
       height: 1080,
       framerate: 30,
-      bitrate: 12_441_600,
+      bitrate: 62_208_000,
       hardwareAcceleration: 'prefer-hardware',
       latencyMode: 'quality',
     });
   });
 
   it('falls back to a lower profile when the preferred one is refused', async () => {
+    const queried: string[] = [];
     const capability = await detectOfflineMp4Capability(input, {
       videoEncoder: {
-        isConfigSupported: async (config) => ({ supported: config.codec === 'avc1.4D0028' }),
+        isConfigSupported: async (config) => {
+          queried.push(config.codec);
+          return { supported: config.codec === 'avc1.4D0032' };
+        },
       },
     });
 
-    expect(capability).toMatchObject({ ok: true, codec: 'avc1.4D0028' });
+    expect(capability).toMatchObject({ ok: true, codec: 'avc1.4D0032' });
+    // Main is only asked for levels that cover the bit rate, so level 4.1 is never tried for it.
+    expect(queried.filter((codec) => codec.startsWith('avc1.4D'))).toEqual(['avc1.4D0032']);
+  });
+
+  it('keeps the bit rate floor and ceiling of the default', async () => {
+    const encoder = { videoEncoder: { isConfigSupported: async () => ({ supported: true }) } };
+    const small = await detectOfflineMp4Capability(
+      { width: 320, height: 240, frameRate: 1, needsAudio: false },
+      encoder,
+    );
+    const large = await detectOfflineMp4Capability(
+      { width: 7680, height: 4320, frameRate: 60, needsAudio: false },
+      encoder,
+    );
+
+    expect(small).toMatchObject({ ok: true, bitrate: 2_000_000 });
+    expect(large).toMatchObject({ ok: true, bitrate: 300_000_000 });
   });
 
   it('reports a plain reason when no candidate is supported', async () => {

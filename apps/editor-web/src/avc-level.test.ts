@@ -61,6 +61,28 @@ describe('selectAvcLevels', () => {
   });
 });
 
+describe('selectAvcLevels with a bit rate', () => {
+  it('moves up to a level whose bit rate limit covers the target', () => {
+    // Level 4.0 allows 25 Mbit/s in the High profile, so 1080p30 at 62.2 Mbit/s needs level 4.1.
+    expect(selectAvcLevels(1920, 1080, 30, 62_208_000)[0]).toBe(41);
+    expect(selectAvcLevels(1920, 1080, 30, 12_441_600)[0]).toBe(40);
+  });
+
+  it('applies the Main profile limit, which has no High profile factor', () => {
+    // Level 4.1 allows 50 Mbit/s in Main, so 62.2 Mbit/s needs level 5.0.
+    expect(selectAvcLevels(1920, 1080, 30, 62_208_000, 'main')).toEqual([50, 51, 52]);
+  });
+
+  it('falls back to level 5.2 when the target is above every level', () => {
+    // Without a bit rate, 1080p30 would give [40, 41, 42]; no level allows 400 Mbit/s.
+    expect(selectAvcLevels(1920, 1080, 30, 400_000_000)).toEqual([52]);
+  });
+
+  it('ignores a bit rate that is not a positive number', () => {
+    expect(selectAvcLevels(1920, 1080, 30, Number.NaN)[0]).toBe(40);
+  });
+});
+
 describe('avcCodecString', () => {
   it('builds the codec string of each profile', () => {
     expect(avcCodecString('high', 40)).toBe('avc1.640028');

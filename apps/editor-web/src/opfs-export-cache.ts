@@ -19,16 +19,14 @@ export class OpfsExportCache {
 
   /**
    * Commits bytes, reopens the durable file, and returns that exact readback.
-   * Callers can use the returned Blob for both the first download and every
-   * later re-download, making the persisted bytes the single source of truth.
+   * The readback is compared with the source in slices, so neither copy is ever held in memory
+   * whole. Callers can use the returned Blob for both the first download and every later
+   * re-download, making the persisted bytes the single source of truth.
    */
   async putVerified(entryId: string, data: Blob): Promise<Blob> {
     await this.put(entryId, data);
     const stored = await this.get(entryId);
-    const matches =
-      stored !== undefined &&
-      stored.size === data.size &&
-      (await blobDigest(stored)) === (await blobDigest(data));
+    const matches = stored !== undefined && (await sameBytes(stored, data));
     if (!matches) {
       await this.remove(entryId);
       throw new Error('OPFS export cache verification failed');
@@ -102,9 +100,25 @@ export class OpfsExportCache {
   }
 }
 
-async function blobDigest(blob: Blob): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+/** How many bytes of each copy are read at a time while the two copies are compared. */
+const COMPARE_SLICE_BYTES = 8 * 1024 * 1024;
+
+/** Whether two Blobs hold the same bytes. Both are read in slices, so no whole file is copied. */
+async function sameBytes(left: Blob, right: Blob): Promise<boolean> {
+  if (left.size !== right.size) return false;
+  for (let offset = 0; offset < left.size; offset += COMPARE_SLICE_BYTES) {
+    const end = Math.min(left.size, offset + COMPARE_SLICE_BYTES);
+    const [leftBytes, rightBytes] = await Promise.all([
+      left.slice(offset, end).arrayBuffer(),
+      right.slice(offset, end).arrayBuffer(),
+    ]);
+    const leftView = new Uint8Array(leftBytes);
+    const rightView = new Uint8Array(rightBytes);
+    for (let index = 0; index < leftView.length; index++) {
+      if (leftView[index] !== rightView[index]) return false;
+    }
+  }
+  return true;
 }
 
 export async function openOpfsExportCache(): Promise<OpfsExportCache> {
