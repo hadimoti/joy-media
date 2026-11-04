@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import type { SupervisedChild } from './worker-supervisor.js';
 
@@ -28,6 +29,121 @@ function fakeChild(): {
 }
 
 describe('createWorkerSupervisor', () => {
+  it('does not start another worker when a live worker reports an error', () => {
+    const child = Object.assign(new EventEmitter(), { pid: 123 }) as EventEmitter & SupervisedChild;
+    child.kill = () => true;
+    const spawn = vi.fn(() => child);
+    const supervisor = createWorkerSupervisor({ spawn, command: 'node' });
+    supervisor.start();
+    child.emit('error', new Error('operation failed'));
+    supervisor.start();
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('immediately tries a forced stop if the worker refuses SIGTERM', () => {
+    const child = Object.assign(new EventEmitter(), { pid: 123 }) as EventEmitter & SupervisedChild;
+    const kill = vi.fn((_signal?: NodeJS.Signals) => false);
+    child.kill = kill;
+    const supervisor = createWorkerSupervisor({ spawn: () => child, command: 'node' });
+    supervisor.start();
+    supervisor.stop();
+    expect(kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL']);
+    child.emit('exit', null, 'SIGKILL');
+  });
+
+  it('tries a forced stop and waits if SIGTERM throws', async () => {
+    const child = Object.assign(new EventEmitter(), { pid: 123 }) as EventEmitter & SupervisedChild;
+    const kill = vi.fn((signal?: NodeJS.Signals) => {
+      if (signal === 'SIGTERM') throw new Error('signal failed');
+      return true;
+    });
+    child.kill = kill;
+    const supervisor = createWorkerSupervisor({ spawn: () => child, command: 'node' });
+    supervisor.start();
+    const stopping = supervisor.stopAndWait();
+    expect(kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL']);
+    child.emit('exit', null, 'SIGKILL');
+    await expect(stopping).resolves.toBeUndefined();
+  });
+
+  it('finishes shutdown when the worker fails before it starts', async () => {
+    const child = new EventEmitter() as EventEmitter & SupervisedChild;
+    child.kill = () => false;
+    const supervisor = createWorkerSupervisor({ spawn: () => child, command: 'node' });
+    supervisor.start();
+    const stopping = supervisor.stopAndWait();
+    child.emit('error', new Error('spawn ENOENT'));
+    await expect(stopping).resolves.toBeUndefined();
+  });
+
+  it('forces termination and waits for exit if stopping a live worker errors', async () => {
+    const child = Object.assign(new EventEmitter(), { pid: 123 }) as EventEmitter & SupervisedChild;
+    const kill = vi.fn((_signal?: NodeJS.Signals) => true);
+    child.kill = kill;
+    const supervisor = createWorkerSupervisor({ spawn: () => child, command: 'node' });
+    supervisor.start();
+    const stopping = supervisor.stopAndWait();
+    child.emit('error', new Error('kill failed'));
+    expect(kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL']);
+    expect(supervisor.status().connection).toBe('stopping');
+    child.emit('exit', null, 'SIGKILL');
+    await expect(stopping).resolves.toBeUndefined();
+  });
+
+  it('reports an error if the worker never exits after the stop request', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new EventEmitter() as EventEmitter & SupervisedChild;
+      child.kill = () => true;
+      const supervisor = createWorkerSupervisor({ spawn: () => child, command: 'node' });
+      supervisor.start();
+      const result = supervisor.stopAndWait(100).then(
+        () => 'stopped',
+        () => 'failed',
+      );
+      await vi.advanceTimersByTimeAsync(5100);
+      expect(await result).toBe('failed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cannot start a new worker after shutdown has begun', async () => {
+    const child = new EventEmitter() as EventEmitter & SupervisedChild;
+    child.kill = () => true;
+    let starts = 0;
+    const supervisor = createWorkerSupervisor({
+      spawn: () => {
+        starts += 1;
+        return child;
+      },
+      command: 'node',
+    });
+    supervisor.start();
+    const stopping = supervisor.stopAndWait();
+    child.emit('exit', 0, null);
+    await stopping;
+    supervisor.start();
+    expect(starts).toBe(1);
+  });
+
+  it('waits for the worker to exit before completing a restart shutdown', async () => {
+    const child = new EventEmitter() as EventEmitter & SupervisedChild;
+    child.kill = () => true;
+    const supervisor = createWorkerSupervisor({ spawn: () => child, command: 'node' });
+    supervisor.start();
+    let stopped = false;
+    const stopping = supervisor.stopAndWait().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    child.emit('exit', 0, null);
+    await stopping;
+    expect(stopped).toBe(true);
+    expect(supervisor.status().connection).toBe('offline');
+  });
+
   it('reports online with a workerId once spawned', () => {
     const { child } = fakeChild();
     const supervisor = createWorkerSupervisor({

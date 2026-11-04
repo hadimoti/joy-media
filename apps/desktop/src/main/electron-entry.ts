@@ -103,6 +103,9 @@ if (!app.requestSingleInstanceLock()) {
   // Started in app.whenReady, before any window loads. The Worker gets its loopback URL and token
   // only once it has started, so its environment is read at spawn time.
   let localJobApi: LocalJobApi | undefined;
+  let localJobApiStart: Promise<LocalJobApi> | undefined;
+  let shuttingDown = false;
+  let quitting = false;
   const workerEntry = resolveWorkerEntry({ mainDirname: __dirname, execPath: process.execPath });
   const workerSupervisor = createWorkerSupervisor({
     spawn: (command, args, options) => spawn(command, args, options),
@@ -224,6 +227,7 @@ if (!app.requestSingleInstanceLock()) {
   // The sender frame is what the browser reports, so it decides whether a page may call at all.
   // The origin inside the request is the renderer's own claim, and dispatch checks it as well.
   ipcMain.handle('joy-desktop-ipc', (event, request: IpcRequest) => {
+    if (shuttingDown) return { ok: false, error: 'Application is shutting down' };
     const senderOrigin = originOfPageUrl(event.senderFrame?.url ?? '');
     if (senderOrigin === undefined || !isAllowedEditorOrigin(senderOrigin)) {
       console.error(`[joy-desktop] refused IPC from ${senderOrigin ?? 'an unreadable frame'}`);
@@ -252,11 +256,37 @@ if (!app.requestSingleInstanceLock()) {
     localDatabase.localAssets.storedPath(refId) ??
     fileRegistry.resolvePath({ kind: 'local-file', id: refId, displayName: '' });
 
+  const shutdown = registerShutdownHooks({
+    onAppEvent: (event, listener) => {
+      if (event === 'before-quit') app.on('before-quit', (quitEvent) => listener(quitEvent));
+      else app.on('window-all-closed', () => listener());
+    },
+    onProcessSignal: (signalName, listener) => process.on(signalName, listener),
+    stopWorker: async () => {
+      shuttingDown = true;
+      await localJobApiStart?.catch(() => undefined);
+      await workerSupervisor.stopAndWait();
+    },
+    discardUploads: () => originals.abortAllOriginalUploads(),
+    flush: async () => {
+      await localJobApi?.close().catch(() => undefined);
+      localDatabase.close();
+    },
+    quit: () => app.quit(),
+    onQuitRequested: () => {
+      quitting = true;
+    },
+    onError: (error) => console.error('Shutdown failed', error),
+  });
+
   // Crash-triggered fallback for the Media Foundation video encoder (see gpu-encode-fallback.ts). It
   // must be installed before the app is ready, because Chromium reads switches at startup.
   installGpuEncodeFallback(
     {
       commandLine: app.commandLine,
+      shutdown,
+      isQuitting: () => quitting,
+      quit: () => app.quit(),
       relaunch: (options) => app.relaunch(options),
       exit: (code) => app.exit(code),
       onChildProcessGone: (listener) =>
@@ -267,11 +297,12 @@ if (!app.requestSingleInstanceLock()) {
   );
 
   app.whenReady().then(async () => {
+    if (shuttingDown) return;
     // Marks, but never deletes, any profile whose stored key cannot be read (PLAN-v4 §9c).
     // Keys are read only after ready: safeStorage is not guaranteed to work before it.
     void checkProfileCredentials(localDatabase, secretStore).catch(() => undefined);
     try {
-      localJobApi = await startLocalJobApi({
+      localJobApiStart = startLocalJobApi({
         orchestrator: jobOrchestrator,
         derivativeDirectory: join(paths.mediaRoot, 'derivatives'),
         sourceSize: async (refId) => statSync(resolveSourcePath(refId)).size,
@@ -279,10 +310,12 @@ if (!app.requestSingleInstanceLock()) {
         onWarning: (message) => console.warn(message),
         completeAi: createWorkerCompletion(providerBroker),
       });
+      localJobApi = await localJobApiStart;
     } catch (error) {
       // Without the local API the Worker cannot connect. The rest of the app still opens.
       console.error('local job API did not start', error);
     }
+    if (shuttingDown) return;
     // The Worker starts with the app, once the loopback job API it connects to is listening.
     if (localJobApi !== undefined) workerSupervisor.start();
     Menu.setApplicationMenu(null);
@@ -426,26 +459,5 @@ if (!app.requestSingleInstanceLock()) {
         }
       }, 5000);
     }
-
-    registerShutdownHooks({
-      onAppEvent: (event, listener) => {
-        // electron's `app.on` overloads are keyed to each literal event name, so a union-typed
-        // `event` variable can't be forwarded directly - dispatch per literal instead.
-        if (event === 'before-quit') app.on('before-quit', listener);
-        else app.on('window-all-closed', listener);
-      },
-      onProcessSignal: (signalName, listener) => process.on(signalName, listener),
-      stopWorker: () => workerSupervisor.stop(),
-      discardUploads: () => originals.abortAllOriginalUploads(),
-      flush: () => {
-        // SqliteProjectStore (packages/project-persistence's desktop subpath) is not yet
-        // wired here: no IPC channel opens/saves a project through it yet (see
-        // docs/joy-media-final-migration-progress.md's wave 2 entry). LocalDatabase is the
-        // one open handle this process holds today.
-        void localJobApi?.close().catch(() => undefined);
-        localDatabase.close();
-      },
-      quit: () => app.quit(),
-    });
   });
 }

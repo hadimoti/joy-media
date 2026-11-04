@@ -27,6 +27,9 @@ function recordingHost(argv: readonly string[]) {
   let listener: ((details: GpuChildProcessGone) => void) | undefined;
   const host: GpuEncodeFallbackHost = {
     commandLine: { appendSwitch: (name, value) => switches.push({ name, value }) },
+    shutdown: async () => undefined,
+    isQuitting: () => false,
+    quit: () => undefined,
     relaunch: (options) => relaunches.push(options),
     exit: (code) => exits.push(code),
     onChildProcessGone: (next) => {
@@ -76,14 +79,95 @@ describe('GPU encode fallback', () => {
     expect(applyGpuEncodeFallback({ appendSwitch: () => undefined }, launchArgv)).toBe(false);
   });
 
-  it('relaunches with the fallback argument, then exits, after a first GPU fast-fail', () => {
+  it('relaunches with the fallback argument, then exits, after a first GPU fast-fail', async () => {
     const session = recordingHost(launchArgv);
     session.emit(fastFail);
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(session.relaunches).toEqual([
       { args: [...launchArgv.slice(1), GPU_ENCODE_FALLBACK_ARGUMENT] },
     ]);
     expect(session.exits()).toEqual([0]);
     expect(session.logs).toHaveLength(1);
+  });
+
+  it('waits for shutdown and handles repeated fast-fails only once', async () => {
+    let finishShutdown: (() => void) | undefined;
+    const actions: string[] = [];
+    let emit: ((details: GpuChildProcessGone) => void) | undefined;
+    const host: GpuEncodeFallbackHost = {
+      commandLine: { appendSwitch: () => undefined },
+      isQuitting: () => false,
+      quit: () => undefined,
+      shutdown: () => {
+        actions.push('shutdown');
+        return new Promise<void>((resolve) => {
+          finishShutdown = resolve;
+        });
+      },
+      relaunch: () => actions.push('relaunch'),
+      exit: () => actions.push('exit'),
+      onChildProcessGone: (listener) => {
+        emit = listener;
+      },
+      log: () => undefined,
+    };
+    installGpuEncodeFallback(host, launchArgv);
+    emit?.(fastFail);
+    emit?.(fastFail);
+    expect(actions).toEqual(['shutdown']);
+    finishShutdown?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(actions).toEqual(['shutdown', 'relaunch', 'exit']);
+  });
+
+  it('does not relaunch or exit if shutdown fails', async () => {
+    const actions: string[] = [];
+    let emit: ((details: GpuChildProcessGone) => void) | undefined;
+    installGpuEncodeFallback(
+      {
+        commandLine: { appendSwitch: () => undefined },
+        isQuitting: () => false,
+        quit: () => actions.push('quit'),
+        shutdown: async () => {
+          throw new Error('shutdown failed');
+        },
+        relaunch: () => actions.push('relaunch'),
+        exit: () => actions.push('exit'),
+        onChildProcessGone: (listener) => {
+          emit = listener;
+        },
+        log: () => undefined,
+      },
+      launchArgv,
+    );
+    emit?.(fastFail);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(actions).toEqual(['quit']);
+  });
+
+  it('does not reopen the app if the user is already quitting', async () => {
+    let emit: ((details: GpuChildProcessGone) => void) | undefined;
+    const actions: string[] = [];
+    installGpuEncodeFallback(
+      {
+        commandLine: { appendSwitch: () => undefined },
+        shutdown: async () => {
+          actions.push('shutdown');
+        },
+        isQuitting: () => true,
+        quit: () => actions.push('quit'),
+        relaunch: () => actions.push('relaunch'),
+        exit: () => actions.push('exit'),
+        onChildProcessGone: (listener) => {
+          emit = listener;
+        },
+        log: () => undefined,
+      },
+      launchArgv,
+    );
+    emit?.(fastFail);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(actions).toEqual([]);
   });
 
   it('does not relaunch again when the fallback session also fast-fails', () => {

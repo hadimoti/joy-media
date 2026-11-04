@@ -27,6 +27,9 @@ export interface GpuChildProcessGone {
 
 export interface GpuEncodeFallbackHost {
   readonly commandLine: { appendSwitch(name: string, value?: string): void };
+  shutdown(): Promise<void>;
+  isQuitting(): boolean;
+  quit(): void;
   relaunch(options: { readonly args: string[] }): void;
   exit(code: number): void;
   onChildProcessGone(listener: (details: GpuChildProcessGone) => void): void;
@@ -68,16 +71,28 @@ export function installGpuEncodeFallback(
   argv: readonly string[],
 ): void {
   applyGpuEncodeFallback(host.commandLine, argv);
+  let restarting = false;
   host.onChildProcessGone((details) => {
     if (!shouldRelaunchForGpuEncodeFallback(details, argv)) {
       if (isGpuFastFail(details) && isFallbackSession(argv))
         host.log('GPU fast-fail in the encode-fallback session; not relaunching again.');
       return;
     }
+    if (restarting || host.isQuitting()) return;
+    restarting = true;
     host.log(
       'GPU process fast-failed during media setup; relaunching once with the Media Foundation video encoder off.',
     );
-    host.relaunch({ args: [...argv.slice(1), GPU_ENCODE_FALLBACK_ARGUMENT] });
-    host.exit(0);
+    void host.shutdown().then(
+      () => {
+        if (host.isQuitting()) return;
+        host.relaunch({ args: [...argv.slice(1), GPU_ENCODE_FALLBACK_ARGUMENT] });
+        host.exit(0);
+      },
+      (error: unknown) => {
+        host.log(`GPU fallback shutdown failed; not relaunching: ${String(error)}`);
+        if (!host.isQuitting()) host.quit();
+      },
+    );
   });
 }

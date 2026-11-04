@@ -2,6 +2,7 @@ import type { WorkerConnection, WorkerStatus } from '../worker-status.js';
 
 /** Minimal shape of `node:child_process`'s `ChildProcess` this module depends on. */
 export interface SupervisedChild {
+  readonly pid?: number | undefined;
   once(event: 'exit', listener: (code: number | null, signal: string | null) => void): void;
   once(event: 'error', listener: (error: Error) => void): void;
   kill(signal?: NodeJS.Signals): boolean;
@@ -39,6 +40,8 @@ export interface WorkerSupervisor {
   start(): void;
   /** Requests a graceful stop; SIGTERM then SIGKILL after `killTimeoutMs`. */
   stop(killTimeoutMs?: number): void;
+  /** Stops the child and resolves only after it has exited. */
+  stopAndWait(killTimeoutMs?: number): Promise<void>;
   status(): WorkerStatus;
 }
 
@@ -70,6 +73,7 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
   let lastError: string | undefined;
   let restarts = 0;
   let stopRequested = false;
+  let shuttingDown = false;
   let spawnedAtMs = 0;
   // The automatic restart that is waiting for its delay, if any. Stopping the Worker cancels it.
   let pendingRestart: { cancelled: boolean } | undefined;
@@ -86,9 +90,17 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     });
     child = proc;
     spawnedAtMs = Date.parse(now());
-    proc.once('error', (error) => {
-      handleExit(proc, `Worker could not run: ${error.message}`);
-    });
+    function onChildError(error: Error): void {
+      if (child !== proc) return;
+      if (proc.pid === undefined) {
+        handleExit(proc, `Worker could not run: ${error.message}`);
+      } else {
+        lastError = `Worker process error: ${error.message}`;
+        if (!stopRequested) connection = 'degraded';
+        proc.once('error', onChildError);
+      }
+    }
+    proc.once('error', onChildError);
     proc.once('exit', (code, signal) => {
       handleExit(
         proc,
@@ -135,29 +147,84 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     );
   }
 
+  function stop(killTimeoutMs = 5000): void {
+    stopRequested = true;
+    connection = 'stopping';
+    if (pendingRestart !== undefined) {
+      pendingRestart.cancelled = true;
+      pendingRestart = undefined;
+    }
+    if (child === undefined) {
+      connection = 'offline';
+      return;
+    }
+    const proc = child;
+    let signalled = false;
+    try {
+      signalled = proc.kill('SIGTERM');
+    } catch (error) {
+      lastError = `Worker stop request failed: ${String(error)}`;
+    }
+    if (!signalled && proc.pid !== undefined) proc.kill('SIGKILL');
+    setTimeout(() => {
+      if (child === proc) {
+        try {
+          proc.kill('SIGKILL');
+        } catch (error) {
+          lastError = `Worker could not be stopped: ${String(error)}`;
+        }
+      }
+    }, killTimeoutMs).unref();
+  }
+
   return {
     start() {
       // A restart that is already waiting will start the Worker, so a second spawn now would leak a child.
-      if (child !== undefined || pendingRestart !== undefined) return;
+      if (shuttingDown || child !== undefined || pendingRestart !== undefined) return;
       restarts = 0;
       spawnChild();
     },
-    stop(killTimeoutMs = 5000) {
-      stopRequested = true;
-      connection = 'stopping';
-      if (pendingRestart !== undefined) {
-        pendingRestart.cancelled = true;
-        pendingRestart = undefined;
-      }
-      if (child === undefined) {
-        connection = 'offline';
-        return;
-      }
+    stop,
+    stopAndWait(killTimeoutMs = 5000) {
+      shuttingDown = true;
       const proc = child;
-      proc.kill('SIGTERM');
-      setTimeout(() => {
-        if (child === proc) proc.kill('SIGKILL');
-      }, killTimeoutMs);
+      if (proc === undefined) {
+        stop(killTimeoutMs);
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error('Worker did not stop')),
+          killTimeoutMs + 5000,
+        );
+        proc.once('exit', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+        proc.once('error', () => {
+          if (proc.pid === undefined) {
+            clearTimeout(timeout);
+            resolve();
+            return;
+          }
+          proc.once('error', (forceError) => {
+            clearTimeout(timeout);
+            reject(forceError);
+          });
+          try {
+            proc.kill('SIGKILL');
+          } catch (forceError) {
+            clearTimeout(timeout);
+            reject(forceError);
+          }
+        });
+        try {
+          stop(killTimeoutMs);
+        } catch (error) {
+          clearTimeout(timeout);
+          reject(error);
+        }
+      });
     },
     status() {
       return {
