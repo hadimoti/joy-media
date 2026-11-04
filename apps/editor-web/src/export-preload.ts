@@ -1,4 +1,6 @@
 export const EXPORT_PRELOAD_TIMEOUT_MS = 15_000;
+/** Decoding one clip's audio window can take longer than the seeks the other stages wait for. */
+export const EXPORT_AUDIO_DECODE_TIMEOUT_MS = 60_000;
 
 export type ExportPreloadStage =
   | 'resolving source'

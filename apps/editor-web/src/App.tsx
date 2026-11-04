@@ -459,6 +459,7 @@ import { openOpfsExportCache } from './opfs-export-cache.js';
 import { sha256OfBlob } from './blob-sha256.js';
 import type { ExportFrameSource } from './export-frame-source.js';
 import {
+  EXPORT_AUDIO_DECODE_TIMEOUT_MS,
   formatExportClipAssetFailure,
   loadDetachedVideo,
   preflightExportClipSources,
@@ -471,6 +472,7 @@ import {
   createExportAudioBuffer,
   prepareExportAudioChannels,
   selectExportAudioClips,
+  silentExportAudioChannels,
 } from './export-audio.js';
 import { PlaybackOperationGate, playMediaWhenCurrent } from './playback-operation.js';
 import { seekPreviewMedia as seekDetachedVideo } from './preview-media-seek.js';
@@ -3958,9 +3960,10 @@ function EditorWorkspace({
       const preloadStage = <T,>(
         stage: ExportPreloadStage,
         operation: (signal: AbortSignal) => Promise<T>,
+        timeoutMs?: number,
       ) => {
         setExportStatus(`${stage[0]!.toUpperCase()}${stage.slice(1)}…`);
-        return runExportPreloadStage(stage, operation, abortController.signal);
+        return runExportPreloadStage(stage, operation, abortController.signal, timeoutMs);
       };
       try {
         if (retryEntry?.stagedAssetId !== undefined) {
@@ -4284,12 +4287,14 @@ function EditorWorkspace({
               { cause: error },
             );
           }
-          let sampleRate = 48_000;
-          let fullChannels: readonly Float32Array[] = [new Float32Array(0)];
-          const hasAuthoredAudio = audioClipIds.has(clip.id);
-          if (hasAuthoredAudio) {
+          // Only the window the clip plays is decoded (export-audio-window.ts). A muted clip is left
+          // out of the mix, so it is silent without fetching or decoding anything.
+          const clipTiming = { ...clip, playbackRate: normalizePlaybackRate(clip.playbackRate) };
+          let channelData: readonly Float32Array[];
+          if (audioClipIds.has(clip.id) && !mutedAudioClipIds.has(clip.id)) {
             try {
-              const authoredAudioBytes = await preloadStage(
+              // A Blob points at the file on disk; arrayBuffer() would copy all of it into memory.
+              const authoredAudioBlob = await preloadStage(
                 'fetching authored audio bytes',
                 async (signal) => {
                   const audioResponse = await fetch(audioSource.url, { signal });
@@ -4297,19 +4302,36 @@ function EditorWorkspace({
                     throw new Error(
                       `Unable to fetch export audio for ${clipPreflight.audioAssetId}`,
                     );
-                  return audioResponse.arrayBuffer();
+                  return audioResponse.blob();
                 },
               );
-              const audioBuffer = await preloadStage('decoding authored audio', () =>
-                audioContext.decodeAudioData(authoredAudioBytes),
+              const decodedAudio = await preloadStage(
+                'decoding authored audio',
+                async (signal) => {
+                  // Loaded on demand, as the video frame source is.
+                  const { decodeExportAudioWindow } = await import('./export-audio-window.js');
+                  return decodeExportAudioWindow({
+                    blob: authoredAudioBlob,
+                    clip: clipTiming,
+                    outputSampleRate: audioContext.sampleRate,
+                    label:
+                      clipPreflight.audioAssetLabel ?? clipPreflight.audioAssetId ?? clip.assetId,
+                    signal,
+                  });
+                },
+                EXPORT_AUDIO_DECODE_TIMEOUT_MS,
               );
-              sampleRate = audioBuffer.sampleRate;
-              if (audioBuffer.numberOfChannels > 2)
-                throw new Error('Export currently supports mono or stereo source audio');
-              fullChannels = Array.from(
-                { length: audioBuffer.numberOfChannels },
-                (_, channel) => new Float32Array(audioBuffer.getChannelData(channel)),
-              );
+              // A source with no audio track is silent for its clip.
+              channelData =
+                decodedAudio === undefined
+                  ? silentExportAudioChannels(clipTiming, audioContext.sampleRate)
+                  : prepareExportAudioChannels(
+                      decodedAudio.channels,
+                      decodedAudio.sampleRate,
+                      audioContext.sampleRate,
+                      clipTiming,
+                      decodedAudio.firstSample,
+                    );
             } catch (error) {
               if (error instanceof DOMException && error.name === 'AbortError') throw error;
               const detail = error instanceof Error ? error.message : String(error);
@@ -4318,13 +4340,9 @@ function EditorWorkspace({
                 { cause: error },
               );
             }
+          } else {
+            channelData = silentExportAudioChannels(clipTiming, audioContext.sampleRate);
           }
-          const channelData = prepareExportAudioChannels(
-            fullChannels,
-            sampleRate,
-            audioContext.sampleRate,
-            { ...clip, playbackRate: normalizePlaybackRate(clip.playbackRate) },
-          );
           exportMedia.push({
             clip,
             video,

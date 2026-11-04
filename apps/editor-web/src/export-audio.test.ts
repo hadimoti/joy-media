@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   createMonoAudioBuffer,
   createExportAudioBuffer,
+  exportAudioSourceWindow,
   prepareExportAudioChannels,
   selectExportAudioClips,
+  silentExportAudioChannels,
   type MonoBufferAudioContext,
 } from './export-audio.js';
 
@@ -116,5 +118,101 @@ describe('export audio lanes and stereo source preparation', () => {
       [1, 0],
       [0, 1],
     ]);
+  });
+});
+
+describe('export audio source windows', () => {
+  it('covers every source sample the forward mix reads, with a two-sample margin', () => {
+    // 2 s into a 48 kHz source for 5 s reads source samples 96_000 up to 336_000.
+    expect(
+      exportAudioSourceWindow({ sourceInUs: 2_000_000, durationUs: 5_000_000 }, 48_000, 48_000),
+    ).toEqual({ startSample: 95_998, endSample: 336_002 });
+  });
+
+  it('spans twice as far at playback rate 2', () => {
+    expect(
+      exportAudioSourceWindow(
+        { sourceInUs: 2_000_000, durationUs: 5_000_000, playbackRate: 2 },
+        48_000,
+        48_000,
+      ),
+    ).toEqual({ startSample: 95_998, endSample: 576_001 });
+  });
+
+  it('runs backwards from the cursor for a reversed clip', () => {
+    expect(
+      exportAudioSourceWindow(
+        { sourceInUs: 2_000_000, durationUs: 1_000_000, reversed: true },
+        48_000,
+        48_000,
+      ),
+    ).toEqual({ startSample: 47_999, endSample: 96_003 });
+  });
+
+  it('clamps the window at the start of the source', () => {
+    expect(
+      exportAudioSourceWindow({ sourceInUs: 0, durationUs: 1_000_000 }, 48_000, 48_000),
+    ).toEqual({ startSample: 0, endSample: 48_002 });
+    expect(
+      exportAudioSourceWindow({ sourceInUs: 500_000, durationUs: 1_000_000, reversed: true }, 4, 4),
+    ).toEqual({ startSample: 0, endSample: 5 });
+  });
+});
+
+describe('windowed export audio matches the whole source', () => {
+  const source = Float32Array.from(
+    { length: 1_000 },
+    (_, index) => Math.sin(index * 0.7) + index / 1_000,
+  );
+  const stereo = [source, Float32Array.from(source, (value) => -value / 2)];
+  const cases: Array<{ name: string; clip: Parameters<typeof exportAudioSourceWindow>[0] }> = [
+    { name: 'forward', clip: { sourceInUs: 100_000, durationUs: 200_000 } },
+    {
+      name: 'forward at double speed',
+      clip: { sourceInUs: 100_000, durationUs: 200_000, playbackRate: 2 },
+    },
+    {
+      name: 'forward at half speed',
+      clip: { sourceInUs: 100_000, durationUs: 200_000, playbackRate: 0.5 },
+    },
+    { name: 'reversed', clip: { sourceInUs: 500_000, durationUs: 200_000, reversed: true } },
+    {
+      name: 'reversed at double speed',
+      clip: { sourceInUs: 900_000, durationUs: 200_000, playbackRate: 2, reversed: true },
+    },
+    {
+      name: 'running past the end of the source',
+      clip: { sourceInUs: 950_000, durationUs: 200_000 },
+    },
+  ];
+
+  for (const { name, clip } of cases) {
+    it(`reads ${name} from a window exactly as from the whole source`, () => {
+      const range = exportAudioSourceWindow(clip, 1_000, 1_000);
+      const windowed = prepareExportAudioChannels(
+        stereo.map((channel) => channel.slice(range.startSample, range.endSample)),
+        1_000,
+        1_000,
+        clip,
+        range.startSample,
+      );
+      const whole = prepareExportAudioChannels(stereo, 1_000, 1_000, clip);
+      expect(windowed).toHaveLength(whole.length);
+      windowed.forEach((channel, index) => {
+        expect(channel.length).toBe(whole[index]!.length);
+        channel.forEach((value, frame) => expect(value).toBeCloseTo(whole[index]![frame]!, 6));
+      });
+    });
+  }
+});
+
+describe('silent export audio', () => {
+  it('is one channel as long as the prepared channels would be', () => {
+    const clip = { sourceInUs: 0, durationUs: 750_000 };
+    const silent = silentExportAudioChannels(clip, 48_000);
+    const prepared = prepareExportAudioChannels([new Float32Array(10)], 48_000, 48_000, clip);
+    expect(silent).toHaveLength(1);
+    expect(silent[0]!.length).toBe(prepared[0]!.length);
+    expect(silent[0]!.every((value) => value === 0)).toBe(true);
   });
 });
