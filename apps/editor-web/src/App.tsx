@@ -70,6 +70,7 @@ import { normalizePlaybackRate, sourceTimeAtVideoClipTime } from '@joy-media/pro
 import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
 import { sessionProviderFor } from './joy-agent/provider-call.js';
 import { sourceTimeForTransitionSample } from './transition-source-time.js';
+import { frameCentreSeekUs } from './export-seek-target.js';
 import { markOverridesFromCommittedKeys } from './joy-agent/look-instance-operations.js';
 import { type VisualObjectTransaction } from '@joy-media/property-system';
 import {
@@ -4191,6 +4192,8 @@ function EditorWorkspace({
           readonly clip: VideoClip;
           readonly video: HTMLVideoElement | undefined;
           readonly decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
+          /** Frame length of the source; seeks in the export aim at the middle of a frame. */
+          readonly seekFrameDurationUs: number | undefined;
           /** Decodes the clip forward-only; set instead of `video` when the clip allows it. */
           readonly frameSource: ExportFrameSource | undefined;
           readonly sourceUrl: string | undefined;
@@ -4219,6 +4222,7 @@ function EditorWorkspace({
           const assetKind = exportVisualProject.assets[clip.assetId]?.kind ?? 'video';
           let video: HTMLVideoElement | undefined;
           let decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
+          let seekFrameDurationUs: number | undefined;
           let frameSource: ExportFrameSource | undefined;
           let stillFrame: ImageDataLike | undefined;
           let animatedFrameSource: AnimatedImageFrameSource | undefined;
@@ -4265,6 +4269,12 @@ function EditorWorkspace({
                   await loadDetachedVideo(video, source.url, abortController.signal);
                   setExportStatus('Seeking video…');
                   await seekExportDetachedVideo(video, clip.sourceInUs, abortController.signal);
+                  // Loaded on demand with the forward decoder, so mediabunny stays out of the main chunk.
+                  const { readSourceFrameDurationUs } = await import('./export-source-frame.js');
+                  seekFrameDurationUs = await readSourceFrameDurationUs(
+                    source.url,
+                    abortController.signal,
+                  );
                   const captureCanvas = document.createElement('canvas');
                   captureCanvas.width = 0;
                   captureCanvas.height = 0;
@@ -4340,6 +4350,7 @@ function EditorWorkspace({
             clip,
             video,
             decoder,
+            seekFrameDurationUs,
             frameSource,
             sourceUrl: frameSource === undefined ? undefined : source.url,
             stillFrame,
@@ -4596,7 +4607,12 @@ function EditorWorkspace({
                   (media.video !== undefined && media.decoder !== undefined
                     ? { video: media.video, decoder: media.decoder }
                     : await openSeekFallback(media));
-                await seekExportDetachedVideo(seeking.video, sourceUs, abortController.signal);
+                // Seek to the middle of the source frame (export-seek-target.ts), not to its edge.
+                const seekUs =
+                  media.seekFrameDurationUs === undefined
+                    ? sourceUs
+                    : frameCentreSeekUs(sourceUs, media.seekFrameDurationUs);
+                await seekExportDetachedVideo(seeking.video, seekUs, abortController.signal);
                 decoded = seeking.decoder.captureCurrentFrame(token);
                 intrinsic = { width: seeking.video.videoWidth, height: seeking.video.videoHeight };
               }
