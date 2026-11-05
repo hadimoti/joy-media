@@ -4518,7 +4518,8 @@ function EditorWorkspace({
         const encodeSource = {
           manifest,
           frameCount: totalFrames,
-          canvas: recorderCanvas,
+          // Offline export encodes the Pixi canvas directly; the recorder keeps the copy.
+          canvas: offlineCapability.ok ? renderer.canvas : recorderCanvas,
           paintFrame: async (index: number) => {
             const timeUs = Math.min(durationUs - 1, Math.floor((index * 1_000_000) / frameRate));
             // A clip that ended more than a second ago (past any transition that holds its last
@@ -4661,8 +4662,11 @@ function EditorWorkspace({
             // CanvasCaptureMediaStreamTrack can sample a WebGL surface before
             // its GPU work is committed on cold/software renderers. Copying
             // into a 2D staging canvas synchronizes the exact painted frame.
-            recorderContext.clearRect(0, 0, width, height);
-            recorderContext.drawImage(renderer.canvas, 0, 0, width, height);
+            // Offline export reads the Pixi canvas; only the recorder fallback needs this copy.
+            if (!offlineCapability.ok) {
+              recorderContext.clearRect(0, 0, width, height);
+              recorderContext.drawImage(renderer.canvas, 0, 0, width, height);
+            }
           },
           onProgress: (completed: number, total: number) => {
             // A React update on every frame re-renders the whole editor and slows the encode loop,
