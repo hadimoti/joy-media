@@ -2,8 +2,7 @@
  * Pixi v8 Filter adapter for curated gl-transitions shaders.
  */
 
-import type { Texture } from 'pixi.js';
-import { Filter, GlProgram } from 'pixi.js';
+import { Filter, GlProgram, Texture } from 'pixi.js';
 import {
   buildPixiTransitionFragment,
   getTransitionShader,
@@ -14,6 +13,7 @@ import {
 const DEFAULT_FILTER_VERT = `
 in vec2 aPosition;
 out vec2 vTextureCoord;
+out vec2 vFromScale;
 
 uniform vec4 uInputSize;
 uniform vec4 uOutputFrame;
@@ -27,15 +27,13 @@ vec4 filterVertexPosition( void )
     return vec4(position, 0.0, 1.0);
 }
 
-vec2 filterTextureCoord( void )
-{
-    return aPosition * (uOutputFrame.zw * uInputSize.zw);
-}
-
 void main(void)
 {
     gl_Position = filterVertexPosition();
-    vTextureCoord = filterTextureCoord();
+    // Transition uv runs 0..1 over the output frame. Pixi pads the filter input to a power of two,
+    // so the first texture (from) needs its own scale; the second texture (to) is output-sized.
+    vTextureCoord = aPosition;
+    vFromScale = uOutputFrame.zw * uInputSize.zw;
 }
 `;
 
@@ -86,8 +84,11 @@ export function createGlTransitionFilter(
       fragment: fragWithUniforms,
       name: `joy-gl-transition-${entry.glName}`,
     }),
+    // Declare the second sampler now. Pixi only binds resource names that exist when the filter is
+    // built, so a texture written to uTextureTo later never reaches the shader (F-01).
     resources: {
       transitionUniforms: floatUniforms,
+      uTextureTo: Texture.EMPTY.source,
     },
   });
 

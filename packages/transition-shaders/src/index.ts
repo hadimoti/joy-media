@@ -120,6 +120,7 @@ export function mergeTransitionParams(
  */
 export function buildPixiTransitionFragment(glslBody: string): string {
   return `in vec2 vTextureCoord;
+in vec2 vFromScale;
 out vec4 finalColor;
 uniform sampler2D uTexture;
 uniform sampler2D uTextureTo;
@@ -127,7 +128,7 @@ uniform float uProgress;
 uniform float uRatio;
 
 vec4 getFromColor(vec2 uv) {
-  return texture(uTexture, uv);
+  return texture(uTexture, uv * vFromScale);
 }
 vec4 getToColor(vec2 uv) {
   return texture(uTextureTo, uv);

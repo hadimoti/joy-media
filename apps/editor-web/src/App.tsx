@@ -85,6 +85,7 @@ import {
   isTransitionActive,
   normalizeColorGrade,
   type BuildRenderFrameOptions,
+  type ClipTimingLookup,
   type ResolvedObject,
 } from '@joy-media/visual-object-renderer';
 import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
@@ -539,7 +540,6 @@ function renderFrameOptions(
     Record<string, { readonly width: number; readonly height: number }>
   >,
 ): BuildRenderFrameOptions {
-  const composition = project.compositions[project.rootCompositionId];
   const outputGrade =
     project.colorGrade !== undefined &&
     'version' in project.colorGrade &&
@@ -556,7 +556,7 @@ function renderFrameOptions(
     propertyAnimations: project.propertyAnimations,
     ...(outputGrade !== undefined ? { colorGrade: outputGrade } : {}),
     ...(project.transitions !== undefined ? { transitions: project.transitions } : {}),
-    ...(composition ? { clipTimes: clipTimesFromTracks(composition.tracks) } : {}),
+    clipTimes: transitionClipTimes(timeline),
     ...(imageSizesByObjectId !== undefined ? { imageSizesByObjectId } : {}),
   };
 }
@@ -714,11 +714,22 @@ function colorGradeForClipAtTime(
   return normalizeColorGrade(evaluated);
 }
 
+/**
+ * Clip start times for transition windows. The video clips live in the timeline project; the visual
+ * project's root composition holds no video tracks, so reading it found no clip and no transition.
+ */
+function transitionClipTimes(timeline: SpikeProject): ClipTimingLookup {
+  const composition = timeline.compositions[timeline.rootCompositionId];
+  return composition === undefined ? new Map() : clipTimesFromTracks(composition.tracks);
+}
+
 /** Active transition (if any) at composition time. */
-function activeTransitionAt(project: JoyProjectV1, playheadUs: number): TransitionV1 | undefined {
-  const composition = project.compositions[project.rootCompositionId];
-  if (composition === undefined || project.transitions === undefined) return undefined;
-  const clipTimes = clipTimesFromTracks(composition.tracks);
+function activeTransitionAt(
+  project: JoyProjectV1,
+  playheadUs: number,
+  clipTimes: ClipTimingLookup,
+): TransitionV1 | undefined {
+  if (project.transitions === undefined) return undefined;
   return project.transitions.find((transition) =>
     isTransitionActive(transition, playheadUs, clipTimes),
   );
@@ -775,6 +786,15 @@ function sourceTimeForTransitionSample(
     if (rate === 0) return clip.sourceInUs;
     const windowStart = clip.startUs - transition.durationUs;
     const direction = clip.reversed === true ? -1 : 1;
+    if (direction === 1) {
+      // The incoming clip's window starts one transition length before its in-point. Before the
+      // in-point there are only handle frames: a clip with no handle holds its first frame, and the
+      // window ends on the in-point frame, so the cut does not jump back to the first frame.
+      return Math.max(
+        0,
+        clip.sourceInUs - transition.durationUs * rate + (playheadUs - windowStart) * rate,
+      );
+    }
     return clip.sourceInUs + Math.max(0, playheadUs - windowStart) * rate * direction;
   }
   if (playheadUs < clip.startUs) return clip.sourceInUs;
@@ -2114,7 +2134,11 @@ function EditorWorkspace({
 
   const captureTransitionPartnerFrames = useCallback(
     async (playheadUs: number): Promise<void> => {
-      const transition = activeTransitionAt(session.visualProject, playheadUs);
+      const transition = activeTransitionAt(
+        session.visualProject,
+        playheadUs,
+        transitionClipTimes(session.timelineProject),
+      );
       if (transition === undefined) return;
       const { video, decoder } = ensurePartnerDecoder();
       for (const clipId of [transition.leftClipId, transition.rightClipId]) {
@@ -2163,7 +2187,11 @@ function EditorWorkspace({
       const operation = playbackOperationRef.current;
       const composition =
         session.timelineProject.compositions[session.timelineProject.rootCompositionId];
-      const transition = activeTransitionAt(session.visualProject, playheadUs);
+      const transition = activeTransitionAt(
+        session.visualProject,
+        playheadUs,
+        transitionClipTimes(session.timelineProject),
+      );
       const clip =
         activeVideoClipAt(
           session.timelineProject,
@@ -4527,7 +4555,11 @@ function EditorWorkspace({
               )
                 media.frameSource.release();
             }
-            const transition = activeTransitionAt(exportVisualProject, timeUs);
+            const transition = activeTransitionAt(
+              exportVisualProject,
+              timeUs,
+              transitionClipTimes(exportTimelineProject),
+            );
             const activeClips = activePreparedExportClipsAt(
               playableTimelineClips,
               timeUs,
@@ -7627,7 +7659,11 @@ function MonitorPanelContent({
     }
     applyClipGradesToTransitionBitmaps(
       previewVisualProject,
-      activeTransitionAt(previewVisualProject, state.playheadUs),
+      activeTransitionAt(
+        previewVisualProject,
+        state.playheadUs,
+        transitionClipTimes(timelineProject),
+      ),
       state.playheadUs,
       videoBitmaps,
     );

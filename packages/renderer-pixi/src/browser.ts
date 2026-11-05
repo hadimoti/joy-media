@@ -497,9 +497,10 @@ export async function createBrowserPixiRenderer(
     const seenTransitionIds = new Set<string>();
     for (const { node } of transitionNodes) {
       seenTransitionIds.add(node.id);
+      // Pixi returns null (not undefined) when no child matches the label (F-01 follow-up).
       const existing = transitionLayer.getChildByName(`transition:${node.id}`) as
-        TransitionLayerContainer | undefined;
-      if (existing === undefined) {
+        TransitionLayerContainer | null | undefined;
+      if (existing === null || existing === undefined) {
         const container = createTransitionLayer(node, videoBitmaps);
         transitionLayer.addChild(container);
       } else {
