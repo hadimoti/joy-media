@@ -69,6 +69,7 @@ import type {
 import { normalizePlaybackRate, sourceTimeAtVideoClipTime } from '@joy-media/project-schema';
 import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
 import { sessionProviderFor } from './joy-agent/provider-call.js';
+import { sourceTimeForTransitionSample } from './transition-source-time.js';
 import { markOverridesFromCommittedKeys } from './joy-agent/look-instance-operations.js';
 import { type VisualObjectTransaction } from '@joy-media/property-system';
 import {
@@ -769,42 +770,6 @@ function findVideoClipById(
 /** Composition playhead → source media time, honoring clip.playbackRate (0 = freeze). */
 function sourceTimeForPlayhead(clip: VideoClip, playheadUs: number): number {
   return sourceTimeAtVideoClipTime(clip, playheadUs);
-}
-
-/**
- * Source time for a clip during an active A↔B transition. The outgoing clip
- * keeps its normal mapping; the incoming clip advances from `sourceInUs` as if
- * it began at the transition window start.
- */
-function sourceTimeForTransitionSample(
-  clip: VideoClip,
-  playheadUs: number,
-  transition: TransitionV1 | undefined,
-): number {
-  if (transition !== undefined && clip.id === transition.rightClipId && playheadUs < clip.startUs) {
-    const rate = normalizePlaybackRate(clip.playbackRate);
-    if (rate === 0) return clip.sourceInUs;
-    const windowStart = clip.startUs - transition.durationUs;
-    const direction = clip.reversed === true ? -1 : 1;
-    if (direction === 1) {
-      // The incoming clip's window starts one transition length before its in-point. Before the
-      // in-point there are only handle frames: a clip with no handle holds its first frame, and the
-      // window ends on the in-point frame, so the cut does not jump back to the first frame.
-      return Math.max(
-        0,
-        clip.sourceInUs - transition.durationUs * rate + (playheadUs - windowStart) * rate,
-      );
-    }
-    return clip.sourceInUs + Math.max(0, playheadUs - windowStart) * rate * direction;
-  }
-  if (playheadUs < clip.startUs) return clip.sourceInUs;
-  if (playheadUs >= clip.startUs + clip.durationUs) {
-    const rate = normalizePlaybackRate(clip.playbackRate);
-    if (rate === 0) return clip.sourceInUs;
-    const direction = clip.reversed === true ? -1 : 1;
-    return clip.sourceInUs + Math.max(0, Math.round((clip.durationUs - 1) * rate)) * direction;
-  }
-  return sourceTimeForPlayhead(clip, playheadUs);
 }
 
 /** Source media time → composition playhead (freeze holds last mapped start). */
