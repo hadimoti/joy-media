@@ -14,9 +14,12 @@ import {
   type DesktopProviderProfile,
 } from './desktop-client.js';
 
-/** Owner wording for every OAuth route, reworded 2026-11-01 to say the route may be disabled and the API key is better. */
+/** Owner wording for the xAI sign-in route, reworded 2026-11-01 to say the route may be disabled and the API key is better. */
 const OAUTH_RISK_NOTICE =
   'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
+
+/** Only xAI's sign-in shows the risk notice (owner decision 2026-11-05). ChatGPT and Kimi show none. */
+const RISK_NOTICE_PROVIDERS: ReadonlySet<RegistryProviderId> = new Set<RegistryProviderId>(['xai']);
 
 /** D23 sign-in provider order follows the existing settings panel order. */
 const ORDER: readonly RegistryProviderId[] = ['chatgpt', 'kimi', 'xai'];
@@ -123,7 +126,6 @@ function ProviderRouteAccordion({
   const label = providerLabel(provider.id);
   const regions = apiKeyRegions(provider);
   const [open, setOpen] = useState(false);
-  const [signInOpen, setSignInOpen] = useState(false);
   const [apiKeyRegionId, setApiKeyRegionId] = useState<ProviderRegionId | undefined>(
     regions[0]?.id,
   );
@@ -191,8 +193,25 @@ function ProviderRouteAccordion({
 
       {open && (
         <div id={'joy-provider-routes-' + provider.id} className="joy-accordion-content">
+          <section className="joy-provider-route" aria-label={label + ' OAuth route'}>
+            <h4 className="joy-provider-route-title">Sign-in route (Primary)</h4>
+            <button
+              type="button"
+              className="joy-btn-primary"
+              disabled={signInDisabled || saving}
+              onClick={onSignIn}
+            >
+              Sign in with {label}
+              {signInBusy ? '…' : ''}
+            </button>
+            {RISK_NOTICE_PROVIDERS.has(provider.id) && (
+              <p className="joy-provider-risk-notice">{OAUTH_RISK_NOTICE}</p>
+            )}
+            {signInMessage !== undefined && <p role="status">{signInMessage}</p>}
+          </section>
+
           <section className="joy-provider-route" aria-label={label + ' API-key route'}>
-            <h4 className="joy-provider-route-title">API key route (Primary)</h4>
+            <h4 className="joy-provider-route-title">API key route (Secondary)</h4>
             {selectedRegion === undefined ? (
               <p>
                 No API-key endpoint is registered for this provider. OpenAI API keys remain under
@@ -291,40 +310,6 @@ function ProviderRouteAccordion({
               </div>
             )}
           </section>
-
-          <div className={'joy-accordion-item' + (signInOpen ? ' is-open' : '')}>
-            <button
-              type="button"
-              className="joy-accordion-trigger"
-              aria-label={'Toggle ' + label + ' sign-in route'}
-              aria-expanded={signInOpen}
-              aria-controls={'joy-provider-oauth-' + provider.id}
-              onClick={() => setSignInOpen((previous) => !previous)}
-            >
-              <span className="joy-accordion-trigger-title">Sign-in route (Secondary)</span>
-              <span className="joy-accordion-trigger-meta">
-                <span className="joy-accordion-chevron">▾</span>
-              </span>
-            </button>
-
-            {signInOpen && (
-              <div id={'joy-provider-oauth-' + provider.id} className="joy-accordion-content">
-                <section className="joy-provider-route" aria-label={label + ' OAuth route'}>
-                  <button
-                    type="button"
-                    className="joy-btn-secondary"
-                    disabled={signInDisabled || saving}
-                    onClick={onSignIn}
-                  >
-                    Sign in with {label}
-                    {signInBusy ? '…' : ''}
-                  </button>
-                  <p className="joy-provider-risk-notice">{OAUTH_RISK_NOTICE}</p>
-                  {signInMessage !== undefined && <p role="status">{signInMessage}</p>}
-                </section>
-              </div>
-            )}
-          </div>
         </div>
       )}
     </div>

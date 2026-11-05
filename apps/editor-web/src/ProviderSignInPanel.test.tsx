@@ -75,14 +75,6 @@ describe('ProviderSignInPanel', () => {
     await act(async () => button.click());
   }
 
-  async function openSignInRoute(provider: string): Promise<void> {
-    const button = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Toggle ' + provider + ' sign-in route"]',
-    );
-    if (button === null) throw new Error('Expected ' + provider + ' sign-in route accordion');
-    await act(async () => button.click());
-  }
-
   function route(provider: string, name: 'API-key' | 'OAuth'): HTMLElement {
     const element = container.querySelector<HTMLElement>(
       'section[aria-label="' + provider + ' ' + name + ' route"]',
@@ -138,52 +130,51 @@ describe('ProviderSignInPanel', () => {
     }
   });
 
-  it('keeps the sign-in route in a secondary accordion that starts closed', async () => {
-    installDesktopBridge();
-    await mount();
-    await openAccordion('xAI');
-
-    const trigger = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Toggle xAI sign-in route"]',
-    );
-    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
-    expect(trigger?.textContent).toContain('Sign-in route (Secondary)');
-    expect(container.textContent).not.toContain('Sign in with xAI');
-    expect(container.textContent).not.toContain(RISK_NOTICE);
-
-    await openSignInRoute('xAI');
-    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
-    expect(container.textContent).toContain(RISK_NOTICE);
-  });
-
-  it('renders the same approved notice directly below each sign-in button', async () => {
+  it('shows OAuth sign-in as the primary route for every provider, with the API key second as secondary', async () => {
     installDesktopBridge();
     await mount();
 
     for (const provider of ['ChatGPT', 'Kimi', 'xAI']) {
       await openAccordion(provider);
-      await openSignInRoute(provider);
       const signInRoute = route(provider, 'OAuth');
+      expect(signInRoute.querySelector('h4')?.textContent).toBe('Sign-in route (Primary)');
+      expect(signInRoute.querySelector('button')?.textContent?.trim()).toBe(
+        'Sign in with ' + provider,
+      );
+      expect(route(provider, 'API-key').querySelector('h4')?.textContent).toBe(
+        'API key route (Secondary)',
+      );
+
       const card = container
         .querySelector('button[aria-label="Toggle ' + provider + ' connection routes"]')
         ?.closest('.joy-accordion-item');
-      const button = signInRoute.querySelector('button');
-      expect(button?.textContent?.trim()).toBe('Sign in with ' + provider);
-      expect(button?.nextElementSibling?.tagName).toBe('P');
-      expect(button?.nextElementSibling?.textContent).toBe(RISK_NOTICE);
       expect(
         [...(card?.querySelectorAll('section[aria-label$="route"]') ?? [])].map((section) =>
           section.getAttribute('aria-label'),
         ),
-      ).toEqual([provider + ' API-key route', provider + ' OAuth route']);
-      expect(route(provider, 'API-key').textContent).not.toContain(RISK_NOTICE);
+      ).toEqual([provider + ' OAuth route', provider + ' API-key route']);
+      expect(
+        container.querySelector('button[aria-label="Toggle ' + provider + ' sign-in route"]'),
+      ).toBeNull();
     }
+  });
 
+  it('shows the risk notice only under the xAI sign-in button', async () => {
+    installDesktopBridge();
+    await mount();
+
+    for (const provider of ['ChatGPT', 'Kimi', 'xAI']) await openAccordion(provider);
+
+    const xaiButton = route('xAI', 'OAuth').querySelector('button');
+    expect(xaiButton?.nextElementSibling?.tagName).toBe('P');
+    expect(xaiButton?.nextElementSibling?.textContent).toBe(RISK_NOTICE);
+    expect(route('ChatGPT', 'OAuth').textContent).not.toContain(RISK_NOTICE);
+    expect(route('Kimi', 'OAuth').textContent).not.toContain(RISK_NOTICE);
     expect(
       [...container.querySelectorAll('p')].filter(
         (paragraph) => paragraph.textContent === RISK_NOTICE,
       ),
-    ).toHaveLength(3);
+    ).toHaveLength(1);
   });
 
   it('uses only API-key regions for the primary route and keeps OAuth-only bases out of it', async () => {
