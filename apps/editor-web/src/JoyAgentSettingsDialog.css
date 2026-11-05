@@ -550,11 +550,6 @@
   border-top: 1px solid var(--joy-border-subtle);
 }
 
-.joy-provider-route-accordions .joy-accordion-content .joy-accordion-item {
-  background: var(--joy-bg-inset);
-  border-color: var(--joy-border);
-}
-
 .joy-provider-route-accordions .joy-provider-route,
 .joy-provider-route-accordions .joy-provider-route-title {
   align-items: center;

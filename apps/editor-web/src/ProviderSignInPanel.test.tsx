@@ -177,7 +177,54 @@ describe('ProviderSignInPanel', () => {
     ).toHaveLength(1);
   });
 
-  it('uses only API-key regions for the primary route and keeps OAuth-only bases out of it', async () => {
+  it('signs in with xAI from the primary route and reports the result there', async () => {
+    const invoke = installDesktopBridge();
+    const onSignedIn = vi.fn();
+    await mount(onSignedIn);
+    await openAccordion('xAI');
+
+    const button = route('xAI', 'OAuth').querySelector<HTMLButtonElement>('button');
+    if (button === null) throw new Error('Expected the xAI sign-in button');
+    await act(async () => {
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.sign-in', { provider: 'xai' });
+    expect(onSignedIn).toHaveBeenCalledWith(expect.objectContaining({ provider: 'xai' }));
+    expect(route('xAI', 'OAuth').querySelector('[role="status"]')?.textContent).toBe(
+      'Signed in to xAI.',
+    );
+    expect(route('xAI', 'API-key').querySelector('[role="status"]')).toBeNull();
+  });
+
+  it('shows a failed xAI sign-in inside the primary route', async () => {
+    const invoke = installDesktopBridge();
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'desktop.provider-profile.sign-in') {
+        throw new Error('xAI sign-in was refused.');
+      }
+      return undefined;
+    });
+    const onSignedIn = vi.fn();
+    await mount(onSignedIn);
+    await openAccordion('xAI');
+
+    const button = route('xAI', 'OAuth').querySelector<HTMLButtonElement>('button');
+    if (button === null) throw new Error('Expected the xAI sign-in button');
+    await act(async () => {
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(onSignedIn).not.toHaveBeenCalled();
+    expect(route('xAI', 'OAuth').querySelector('[role="status"]')?.textContent).toBe(
+      'xAI sign-in was refused.',
+    );
+    expect(route('xAI', 'API-key').querySelector('[role="status"]')).toBeNull();
+  });
+
+  it('uses only API-key regions for the API-key route and keeps OAuth-only bases out of it', async () => {
     installDesktopBridge();
     await mount();
 

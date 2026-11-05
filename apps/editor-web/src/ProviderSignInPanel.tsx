@@ -185,7 +185,7 @@ function ProviderRouteAccordion({
         <span className="joy-accordion-trigger-title">{label}</span>
         <span className="joy-accordion-trigger-meta">
           <span className="joy-accordion-tag">
-            {regions.length > 0 ? 'API key + sign-in' : 'Sign-in only'}
+            {regions.length > 0 ? 'Sign-in + API key' : 'Sign-in only'}
           </span>
           <span className="joy-accordion-chevron">▾</span>
         </span>
