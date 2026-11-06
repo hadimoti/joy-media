@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
-  existsSync,
   linkSync,
   mkdirSync,
   openSync,
@@ -343,12 +342,40 @@ function createExclusiveLock(path: string, now: () => number): boolean {
  * reclaim guard left behind while the lock's recorded owner is dead. A live owner is still working, so nothing is named.
  */
 function stuckLockFile(path: string, isProcessAlive: (pid: number) => boolean): string | undefined {
-  if (!existsSync(path)) return undefined;
-  const owner = readLockOwner(path);
-  if (owner === undefined) return path;
-  if (isProcessAlive(owner.pid)) return undefined;
+  // Each file is read once. A separate exists check could race with a normal release and name a file that is gone.
+  const lock = inspectLockFile(path);
+  if (lock === 'missing') return undefined;
+  if (lock === 'unreadable') return path;
+  if (isProcessAlive(lock.pid)) return undefined;
   const guard = `${path}.reclaim`;
-  return existsSync(guard) && readLockOwner(guard) === undefined ? guard : undefined;
+  return inspectLockFile(guard) === 'unreadable' ? guard : undefined;
+}
+
+/** 'missing' when no file exists, 'unreadable' when it exists without a readable owner record, else the owner. */
+function inspectLockFile(path: string): LockOwner | 'missing' | 'unreadable' {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable';
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      Number.isInteger((parsed as { pid?: unknown }).pid) &&
+      typeof (parsed as { createdAt?: unknown }).createdAt === 'number'
+    ) {
+      return {
+        pid: (parsed as { pid: number }).pid,
+        createdAt: (parsed as { createdAt: number }).createdAt,
+      };
+    }
+  } catch {
+    // Malformed content is handled as unreadable below.
+  }
+  return 'unreadable';
 }
 
 function reclaimDeadLock(
