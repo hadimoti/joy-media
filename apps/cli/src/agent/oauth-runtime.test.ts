@@ -281,6 +281,29 @@ describe('CLI OAuth token manager', () => {
     expect(existsSync(`${path}.reclaim`)).toBe(false);
   });
 
+  it('does not report an empty guard as stuck while a live process owns the lock', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: process.pid, createdAt: NOW }));
+    writeFileSync(`${path}.reclaim`, '');
+
+    const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+      timeoutMs: 4,
+      retryIntervalMs: 1,
+      now: () => NOW,
+      isProcessAlive: () => true,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+    // A live owner is still working, so the timeout must not tell the user to delete anything.
+    expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBeUndefined();
+    expect((failure as Error).message).toBe(
+      'Another JOY Media process is refreshing this sign-in; retry.',
+    );
+  });
+
   it('keeps the lock exclusive and leaves no staging file when hard links are unsupported', async () => {
     const path = oauthProfileLockPath(KIMI_PROFILE);
     linkMode.code = 'EPERM';

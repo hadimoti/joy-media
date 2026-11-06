@@ -93,7 +93,7 @@ export async function withOAuthProfileLock<T>(
       reclaimDeadLock(path, owner, now, isProcessAlive);
     }
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new OAuthProfileLockTimeoutError(unreadableLockFile(path));
+    if (remaining <= 0) throw new OAuthProfileLockTimeoutError(stuckLockFile(path, isProcessAlive));
     await wait(Math.min(retryIntervalMs, remaining));
   }
 }
@@ -316,7 +316,7 @@ function isHardLinkUnsupported(error: unknown): boolean {
 
 /**
  * Exclusive create for filesystems without hard links, as the lock was before publication by link. A crash between
- * the create and the write can leave an empty lock. It is never reclaimed on age alone; the timeout names the file so
+ * the create and the write can leave an empty lock or an empty reclaim guard. Neither is reclaimed on age; the timeout names the file so
  * the user can remove it. This gap exists only on filesystems without hard links.
  */
 function createExclusiveLock(path: string, now: () => number): boolean {
@@ -338,12 +338,17 @@ function createExclusiveLock(path: string, now: () => number): boolean {
   return true;
 }
 
-/** The first of the lock or its reclaim guard that exists but has no readable owner record, if any. */
-function unreadableLockFile(path: string): string | undefined {
-  for (const candidate of [path, `${path}.reclaim`]) {
-    if (existsSync(candidate) && readLockOwner(candidate) === undefined) return candidate;
-  }
-  return undefined;
+/**
+ * The file the user must remove, when the wait cannot end by itself. That is an unreadable lock, or an unreadable
+ * reclaim guard left behind while the lock's recorded owner is dead. A live owner is still working, so nothing is named.
+ */
+function stuckLockFile(path: string, isProcessAlive: (pid: number) => boolean): string | undefined {
+  if (!existsSync(path)) return undefined;
+  const owner = readLockOwner(path);
+  if (owner === undefined) return path;
+  if (isProcessAlive(owner.pid)) return undefined;
+  const guard = `${path}.reclaim`;
+  return existsSync(guard) && readLockOwner(guard) === undefined ? guard : undefined;
 }
 
 function reclaimDeadLock(
