@@ -316,6 +316,56 @@ describe('exchangeChatGptCode', () => {
 });
 
 describe('signInWithChatGpt', () => {
+  it('persists a newly issued client before a failed code exchange', async () => {
+    const issued = 'oaiapp_recovery-test';
+    const events: string[] = [];
+    const { fetch, tokenForms } = provider(() => {
+      events.push('exchange');
+      return jsonReply({ error: 'invalid_grant' }, 400);
+    });
+    await expect(
+      signInWithChatGpt({
+        issuedClientId: undefined,
+        extAgentHostId: HOST_ID,
+        onRegistration: async (clientId: string) => {
+          expect(clientId).toBe(issued);
+          events.push('saved');
+        },
+        openExternal: (url) =>
+          returnFromBrowser(url, (state) => `client_id=${issued}&code=the-code&state=${state}`),
+        fetch,
+        now,
+        port: 0,
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toBeDefined();
+    expect(events).toEqual(['saved', 'exchange']);
+    expect(tokenForms).toHaveLength(1);
+  });
+
+  it('does not exchange a code if saving the new registration fails', async () => {
+    const { fetch, tokenForms } = provider(() => jsonReply({}));
+    await expect(
+      signInWithChatGpt({
+        issuedClientId: undefined,
+        extAgentHostId: HOST_ID,
+        onRegistration: () => {
+          throw new Error('registration store unavailable');
+        },
+        openExternal: (url) =>
+          returnFromBrowser(
+            url,
+            (state) => `client_id=oaiapp_save-failure&code=the-code&state=${state}`,
+          ),
+        fetch,
+        now,
+        port: 0,
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toThrow('registration store unavailable');
+    expect(tokenForms).toHaveLength(0);
+  });
+
   it('registers a client when none is saved, and keeps the client ChatGPT names on the callback', async () => {
     const issued = 'oaiapp_issued-1';
     let authUrl = '';

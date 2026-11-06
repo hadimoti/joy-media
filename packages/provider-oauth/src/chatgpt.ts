@@ -70,6 +70,8 @@ export interface ChatGptCode {
 export interface ChatGptSignInOptions {
   /** The client of a saved account, to sign in to that account again. Undefined registers a new client. */
   readonly issuedClientId: string | undefined;
+  /** Persist a new issued client before exchanging the authorization code. */
+  readonly onRegistration?: (clientId: string) => void | Promise<void>;
   /** The host ID this install sends: a `urn:uuid:` URN, created once per install (PLAN-v4 §6d). */
   readonly extAgentHostId: string;
   /** Opens the system browser on the sign-in page. Injected, so the flow never opens one by itself. */
@@ -406,6 +408,7 @@ export async function signInWithChatGpt(
         'ChatGPT did not register a client for this app.',
       );
     }
+    if (saved === undefined) await options.onRegistration?.(clientId);
     const tokens = await exchangeChatGptCode({
       clientId,
       code,

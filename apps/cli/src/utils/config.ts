@@ -5,7 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
-  rmdirSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -34,6 +34,8 @@ export interface CliConfig {
   sqlitePath?: string | undefined;
   /** ChatGPT's accepted host identity, generated once for this CLI installation. */
   chatgptExtAgentHostId?: string | undefined;
+  /** Issued clients awaiting a successful sign-in; client IDs are public, never tokens. */
+  chatgptPendingRegistrations?: Array<{ profileId: string; clientId: string }> | undefined;
   /** The two agent slots (PLAN-v4 §6d-1). A slot that is not saved is empty. */
   agentSlots?: Partial<Record<'workhorse' | 'creative', SavedAgentSlot>> | undefined;
 }
@@ -160,7 +162,7 @@ function withNamedLock<T>(name: string, fn: () => T): T {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       try {
-        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) rmdirSync(lock);
+        if (lockOwnerIsGone(lock)) rmSync(lock, { recursive: true, force: true });
       } catch {
         // Lock released between our checks: retry.
       }
@@ -171,13 +173,47 @@ function withNamedLock<T>(name: string, fn: () => T): T {
     }
   }
   try {
+    // The owner is recorded after the lock is taken. A lock whose owner is alive is never reclaimed, however old.
+    try {
+      writeFileSync(join(lock, 'owner'), JSON.stringify({ pid: process.pid }), {
+        mode: PRIVATE_FILE_MODE,
+      });
+    } catch {
+      // Without a record the lock is judged by its age alone.
+    }
     return fn();
   } finally {
     try {
-      rmdirSync(lock);
+      rmSync(lock, { recursive: true, force: true });
     } catch {
       // Already gone.
     }
+  }
+}
+
+/**
+ * Whether a lock directory's owner has gone. A live owner is never reclaimed, however long it holds the lock. A lock
+ * with no readable owner record goes by age alone, which covers a crash between taking the lock and recording it.
+ */
+function lockOwnerIsGone(lock: string): boolean {
+  let pid: unknown;
+  try {
+    pid = (JSON.parse(readFileSync(join(lock, 'owner'), 'utf8')) as { pid?: unknown }).pid;
+  } catch {
+    pid = undefined;
+  }
+  if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ESRCH';
+    }
+  }
+  try {
+    return Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS;
+  } catch {
+    return false;
   }
 }
 
@@ -204,6 +240,86 @@ export function updateCliConfig(mutate: (current: CliConfig) => CliConfig): CliC
     const next = mutate(loadCliConfig());
     saveCliConfig(next);
     return next;
+  });
+}
+
+/** Read pending public registrations without accepting malformed or ambiguous configuration. */
+function pendingChatGptRegistrations(
+  config: CliConfig,
+): Array<{ profileId: string; clientId: string }> {
+  const value: unknown = config.chatgptPendingRegistrations;
+  if (value === undefined) return [];
+  if (!Array.isArray(value))
+    throw new ConfigFileError(getCliConfigPath(), 'invalid ChatGPT registrations');
+  const entries: Array<{ profileId: string; clientId: string }> = [];
+  for (const item of value as unknown[]) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item))
+      throw new ConfigFileError(getCliConfigPath(), 'invalid ChatGPT registrations');
+    const { profileId, clientId } = item as Record<string, unknown>;
+    if (
+      typeof profileId !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(profileId) ||
+      typeof clientId !== 'string' ||
+      !/^[A-Za-z0-9._-]{1,256}$/.test(clientId) ||
+      clientId === 'dynamic_agent_client' ||
+      entries.some((entry) => entry.profileId === profileId)
+    )
+      throw new ConfigFileError(getCliConfigPath(), 'invalid ChatGPT registrations');
+    entries.push({ profileId, clientId });
+  }
+  return entries;
+}
+
+export function pendingChatGptClientId(profileId: string): string | undefined {
+  return pendingChatGptRegistrations(loadCliConfig()).find((entry) => entry.profileId === profileId)
+    ?.clientId;
+}
+
+/** Fail closed if another attempt already retained a different registration for this profile. */
+export function savePendingChatGptClientId(profileId: string, clientId: string): void {
+  updateCliConfig((config) => {
+    const entries = pendingChatGptRegistrations(config);
+    const existing = entries.find((entry) => entry.profileId === profileId);
+    if (existing !== undefined && existing.clientId !== clientId)
+      throw new Error('Another ChatGPT registration is pending for this profile.');
+    const next = existing === undefined ? [...entries, { profileId, clientId }] : entries;
+    pendingChatGptRegistrations({ chatgptPendingRegistrations: next });
+    return { ...config, chatgptPendingRegistrations: next };
+  });
+}
+
+/**
+ * Drop every pending registration for this profile. Used after its sign-in has been stored, and when the
+ * profile is removed. It never touches another profile's registration.
+ */
+export function clearPendingChatGptRegistrations(profileId: string): void {
+  // Nothing to clear means nothing to write, so an unrelated write failure cannot block this step.
+  if (
+    !pendingChatGptRegistrations(loadCliConfig()).some((entry) => entry.profileId === profileId)
+  ) {
+    return;
+  }
+  updateCliConfig((config) => {
+    const entries = pendingChatGptRegistrations(config);
+    if (!entries.some((entry) => entry.profileId === profileId)) return config;
+    return {
+      ...config,
+      chatgptPendingRegistrations: entries.filter((entry) => entry.profileId !== profileId),
+    };
+  });
+}
+
+/**
+ * Returns the saved host ID, creating it only when it is absent. An existing config is never rewritten, so a
+ * config write failure cannot block a sign-in that needs no new value.
+ */
+export function ensureChatGptExtAgentHostId(create: () => string): string {
+  return withConfigLock(() => {
+    const current = loadCliConfig();
+    if (current.chatgptExtAgentHostId !== undefined) return current.chatgptExtAgentHostId;
+    const created = create();
+    saveCliConfig({ ...current, chatgptExtAgentHostId: created });
+    return created;
   });
 }
 
@@ -333,14 +449,15 @@ export function saveAiProviders(providers: Record<string, AiProviderConfig>): vo
 export function updateAiProviders<T>(
   mutate: (providers: Record<string, AiProviderConfig>) => T,
 ): T {
-  const update = withConfigLock(() => {
+  // The keys are saved inside the same lock. Otherwise a key captured here could be saved after a removal of its
+  // profile had completed, and would then reattach to a later profile of the same name.
+  return withConfigLock(() => {
     const providers = loadAiProviderMetadata();
     const result = mutate(providers);
     saveAiProviderMetadata(providers);
-    return { result, after: { ...providers } };
+    for (const [name, entry] of Object.entries(providers)) saveProviderCredential(name, entry);
+    return result;
   });
-  for (const [name, entry] of Object.entries(update.after)) saveProviderCredential(name, entry);
-  return update.result;
 }
 
 export function hasAiProvider(providers: Record<string, AiProviderConfig>, name: string): boolean {
@@ -353,19 +470,48 @@ export function setAiProvider(name: string, config: AiProviderConfig): void {
   });
 }
 
+/** Puts back the profile metadata from before a failed sign-in commit. `undefined` means it did not exist. */
+export function restoreAiProvider(name: string, previous: AiProviderConfig | undefined): void {
+  updateAiProviders((providers) => {
+    if (previous === undefined) delete providers[name];
+    else providers[name] = previous;
+  });
+}
+
+/**
+ * Removes a profile and its stored key. The key goes first, and if it cannot be deleted this throws and the profile
+ * stays. A profile left without its key would let a stale key reattach to a later profile of the same name, since
+ * loadAiProviders matches stored keys by name. Callers hold the profile lock.
+ */
 export function deleteAiProvider(name: string): boolean {
-  const removed = withConfigLock(() => {
+  // The key and the profile go under one config lock. Legacy key migration takes the same lock, so it cannot
+  // save this name's key between the two steps and leave an orphan behind.
+  return withConfigLock(() => {
     const providers = loadAiProviderMetadata();
     if (!hasAiProvider(providers, name)) return false;
+    // The store file is not created just to forget a key.
+    if (existsSync(join(getJoyMediaDir(), 'credentials.json'))) {
+      try {
+        openCredentialStore().remove(name);
+      } catch (error) {
+        throw new StoredKeyRemovalError(name, error);
+      }
+    }
     delete providers[name];
     saveAiProviderMetadata(providers);
     return true;
   });
-  // The key leaves the store too. The store file is not created just to forget a key.
-  if (removed && existsSync(join(getJoyMediaDir(), 'credentials.json'))) {
-    openCredentialStore().remove(name);
+}
+
+/** The stored key could not be deleted, so the profile was kept. */
+export class StoredKeyRemovalError extends Error {
+  constructor(
+    readonly profileId: string,
+    cause: unknown,
+  ) {
+    super(`The stored key for "${profileId}" could not be deleted.`, { cause });
+    this.name = 'StoredKeyRemovalError';
   }
-  return removed;
 }
 
 export function getDefaultSqlitePath(): string {

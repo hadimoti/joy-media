@@ -1,5 +1,13 @@
-import { createHash } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  closeSync,
+  linkSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   ACCESS_TOKEN_REFRESH_MARGIN_MS,
@@ -61,20 +69,7 @@ export async function withOAuthProfileLock<T>(
   const deadline = Date.now() + timeoutMs;
 
   while (true) {
-    let descriptor: number | undefined;
-    try {
-      descriptor = openSync(path, 'wx', 0o600);
-      writeFileSync(descriptor, JSON.stringify({ pid: process.pid, createdAt: now() }));
-    } catch (error) {
-      if (descriptor !== undefined) {
-        closeSync(descriptor);
-        rmSync(path, { force: true });
-      }
-      if (!isAlreadyExists(error)) throw error;
-    }
-
-    if (descriptor !== undefined) {
-      closeSync(descriptor);
+    if (tryPublishLock(path, now)) {
       try {
         return await work();
       } finally {
@@ -84,8 +79,9 @@ export async function withOAuthProfileLock<T>(
 
     const owner = readLockOwner(path);
     if (owner !== undefined && !isProcessAlive(owner.pid)) {
+      // Fall through to the deadline check and the wait, even after a reclaim. Continuing here skipped the
+      // deadline, so an abandoned reclaim guard could spin forever.
       reclaimDeadLock(path, owner, now, isProcessAlive);
-      continue;
     }
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new OAuthProfileLockTimeoutError();
@@ -267,6 +263,70 @@ function readLockOwner(path: string): LockOwner | undefined {
     // A malformed lock has no recorded process we can prove is dead, so it is never reclaimed here.
   }
   return undefined;
+}
+
+/**
+ * Takes the lock by publishing its owner record in one step. The record is written to a private staging file,
+ * which is then hard-linked to the lock path. The link fails if the lock already exists, and the lock is never
+ * visible without its content, so a live writer can never be mistaken for an empty, abandoned lock.
+ */
+function tryPublishLock(path: string, now: () => number): boolean {
+  const staging = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(staging, JSON.stringify({ pid: process.pid, createdAt: now() }), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    linkSync(staging, path);
+    return true;
+  } catch (error) {
+    if (isAlreadyExists(error)) return false;
+    if (!isHardLinkUnsupported(error)) throw error;
+  } finally {
+    // Best effort. A staging file that survives is harmless, and its cleanup must not hide a lock just published.
+    try {
+      rmSync(staging, { force: true });
+    } catch {
+      // Left behind; it is never read as a lock.
+    }
+  }
+  return createExclusiveLock(path, now);
+}
+
+/** Filesystems such as FAT, exFAT and some network mounts refuse hard links. */
+function isHardLinkUnsupported(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return (
+    code === 'EPERM' ||
+    code === 'ENOTSUP' ||
+    code === 'EOPNOTSUPP' ||
+    code === 'EXDEV' ||
+    code === 'ENOSYS'
+  );
+}
+
+/**
+ * Exclusive create for filesystems without hard links, as the lock was before publication by link. A crash between
+ * the create and the write can leave an empty lock, which waits and then needs manual deletion. That is the one
+ * accepted gap on these filesystems.
+ */
+function createExclusiveLock(path: string, now: () => number): boolean {
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, 'wx', 0o600);
+  } catch (error) {
+    if (isAlreadyExists(error)) return false;
+    throw error;
+  }
+  try {
+    writeFileSync(descriptor, JSON.stringify({ pid: process.pid, createdAt: now() }));
+  } catch (error) {
+    closeSync(descriptor);
+    rmSync(path, { force: true });
+    throw error;
+  }
+  closeSync(descriptor);
+  return true;
 }
 
 function reclaimDeadLock(
