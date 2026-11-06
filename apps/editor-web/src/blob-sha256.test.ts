@@ -74,3 +74,94 @@ describe('sha256OfBlob', () => {
     ).rejects.toThrow();
   });
 });
+
+/**
+ * Stands in for the hashing worker. It answers each request one message later with a digest computed by node:crypto,
+ * or stays silent, or reports a worker error, so the tests can drive every path of sha256OfBlob.
+ */
+class FakeHashWorker {
+  onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+  onerror: ((event: ErrorEvent) => void) | null = null;
+  readonly requests: Array<{ blob: Blob; sliceBytes?: number }> = [];
+  terminated = false;
+  private readonly mode: 'answer' | 'silent' | 'fail';
+  private readonly failure: string;
+
+  constructor(mode: 'answer' | 'silent' | 'fail' = 'answer', failure = 'worker crashed') {
+    this.mode = mode;
+    this.failure = failure;
+  }
+
+  postMessage(request: { blob: Blob; sliceBytes?: number }): void {
+    this.requests.push(request);
+    if (this.mode === 'silent') return;
+    queueMicrotask(() => {
+      if (this.terminated) return;
+      if (this.mode === 'fail') {
+        this.onerror?.({ message: this.failure } as ErrorEvent);
+        return;
+      }
+      void request.blob.arrayBuffer().then((buffer) => {
+        if (this.terminated) return;
+        const digest = createHash('sha256').update(Buffer.from(buffer)).digest('hex');
+        this.onmessage?.({ data: { digest } } as MessageEvent<unknown>);
+      });
+    });
+  }
+
+  terminate(): void {
+    this.terminated = true;
+  }
+}
+
+function fakeWorkerFactory(worker: FakeHashWorker): () => Worker {
+  return () => worker as unknown as Worker;
+}
+
+describe('sha256OfBlob hashes in a worker, off the calling thread', () => {
+  it('posts the Blob to the worker and resolves with the digest the worker returns', async () => {
+    const bytes = sampleBytes(5000);
+    const worker = new FakeHashWorker();
+    await expect(
+      sha256OfBlob(new Blob([bytes]), { createWorker: fakeWorkerFactory(worker), sliceBytes: 7 }),
+    ).resolves.toBe(nodeSha256Hex(bytes));
+    expect(worker.requests).toHaveLength(1);
+    expect(worker.requests[0]?.blob.size).toBe(bytes.length);
+    expect(worker.requests[0]?.sliceBytes).toBe(7);
+    expect(worker.terminated).toBe(true);
+  });
+
+  it('terminates the worker and rejects when the caller aborts mid-hash', async () => {
+    const controller = new AbortController();
+    const worker = new FakeHashWorker('silent');
+    const pending = sha256OfBlob(new Blob([sampleBytes(100)]), {
+      signal: controller.signal,
+      createWorker: fakeWorkerFactory(worker),
+    });
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+    expect(worker.terminated).toBe(true);
+  });
+
+  it('rejects with the worker error and never returns a digest', async () => {
+    const worker = new FakeHashWorker('fail', 'worker crashed');
+    await expect(
+      sha256OfBlob(new Blob([sampleBytes(10)]), { createWorker: fakeWorkerFactory(worker) }),
+    ).rejects.toThrow('worker crashed');
+    expect(worker.terminated).toBe(true);
+  });
+
+  it('refuses a bad slice size before it starts a worker', async () => {
+    let created = 0;
+    await expect(
+      sha256OfBlob(new Blob([sampleBytes(4)]), {
+        sliceBytes: 0,
+        createWorker: () => {
+          created += 1;
+          return new FakeHashWorker() as unknown as Worker;
+        },
+      }),
+    ).rejects.toThrow(RangeError);
+    expect(created).toBe(0);
+  });
+});
