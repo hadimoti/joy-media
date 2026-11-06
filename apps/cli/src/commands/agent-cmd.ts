@@ -63,6 +63,7 @@ import {
   type CliConfig,
 } from '../utils/config.js';
 import {
+  CHATGPT_REQUEST_TIMEOUT_MS,
   KIMI_CODE_BASE_URL as OAUTH_KIMI_CODE_BASE_URL,
   OAuthFlowError,
 } from '@joy-media/provider-oauth';
@@ -285,6 +286,9 @@ async function listOAuthModels(
   const baseUrl = oauthProfileBaseUrl(provider);
   out.banner();
   out.info(`Fetching models from ${c(baseUrl, 'bold')}...`);
+  // Every provider's model list is bounded like its other requests: the reply and its body must arrive within 30 s.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CHATGPT_REQUEST_TIMEOUT_MS);
   try {
     const chatGptRequest =
       provider === 'chatgpt'
@@ -299,12 +303,14 @@ async function listOAuthModels(
               accept: 'application/json',
               authorization: `Bearer ${credential.tokenRecord.accessToken}`,
             },
+            signal: controller.signal,
           }
         : {
             method: chatGptRequest.method,
             headers: chatGptRequest.headers,
             credentials: 'omit',
             redirect: 'error',
+            signal: controller.signal,
           },
     );
     if (!response.ok) throw new Error('model list request failed');
@@ -330,6 +336,8 @@ async function listOAuthModels(
     return 0;
   } catch {
     throw failure(`Failed to fetch models for OAuth profile "${profileId}".`);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

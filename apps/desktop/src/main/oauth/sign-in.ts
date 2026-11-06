@@ -25,6 +25,7 @@ import {
   encodeKimiTokenRecord,
   signInWithKimiCode,
   type KimiTokenRecord,
+  CHATGPT_REQUEST_TIMEOUT_MS,
   OAuthFlowError,
   MAX_CATALOG_CHARS,
   type FetchLike,
@@ -161,24 +162,11 @@ function providerLabel(provider: string): string {
  * renderer, so an id that holds either token is refused.
  */
 async function firstChatGptModel(record: ChatGptTokenRecord, fetch: FetchLike): Promise<string> {
-  const call = prepareChatGptModels({ accessToken: record.accessToken });
-  let response: Response;
-  try {
-    response = await fetch(call.url, {
-      method: call.method,
-      headers: call.headers,
-      redirect: 'manual',
-    });
-  } catch {
-    throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT could not be reached.');
-  }
-  if (!response.ok) {
-    throw new OAuthFlowError(
-      'EXCHANGE_FAILED',
-      `ChatGPT did not list models (HTTP ${response.status}).`,
-    );
-  }
-  const first = listedChatGptModels(await replyText(response, MAX_CATALOG_CHARS))[0];
+  const listing = await chatGptCatalogText(
+    prepareChatGptModels({ accessToken: record.accessToken }),
+    fetch,
+  );
+  const first = listedChatGptModels(listing)[0];
   if (first === undefined) {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT lists no models for this account.');
   }
@@ -187,6 +175,45 @@ async function firstChatGptModel(record: ChatGptTokenRecord, fetch: FetchLike): 
     throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT lists no usable model for this account.');
   }
   return first.id;
+}
+
+/**
+ * The ChatGPT model catalog as text. The request is bounded from the send until the body is read, so a stalled list
+ * fails as unreachable instead of holding the sign-in open.
+ */
+async function chatGptCatalogText(
+  call: ReturnType<typeof prepareChatGptModels>,
+  fetch: FetchLike,
+): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CHATGPT_REQUEST_TIMEOUT_MS);
+  try {
+    let response: Response;
+    try {
+      response = await fetch(call.url, {
+        method: call.method,
+        headers: call.headers,
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+    } catch {
+      throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT could not be reached.');
+    }
+    if (!response.ok) {
+      throw new OAuthFlowError(
+        'EXCHANGE_FAILED',
+        `ChatGPT did not list models (HTTP ${response.status}).`,
+      );
+    }
+    try {
+      return await replyText(response, MAX_CATALOG_CHARS);
+    } catch (error) {
+      if (error instanceof OAuthFlowError) throw error;
+      throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT could not be reached.');
+    }
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** The first usable model xAI lists for this account; token values can never become model IDs. */

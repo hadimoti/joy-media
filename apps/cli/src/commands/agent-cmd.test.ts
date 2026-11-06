@@ -781,6 +781,44 @@ describe('OAuth provider profiles', () => {
     expect(printed.join('\n')).not.toContain('gpt-hidden');
   });
 
+  it('gives up on a model list whose reply never arrives, after 30 seconds', async () => {
+    setAiProvider('chatgpt-profile', {
+      name: 'chatgpt-profile',
+      provider: 'chatgpt',
+      authKind: 'oauth',
+      defaultModel: 'gpt-visible',
+    });
+    openCredentialStore().save('chatgpt-profile', {
+      provider: 'chatgpt',
+      tokenRecord: {
+        version: 1,
+        clientId: 'chatgpt-client-test',
+        accountId: 'chatgpt-account-test',
+        accessToken: 'chatgpt-stall-access-test',
+        refreshToken: 'chatgpt-stall-refresh-test',
+        accessExpiresAt: Date.now() + 3_600_000,
+      },
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      vi.mocked(globalThis.fetch).mockImplementation(async (_url, init) => {
+        // The clock runs 30 seconds while the list stays silent, as a stalled connection does.
+        await vi.advanceTimersByTimeAsync(30_000);
+        if (init?.signal?.aborted) throw new DOMException('The request was aborted.', 'AbortError');
+        return new Response(
+          JSON.stringify({ models: [{ slug: 'gpt-late', visibility: 'list' }] }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      });
+      expect(await runCli(['agent', 'models', 'chatgpt-profile'])).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('stores a rotated token before making the OAuth model-list request', async () => {
     const expired: OAuthCredential = {
       provider: 'kimi',

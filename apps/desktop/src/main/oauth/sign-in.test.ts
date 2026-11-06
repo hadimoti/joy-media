@@ -291,6 +291,49 @@ describe('createProviderSignIn', () => {
     });
   });
 
+  it('gives up on a ChatGPT sign-in whose model list never answers, after 30 seconds', async () => {
+    let authUrl = '';
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const fetchStub: FetchLike = async (url, init) => {
+        if (url === CHATGPT_JWKS_URL) return json({ keys: [JWK] });
+        if (url === CHATGPT_TOKEN_URL) {
+          const nonce = new URL(authUrl).searchParams.get('nonce') ?? '';
+          return json({
+            access_token: 'at-1',
+            refresh_token: 'rt-1',
+            id_token: signedIdToken(nonce),
+            expires_in: 3600,
+            scope: CHATGPT_SCOPE,
+          });
+        }
+        if (url === `${CHATGPT_RESPONSES_BASE_URL}/models`) {
+          // The clock runs 30 seconds while the list stays silent, as a stalled connection does.
+          await vi.advanceTimersByTimeAsync(30_000);
+          if (init.signal?.aborted)
+            throw new DOMException('The request was aborted.', 'AbortError');
+          return json({ models: [{ slug: 'gpt-late', visibility: 'list' }] });
+        }
+        throw new Error(`unexpected request to ${url}`);
+      };
+      const signIn = createProviderSignIn({
+        openExternal: async (url) => {
+          authUrl = url;
+          await returnFromBrowser(url, 'redirect_uri', (state) => `code=the-code&state=${state}`);
+        },
+        fetch: fetchStub,
+        now: Date.now,
+        chatGptClientId: CLIENT_ID,
+        installId: () => HOST_ID,
+        chatGptPort: 0,
+      });
+
+      await expect(signIn('chatgpt')).rejects.toMatchObject({ code: 'EXCHANGE_FAILED' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reauthorizes a saved ChatGPT account with its client ID instead of registering another client', async () => {
     let authUrl = '';
     const fetch: FetchLike = async (url, init) => {
