@@ -819,6 +819,54 @@ describe('OAuth provider profiles', () => {
     }
   });
 
+  it.each([
+    {
+      provider: 'kimi',
+      profile: 'kimi-profile',
+      baseUrl: 'https://api.kimi.ai/coding/v1',
+      scope: 'kimi-code',
+    },
+    {
+      provider: 'xai',
+      profile: 'xai-profile',
+      baseUrl: 'https://api.x.ai/v1',
+      scope: 'api:access',
+    },
+  ] as const)(
+    'gives up on a $provider model list whose reply never arrives, after 30 seconds',
+    async ({ provider, profile, scope }) => {
+      setAiProvider(profile, { name: profile, provider, authKind: 'oauth' });
+      openCredentialStore().save(profile, {
+        provider,
+        tokenRecord: {
+          version: 1,
+          clientId: `${provider}-client-test`,
+          accessToken: `${provider}-stall-access-test`,
+          refreshToken: `${provider}-stall-refresh-test`,
+          accessExpiresAt: Date.now() + 3_600_000,
+          scope,
+        },
+      });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        vi.mocked(globalThis.fetch).mockImplementation(async (_url, init) => {
+          // The clock runs 30 seconds while the list stays silent, as a stalled connection does.
+          await vi.advanceTimersByTimeAsync(30_000);
+          if (init?.signal?.aborted)
+            throw new DOMException('The request was aborted.', 'AbortError');
+          return new Response(JSON.stringify({ data: [{ id: `${provider}-late-model` }] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        });
+        expect(await runCli(['agent', 'models', profile])).toBe(1);
+        expect(printed.join('\n')).not.toContain(`${provider}-late-model`);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('stores a rotated token before making the OAuth model-list request', async () => {
     const expired: OAuthCredential = {
       provider: 'kimi',
