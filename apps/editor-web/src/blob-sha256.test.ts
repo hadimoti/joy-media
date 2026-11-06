@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { sha256OfBlob } from './blob-sha256.js';
+import { answerHashRequest, sha256OfBlob } from './blob-sha256.js';
 
 /** Deterministic bytes that are not all the same, so a wrong byte order shows up. */
 function sampleBytes(length: number): Uint8Array<ArrayBuffer> {
@@ -84,21 +84,29 @@ class FakeHashWorker {
   onerror: ((event: ErrorEvent) => void) | null = null;
   readonly requests: Array<{ blob: Blob; sliceBytes?: number }> = [];
   terminated = false;
-  private readonly mode: 'answer' | 'silent' | 'fail';
+  private readonly mode: 'answer' | 'silent' | 'fail' | 'malformed' | 'throw-on-post';
   private readonly failure: string;
 
-  constructor(mode: 'answer' | 'silent' | 'fail' = 'answer', failure = 'worker crashed') {
+  constructor(
+    mode: 'answer' | 'silent' | 'fail' | 'malformed' | 'throw-on-post' = 'answer',
+    failure = 'worker crashed',
+  ) {
     this.mode = mode;
     this.failure = failure;
   }
 
   postMessage(request: { blob: Blob; sliceBytes?: number }): void {
     this.requests.push(request);
+    if (this.mode === 'throw-on-post') throw new Error('cannot post to the worker');
     if (this.mode === 'silent') return;
     queueMicrotask(() => {
       if (this.terminated) return;
       if (this.mode === 'fail') {
         this.onerror?.({ message: this.failure } as ErrorEvent);
+        return;
+      }
+      if (this.mode === 'malformed') {
+        this.onmessage?.({ data: 'not a reply' } as MessageEvent<unknown>);
         return;
       }
       void request.blob.arrayBuffer().then((buffer) => {
@@ -163,5 +171,36 @@ describe('sha256OfBlob hashes in a worker, off the calling thread', () => {
       }),
     ).rejects.toThrow(RangeError);
     expect(created).toBe(0);
+  });
+
+  it('rejects instead of hanging when the worker sends a reply that is not a reply', async () => {
+    const worker = new FakeHashWorker('malformed');
+    await expect(
+      sha256OfBlob(new Blob([sampleBytes(10)]), { createWorker: fakeWorkerFactory(worker) }),
+    ).rejects.toThrow('unexpected reply');
+    expect(worker.terminated).toBe(true);
+  });
+
+  it('terminates the worker and rejects when posting the Blob throws', async () => {
+    const worker = new FakeHashWorker('throw-on-post');
+    await expect(
+      sha256OfBlob(new Blob([sampleBytes(10)]), { createWorker: fakeWorkerFactory(worker) }),
+    ).rejects.toThrow('cannot post to the worker');
+    expect(worker.terminated).toBe(true);
+  });
+});
+
+describe('answerHashRequest, the worker script logic', () => {
+  it('replies with the digest of the Blob it was given', async () => {
+    const bytes = sampleBytes(3000);
+    await expect(answerHashRequest({ blob: new Blob([bytes]), sliceBytes: 9 })).resolves.toEqual({
+      digest: nodeSha256Hex(bytes),
+    });
+  });
+
+  it('replies with the error text instead of throwing when the request is invalid', async () => {
+    await expect(
+      answerHashRequest({ blob: new Blob([sampleBytes(4)]), sliceBytes: 0 }),
+    ).resolves.toEqual({ error: 'sliceBytes must be a positive safe integer' });
   });
 });

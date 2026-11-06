@@ -80,10 +80,11 @@ export async function sha256OfBlob(blob: Blob, options: Sha256OfBlobOptions = {}
       reject(options.signal?.reason ?? new DOMException('The hash was aborted.', 'AbortError'));
     };
     options.signal?.addEventListener('abort', onAbort, { once: true });
-    worker.onmessage = (event: MessageEvent<HashReply>) => {
+    worker.onmessage = (event: MessageEvent<unknown>) => {
       finish();
-      const reply = event.data;
-      if ('digest' in reply) resolve(reply.digest);
+      const reply = replyOf(event.data);
+      if (reply === undefined) reject(new Error('The hashing worker sent an unexpected reply.'));
+      else if ('digest' in reply) resolve(reply.digest);
       else reject(new Error(reply.error));
     };
     worker.onerror = (event: ErrorEvent) => {
@@ -91,8 +92,21 @@ export async function sha256OfBlob(blob: Blob, options: Sha256OfBlobOptions = {}
       reject(new Error(event.message || 'The hashing worker failed.'));
     };
     const request: HashRequest = { blob, sliceBytes: options.sliceBytes };
-    worker.postMessage(request);
+    try {
+      worker.postMessage(request);
+    } catch (error) {
+      finish();
+      reject(error);
+    }
   });
+}
+
+/** The reply if it has one of the two shapes the worker sends; otherwise undefined, so a stray message cannot hang the caller. */
+function replyOf(data: unknown): HashReply | undefined {
+  if (typeof data !== 'object' || data === null) return undefined;
+  if ('digest' in data && typeof data.digest === 'string') return { digest: data.digest };
+  if ('error' in data && typeof data.error === 'string') return { error: data.error };
+  return undefined;
 }
 
 function createHashWorker(): Worker {
