@@ -25,7 +25,7 @@ import {
   encodeKimiTokenRecord,
   signInWithKimiCode,
   type KimiTokenRecord,
-  CHATGPT_REQUEST_TIMEOUT_MS,
+  PROVIDER_REQUEST_TIMEOUT_MS,
   OAuthFlowError,
   MAX_CATALOG_CHARS,
   type FetchLike,
@@ -186,7 +186,7 @@ async function chatGptCatalogText(
   fetch: FetchLike,
 ): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CHATGPT_REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
   try {
     let response: Response;
     try {
@@ -227,7 +227,7 @@ async function boundedModelList(
   failure: string,
 ): Promise<ReturnType<typeof parseChatModels>> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CHATGPT_REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, {
       method: 'GET',

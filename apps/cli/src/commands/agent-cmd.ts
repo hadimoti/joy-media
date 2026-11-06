@@ -63,7 +63,7 @@ import {
   type CliConfig,
 } from '../utils/config.js';
 import {
-  CHATGPT_REQUEST_TIMEOUT_MS,
+  PROVIDER_REQUEST_TIMEOUT_MS,
   KIMI_CODE_BASE_URL as OAUTH_KIMI_CODE_BASE_URL,
   OAuthFlowError,
 } from '@joy-media/provider-oauth';
@@ -288,7 +288,7 @@ async function listOAuthModels(
   out.info(`Fetching models from ${c(baseUrl, 'bold')}...`);
   // Every provider's model list is bounded like its other requests: the reply and its body must arrive within 30 s.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CHATGPT_REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
   try {
     const chatGptRequest =
       provider === 'chatgpt'

@@ -462,8 +462,8 @@ export function decodeTokenRecord(text: string): ChatGptTokenRecord | undefined 
   return { version: 1, clientId, accountId, accessToken, refreshToken, accessExpiresAt };
 }
 
-/** A ChatGPT request gives up this long after it is sent, including the time to read its reply. */
-export const CHATGPT_REQUEST_TIMEOUT_MS = 30_000;
+/** A ChatGPT or model-list request gives up this long after it is sent, including the time to read its reply. */
+export const PROVIDER_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
  * Sends one ChatGPT request and reads its reply under one timer that runs until the body is read. A stalled connection
@@ -477,7 +477,7 @@ async function fetchReply(
   unreachable: () => OAuthFlowError,
 ): Promise<{ readonly response: Response; readonly reply: Record<string, unknown> | undefined }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CHATGPT_REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
   try {
     let response: Response;
     try {
