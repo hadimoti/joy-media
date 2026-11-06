@@ -190,6 +190,34 @@ describe('ProjectMediaResolver', () => {
     resolver.clear();
   });
 
+  it('hashes a file larger than one slice in bounded slices and never as one read', async () => {
+    // Larger than the 8 MiB hashing slice, so a whole-file read through a slice would show up as an oversized slice.
+    const bytes = new Uint8Array(20 * 1024 * 1024).fill(7);
+    const sliceSizes: number[] = [];
+    class SliceRecordingBlob extends WholeFileReadForbiddenBlob {
+      override slice(start?: number, end?: number, contentType?: string): Blob {
+        const part = super.slice(start, end, contentType);
+        sliceSizes.push(part.size);
+        return part;
+      }
+    }
+    const blob = new SliceRecordingBlob([bytes], { type: 'video/mp4' });
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:local');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      client: {
+        assets: vi.fn(async () => [catalogAsset(sha256Hex(bytes), bytes.byteLength)]),
+      },
+      originalCache: { get: vi.fn(async () => blob) },
+    });
+
+    await expect(resolver.resolve('media-1')).resolves.toMatchObject({ source: 'opfs' });
+    expect(sliceSizes.length).toBeGreaterThan(1);
+    expect(Math.max(...sliceSizes)).toBeLessThanOrEqual(8 * 1024 * 1024);
+    resolver.clear();
+  });
+
   it('rejects a local blob whose digest does not match the descriptor', async () => {
     const bytes = new TextEncoder().encode('local-bytes-never-read-whole');
     const blob = new WholeFileReadForbiddenBlob([bytes], { type: 'video/mp4' });
