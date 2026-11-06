@@ -683,10 +683,18 @@ describe('ChatGPT model list branches', () => {
 
   it('gives up on a ChatGPT list whose body never finishes, after 30 seconds', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const signIn = chatGptSignIn(stalledBody());
+    // The list request starts its timer before it sends, so once it is reached the clock can run against it.
+    let listReached: () => void = () => undefined;
+    const reached = new Promise<void>((resolve) => {
+      listReached = resolve;
+    });
+    const stalled = stalledBody();
+    const signIn = chatGptSignIn(async (url, init) => {
+      listReached();
+      return stalled(url, init);
+    });
     const outcome = signIn('chatgpt').catch((error: unknown) => error);
-    // The token exchange runs on real timers; the list is the step that waits on the fake clock.
-    await vi.waitFor(() => expect(vi.getTimerCount()).toBeGreaterThan(0));
+    await reached;
     await vi.advanceTimersByTimeAsync(30_000);
     await expect(outcome).resolves.toMatchObject({
       code: 'EXCHANGE_FAILED',
