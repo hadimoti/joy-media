@@ -281,6 +281,32 @@ describe('CLI OAuth token manager', () => {
     expect(existsSync(`${path}.reclaim`)).toBe(false);
   });
 
+  it('does not name a lock that a live writer completes during the stuck check', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    // A fallback writer creates the file empty, then writes its owner record shortly after.
+    writeFileSync(path, '');
+    const completeWrite = setTimeout(() => {
+      writeFileSync(path, JSON.stringify({ pid: process.pid, createdAt: NOW }));
+    }, 20);
+
+    try {
+      const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+        timeoutMs: 4,
+        retryIntervalMs: 1,
+        now: () => NOW,
+        isProcessAlive: () => true,
+      }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+      expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBeUndefined();
+    } finally {
+      clearTimeout(completeWrite);
+    }
+  });
+
   it('does not report an empty guard as stuck while a live process owns the lock', async () => {
     const path = oauthProfileLockPath(KIMI_PROFILE);
     mkdirSync(dirname(path), { recursive: true });

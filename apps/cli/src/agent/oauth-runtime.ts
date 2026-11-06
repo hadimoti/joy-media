@@ -23,6 +23,7 @@ import type { CredentialStore, OAuthCredential } from '../utils/credential-store
 
 const LOCK_TIMEOUT_MS = 30_000;
 const LOCK_RETRY_INTERVAL_MS = 100;
+const STUCK_CONFIRM_MS = 250;
 
 export class OAuthProfileLockTimeoutError extends Error {
   /** Set when a lock or reclaim file is empty or unreadable, so no owner can be checked and the user must remove it. */
@@ -92,7 +93,7 @@ export async function withOAuthProfileLock<T>(
       reclaimDeadLock(path, owner, now, isProcessAlive);
     }
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new OAuthProfileLockTimeoutError(stuckLockFile(path, isProcessAlive));
+    if (remaining <= 0) throw await timeoutError(path, isProcessAlive);
     await wait(Math.min(retryIntervalMs, remaining));
   }
 }
@@ -335,6 +336,22 @@ function createExclusiveLock(path: string, now: () => number): boolean {
   }
   closeSync(descriptor);
   return true;
+}
+
+/**
+ * Names a stuck file only if it is still stuck after a pause. A live writer on a filesystem without hard links is empty
+ * for a moment before its owner record lands, so a single look could misreport it.
+ */
+async function timeoutError(
+  path: string,
+  isProcessAlive: (pid: number) => boolean,
+): Promise<OAuthProfileLockTimeoutError> {
+  const candidate = stuckLockFile(path, isProcessAlive);
+  if (candidate === undefined) return new OAuthProfileLockTimeoutError();
+  await wait(STUCK_CONFIRM_MS);
+  return new OAuthProfileLockTimeoutError(
+    stuckLockFile(path, isProcessAlive) === candidate ? candidate : undefined,
+  );
 }
 
 /**
