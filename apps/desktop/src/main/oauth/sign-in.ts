@@ -216,20 +216,42 @@ async function chatGptCatalogText(
   }
 }
 
-/** The first usable model xAI lists for this account; token values can never become model IDs. */
-async function firstXaiModel(record: XaiTokenRecord, fetch: FetchLike): Promise<string> {
-  let models: ReturnType<typeof parseChatModels>;
+/**
+ * A provider's model list, read under one timer from the send until the body is read, like the ChatGPT list. A stalled
+ * or refused list fails with the given message instead of holding the sign-in open.
+ */
+async function boundedModelList(
+  fetch: FetchLike,
+  url: string,
+  accessToken: string,
+  failure: string,
+): Promise<ReturnType<typeof parseChatModels>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CHATGPT_REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(`${XAI_OAUTH_INFERENCE_BASE_URL}/models`, {
+    const response = await fetch(url, {
       method: 'GET',
-      headers: { accept: 'application/json', authorization: `Bearer ${record.accessToken}` },
+      headers: { accept: 'application/json', authorization: `Bearer ${accessToken}` },
       redirect: 'manual',
+      signal: controller.signal,
     });
     if (!response.ok) throw new Error('model list request failed');
-    models = parseChatModels(await replyText(response, MAX_CATALOG_CHARS));
+    return parseChatModels(await replyText(response, MAX_CATALOG_CHARS));
   } catch {
-    throw new OAuthFlowError('EXCHANGE_FAILED', 'xAI lists no usable model for this account.');
+    throw new OAuthFlowError('EXCHANGE_FAILED', failure);
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+/** The first usable model xAI lists for this account; token values can never become model IDs. */
+export async function firstXaiModel(record: XaiTokenRecord, fetch: FetchLike): Promise<string> {
+  const models = await boundedModelList(
+    fetch,
+    `${XAI_OAUTH_INFERENCE_BASE_URL}/models`,
+    record.accessToken,
+    'xAI lists no usable model for this account.',
+  );
   const tokens = [record.accessToken, record.refreshToken];
   const first = models.find((model) => !tokens.some((token) => holdsCredential(model.id, token)));
   if (first === undefined) {
@@ -239,19 +261,16 @@ async function firstXaiModel(record: XaiTokenRecord, fetch: FetchLike): Promise<
 }
 
 /** The first Kimi Code model listed for the signed-in account; token values can never become model IDs. */
-async function firstKimiCodeModel(record: KimiTokenRecord, fetch: FetchLike): Promise<string> {
-  let models: ReturnType<typeof parseChatModels>;
-  try {
-    const response = await fetch(`${KIMI_CODE_BASE_URL}/models`, {
-      method: 'GET',
-      headers: { accept: 'application/json', authorization: `Bearer ${record.accessToken}` },
-      redirect: 'manual',
-    });
-    if (!response.ok) throw new Error('model list request failed');
-    models = parseChatModels(await replyText(response, MAX_CATALOG_CHARS));
-  } catch {
-    throw new OAuthFlowError('EXCHANGE_FAILED', 'Kimi lists no usable model for this account.');
-  }
+export async function firstKimiCodeModel(
+  record: KimiTokenRecord,
+  fetch: FetchLike,
+): Promise<string> {
+  const models = await boundedModelList(
+    fetch,
+    `${KIMI_CODE_BASE_URL}/models`,
+    record.accessToken,
+    'Kimi lists no usable model for this account.',
+  );
   const tokens = [record.accessToken, record.refreshToken];
   const first = models.find((model) => !tokens.some((token) => holdsCredential(model.id, token)));
   if (first === undefined) {

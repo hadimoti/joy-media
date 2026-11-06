@@ -11,7 +11,13 @@ import {
 } from './chatgpt.js';
 import { decodeKimiTokenRecord, KIMI_CODE_BASE_URL } from './kimi.js';
 import type { FetchLike } from './http.js';
-import { createProviderSignIn, INSTALL_ID_SETTING, loadOrCreateInstallId } from './sign-in.js';
+import {
+  createProviderSignIn,
+  firstKimiCodeModel,
+  firstXaiModel,
+  INSTALL_ID_SETTING,
+  loadOrCreateInstallId,
+} from './sign-in.js';
 
 const CLIENT_ID = 'test-client-id';
 const HOST_ID = 'urn:uuid:550e8400-e29b-41d4-a716-446655440000';
@@ -518,4 +524,193 @@ describe('createProviderSignIn', () => {
       });
     },
   );
+});
+
+/** A list send that answers only once its signal is aborted, as a stalled connection does. */
+function stalledSend(models: unknown): (url: string, init: RequestInit) => Promise<Response> {
+  return (_url, init) => {
+    // Without a signal the list answers at once, so a list with no bound fails these tests instead of hanging.
+    if (init.signal === undefined) return Promise.resolve(json(models));
+    return new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener(
+        'abort',
+        () => reject(new DOMException('The request was aborted.', 'AbortError')),
+        { once: true },
+      );
+    });
+  };
+}
+
+/** A list whose headers arrive at once and whose body stalls until the signal is aborted. */
+function stalledBody(): (url: string, init: RequestInit) => Promise<Response> {
+  return (_url, init) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const fail = (): void =>
+          controller.error(new DOMException('The request was aborted.', 'AbortError'));
+        if (init.signal?.aborted) fail();
+        else init.signal?.addEventListener('abort', fail, { once: true });
+      },
+    });
+    return Promise.resolve(
+      new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+  };
+}
+
+const MODEL_LISTS = [
+  {
+    name: 'xAI',
+    list: firstXaiModel as (record: never, fetch: FetchLike) => Promise<string>,
+    record: { accessToken: 'xai-access', refreshToken: 'xai-refresh' },
+    reply: { data: [{ id: 'grok-first' }] },
+    modelId: 'grok-first',
+    failure: 'xAI lists no usable model for this account.',
+  },
+  {
+    name: 'Kimi Code',
+    list: firstKimiCodeModel as (record: never, fetch: FetchLike) => Promise<string>,
+    record: { accessToken: 'kimi-access', refreshToken: 'kimi-refresh' },
+    reply: { data: [{ id: 'kimi-code-model' }] },
+    modelId: 'kimi-code-model',
+    failure: 'Kimi lists no usable model for this account.',
+  },
+] as const;
+
+describe('bounded provider model lists', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each(MODEL_LISTS)(
+    '$name: gives up on a list that never answers, after 30 seconds',
+    async ({ list, record, reply, failure }) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const outcome = list(record as never, stalledSend(reply)).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(outcome).resolves.toMatchObject({ code: 'EXCHANGE_FAILED', message: failure });
+    },
+  );
+
+  it.each(MODEL_LISTS)(
+    '$name: gives up on a list whose body never finishes, after 30 seconds',
+    async ({ list, record, failure }) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const outcome = list(record as never, stalledBody()).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(outcome).resolves.toMatchObject({ code: 'EXCHANGE_FAILED', message: failure });
+    },
+  );
+
+  it.each(MODEL_LISTS)(
+    '$name: refuses a list the provider does not accept, with its own message',
+    async ({ list, record, failure }) => {
+      const refused = async (): Promise<Response> => json({ error: 'nope' }, 403);
+      await expect(list(record as never, refused)).rejects.toMatchObject({
+        code: 'EXCHANGE_FAILED',
+        message: failure,
+      });
+    },
+  );
+
+  it.each(MODEL_LISTS)(
+    '$name: reads the first model, and clears its timer once the list arrives',
+    async ({ list, record, reply, modelId }) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let sendSignal: AbortSignal | undefined;
+      const answered = async (_url: string, init: RequestInit): Promise<Response> => {
+        sendSignal = init.signal ?? undefined;
+        return json(reply);
+      };
+      await expect(list(record as never, answered)).resolves.toBe(modelId);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(sendSignal).toBeDefined();
+      expect(sendSignal?.aborted).toBe(false);
+    },
+  );
+
+  it.each(MODEL_LISTS)(
+    '$name: refuses a list larger than the catalog limit, with its own message',
+    async ({ list, record, failure }) => {
+      const oversized = async (): Promise<Response> =>
+        new Response('x'.repeat(4 * 1024 * 1024 + 1), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      await expect(list(record as never, oversized)).rejects.toMatchObject({
+        code: 'EXCHANGE_FAILED',
+        message: failure,
+      });
+    },
+  );
+});
+
+describe('ChatGPT model list branches', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Signs ChatGPT in with the given model-list reply, after a token exchange that succeeds. */
+  function chatGptSignIn(list: (url: string, init: RequestInit) => Promise<Response>) {
+    let authUrl = '';
+    const fetchStub: FetchLike = async (url, init) => {
+      if (url === CHATGPT_JWKS_URL) return json({ keys: [JWK] });
+      if (url === CHATGPT_TOKEN_URL) {
+        const nonce = new URL(authUrl).searchParams.get('nonce') ?? '';
+        return json({
+          access_token: 'at-1',
+          refresh_token: 'rt-1',
+          id_token: signedIdToken(nonce),
+          expires_in: 3600,
+          scope: CHATGPT_SCOPE,
+        });
+      }
+      if (url === `${CHATGPT_RESPONSES_BASE_URL}/models`) return list(url, init);
+      throw new Error(`unexpected request to ${url}`);
+    };
+    return createProviderSignIn({
+      openExternal: async (url) => {
+        authUrl = url;
+        await returnFromBrowser(url, 'redirect_uri', (state) => `code=the-code&state=${state}`);
+      },
+      fetch: fetchStub,
+      now: Date.now,
+      chatGptClientId: CLIENT_ID,
+      installId: () => HOST_ID,
+      chatGptPort: 0,
+    });
+  }
+
+  it('gives up on a ChatGPT list whose body never finishes, after 30 seconds', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const signIn = chatGptSignIn(stalledBody());
+    const outcome = signIn('chatgpt').catch((error: unknown) => error);
+    // The token exchange runs on real timers; the list is the step that waits on the fake clock.
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBeGreaterThan(0));
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(outcome).resolves.toMatchObject({
+      code: 'EXCHANGE_FAILED',
+      message: 'ChatGPT could not be reached.',
+    });
+  });
+
+  it('refuses a ChatGPT list the provider does not accept, with its HTTP status', async () => {
+    const refused = async (): Promise<Response> => json({ error: 'nope' }, 403);
+    await expect(chatGptSignIn(refused)('chatgpt')).rejects.toMatchObject({
+      code: 'EXCHANGE_FAILED',
+      message: 'ChatGPT did not list models (HTTP 403).',
+    });
+  });
+
+  it('refuses a ChatGPT list larger than the catalog limit, and returns no profile', async () => {
+    const oversized = async (): Promise<Response> =>
+      new Response('x'.repeat(4 * 1024 * 1024 + 1), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    await expect(chatGptSignIn(oversized)('chatgpt')).rejects.toMatchObject({
+      code: 'EXCHANGE_FAILED',
+      message: 'The provider reply was too large.',
+    });
+  });
 });
