@@ -1,6 +1,7 @@
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { BrowserAsset, BrowserControlPlaneClient } from './control-plane-client.js';
 import type { OpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
+import { sha256OfBlob } from './blob-sha256.js';
 import {
   clearMediaSource,
   revokeDetachedObjectUrl,
@@ -255,7 +256,6 @@ async function matchesDescriptor(
     return false;
   const expected = descriptor?.sha256?.toLowerCase();
   if (expected === undefined || !/^[a-f0-9]{64}$/.test(expected)) return true;
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()));
-  const actual = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const actual = await sha256OfBlob(blob);
   return actual === expected;
 }
