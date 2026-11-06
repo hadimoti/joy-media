@@ -70,7 +70,7 @@ import { normalizePlaybackRate, sourceTimeAtVideoClipTime } from '@joy-media/pro
 import { BUILT_IN_LOOK_PACKS } from '@joy-media/motion-core';
 import { sessionProviderFor } from './joy-agent/provider-call.js';
 import { sourceTimeForTransitionSample } from './transition-source-time.js';
-import { frameCentreSeekUs } from './export-seek-target.js';
+import { seekUsForSource, type SeekFrameTiming } from './export-seek-target.js';
 import { markOverridesFromCommittedKeys } from './joy-agent/look-instance-operations.js';
 import { type VisualObjectTransaction } from '@joy-media/property-system';
 import {
@@ -463,6 +463,7 @@ import { sha256OfBlob } from './blob-sha256.js';
 import type { ExportFrameSource } from './export-frame-source.js';
 import {
   EXPORT_AUDIO_DECODE_TIMEOUT_MS,
+  EXPORT_PRELOAD_TIMEOUT_MS,
   formatExportClipAssetFailure,
   loadDetachedVideo,
   preflightExportClipSources,
@@ -822,7 +823,7 @@ async function openForwardExportFrameSource(
           const { openExportFrameSource } = await import('./export-frame-source.js');
           const response = await fetch(sourceUrl, { signal: stageSignal });
           if (!response.ok) return undefined;
-          return openExportFrameSource(await response.blob(), assetId);
+          return openExportFrameSource(await response.blob(), assetId, { signal: stageSignal });
         })();
         return opening;
       },
@@ -4192,8 +4193,8 @@ function EditorWorkspace({
           readonly clip: VideoClip;
           readonly video: HTMLVideoElement | undefined;
           readonly decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
-          /** Frame length of the source; seeks in the export aim at the middle of a frame. */
-          readonly seekFrameDurationUs: number | undefined;
+          /** Frame length and timestamp tolerance of the source; seeks aim at the middle of a frame. */
+          readonly seekTiming: SeekFrameTiming | undefined;
           /** Decodes the clip forward-only; set instead of `video` when the clip allows it. */
           readonly frameSource: ExportFrameSource | undefined;
           readonly sourceUrl: string | undefined;
@@ -4222,7 +4223,7 @@ function EditorWorkspace({
           const assetKind = exportVisualProject.assets[clip.assetId]?.kind ?? 'video';
           let video: HTMLVideoElement | undefined;
           let decoder: ReturnType<typeof createHtmlMediaDecoder> | undefined;
-          let seekFrameDurationUs: number | undefined;
+          let seekTiming: SeekFrameTiming | undefined;
           let frameSource: ExportFrameSource | undefined;
           let stillFrame: ImageDataLike | undefined;
           let animatedFrameSource: AnimatedImageFrameSource | undefined;
@@ -4260,6 +4261,8 @@ function EditorWorkspace({
                   );
                 }
                 if (frameSource !== undefined) {
+                  // If this clip later hands over to seeking, it aims at the same frames.
+                  seekTiming = frameSource.seekTiming;
                   exportMediaCleanup.push({ frameSource });
                 } else {
                   video = document.createElement('video');
@@ -4270,10 +4273,12 @@ function EditorWorkspace({
                   setExportStatus('Seeking video…');
                   await seekExportDetachedVideo(video, clip.sourceInUs, abortController.signal);
                   // Loaded on demand with the forward decoder, so mediabunny stays out of the main chunk.
-                  const { readSourceFrameDurationUs } = await import('./export-source-frame.js');
-                  seekFrameDurationUs = await readSourceFrameDurationUs(
+                  const { readSourceFrameTimingWithin } = await import('./export-source-frame.js');
+                  // Bounded: a stalled read gives up after the preload limit and the clip seeks nominally.
+                  seekTiming = await readSourceFrameTimingWithin(
                     source.url,
                     abortController.signal,
+                    EXPORT_PRELOAD_TIMEOUT_MS,
                   );
                   const captureCanvas = document.createElement('canvas');
                   captureCanvas.width = 0;
@@ -4350,7 +4355,7 @@ function EditorWorkspace({
             clip,
             video,
             decoder,
-            seekFrameDurationUs,
+            seekTiming,
             frameSource,
             sourceUrl: frameSource === undefined ? undefined : source.url,
             stillFrame,
@@ -4608,11 +4613,9 @@ function EditorWorkspace({
                   (media.video !== undefined && media.decoder !== undefined
                     ? { video: media.video, decoder: media.decoder }
                     : await openSeekFallback(media));
-                // Seek to the middle of the source frame (export-seek-target.ts), not to its edge.
-                const seekUs =
-                  media.seekFrameDurationUs === undefined
-                    ? sourceUs
-                    : frameCentreSeekUs(sourceUs, media.seekFrameDurationUs);
+                // Seek to the middle of the source frame the forward lookup would show, not to its
+                // edge (export-seek-target.ts).
+                const seekUs = seekUsForSource(sourceUs, media.seekTiming);
                 await seekExportDetachedVideo(seeking.video, seekUs, abortController.signal);
                 decoded = seeking.decoder.captureCurrentFrame(token);
                 intrinsic = { width: seeking.video.videoWidth, height: seeking.video.videoHeight };

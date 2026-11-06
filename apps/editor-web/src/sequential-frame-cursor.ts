@@ -29,6 +29,14 @@ export interface SequentialFrameCursorOptions {
    * It counts against `maxRestarts` like a backward request. Default: never.
    */
   readonly maxForwardGapUs?: number;
+  /**
+   * A frame whose timestamp is at most this far after the requested time still counts as on
+   * screen at that time. Containers store timestamps at their own resolution: WebM in whole
+   * milliseconds, so frame 2 at 30 fps (66.67 ms) is stored as 67 ms. Without a tolerance the
+   * lookup then shows the frame before it, and every third output frame repeats its predecessor
+   * (C8 and C9 matrix fixtures, 6 Nov). Default: 0, an exact lookup.
+   */
+  readonly lookupToleranceUs?: number;
 }
 
 export interface SequentialFrameCursor<F extends CursorFrame> {
@@ -61,6 +69,7 @@ export function createSequentialFrameCursor<F extends CursorFrame>(
 ): SequentialFrameCursor<F> {
   const maxRestarts = options.maxRestarts ?? 0;
   const maxForwardGapUs = options.maxForwardGapUs ?? Number.POSITIVE_INFINITY;
+  const lookupToleranceUs = options.lookupToleranceUs ?? 0;
   let iterator: AsyncIterator<F> | undefined;
   let current: F | undefined;
   let upcoming: F | undefined;
@@ -109,11 +118,13 @@ export function createSequentialFrameCursor<F extends CursorFrame>(
           releaseRequested = false;
           stopDecoder();
         }
+        // Same tolerance as the lookup below: a frame within it is still on screen at `timeUs`, so
+        // a request that only steps back inside that window does not restart the decoder.
         const wentBackwards =
           lastRequestUs !== undefined &&
           timeUs < lastRequestUs &&
           current !== undefined &&
-          timeUs < current.timestampUs;
+          timeUs + lookupToleranceUs < current.timestampUs;
         const jumpedFarAhead =
           current !== undefined && timeUs - current.timestampUs > maxForwardGapUs;
         if (wentBackwards || jumpedFarAhead) {
@@ -133,7 +144,7 @@ export function createSequentialFrameCursor<F extends CursorFrame>(
           const next = upcoming ?? (await pull());
           if (closed) return undefined;
           if (next === undefined) break;
-          if (next.timestampUs > timeUs) {
+          if (next.timestampUs > timeUs + lookupToleranceUs) {
             upcoming = next;
             break;
           }

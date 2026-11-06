@@ -1,5 +1,20 @@
-import { ALL_FORMATS, BlobSource, Input, VideoSampleSink, type VideoSample } from 'mediabunny';
+import {
+  ALL_FORMATS,
+  BlobSource,
+  EncodedPacketSink,
+  Input,
+  VideoSampleSink,
+  type VideoSample,
+} from 'mediabunny';
 import type { DecodedFrame } from '@joy-media/playback-engine';
+import {
+  abortable,
+  abortIfCancelled,
+  frameTimesOf,
+  frameTimingOf,
+  timestampToleranceUs,
+  type SeekFrameTiming,
+} from './export-seek-target.js';
 import {
   createSequentialFrameCursor,
   type CursorFrame,
@@ -22,6 +37,8 @@ export interface ExportFrameSource {
   ): Promise<DecodedFrame | undefined>;
   /** Width and height of the frames, after rotation, once the first one has been served. */
   readonly size: () => { readonly width: number; readonly height: number };
+  /** Frame timing for the seek fallback, so a clip that hands over to seeking aims the same way. */
+  readonly seekTiming: SeekFrameTiming | undefined;
   /** Frees the decoder of a clip that has ended; a later request reopens it. */
   release(): void;
   close(): void;
@@ -33,6 +50,8 @@ export interface OpenExportFrameSourceOptions {
    * The seeking path gives each seek the same 15 seconds (`EXPORT_PRELOAD_TIMEOUT_MS`).
    */
   readonly decodeTimeoutMs?: number;
+  /** Stops the one-off scan of the stored frame times when the export is cancelled. */
+  readonly signal?: AbortSignal;
 }
 
 /** Compressed bytes the Blob reader keeps in memory; the clip itself is already held as a Blob. */
@@ -59,6 +78,9 @@ export async function openExportFrameSource(
   assetId: string,
   options: OpenExportFrameSourceOptions = {},
 ): Promise<ExportFrameSource | undefined> {
+  const signal = options.signal;
+  // A cancelled export never gets a source back, even on a browser that cannot decode.
+  if (signal !== undefined) abortIfCancelled(signal);
   if (typeof document === 'undefined' || typeof VideoDecoder === 'undefined') return undefined;
   const decodeTimeoutMs = options.decodeTimeoutMs ?? DEFAULT_DECODE_TIMEOUT_MS;
   const input = new Input({
@@ -66,11 +88,49 @@ export async function openExportFrameSource(
     source: new BlobSource(blob, { maxCacheSize: SOURCE_CACHE_BYTES }),
   });
   try {
-    const track = await input.getPrimaryVideoTrack();
-    if (track === null || !(await track.canDecode())) {
+    const track = signal
+      ? await abortable(input.getPrimaryVideoTrack(), signal)
+      : await input.getPrimaryVideoTrack();
+    const decodable =
+      track === null
+        ? false
+        : signal
+          ? await abortable(track.canDecode(), signal)
+          : await track.canDecode();
+    if (track === null || !decodable) {
+      input.dispose();
+      if (signal !== undefined) abortIfCancelled(signal);
+      return undefined;
+    }
+    // The container's own timestamp resolution decides how much rounding to forgive (see
+    // timestampToleranceUs): 500 us for WebM and Matroska, about 33 us for the C7 MP4. A track that
+    // cannot report it keeps the exact lookup, so the forward decoder still works for it.
+    const resolutionRead = track.getTimeResolution().catch(() => 0);
+    const timeResolution = signal ? await abortable(resolutionRead, signal) : await resolutionRead;
+    const lookupToleranceUs = timestampToleranceUs(timeResolution);
+    // The same timing the seek fallback uses, so a clip that hands over to seeking aims at the same
+    // frames (App.tsx reads it from here instead of fetching the clip again). The stored frame
+    // times are the ones the lookup compares, so the seek picks the frame the lookup picks.
+    const timing = await frameTimingOf(track, lookupToleranceUs, signal);
+    const storedFrameUs =
+      timing === undefined
+        ? undefined
+        : await frameTimesOf(
+            () =>
+              new EncodedPacketSink(track).packets(undefined, undefined, { metadataOnly: true }),
+            timeResolution,
+            signal,
+          );
+    // Cancelled while the timing was read: throw, and the catch below releases the input.
+    if (signal !== undefined) abortIfCancelled(signal);
+    // The forward lookup and the seek fallback must pick the same frame, so a clip is decoded
+    // forward only with its stored frame times in hand. Without them it stays on the seeking path,
+    // where every seek uses the same nominal frames throughout.
+    if (timing === undefined || storedFrameUs === undefined) {
       input.dispose();
       return undefined;
     }
+    const seekTiming: SeekFrameTiming = { ...timing, storedFrameUs };
     const sink = new VideoSampleSink(track);
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
@@ -103,7 +163,11 @@ export async function openExportFrameSource(
           },
         };
       },
-      { maxRestarts: MAX_RESTARTS, maxForwardGapUs: MAX_FORWARD_GAP_US },
+      {
+        maxRestarts: MAX_RESTARTS,
+        maxForwardGapUs: MAX_FORWARD_GAP_US,
+        lookupToleranceUs,
+      },
     );
     const close = () => {
       if (closed) return;
@@ -137,11 +201,13 @@ export async function openExportFrameSource(
     };
     return {
       async frameAt(sourceUs, requestToken, signal) {
-        if (failed) return undefined;
-        if (signal?.aborted === true) {
+        // A function, so TypeScript does not narrow `aborted` to false after the first check.
+        const isCancelled = () => signal?.aborted === true;
+        if (isCancelled()) {
           close();
           throw new DOMException('Export cancelled', 'AbortError');
         }
+        if (failed) return undefined;
         const decoding = decode(sourceUs, requestToken);
         let onAbort: (() => void) | undefined;
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -152,7 +218,8 @@ export async function openExportFrameSource(
         });
         try {
           const outcome = await Promise.race([decoding, interrupted]);
-          if (outcome === 'aborted') {
+          // A frame that arrived just as the export was cancelled is not returned: the cancel wins.
+          if (outcome === 'aborted' || isCancelled()) {
             // The decoder may be stuck mid-frame, so stop it now instead of waiting for cleanup.
             close();
             void decoding.catch(() => undefined);
@@ -169,6 +236,10 @@ export async function openExportFrameSource(
           }
           return outcome;
         } catch (error) {
+          if (isCancelled()) {
+            close();
+            throw new DOMException('Export cancelled', 'AbortError');
+          }
           if (error instanceof DOMException && error.name === 'AbortError') throw error;
           // The decoder can fail after it opened (a stream WebCodecs rejects half way, a codec
           // `canDecode` promised but the hardware refused). The export carries on by seeking.
@@ -185,12 +256,16 @@ export async function openExportFrameSource(
           if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
         }
       },
+      seekTiming,
       size: () => ({ width: canvas.width, height: canvas.height }),
       release: () => cursor.release(),
       close,
     };
-  } catch {
+  } catch (error) {
     input.dispose();
+    // A cancelled export must not carry on with a source it no longer needs, whatever the error.
+    if (signal !== undefined) abortIfCancelled(signal);
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
     return undefined;
   }
 }

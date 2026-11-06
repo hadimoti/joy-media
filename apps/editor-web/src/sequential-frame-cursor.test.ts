@@ -247,3 +247,145 @@ describe('createSequentialFrameCursor', () => {
     expect(() => cursor.close()).not.toThrow();
   });
 });
+
+/**
+ * The timeline a WebM 30 fps source has: each frame's time is rounded to whole milliseconds, as
+ * the container stores it (ffprobe on the C8 and C9 fixtures: 0, 33, 67, 100, 133, 167, 200 ms).
+ * Output frame n is at floor(n / 30 s), as the offline export computes it.
+ */
+function makeWebmTimeline(count: number) {
+  const labels: string[] = [];
+  const timestampsUs: number[] = [];
+  for (let index = 0; index < count; index++) {
+    labels.push(`f${index}`);
+    timestampsUs.push(Math.round((index * 100) / 3) * 1000);
+  }
+  const open = (startUs: number): AsyncIterator<TestFrame> => {
+    let index = 0;
+    while (index + 1 < count && timestampsUs[index + 1]! <= startUs) index += 1;
+    return {
+      next: async () => {
+        if (index >= count) return { done: true, value: undefined };
+        const frame: TestFrame = {
+          timestampUs: timestampsUs[index]!,
+          label: labels[index]!,
+          close: () => undefined,
+          closeCount: () => 0,
+        };
+        index += 1;
+        return { done: false, value: frame };
+      },
+      return: async () => ({ done: true, value: undefined }),
+    };
+  };
+  return { labels, open };
+}
+
+describe('createSequentialFrameCursor on a millisecond-rounded 30 fps timeline', () => {
+  it('shows each source frame once, in order, with a 1 ms lookup tolerance', async () => {
+    const { labels, open } = makeWebmTimeline(180);
+    const cursor = createSequentialFrameCursor(open, { lookupToleranceUs: 1_000 });
+    const seen: string[] = [];
+    for (let index = 0; index < 180; index++) {
+      const frame = await cursor.frameAt(Math.floor((index * 1_000_000) / 30));
+      seen.push(frame?.label ?? 'none');
+    }
+    // Before the fix the lookup repeated every third frame (output 2 showed f1, output 5 showed f4).
+    expect(seen).toEqual(labels);
+    cursor.close();
+  });
+
+  it('keeps the exact lookup when no tolerance is set, so the every-third-frame repeat is visible', async () => {
+    const { open } = makeWebmTimeline(180);
+    const cursor = createSequentialFrameCursor(open);
+    const seen: string[] = [];
+    for (let index = 0; index < 9; index++) {
+      const frame = await cursor.frameAt(Math.floor((index * 1_000_000) / 30));
+      seen.push(frame?.label ?? 'none');
+    }
+    // Output 2 (66.67 ms) and output 5 (166.67 ms) show the frame before, because the source frame
+    // after each is stored one millisecond later.
+    expect(seen).toEqual(['f0', 'f1', 'f1', 'f3', 'f4', 'f4', 'f6', 'f7', 'f7']);
+    cursor.close();
+  });
+
+  it('does not restart for a step back that stays inside the tolerance', async () => {
+    const timeline = makeWebmTimeline(10);
+    let opens = 0;
+    const open = (startUs: number) => {
+      opens += 1;
+      return timeline.open(startUs);
+    };
+    // With no restart budget, any restart would make the request return undefined.
+    const cursor = createSequentialFrameCursor(open, { lookupToleranceUs: 500, maxRestarts: 0 });
+    expect((await cursor.frameAt(100_000))?.label).toBe('f3');
+    // 99.7 ms is inside the 0.5 ms window before f3 (at 100 ms), so f3 is still on screen.
+    expect((await cursor.frameAt(99_700))?.label).toBe('f3');
+    expect(opens).toBe(1);
+    cursor.close();
+  });
+
+  it('includes a frame exactly one tolerance after the requested time, and not one just past it', async () => {
+    const { open } = makeWebmTimeline(10);
+    const cursor = createSequentialFrameCursor(open, { lookupToleranceUs: 500 });
+    // f2 is at 67 ms.
+    expect((await cursor.frameAt(66_500))?.label).toBe('f2');
+    cursor.close();
+    const strict = createSequentialFrameCursor(open, { lookupToleranceUs: 500 });
+    expect((await strict.frameAt(66_499))?.label).toBe('f1');
+    strict.close();
+  });
+
+  it('walks a reversed WebM timeline on the export budget of 16 restarts, then hands over to seeking', async () => {
+    const { labels, open } = makeWebmTimeline(180);
+    // The export allows 16 restarts per clip (MAX_RESTARTS in export-frame-source.ts).
+    const cursor = createSequentialFrameCursor(open, { lookupToleranceUs: 500, maxRestarts: 16 });
+    const seen: (string | undefined)[] = [];
+    for (let index = 179; index >= 162; index--) {
+      seen.push((await cursor.frameAt(Math.floor((index * 1_000_000) / 30)))?.label);
+    }
+    // The first request opens the decoder; each of the next 16 steps back restarts it. The 18th
+    // request is over budget and resolves undefined, so the clip goes to the seeking path.
+    expect(seen.slice(0, 17)).toEqual(labels.slice(163, 180).reverse());
+    expect(seen[17]).toBeUndefined();
+    cursor.close();
+  });
+
+  it('keeps an MP4 timeline exact with no tolerance: truncated microsecond times, 30 fps', async () => {
+    // C7 fixture: time base 1/15360, frame n at 512 n units, which is n / 30 s. The
+    // microsecond time is truncated, as mediabunny does, so it never runs past the true time.
+    const count = 180;
+    const labels: string[] = [];
+    const timestampsUs: number[] = [];
+    for (let index = 0; index < count; index++) {
+      labels.push(`f${index}`);
+      timestampsUs.push(Math.trunc((index * 512 * 1_000_000) / 15360));
+    }
+    const open = (startUs: number): AsyncIterator<TestFrame> => {
+      let index = 0;
+      while (index + 1 < count && timestampsUs[index + 1]! <= startUs) index += 1;
+      return {
+        next: async () => {
+          if (index >= count) return { done: true, value: undefined };
+          const frame: TestFrame = {
+            timestampUs: timestampsUs[index]!,
+            label: labels[index]!,
+            close: () => undefined,
+            closeCount: () => 0,
+          };
+          index += 1;
+          return { done: false, value: frame };
+        },
+        return: async () => ({ done: true, value: undefined }),
+      };
+    };
+    const cursor = createSequentialFrameCursor(open);
+    const seen: string[] = [];
+    for (let index = 0; index < count; index++) {
+      const frame = await cursor.frameAt(Math.floor((index * 1_000_000) / 30));
+      seen.push(frame?.label ?? 'none');
+    }
+    expect(seen).toEqual(labels);
+    cursor.close();
+  });
+});

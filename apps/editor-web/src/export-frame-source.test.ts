@@ -10,8 +10,18 @@ interface FakeSample {
   close(): void;
 }
 
+interface FakeTrack {
+  canDecode(): Promise<boolean>;
+  getTimeResolution(): Promise<number>;
+  computePacketStats(packetCount: number): Promise<{ readonly averagePacketRate: number }>;
+}
+
 const fake = vi.hoisted(() => ({
-  track: undefined as { canDecode(): Promise<boolean> } | null | undefined,
+  track: undefined as FakeTrack | null | undefined,
+  timeResolution: 15_360,
+  packetTicks: [0, 512, 1024, 1536] as number[],
+  packetsFail: false,
+  onResolutionRead: undefined as (() => void) | undefined,
   samples: undefined as ((startSec: number) => AsyncIterator<unknown>) | undefined,
   inputDisposed: 0,
   log: [] as string[],
@@ -26,6 +36,17 @@ vi.mock('mediabunny', () => ({
     }
     dispose() {
       fake.inputDisposed += 1;
+    }
+  },
+  EncodedPacketSink: class {
+    packets() {
+      return (async function* () {
+        for (const ticks of fake.packetTicks) {
+          if (fake.packetsFail) throw new Error('packets unreadable');
+          // Packet times in seconds, on the MP4 fixture's 1/15360 grid, as the demuxer reports them.
+          yield { timestamp: ticks / 15_360 };
+        }
+      })();
     }
   },
   VideoSampleSink: class {
@@ -73,7 +94,15 @@ const context = {
 };
 
 beforeEach(() => {
-  fake.track = { canDecode: async () => true };
+  fake.packetTicks = [0, 512, 1024, 1536];
+  fake.packetsFail = false;
+  fake.onResolutionRead = undefined;
+  fake.track = {
+    canDecode: async () => true,
+    getTimeResolution: async () => fake.timeResolution,
+    computePacketStats: async () => ({ averagePacketRate: 30 }),
+  };
+  fake.timeResolution = 15_360;
   fake.samples = framesFrom([0, 41_667, 83_333, 125_000]);
   fake.inputDisposed = 0;
   fake.log = [];
@@ -89,6 +118,128 @@ afterEach(() => {
 });
 
 describe('openExportFrameSource', () => {
+  it('shows a WebM frame at its millisecond-rounded time, but an MP4 frame only at its exact time', async () => {
+    // Frame times as the containers store them: WebM rounds to whole milliseconds (the third
+    // frame at 30 fps is at 66.67 ms, stored as 67 ms); MP4 keeps the truncated microsecond time.
+    // The tolerance follows each container's own resolution: 1000 for WebM, 15360 for the C7 MP4.
+    const timesUs = [0, 33_000, 67_000, 100_000];
+    fake.samples = framesFrom(timesUs);
+    fake.timeResolution = 1000;
+    const webm = await openExportFrameSource(new Blob([]), 'webm-asset');
+    await webm?.frameAt(66_666, 1);
+    expect(fake.log).toContain('draw:67000');
+    webm?.close();
+
+    fake.log = [];
+    fake.samples = framesFrom(timesUs);
+    fake.timeResolution = 15_360;
+    const mp4 = await openExportFrameSource(new Blob([]), 'mp4-asset');
+    await mp4?.frameAt(66_666, 1);
+    expect(fake.log).toContain('draw:33000');
+    expect(fake.log).not.toContain('draw:67000');
+    mp4?.close();
+  });
+
+  it('reports the frame timing that the seek fallback aims with', async () => {
+    fake.timeResolution = 1000;
+    const source = await openExportFrameSource(new Blob([]), 'asset-a');
+    expect(source?.seekTiming?.frameDurationUs).toBeCloseTo(1_000_000 / 30, 3);
+    expect(source?.seekTiming?.toleranceUs).toBeCloseTo(500, 6);
+    // The stored frame times are the ones the forward lookup compares: each packet time rounded to
+    // the 1000 resolution (WebM style), then truncated to microseconds, in ascending order.
+    expect(source?.seekTiming?.storedFrameUs).toEqual([0, 33_000, 67_000, 100_000]);
+    source?.close();
+  });
+
+  it('stays on the seeking path when the stored frame times cannot be read', async () => {
+    // The forward decoder and the seek fallback must agree frame for frame, so a clip without its
+    // stored frame times is not decoded forward at all.
+    fake.packetsFail = true;
+    const source = await openExportFrameSource(new Blob([]), 'asset-a');
+    expect(source).toBeUndefined();
+    expect(fake.inputDisposed).toBe(1);
+  });
+
+  it('stays on the seeking path when the track cannot report its resolution', async () => {
+    // Without a resolution there is no table to normalise against.
+    fake.track = {
+      canDecode: async () => true,
+      getTimeResolution: async () => {
+        throw new Error('no resolution');
+      },
+      computePacketStats: async () => ({ averagePacketRate: 30 }),
+    };
+    fake.samples = framesFrom([0, 33_333]);
+    expect(await openExportFrameSource(new Blob([]), 'asset-a')).toBeUndefined();
+  });
+
+  it('throws an AbortError, not a source, when cancelled while the resolution is read', async () => {
+    // Abort only once the resolution read has started, so the stall is what the cancel interrupts.
+    const started = new Promise<void>((resolve) => {
+      fake.onResolutionRead = resolve;
+    });
+    fake.track = {
+      canDecode: async () => true,
+      getTimeResolution: () => {
+        fake.onResolutionRead?.();
+        return new Promise<number>(() => undefined);
+      },
+      computePacketStats: async () => ({ averagePacketRate: 30 }),
+    };
+    const controller = new AbortController();
+    const pending = openExportFrameSource(new Blob([]), 'asset-a', { signal: controller.signal });
+    await started;
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    // The input is released once, by the cancelled open.
+    expect(fake.inputDisposed).toBe(1);
+  });
+
+  it('throws an AbortError when cancelled while the codec check never settles', async () => {
+    fake.track = {
+      canDecode: () => new Promise<boolean>(() => undefined),
+      getTimeResolution: async () => fake.timeResolution,
+      computePacketStats: async () => ({ averagePacketRate: 30 }),
+    };
+    const controller = new AbortController();
+    const pending = openExportFrameSource(new Blob([]), 'asset-a', { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fake.inputDisposed).toBe(1);
+  });
+
+  it('throws an AbortError, not undefined, when the codec check answers false after a cancel', async () => {
+    const controller = new AbortController();
+    fake.track = {
+      canDecode: async () => {
+        controller.abort();
+        return false;
+      },
+      getTimeResolution: async () => fake.timeResolution,
+      computePacketStats: async () => ({ averagePacketRate: 30 }),
+    };
+    await expect(
+      openExportFrameSource(new Blob([]), 'asset-a', { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('throws an AbortError on a browser without WebCodecs when the export is already cancelled', async () => {
+    vi.stubGlobal('VideoDecoder', undefined);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      openExportFrameSource(new Blob([]), 'asset-a', { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('throws an AbortError when the export is cancelled before the forward open starts', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      openExportFrameSource(new Blob([]), 'asset-a', { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('hands the clip back to the seeking path when it has no video track', async () => {
     fake.track = null;
     expect(await openExportFrameSource(new Blob([]), 'asset-a')).toBeUndefined();
@@ -96,7 +247,11 @@ describe('openExportFrameSource', () => {
   });
 
   it('hands the clip back when the browser cannot decode its codec', async () => {
-    fake.track = { canDecode: async () => false };
+    fake.track = {
+      canDecode: async () => false,
+      getTimeResolution: async () => fake.timeResolution,
+      computePacketStats: async () => ({ averagePacketRate: 30 }),
+    };
     expect(await openExportFrameSource(new Blob([]), 'asset-a')).toBeUndefined();
     expect(fake.inputDisposed).toBe(1);
   });
