@@ -130,8 +130,11 @@ async function underProfileLock<T>(name: string, fn: () => Promise<T>): Promise<
     return await withOAuthProfileLock(name, fn);
   } catch (error) {
     if (error instanceof OAuthProfileLockTimeoutError) {
+      // A stuck file needs the user to remove it, so its path is shown instead of a retry hint.
       throw failure(
-        `Another sign-in or token refresh is using profile "${name}". Retry when it finishes.`,
+        error.stuckPath === undefined
+          ? `Another sign-in or token refresh is using profile "${name}". Retry when it finishes.`
+          : error.message,
       );
     }
     throw error;

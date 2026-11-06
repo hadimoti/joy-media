@@ -237,26 +237,48 @@ describe('CLI OAuth token manager', () => {
     expect(existsSync(path)).toBe(false);
   });
 
-  it('does not spin forever when a dead lock owner leaves an empty reclaim guard', async () => {
+  it('does not spin forever when a dead lock owner leaves an empty reclaim guard, and names the guard', async () => {
     const path = oauthProfileLockPath(KIMI_PROFILE);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify({ pid: 987_654_321, createdAt: NOW }));
     writeFileSync(`${path}.reclaim`, '');
     let liveness = 0;
 
+    const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+      timeoutMs: 50,
+      retryIntervalMs: 1,
+      now: () => NOW,
+      isProcessAlive: (pid) => {
+        liveness += 1;
+        // A spin would call this without limit; the guard turns that into a clear failure instead of a hang.
+        if (liveness > 1000) throw new Error('lock loop never reached the deadline');
+        return pid === process.pid;
+      },
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+    expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBe(`${path}.reclaim`);
+    expect((failure as Error).message).toContain(`${path}.reclaim`);
+  });
+
+  it('reclaims a dead lock when the reclaim guard is left with a dead owner record', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: 987_654_321, createdAt: NOW }));
+    writeFileSync(`${path}.reclaim`, JSON.stringify({ pid: 987_654_322, createdAt: NOW }));
+    const work = vi.fn(async () => 'acquired');
+
     await expect(
-      withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
-        timeoutMs: 50,
+      withOAuthProfileLock(KIMI_PROFILE, work, {
+        timeoutMs: 1_000,
         retryIntervalMs: 1,
         now: () => NOW,
-        isProcessAlive: (pid) => {
-          liveness += 1;
-          // A spin would call this without limit; the guard turns that into a clear failure instead of a hang.
-          if (liveness > 1000) throw new Error('lock loop never reached the deadline');
-          return pid === process.pid;
-        },
+        isProcessAlive: (pid) => pid === process.pid,
       }),
-    ).rejects.toThrow('Another JOY Media process is refreshing this sign-in; retry.');
+    ).resolves.toBe('acquired');
+    expect(existsSync(`${path}.reclaim`)).toBe(false);
   });
 
   it('keeps the lock exclusive and leaves no staging file when hard links are unsupported', async () => {
@@ -304,19 +326,25 @@ describe('CLI OAuth token manager', () => {
     }
   });
 
-  it('never reclaims an empty lock file on age alone, so it waits and then times out', async () => {
+  it('never reclaims an empty lock file on age alone, and the timeout names that file', async () => {
     const path = oauthProfileLockPath(KIMI_PROFILE);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, '');
 
-    await expect(
-      withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
-        timeoutMs: 4,
-        retryIntervalMs: 1,
-        now: Date.now,
-        isProcessAlive: () => true,
-      }),
-    ).rejects.toThrow('Another JOY Media process is refreshing this sign-in; retry.');
+    const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+      timeoutMs: 4,
+      retryIntervalMs: 1,
+      now: Date.now,
+      isProcessAlive: () => true,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+    expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBe(path);
+    expect((failure as Error).message).toContain(path);
+    // The empty lock is left in place for the user to inspect and remove; it was not reclaimed.
+    expect(existsSync(path)).toBe(true);
   });
 
   it('times out while another live process owns the profile lock', async () => {

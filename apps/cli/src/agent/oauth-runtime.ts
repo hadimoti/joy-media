@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
+  existsSync,
   linkSync,
   mkdirSync,
   openSync,
@@ -25,9 +26,17 @@ const LOCK_TIMEOUT_MS = 30_000;
 const LOCK_RETRY_INTERVAL_MS = 100;
 
 export class OAuthProfileLockTimeoutError extends Error {
-  constructor() {
-    super('Another JOY Media process is refreshing this sign-in; retry.');
+  /** Set when a lock or reclaim file is empty or unreadable, so no owner can be checked and the user must remove it. */
+  readonly stuckPath: string | undefined;
+
+  constructor(stuckPath?: string) {
+    super(
+      stuckPath === undefined
+        ? 'Another JOY Media process is refreshing this sign-in; retry.'
+        : `The profile lock file ${stuckPath} is empty or unreadable, so JOY Media cannot tell whether its owner is still running. Make sure no JOY Media CLI is running, delete that file, then retry.`,
+    );
     this.name = 'OAuthProfileLockTimeoutError';
+    this.stuckPath = stuckPath;
   }
 }
 
@@ -84,7 +93,7 @@ export async function withOAuthProfileLock<T>(
       reclaimDeadLock(path, owner, now, isProcessAlive);
     }
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new OAuthProfileLockTimeoutError();
+    if (remaining <= 0) throw new OAuthProfileLockTimeoutError(unreadableLockFile(path));
     await wait(Math.min(retryIntervalMs, remaining));
   }
 }
@@ -307,8 +316,8 @@ function isHardLinkUnsupported(error: unknown): boolean {
 
 /**
  * Exclusive create for filesystems without hard links, as the lock was before publication by link. A crash between
- * the create and the write can leave an empty lock, which waits and then needs manual deletion. That is the one
- * accepted gap on these filesystems.
+ * the create and the write can leave an empty lock. It is never reclaimed on age alone; the timeout names the file so
+ * the user can remove it. This gap exists only on filesystems without hard links.
  */
 function createExclusiveLock(path: string, now: () => number): boolean {
   let descriptor: number;
@@ -329,6 +338,14 @@ function createExclusiveLock(path: string, now: () => number): boolean {
   return true;
 }
 
+/** The first of the lock or its reclaim guard that exists but has no readable owner record, if any. */
+function unreadableLockFile(path: string): string | undefined {
+  for (const candidate of [path, `${path}.reclaim`]) {
+    if (existsSync(candidate) && readLockOwner(candidate) === undefined) return candidate;
+  }
+  return undefined;
+}
+
 function reclaimDeadLock(
   path: string,
   expected: LockOwner,
@@ -336,25 +353,15 @@ function reclaimDeadLock(
   isProcessAlive: (pid: number) => boolean,
 ): void {
   const reclaimPath = `${path}.reclaim`;
-  let descriptor: number;
-  try {
-    descriptor = openSync(reclaimPath, 'wx', 0o600);
-  } catch (error) {
-    if (!isAlreadyExists(error)) throw error;
+  // The guard is published with its owner record in one step, like the lock, so a crash cannot leave an empty guard
+  // that blocks every later reclaim. Only the no-hard-link fallback keeps the create-then-write gap.
+  if (!tryPublishLock(reclaimPath, now)) {
     const reclaimOwner = readLockOwner(reclaimPath);
     if (reclaimOwner !== undefined && !isProcessAlive(reclaimOwner.pid)) {
       rmSync(reclaimPath, { force: true });
     }
     return;
   }
-  try {
-    writeFileSync(descriptor, JSON.stringify({ pid: process.pid, createdAt: now() }));
-  } catch (error) {
-    closeSync(descriptor);
-    rmSync(reclaimPath, { force: true });
-    throw error;
-  }
-  closeSync(descriptor);
   try {
     const current = readLockOwner(path);
     if (
