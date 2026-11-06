@@ -24,6 +24,12 @@ import type { CredentialStore, OAuthCredential } from '../utils/credential-store
 const LOCK_TIMEOUT_MS = 30_000;
 const LOCK_RETRY_INTERVAL_MS = 100;
 const STUCK_CONFIRM_MS = 250;
+/**
+ * Longest a live process may hold a profile lock before it counts as stale. A process hard-killed while holding the lock
+ * can leave a record whose PID is later reused by an unrelated live process; PID liveness alone would then block every
+ * later sign-in. The longest legitimate hold is a device approval, which waits at most 15 minutes, so 30 minutes leaves margin.
+ */
+const LOCK_MAX_HOLD_MS = 30 * 60_000;
 
 export class OAuthProfileLockTimeoutError extends Error {
   /** Set when a lock or reclaim file is empty or unreadable, so no owner can be checked and the user must remove it. */
@@ -61,6 +67,7 @@ export interface OAuthProfileLockOptions {
   readonly retryIntervalMs?: number;
   readonly now?: () => number;
   readonly isProcessAlive?: (pid: number) => boolean;
+  readonly maxHoldMs?: number;
 }
 
 /** Serializes refresh-token rotation across CLI processes (D22 step 3 design §6). */
@@ -75,6 +82,9 @@ export async function withOAuthProfileLock<T>(
   const retryIntervalMs = options.retryIntervalMs ?? LOCK_RETRY_INTERVAL_MS;
   const now = options.now ?? Date.now;
   const isProcessAlive = options.isProcessAlive ?? processIsAlive;
+  const maxHoldMs = options.maxHoldMs ?? LOCK_MAX_HOLD_MS;
+  const isStale = (owner: LockOwner): boolean =>
+    !isProcessAlive(owner.pid) || now() - owner.createdAt > maxHoldMs;
   const deadline = Date.now() + timeoutMs;
 
   while (true) {
@@ -87,13 +97,13 @@ export async function withOAuthProfileLock<T>(
     }
 
     const owner = readLockOwner(path);
-    if (owner !== undefined && !isProcessAlive(owner.pid)) {
+    if (owner !== undefined && isStale(owner)) {
       // Fall through to the deadline check and the wait, even after a reclaim. Continuing here skipped the
       // deadline, so an abandoned reclaim guard could spin forever.
-      reclaimDeadLock(path, owner, now, isProcessAlive);
+      reclaimStaleLock(path, owner, now, isStale);
     }
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw await timeoutError(path, isProcessAlive);
+    if (remaining <= 0) throw await timeoutError(path, isStale);
     await wait(Math.min(retryIntervalMs, remaining));
   }
 }
@@ -344,26 +354,26 @@ function createExclusiveLock(path: string, now: () => number): boolean {
  */
 async function timeoutError(
   path: string,
-  isProcessAlive: (pid: number) => boolean,
+  isStale: (owner: LockOwner) => boolean,
 ): Promise<OAuthProfileLockTimeoutError> {
-  const candidate = stuckLockFile(path, isProcessAlive);
+  const candidate = stuckLockFile(path, isStale);
   if (candidate === undefined) return new OAuthProfileLockTimeoutError();
   await wait(STUCK_CONFIRM_MS);
   return new OAuthProfileLockTimeoutError(
-    stuckLockFile(path, isProcessAlive) === candidate ? candidate : undefined,
+    stuckLockFile(path, isStale) === candidate ? candidate : undefined,
   );
 }
 
 /**
  * The file the user must remove, when the wait cannot end by itself. That is an unreadable lock, or an unreadable
- * reclaim guard left behind while the lock's recorded owner is dead. A live owner is still working, so nothing is named.
+ * reclaim guard left behind while the lock's recorded owner is stale. A fresh live owner is still working, so nothing is named.
  */
-function stuckLockFile(path: string, isProcessAlive: (pid: number) => boolean): string | undefined {
+function stuckLockFile(path: string, isStale: (owner: LockOwner) => boolean): string | undefined {
   // Each file is read once. A separate exists check could race with a normal release and name a file that is gone.
   const lock = inspectLockFile(path);
   if (lock === 'missing') return undefined;
   if (lock === 'unreadable') return path;
-  if (isProcessAlive(lock.pid)) return undefined;
+  if (!isStale(lock)) return undefined;
   const guard = `${path}.reclaim`;
   return inspectLockFile(guard) === 'unreadable' ? guard : undefined;
 }
@@ -395,18 +405,19 @@ function inspectLockFile(path: string): LockOwner | 'missing' | 'unreadable' {
   return 'unreadable';
 }
 
-function reclaimDeadLock(
+function reclaimStaleLock(
   path: string,
   expected: LockOwner,
   now: () => number,
-  isProcessAlive: (pid: number) => boolean,
+  isStale: (owner: LockOwner) => boolean,
 ): void {
   const reclaimPath = `${path}.reclaim`;
   // The guard is published with its owner record in one step, like the lock, so a crash cannot leave an empty guard
   // that blocks every later reclaim. Only the no-hard-link fallback keeps the create-then-write gap.
   if (!tryPublishLock(reclaimPath, now)) {
+    // A guard whose PID was reused would block every reclaim, so an aged guard is removed the same way as a stale lock.
     const reclaimOwner = readLockOwner(reclaimPath);
-    if (reclaimOwner !== undefined && !isProcessAlive(reclaimOwner.pid)) {
+    if (reclaimOwner !== undefined && isStale(reclaimOwner)) {
       rmSync(reclaimPath, { force: true });
     }
     return;
@@ -417,7 +428,7 @@ function reclaimDeadLock(
       current !== undefined &&
       current.pid === expected.pid &&
       current.createdAt === expected.createdAt &&
-      !isProcessAlive(current.pid)
+      isStale(current)
     ) {
       rmSync(path, { force: true });
     }

@@ -410,4 +410,63 @@ describe('CLI OAuth token manager', () => {
       }),
     ).rejects.toThrow('Another JOY Media process is refreshing this sign-in; retry.');
   });
+
+  it('reclaims a lock held past the maximum by a live owner whose PID was reused', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    // The recorded PID now belongs to a live, unrelated process, but no sign-in holds a lock this long.
+    writeFileSync(path, JSON.stringify({ pid: 987_654_321, createdAt: NOW - 31 * 60_000 }));
+    const work = vi.fn(async () => 'acquired');
+
+    await expect(
+      withOAuthProfileLock(KIMI_PROFILE, work, {
+        timeoutMs: 1_000,
+        retryIntervalMs: 1,
+        now: () => NOW,
+        isProcessAlive: () => true,
+      }),
+    ).resolves.toBe('acquired');
+    expect(work).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a live lock younger than the maximum, as a long device approval is', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: process.pid, createdAt: NOW - 16 * 60_000 }));
+
+    const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+      timeoutMs: 4,
+      retryIntervalMs: 1,
+      now: () => NOW,
+      isProcessAlive: () => true,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+    expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBeUndefined();
+    expect(existsSync(path)).toBe(true);
+  });
+
+  it('reclaims a dead lock when its reclaim guard is older than the maximum and its PID was reused', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: 987_654_321, createdAt: NOW }));
+    writeFileSync(
+      `${path}.reclaim`,
+      JSON.stringify({ pid: 987_654_322, createdAt: NOW - 31 * 60_000 }),
+    );
+    const work = vi.fn(async () => 'acquired');
+
+    await expect(
+      withOAuthProfileLock(KIMI_PROFILE, work, {
+        timeoutMs: 1_000,
+        retryIntervalMs: 1,
+        now: () => NOW,
+        isProcessAlive: (pid) => pid === 987_654_322 || pid === process.pid,
+      }),
+    ).resolves.toBe('acquired');
+    expect(work).toHaveBeenCalledTimes(1);
+    expect(existsSync(`${path}.reclaim`)).toBe(false);
+  });
 });
