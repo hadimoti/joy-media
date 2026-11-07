@@ -448,6 +448,44 @@ describe('CLI OAuth token manager', () => {
     expect(existsSync(path)).toBe(true);
   });
 
+  it('reclaims a live lock once it is older than a shorter maxHoldMs', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: process.pid, createdAt: NOW - 6_000 }));
+    const work = vi.fn(async () => 'acquired');
+
+    await expect(
+      withOAuthProfileLock(KIMI_PROFILE, work, {
+        timeoutMs: 1_000,
+        retryIntervalMs: 1,
+        now: () => NOW,
+        isProcessAlive: () => true,
+        maxHoldMs: 5_000,
+      }),
+    ).resolves.toBe('acquired');
+    expect(work).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a live lock younger than a shorter maxHoldMs', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: process.pid, createdAt: NOW - 4_000 }));
+
+    const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+      timeoutMs: 4,
+      retryIntervalMs: 1,
+      now: () => NOW,
+      isProcessAlive: () => true,
+      maxHoldMs: 5_000,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+    expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBeUndefined();
+    expect(existsSync(path)).toBe(true);
+  });
+
   it('reclaims a dead lock when its reclaim guard is older than the maximum and its PID was reused', async () => {
     const path = oauthProfileLockPath(KIMI_PROFILE);
     mkdirSync(dirname(path), { recursive: true });
