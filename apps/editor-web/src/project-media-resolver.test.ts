@@ -1,6 +1,36 @@
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { BrowserAsset } from './control-plane-client.js';
 import { ProjectMediaResolver } from './project-media-resolver.js';
 import { clearMediaSource } from './media-object-url.js';
+
+/**
+ * A Blob that refuses the whole-file read. Only sliced reads are possible, so a
+ * descriptor digest can only be verified without copying the file into one buffer.
+ */
+class WholeFileReadForbiddenBlob extends Blob {
+  override async arrayBuffer(): Promise<ArrayBuffer> {
+    throw new Error('whole-file read is not allowed');
+  }
+}
+
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function catalogAsset(sha256: string, bytes: number): BrowserAsset {
+  return {
+    id: 'media-1',
+    projectId: 'project-1',
+    kind: 'video',
+    displayName: 'clip.mp4',
+    sha256,
+    bytes,
+    descriptor: { mimeType: 'video/mp4' },
+    createdAt: 0,
+    cloudBacked: false,
+  };
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -136,6 +166,78 @@ describe('ProjectMediaResolver', () => {
     expect(revoke).toHaveBeenCalledWith('blob:local');
     create.mockRestore();
     revoke.mockRestore();
+  });
+
+  it('verifies a matching descriptor sha256 without reading the whole blob', async () => {
+    const bytes = new TextEncoder().encode('local-bytes-never-read-whole');
+    const blob = new WholeFileReadForbiddenBlob([bytes], { type: 'video/mp4' });
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:local');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      client: {
+        assets: vi.fn(async () => [catalogAsset(sha256Hex(bytes), bytes.byteLength)]),
+      },
+      originalCache: { get: vi.fn(async () => blob) },
+    });
+
+    await expect(resolver.resolve('media-1')).resolves.toEqual({
+      url: 'blob:local',
+      mimeType: 'video/mp4',
+      source: 'opfs',
+    });
+    expect(create).toHaveBeenCalledExactlyOnceWith(blob);
+    resolver.clear();
+  });
+
+  it('hashes a file larger than one slice in bounded slices and never as one read', async () => {
+    // Larger than the 8 MiB hashing slice, so a whole-file read through a slice would show up as an oversized slice.
+    const bytes = new Uint8Array(20 * 1024 * 1024).fill(7);
+    const sliceSizes: number[] = [];
+    class SliceRecordingBlob extends WholeFileReadForbiddenBlob {
+      override slice(start?: number, end?: number, contentType?: string): Blob {
+        const part = super.slice(start, end, contentType);
+        sliceSizes.push(part.size);
+        return part;
+      }
+    }
+    const blob = new SliceRecordingBlob([bytes], { type: 'video/mp4' });
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:local');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      client: {
+        assets: vi.fn(async () => [catalogAsset(sha256Hex(bytes), bytes.byteLength)]),
+      },
+      originalCache: { get: vi.fn(async () => blob) },
+    });
+
+    await expect(resolver.resolve('media-1')).resolves.toMatchObject({ source: 'opfs' });
+    expect(sliceSizes.length).toBeGreaterThan(1);
+    expect(Math.max(...sliceSizes)).toBeLessThanOrEqual(8 * 1024 * 1024);
+    resolver.clear();
+  });
+
+  it('rejects a local blob whose digest does not match the descriptor', async () => {
+    const bytes = new TextEncoder().encode('local-bytes-never-read-whole');
+    const blob = new WholeFileReadForbiddenBlob([bytes], { type: 'video/mp4' });
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:local');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const actual = sha256Hex(bytes);
+    const wrong = actual.startsWith('a') ? `b${actual.slice(1)}` : `a${actual.slice(1)}`;
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      client: {
+        assets: vi.fn(async () => [catalogAsset(wrong, bytes.byteLength)]),
+      },
+      originalCache: { get: vi.fn(async () => blob) },
+    });
+
+    await expect(resolver.resolve('media-1')).rejects.toThrow(
+      'Media clip.mp4 is unavailable in the local cache',
+    );
+    expect(create).not.toHaveBeenCalled();
+    resolver.clear();
   });
 
   it('provides only owner-authorized local bytes to the observation host', async () => {
