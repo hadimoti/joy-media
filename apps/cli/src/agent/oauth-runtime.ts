@@ -27,7 +27,8 @@ const STUCK_CONFIRM_MS = 250;
 /**
  * Longest a live process may hold a profile lock before it counts as stale. A process hard-killed while holding the lock
  * can leave a record whose PID is later reused by an unrelated live process; PID liveness alone would then block every
- * later sign-in. The longest legitimate hold is a device approval, which waits at most 15 minutes, so 30 minutes leaves margin.
+ * later sign-in. The longest legitimate holds are a Kimi Code or xAI device approval (at most 15 minutes) and a ChatGPT
+ * browser sign-in, which waits at most 5 minutes for its callback. So 30 minutes leaves margin over both.
  */
 const LOCK_MAX_HOLD_MS = 30 * 60_000;
 
