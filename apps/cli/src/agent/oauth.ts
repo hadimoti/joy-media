@@ -6,7 +6,12 @@ import {
   signInWithXai,
   type OAuthAuthorizationPresentation,
 } from '@joy-media/provider-oauth';
-import { loadCliConfig, openCredentialStore, updateCliConfig } from '../utils/config.js';
+import {
+  ensureChatGptExtAgentHostId,
+  openCredentialStore,
+  pendingChatGptClientId,
+  savePendingChatGptClientId,
+} from '../utils/config.js';
 import type { OAuthCredential } from '../utils/credential-store.js';
 
 export type OAuthProfileProvider = 'chatgpt' | 'kimi' | 'xai';
@@ -30,19 +35,16 @@ export async function signInOAuthProfile(input: OAuthProfileSignInInput): Promis
 
   switch (input.provider) {
     case 'chatgpt': {
-      const config = loadCliConfig();
-      const extAgentHostId = config.chatgptExtAgentHostId ?? newExtAgentHostId();
-      if (config.chatgptExtAgentHostId === undefined) {
-        updateCliConfig((current) => ({ ...current, chatgptExtAgentHostId: extAgentHostId }));
-      }
+      const extAgentHostId = ensureChatGptExtAgentHostId(newExtAgentHostId);
       const existing = openCredentialStore().read(input.profileId);
       const issuedClientId =
         existing !== undefined && 'provider' in existing && existing.provider === 'chatgpt'
           ? existing.tokenRecord.clientId
-          : client?.clientId;
+          : (pendingChatGptClientId(input.profileId) ?? client?.clientId);
       const tokenRecord = await signInWithChatGpt({
         issuedClientId,
         extAgentHostId,
+        onRegistration: (clientId) => savePendingChatGptClientId(input.profileId, clientId),
         openExternal: openChatGptAuthorization,
         fetch: fetchFromProvider,
         now,

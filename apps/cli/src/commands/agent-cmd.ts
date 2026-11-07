@@ -12,7 +12,12 @@ import {
   parseAgentSlotId,
 } from '@joy-media/provider-sdk';
 import { prepareChatGptModels, readChatGptModels } from '@joy-media/joy-agent-engine';
-import { isOAuthProfileProvider, oauthTokenExpiry, signInOAuthProfile } from '../agent/oauth.js';
+import {
+  isOAuthProfileProvider,
+  oauthTokenExpiry,
+  signInOAuthProfile,
+  type OAuthProfileProvider,
+} from '../agent/oauth.js';
 import { clearAgentSlot, loadAgentSlot, saveAgentSlot } from '../agent/agent-slots.js';
 import {
   AgentRunError,
@@ -36,16 +41,21 @@ import {
   getDefaultOAuthTokenManager,
   OAuthProfileLockTimeoutError,
   OAuthRefreshFailedError,
+  withOAuthProfileLock,
 } from '../agent/oauth-runtime.js';
 import { startAgentRepl } from '../agent/repl.js';
 import {
   ConfigFileError,
+  clearPendingChatGptRegistrations,
   deleteAiProvider,
   getDefaultSqlitePath,
   hasAiProvider,
   loadAiProviders,
   loadCliConfig,
   openCredentialStore,
+  pendingChatGptClientId,
+  restoreAiProvider,
+  StoredKeyRemovalError,
   setAiProvider,
   updateAiProviders,
   updateCliConfig,
@@ -53,6 +63,7 @@ import {
   type CliConfig,
 } from '../utils/config.js';
 import {
+  PROVIDER_REQUEST_TIMEOUT_MS,
   KIMI_CODE_BASE_URL as OAUTH_KIMI_CODE_BASE_URL,
   OAuthFlowError,
 } from '@joy-media/provider-oauth';
@@ -105,30 +116,89 @@ async function addOAuthProvider(name: string, flags: CliFlags, out: AgentOutput)
   if (!isOAuthProfileProvider(flags.provider)) {
     throw failure(`Provider "${flags.provider}" does not offer OAuth sign-in.`);
   }
+  const provider: OAuthProfileProvider = flags.provider;
+  // One add at a time per profile. The lock covers the sign-in, its commit and any refresh of this profile.
+  // It is the same lock the runtime takes to rotate tokens, so these writes cannot interleave with them.
+  return underProfileLock(name, () => addOAuthProviderLocked(name, provider, flags, out));
+}
+
+/**
+ * Runs fn under the profile lock, shared with token refresh and with every other write to this profile name.
+ * Waiting past the lock timeout is reported as a retryable failure.
+ */
+async function underProfileLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await withOAuthProfileLock(name, fn);
+  } catch (error) {
+    if (error instanceof OAuthProfileLockTimeoutError) {
+      // A stuck file needs the user to remove it, so its path is shown instead of a retry hint.
+      throw failure(
+        error.stuckPath === undefined
+          ? `Another sign-in or token refresh is using profile "${name}". Retry when it finishes.`
+          : error.message,
+      );
+    }
+    throw error;
+  }
+}
+
+/** Names the way out when a kept ChatGPT registration may be the cause of a failed sign-in. Never throws. */
+function pendingRegistrationHint(name: string, provider: OAuthProfileProvider): string {
+  if (provider !== 'chatgpt') return '';
+  try {
+    if (pendingChatGptClientId(name) === undefined) return '';
+  } catch {
+    return '';
+  }
+  return ` A ChatGPT registration is kept for retry. If ChatGPT rejects it, discard it with: joy-media agent provider remove ${name}`;
+}
+
+/**
+ * Puts the previous profile metadata back after a failed commit, then says what is now true. The message says the
+ * profile is unchanged only when the restore itself succeeded.
+ */
+function rollbackFailedCommit(
+  name: string,
+  previous: AiProviderConfig | undefined,
+): ReturnType<typeof failure> {
+  try {
+    restoreAiProvider(name, previous);
+  } catch {
+    return failure(
+      'OAuth credential could not be saved, and the profile metadata could not be restored. Run the add command again.',
+    );
+  }
+  return failure('OAuth credential could not be saved. The profile was left unchanged.');
+}
+
+/** Runs under the profile lock. The profile is written only after the sign-in has succeeded. */
+async function addOAuthProviderLocked(
+  name: string,
+  provider: OAuthProfileProvider,
+  flags: CliFlags,
+  out: AgentOutput,
+): Promise<number> {
   const previous = loadAiProviders()[name];
-  if (
-    previous !== undefined &&
-    (previous.authKind !== 'oauth' || previous.provider !== flags.provider)
-  ) {
+  if (previous !== undefined && (previous.authKind !== 'oauth' || previous.provider !== provider)) {
     throw failure(
       `Provider profile "${name}" uses a different authentication method or provider; remove it before changing authentication.`,
     );
   }
   const model = flags.model ?? previous?.defaultModel;
-  console.error(OAUTH_RISK_NOTICE);
+  if (provider !== 'chatgpt') console.error(OAUTH_RISK_NOTICE);
   let approvalStatusShown = false;
   let credential: OAuthCredential;
   try {
     credential = await signInOAuthProfile({
       profileId: name,
-      provider: flags.provider,
+      provider,
       onAuthorization: ({ url, userCode, expiresAt }) => {
         out.line(`Approval URL: ${url}`);
         if (userCode) out.line(`User code: ${userCode}`);
         if (expiresAt !== undefined && Number.isFinite(expiresAt)) {
           out.line(`Code expires at: ${new Date(expiresAt).toISOString()}`);
         }
-        if (flags.provider === 'chatgpt') {
+        if (provider === 'chatgpt') {
           out.line(
             'Open the URL in a browser on this same machine. A remote CLI with no browser on that machine cannot complete it.',
           );
@@ -145,6 +215,7 @@ async function addOAuthProvider(name: string, flags: CliFlags, out: AgentOutput)
       },
     });
   } catch (error) {
+    const hint = pendingRegistrationHint(name, provider);
     if (error instanceof OAuthFlowError) {
       const message =
         error.code === 'TIMEOUT'
@@ -154,32 +225,42 @@ async function addOAuthProvider(name: string, flags: CliFlags, out: AgentOutput)
             : error.message;
       throw error.code === 'CANCELLED'
         ? new AgentCommandError(message, 130, error.code)
-        : failure(message, error.code);
+        : failure(`${message}${hint}`, error.code);
     }
-    throw failure('OAuth sign-in failed. No profile was changed.');
+    throw failure(`OAuth sign-in failed. No profile was changed.${hint}`);
   } finally {
     if (approvalStatusShown) out.line();
   }
+  // The profile metadata goes first. It is small and reversible, so a failure here leaves the saved sign-in as it was.
   try {
-    openCredentialStore().save(name, credential);
     setAiProvider(name, {
       name,
-      provider: flags.provider,
+      provider,
       authKind: 'oauth',
-      baseUrl: oauthProfileBaseUrl(flags.provider),
+      baseUrl: oauthProfileBaseUrl(provider),
       defaultModel: model,
     });
   } catch {
-    throw failure('OAuth credential could not be saved.');
+    throw rollbackFailedCommit(name, previous);
+  }
+  try {
+    openCredentialStore().save(name, credential);
+  } catch {
+    throw rollbackFailedCommit(name, previous);
+  }
+  try {
+    clearPendingChatGptRegistrations(name);
+  } catch {
+    out.warn('The provider is saved, but its pending registration could not be cleared.');
   }
   out.success(`Provider "${name}" configured successfully!`);
-  out.step('Provider', flags.provider);
-  out.step('Auth', `OAuth (${flags.provider})`);
+  out.step('Provider', provider);
+  out.step('Auth', `OAuth (${provider})`);
   if (model) out.step('Default Model', model);
   out.result({
     ok: true,
     name,
-    provider: flags.provider,
+    provider,
     authKind: 'oauth',
     defaultModel: model ?? null,
   });
@@ -205,6 +286,9 @@ async function listOAuthModels(
   const baseUrl = oauthProfileBaseUrl(provider);
   out.banner();
   out.info(`Fetching models from ${c(baseUrl, 'bold')}...`);
+  // Every provider's model list is bounded like its other requests: the reply and its body must arrive within 30 s.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
   try {
     const chatGptRequest =
       provider === 'chatgpt'
@@ -219,12 +303,14 @@ async function listOAuthModels(
               accept: 'application/json',
               authorization: `Bearer ${credential.tokenRecord.accessToken}`,
             },
+            signal: controller.signal,
           }
         : {
             method: chatGptRequest.method,
             headers: chatGptRequest.headers,
             credentials: 'omit',
             redirect: 'error',
+            signal: controller.signal,
           },
     );
     if (!response.ok) throw new Error('model list request failed');
@@ -250,6 +336,8 @@ async function listOAuthModels(
     return 0;
   } catch {
     throw failure(`Failed to fetch models for OAuth profile "${profileId}".`);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -619,11 +707,14 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
       ...(defaultModel ? { defaultModel } : {}),
       ...(cachedModels ? { cachedModels } : {}),
     };
-    const replaced = updateAiProviders((providers) => {
-      const existed = hasAiProvider(providers, name);
-      providers[name] = entry;
-      return existed;
-    });
+    // Under the profile lock, so this write cannot interleave with an OAuth sign-in or removal of the same name.
+    const replaced = await underProfileLock(name, async () =>
+      updateAiProviders((providers) => {
+        const existed = hasAiProvider(providers, name);
+        providers[name] = entry;
+        return existed;
+      }),
+    );
 
     out.success(
       replaced
@@ -654,23 +745,36 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
     if (isRetiredProvider(name)) {
       throw failure(`The ${name} provider was retired from JOY Media. Choose another provider.`);
     }
-    const providers = loadAiProviders();
-    if (providers[name]?.provider !== undefined && isRetiredProvider(providers[name]!.provider!)) {
-      throw failure(
-        `The ${providers[name]!.provider} provider was retired from JOY Media. Choose another provider.`,
-      );
-    }
-    if (!isKnownProvider(providers, name)) {
-      throw failure(
-        `Unknown provider "${name}". Run "joy-media agent provider list" to see available providers.`,
-        'UNKNOWN_PROVIDER',
-      );
-    }
-    const model = hasAiProvider(providers, name) ? providers[name]!.defaultModel : undefined;
-    updateCliConfig((current) => {
-      // The model / URL overrides belonged to the previously active provider.
-      const { defaultModel: _model, customBaseUrl: _url, ...rest } = current;
-      return { ...rest, activeProvider: name, ...(model ? { defaultModel: model } : {}) };
+    // Under the profile lock, so the check and the selection cannot interleave with a removal of this profile.
+    const model = await underProfileLock(name, async () => {
+      const providers = loadAiProviders();
+      if (
+        providers[name]?.provider !== undefined &&
+        isRetiredProvider(providers[name]!.provider!)
+      ) {
+        throw failure(
+          `The ${providers[name]!.provider} provider was retired from JOY Media. Choose another provider.`,
+        );
+      }
+      if (!isKnownProvider(providers, name)) {
+        throw failure(
+          `Unknown provider "${name}". Run "joy-media agent provider list" to see available providers.`,
+          'UNKNOWN_PROVIDER',
+        );
+      }
+      const selectedModel = hasAiProvider(providers, name)
+        ? providers[name]!.defaultModel
+        : undefined;
+      updateCliConfig((current) => {
+        // The model / URL overrides belonged to the previously active provider.
+        const { defaultModel: _model, customBaseUrl: _url, ...rest } = current;
+        return {
+          ...rest,
+          activeProvider: name,
+          ...(selectedModel ? { defaultModel: selectedModel } : {}),
+        };
+      });
+      return selectedModel;
     });
     out.success(`Active provider set to "${name}".`);
     if (model) out.step('Default Model', model);
@@ -681,30 +785,60 @@ async function handleProvider(args: string[], flags: CliFlags, out: AgentOutput)
   if (action === 'remove' || action === 'delete' || action === 'rm') {
     const name = args[2] ?? flags.name;
     if (!name) throw usage('Provider name required. Usage: joy-media agent provider remove <name>');
-    const removedModel = hasAiProvider(loadAiProviders(), name)
-      ? loadAiProviders()[name]?.defaultModel
-      : undefined;
-    if (!deleteAiProvider(name)) {
+    // Under the profile lock, so removal waits for an in-flight sign-in or refresh of this profile.
+    // Removing a name also discards any kept ChatGPT registration for it. That is the supported way to drop
+    // a registration ChatGPT rejects, and it works even when no profile was saved.
+    const outcome = await underProfileLock(name, async () => {
+      const providers = loadAiProviders();
+      const profileExisted = hasAiProvider(providers, name);
+      const removedModel = profileExisted ? providers[name]?.defaultModel : undefined;
+      const discardedPending = pendingChatGptClientId(name) !== undefined;
+      // Each step below can fail. They run in an order where a failure leaves a state that a retry finishes:
+      // the pending registration, then the active-provider setting, then the key, then the profile.
+      clearPendingChatGptRegistrations(name);
+      let wasActive = false;
+      if (profileExisted) {
+        updateCliConfig((cfg) => {
+          if (cfg.activeProvider !== name) return cfg;
+          wasActive = true;
+          const { activeProvider: _active, customBaseUrl: _url, ...rest } = cfg;
+          if (rest.defaultModel !== undefined && rest.defaultModel === removedModel) {
+            delete rest.defaultModel;
+          }
+          return rest;
+        });
+      }
+      let removedProfile = false;
+      if (profileExisted) {
+        try {
+          removedProfile = deleteAiProvider(name);
+        } catch (error) {
+          if (error instanceof StoredKeyRemovalError) {
+            throw failure(
+              `The stored key for "${name}" could not be deleted, so the profile was kept. Repair the credential store and run the remove command again.`,
+            );
+          }
+          throw error;
+        }
+      }
+      return { removedProfile, discardedPending, wasActive };
+    });
+    if (!outcome.removedProfile && !outcome.discardedPending) {
       throw failure(`Provider "${name}" not found.`, 'UNKNOWN_PROVIDER');
     }
-    let wasActive = false;
-    updateCliConfig((cfg) => {
-      if (cfg.activeProvider !== name) return cfg;
-      wasActive = true;
-      const { activeProvider: _active, customBaseUrl: _url, ...rest } = cfg;
-      if (rest.defaultModel !== undefined && rest.defaultModel === removedModel) {
-        delete rest.defaultModel;
-      }
-      return rest;
-    });
+    if (!outcome.removedProfile) {
+      out.success(`Pending ChatGPT registration for "${name}" discarded.`);
+      out.result({ ok: true, removed: null, discardedPending: name, wasActive: false });
+      return 0;
+    }
     out.success(`Provider "${name}" removed.`);
-    if (wasActive) {
+    if (outcome.wasActive) {
       out.warn(
         'It was the active provider; no provider is selected now. ' +
           'Pick one with "joy-media agent provider use <name>".',
       );
     }
-    out.result({ ok: true, removed: name, wasActive });
+    out.result({ ok: true, removed: name, wasActive: outcome.wasActive });
     return 0;
   }
 

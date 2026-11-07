@@ -1,15 +1,42 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as NodeFs from 'node:fs';
 import { CHATGPT_TOKEN_URL } from '@joy-media/provider-oauth';
 import type { SecretProtector } from '../utils/dpapi-protector.js';
 import { createCredentialStore, type OAuthCredential } from '../utils/credential-store.js';
 import {
   createOAuthTokenManager,
+  OAuthProfileLockTimeoutError,
   oauthProfileLockPath,
   withOAuthProfileLock,
 } from './oauth-runtime.js';
+
+// Passes through to the real file system, except that a test can make hard links fail as on FAT or exFAT.
+const { linkMode } = vi.hoisted(() => ({ linkMode: { code: undefined as string | undefined } }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeFs>();
+  return {
+    ...actual,
+    linkSync: (existing: string, path: string) => {
+      if (linkMode.code !== undefined) {
+        throw Object.assign(new Error(`${linkMode.code}: links unsupported`), {
+          code: linkMode.code,
+        });
+      }
+      return actual.linkSync(existing, path);
+    },
+  };
+});
 
 const NOW = Date.UTC(2026, 9, 31, 0, 0, 0);
 const KIMI_PROFILE = 'kimi-profile';
@@ -196,6 +223,179 @@ describe('CLI OAuth token manager', () => {
     expect(work).toHaveBeenCalledTimes(1);
   });
 
+  it('publishes the owner record with the lock, so a held lock is never seen empty', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    let recordWhileHeld: unknown;
+    await withOAuthProfileLock(
+      KIMI_PROFILE,
+      async () => {
+        recordWhileHeld = JSON.parse(readFileSync(path, 'utf8'));
+      },
+      { now: () => NOW, isProcessAlive: () => true },
+    );
+    expect(recordWhileHeld).toEqual({ pid: process.pid, createdAt: NOW });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('does not spin forever when a dead lock owner leaves an empty reclaim guard, and names the guard', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: 987_654_321, createdAt: NOW }));
+    writeFileSync(`${path}.reclaim`, '');
+    let liveness = 0;
+
+    const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+      timeoutMs: 50,
+      retryIntervalMs: 1,
+      now: () => NOW,
+      isProcessAlive: (pid) => {
+        liveness += 1;
+        // A spin would call this without limit; the guard turns that into a clear failure instead of a hang.
+        if (liveness > 1000) throw new Error('lock loop never reached the deadline');
+        return pid === process.pid;
+      },
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+    expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBe(`${path}.reclaim`);
+    expect((failure as Error).message).toContain(`${path}.reclaim`);
+  });
+
+  it('reclaims a dead lock when the reclaim guard is left with a dead owner record', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: 987_654_321, createdAt: NOW }));
+    writeFileSync(`${path}.reclaim`, JSON.stringify({ pid: 987_654_322, createdAt: NOW }));
+    const work = vi.fn(async () => 'acquired');
+
+    await expect(
+      withOAuthProfileLock(KIMI_PROFILE, work, {
+        timeoutMs: 1_000,
+        retryIntervalMs: 1,
+        now: () => NOW,
+        isProcessAlive: (pid) => pid === process.pid,
+      }),
+    ).resolves.toBe('acquired');
+    expect(existsSync(`${path}.reclaim`)).toBe(false);
+  });
+
+  it('does not name a lock that a live writer completes during the stuck check', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    // A fallback writer creates the file empty, then writes its owner record shortly after.
+    writeFileSync(path, '');
+    const completeWrite = setTimeout(() => {
+      writeFileSync(path, JSON.stringify({ pid: process.pid, createdAt: NOW }));
+    }, 20);
+
+    try {
+      const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+        timeoutMs: 4,
+        retryIntervalMs: 1,
+        now: () => NOW,
+        isProcessAlive: () => true,
+      }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+      expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBeUndefined();
+    } finally {
+      clearTimeout(completeWrite);
+    }
+  });
+
+  it('does not report an empty guard as stuck while a live process owns the lock', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: process.pid, createdAt: NOW }));
+    writeFileSync(`${path}.reclaim`, '');
+
+    const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+      timeoutMs: 4,
+      retryIntervalMs: 1,
+      now: () => NOW,
+      isProcessAlive: () => true,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+    // A live owner is still working, so the timeout must not tell the user to delete anything.
+    expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBeUndefined();
+    expect((failure as Error).message).toBe(
+      'Another JOY Media process is refreshing this sign-in; retry.',
+    );
+  });
+
+  it('keeps the lock exclusive and leaves no staging file when hard links are unsupported', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    linkMode.code = 'EPERM';
+    try {
+      let nestedBlocked = false;
+      await withOAuthProfileLock(
+        KIMI_PROFILE,
+        async () => {
+          // A second acquisition while the first is held must still be refused, not silently granted.
+          await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+            timeoutMs: 4,
+            retryIntervalMs: 1,
+            now: Date.now,
+            isProcessAlive: () => true,
+          }).catch((error: unknown) => {
+            // Only the lock's own timeout proves exclusion; any other error must fail the test.
+            nestedBlocked = error instanceof OAuthProfileLockTimeoutError;
+          });
+        },
+        { now: Date.now, isProcessAlive: () => true },
+      );
+      expect(nestedBlocked).toBe(true);
+    } finally {
+      linkMode.code = undefined;
+    }
+    expect(existsSync(path)).toBe(false);
+    expect(readdirSync(dirname(path)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('reports a link failure other than an unsupported filesystem instead of hiding it', async () => {
+    linkMode.code = 'EIO';
+    try {
+      await expect(
+        withOAuthProfileLock(KIMI_PROFILE, async () => 'acquired', {
+          timeoutMs: 50,
+          retryIntervalMs: 1,
+          now: Date.now,
+          isProcessAlive: () => true,
+        }),
+      ).rejects.toThrow('EIO');
+    } finally {
+      linkMode.code = undefined;
+    }
+  });
+
+  it('never reclaims an empty lock file on age alone, and the timeout names that file', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, '');
+
+    const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+      timeoutMs: 4,
+      retryIntervalMs: 1,
+      now: Date.now,
+      isProcessAlive: () => true,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+    expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBe(path);
+    expect((failure as Error).message).toContain(path);
+    // The empty lock is left in place for the user to inspect and remove; it was not reclaimed.
+    expect(existsSync(path)).toBe(true);
+  });
+
   it('times out while another live process owns the profile lock', async () => {
     const path = oauthProfileLockPath(KIMI_PROFILE);
     mkdirSync(dirname(path), { recursive: true });
@@ -209,5 +409,102 @@ describe('CLI OAuth token manager', () => {
         isProcessAlive: () => true,
       }),
     ).rejects.toThrow('Another JOY Media process is refreshing this sign-in; retry.');
+  });
+
+  it('reclaims a lock held past the maximum by a live owner whose PID was reused', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    // The recorded PID now belongs to a live, unrelated process, but no sign-in holds a lock this long.
+    writeFileSync(path, JSON.stringify({ pid: 987_654_321, createdAt: NOW - 31 * 60_000 }));
+    const work = vi.fn(async () => 'acquired');
+
+    await expect(
+      withOAuthProfileLock(KIMI_PROFILE, work, {
+        timeoutMs: 1_000,
+        retryIntervalMs: 1,
+        now: () => NOW,
+        isProcessAlive: () => true,
+      }),
+    ).resolves.toBe('acquired');
+    expect(work).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a live lock younger than the maximum, as a long device approval is', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: process.pid, createdAt: NOW - 16 * 60_000 }));
+
+    const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+      timeoutMs: 4,
+      retryIntervalMs: 1,
+      now: () => NOW,
+      isProcessAlive: () => true,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+    expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBeUndefined();
+    expect(existsSync(path)).toBe(true);
+  });
+
+  it('reclaims a live lock once it is older than a shorter maxHoldMs', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: process.pid, createdAt: NOW - 6_000 }));
+    const work = vi.fn(async () => 'acquired');
+
+    await expect(
+      withOAuthProfileLock(KIMI_PROFILE, work, {
+        timeoutMs: 1_000,
+        retryIntervalMs: 1,
+        now: () => NOW,
+        isProcessAlive: () => true,
+        maxHoldMs: 5_000,
+      }),
+    ).resolves.toBe('acquired');
+    expect(work).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a live lock younger than a shorter maxHoldMs', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: process.pid, createdAt: NOW - 4_000 }));
+
+    const failure = await withOAuthProfileLock(KIMI_PROFILE, async () => undefined, {
+      timeoutMs: 4,
+      retryIntervalMs: 1,
+      now: () => NOW,
+      isProcessAlive: () => true,
+      maxHoldMs: 5_000,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(OAuthProfileLockTimeoutError);
+    expect((failure as OAuthProfileLockTimeoutError).stuckPath).toBeUndefined();
+    expect(existsSync(path)).toBe(true);
+  });
+
+  it('reclaims a dead lock when its reclaim guard is older than the maximum and its PID was reused', async () => {
+    const path = oauthProfileLockPath(KIMI_PROFILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ pid: 987_654_321, createdAt: NOW }));
+    writeFileSync(
+      `${path}.reclaim`,
+      JSON.stringify({ pid: 987_654_322, createdAt: NOW - 31 * 60_000 }),
+    );
+    const work = vi.fn(async () => 'acquired');
+
+    await expect(
+      withOAuthProfileLock(KIMI_PROFILE, work, {
+        timeoutMs: 1_000,
+        retryIntervalMs: 1,
+        now: () => NOW,
+        isProcessAlive: (pid) => pid === 987_654_322 || pid === process.pid,
+      }),
+    ).resolves.toBe('acquired');
+    expect(work).toHaveBeenCalledTimes(1);
+    expect(existsSync(`${path}.reclaim`)).toBe(false);
   });
 });

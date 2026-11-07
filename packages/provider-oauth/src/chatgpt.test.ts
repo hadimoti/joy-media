@@ -1,5 +1,5 @@
 import { createSign, generateKeyPairSync } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { challengeFor } from './pkce.js';
 import {
   type ChatGptTokenRecord,
@@ -316,6 +316,56 @@ describe('exchangeChatGptCode', () => {
 });
 
 describe('signInWithChatGpt', () => {
+  it('persists a newly issued client before a failed code exchange', async () => {
+    const issued = 'oaiapp_recovery-test';
+    const events: string[] = [];
+    const { fetch, tokenForms } = provider(() => {
+      events.push('exchange');
+      return jsonReply({ error: 'invalid_grant' }, 400);
+    });
+    await expect(
+      signInWithChatGpt({
+        issuedClientId: undefined,
+        extAgentHostId: HOST_ID,
+        onRegistration: async (clientId: string) => {
+          expect(clientId).toBe(issued);
+          events.push('saved');
+        },
+        openExternal: (url) =>
+          returnFromBrowser(url, (state) => `client_id=${issued}&code=the-code&state=${state}`),
+        fetch,
+        now,
+        port: 0,
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toBeDefined();
+    expect(events).toEqual(['saved', 'exchange']);
+    expect(tokenForms).toHaveLength(1);
+  });
+
+  it('does not exchange a code if saving the new registration fails', async () => {
+    const { fetch, tokenForms } = provider(() => jsonReply({}));
+    await expect(
+      signInWithChatGpt({
+        issuedClientId: undefined,
+        extAgentHostId: HOST_ID,
+        onRegistration: () => {
+          throw new Error('registration store unavailable');
+        },
+        openExternal: (url) =>
+          returnFromBrowser(
+            url,
+            (state) => `client_id=oaiapp_save-failure&code=the-code&state=${state}`,
+          ),
+        fetch,
+        now,
+        port: 0,
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toThrow('registration store unavailable');
+    expect(tokenForms).toHaveLength(0);
+  });
+
   it('registers a client when none is saved, and keeps the client ChatGPT names on the callback', async () => {
     const issued = 'oaiapp_issued-1';
     let authUrl = '';
@@ -687,5 +737,103 @@ describe('revokeChatGptRefreshToken', () => {
       code: 'REVOCATION_FAILED',
       message: expect.not.stringContaining('refresh-token-should-not-be-reported'),
     });
+  });
+});
+
+describe('ChatGPT requests give up after 30 seconds', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Headers that never arrive. The request fails only when it is aborted, as a real fetch does.
+  const stalledHeaders: FetchLike = (_url, init) =>
+    new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => {
+        reject(new DOMException('The request was aborted.', 'AbortError'));
+      });
+    });
+
+  // Headers arrive, then the body never ends until the request is aborted.
+  const stalledBody: FetchLike = (_url, init) =>
+    Promise.resolve({
+      ok: true,
+      status: 200,
+      text: () =>
+        new Promise<string>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The request was aborted.', 'AbortError'));
+          });
+        }),
+    } as unknown as Response);
+
+  // Records how a call ends. It is read only after the timers have run.
+  const recordOutcome = (pending: Promise<unknown>) => {
+    const outcome: { settled: boolean; value?: unknown; error?: unknown } = { settled: false };
+    pending.then(
+      (value) => Object.assign(outcome, { settled: true, value }),
+      (error: unknown) => Object.assign(outcome, { settled: true, error }),
+    );
+    return outcome;
+  };
+
+  const exchange = (fetch: FetchLike) =>
+    exchangeChatGptCode({
+      clientId: CLIENT_ID,
+      code: 'the-code',
+      codeVerifier: 'the-verifier',
+      redirectUri: `http://127.0.0.1:1455${CHATGPT_CALLBACK_PATH}`,
+      fetch,
+    });
+
+  it('gives up on a token exchange whose headers never arrive', async () => {
+    vi.useFakeTimers();
+    const outcome = recordOutcome(exchange(stalledHeaders));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(outcome).toMatchObject({ settled: true, error: { code: 'EXCHANGE_FAILED' } });
+  });
+
+  it('gives up on a token exchange whose body never ends', async () => {
+    vi.useFakeTimers();
+    const outcome = recordOutcome(exchange(stalledBody));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(outcome).toMatchObject({ settled: true, error: { code: 'EXCHANGE_FAILED' } });
+  });
+
+  it('gives up on a refresh whose headers never arrive', async () => {
+    vi.useFakeTimers();
+    const outcome = recordOutcome(
+      refreshChatGptTokens({
+        record: recordAt(-1),
+        fetch: stalledHeaders,
+        now,
+        save: async () => undefined,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(outcome).toMatchObject({ settled: true, error: { code: 'EXCHANGE_FAILED' } });
+  });
+
+  it('gives up on the signing-key fetch, so a sign-in cannot be verified forever', async () => {
+    vi.useFakeTimers();
+    const outcome = recordOutcome(
+      verifyIdToken({
+        idToken: signed(claimsFor('nonce-1')),
+        clientId: CLIENT_ID,
+        nonce: 'nonce-1',
+        fetch: stalledHeaders,
+        nowSeconds: nowSeconds(),
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(outcome).toMatchObject({ settled: true, error: { code: 'ID_TOKEN_INVALID' } });
+  });
+
+  it('gives up on a sign-out whose discovery request never answers', async () => {
+    vi.useFakeTimers();
+    const outcome = recordOutcome(
+      revokeChatGptRefreshToken({ record: recordAt(1_000), fetch: stalledHeaders }),
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(outcome).toMatchObject({ settled: true, error: { code: 'REVOCATION_FAILED' } });
   });
 });

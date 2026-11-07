@@ -1,5 +1,13 @@
-import { createHash } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  closeSync,
+  linkSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   ACCESS_TOKEN_REFRESH_MARGIN_MS,
@@ -15,11 +23,27 @@ import type { CredentialStore, OAuthCredential } from '../utils/credential-store
 
 const LOCK_TIMEOUT_MS = 30_000;
 const LOCK_RETRY_INTERVAL_MS = 100;
+const STUCK_CONFIRM_MS = 250;
+/**
+ * Longest a live process may hold a profile lock before it counts as stale. A process hard-killed while holding the lock
+ * can leave a record whose PID is later reused by an unrelated live process; PID liveness alone would then block every
+ * later sign-in. The longest legitimate holds are a Kimi Code or xAI device approval (at most 15 minutes) and a ChatGPT
+ * browser sign-in, which waits at most 5 minutes for its callback. So 30 minutes leaves margin over both.
+ */
+const LOCK_MAX_HOLD_MS = 30 * 60_000;
 
 export class OAuthProfileLockTimeoutError extends Error {
-  constructor() {
-    super('Another JOY Media process is refreshing this sign-in; retry.');
+  /** Set when a lock or reclaim file is empty or unreadable, so no owner can be checked and the user must remove it. */
+  readonly stuckPath: string | undefined;
+
+  constructor(stuckPath?: string) {
+    super(
+      stuckPath === undefined
+        ? 'Another JOY Media process is refreshing this sign-in; retry.'
+        : `The profile lock file ${stuckPath} is empty or unreadable, so JOY Media cannot tell whether its owner is still running. Make sure no JOY Media CLI is running, delete that file, then retry.`,
+    );
     this.name = 'OAuthProfileLockTimeoutError';
+    this.stuckPath = stuckPath;
   }
 }
 
@@ -44,6 +68,7 @@ export interface OAuthProfileLockOptions {
   readonly retryIntervalMs?: number;
   readonly now?: () => number;
   readonly isProcessAlive?: (pid: number) => boolean;
+  readonly maxHoldMs?: number;
 }
 
 /** Serializes refresh-token rotation across CLI processes (D22 step 3 design §6). */
@@ -58,23 +83,13 @@ export async function withOAuthProfileLock<T>(
   const retryIntervalMs = options.retryIntervalMs ?? LOCK_RETRY_INTERVAL_MS;
   const now = options.now ?? Date.now;
   const isProcessAlive = options.isProcessAlive ?? processIsAlive;
+  const maxHoldMs = options.maxHoldMs ?? LOCK_MAX_HOLD_MS;
+  const isStale = (owner: LockOwner): boolean =>
+    !isProcessAlive(owner.pid) || now() - owner.createdAt > maxHoldMs;
   const deadline = Date.now() + timeoutMs;
 
   while (true) {
-    let descriptor: number | undefined;
-    try {
-      descriptor = openSync(path, 'wx', 0o600);
-      writeFileSync(descriptor, JSON.stringify({ pid: process.pid, createdAt: now() }));
-    } catch (error) {
-      if (descriptor !== undefined) {
-        closeSync(descriptor);
-        rmSync(path, { force: true });
-      }
-      if (!isAlreadyExists(error)) throw error;
-    }
-
-    if (descriptor !== undefined) {
-      closeSync(descriptor);
+    if (tryPublishLock(path, now)) {
       try {
         return await work();
       } finally {
@@ -83,12 +98,13 @@ export async function withOAuthProfileLock<T>(
     }
 
     const owner = readLockOwner(path);
-    if (owner !== undefined && !isProcessAlive(owner.pid)) {
-      reclaimDeadLock(path, owner, now, isProcessAlive);
-      continue;
+    if (owner !== undefined && isStale(owner)) {
+      // Fall through to the deadline check and the wait, even after a reclaim. Continuing here skipped the
+      // deadline, so an abandoned reclaim guard could spin forever.
+      reclaimStaleLock(path, owner, now, isStale);
     }
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new OAuthProfileLockTimeoutError();
+    if (remaining <= 0) throw await timeoutError(path, isStale);
     await wait(Math.min(retryIntervalMs, remaining));
   }
 }
@@ -269,39 +285,151 @@ function readLockOwner(path: string): LockOwner | undefined {
   return undefined;
 }
 
-function reclaimDeadLock(
-  path: string,
-  expected: LockOwner,
-  now: () => number,
-  isProcessAlive: (pid: number) => boolean,
-): void {
-  const reclaimPath = `${path}.reclaim`;
+/**
+ * Takes the lock by publishing its owner record in one step. The record is written to a private staging file,
+ * which is then hard-linked to the lock path. The link fails if the lock already exists, and the lock is never
+ * visible without its content, so a live writer can never be mistaken for an empty, abandoned lock.
+ */
+function tryPublishLock(path: string, now: () => number): boolean {
+  const staging = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(staging, JSON.stringify({ pid: process.pid, createdAt: now() }), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    linkSync(staging, path);
+    return true;
+  } catch (error) {
+    if (isAlreadyExists(error)) return false;
+    if (!isHardLinkUnsupported(error)) throw error;
+  } finally {
+    // Best effort. A staging file that survives is harmless, and its cleanup must not hide a lock just published.
+    try {
+      rmSync(staging, { force: true });
+    } catch {
+      // Left behind; it is never read as a lock.
+    }
+  }
+  return createExclusiveLock(path, now);
+}
+
+/** Filesystems such as FAT, exFAT and some network mounts refuse hard links. */
+function isHardLinkUnsupported(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return (
+    code === 'EPERM' ||
+    code === 'ENOTSUP' ||
+    code === 'EOPNOTSUPP' ||
+    code === 'EXDEV' ||
+    code === 'ENOSYS'
+  );
+}
+
+/**
+ * Exclusive create for filesystems without hard links, as the lock was before publication by link. A crash between
+ * the create and the write can leave an empty lock or an empty reclaim guard. Neither is reclaimed on age; the timeout names the file so
+ * the user can remove it. This gap exists only on filesystems without hard links.
+ */
+function createExclusiveLock(path: string, now: () => number): boolean {
   let descriptor: number;
   try {
-    descriptor = openSync(reclaimPath, 'wx', 0o600);
+    descriptor = openSync(path, 'wx', 0o600);
   } catch (error) {
-    if (!isAlreadyExists(error)) throw error;
-    const reclaimOwner = readLockOwner(reclaimPath);
-    if (reclaimOwner !== undefined && !isProcessAlive(reclaimOwner.pid)) {
-      rmSync(reclaimPath, { force: true });
-    }
-    return;
+    if (isAlreadyExists(error)) return false;
+    throw error;
   }
   try {
     writeFileSync(descriptor, JSON.stringify({ pid: process.pid, createdAt: now() }));
   } catch (error) {
     closeSync(descriptor);
-    rmSync(reclaimPath, { force: true });
+    rmSync(path, { force: true });
     throw error;
   }
   closeSync(descriptor);
+  return true;
+}
+
+/**
+ * Names a stuck file only if it is still stuck after a pause. A live writer on a filesystem without hard links is empty
+ * for a moment before its owner record lands, so a single look could misreport it.
+ */
+async function timeoutError(
+  path: string,
+  isStale: (owner: LockOwner) => boolean,
+): Promise<OAuthProfileLockTimeoutError> {
+  const candidate = stuckLockFile(path, isStale);
+  if (candidate === undefined) return new OAuthProfileLockTimeoutError();
+  await wait(STUCK_CONFIRM_MS);
+  return new OAuthProfileLockTimeoutError(
+    stuckLockFile(path, isStale) === candidate ? candidate : undefined,
+  );
+}
+
+/**
+ * The file the user must remove, when the wait cannot end by itself. That is an unreadable lock, or an unreadable
+ * reclaim guard left behind while the lock's recorded owner is stale. A fresh live owner is still working, so nothing is named.
+ */
+function stuckLockFile(path: string, isStale: (owner: LockOwner) => boolean): string | undefined {
+  // Each file is read once. A separate exists check could race with a normal release and name a file that is gone.
+  const lock = inspectLockFile(path);
+  if (lock === 'missing') return undefined;
+  if (lock === 'unreadable') return path;
+  if (!isStale(lock)) return undefined;
+  const guard = `${path}.reclaim`;
+  return inspectLockFile(guard) === 'unreadable' ? guard : undefined;
+}
+
+/** 'missing' when no file exists, 'unreadable' when it exists without a readable owner record, else the owner. */
+function inspectLockFile(path: string): LockOwner | 'missing' | 'unreadable' {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable';
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      Number.isInteger((parsed as { pid?: unknown }).pid) &&
+      typeof (parsed as { createdAt?: unknown }).createdAt === 'number'
+    ) {
+      return {
+        pid: (parsed as { pid: number }).pid,
+        createdAt: (parsed as { createdAt: number }).createdAt,
+      };
+    }
+  } catch {
+    // Malformed content is handled as unreadable below.
+  }
+  return 'unreadable';
+}
+
+function reclaimStaleLock(
+  path: string,
+  expected: LockOwner,
+  now: () => number,
+  isStale: (owner: LockOwner) => boolean,
+): void {
+  const reclaimPath = `${path}.reclaim`;
+  // The guard is published with its owner record in one step, like the lock, so a crash cannot leave an empty guard
+  // that blocks every later reclaim. Only the no-hard-link fallback keeps the create-then-write gap.
+  if (!tryPublishLock(reclaimPath, now)) {
+    // A guard whose PID was reused would block every reclaim, so an aged guard is removed the same way as a stale lock.
+    const reclaimOwner = readLockOwner(reclaimPath);
+    if (reclaimOwner !== undefined && isStale(reclaimOwner)) {
+      rmSync(reclaimPath, { force: true });
+    }
+    return;
+  }
   try {
     const current = readLockOwner(path);
     if (
       current !== undefined &&
       current.pid === expected.pid &&
       current.createdAt === expected.createdAt &&
-      !isProcessAlive(current.pid)
+      isStale(current)
     ) {
       rmSync(path, { force: true });
     }

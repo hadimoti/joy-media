@@ -1,22 +1,40 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../cli.js';
 import { resolveAgentConfig } from '../agent/provider.js';
+import { oauthProfileLockPath } from '../agent/oauth-runtime.js';
 import type { OAuthCredential } from '../utils/credential-store.js';
+import type * as ConfigModule from '../utils/config.js';
 import {
   loadAiProviders,
+  getAiProvidersPath,
   loadCliConfig,
   openCredentialStore,
   setAiProvider,
+  updateCliConfig,
 } from '../utils/config.js';
 
-const { signInOAuthProfileMock } = vi.hoisted(() => ({ signInOAuthProfileMock: vi.fn() }));
+const { signInOAuthProfileMock, failPendingClear } = vi.hoisted(() => ({
+  signInOAuthProfileMock: vi.fn(),
+  failPendingClear: { on: false },
+}));
 vi.mock('../agent/oauth.js', async (importOriginal) => ({
   ...(await importOriginal()),
   signInOAuthProfile: signInOAuthProfileMock,
 }));
+// Passes through to the real config, except that a test can make the pending-registration write fail.
+vi.mock('../utils/config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof ConfigModule>();
+  return {
+    ...actual,
+    clearPendingChatGptRegistrations: (profileId: string) => {
+      if (failPendingClear.on) throw new Error('config write failed');
+      return actual.clearPendingChatGptRegistrations(profileId);
+    },
+  };
+});
 
 /** The key the listing must never show, not even a part of one (PLAN-v4 §6d-1). */
 const SECRET = 'sk-or-cli-secret-0123456789abcdef';
@@ -372,6 +390,180 @@ describe('OAuth provider profiles', () => {
     expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
   });
 
+  it('preserves an existing credential if saving reauthorization metadata fails', async () => {
+    const oldCredential = {
+      provider: 'chatgpt' as const,
+      tokenRecord: {
+        version: 1 as const,
+        clientId: 'oaiapp_old',
+        accountId: 'account-old',
+        accessToken: 'old-access',
+        refreshToken: 'old-refresh',
+        accessExpiresAt: Date.now() + 3600000,
+      },
+    };
+    setAiProvider('chatgpt-profile', {
+      name: 'chatgpt-profile',
+      provider: 'chatgpt',
+      authKind: 'oauth',
+    });
+    openCredentialStore().save('chatgpt-profile', oldCredential);
+    signInOAuthProfileMock.mockImplementation(async () => {
+      writeFileSync(getAiProvidersPath(), '{broken');
+      return {
+        provider: 'chatgpt',
+        tokenRecord: { ...oldCredential.tokenRecord, accessToken: 'new-access' },
+      };
+    });
+    expect(
+      await runCli([
+        'agent',
+        'provider',
+        'add',
+        'chatgpt-profile',
+        '--provider',
+        'chatgpt',
+        '--oauth',
+      ]),
+    ).toBe(1);
+    expect(openCredentialStore().read('chatgpt-profile')).toEqual(oldCredential);
+  });
+
+  it('holds the profile lock from sign-in until the profile is stored, then releases it', async () => {
+    const lockPath = oauthProfileLockPath('chatgpt-profile');
+    let heldDuringSignIn = false;
+    signInOAuthProfileMock.mockImplementation(async () => {
+      heldDuringSignIn = existsSync(lockPath);
+      return {
+        provider: 'chatgpt',
+        tokenRecord: {
+          version: 1,
+          clientId: 'oaiapp_locked',
+          accountId: 'account-test',
+          accessToken: 'access-test',
+          refreshToken: 'refresh-test',
+          accessExpiresAt: Date.now() + 3600000,
+        },
+      };
+    });
+    expect(
+      await runCli([
+        'agent',
+        'provider',
+        'add',
+        'chatgpt-profile',
+        '--provider',
+        'chatgpt',
+        '--oauth',
+      ]),
+    ).toBe(0);
+    expect(heldDuringSignIn).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it('restores the previous profile settings when the new credential cannot be saved', async () => {
+    setAiProvider('chatgpt-profile', {
+      name: 'chatgpt-profile',
+      provider: 'chatgpt',
+      authKind: 'oauth',
+      defaultModel: 'old-model',
+    });
+    signInOAuthProfileMock.mockResolvedValue({
+      provider: 'chatgpt',
+      tokenRecord: { version: 1 },
+    } as unknown as OAuthCredential);
+    expect(
+      await runCli([
+        'agent',
+        'provider',
+        'add',
+        'chatgpt-profile',
+        '--provider',
+        'chatgpt',
+        '--oauth',
+        '--model',
+        'new-model',
+      ]),
+    ).toBe(1);
+    expect(loadAiProviders()['chatgpt-profile']?.defaultModel).toBe('old-model');
+  });
+
+  it('a failed pending-registration clear is reported before the profile is removed', async () => {
+    setAiProvider('chatgpt-profile', {
+      name: 'chatgpt-profile',
+      provider: 'chatgpt',
+      authKind: 'oauth',
+    });
+    failPendingClear.on = true;
+    try {
+      expect(await runCli(['agent', 'provider', 'remove', 'chatgpt-profile'])).not.toBe(0);
+    } finally {
+      failPendingClear.on = false;
+    }
+    expect(loadAiProviders()['chatgpt-profile']?.authKind).toBe('oauth');
+  });
+
+  it('keeps the profile when its stored key cannot be deleted, so no orphaned key can reattach', async () => {
+    setAiProvider('chatgpt-profile', {
+      name: 'chatgpt-profile',
+      provider: 'chatgpt',
+      authKind: 'oauth',
+    });
+    writeFileSync(join(process.env.JOY_MEDIA_HOME!, 'credentials.json'), '{broken');
+    expect(await runCli(['agent', 'provider', 'remove', 'chatgpt-profile'])).not.toBe(0);
+    expect(loadAiProviders()['chatgpt-profile']?.authKind).toBe('oauth');
+  });
+
+  it('removing a name discards its kept ChatGPT registration even when no profile was saved', async () => {
+    updateCliConfig((config) => ({
+      ...config,
+      chatgptPendingRegistrations: [
+        { profileId: 'ghost', clientId: 'oaiapp_ghost' },
+        { profileId: 'other', clientId: 'oaiapp_other' },
+      ],
+    }));
+    expect(await runCli(['agent', 'provider', 'remove', 'ghost'])).toBe(0);
+    expect(loadCliConfig().chatgptPendingRegistrations).toEqual([
+      { profileId: 'other', clientId: 'oaiapp_other' },
+    ]);
+  });
+
+  it('clears the matching pending ChatGPT registration only after storing the profile', async () => {
+    updateCliConfig((config) => ({
+      ...config,
+      chatgptPendingRegistrations: [
+        { profileId: 'chatgpt-profile', clientId: 'oaiapp_pending' },
+        { profileId: 'other', clientId: 'oaiapp_other' },
+      ],
+    }));
+    signInOAuthProfileMock.mockResolvedValue({
+      provider: 'chatgpt',
+      tokenRecord: {
+        version: 1,
+        clientId: 'oaiapp_pending',
+        accountId: 'account-test',
+        accessToken: 'access-test',
+        refreshToken: 'refresh-test',
+        accessExpiresAt: Date.now() + 3600000,
+      },
+    });
+    expect(
+      await runCli([
+        'agent',
+        'provider',
+        'add',
+        'chatgpt-profile',
+        '--provider',
+        'chatgpt',
+        '--oauth',
+      ]),
+    ).toBe(0);
+    expect(loadAiProviders()['chatgpt-profile']?.authKind).toBe('oauth');
+    expect(loadCliConfig().chatgptPendingRegistrations).toEqual([
+      { profileId: 'other', clientId: 'oaiapp_other' },
+    ]);
+  });
+
   it('explains the ChatGPT loopback and remote-machine limitation without launching a browser', async () => {
     const authorizationUrl = 'https://auth.openai.com/api/accounts/authorize?state=cli-test';
     signInOAuthProfileMock.mockImplementation(
@@ -408,6 +600,7 @@ describe('OAuth provider profiles', () => {
     expect(printed.join('\n')).toContain(
       'A remote CLI with no browser on that machine cannot complete it.',
     );
+    expect(errors.join('\n')).not.toContain('Signing in uses a third-party public app');
     expect(printed.join('\n')).not.toContain('chatgpt-access-secret');
     expect(printed.join('\n')).not.toContain('chatgpt-refresh-secret');
     expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
@@ -587,6 +780,92 @@ describe('OAuth provider profiles', () => {
     expect(printed.join('\n')).toContain('gpt-visible');
     expect(printed.join('\n')).not.toContain('gpt-hidden');
   });
+
+  it('gives up on a model list whose reply never arrives, after 30 seconds', async () => {
+    setAiProvider('chatgpt-profile', {
+      name: 'chatgpt-profile',
+      provider: 'chatgpt',
+      authKind: 'oauth',
+      defaultModel: 'gpt-visible',
+    });
+    openCredentialStore().save('chatgpt-profile', {
+      provider: 'chatgpt',
+      tokenRecord: {
+        version: 1,
+        clientId: 'chatgpt-client-test',
+        accountId: 'chatgpt-account-test',
+        accessToken: 'chatgpt-stall-access-test',
+        refreshToken: 'chatgpt-stall-refresh-test',
+        accessExpiresAt: Date.now() + 3_600_000,
+      },
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      vi.mocked(globalThis.fetch).mockImplementation(async (_url, init) => {
+        // The clock runs 30 seconds while the list stays silent, as a stalled connection does.
+        await vi.advanceTimersByTimeAsync(30_000);
+        if (init?.signal?.aborted) throw new DOMException('The request was aborted.', 'AbortError');
+        return new Response(
+          JSON.stringify({ models: [{ slug: 'gpt-late', visibility: 'list' }] }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      });
+      expect(await runCli(['agent', 'models', 'chatgpt-profile'])).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    {
+      provider: 'kimi',
+      profile: 'kimi-profile',
+      baseUrl: 'https://api.kimi.ai/coding/v1',
+      scope: 'kimi-code',
+    },
+    {
+      provider: 'xai',
+      profile: 'xai-profile',
+      baseUrl: 'https://api.x.ai/v1',
+      scope: 'api:access',
+    },
+  ] as const)(
+    'gives up on a $provider model list whose reply never arrives, after 30 seconds',
+    async ({ provider, profile, scope }) => {
+      setAiProvider(profile, { name: profile, provider, authKind: 'oauth' });
+      openCredentialStore().save(profile, {
+        provider,
+        tokenRecord: {
+          version: 1,
+          clientId: `${provider}-client-test`,
+          accessToken: `${provider}-stall-access-test`,
+          refreshToken: `${provider}-stall-refresh-test`,
+          accessExpiresAt: Date.now() + 3_600_000,
+          scope,
+        },
+      });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        vi.mocked(globalThis.fetch).mockImplementation(async (_url, init) => {
+          // The clock runs 30 seconds while the list stays silent, as a stalled connection does.
+          await vi.advanceTimersByTimeAsync(30_000);
+          if (init?.signal?.aborted)
+            throw new DOMException('The request was aborted.', 'AbortError');
+          return new Response(JSON.stringify({ data: [{ id: `${provider}-late-model` }] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        });
+        expect(await runCli(['agent', 'models', profile])).toBe(1);
+        expect(printed.join('\n')).not.toContain(`${provider}-late-model`);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('stores a rotated token before making the OAuth model-list request', async () => {
     const expired: OAuthCredential = {

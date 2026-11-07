@@ -70,6 +70,8 @@ export interface ChatGptCode {
 export interface ChatGptSignInOptions {
   /** The client of a saved account, to sign in to that account again. Undefined registers a new client. */
   readonly issuedClientId: string | undefined;
+  /** Persist a new issued client before exchanging the authorization code. */
+  readonly onRegistration?: (clientId: string) => void | Promise<void>;
   /** The host ID this install sends: a `urn:uuid:` URN, created once per install (PLAN-v4 §6d). */
   readonly extAgentHostId: string;
   /** Opens the system browser on the sign-in page. Injected, so the flow never opens one by itself. */
@@ -268,13 +270,13 @@ export async function revokeChatGptRefreshToken(input: {
 
   let endpoint: string;
   try {
-    const discoveryResponse = await input.fetch(CHATGPT_DISCOVERY_URL, {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-      redirect: 'manual',
-    });
+    const { response: discoveryResponse, reply: discovery } = await fetchReply(
+      input.fetch,
+      CHATGPT_DISCOVERY_URL,
+      { method: 'GET', headers: { accept: 'application/json' }, redirect: 'manual' },
+      revocationFailed,
+    );
     if (!discoveryResponse.ok) throw revocationFailed();
-    const discovery = parseReplyObject(await replyText(discoveryResponse));
     if (discovery?.issuer !== CHATGPT_ISSUER) throw revocationFailed();
     endpoint = safeRevocationEndpoint(discovery.revocation_endpoint);
   } catch {
@@ -282,19 +284,24 @@ export async function revokeChatGptRefreshToken(input: {
   }
 
   try {
-    const response = await input.fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/x-www-form-urlencoded',
+    const { response } = await fetchReply(
+      input.fetch,
+      endpoint,
+      {
+        method: 'POST',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: input.record.clientId,
+          token: input.record.refreshToken,
+          token_type_hint: 'refresh_token',
+        }).toString(),
+        redirect: 'manual',
       },
-      body: new URLSearchParams({
-        client_id: input.record.clientId,
-        token: input.record.refreshToken,
-        token_type_hint: 'refresh_token',
-      }).toString(),
-      redirect: 'manual',
-    });
+      revocationFailed,
+    );
     if (!response.ok) throw revocationFailed();
   } catch {
     throw revocationFailed();
@@ -406,6 +413,7 @@ export async function signInWithChatGpt(
         'ChatGPT did not register a client for this app.',
       );
     }
+    if (saved === undefined) await options.onRegistration?.(clientId);
     const tokens = await exchangeChatGptCode({
       clientId,
       code,
@@ -454,13 +462,48 @@ export function decodeTokenRecord(text: string): ChatGptTokenRecord | undefined 
   return { version: 1, clientId, accountId, accessToken, refreshToken, accessExpiresAt };
 }
 
+/** A ChatGPT or model-list request gives up this long after it is sent, including the time to read its reply. */
+export const PROVIDER_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Sends one ChatGPT request and reads its reply under one timer that runs until the body is read. A stalled connection
+ * or body then fails as unreachable, instead of holding the profile lock until the process is killed. A reply that is
+ * too large keeps its own error.
+ */
+async function fetchReply(
+  fetchImpl: FetchLike,
+  url: string,
+  init: RequestInit,
+  unreachable: () => OAuthFlowError,
+): Promise<{ readonly response: Response; readonly reply: Record<string, unknown> | undefined }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
+  try {
+    let response: Response;
+    try {
+      response = await fetchImpl(url, { ...init, signal: controller.signal });
+    } catch {
+      throw unreachable();
+    }
+    try {
+      return { response, reply: parseReplyObject(await replyText(response)) };
+    } catch (error) {
+      if (error instanceof OAuthFlowError) throw error;
+      throw unreachable();
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function postToken(
   fetchImpl: FetchLike,
   body: URLSearchParams,
 ): Promise<Record<string, unknown>> {
-  let response: Response;
-  try {
-    response = await fetchImpl(CHATGPT_TOKEN_URL, {
+  const { response, reply } = await fetchReply(
+    fetchImpl,
+    CHATGPT_TOKEN_URL,
+    {
       method: 'POST',
       headers: {
         'content-type': 'application/x-www-form-urlencoded',
@@ -468,11 +511,9 @@ async function postToken(
       },
       body: body.toString(),
       redirect: 'manual',
-    });
-  } catch {
-    throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT could not be reached.');
-  }
-  const reply = parseReplyObject(await replyText(response));
+    },
+    () => new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT could not be reached.'),
+  );
   if (!response.ok) {
     if (reply?.error === 'invalid_grant') {
       throw new OAuthFlowError('SIGN_IN_REQUIRED', 'ChatGPT needs a new sign-in.');
@@ -518,17 +559,13 @@ function decodePart(part: string): Record<string, unknown> | undefined {
 }
 
 async function signingKeyFor(kid: string, fetchImpl: FetchLike): Promise<JsonWebKey | undefined> {
-  let response: Response;
-  try {
-    response = await fetchImpl(CHATGPT_JWKS_URL, {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-      redirect: 'manual',
-    });
-  } catch {
-    throw new OAuthFlowError('ID_TOKEN_INVALID', 'The ChatGPT sign-in could not be verified.');
-  }
-  const keys = parseReplyObject(await replyText(response))?.keys;
+  const { response, reply } = await fetchReply(
+    fetchImpl,
+    CHATGPT_JWKS_URL,
+    { method: 'GET', headers: { accept: 'application/json' }, redirect: 'manual' },
+    () => new OAuthFlowError('ID_TOKEN_INVALID', 'The ChatGPT sign-in could not be verified.'),
+  );
+  const keys = reply?.keys;
   if (!response.ok || !Array.isArray(keys)) return undefined;
   return keys.find(
     (key: unknown): key is JsonWebKey => isRecord(key) && key.kid === kid && key.kty === 'RSA',
