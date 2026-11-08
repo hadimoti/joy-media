@@ -602,7 +602,65 @@ function isPrivateIpv6(host: string): boolean {
     const low = Number.parseInt(mapped[2], 16);
     return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
   }
-  return false;
+  return isPrivateEmbeddedIpv4(host);
+}
+
+/** The eight 16-bit groups of an IPv6 address written as text, or undefined when the text is not one. */
+function ipv6Groups(text: string): number[] | undefined {
+  const sides = text.split('::');
+  if (sides.length > 2) return undefined;
+  const parse = (side: string, endsAddress: boolean): number[] | undefined => {
+    if (side === '') return [];
+    const pieces = side.split(':');
+    const groups: number[] = [];
+    for (const [index, piece] of pieces.entries()) {
+      const dotted =
+        endsAddress && index === pieces.length - 1
+          ? /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(piece)
+          : null;
+      if (dotted !== null) {
+        const octets = dotted.slice(1).map(Number);
+        if (octets.some((octet) => octet > 255)) return undefined;
+        const [a = 0, b = 0, c = 0, d = 0] = octets;
+        groups.push(a * 256 + b, c * 256 + d);
+      } else if (/^[0-9a-f]{1,4}$/i.test(piece)) {
+        groups.push(Number.parseInt(piece, 16));
+      } else {
+        return undefined;
+      }
+    }
+    return groups;
+  };
+  if (sides.length === 1) {
+    const whole = parse(text, true);
+    return whole?.length === 8 ? whole : undefined;
+  }
+  const head = parse(sides[0] ?? '', false);
+  const tail = parse(sides[1] ?? '', true);
+  if (head === undefined || tail === undefined) return undefined;
+  const missing = 8 - head.length - tail.length;
+  return missing < 1 ? undefined : [...head, ...new Array<number>(missing).fill(0), ...tail];
+}
+
+/**
+ * An IPv6 address that carries an IPv4 address (S8 item 4). The mapped form, in any spelling, is judged by the IPv4
+ * address it carries. A prefix that a router or a NAT64 gateway can deliver to is refused whatever IPv4 address it
+ * carries: the IPv4-compatible ::/96, the translated ::ffff:0:0:0/96, the NAT64 prefixes 64:ff9b::/96 and 64:ff9b:1::/48,
+ * and 6to4 2002::/16.
+ */
+function isPrivateEmbeddedIpv4(host: string): boolean {
+  const groups = ipv6Groups(host);
+  if (groups === undefined) return false;
+  const leading = (count: number): boolean => groups.slice(0, count).every((group) => group === 0);
+  if (leading(5) && groups[5] === 0xffff) {
+    const [high = 0, low = 0] = groups.slice(6);
+    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+  }
+  if (leading(6)) return true;
+  if (leading(4) && groups[4] === 0xffff && groups[5] === 0) return true;
+  const nat64 = groups[0] === 0x64 && groups[1] === 0xff9b;
+  if (nat64 && (groups[2] === 1 || groups.slice(2, 6).every((group) => group === 0))) return true;
+  return groups[0] === 0x2002;
 }
 
 function allowedVerdict(kind: 'registry' | 'loopback' | 'public', url: URL): EndpointVerdict {

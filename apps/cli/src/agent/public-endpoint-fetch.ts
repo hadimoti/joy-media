@@ -5,7 +5,7 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import type { IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { BlockList, isIP, type LookupFunction } from 'node:net';
+import { isIP, type LookupFunction } from 'node:net';
 import { Duplex, pipeline, Readable, type Transform } from 'node:stream';
 import {
   constants,
@@ -53,28 +53,12 @@ export function pinnedLookup(addresses: readonly string[]): LookupFunction {
 }
 
 /**
- * IPv6 ranges that carry an IPv4 address a kernel, a NAT64 gateway or a 6to4 relay can deliver to: the IPv4-compatible
- * ::/96, the translated ::ffff:0:0:0/96, the NAT64 prefixes 64:ff9b::/96 and 64:ff9b:1::/48, and 6to4 2002::/16. The
- * shared address check does not list them, so this transport refuses them as well.
- */
-const embeddedIpv4Ranges = new BlockList();
-for (const [network, prefix] of [
-  ['::', 96],
-  ['::ffff:0:0:0', 96],
-  ['64:ff9b::', 96],
-  ['64:ff9b:1::', 48],
-  ['2002::', 16],
-] as const) {
-  embeddedIpv4Ranges.addSubnet(network, prefix, 'ipv6');
-}
-
-/**
- * Whether an address is refused for a public endpoint: the shared private-address rule, the embedded-IPv4 ranges above,
- * and any address with a zone, which no DNS answer should carry.
+ * Whether an address is refused for a public endpoint: the shared private-address rule, which also refuses an IPv4
+ * address carried in an IPv6 prefix that a router or a NAT64 gateway can deliver to, and any address with a zone,
+ * which no DNS answer should carry.
  */
 function isRefusedAddress(address: string): boolean {
-  if (address.includes('%') || isPrivateOrInternalHost(address)) return true;
-  return isIP(address) === 6 && embeddedIpv4Ranges.check(address, 'ipv6');
+  return address.includes('%') || isPrivateOrInternalHost(address);
 }
 
 /** A refusal has the shape of a failed fetch, so the CLI reports it as a network error with this code. */
