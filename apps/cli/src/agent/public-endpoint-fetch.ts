@@ -53,9 +53,10 @@ export function pinnedLookup(addresses: readonly string[]): LookupFunction {
 }
 
 /**
- * Whether an address is refused for a public endpoint: the shared private-address rule, which also refuses an IPv4
- * address carried in an IPv6 prefix that a router or a NAT64 gateway can deliver to, and any address with a zone,
- * which no DNS answer should carry.
+ * Whether an address is refused for a public endpoint: the shared private-address rule, and any address with a zone,
+ * which no DNS answer should carry. The shared rule judges an IPv4 address carried in an IPv6 prefix by that IPv4
+ * address (mapped, translated and NAT64 well-known addresses), and refuses the IPv4-compatible, NAT64 local-use and
+ * 6to4 prefixes whatever they carry.
  */
 function isRefusedAddress(address: string): boolean {
   return address.includes('%') || isPrivateOrInternalHost(address);
