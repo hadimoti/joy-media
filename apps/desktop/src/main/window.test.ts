@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEV_RENDERER_RETRY_MS,
   DEV_RENDERER_URL,
   PACKAGED_RENDERER_ORIGIN,
   buildSecureWebPreferences,
-  devRendererFailureHtml,
+  devLoadingPageHtml,
   resolveRendererTarget,
 } from './window.js';
 
@@ -18,18 +17,37 @@ describe('resolveRendererTarget', () => {
   });
 });
 
-describe('devRendererFailureHtml', () => {
-  it('names the URL and the command that starts the editor dev server, and the retry', () => {
-    const page = devRendererFailureHtml(DEV_RENDERER_URL, 'ERR_CONNECTION_REFUSED');
-    expect(page).toContain(DEV_RENDERER_URL);
-    expect(page).toContain('pnpm --filter @joy-media/editor-web dev');
-    expect(page).toContain(`retries every ${DEV_RENDERER_RETRY_MS / 1000} seconds`);
+describe('devLoadingPageHtml', () => {
+  it('shows the JOY Media logo and a loading line', () => {
+    const page = devLoadingPageHtml('data:image/png;base64,AAAA', DEV_RENDERER_URL);
+    expect(page).toContain('src="data:image/png;base64,AAAA"');
+    expect(page).toContain('Loading JOY Media');
   });
 
-  it('escapes the reason, so it cannot inject markup into the page', () => {
-    const page = devRendererFailureHtml(DEV_RENDERER_URL, '<script>alert(1)</script>');
-    expect(page).not.toContain('<script>alert(1)</script>');
-    expect(page).toContain('&#60;script&#62;');
+  it('shows the name in text when the logo file is missing', () => {
+    const page = devLoadingPageHtml(undefined, DEV_RENDERER_URL);
+    expect(page).toContain('class="wordmark">JOY Media');
+    expect(page).not.toContain('<img');
+  });
+
+  it('has a Try again link to the editor address', () => {
+    const page = devLoadingPageHtml(undefined, DEV_RENDERER_URL);
+    expect(page).toContain(`href="${DEV_RENDERER_URL}"`);
+    expect(page).toContain('Try again');
+  });
+
+  it('wiggles the logo, and keeps it still when motion is reduced', () => {
+    const page = devLoadingPageHtml(undefined, DEV_RENDERER_URL);
+    expect(page).toContain('@keyframes wiggle');
+    expect(page).toContain('animation:wiggle');
+    expect(page).toContain('prefers-reduced-motion');
+  });
+
+  it('is dark and in the app style, never white and never about a server', () => {
+    const page = devLoadingPageHtml(undefined, DEV_RENDERER_URL);
+    expect(page).toContain('background:#000000');
+    expect(page).not.toMatch(/#fff(fff)?\b/i);
+    expect(page).not.toMatch(/dev server|not running|pnpm --filter/i);
   });
 });
 

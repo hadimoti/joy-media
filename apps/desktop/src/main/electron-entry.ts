@@ -23,7 +23,7 @@ import {
 } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path, { dirname, join } from 'node:path';
-import { createReadStream, existsSync, mkdirSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { parseProjectDeepLink } from '../deep-link.js';
 import { createFileRegistry } from './file-registry.js';
@@ -37,9 +37,10 @@ import type { IpcRequest } from '../ipc.js';
 import { isAllowedEditorOrigin, originOfPageUrl } from '../origin-policy.js';
 import {
   DEV_RENDERER_RETRY_MS,
+  DEV_RENDERER_URL,
   PACKAGED_RENDERER_SCHEME,
   buildSecureWebPreferences,
-  devRendererFailureHtml,
+  devLoadingPageHtml,
   resolveRendererTarget,
 } from './window.js';
 import { registerShutdownHooks } from './shutdown.js';
@@ -62,6 +63,18 @@ import { checkProfileCredentials } from './profile-credential-check.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
+
+/** The JOY Media mark for the development loading page, read from the editor's public assets (undefined if absent). */
+function readDevLogoDataUrl(): string | undefined {
+  try {
+    const bytes = readFileSync(
+      join(__dirname, '..', '..', '..', 'editor-web', 'public', 'assets', 'logo.png'),
+    );
+    return `data:image/png;base64,${bytes.toString('base64')}`;
+  } catch {
+    return undefined;
+  }
+}
 // Automated runtime smoke check (`pnpm --filter @joy-media/desktop test:smoke`, wave 9): a real
 // `electron .` launch that proves app.whenReady, window construction, and IPC registration all
 // actually happen in this runtime, then exits on its own — closing the wave 1 gap documented in
@@ -407,6 +420,7 @@ if (!app.requestSingleInstanceLock()) {
       show: !isSmokeMode,
       frame: false,
       titleBarStyle: 'hidden',
+      backgroundColor: '#000000',
       webPreferences: buildSecureWebPreferences(join(__dirname, '..', 'preload', 'preload.cjs')),
     });
     mainWindow = win;
@@ -414,18 +428,36 @@ if (!app.requestSingleInstanceLock()) {
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));
     if (isDev) {
-      // A development window loads the editor dev server. When nothing answers, Electron leaves a blank page with no
-      // message. Show the start command instead, and retry until the server answers (see devRendererFailureHtml).
+      // A development window loads the editor dev server. While it does not answer, the window shows the JOY Media
+      // loading page and checks the server every few seconds, then opens the editor as soon as it answers.
+      const loadingPage = `data:text/html;charset=utf-8,${encodeURIComponent(
+        devLoadingPageHtml(readDevLogoDataUrl(), DEV_RENDERER_URL),
+      )}`;
+      let poll: ReturnType<typeof setInterval> | undefined;
+      const stopPolling = (): void => {
+        if (poll !== undefined) clearInterval(poll);
+        poll = undefined;
+      };
+      const startPolling = (): void => {
+        if (poll !== undefined) return;
+        poll = setInterval(() => {
+          void fetch(DEV_RENDERER_URL, { signal: AbortSignal.timeout(1500) })
+            .then((response) => {
+              if (!response.ok || win.isDestroyed()) return;
+              stopPolling();
+              void win.loadURL(DEV_RENDERER_URL);
+            })
+            .catch(() => undefined);
+        }, DEV_RENDERER_RETRY_MS);
+      };
+      win.on('closed', stopPolling);
       win.webContents.on(
         'did-fail-load',
-        (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+        (_event, errorCode, _errorDescription, _validatedUrl, isMainFrame) => {
           // -3 is an aborted navigation, not a missing server, and a subframe failure is not the page itself.
           if (errorCode === -3 || !isMainFrame || win.isDestroyed()) return;
-          const page = devRendererFailureHtml(validatedUrl, errorDescription);
-          void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
-          setTimeout(() => {
-            if (!win.isDestroyed()) void win.loadURL(resolveRendererTarget(isDev));
-          }, DEV_RENDERER_RETRY_MS);
+          void win.loadURL(loadingPage);
+          startPolling();
         },
       );
     }
