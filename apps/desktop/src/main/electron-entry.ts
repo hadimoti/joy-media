@@ -36,8 +36,10 @@ import { registerJoyProtocol } from './protocol-registration.js';
 import type { IpcRequest } from '../ipc.js';
 import { isAllowedEditorOrigin, originOfPageUrl } from '../origin-policy.js';
 import {
+  DEV_RENDERER_RETRY_MS,
   PACKAGED_RENDERER_SCHEME,
   buildSecureWebPreferences,
+  devRendererFailureHtml,
   resolveRendererTarget,
 } from './window.js';
 import { registerShutdownHooks } from './shutdown.js';
@@ -411,6 +413,22 @@ if (!app.requestSingleInstanceLock()) {
     cancelWhenPageGoes(agentRequests, win);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     void win.loadURL(resolveRendererTarget(isDev));
+    if (isDev) {
+      // A development window loads the editor dev server. When nothing answers, Electron leaves a blank page with no
+      // message. Show the start command instead, and retry until the server answers (see devRendererFailureHtml).
+      win.webContents.on(
+        'did-fail-load',
+        (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+          // -3 is an aborted navigation, not a missing server, and a subframe failure is not the page itself.
+          if (errorCode === -3 || !isMainFrame || win.isDestroyed()) return;
+          const page = devRendererFailureHtml(validatedUrl, errorDescription);
+          void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
+          setTimeout(() => {
+            if (!win.isDestroyed()) void win.loadURL(resolveRendererTarget(isDev));
+          }, DEV_RENDERER_RETRY_MS);
+        },
+      );
+    }
 
     if (isSmokeMode && isDev) {
       // By this point `app.whenReady()` has resolved, the window above is constructed, and

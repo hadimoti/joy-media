@@ -19,6 +19,32 @@ export function resolveRendererTarget(isDev: boolean): string {
   return isDev ? DEV_RENDERER_URL : `${PACKAGED_RENDERER_ORIGIN}/index.html`;
 }
 
+/** How long a development window waits before it asks the editor dev server again. */
+export const DEV_RENDERER_RETRY_MS = 2000;
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+}
+
+/**
+ * The page a development window shows while the editor dev server does not answer. It names the URL and the command
+ * that starts the server, so a blank window cannot pass for a finished launch. The reason text is escaped.
+ */
+export function devRendererFailureHtml(url: string, reason: string): string {
+  return [
+    '<!doctype html><html><head><meta charset="utf-8">',
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">`,
+    '<title>JOY Media: editor server not running</title></head>',
+    '<body style="font-family:system-ui,sans-serif;margin:48px;color:#1f2933;background:#ffffff">',
+    '<h1>The editor dev server is not running</h1>',
+    `<p>This development window loads <code>${escapeHtml(url)}</code>, and nothing answered (${escapeHtml(reason)}).</p>`,
+    '<p>Start it in a terminal at the repository root:</p>',
+    '<pre>pnpm --filter @joy-media/editor-web dev</pre>',
+    `<p>This window retries every ${DEV_RENDERER_RETRY_MS / 1000} seconds and loads the editor as soon as the server answers.</p>`,
+    '</body></html>',
+  ].join('');
+}
+
 /** The security-relevant subset of `BrowserWindowConstructorOptions['webPreferences']`.
  * Every field here is load-bearing: flipping any of them weakens the sandbox boundary
  * the rest of this package assumes. */
