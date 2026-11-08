@@ -165,6 +165,11 @@ function deflateDecoder(): Duplex {
       inflater?.resume();
     },
     write(chunk: Buffer, _encoding, callback) {
+      // An empty chunk says nothing about the format, so the choice waits for the first chunk with data, as undici does.
+      if (chunk.length === 0) {
+        callback();
+        return;
+      }
       if (inflater === undefined) {
         inflater =
           ((chunk[0] ?? 0) & 0x0f) === 8 ? createInflate(ZLIB_FLUSH) : createInflateRaw(ZLIB_FLUSH);
