@@ -11,6 +11,7 @@ const FRAME_BYTES = 320 * 180 * 3;
 
 interface CaptionReference {
   readonly ffmpegVersionLine: string;
+  readonly platform: string;
   readonly font: string;
   readonly differingPixels: number;
   readonly canonicalFrameSha256: string;
@@ -157,14 +158,14 @@ describe.skipIf(!hasFfmpeg)('caption probe with FFmpeg', () => {
     expect(drawProbe(Buffer.from('this is not a font file'))).toMatchObject({ usable: false });
   });
 
-  // The exact frames are pinned to one FFmpeg build. Other builds are judged by the usable check above.
-  it.skipIf(ffmpegVersionLine() !== reference.ffmpegVersionLine)(
-    'matches the pinned reference frames on the pinned FFmpeg build',
-    () => {
-      const judged = drawProbe(bundledFace());
-      expect(judged.differingPixels).toBe(reference.differingPixels);
-      expect(digestOf(join(directory, 'canonical.rgb'))).toBe(reference.canonicalFrameSha256);
-      expect(digestOf(join(directory, 'missing.rgb'))).toBe(reference.missingFrameSha256);
-    },
-  );
+  // The exact frames are pinned to one FFmpeg build on one platform: each OS picks its own system font for the missing
+  // family. Other builds and platforms are judged by the usable check above.
+  it.skipIf(
+    process.platform !== reference.platform || ffmpegVersionLine() !== reference.ffmpegVersionLine,
+  )('matches the pinned reference frames on the pinned FFmpeg build', () => {
+    const judged = drawProbe(bundledFace());
+    expect(judged.differingPixels).toBe(reference.differingPixels);
+    expect(digestOf(join(directory, 'canonical.rgb'))).toBe(reference.canonicalFrameSha256);
+    expect(digestOf(join(directory, 'missing.rgb'))).toBe(reference.missingFrameSha256);
+  });
 });
