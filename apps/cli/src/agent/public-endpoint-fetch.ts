@@ -5,7 +5,7 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import type { IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { isIP, type LookupFunction } from 'node:net';
+import { BlockList, isIP, type LookupFunction } from 'node:net';
 import { Readable } from 'node:stream';
 import type { JoyFetch } from '@joy-media/joy-agent-engine';
 import { isPrivateOrInternalHost } from '@joy-media/provider-sdk';
@@ -43,6 +43,31 @@ export function pinnedLookup(addresses: readonly string[]): LookupFunction {
     }
     callback(null, first.address, first.family);
   };
+}
+
+/**
+ * IPv6 ranges that carry an IPv4 address a kernel, a NAT64 gateway or a 6to4 relay can deliver to: the IPv4-compatible
+ * ::/96, the translated ::ffff:0:0:0/96, the NAT64 prefixes 64:ff9b::/96 and 64:ff9b:1::/48, and 6to4 2002::/16. The
+ * shared address check does not list them, so this transport refuses them as well.
+ */
+const embeddedIpv4Ranges = new BlockList();
+for (const [network, prefix] of [
+  ['::', 96],
+  ['::ffff:0:0:0', 96],
+  ['64:ff9b::', 96],
+  ['64:ff9b:1::', 48],
+  ['2002::', 16],
+] as const) {
+  embeddedIpv4Ranges.addSubnet(network, prefix, 'ipv6');
+}
+
+/**
+ * Whether an address is refused for a public endpoint: the shared private-address rule, the embedded-IPv4 ranges above,
+ * and any address with a zone, which no DNS answer should carry.
+ */
+function isRefusedAddress(address: string): boolean {
+  if (address.includes('%') || isPrivateOrInternalHost(address)) return true;
+  return isIP(address) === 6 && embeddedIpv4Ranges.check(address, 'ipv6');
 }
 
 /** A refusal has the shape of a failed fetch, so the CLI reports it as a network error with this code. */
@@ -109,7 +134,11 @@ function toResponse(reply: IncomingMessage): Response {
     if (value === undefined) continue;
     for (const item of Array.isArray(value) ? value : [value]) headers.append(name, item);
   }
-  const status = reply.statusCode !== undefined && reply.statusCode >= 200 ? reply.statusCode : 502;
+  // The Response constructor throws outside 200-599, so such a status becomes a bad gateway.
+  const status =
+    reply.statusCode !== undefined && reply.statusCode >= 200 && reply.statusCode <= 599
+      ? reply.statusCode
+      : 502;
   const init = { status, statusText: reply.statusMessage ?? '', headers };
   if (status === 204 || status === 205 || status === 304) {
     reply.resume();
@@ -119,6 +148,13 @@ function toResponse(reply: IncomingMessage): Response {
     Readable.toWeb(reply) as unknown as ConstructorParameters<typeof Response>[0],
     init,
   );
+}
+
+const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
+
+/** A redirect as the fetch API defines it: a redirect status with a Location header. */
+function isRedirect(reply: IncomingMessage): boolean {
+  return REDIRECT_STATUSES.has(reply.statusCode ?? 0) && reply.headers.location !== undefined;
 }
 
 /** One HTTPS request to the vetted addresses: a fresh socket, the name kept for TLS, and no redirect followed. */
@@ -154,9 +190,22 @@ function sendPinned(
         agent: false,
         lookup: pinnedLookup(addresses),
       },
-      (reply) => resolve(toResponse(reply)),
+      (reply) => {
+        try {
+          if (init?.redirect === 'error' && isRedirect(reply)) {
+            throw new TypeError('fetch failed', { cause: new Error('unexpected redirect') });
+          }
+          resolve(toResponse(reply));
+        } catch (error) {
+          reply.resume();
+          reject(error);
+        }
+      },
     );
-    req.on('error', reject);
+    // A socket or TLS failure is a failed fetch, as undici reports it. An abort keeps the reason the caller gave.
+    req.on('error', (error) => {
+      reject(signal?.aborted ? error : new TypeError('fetch failed', { cause: error }));
+    });
     if (signal !== undefined) {
       const onAbort = (): void => {
         req.destroy(abortReason(signal) as Error);
@@ -171,7 +220,7 @@ function sendPinned(
 /**
  * A fetch for a public custom endpoint. Before each request the name is resolved again, and the request goes only to
  * addresses that are public. An answer that is private, loopback, link-local or internal is refused before any socket
- * opens. A redirect is returned as it is.
+ * opens. A redirect is returned as it is, unless the caller asks for an error, and it is never followed.
  */
 export function createPublicEndpointFetch(options: PublicEndpointFetchOptions = {}): JoyFetch {
   const resolveHost = options.resolveHost ?? resolveSystemHost;
@@ -179,15 +228,18 @@ export function createPublicEndpointFetch(options: PublicEndpointFetchOptions = 
   return async (input, init) => {
     const signal = init?.signal ?? undefined;
     if (signal?.aborted) throw abortReason(signal);
-    const url = new URL(input instanceof Request ? input.url : input.toString());
+    if (input instanceof Request) {
+      throw new TypeError('A public endpoint request takes a URL and options, not a Request.');
+    }
+    const url = new URL(input.toString());
     if (url.protocol !== 'https:') throw refused('A public endpoint must use HTTPS.');
     const hostname = url.hostname.replace(/^\[/, '').replace(/\]$/, '');
-    if (isPrivateOrInternalHost(hostname)) {
+    if (isRefusedAddress(hostname)) {
       throw refused('A public endpoint may not name a private, link-local or internal address.');
     }
     const body = bodyBytes(init?.body);
     const addresses = await answerFor(resolveHost, hostname, signal);
-    if (addresses.length === 0 || addresses.some((address) => isPrivateOrInternalHost(address))) {
+    if (addresses.length === 0 || addresses.some((address) => isRefusedAddress(address))) {
       throw refused('This endpoint name resolves to a private address.');
     }
     return sendPinned(url, hostname, addresses, init, body, request);
