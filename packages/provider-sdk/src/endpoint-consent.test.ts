@@ -52,6 +52,14 @@ describe('a public custom endpoint (S8)', () => {
     });
   });
 
+  it('allows a NAT64 address that embeds a public IPv4, with consent, as a DNS64 network returns it', () => {
+    expect(
+      evaluateEndpoint(CUSTOM_PROVIDER_ID, 'https://[64:ff9b::5db8:d822]/v1', {
+        consentToPublicEndpoint: true,
+      }),
+    ).toMatchObject({ allowed: true, kind: 'public' });
+  });
+
   it('does not let consent widen a registry provider', () => {
     expect(
       evaluateEndpoint('grok', 'https://api.example.com/v1', { consentToPublicEndpoint: true })

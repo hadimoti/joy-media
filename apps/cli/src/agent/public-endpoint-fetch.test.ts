@@ -423,6 +423,19 @@ describe('createPublicEndpointFetch', () => {
     expect(await failureCode(send('https://api.example.com/v1/models'))).toBe('ECONNREFUSED');
   });
 
+  it('connects to a NAT64 address that embeds a public IPv4 address, as a DNS64 network returns it', async () => {
+    const https = fakeHttps(OK);
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['64:ff9b::5db8:d822'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    expect(response.status).toBe(200);
+    expect(https.mock).toHaveBeenCalledTimes(1);
+  });
+
   it('connects an IPv6 literal without brackets and without a server name', async () => {
     const https = fakeHttps(OK);
     const resolveHost = vi.fn(async (_hostname: string) => ['2606:4700:4700::1111']);

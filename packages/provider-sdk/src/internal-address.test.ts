@@ -27,8 +27,8 @@ describe('internal address names (S8 item 4)', () => {
     '[::a00:1]',
     '[::ffff:0:a00:1]',
     '[64:ff9b::a9fe:a9fe]',
-    '[64:ff9b::5db8:d822]',
     '[64:ff9b:1::a00:1]',
+    '[64:ff9b:1::5db8:d822]',
     '[2002:c0a8:101::1]',
     '[2002:5db8:d822::1]',
     '[0:0:0:0:0:0:7f00:1]',
@@ -44,6 +44,10 @@ describe('internal address names (S8 item 4)', () => {
     '[2606:4700:4700::1111]',
     '[2001:4860:4860::8888]',
     '[::ffff:93.184.216.34]',
+    // A NAT64 or translated address is judged by the IPv4 it carries: a DNS64 network returns these for public servers.
+    '[64:ff9b::5db8:d822]',
+    '[64:ff9b::808:808]',
+    '[::ffff:0:5db8:d822]',
     'api.example.com',
   ])('allows the public %s', (host) => {
     expect(isPrivateOrInternalHost(host)).toBe(false);
