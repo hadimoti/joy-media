@@ -6,7 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
-  rmdirSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -318,8 +318,38 @@ const LOCK_STALE_MS = 10_000;
 const LOCK_WAIT_MS = 15_000;
 
 /**
+ * Whether the process that holds the config lock directory has gone. A live owner is never reclaimed, however long it
+ * holds the lock. A lock with no readable owner record goes by age alone, which covers a crash between taking the lock
+ * and recording it.
+ */
+function configLockOwnerIsGone(lock: string): boolean {
+  let pid: unknown;
+  try {
+    pid = (JSON.parse(readFileSync(join(lock, 'owner'), 'utf8')) as { pid?: unknown }).pid;
+  } catch {
+    pid = undefined;
+  }
+  if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ESRCH';
+    }
+  }
+  try {
+    return Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Serialise read-modify-write cycles on the config files across processes
  * (AI agents happily run several `joy-media agent provider add` at once).
+ *
+ * On Windows, creating a lock directory while another process is still removing it fails with EPERM or EBUSY. Both are
+ * transient, so they are retried until the deadline, like a held lock (EEXIST).
  */
 function withConfigLock<T>(fn: () => T): T {
   const lock = join(getJoyMediaDir(), '.config.lock');
@@ -329,11 +359,14 @@ function withConfigLock<T>(fn: () => T): T {
       mkdirSync(lock);
       break;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) rmdirSync(lock);
-      } catch {
-        // Lock released between our checks: retry.
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST' && code !== 'EPERM' && code !== 'EBUSY') throw error;
+      if (code === 'EEXIST') {
+        try {
+          if (configLockOwnerIsGone(lock)) rmSync(lock, { recursive: true, force: true });
+        } catch {
+          // Lock released between our checks: retry.
+        }
       }
       if (Date.now() > deadline) {
         throw new Error(`Timed out waiting for the config lock ${lock}. Remove it if stale.`);
@@ -342,10 +375,18 @@ function withConfigLock<T>(fn: () => T): T {
     }
   }
   try {
+    // The owner is recorded after the lock is taken. A missing record only means the lock is judged by its age.
+    try {
+      writeFileSync(join(lock, 'owner'), JSON.stringify({ pid: process.pid }), {
+        mode: PRIVATE_FILE_MODE,
+      });
+    } catch {
+      // Without a record the lock is judged by its age alone.
+    }
     return fn();
   } finally {
     try {
-      rmdirSync(lock);
+      rmSync(lock, { recursive: true, force: true });
     } catch {
       // Already gone.
     }
