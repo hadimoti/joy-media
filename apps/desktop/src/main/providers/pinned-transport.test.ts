@@ -1,13 +1,18 @@
 import { EventEmitter } from 'node:events';
 import type { request as httpsRequest } from 'node:https';
 import { Readable } from 'node:stream';
+import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from 'node:zlib';
 import { describe, expect, it, vi } from 'vitest';
 import { pinnedFetch, pinnedLookup } from './pinned-transport.js';
 
 type FakeResponse = Readable & { statusCode?: number; statusMessage?: string; headers?: object };
 
 /** A stand-in for https.request that records each call and answers with a fixed reply. */
-function fakeRequest(reply: { status: number; headers?: Record<string, string>; body?: string }) {
+function fakeRequest(reply: {
+  status: number;
+  headers?: Record<string, string>;
+  body?: string | Buffer;
+}) {
   const calls: Array<{ options: Record<string, unknown>; written: string[] }> = [];
   const request = vi.fn(
     (options: Record<string, unknown>, onResponse: (res: FakeResponse) => void) => {
@@ -19,7 +24,8 @@ function fakeRequest(reply: { status: number; headers?: Record<string, string>; 
           return true;
         },
         end: () => {
-          const res = Readable.from([Buffer.from(reply.body ?? '')]) as FakeResponse;
+          const bytes = Buffer.isBuffer(reply.body) ? reply.body : Buffer.from(reply.body ?? '');
+          const res = Readable.from([bytes]) as FakeResponse;
           res.statusCode = reply.status;
           res.statusMessage = 'OK';
           res.headers = reply.headers ?? {};
@@ -37,6 +43,21 @@ function fakeRequest(reply: { status: number; headers?: Record<string, string>; 
 
 function asHttps(request: ReturnType<typeof fakeRequest>['request']): typeof httpsRequest {
   return request as unknown as typeof httpsRequest;
+}
+
+/** Fetches one pinned public host with the fake reply, and returns the response with the recorded calls. */
+async function fetchReply(
+  reply: { status: number; headers?: Record<string, string>; body?: string | Buffer },
+  init: RequestInit = {},
+) {
+  const { request, calls } = fakeRequest(reply);
+  const fetchImpl = pinnedFetch(
+    new Map([['api.example.com', ['93.184.216.34']]]),
+    vi.fn(),
+    asHttps(request),
+  );
+  const response = await fetchImpl('https://api.example.com/v1/models', init);
+  return { response, calls };
 }
 
 describe('pinned lookup (S8 item 4)', () => {
@@ -217,5 +238,81 @@ describe('pinned fetch (S8 item 4 and 5)', () => {
       fetchImpl('https://api.example.com/v1/upload', { method: 'POST', body: new Blob(['x']) }),
     ).rejects.toThrow(/text or bytes/);
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unpinned host that is neither a provider host nor this computer', async () => {
+    const fallback = vi.fn(async () => new Response('ok'));
+    const { request } = fakeRequest({ status: 200 });
+    const fetchImpl = pinnedFetch(new Map(), fallback, asHttps(request));
+    await expect(fetchImpl('https://attacker.example/v1/models', {})).rejects.toThrow(
+      /no vetted address/,
+    );
+    expect(fallback).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('sends this computer, a sign-in host and a provider host to the fallback without a pin', async () => {
+    const fallback = vi.fn(async () => new Response('ok'));
+    const { request } = fakeRequest({ status: 200 });
+    const fetchImpl = pinnedFetch(new Map(), fallback, asHttps(request));
+    for (const url of [
+      'http://127.0.0.1:1234/v1/models',
+      'https://auth.x.ai/.well-known/openid-configuration',
+      'https://api.anthropic.com/v1/messages',
+    ]) {
+      await fetchImpl(url, {});
+    }
+    expect(fallback).toHaveBeenCalledTimes(3);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('decodes a gzip reply and drops its coding headers', async () => {
+    const { response } = await fetchReply({
+      status: 200,
+      headers: { 'content-encoding': 'gzip', 'content-length': '24' },
+      body: gzipSync('{"ok":true}'),
+    });
+    expect(await response.text()).toBe('{"ok":true}');
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expect(response.headers.get('content-length')).toBeNull();
+  });
+
+  it('decodes zlib and raw deflate replies', async () => {
+    const zlibReply = await fetchReply({
+      status: 200,
+      headers: { 'content-encoding': 'deflate' },
+      body: deflateSync('{"ok":true}'),
+    });
+    expect(await zlibReply.response.text()).toBe('{"ok":true}');
+    const rawReply = await fetchReply({
+      status: 200,
+      headers: { 'content-encoding': 'deflate' },
+      body: deflateRawSync('{"ok":true}'),
+    });
+    expect(await rawReply.response.text()).toBe('{"ok":true}');
+  });
+
+  it('decodes a brotli reply', async () => {
+    const { response } = await fetchReply({
+      status: 200,
+      headers: { 'content-encoding': 'br' },
+      body: brotliCompressSync('{"ok":true}'),
+    });
+    expect(await response.text()).toBe('{"ok":true}');
+  });
+
+  it('passes a reply in a coding it does not decode through as it is', async () => {
+    const { response } = await fetchReply({
+      status: 200,
+      headers: { 'content-encoding': 'zstd' },
+      body: 'raw-bytes',
+    });
+    expect(response.headers.get('content-encoding')).toBe('zstd');
+    expect(await response.text()).toBe('raw-bytes');
+  });
+
+  it('asks for gzip, deflate and br by default, as the fetch API does', async () => {
+    const { calls } = await fetchReply({ status: 200, body: '{}' });
+    expect(calls[0]?.options.headers).toMatchObject({ 'accept-encoding': 'gzip, deflate, br' });
   });
 });
