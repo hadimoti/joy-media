@@ -154,6 +154,7 @@ export function AgentSlotsSection({
             setSlots((current) => current.map((item) => (item.id === next.id ? next : item)))
           }
           onUse={(profile) => onUseSlot(slot, profile)}
+          onProfilesChanged={onProfilesChanged}
         />
       ))}
     </section>
@@ -165,11 +166,13 @@ function AgentSlotCard({
   profiles,
   onSaved,
   onUse,
+  onProfilesChanged,
 }: {
   readonly slot: DesktopAgentSlot;
   readonly profiles: readonly DesktopProviderProfile[];
   readonly onSaved: (next: DesktopAgentSlot) => void;
   readonly onUse: (profile: DesktopProviderProfile) => Promise<void>;
+  readonly onProfilesChanged?: (() => unknown) | undefined;
 }) {
   const label = slot.label;
   const [profileId, setProfileId] = useState(slot.profileId ?? '');
@@ -222,6 +225,8 @@ function AgentSlotCard({
       setListingNote(
         ids.length === 0 ? 'This profile offers no models. Type a model ID.' : undefined,
       );
+      // The desktop keeps this list on the saved profile, so the profiles the page shows are read again.
+      await onProfilesChanged?.();
     } catch (error) {
       setListingNote(`The models could not be read: ${errorMessage(error)}`);
     } finally {

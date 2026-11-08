@@ -369,7 +369,8 @@ describe('AgentSlotsSection', () => {
       invoke,
     } as unknown as NonNullable<typeof window.joyDesktop>;
     const withoutList: DesktopProviderProfile = { ...chatGptProfile, cachedModels: undefined };
-    const panel = await render({ profiles: [withoutList], onUseSlot: vi.fn() });
+    const onProfilesChanged = vi.fn();
+    const panel = await render({ profiles: [withoutList], onUseSlot: vi.fn(), onProfilesChanged });
 
     expect(panel.querySelector('[aria-label="Workhorse model"]')?.tagName).toBe('INPUT');
     await act(async () => {
@@ -378,6 +379,8 @@ describe('AgentSlotsSection', () => {
     });
 
     expect(invoke).toHaveBeenCalledWith('desktop.provider.models', { id: 'chatgpt-profile-1' });
+    // The desktop keeps the list on the profile, so the profiles are read again.
+    expect(onProfilesChanged).toHaveBeenCalled();
     expect(panel.querySelector('[aria-label="Workhorse model"]')?.tagName).toBe('SELECT');
     expect(buttonNamed(panel, 'Type a model ID')).toBeDefined();
   });

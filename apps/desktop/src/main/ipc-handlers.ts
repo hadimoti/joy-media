@@ -477,8 +477,13 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
     'desktop.provider.models': async (payload): Promise<IpcResult> => {
       const source = asModelSource(payload);
       if (source === undefined) return { ok: false, error: 'Invalid model source' };
+      // The saved profile as it was when its list was asked for, so the list is kept only for that same profile.
+      const before =
+        'profileId' in source ? deps.localDatabase.getProviderProfile(source.profileId) : undefined;
       const result = await deps.providerBroker.listModels(source);
-      return result.ok ? { ok: true, data: result.data } : { ok: false, error: result.message };
+      if (!result.ok) return { ok: false, error: result.message };
+      if (before !== undefined) keepListedModels(deps.localDatabase, before, result.data);
+      return { ok: true, data: result.data };
     },
     'desktop.agent.request': async (payload): Promise<IpcResult> => {
       const request = asAgentRequest(payload);
@@ -710,6 +715,30 @@ function asProfileId(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = (value as { id?: unknown }).id;
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
+}
+
+/**
+ * Keeps a list read by Refresh models on its saved profile, so the list is offered again after a reload. The list is
+ * kept only while the profile still has the provider, endpoint and key it had when the list was asked for.
+ */
+function keepListedModels(
+  database: LocalDatabase,
+  before: ProviderProfile,
+  models: readonly { readonly id: string }[],
+): void {
+  const now = database.getProviderProfile(before.id);
+  if (
+    now === undefined ||
+    now.provider !== before.provider ||
+    now.baseUrl !== before.baseUrl ||
+    now.secretHandleId !== before.secretHandleId
+  ) {
+    return;
+  }
+  database.setProviderProfileCachedModels(
+    before.id,
+    models.map((model) => model.id),
+  );
 }
 
 /**

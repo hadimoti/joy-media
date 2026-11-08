@@ -600,6 +600,100 @@ describe('IPC dispatch', () => {
     );
     expect(JSON.stringify(result)).not.toContain('sk-draft');
   });
+  it('a refresh of a saved profile keeps its list on the profile', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const created = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        modelId: 'gpt-4o-mini',
+        apiKey: 'sk-saved',
+      },
+    });
+    const id = (created.data as { id: string }).id;
+    d.providerFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: [{ id: 'gpt-4o-mini' }, { id: 'gpt-4.1' }] }), {
+        status: 200,
+      }),
+    );
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider.models',
+      payload: { id },
+    });
+    expect(result.ok).toBe(true);
+    expect(d.localDatabase.getProviderProfile(id)?.cachedModels).toEqual([
+      'gpt-4o-mini',
+      'gpt-4.1',
+    ]);
+    expect(JSON.stringify(result)).not.toContain('sk-saved');
+  });
+  it('a refresh that fails keeps the saved list', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const created = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        modelId: 'gpt-4o-mini',
+        apiKey: 'sk-saved',
+      },
+    });
+    const id = (created.data as { id: string }).id;
+    d.localDatabase.setProviderProfileCachedModels(id, ['gpt-4o-mini']);
+    d.providerFetch.mockImplementation(async () => new Response('{}', { status: 500 }));
+    const result = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider.models',
+      payload: { id },
+    });
+    expect(result.ok).toBe(false);
+    expect(d.localDatabase.getProviderProfile(id)?.cachedModels).toEqual(['gpt-4o-mini']);
+  });
+  it('a list read for an endpoint changed meanwhile is not saved', async () => {
+    const d = deps();
+    const handlers = createIpcHandlers(d);
+    const created = await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider-profile.save',
+      payload: {
+        provider: 'openai-compatible',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        modelId: 'gpt-4o-mini',
+        apiKey: 'sk-saved',
+      },
+    });
+    const id = (created.data as { id: string }).id;
+    d.localDatabase.setProviderProfileCachedModels(id, ['gpt-4o-mini']);
+    d.providerFetch.mockImplementationOnce(async () => {
+      // The endpoint and the key change while the list is being read.
+      await dispatchIpcRequest(handlers, {
+        origin: 'joy-media-app://renderer',
+        channel: 'desktop.provider-profile.save',
+        payload: {
+          id,
+          provider: 'openai-compatible',
+          baseUrl: 'http://127.0.0.1:9999/v1',
+          modelId: 'gpt-4o-mini',
+          apiKey: 'sk-other',
+        },
+      });
+      return new Response(JSON.stringify({ data: [{ id: 'gpt-4.1' }] }), { status: 200 });
+    });
+    await dispatchIpcRequest(handlers, {
+      origin: 'joy-media-app://renderer',
+      channel: 'desktop.provider.models',
+      payload: { id },
+    });
+    const after = d.localDatabase.getProviderProfile(id);
+    expect(after?.baseUrl).toBe('http://127.0.0.1:9999/v1');
+    expect(after?.cachedModels).toBeUndefined();
+  });
   it('handles desktop window control actions', async () => {
     const handleWindowControl = vi.fn(async (action: string) => {
       if (action === 'maximize') return true;

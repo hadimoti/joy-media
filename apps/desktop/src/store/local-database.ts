@@ -410,6 +410,16 @@ export class LocalDatabase {
       .run(secretDigest, this.now(), profileId);
   }
 
+  /**
+   * Keeps the model list read by Refresh models on a saved profile, so the list is offered again after a reload.
+   * Only the list changes; the endpoint, the key and the binding stay as they are.
+   */
+  setProviderProfileCachedModels(profileId: string, models: readonly string[]): void {
+    this.db
+      .prepare('UPDATE provider_profiles SET cached_models = ? WHERE id = ?')
+      .run(JSON.stringify(models), profileId);
+  }
+
   getSetting(key: string): string | undefined {
     const row = this.db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as
       { value: string } | undefined;
