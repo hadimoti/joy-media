@@ -251,6 +251,33 @@ describe('agent slots in the CLI', () => {
     expect(loadAgentSlot('creative').profileId).toBeUndefined();
   });
 
+  it('changes one slot model through the command line, and keeps its profile, instructions and settings', async () => {
+    saveAgentSlot('workhorse', {
+      profileId: 'local-a',
+      model: 'model-old',
+      instructions: 'Plain words.',
+      settings: { temperature: 0.2 },
+    });
+
+    expect(await runCli(['agent', 'model', 'set', 'model-new', '--slot', 'workhorse'])).toBe(0);
+    expect(loadAgentSlot('workhorse')).toMatchObject({
+      profileId: 'local-a',
+      model: 'model-new',
+      instructions: 'Plain words.',
+      settings: { temperature: 0.2 },
+    });
+    expect(await runCli(['agent', 'model', 'get', '--slot', 'workhorse'])).toBe(0);
+    expect(await runCli(['agent', 'model', 'set', 'model-x', '--slot', 'nobody'])).not.toBe(0);
+    expect(loadAgentSlot('workhorse').model).toBe('model-new');
+  });
+
+  it('leaves the slots alone when the model is set without a slot', async () => {
+    saveAgentSlot('workhorse', { profileId: 'local-a', model: 'model-old' });
+
+    expect(await runCli(['agent', 'model', 'set', 'default-model'])).toBe(0);
+    expect(loadAgentSlot('workhorse').model).toBe('model-old');
+  });
+
   it('refuses a slot combined with an explicit provider', () => {
     saveAgentSlot('workhorse', { profileId: 'local-a', model: 'model-a' });
     expect(() => resolveByokConfig({ slot: 'workhorse', provider: 'local-b' })).toThrow(

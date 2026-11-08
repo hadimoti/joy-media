@@ -46,6 +46,8 @@ export interface SignInResult {
   readonly provider: SignInProvider;
   readonly baseUrl: string;
   readonly modelId: string;
+  /** The model ids the account lists, when the sign-in read them. Saved with the profile, so the choice needs no new read. */
+  readonly cachedModels?: readonly string[];
   readonly secret: string;
 }
 
@@ -133,11 +135,12 @@ export function createProviderSignIn(
       now: deps.now,
       ...(deps.chatGptPort === undefined ? {} : { port: deps.chatGptPort }),
     });
-    const modelId = await firstChatGptModel(record, deps.fetch);
+    const choice = await chatGptModelChoice(record, deps.fetch);
     return {
       provider,
       baseUrl: CHATGPT_RESPONSES_BASE_URL,
-      modelId,
+      modelId: choice.modelId,
+      cachedModels: choice.models,
       secret: encodeTokenRecord(record),
     };
   };
@@ -157,24 +160,35 @@ function providerLabel(provider: string): string {
   return findRegistryProvider(provider)?.label ?? provider;
 }
 
+/** The model a new ChatGPT profile starts on when the account lists it. Every other listed model stays selectable. */
+const PREFERRED_CHATGPT_MODEL = 'gpt-6-luna';
+
 /**
- * The first model the account may list. A new ChatGPT profile starts on it, and the profile returns its id to the
- * renderer, so an id that holds either token is refused.
+ * The models the account may list, and the model a new ChatGPT profile starts on: gpt-6-luna when it is listed,
+ * otherwise the first usable model. The profile returns its id to the renderer, so an id that holds either token is
+ * never offered.
  */
-async function firstChatGptModel(record: ChatGptTokenRecord, fetch: FetchLike): Promise<string> {
+async function chatGptModelChoice(
+  record: ChatGptTokenRecord,
+  fetch: FetchLike,
+): Promise<{ readonly modelId: string; readonly models: readonly string[] }> {
   const listing = await chatGptCatalogText(
     prepareChatGptModels({ accessToken: record.accessToken }),
     fetch,
   );
-  const first = listedChatGptModels(listing)[0];
-  if (first === undefined) {
+  const listed = listedChatGptModels(listing);
+  if (listed.length === 0) {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT lists no models for this account.');
   }
   const tokens = [record.accessToken, record.refreshToken];
-  if (tokens.some((token) => holdsCredential(first.id, token))) {
+  const models = listed.filter(
+    (model) => !tokens.some((token) => holdsCredential(model.id, token)),
+  );
+  const chosen = models.find((model) => model.id === PREFERRED_CHATGPT_MODEL) ?? models[0];
+  if (chosen === undefined) {
     throw new OAuthFlowError('EXCHANGE_FAILED', 'ChatGPT lists no usable model for this account.');
   }
-  return first.id;
+  return { modelId: chosen.id, models: models.map((model) => model.id) };
 }
 
 /**

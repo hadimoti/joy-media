@@ -13,6 +13,7 @@ import {
   signInDesktopProviderProfile,
   type DesktopProviderProfile,
 } from './desktop-client.js';
+import { providerLabel } from './provider-labels.js';
 
 /** Owner wording for the xAI sign-in route, reworded 2026-11-01 to say the route may be disabled and the API key is better. */
 const OAUTH_RISK_NOTICE =
@@ -23,12 +24,6 @@ const RISK_NOTICE_PROVIDERS: ReadonlySet<RegistryProviderId> = new Set<RegistryP
 
 /** D23 sign-in provider order follows the existing settings panel order. */
 const ORDER: readonly RegistryProviderId[] = ['chatgpt', 'kimi', 'xai'];
-
-const LABELS: Partial<Record<RegistryProviderId, string>> = {
-  chatgpt: 'ChatGPT',
-  kimi: 'Kimi',
-  xai: 'xAI',
-};
 
 function rank(provider: RegistryProviderId): number {
   const index = ORDER.indexOf(provider);
@@ -42,11 +37,6 @@ function rank(provider: RegistryProviderId): number {
 function apiKeyRegions(provider: RegistryProvider): readonly ProviderRegion[] {
   if (provider.signInOnly === true || !provider.auth.methods.includes('api-key')) return [];
   return provider.regions.filter((region) => region.route !== 'oauth');
-}
-
-/** The short D22 provider names used by the sign-in actions. Source: D22 step 2 brief (2026-10-30). */
-function providerLabel(provider: RegistryProviderId): string {
-  return LABELS[provider] ?? findRegistryProvider(provider)?.label ?? provider;
 }
 
 /**

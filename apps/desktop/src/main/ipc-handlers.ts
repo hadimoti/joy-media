@@ -14,7 +14,12 @@ import type {
   ProviderProfile,
 } from '../store/local-database.js';
 import { LEGACY_PROVIDER_IDS } from '../store/migrations.js';
-import { clearAgentSlotsForProfile, readAgentSlots, writeAgentSlot } from '../store/agent-slots.js';
+import {
+  clearAgentSlotsForProfile,
+  readAgentSlot,
+  readAgentSlots,
+  writeAgentSlot,
+} from '../store/agent-slots.js';
 import { resolveSlotRequest } from './agent-slot-request.js';
 import { AgentRequestRegistry } from './agent-requests.js';
 import { OAuthFlowError } from './oauth/errors.js';
@@ -106,12 +111,15 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         return { ok: false, error: 'Sign-in is not available in this build' };
       }
       let savedChatGptRecord: ChatGptTokenRecord | undefined;
+      // The model list the profile already holds, so signing in again does not drop it.
+      let existingCachedModels: readonly string[] | undefined;
       // A sign-in can only update a profile of the same provider, so it never changes what a profile is.
       if (request.id !== undefined) {
         const existing = deps.localDatabase.getProviderProfile(request.id);
         if (existing === undefined || existing.provider !== request.provider) {
           return { ok: false, error: 'That profile cannot be signed in again' };
         }
+        existingCachedModels = existing.cachedModels;
         if (request.provider === 'chatgpt') {
           try {
             const stored = await deps.secretStore.get(existing.secretHandleId);
@@ -183,13 +191,27 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
           }
         }
         // The result is saved through the profile route, so it is checked and bound like any other save.
-        return await handlers['desktop.provider-profile.save']({
+        const cachedModels = signedIn.cachedModels ?? existingCachedModels;
+        const saved = await handlers['desktop.provider-profile.save']({
           ...(request.id === undefined ? {} : { id: request.id }),
+          ...(cachedModels === undefined ? {} : { cachedModels }),
           provider: signedIn.provider,
           baseUrl: signedIn.baseUrl,
           modelId: signedIn.modelId,
           apiKey: signedIn.secret,
         });
+        // A first sign-in fills an empty Workhorse, so the new subscription is in use without a pick. A slot that already
+        // names a profile is left as it is.
+        if (saved.ok && request.id === undefined) {
+          const profileId = (saved.data as { readonly id?: unknown } | undefined)?.id;
+          if (
+            typeof profileId === 'string' &&
+            readAgentSlot(deps.localDatabase, 'workhorse').profileId === undefined
+          ) {
+            writeAgentSlot(deps.localDatabase, 'workhorse', { profileId, model: signedIn.modelId });
+          }
+        }
+        return saved;
       } catch (error) {
         return {
           ok: false,

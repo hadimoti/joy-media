@@ -11,6 +11,7 @@ import type {
 import { CloseIcon } from './icons.js';
 import { AgentSlotsSection } from './AgentSlotsSection.js';
 import type { DesktopAgentSlot } from './desktop-client.js';
+import { profileLabel } from './provider-labels.js';
 import { sessionProviderFor } from './joy-agent/provider-call.js';
 import {
   evaluateEndpoint,
@@ -1067,7 +1068,11 @@ export function JoyAgentSettingsDialog({
 
             {/* TAB 1: AI MODELS & APIS */}
             {activeTab === 'models' ? (
-              <AgentSlotsSection profiles={profiles} onUseSlot={useAgentSlot} />
+              <AgentSlotsSection
+                profiles={profiles}
+                onUseSlot={useAgentSlot}
+                onProfilesChanged={() => loadProfiles()}
+              />
             ) : null}
             {activeTab === 'models' && (
               <div className="joy-accordion">
@@ -1135,7 +1140,7 @@ export function JoyAgentSettingsDialog({
                             className={`joy-settings-provider-card ${savedProfile?.id === prof.id ? 'is-active' : ''} ${disabledLegacy ? 'is-disabled-legacy' : ''}`}
                           >
                             <div className="joy-settings-provider-meta">
-                              <strong>{prof.name || prof.provider}</strong>
+                              <strong>{profileLabel(prof)}</strong>
                               <span>{displayModelId(prof.modelId)}</span>
                               {disabledLegacy && (
                                 <span className="joy-settings-legacy-status">
@@ -1210,7 +1215,7 @@ export function JoyAgentSettingsDialog({
                                     aria-label={
                                       prof.provider === 'chatgpt'
                                         ? 'Remove ChatGPT profile locally'
-                                        : `Remove ${prof.name || prof.provider} profile`
+                                        : `Remove ${profileLabel(prof)} profile`
                                     }
                                   >
                                     ✕

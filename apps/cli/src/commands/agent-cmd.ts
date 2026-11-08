@@ -1026,11 +1026,34 @@ function effectiveJson(resolved: ReturnType<typeof tryResolve>): unknown {
 }
 
 async function handleModel(args: string[], flags: CliFlags, out: AgentOutput): Promise<number> {
+  // --slot points the model at one agent slot. Without it the CLI default model is used, exactly as before.
+  const slotId = flags.slot === undefined ? undefined : parseAgentSlotId(flags.slot);
+  if (flags.slot !== undefined && slotId === undefined) {
+    throw usage('--slot must be "workhorse" or "creative".');
+  }
   const action = args[1] ?? 'get';
   if (action === 'set') {
     const modelId = (args[2] ?? flags.model)?.trim();
     if (!modelId) throw usage('Model ID required. Usage: joy-media agent model set <model-id>');
     if (modelId.length > 256) throw usage('The model id must be at most 256 characters long.');
+    if (slotId !== undefined) {
+      // The slot keeps its profile, instructions and settings. Only its model changes.
+      const current = loadAgentSlot(slotId);
+      const result = saveAgentSlot(slotId, {
+        profileId: current.profileId,
+        model: modelId,
+        instructions: current.instructions,
+        settings: current.settings,
+      });
+      if (!result.ok) {
+        throw failure(
+          `The slot was not saved: ${result.issue}${result.field === undefined ? '' : ` (${result.field})`}.`,
+        );
+      }
+      out.success(`${result.slot.label} model set to "${modelId}".`);
+      out.result({ ok: true, slot: result.slot.id, model: modelId });
+      return 0;
+    }
     updateCliConfig((cfg) => ({ ...cfg, defaultModel: modelId }));
     out.success(`Default model set to "${modelId}".`);
     out.result({ ok: true, defaultModel: modelId });
@@ -1041,6 +1064,12 @@ async function handleModel(args: string[], flags: CliFlags, out: AgentOutput): P
       `Unknown model action "${action}". Available actions: get, set`,
       'UNKNOWN_SUBCOMMAND',
     );
+  }
+  if (slotId !== undefined) {
+    const slot = loadAgentSlot(slotId);
+    out.info(`${slot.label} model: ${slot.model ?? 'not set'}`);
+    out.result({ slot: slotId, model: slot.model ?? null });
+    return 0;
   }
   const resolved = tryResolve();
   const model = 'settings' in resolved ? resolved.settings.modelId : loadCliConfig().defaultModel;

@@ -124,7 +124,14 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['probe', 'Check the configured LLM provider capabilities'],
       ['config', 'Show or update the agent configuration'],
       ['provider [list|add|use|remove] <name>', 'Manage AI providers'],
-      ['model [get|set <model-id>]', 'Show or set the default model'],
+      [
+        'model [get|set <model-id>] [--slot <workhorse|creative>]',
+        'Show or set the default model, or an agent slot model',
+      ],
+      [
+        'slot [list|set|clear] <workhorse|creative>',
+        'Show or change an agent slot (the desktop app keeps its own slots)',
+      ],
       ['models [provider]', 'List models offered by a provider (network)'],
     ],
     options: [
@@ -135,6 +142,8 @@ const COMMAND_HELP: Readonly<Record<string, CommandHelp>> = {
       ['--api-key <key>', 'API key override'],
       ['--url, -u <url> / --base-url <url>', 'Provider base URL'],
       ['--name, -n <name>', 'Provider name (provider add/use/remove)'],
+      ['--slot <workhorse|creative>', 'Agent slot for model get/set'],
+      ['--profile <name>', 'Provider profile for an agent slot'],
       ['--json', 'Machine-readable output where supported'],
     ],
   },

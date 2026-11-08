@@ -5,6 +5,7 @@ import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
 import type { SupervisedChild } from './worker-supervisor.js';
 import { LocalDatabase } from '../store/local-database.js';
+import { readAgentSlot, writeAgentSlot } from '../store/agent-slots.js';
 import type { ProviderBroker } from './providers/provider-broker.js';
 import { OAuthFlowError } from './oauth/errors.js';
 import type { ProviderSignInContext, SignInProvider, SignInResult } from './oauth/sign-in.js';
@@ -48,6 +49,57 @@ function harness(
   });
   return { handlers, localDatabase, secretStore };
 }
+
+describe('a first sign-in in the desktop', () => {
+  it('fills an empty Workhorse with the new profile and its model, and keeps the model list the sign-in read', async () => {
+    const providerSignIn = vi.fn(async (): Promise<SignInResult> => ({
+      provider: 'chatgpt',
+      baseUrl: 'https://api.openai.com/v1',
+      modelId: 'gpt-6-luna',
+      cachedModels: ['gpt-6.1-sol', 'gpt-6-luna'],
+      secret: CHATGPT_SECRET,
+    }));
+    const { handlers, localDatabase } = harness(providerSignIn);
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin: ORIGIN,
+      channel: 'desktop.provider-profile.sign-in',
+      payload: { provider: 'chatgpt' },
+    });
+
+    expect(result.ok).toBe(true);
+    const [profile] = localDatabase.listProviderProfiles();
+    expect(profile?.cachedModels).toEqual(['gpt-6.1-sol', 'gpt-6-luna']);
+    expect(readAgentSlot(localDatabase, 'workhorse')).toMatchObject({
+      profileId: profile?.id,
+      model: 'gpt-6-luna',
+    });
+    expect(readAgentSlot(localDatabase, 'creative').profileId).toBeUndefined();
+  });
+
+  it('leaves a Workhorse that already names a profile as it is', async () => {
+    const providerSignIn = vi.fn(async (): Promise<SignInResult> => ({
+      provider: 'chatgpt',
+      baseUrl: 'https://api.openai.com/v1',
+      modelId: 'gpt-6-luna',
+      secret: CHATGPT_SECRET,
+    }));
+    const { handlers, localDatabase } = harness(providerSignIn);
+    writeAgentSlot(localDatabase, 'workhorse', { profileId: 'kept-profile', model: 'kept-model' });
+
+    const result = await dispatchIpcRequest(handlers, {
+      origin: ORIGIN,
+      channel: 'desktop.provider-profile.sign-in',
+      payload: { provider: 'chatgpt' },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(readAgentSlot(localDatabase, 'workhorse')).toMatchObject({
+      profileId: 'kept-profile',
+      model: 'kept-model',
+    });
+  });
+});
 
 describe('desktop.provider-profile.sign-in', () => {
   it('saves the signed-in profile through the save route, and never returns its secret', async () => {
