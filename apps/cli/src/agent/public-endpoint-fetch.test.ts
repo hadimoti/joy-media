@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 import type { LookupFunction } from 'node:net';
-import { Readable } from 'node:stream';
+import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createPublicEndpointFetch,
@@ -13,6 +13,10 @@ interface Reply {
   readonly status: number;
   readonly headers?: Record<string, string>;
   readonly body?: string;
+  /** The body never ends, so that a test can abort it while it is still streaming. */
+  readonly hold?: boolean;
+  /** The request fails with this error instead of answering. */
+  readonly fail?: Error;
 }
 
 const OK: Reply = {
@@ -21,10 +25,14 @@ const OK: Reply = {
   body: '{"ok":true}',
 };
 
-/** Stands in for one https request: it records what is written, and answers only when given a reply. No socket opens. */
+/**
+ * Stands in for one https request. It records what is written, and answers with a reply or fails with an error. Both
+ * happen on a later tick, as a socket delivers them. No socket opens.
+ */
 class FakeRequest extends EventEmitter {
   readonly written: Buffer[] = [];
   destroyedWith: unknown = undefined;
+  private response: PassThrough | undefined = undefined;
   private readonly reply: Reply | undefined;
   private readonly onResponse: (res: IncomingMessage) => void;
 
@@ -42,18 +50,27 @@ class FakeRequest extends EventEmitter {
   end(chunk?: Buffer | string): void {
     if (chunk !== undefined) this.written.push(Buffer.from(chunk));
     if (this.reply === undefined) return;
-    const res = Readable.from([Buffer.from(this.reply.body ?? '')]);
-    Object.assign(res, {
+    if (this.reply.fail !== undefined) {
+      const error = this.reply.fail;
+      setImmediate(() => this.emit('error', error));
+      return;
+    }
+    const body = new PassThrough();
+    if (this.reply.hold === true) body.write(this.reply.body ?? '');
+    else body.end(this.reply.body ?? '');
+    Object.assign(body, {
       statusCode: this.reply.status,
       statusMessage: 'OK',
       headers: this.reply.headers ?? {},
     });
-    this.onResponse(res as unknown as IncomingMessage);
+    this.response = body;
+    setImmediate(() => this.onResponse(body as unknown as IncomingMessage));
   }
 
   destroy(error?: Error): this {
     this.destroyedWith = error;
-    this.emit('error', error);
+    this.response?.destroy(error);
+    setImmediate(() => this.emit('error', error));
     return this;
   }
 }
@@ -142,6 +159,11 @@ describe('createPublicEndpointFetch', () => {
     ['an IPv6 unique-local address', ['fd00::1']],
     ['an IPv6 multicast address', ['ff02::1']],
     ['an IPv4-mapped loopback address in dotted form', ['::ffff:127.0.0.1']],
+    ['an IPv4-compatible IPv6 address', ['::7f00:1']],
+    ['a NAT64 address that embeds a private IPv4 address', ['64:ff9b::a9fe:a9fe']],
+    ['a 6to4 address that embeds a private IPv4 address', ['2002:c0a8:101::1']],
+    ['a translated IPv4 address', ['::ffff:0:a00:1']],
+    ['a public IPv6 address with a zone', ['2606:4700:4700::1111%eth0']],
     ['a mix of a public and a private address', ['93.184.216.34', '10.0.0.7']],
   ])('refuses a name whose answer is %s', async (_label, answer) => {
     const https = fakeHttps(OK);
@@ -200,6 +222,16 @@ describe('createPublicEndpointFetch', () => {
     },
   );
 
+  it('refuses an IPv4-compatible IPv6 literal before any lookup', async () => {
+    const https = fakeHttps(OK);
+    const resolveHost = vi.fn(async (_hostname: string): Promise<string[]> => ['93.184.216.34']);
+    const send = createPublicEndpointFetch({ resolveHost, request: https.request });
+
+    expect(await failureCode(send('https://[::127.0.0.1]/v1/models'))).toBe('ENDPOINT_REFUSED');
+    expect(resolveHost).not.toHaveBeenCalled();
+    expect(https.mock).not.toHaveBeenCalled();
+  });
+
   it('refuses plain HTTP before any lookup', async () => {
     const https = fakeHttps(OK);
     const resolveHost = vi.fn(async (_hostname: string): Promise<string[]> => ['93.184.216.34']);
@@ -226,6 +258,38 @@ describe('createPublicEndpointFetch', () => {
     expect(response.status).toBe(302);
     expect(response.headers.get('location')).toBe('https://elsewhere.example/v1/models');
     expect(https.mock).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a redirect when the caller asks for an error, as the global fetch does', async () => {
+    const https = fakeHttps({
+      status: 302,
+      headers: { location: 'https://elsewhere.example/v1/models' },
+      body: '',
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const error = await send('https://api.example.com/v1/models', { redirect: 'error' }).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(TypeError);
+    expect((error as TypeError).message).toBe('fetch failed');
+    expect(((error as { cause?: Error }).cause as Error).message).toBe('unexpected redirect');
+  });
+
+  it('answers a status outside the HTTP range as a bad gateway instead of failing', async () => {
+    const https = fakeHttps({ status: 600, body: '' });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    expect(response.status).toBe(502);
   });
 
   it('returns a reply that has no body as a response with no body', async () => {
@@ -257,6 +321,36 @@ describe('createPublicEndpointFetch', () => {
     expect(https.mock).not.toHaveBeenCalled();
   });
 
+  it('sends a binary body as the bytes it holds, with its length', async () => {
+    const https = fakeHttps(OK);
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+    const bytes = new TextEncoder().encode('{"model":"m"}');
+
+    await send('https://api.example.com/v1/chat/completions', { method: 'POST', body: bytes });
+
+    const call = https.calls[0]!;
+    expect(Buffer.concat(call.req.written).equals(Buffer.from(bytes))).toBe(true);
+    expect(call.options.headers).toMatchObject({ 'content-length': String(bytes.byteLength) });
+  });
+
+  it('refuses a Request object, which would lose its method, headers and body', async () => {
+    const https = fakeHttps(OK);
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    await expect(
+      send(
+        new Request('https://api.example.com/v1/chat/completions', { method: 'POST', body: '{}' }),
+      ),
+    ).rejects.toThrow('takes a URL');
+    expect(https.mock).not.toHaveBeenCalled();
+  });
+
   it('sends nothing and does not look up the name for a signal that is already aborted', async () => {
     const https = fakeHttps(OK);
     const resolveHost = vi.fn(async (_hostname: string): Promise<string[]> => ['93.184.216.34']);
@@ -285,6 +379,42 @@ describe('createPublicEndpointFetch', () => {
 
     await expect(pending).rejects.toThrow('stopped by the caller');
     expect(https.calls[0]!.req.destroyedWith).toBeInstanceOf(DOMException);
+  });
+
+  it('stops the request when the signal aborts while the body is still streaming', async () => {
+    const https = fakeHttps({ status: 200, body: '{"partial":', hold: true });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+    const controller = new AbortController();
+
+    const response = await send('https://api.example.com/v1/models', { signal: controller.signal });
+    const reader = response.body!.getReader();
+    controller.abort(new DOMException('stopped mid-body', 'AbortError'));
+
+    // The partial chunk that arrived before the abort is delivered first; the stream then fails with the abort reason.
+    const drain = async (): Promise<void> => {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) return;
+      }
+    };
+    await expect(drain()).rejects.toThrow('stopped mid-body');
+    expect(https.calls[0]!.req.destroyedWith).toBeInstanceOf(DOMException);
+  });
+
+  it('reports a connection failure as a failed fetch that keeps the socket error code', async () => {
+    const socketError = Object.assign(new Error('connect ECONNREFUSED 93.184.216.34:443'), {
+      code: 'ECONNREFUSED',
+    });
+    const https = fakeHttps({ status: 200, fail: socketError });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    expect(await failureCode(send('https://api.example.com/v1/models'))).toBe('ECONNREFUSED');
   });
 
   it('connects an IPv6 literal without brackets and without a server name', async () => {
@@ -327,6 +457,15 @@ describe('pinnedLookup', () => {
       { address: '93.184.216.34', family: 4 },
       { address: '2606:4700:4700::1111', family: 6 },
     ]);
+  });
+
+  it('answers with the vetted addresses whatever host name is asked for', () => {
+    const lookup = pinnedLookup(['93.184.216.34']);
+    const answer = vi.fn();
+
+    lookup('some-other.example', {}, answer);
+
+    expect(answer).toHaveBeenCalledWith(null, '93.184.216.34', 4);
   });
 
   it('fails closed when no address is pinned', () => {

@@ -20,16 +20,21 @@ const CHAT_REPLY = JSON.stringify({
   usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
 });
 
-/** Stands in for https.request: it records each call and answers with a chat reply. No socket opens. */
-function fakeHttps() {
+/** Stands in for https.request: it records each call, answers with a chat reply, or fails with the given error. No socket opens. */
+function fakeHttps(fail?: Error) {
   const calls: Record<string, unknown>[] = [];
   const request = vi.fn(
     (options: Record<string, unknown>, onResponse: (res: IncomingMessage) => void) => {
       calls.push(options);
-      return Object.assign(new EventEmitter(), {
+      const req = new EventEmitter();
+      return Object.assign(req, {
         write: (): boolean => true,
         destroy: (): void => undefined,
         end: (): void => {
+          if (fail !== undefined) {
+            req.emit('error', fail);
+            return;
+          }
           const res = Readable.from([Buffer.from(CHAT_REPLY)]);
           Object.assign(res, {
             statusCode: 200,
@@ -116,6 +121,24 @@ describe('the provider transport for a public custom endpoint', () => {
     expect(globalFetch).not.toHaveBeenCalled();
     expect(https.mock).not.toHaveBeenCalled();
     expect(traffic.networkErrorCode).toBe('ENDPOINT_REFUSED');
+  });
+
+  it('records the connection error code when the public endpoint cannot be reached', async () => {
+    const globalFetch = okFetch();
+    const https = fakeHttps(
+      Object.assign(new Error('connect ECONNREFUSED 93.184.216.34:443'), { code: 'ECONNREFUSED' }),
+    );
+    const traffic: ProviderTraffic = { requests: 0 };
+    const model = createModelFromConfig(PUBLIC_CUSTOM, traffic, {
+      fetch: globalFetch,
+      request: https.request,
+      resolveHost: async () => ['93.184.216.34'],
+    });
+
+    await expect(generateText({ model, prompt: 'Say hello.', maxRetries: 0 })).rejects.toThrow();
+
+    expect(globalFetch).not.toHaveBeenCalled();
+    expect(traffic.networkErrorCode).toBe('ECONNREFUSED');
   });
 
   it('keeps the global fetch and resolves nothing for a loopback endpoint', async () => {
