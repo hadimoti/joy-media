@@ -79,9 +79,10 @@ describe('pinned fetch (S8 item 4 and 5)', () => {
       servername: 'api.example.com',
       path: '/v1/models?x=1',
       method: 'POST',
-      headers: { authorization: 'Bearer test-token' },
+      headers: { authorization: 'Bearer test-token', 'content-length': '2' },
+      agent: false,
     });
-    expect(calls[0]?.written).toEqual(['{}']);
+    expect(calls[0]?.written.map(String)).toEqual(['{}']);
     const lookup = options.lookup as (h: string, o: unknown, cb: (...a: unknown[]) => void) => void;
     const callback = vi.fn();
     lookup('api.example.com', {}, callback);
@@ -151,5 +152,70 @@ describe('pinned fetch (S8 item 4 and 5)', () => {
     await expect(
       fetchImpl('https://api.example.com/v1/models', { signal: controller.signal }),
     ).rejects.toThrow(/aborted/);
+  });
+
+  it('refuses a pinned address that carries a zone', async () => {
+    const { request } = fakeRequest({ status: 200 });
+    const fetchImpl = pinnedFetch(
+      new Map([['api.example.com', ['2001:db8::1%eth0']]]),
+      vi.fn(),
+      asHttps(request),
+    );
+    await expect(fetchImpl('https://api.example.com/v1/models', {})).rejects.toThrow(/not public/);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('answers a status outside 200 to 599 as a bad gateway, without throwing', async () => {
+    const { request } = fakeRequest({ status: 600, body: 'odd' });
+    const fetchImpl = pinnedFetch(
+      new Map([['api.example.com', ['93.184.216.34']]]),
+      vi.fn(),
+      asHttps(request),
+    );
+    const response = await fetchImpl('https://api.example.com/v1/models', {});
+    expect(response.status).toBe(502);
+  });
+
+  it('refuses a redirect when the caller asks for an error', async () => {
+    const { request } = fakeRequest({
+      status: 302,
+      headers: { location: 'https://elsewhere.example/v1' },
+    });
+    const fetchImpl = pinnedFetch(
+      new Map([['api.example.com', ['93.184.216.34']]]),
+      vi.fn(),
+      asHttps(request),
+    );
+    await expect(
+      fetchImpl('https://api.example.com/v1/models', { redirect: 'error' }),
+    ).rejects.toThrow(/fetch failed/);
+  });
+
+  it('sends a binary body as bytes, with its length', async () => {
+    const { request, calls } = fakeRequest({ status: 200 });
+    const fetchImpl = pinnedFetch(
+      new Map([['api.example.com', ['93.184.216.34']]]),
+      vi.fn(),
+      asHttps(request),
+    );
+    await fetchImpl('https://api.example.com/v1/audio', {
+      method: 'POST',
+      body: new Uint8Array([1, 2, 3]),
+    });
+    expect(Buffer.from(calls[0]?.written[0] ?? '').equals(Buffer.from([1, 2, 3]))).toBe(true);
+    expect(calls[0]?.options.headers).toMatchObject({ 'content-length': '3' });
+  });
+
+  it('refuses a body that is neither text nor bytes', async () => {
+    const { request } = fakeRequest({ status: 200 });
+    const fetchImpl = pinnedFetch(
+      new Map([['api.example.com', ['93.184.216.34']]]),
+      vi.fn(),
+      asHttps(request),
+    );
+    await expect(
+      fetchImpl('https://api.example.com/v1/upload', { method: 'POST', body: new Blob(['x']) }),
+    ).rejects.toThrow(/text or bytes/);
+    expect(request).not.toHaveBeenCalled();
   });
 });
