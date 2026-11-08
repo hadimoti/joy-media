@@ -517,7 +517,7 @@ describe('v2 release-candidate artifact upload policy', () => {
     expect(step).toMatch(/\n {8}timeout-minutes: 20\n/);
     // The same build and digest as the development verification (ci-dev.yml static job).
     expect(step).toContain(
-      'FFMPEG_SHA256: d0eb612b8994407f78413e2929cb4b073bc699c8ab79e198b31624736fdc2f93',
+      'FFMPEG_SHA256: d9e9ab7ecc262a4d6cdb334b17af16ce227a9ed44d052f194ad0deca1a29e037',
     );
     expect(step).toContain('--connect-timeout 20 --max-time 300');
     expect(step).toContain('for attempt in 1 2 3; do');

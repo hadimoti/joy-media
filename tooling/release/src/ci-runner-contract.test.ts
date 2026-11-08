@@ -174,10 +174,10 @@ describe('JOY Media self-hosted runner contract (Docker + Windows-container)', (
       );
       expect(dockerfile).toMatch(/^ARG\s+WINDOWS_BASE=.*@sha256:[0-9a-f]{64}/m);
       expect(dockerfile).toMatch(/^FROM\s+\$\{WINDOWS_BASE\}/m);
-      expect(dockerfile).toContain('ffmpeg-n8.1.3-win64-gpl-8.1.zip');
-      expect(dockerfile).toContain('autobuild-2026-09-22-13-18');
+      expect(dockerfile).toContain('ffmpeg-n8.1.3-34-ga35157abb9-win64-gpl-8.1.zip');
+      expect(dockerfile).toContain('releases/download/ffmpeg-n8.1.3-34-ga35157abb9');
       expect(dockerfile).toContain(
-        'ed885833e406f0f7a1ea0304dd170779117799b2fba8096abc3e2e4dd679cc20',
+        '06bfc0069beb764b75f9eed956acc90c4d651bf06aed340fbf0708d10a6f76dc',
       );
       expect(dockerfile).not.toContain('releases/download/latest/');
       expect(dockerfile).toContain('ffmpeg.exe -version');

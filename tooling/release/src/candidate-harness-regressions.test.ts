@@ -61,7 +61,7 @@ export function provisioningFindings(source: string): string[] {
   if (/apt-get\s+install/u.test(source)) findings.push('FFmpeg is installed with apt-get');
   if (
     !source.includes(
-      'FFMPEG_SHA256: d0eb612b8994407f78413e2929cb4b073bc699c8ab79e198b31624736fdc2f93',
+      'FFMPEG_SHA256: d9e9ab7ecc262a4d6cdb334b17af16ce227a9ed44d052f194ad0deca1a29e037',
     )
   ) {
     findings.push('the pinned FFmpeg digest is missing');
@@ -166,7 +166,7 @@ export function collectionPrerequisiteFindings(source: string): string[] {
   const prerequisites = [
     ['pnpm typecheck', 'the project references are not emitted'],
     [
-      'FFMPEG_SHA256: d0eb612b8994407f78413e2929cb4b073bc699c8ab79e198b31624736fdc2f93',
+      'FFMPEG_SHA256: d9e9ab7ecc262a4d6cdb334b17af16ce227a9ed44d052f194ad0deca1a29e037',
       'the pinned FFmpeg is not installed',
     ],
     ['pnpm exec playwright install --with-deps chromium', 'Chromium is not installed'],
@@ -193,7 +193,7 @@ describe('collection: the hosted-prepare job lists the tests in the toolchain th
       '      - run: node node_modules/vitest/vitest.mjs list --json > test-output/hosted-verify/prep/list.json',
       '      - run: pnpm typecheck',
       '      - env:',
-      '          FFMPEG_SHA256: d0eb612b8994407f78413e2929cb4b073bc699c8ab79e198b31624736fdc2f93',
+      '          FFMPEG_SHA256: d9e9ab7ecc262a4d6cdb334b17af16ce227a9ed44d052f194ad0deca1a29e037',
       '        run: pnpm exec playwright install --with-deps chromium',
     ].join('\n');
     expect(collectionPrerequisiteFindings(defective)).toHaveLength(3);
