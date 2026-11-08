@@ -95,10 +95,11 @@ export function ModelDrawer({
 
   // New Connection Form State
   const [newName, setNewName] = useState('');
-  const [newProvider, setNewProvider] = useState<ProviderType>('openrouter');
-  const [newBaseUrl, setNewBaseUrl] = useState(PROVIDER_DEFAULT_URLS.openrouter);
+  // No provider is preselected, and OpenRouter is never a default (PLAN-v4 §6d-1 rule 3).
+  const [newProvider, setNewProvider] = useState<ProviderType | ''>('');
+  const [newBaseUrl, setNewBaseUrl] = useState('');
   const [newApiKey, setNewApiKey] = useState('');
-  const [newSelectedModel, setNewSelectedModel] = useState('openrouter/free');
+  const [newSelectedModel, setNewSelectedModel] = useState('');
   const [discoveredModels, setDiscoveredModels] = useState<readonly string[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
@@ -164,6 +165,10 @@ export function ModelDrawer({
   };
 
   const handleDiscoverModels = async () => {
+    if (newProvider === '') {
+      setDiscoveryError('Choose a provider first.');
+      return;
+    }
     if (
       requiresCustomEndpointConsent(newProvider, newBaseUrl) &&
       !requireCustomEndpointAcknowledgement({ provider: 'custom', baseUrl: newBaseUrl })
@@ -208,6 +213,10 @@ export function ModelDrawer({
   };
 
   const handleSaveAndConnect = async () => {
+    if (newProvider === '') {
+      onNotice?.('Choose a provider first.', 'error');
+      return;
+    }
     if (
       requiresCustomEndpointConsent(newProvider, newBaseUrl) &&
       !requireCustomEndpointAcknowledgement({ provider: 'custom', baseUrl: newBaseUrl })
@@ -500,6 +509,9 @@ export function ModelDrawer({
                     value={newProvider}
                     onChange={(e) => handleProviderTypeChange(e.target.value as ProviderType)}
                   >
+                    <option value="" disabled>
+                      Choose a provider
+                    </option>
                     <option value="openrouter">OpenRouter</option>
                     {PROVIDER_REGISTRY.filter(
                       (item) => item.id !== 'openrouter' && item.signInOnly !== true,
@@ -538,7 +550,7 @@ export function ModelDrawer({
                 />
               </div>
 
-              {requiresCustomEndpointConsent(newProvider, newBaseUrl) && (
+              {newProvider !== '' && requiresCustomEndpointConsent(newProvider, newBaseUrl) && (
                 <label className="model-drawer-form-group">
                   <input
                     type="checkbox"
@@ -578,7 +590,7 @@ export function ModelDrawer({
                 <button
                   type="button"
                   className="model-drawer-btn-secondary"
-                  disabled={isDiscovering || !newBaseUrl.trim()}
+                  disabled={isDiscovering || newProvider === '' || !newBaseUrl.trim()}
                   onClick={() => void handleDiscoverModels()}
                 >
                   {isDiscovering ? 'Discovering Models…' : '🔍 Discover Models Behind Link'}
@@ -632,7 +644,9 @@ export function ModelDrawer({
                 <button
                   type="button"
                   className="model-drawer-btn-primary"
-                  disabled={isSaving || !newBaseUrl.trim() || !newSelectedModel.trim()}
+                  disabled={
+                    isSaving || newProvider === '' || !newBaseUrl.trim() || !newSelectedModel.trim()
+                  }
                   onClick={() => void handleSaveAndConnect()}
                 >
                   {isSaving ? 'Connecting…' : 'Save & Connect'}

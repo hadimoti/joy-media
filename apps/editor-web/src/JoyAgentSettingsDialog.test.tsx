@@ -855,6 +855,14 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
     const rendered = await render(client(), undefined);
 
     await act(async () => {
+      const use = [...rendered.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Use',
+      );
+      use?.click();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
       const drawer = [...rendered.querySelectorAll('button')].find((button) =>
         button.textContent?.includes('Discovered Models Drawer'),
       );
@@ -891,6 +899,14 @@ describe('JOY Agent Settings custom provider acknowledgement', () => {
       invoke,
     } as unknown as NonNullable<typeof window.joyDesktop>;
     const rendered = await render(client(), undefined);
+
+    await act(async () => {
+      const use = [...rendered.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Use',
+      );
+      use?.click();
+      await Promise.resolve();
+    });
 
     await act(async () => {
       const drawer = [...rendered.querySelectorAll('button')].find((button) =>
@@ -1815,7 +1831,7 @@ describe('JOY Agent Settings saved profile connect', () => {
 });
 
 describe('JOY Agent Settings desktop profile persistence', () => {
-  it('loads saved profile on mount when isDesktopHost is true', async () => {
+  it('lists a saved profile on mount without preselecting it', async () => {
     const invoke = vi.fn().mockImplementation(async (channel: string) => {
       if (channel === 'desktop.provider-profile.list') {
         return [
@@ -1836,10 +1852,21 @@ describe('JOY Agent Settings desktop profile persistence', () => {
     const rendered = await render(engineClient, undefined);
 
     expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.list');
-    const modelInput = rendered.querySelector<HTMLInputElement>(
-      'input[placeholder="provider/model"]',
-    );
-    expect(modelInput?.value).toBe('anthropic/claude-3.5-sonnet');
+    // Nothing is preselected (PLAN-v4 §6d-1 rule 3): the profile is listed, and the form waits for the user.
+    expect(
+      rendered.querySelector<HTMLInputElement>('input[placeholder="provider/model"]')?.value,
+    ).toBe('');
+    expect(rendered.textContent).toContain('anthropic/claude-3.5-sonnet');
+    await act(async () => {
+      const use = [...rendered.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Use',
+      );
+      use?.click();
+      await Promise.resolve();
+    });
+    expect(
+      rendered.querySelector<HTMLInputElement>('input[placeholder="provider/model"]')?.value,
+    ).toBe('anthropic/claude-3.5-sonnet');
     expect(rendered.textContent).toContain('(Saved in desktop vault)');
   });
 

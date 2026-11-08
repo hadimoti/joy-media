@@ -251,7 +251,6 @@ function resolveProfile(options: ResolveProviderOptions = {}): ResolvedProfile {
     slot?.profileId ??
     options.provider ??
     cliConfig.activeProvider ??
-    environmentDefault() ??
     // A one-off --url (with --api-key or --model) names the custom endpoint, as the primary branch allows.
     (options.baseUrl === undefined ? undefined : CUSTOM_PROVIDER_ID);
   if (name === undefined) {
@@ -377,7 +376,6 @@ export async function resolveAgentConfig(
     slot?.profileId ??
     options.provider ??
     cliConfig.activeProvider ??
-    environmentDefault() ??
     // A one-off --url (with --api-key or --model) names the custom endpoint, as the primary branch allows.
     (options.baseUrl === undefined ? undefined : CUSTOM_PROVIDER_ID);
   if (name === undefined) {
@@ -558,13 +556,6 @@ function engineMode(
   if (type === 'openrouter') return 'openrouter';
   if (type === 'claude') return 'anthropic-messages';
   return isCustomProviderId(type) ? 'custom' : 'openai-compatible';
-}
-
-/** The provider whose key is in the environment, when one is. Nothing is chosen for the owner otherwise. */
-function environmentDefault(): string | undefined {
-  if (process.env.OPENROUTER_API_KEY) return 'openrouter';
-  if (process.env.OPENAI_API_KEY) return 'openai';
-  return undefined;
 }
 
 function refuseRetired(provider: string): void {

@@ -394,21 +394,7 @@ export function JoyAgentSettingsDialog({
         }
         return list;
       }
-      // Shown by default only when it is the one OpenRouter profile. With several on the same endpoint, the user
-      // chooses one (the form refuses to connect until then), so no profile is picked for them.
-      const openRouterProfiles = list.filter(
-        (p) => p.provider === 'openrouter' && p.state !== 'disabled-legacy',
-      );
-      const openRouterProfile = openRouterProfiles.length === 1 ? openRouterProfiles[0] : undefined;
-      if (openRouterProfile) {
-        // Written out here, not through selectProfile, so this effect depends on stable setters only.
-        selectedProfileIdRef.current = openRouterProfile.id;
-        setSavedProfile(openRouterProfile);
-        setModelId(openRouterProfile.modelId);
-        setBaseUrl(openRouterProfile.baseUrl);
-        setProvider('openrouter');
-        setCustomDisclosure(false);
-      }
+      // No profile is picked by default, OpenRouter included (PLAN-v4 §6d-1 rule 3). The user chooses one.
       return list;
     } catch {
       // A failed read that is no longer the latest says nothing about the list the user now sees.

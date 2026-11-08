@@ -52,6 +52,7 @@ import { createAssetLibrary } from '../store/asset-library.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { createProviderBroker } from './providers/provider-broker.js';
+import { pinnedFetch } from './providers/pinned-transport.js';
 import { createProviderSignIn, loadOrCreateInstallId } from './oauth/sign-in.js';
 import { revokeChatGptRefreshToken } from './oauth/chatgpt.js';
 import { createWorkerCompletion } from './providers/worker-completion.js';
@@ -120,6 +121,8 @@ if (!app.requestSingleInstanceLock()) {
           },
   });
   const secretStore = createElectronSecretStore(localDatabase, safeStorage);
+  // Public custom endpoints are reached only at the addresses vetted before each request (S8 item 4).
+  const publicHostPins = new Map<string, readonly string[]>();
   const providerBroker = createProviderBroker({
     store: {
       getProfile: (id) => localDatabase.getProviderProfile(id),
@@ -133,7 +136,10 @@ if (!app.requestSingleInstanceLock()) {
         localDatabase.rebindProfileSecret(profileId, version),
     },
     secrets: secretStore,
-    fetch: (url, init) => fetch(url, init),
+    fetch: pinnedFetch(publicHostPins, (url, init) => fetch(url, init)),
+    pinPublicHost: (hostname, addresses) => {
+      publicHostPins.set(hostname, addresses);
+    },
   });
   // The provider calls in progress. A reload of the page ends them, since nothing will read their replies.
   const agentRequests = new AgentRequestRegistry();
