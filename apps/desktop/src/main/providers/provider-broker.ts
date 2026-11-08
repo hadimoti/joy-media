@@ -456,7 +456,9 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     const hostname = new URL(profile.baseUrl).hostname;
     if (verdict.kind === 'loopback') await assertLoopbackHost(hostname, resolveHost);
     if (verdict.kind === 'public') {
-      deps.pinPublicHost?.(hostname, await assertPublicHost(hostname, resolveHost));
+      // The check runs whether or not a pin hook is given: the arguments of an optional call are not evaluated (S8).
+      const addresses = await assertPublicHost(hostname, resolveHost);
+      deps.pinPublicHost?.(hostname, addresses);
     }
 
     let stored: string | null;
@@ -540,7 +542,8 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     const hostname = new URL(draft.baseUrl).hostname;
     if (verdict.kind === 'loopback') await assertLoopbackHost(hostname, resolveHost);
     if (verdict.kind === 'public') {
-      deps.pinPublicHost?.(hostname, await assertPublicHost(hostname, resolveHost));
+      const addresses = await assertPublicHost(hostname, resolveHost);
+      deps.pinPublicHost?.(hostname, addresses);
     }
     return makeEndpoint(
       '',

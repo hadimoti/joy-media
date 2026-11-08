@@ -790,6 +790,23 @@ describe('provider broker: probe and model lists', () => {
     expect(sent).toHaveLength(0);
   });
 
+  it('refuses a consented draft whose name resolves to a private address, with no request', async () => {
+    // The harness gives no pin hook, so the check must run on its own (S8).
+    const { broker, sent } = harness({ resolveHost: async () => ['127.0.0.1'] });
+
+    expect(
+      await broker.listModels({
+        draft: {
+          provider: 'openai-compatible',
+          baseUrl: 'https://api.example.com/v1',
+          apiKey: KEY,
+          acknowledgedPublicEndpoint: true,
+        },
+      }),
+    ).toMatchObject({ ok: false, code: 'ENDPOINT_REFUSED' });
+    expect(sent).toHaveLength(0);
+  });
+
   it('lists Claude models with the x-api-key header and their display names', async () => {
     const { broker, sent } = harness({
       reply: () =>

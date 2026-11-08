@@ -35,6 +35,9 @@ describe('a public custom endpoint (S8)', () => {
     'https://198.18.0.9/v1',
     'https://224.0.0.1/v1',
     'https://[::ffff:7f00:1]/v1',
+    'https://[::7f00:1]/v1',
+    'https://[64:ff9b::a9fe:a9fe]/v1',
+    'https://[2002:c0a8:101::1]/v1',
     'https://[fd00::1]/v1',
     'https://[fe80::1]/v1',
     'https://metadata.google.internal/v1',
@@ -47,6 +50,14 @@ describe('a public custom endpoint (S8)', () => {
       allowed: false,
       code: 'BASE_URL_REFUSED',
     });
+  });
+
+  it('allows a NAT64 address that embeds a public IPv4, with consent, as a DNS64 network returns it', () => {
+    expect(
+      evaluateEndpoint(CUSTOM_PROVIDER_ID, 'https://[64:ff9b::5db8:d822]/v1', {
+        consentToPublicEndpoint: true,
+      }),
+    ).toMatchObject({ allowed: true, kind: 'public' });
   });
 
   it('does not let consent widen a registry provider', () => {
