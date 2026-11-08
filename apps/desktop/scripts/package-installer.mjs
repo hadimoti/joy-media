@@ -3,6 +3,7 @@ import { existsSync, createReadStream } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { setExecutableIcon } from './set-exe-icon.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const repoRoot = resolve(desktopRoot, '..', '..');
@@ -56,6 +57,11 @@ if (existsSync(origExe)) {
   const { rename } = await import('node:fs/promises');
   await rename(origExe, targetExe);
 }
+
+// The packaged exe shows the JOY mark the loading page and editor header use, not Electron's icon.
+const joyIcon = resolve(desktopRoot, 'build', 'joy-media.ico');
+if (!existsSync(joyIcon)) throw new Error(`JOY icon not found at ${joyIcon}`);
+await setExecutableIcon(targetExe, joyIcon);
 
 // Remove default_app.asar to ensure Electron loads resources/app
 const defaultAppAsar = resolve(standaloneDir, 'resources', 'default_app.asar');
