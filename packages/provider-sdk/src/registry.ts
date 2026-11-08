@@ -590,7 +590,8 @@ function isPrivateIpv4(host: string): boolean {
 
 function isPrivateIpv6(host: string): boolean {
   if (host === '::' || host === '::1') return true;
-  if (/^f[cd]/.test(host) || /^fe[89ab]/.test(host)) return true;
+  // Unique-local fc00::/7, link-local fe80::/10 and the deprecated site-local fec0::/10 are never public.
+  if (/^f[cd]/.test(host) || /^fe[89a-f]/.test(host)) return true;
   // Multicast (ff00::/8) is never a public endpoint.
   if (/^ff/.test(host)) return true;
   // IPv4-mapped in the dotted form, ::ffff:127.0.0.1, is judged by its IPv4 address.

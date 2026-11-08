@@ -18,6 +18,10 @@ describe('internal address names (S8 item 4)', () => {
     '[::1]',
     '[fd00::1]',
     '[fe80::1]',
+    // The deprecated site-local range fec0::/10 is refused with link-local, whatever its case.
+    '[fec0::1]',
+    '[FEC0::1]',
+    '[feff::1]',
     '[ff02::1]',
     '[::ffff:127.0.0.1]',
     '[::ffff:10.0.0.1]',
