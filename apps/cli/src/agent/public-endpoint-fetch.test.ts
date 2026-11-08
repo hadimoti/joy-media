@@ -639,6 +639,51 @@ describe('createPublicEndpointFetch', () => {
     await expect(reader.read()).rejects.toThrow('stopped mid-decode');
   });
 
+  it('reports the reason the caller gave when a deflate body is aborted', async () => {
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'deflate' },
+      body: deflateSync('{"ok":true}').subarray(0, 8),
+      hold: true,
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+    const controller = new AbortController();
+
+    const response = await send('https://api.example.com/v1/models', { signal: controller.signal });
+    const reader = response.body!.getReader();
+    controller.abort(new DOMException('stopped mid-deflate', 'AbortError'));
+
+    await expect(reader.read()).rejects.toThrow('stopped mid-deflate');
+  });
+
+  it('decodes a large deflate reply read slowly, so the decoder waits for the reader', async () => {
+    const text = JSON.stringify({ text: 'x'.repeat(300_000) });
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'deflate' },
+      body: deflateSync(text),
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+    const reader = response.body!.getReader();
+    let received = '';
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      received += Buffer.from(chunk.value).toString();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(received).toBe(text);
+  });
+
   it('leaves a reply in a coding it cannot decode as it is', async () => {
     const https = fakeHttps({
       status: 200,
