@@ -702,6 +702,9 @@ describe('createPublicEndpointFetch', () => {
     const error = await response.text().catch((caught: unknown) => caught);
 
     expect((error as { code?: unknown }).code).toBe('Z_DATA_ERROR');
+    expect((error as { cause?: { message?: unknown } }).cause?.message).toBe(
+      'incorrect data check',
+    );
   });
 
   it('rejects a deflate reply whose checksum is damaged, with the zlib error', async () => {
@@ -722,6 +725,9 @@ describe('createPublicEndpointFetch', () => {
     const error = await response.text().catch((caught: unknown) => caught);
 
     expect((error as { code?: unknown }).code).toBe('Z_DATA_ERROR');
+    expect((error as { cause?: { message?: unknown } }).cause?.message).toBe(
+      'incorrect data check',
+    );
   });
 
   it('leaves a reply in a coding it cannot decode as it is', async () => {
