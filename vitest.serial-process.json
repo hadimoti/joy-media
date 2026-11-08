@@ -29,6 +29,7 @@
   "apps/cli/src/humanized/windows-profile-acl.e2e.test.ts",
   "apps/cli/src/services/caption-direction-pixels.test.ts",
   "apps/cli/src/services/caption-face-pixels.test.ts",
+  "apps/cli/src/utils/config-lock.test.ts",
   "apps/cli/src/utils/exclusive-record.test.ts",
   "apps/desktop/scripts/installer-uninstall.test.mjs",
   "apps/desktop/src/jobs/local-worker.integration.test.ts",

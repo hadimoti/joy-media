@@ -55,15 +55,17 @@ export function installedCliRootFindings(source: string): string[] {
   return findings;
 }
 
+/** release-candidate-v2 is frozen byte-identical to its pinned checksum, so it keeps the FFmpeg digest it was frozen with. */
+const FROZEN_V2_FFMPEG_SHA256 = 'd0eb612b8994407f78413e2929cb4b073bc699c8ab79e198b31624736fdc2f93';
+
 /** A shadow workflow provisions FFmpeg from the pinned, digest-checked build, not from an unbounded apt install. */
-export function provisioningFindings(source: string): string[] {
+export function provisioningFindings(
+  source: string,
+  pinnedSha256 = 'd9e9ab7ecc262a4d6cdb334b17af16ce227a9ed44d052f194ad0deca1a29e037',
+): string[] {
   const findings: string[] = [];
   if (/apt-get\s+install/u.test(source)) findings.push('FFmpeg is installed with apt-get');
-  if (
-    !source.includes(
-      'FFMPEG_SHA256: d9e9ab7ecc262a4d6cdb334b17af16ce227a9ed44d052f194ad0deca1a29e037',
-    )
-  ) {
+  if (!source.includes(`FFMPEG_SHA256: ${pinnedSha256}`)) {
     findings.push('the pinned FFmpeg digest is missing');
   }
   return findings;
@@ -202,7 +204,12 @@ describe('collection: the hosted-prepare job lists the tests in the toolchain th
 
 describe('shadow workflows: FFmpeg comes from the pinned, digest-checked build', () => {
   it('the v2 and v3 workflows contain no unbounded apt install of FFmpeg', () => {
-    expect(provisioningFindings(read('.github/workflows/release-candidate-v2.yml'))).toEqual([]);
+    expect(
+      provisioningFindings(
+        read('.github/workflows/release-candidate-v2.yml'),
+        FROZEN_V2_FFMPEG_SHA256,
+      ),
+    ).toEqual([]);
     expect(provisioningFindings(read('.github/workflows/release-candidate-v3.yml'))).toEqual([]);
   });
 
