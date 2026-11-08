@@ -64,11 +64,11 @@ import { checkProfileCredentials } from './profile-credential-check.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
 
-/** The JOY Media mark for the development loading page, read from the editor's public assets (undefined if absent). */
+/** The JOY brand mark the editor shows in its header, for the development loading page (undefined if absent). */
 function readDevLogoDataUrl(): string | undefined {
   try {
     const bytes = readFileSync(
-      join(__dirname, '..', '..', '..', 'editor-web', 'public', 'assets', 'logo.png'),
+      join(__dirname, '..', '..', '..', 'editor-web', 'public', 'assets', 'JoyCodeNew_128x128.png'),
     );
     return `data:image/png;base64,${bytes.toString('base64')}`;
   } catch {
