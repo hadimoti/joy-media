@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 import type { LookupFunction } from 'node:net';
 import { PassThrough } from 'node:stream';
-import { brotliCompressSync, gzipSync } from 'node:zlib';
+import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from 'node:zlib';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createPublicEndpointFetch,
@@ -504,6 +504,139 @@ describe('createPublicEndpointFetch', () => {
     const response = await send('https://api.example.com/v1/models');
 
     await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it('decodes a deflate reply in the zlib format', async () => {
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'deflate' },
+      body: deflateSync('{"ok":true}'),
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it('decodes a deflate reply that carries raw deflate without the zlib header', async () => {
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'deflate' },
+      body: deflateRawSync('{"ok":true}'),
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it('decodes a reply stacked under two codings, last coding undone first', async () => {
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip, br' },
+      body: brotliCompressSync(gzipSync('{"ok":true}')),
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it.each(['x-gzip', 'GZIP', ' gzip '])('decodes a gzip reply named %j', async (coding) => {
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': coding },
+      body: gzipSync('{"ok":true}'),
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it('decodes an empty gzip reply to an empty body, as the global fetch does', async () => {
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+      body: '',
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    await expect(response.text()).resolves.toBe('');
+  });
+
+  it('decodes an empty brotli reply to an empty body, as the global fetch does', async () => {
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'br' },
+      body: '',
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    await expect(response.text()).resolves.toBe('');
+  });
+
+  it('decodes a truncated gzip reply to the part it holds, as the global fetch does', async () => {
+    const compressed = gzipSync('{"ok":true}');
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+      body: compressed.subarray(0, 20),
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    await expect(response.text()).resolves.toBe('{"ok":tru');
+  });
+
+  it('reports the reason the caller gave when a decoded body is aborted', async () => {
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+      body: gzipSync('{"ok":true}').subarray(0, 12),
+      hold: true,
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+    const controller = new AbortController();
+
+    const response = await send('https://api.example.com/v1/models', { signal: controller.signal });
+    const reader = response.body!.getReader();
+    controller.abort(new DOMException('stopped mid-decode', 'AbortError'));
+
+    await expect(reader.read()).rejects.toThrow('stopped mid-decode');
   });
 
   it('leaves a reply in a coding it cannot decode as it is', async () => {
