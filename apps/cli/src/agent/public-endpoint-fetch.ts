@@ -6,7 +6,8 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import type { IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { BlockList, isIP, type LookupFunction } from 'node:net';
-import { Readable } from 'node:stream';
+import { pipeline, Readable, type Transform } from 'node:stream';
+import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 import type { JoyFetch } from '@joy-media/joy-agent-engine';
 import { isPrivateOrInternalHost } from '@joy-media/provider-sdk';
 
@@ -127,6 +128,39 @@ function headerRecord(headers: RequestInit['headers']): Record<string, string> {
   return Object.fromEntries(new Headers(headers).entries());
 }
 
+/** The content codings the fetch API decodes. A reply in any other coding is passed through as it is. */
+const DECODED_CODINGS: ReadonlySet<string> = new Set(['gzip', 'x-gzip', 'deflate', 'br']);
+
+/** The content codings a reply names, in the order they were applied, leaving out identity. */
+function contentCodings(value: string | string[] | undefined): string[] {
+  const text = Array.isArray(value) ? value.join(',') : (value ?? '');
+  return text
+    .split(',')
+    .map((coding) => coding.trim().toLowerCase())
+    .filter((coding) => coding !== '' && coding !== 'identity');
+}
+
+function decoderFor(coding: string): Transform {
+  if (coding === 'br') return createBrotliDecompress();
+  if (coding === 'deflate') return createInflate();
+  return createGunzip();
+}
+
+/** The reply body with its codings undone, last coding first, as the fetch API does. */
+function decodedBody(reply: IncomingMessage, codings: readonly string[]): Readable {
+  let body: Readable = reply;
+  for (const coding of [...codings].reverse()) {
+    const decoder = decoderFor(coding);
+    // pipeline passes a failure on to the decoder, so the body fails rather than stalls.
+    pipeline(body, decoder, () => undefined);
+    body = decoder;
+  }
+  return body;
+}
+
+/** The body a Response takes: the web stream a Node stream converts to. */
+type ResponseBody = ConstructorParameters<typeof Response>[0];
+
 /** The reply as a Response. A redirect is returned as it is, and is never followed. */
 function toResponse(reply: IncomingMessage): Response {
   const headers = new Headers();
@@ -144,10 +178,15 @@ function toResponse(reply: IncomingMessage): Response {
     reply.resume();
     return new Response(null, init);
   }
-  return new Response(
-    Readable.toWeb(reply) as unknown as ConstructorParameters<typeof Response>[0],
-    init,
-  );
+  const codings = contentCodings(reply.headers['content-encoding']);
+  const decodable = codings.length > 0 && codings.every((coding) => DECODED_CODINGS.has(coding));
+  if (decodable) {
+    // The body is decoded, so the coding and the compressed length no longer describe it.
+    headers.delete('content-encoding');
+    headers.delete('content-length');
+  }
+  const stream: Readable = decodable ? decodedBody(reply, codings) : reply;
+  return new Response(Readable.toWeb(stream) as unknown as ResponseBody, init);
 }
 
 const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
@@ -173,9 +212,12 @@ function sendPinned(
       return;
     }
     const headers = headerRecord(init?.headers);
+    if (headers.host === undefined) headers.host = url.host;
+    if (headers['accept-encoding'] === undefined) headers['accept-encoding'] = 'gzip, deflate, br';
     if (body !== undefined && headers['content-length'] === undefined) {
       headers['content-length'] = String(body.byteLength);
     }
+    let activeReply: IncomingMessage | undefined;
     const req = request(
       {
         protocol: 'https:',
@@ -191,6 +233,10 @@ function sendPinned(
         lookup: pinnedLookup(addresses),
       },
       (reply) => {
+        activeReply = reply;
+        // Errors reach the body through Readable.toWeb. This listener only keeps a reply that nobody reads from
+        // crashing the process when an abort destroys it.
+        reply.on('error', () => undefined);
         try {
           if (init?.redirect === 'error' && isRedirect(reply)) {
             throw new TypeError('fetch failed', { cause: new Error('unexpected redirect') });
@@ -208,6 +254,8 @@ function sendPinned(
     });
     if (signal !== undefined) {
       const onAbort = (): void => {
+        // Destroy the reply first, so the body fails with the caller's reason rather than the socket's 'aborted'.
+        activeReply?.destroy(abortReason(signal) as Error);
         req.destroy(abortReason(signal) as Error);
       };
       signal.addEventListener('abort', onAbort, { once: true });
