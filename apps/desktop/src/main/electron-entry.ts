@@ -341,9 +341,13 @@ if (!app.requestSingleInstanceLock()) {
     // The Worker starts with the app, once the loopback job API it connects to is listening.
     if (localJobApi !== undefined) workerSupervisor.start();
     Menu.setApplicationMenu(null);
-    // Only the installed app claims the joy:// scheme. A development run would otherwise point
-    // it at the Electron binary in the source tree. A smoke run leaves the host alone as well.
-    if (!isSmokeMode) registerJoyProtocol(app);
+    // Only the installed copy claims the joy:// scheme (see registerJoyProtocol). A smoke run leaves the host alone.
+    if (!isSmokeMode) {
+      registerJoyProtocol(app, {
+        execPath: process.execPath,
+        localAppData: process.env['LOCALAPPDATA'],
+      });
+    }
 
     if (!isDev) {
       protocol.handle(PACKAGED_RENDERER_SCHEME, (request) => {
