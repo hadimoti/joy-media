@@ -591,6 +591,11 @@ function isPrivateIpv4(host: string): boolean {
 function isPrivateIpv6(host: string): boolean {
   if (host === '::' || host === '::1') return true;
   if (/^f[cd]/.test(host) || /^fe[89ab]/.test(host)) return true;
+  // Multicast (ff00::/8) is never a public endpoint.
+  if (/^ff/.test(host)) return true;
+  // IPv4-mapped in the dotted form, ::ffff:127.0.0.1, is judged by its IPv4 address.
+  const dotted = host.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dotted?.[1] !== undefined) return isPrivateIpv4(dotted[1]);
   const mapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
   if (mapped?.[1] !== undefined && mapped[2] !== undefined) {
     const high = Number.parseInt(mapped[1], 16);

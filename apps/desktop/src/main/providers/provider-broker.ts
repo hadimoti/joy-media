@@ -166,6 +166,8 @@ export interface ProviderBrokerDeps {
   readonly fetch: ProviderFetch;
   /** Every address a host name resolves to. Injected so tests never touch DNS. */
   readonly resolveHost?: (hostname: string) => Promise<readonly string[]>;
+  /** Records the vetted addresses of a public endpoint host, so its connections are pinned to them (S8 item 4). */
+  readonly pinPublicHost?: (hostname: string, addresses: readonly string[]) => void;
   /** Test hook: shorter timeouts. Production uses the defaults above. */
   readonly timeoutMs?: { readonly complete?: number; readonly control?: number };
   /** The clock for ChatGPT token expiry. Production uses the system clock. */
@@ -453,7 +455,9 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     }
     const hostname = new URL(profile.baseUrl).hostname;
     if (verdict.kind === 'loopback') await assertLoopbackHost(hostname, resolveHost);
-    if (verdict.kind === 'public') await assertPublicHost(hostname, resolveHost);
+    if (verdict.kind === 'public') {
+      deps.pinPublicHost?.(hostname, await assertPublicHost(hostname, resolveHost));
+    }
 
     let stored: string | null;
     try {
@@ -535,7 +539,9 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     if (!verdict.allowed) throw new BrokerError('ENDPOINT_REFUSED', verdict.reason);
     const hostname = new URL(draft.baseUrl).hostname;
     if (verdict.kind === 'loopback') await assertLoopbackHost(hostname, resolveHost);
-    if (verdict.kind === 'public') await assertPublicHost(hostname, resolveHost);
+    if (verdict.kind === 'public') {
+      deps.pinPublicHost?.(hostname, await assertPublicHost(hostname, resolveHost));
+    }
     return makeEndpoint(
       '',
       draft.provider,
@@ -1278,11 +1284,12 @@ async function readBounded(response: Response, limit: number): Promise<string> {
 async function assertPublicHost(
   hostname: string,
   resolveHost: (name: string) => Promise<readonly string[]>,
-): Promise<void> {
+): Promise<readonly string[]> {
   const addresses = await resolveHost(hostname);
   if (addresses.length === 0 || addresses.some((address) => isPrivateOrInternalHost(address))) {
     throw new BrokerError('ENDPOINT_REFUSED', 'This endpoint name resolves to a private address.');
   }
+  return addresses;
 }
 
 export async function assertLoopbackHost(
