@@ -310,6 +310,13 @@ describe('ModelDrawer', () => {
 
     expect(container?.textContent).toContain('Connect New API Endpoint');
 
+    // Nothing is preselected for a new connection, so the test chooses OpenRouter explicitly.
+    const provider = container?.querySelector('#md-provider-type') as HTMLSelectElement;
+    await act(async () => {
+      provider.value = 'openrouter';
+      provider.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
     const discoverBtn = Array.from(container?.querySelectorAll('button') ?? []).find((btn) =>
       btn.textContent?.includes('Discover Models Behind Link'),
     );

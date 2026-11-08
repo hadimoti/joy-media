@@ -89,4 +89,10 @@ describe('first CLI install without an OpenRouter profile or key', () => {
     expect(persisted).not.toContain('sk-or-');
     expect(existsSync(credentialsPath)).toBe(false);
   });
+
+  it('does not choose a provider from a key in the environment when no slot or provider is set', () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-environment-only-test-key';
+    process.env.OPENAI_API_KEY = 'sk-environment-only-test-key';
+    expect(() => resolveByokConfig({})).toThrow(/No provider is set/);
+  });
 });
