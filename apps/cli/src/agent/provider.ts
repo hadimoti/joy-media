@@ -34,6 +34,11 @@ import {
 import { loadAgentSlot } from './agent-slots.js';
 import { loadAiProviders, loadCliConfig } from '../utils/config.js';
 import type { OAuthCredential } from '../utils/credential-store.js';
+import {
+  createPublicEndpointFetch,
+  type HttpsRequest,
+  type ResolveHost,
+} from './public-endpoint-fetch.js';
 
 export interface ResolveProviderOptions {
   readonly provider?: string | undefined;
@@ -523,14 +528,47 @@ export interface ProviderTraffic {
   networkErrorCode?: string | undefined;
 }
 
+/**
+ * A public custom endpoint is the one kind reached only at the addresses vetted for each request (S8). The engine
+ * names a custom endpoint `custom`. A registry provider keeps its own engine name, so it keeps the ordinary fetch.
+ */
+export function isPublicCustomEndpoint(
+  config: Pick<ByokSessionConfig, 'provider' | 'baseUrl'>,
+): boolean {
+  const verdict = evaluateEndpoint(CUSTOM_PROVIDER_ID, config.baseUrl, {
+    consentToPublicEndpoint: true,
+  });
+  return config.provider === 'custom' && verdict.allowed && verdict.kind === 'public';
+}
+
+/** Seams for tests: the global fetch, the DNS answer and the https request. Production uses the defaults. */
+export interface ProviderTransportDeps {
+  readonly fetch?: JoyFetch | undefined;
+  readonly resolveHost?: ResolveHost | undefined;
+  readonly request?: HttpsRequest | undefined;
+}
+
+/** The fetch a provider request goes through: pinned for a public custom endpoint, the global fetch otherwise. */
+export function createProviderTransport(
+  config: ByokSessionConfig,
+  deps: ProviderTransportDeps = {},
+): JoyFetch {
+  if (isPublicCustomEndpoint(config)) {
+    return createPublicEndpointFetch({ resolveHost: deps.resolveHost, request: deps.request });
+  }
+  return deps.fetch ?? ((input, init) => fetch(input, init));
+}
+
 export function createModelFromConfig(
   config: ByokSessionConfig,
   traffic?: ProviderTraffic,
+  deps: ProviderTransportDeps = {},
 ): LanguageModel {
+  const transport = createProviderTransport(config, deps);
   const observingFetch: JoyFetch = async (input, init) => {
     if (traffic) traffic.requests += 1;
     try {
-      const response = await fetch(input, init);
+      const response = await transport(input, init);
       if (traffic) {
         traffic.lastStatus = response.status;
         traffic.lastStatusText = response.statusText;
