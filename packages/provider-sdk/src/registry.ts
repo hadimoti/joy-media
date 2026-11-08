@@ -643,23 +643,25 @@ function ipv6Groups(text: string): number[] | undefined {
 }
 
 /**
- * An IPv6 address that carries an IPv4 address (S8 item 4). The mapped form, in any spelling, is judged by the IPv4
- * address it carries. A prefix that a router or a NAT64 gateway can deliver to is refused whatever IPv4 address it
- * carries: the IPv4-compatible ::/96, the translated ::ffff:0:0:0/96, the NAT64 prefixes 64:ff9b::/96 and 64:ff9b:1::/48,
- * and 6to4 2002::/16.
+ * An IPv6 address that carries an IPv4 address (S8 item 4). The mapped form, in any spelling, the translated form
+ * ::ffff:0:a.b.c.d, and the NAT64 well-known prefix 64:ff9b::/96 are judged by the IPv4 address they carry: a DNS64
+ * network returns that prefix for a public IPv4-only server. The IPv4-compatible ::/96, the NAT64 local-use prefix
+ * 64:ff9b:1::/48 and 6to4 2002::/16 are refused whatever IPv4 address they carry.
  */
 function isPrivateEmbeddedIpv4(host: string): boolean {
   const groups = ipv6Groups(host);
   if (groups === undefined) return false;
   const leading = (count: number): boolean => groups.slice(0, count).every((group) => group === 0);
-  if (leading(5) && groups[5] === 0xffff) {
+  const embeddedPrivate = (): boolean => {
     const [high = 0, low = 0] = groups.slice(6);
     return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
-  }
-  if (leading(6)) return true;
-  if (leading(4) && groups[4] === 0xffff && groups[5] === 0) return true;
+  };
+  if (leading(5) && groups[5] === 0xffff) return embeddedPrivate();
+  if (leading(4) && groups[4] === 0xffff && groups[5] === 0) return embeddedPrivate();
   const nat64 = groups[0] === 0x64 && groups[1] === 0xff9b;
-  if (nat64 && (groups[2] === 1 || groups.slice(2, 6).every((group) => group === 0))) return true;
+  if (nat64 && groups[2] === 1) return true;
+  if (nat64 && groups.slice(2, 6).every((group) => group === 0)) return embeddedPrivate();
+  if (leading(6)) return true;
   return groups[0] === 0x2002;
 }
 
