@@ -659,7 +659,7 @@ describe('createPublicEndpointFetch', () => {
     await expect(reader.read()).rejects.toThrow('stopped mid-deflate');
   });
 
-  it('decodes a large deflate reply read slowly, so the decoder waits for the reader', async () => {
+  it('decodes a large deflate reply read in pieces', async () => {
     const text = JSON.stringify({ text: 'x'.repeat(300_000) });
     const https = fakeHttps({
       status: 200,
@@ -682,6 +682,46 @@ describe('createPublicEndpointFetch', () => {
     }
 
     expect(received).toBe(text);
+  });
+
+  it('rejects a gzip reply whose checksum is damaged, with the zlib error', async () => {
+    const compressed = gzipSync('{"ok":true}');
+    const crcIndex = compressed.length - 8; // the CRC-32 in the gzip trailer
+    compressed[crcIndex] = (compressed[crcIndex] ?? 0) ^ 0xff;
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+      body: compressed,
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+    const error = await response.text().catch((caught: unknown) => caught);
+
+    expect((error as { code?: unknown }).code).toBe('Z_DATA_ERROR');
+  });
+
+  it('rejects a deflate reply whose checksum is damaged, with the zlib error', async () => {
+    const compressed = deflateSync('{"ok":true}');
+    const adlerIndex = compressed.length - 1; // the Adler-32 at the end of the zlib stream
+    compressed[adlerIndex] = (compressed[adlerIndex] ?? 0) ^ 0xff;
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'deflate' },
+      body: compressed,
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+    const error = await response.text().catch((caught: unknown) => caught);
+
+    expect((error as { code?: unknown }).code).toBe('Z_DATA_ERROR');
   });
 
   it('leaves a reply in a coding it cannot decode as it is', async () => {
