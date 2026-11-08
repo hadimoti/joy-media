@@ -36,6 +36,7 @@ import { registerJoyProtocol } from './protocol-registration.js';
 import type { IpcRequest } from '../ipc.js';
 import { isAllowedEditorOrigin, originOfPageUrl } from '../origin-policy.js';
 import {
+  DEV_LOADING_BAR_MS,
   DEV_RENDERER_RETRY_MS,
   DEV_RENDERER_URL,
   PACKAGED_RENDERER_SCHEME,
@@ -431,8 +432,9 @@ if (!app.requestSingleInstanceLock()) {
       // A development window loads the editor dev server. While it does not answer, the window shows the JOY Media
       // loading page and checks the server every few seconds, then opens the editor as soon as it answers.
       const loadingPage = `data:text/html;charset=utf-8,${encodeURIComponent(
-        devLoadingPageHtml(readDevLogoDataUrl(), DEV_RENDERER_URL),
+        devLoadingPageHtml(readDevLogoDataUrl()),
       )}`;
+      let loadingShownAt = 0;
       let poll: ReturnType<typeof setInterval> | undefined;
       const stopPolling = (): void => {
         if (poll !== undefined) clearInterval(poll);
@@ -445,7 +447,11 @@ if (!app.requestSingleInstanceLock()) {
             .then((response) => {
               if (!response.ok || win.isDestroyed()) return;
               stopPolling();
-              void win.loadURL(DEV_RENDERER_URL);
+              // The bar gets to finish before the editor opens.
+              const wait = Math.max(0, loadingShownAt + DEV_LOADING_BAR_MS - Date.now());
+              setTimeout(() => {
+                if (!win.isDestroyed()) void win.loadURL(DEV_RENDERER_URL);
+              }, wait);
             })
             .catch(() => undefined);
         }, DEV_RENDERER_RETRY_MS);
@@ -456,6 +462,7 @@ if (!app.requestSingleInstanceLock()) {
         (_event, errorCode, _errorDescription, _validatedUrl, isMainFrame) => {
           // -3 is an aborted navigation, not a missing server, and a subframe failure is not the page itself.
           if (errorCode === -3 || !isMainFrame || win.isDestroyed()) return;
+          loadingShownAt = Date.now();
           void win.loadURL(loadingPage);
           startPolling();
         },

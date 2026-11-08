@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEV_LOADING_BAR_MS,
   DEV_RENDERER_URL,
   PACKAGED_RENDERER_ORIGIN,
   buildSecureWebPreferences,
@@ -19,32 +20,35 @@ describe('resolveRendererTarget', () => {
 
 describe('devLoadingPageHtml', () => {
   it('shows the JOY Media logo and a loading line', () => {
-    const page = devLoadingPageHtml('data:image/png;base64,AAAA', DEV_RENDERER_URL);
+    const page = devLoadingPageHtml('data:image/png;base64,AAAA');
     expect(page).toContain('src="data:image/png;base64,AAAA"');
     expect(page).toContain('Loading JOY Media');
   });
 
   it('shows the name in text when the logo file is missing', () => {
-    const page = devLoadingPageHtml(undefined, DEV_RENDERER_URL);
+    const page = devLoadingPageHtml(undefined);
     expect(page).toContain('class="wordmark">JOY Media');
     expect(page).not.toContain('<img');
   });
 
-  it('has a Try again link to the editor address', () => {
-    const page = devLoadingPageHtml(undefined, DEV_RENDERER_URL);
-    expect(page).toContain(`href="${DEV_RENDERER_URL}"`);
-    expect(page).toContain('Try again');
+  it('shows a loading bar that fills over the loading time, and no button', () => {
+    const page = devLoadingPageHtml(undefined);
+    expect(page).toContain('class="bar"');
+    expect(page).toContain(`${DEV_LOADING_BAR_MS}ms`);
+    expect(page).toContain('@keyframes fill');
+    expect(page).not.toContain('Try again');
+    expect(page).not.toContain('href=');
   });
 
   it('wiggles the logo, and keeps it still when motion is reduced', () => {
-    const page = devLoadingPageHtml(undefined, DEV_RENDERER_URL);
+    const page = devLoadingPageHtml(undefined);
     expect(page).toContain('@keyframes wiggle');
     expect(page).toContain('animation:wiggle');
     expect(page).toContain('prefers-reduced-motion');
   });
 
   it('is dark and in the app style, never white and never about a server', () => {
-    const page = devLoadingPageHtml(undefined, DEV_RENDERER_URL);
+    const page = devLoadingPageHtml(undefined);
     expect(page).toContain('background:#000000');
     expect(page).not.toMatch(/#fff(fff)?\b/i);
     expect(page).not.toMatch(/dev server|not running|pnpm --filter/i);

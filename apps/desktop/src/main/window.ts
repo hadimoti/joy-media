@@ -20,7 +20,10 @@ export function resolveRendererTarget(isDev: boolean): string {
 }
 
 /** How often a development window checks the editor while it shows the loading page. */
-export const DEV_RENDERER_RETRY_MS = 2000;
+export const DEV_RENDERER_RETRY_MS = 1000;
+
+/** How long the loading bar takes to fill. The editor opens once the bar is full and the editor server has answered. */
+export const DEV_LOADING_BAR_MS = 2800;
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
@@ -35,18 +38,18 @@ const LOADING_PAGE_CSS = [
   'img{width:128px;height:128px;object-fit:contain;transform-origin:50% 50%;animation:wiggle 2.4s ease-in-out infinite}',
   '.wordmark{margin:0;font-size:40px;font-weight:700;letter-spacing:0.02em}',
   '.status{margin:0;font-size:15px;color:#a8a8b0}',
-  '.retry{display:inline-block;padding:10px 22px;border-radius:8px;background:#f4b72f;color:#1a1408;',
-  'font-size:14px;font-weight:600;text-decoration:none}',
-  '.retry:hover{background:#ffc94f}',
+  '.bar{width:260px;height:6px;border-radius:999px;background:#1e1e1e;border:1px solid #3a3a3a;overflow:hidden}',
+  `.bar i{display:block;height:100%;transform:scaleX(0);transform-origin:left center;background:linear-gradient(90deg,#f4b72f,#ffc94f);animation:fill ${DEV_LOADING_BAR_MS}ms cubic-bezier(.22,.61,.36,1) forwards}`,
+  '@keyframes fill{to{transform:scaleX(1)}}',
   '@keyframes wiggle{0%{transform:rotate(0deg)}10%{transform:rotate(-7deg)}20%{transform:rotate(6deg)}30%{transform:rotate(-5deg)}40%{transform:rotate(3deg)}50%{transform:rotate(-2deg)}60%,100%{transform:rotate(0deg)}}',
   '@media (prefers-reduced-motion:reduce){img{animation:none}}',
 ].join('');
 
 /**
  * The page a development window shows while the editor is not ready yet: the JOY Media logo, a loading line, and a
- * Try again link that asks for the editor again at once. It is dark, in the app's style, and never mentions a server.
+ * bar that fills over the loading time. There is no button. It is dark, in the app's style, and never mentions a server.
  */
-export function devLoadingPageHtml(logoDataUrl: string | undefined, retryUrl: string): string {
+export function devLoadingPageHtml(logoDataUrl: string | undefined): string {
   const logo =
     logoDataUrl === undefined
       ? '<p class="wordmark">JOY Media</p>'
@@ -60,7 +63,7 @@ export function devLoadingPageHtml(logoDataUrl: string | undefined, retryUrl: st
     '</head><body>',
     logo,
     '<p class="status">Loading JOY Media&hellip;</p>',
-    `<a class="retry" href="${escapeHtml(retryUrl)}">Try again</a>`,
+    '<div class="bar" role="progressbar" aria-label="Loading JOY Media"><i></i></div>',
     '</body></html>',
   ].join('');
 }
