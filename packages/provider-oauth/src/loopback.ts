@@ -30,12 +30,55 @@ export interface LoopbackCallback {
   close(): void;
 }
 
-const PAGE_DONE =
-  '<!doctype html><meta charset="utf-8"><title>JOY Media</title>' +
-  '<p>Sign-in complete. You can close this window.</p>';
-const PAGE_FAILED =
-  '<!doctype html><meta charset="utf-8"><title>JOY Media</title>' +
-  '<p>Sign-in did not complete. Return to JOY Media and try again.</p>';
+/** The JOY Media look for the sign-in page: black ground, light text, the gold accent of the app (app.css). */
+const SIGN_IN_PAGE_CSS = [
+  'html,body{height:100%;margin:0}',
+  'body{display:flex;align-items:center;justify-content:center;background:#000000;color:#ececef;',
+  "font-family:'Inter Variable','Vazirmatn Variable','Noto Sans Arabic',Tahoma,system-ui,sans-serif}",
+  'main{display:flex;flex-direction:column;align-items:center;gap:12px;padding:32px;text-align:center}',
+  '.brand{margin:0 0 12px;font-size:20px;font-weight:700;letter-spacing:0.02em}',
+  '.brand span{color:#f4b72f}',
+  'svg{width:56px;height:56px}',
+  'h1{margin:8px 0 0;font-size:22px;font-weight:600}',
+  'p.note{margin:0;font-size:15px;color:#a8a8b0}',
+].join('');
+
+const SUCCESS_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#f4b72f"/>' +
+  '<path d="M7 12.5l3.2 3.2L17 9" fill="none" stroke="#1a1408" stroke-width="2.4" ' +
+  'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const FAILURE_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#e8705f"/>' +
+  '<path d="M8 8l8 8M16 8l-8 8" fill="none" stroke="#1a1408" stroke-width="2.4" ' +
+  'stroke-linecap="round"/></svg>';
+
+/** A static page in the app's style. Its wording is fixed here, so it never echoes a parameter back. */
+function signInPage(title: string, note: string, succeeded: boolean): string {
+  return [
+    '<!doctype html><html lang="en"><head><meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">',
+    '<title>JOY Media</title>',
+    `<style>${SIGN_IN_PAGE_CSS}</style>`,
+    '</head><body><main>',
+    '<p class="brand"><span>JOY</span> Media</p>',
+    succeeded ? SUCCESS_ICON : FAILURE_ICON,
+    `<h1>${title}</h1>`,
+    `<p class="note">${note}</p>`,
+    '</main></body></html>',
+  ].join('');
+}
+
+const PAGE_DONE = signInPage(
+  'Sign-in complete',
+  'You can close this window and return to JOY Media.',
+  true,
+);
+const PAGE_FAILED = signInPage(
+  'Sign-in did not complete',
+  'Return to JOY Media and try again.',
+  false,
+);
 
 /**
  * Starts a one-shot listener on 127.0.0.1 for a provider's redirect (PLAN-v4 §6d). It takes the first callback on

@@ -46,6 +46,22 @@ describe('startLoopbackCallback', () => {
     await expect(get(`${callback.redirectUri}?code=again&state=state-1`)).rejects.toThrow();
   });
 
+  it('answers with a page in the JOY style: dark, never white, and with no parameter echoed', async () => {
+    const callback = await startLoopbackCallback({
+      path: '/callback',
+      expectedState: 'state-2',
+      timeoutMs: 5_000,
+    });
+    const reply = await get(
+      `${callback.redirectUri}?code=the-code&state=state-2&client_id=echo-me`,
+    );
+    expect(reply.body).toContain('background:#000000');
+    expect(reply.body).toContain('JOY');
+    expect(reply.body).not.toMatch(/#fff(fff)?\b/i);
+    expect(reply.body).not.toContain('echo-me');
+    await expect(callback.code).resolves.toBe('the-code');
+  });
+
   it('refuses a state that does not match and ends the flow with STATE_MISMATCH', async () => {
     const callback = await startLoopbackCallback({ path: '/callback', expectedState: 'state-1' });
     const reply = await get(`${callback.redirectUri}?code=the-code&state=other`);
