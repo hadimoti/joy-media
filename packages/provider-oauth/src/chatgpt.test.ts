@@ -167,7 +167,9 @@ describe('ChatGPT host ID', () => {
   it.each([
     'urn:uuid:550e8400-e29b-41d4-a716-446655440000',
     'urn:uuid:6ba7b810-9dad-41d1-80b4-00c04fd430c8',
-  ])('accepts %s, the urn:uuid form', (hostId) => {
+    'urn:ietf:params:oauth:jwk-thumbprint:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs',
+    'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
+  ])('accepts %s, a documented host ID form', (hostId) => {
     expect(isExtAgentHostId(hostId)).toBe(true);
   });
 
@@ -182,6 +184,12 @@ describe('ChatGPT host ID', () => {
     ['a UUID with version 0', 'urn:uuid:550e8400-e29b-04d4-a716-446655440000'],
     ['a UUID with a trailing space', 'urn:uuid:550e8400-e29b-41d4-a716-446655440000 '],
     ['another scheme', 'uuid:550e8400-e29b-41d4-a716-446655440000'],
+    ['another DID method', 'did:web:example.com'],
+    ['a thumbprint that is too short', 'urn:ietf:params:oauth:jwk-thumbprint:short'],
+    [
+      'a did:key with a base58-invalid character',
+      'did:key:z0MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
+    ],
   ])('refuses %s', (_name, hostId) => {
     expect(isExtAgentHostId(hostId)).toBe(false);
   });
