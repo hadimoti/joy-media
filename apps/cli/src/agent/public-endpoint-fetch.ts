@@ -6,8 +6,14 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import type { IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { BlockList, isIP, type LookupFunction } from 'node:net';
-import { pipeline, Readable, type Transform } from 'node:stream';
-import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
+import { Duplex, pipeline, Readable, type Transform } from 'node:stream';
+import {
+  constants,
+  createBrotliDecompress,
+  createGunzip,
+  createInflate,
+  createInflateRaw,
+} from 'node:zlib';
 import type { JoyFetch } from '@joy-media/joy-agent-engine';
 import { isPrivateOrInternalHost } from '@joy-media/provider-sdk';
 
@@ -140,10 +146,61 @@ function contentCodings(value: string | string[] | undefined): string[] {
     .filter((coding) => coding !== '' && coding !== 'identity');
 }
 
-function decoderFor(coding: string): Transform {
-  if (coding === 'br') return createBrotliDecompress();
-  if (coding === 'deflate') return createInflate();
-  return createGunzip();
+/** The flush options undici uses: a body that ends early is decoded as far as it goes, and an empty body is empty. */
+const ZLIB_FLUSH = { flush: constants.Z_SYNC_FLUSH, finishFlush: constants.Z_SYNC_FLUSH };
+const BROTLI_FLUSH = {
+  flush: constants.BROTLI_OPERATION_FLUSH,
+  finishFlush: constants.BROTLI_OPERATION_FLUSH,
+};
+
+/**
+ * The deflate coding. Most servers send the zlib format (RFC 1950), but some send raw deflate (RFC 1951). As undici
+ * does, the first byte decides: a zlib header has 8 as its compression method. The inflater is made on the first chunk,
+ * and its output waits for the reader, so a slow reader pauses the input.
+ */
+function deflateDecoder(): Duplex {
+  let inflater: Transform | undefined;
+  const decoder: Duplex = new Duplex({
+    read() {
+      inflater?.resume();
+    },
+    write(chunk: Buffer, _encoding, callback) {
+      if (inflater === undefined) {
+        inflater =
+          ((chunk[0] ?? 0) & 0x0f) === 8 ? createInflate(ZLIB_FLUSH) : createInflateRaw(ZLIB_FLUSH);
+        inflater.on('data', (data: Buffer) => {
+          if (!decoder.push(data)) inflater?.pause();
+        });
+        inflater.on('error', (error) => decoder.destroy(error));
+      }
+      inflater.write(chunk, callback);
+    },
+    final(callback) {
+      // A Duplex ends its readable side only when told to, so the end is pushed here, as a Transform would do.
+      if (inflater === undefined) {
+        decoder.push(null);
+        callback();
+        return;
+      }
+      inflater.once('end', () => {
+        decoder.push(null);
+        callback();
+      });
+      inflater.end();
+    },
+    destroy(error, callback) {
+      // The inflater holds a native zlib handle, which an abort must release with the stream.
+      inflater?.destroy();
+      callback(error);
+    },
+  });
+  return decoder;
+}
+
+function decoderFor(coding: string): Duplex {
+  if (coding === 'br') return createBrotliDecompress(BROTLI_FLUSH);
+  if (coding === 'deflate') return deflateDecoder();
+  return createGunzip(ZLIB_FLUSH);
 }
 
 /** The reply body with its codings undone, last coding first, as the fetch API does. */
