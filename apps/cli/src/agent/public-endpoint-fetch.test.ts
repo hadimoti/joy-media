@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 import type { LookupFunction } from 'node:net';
 import { PassThrough } from 'node:stream';
+import { brotliCompressSync, gzipSync } from 'node:zlib';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createPublicEndpointFetch,
@@ -12,7 +13,7 @@ import {
 interface Reply {
   readonly status: number;
   readonly headers?: Record<string, string>;
-  readonly body?: string;
+  readonly body?: string | Buffer;
   /** The body never ends, so that a test can abort it while it is still streaming. */
   readonly hold?: boolean;
   /** The request fails with this error instead of answering. */
@@ -69,7 +70,10 @@ class FakeRequest extends EventEmitter {
 
   destroy(error?: Error): this {
     this.destroyedWith = error;
-    this.response?.destroy(error);
+    // Node destroys a response that is still unfinished with ECONNRESET 'aborted' when the socket closes.
+    if (this.response !== undefined && !this.response.destroyed) {
+      this.response.destroy(Object.assign(new Error('aborted'), { code: 'ECONNRESET' }));
+    }
     setImmediate(() => this.emit('error', error));
     return this;
   }
@@ -163,6 +167,8 @@ describe('createPublicEndpointFetch', () => {
     ['a NAT64 address that embeds a private IPv4 address', ['64:ff9b::a9fe:a9fe']],
     ['a 6to4 address that embeds a private IPv4 address', ['2002:c0a8:101::1']],
     ['a translated IPv4 address', ['::ffff:0:a00:1']],
+    ['an IPv4-mapped private address in dotted form', ['::ffff:10.0.0.7']],
+    ['an IPv4-mapped private address in hex form', ['::ffff:a00:7']],
     ['a public IPv6 address with a zone', ['2606:4700:4700::1111%eth0']],
     ['a mix of a public and a private address', ['93.184.216.34', '10.0.0.7']],
   ])('refuses a name whose answer is %s', async (_label, answer) => {
@@ -429,6 +435,119 @@ describe('createPublicEndpointFetch', () => {
     expect(options).toMatchObject({ hostname: '2606:4700:4700::1111' });
     expect(options).not.toHaveProperty('servername');
   });
+
+  it('sends the URL host as the Host header, with the port when the URL names one', async () => {
+    const https = fakeHttps(OK);
+    const send = createPublicEndpointFetch({
+      resolveHost: async (hostname: string): Promise<string[]> =>
+        hostname === '2606:4700:4700::1111' ? ['2606:4700:4700::1111'] : ['93.184.216.34'],
+      request: https.request,
+    });
+
+    await send('https://api.example.com:8443/v1/models');
+    await send('https://[2606:4700:4700::1111]/v1/models');
+
+    expect(https.calls[0]!.options.headers).toMatchObject({ host: 'api.example.com:8443' });
+    expect(https.calls[1]!.options.headers).toMatchObject({ host: '[2606:4700:4700::1111]' });
+  });
+
+  it('asks for the content codings it can decode unless the caller names its own', async () => {
+    const https = fakeHttps(OK);
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    await send('https://api.example.com/v1/models');
+    await send('https://api.example.com/v1/models', { headers: { 'accept-encoding': 'identity' } });
+
+    expect(https.calls[0]!.options.headers).toMatchObject({
+      'accept-encoding': 'gzip, deflate, br',
+    });
+    expect(https.calls[1]!.options.headers).toMatchObject({ 'accept-encoding': 'identity' });
+  });
+
+  it('decodes a gzip reply and drops the coding and length headers', async () => {
+    const compressed = gzipSync('{"ok":true}');
+    const https = fakeHttps({
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'content-encoding': 'gzip',
+        'content-length': String(compressed.byteLength),
+      },
+      body: compressed,
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expect(response.headers.get('content-length')).toBeNull();
+  });
+
+  it('decodes a brotli reply', async () => {
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-encoding': 'br' },
+      body: brotliCompressSync('{"ok":true}'),
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it('leaves a reply in a coding it cannot decode as it is', async () => {
+    const https = fakeHttps({
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream', 'content-encoding': 'zstd' },
+      body: 'opaque-bytes',
+    });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    const response = await send('https://api.example.com/v1/models');
+
+    expect(response.headers.get('content-encoding')).toBe('zstd');
+    await expect(response.text()).resolves.toBe('opaque-bytes');
+  });
+
+  it('rejects the request when a reply cannot be converted, rather than failing outside it', async () => {
+    const https = fakeHttps({ status: 200, headers: { 'x-broken': 'line\nbreak' }, body: '' });
+    const send = createPublicEndpointFetch({
+      resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+      request: https.request,
+    });
+
+    await expect(send('https://api.example.com/v1/models')).rejects.toThrow();
+  });
+
+  it.each([205, 304])(
+    'returns a reply with status %i as a response with no body',
+    async (status) => {
+      const https = fakeHttps({ status, body: '' });
+      const send = createPublicEndpointFetch({
+        resolveHost: async (): Promise<string[]> => ['93.184.216.34'],
+        request: https.request,
+      });
+
+      const response = await send('https://api.example.com/v1/models');
+
+      expect(response.status).toBe(status);
+      expect(response.body).toBeNull();
+    },
+  );
 
   it('uses the port written in the URL', async () => {
     const https = fakeHttps(OK);
