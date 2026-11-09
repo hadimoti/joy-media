@@ -284,6 +284,9 @@ describe('JOY Agent Settings connection status', () => {
       (select) => [...select.options].some((option) => option.value === 'openrouter'),
     );
     expect(providerSelect?.value).toBe('openai-compatible');
+    expect(
+      rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]')?.value,
+    ).toBe('');
     const modelInput = rendered.querySelector<HTMLInputElement>('input[aria-label="Model ID"]');
     expect(modelInput?.value).toBe('local-model');
   });
