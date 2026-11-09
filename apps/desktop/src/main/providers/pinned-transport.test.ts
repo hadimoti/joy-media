@@ -399,6 +399,8 @@ describe('pinned fetch (S8 item 4 and 5)', () => {
         signal: controller.signal,
       }),
     ).rejects.toThrow('fetch failed');
+    // The guard is the only error listener on this reply, because no response body was built from it.
+    expect(reply?.listenerCount('error')).toBeGreaterThan(0);
     // Without the reply's error listener, the abort's destroy would raise an unhandled error and fail the run.
     controller.abort();
     await new Promise((resolve) => setImmediate(resolve));
@@ -458,6 +460,13 @@ describe('pinned fetch (S8 item 4 and 5)', () => {
       /no vetted address/,
     );
     await expect(fetchImpl('https://user:pass@accounts.x.ai/oauth2/token', {})).rejects.toThrow(
+      /no vetted address/,
+    );
+    // The named xAI hosts get the same checks as any other x.ai name.
+    await expect(
+      fetchImpl('https://auth.x.ai:8443/.well-known/openid-configuration', {}),
+    ).rejects.toThrow(/no vetted address/);
+    await expect(fetchImpl('https://user:pass@api.x.ai/v1/models', {})).rejects.toThrow(
       /no vetted address/,
     );
     expect(fallback).not.toHaveBeenCalled();

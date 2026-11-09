@@ -43,15 +43,19 @@ const NAMED_HOSTS: ReadonlySet<string> = new Set([
   ),
 ]);
 
+/** xAI's own domain: x.ai and its subdomains. */
+function isXaiHostname(hostname: string): boolean {
+  return hostname === 'x.ai' || hostname.endsWith('.x.ai');
+}
+
 /**
  * xAI's own domain, reached over HTTPS on the default port and without credentials. The sign-in code accepts the same
- * hosts for its discovered endpoints (isTrustedXaiUrl in packages/provider-oauth/src/xai.ts), so the transport does too.
+ * URLs for its discovered endpoints (isTrustedXaiUrl in packages/provider-oauth/src/xai.ts), so the transport does too.
  */
 function isXaiTarget(target: URL): boolean {
-  const hostname = target.hostname.toLowerCase();
   return (
     target.protocol === 'https:' &&
-    (hostname === 'x.ai' || hostname.endsWith('.x.ai')) &&
+    isXaiHostname(target.hostname.toLowerCase()) &&
     target.username === '' &&
     target.password === '' &&
     target.port === ''
@@ -59,9 +63,9 @@ function isXaiTarget(target: URL): boolean {
 }
 
 function isUnpinnedHostAllowed(target: URL): boolean {
-  return (
-    isLoopbackHostname(target.hostname) || NAMED_HOSTS.has(target.hostname) || isXaiTarget(target)
-  );
+  // An x.ai name is judged by its URL alone, before the named-host list, so the named xAI hosts get the same checks.
+  if (isXaiHostname(target.hostname.toLowerCase())) return isXaiTarget(target);
+  return isLoopbackHostname(target.hostname) || NAMED_HOSTS.has(target.hostname);
 }
 
 /**
