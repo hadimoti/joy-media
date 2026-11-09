@@ -315,4 +315,53 @@ describe('pinned fetch (S8 item 4 and 5)', () => {
     const { calls } = await fetchReply({ status: 200, body: '{}' });
     expect(calls[0]?.options.headers).toMatchObject({ 'accept-encoding': 'gzip, deflate, br' });
   });
+
+  it("ends the connection with the caller's abort reason, so a timeout stays an AbortError", async () => {
+    const { request } = fakeRequest({ status: 200, body: '' });
+    const fetchImpl = pinnedFetch(
+      new Map([['api.example.com', ['93.184.216.34']]]),
+      vi.fn(),
+      asHttps(request),
+    );
+    const controller = new AbortController();
+    controller.abort();
+    const failure = await fetchImpl('https://api.example.com/v1/models', {
+      signal: controller.signal,
+    }).catch((caught: unknown) => caught);
+    expect((failure as { name?: unknown }).name).toBe('AbortError');
+  });
+
+  it('refuses a provider host reached over plain HTTP without a pin', async () => {
+    const fallback = vi.fn(async () => new Response('ok'));
+    const { request } = fakeRequest({ status: 200 });
+    const fetchImpl = pinnedFetch(new Map(), fallback, asHttps(request));
+    await expect(fetchImpl('http://api.openai.com/v1/models', {})).rejects.toThrow(/HTTPS/);
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it('sends the xAI host family to the fallback without a pin, as the sign-in code trusts it', async () => {
+    const fallback = vi.fn(async () => new Response('ok'));
+    const { request } = fakeRequest({ status: 200 });
+    const fetchImpl = pinnedFetch(new Map(), fallback, asHttps(request));
+    await fetchImpl('https://accounts.x.ai/oauth2/token', {});
+    expect(fallback).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends no server name for a host that is an IP address', async () => {
+    const { request, calls } = fakeRequest({ status: 200, body: '' });
+    const fetchImpl = pinnedFetch(
+      new Map([['93.184.216.34', ['93.184.216.34']]]),
+      vi.fn(),
+      asHttps(request),
+    );
+    await fetchImpl('https://93.184.216.34/v1/models', {});
+    expect(calls[0]?.options.hostname).toBe('93.184.216.34');
+    expect(calls[0]?.options.servername).toBeUndefined();
+  });
+
+  it('rejects a URL it cannot parse instead of throwing', async () => {
+    const { request } = fakeRequest({ status: 200 });
+    const fetchImpl = pinnedFetch(new Map(), vi.fn(), asHttps(request));
+    await expect(fetchImpl('not a url', {})).rejects.toThrow();
+  });
 });

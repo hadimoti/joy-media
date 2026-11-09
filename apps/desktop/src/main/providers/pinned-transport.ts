@@ -1,10 +1,11 @@
 /*
  * The pinned transport for public custom endpoints (S8, PLAN-v4 §6c). It is Node-only: it opens HTTPS sockets, so
  * browser code must never import this module. It follows the CLI transport (apps/cli/src/agent/public-endpoint-fetch.ts)
- * for connections, redirects and compressed replies.
+ * for connections, redirects, aborts and compressed replies.
  */
 import type { IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+import { isIP } from 'node:net';
 import { Duplex, pipeline, Readable, type Transform } from 'node:stream';
 import {
   constants,
@@ -42,8 +43,13 @@ const NAMED_HOSTS: ReadonlySet<string> = new Set([
   ),
 ]);
 
+/** xAI's own domain. The sign-in code accepts any x.ai host for its discovered endpoints, so the transport does too. */
+function isXaiHost(hostname: string): boolean {
+  return hostname === 'x.ai' || hostname.endsWith('.x.ai');
+}
+
 function isUnpinnedHostAllowed(hostname: string): boolean {
-  return isLoopbackHostname(hostname) || NAMED_HOSTS.has(hostname);
+  return isLoopbackHostname(hostname) || NAMED_HOSTS.has(hostname) || isXaiHost(hostname);
 }
 
 /**
@@ -221,7 +227,7 @@ function isRedirect(reply: IncomingMessage): boolean {
  * A fetch for public custom endpoints. A host with a pin is reached over HTTPS at its vetted addresses only, with
  * the name kept for SNI and the Host header. Redirects are returned as they are, never followed, unless the caller
  * asks for an error. A host without a pin is reached only when it is this computer or a provider host the registry
- * names; any other host is refused.
+ * names, and then only over HTTPS unless it is this computer; any other host is refused.
  */
 export function pinnedFetch(
   pins: ReadonlyMap<string, readonly string[]>,
@@ -229,13 +235,23 @@ export function pinnedFetch(
   request: HttpsRequest = httpsRequest,
 ): PinnedFetch {
   return (url, init) => {
-    const target = new URL(url);
+    let target: URL;
+    try {
+      target = new URL(url);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     const addresses = pins.get(target.hostname);
     if (addresses === undefined) {
-      if (isUnpinnedHostAllowed(target.hostname)) return fallback(url, init);
-      return Promise.reject(
-        new Error('This host has no vetted address, so the request was not sent.'),
-      );
+      if (!isUnpinnedHostAllowed(target.hostname)) {
+        return Promise.reject(
+          new Error('This host has no vetted address, so the request was not sent.'),
+        );
+      }
+      if (target.protocol !== 'https:' && !isLoopbackHostname(target.hostname)) {
+        return Promise.reject(new Error('A provider host must use HTTPS.'));
+      }
+      return fallback(url, init);
     }
     if (target.protocol !== 'https:') {
       return Promise.reject(new Error('A public endpoint must use HTTPS.'));
@@ -243,6 +259,8 @@ export function pinnedFetch(
     if (addresses.length === 0 || addresses.some((address) => isRefusedAddress(address))) {
       return Promise.reject(new Error('A pinned address for this endpoint is not public.'));
     }
+    // The name without brackets, for the socket; the pin map keeps the URL's own spelling.
+    const hostname = target.hostname.replace(/^\[/, '').replace(/\]$/, '');
     return new Promise<Response>((resolve, reject) => {
       let body: Buffer | undefined;
       try {
@@ -257,20 +275,26 @@ export function pinnedFetch(
       if (body !== undefined && headers['content-length'] === undefined) {
         headers['content-length'] = String(body.byteLength);
       }
+      const signal = init.signal ?? undefined;
+      let activeReply: IncomingMessage | undefined;
       const req = request(
         {
           protocol: 'https:',
-          hostname: target.hostname,
+          hostname,
           port: target.port === '' ? 443 : Number(target.port),
           path: `${target.pathname}${target.search}`,
           method: init.method ?? 'GET',
           headers,
-          servername: target.hostname,
+          // The name stays for SNI and the certificate check. An IP address has no name to send.
+          ...(isIP(hostname) === 0 ? { servername: hostname } : {}),
           // No pooled socket: every request connects again, to the addresses vetted for that request.
           agent: false,
           lookup: pinnedLookup(addresses) as never,
         },
         (reply) => {
+          activeReply = reply;
+          // An abort destroys the reply, and nobody may be reading it. Its error must not crash the process.
+          reply.on('error', () => undefined);
           try {
             if (init.redirect === 'error' && isRedirect(reply)) {
               reply.resume();
@@ -284,14 +308,21 @@ export function pinnedFetch(
           }
         },
       );
-      req.on('error', reject);
-      const signal = init.signal;
-      if (signal) {
-        const abort = (): void => {
-          req.destroy(new Error('The request was aborted.'));
+      // A socket or TLS failure is a failed fetch, as undici reports it. An abort keeps the reason the caller gave.
+      req.on('error', (error) => {
+        reject(signal?.aborted ? error : new TypeError('fetch failed', { cause: error }));
+      });
+      if (signal !== undefined) {
+        // The caller's reason goes on, so a timeout stays an AbortError, as it does with the global fetch.
+        const onAbort = (): void => {
+          const reason =
+            signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+          activeReply?.destroy(reason as Error);
+          req.destroy(reason as Error);
         };
-        if (signal.aborted) abort();
-        else signal.addEventListener('abort', abort, { once: true });
+        signal.addEventListener('abort', onAbort, { once: true });
+        req.once('close', () => signal.removeEventListener('abort', onAbort));
+        if (signal.aborted) onAbort();
       }
       if (body !== undefined) req.write(body);
       req.end();
