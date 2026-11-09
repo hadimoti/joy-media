@@ -227,14 +227,17 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
             }
           }
 
-          if (
-            catalog.assets.some(
-              (entry) =>
-                typeof entry === 'object' &&
-                entry !== null &&
-                (entry as Record<string, unknown>).id === id,
-            )
-          ) {
+          const isEntryForId = (entry: unknown): boolean =>
+            typeof entry === 'object' &&
+            entry !== null &&
+            (entry as Record<string, unknown>).id === id;
+          const hasEntry = catalog.assets.some(isEntryForId);
+          const namesAreCurrent = catalog.assets.every(
+            (entry) =>
+              !isEntryForId(entry) ||
+              (entry as Record<string, unknown>).displayName === registration.displayName,
+          );
+          if (hasEntry && namesAreCurrent) {
             result = { ok: true };
           } else {
             if (catalogExists && previousCatalog !== undefined) {
@@ -258,7 +261,19 @@ export function createAssetLibrary(options: AssetLibraryOptions): AssetLibraryPo
               displayName: registration.displayName,
               sortName: registration.displayName.toLowerCase(),
             };
-            const assets = [...catalog.assets, entry];
+            // One entry per content. A later import of the same bytes under another name renames
+            // every entry for them, so the Media list shows the file that was just imported.
+            const assets = hasEntry
+              ? catalog.assets.map((item) =>
+                  isEntryForId(item)
+                    ? {
+                        ...(item as Record<string, unknown>),
+                        displayName: entry.displayName,
+                        sortName: entry.sortName,
+                      }
+                    : item,
+                )
+              : [...catalog.assets, entry];
             const counts = {
               total: assets.length,
               audio: assets.filter(
