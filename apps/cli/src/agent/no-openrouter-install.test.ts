@@ -111,6 +111,7 @@ describe('first CLI install without an OpenRouter profile or key', () => {
 
   it('does not send an environment key to a consented custom endpoint without a saved key', async () => {
     process.env.OPENROUTER_API_KEY = 'sk-or-environment-only-test-key';
+    process.env.OPENAI_API_KEY = 'sk-environment-only-test-key';
     const baseUrl = 'https://custom.example.com/v1';
     setAiProvider('consented-custom', {
       name: 'Consented custom',
