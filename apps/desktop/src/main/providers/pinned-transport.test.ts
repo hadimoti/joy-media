@@ -347,6 +347,19 @@ describe('pinned fetch (S8 item 4 and 5)', () => {
     expect(fallback).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses an xAI host that has a port or credentials unless it is pinned', async () => {
+    const fallback = vi.fn(async () => new Response('ok'));
+    const { request } = fakeRequest({ status: 200 });
+    const fetchImpl = pinnedFetch(new Map(), fallback, asHttps(request));
+    await expect(fetchImpl('https://accounts.x.ai:8443/oauth2/token', {})).rejects.toThrow(
+      /no vetted address/,
+    );
+    await expect(fetchImpl('https://user:pass@accounts.x.ai/oauth2/token', {})).rejects.toThrow(
+      /no vetted address/,
+    );
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
   it('sends no server name for a host that is an IP address', async () => {
     const { request, calls } = fakeRequest({ status: 200, body: '' });
     const fetchImpl = pinnedFetch(

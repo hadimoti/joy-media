@@ -43,13 +43,25 @@ const NAMED_HOSTS: ReadonlySet<string> = new Set([
   ),
 ]);
 
-/** xAI's own domain. The sign-in code accepts any x.ai host for its discovered endpoints, so the transport does too. */
-function isXaiHost(hostname: string): boolean {
-  return hostname === 'x.ai' || hostname.endsWith('.x.ai');
+/**
+ * xAI's own domain, reached over HTTPS on the default port and without credentials. The sign-in code accepts the same
+ * hosts for its discovered endpoints (isTrustedXaiUrl in packages/provider-oauth/src/xai.ts), so the transport does too.
+ */
+function isXaiTarget(target: URL): boolean {
+  const hostname = target.hostname.toLowerCase();
+  return (
+    target.protocol === 'https:' &&
+    (hostname === 'x.ai' || hostname.endsWith('.x.ai')) &&
+    target.username === '' &&
+    target.password === '' &&
+    target.port === ''
+  );
 }
 
-function isUnpinnedHostAllowed(hostname: string): boolean {
-  return isLoopbackHostname(hostname) || NAMED_HOSTS.has(hostname) || isXaiHost(hostname);
+function isUnpinnedHostAllowed(target: URL): boolean {
+  return (
+    isLoopbackHostname(target.hostname) || NAMED_HOSTS.has(target.hostname) || isXaiTarget(target)
+  );
 }
 
 /**
@@ -243,7 +255,7 @@ export function pinnedFetch(
     }
     const addresses = pins.get(target.hostname);
     if (addresses === undefined) {
-      if (!isUnpinnedHostAllowed(target.hostname)) {
+      if (!isUnpinnedHostAllowed(target)) {
         return Promise.reject(
           new Error('This host has no vetted address, so the request was not sent.'),
         );
