@@ -11,7 +11,7 @@ import {
   setAiProvider,
 } from '../utils/config.js';
 import { loadAgentSlots } from './agent-slots.js';
-import { resolveByokConfig } from './provider.js';
+import { resolveAgentConfig, resolveByokConfig } from './provider.js';
 
 const savedEnvironment = {
   HOME: process.env.HOME,
@@ -94,5 +94,31 @@ describe('first CLI install without an OpenRouter profile or key', () => {
     process.env.OPENROUTER_API_KEY = 'sk-or-environment-only-test-key';
     process.env.OPENAI_API_KEY = 'sk-environment-only-test-key';
     expect(() => resolveByokConfig({})).toThrow(/No provider is set/);
+  });
+
+  it('does not choose the environment provider in resolveAgentConfig when none is set', async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-environment-only-test-key';
+    process.env.OPENAI_API_KEY = 'sk-environment-only-test-key';
+    await expect(resolveAgentConfig({})).rejects.toThrow(/No provider is set/);
+  });
+
+  it('does not send an environment key to a one-off custom endpoint', async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-environment-only-test-key';
+    await expect(
+      resolveAgentConfig({ baseUrl: 'https://custom.example.com/v1', model: 'custom-model' }),
+    ).rejects.toThrow(/explicit consent/);
+  });
+
+  it('gives a one-off local endpoint no environment key', async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-environment-only-test-key';
+    const config = await resolveAgentConfig({
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      model: 'local-model',
+    });
+    expect(config).toMatchObject({
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'local-model',
+    });
+    expect(config.apiKey).not.toBe('sk-or-environment-only-test-key');
   });
 });
