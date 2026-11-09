@@ -1,13 +1,14 @@
-// Writes the summary one shadow run leaves for the comparison (plan section 3.4, D18). The shadow job gathers the inputs from its gate
-// and job results, and this module checks them and writes ci-v3-shadow-compare.mjs's input. It invents nothing: a missing check, lane,
-// scenario, transition or Vitest list fails the write, so the comparison never compares a summary that is only partly known.
+// Writes the run summary of one gate run (plan section 8b). The job gathers the inputs from its gate and job results, and
+// this module checks them. It invents nothing: a missing check, lane, scenario, transition or Vitest list fails the write,
+// so no summary is written from inputs that are only partly known. The shadow comparison that once read these summaries is
+// retired (owner approval, 9 Nov).
 //
 //   node tooling/release/src/ci-v3-run-summary.mjs --input <run-inputs.json> --out <run-summary.json>
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// The same lists ci-v3-shadow-compare.mjs compares against. ci-v3-run-summary.test.ts fails if they drift apart.
+// The gate checks every summary records. ci-v3-run-summary.test.ts pins the list.
 export const GATE_CHECKS = [
   'command-health',
   'source-provenance',
