@@ -70,11 +70,12 @@ function statusProviderFor(provider: DialogProvider): 'openrouter' | 'openai-com
 
 /**
  * The provider a connected session keeps in the form. A session runs on OpenRouter or the openai-compatible
- * transport; any other status names no provider here, so OpenRouter is never shown for it.
+ * transport, and a custom endpoint is the openai-compatible choice. Any other status names no provider here,
+ * so OpenRouter is never shown for it.
  */
 function formProviderForStatus(status: ByokSessionStatus | undefined): DialogProvider | '' {
   if (status?.provider === 'openrouter') return 'openrouter';
-  if (status?.provider === 'openai-compatible') return 'openai-compatible';
+  if (status !== undefined && isCustomEndpointProvider(status.provider)) return 'openai-compatible';
   return '';
 }
 
@@ -286,7 +287,7 @@ export function JoyAgentSettingsDialog({
 
   // No provider is preselected, and OpenRouter is never a default (PLAN-v4 §6d-1 rule 3). A new connection
   // starts with nothing chosen; a session that is already connected keeps the provider it has, when its status
-  // names one of the two transports a session runs on. Any other status keeps no provider and no OpenRouter default.
+  // names OpenRouter or a custom endpoint. Any other status keeps no provider and no OpenRouter default.
   const connectedProvider = formProviderForStatus(status);
   const [provider, setProvider] = useState<DialogProvider | ''>(connectedProvider);
   const [baseUrl, setBaseUrl] = useState(

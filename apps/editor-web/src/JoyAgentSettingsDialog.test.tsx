@@ -251,6 +251,43 @@ describe('JOY Agent Settings connection status', () => {
     expect(modelInput?.value).toBe('');
   });
 
+  it('keeps a connected openai-compatible session and adds no OpenRouter model', async () => {
+    const compatibleStatus: ByokSessionStatus = {
+      provider: 'openai-compatible',
+      modelId: '',
+      capability: 'tool-loop',
+    };
+    const rendered = await render(client(), compatibleStatus);
+    await selectCustomPreset(rendered);
+
+    const providerSelect = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find(
+      (select) => [...select.options].some((option) => option.value === 'openrouter'),
+    );
+    expect(providerSelect?.value).toBe('openai-compatible');
+    expect(
+      rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]')?.value,
+    ).toBe('');
+    const modelInput = rendered.querySelector<HTMLInputElement>('input[aria-label="Model ID"]');
+    expect(modelInput?.value).toBe('');
+  });
+
+  it('shows a connected custom endpoint as the openai-compatible choice', async () => {
+    const customStatus: ByokSessionStatus = {
+      provider: 'custom',
+      modelId: 'local-model',
+      capability: 'tool-loop',
+    };
+    const rendered = await render(client(), customStatus);
+    await selectCustomPreset(rendered);
+
+    const providerSelect = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find(
+      (select) => [...select.options].some((option) => option.value === 'openrouter'),
+    );
+    expect(providerSelect?.value).toBe('openai-compatible');
+    const modelInput = rendered.querySelector<HTMLInputElement>('input[aria-label="Model ID"]');
+    expect(modelInput?.value).toBe('local-model');
+  });
+
   it('shows tool-loop readiness and the connection notice in the dialog', async () => {
     const rendered = await render(client(), undefined);
 
