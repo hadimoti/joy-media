@@ -325,7 +325,8 @@ export function pinnedFetch(
         reject(signal?.aborted ? error : new TypeError('fetch failed', { cause: error }));
       });
       if (signal !== undefined) {
-        // The caller's reason goes on, so a timeout stays an AbortError, as it does with the global fetch.
+        // The caller's reason goes on, as it does with the global fetch. An abort without a reason rejects with an
+        // AbortError, and AbortSignal.timeout() rejects with a TimeoutError.
         const onAbort = (): void => {
           const reason =
             signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');

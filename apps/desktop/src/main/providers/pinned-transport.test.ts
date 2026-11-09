@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { request as httpsRequest } from 'node:https';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from 'node:zlib';
 import { describe, expect, it, vi } from 'vitest';
 import { pinnedFetch, pinnedLookup } from './pinned-transport.js';
@@ -316,7 +316,7 @@ describe('pinned fetch (S8 item 4 and 5)', () => {
     expect(calls[0]?.options.headers).toMatchObject({ 'accept-encoding': 'gzip, deflate, br' });
   });
 
-  it("ends the connection with the caller's abort reason, so a timeout stays an AbortError", async () => {
+  it("ends the connection with the caller's abort reason", async () => {
     const { request } = fakeRequest({ status: 200, body: '' });
     const fetchImpl = pinnedFetch(
       new Map([['api.example.com', ['93.184.216.34']]]),
@@ -329,6 +329,109 @@ describe('pinned fetch (S8 item 4 and 5)', () => {
       signal: controller.signal,
     }).catch((caught: unknown) => caught);
     expect((failure as { name?: unknown }).name).toBe('AbortError');
+  });
+
+  it('passes a timeout reason through, so a timeout rejects with a TimeoutError', async () => {
+    const { request } = fakeRequest({ status: 200, body: '' });
+    const fetchImpl = pinnedFetch(
+      new Map([['api.example.com', ['93.184.216.34']]]),
+      vi.fn(),
+      asHttps(request),
+    );
+    const signal = AbortSignal.abort(new DOMException('timed out', 'TimeoutError'));
+    const failure = await fetchImpl('https://api.example.com/v1/models', { signal }).catch(
+      (caught: unknown) => caught,
+    );
+    expect((failure as { name?: unknown }).name).toBe('TimeoutError');
+  });
+
+  it('reports a socket failure as a failed fetch, with the socket error as its cause', async () => {
+    const socketError = new Error('socket hang up');
+    const failing = vi.fn(() => {
+      const req = Object.assign(new EventEmitter(), {
+        write: () => true,
+        end: () => req.emit('error', socketError),
+        destroy: () => req.emit('error', socketError),
+      });
+      return req;
+    });
+    const fetchImpl = pinnedFetch(
+      new Map([['api.example.com', ['93.184.216.34']]]),
+      vi.fn(),
+      failing as unknown as typeof httpsRequest,
+    );
+    const failure = await fetchImpl('https://api.example.com/v1/models', {}).catch(
+      (caught: unknown) => caught,
+    );
+    expect(failure).toBeInstanceOf(TypeError);
+    expect((failure as TypeError).message).toBe('fetch failed');
+    expect((failure as TypeError).cause).toBe(socketError);
+  });
+
+  it("keeps a refused redirect's open reply from raising an unhandled error on abort", async () => {
+    // A stream that never ends, so the abort still finds the reply open. The refused redirect leaves it unread.
+    let reply: FakeResponse | undefined;
+    const redirecting = vi.fn(
+      (_options: Record<string, unknown>, onResponse: (res: FakeResponse) => void) => {
+        const req = Object.assign(new EventEmitter(), {
+          write: () => true,
+          end: () => {
+            reply = new PassThrough() as unknown as FakeResponse;
+            reply.statusCode = 302;
+            reply.statusMessage = 'Found';
+            reply.headers = { location: 'https://api.example.com/next' };
+            onResponse(reply);
+          },
+          destroy: (error?: Error) => req.emit('error', error ?? new Error('destroyed')),
+        });
+        return req;
+      },
+    );
+    const controller = new AbortController();
+    const fetchImpl = pinnedFetch(
+      new Map([['api.example.com', ['93.184.216.34']]]),
+      vi.fn(),
+      redirecting as unknown as typeof httpsRequest,
+    );
+    await expect(
+      fetchImpl('https://api.example.com/v1/models', {
+        redirect: 'error',
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('fetch failed');
+    // Without the reply's error listener, the abort's destroy would raise an unhandled error and fail the run.
+    controller.abort();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(reply?.destroyed).toBe(true);
+  });
+
+  it('removes its abort listener once the request closes', async () => {
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
+    const closing = vi.fn(
+      (_options: Record<string, unknown>, onResponse: (res: FakeResponse) => void) => {
+        const req = Object.assign(new EventEmitter(), {
+          write: () => true,
+          end: () => {
+            const res = Readable.from([Buffer.from('')]) as FakeResponse;
+            res.statusCode = 200;
+            res.statusMessage = 'OK';
+            res.headers = {};
+            onResponse(res);
+            req.emit('close');
+          },
+          destroy: (error?: Error) => req.emit('error', error ?? new Error('destroyed')),
+        });
+        return req;
+      },
+    );
+    const fetchImpl = pinnedFetch(
+      new Map([['api.example.com', ['93.184.216.34']]]),
+      vi.fn(),
+      closing as unknown as typeof httpsRequest,
+    );
+    await fetchImpl('https://api.example.com/v1/models', { signal: controller.signal });
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
   });
 
   it('refuses a provider host reached over plain HTTP without a pin', async () => {
