@@ -11,7 +11,7 @@ import {
   setAiProvider,
 } from '../utils/config.js';
 import { loadAgentSlots } from './agent-slots.js';
-import { resolveAgentConfig, resolveByokConfig } from './provider.js';
+import { consentKey, resolveAgentConfig, resolveByokConfig } from './provider.js';
 
 const savedEnvironment = {
   HOME: process.env.HOME,
@@ -102,11 +102,25 @@ describe('first CLI install without an OpenRouter profile or key', () => {
     await expect(resolveAgentConfig({})).rejects.toThrow(/No provider is set/);
   });
 
-  it('does not send an environment key to a one-off custom endpoint', async () => {
+  it('refuses a one-off public endpoint for consent before any key is read', async () => {
     process.env.OPENROUTER_API_KEY = 'sk-or-environment-only-test-key';
     await expect(
       resolveAgentConfig({ baseUrl: 'https://custom.example.com/v1', model: 'custom-model' }),
     ).rejects.toThrow(/explicit consent/);
+  });
+
+  it('does not send an environment key to a consented custom endpoint without a saved key', async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-environment-only-test-key';
+    const baseUrl = 'https://custom.example.com/v1';
+    setAiProvider('consented-custom', {
+      name: 'Consented custom',
+      provider: 'custom',
+      baseUrl,
+      endpointConsent: consentKey('custom', baseUrl),
+    });
+    await expect(
+      resolveAgentConfig({ provider: 'consented-custom', model: 'custom-model' }),
+    ).rejects.toThrow(/No API key is saved/);
   });
 
   it('gives a one-off local endpoint no environment key', async () => {
