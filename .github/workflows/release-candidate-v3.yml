@@ -20,13 +20,13 @@ name: release-candidate-v3
 # hosted-verify report refuse it again. GitHub lists this file for dispatch only from the default branch (see
 # docs/release/ci-v3-shadow-runbook.md).
 #
-# Runner placement is unchanged from v2 (ci-runner-policy.test.ts pins it):
-#   - validate-candidate / hosted-verify-shard / hosted-verify / node-contracts / editor-web-bundle / acceptance-responsive:
-#     GitHub-hosted ubuntu-24.04.
-#   - fixture-acceptance / real-service-acceptance / p3-real-services / gate-summary:
-#     self-hosted,linux,x64,joy-media-acceptance.
-#   - linux-real-services: self-hosted,linux,x64,joy-media-ci.
-#   - windows-candidate: self-hosted,windows,x64,joy-media-worker-docker.
+# Runner placement follows the self-hosted-only contract (ci-runner-policy.test.ts pins it). No GitHub-hosted label is used.
+#   - validate-candidate, hosted-prepare, hosted-verify-shard, hosted-verify, node-contracts, editor-web-bundle and
+#     acceptance-responsive: self-hosted,linux,x64,joy-media-ci.
+#   - fixture-acceptance, real-service-acceptance, p3-real-services and gate-summary: self-hosted,linux,x64,joy-media-acceptance.
+#   - windows-candidate: self-hosted,windows,x64,joy-media-worker-docker. The Windows runner was retired (commit 4cb35d7a), and
+#     the windows lane is attended on the owner's PC (plan section 17e). Its CI job waits for the attended-receipt design
+#     (plan section 17f), so ci-runner-policy fails on this one line until that design is approved.
 
 on:
   workflow_dispatch:
@@ -50,7 +50,7 @@ env:
 jobs:
   validate-candidate:
     name: validate-candidate
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -76,7 +76,7 @@ jobs:
 
   hosted-verify-shard:
     name: hosted-verify shard ${{ matrix.shard }} of 3
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
     needs: [validate-candidate]
     strategy:
       fail-fast: false
@@ -137,7 +137,7 @@ jobs:
 
   hosted-prepare:
     name: hosted-prepare (collection, static commands, production audit)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
     needs: [validate-candidate]
     timeout-minutes: 60
     # The collection runs with the same PostgreSQL environment as the shards. A suite that registers only when the database is
@@ -205,7 +205,7 @@ jobs:
 
   hosted-verify:
     name: hosted-verify (merge and assemble; no dependency install)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
     needs: [validate-candidate, hosted-verify-shard, hosted-prepare]
     timeout-minutes: 30
     outputs:
@@ -269,7 +269,7 @@ jobs:
 
   node-contracts:
     name: node-contracts (Node ${{ matrix.node }})
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
     needs: [validate-candidate]
     strategy:
       fail-fast: false
@@ -336,7 +336,7 @@ jobs:
 
   editor-web-bundle:
     name: editor-web-bundle (standard hosted Linux)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
     needs: [validate-candidate]
     timeout-minutes: 30
     steps:
@@ -1237,7 +1237,7 @@ jobs:
 
   acceptance-responsive:
     name: acceptance-responsive 6 viewports (single pass)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
     needs: [validate-candidate]
     timeout-minutes: 20
     env:
