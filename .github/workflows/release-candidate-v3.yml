@@ -1,0 +1,1686 @@
+name: release-candidate-v3
+
+# SINGLE-PASS RELEASE GATE, BRANCH IMPLEMENTATION (decision D17). This is not the production gate.
+# release-candidate-v2.yml stays the release gate until the owner approves the cutover (D19). Nothing here publishes,
+# tags, deploys or merges, and it is dispatch-only.
+#
+# Plan section 3.4 is the source. The job merges are implemented here (D17 covers the branch implementation):
+#   - hosted-verify-shard x3 and hosted-verify: the Vitest suite runs in three parallel shards on hosted Ubuntu. The merge
+#     job checks that the shards executed every test `vitest list` names, exactly once, with no failures. The same job runs
+#     the static gates the final gate used to rerun (typecheck, lint, format, goldens) and the production audit. The gate
+#     reads one report, bound to this candidate, run and attempt (tooling/release/src/hosted-verify.mjs).
+#   - windows-candidate: windows-p0-real-services and windows-worker-clean, one checkout, one install, one build, one P0 lane,
+#     one CLI suite and one installed lifecycle pass. The Windows evidence output is evidence1 only.
+#   - fixture-acceptance: acceptance-primary and prod-build-smoke, one checkout and one build.
+#   - linux-real-services no longer runs verify:ci (hosted-verify runs it). It keeps the real-service harness and the P0 lane.
+#   - real-service-acceptance runs once. Its per-pass gate is removed, because the final gate covers the same checks.
+#   - The 17 gate checks are unchanged (tooling/release/src/gate.ts). Their inputs come from one pass and the hosted report.
+#
+# A re-run cannot become evidence: validate-candidate refuses any attempt other than 1, and the readiness builder and the
+# hosted-verify report refuse it again. GitHub lists this file for dispatch only from the default branch (see
+# docs/release/ci-v3-shadow-runbook.md).
+#
+# Runner placement is unchanged from v2 (ci-runner-policy.test.ts pins it):
+#   - validate-candidate / hosted-verify-shard / hosted-verify / node-contracts / editor-web-bundle / acceptance-responsive:
+#     GitHub-hosted ubuntu-24.04.
+#   - fixture-acceptance / real-service-acceptance / p3-real-services / gate-summary:
+#     self-hosted,linux,x64,joy-media-acceptance.
+#   - linux-real-services: self-hosted,linux,x64,joy-media-ci.
+#   - windows-candidate: self-hosted,windows,x64,joy-media-worker-docker.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Full 40-character commit SHA to verify (must already be reachable from this repository remote)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read # ci-namespace-janitor reads other runs' status to classify orphans
+
+concurrency:
+  group: release-candidate-v3-${{ inputs.candidate_sha }}
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+
+jobs:
+  validate-candidate:
+    name: validate-candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Validate immutable candidate input
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          resolved_sha="$(git rev-parse HEAD)"
+          [[ "$resolved_sha" == "$CANDIDATE_SHA" ]] || { echo 'candidate_sha is not reachable from this repository' >&2; exit 1; }
+      - name: Refuse a re-run (only the first attempt can produce evidence)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = '1' || { echo 'release-candidate-v3 refuses a re-run: only attempt 1 can produce evidence' >&2; exit 1; }
+
+  hosted-verify-shard:
+    name: hosted-verify shard ${{ matrix.shard }} of 3
+    runs-on: ubuntu-24.04
+    needs: [validate-candidate]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    timeout-minutes: 90
+    env:
+      JOY_TEST_DATABASE_URL: postgres://joy_media:joy_media@localhost:5432/joy_media_test
+      JOY_MEDIA_EDGE_URL: off
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: joy_media
+          POSTGRES_PASSWORD: joy_media
+          POSTGRES_DB: joy_media_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U joy_media -d joy_media_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Verify exact candidate and pinned pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA" || { echo 'hosted-verify checkout does not match candidate_sha' >&2; exit 1; }
+          corepack enable pnpm
+          test "$(pnpm --version)" = '11.15.0'
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run Vitest shard ${{ matrix.shard }} of 3 (retries disabled, JSON report)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-output/hosted-verify
+          node node_modules/vitest/vitest.mjs run --retry=0 --shard=${{ matrix.shard }}/3 --reporter=json --outputFile=test-output/hosted-verify/shard-${{ matrix.shard }}.json
+          test -s test-output/hosted-verify/shard-${{ matrix.shard }}.json
+      # Transport only: the merge job reads the report from this run alone. The merge decides whether the shards are complete.
+      - name: Upload the shard report (one day, this run only)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-hosted-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}-${{ matrix.shard }}
+          path: test-output/hosted-verify/shard-${{ matrix.shard }}.json
+          retention-days: 1
+          if-no-files-found: error
+
+  hosted-prepare:
+    name: hosted-prepare (collection, static commands, production audit)
+    runs-on: ubuntu-24.04
+    needs: [validate-candidate]
+    timeout-minutes: 60
+    # The collection runs with the same PostgreSQL environment as the shards. A suite that registers only when the database is
+    # set (describe.skipIf) must be listed here exactly as it runs in a shard, or the merge would meet a test the list does not
+    # name. This is the environment the collection lacked before this job existed.
+    env:
+      JOY_TEST_DATABASE_URL: postgres://joy_media:joy_media@localhost:5432/joy_media_test
+      JOY_MEDIA_EDGE_URL: off
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: joy_media
+          POSTGRES_PASSWORD: joy_media
+          POSTGRES_DB: joy_media_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U joy_media -d joy_media_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Verify exact candidate and pinned pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA" || { echo 'hosted-prepare checkout does not match candidate_sha' >&2; exit 1; }
+          corepack enable pnpm
+          test "$(pnpm --version)" = '11.15.0'
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Collect the full Vitest collection on this exact commit (the shards' database environment)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-output/hosted-verify/prep
+          node node_modules/vitest/vitest.mjs list --json > test-output/hosted-verify/prep/list.json
+          test -s test-output/hosted-verify/prep/list.json
+      - name: Run the static release commands once on this commit (typecheck, lint, format, goldens)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tooling/release/src/hosted-verify.mjs commands --out test-output/hosted-verify/prep/commands.json
+      - name: Run the production dependency audit
+        shell: bash
+        run: pnpm run audit:prod
+      # Transport only: the merge job reads the collection and the static results from this run alone.
+      - name: Upload the collection and the static results (one day, this run only)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-hosted-prepare-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/hosted-verify/prep
+          retention-days: 1
+          if-no-files-found: error
+
+  hosted-verify:
+    name: hosted-verify (merge and assemble; no dependency install)
+    runs-on: ubuntu-24.04
+    needs: [validate-candidate, hosted-verify-shard, hosted-prepare]
+    timeout-minutes: 30
+    outputs:
+      report_sha256: ${{ steps.report.outputs.report_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Verify exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA" || { echo 'hosted-verify checkout does not match candidate_sha' >&2; exit 1; }
+      - name: Download this run's Vitest shard reports (this run and this candidate only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: joy-media-hosted-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}-*
+          path: test-output/hosted-verify/shards
+          merge-multiple: true
+      - name: Download this run's collection and static results (this run and this candidate only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joy-media-hosted-prepare-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/hosted-verify/prep
+      - name: Merge the three shards against the collection (exact coverage, no failures)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tooling/release/src/hosted-verify.mjs merge \
+            --list test-output/hosted-verify/prep/list.json \
+            --reports test-output/hosted-verify/shards \
+            --out test-output/hosted-verify/merge.json
+      - name: Assemble and verify the hosted-verify report
+        id: report
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tooling/release/src/hosted-verify.mjs assemble \
+            --merge test-output/hosted-verify/merge.json \
+            --commands test-output/hosted-verify/prep/commands.json \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --out test-output/hosted-verify/report.json
+          digest="$(sha256sum test-output/hosted-verify/report.json | cut -d' ' -f1)"
+          echo "report_sha256=$digest" >> "$GITHUB_OUTPUT"
+      # Transport only: the gate checks the report's digest against the digest this job output, so a swapped file fails.
+      - name: Upload the hosted-verify report (one day, this run only)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-hosted-verify-report-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/hosted-verify/report.json
+          retention-days: 1
+          if-no-files-found: error
+
+  node-contracts:
+    name: node-contracts (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    needs: [validate-candidate]
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.17.0', 24]
+    timeout-minutes: 45
+    env:
+      JOY_TEST_DATABASE_URL: postgres://joy_media:joy_media@localhost:5432/joy_media_test
+      JOY_MEDIA_EDGE_URL: off
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: joy_media
+          POSTGRES_PASSWORD: joy_media
+          POSTGRES_DB: joy_media_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U joy_media -d joy_media_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify exact candidate and runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          node --version
+      - name: Install frozen dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable pnpm
+          test "$(pnpm --version)" = '11.15.0'
+          pnpm install --frozen-lockfile
+      - name: Ensure media codec tool is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version
+      - name: Run full CLI contract suite on the supported Node version
+        run: pnpm exec vitest run --retry=0 apps/cli/src --no-file-parallelism
+      - name: Run PostgreSQL migration and concurrent invoice acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$JOY_TEST_DATABASE_URL"
+          pnpm exec vitest run --retry=0 apps/api/src/usdc-invoice-ledger.pg.test.ts --no-file-parallelism
+
+  editor-web-bundle:
+    name: editor-web-bundle (standard hosted Linux)
+    runs-on: ubuntu-24.04
+    needs: [validate-candidate]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Verify exact candidate and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          resolved_sha="$(git rev-parse HEAD)"
+          [[ "$resolved_sha" == "$CANDIDATE_SHA" ]] || { echo 'editor bundle checkout does not match candidate_sha' >&2; exit 1; }
+          node --version
+          corepack enable pnpm
+          test "$(pnpm --version)" = '11.15.0'
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build editor web bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf apps/editor-web/dist
+          pnpm --filter @joy-media/editor-web... build
+      - name: Stage source-bound renderer artifact
+        id: stage-renderer
+        shell: bash
+        env:
+          EDITOR_WEB_ARTIFACT_DIR: ${{ runner.temp }}/joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          rm -rf "$EDITOR_WEB_ARTIFACT_DIR"
+          mkdir -p "$EDITOR_WEB_ARTIFACT_DIR"
+          cp -a apps/editor-web/dist "$EDITOR_WEB_ARTIFACT_DIR/dist"
+          node tooling/release/src/editor-web-artifact.mjs create \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --lockfile pnpm-lock.yaml \
+            --dist "$EDITOR_WEB_ARTIFACT_DIR/dist" \
+            --manifest "$EDITOR_WEB_ARTIFACT_DIR/manifest.json"
+      - name: Upload renderer artifact for the Windows package job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: ${{ runner.temp }}/joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 1
+          if-no-files-found: error
+
+  linux-real-services:
+    name: linux-real-services (single pass)
+    runs-on: [self-hosted, linux, x64, joy-media-ci]
+    needs: [validate-candidate]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify isolated real-service prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          node --version
+          corepack enable pnpm
+          pnpm --version
+          command -v psql >/dev/null || { echo 'psql is required on the Linux release runner' >&2; exit 1; }
+          command -v pg_isready >/dev/null || { echo 'pg_isready is required on the Linux release runner' >&2; exit 1; }
+          test -n "${JOY_MEDIA_CI_DATABASE_URL:-}" || { echo 'JOY_MEDIA_CI_DATABASE_URL is not configured on this isolated runner' >&2; exit 1; }
+          pg_isready --dbname="$JOY_MEDIA_CI_DATABASE_URL" >/dev/null
+          test -n "${JOY_MEDIA_CI_S3_HEALTHCHECK_URL:-}" || { echo 'JOY_MEDIA_CI_S3_HEALTHCHECK_URL is not configured on this isolated runner' >&2; exit 1; }
+          curl --fail --silent --show-error "$JOY_MEDIA_CI_S3_HEALTHCHECK_URL" >/dev/null
+      - run: pnpm install --frozen-lockfile
+      - name: Install locked Playwright Chromium before the gates that need it
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec playwright install chromium
+          chromium_path="$(node -e "process.stdout.write(require('@playwright/test').chromium.executablePath())")"
+          test -x "$chromium_path" || { echo 'Locked Playwright Chromium executable is missing' >&2; exit 1; }
+          echo "JOY_CHROMIUM_PATH=$chromium_path" >> "$GITHUB_ENV"
+      - name: Run real-service gates on a fresh build
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The static gates and the Vitest suite run once, in hosted-verify, on this same commit (plan section 3.4). This
+          # lane builds fresh, so no job trusts another job's output, and runs its own harness.
+          git clean -xdf -e node_modules -e '.pnpm-store'
+          pnpm run build
+          # The self-hosted-CI harness unit tests (terminateProcessTree / removeDirWithRetry / classifyRun / retain-evidence
+          # redaction). Not matched by vitest's include glob, so run them explicitly on Linux where the POSIX-only cases run.
+          pnpm run test:harness
+          release_command="${JOY_MEDIA_CI_RELEASE_COMMAND:-}"
+          test -x "$release_command" || { echo 'JOY_MEDIA_CI_RELEASE_COMMAND must point to the isolated Linux release harness' >&2; exit 1; }
+          "$release_command" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "1"
+      - name: Run P0 font, browser, and render integration lane
+        shell: bash
+        run: |
+          set -euo pipefail
+          chromium_path="${JOY_CHROMIUM_PATH:-}"
+          test -n "$chromium_path" && test -x "$chromium_path" || { echo 'Locked Playwright Chromium is required on the Linux P0 runner' >&2; exit 1; }
+          command -v ffmpeg >/dev/null || { echo 'ffmpeg is required on the Linux P0 runner' >&2; exit 1; }
+          command -v ffprobe >/dev/null || { echo 'ffprobe is required on the Linux P0 runner' >&2; exit 1; }
+          ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]]ass[[:space:]]' || { echo 'FFmpeg with the ass filter is required on the Linux P0 runner' >&2; exit 1; }
+          export JOY_REQUIRE_CHROMIUM=1
+          export JOY_CHROMIUM_PATH="$chromium_path"
+          node node_modules/typescript/bin/tsc -b apps/cli
+          (cd apps/cli && node scripts/bundle.mjs)
+          node node_modules/vitest/vitest.mjs run --retry=0 --config vitest.p0-v3.config.ts
+      - name: Verify no untracked teardown residue
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+
+  windows-candidate:
+    name: windows-candidate (P0, CLI suite, one build, one installed lifecycle pass)
+    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]
+    needs: [validate-candidate, editor-web-bundle]
+    timeout-minutes: 240
+    outputs:
+      evidence1: ${{ steps.publish-evidence.outputs.evidence1 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify candidate and install frozen dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'candidate_sha must be a full lowercase commit SHA' }
+          if ((git rev-parse HEAD) -ne $env:CANDIDATE_SHA) { throw 'Windows candidate checkout does not match candidate_sha' }
+          node --version
+          if ($LASTEXITCODE -ne 0) { throw "Node version check failed with exit code $LASTEXITCODE." }
+          corepack enable pnpm
+          if ($LASTEXITCODE -ne 0) { throw "Corepack failed to enable pnpm with exit code $LASTEXITCODE." }
+          pnpm --version
+          if ($LASTEXITCODE -ne 0) { throw "pnpm version check failed with exit code $LASTEXITCODE." }
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw "Frozen dependency install failed with exit code $LASTEXITCODE." }
+      - name: Install locked Playwright Chromium for P0 and the packaged HTML scene
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm exec playwright install chromium
+          if ($LASTEXITCODE -ne 0) { throw "Locked Playwright Chromium install failed with exit code $LASTEXITCODE." }
+          $chromiumPath = node -e "process.stdout.write(require('@playwright/test').chromium.executablePath())"
+          if ($LASTEXITCODE -ne 0) { throw "Locked Playwright Chromium path lookup failed with exit code $LASTEXITCODE." }
+          if (-not (Test-Path -LiteralPath $chromiumPath -PathType Leaf)) { throw "Locked Playwright Chromium executable is missing: $chromiumPath" }
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "JOY_CHROMIUM_PATH=$chromiumPath$([Environment]::NewLine)")
+      - name: Build editor-web workspace dependencies for the P0 lane
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm --workspace-concurrency=1 --filter @joy-media/editor-web... build
+          if ($LASTEXITCODE -ne 0) { throw "editor-web workspace dependency build failed with exit code $LASTEXITCODE." }
+      - name: Run P0 font, browser, and render integration lane
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:JOY_CHROMIUM_PATH -or -not (Test-Path -LiteralPath $env:JOY_CHROMIUM_PATH -PathType Leaf)) { throw 'Locked Playwright Chromium is required on the Windows P0 runner.' }
+          ffmpeg -version
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg check failed with exit code $LASTEXITCODE." }
+          ffprobe -version
+          if ($LASTEXITCODE -ne 0) { throw "ffprobe check failed with exit code $LASTEXITCODE." }
+          $ffmpegFilters = ffmpeg -hide_banner -filters 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0 -or $ffmpegFilters -notmatch '(?m)\sass\s') { throw 'FFmpeg with the ass filter is required on the Windows P0 runner.' }
+          $env:JOY_REQUIRE_CHROMIUM = '1'
+          node node_modules/typescript/bin/tsc -b apps/cli
+          if ($LASTEXITCODE -ne 0) { throw "CLI TypeScript build failed with exit code $LASTEXITCODE." }
+          Push-Location apps/cli
+          try {
+            node scripts/bundle.mjs
+            if ($LASTEXITCODE -ne 0) { throw "CLI bundle failed with exit code $LASTEXITCODE." }
+          } finally {
+            Pop-Location
+          }
+          node node_modules/vitest/vitest.mjs run --retry=0 --config vitest.p0-v3.config.ts
+          if ($LASTEXITCODE -ne 0) { throw "P0 integration tests failed with exit code $LASTEXITCODE." }
+      - name: Run full CLI contract suite on Windows (once in this job)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:JOY_REQUIRE_CHROMIUM = '1'
+          node node_modules/vitest/vitest.mjs run --retry=0 apps/cli/src --no-file-parallelism
+          if ($LASTEXITCODE -ne 0) { throw "Windows CLI contract suite failed with exit code $LASTEXITCODE." }
+      - name: Check for untracked residue after the P0 lane
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $status = git status --porcelain
+          if ($LASTEXITCODE -ne 0) { throw "git status failed with exit code $LASTEXITCODE." }
+          if ($status) { throw "Windows candidate left worktree residue after the P0 lane:`n$status" }
+      - name: Download renderer artifact from this candidate run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: ${{ runner.temp }}/joy-media-editor-web-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify and stage exact editor web bundle
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactRoot = Join-Path $env:RUNNER_TEMP ("joy-media-editor-web-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT)
+          $artifactDist = Join-Path $artifactRoot 'dist'
+          $artifactManifest = Join-Path $artifactRoot 'manifest.json'
+          if (-not (Test-Path -LiteralPath $artifactDist -PathType Container)) { throw 'Downloaded editor web dist directory is missing.' }
+          if (-not (Test-Path -LiteralPath $artifactManifest -PathType Leaf)) { throw 'Downloaded editor web manifest is missing.' }
+          node tooling/release/src/editor-web-artifact.mjs verify --candidate-sha $env:CANDIDATE_SHA --lockfile pnpm-lock.yaml --dist $artifactDist --manifest $artifactManifest
+          if ($LASTEXITCODE -ne 0) { throw "editor-web artifact verification failed before packaging (exit $LASTEXITCODE)." }
+          $editorDist = Join-Path $PWD 'apps\editor-web\dist'
+          if (Test-Path -LiteralPath $editorDist) { Remove-Item -LiteralPath $editorDist -Recurse -Force }
+          Copy-Item -LiteralPath $artifactDist -Destination $editorDist -Recurse
+          node tooling/release/src/editor-web-artifact.mjs verify --candidate-sha $env:CANDIDATE_SHA --lockfile pnpm-lock.yaml --dist $editorDist --manifest $artifactManifest
+          if ($LASTEXITCODE -ne 0) { throw "editor-web artifact verification failed after staging (exit $LASTEXITCODE)." }
+      - name: Verify clean Worker host
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'candidate_sha must be a full lowercase commit SHA' }
+          node --version
+          if ($LASTEXITCODE -ne 0) { throw "Node version check failed with exit code $LASTEXITCODE." }
+          corepack enable pnpm
+          if ($LASTEXITCODE -ne 0) { throw "Corepack failed to enable pnpm with exit code $LASTEXITCODE." }
+          pnpm --version
+          if ($LASTEXITCODE -ne 0) { throw "pnpm version check failed with exit code $LASTEXITCODE." }
+          ffmpeg -version
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg version check failed with exit code $LASTEXITCODE." }
+          ffprobe -version
+          if ($LASTEXITCODE -ne 0) { throw "ffprobe version check failed with exit code $LASTEXITCODE." }
+          if ($env:JOY_MEDIA_CI_WORKER_PROFILE -ne 'clean') { throw 'JOY_MEDIA_CI_WORKER_PROFILE=clean is required' }
+          if ($env:JOY_MEDIA_WINDOWS_CONTAINER_ID -notmatch '^[0-9a-f]{12,64}$') { throw 'the Windows Docker runner must expose its real container id' }
+          if ($env:JOY_MEDIA_WINDOWS_IMAGE_DIGEST -notmatch '^sha256:[0-9a-f]{64}$') { throw 'the Windows Docker runner must expose its immutable image digest' }
+      - name: Run lifecycle accounting negative tests on Windows
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # accounting.test.mjs runs only under Windows PowerShell, so it runs here rather than in the Linux harness, where every
+          # case would be skipped. The step counts the cases the file defines and fails on any skipped, todo, failed or cancelled
+          # case, or on any defined case that does not run and pass.
+          $defined = @(Select-String -LiteralPath 'tests/desktop/accounting.test.mjs' -Pattern '^test\(').Count
+          $tap = node --test --test-reporter=tap tests/desktop/accounting.test.mjs
+          Write-Output $tap
+          if ($LASTEXITCODE -ne 0) { throw "Lifecycle accounting negative tests failed with exit code $LASTEXITCODE." }
+          foreach ($counter in @('cancelled', 'skipped', 'todo', 'fail')) {
+            if (@($tap | Where-Object { $_ -match "^# $counter [1-9][0-9]*$" }).Count -gt 0) {
+              throw "Lifecycle accounting negative tests reported $counter cases."
+            }
+          }
+          $ranLine = @($tap | Where-Object { $_ -match '^# tests [0-9]+$' })
+          $passLine = @($tap | Where-Object { $_ -match '^# pass [0-9]+$' })
+          if ($ranLine.Count -ne 1 -or $passLine.Count -ne 1) {
+            throw 'Lifecycle accounting negative tests reported no totals.'
+          }
+          $ran = [int]([regex]::Match($ranLine[0], '[0-9]+$').Value)
+          $passed = [int]([regex]::Match($passLine[0], '[0-9]+$').Value)
+          if ($defined -eq 0 -or $ran -ne $defined -or $passed -ne $defined) {
+            throw "Lifecycle accounting negative tests did not all run: the file defines $defined, ran $ran and passed $passed."
+          }
+      - name: Install and verify Electron runtime
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node apps/desktop/scripts/install-electron-windows.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Electron runtime install failed with exit code $LASTEXITCODE." }
+          $electronExe = Join-Path $PWD 'apps\desktop\node_modules\electron\dist\electron.exe'
+          if (-not (Test-Path -LiteralPath $electronExe -PathType Leaf)) { throw "Electron runtime executable is missing: $electronExe" }
+          pnpm --filter @joy-media/desktop exec electron --version
+          if ($LASTEXITCODE -ne 0) { throw "Electron runtime verification failed with exit code $LASTEXITCODE." }
+      - name: Build frozen Windows desktop, CLI, and Worker candidate
+        timeout-minutes: 45
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "JOY_MEDIA_WINDOWS_BUILD_STARTED=true$([Environment]::NewLine)")
+          $desktopDist = Join-Path $PWD 'apps\desktop\dist'
+          if (Test-Path -LiteralPath $desktopDist) { Remove-Item -LiteralPath $desktopDist -Recurse -Force }
+          $workerExe = Join-Path $PWD 'apps\worker\bin\joy-worker.exe'
+          if (Test-Path -LiteralPath $workerExe) { Remove-Item -LiteralPath $workerExe -Force }
+          pnpm --filter @joy-media/worker build
+          if ($LASTEXITCODE -ne 0) { throw "Worker package build failed with exit code $LASTEXITCODE." }
+          pnpm --filter @joy-media/desktop build
+          if ($LASTEXITCODE -ne 0) { throw "Desktop package build failed with exit code $LASTEXITCODE." }
+          pnpm --workspace-concurrency=1 --filter @joy-media/cli... build
+          if ($LASTEXITCODE -ne 0) { throw "CLI workspace dependency build failed with exit code $LASTEXITCODE." }
+          $buildMarker = "release-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)"
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-worker-exe.ps1 -OutputPath $workerExe -BuildMarker $buildMarker
+          if ($LASTEXITCODE -ne 0) { throw "Worker executable build failed with exit code $LASTEXITCODE." }
+          pnpm --filter @joy-media/desktop package:installer
+          if ($LASTEXITCODE -ne 0) { throw "Desktop installer and portable package build failed with exit code $LASTEXITCODE." }
+          powershell -NoProfile -ExecutionPolicy Bypass -File apps/desktop/installer/build-installer.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Windows setup executable build failed with exit code $LASTEXITCODE." }
+          node tests/desktop/installer-package-check.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Installer package integrity check failed with exit code $LASTEXITCODE." }
+          $releaseDir = Join-Path $PWD 'apps\desktop\dist\releases'
+          $version = (Get-Content -LiteralPath (Join-Path $PWD 'apps\desktop\package.json') -Raw | ConvertFrom-Json).version
+          $required = @(
+            (Join-Path $releaseDir 'joy-media-setup.exe'),
+            (Join-Path $releaseDir "joy-media-windows-x64-v$version.zip"),
+            (Join-Path $releaseDir 'joy-media-release-manifest.json'),
+            (Join-Path $releaseDir 'SHA256SUMS.txt'),
+            (Join-Path $PWD 'apps\desktop\dist\joy-media-win32-x64\joy-media.exe'),
+            (Join-Path $PWD 'apps\desktop\dist\joy-media-win32-x64\resources\app\cli\joy-media-bundle.mjs'),
+            (Join-Path $PWD 'apps\desktop\dist\joy-media-win32-x64\resources\app\worker\joy-worker.exe')
+          )
+          foreach ($path in $required) { if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required Windows release artifact was not built: $path" } }
+          $previousRoot = Join-Path $env:RUNNER_TEMP ("joy-media-previous-v1.0.2-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)")
+          if (Test-Path -LiteralPath $previousRoot) { throw "Pinned previous-release download path already exists: $previousRoot" }
+          New-Item -ItemType Directory -Path $previousRoot | Out-Null
+          $runnerTempDrive = [IO.Path]::GetPathRoot($env:RUNNER_TEMP).TrimEnd('\').TrimEnd(':')
+          $availableBytes = (Get-PSDrive -Name $runnerTempDrive).Free
+          if ($availableBytes -lt 12GB) { throw "Windows Docker runner needs at least 12 GiB free on its temp drive; found $([math]::Round($availableBytes / 1GB, 2)) GiB." }
+          . .\tests\desktop\windows-release-checksum.ps1
+          $zip = 'joy-media-windows-x64-v1.0.2.zip'
+          $pins = [ordered]@{
+            'SHA256SUMS.txt' = '9e15f9b45307293a33414b1f89461859c7c5fcdcdf69f7b3f03e491cae55a8eb'
+            'joy-media-setup.exe' = '6d8089467afaecc1d78d272f5c029d6c186a81f7aac90a7cd584045e847bdabe'
+            'joy-media-windows-x64-v1.0.2.zip' = 'e59ee15f2f881cd6620ad59e9f1d9fdc4f9b82efaf221f4e6041c079978d59ca'
+          }
+          $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+          if (-not (Test-Path -LiteralPath $curl -PathType Leaf)) { throw 'curl.exe is required for the pinned previous-release download' }
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            try {
+              foreach ($name in $pins.Keys) {
+                $path = Join-Path $previousRoot $name
+                if ((Test-Path -LiteralPath $path -PathType Leaf) -and ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -eq $pins[$name])) { continue }
+                & $curl --fail --location --silent --show-error --connect-timeout 60 --max-time 600 --continue-at - --output $path "https://github.com/hadimoti/joy-media/releases/download/v1.0.2/$name"
+                if ($LASTEXITCODE -ne 0) { throw "download failed for $name (curl exit $LASTEXITCODE)" }
+                if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pins[$name]) {
+                  Remove-Item -LiteralPath $path -Force
+                  throw "SHA256 mismatch: $name"
+                }
+              }
+              $sums = Get-Content -LiteralPath (Join-Path $previousRoot 'SHA256SUMS.txt') -Raw
+              $actual = (Get-FileHash -LiteralPath (Join-Path $previousRoot $zip) -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ((Get-ChecksummedFile $sums $zip) -ne $actual) { throw "SHA256SUMS.txt mismatch: $zip" }
+              break
+            } catch {
+              if ($attempt -eq 4) { throw "v1.0.2 download/verification failed after 4 attempts: $($_.Exception.Message)" }
+              Write-Warning "Attempt $attempt failed: $($_.Exception.Message)"
+              Start-Sleep -Seconds (5 * [math]::Pow(2, $attempt - 1))
+            }
+          }
+      - name: Exercise Worker and installed desktop lifecycle in one exact pass
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseDir = Join-Path $PWD 'apps\desktop\dist\releases'
+          $desktopManifest = Get-Content -LiteralPath (Join-Path $PWD 'apps\desktop\package.json') -Raw | ConvertFrom-Json
+          $candidateSetup = Join-Path $releaseDir 'joy-media-setup.exe'
+          $candidateArchive = Join-Path $releaseDir "joy-media-windows-x64-v$($desktopManifest.version).zip"
+          $candidateStandalone = Join-Path $PWD 'apps\desktop\dist\joy-media-win32-x64'
+          $candidateWorker = Join-Path $PWD 'apps\worker\bin\joy-worker.exe'
+          $previousRoot = Join-Path $env:RUNNER_TEMP ("joy-media-previous-v1.0.2-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)")
+          $previousSetup = Join-Path $previousRoot 'joy-media-setup.exe'
+          $previousArchive = Join-Path $previousRoot 'joy-media-windows-x64-v1.0.2.zip'
+          $previousChecksums = Join-Path $previousRoot 'SHA256SUMS.txt'
+          foreach ($path in @($candidateSetup, $candidateArchive, $candidateWorker, $previousSetup, $previousArchive, $previousChecksums)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required lifecycle artifact is missing: $path" }
+          }
+          # Match against the joined output: -notmatch on a captured array returns the lines that do not match, so any extra
+          # line would fail a healthy self-test. Report the exit code and output when it fails.
+          $workerSelfTest = (& $candidateWorker --joy-worker-self-test | Out-String)
+          if ($LASTEXITCODE -ne 0 -or $workerSelfTest -notmatch '"ok"\s*:\s*true') { throw "Frozen Worker executable failed its self-test before the acceptance pass (exit $LASTEXITCODE): $workerSelfTest" }
+          # One exact pass (plan section 3.4): the single pass is pass 1, and its evidence is the only evidence output.
+          $results = @{}
+          foreach ($pass in @('1')) {
+            $result = (& $candidateWorker --joy-worker-self-test | Out-String)
+            if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok"\s*:\s*true') { throw "Worker executable self-test failed for pass $pass (exit $LASTEXITCODE): $result" }
+            $evidence = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".json")
+            if (Test-Path -LiteralPath $evidence) { throw "Windows Worker acceptance output already exists for this run/pass: $evidence" }
+            & powershell -NoProfile -ExecutionPolicy Bypass -File ops/self-hosted/windows-runner/worker-acceptance-container.ps1 `
+              -CandidateSha $env:CANDIDATE_SHA `
+              -RunId $env:GITHUB_RUN_ID `
+              -Attempt $env:GITHUB_RUN_ATTEMPT `
+              -Pass $pass `
+              -ExecutablePath $candidateWorker `
+              -OutputPath $evidence
+            if ($LASTEXITCODE -ne 0) { throw "Windows Worker acceptance harness failed for pass $pass with exit code $LASTEXITCODE." }
+            if (-not (Test-Path -LiteralPath $evidence -PathType Leaf)) { throw "Windows Worker acceptance evidence was not produced for pass $pass." }
+            $lifecycle = Join-Path $env:RUNNER_TEMP ("joy-media-windows-lifecycle-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + "-" + $pass + ".json")
+            if (Test-Path -LiteralPath $lifecycle) { throw "Windows installed lifecycle evidence already exists for pass $pass." }
+            powershell -NoProfile -ExecutionPolicy Bypass -File tests/desktop/windows-lifecycle.ps1 `
+              -CandidateSha $env:CANDIDATE_SHA `
+              -RunId $env:GITHUB_RUN_ID `
+              -Attempt $env:GITHUB_RUN_ATTEMPT `
+              -Pass $pass `
+              -CandidateSetupPath $candidateSetup `
+              -CandidateArchivePath $candidateArchive `
+              -CandidateStandalonePath $candidateStandalone `
+              -PreviousSetupPath $previousSetup `
+              -PreviousArchivePath $previousArchive `
+              -PreviousChecksumsPath $previousChecksums `
+              -OutputPath $lifecycle
+            if ($LASTEXITCODE -ne 0) { throw "Windows installed desktop/CLI lifecycle failed for pass $pass with exit code $LASTEXITCODE." }
+            if (-not (Test-Path -LiteralPath $lifecycle -PathType Leaf)) { throw "Installed desktop lifecycle evidence was not produced for pass $pass." }
+            $workerReceipt = Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json
+            $lifecycleReceipt = Get-Content -LiteralPath $lifecycle -Raw | ConvertFrom-Json
+            if ($lifecycleReceipt.candidateSha -ne $env:CANDIDATE_SHA -or $lifecycleReceipt.pass -ne [int]$pass) { throw "Installed desktop lifecycle receipt does not bind pass $pass to the candidate." }
+            $workerReceipt | Add-Member -NotePropertyName desktopLifecycle -NotePropertyValue $lifecycleReceipt -Force
+            [IO.File]::WriteAllText($evidence, ($workerReceipt | ConvertTo-Json -Depth 16) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+            $results[$pass] = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content -LiteralPath $evidence -Raw)))
+          }
+          $outputs = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-outputs-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".json")
+          if (Test-Path -LiteralPath $outputs) { throw "Windows Worker acceptance outputs already exist for this run: $outputs" }
+          Set-Content -LiteralPath $outputs -Value ($results | ConvertTo-Json) -Encoding utf8
+      - name: Show failed desktop acceptance page state
+        if: failure()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $snapshots = @(Get-ChildItem -Path test-results -Recurse -Filter error-context.md -ErrorAction SilentlyContinue)
+          if ($snapshots.Count -eq 0) { Write-Output 'No Playwright error-context snapshots were written.'; exit 0 }
+          foreach ($snapshot in $snapshots | Select-Object -First 6) {
+            Write-Output "===== $($snapshot.FullName) ====="
+            Get-Content -LiteralPath $snapshot.FullName -TotalCount 160 | ForEach-Object { $_ }
+          }
+      - name: Publish Windows Worker acceptance outputs
+        id: publish-evidence
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputs = Join-Path $env:RUNNER_TEMP ("joy-media-windows-acceptance-outputs-" + $env:GITHUB_RUN_ID + "-" + $env:GITHUB_RUN_ATTEMPT + ".json")
+          $results = Get-Content -LiteralPath $outputs -Raw | ConvertFrom-Json
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "evidence1=$($results.'1')$([Environment]::NewLine)")
+      - name: Stage Windows release artifacts with their manifest
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repoRoot = (Resolve-Path $PWD).Path
+          $releaseDir = Join-Path $repoRoot 'apps\desktop\dist\releases'
+          $standalone = Join-Path $repoRoot 'apps\desktop\dist\joy-media-win32-x64'
+          $version = (Get-Content -LiteralPath (Join-Path $repoRoot 'apps\desktop\package.json') -Raw | ConvertFrom-Json).version
+          $stage = Join-Path $repoRoot 'test-output\release-artifacts'
+          if (Test-Path -LiteralPath $stage) { throw "Release artifact staging path already exists: $stage" }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          $sources = [ordered]@{
+            'joy-media-setup.exe' = Join-Path $releaseDir 'joy-media-setup.exe'
+            "joy-media-windows-x64-v$version.zip" = Join-Path $releaseDir "joy-media-windows-x64-v$version.zip"
+            'joy-media-release-manifest.json' = Join-Path $releaseDir 'joy-media-release-manifest.json'
+            'SHA256SUMS.txt' = Join-Path $releaseDir 'SHA256SUMS.txt'
+            'joy-media.exe' = Join-Path $standalone 'joy-media.exe'
+            'joy-media-bundle.mjs' = Join-Path $standalone 'resources\app\cli\joy-media-bundle.mjs'
+            'joy-worker.exe' = Join-Path $standalone 'resources\app\worker\joy-worker.exe'
+          }
+          $files = foreach ($name in $sources.Keys) {
+            $source = $sources[$name]
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Required release artifact is missing: $source" }
+            $target = Join-Path $stage ($name -replace '/', '\')
+            New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+            Copy-Item -LiteralPath $source -Destination $target -ErrorAction Stop
+            [ordered]@{
+              path = $name
+              bytes = [int64](Get-Item -LiteralPath $target).Length
+              sha256 = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          }
+          $manifest = [ordered]@{
+            format = 'joy-media-release-artifacts'
+            candidateSha = $env:CANDIDATE_SHA
+            runId = [int64]$env:GITHUB_RUN_ID
+            attempt = [int]$env:GITHUB_RUN_ATTEMPT
+            version = $version
+            files = @($files)
+          }
+          [IO.File]::WriteAllText((Join-Path $stage 'artifact-manifest.json'), ($manifest | ConvertTo-Json -Depth 6) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+      # Transport only. The Windows container and the Linux gate share no storage, so the staged release files travel to the
+      # gate as a one-day artifact of THIS run. The gate downloads it from this run alone, retains it in its own durable store,
+      # and re-verifies every byte there. The artifact is not evidence and is never trusted as such: the manifest,
+      # SHA256SUMS.txt and the Windows receipt decide. The staged tree holds only the seven release files and artifact-manifest.json.
+      - name: Upload the staged Windows release artifacts for the final gate (one day, this run only)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        timeout-minutes: 30
+        with:
+          name: joy-media-windows-release-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/release-artifacts
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+      - name: Verify clean Worker teardown
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $statePath = Join-Path $env:RUNNER_TEMP 'joy-media-release-state'
+          if (Test-Path -LiteralPath $statePath) { throw 'clean Worker state leaked into the runner temp directory' }
+          if ($env:USERPROFILE -match '(?i)HadiMoti') { throw 'The Windows job must never install into the owner profile.' }
+          $installPath = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'Programs\JOY Media'
+          if (Test-Path -LiteralPath $installPath) { throw 'Installed JOY Media files remained after lifecycle cleanup.' }
+          $uninstallKey = 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\JoyMedia'
+          if (Test-Path -LiteralPath $uninstallKey) { throw 'JOY Media uninstall registry entry remained after lifecycle cleanup.' }
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'JOY Media.lnk'
+          $startMenuShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\JOY Media.lnk'
+          if ((Test-Path -LiteralPath $desktopShortcut) -or (Test-Path -LiteralPath $startMenuShortcut)) { throw 'JOY Media shortcuts remained after lifecycle cleanup.' }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($userPath -and ($userPath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $installPath.TrimEnd('\') })) { throw 'JOY Media PATH registration remained after lifecycle cleanup.' }
+          # Detect a genuine leak: a joy-worker.exe whose command line references THIS run's RUNNER_TEMP (so an unrelated
+          # joy-worker on the box, or a concurrent job's, never trips this) that outlives a bounded settle window. 30s because a
+          # Node SEA can take >15s to fully release under machine load after printing its self-test result.
+          #
+          # A joy-worker.exe whose CommandLine cannot be read is NOT assumed clean: we cannot prove it is not ours, so an
+          # unreadable one that survives the settle window fails the step just like a run-owned one.
+          $ownedPattern = [regex]::Escape($env:RUNNER_TEMP)
+          function Get-SuspectWorkers {
+            $all = @(Get-CimInstance Win32_Process -Filter "Name='joy-worker.exe'" -ErrorAction Stop)
+            $owned = @($all | Where-Object { $_.CommandLine -and ($_.CommandLine -match $ownedPattern) })
+            $unreadable = @($all | Where-Object { -not $_.CommandLine })
+            [pscustomobject]@{ Owned = $owned; Unreadable = $unreadable }
+          }
+          $suspect = $null
+          for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            $suspect = Get-SuspectWorkers
+            if ($suspect.Owned.Count -eq 0 -and $suspect.Unreadable.Count -eq 0) { break }
+            Start-Sleep -Seconds 1
+          }
+          $bad = @($suspect.Owned) + @($suspect.Unreadable)
+          if ($bad.Count -gt 0) {
+            $bad | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            $ownedIds = ($suspect.Owned.ProcessId -join ', ')
+            $unreadableIds = ($suspect.Unreadable.ProcessId -join ', ')
+            throw "clean Worker teardown after a 30s settle - run-owned joy-worker: [$ownedIds]; joy-worker with unreadable command line (cannot prove not ours): [$unreadableIds]"
+          }
+      - name: Remove Windows candidate build and per-run temporary evidence
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $profileRoot = [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\')
+          $installPath = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs\JOY Media'))
+          if ($profileRoot -match '(?i)HadiMoti' -or -not $installPath.StartsWith($profileRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Refusing install cleanup outside the disposable runner profile.'
+          }
+          if (Test-Path -LiteralPath $installPath) {
+            Remove-Item -LiteralPath $installPath -Recurse -Force -ErrorAction Stop
+          }
+          $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\JoyMedia'
+          if (Test-Path -LiteralPath $uninstallKey) {
+            Remove-Item -LiteralPath $uninstallKey -Recurse -Force -ErrorAction Stop
+          }
+          if ($env:JOY_MEDIA_WINDOWS_BUILD_STARTED -eq 'true') {
+            $repoRoot = (Resolve-Path $PWD).Path
+            $desktopDist = Join-Path $repoRoot 'apps\desktop\dist'
+            if (-not ([IO.Path]::GetFullPath($desktopDist).StartsWith($repoRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase))) {
+              throw 'Refusing to clean a Windows build path outside the checked-out repository.'
+            }
+            if (Test-Path -LiteralPath $desktopDist) { Remove-Item -LiteralPath $desktopDist -Recurse -Force }
+            $workerExe = Join-Path $repoRoot 'apps\worker\bin\joy-worker.exe'
+            if (Test-Path -LiteralPath $workerExe) { Remove-Item -LiteralPath $workerExe -Force }
+          }
+          $previousRoot = Join-Path $env:RUNNER_TEMP ("joy-media-previous-v1.0.2-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)")
+          if (Test-Path -LiteralPath $previousRoot) { Remove-Item -LiteralPath $previousRoot -Recurse -Force }
+          foreach ($name in @(
+            ("joy-media-windows-acceptance-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)-1.json"),
+            ("joy-media-windows-lifecycle-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)-1.json"),
+            ("joy-media-windows-acceptance-outputs-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT).json")
+          )) {
+            $path = Join-Path $env:RUNNER_TEMP $name
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+          }
+          Get-ChildItem -LiteralPath $env:RUNNER_TEMP -Directory -Filter "acceptance-diagnostics-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)-*" -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          $stage = Join-Path (Resolve-Path $PWD).Path 'test-output\release-artifacts'
+          if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop }
+
+  real-service-acceptance:
+    name: real-service-acceptance (single pass)
+    runs-on: [self-hosted, linux, x64, joy-media-acceptance]
+    env:
+      JOY_MEDIA_CI_LANE_MODE: full
+      # The Windows evidence is bound and required at the final gate (restore-retained-evidence.mjs), not inside this pass.
+      JOY_MEDIA_CI_WINDOWS_EVIDENCE: deferred
+    needs: [validate-candidate]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify real-service acceptance prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = 'real-services' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_PROFILE=real-services is required' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_ACCEPTANCE_WORKER:-}" = 'disposable' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_WORKER=disposable is required' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_LANE_MODE:-}" = 'full' || { echo 'JOY_MEDIA_CI_LANE_MODE=full is required for the non-P3 lane' >&2; exit 1; }
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
+          command -v node >/dev/null || { echo 'Node 22 is required on the acceptance runner' >&2; exit 1; }
+          corepack enable pnpm
+          pnpm --version
+          acceptance_command="${JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND:-}"
+          test -n "$acceptance_command" && test -x "$acceptance_command" || {
+            echo 'JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND must point to the isolated real-service acceptance harness' >&2
+            exit 1
+          }
+          # Durable evidence retention needs a persistent location OUTSIDE the checkout and _work/_temp (both are wiped between
+          # jobs). The runner operator sets this; e.g. /opt/actions-runner/ci-evidence.
+          evidence_root="${JOY_MEDIA_CI_EVIDENCE_ROOT:-}"
+          test -n "$evidence_root" || { echo 'JOY_MEDIA_CI_EVIDENCE_ROOT must point to a persistent evidence directory outside _work' >&2; exit 1; }
+          mkdir -p "$evidence_root"
+          test -d "$evidence_root" && test -w "$evidence_root" || { echo "JOY_MEDIA_CI_EVIDENCE_ROOT is not a writable directory: $evidence_root" >&2; exit 1; }
+          case "$evidence_root" in
+            *"$RUNNER_WORKSPACE"* | *"/_work/"* | *"/_temp/"*) echo "JOY_MEDIA_CI_EVIDENCE_ROOT must be outside the checkout / _work / _temp: $evidence_root" >&2; exit 1 ;;
+          esac
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install chromium
+      - name: CI namespace janitor — inventory orphaned schemas/buckets (interruption recovery)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Inventory only: classifies every ci_accept_* / joy-media-* namespace as current / active / orphan / unknown by
+          # looking up the owning run's status. Deletes nothing here — the report is release evidence. A sweep
+          # (JOY_MEDIA_CI_JANITOR_SWEEP=1 + --sweep) is enabled only after independent review.
+          node ops/self-hosted/linux-runner/ci-namespace-janitor.mjs
+          test -s test-output/ci-janitor/inventory.json
+      - name: Run authenticated real-service desktop acceptance and evidence
+        id: harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The harness owns disposable auth, PostgreSQL/object namespaces, Worker identity, the reference-viewport full suite,
+          # the six non-primary responsive checkpoints, the 30-minute effects soak (one per pass, retained), the delivery
+          # journey, and N/N-1 restore.
+          acceptance_command="$JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND"
+          "$acceptance_command" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "1"
+          for required in \
+            test-output/browser/journeys.json \
+            test-output/release-performance/polling.json \
+            test-output/release-performance/effects-soak.json \
+            test-output/release-performance/timeline-integrity.json \
+            test-output/release-performance/editor.json \
+            test-output/delivery/result.json \
+            test-output/operations/restore.json \
+            test-output/ci-janitor/inventory.json; do
+            test -s "$required" || { echo "required real-service evidence is missing: $required" >&2; exit 1; }
+          done
+      # The per-pass release gate of v2 is removed (plan section 3.4). The final gate evaluates this pass's evidence once, from
+      # the retained store, with the rest of the run.
+      - name: Retain real-service evidence (durable, redacted, checksum-verified)
+        if: always()
+        shell: bash
+        env:
+          JOY_MEDIA_EVIDENCE_PASS: 1
+        run: |
+          set -uo pipefail
+          # The single real-service pass copies an explicit allowlist of structured evidence, sanitizes it (literal/base64/url-encoded
+          # secrets, Bearer headers, presigned params), leak-guards it, writes MANIFEST.sha256/.json, and PERSISTS it to
+          # $JOY_MEDIA_CI_EVIDENCE_ROOT (outside _work), re-verifying every file against the manifest. Non-zero exit => the pass
+          # fails. Shared implementation, exercised by evidence-retention.test.mjs.
+          bash ops/self-hosted/linux-runner/retain-evidence.sh \
+            "$PWD" \
+            "${{ runner.temp }}/real-service-evidence-p1-${{ github.run_id }}-${{ github.run_attempt }}" \
+            "$JOY_MEDIA_CI_EVIDENCE_ROOT"
+      - name: Verify retained evidence (required — missing evidence fails the gate)
+        if: always()
+        shell: bash
+        env:
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p1"
+          test -d "$root" || { echo "durable evidence dir missing: $root" >&2; exit 1; }
+          test -s "$root/MANIFEST.sha256" && test -s "$root/MANIFEST.json" || { echo 'evidence manifest missing' >&2; exit 1; }
+          ( cd "$root" && sha256sum -c MANIFEST.sha256 ) || { echo 'evidence checksum verification FAILED' >&2; exit 1; }
+          test ! -s "$root/REDACTION-FAILURES.txt" || { echo 'a staged evidence file failed redaction (quarantined) — see REDACTION-FAILURES.txt' >&2; cat "$root/REDACTION-FAILURES.txt" >&2; exit 1; }
+          # teardown.json is required for EVERY pass outcome and must be clean.
+          test -s "$root/test-output/operations/teardown.json" || { echo 'teardown.json missing from retained evidence' >&2; exit 1; }
+          node -e '
+            const r = require(process.argv[1]);
+            if (r.clean !== true) { console.error("teardown not clean: " + JSON.stringify(r.residue || r)); process.exit(1); }
+            console.error("teardown verified clean: " + (r.verified || []).join(", "));
+          ' "$root/test-output/operations/teardown.json"
+          # If the harness step succeeded, the FULL required evidence set must be present.
+          if [ "$HARNESS_OUTCOME" = "success" ]; then
+            required_evidence=(
+              test-output/browser/journeys.json
+              test-output/browser/real-service-profile-matrix.json
+              test-output/release-performance/polling.json
+              test-output/release-performance/effects-soak.json
+              test-output/release-performance/timeline-integrity.json
+              test-output/release-performance/editor.json
+              test-output/delivery/result.json
+              test-output/operations/restore.json
+              test-output/ci-janitor/inventory.json
+            )
+            if [ "${JOY_MEDIA_CI_LANE_MODE:-full}" = "p3" ]; then
+              required_evidence+=(test-output/browser/p3-export-matrix.json)
+            fi
+            for rel in "${required_evidence[@]}"; do
+              test -s "$root/$rel" || { echo "required evidence missing after a successful harness run: $rel" >&2; exit 1; }
+            done
+          else
+            echo "harness outcome=$HARNESS_OUTCOME — a journey-failure.json is expected:"
+            test -s "$root/test-output/browser/journey-failure.json" && echo "  present" || echo "  (not written — pre-journey failure)"
+          fi
+          echo "retained evidence verified: $root"
+      - name: Record artifact upload policy in durable evidence store
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p1"
+          test -d "$root" || { echo "durable evidence dir missing: $root" >&2; exit 1; }
+          {
+            printf 'candidate_sha=%s\n' "$CANDIDATE_SHA"
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'pass=%s\n' '1'
+            printf 'upload_outcome=disabled\n'
+            printf 'source=durable-evidence-store\n'
+            printf 'reason=github-artifact-upload-disabled-by-policy\n'
+          } > "$root/ARTIFACT-UPLOAD-STATUS.txt"
+      - name: Verify real-service acceptance teardown
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"
+          test -z "$(git status --porcelain)"
+          # Teardown verification is a required acceptance item. The harness re-inspects PostgreSQL, MinIO, the temp root and its
+          # child processes after cleanup and FAILS the pass on any run-owned residue (it no longer swallows deletion errors). It
+          # records the result here; a missing file or clean:false fails the step even if the harness somehow exited 0.
+          test -s test-output/operations/teardown.json || {
+            echo 'harness did not emit a teardown verification record' >&2; exit 1; }
+          node -e '
+            const r = require("./test-output/operations/teardown.json");
+            if (r.clean !== true) {
+              console.error("teardown not clean: " + JSON.stringify(r.residue || r));
+              process.exit(1);
+            }
+            console.error("teardown verified clean: " + (r.verified || []).join(", "));
+          '
+
+  fixture-acceptance:
+    name: fixture-acceptance (desktop-primary suite and production bundle smoke, one build)
+    runs-on: [self-hosted, linux, x64, joy-media-acceptance]
+    needs: [validate-candidate, real-service-acceptance]
+    if: ${{ always() && needs.validate-candidate.result == 'success' }}
+    timeout-minutes: 60
+    env:
+      JOY_MEDIA_CI_ACCEPTANCE_PROFILE: fixture-only
+      JOY_MEDIA_CI_ACCEPTANCE_WORKER: ''
+      JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND: ''
+      JOY_MEDIA_CI_EVIDENCE_ROOT: ''
+      JOY_MEDIA_CI_DATABASE_URL: ''
+      JOY_MEDIA_CI_S3_ENDPOINT: ''
+      JOY_MEDIA_CI_S3_ACCESS_KEY: ''
+      JOY_MEDIA_CI_S3_SECRET_KEY: ''
+      JOY_MEDIA_CI_S3_SECRET_ACCESS_KEY: ''
+      JOY_MEDIA_CI_S3_HEALTHCHECK_URL: ''
+      JOY_MEDIA_OPENCLI_PROFILE: ''
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Verify fixture-only acceptance boundary and pinned pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = 'fixture-only' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only is required' >&2; exit 1; }
+          node --version
+          corepack enable pnpm
+          test "$(pnpm --version)" = '11.15.0'
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
+          test -z "${JOY_MEDIA_CI_DATABASE_URL:-}" || { echo 'fixture-only acceptance must not receive the runner database URL' >&2; exit 1; }
+          test -z "${JOY_MEDIA_CI_S3_ACCESS_KEY:-}${JOY_MEDIA_CI_S3_SECRET_KEY:-}${JOY_MEDIA_CI_S3_SECRET_ACCESS_KEY:-}" || { echo 'fixture-only acceptance must not receive runner object-storage credentials' >&2; exit 1; }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install chromium
+      - name: Full disposable desktop acceptance suite (reference viewport)
+        shell: bash
+        env:
+          CI: true
+          PLAYWRIGHT_WORKERS: 2
+          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-primary-1-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-primary-1-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # Exclude the P3 shipping-export matrix spec from *discovery* (not just filtering). --grep-invert runs after Playwright
+          # imports the spec, which is too late: the spec's top-level imports of tests/e2e/helpers/p3-export-observer.mjs trigger a
+          # Vitest "Cannot require() ES Module ... in a cycle" error during module load. That spec only runs safely inside the
+          # dedicated JOY_MEDIA_CI_LANE_MODE=p3 lane; everywhere else we must keep it out of the loader entirely. Building an
+          # explicit positional argument list keeps every other desktop-primary test and prevents the excluded module from being
+          # imported at all.
+          desktop_specs=()
+          for spec in tests/e2e/*.spec.ts; do
+            case "$(basename "$spec")" in
+              r2-p3-shipping-export-acceptance.spec.ts) continue ;;
+            esac
+            desktop_specs+=("$spec")
+          done
+          if [ "${#desktop_specs[@]}" -eq 0 ]; then
+            echo "::error::no acceptance specs remained after excluding r2-p3-shipping-export-acceptance.spec.ts" >&2
+            exit 1
+          fi
+          pnpm exec playwright test --retries=0 "${desktop_specs[@]}" --project=desktop-primary --workers=2
+      - name: Measure the shipped editor entry-bundle graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The soak's initialEditorJsBytes budget measures the DEV entry module (/src/main.tsx) in the real-service lane and does
+          # not substantiate production bundle size. Measure the real artifact here: dist/index.html entry chunk + its
+          # modulepreload graph, raw AND gzip. Budgets are generous (a real regression, not noise) and the numbers are evidence.
+          node tooling/release/measure-entry-bundle.mjs \
+            apps/editor-web/dist \
+            test-output/prod-build/entry-bundle.json
+          test -s test-output/prod-build/entry-bundle.json
+      - name: Smoke the production bundle through the app's public UI
+        shell: bash
+        env:
+          CI: true
+          PLAYWRIGHT_WORKERS: 1
+          PW_PID_DIR: ${{ runner.temp }}/joy-media-prodsmoke-pids-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$PW_PID_DIR"
+          # Run-scoped ports (not fixed 4990/4991 — this lane shares the joy-media-acceptance label with the real-service and P3
+          # lanes, and two gate runs, or a v1 run, must not collide). --strictPort so a genuine clash fails loud.
+          api_port=$(( 21000 + (GITHUB_RUN_ID % 3000) ))
+          web_port=$(( api_port + 5000 ))
+          export JOY_MEDIA_E2E_API_PORT="$api_port"
+          export JOY_MEDIA_E2E_API_URL="http://127.0.0.1:${api_port}"
+          export PLAYWRIGHT_BASE_URL="http://127.0.0.1:${web_port}"
+          # Each server is its own process group (setsid) so teardown can signal the whole tree by pgid — no `pkill -f` sweeping
+          # other jobs.
+          setsid pnpm --filter @joy-media/api exec tsx ../../tooling/e2e-server.ts >"$PW_PID_DIR/api.log" 2>&1 &
+          echo $! > "$PW_PID_DIR/api.pid"
+          setsid pnpm --filter @joy-media/editor-web exec vite preview --host 127.0.0.1 --port "$web_port" --strictPort >"$PW_PID_DIR/web.log" 2>&1 &
+          echo $! > "$PW_PID_DIR/web.pid"
+          for i in $(seq 1 60); do curl -fsS "http://127.0.0.1:${api_port}/health" >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS "http://127.0.0.1:${api_port}/health" >/dev/null
+          for i in $(seq 1 45); do curl -fsS "http://127.0.0.1:${web_port}/" >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS "http://127.0.0.1:${web_port}/" >/dev/null
+          # Serve the *production* editor bundle (vite preview of dist/, mirrored /api proxy) + the isolated e2e API; run the
+          # UI-journey specs that exercise import, decode/seek and the encode/export Worker path against the shipped artifact. The
+          # dev-server-only white-box decoder specs stay in the desktop-primary and real-service lanes.
+          pnpm exec playwright test --retries=0 \
+            tests/e2e/authenticated-smoke.spec.ts \
+            tests/e2e/wp32-real-project-journey.spec.ts \
+            tests/e2e/wp30-animated-timeline-export.spec.ts \
+            tests/e2e/golden-path.spec.ts \
+            --project=desktop-primary --workers=1
+      - name: Verify fixture-acceptance teardown
+        if: always()
+        shell: bash
+        env:
+          PW_PID_DIR: ${{ runner.temp }}/joy-media-prodsmoke-pids-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-prodsmoke-${{ github.run_id }}-${{ github.run_attempt }}
+          PRIMARY_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-primary-1-${{ github.run_id }}-${{ github.run_attempt }}
+          PRIMARY_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-primary-1-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          alive() { kill -0 "$1" 2>/dev/null; }
+          for name in api web; do
+            pid_file="$PW_PID_DIR/$name.pid"
+            [ -s "$pid_file" ] || continue
+            pid=$(cat "$pid_file")
+            kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+            for i in $(seq 1 15); do alive "$pid" || break; sleep 1; done
+            if alive "$pid"; then kill -KILL -"$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true; sleep 2; fi
+            alive "$pid" && { echo "fixture smoke $name server $pid survived teardown" >&2; exit 1; } || true
+          done
+          # Both suites' outputs are run-owned and must be removed inside RUNNER_TEMP, with bounded retries.
+          for output_path in "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR" "$PW_PID_DIR" "$PRIMARY_HTML_REPORT" "$PRIMARY_RESULTS_DIR"; do
+            case "$output_path" in
+              "$RUNNER_TEMP"/*) ;;
+              *) echo "refusing to clean output outside RUNNER_TEMP: $output_path" >&2; exit 1 ;;
+            esac
+            removed=0
+            for attempt in $(seq 1 15); do
+              if rm -rf -- "$output_path" 2>/dev/null && test ! -e "$output_path"; then removed=1; break; fi
+              sleep 1
+            done
+            test "$removed" -eq 1 || { echo "unable to remove run-owned output after bounded retries: $output_path" >&2; exit 1; }
+          done
+          test -z "$(git status --porcelain)"
+
+  acceptance-responsive:
+    name: acceptance-responsive 6 viewports (single pass)
+    runs-on: ubuntu-24.04
+    needs: [validate-candidate]
+    timeout-minutes: 20
+    env:
+      JOY_MEDIA_CI_ACCEPTANCE_PROFILE: fixture-only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Verify fixture-only acceptance boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = 'fixture-only' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_PROFILE=fixture-only is required' >&2; exit 1; }
+          node --version
+          corepack enable pnpm
+          pnpm --version
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Layout / overflow / a11y / panel-reachability at every non-primary viewport
+        shell: bash
+        env:
+          CI: true
+          PLAYWRIGHT_WORKERS: 1
+          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-responsive-1-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-responsive-1-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # Per-viewport: wp32 panel-reachability + per-panel overflow; golden-path login-gate overflow + axe scan; wp35
+          # loaded-timeline transport/workspace geometry. --grep unions the three, then assert-playwright-titles verifies each of
+          # the 3 EXACT test titles ran and passed at that viewport (identity, not just a count).
+          grep_re='(keeps project controls, workspace navigation|login gate loads without fatal|renders backend track titles, mixed elements)'
+          req_titles=(
+            'keeps project controls, workspace navigation, and keyboard menus reachable'
+            'login gate loads without fatal browser errors or horizontal overflow'
+            'renders backend track titles, mixed elements, and Quarter preview controls'
+          )
+          for profile in desktop-compact desktop-minimum desktop-1280 desktop-1440 desktop-1581 desktop-1920; do
+            echo "::group::responsive checkpoints @ $profile"
+            # Report name unique to run/attempt/pass/profile; deleted before the run so a stale file can never satisfy the identity check.
+            rj="$RUNNER_TEMP/pw-responsive-1-$profile-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.json"
+            rm -f "$rj"
+            PLAYWRIGHT_JSON_OUTPUT_NAME="$rj" pnpm exec playwright test --retries=0 \
+              tests/e2e/wp32-responsive-checkpoints.spec.ts \
+              tests/e2e/golden-path.spec.ts \
+              tests/e2e/wp35-universal-timeline.spec.ts \
+              --grep "$grep_re" --project="$profile" --workers=1 --reporter=json,line
+            test -s "$rj" || { echo "no Playwright JSON report produced for $profile" >&2; exit 1; }
+            node tooling/release/assert-playwright-titles.mjs "$rj" "${req_titles[@]}"
+            rm -f "$rj"
+            echo "::endgroup::"
+          done
+      - name: Verify acceptance teardown
+        if: always()
+        shell: bash
+        env:
+          PLAYWRIGHT_HTML_REPORT: ${{ runner.temp }}/joy-media-pw-report-responsive-1-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/joy-media-pw-results-responsive-1-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          for output_path in "$PLAYWRIGHT_HTML_REPORT" "$PLAYWRIGHT_TEST_RESULTS_DIR"; do
+            case "$output_path" in
+              "$RUNNER_TEMP"/*) ;;
+              *) echo "refusing to clean output outside RUNNER_TEMP: $output_path" >&2; exit 1 ;;
+            esac
+            removed=0
+            for attempt in $(seq 1 15); do
+              if rm -rf -- "$output_path" 2>/dev/null && test ! -e "$output_path"; then removed=1; break; fi
+              sleep 1
+            done
+            test "$removed" -eq 1 || { echo "unable to remove run-owned output after bounded retries: $output_path" >&2; exit 1; }
+          done
+          test -z "$(git status --porcelain)"
+
+  p3-real-services:
+    name: p3-real-services (single pass)
+    runs-on: [self-hosted, linux, x64, joy-media-acceptance]
+    needs: [validate-candidate, fixture-acceptance]
+    if: ${{ always() && needs.validate-candidate.result == 'success' }}
+    # The P3 matrix is currently sequential inside one browser process. This lane has an explicit deadline plus cleanup reserve so
+    # it cannot be mistaken for the 120-minute broad lane. Re-measure before claiming a shorter target or adding shards.
+    timeout-minutes: 360
+    env:
+      JOY_MEDIA_CI_LANE_MODE: p3
+      JOY_P3_EXECUTION_DEADLINE_MS: 19800000
+      JOY_P3_CLEANUP_RESERVE_MS: 1200000
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify isolated P3 prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'candidate_sha must be a full lowercase commit SHA' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_LANE_MODE:-}" = 'p3' || { echo 'JOY_MEDIA_CI_LANE_MODE=p3 is required' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_ACCEPTANCE_PROFILE:-}" = 'real-services' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_PROFILE=real-services is required' >&2; exit 1; }
+          test "${JOY_MEDIA_CI_ACCEPTANCE_WORKER:-}" = 'disposable' || { echo 'JOY_MEDIA_CI_ACCEPTANCE_WORKER=disposable is required' >&2; exit 1; }
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on acceptance runners' >&2; exit 1; }
+          command -v node >/dev/null || { echo 'Node is required on the P3 runner' >&2; exit 1; }
+          corepack enable pnpm
+          pnpm --version
+          acceptance_command="${JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND:-}"
+          test -n "$acceptance_command" && test -x "$acceptance_command" || { echo 'JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND must point to the isolated real-service acceptance harness' >&2; exit 1; }
+          evidence_root="${JOY_MEDIA_CI_EVIDENCE_ROOT:-}"
+          test -n "$evidence_root" || { echo 'JOY_MEDIA_CI_EVIDENCE_ROOT must point to persistent evidence outside _work' >&2; exit 1; }
+          mkdir -p "$evidence_root"
+          test -w "$evidence_root" || { echo "evidence root is not writable: $evidence_root" >&2; exit 1; }
+          case "$evidence_root" in *"$RUNNER_WORKSPACE"*|*"/_work/"*|*"/_temp/"*) echo "evidence root must be outside checkout/_work/_temp: $evidence_root" >&2; exit 1;; esac
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install chromium
+      - name: CI namespace janitor — inventory orphaned schemas/buckets
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node ops/self-hosted/linux-runner/ci-namespace-janitor.mjs
+          test -s test-output/ci-janitor/inventory.json
+      - name: Run bounded P3-only real-service qualification
+        id: harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "1"
+          test -s test-output/browser/p3-export-matrix.json
+          test -s test-output/browser/p3-lane-evidence.json
+      - name: Retain P3 evidence (durable, redacted, checksum-verified)
+        if: always()
+        shell: bash
+        env:
+          JOY_MEDIA_EVIDENCE_PASS: 1
+        run: |
+          set -uo pipefail
+          bash ops/self-hosted/linux-runner/retain-evidence.sh \
+            "$PWD" \
+            "${{ runner.temp }}/p3-evidence-p1-${{ github.run_id }}-${{ github.run_attempt }}" \
+            "$JOY_MEDIA_CI_EVIDENCE_ROOT/p3"
+      - name: Verify retained P3 evidence
+        if: always()
+        shell: bash
+        env:
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/p3/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p1"
+          test -d "$root" || { echo "durable P3 evidence dir missing: $root" >&2; exit 1; }
+          test -s "$root/MANIFEST.sha256" && test -s "$root/MANIFEST.json" || { echo 'P3 evidence manifest missing' >&2; exit 1; }
+          ( cd "$root" && sha256sum -c MANIFEST.sha256 ) || { echo 'P3 evidence checksum verification failed' >&2; exit 1; }
+          test -s "$root/test-output/operations/teardown.json" || { echo 'P3 teardown.json missing' >&2; exit 1; }
+          node -e 'const r=require(process.argv[1]); if(r.clean!==true) process.exit(1)' "$root/test-output/operations/teardown.json"
+          if [ "$HARNESS_OUTCOME" = success ]; then
+            for rel in \
+              test-output/browser/p3-export-matrix.json \
+              test-output/browser/p3-lane-evidence.json \
+              test-output/browser/p3-case-evidence.json \
+              test-output/browser/p3-progress.jsonl \
+              test-output/browser/p3-child-stdout-tail.txt; do
+              test -s "$root/$rel" || { echo "required P3 evidence missing: $rel" >&2; exit 1; }
+            done
+            node --input-type=module - \
+              "$root/test-output/browser/p3-case-evidence.json" \
+              "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "1" <<'NODE'
+            import { readFile } from 'node:fs/promises';
+            import { validateP3CaseEvidenceForSuccess } from './ops/self-hosted/linux-runner/p3-case-evidence.mjs';
+            // Node places the stdin marker at argv[1], so workflow arguments begin at argv[2].
+            const [evidencePath, candidateSha, runId, runAttempt, pass] = process.argv.slice(2);
+            const aggregate = JSON.parse(await readFile(evidencePath, 'utf8'));
+            validateP3CaseEvidenceForSuccess(aggregate, { candidateSha, runId, runAttempt, pass });
+          NODE
+            # The successful P3 child may legitimately emit zero bytes on stderr (it is a diagnostic tail, not a required-content
+            # stream). Require existence, not non-emptiness, so a clean 0-byte tail still satisfies the required-evidence loop;
+            # checksum/teardown/provenance above already guard against the file being absent or replaced.
+            test -f "$root/test-output/browser/p3-child-stderr-tail.txt" || { echo "required P3 evidence missing: test-output/browser/p3-child-stderr-tail.txt" >&2; exit 1; }
+          fi
+      - name: Record P3 artifact upload policy in durable evidence store
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/p3/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-p1"
+          test -d "$root"
+          {
+            printf 'candidate_sha=%s\n' "$CANDIDATE_SHA"
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'pass=%s\n' '1'
+            printf 'upload_outcome=disabled\n'
+            printf 'source=durable-evidence-store\n'
+            printf 'reason=github-artifact-upload-disabled-by-policy\n'
+          } > "$root/ARTIFACT-UPLOAD-STATUS.txt"
+      - name: Verify P3 teardown
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"
+          test -z "$(git status --porcelain)"
+          test -s test-output/operations/teardown.json
+          node -e 'const r=require("./test-output/operations/teardown.json"); if(r.clean!==true) process.exit(1)'
+
+  gate-summary:
+    name: gate-summary
+    runs-on: [self-hosted, linux, x64, joy-media-acceptance]
+    timeout-minutes: 240
+    needs:
+      [
+        hosted-verify,
+        node-contracts,
+        linux-real-services,
+        windows-candidate,
+        real-service-acceptance,
+        fixture-acceptance,
+        acceptance-responsive,
+        p3-real-services,
+      ]
+    if: always()
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Require every lane green on the single pass
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          # Structured, NAME-keyed evaluation (tooling/release/src/ci-gate-summary.ts, unit-tested): JSON.parse toJSON(needs), require
+          # its key set to be EXACTLY these lane names (a lane silently dropped from `needs:`, or an unexpected extra lane, fails),
+          # and require every lane's `result` to be exactly "success" (failure / cancelled / skipped / timed_out all fail).
+          node --experimental-strip-types tooling/release/src/ci-gate-summary.ts "$NEEDS_JSON" \
+            'hosted-verify,node-contracts,linux-real-services,windows-candidate,real-service-acceptance,fixture-acceptance,acceptance-responsive,p3-real-services'
+      - name: Install frozen workspace for the final source-bound gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable pnpm
+          pnpm --version
+          pnpm install --frozen-lockfile
+      - name: Verify final-gate evidence-store isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}" || { echo 'OpenCLI profiles are forbidden on the release gate runner' >&2; exit 1; }
+          evidence_root="${JOY_MEDIA_CI_EVIDENCE_ROOT:-}"
+          test -n "$evidence_root" || { echo 'JOY_MEDIA_CI_EVIDENCE_ROOT is required for the final release receipt' >&2; exit 1; }
+          mkdir -p "$evidence_root"
+          test -d "$evidence_root" && test -w "$evidence_root" || { echo 'final-gate evidence store is not writable' >&2; exit 1; }
+          case "$evidence_root" in
+            *"$RUNNER_WORKSPACE"* | *"/_work/"* | *"/_temp/"*) echo 'final-gate evidence store must be outside checkout/_work/_temp' >&2; exit 1 ;;
+          esac
+      - name: Restore and bind the single evidence pass
+        shell: bash
+        env:
+          EVIDENCE_TOPOLOGY: single-pass
+          WINDOWS_EVIDENCE_1_B64: ${{ needs.windows-candidate.outputs.evidence1 }}
+        run: |
+          set -euo pipefail
+          node ops/self-hosted/linux-runner/restore-retained-evidence.mjs \
+            "$JOY_MEDIA_CI_EVIDENCE_ROOT" "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+      # Same run only: no run-id, repository or token is passed, so only this run's artifact can be fetched, and its name carries
+      # the run, the attempt and the exact candidate. A missing artifact fails the gate.
+      - name: Download the Windows release artifacts that this run uploaded
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joy-media-windows-release-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/windows-release-incoming
+      - name: Retain the downloaded Windows release artifacts in the durable evidence store
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Hashes every downloaded file here against artifact-manifest.json and SHA256SUMS.txt, checks the manifest names this
+          # candidate, run and attempt, then writes the files once into the store and re-verifies them there. A missing, extra,
+          # corrupted or mismatched file writes nothing.
+          node tooling/release/src/retain-release-artifacts.mjs test-output/windows-release-incoming "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$JOY_MEDIA_CI_EVIDENCE_ROOT"
+      - name: Verify the retained Windows release artifacts in the evidence store
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Reads the bytes back from the store and re-hashes them against the manifest and SHA256SUMS.txt. A missing or altered
+          # copy fails the gate.
+          node tooling/release/src/retain-release-artifacts.mjs - "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$JOY_MEDIA_CI_EVIDENCE_ROOT" --verify-only
+      - name: Place the verified Windows release artifacts where the readiness builder reads them
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The builder hashes these bytes against SHA256SUMS.txt and the digests in the Windows receipt. They come from the store
+          # copy that was just verified, never from the downloaded directory.
+          node tooling/release/src/retain-release-artifacts.mjs - "$CANDIDATE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$JOY_MEDIA_CI_EVIDENCE_ROOT" --restore-to test-output/readiness/artifacts
+      # Same run only, like the Windows artifacts above. The report's digest is the one hosted-verify wrote as its job output, so a
+      # swapped or edited report fails before the gate reads it.
+      - name: Download the hosted-verify report that this run uploaded
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joy-media-hosted-verify-report-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.candidate_sha }}
+          path: test-output/hosted-verify-incoming
+      - name: Check the hosted-verify report digest and place it for the gate
+        shell: bash
+        env:
+          EXPECTED_REPORT_SHA256: ${{ needs.hosted-verify.outputs.report_sha256 }}
+        run: |
+          set -euo pipefail
+          report=test-output/hosted-verify-incoming/report.json
+          test -s "$report" || { echo 'the hosted-verify report did not arrive from this run' >&2; exit 1; }
+          test -n "$EXPECTED_REPORT_SHA256" || { echo 'hosted-verify did not output a report digest' >&2; exit 1; }
+          actual="$(sha256sum "$report" | cut -d' ' -f1)"
+          test "$actual" = "$EXPECTED_REPORT_SHA256" || { echo 'the hosted-verify report does not match the digest its job produced' >&2; exit 1; }
+          mkdir -p test-output/hosted-verify
+          cp "$report" test-output/hosted-verify/report.json
+      - name: Build source-bound readiness evidence from the single-pass results
+        shell: bash
+        env:
+          READINESS_TOPOLOGY: single-pass
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types tooling/release/src/create-readiness-evidence.mjs
+          test -s test-output/readiness/evidence.json
+      - name: Evaluate source-bound release gate
+        id: release-gate
+        shell: bash
+        env:
+          JOY_RELEASE_SCOPE: release
+          JOY_RELEASE_OUTPUT: ${{ github.workspace }}/test-output/release-gate
+          JOY_RELEASE_WORKFLOW_RUN_ID: ${{ github.run_id }}
+          JOY_RELEASE_WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOY_RELEASE_CANDIDATE_SHA: ${{ env.CANDIDATE_SHA }}
+          JOY_RELEASE_HOSTED_VERIFY_REPORT: test-output/hosted-verify/report.json
+          JOY_RELEASE_HOSTED_VERIFY_SHA256: ${{ needs.hosted-verify.outputs.report_sha256 }}
+          JOY_MEDIA_CI_ACCEPTANCE_PROFILE: ''
+          JOY_MEDIA_CI_ACCEPTANCE_WORKER: ''
+          JOY_MEDIA_CI_LANE_MODE: ''
+          JOY_MEDIA_CI_DATABASE_URL: ''
+          JOY_MEDIA_CI_S3_ACCESS_KEY: ''
+          JOY_MEDIA_CI_S3_SECRET_KEY: ''
+          JOY_MEDIA_CI_S3_SECRET_ACCESS_KEY: ''
+          JOY_MEDIA_CI_S3_ENDPOINT: ''
+          JOY_MEDIA_CI_S3_HEALTHCHECK_URL: ''
+          JOY_MEDIA_CI_REAL_ACCEPTANCE_COMMAND: ''
+          JOY_MEDIA_CI_RELEASE_COMMAND: ''
+          JOY_MEDIA_CI_EVIDENCE_ROOT: ''
+          JOY_MEDIA_OPENCLI_PROFILE: ''
+        run: |
+          set -euo pipefail
+          pnpm run release:gate
+      - name: Write the shadow run summary for this run (development measurement, D18)
+        if: always()
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          mkdir -p test-output/ci-v3
+          printf '%s' "$NEEDS_JSON" > test-output/ci-v3/needs.json
+          node tooling/release/src/ci-v3-run-inputs.mjs \
+            --topology single-pass \
+            --needs test-output/ci-v3/needs.json \
+            --gate test-output/release-gate/report.json \
+            --readiness test-output/readiness/evidence.json \
+            --windows test-output/readiness/single-pass-evidence/windows/pass-1/acceptance.json \
+            --hosted test-output/hosted-verify/report.json \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --out test-output/ci-v3/run-inputs.json
+          node tooling/release/src/ci-v3-run-summary.mjs --input test-output/ci-v3/run-inputs.json --out test-output/ci-v3/run-summary.json
+          {
+            echo '### Shadow run summary (release-candidate-v3, single pass)'
+            echo '```json'
+            cat test-output/ci-v3/run-summary.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain final source-bound release evidence (durable, redacted, checksum-verified)
+        if: always()
+        shell: bash
+        env:
+          JOY_MEDIA_EVIDENCE_PASS: gate
+        run: |
+          set -uo pipefail
+          bash ops/self-hosted/linux-runner/retain-evidence.sh \
+            "$PWD" \
+            "${{ runner.temp }}/final-release-gate-evidence-${{ github.run_id }}-${{ github.run_attempt }}" \
+            "$JOY_MEDIA_CI_EVIDENCE_ROOT"
+      # The v3 coverage receipts: the hosted-verify report (the coverage proof), the readiness record and the run summary. They
+      # are kept with the final evidence, because the transport artifacts expire after one day.
+      - name: Retain the v3 coverage receipts beside the final evidence (checksum-verified)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pgate"
+          test -d "$root" || { echo "durable final-gate evidence directory is missing: $root" >&2; exit 1; }
+          mkdir -p "$root/v3-receipts"
+          cp test-output/hosted-verify/report.json "$root/v3-receipts/hosted-verify-report.json"
+          cp test-output/readiness/evidence.json "$root/v3-receipts/readiness-evidence.json"
+          cp test-output/ci-v3/run-summary.json "$root/v3-receipts/run-summary.json"
+          (cd "$root" && sha256sum v3-receipts/* > v3-receipts.sha256)
+      - name: Verify retained final source-bound release evidence
+        if: always()
+        shell: bash
+        env:
+          GATE_OUTCOME: ${{ steps.release-gate.outcome }}
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pgate"
+          test -s "$root/MANIFEST.sha256" && test -s "$root/MANIFEST.json" || { echo 'final release evidence manifest is missing' >&2; exit 1; }
+          ( cd "$root" && sha256sum -c MANIFEST.sha256 ) || { echo 'final release evidence checksum verification failed' >&2; exit 1; }
+          ( cd "$root" && sha256sum -c v3-receipts.sha256 ) || { echo 'v3 coverage receipts checksum verification failed' >&2; exit 1; }
+          if [ "$GATE_OUTCOME" != skipped ]; then
+            test -s "$root/test-output/release-gate/report.json" || { echo 'source-bound release-gate report was not retained' >&2; exit 1; }
+            test -s "$root/test-output/release-gate/release-manifest.sha256" || { echo 'source-bound release manifest checksum was not retained' >&2; exit 1; }
+          fi
+      - name: Record final release-gate artifact-upload policy
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$JOY_MEDIA_CI_EVIDENCE_ROOT/$CANDIDATE_SHA/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pgate"
+          test -d "$root" || { echo "durable final-gate evidence directory is missing: $root" >&2; exit 1; }
+          {
+            printf 'candidate_sha=%s\n' "$CANDIDATE_SHA"
+            printf 'run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'pass=gate\n'
+            printf 'upload_outcome=disabled\n'
+            printf 'source=durable-evidence-store\n'
+            printf 'reason=github-artifact-upload-disabled-by-policy\n'
+          } > "$root/ARTIFACT-UPLOAD-STATUS.txt"
+      - name: Verify final-gate teardown
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${JOY_MEDIA_OPENCLI_PROFILE:-}"
+          test -z "$(git status --porcelain)"
