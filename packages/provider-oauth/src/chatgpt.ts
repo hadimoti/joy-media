@@ -37,9 +37,9 @@ export const CHATGPT_AGENT_NAME = 'JOY Media';
 /**
  * The host ID ChatGPT accepts in `ext_agent_host_id`: a UUID as a `urn:uuid:` URN. ChatGPT refuses a bare UUID with
  * "Invalid authorize request" (the first attended sign-in, 2026-10-29), so only this form is created here. The
- * documented JWK-thumbprint form is a SHA-256 thumbprint: 43 base64url characters (RFC 9278). Its last character
- * carries only the top four bits of the digest, so it must be one of the 16 characters that can end such a value.
- * The did:key form is accepted when read.
+ * documented JWK-thumbprint form (RFC 9278) carries a SHA-256 thumbprint (RFC 7638) as 43 base64url characters. Its
+ * last character holds the final four bits of the digest in its high-order bits, and its two low-order bits are zero
+ * padding, so it must be one of the 16 characters that can end such a value. The did:key form is accepted when read.
  */
 const EXT_AGENT_HOST_ID_PATTERN =
   /^(?:urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|urn:ietf:params:oauth:jwk-thumbprint:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]|did:key:z[1-9A-HJ-NP-Za-km-z]{16,})$/;

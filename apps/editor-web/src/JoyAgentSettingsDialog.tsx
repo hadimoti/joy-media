@@ -286,9 +286,9 @@ export function JoyAgentSettingsDialog({
   };
 
   // No provider is preselected, and OpenRouter is never a default (PLAN-v4 §6d-1 rule 3). A new connection
-  // starts with nothing chosen. A connected session shows the transport its status names, OpenRouter or a custom
-  // endpoint. A registry provider runs on the openai-compatible transport, so its session shows as a custom
-  // endpoint. Any other status shows no provider and no OpenRouter default.
+  // starts with nothing chosen. A connected session shows the transport its status names: OpenRouter, or a custom
+  // endpoint. A connected registry provider reports the openai-compatible transport, so it shows as a custom endpoint.
+  // Any other status shows no provider and no OpenRouter default.
   const connectedProvider = formProviderForStatus(status);
   const [provider, setProvider] = useState<DialogProvider | ''>(connectedProvider);
   const [baseUrl, setBaseUrl] = useState(
