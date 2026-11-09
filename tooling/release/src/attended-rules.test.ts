@@ -78,8 +78,13 @@ describe('run arguments', () => {
     expect(options).toMatchObject({ scenario: SCENARIO, project: 'project-1', launch: false });
   });
 
-  it('turns the app on only with --launch', () => {
-    expect(parseRunArgs([...VALID, '--launch'], SCENARIOS).launch).toBe(true);
+  it('turns the app on only with --launch, and a launch needs an approved owner library count', () => {
+    expect(
+      parseRunArgs([...VALID, '--launch', '--owner-library-files', '3221'], SCENARIOS).launch,
+    ).toBe(true);
+    expect(() => parseRunArgs([...VALID, '--launch'], SCENARIOS)).toThrow(
+      '--owner-library-files is required with --launch',
+    );
   });
 
   it('names the first missing option', () => {

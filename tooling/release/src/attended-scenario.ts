@@ -171,6 +171,8 @@ export interface ScenarioInput {
   readonly projectId: string;
   readonly exeSha256: string;
   readonly unpackedDir: string;
+  /** The owner library count this run approves. The count before the first launch must equal it. */
+  readonly approvedOwnerFiles: number;
 }
 
 export interface GuardReadings {
@@ -409,14 +411,16 @@ export function stagedClipName(runId: string): string {
 
 /**
  * The problems a set of guard readings shows. `when` names the moment in the reason the owner reads.
- * With a reference reading, the owner library and the installed folder must match it too. A guard
- * listed in `unread` could not be read, so it is not judged here: its read error is reported instead.
+ * With an approved count, the owner library must hold exactly that many files. With a reference reading, the
+ * owner library and the installed folder must match it too. A guard listed in `unread` could not be read, so
+ * it is not judged here: its read error is reported instead.
  */
 export function guardBlockers(
   current: GuardReadings,
   when: string,
   reference?: GuardReadings,
   unread: readonly GuardField[] = [],
+  approvedOwnerFiles?: number,
 ): string[] {
   const blockers: string[] = [];
   if (!unread.includes('joyKeySha256') && current.joyKeySha256 !== JOY_KEY_EXPECTED_SHA256) {
@@ -424,6 +428,15 @@ export function guardBlockers(
   }
   if (!unread.includes('joyProcesses') && current.joyProcesses !== 0) {
     blockers.push(`${current.joyProcesses} JOY process(es) running ${when}`);
+  }
+  if (
+    approvedOwnerFiles !== undefined &&
+    !unread.includes('ownerLibraryFiles') &&
+    current.ownerLibraryFiles !== approvedOwnerFiles
+  ) {
+    blockers.push(
+      `the owner library has ${current.ownerLibraryFiles} files, not the ${approvedOwnerFiles} approved for this run ${when}`,
+    );
   }
   if (reference !== undefined) {
     if (
@@ -660,6 +673,10 @@ export async function runRestartSaveExport(
   driver: ScenarioDriver,
   input: ScenarioInput,
 ): Promise<ScenarioReport> {
+  // A launch is judged against an approved owner library count, so a run without one does not start at all.
+  if (!Number.isInteger(input.approvedOwnerFiles) || input.approvedOwnerFiles < 1) {
+    throw new Error('a run needs an approved owner library count before it can start');
+  }
   const required = REQUIRED_ATTENDED_CHECKS[RESTART_SAVE_EXPORT];
   const startedAt = driver.now().toISOString();
   const results = new Map<string, AttendedCheck>();
@@ -677,7 +694,13 @@ export async function runRestartSaveExport(
   const before = beforeReading.guards;
   const refusals = [
     ...beforeReading.readErrors,
-    ...guardBlockers(before, 'before launch', undefined, beforeReading.unread),
+    ...guardBlockers(
+      before,
+      'before launch',
+      undefined,
+      beforeReading.unread,
+      input.approvedOwnerFiles,
+    ),
   ];
   if (refusals.length > 0) {
     note('refused', refusals.join('; '));
@@ -755,7 +778,14 @@ export async function runRestartSaveExport(
     // Restart: close the first process and check the guards, then start a new process on the same profile.
     // The session is marked closed before the attempt, so a failed close is not retried in cleanup.
     first.session.closed = true;
-    await stage('app-restarted', () => driver.close(first.session.app, first.page));
+    await stage('app-restarted', async () => {
+      try {
+        await driver.close(first.session.app, first.page);
+      } catch (error) {
+        closeErrors.push(`process ${first.session.app.pid} did not close: ${describeError(error)}`);
+        throw error;
+      }
+    });
     const between = await readGuards(driver);
     const betweenProblems = [
       ...between.readErrors,

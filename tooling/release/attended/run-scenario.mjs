@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // The first scripted attended scenario (restart, save and export) for one candidate build.
 //
-// Without --launch it runs the preflight and the refusals, then prints the plan. It copies no profile
-// and starts nothing. With --launch it copies the source profile into the run folder, checks that the
-// copy's asset library is the scratch library, and only then starts the candidate copy on that copy.
+// Without --launch it runs the preflight and the refusals, then prints the plan. It copies the source
+// database and its write-ahead files into plan-source only to read them, and starts nothing. With --launch
+// it copies the source profile into the run folder, checks that the copy's asset library is the scratch
+// library, and only then starts the candidate copy on that copy.
 // Each run needs the owner at the PC and a yes that names the run.
 //
 // Usage (Windows, from the repository root):
@@ -12,14 +13,17 @@
 //     --candidate <40-hex commit> --expected-exe-sha256 <64-hex build hash> \
 //     --profile-source <profile holding the project> --profile <new folder>\profile \
 //     --library <scratch library with catalog.json> --out <new run folder> \
-//     --project <project id> [--port 9339] [--launch]
+//     --project <project id> [--port 9339] [--owner-library-files <n>] [--launch]
 //
 // The fresh-process scenario (project.persistence.fresh-process) creates its two profiles inside the run
 // folder, so it takes no source profile and no project:
 //   node --experimental-strip-types tooling/release/attended/run-scenario.mjs \
 //     --scenario project.persistence.fresh-process --exe <unpacked copy>\joy-media.exe \
 //     --candidate <40-hex commit> --expected-exe-sha256 <64-hex build hash> \
-//     --library <scratch library with catalog.json> --out <new run folder> [--media <mp4>] [--launch]
+//     --library <scratch library with catalog.json> --out <new run folder> [--media <mp4>]
+//     [--owner-library-files <n>] [--launch]
+// --owner-library-files approves the owner library's file count for the run; a different count is refused.
+// An option the runner does not know, or one given twice, is refused, so a typo cannot drop an approval.
 // Exit codes: 0 passed (or a dry run with no refusals), 2 refused, failed or not ready, 1 usage error.
 
 import { spawnSync } from 'node:child_process';
@@ -42,13 +46,41 @@ import {
 } from '../src/attended-scenario.ts';
 import {
   createFreshProcessDriver,
+  boundedWait,
   createScenarioDriver,
   databaseModuleProblem,
 } from './scenario-driver.mjs';
-import { finishedRunArtifacts, isInside, parseRunArgs, samePath } from './scenario-rules.mjs';
+import {
+  approvedOwnerFilesOf,
+  countFiles,
+  unexpectedRunArtifacts,
+  isInside,
+  linkInside,
+  linkOnPath,
+  ownerDefaultLibrary,
+  ownerLibraryRefusal,
+  parseRunArgs,
+  reportWithFolderChanges,
+  runFolderProblem,
+  samePath,
+} from './scenario-rules.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SCENARIOS = [RESTART_SAVE_EXPORT, FRESH_PROCESS_SCENARIO];
+
+/** The longest a scenario may take. A run that has not ended by then is recorded as an error; nothing is killed. */
+const RUN_LIMIT_MS = 60 * 60_000;
+
+/** Waits for a scenario to end, or throws when it passes the run limit. The timer stops when the scenario ends. */
+async function withinRunLimit(scenario) {
+  const report = await boundedWait(scenario, RUN_LIMIT_MS);
+  if (report === undefined) {
+    throw new Error(
+      'the run did not finish within 60 minutes; the app may still be running, and the owner closes it. Nothing was killed.',
+    );
+  }
+  return report;
+}
 /** The media the fresh-process scenario imports unless --media names another clip. */
 const DEFAULT_CLIP = join(
   here,
@@ -62,7 +94,7 @@ const DEFAULT_CLIP = join(
 );
 const DB_NAME = 'joy-media.sqlite3';
 const LIBRARY_SETTING = 'asset_library_directory';
-const DEFAULT_LIBRARY = join(homedir(), 'joy-media-assets');
+const DEFAULT_LIBRARY = ownerDefaultLibrary(homedir());
 const INSTALLED_FOLDER = join(homedir(), 'AppData', 'Local', 'Programs', 'JOY Media');
 
 /**
@@ -148,6 +180,71 @@ function printFreshPlan(plan) {
 }
 
 /**
+ * Refuses a run before the preflight writes anything when the owner library holds a link, a junction, a shared file or
+ * an unreadable folder: a link there could send a write to another folder, and a link is never followed. It also
+ * checks the approved count, when one is given. The count is compared again before the first launch.
+ */
+function refuseOwnerLibrary(options) {
+  const folder = ownerDefaultLibrary(homedir());
+  // linkInside also finds a junction whose target is gone: it exists as a link even though it is not a folder.
+  const link = linkInside(folder);
+  if (link !== undefined) {
+    process.stderr.write(
+      `refused: ${link} is a link, a junction, a shared file or an unreadable folder in the owner library\nnothing was written or started\n`,
+    );
+    process.exit(2);
+  }
+  const approved = approvedOwnerFilesOf(options);
+  if (approved === undefined) return;
+  let actual;
+  try {
+    actual = existsSync(folder) ? countFiles(folder) : 0;
+  } catch (error) {
+    process.stderr.write(
+      `refused: the owner library could not be counted: ${error.message}\nnothing was written or started\n`,
+    );
+    process.exit(2);
+  }
+  const refusal = ownerLibraryRefusal(approved, actual);
+  if (refusal === null) return;
+  process.stderr.write(`refused: ${refusal}\nnothing was written or started\n`);
+  process.exit(2);
+}
+
+/**
+ * Checks the run paths again just before anything is copied or seeded: a link may have appeared since the preflight.
+ */
+function refuseLinkedPaths(linkPaths, treePaths) {
+  for (const path of linkPaths) {
+    if (linkOnPath(path)) {
+      throw new Error(
+        `${path} goes through a link or a junction, so nothing was copied or started`,
+      );
+    }
+  }
+  for (const folder of treePaths) {
+    const found = linkInside(folder);
+    if (found !== undefined) {
+      throw new Error(
+        `${found} is a link, a junction, a shared file or an unreadable folder, so nothing was copied or started`,
+      );
+    }
+  }
+}
+
+/**
+ * Refuses before a write into the run folder when a link, a junction, a shared file or an unreadable folder is in it now.
+ * The preflight checked the run folder earlier, and a link can appear after that check.
+ */
+function refuseLinkedRunFolder(out) {
+  const problem = runFolderProblem(out);
+  if (problem !== undefined) {
+    process.stderr.write(`refused: ${problem}\nno further file was written to the run folder\n`);
+    process.exit(2);
+  }
+}
+
+/**
  * The fresh-process scenario from the command line: the preflight and the refusals, then the plan, and
  * with --launch the two processes. It never copies a profile and never opens the owner's data.
  */
@@ -169,6 +266,17 @@ async function runFreshProcess(options) {
     process.exit(2);
   }
 
+  // A run writes into its folder only when the folder holds nothing but the preflight's own files.
+  const unexpected = unexpectedRunArtifacts(out);
+  if (unexpected.length > 0) {
+    process.stderr.write(
+      `refused: ${out} already holds ${unexpected.join(', ')}; a run needs an empty folder, so use a new run folder\n`,
+    );
+    process.exit(2);
+  }
+
+  refuseOwnerLibrary(options);
+
   // The preflight checks the owner's folders, the joy:// key, the app and the tools. It is given the
   // fresh profile as its profile; the source profile is checked below, because it must not exist either.
   const preflight = spawnSync(
@@ -187,14 +295,12 @@ async function runFreshProcess(options) {
       '--out',
       out,
     ],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', timeout: 300_000 },
   );
   process.stdout.write(preflight.stdout ?? '');
   process.stderr.write(preflight.stderr ?? '');
   if (preflight.status !== 0) {
-    process.stderr.write(
-      'not ready: the preflight blocked the run, so nothing was created or started\n',
-    );
+    process.stderr.write('not ready: the preflight blocked the run, so nothing was started\n');
     process.exit(2);
   }
   const preflightReport = JSON.parse(readFileSync(join(out, 'preflight.json'), 'utf8'));
@@ -212,7 +318,7 @@ async function runFreshProcess(options) {
   }
   if (refusals.length > 0) {
     for (const refusal of refusals) process.stderr.write(`refused: ${refusal}\n`);
-    process.stderr.write('nothing was created or started\n');
+    process.stderr.write('nothing was started\n');
     process.exit(2);
   }
 
@@ -232,23 +338,15 @@ async function runFreshProcess(options) {
       ),
     });
     process.stdout.write(
-      'dry run: no refusals; nothing was created or started. Repeat with --launch after the owner says yes.\n',
+      'dry run: no refusals; no profile was created and nothing was started. The preflight wrote only its own files. Repeat with --launch after the owner says yes.\n',
     );
     process.exit(0);
   }
 
-  // A launch never reuses a folder that holds a finished run or a profile: its results would be lost.
-  const finished = finishedRunArtifacts(out);
-  if (finished.length > 0) {
-    process.stderr.write(
-      `refused: ${out} already holds ${finished.join(', ')}; a launch needs a folder with no finished run in it\n`,
-    );
-    process.exit(2);
-  }
   // The candidate's database module runs only here, once the owner has asked for a launch. A dry run runs none of it.
-  const moduleProblem = databaseModuleProblem(preflightReport.unpackedDir);
+  const moduleProblem = await databaseModuleProblem(preflightReport.unpackedDir);
   if (moduleProblem !== null) {
-    process.stderr.write(`refused: ${moduleProblem}\nnothing was created or started\n`);
+    process.stderr.write(`refused: ${moduleProblem}\nnothing was started\n`);
     process.exit(2);
   }
 
@@ -268,28 +366,54 @@ async function runFreshProcess(options) {
       installedFolder: INSTALLED_FOLDER,
       downloadsFolder: join(homedir(), 'Downloads'),
       clipFixture: media,
+      ffmpeg: preflightReport.tools.ffmpeg,
+      ffprobe: preflightReport.tools.ffprobe,
     });
-    report = await runFreshProcessPersistence(driver, {
-      runId,
-      candidateSha: preflightReport.candidateSha,
-      exeSha256: preflightReport.exe.sha256,
-      unpackedDir: preflightReport.unpackedDir,
-      library,
-      sourceProfile,
-      freshProfile,
-    });
+    const libraryBefore = await driver.ownerLibrarySignature();
+    refuseLinkedPaths([out, library], [out, library, DEFAULT_LIBRARY]);
+    report = await withinRunLimit(
+      runFreshProcessPersistence(driver, {
+        approvedOwnerFiles: approvedOwnerFilesOf(options),
+        runId,
+        candidateSha: preflightReport.candidateSha,
+        exeSha256: preflightReport.exe.sha256,
+        unpackedDir: preflightReport.unpackedDir,
+        library,
+        sourceProfile,
+        freshProfile,
+      }),
+    );
+    // The owner library is compared with its reading from before the run. A change is a blocker, as in the restart runner.
+    report = reportWithFolderChanges(report, [
+      {
+        label: 'the owner library',
+        before: libraryBefore,
+        after: await driver.ownerLibrarySignature(),
+      },
+    ]);
   } catch (error) {
     const errorPath = join(out, 'error.json');
-    writeFileSync(
-      errorPath,
-      `${JSON.stringify({ runId, error: String(error?.stack ?? error) }, null, 2)}\n`,
-      'utf8',
-    );
-    process.stderr.write(`error: the run stopped (${errorPath}): ${error?.message ?? error}\n`);
+    if (runFolderProblem(out) === undefined) {
+      writeFileSync(
+        errorPath,
+        `${JSON.stringify({ runId, error: String(error?.stack ?? error) }, null, 2)}\n`,
+        'utf8',
+      );
+      process.stderr.write(`error: the run stopped (${errorPath}): ${error?.message ?? error}\n`);
+    } else {
+      process.stderr.write(
+        `error: the run stopped: ${error?.message ?? error}; no file was written to the run folder, which has a link\n`,
+      );
+    }
     process.exit(2);
   }
 
-  writeFileSync(join(out, 'run.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  refuseLinkedRunFolder(out);
+  writeFileSync(
+    join(out, 'run.json'),
+    `${JSON.stringify({ ...report, approvedOwnerFiles: approvedOwnerFilesOf(options) }, null, 2)}\n`,
+    'utf8',
+  );
   if (report.receipt !== undefined) {
     writeFileSync(
       join(out, 'receipt.json'),
@@ -334,6 +458,24 @@ async function main() {
     );
     process.exit(2);
   }
+  // A run writes into its folder only when the folder holds nothing but the preflight's own files.
+  const unexpected = unexpectedRunArtifacts(out);
+  if (unexpected.length > 0) {
+    process.stderr.write(
+      `refused: ${out} already holds ${unexpected.join(', ')}; a run needs an empty folder, so use a new run folder\n`,
+    );
+    process.exit(2);
+  }
+  // A copy of the source profile follows its links, so a link anywhere in the tree refuses the run before anything runs.
+  const profileLink = linkInside(profileSource);
+  if (profileLink !== undefined) {
+    process.stderr.write(
+      `refused: the source profile holds a link, a junction, a shared file or an unreadable folder: ${profileLink}\nnothing was copied or started\n`,
+    );
+    process.exit(2);
+  }
+
+  refuseOwnerLibrary(options);
 
   const preflight = spawnSync(
     process.execPath,
@@ -351,7 +493,7 @@ async function main() {
       '--out',
       out,
     ],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', timeout: 300_000 },
   );
   process.stdout.write(preflight.stdout ?? '');
   process.stderr.write(preflight.stderr ?? '');
@@ -368,6 +510,7 @@ async function main() {
     );
   }
 
+  refuseLinkedRunFolder(out);
   let project;
   let expected;
   let profileLibrary;
@@ -391,14 +534,16 @@ async function main() {
 
   if (refusals.length > 0) {
     for (const refusal of refusals) process.stderr.write(`refused: ${refusal}\n`);
-    process.stderr.write('nothing was copied or started\n');
+    process.stderr.write(
+      'nothing was started; the source database was copied only into plan-source, for reading\n',
+    );
     process.exit(2);
   }
 
   if (!options.launch) {
     printPlan(options, project, expected, library);
     process.stdout.write(
-      'dry run: no refusals; nothing was copied or started. Repeat with --launch after the owner says yes.\n',
+      'dry run: no refusals; nothing was started; the source database was copied only into plan-source, for reading. Repeat with --launch after the owner says yes.\n',
     );
     process.exit(0);
   }
@@ -410,6 +555,7 @@ async function main() {
     process.stdout.write(
       `launching the candidate copy on a copy of the profile (${profile}); the owner must be at the PC\n`,
     );
+    refuseLinkedPaths([profile, out, library], [out, profileSource, library, DEFAULT_LIBRARY]);
     cpSync(profileSource, profile, { recursive: true, errorOnExist: true, force: false });
     const copiedLibrary = libraryOf(join(profile, DB_NAME));
     if (copiedLibrary === undefined || !samePath(copiedLibrary, library)) {
@@ -425,26 +571,59 @@ async function main() {
       port,
       defaultLibrary: DEFAULT_LIBRARY,
       installedFolder: INSTALLED_FOLDER,
+      downloadsFolder: join(homedir(), 'Downloads'),
+      ffmpeg: preflightReport.tools.ffmpeg,
+      ffprobe: preflightReport.tools.ffprobe,
     });
-    report = await runRestartSaveExport(driver, {
-      runId,
-      candidateSha: preflightReport.candidateSha,
-      projectId: options.project,
-      exeSha256: preflightReport.exe.sha256,
-      unpackedDir: preflightReport.unpackedDir,
-    });
+    const downloadsBefore = await driver.downloadsSignature();
+    const libraryBefore = await driver.ownerLibrarySignature();
+    report = await withinRunLimit(
+      runRestartSaveExport(driver, {
+        approvedOwnerFiles: approvedOwnerFilesOf(options),
+        runId,
+        candidateSha: preflightReport.candidateSha,
+        projectId: options.project,
+        exeSha256: preflightReport.exe.sha256,
+        unpackedDir: preflightReport.unpackedDir,
+      }),
+    );
+    // The owner library and the Downloads folder are compared with their readings from before the run. A change is
+    // recorded as a blocker and no receipt is written, so the run's evidence is kept.
+    report = reportWithFolderChanges(report, [
+      {
+        label: 'the owner library',
+        before: libraryBefore,
+        after: await driver.ownerLibrarySignature(),
+      },
+      {
+        label: 'the Downloads folder',
+        before: downloadsBefore,
+        after: await driver.downloadsSignature(),
+      },
+    ]);
   } catch (error) {
     const errorPath = join(out, 'error.json');
-    writeFileSync(
-      errorPath,
-      `${JSON.stringify({ runId, error: String(error?.stack ?? error) }, null, 2)}\n`,
-      'utf8',
-    );
-    process.stderr.write(`error: the run stopped (${errorPath}): ${error?.message ?? error}\n`);
+    if (runFolderProblem(out) === undefined) {
+      writeFileSync(
+        errorPath,
+        `${JSON.stringify({ runId, error: String(error?.stack ?? error) }, null, 2)}\n`,
+        'utf8',
+      );
+      process.stderr.write(`error: the run stopped (${errorPath}): ${error?.message ?? error}\n`);
+    } else {
+      process.stderr.write(
+        `error: the run stopped: ${error?.message ?? error}; no file was written to the run folder, which has a link\n`,
+      );
+    }
     process.exit(2);
   }
 
-  writeFileSync(join(out, 'run.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  refuseLinkedRunFolder(out);
+  writeFileSync(
+    join(out, 'run.json'),
+    `${JSON.stringify({ ...report, approvedOwnerFiles: approvedOwnerFilesOf(options) }, null, 2)}\n`,
+    'utf8',
+  );
   if (report.receipt !== undefined) {
     writeFileSync(
       join(out, 'receipt.json'),

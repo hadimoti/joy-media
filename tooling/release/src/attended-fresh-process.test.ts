@@ -77,6 +77,7 @@ function input(): FreshProcessInput {
     library: LIBRARY,
     sourceProfile: SOURCE_PROFILE,
     freshProfile: FRESH_PROFILE,
+    approvedOwnerFiles: 3221,
   };
 }
 
@@ -436,6 +437,43 @@ describe('the fresh-process scenario, end to end', () => {
     ).toEqual([]);
   });
 
+  it('refuses to start a run that has no approved owner library count', async () => {
+    const withoutCount = {
+      ...input(),
+      approvedOwnerFiles: undefined,
+    } as unknown as FreshProcessInput;
+
+    await expect(runFreshProcessPersistence(new FakeFreshDriver(), withoutCount)).rejects.toThrow(
+      'a run needs an approved owner library count',
+    );
+  });
+
+  it('refuses before any launch when the owner library count is not the approved one', async () => {
+    const driver = new FakeFreshDriver({ libraryFiles: [3221] });
+    const report = await runFreshProcessPersistence(driver, {
+      ...input(),
+      approvedOwnerFiles: 3222,
+    });
+
+    expect(report.verdict).toBe('refused');
+    expect(report.launches).toBe(0);
+    expect(driver.events).toEqual([]);
+    expect(report.blockers).toEqual([
+      'the owner library has 3221 files, not the 3222 approved for this run before launch',
+    ]);
+    expectNoReceipt(report);
+  });
+
+  it('lets a launch through when the owner library count is the approved one', async () => {
+    const driver = new FakeFreshDriver({ libraryFiles: [3221] });
+    const report = await runFreshProcessPersistence(driver, {
+      ...input(),
+      approvedOwnerFiles: 3221,
+    });
+
+    expect(report.verdict).toBe('passed');
+  });
+
   it('refuses before any launch when the joy:// key is not the expected value', async () => {
     const driver = new FakeFreshDriver({ joyKey: 'b'.repeat(64) });
     const report = await runFreshProcessPersistence(driver, input());
@@ -516,13 +554,24 @@ describe('the first process: the editable package and the saved state', () => {
     expect(report.blockers).toEqual([]);
   });
 
-  it('fails the export check when the first process does not close', async () => {
+  it('fails the export check when the first process does not close, and names that process as a blocker', async () => {
     const driver = new FakeFreshDriver({ closeFails: 1 });
     const report = await runFreshProcessPersistence(driver, input());
 
     expect(report.verdict).toBe('failed');
     expect(failedCheck(report, 'editable-project-exported')).toBe('failed');
     expect(report.launches).toBe(1);
+    expect(report.blockers).toContain('process 4001 did not close: process 4001 is still running');
+    expectNoReceipt(report);
+  });
+
+  it('names the second process as a blocker when it does not close, and writes no receipt', async () => {
+    const driver = new FakeFreshDriver({ closeFails: 2 });
+    const report = await runFreshProcessPersistence(driver, input());
+
+    expect(report.verdict).toBe('failed');
+    expect(report.blockers).toContain('process 4002 did not close: process 4002 is still running');
+    expectNoReceipt(report);
   });
 });
 

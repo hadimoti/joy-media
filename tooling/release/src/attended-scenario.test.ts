@@ -62,6 +62,7 @@ function input(): ScenarioInput {
     projectId: PROJECT,
     exeSha256: EXE_SHA256,
     unpackedDir: 'C:\\jgp\\attended-ded976c8-20261109\\app',
+    approvedOwnerFiles: 3221,
   };
 }
 
@@ -639,7 +640,9 @@ describe('restart, save and export scenario', () => {
   });
 
   it('fails the probe when the frame rate or the frame count is missing from the probe', async () => {
-    const world = new FakeWorld({ probe: { frameRate: undefined, frames: undefined } });
+    // Both fields are present but undefined; the spread in probeMedia lets them override the defaults.
+    const missing = { frameRate: undefined, frames: undefined } as unknown as Partial<MediaProbe>;
+    const world = new FakeWorld({ probe: missing });
     const report = await runRestartSaveExport(world, input());
     expect(report.verdict).toBe('failed');
     expect(checkOf(report, 'export-probed-playable')?.detail).toBe(
@@ -673,7 +676,7 @@ describe('restart, save and export scenario', () => {
     expectNoReceipt(report);
   });
 
-  it('fails the restart check when the first window does not close', async () => {
+  it('fails the restart check when the first window does not close, and names that process as a blocker', async () => {
     const world = new FakeWorld({ closeStuckAttempt: 1 });
     const report = await runRestartSaveExport(world, input());
     expect(report.verdict).toBe('failed');
@@ -681,6 +684,10 @@ describe('restart, save and export scenario', () => {
       status: 'failed',
       detail: 'the window did not close',
     });
+    expect(report.blockers).toEqual([
+      'process 4000 did not close: the window did not close',
+      '1 JOY process(es) running after the run',
+    ]);
     expect(world.launchesMade).toEqual([1]);
     expectNoReceipt(report);
   });
@@ -864,6 +871,51 @@ describe('scenario helpers', () => {
     expect(guardBlockers(reading, 'now', undefined, ['joyProcesses'])).toEqual([
       'the joy:// key was not the expected value now',
     ]);
+  });
+
+  it('judges the owner library against an approved count before launch, when one is given', () => {
+    const reading: GuardReadings = {
+      joyKeySha256: JOY_KEY_EXPECTED_SHA256,
+      joyProcesses: 0,
+      ownerLibraryFiles: 3221,
+      installedFolder: SIGNATURE,
+    };
+    expect(guardBlockers(reading, 'before launch', undefined, [], 3221)).toEqual([]);
+    expect(guardBlockers(reading, 'before launch', undefined, [], 3222)).toEqual([
+      'the owner library has 3221 files, not the 3222 approved for this run before launch',
+    ]);
+    expect(guardBlockers(reading, 'before launch', undefined, ['ownerLibraryFiles'], 3222)).toEqual(
+      [],
+    );
+  });
+
+  it('refuses a launch whose owner library count is not the approved one, and starts nothing', async () => {
+    const world = new FakeWorld({ libraryCounts: [3221] });
+    const report = await runRestartSaveExport(world, { ...input(), approvedOwnerFiles: 3222 });
+
+    expect(report.verdict).toBe('refused');
+    expect(report.launches).toBe(0);
+    expect(report.blockers).toEqual([
+      'the owner library has 3221 files, not the 3222 approved for this run before launch',
+    ]);
+    expect(world.launchesMade).toEqual([]);
+  });
+
+  it('refuses to start a run that has no approved owner library count', async () => {
+    const withoutCount = { ...input(), approvedOwnerFiles: undefined } as unknown as ScenarioInput;
+
+    await expect(runRestartSaveExport(new FakeWorld(), withoutCount)).rejects.toThrow(
+      'a run needs an approved owner library count',
+    );
+  });
+
+  it('lets a launch through when the owner library count is the approved one', async () => {
+    const report = await runRestartSaveExport(new FakeWorld({ libraryCounts: [3221] }), {
+      ...input(),
+      approvedOwnerFiles: 3221,
+    });
+
+    expect(report.verdict).toBe('passed');
   });
 
   it('refuses a job status that the bridge does not use', () => {

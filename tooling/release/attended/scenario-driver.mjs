@@ -14,20 +14,46 @@ import {
   existsSync,
   mkdirSync,
   openSync,
-  readdirSync,
   readFileSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { libraryDirectoryOf } from '../src/attended-fresh-process.ts';
+import { countFiles, folderSignature, systemTool } from './scenario-rules.mjs';
 
 const JOY_KEY_PATH = 'HKCU\\Software\\Classes\\joy';
 
 function sleep(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+/**
+ * Waits for a promise, but no longer than ms. The timer is referenced while it runs, so the wait is real,
+ * and it is cleared as soon as the promise settles, so it does not hold the process open afterwards.
+ */
+export function boundedWait(promise, ms) {
+  let timer;
+  const timeout = new Promise((resolvePromise) => {
+    timer = setTimeout(resolvePromise, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Waits for a call to the app no longer than ms. A call that does not answer in time is an error, so the run
+ * fails with a reason instead of waiting on a frozen renderer.
+ */
+async function withinTime(promise, what, ms) {
+  const outcome = await boundedWait(
+    promise.then((value) => ({ value })),
+    ms,
+  );
+  if (outcome === undefined) {
+    throw new Error(`${what} did not answer within ${Math.round(ms / 1000)} seconds`);
+  }
+  return outcome.value;
 }
 
 function sha256(bytes) {
@@ -51,41 +77,6 @@ function parseRate(text) {
   return denominator > 0 && Number.isFinite(rate) ? rate : undefined;
 }
 
-/** Files under a folder, counted without following links. Missing folders count as zero. */
-function countFiles(folder) {
-  if (!existsSync(folder)) return 0;
-  let total = 0;
-  for (const entry of readdirSync(folder, { withFileTypes: true })) {
-    const path = join(folder, entry.name);
-    if (entry.isDirectory()) total += countFiles(path);
-    else if (entry.isFile()) total += 1;
-  }
-  return total;
-}
-
-/** A signature that changes when any file under the folder is added, removed, resized or rewritten. */
-function folderSignature(folder) {
-  if (!existsSync(folder)) return 'missing';
-  let files = 0;
-  let bytes = 0;
-  let newest = 0;
-  const walk = (directory) => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) {
-        walk(path);
-      } else if (entry.isFile()) {
-        const info = statSync(path);
-        files += 1;
-        bytes += info.size;
-        newest = Math.max(newest, info.mtimeMs);
-      }
-    }
-  };
-  walk(folder);
-  return `${files}:${bytes}:${Math.trunc(newest)}`;
-}
-
 function processAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -101,9 +92,12 @@ async function findBridgePage(browser, deadline) {
   while (Date.now() < deadline) {
     for (const context of browser.contexts()) {
       for (const page of context.pages()) {
-        const ready = await page
-          .evaluate(() => typeof window.joyDesktop?.invoke === 'function')
-          .catch(() => false);
+        if (Date.now() >= deadline) break;
+        const ready = await withinTime(
+          page.evaluate(() => typeof window.joyDesktop?.invoke === 'function'),
+          'the page check',
+          5_000,
+        ).catch(() => false);
         if (ready) return page;
       }
     }
@@ -113,41 +107,55 @@ async function findBridgePage(browser, deadline) {
 }
 
 function editorPageOf(browser, page) {
+  // Under PWDEBUG Playwright's action timeout is 0, so the page's default is set here to keep actions bounded.
+  page.setDefaultTimeout(30_000);
   return {
     page,
     invoke: (channel, payload) =>
-      page.evaluate(([name, body]) => window.joyDesktop.invoke(name, body), [channel, payload]),
+      withinTime(
+        page.evaluate(([name, body]) => window.joyDesktop.invoke(name, body), [channel, payload]),
+        `the bridge call ${channel}`,
+        120_000,
+      ),
     // Bytes cross the debug session as base64 and are rebuilt in the page as a Uint8Array.
     uploadOriginal: async (assetId, bytes) => {
-      await page.evaluate(
-        async ([id, base64]) => {
-          const binary = atob(base64);
-          const data = new Uint8Array(binary.length);
-          for (let index = 0; index < binary.length; index += 1)
-            data[index] = binary.charCodeAt(index);
-          await window.joyDesktop.invoke('desktop.media.asset.upload-original', {
-            assetId: id,
-            bytes: data,
-          });
-        },
-        [assetId, Buffer.from(bytes).toString('base64')],
+      await withinTime(
+        page.evaluate(
+          async ([id, base64]) => {
+            const binary = atob(base64);
+            const data = new Uint8Array(binary.length);
+            for (let index = 0; index < binary.length; index += 1)
+              data[index] = binary.charCodeAt(index);
+            await window.joyDesktop.invoke('desktop.media.asset.upload-original', {
+              assetId: id,
+              bytes: data,
+            });
+          },
+          [assetId, Buffer.from(bytes).toString('base64')],
+        ),
+        'the upload',
+        300_000,
       );
     },
     fetchDerivative: async (jobId) => {
-      const answer = await page.evaluate(
-        async ([id]) => {
-          const result = await window.joyDesktop.invoke('desktop.media.derivative.bytes', {
-            jobId: id,
-          });
-          const data =
-            result.bytes instanceof Uint8Array ? result.bytes : Uint8Array.from(result.bytes);
-          let binary = '';
-          for (let index = 0; index < data.length; index += 0x8000) {
-            binary += String.fromCharCode(...data.subarray(index, index + 0x8000));
-          }
-          return { mimeType: result.mimeType, sha256: result.sha256, base64: btoa(binary) };
-        },
-        [jobId],
+      const answer = await withinTime(
+        page.evaluate(
+          async ([id]) => {
+            const result = await window.joyDesktop.invoke('desktop.media.derivative.bytes', {
+              jobId: id,
+            });
+            const data =
+              result.bytes instanceof Uint8Array ? result.bytes : Uint8Array.from(result.bytes);
+            let binary = '';
+            for (let index = 0; index < data.length; index += 0x8000) {
+              binary += String.fromCharCode(...data.subarray(index, index + 0x8000));
+            }
+            return { mimeType: result.mimeType, sha256: result.sha256, base64: btoa(binary) };
+          },
+          [jobId],
+        ),
+        'the derivative read',
+        300_000,
       );
       return {
         mimeType: answer.mimeType,
@@ -155,7 +163,15 @@ function editorPageOf(browser, page) {
         bytes: Buffer.from(answer.base64, 'base64'),
       };
     },
-    disconnect: () => browser.close().catch(() => {}),
+    // On a browser connected over CDP, browser.close() closes only this harness's WebSocket. In
+    // playwright-core 1.62.1 the connected browser's close is the transport close, and Browser.close is
+    // sent only to browsers that Playwright launched itself. The app is not closed here, so a timeout
+    // leaves it running. The wait is bounded, so a close that never reports does not hang the run.
+    disconnect: () =>
+      boundedWait(
+        browser.close().catch(() => {}),
+        15_000,
+      ),
   };
 }
 
@@ -178,8 +194,9 @@ export function createScenarioDriver(config) {
     async joyKeySha256() {
       keyReads += 1;
       const file = join(config.runDir, `joy-key-${keyReads}.reg`);
-      const result = spawnSync('reg.exe', ['export', JOY_KEY_PATH, file, '/y'], {
+      const result = spawnSync(systemTool('reg.exe'), ['export', JOY_KEY_PATH, file, '/y'], {
         encoding: 'utf8',
+        timeout: 20_000,
       });
       if (result.status !== 0 || !existsSync(file)) {
         throw new Error(
@@ -196,10 +213,11 @@ export function createScenarioDriver(config) {
         `@(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'joy-media.exe' -or ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($d, [StringComparison]::OrdinalIgnoreCase)) }).Count`,
       ].join('; ');
       const result = spawnSync(
-        'powershell.exe',
+        systemTool('WindowsPowerShell', 'v1.0', 'powershell.exe'),
         ['-NoProfile', '-NonInteractive', '-Command', script],
         {
           encoding: 'utf8',
+          timeout: 20_000,
         },
       );
       const count = Number.parseInt(String(result.stdout).trim(), 10);
@@ -209,8 +227,16 @@ export function createScenarioDriver(config) {
       return count;
     },
 
+    async downloadsSignature() {
+      return folderSignature(config.downloadsFolder);
+    },
+
+    async ownerLibrarySignature() {
+      return folderSignature(config.defaultLibrary);
+    },
+
     async ownerLibraryFileCount() {
-      return countFiles(config.defaultLibrary);
+      return existsSync(config.defaultLibrary) ? countFiles(config.defaultLibrary) : 0;
     },
 
     async installedFolderSignature() {
@@ -249,8 +275,38 @@ export function createScenarioDriver(config) {
           `no debug port on ${config.port} within 90 seconds (attempt ${app.attempt})`,
         );
       }
-      const page = await findBridgePage(browser, deadline);
-      return editorPageOf(browser, page);
+      // A page that never shows up must not leave the harness connected: drop its connection, then fail.
+      // That closes only this WebSocket; it does not close the app.
+      const page = await findBridgePage(browser, deadline).catch(async (error) => {
+        await boundedWait(
+          browser.close().catch(() => {}),
+          15_000,
+        );
+        throw error;
+      });
+      const base = editorPageOf(browser, page);
+      // Both download layers are required, and are set before the scenario takes any step. The capture cancels the
+      // default save of an editor download, and the browser is asked to refuse downloads for this page. If either
+      // cannot be set, the attach fails and the harness drops its connection first. The layers do not cover other
+      // pages, popups or the main process, and the browser's answer is not read back.
+      try {
+        await withinTime(page.evaluate(INSTALL_DOWNLOAD_CAPTURE), 'the download capture', 20_000);
+        // The session is not closed here: the download setting is made on it, and it is meant to hold for the whole run.
+        const session = await withinTime(
+          page.context().newCDPSession(page),
+          'the download session',
+          5_000,
+        );
+        await withinTime(
+          session.send('Page.setDownloadBehavior', { behavior: 'deny' }),
+          'the download setting',
+          5_000,
+        );
+      } catch (error) {
+        await base.disconnect();
+        throw error;
+      }
+      return base;
     },
 
     async isAlive(app) {
@@ -262,7 +318,11 @@ export function createScenarioDriver(config) {
         if (page !== undefined) {
           // The bridge closes the window the way the title bar does. A reply may never come, because the
           // window goes away first, so the answer is not required.
-          await page.invoke('desktop.window-close', {}).catch(() => {});
+          await withinTime(
+            page.invoke('desktop.window-close', {}),
+            'the window close',
+            5_000,
+          ).catch(() => {});
         }
         // The launcher is not the only JOY process: its children must be gone too, or the next launch
         // would meet them still holding the profile. So the close waits for the launcher and for a count
@@ -273,9 +333,13 @@ export function createScenarioDriver(config) {
           const remaining = launcherGone ? await this.joyProcessCount().catch(() => -1) : -1;
           if (launcherGone && remaining === 0) return;
           if (Date.now() > deadline) {
+            const sent =
+              page === undefined
+                ? 'and no window close was sent, because the attach failed'
+                : 'after the window close';
             throw new Error(
-              `the app did not exit within 60 seconds after the window close ` +
-                `(launcher ${launcherGone ? 'gone' : 'still running'}, JOY processes ${remaining})`,
+              `the app did not exit within 60 seconds ${sent} ` +
+                `(pid ${app.pid}, launcher ${launcherGone ? 'gone' : 'still running'}, JOY processes ${remaining})`,
             );
           }
           await sleep(1000);
@@ -312,7 +376,7 @@ export function createScenarioDriver(config) {
         '+faststart',
         path,
       ];
-      const result = spawnSync('ffmpeg', args, { encoding: 'utf8' });
+      const result = spawnSync(config.ffmpeg, args, { encoding: 'utf8', timeout: 300_000 });
       if (result.status !== 0)
         throw new Error(`ffmpeg could not stage the clip: ${tail(result.stderr)}`);
       return { bytes: readFileSync(path) };
@@ -321,9 +385,9 @@ export function createScenarioDriver(config) {
     async probeMedia(name) {
       const path = join(config.runDir, name);
       const result = spawnSync(
-        'ffprobe',
+        config.ffprobe,
         ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', path],
-        { encoding: 'utf8' },
+        { encoding: 'utf8', timeout: 60_000 },
       );
       if (result.status !== 0) throw new Error(`ffprobe failed on ${name}: ${tail(result.stderr)}`);
       const parsed = JSON.parse(result.stdout);
@@ -361,7 +425,8 @@ export function createScenarioDriver(config) {
 // run in two new profiles. Each profile's database is made by the candidate's own LocalDatabase module,
 // with the scratch asset library already set, before its process starts. The owner's profile is never
 // read. The owner's Downloads folder is only counted: the editor's downloads are captured in the page
-// and the default save is cancelled, so nothing is written there.
+// and the default save is cancelled. The browser is also asked to refuse downloads, and the attach fails if it
+// cannot. The layers do not cover other pages, popups or the main process (README decision 6).
 // ---------------------------------------------------------------------------------------------------
 
 /** The candidate's database module, as a file URL. */
@@ -371,21 +436,58 @@ function localDatabaseUrlOf(unpackedDir) {
 }
 
 /**
- * Null when the candidate's database module loads under this Node, otherwise the reason. Nothing is
- * written: the module is imported and no database is opened.
+ * Runs a Node helper that loads the candidate's own database module. A helper that does not finish within ms is
+ * NOT stopped: the promise rejects and the helper is left running, for the owner to close.
  */
-export function databaseModuleProblem(unpackedDir) {
+function runNodeHelper(args, ms) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          `the helper did not finish within ${Math.round(ms / 1000)} seconds; it was left running and was not stopped`,
+        ),
+      );
+    }, ms);
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('close', (status) => {
+      clearTimeout(timer);
+      resolvePromise({ status, stdout, stderr });
+    });
+  });
+}
+
+/**
+ * Null when the candidate's database module loads under this Node, otherwise the reason. Nothing is
+ * written: the module is imported and no database is opened. The helper is never stopped (see runNodeHelper).
+ */
+export async function databaseModuleProblem(unpackedDir) {
   const url = localDatabaseUrlOf(unpackedDir);
-  const result = spawnSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '--eval',
-      `await import(${JSON.stringify(url)}); process.stdout.write('loaded');`,
-    ],
-    { encoding: 'utf8' },
-  );
-  if (result.status === 0 && String(result.stdout).includes('loaded')) return null;
+  let result;
+  try {
+    result = await runNodeHelper(
+      [
+        '--input-type=module',
+        '--eval',
+        `await import(${JSON.stringify(url)}); process.stdout.write('loaded');`,
+      ],
+      60_000,
+    );
+  } catch (error) {
+    return `the candidate's database module check did not finish: ${error.message}`;
+  }
+  if (result.status === 0 && result.stdout.includes('loaded')) return null;
   return `the candidate's database module did not load: ${tail(result.stderr || result.stdout)}`;
 }
 
@@ -393,7 +495,7 @@ export function databaseModuleProblem(unpackedDir) {
  * Creates a new profile folder whose database names the scratch library. The candidate's own module
  * makes the database, in a child process that exits at once, so no handle stays open on the file.
  */
-function seedProfileDatabase(localDatabaseUrl, profile, library) {
+async function seedProfileDatabase(localDatabaseUrl, profile, library) {
   if (existsSync(profile)) throw new Error(`the profile folder ${profile} already exists`);
   mkdirSync(profile, { recursive: true });
   const script = [
@@ -404,9 +506,7 @@ function seedProfileDatabase(localDatabaseUrl, profile, library) {
     'db.close();',
     `if (named !== ${JSON.stringify(library)}) { process.stderr.write('the profile names ' + named); process.exit(3); }`,
   ].join('\n');
-  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
-    encoding: 'utf8',
-  });
+  const result = await runNodeHelper(['--input-type=module', '--eval', script], 60_000);
   if (result.status !== 0) {
     throw new Error(`the profile could not be seeded: ${tail(result.stderr || result.stdout)}`);
   }
@@ -460,25 +560,33 @@ const ACTIVE_PROJECT_TITLE = `(() => {
 async function captureStart(page) {
   // Installed again before each download, in case the page was reloaded since the attach. A second
   // install is a no-op, so this is safe to repeat.
-  await page.evaluate(INSTALL_DOWNLOAD_CAPTURE);
-  return page.evaluate(() => window.__joyAttendedCapture?.items.length ?? 0);
+  await withinTime(page.evaluate(INSTALL_DOWNLOAD_CAPTURE), 'the download capture', 30_000);
+  return withinTime(
+    page.evaluate(() => window.__joyAttendedCapture?.items.length ?? 0),
+    'the download count',
+    30_000,
+  );
 }
 
 /** Waits for the first captured download after `from` whose name matches, and returns its bytes. */
 async function nextCapture(page, from, pattern, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const answer = await page.evaluate(
-      ([start, source]) => {
-        const items = window.__joyAttendedCapture?.items.slice(start) ?? [];
-        const failed = items.find((item) => item.error !== undefined);
-        if (failed !== undefined) {
-          return { error: `the download ${failed.name} could not be read: ${failed.error}` };
-        }
-        const match = items.find((item) => new RegExp(source, 'u').test(item.name));
-        return match === undefined ? null : { name: match.name, base64: match.base64 };
-      },
-      [from, pattern.source],
+    const answer = await withinTime(
+      page.evaluate(
+        ([start, source]) => {
+          const items = window.__joyAttendedCapture?.items.slice(start) ?? [];
+          const failed = items.find((item) => item.error !== undefined);
+          if (failed !== undefined) {
+            return { error: `the download ${failed.name} could not be read: ${failed.error}` };
+          }
+          const match = items.find((item) => new RegExp(source, 'u').test(item.name));
+          return match === undefined ? null : { name: match.name, base64: match.base64 };
+        },
+        [from, pattern.source],
+      ),
+      'the download read',
+      30_000,
     );
     if (answer?.error !== undefined) throw new Error(answer.error);
     if (answer !== null && answer !== undefined) return Buffer.from(answer.base64, 'base64');
@@ -521,7 +629,12 @@ function freshEditorPageOf(base) {
     },
 
     async importClip(name, bytes) {
-      if (!(await button('Import media').first().isVisible())) {
+      const panelOpen = await withinTime(
+        button('Import media').first().isVisible(),
+        'the Media panel check',
+        30_000,
+      );
+      if (!panelOpen) {
         await button('View').click();
         await menuItem('Media').click();
       }
@@ -545,7 +658,11 @@ function freshEditorPageOf(base) {
     },
 
     async timelineClipCount(name) {
-      return page.locator(`.timeline-clip[aria-label^="${name},"]`).count();
+      return withinTime(
+        page.locator(`.timeline-clip[aria-label^="${name},"]`).count(),
+        'the timeline clip count',
+        30_000,
+      );
     },
 
     async exportEditablePackage() {
@@ -573,28 +690,40 @@ function freshEditorPageOf(base) {
         { timeout: 120_000 },
       );
       // The app's notice is a toast. It may already be gone, so an empty text is reported as such.
-      return page.evaluate(() => {
-        const match = /(Imported [^\n]*|Project import failed[^\n]*)/u.exec(
-          document.body.innerText,
-        );
-        return match === null ? '' : match[1];
-      });
+      return withinTime(
+        page.evaluate(() => {
+          const match = /(Imported [^\n]*|Project import failed[^\n]*)/u.exec(
+            document.body.innerText,
+          );
+          return match === null ? '' : match[1];
+        }),
+        'the import notice',
+        30_000,
+      );
     },
 
     async activeProjectTitle() {
-      return page.evaluate(ACTIVE_PROJECT_TITLE);
+      return withinTime(page.evaluate(ACTIVE_PROJECT_TITLE), 'the project title', 30_000);
     },
 
     async readStorage(keys) {
-      return page.evaluate(
-        (list) => Object.fromEntries(list.map((key) => [key, window.localStorage.getItem(key)])),
-        keys,
+      return withinTime(
+        page.evaluate(
+          (list) => Object.fromEntries(list.map((key) => [key, window.localStorage.getItem(key)])),
+          keys,
+        ),
+        'the stored settings',
+        30_000,
       );
     },
 
     async snapshot() {
       // The text the page shows and a screenshot, for reading a failure after the window has closed.
-      const text = await page.evaluate(() => (document.body?.innerText ?? '').slice(0, 20000));
+      const text = await withinTime(
+        page.evaluate(() => (document.body?.innerText ?? '').slice(0, 20000)),
+        'the page text',
+        30_000,
+      );
       const png = await page.screenshot({ timeout: 30_000 });
       return { text, png: new Uint8Array(png) };
     },
@@ -603,13 +732,18 @@ function freshEditorPageOf(base) {
       const start = await captureStart(page);
       await button('Export MP4').click();
       const recent = button('Recent processes');
-      if ((await recent.getAttribute('aria-expanded')) !== 'true') await recent.click();
+      const expanded = await withinTime(
+        recent.getAttribute('aria-expanded'),
+        'the process list state',
+        30_000,
+      );
+      if (expanded !== 'true') await recent.click();
       const history = page.getByRole('region', { name: 'Recent processes', exact: true });
       await history
         .getByText(/Completed — final MP4 verified|Failed —/u)
         .first()
         .waitFor({ timeout: 900_000 });
-      const status = await history.innerText();
+      const status = await withinTime(history.innerText(), 'the render status', 30_000);
       if (!status.includes('Completed — final MP4 verified')) {
         throw new Error(`the render did not verify: ${tail(status)}`);
       }
@@ -634,6 +768,7 @@ export function createFreshProcessDriver(config) {
     joyKeySha256: () => shared.joyKeySha256(),
     joyProcessCount: () => shared.joyProcessCount(),
     ownerLibraryFileCount: () => shared.ownerLibraryFileCount(),
+    ownerLibrarySignature: () => shared.ownerLibrarySignature(),
     installedFolderSignature: () => shared.installedFolderSignature(),
     isAlive: (app) => shared.isAlive(app),
     close: (app, page) => shared.close(app, page),
@@ -656,7 +791,7 @@ export function createFreshProcessDriver(config) {
     },
 
     async seedProfile(profile, library) {
-      seedProfileDatabase(localDatabaseUrl, profile, library);
+      await seedProfileDatabase(localDatabaseUrl, profile, library);
     },
 
     async launch(attempt, profile) {
@@ -672,17 +807,8 @@ export function createFreshProcessDriver(config) {
     },
 
     async attach(app) {
-      const base = await shared.attach(app);
-      await base.page.evaluate(INSTALL_DOWNLOAD_CAPTURE);
-      // A second layer, best effort: ask the browser to refuse downloads for this page. The capture above
-      // is where the editor's exports arrive. This only stops a save the page would start on its own.
-      try {
-        const session = await base.page.context().newCDPSession(base.page);
-        await session.send('Page.setDownloadBehavior', { behavior: 'deny' });
-      } catch {
-        // Not every build accepts the command. The capture still cancels the default save.
-      }
-      return freshEditorPageOf(base);
+      // The shared attach sets both download layers, so both scenarios have them.
+      return freshEditorPageOf(await shared.attach(app));
     },
   };
 }

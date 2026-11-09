@@ -91,7 +91,7 @@ export interface FreshProcessDriver extends GuardDriver {
   sleep(ms: number): Promise<void>;
   /** Creates a new, empty profile folder whose database names the given asset library. */
   seedProfile(profile: string, library: string): Promise<void>;
-  /** A signature of the owner's Downloads folder: its files, their sizes and newest write. A run must leave it unchanged. */
+  /** A signature of the owner's Downloads folder: a digest of every entry in it (see folderSignature). A run must leave it unchanged. */
   downloadsSignature(): Promise<string>;
   /** Starts the candidate app on a profile with a debug port. */
   launch(attempt: number, profile: string): Promise<AppHandle>;
@@ -120,6 +120,8 @@ export interface FreshProcessInput {
   /** New folders for the two profiles. Neither exists when the run starts. */
   readonly sourceProfile: string;
   readonly freshProfile: string;
+  /** The owner library count this run approves. The count before the first launch must equal it. */
+  readonly approvedOwnerFiles: number;
 }
 
 export interface FreshProcessReport {
@@ -516,6 +518,10 @@ export async function runFreshProcessPersistence(
   driver: FreshProcessDriver,
   input: FreshProcessInput,
 ): Promise<FreshProcessReport> {
+  // A launch is judged against an approved owner library count, so a run without one does not start at all.
+  if (!Number.isInteger(input.approvedOwnerFiles) || input.approvedOwnerFiles < 1) {
+    throw new Error('a run needs an approved owner library count before it can start');
+  }
   const required = REQUIRED_ATTENDED_CHECKS[FRESH_PROCESS_SCENARIO];
   const names = freshNames(input.runId);
   const startedAt = driver.now().toISOString();
@@ -536,7 +542,13 @@ export async function runFreshProcessPersistence(
   const downloadsBefore = await readDownloads(driver);
   const refusals = [
     ...beforeReading.readErrors,
-    ...guardBlockers(before, 'before launch', undefined, beforeReading.unread),
+    ...guardBlockers(
+      before,
+      'before launch',
+      undefined,
+      beforeReading.unread,
+      input.approvedOwnerFiles,
+    ),
   ];
   if (downloadsBefore.error !== undefined) {
     refusals.push(`could not read the Downloads folder: ${downloadsBefore.error}`);
@@ -661,7 +673,16 @@ export async function runFreshProcessPersistence(
 
     // The first process ends before the second starts. The guards must hold in between.
     source.session.closed = true;
-    await stage('editable-project-exported', () => driver.close(source.session.app, source.page));
+    await stage('editable-project-exported', async () => {
+      try {
+        await driver.close(source.session.app, source.page);
+      } catch (error) {
+        closeErrors.push(
+          `process ${source.session.app.pid} did not close: ${describeError(error)}`,
+        );
+        throw error;
+      }
+    });
     const between = await readGuards(driver);
     const betweenProblems = [
       ...between.readErrors,

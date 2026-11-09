@@ -151,7 +151,7 @@ describe('attended receipt contract', () => {
   it('refuses a receipt with a failed, not-run or duplicated check', () => {
     const id = 'desktop.app.restart-save-export';
     const failed = mutated(id, (receipt) => {
-      (receipt.checks as Mutable[])[0].status = 'failed';
+      ((receipt.checks as Mutable[])[0] as Mutable).status = 'failed';
     });
     expect(validateAttendedReceipt(failed, expectation(id))).toContain(
       'check project-saved is failed',
@@ -167,13 +167,13 @@ describe('attended receipt contract', () => {
   it('refuses artifacts with a bad digest, no size, or no artifacts at all', () => {
     const id = 'cli.render.windows-entrypoints';
     const badDigest = mutated(id, (receipt) => {
-      (receipt.artifacts as Mutable[])[0].sha256 = 'not-a-digest';
+      ((receipt.artifacts as Mutable[])[0] as Mutable).sha256 = 'not-a-digest';
     });
     expect(validateAttendedReceipt(badDigest, expectation(id))).toContain(
       'artifact export.mp4 must have a SHA-256 digest',
     );
     const emptyBytes = mutated(id, (receipt) => {
-      (receipt.artifacts as Mutable[])[0].bytes = 0;
+      ((receipt.artifacts as Mutable[])[0] as Mutable).bytes = 0;
     });
     expect(validateAttendedReceipt(emptyBytes, expectation(id))).toContain(
       'artifact export.mp4 must have a positive byte count',
