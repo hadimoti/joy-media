@@ -230,6 +230,27 @@ describe('JOY Agent Settings connection status', () => {
     expect(rendered.textContent).toContain('Choose a provider before connecting.');
   });
 
+  it('does not preselect OpenRouter for another connected provider', async () => {
+    // The status type allows every JoyAgentProvider. Only the two transports a session runs on keep a provider.
+    const otherStatus: ByokSessionStatus = {
+      provider: 'kilo',
+      modelId: '',
+      capability: 'tool-loop',
+    };
+    const rendered = await render(client(), otherStatus);
+    await selectCustomPreset(rendered);
+
+    const providerSelect = [...rendered.querySelectorAll<HTMLSelectElement>('select')].find(
+      (select) => [...select.options].some((option) => option.value === 'openrouter'),
+    );
+    expect(providerSelect?.value).toBe('');
+    expect(
+      rendered.querySelector<HTMLInputElement>('input[placeholder="https://..."]')?.value,
+    ).toBe('');
+    const modelInput = rendered.querySelector<HTMLInputElement>('input[aria-label="Model ID"]');
+    expect(modelInput?.value).toBe('');
+  });
+
   it('shows tool-loop readiness and the connection notice in the dialog', async () => {
     const rendered = await render(client(), undefined);
 

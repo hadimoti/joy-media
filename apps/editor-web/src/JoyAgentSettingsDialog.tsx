@@ -68,6 +68,16 @@ function statusProviderFor(provider: DialogProvider): 'openrouter' | 'openai-com
   return provider === 'openrouter' ? 'openrouter' : 'openai-compatible';
 }
 
+/**
+ * The provider a connected session keeps in the form. A session runs on OpenRouter or the openai-compatible
+ * transport; any other status names no provider here, so OpenRouter is never shown for it.
+ */
+function formProviderForStatus(status: ByokSessionStatus | undefined): DialogProvider | '' {
+  if (status?.provider === 'openrouter') return 'openrouter';
+  if (status?.provider === 'openai-compatible') return 'openai-compatible';
+  return '';
+}
+
 /** A local endpoint with no key: the one case in which a profile is saved without a key (PLAN-v4 D8). */
 function isKeylessLocalEndpoint(baseUrl: string): boolean {
   const verdict = evaluateEndpoint('openai-compatible', baseUrl);
@@ -275,23 +285,17 @@ export function JoyAgentSettingsDialog({
   };
 
   // No provider is preselected, and OpenRouter is never a default (PLAN-v4 §6d-1 rule 3). A new connection
-  // starts with nothing chosen; a session that is already connected keeps the provider it has.
-  const [provider, setProvider] = useState<DialogProvider | ''>(
-    status === undefined
-      ? ''
-      : status.provider === 'openai-compatible'
-        ? 'openai-compatible'
-        : 'openrouter',
-  );
+  // starts with nothing chosen; a session that is already connected keeps the provider it has, when its status
+  // names one of the two transports a session runs on. Any other status keeps no provider and no OpenRouter default.
+  const connectedProvider = formProviderForStatus(status);
+  const [provider, setProvider] = useState<DialogProvider | ''>(connectedProvider);
   const [baseUrl, setBaseUrl] = useState(
-    status === undefined
-      ? ''
-      : status.provider === 'openai-compatible'
-        ? ''
-        : 'https://openrouter.ai/api/v1',
+    connectedProvider === 'openrouter' ? 'https://openrouter.ai/api/v1' : '',
   );
   const [modelId, setModelId] = useState(
-    status === undefined ? '' : status.modelId || 'openrouter/auto',
+    status === undefined
+      ? ''
+      : status.modelId || (connectedProvider === 'openrouter' ? 'openrouter/auto' : ''),
   );
   const [connectionName, setConnectionName] = useState('');
   const [customDisclosure, setCustomDisclosure] = useState(false);
