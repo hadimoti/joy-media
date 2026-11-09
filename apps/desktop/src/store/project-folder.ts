@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { access, mkdir, rename, stat, unlink } from 'node:fs/promises';
+import { access, mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { DatabaseSync } from 'node:sqlite';
@@ -13,8 +13,8 @@ import { ensureProjectDocumentSchema, SqliteProjectDocumentStore } from './proje
  * media in one directory, so copying the folder copies the project. This is design B from the
  * v1.2 model review: `project.sqlite`, `assets/<sha256>.bin` and a rebuildable `cache/`.
  *
- * This is the storage slice only. It is not wired into the editor, the IPC channels or the
- * project list. Those need product decisions first.
+ * The folder also holds the project's catalog entry, so the merged project list can show it. The
+ * folder is not wired into the editor or the IPC channels yet.
  */
 
 export const PROJECT_FOLDER_SUFFIX = '.joyproj';
@@ -52,6 +52,38 @@ export interface ProjectAssetImport {
   /** The name kept for this checksum in this project: the first one imported. */
   readonly displayName: string;
 }
+
+/** The project's catalog entry, shaped like the browser project list's entry. One per folder. */
+export interface ProjectFolderEntry {
+  readonly id: string;
+  readonly title: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly timelineProjectId: string;
+  readonly visualProjectId: string;
+  readonly trashedAt?: string;
+}
+
+/** One `NAME.joyproj` folder as the listing found it: its entry, or why it has none. */
+export interface ProjectFolderListing {
+  readonly root: string;
+  readonly entry?: ProjectFolderEntry;
+  readonly problem?: string;
+}
+
+const ENTRY_TABLE_SQL = `CREATE TABLE IF NOT EXISTS project_folder_entry (
+   id INTEGER PRIMARY KEY CHECK (id = 1),
+   entry_json TEXT NOT NULL
+ )`;
+
+const ENTRY_TEXT_FIELDS = [
+  'id',
+  'title',
+  'createdAt',
+  'updatedAt',
+  'timelineProjectId',
+  'visualProjectId',
+] as const;
 
 const defaultNow = (): string => new Date().toISOString();
 
@@ -124,6 +156,7 @@ async function attachProjectFolder(root: string, now: () => string): Promise<Pro
   try {
     ensureLocalAssetSchema(database);
     ensureProjectDocumentSchema(database);
+    database.exec(ENTRY_TABLE_SQL);
   } catch (error) {
     database.close();
     throw error;
@@ -214,6 +247,78 @@ export function projectAssetPath(folder: ProjectFolder, assetId: string): string
   if (storedPath === undefined || !STORED_PATH_PATTERN.test(storedPath)) return undefined;
   const absolute = join(folder.root, ...storedPath.split('/'));
   return existsSync(absolute) ? absolute : undefined;
+}
+
+/** Stores the project's catalog entry in the folder, replacing the one already there. */
+export function writeProjectFolderEntry(folder: ProjectFolder, entry: ProjectFolderEntry): void {
+  folder.database
+    .prepare(
+      `INSERT INTO project_folder_entry (id, entry_json) VALUES (1, ?)
+       ON CONFLICT(id) DO UPDATE SET entry_json = excluded.entry_json`,
+    )
+    .run(JSON.stringify(entry));
+}
+
+/** The folder's catalog entry, or `undefined` when none was written yet. */
+export function readProjectFolderEntry(folder: ProjectFolder): ProjectFolderEntry | undefined {
+  return readEntryFrom(folder.database);
+}
+
+/**
+ * Lists the `NAME.joyproj` folders in `directory`, each with its catalog entry. It only reads: it
+ * does not create a cache, change the schema or write. A broken folder is reported as a problem,
+ * not thrown, so one bad folder does not hide the others.
+ */
+export async function listProjectFolders(directory: string): Promise<ProjectFolderListing[]> {
+  let names: string[];
+  try {
+    const entries = await readdir(directory, { withFileTypes: true });
+    names = entries
+      .filter(
+        (entry) => entry.isDirectory() && entry.name.toLowerCase().endsWith(PROJECT_FOLDER_SUFFIX),
+      )
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b));
+  } catch (error) {
+    if (isErrnoCode(error, 'ENOENT')) return [];
+    throw error;
+  }
+  return names.map((name) => readListing(join(directory, name)));
+}
+
+function readListing(root: string): ProjectFolderListing {
+  const databasePath = join(root, PROJECT_DATABASE_FILE);
+  if (!existsSync(databasePath)) return { root, problem: 'project.sqlite is missing' };
+  let database: DatabaseSync | undefined;
+  try {
+    database = new DatabaseSync(databasePath);
+    const entry = readEntryFrom(database);
+    return entry === undefined ? { root, problem: 'no catalog entry' } : { root, entry };
+  } catch (error) {
+    return { root, problem: error instanceof Error ? error.message : 'unreadable project folder' };
+  } finally {
+    database?.close();
+  }
+}
+
+function readEntryFrom(database: DatabaseSync): ProjectFolderEntry | undefined {
+  const row = database.prepare('SELECT entry_json FROM project_folder_entry WHERE id = 1').get() as
+    { entry_json: string } | undefined;
+  if (row === undefined) return undefined;
+  const parsed: unknown = JSON.parse(row.entry_json);
+  if (!isProjectFolderEntry(parsed)) {
+    throw new Error('The project folder entry is malformed');
+  }
+  return parsed;
+}
+
+function isProjectFolderEntry(value: unknown): value is ProjectFolderEntry {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    ENTRY_TEXT_FIELDS.every((field) => typeof candidate[field] === 'string') &&
+    (candidate['trashedAt'] === undefined || typeof candidate['trashedAt'] === 'string')
+  );
 }
 
 async function copyAndHash(from: string, to: string): Promise<{ sha256: string; bytes: number }> {
