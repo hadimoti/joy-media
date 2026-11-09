@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 // Keep the explicit .ts extension so the release command works from a clean
 // checkout where no compiled font-assets.js sibling exists yet.
 import { scanFontAssets } from './font-assets.ts';
+import { refusedInputs, verifyReport } from './hosted-verify.mjs';
 
 export const REQUIRED_BUILD_IDS = ['editor', 'worker'] as const;
 export const REQUIRED_JOURNEY_ID = 'authenticated-editor-1.0' as const;
@@ -1166,8 +1167,67 @@ function staticAssetMessage(input: ReleaseGateInput): string {
   return `static asset inventory recorded ${summary.copiedSourceAssetCount} copied public assets, ${summary.builtAssetCount} built assets, ${summary.effectPreviewCount} effect preview PNGs, and ${summary.effectMotionPreviewCount} motion previews`;
 }
 
+// The release-candidate-v3 hosted-verify job (plan section 3.4) runs the typecheck, lint, format, goldens and Vitest
+// suites on hosted shards and writes one report. The gate reads their results from that report, bound to this candidate,
+// run and attempt. The builds still run here, because the gate needs the built output on disk. A run that names no report
+// (the two-pass gate) runs every command itself, exactly as before.
+const BUILD_COMMAND_IDS = ['editor-build', 'worker-build'] as const;
+
+interface HostedVerifyOutcome {
+  readonly commandResults: readonly ReleaseCommandResult[];
+  readonly testSummary: { readonly collected: number; readonly failed: number };
+  readonly reasons: readonly string[];
+  readonly sha256: string | null;
+}
+
+/** Reads and verifies the hosted-verify report, or returns null when the run names none (the two-pass gate). */
+export function hostedVerifyFromEnvironment(root: string): HostedVerifyOutcome | null {
+  const reportPath = process.env.JOY_RELEASE_HOSTED_VERIFY_REPORT?.trim();
+  if (reportPath === undefined || reportPath === '') return null;
+  const expectedSha256 = process.env.JOY_RELEASE_HOSTED_VERIFY_SHA256?.trim() ?? '';
+  const reasons: string[] = [];
+  let bytes: Buffer | null = null;
+  try {
+    bytes = readFileSync(resolve(root, reportPath));
+  } catch {
+    reasons.push('the hosted-verify report is missing');
+  }
+  const sha256 = bytes === null ? null : createHash('sha256').update(bytes).digest('hex');
+  if (bytes !== null && !/^[0-9a-f]{64}$/u.test(expectedSha256)) {
+    reasons.push('the hosted-verify report digest was not supplied by its job');
+  } else if (bytes !== null && sha256 !== expectedSha256) {
+    reasons.push('the hosted-verify report does not match the digest its job produced');
+  }
+  let parsed: unknown;
+  if (bytes !== null && reasons.length === 0) {
+    try {
+      parsed = JSON.parse(bytes.toString('utf8'));
+    } catch {
+      reasons.push('the hosted-verify report is not valid JSON');
+    }
+  }
+  const verdict =
+    reasons.length > 0
+      ? refusedInputs(reasons)
+      : verifyReport(parsed, {
+          candidateSha: process.env.JOY_RELEASE_CANDIDATE_SHA ?? '',
+          runId: process.env.JOY_RELEASE_WORKFLOW_RUN_ID ?? '',
+          runAttempt: process.env.JOY_RELEASE_WORKFLOW_RUN_ATTEMPT ?? '',
+        });
+  return {
+    commandResults: verdict.commandResults,
+    testSummary: verdict.testSummary,
+    reasons: verdict.reasons,
+    sha256,
+  };
+}
+
 export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
-  const commandResults = runReleaseCommands(root);
+  const hostedVerify = hostedVerifyFromEnvironment(root);
+  const commandResults =
+    hostedVerify === null
+      ? runReleaseCommands(root)
+      : [...runReleaseCommands(root, BUILD_COMMAND_IDS), ...hostedVerify.commandResults];
   const sourceProvenance = workspaceSourceProvenance(root);
   const performanceEvidence = readPerformanceEvidence(root);
   const staticAssets = buildStaticAssetInventory(root);
@@ -1449,12 +1509,16 @@ export function releaseChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith('JOY_RELEASE_')));
 }
 
-function runReleaseCommands(root: string): readonly ReleaseCommandResult[] {
+function runReleaseCommands(
+  root: string,
+  only?: readonly string[],
+): readonly ReleaseCommandResult[] {
   const pnpm =
     process.platform === 'win32'
       ? { cmd: 'corepack.cmd', prefix: ['pnpm'] as const }
       : { cmd: 'pnpm', prefix: [] as const };
-  return RELEASE_COMMANDS.map(([id, args]) => {
+  const selected = RELEASE_COMMANDS.filter(([id]) => only === undefined || only.includes(id));
+  return selected.map(([id, args]) => {
     const started = Date.now();
     // On Windows, pnpm is exposed as a `.cmd` shim installed by corepack and
     // Node refuses to spawn `.cmd` directly with shell:false (EINVAL) because

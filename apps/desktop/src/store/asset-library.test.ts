@@ -98,6 +98,76 @@ describe('createAssetLibrary', () => {
     );
   });
 
+  it('shows the newest name when the same content is added again under another name', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const bytes = Buffer.from('library media');
+    const first = await writeOriginal(
+      root,
+      registration({ id: 'asset-1', displayName: 'first.png' }, bytes),
+      bytes,
+    );
+    const second = await writeOriginal(
+      root,
+      registration({ id: 'asset-2', displayName: 'second.png' }, bytes),
+      bytes,
+    );
+    const registrations = new Map([first, second].map((asset) => [asset.id, asset] as const));
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: (assetId) => registrations.get(assetId) },
+    });
+
+    expect(await library.addAsset(first.id)).toEqual({ ok: true });
+    expect(await library.addAsset(second.id)).toEqual({ ok: true });
+
+    const catalog = JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8'));
+    expect(catalog.assets).toHaveLength(1);
+    expect(catalog.counts).toEqual({ total: 1, audio: 0, image: 1, video: 0 });
+    expect(catalog.assets[0]).toMatchObject({
+      id: `joylib-${first.sha256}`,
+      displayName: 'second.png',
+      sortName: 'second.png',
+    });
+  });
+
+  it('renames every legacy entry for the same content', async () => {
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'library');
+    const bytes = Buffer.from('library media');
+    const asset = await writeOriginal(
+      root,
+      registration({ id: 'asset-1', displayName: 'current.png' }, bytes),
+      bytes,
+    );
+    const id = `joylib-${asset.sha256}`;
+    const legacy = {
+      id,
+      kind: 'image',
+      sha256: asset.sha256,
+      displayName: 'old.png',
+      sortName: 'old.png',
+      relativePath: `images/${id}`,
+    };
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      path.join(directory, 'catalog.json'),
+      JSON.stringify({ version: 1, assets: [legacy, legacy] }),
+    );
+    const library = createAssetLibrary({
+      directory: () => directory,
+      registrations: { get: () => asset },
+    });
+
+    expect(await library.addAsset(asset.id)).toEqual({ ok: true });
+
+    const catalog = JSON.parse(await readFile(path.join(directory, 'catalog.json'), 'utf8'));
+    expect(catalog.assets.map((item: { displayName: string }) => item.displayName)).toEqual([
+      'current.png',
+      'current.png',
+    ]);
+  });
+
   it('keeps only one entry when the same content is added twice', async () => {
     const root = await temporaryDirectory();
     const directory = path.join(root, 'library');
