@@ -187,6 +187,18 @@ describe('ChatGPT host ID', () => {
     ['another DID method', 'did:web:example.com'],
     ['a thumbprint that is too short', 'urn:ietf:params:oauth:jwk-thumbprint:short'],
     [
+      'a thumbprint of 16 characters, the old minimum',
+      'urn:ietf:params:oauth:jwk-thumbprint:NzbLsXh8uDCcd-6M',
+    ],
+    [
+      'a thumbprint of 42 characters',
+      'urn:ietf:params:oauth:jwk-thumbprint:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9X',
+    ],
+    [
+      'a thumbprint of 44 characters',
+      'urn:ietf:params:oauth:jwk-thumbprint:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9XsA',
+    ],
+    [
       'a did:key with a base58-invalid character',
       'did:key:z0MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
     ],
