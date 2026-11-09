@@ -88,10 +88,8 @@ export interface MediaProbe {
   readonly frames?: number;
 }
 
-/** Everything the scenario does to the machine goes through this interface. */
-export interface ScenarioDriver {
-  now(): Date;
-  sleep(ms: number): Promise<void>;
+/** The readings the guards are made of. Every scenario takes them before, between and after its launches. */
+export interface GuardDriver {
   /** SHA-256 of the joy:// registration key as reg.exe exports it. */
   joyKeySha256(): Promise<string>;
   /** JOY Media processes on the machine, whichever build they come from, including the app's children. */
@@ -100,6 +98,11 @@ export interface ScenarioDriver {
   ownerLibraryFileCount(): Promise<number>;
   /** A signature of the installed JOY Media folder that changes when any file in it changes. */
   installedFolderSignature(): Promise<string>;
+}
+
+export interface ScenarioDriver extends GuardDriver {
+  now(): Date;
+  sleep(ms: number): Promise<void>;
   /** Starts the candidate app on the run profile with a debug port. */
   launch(attempt: number): Promise<AppHandle>;
   /** Waits for the editor page that exposes the bridge. */
@@ -445,7 +448,7 @@ export function guardBlockers(
  * Reads the guards. A read that throws does not end the run: its error is reported, the field is
  * listed as unread, and its placeholder value is never judged. The other guards are still judged.
  */
-export async function readGuards(driver: ScenarioDriver): Promise<{
+export async function readGuards(driver: GuardDriver): Promise<{
   readonly guards: GuardReadings;
   readonly readErrors: string[];
   readonly unread: GuardField[];

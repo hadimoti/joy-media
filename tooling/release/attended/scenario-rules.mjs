@@ -3,6 +3,7 @@
 
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
+import { FRESH_PROCESS_SCENARIO } from '../src/attended-fresh-process.ts';
 
 /**
  * The real path of a path, with links and short names resolved. A path that does not exist yet is
@@ -39,6 +40,23 @@ export function isInside(child, parent) {
   return c === p || c.startsWith(p.endsWith(sep) ? p : `${p}${sep}`);
 }
 
+/** The files a finished run leaves in its folder. A launch must not reuse a folder that holds any of them. */
+const FINISHED_RUN_ARTIFACTS = [
+  'run.json',
+  'receipt.json',
+  'error.json',
+  'profile-source',
+  'profile-fresh',
+];
+
+/**
+ * The finished-run files and profile folders that already exist in a run folder. A dry run leaves only
+ * its preflight files, so a launch may follow one in the same folder; a list that is not empty is a refusal.
+ */
+export function finishedRunArtifacts(outDir) {
+  return FINISHED_RUN_ARTIFACTS.filter((name) => existsSync(join(outDir, name)));
+}
+
 /** The options a scenario run takes. Each name is required, as --name value. */
 export const RUN_OPTION_NAMES = [
   'scenario',
@@ -50,6 +68,16 @@ export const RUN_OPTION_NAMES = [
   'library',
   'out',
   'project',
+];
+
+/** The options the fresh-process scenario takes. It creates both of its profiles inside the run folder. */
+export const FRESH_PROCESS_OPTION_NAMES = [
+  'scenario',
+  'exe',
+  'candidate',
+  'expected-exe-sha256',
+  'library',
+  'out',
 ];
 
 /**
@@ -70,7 +98,9 @@ export function parseRunArgs(argv, scenarios) {
     options[arg.slice(2)] = value;
     index += 1;
   }
-  for (const name of RUN_OPTION_NAMES) {
+  const required =
+    options.scenario === FRESH_PROCESS_SCENARIO ? FRESH_PROCESS_OPTION_NAMES : RUN_OPTION_NAMES;
+  for (const name of required) {
     if (typeof options[name] !== 'string' || options[name] === '') {
       throw new Error(`--${name} is required`);
     }

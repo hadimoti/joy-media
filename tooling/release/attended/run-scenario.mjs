@@ -13,6 +13,13 @@
 //     --profile-source <profile holding the project> --profile <new folder>\profile \
 //     --library <scratch library with catalog.json> --out <new run folder> \
 //     --project <project id> [--port 9339] [--launch]
+//
+// The fresh-process scenario (project.persistence.fresh-process) creates its two profiles inside the run
+// folder, so it takes no source profile and no project:
+//   node --experimental-strip-types tooling/release/attended/run-scenario.mjs \
+//     --scenario project.persistence.fresh-process --exe <unpacked copy>\joy-media.exe \
+//     --candidate <40-hex commit> --expected-exe-sha256 <64-hex build hash> \
+//     --library <scratch library with catalog.json> --out <new run folder> [--media <mp4>] [--launch]
 // Exit codes: 0 passed (or a dry run with no refusals), 2 refused, failed or not ready, 1 usage error.
 
 import { spawnSync } from 'node:child_process';
@@ -24,16 +31,35 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import {
+  FRESH_PROCESS_SCENARIO,
+  runFreshProcessPersistence,
+} from '../src/attended-fresh-process.ts';
+import {
   RESTART_SAVE_EXPORT,
   exportExpectation,
   runRestartSaveExport,
   stagedClipName,
 } from '../src/attended-scenario.ts';
-import { createScenarioDriver } from './scenario-driver.mjs';
-import { isInside, parseRunArgs, samePath } from './scenario-rules.mjs';
+import {
+  createFreshProcessDriver,
+  createScenarioDriver,
+  databaseModuleProblem,
+} from './scenario-driver.mjs';
+import { finishedRunArtifacts, isInside, parseRunArgs, samePath } from './scenario-rules.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SCENARIOS = [RESTART_SAVE_EXPORT];
+const SCENARIOS = [RESTART_SAVE_EXPORT, FRESH_PROCESS_SCENARIO];
+/** The media the fresh-process scenario imports unless --media names another clip. */
+const DEFAULT_CLIP = join(
+  here,
+  '..',
+  '..',
+  '..',
+  'packages',
+  'test-fixtures',
+  'media',
+  'video.mp4',
+);
 const DB_NAME = 'joy-media.sqlite3';
 const LIBRARY_SETTING = 'asset_library_directory';
 const DEFAULT_LIBRARY = join(homedir(), 'joy-media-assets');
@@ -104,6 +130,181 @@ function printPlan(options, project, expected, library) {
   for (const line of lines) process.stdout.write(`${line}\n`);
 }
 
+function printFreshPlan(plan) {
+  const lines = [
+    `scenario: ${FRESH_PROCESS_SCENARIO}`,
+    `first process, new profile ${plan.sourceProfile} (asset library ${plan.library}):`,
+    `  create the project FreshProcess-<run id>, import fresh-process-<run id>.mp4 (${plan.media}), add it to the timeline,`,
+    '  File > Export Editable Project…; check the package and the saved state; close',
+    `second process, new profile ${plan.freshProfile} (asset library ${plan.library}):`,
+    '  check that it starts with no copy of the project; create FreshProcessHost-<run id>;',
+    '  import the package through the import control (no native chooser); check that the imported project is the open one, its clip',
+    '  and the saved state; Export MP4 and wait for the verified file; probe it with ffprobe; close',
+    `guards: the joy:// key, JOY processes, the owner library (${DEFAULT_LIBRARY}) and the installed folder,`,
+    '  checked before, between and after the processes; the Downloads folder is compared before and after',
+    `profiles: made by the candidate's database module (${plan.databaseModule}), not copied from any profile`,
+  ];
+  for (const line of lines) process.stdout.write(`${line}\n`);
+}
+
+/**
+ * The fresh-process scenario from the command line: the preflight and the refusals, then the plan, and
+ * with --launch the two processes. It never copies a profile and never opens the owner's data.
+ */
+async function runFreshProcess(options) {
+  const out = resolve(options.out);
+  const library = resolve(options.library);
+  const exe = resolve(options.exe);
+  const port = Number(options.port ?? 9339);
+  const media = resolve(options.media ?? DEFAULT_CLIP);
+  const sourceProfile = join(out, 'profile-source');
+  const freshProfile = join(out, 'profile-fresh');
+  const refusals = [];
+
+  // The installed app is never run by a scenario, so this is refused before anything else is read.
+  if (isInside(exe, INSTALLED_FOLDER)) {
+    process.stderr.write(
+      'refused: the exe is inside the installed JOY Media folder; the run uses the candidate copy only. Nothing was checked, created or started.\n',
+    );
+    process.exit(2);
+  }
+
+  // The preflight checks the owner's folders, the joy:// key, the app and the tools. It is given the
+  // fresh profile as its profile; the source profile is checked below, because it must not exist either.
+  const preflight = spawnSync(
+    process.execPath,
+    [
+      '--experimental-strip-types',
+      join(here, 'attended-preflight.mjs'),
+      '--exe',
+      exe,
+      '--candidate',
+      options.candidate,
+      '--profile',
+      freshProfile,
+      '--library',
+      library,
+      '--out',
+      out,
+    ],
+    { encoding: 'utf8' },
+  );
+  process.stdout.write(preflight.stdout ?? '');
+  process.stderr.write(preflight.stderr ?? '');
+  if (preflight.status !== 0) {
+    process.stderr.write(
+      'not ready: the preflight blocked the run, so nothing was created or started\n',
+    );
+    process.exit(2);
+  }
+  const preflightReport = JSON.parse(readFileSync(join(out, 'preflight.json'), 'utf8'));
+  if (preflightReport.exe.sha256 !== options['expected-exe-sha256']) {
+    refusals.push(
+      `the exe hash ${preflightReport.exe.sha256} is not the expected build hash ${options['expected-exe-sha256']}`,
+    );
+  }
+  if (existsSync(sourceProfile)) {
+    refusals.push(`${sourceProfile} already exists; a run needs new profile folders`);
+  }
+  if (!existsSync(media)) refusals.push(`the clip ${media} does not exist`);
+  if (!(await portIsFree(port))) {
+    refusals.push(`port ${port} is in use; the app's debug port must be free`);
+  }
+  if (refusals.length > 0) {
+    for (const refusal of refusals) process.stderr.write(`refused: ${refusal}\n`);
+    process.stderr.write('nothing was created or started\n');
+    process.exit(2);
+  }
+
+  if (!options.launch) {
+    printFreshPlan({
+      library,
+      media,
+      sourceProfile,
+      freshProfile,
+      databaseModule: join(
+        preflightReport.unpackedDir,
+        'resources',
+        'app',
+        'dist',
+        'store',
+        'local-database.js',
+      ),
+    });
+    process.stdout.write(
+      'dry run: no refusals; nothing was created or started. Repeat with --launch after the owner says yes.\n',
+    );
+    process.exit(0);
+  }
+
+  // A launch never reuses a folder that holds a finished run or a profile: its results would be lost.
+  const finished = finishedRunArtifacts(out);
+  if (finished.length > 0) {
+    process.stderr.write(
+      `refused: ${out} already holds ${finished.join(', ')}; a launch needs a folder with no finished run in it\n`,
+    );
+    process.exit(2);
+  }
+  // The candidate's database module runs only here, once the owner has asked for a launch. A dry run runs none of it.
+  const moduleProblem = databaseModuleProblem(preflightReport.unpackedDir);
+  if (moduleProblem !== null) {
+    process.stderr.write(`refused: ${moduleProblem}\nnothing was created or started\n`);
+    process.exit(2);
+  }
+
+  // From here on, anything that goes wrong is written to error.json, so the run never fails silently.
+  const runId = randomUUID();
+  let report;
+  try {
+    process.stdout.write(
+      'launching the candidate copy in two new profiles; the owner must be at the PC\n',
+    );
+    const driver = createFreshProcessDriver({
+      exe,
+      unpackedDir: preflightReport.unpackedDir,
+      runDir: out,
+      port,
+      defaultLibrary: DEFAULT_LIBRARY,
+      installedFolder: INSTALLED_FOLDER,
+      downloadsFolder: join(homedir(), 'Downloads'),
+      clipFixture: media,
+    });
+    report = await runFreshProcessPersistence(driver, {
+      runId,
+      candidateSha: preflightReport.candidateSha,
+      exeSha256: preflightReport.exe.sha256,
+      unpackedDir: preflightReport.unpackedDir,
+      library,
+      sourceProfile,
+      freshProfile,
+    });
+  } catch (error) {
+    const errorPath = join(out, 'error.json');
+    writeFileSync(
+      errorPath,
+      `${JSON.stringify({ runId, error: String(error?.stack ?? error) }, null, 2)}\n`,
+      'utf8',
+    );
+    process.stderr.write(`error: the run stopped (${errorPath}): ${error?.message ?? error}\n`);
+    process.exit(2);
+  }
+
+  writeFileSync(join(out, 'run.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  if (report.receipt !== undefined) {
+    writeFileSync(
+      join(out, 'receipt.json'),
+      `${JSON.stringify(report.receipt, null, 2)}\n`,
+      'utf8',
+    );
+  }
+  process.stdout.write(`verdict: ${report.verdict} (${join(out, 'run.json')})\n`);
+  for (const check of report.checks) {
+    process.stdout.write(`${check.status.padEnd(8)} ${check.name}: ${check.detail}\n`);
+  }
+  for (const blocker of report.blockers) process.stdout.write(`blocker: ${blocker}\n`);
+  process.exit(report.verdict === 'passed' ? 0 : 2);
+}
+
 async function main() {
   let options;
   try {
@@ -111,6 +312,11 @@ async function main() {
   } catch (error) {
     process.stderr.write(`usage error: ${error.message}\n`);
     process.exit(1);
+  }
+
+  if (options.scenario === FRESH_PROCESS_SCENARIO) {
+    await runFreshProcess(options);
+    return;
   }
 
   const out = resolve(options.out);
