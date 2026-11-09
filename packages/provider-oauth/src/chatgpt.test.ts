@@ -202,6 +202,22 @@ describe('ChatGPT host ID', () => {
       'a did:key with a base58-invalid character',
       'did:key:z0MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
     ],
+    [
+      'a thumbprint whose last character carries bits past the digest',
+      'urn:ietf:params:oauth:jwk-thumbprint:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9XX',
+    ],
+    [
+      'a thumbprint with a standard base64 plus sign',
+      'urn:ietf:params:oauth:jwk-thumbprint:NzbLsXh8uDCcd+6MNwXF4W_7noWXFZAfHkxZsRGC9Xs',
+    ],
+    [
+      'a thumbprint with a standard base64 slash',
+      'urn:ietf:params:oauth:jwk-thumbprint:NzbLsXh8uDCcd/6MNwXF4W_7noWXFZAfHkxZsRGC9Xs',
+    ],
+    [
+      'a thumbprint with base64 padding',
+      'urn:ietf:params:oauth:jwk-thumbprint:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs=',
+    ],
   ])('refuses %s', (_name, hostId) => {
     expect(isExtAgentHostId(hostId)).toBe(false);
   });

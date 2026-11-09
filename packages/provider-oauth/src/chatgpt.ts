@@ -36,10 +36,13 @@ export const CHATGPT_DYNAMIC_CLIENT_ID = 'dynamic_agent_client';
 export const CHATGPT_AGENT_NAME = 'JOY Media';
 /**
  * The host ID ChatGPT accepts in `ext_agent_host_id`: a UUID as a `urn:uuid:` URN. ChatGPT refuses a bare UUID with
- * "Invalid authorize request" (the first attended sign-in, 2026-10-29), so only this form is created here. The documented JWK-thumbprint form is a SHA-256 thumbprint, which is 43 base64url characters (RFC 9278), and the did:key form is accepted when read.
+ * "Invalid authorize request" (the first attended sign-in, 2026-10-29), so only this form is created here. The
+ * documented JWK-thumbprint form is a SHA-256 thumbprint: 43 base64url characters (RFC 9278). Its last character
+ * carries only the top four bits of the digest, so it must be one of the 16 characters that can end such a value.
+ * The did:key form is accepted when read.
  */
 const EXT_AGENT_HOST_ID_PATTERN =
-  /^(?:urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|urn:ietf:params:oauth:jwk-thumbprint:[A-Za-z0-9_-]{43}|did:key:z[1-9A-HJ-NP-Za-km-z]{16,})$/;
+  /^(?:urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|urn:ietf:params:oauth:jwk-thumbprint:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]|did:key:z[1-9A-HJ-NP-Za-km-z]{16,})$/;
 /** The loopback path is the one the official sign-in page names. The port is its example; any free port is allowed. */
 export const CHATGPT_CALLBACK_PORT = 1455;
 export const CHATGPT_CALLBACK_PATH = '/auth/callback';
