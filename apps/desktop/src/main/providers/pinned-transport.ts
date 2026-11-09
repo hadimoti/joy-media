@@ -51,7 +51,7 @@ function isXaiHostname(hostname: string): boolean {
 /**
  * xAI's own domain, reached over HTTPS on the default port and without credentials. The sign-in check (isTrustedXaiUrl
  * in packages/provider-oauth/src/xai.ts) applies the same host, port and credential rules, and also refuses query strings
- * on some endpoints; this transport checks the first three.
+ * on some endpoints; this transport checks the protocol, host, port and credentials, not the query.
  */
 function isXaiTarget(target: URL): boolean {
   return (
