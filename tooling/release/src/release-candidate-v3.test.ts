@@ -312,9 +312,10 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
     }
   });
 
-  it('runs the Vitest suite in three parallel shards on hosted Ubuntu, each with retries off', () => {
+  it('runs the Vitest suite in three parallel shards on the joy-media-ci runner, each with retries off', () => {
     const shard = v3.jobs['hosted-verify-shard'];
-    expect(shard['runs-on']).toBe('ubuntu-24.04');
+    // The self-hosted-only contract (ci-runner-policy.test.ts) forbids GitHub-hosted labels, so the shards run on joy-media-ci.
+    expect(shard['runs-on']).toEqual(['self-hosted', 'linux', 'x64', 'joy-media-ci']);
     expect(shard.strategy).toEqual(SHARD_STRATEGY);
     const runLines = (shard.steps ?? [])
       .flatMap((step) => (step.run ?? '').split('\n'))
