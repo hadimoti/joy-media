@@ -89,7 +89,7 @@ Partial evidence, not a receipt. The owner said "Yes, launch it".
 - `universalTimeline.items[]` holds the clip placement: `id`, `compositionId`, `elementKind`,
   `source {kind, id}`, `trackId`, `startUs`, `durationUs`, `sourceInUs`, `withinTrackOrder`.
 - `visualObjects` is keyed by element id: `id`, `kind`, `assetId`, and `transform {x, y, scaleX, scaleY,
-  rotationDeg, opacity, crop {top, right, bottom, left}}`.
+rotationDeg, opacity, crop {top, right, bottom, left}}`.
 - `audio`: `buses[]` (`id`, `name`, `gain`, `pan`, `mute`, `solo`, `inputs`), `clips` keyed by clip id,
   and `effects[]`.
 - The `lookInstances` envelope is `{ id, instances, schemaVersion }`.
