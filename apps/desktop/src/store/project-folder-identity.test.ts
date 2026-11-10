@@ -2,7 +2,8 @@ import type * as NodeFs from 'node:fs';
 import { realpathSync, statSync } from 'node:fs';
 import { cp, mkdtemp, rename, rm, rmdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, parse, resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { basename, dirname, join, parse, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -48,12 +49,44 @@ const identityFaults = vi.hoisted(
 /** Folder paths whose real path cannot be read, although the folder itself can be read. */
 const realpathFaults = vi.hoisted(() => new Set<string>());
 
+/** The file system without the mock below, for the fault keys. */
+const actualFs = createRequire(import.meta.url)('node:fs') as typeof NodeFs;
+
+/**
+ * The key a fault is stored and looked up under: the real path of the folder's parent, then the name, lowercased
+ * on Windows. A short 8.3 parent or another spelling of the same folder keys the same, while an alias keeps its
+ * own name, so it is never mistaken for the folder it points to. The mock applies the same rule (keyOf).
+ */
+function faultKey(path: string): string {
+  const resolved = resolve(path);
+  let parent = dirname(resolved);
+  try {
+    parent = actualFs.realpathSync.native(parent);
+  } catch {
+    // The parent cannot be read, so the path is keyed as given.
+  }
+  const key = join(parent, basename(resolved));
+  return process.platform === 'win32' ? key.toLowerCase() : key;
+}
+
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof NodeFs>();
-  const { resolve: resolvePath } = await import('node:path');
+  const path = await import('node:path');
+  // The same rule as faultKey, which the tests use to store faults.
+  const keyOf = (target: string): string => {
+    const resolved = path.resolve(target);
+    let parent = path.dirname(resolved);
+    try {
+      parent = actual.realpathSync.native(parent);
+    } catch {
+      // Keyed as given.
+    }
+    const key = path.join(parent, path.basename(resolved));
+    return process.platform === 'win32' ? key.toLowerCase() : key;
+  };
   const realpathSync = Object.assign((target: string) => actual.realpathSync(target), {
     native: (target: string) => {
-      if (realpathFaults.has(resolvePath(target))) {
+      if (realpathFaults.has(keyOf(target))) {
         throw Object.assign(new Error('EACCES: simulated'), { code: 'EACCES' });
       }
       return actual.realpathSync.native(target);
@@ -63,7 +96,7 @@ vi.mock('node:fs', async (importOriginal) => {
     ...actual,
     realpathSync,
     statSync: (target: string, options?: unknown) => {
-      const fault = identityFaults.get(resolvePath(target));
+      const fault = identityFaults.get(keyOf(target));
       if (fault?.code !== undefined) {
         throw Object.assign(new Error(`${fault.code}: simulated`), { code: fault.code });
       }
@@ -134,8 +167,14 @@ function entryFor(root: string, id: string): ProjectFolderEntry {
 }
 
 /** A project folder made in place and recorded as the original of its id, with a saved document. */
+/** The busy tests hold a read open on a folder's database. That blocks its commit only in rollback-journal mode. */
+function expectRollbackJournal(folder: ProjectFolder): void {
+  expect(folder.database.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'delete' });
+}
+
 async function createOriginal(name: string, id: string): Promise<ProjectFolder> {
   const folder = track(await createProjectFolder(scratch, name));
+  expectRollbackJournal(folder);
   recordNewProjectFolder(folder, entryFor(folder.root, id), registry);
   folder.documents.put({
     projectId: id,
@@ -160,7 +199,9 @@ async function openedCopyOfOriginal(): Promise<{
   forget(original);
   const copyRoot = join(scratch, 'Trip copy.joyproj');
   await cp(originalRoot, copyRoot, { recursive: true });
-  return { copy: track(await openProjectFolder(copyRoot)), copyRoot, originalRoot };
+  const copy = track(await openProjectFolder(copyRoot));
+  expectRollbackJournal(copy);
+  return { copy, copyRoot, originalRoot };
 }
 
 /** A recorded original copied, then moved away. The copy is opened; its home is the old place. */
@@ -270,7 +311,7 @@ describe('new id on open', () => {
     const { copy, copyRoot, originalRoot } = await openedCopyOfOriginal();
     // The clone reads as the original: a bit-for-bit copy of a drive keeps the file identities.
     const original = statSync(originalRoot, { bigint: true });
-    identityFaults.set(resolve(copyRoot), { identity: { dev: original.dev, ino: original.ino } });
+    identityFaults.set(faultKey(copyRoot), { identity: { dev: original.dev, ino: original.ino } });
 
     expect(claimProjectFolderId(copy, registry)).toMatchObject({
       kind: 'ask',
@@ -291,7 +332,7 @@ describe('new id on open', () => {
   it('the owner can make the clone the original, and the other folder then asks', async () => {
     const { copy, copyRoot, originalRoot } = await openedCopyOfOriginal();
     const original = statSync(originalRoot, { bigint: true });
-    identityFaults.set(resolve(copyRoot), { identity: { dev: original.dev, ino: original.ino } });
+    identityFaults.set(faultKey(copyRoot), { identity: { dev: original.dev, ino: original.ino } });
 
     expect(claimProjectFolderId(copy, registry)).toMatchObject({
       kind: 'ask',
@@ -351,7 +392,7 @@ describe('new id on open', () => {
 
   it('a folder whose real path cannot be read is not recorded, and nothing is written', async () => {
     const folder = track(await createProjectFolder(scratch, 'Unreadable'));
-    realpathFaults.add(resolve(folder.root));
+    realpathFaults.add(faultKey(folder.root));
 
     expect(
       reasonOf(() => recordNewProjectFolder(folder, entryFor(folder.root, ID), registry)),
@@ -362,7 +403,7 @@ describe('new id on open', () => {
 
   it('a folder whose real path cannot be read is unverifiable, and nothing is written', async () => {
     const { copy, copyRoot, originalRoot } = await openedCopyOfOriginal();
-    realpathFaults.add(resolve(copyRoot));
+    realpathFaults.add(faultKey(copyRoot));
 
     expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
     expect(resolveProjectFolderAsOriginal(copy, registry)).toEqual({ kind: 'unverifiable' });
@@ -373,8 +414,8 @@ describe('new id on open', () => {
 
   it('a copy answer changes nothing while the recorded original cannot be read', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
-    identityFaults.set(real(originalRoot), { code: 'ENOENT' });
-    identityFaults.set(resolve(parse(originalRoot).root), { code: 'ENOENT' });
+    identityFaults.set(faultKey(originalRoot), { code: 'ENOENT' });
+    identityFaults.set(faultKey(parse(originalRoot).root), { code: 'ENOENT' });
 
     expect(resolveProjectFolderAsCopy(copy, registry)).toEqual({ kind: 'unverifiable' });
     expect(readProjectFolderEntry(copy)?.id).toBe(ID);
@@ -383,8 +424,8 @@ describe('new id on open', () => {
 
   it('a recorded place on a volume that is not mounted is unverifiable, not gone', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
-    identityFaults.set(real(originalRoot), { code: 'ENOENT' });
-    identityFaults.set(resolve(parse(originalRoot).root), { code: 'ENOENT' });
+    identityFaults.set(faultKey(originalRoot), { code: 'ENOENT' });
+    identityFaults.set(faultKey(parse(originalRoot).root), { code: 'ENOENT' });
 
     expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
     expect(readProjectFolderEntry(copy)?.id).toBe(ID);
@@ -392,7 +433,7 @@ describe('new id on open', () => {
 
   it('a recorded place that is no longer a folder asks as missing', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
-    identityFaults.set(real(originalRoot), { code: 'ENOTDIR' });
+    identityFaults.set(faultKey(originalRoot), { code: 'ENOTDIR' });
 
     expect(claimProjectFolderId(copy, registry)).toMatchObject({
       kind: 'ask',
@@ -523,7 +564,7 @@ describe('new id on open', () => {
 
   it('the editable gate holds a folder whose identity cannot be read', async () => {
     const { copyRoot } = await openedCopyOfOriginal();
-    identityFaults.set(resolve(copyRoot), { code: 'EIO' });
+    identityFaults.set(faultKey(copyRoot), { code: 'EIO' });
 
     expect(await openProjectFolderForEditing(copyRoot, registry)).toEqual({
       kind: 'held',
@@ -535,7 +576,7 @@ describe('new id on open', () => {
     const { copy, copyRoot, originalRoot } = await openedCopyOfOriginal();
     // The copy reads as a clone of the original: same identity, and the original is still live.
     const original = statSync(originalRoot, { bigint: true });
-    identityFaults.set(resolve(copyRoot), { identity: { dev: original.dev, ino: original.ino } });
+    identityFaults.set(faultKey(copyRoot), { identity: { dev: original.dev, ino: original.ino } });
 
     expect(reasonOf(() => recordNewProjectFolder(copy, entryFor(copyRoot, ID), registry))).toBe(
       'id-recorded-elsewhere',
@@ -819,9 +860,9 @@ describe('new id on open', () => {
     const { copy, copyRoot, originalRoot } = await openedCopyOfOriginal();
     // The copy reads as the original's identity, and the original's place cannot be read at all.
     const original = statSync(originalRoot, { bigint: true });
-    identityFaults.set(resolve(copyRoot), { identity: { dev: original.dev, ino: original.ino } });
-    identityFaults.set(real(originalRoot), { code: 'ENOENT' });
-    identityFaults.set(resolve(parse(originalRoot).root), { code: 'ENOENT' });
+    identityFaults.set(faultKey(copyRoot), { identity: { dev: original.dev, ino: original.ino } });
+    identityFaults.set(faultKey(originalRoot), { code: 'ENOENT' });
+    identityFaults.set(faultKey(parse(originalRoot).root), { code: 'ENOENT' });
 
     expect(resolveProjectFolderAsCopy(copy, registry)).toEqual({ kind: 'unverifiable' });
     expect(readProjectFolderEntry(copy)?.id).toBe(ID);
@@ -909,7 +950,7 @@ describe('new id on open', () => {
 
   it('a folder whose identity cannot be read is refused as unreadable, not as having no identity', async () => {
     const folder = track(await createProjectFolder(scratch, 'Unreadable identity'));
-    identityFaults.set(resolve(folder.root), { code: 'EIO' });
+    identityFaults.set(faultKey(folder.root), { code: 'EIO' });
 
     expect(
       reasonOf(() => recordNewProjectFolder(folder, entryFor(folder.root, ID), registry)),
@@ -929,7 +970,7 @@ describe('new id on open', () => {
 
   it('a volume that gives no folder identities is refused as having none', async () => {
     const folder = track(await createProjectFolder(scratch, 'No identity'));
-    identityFaults.set(resolve(folder.root), { identity: { dev: 1n, ino: 0n } });
+    identityFaults.set(faultKey(folder.root), { identity: { dev: 1n, ino: 0n } });
 
     expect(
       reasonOf(() => recordNewProjectFolder(folder, entryFor(folder.root, ID), registry)),
@@ -939,8 +980,8 @@ describe('new id on open', () => {
   it('a recorded place whose drive now holds another volume is unverifiable, not gone', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
     // The original's folder is missing, and its drive letter now belongs to another volume.
-    identityFaults.set(real(originalRoot), { code: 'ENOENT' });
-    identityFaults.set(resolve(parse(originalRoot).root), { identity: { dev: 999n, ino: 1n } });
+    identityFaults.set(faultKey(originalRoot), { code: 'ENOENT' });
+    identityFaults.set(faultKey(parse(originalRoot).root), { identity: { dev: 999n, ino: 1n } });
 
     expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
     expect(readProjectFolderEntry(copy)?.id).toBe(ID);
@@ -964,8 +1005,8 @@ describe('new id on open', () => {
   it('a recorded place that holds another identity on another volume is unverifiable, not gone', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
     // The place now holds another folder, and its drive now holds another volume too.
-    identityFaults.set(real(originalRoot), { identity: { dev: 999n, ino: 1n } });
-    identityFaults.set(resolve(parse(originalRoot).root), { identity: { dev: 999n, ino: 1n } });
+    identityFaults.set(faultKey(originalRoot), { identity: { dev: 999n, ino: 1n } });
+    identityFaults.set(faultKey(parse(originalRoot).root), { identity: { dev: 999n, ino: 1n } });
 
     expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
     expect(readProjectFolderEntry(copy)?.id).toBe(ID);
@@ -974,7 +1015,7 @@ describe('new id on open', () => {
 
   it('a recorded place that cannot be read is unverifiable, not gone, even on its own volume', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
-    identityFaults.set(real(originalRoot), { code: 'EIO' });
+    identityFaults.set(faultKey(originalRoot), { code: 'EIO' });
 
     expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
     expect(readProjectFolderEntry(copy)?.id).toBe(ID);
@@ -995,15 +1036,15 @@ describe('new id on open', () => {
   it('a live recorded place is live on any drive, so a copy is renewed', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
     // The original's drive now reports another device, but its place still holds the recorded identity.
-    identityFaults.set(resolve(parse(originalRoot).root), { identity: { dev: 999n, ino: 1n } });
+    identityFaults.set(faultKey(parse(originalRoot).root), { identity: { dev: 999n, ino: 1n } });
 
     expect(claimProjectFolderId(copy, registry)).toMatchObject({ kind: 'renewed', previousId: ID });
   });
 
   it('a recorded place that is missing is unverifiable when its drive cannot be read', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
-    identityFaults.set(real(originalRoot), { code: 'ENOENT' });
-    identityFaults.set(resolve(parse(originalRoot).root), { code: 'EIO' });
+    identityFaults.set(faultKey(originalRoot), { code: 'ENOENT' });
+    identityFaults.set(faultKey(parse(originalRoot).root), { code: 'EIO' });
 
     expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
     expect(readProjectFolderEntry(copy)?.id).toBe(ID);
@@ -1018,8 +1059,8 @@ describe('new id on open', () => {
       folderPath: share,
       recordedAt: '2026-11-10T00:00:00.000Z',
     });
-    identityFaults.set(resolve(share), { code: 'ENOENT' });
-    identityFaults.set(resolve('\\\\server\\share\\'), { code: 'ENOENT' });
+    identityFaults.set(faultKey(share), { code: 'ENOENT' });
+    identityFaults.set(faultKey('\\\\server\\share\\'), { code: 'ENOENT' });
 
     expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
     expect(readProjectClaim(registry, ID)?.folderPath).toBe(share);
@@ -1442,7 +1483,7 @@ describe('new id on open', () => {
     await symlink(original.root, alias, 'junction');
     try {
       writeProjectClaim(registry, { ...recorded, folderPath: alias });
-      realpathFaults.add(resolve(alias));
+      realpathFaults.add(faultKey(alias));
 
       expect(resolveProjectFolderAsCopy(original, registry)).toEqual({ kind: 'unverifiable' });
       expect(readProjectFolderEntry(original)?.id).toBe(ID);
@@ -1516,6 +1557,120 @@ describe('new id on open', () => {
     }
     expect(busy).toBeInstanceOf(ProjectClaimBusyError);
     expect((busy as ProjectClaimBusyError).appliedInRegistry).toBe(true);
+  });
+
+  it.runIf(process.platform === 'win32')(
+    'a fault set on a folder is found by another spelling of its path',
+    async () => {
+      const folder = track(await createProjectFolder(scratch, 'Spelling'));
+      identityFaults.set(faultKey(folder.root), { code: 'EIO' });
+
+      expect(() => statSync(folder.root.toUpperCase(), { bigint: true })).toThrow('EIO');
+    },
+  );
+
+  it('a kept claim rewrites a record made through an alias to the real place, and keeps its time', async () => {
+    const original = await createOriginal('Trip', ID);
+    const recorded = readProjectClaim(registry, ID);
+    if (recorded === undefined) throw new Error('expected the original to be recorded');
+    const alias = join(scratch, 'Trip alias');
+    await symlink(original.root, alias, 'junction');
+    try {
+      writeProjectClaim(registry, { ...recorded, folderPath: alias });
+
+      expect(claimProjectFolderId(original, registry)).toEqual({ kind: 'kept' });
+      expect(readProjectClaim(registry, ID)).toEqual({
+        ...recorded,
+        folderPath: real(original.root),
+      });
+    } finally {
+      // Removes the junction itself, not the folder it points to.
+      await rmdir(alias);
+    }
+    // The record names the real place now, so the original is still kept with the alias gone.
+    expect(claimProjectFolderId(original, registry)).toEqual({ kind: 'kept' });
+  });
+
+  it('an original answer rewrites a record made through an alias to the real place', async () => {
+    const original = await createOriginal('Trip', ID);
+    const recorded = readProjectClaim(registry, ID);
+    if (recorded === undefined) throw new Error('expected the original to be recorded');
+    const alias = join(scratch, 'Trip alias');
+    await symlink(original.root, alias, 'junction');
+    try {
+      writeProjectClaim(registry, { ...recorded, folderPath: alias });
+
+      expect(resolveProjectFolderAsOriginal(original, registry)).toEqual({ kind: 'claimed' });
+      expect(readProjectClaim(registry, ID)).toEqual({
+        ...recorded,
+        folderPath: real(original.root),
+      });
+    } finally {
+      await rmdir(alias);
+    }
+  });
+
+  it('an entry-less folder whose identity the registry knows is held as an ask, and nothing is written', async () => {
+    const original = await createOriginal('Trip', ID);
+    const originalRoot = original.root;
+    const recorded = readProjectClaim(registry, ID);
+    if (recorded === undefined) throw new Error('expected the original to be recorded');
+    // The entry and the documents are lost, but the registry still names the folder by its identity.
+    original.database.exec('DELETE FROM project_folder_entry');
+    original.database.exec('DELETE FROM project_documents');
+
+    expect(claimProjectFolderId(original, registry)).toEqual({
+      kind: 'ask',
+      reason: 'entry-missing',
+      projectId: ID,
+      recordedPath: recorded.folderPath,
+      recordedAt: recorded.recordedAt,
+    });
+    expect(readProjectFolderEntry(original)).toBeUndefined();
+    expect(readProjectClaim(registry, ID)).toEqual(recorded);
+    expect((await openProjectFolderForEditing(originalRoot, registry)).kind).toBe('held');
+  });
+
+  it('the owner answers leave an entry-less folder held, and write nothing', async () => {
+    const original = await createOriginal('Trip', ID);
+    const recorded = readProjectClaim(registry, ID);
+    if (recorded === undefined) throw new Error('expected the original to be recorded');
+    original.database.exec('DELETE FROM project_folder_entry');
+    original.database.exec('DELETE FROM project_documents');
+    const held = {
+      kind: 'ask',
+      reason: 'entry-missing',
+      projectId: ID,
+      recordedPath: recorded.folderPath,
+      recordedAt: recorded.recordedAt,
+    };
+
+    expect(resolveProjectFolderAsOriginal(original, registry)).toEqual(held);
+    expect(resolveProjectFolderAsCopy(original, registry)).toEqual(held);
+    expect(readProjectFolderEntry(original)).toBeUndefined();
+    expect(readProjectClaim(registry, ID)).toEqual(recorded);
+  });
+
+  it('a new empty folder at the place of a moved original is settled as none, because only the identity counts', async () => {
+    const original = await createOriginal('Trip', ID);
+    const originalRoot = original.root;
+    forget(original);
+    await rename(originalRoot, join(scratch, 'Moved trip.joyproj'));
+    // A new empty project is made at the old place. It has its own identity, so the record does not hold it.
+    const fresh = track(await createProjectFolder(scratch, 'Trip'));
+
+    expect(claimProjectFolderId(fresh, registry)).toEqual({ kind: 'none' });
+  });
+
+  it('recording the same id again gives an entry-less folder its entry back, as the original', async () => {
+    const original = await createOriginal('Trip', ID);
+    original.database.exec('DELETE FROM project_folder_entry');
+    original.database.exec('DELETE FROM project_documents');
+
+    recordNewProjectFolder(original, entryFor(original.root, ID), registry);
+
+    expect(readProjectFolderEntry(original)?.id).toBe(ID);
+    expect(claimProjectFolderId(original, registry)).toEqual({ kind: 'kept' });
   });
 
   it('a folder whose path is missing is unverifiable, and nothing is written', async () => {

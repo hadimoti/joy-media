@@ -70,6 +70,16 @@ export type ProjectFolderClaim =
       /** When that place was recorded, for the owner's prompt. */
       readonly recordedAt: string;
     }
+  | {
+      readonly kind: 'ask';
+      readonly reason: 'entry-missing';
+      /** The project id the registry records for this folder's identity: the id its lost entry named. */
+      readonly projectId: string;
+      /** Where that record was last seen, for the owner's prompt. */
+      readonly recordedPath: string;
+      /** When that place was recorded, for the owner's prompt. */
+      readonly recordedAt: string;
+    }
   | { readonly kind: 'unverifiable' };
 
 /**
@@ -247,8 +257,13 @@ export function recordNewProjectFolder(
     if (current === undefined) {
       writeProjectFolderEntry(folder, { ...entry, homeRoot: storedPlace(root) });
     }
-    // A retry keeps the record it already has, with its time, as an original answer does.
-    if (!isRetry) recordClaim(registry, entry.id, own.identity, root);
+    // A retry keeps the record it already has, with its time, as an original answer does. A record made through
+    // an alias takes the real place, and keeps its time.
+    if (!isRetry) {
+      recordClaim(registry, entry.id, own.identity, root);
+    } else if (existing !== undefined && existing.folderPath !== storedPlace(root)) {
+      writeProjectClaim(registry, { ...existing, folderPath: storedPlace(root) });
+    }
   });
 }
 
@@ -325,10 +340,9 @@ export function resolveProjectFolderAsOriginal(
   return inClaimTransactions<ProjectFolderClaim>(folder, registry, () => {
     const root = resolve(folder.root);
     const entry = readProjectFolderEntry(folder);
-    // No entry and no documents is 'none', even when a registry record names this folder's identity or place.
-    // The wiring must check the registry before it writes a new id to such a folder.
+    // No entry and no documents: held when the registry names this folder's identity, otherwise none.
     if (entry === undefined) {
-      return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : { kind: 'none' };
+      return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : entryLessClaim(registry, root);
     }
     const own = readIdentity(root);
     if (own.kind !== 'known') return { kind: 'unverifiable' };
@@ -349,8 +363,13 @@ export function resolveProjectFolderAsOriginal(
         );
       }
     }
-    // A folder already recorded here keeps its record and its time, so nothing is written there.
-    if (!isRecordedHere) recordClaim(registry, entry.id, own.identity, root);
+    // A folder already recorded here keeps its record and its time. Only a record made through an alias is
+    // rewritten, to the real place, so that it outlives the alias.
+    if (!isRecordedHere) {
+      recordClaim(registry, entry.id, own.identity, root);
+    } else if (record !== undefined && record.folderPath !== storedPlace(root)) {
+      writeProjectClaim(registry, { ...record, folderPath: storedPlace(root) });
+    }
     if (!isHomeAt(entry, root)) {
       writeProjectFolderEntry(folder, { ...entry, homeRoot: storedPlace(root) });
     }
@@ -373,10 +392,9 @@ export function resolveProjectFolderAsCopy(
   return inClaimTransactions<ProjectFolderClaim>(folder, registry, () => {
     const root = resolve(folder.root);
     const entry = readProjectFolderEntry(folder);
-    // No entry and no documents is 'none', even when a registry record names this folder's identity or place.
-    // The wiring must check the registry before it writes a new id to such a folder.
+    // No entry and no documents: held when the registry names this folder's identity, otherwise none.
     if (entry === undefined) {
-      return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : { kind: 'none' };
+      return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : entryLessClaim(registry, root);
     }
     const own = readIdentity(root);
     if (own.kind !== 'known') return { kind: 'unverifiable' };
@@ -423,10 +441,9 @@ function settleClaim(
 ): ProjectFolderClaim {
   // Read inside the transaction, so the decision and the write see the same entry.
   const entry = readProjectFolderEntry(folder);
-  // No entry and no documents is 'none', even when a registry record names this folder's identity or place.
-  // The wiring must check the registry before it writes a new id to such a folder.
+  // No entry and no documents: held when the registry names this folder's identity, otherwise none.
   if (entry === undefined) {
-    return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : { kind: 'none' };
+    return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : entryLessClaim(registry, root);
   }
   const own = readIdentity(root);
   if (own.kind !== 'known') return { kind: 'unverifiable' };
@@ -440,6 +457,10 @@ function settleClaim(
   // A copy of a lost original is home at the old place too, so the owner decides.
   if (record === undefined) return { kind: 'ask', reason: 'no-record' };
   if (record.folderIdentity === own.identity && isSamePlace(record.folderPath, root)) {
+    // A record made through an alias (a junction or a subst drive) takes the real place, and keeps its time.
+    if (record.folderPath !== storedPlace(root)) {
+      writeProjectClaim(registry, { ...record, folderPath: storedPlace(root) });
+    }
     if (!isHomeAt(entry, root)) {
       writeProjectFolderEntry(folder, { ...entry, homeRoot: storedPlace(root) });
     }
@@ -718,8 +739,8 @@ function realPathOrUndefined(path: string): string | undefined {
 
 /**
  * The place a folder is stored under: its real path, so that an alias (a subst drive, a junction)
- * never outlives the drive it names. A folder whose real path cannot be read is refused, so nothing is
- * ever stored under an alias.
+ * never outlives the drive it names. A folder whose real path cannot be read is refused. Every record the claims
+ * write takes this place, and a record made through an alias is rewritten to it.
  */
 function storedPlace(root: string): string {
   const place = realPathOrUndefined(root);
@@ -780,11 +801,15 @@ function holdsAnyDocuments(folder: ProjectFolder): boolean {
 
 /**
  * True when this folder, by its identity, already has a record under a project id other than the given one.
- * A new folder has a new identity, so a stale record at its path does not refuse it. The guard covers new-folder
- * records only. A renewal and an owner's original answer write records without it, since the owner may make a
- * live clone the original, so one identity can then hold records under two ids. A record left by a partly
- * applied renewal, or by a renewed clone that shares this identity, counts here too. Then a retry of the original's
- * own id is refused, because another id's record holds the identity. That refusal writes nothing, and it fails closed.
+ * A stale record at a new folder's path does not refuse it, because the new folder has its own identity. That relies
+ * on identities never being reused: NTFS file references carry a sequence number, so a deleted file's identity is not
+ * reused, but ReFS and other volumes are not verified yet (a real-volume check). A reused identity that matches a stale
+ * record refuses the folder, and nothing in this module clears a record: clearing is an owner decision.
+ * The guard covers new-folder records only. A renewal and an owner's original answer write records without it, since
+ * the owner may make a live clone the original, so one identity can then hold records under two ids. A record left by
+ * a partly applied renewal, or by a renewed clone that shares this identity, counts here too. Then a retry of the
+ * original's own id is refused, because another id's record holds the identity. That refusal writes nothing, and it
+ * fails closed.
  */
 function folderRecordedUnderOtherId(
   registry: ProjectClaimRegistry,
@@ -796,6 +821,33 @@ function folderRecordedUnderOtherId(
       .prepare('SELECT 1 FROM project_claims WHERE folder_identity = ? AND project_id <> ? LIMIT 1')
       .get(identity, id) !== undefined
   );
+}
+
+/**
+ * A folder with no entry and no documents. The registry may still name it by its identity: then its entry was lost,
+ * and the owner decides, so it is held as an ask. Only the identity counts. A new empty folder at the place of a
+ * moved original has its own identity, so it is settled as none.
+ */
+function entryLessClaim(registry: ProjectClaimRegistry, root: string): ProjectFolderClaim {
+  const own = readIdentity(root);
+  // Without an identity no record can be ruled out, so the folder stays closed.
+  if (own.kind === 'missing' || own.kind === 'unreadable') return { kind: 'unverifiable' };
+  // A volume that gives no identities can hold no record.
+  if (own.kind === 'no-identity') return { kind: 'none' };
+  const row = registry.database
+    .prepare(
+      'SELECT project_id, folder_path, recorded_at FROM project_claims WHERE folder_identity = ? LIMIT 1',
+    )
+    .get(own.identity) as
+    { project_id: string; folder_path: string; recorded_at: string } | undefined;
+  if (row === undefined) return { kind: 'none' };
+  return {
+    kind: 'ask',
+    reason: 'entry-missing',
+    projectId: row.project_id,
+    recordedPath: row.folder_path,
+    recordedAt: row.recorded_at,
+  };
 }
 
 /** True when this folder has a document keyed by the given id. */
@@ -881,14 +933,13 @@ const JSON_STRING_TOKEN = /"[^"\\]*(?:\\.[^"\\]*)*"/g;
  * Replaces the old id where a JSON string holds it exactly: as a value, or as an object key, at any
  * depth. Only string tokens are read and replaced, so every number, space and other string keeps its
  * exact text. A number beyond 2^53 would not survive a parse and a stringify. Returns undefined when no
- * string holds the old id. The text must be valid JSON. The old id is unique to this project, so a string
- * equal to it names this project. Ownership is decided by a document's key (see documentsNameOtherIds), not
- * by strings in its body, so an id of another project inside a body is left alone. User text that is exactly
- * the old id is renamed as well, since the rule is by whole string. The rule relies on two things: project ids
- * are random, so no other project carries the old id, and the wiring never stores another project's id as a
- * whole string in a document that is renamed. The store checks neither one. Its claims and recordNewProjectFolder
- * accept the id they are given, and newProjectId makes random ids only for renewals, so the wiring must create the
- * ids of new projects at random.
+ * string holds the old id. The text must be valid JSON. A whole-string match is taken to name this lineage: the
+ * original, and a copy that still shares its id until it is renewed, both carry the id, and a browser project may
+ * share it by owner decision. Ownership is decided by a document's key (see documentsNameOtherIds), not by strings in
+ * its body, so an id of another project inside a body is left alone. User text that is exactly the old id is renamed
+ * as well, since the rule is by whole string. The wiring keeps any other project's id out of renamed strings. The
+ * store does not check that: its claims and recordNewProjectFolder accept the id they are given, and newProjectId
+ * makes random ids only for renewals, so the wiring must create the ids of new projects at random.
  */
 function renameIdInJson(text: string, previousId: string, id: string): string | undefined {
   const result = text.replace(JSON_STRING_TOKEN, (token) =>
