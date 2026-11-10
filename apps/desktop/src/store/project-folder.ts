@@ -26,6 +26,11 @@ export const PROJECT_CACHE_DIRECTORY = 'cache';
 const STORED_PATH_PATTERN = /^assets\/[a-f0-9]{64}\.bin$/;
 const RESERVED_WINDOWS_NAME = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
 const DEFAULT_TITLE_LENGTH = 80;
+/** How long a folder's connection waits for another writer. A claim shortens this while it runs. */
+export const PROJECT_FOLDER_BUSY_WAIT_MS = 5000;
+/** A listing never waits longer than this for folders that are being written, in all. */
+const LISTING_WAIT_BUDGET_MS = 1000;
+const LISTING_WAIT_PER_FOLDER_MS = 200;
 
 export interface ProjectFolder {
   /** The `NAME.joyproj` directory. */
@@ -130,16 +135,20 @@ export async function createProjectFolder(
   }
   await mkdir(join(root, PROJECT_ASSETS_DIRECTORY));
   await mkdir(join(root, PROJECT_CACHE_DIRECTORY));
-  return attachProjectFolder(root, now);
+  return attachProjectFolder(root, now, PROJECT_FOLDER_BUSY_WAIT_MS);
 }
 
 /**
  * Opens an existing project folder. A missing `cache/` is recreated, since it is rebuildable and
  * the project does not depend on it. A missing `project.sqlite` or `assets/` is refused.
+ *
+ * This does not settle the folder's project id. The app opens a project for editing only through
+ * `openProjectFolderForEditing` (project-folder-identity.ts), which settles the id first.
  */
 export async function openProjectFolder(
   root: string,
   now: () => string = defaultNow,
+  busyWaitMs: number = PROJECT_FOLDER_BUSY_WAIT_MS,
 ): Promise<ProjectFolder> {
   const databasePath = join(root, PROJECT_DATABASE_FILE);
   if (!existsSync(databasePath)) {
@@ -148,14 +157,20 @@ export async function openProjectFolder(
   if (!(await isDirectory(join(root, PROJECT_ASSETS_DIRECTORY)))) {
     throw new Error('Not a project folder: assets/ is missing');
   }
-  return attachProjectFolder(root, now);
+  return attachProjectFolder(root, now, busyWaitMs);
 }
 
-async function attachProjectFolder(root: string, now: () => string): Promise<ProjectFolder> {
+async function attachProjectFolder(
+  root: string,
+  now: () => string,
+  busyWaitMs: number,
+): Promise<ProjectFolder> {
   await mkdir(join(root, PROJECT_CACHE_DIRECTORY), { recursive: true });
 
   const database = new DatabaseSync(join(root, PROJECT_DATABASE_FILE));
   try {
+    // A second window or process that opens the same folder waits for the first one's write.
+    database.exec(`PRAGMA busy_timeout = ${busyWaitMs}`);
     ensureLocalAssetSchema(database);
     ensureProjectDocumentSchema(database);
     database.exec(ENTRY_TABLE_SQL);
@@ -285,15 +300,21 @@ export async function listProjectFolders(directory: string): Promise<ProjectFold
     if (isErrnoCode(error, 'ENOENT')) return [];
     throw error;
   }
-  return names.map((name) => readListing(join(directory, name)));
+  // The whole listing shares one wait budget, so many locked folders cannot stall it.
+  const deadline = Date.now() + LISTING_WAIT_BUDGET_MS;
+  return names.map((name) => readListing(join(directory, name), deadline));
 }
 
-function readListing(root: string): ProjectFolderListing {
+function readListing(root: string, deadline: number): ProjectFolderListing {
   const databasePath = join(root, PROJECT_DATABASE_FILE);
   if (!existsSync(databasePath)) return { root, problem: 'project.sqlite is missing' };
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) return { root, problem: 'not read: the listing ran out of time' };
   let database: DatabaseSync | undefined;
   try {
     database = new DatabaseSync(databasePath);
+    // A folder that is being written is waited for, but never past the listing's budget.
+    database.exec(`PRAGMA busy_timeout = ${Math.min(remaining, LISTING_WAIT_PER_FOLDER_MS)}`);
     const entry = readEntryFrom(database);
     return entry === undefined ? { root, problem: 'no catalog entry' } : { root, entry };
   } catch (error) {

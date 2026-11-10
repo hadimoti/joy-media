@@ -138,6 +138,39 @@ describe('new id on open', () => {
     expect(readProjectFolderEntry(second)?.id).toBe('project-stray');
   });
 
+  it('a claim cannot run inside another claim on the same copy, so the copy keeps one id', async () => {
+    const original = await createOriginal('Trip', ID);
+    const originalRoot = original.root;
+    forget(original);
+    const copyRoot = join(scratch, 'Trip copy.joyproj');
+    await cp(originalRoot, copyRoot, { recursive: true });
+    const first = track(await openProjectFolder(copyRoot));
+    const second = track(await openProjectFolder(copyRoot));
+    second.database.exec('PRAGMA busy_timeout = 0');
+    const siblings = await listProjectFolders(scratch);
+
+    let interleaved: unknown;
+    const claim = claimProjectFolderId(first, siblings, () => {
+      // Runs while the first claim holds the copy's write lock, as a second open would.
+      try {
+        claimProjectFolderId(second, siblings, () => 'project-second');
+      } catch (error) {
+        interleaved = error;
+      }
+      return 'project-first';
+    });
+
+    expect(interleaved).toBeInstanceOf(Error);
+    expect(claim).toEqual({ kind: 'renewed', previousId: ID, id: 'project-first' });
+    expect(readProjectFolderEntry(first)?.id).toBe('project-first');
+    expect(first.documents.get('project-first')?.document).toEqual({
+      id: 'project-first',
+      title: 'Trip',
+    });
+    expect(first.documents.get('project-second')).toBeUndefined();
+    expect(first.documents.get(ID)).toBeUndefined();
+  });
+
   it('a folder without a catalog entry is left alone', async () => {
     const empty = track(await createProjectFolder(scratch, 'Empty'));
 
