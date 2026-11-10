@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   openProjectClaimRegistry,
   readProjectClaim,
+  writeProjectClaim,
   type ProjectClaimRegistry,
 } from './project-claim-registry.js';
 import {
@@ -965,6 +966,88 @@ describe('new id on open', () => {
 
     expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
     expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a folder whose documents name another id is held by every claim and answer, and nothing is written', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    copy.database.prepare('UPDATE project_documents SET project_id = ?').run('project-other');
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(resolveProjectFolderAsOriginal(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(resolveProjectFolderAsCopy(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a live recorded place is live on any drive, so a copy is renewed', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    // The original's drive now reports another device, but its place still holds the recorded identity.
+    identityFaults.set(resolve(parse(originalRoot).root), { identity: { dev: 999n, ino: 1n } });
+
+    expect(claimProjectFolderId(copy, registry)).toMatchObject({ kind: 'renewed', previousId: ID });
+  });
+
+  it('a recorded place that is missing is unverifiable when its drive cannot be read', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    identityFaults.set(real(originalRoot), { code: 'ENOENT' });
+    identityFaults.set(resolve(parse(originalRoot).root), { code: 'EIO' });
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+  });
+
+  it('a recorded place on a network share is unverifiable while the share cannot be read', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    const share = '\\\\server\\share\\Trip.joyproj';
+    writeProjectClaim(registry, {
+      projectId: ID,
+      folderIdentity: '1:2',
+      folderPath: share,
+      recordedAt: '2026-11-10T00:00:00.000Z',
+    });
+    identityFaults.set(resolve(share), { code: 'ENOENT' });
+    identityFaults.set(resolve('\\\\server\\share\\'), { code: 'ENOENT' });
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(share);
+  });
+
+  it('a rollback that cannot say whether its connection is still in a transaction is reported', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    let failRollback = true;
+    // A connection whose ROLLBACK fails, and whose transaction state cannot be read.
+    const unreadable = new Proxy(copy.database, {
+      get(target, property) {
+        if (property === 'isTransaction') throw new Error('database is not open');
+        if (property === 'exec') {
+          return (sql: string) => {
+            if (failRollback && sql === 'ROLLBACK') throw new Error('simulated rollback failure');
+            return target.exec(sql);
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const stub: ProjectFolder = { ...copy, database: unreadable };
+
+    let failure: unknown;
+    try {
+      // Refused, because the original is still where it was recorded. Then the rollback fails.
+      resolveProjectFolderAsOriginal(stub, registry);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(ProjectClaimRollbackError);
+    expect((failure as ProjectClaimRollbackError).original).toBeInstanceOf(
+      ProjectClaimRefusedError,
+    );
+    expect((failure as ProjectClaimRollbackError).rollbackFailures).toHaveLength(1);
+
+    // The copy's transaction is still open, because its rollback was made to fail. Run the real one.
+    failRollback = false;
+    copy.database.exec('ROLLBACK');
     expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
   });
 

@@ -195,11 +195,7 @@ export function recordNewProjectFolder(
       );
     }
     // Documents of another project id mean this is not that project's folder, whatever its entry says.
-    const holdsOtherDocuments =
-      folder.database
-        .prepare('SELECT 1 FROM project_documents WHERE project_id <> ? LIMIT 1')
-        .get(entry.id) !== undefined;
-    if (holdsOtherDocuments) {
+    if (documentsNameOtherIds(folder, entry.id)) {
       throw new ProjectRecordRefusedError(
         'other-id-held',
         'This folder holds documents of another project id',
@@ -311,6 +307,7 @@ export function resolveProjectFolderAsOriginal(
     const own = readIdentity(root);
     if (own.kind !== 'known') return { kind: 'unverifiable' };
     if (realPathOrUndefined(root) === undefined) return { kind: 'unverifiable' };
+    if (documentsNameOtherIds(folder, entry.id)) return { kind: 'unverifiable' };
     const record = readProjectClaim(registry, entry.id);
     const isRecordedHere =
       record !== undefined &&
@@ -350,6 +347,7 @@ export function resolveProjectFolderAsCopy(
     const own = readIdentity(root);
     if (own.kind !== 'known') return { kind: 'unverifiable' };
     if (realPathOrUndefined(root) === undefined) return { kind: 'unverifiable' };
+    if (documentsNameOtherIds(folder, entry.id)) return { kind: 'unverifiable' };
     const record = readProjectClaim(registry, entry.id);
     if (record !== undefined) {
       const sameIdentity = record.folderIdentity === own.identity;
@@ -387,6 +385,8 @@ function settleClaim(
   if (own.kind !== 'known') return { kind: 'unverifiable' };
   // A real path that cannot be read is never a guess: nothing is decided or written for it.
   if (realPathOrUndefined(root) === undefined) return { kind: 'unverifiable' };
+  // Documents that name another id make the folder inconsistent, so nothing is decided for it.
+  if (documentsNameOtherIds(folder, entry.id)) return { kind: 'unverifiable' };
 
   const record = readProjectClaim(registry, entry.id);
   // Without a record, nothing says which folder is the original, even where this one is home.
@@ -450,8 +450,8 @@ function renewAsCopy(
  * after the registry's, the folder keeps its old id, and the registry keeps the record it committed.
  * For a claim that renewed the folder, that record names an id no folder holds. For an owner's answer,
  * the record already names the answering folder. Either way the caller gets ProjectClaimBusyError and must
- * run the claim again. Running it again is safe: an answer finds its own record and settles again, and a
- * renewal may leave one more record.
+ * run the claim again. Running it again is safe. An original answer finds its own record and settles
+ * again. A copy answer renews the folder again, and that may leave one more record.
  */
 function inClaimTransactions<T>(
   folder: ProjectFolder,
@@ -665,6 +665,15 @@ function recordClaim(
 
 function newProjectId(): string {
   return `project-${randomUUID()}`;
+}
+
+/** True when a folder's documents carry an id other than the one its entry names. */
+function documentsNameOtherIds(folder: ProjectFolder, id: string): boolean {
+  return (
+    folder.database
+      .prepare('SELECT 1 FROM project_documents WHERE project_id <> ? LIMIT 1')
+      .get(id) !== undefined
+  );
 }
 
 /** True when the stored home path is this folder's real place. An alias stored as the home is not. */
