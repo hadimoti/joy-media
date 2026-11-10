@@ -14,6 +14,7 @@ import {
   ProjectClaimBusyError,
   ProjectClaimRefusedError,
   ProjectClaimRollbackError,
+  ProjectRecordRefusedError,
   answerProjectFolderAsk,
   claimProjectFolderId,
   identityFromStats,
@@ -41,11 +42,23 @@ const identityFaults = vi.hoisted(
   () => new Map<string, { identity?: { dev: bigint; ino: bigint }; code?: string }>(),
 );
 
+/** Folder paths whose real path cannot be read, although the folder itself can be read. */
+const realpathFaults = vi.hoisted(() => new Set<string>());
+
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof NodeFs>();
   const { resolve: resolvePath } = await import('node:path');
+  const realpathSync = Object.assign((target: string) => actual.realpathSync(target), {
+    native: (target: string) => {
+      if (realpathFaults.has(resolvePath(target))) {
+        throw Object.assign(new Error('EACCES: simulated'), { code: 'EACCES' });
+      }
+      return actual.realpathSync.native(target);
+    },
+  });
   return {
     ...actual,
+    realpathSync,
     statSync: (target: string, options?: unknown) => {
       const fault = identityFaults.get(resolvePath(target));
       if (fault?.code !== undefined) {
@@ -78,6 +91,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   identityFaults.clear();
+  realpathFaults.clear();
   for (const folder of opened) folder.close();
   for (const rival of rivals) rival.close();
   registry.close();
@@ -92,6 +106,16 @@ function track(folder: ProjectFolder): ProjectFolder {
 function forget(folder: ProjectFolder): void {
   folder.close();
   opened = opened.filter((item) => item !== folder);
+}
+
+/** The reason a rule refused the record, or undefined when the call did not refuse it. */
+function reasonOf(action: () => unknown): string | undefined {
+  try {
+    action();
+  } catch (error) {
+    return error instanceof ProjectRecordRefusedError ? error.reason : undefined;
+  }
+  return undefined;
 }
 
 function entryFor(root: string, id: string): ProjectFolderEntry {
@@ -285,10 +309,14 @@ describe('new id on open', () => {
     const originalRoot = original.root;
     const junction = join(scratch, 'Trip link');
     await symlink(originalRoot, junction, 'junction');
+    // A home path stored through the alias, as an older build could store it.
+    const stored = readProjectFolderEntry(original);
+    if (stored === undefined) throw new Error('expected a stored entry');
+    writeProjectFolderEntry(original, { ...stored, homeRoot: junction });
     const viaJunction = track(await openProjectFolder(junction));
     try {
       expect(claimProjectFolderId(viaJunction, registry)).toEqual({ kind: 'kept' });
-      // The home path keeps its real place: opening through the alias does not rewrite it.
+      // The alias is rewritten to the real place on open, so a stored home path is always a real path.
       expect(readProjectFolderEntry(viaJunction)?.homeRoot).toBe(real(originalRoot));
       expect(() => resolveProjectFolderAsCopy(viaJunction, registry)).toThrow('recorded original');
       expect(claimProjectFolderId(original, registry)).toEqual({ kind: 'kept' });
@@ -318,6 +346,38 @@ describe('new id on open', () => {
     expect(claimProjectFolderId(atRealPlace, registry)).toEqual({ kind: 'kept' });
   });
 
+  it('a folder whose real path cannot be read is not recorded, and nothing is written', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Unreadable'));
+    realpathFaults.add(resolve(folder.root));
+
+    expect(
+      reasonOf(() => recordNewProjectFolder(folder, entryFor(folder.root, ID), registry)),
+    ).toBe('unreadable-place');
+    expect(readProjectClaim(registry, ID)).toBeUndefined();
+    expect(readProjectFolderEntry(folder)).toBeUndefined();
+  });
+
+  it('a folder whose real path cannot be read is unverifiable, and nothing is written', async () => {
+    const { copy, copyRoot, originalRoot } = await openedCopyOfOriginal();
+    realpathFaults.add(resolve(copyRoot));
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(resolveProjectFolderAsOriginal(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(resolveProjectFolderAsCopy(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a copy answer changes nothing while the recorded original cannot be read', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    identityFaults.set(real(originalRoot), { code: 'ENOENT' });
+    identityFaults.set(resolve(parse(originalRoot).root), { code: 'ENOENT' });
+
+    expect(resolveProjectFolderAsCopy(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
   it('a recorded place on a volume that is not mounted is unverifiable, not gone', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
     identityFaults.set(real(originalRoot), { code: 'ENOENT' });
@@ -335,6 +395,7 @@ describe('new id on open', () => {
       kind: 'ask',
       reason: 'claimant-missing',
       recordedPath: real(originalRoot),
+      recordedAt: readProjectClaim(registry, ID)?.recordedAt,
     });
   });
 
@@ -423,6 +484,8 @@ describe('new id on open', () => {
 
     expect(claimProjectFolderId(first, registry)).toEqual({ kind: 'ask', reason: 'no-record' });
     expect(resolveProjectFolderAsOriginal(first, registry)).toEqual({ kind: 'claimed' });
+    // The hazard in wiring requirement k: after an 'original' answer, the other folder renews on its next
+    // open without an ask. The wiring must list the sibling folders before it accepts that answer.
     expect(claimProjectFolderId(second, registry)).toMatchObject({
       kind: 'renewed',
       previousId: 'project-stray',
@@ -471,8 +534,8 @@ describe('new id on open', () => {
     const original = statSync(originalRoot, { bigint: true });
     identityFaults.set(resolve(copyRoot), { identity: { dev: original.dev, ino: original.ino } });
 
-    expect(() => recordNewProjectFolder(copy, entryFor(copyRoot, ID), registry)).toThrow(
-      'already recorded for another folder',
+    expect(reasonOf(() => recordNewProjectFolder(copy, entryFor(copyRoot, ID), registry))).toBe(
+      'id-recorded-elsewhere',
     );
     expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
   });
@@ -488,7 +551,6 @@ describe('new id on open', () => {
     const second = track(await openProjectFolder(copyRoot));
     const rival = openProjectClaimRegistry(registryPath);
     rivals.push(rival);
-    rival.database.exec('PRAGMA busy_timeout = 0');
 
     let interleaved: unknown;
     const claim = claimProjectFolderId(first, registry, () => {
@@ -565,7 +627,10 @@ describe('new id on open', () => {
 
   it('a registry commit that fails leaves the folder with its old id', async () => {
     const { copy } = await openedCopyOfOriginal();
-    registry.database.exec('PRAGMA busy_timeout = 0');
+    // A read blocks a commit only under the default rollback journal, which this test relies on.
+    expect(registry.database.prepare('PRAGMA journal_mode').get()).toEqual({
+      journal_mode: 'delete',
+    });
     const reader = new DatabaseSync(registryPath);
     try {
       // A read that stays open blocks the registry's commit, which comes first.
@@ -632,9 +697,11 @@ describe('new id on open', () => {
     const folder = track(await createProjectFolder(scratch, 'Holds one'));
     writeProjectFolderEntry(folder, entryFor(folder.root, 'project-first-id'));
 
-    expect(() =>
-      recordNewProjectFolder(folder, entryFor(folder.root, 'project-second-id'), registry),
-    ).toThrow('already holds a different project id');
+    expect(
+      reasonOf(() =>
+        recordNewProjectFolder(folder, entryFor(folder.root, 'project-second-id'), registry),
+      ),
+    ).toBe('other-id-held');
     expect(readProjectFolderEntry(folder)?.id).toBe('project-first-id');
   });
 
@@ -718,6 +785,189 @@ describe('new id on open', () => {
     expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
   });
 
+  it('a folder that holds an id with no record is not recorded as its original', async () => {
+    const { copy, copyRoot } = await openedCopyOfOriginal();
+    // A lost registry: the copy still holds the id, and no record names any folder for it.
+    registry.database.prepare('DELETE FROM project_claims WHERE project_id = ?').run(ID);
+
+    let refusal: unknown;
+    try {
+      recordNewProjectFolder(copy, entryFor(copyRoot, ID), registry);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(ProjectRecordRefusedError);
+    expect((refusal as ProjectRecordRefusedError).reason).toBe('id-held-unrecorded');
+    expect(readProjectClaim(registry, ID)).toBeUndefined();
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+  });
+
+  it('a copy answer changes nothing when a clone of the original has an unknown recorded place', async () => {
+    const { copy, copyRoot, originalRoot } = await openedCopyOfOriginal();
+    // The copy reads as the original's identity, and the original's place cannot be read at all.
+    const original = statSync(originalRoot, { bigint: true });
+    identityFaults.set(resolve(copyRoot), { identity: { dev: original.dev, ino: original.ino } });
+    identityFaults.set(real(originalRoot), { code: 'ENOENT' });
+    identityFaults.set(resolve(parse(originalRoot).root), { code: 'ENOENT' });
+
+    expect(resolveProjectFolderAsCopy(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a moved original cannot be settled as a copy either', async () => {
+    const original = await createOriginal('Trip', ID);
+    const originalRoot = original.root;
+    forget(original);
+    const movedRoot = join(scratch, 'Moved trip.joyproj');
+    await rename(originalRoot, movedRoot);
+    const moved = track(await openProjectFolder(movedRoot));
+
+    expect(() => resolveProjectFolderAsCopy(moved, registry)).toThrow(ProjectClaimRefusedError);
+    expect(readProjectFolderEntry(moved)?.id).toBe(ID);
+  });
+
+  it('a stored look instance text that is not JSON stops the renewal before anything is written', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    copy.database
+      .prepare('UPDATE project_documents SET look_instances_json = ? WHERE project_id = ?')
+      .run('{"id":', ID);
+
+    expect(() => claimProjectFolderId(copy, registry)).toThrow(SyntaxError);
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(copy.database.prepare('SELECT project_id FROM project_documents').all()).toEqual([
+      { project_id: ID },
+    ]);
+  });
+
+  it('when both rollbacks fail, both failures are reported', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    let failRollback = true;
+    // A connection whose ROLLBACK fails while the flag is set.
+    const failing = (database: DatabaseSync): DatabaseSync =>
+      new Proxy(database, {
+        get(target, property) {
+          const value: unknown = Reflect.get(target, property, target);
+          if (property === 'exec') {
+            return (sql: string) => {
+              if (failRollback && sql === 'ROLLBACK') throw new Error('simulated rollback failure');
+              return target.exec(sql);
+            };
+          }
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    const stubFolder: ProjectFolder = { ...copy, database: failing(copy.database) };
+    const stubRegistry: ProjectClaimRegistry = {
+      database: failing(registry.database),
+      close: () => registry.close(),
+    };
+
+    let failure: unknown;
+    try {
+      // Refused, because the original is still where it was recorded. Then both rollbacks fail.
+      resolveProjectFolderAsOriginal(stubFolder, stubRegistry);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(ProjectClaimRollbackError);
+    expect((failure as ProjectClaimRollbackError).rollbackFailures).toHaveLength(2);
+
+    // Both transactions are still open, because their rollbacks were made to fail. Run the real ones.
+    failRollback = false;
+    copy.database.exec('ROLLBACK');
+    registry.database.exec('ROLLBACK');
+    expect(claimProjectFolderId(copy, registry)).toMatchObject({ kind: 'renewed', previousId: ID });
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a folder that holds the id in its documents, with no entry, is not recorded as its original', async () => {
+    const { copy, copyRoot } = await openedCopyOfOriginal();
+    // The record and the entry row are gone, but the documents still carry the id.
+    registry.database.prepare('DELETE FROM project_claims WHERE project_id = ?').run(ID);
+    copy.database.exec('DELETE FROM project_folder_entry');
+
+    expect(reasonOf(() => recordNewProjectFolder(copy, entryFor(copyRoot, ID), registry))).toBe(
+      'id-held-unrecorded',
+    );
+    expect(readProjectClaim(registry, ID)).toBeUndefined();
+    expect(readProjectFolderEntry(copy)).toBeUndefined();
+  });
+
+  it('a folder whose identity cannot be read is refused as unreadable, not as having no identity', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Unreadable identity'));
+    identityFaults.set(resolve(folder.root), { code: 'EIO' });
+
+    expect(
+      reasonOf(() => recordNewProjectFolder(folder, entryFor(folder.root, ID), registry)),
+    ).toBe('unreadable-identity');
+    expect(readProjectClaim(registry, ID)).toBeUndefined();
+  });
+
+  it('a folder that is missing is refused as missing', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Gone folder'));
+    const missing: ProjectFolder = { ...folder, root: join(scratch, 'Not here.joyproj') };
+
+    expect(
+      reasonOf(() => recordNewProjectFolder(missing, entryFor(missing.root, ID), registry)),
+    ).toBe('missing-folder');
+    expect(readProjectClaim(registry, ID)).toBeUndefined();
+  });
+
+  it('a volume that gives no folder identities is refused as having none', async () => {
+    const folder = track(await createProjectFolder(scratch, 'No identity'));
+    identityFaults.set(resolve(folder.root), { identity: { dev: 1n, ino: 0n } });
+
+    expect(
+      reasonOf(() => recordNewProjectFolder(folder, entryFor(folder.root, ID), registry)),
+    ).toBe('no-folder-identity');
+  });
+
+  it('a recorded place whose drive now holds another volume is unverifiable, not gone', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    // The original's folder is missing, and its drive letter now belongs to another volume.
+    identityFaults.set(real(originalRoot), { code: 'ENOENT' });
+    identityFaults.set(resolve(parse(originalRoot).root), { identity: { dev: 999n, ino: 1n } });
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a folder whose documents belong to another project id is not recorded under this id', async () => {
+    const { copy, copyRoot, originalRoot } = await openedCopyOfOriginal();
+    // No entry row and no record, and the one document is keyed to another project.
+    copy.database.exec('DELETE FROM project_folder_entry');
+    registry.database.prepare('DELETE FROM project_claims WHERE project_id = ?').run(ID);
+    copy.database.prepare('UPDATE project_documents SET project_id = ?').run('project-other');
+
+    expect(reasonOf(() => recordNewProjectFolder(copy, entryFor(copyRoot, ID), registry))).toBe(
+      'other-id-held',
+    );
+    expect(readProjectFolderEntry(copy)).toBeUndefined();
+    expect(readProjectClaim(registry, ID)).toBeUndefined();
+  });
+
+  it('a recorded place that holds another identity on another volume is unverifiable, not gone', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    // The place now holds another folder, and its drive now holds another volume too.
+    identityFaults.set(real(originalRoot), { identity: { dev: 999n, ino: 1n } });
+    identityFaults.set(resolve(parse(originalRoot).root), { identity: { dev: 999n, ino: 1n } });
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a recorded place that cannot be read is unverifiable, not gone, even on its own volume', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    identityFaults.set(real(originalRoot), { code: 'EIO' });
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
   it('a folder whose path is missing is unverifiable, and nothing is written', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
     const missing: ProjectFolder = { ...copy, root: join(scratch, 'Not here.joyproj') };
@@ -725,6 +975,115 @@ describe('new id on open', () => {
     expect(claimProjectFolderId(missing, registry)).toEqual({ kind: 'unverifiable' });
     expect(readProjectFolderEntry(copy)?.id).toBe(ID);
     expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a renewal keeps every number and every other character of the stored text', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    // Numbers beyond 2^53, a negative zero and an exponent. A parse and a stringify would change them.
+    const documentText = `{"id":"${ID}","title":"Trip","frames":9007199254740993,"big":12345678901234567890,"ratio":0.1,"exp":1e21,"zero":-0,"quoted":"\\"${ID}\\"","note":"see ${ID} later","byProject":{"${ID}":"kept"}}`;
+    const lookText = `{"id":"${ID}","instances":{"inst-1":{"projectId":"${ID}","seq":[9007199254740993,-0]}}}`;
+    copy.database
+      .prepare(
+        'UPDATE project_documents SET document_json = ?, look_instances_json = ? WHERE project_id = ?',
+      )
+      .run(documentText, lookText, ID);
+
+    const claim = claimProjectFolderId(copy, registry);
+    if (claim.kind !== 'renewed') throw new Error('expected a renewed id');
+    const after = copy.database
+      .prepare(
+        'SELECT document_json, look_instances_json FROM project_documents WHERE project_id = ?',
+      )
+      .get(claim.id) as { document_json: string; look_instances_json: string };
+    // Only the string tokens that hold the old id change. A quoted or partial match stays as written.
+    expect(after.document_json).toBe(documentText.replaceAll(`"${ID}"`, `"${claim.id}"`));
+    expect(after.look_instances_json).toBe(lookText.replaceAll(`"${ID}"`, `"${claim.id}"`));
+  });
+
+  it('a copy whose new id is already recorded is refused, and nothing changes', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+
+    // The id is already recorded for the original. A copy that took it would overwrite that record.
+    expect(reasonOf(() => claimProjectFolderId(copy, registry, () => ID))).toBe('id-in-use');
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a stored text that is not JSON stops the renewal before anything is written', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    copy.database
+      .prepare('UPDATE project_documents SET document_json = ? WHERE project_id = ?')
+      .run('{"id":', ID);
+
+    expect(() => claimProjectFolderId(copy, registry)).toThrow(SyntaxError);
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(copy.database.prepare('SELECT project_id FROM project_documents').all()).toEqual([
+      { project_id: ID },
+    ]);
+  });
+
+  it('an id written with a unicode escape is renamed like the id itself', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    // - is a hyphen, so the escaped text decodes to the old id and is renamed as a whole string.
+    copy.database
+      .prepare('UPDATE project_documents SET document_json = ? WHERE project_id = ?')
+      .run('{"id":"project\\u002dtrip","title":"Trip"}', ID);
+
+    const claim = claimProjectFolderId(copy, registry);
+    if (claim.kind !== 'renewed') throw new Error('expected a renewed id');
+    const row = copy.database
+      .prepare('SELECT document_json FROM project_documents WHERE project_id = ?')
+      .get(claim.id) as { document_json: string };
+    expect(row.document_json).toBe(`{"id":"${claim.id}","title":"Trip"}`);
+  });
+
+  it('a renewal with no look instances renames the document alone', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    copy.database
+      .prepare(
+        'UPDATE project_documents SET document_json = ?, look_instances_json = NULL WHERE project_id = ?',
+      )
+      .run(`{"id":"${ID}"}`, ID);
+
+    const claim = claimProjectFolderId(copy, registry);
+    if (claim.kind !== 'renewed') throw new Error('expected a renewed id');
+    expect(
+      copy.database
+        .prepare(
+          'SELECT document_json, look_instances_json FROM project_documents WHERE project_id = ?',
+        )
+        .get(claim.id),
+    ).toEqual({ document_json: `{"id":"${claim.id}"}`, look_instances_json: null });
+  });
+
+  it('a string that is exactly the old id is renamed wherever it stands, even as a title', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    copy.database
+      .prepare('UPDATE project_documents SET document_json = ? WHERE project_id = ?')
+      .run(`{"id":"${ID}","title":"${ID}"}`, ID);
+
+    const claim = claimProjectFolderId(copy, registry);
+    if (claim.kind !== 'renewed') throw new Error('expected a renewed id');
+    const row = copy.database
+      .prepare('SELECT document_json FROM project_documents WHERE project_id = ?')
+      .get(claim.id) as { document_json: string };
+    // The rule is by whole string: a title that equals the old id changes too.
+    expect(row.document_json).toBe(`{"id":"${claim.id}","title":"${claim.id}"}`);
+  });
+
+  it('a renewal handles a stored string of ten megabytes', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    const body = 'a'.repeat(10 * 1024 * 1024);
+    copy.database
+      .prepare('UPDATE project_documents SET document_json = ? WHERE project_id = ?')
+      .run(JSON.stringify({ id: ID, body }), ID);
+
+    const claim = claimProjectFolderId(copy, registry);
+    if (claim.kind !== 'renewed') throw new Error('expected a renewed id');
+    const row = copy.database
+      .prepare('SELECT document_json FROM project_documents WHERE project_id = ?')
+      .get(claim.id) as { document_json: string };
+    expect(JSON.parse(row.document_json)).toEqual({ id: claim.id, body });
   });
 
   it('a stored document that does not name the old id is kept byte for byte', async () => {
@@ -757,8 +1116,9 @@ describe('new id on open', () => {
     expect(after).toEqual(before);
   });
 
-  it('only the top-level id and the document key name the project in the folder schema', async () => {
+  it('the entry id is the project id, and the document key is the only project column', async () => {
     const { copy } = await openedCopyOfOriginal();
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
     copy.assets.register({
       id: `asset-${'a'.repeat(64)}`,
       kind: 'video',

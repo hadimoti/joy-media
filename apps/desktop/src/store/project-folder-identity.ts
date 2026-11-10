@@ -38,17 +38,19 @@ import {
  * - otherwise the owner must say which folder is which (`ask`): a folder with no record, which is
  *   what a lost registry looks like, or a recorded original that is no longer where it was recorded.
  *   The claim writes nothing for an `ask`.
- * A folder or a recorded place that cannot be read at all, or whose drive is not mounted, is
- * `unverifiable`, never a guess.
+ * A folder whose real path cannot be read, a folder or a recorded place that cannot be read at all,
+ * and a recorded place whose drive is not mounted are `unverifiable`, never a guess.
  *
  * The app opens a project for editing only through `openProjectFolderForEditing`. It settles the id
  * first, so an editable folder never carries an id that has not been settled. The owner's answer to
  * an ask goes through `answerProjectFolderAsk`, which never hands out an editable folder.
  *
  * Every claim takes the registry's write lock first, then the folder's, each in one transaction, and
- * commits the registry first. Each lock waits at most CLAIM_WAIT_MS. A claim that cannot get a lock
- * throws ProjectClaimBusyError. It writes nothing when it fails before the registry commit. A folder
- * commit that fails after the registry commit leaves one registry record (see inClaimTransactions).
+ * commits the registry first. Each of the four lock steps (the two begins and the two commits) waits at
+ * most CLAIM_WAIT_MS. Once a claim holds the registry's lock, it keeps that lock through two of those
+ * waits and its work. A claim that cannot get a lock throws ProjectClaimBusyError. It writes nothing when
+ * it fails before the registry commit. A folder commit that fails after the registry commit leaves the
+ * registry record that was committed (see inClaimTransactions).
  */
 
 export type ProjectFolderClaim =
@@ -80,19 +82,20 @@ export class ProjectClaimBusyError extends Error {
 
 /**
  * A claim failed, and a rollback failed too, so a connection may still be inside a transaction. The
- * app should restart before it claims again. The failure that started it is kept in `original`.
+ * app should restart before it claims again. The failure that started it is kept in `original`, and
+ * every rollback that failed is in `rollbackFailures`.
  */
 export class ProjectClaimRollbackError extends Error {
   readonly original: unknown;
-  readonly rollbackFailure: unknown;
+  readonly rollbackFailures: readonly unknown[];
 
-  constructor(original: unknown, rollbackFailure: unknown) {
+  constructor(original: unknown, rollbackFailures: readonly unknown[]) {
     super(
       'A project claim failed and could not be rolled back. Restart the app before claiming again.',
     );
     this.name = 'ProjectClaimRollbackError';
     this.original = original;
-    this.rollbackFailure = rollbackFailure;
+    this.rollbackFailures = rollbackFailures;
   }
 }
 
@@ -105,6 +108,28 @@ export class ProjectClaimRefusedError extends Error {
   constructor(reason: 'recorded-original-in-place' | 'recorded-original-itself', message: string) {
     super(message);
     this.name = 'ProjectClaimRefusedError';
+    this.reason = reason;
+  }
+}
+
+/**
+ * A folder could not be recorded, or an id could not be taken, because a rule refused it. `reason`
+ * says which rule. Nothing was written.
+ */
+export class ProjectRecordRefusedError extends Error {
+  readonly reason:
+    | 'no-folder-identity'
+    | 'missing-folder'
+    | 'unreadable-identity'
+    | 'unreadable-place'
+    | 'other-id-held'
+    | 'id-recorded-elsewhere'
+    | 'id-held-unrecorded'
+    | 'id-in-use';
+
+  constructor(reason: ProjectRecordRefusedError['reason'], message: string) {
+    super(message);
+    this.name = 'ProjectRecordRefusedError';
     this.reason = reason;
   }
 }
@@ -124,8 +149,11 @@ export type EditableProjectFolder =
 /**
  * Writes the catalog entry of a folder made in place, and records the folder as the original of its
  * id, in one transaction. The create path uses this, so a new folder never waits for a first open
- * to be recorded. A retry for the same folder is safe: the stored entry is kept, and the record is
- * written again.
+ * to be recorded. A folder that already holds the id, through its entry or its documents, is recorded
+ * again only as a retry for this same folder at this place, which keeps the stored entry. Any other
+ * record is refused, and so is a folder that holds the id with no matching record: then the owner decides.
+ * A folder whose real path cannot be read is refused. Every refusal is a ProjectRecordRefusedError, and
+ * nothing is written.
  */
 export function recordNewProjectFolder(
   folder: ProjectFolder,
@@ -135,12 +163,47 @@ export function recordNewProjectFolder(
   inClaimTransactions<void>(folder, registry, () => {
     const root = resolve(folder.root);
     const own = readIdentity(root);
-    if (own.kind !== 'known') {
-      throw new Error('The volume gives no folder identity, so the project cannot be recorded');
+    if (own.kind === 'missing') {
+      throw new ProjectRecordRefusedError(
+        'missing-folder',
+        'The folder is missing, so the project cannot be recorded',
+      );
+    }
+    if (own.kind === 'unreadable') {
+      throw new ProjectRecordRefusedError(
+        'unreadable-identity',
+        'The folder identity cannot be read, so the project cannot be recorded',
+      );
+    }
+    if (own.kind === 'no-identity') {
+      throw new ProjectRecordRefusedError(
+        'no-folder-identity',
+        'The volume gives no folder identity, so the project cannot be recorded',
+      );
+    }
+    if (realPathOrUndefined(root) === undefined) {
+      throw new ProjectRecordRefusedError(
+        'unreadable-place',
+        'The real path of the folder cannot be read, so the project cannot be recorded by its place',
+      );
     }
     const current = readProjectFolderEntry(folder);
     if (current !== undefined && current.id !== entry.id) {
-      throw new Error('This folder already holds a different project id');
+      throw new ProjectRecordRefusedError(
+        'other-id-held',
+        'This folder already holds a different project id',
+      );
+    }
+    // Documents of another project id mean this is not that project's folder, whatever its entry says.
+    const holdsOtherDocuments =
+      folder.database
+        .prepare('SELECT 1 FROM project_documents WHERE project_id <> ? LIMIT 1')
+        .get(entry.id) !== undefined;
+    if (holdsOtherDocuments) {
+      throw new ProjectRecordRefusedError(
+        'other-id-held',
+        'This folder holds documents of another project id',
+      );
     }
     const existing = readProjectClaim(registry, entry.id);
     // Only a retry for this same folder may find a record. Any other record names another folder.
@@ -149,7 +212,23 @@ export function recordNewProjectFolder(
       existing.folderIdentity === own.identity &&
       isSamePlace(existing.folderPath, root);
     if (existing !== undefined && !isRetry) {
-      throw new Error(`The project id ${entry.id} is already recorded for another folder`);
+      throw new ProjectRecordRefusedError(
+        'id-recorded-elsewhere',
+        `The project id ${entry.id} is already recorded for another folder`,
+      );
+    }
+    // A folder holds the id through its entry or through a document. It can be recorded only by its own
+    // retry: a holder with no record is a copy, or a folder whose registry was lost, and nothing here can
+    // tell which.
+    const holdsDocuments =
+      folder.database
+        .prepare('SELECT 1 FROM project_documents WHERE project_id = ? LIMIT 1')
+        .get(entry.id) !== undefined;
+    if ((current !== undefined || holdsDocuments) && !isRetry) {
+      throw new ProjectRecordRefusedError(
+        'id-held-unrecorded',
+        `This folder holds the project id ${entry.id}, but no record says it is the original`,
+      );
     }
     if (current === undefined) {
       writeProjectFolderEntry(folder, { ...entry, homeRoot: storedPlace(root) });
@@ -231,6 +310,7 @@ export function resolveProjectFolderAsOriginal(
     if (entry === undefined) return { kind: 'none' };
     const own = readIdentity(root);
     if (own.kind !== 'known') return { kind: 'unverifiable' };
+    if (realPathOrUndefined(root) === undefined) return { kind: 'unverifiable' };
     const record = readProjectClaim(registry, entry.id);
     const isRecordedHere =
       record !== undefined &&
@@ -269,18 +349,21 @@ export function resolveProjectFolderAsCopy(
     if (entry === undefined) return { kind: 'none' };
     const own = readIdentity(root);
     if (own.kind !== 'known') return { kind: 'unverifiable' };
+    if (realPathOrUndefined(root) === undefined) return { kind: 'unverifiable' };
     const record = readProjectClaim(registry, entry.id);
-    if (record !== undefined && record.folderIdentity === own.identity) {
-      if (isSamePlace(record.folderPath, root)) {
+    if (record !== undefined) {
+      const sameIdentity = record.folderIdentity === own.identity;
+      if (sameIdentity && isSamePlace(record.folderPath, root)) {
         throw new ProjectClaimRefusedError(
           'recorded-original-itself',
           'This folder is the recorded original of its project id, so it cannot be a copy',
         );
       }
+      // A recorded place that cannot be read is never a guess, so the answer changes nothing.
       const place = recordedPlace(record);
       if (place === 'unknown') return { kind: 'unverifiable' };
-      // The recorded place is gone, so this folder is the moved original. A live place is a clone.
-      if (place === 'gone') {
+      // The same identity at a gone place is the moved original. A live place is a clone.
+      if (sameIdentity && place === 'gone') {
         throw new ProjectClaimRefusedError(
           'recorded-original-itself',
           'This folder is the recorded original of its project id, so it cannot be a copy',
@@ -302,6 +385,8 @@ function settleClaim(
   if (entry === undefined) return { kind: 'none' };
   const own = readIdentity(root);
   if (own.kind !== 'known') return { kind: 'unverifiable' };
+  // A real path that cannot be read is never a guess: nothing is decided or written for it.
+  if (realPathOrUndefined(root) === undefined) return { kind: 'unverifiable' };
 
   const record = readProjectClaim(registry, entry.id);
   // Without a record, nothing says which folder is the original, even where this one is home.
@@ -346,6 +431,13 @@ function renewAsCopy(
   createId: () => string,
 ): ProjectFolderClaim {
   const id = createId();
+  // A repeated id would overwrite the record of another folder, so a taken id is refused.
+  if (readProjectClaim(registry, id) !== undefined) {
+    throw new ProjectRecordRefusedError(
+      'id-in-use',
+      'The new project id is already recorded for another folder',
+    );
+  }
   renewIdentity(folder, entry, id, root);
   recordClaim(registry, id, identity, root);
   return { kind: 'renewed', previousId: entry.id, id };
@@ -355,18 +447,22 @@ function renewAsCopy(
  * Runs `work` inside a write transaction on the registry and on the folder. The registry's lock is
  * taken first, so claims on this machine line up in one order, and the registry commits first. If
  * the registry's commit fails, both roll back and nothing changed. If the folder's commit fails
- * after the registry's, the folder keeps its old id, and the registry holds one extra record for an
- * id that no folder has. That record does no harm.
+ * after the registry's, the folder keeps its old id, and the registry keeps the record it committed.
+ * For a claim that renewed the folder, that record names an id no folder holds. For an owner's answer,
+ * the record already names the answering folder. Either way the caller gets ProjectClaimBusyError and must
+ * run the claim again. Running it again is safe: an answer finds its own record and settles again, and a
+ * renewal may leave one more record.
  */
 function inClaimTransactions<T>(
   folder: ProjectFolder,
   registry: ProjectClaimRegistry,
   work: () => T,
 ): T {
-  folder.database.exec(`PRAGMA busy_timeout = ${CLAIM_WAIT_MS}`);
   let registryOpen = false;
   let folderOpen = false;
   try {
+    folder.database.exec(`PRAGMA busy_timeout = ${CLAIM_WAIT_MS}`);
+    registry.database.exec(`PRAGMA busy_timeout = ${CLAIM_WAIT_MS}`);
     registry.database.exec('BEGIN IMMEDIATE');
     registryOpen = true;
     folder.database.exec('BEGIN IMMEDIATE');
@@ -379,13 +475,15 @@ function inClaimTransactions<T>(
     return result;
   } catch (error) {
     // Both connections are rolled back, even when the first rollback fails, so a folder failure
-    // never leaves the registry inside a transaction.
+    // never leaves the registry inside a transaction. Every rollback that fails is reported.
     const folderFailure = folderOpen ? rollback(folder.database) : undefined;
     const registryFailure = registryOpen ? rollback(registry.database) : undefined;
     const claimError = busyAsClaimError(error);
-    const rollbackFailure = folderFailure ?? registryFailure;
-    if (rollbackFailure !== undefined) {
-      throw new ProjectClaimRollbackError(claimError, rollbackFailure);
+    const rollbackFailures = [folderFailure, registryFailure].filter(
+      (failure) => failure !== undefined,
+    );
+    if (rollbackFailures.length > 0) {
+      throw new ProjectClaimRollbackError(claimError, rollbackFailures);
     }
     throw claimError;
   } finally {
@@ -430,24 +528,37 @@ function busyAsClaimError(error: unknown): unknown {
   return isBusyError(error) ? new ProjectClaimBusyError() : error;
 }
 
-/** Rolls the connection back. Returns the failure only when the connection is still in a transaction. */
+/**
+ * Rolls the connection back. Returns the failure when the connection is still in a transaction, or when it
+ * cannot say whether it is. A closed connection cannot be asked, so its rollback failure is reported.
+ */
 function rollback(database: DatabaseSync): unknown {
   try {
     database.exec('ROLLBACK');
     return undefined;
   } catch (error) {
-    return database.isTransaction ? error : undefined;
+    return isInTransaction(database) ? error : undefined;
+  }
+}
+
+function isInTransaction(database: DatabaseSync): boolean {
+  try {
+    return database.isTransaction;
+  } catch {
+    return true;
   }
 }
 
 /**
- * A folder's identity on its volume. `missing` means the path is not there. `unknown` means the path
- * could not be read, or its volume gives no identities, so nothing can be decided from it.
+ * A folder's identity on its volume. `missing` means the path is not there. `unreadable` means the stat
+ * failed for another reason, such as a share that is unreachable. `no-identity` means the volume gives no
+ * identities. Nothing can be decided from any of the three.
  */
 type IdentityRead =
   | { readonly kind: 'known'; readonly identity: string }
   | { readonly kind: 'missing' }
-  | { readonly kind: 'unknown' };
+  | { readonly kind: 'unreadable' }
+  | { readonly kind: 'no-identity' };
 
 function readIdentity(root: string): IdentityRead {
   let stats: { readonly dev: bigint; readonly ino: bigint };
@@ -455,29 +566,36 @@ function readIdentity(root: string): IdentityRead {
     stats = statSync(root, { bigint: true });
   } catch (error) {
     const code = (error as { readonly code?: unknown }).code;
-    return code === 'ENOENT' || code === 'ENOTDIR' ? { kind: 'missing' } : { kind: 'unknown' };
+    return code === 'ENOENT' || code === 'ENOTDIR' ? { kind: 'missing' } : { kind: 'unreadable' };
   }
   const identity = identityFromStats(stats);
-  return identity === undefined ? { kind: 'unknown' } : { kind: 'known', identity };
+  return identity === undefined ? { kind: 'no-identity' } : { kind: 'known', identity };
 }
 
 /**
- * Where a recorded folder is now. `live`: its place still holds the recorded identity. `gone`: the
- * place is missing, or holds another identity, on a drive that is mounted. `unknown`: the place
- * cannot be read, or its drive is not mounted at all.
+ * Where a recorded folder is now. `live`: its place still holds the recorded identity, on whatever drive it
+ * is. `gone`: the place is missing, or holds another identity, and the drive at the place is the volume the
+ * record was made on, which is mounted. `unknown`: the place cannot be read, its volume gives no identities,
+ * or its drive is another volume or is not mounted at all, so nothing says whether the record's own volume
+ * is there.
  */
 function recordedPlace(record: ProjectClaim): 'live' | 'gone' | 'unknown' {
   const read = readIdentity(record.folderPath);
-  if (read.kind === 'unknown') return 'unknown';
-  if (read.kind === 'missing') return volumeIsPresent(record.folderPath) ? 'gone' : 'unknown';
-  return read.identity === record.folderIdentity ? 'live' : 'gone';
+  if (read.kind === 'known' && read.identity === record.folderIdentity) return 'live';
+  if (read.kind === 'unreadable' || read.kind === 'no-identity') return 'unknown';
+  return volumeIsPresent(record) ? 'gone' : 'unknown';
 }
 
-/** False when the drive or share that holds a path is not there, so the path cannot be read at all. */
-function volumeIsPresent(path: string): boolean {
+/**
+ * True when the drive at a recorded place is the volume the record was made on, and is mounted. Windows
+ * gives every path on a volume the same device number, so a drive letter that another volume has taken is
+ * not that volume.
+ */
+function volumeIsPresent(record: ProjectClaim): boolean {
   try {
-    statSync(parse(path).root);
-    return true;
+    const drive = statSync(parse(record.folderPath).root, { bigint: true });
+    // The identity starts with the device number of the volume the folder was on.
+    return `${drive.dev}` === record.folderIdentity.split(':')[0];
   } catch {
     return false;
   }
@@ -491,7 +609,12 @@ function isSamePlace(a: string, b: string): boolean {
   const left = realPathOrUndefined(a);
   const right = realPathOrUndefined(b);
   if (left === undefined || right === undefined) return false;
-  return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
+  return samePathText(left, right);
+}
+
+/** Two real paths name the same place as text. Windows paths are compared without case. */
+function samePathText(a: string, b: string): boolean {
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
 function realPathOrUndefined(path: string): string | undefined {
@@ -504,10 +627,18 @@ function realPathOrUndefined(path: string): string | undefined {
 
 /**
  * The place a folder is stored under: its real path, so that an alias (a subst drive, a junction)
- * never outlives the drive it names. A folder that cannot be resolved is stored as given.
+ * never outlives the drive it names. A folder whose real path cannot be read is refused, so nothing is
+ * ever stored under an alias.
  */
 function storedPlace(root: string): string {
-  return realPathOrUndefined(root) ?? root;
+  const place = realPathOrUndefined(root);
+  if (place === undefined) {
+    throw new ProjectRecordRefusedError(
+      'unreadable-place',
+      'The real path of the folder cannot be read, so it cannot be stored by its place',
+    );
+  }
+  return place;
 }
 
 /** The identity string for a stat result. A zero index means the volume gives no identities. */
@@ -536,8 +667,9 @@ function newProjectId(): string {
   return `project-${randomUUID()}`;
 }
 
+/** True when the stored home path is this folder's real place. An alias stored as the home is not. */
 function isHomeAt(entry: ProjectFolderEntry, root: string): boolean {
-  return entry.homeRoot !== undefined && isSamePlace(entry.homeRoot, root);
+  return entry.homeRoot !== undefined && samePathText(entry.homeRoot, storedPlace(root));
 }
 
 /**
@@ -545,8 +677,9 @@ function isHomeAt(entry: ProjectFolderEntry, root: string): boolean {
  * stored document and look instances. The revision is not changed. The caller holds the transaction.
  *
  * The timeline and visual ids are document ids, not always the project id, so each changes only when
- * it named the old project. Every other field of the entry is kept as it was read. A stored document
- * that does not name the old id is not rewritten at all.
+ * it named the old project. Every other field of the entry is kept as it was read. A stored text that
+ * does not hold the old id is not rewritten at all, and a rewritten text changes only the string tokens
+ * that hold the old id.
  */
 function renewIdentity(
   folder: ProjectFolder,
@@ -555,6 +688,17 @@ function renewIdentity(
   root: string,
 ): void {
   const previousId = entry.id;
+  const row = folder.database
+    .prepare(
+      'SELECT document_json, look_instances_json FROM project_documents WHERE project_id = ?',
+    )
+    .get(previousId) as
+    { readonly document_json: string; readonly look_instances_json: string | null } | undefined;
+  // Both stored texts must be JSON before anything is written, so a text that is not throws here.
+  if (row !== undefined) {
+    JSON.parse(row.document_json);
+    if (row.look_instances_json !== null) JSON.parse(row.look_instances_json);
+  }
   writeProjectFolderEntry(folder, {
     ...entry,
     id,
@@ -562,17 +706,13 @@ function renewIdentity(
     visualProjectId: entry.visualProjectId === previousId ? id : entry.visualProjectId,
     homeRoot: storedPlace(root),
   });
-  const row = folder.database
-    .prepare(
-      'SELECT document_json, look_instances_json FROM project_documents WHERE project_id = ?',
-    )
-    .get(previousId) as
-    { readonly document_json: string; readonly look_instances_json: string | null } | undefined;
   if (row === undefined) return;
-  const document = JSON.parse(row.document_json) as unknown;
+  const document = renameIdInJson(row.document_json, previousId, id);
   const lookInstances =
-    row.look_instances_json === null ? null : (JSON.parse(row.look_instances_json) as unknown);
-  if (!mentionsId(document, previousId) && !mentionsId(lookInstances, previousId)) {
+    row.look_instances_json === null
+      ? undefined
+      : renameIdInJson(row.look_instances_json, previousId, id);
+  if (document === undefined && lookInstances === undefined) {
     folder.database
       .prepare('UPDATE project_documents SET project_id = ? WHERE project_id = ?')
       .run(id, previousId);
@@ -582,41 +722,23 @@ function renewIdentity(
     .prepare(
       'UPDATE project_documents SET project_id = ?, document_json = ?, look_instances_json = ? WHERE project_id = ?',
     )
-    .run(
-      id,
-      JSON.stringify(renameIds(document, previousId, id)),
-      lookInstances === null ? null : JSON.stringify(renameIds(lookInstances, previousId, id)),
-      previousId,
-    );
+    .run(id, document ?? row.document_json, lookInstances ?? row.look_instances_json, previousId);
 }
 
-/** True when the old id stands alone anywhere in the value: as a whole value, or as a whole key. */
-function mentionsId(value: unknown, previousId: string): boolean {
-  if (value === previousId) return true;
-  if (Array.isArray(value)) return value.some((item) => mentionsId(item, previousId));
-  if (typeof value === 'object' && value !== null) {
-    return Object.entries(value).some(
-      ([key, item]) => key === previousId || mentionsId(item, previousId),
-    );
-  }
-  return false;
-}
+// Unrolled, so a long string does not push a backtrack entry for every one of its characters.
+const JSON_STRING_TOKEN = /"[^"\\]*(?:\\.[^"\\]*)*"/g;
 
 /**
- * Replaces the old id wherever it stands alone: as a whole value, or as a whole object key, at any
- * depth. Text that only contains it is left alone. The project schema has no nested project id field,
- * so this is a safety net for any nested reference.
+ * Replaces the old id where a JSON string holds it exactly: as a value, or as an object key, at any
+ * depth. Only string tokens are read and replaced, so every number, space and other string keeps its
+ * exact text. A number beyond 2^53 would not survive a parse and a stringify. Returns undefined when no
+ * string holds the old id. The text must be valid JSON. The old id is unique to this project, so a string
+ * equal to it names this project. A project document must never hold the id of another project, or a copy
+ * would rename that reference too.
  */
-function renameIds(value: unknown, previousId: string, id: string): unknown {
-  if (value === previousId) return id;
-  if (Array.isArray(value)) return value.map((item) => renameIds(item, previousId, id));
-  if (typeof value === 'object' && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key === previousId ? id : key,
-        renameIds(item, previousId, id),
-      ]),
-    );
-  }
-  return value;
+function renameIdInJson(text: string, previousId: string, id: string): string | undefined {
+  const result = text.replace(JSON_STRING_TOKEN, (token) =>
+    JSON.parse(token) === previousId ? JSON.stringify(id) : token,
+  );
+  return result === text ? undefined : result;
 }
