@@ -39,7 +39,8 @@ import {
  *   what a lost registry looks like, or a recorded original that is no longer where it was recorded.
  *   The claim writes nothing for an `ask`.
  * A folder whose real path cannot be read, a folder or a recorded place that cannot be read at all,
- * and a recorded place whose drive is not mounted are `unverifiable`, never a guess.
+ * and a recorded place whose drive is not mounted are `unverifiable`, never a guess. So is a folder whose
+ * documents name another project id, and a folder whose documents exist without an entry.
  *
  * The app opens a project for editing only through `openProjectFolderForEditing`. It settles the id
  * first, so an editable folder never carries an id that has not been settled. The owner's answer to
@@ -72,11 +73,16 @@ export type ProjectFolderClaim =
 /**
  * A claim could not get a lock in time. The folder was not changed, so the caller may try again. A
  * claim that fails after the registry commit leaves one registry record (see inClaimTransactions).
+ * `appliedInRegistry` says whether that happened. An answer that reports busy this way is partly applied.
  */
 export class ProjectClaimBusyError extends Error {
-  constructor() {
+  /** True when the registry had already committed this claim, so its record is in place. */
+  readonly appliedInRegistry: boolean;
+
+  constructor(appliedInRegistry = false) {
     super('The project is busy. Try again in a moment.');
     this.name = 'ProjectClaimBusyError';
+    this.appliedInRegistry = appliedInRegistry;
   }
 }
 
@@ -303,7 +309,9 @@ export function resolveProjectFolderAsOriginal(
   return inClaimTransactions<ProjectFolderClaim>(folder, registry, () => {
     const root = resolve(folder.root);
     const entry = readProjectFolderEntry(folder);
-    if (entry === undefined) return { kind: 'none' };
+    if (entry === undefined) {
+      return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : { kind: 'none' };
+    }
     const own = readIdentity(root);
     if (own.kind !== 'known') return { kind: 'unverifiable' };
     if (realPathOrUndefined(root) === undefined) return { kind: 'unverifiable' };
@@ -343,7 +351,9 @@ export function resolveProjectFolderAsCopy(
   return inClaimTransactions<ProjectFolderClaim>(folder, registry, () => {
     const root = resolve(folder.root);
     const entry = readProjectFolderEntry(folder);
-    if (entry === undefined) return { kind: 'none' };
+    if (entry === undefined) {
+      return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : { kind: 'none' };
+    }
     const own = readIdentity(root);
     if (own.kind !== 'known') return { kind: 'unverifiable' };
     if (realPathOrUndefined(root) === undefined) return { kind: 'unverifiable' };
@@ -380,7 +390,9 @@ function settleClaim(
 ): ProjectFolderClaim {
   // Read inside the transaction, so the decision and the write see the same entry.
   const entry = readProjectFolderEntry(folder);
-  if (entry === undefined) return { kind: 'none' };
+  if (entry === undefined) {
+    return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : { kind: 'none' };
+  }
   const own = readIdentity(root);
   if (own.kind !== 'known') return { kind: 'unverifiable' };
   // A real path that cannot be read is never a guess: nothing is decided or written for it.
@@ -450,8 +462,10 @@ function renewAsCopy(
  * after the registry's, the folder keeps its old id, and the registry keeps the record it committed.
  * For a claim that renewed the folder, that record names an id no folder holds. For an owner's answer,
  * the record already names the answering folder. Either way the caller gets ProjectClaimBusyError and must
- * run the claim again. Running it again is safe. An original answer finds its own record and settles
- * again. A copy answer renews the folder again, and that may leave one more record.
+ * run the claim again. Running it again is safe for an original answer, which finds its own record and
+ * settles again. A copy answer, and any claim that renews the folder, renews again and may leave one more
+ * record. A busy error with appliedInRegistry set means the answer is partly applied: its record is in
+ * place, so the same answer must be run again before the other folder is opened.
  */
 function inClaimTransactions<T>(
   folder: ProjectFolder,
@@ -460,6 +474,7 @@ function inClaimTransactions<T>(
 ): T {
   let registryOpen = false;
   let folderOpen = false;
+  let registryCommitted = false;
   try {
     folder.database.exec(`PRAGMA busy_timeout = ${CLAIM_WAIT_MS}`);
     registry.database.exec(`PRAGMA busy_timeout = ${CLAIM_WAIT_MS}`);
@@ -470,6 +485,7 @@ function inClaimTransactions<T>(
     const result = work();
     registry.database.exec('COMMIT');
     registryOpen = false;
+    registryCommitted = true;
     folder.database.exec('COMMIT');
     folderOpen = false;
     return result;
@@ -478,7 +494,7 @@ function inClaimTransactions<T>(
     // never leaves the registry inside a transaction. Every rollback that fails is reported.
     const folderFailure = folderOpen ? rollback(folder.database) : undefined;
     const registryFailure = registryOpen ? rollback(registry.database) : undefined;
-    const claimError = busyAsClaimError(error);
+    const claimError = busyAsClaimError(error, registryCommitted);
     const rollbackFailures = [folderFailure, registryFailure].filter(
       (failure) => failure !== undefined,
     );
@@ -524,8 +540,8 @@ export function isBusyError(error: unknown): boolean {
   return primary === SQLITE_BUSY || primary === SQLITE_LOCKED;
 }
 
-function busyAsClaimError(error: unknown): unknown {
-  return isBusyError(error) ? new ProjectClaimBusyError() : error;
+function busyAsClaimError(error: unknown, registryCommitted = false): unknown {
+  return isBusyError(error) ? new ProjectClaimBusyError(registryCommitted) : error;
 }
 
 /**
@@ -667,13 +683,23 @@ function newProjectId(): string {
   return `project-${randomUUID()}`;
 }
 
-/** True when a folder's documents carry an id other than the one its entry names. */
+/**
+ * True when a folder's documents carry an id other than the one its entry names. A NULL key counts too:
+ * the schema does not forbid one, and a document with no key is not this project's.
+ */
 function documentsNameOtherIds(folder: ProjectFolder, id: string): boolean {
   return (
     folder.database
-      .prepare('SELECT 1 FROM project_documents WHERE project_id <> ? LIMIT 1')
+      .prepare(
+        'SELECT 1 FROM project_documents WHERE project_id IS NULL OR project_id <> ? LIMIT 1',
+      )
       .get(id) !== undefined
   );
+}
+
+/** True when a folder has any document at all, whatever its key. */
+function holdsAnyDocuments(folder: ProjectFolder): boolean {
+  return folder.database.prepare('SELECT 1 FROM project_documents LIMIT 1').get() !== undefined;
 }
 
 /** True when the stored home path is this folder's real place. An alias stored as the home is not. */

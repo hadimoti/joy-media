@@ -1051,6 +1051,75 @@ describe('new id on open', () => {
     expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
   });
 
+  it('a folder whose documents exist without an entry is held by every claim and answer', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    copy.database.exec('DELETE FROM project_folder_entry');
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(resolveProjectFolderAsOriginal(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(resolveProjectFolderAsCopy(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectFolderEntry(copy)).toBeUndefined();
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a folder whose documents mix its own id with another id is held', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    copy.documents.put({
+      projectId: 'project-other',
+      baseRevisionId: '',
+      revisionId: 'r1',
+      document: { id: 'project-other', title: 'Other' },
+      lookInstances: { id: 'project-other', instances: {} },
+    });
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a claim that is busy after its registry record is committed says the record is in place', async () => {
+    const { copy, copyRoot } = await openedCopyOfOriginal();
+    const reader = new DatabaseSync(join(copyRoot, PROJECT_DATABASE_FILE));
+    let busy: unknown;
+    try {
+      // A read that stays open blocks the folder's commit, which comes after the registry's.
+      reader.exec('BEGIN');
+      reader.prepare('SELECT COUNT(*) AS n FROM project_folder_entry').get();
+      try {
+        claimProjectFolderId(copy, registry, () => 'project-next');
+      } catch (error) {
+        busy = error;
+      }
+    } finally {
+      reader.exec('ROLLBACK');
+      reader.close();
+    }
+    expect(busy).toBeInstanceOf(ProjectClaimBusyError);
+    expect((busy as ProjectClaimBusyError).appliedInRegistry).toBe(true);
+  });
+
+  it('a claim that is busy before its registry record is committed says nothing was applied', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    const reader = new DatabaseSync(registryPath);
+    let busy: unknown;
+    try {
+      // A read that stays open blocks the registry's commit, which comes first.
+      reader.exec('BEGIN');
+      reader.prepare('SELECT COUNT(*) AS n FROM project_claims').get();
+      try {
+        claimProjectFolderId(copy, registry, () => 'project-next');
+      } catch (error) {
+        busy = error;
+      }
+    } finally {
+      reader.exec('ROLLBACK');
+      reader.close();
+    }
+    expect(busy).toBeInstanceOf(ProjectClaimBusyError);
+    expect((busy as ProjectClaimBusyError).appliedInRegistry).toBe(false);
+    expect(readProjectClaim(registry, 'project-next')).toBeUndefined();
+  });
+
   it('a folder whose path is missing is unverifiable, and nothing is written', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
     const missing: ProjectFolder = { ...copy, root: join(scratch, 'Not here.joyproj') };
