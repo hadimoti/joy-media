@@ -35,6 +35,10 @@ import {
  *   original exists, so the owner decides which of the two is the original (`ask`, `duplicate-identity`);
  * - another folder is the recorded original, and that original is still where it was recorded:
  *   this folder is a copy and gets a new id (`renewed`);
+ * - a folder with no entry and no documents is settled by its identity alone, so the other bullets do not apply to
+ *   it. When the registry names its identity, the entry was lost, so the folder is held (`ask`, `entry-missing`).
+ *   When the registry does not name it, or the volume gives no identities, the claim is `none`. When the folder is
+ *   missing or its identity cannot be read, the claim is `unverifiable`. The claim writes nothing in each of these.
  * - otherwise the owner must say which folder is which (`ask`): a folder with no record, which is
  *   what a lost registry looks like, or a recorded original that is no longer where it was recorded.
  *   The claim writes nothing for an `ask`.
@@ -347,7 +351,7 @@ export function resolveProjectFolderAsOriginal(
   return inClaimTransactions<ProjectFolderClaim>(folder, registry, () => {
     const root = resolve(folder.root);
     const entry = readProjectFolderEntry(folder);
-    // No entry and no documents: held when the registry names this folder's identity, otherwise none.
+    // No entry and no documents: settled by its identity alone, as the module header says.
     if (entry === undefined) {
       return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : entryLessClaim(registry, root);
     }
@@ -399,7 +403,7 @@ export function resolveProjectFolderAsCopy(
   return inClaimTransactions<ProjectFolderClaim>(folder, registry, () => {
     const root = resolve(folder.root);
     const entry = readProjectFolderEntry(folder);
-    // No entry and no documents: held when the registry names this folder's identity, otherwise none.
+    // No entry and no documents: settled by its identity alone, as the module header says.
     if (entry === undefined) {
       return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : entryLessClaim(registry, root);
     }
@@ -448,7 +452,7 @@ export function resolveProjectFolderAsCopy(
  * record keeps its id, its place and its time. A folder that was moved, or that the registry does not name at this place,
  * is refused. So is a folder that already has its entry, a folder with documents but no entry, and a folder whose identity
  * more than one record names. A refusal writes nothing. The answer is `kept`: the folder keeps its id and its record,
- * and the app opens it for editing after this. A copy that still holds the same id is renewed the next time it
+ * and the caller may open it for editing after this. A copy that still holds the same id is renewed the next time it
  * opens, so this function does not look at other folders.
  */
 export function resolveProjectFolderAsRestored(
@@ -534,7 +538,7 @@ function settleClaim(
 ): ProjectFolderClaim {
   // Read inside the transaction, so the decision and the write see the same entry.
   const entry = readProjectFolderEntry(folder);
-  // No entry and no documents: held when the registry names this folder's identity, otherwise none.
+  // No entry and no documents: settled by its identity alone, as the module header says.
   if (entry === undefined) {
     return holdsAnyDocuments(folder) ? { kind: 'unverifiable' } : entryLessClaim(registry, root);
   }
