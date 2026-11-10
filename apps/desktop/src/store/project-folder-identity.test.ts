@@ -107,6 +107,13 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
+/** Places that the tests name as not verified as NTFS, keyed in lower case. Every other place counts as verified. */
+const volumeFaults = vi.hoisted(() => new Set<string>());
+
+vi.mock('./project-volume.js', () => ({
+  isVerifiedNtfsVolume: (place: string) => !volumeFaults.has(place.toLowerCase()),
+}));
+
 const ID = 'project-trip';
 
 /** The time a restore writes for both dates in these tests. */
@@ -132,6 +139,7 @@ beforeEach(async () => {
 afterEach(async () => {
   identityFaults.clear();
   realpathFaults.clear();
+  volumeFaults.clear();
   for (const folder of opened) folder.close();
   for (const rival of rivals) rival.close();
   registry.close();
@@ -154,6 +162,16 @@ function reasonOf(action: () => unknown): string | undefined {
     action();
   } catch (error) {
     return error instanceof ProjectRecordRefusedError ? error.reason : undefined;
+  }
+  return undefined;
+}
+
+/** The reason a claim rule refused the answer, or undefined when the call did not refuse it. */
+function claimRefusalOf(action: () => unknown): string | undefined {
+  try {
+    action();
+  } catch (error) {
+    return error instanceof ProjectClaimRefusedError ? error.reason : undefined;
   }
   return undefined;
 }
@@ -1751,6 +1769,102 @@ describe('new id on open', () => {
       ),
     ).toBe('no-record-here');
     expect(readProjectFolderEntry(moved)).toBeUndefined();
+  });
+
+  it('a copy answer on a folder whose identity changed at its own recorded place is refused, and writes nothing', async () => {
+    const original = await createOriginal('Trip', ID);
+    const recorded = readProjectClaim(registry, ID);
+    // The folder keeps its place, but the file system now gives it another identity.
+    identityFaults.set(faultKey(original.root), { identity: { dev: 1n, ino: 4242n } });
+
+    expect(claimRefusalOf(() => resolveProjectFolderAsCopy(original, registry))).toBe(
+      'identity-changed-at-place',
+    );
+    expect(readProjectClaim(registry, ID)).toEqual(recorded);
+    expect(readProjectFolderEntry(original)?.id).toBe(ID);
+  });
+
+  it('the owner settles a folder whose identity changed at its own recorded place as the original, under the same id', async () => {
+    const original = await createOriginal('Trip', ID);
+    identityFaults.set(faultKey(original.root), { identity: { dev: 1n, ino: 4242n } });
+
+    expect(resolveProjectFolderAsOriginal(original, registry)).toEqual({ kind: 'claimed' });
+    expect(readProjectClaim(registry, ID)).toMatchObject({
+      projectId: ID,
+      folderIdentity: '1:4242',
+      folderPath: real(original.root),
+    });
+    expect(readProjectFolderEntry(original)?.id).toBe(ID);
+  });
+
+  it('a folder on a volume that is not verified as NTFS is held as unverifiable, and nothing is written', async () => {
+    const original = await createOriginal('Trip', ID);
+    const recorded = readProjectClaim(registry, ID);
+    volumeFaults.add(real(original.root).toLowerCase());
+
+    expect(claimProjectFolderId(original, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectClaim(registry, ID)).toEqual(recorded);
+    expect((await openProjectFolderForEditing(original.root, registry)).kind).toBe('held');
+  });
+
+  it('an entry-less folder on a volume that is not verified as NTFS is held as unverifiable, not opened as none', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Trip'));
+    volumeFaults.add(real(folder.root).toLowerCase());
+
+    expect(claimProjectFolderId(folder, registry)).toEqual({ kind: 'unverifiable' });
+  });
+
+  it('a folder on a volume that is not verified as NTFS cannot be recorded or restored, and writes nothing', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Trip'));
+    volumeFaults.add(real(folder.root).toLowerCase());
+
+    expect(
+      reasonOf(() => recordNewProjectFolder(folder, entryFor(folder.root, ID), registry)),
+    ).toBe('unverified-volume');
+    expect(
+      reasonOf(() =>
+        resolveProjectFolderAsRestored(folder, registry, { title: 'Trip', now: RESTORED_AT }),
+      ),
+    ).toBe('unverified-volume');
+    expect(readProjectClaim(registry, ID)).toBeUndefined();
+    expect(readProjectFolderEntry(folder)).toBeUndefined();
+  });
+
+  it('a recorded place on a volume that is not verified as NTFS is unknown, so a copy is unverifiable and writes nothing', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    const recorded = readProjectClaim(registry, ID);
+    volumeFaults.add(real(originalRoot).toLowerCase());
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(resolveProjectFolderAsCopy(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectClaim(registry, ID)).toEqual(recorded);
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+  });
+
+  it('the original answer on a folder on a volume that is not verified as NTFS is unverifiable, and writes nothing', async () => {
+    const original = await createOriginal('Trip', ID);
+    const recorded = readProjectClaim(registry, ID);
+    volumeFaults.add(real(original.root).toLowerCase());
+
+    expect(resolveProjectFolderAsOriginal(original, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectClaim(registry, ID)).toEqual(recorded);
+    expect(readProjectFolderEntry(original)?.id).toBe(ID);
+  });
+
+  it('the original answer on a folder whose real path cannot be read is unverifiable, and writes nothing', async () => {
+    const original = await createOriginal('Trip', ID);
+    const recorded = readProjectClaim(registry, ID);
+    realpathFaults.add(faultKey(original.root));
+
+    expect(resolveProjectFolderAsOriginal(original, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectClaim(registry, ID)).toEqual(recorded);
+  });
+
+  it('an entry-less folder whose real path cannot be read is unverifiable, not opened as none', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Trip'));
+    realpathFaults.add(faultKey(folder.root));
+
+    expect(claimProjectFolderId(folder, registry)).toEqual({ kind: 'unverifiable' });
   });
 
   it('a restore refuses a folder whose identity another project id also holds, and writes nothing', async () => {

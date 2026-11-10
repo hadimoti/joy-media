@@ -17,6 +17,7 @@ import {
   type ProjectFolder,
   type ProjectFolderEntry,
 } from './project-folder.js';
+import { isVerifiedNtfsVolume } from './project-volume.js';
 
 /**
  * New id on open (owner decision, 10 Nov 2026). A project folder keeps its project id. A copy of it
@@ -38,12 +39,14 @@ import {
  * - a folder with no entry and no documents is settled by its identity alone, so the other bullets do not apply to
  *   it. When the registry names its identity, the entry was lost, so the folder is held (`ask`, `entry-missing`).
  *   When the registry does not name it, or the volume gives no identities, the claim is `none`. When the folder is
- *   missing or its identity cannot be read, the claim is `unverifiable`. The claim writes nothing in each of these.
+ *   missing, its identity cannot be read, or its volume is not verified as NTFS, the claim is `unverifiable`. The claim
+ *   writes nothing in each of these.
  * - otherwise the owner must say which folder is which (`ask`): a folder with no record, which is
  *   what a lost registry looks like, or a recorded original that is no longer where it was recorded.
  *   The claim writes nothing for an `ask`.
  * A folder whose real path cannot be read, a folder or a recorded place that cannot be read at all,
- * and a recorded place whose drive is not mounted are `unverifiable`, never a guess. So is a folder whose
+ * and a recorded place whose drive is not mounted are `unverifiable`, never a guess. So are a folder and a recorded
+ * place on a volume that is not verified as NTFS. So is a folder whose
  * documents name another project id, and a folder whose documents exist without an entry.
  *
  * The app should open a project for editing only through `openProjectFolderForEditing`, which settles the
@@ -133,9 +136,13 @@ export class ProjectClaimRollbackError extends Error {
  * The owner's answer was refused by a rule, not by a fault. `reason` says which rule refused it.
  */
 export class ProjectClaimRefusedError extends Error {
-  readonly reason: 'recorded-original-in-place' | 'recorded-original-itself';
+  readonly reason:
+    'recorded-original-in-place' | 'recorded-original-itself' | 'identity-changed-at-place';
 
-  constructor(reason: 'recorded-original-in-place' | 'recorded-original-itself', message: string) {
+  constructor(
+    reason: 'recorded-original-in-place' | 'recorded-original-itself' | 'identity-changed-at-place',
+    message: string,
+  ) {
     super(message);
     this.name = 'ProjectClaimRefusedError';
     this.reason = reason;
@@ -160,7 +167,8 @@ export class ProjectRecordRefusedError extends Error {
     | 'no-title'
     | 'has-entry'
     | 'has-documents'
-    | 'no-record-here';
+    | 'no-record-here'
+    | 'unverified-volume';
 
   constructor(reason: ProjectRecordRefusedError['reason'], message: string) {
     super(message);
@@ -187,7 +195,8 @@ export type EditableProjectFolder =
  * to be recorded. A folder that already holds the id, through its entry or its documents, is recorded
  * again only as a retry for this same folder at this place, which keeps the stored entry. Any other
  * record is refused, and so is a folder that holds the id with no matching record: then the owner decides.
- * A folder whose real path cannot be read is refused. A folder that already has a record under another id,
+ * A folder whose real path cannot be read is refused, and so is a folder on a volume that is not verified as NTFS. A
+ * folder that already has a record under another id,
  * by its identity, is refused too. Every refusal is a ProjectRecordRefusedError, and nothing is written.
  */
 export function recordNewProjectFolder(
@@ -210,16 +219,22 @@ export function recordNewProjectFolder(
         'The folder identity cannot be read, so the project cannot be recorded',
       );
     }
+    if (own.kind === 'unreadable-place') {
+      throw new ProjectRecordRefusedError(
+        'unreadable-place',
+        'The real path of the folder cannot be read, so the project cannot be recorded by its place',
+      );
+    }
+    if (own.kind === 'unverified-volume') {
+      throw new ProjectRecordRefusedError(
+        'unverified-volume',
+        'This drive is not verified as NTFS, so the project cannot be recorded',
+      );
+    }
     if (own.kind === 'no-identity') {
       throw new ProjectRecordRefusedError(
         'no-folder-identity',
         'The volume gives no folder identity, so the project cannot be recorded',
-      );
-    }
-    if (realPathOrUndefined(root) === undefined) {
-      throw new ProjectRecordRefusedError(
-        'unreadable-place',
-        'The real path of the folder cannot be read, so the project cannot be recorded by its place',
       );
     }
     const current = readProjectFolderEntry(folder);
@@ -391,9 +406,8 @@ export function resolveProjectFolderAsOriginal(
 /**
  * The owner's answer to an ask: this folder is a copy. It gets a new id. If the folder is really the
  * original, moved to another drive, its id changes when it is opened again. The ask prompt must say so.
- * A folder whose identity changed at its own recorded place, as after a restore that changed file identities, is
- * renewed by this answer too. Its id then changes, and nothing in the app changes it back: the old id keeps its
- * record at this place. The ask prompt must say this too.
+ * A folder whose identity changed at its own recorded place is refused: a new id there could not be undone. The
+ * owner's original answer settles it instead, under the same id.
  */
 export function resolveProjectFolderAsCopy(
   folder: ProjectFolder,
@@ -418,6 +432,14 @@ export function resolveProjectFolderAsCopy(
         throw new ProjectClaimRefusedError(
           'recorded-original-itself',
           'This folder is the recorded original of its project id, so it cannot be a copy',
+        );
+      }
+      // The folder is at its recorded place, but its identity changed there. Only the owner's original answer settles
+      // it: that re-records the new identity under the same id. A new id here could not be undone.
+      if (!sameIdentity && isSamePlace(record.folderPath, root)) {
+        throw new ProjectClaimRefusedError(
+          'identity-changed-at-place',
+          'This folder is at the recorded place of its project id, but its identity changed, so it cannot be a copy',
         );
       }
       // A recorded place that cannot be read is never a guess, so the answer changes nothing.
@@ -451,7 +473,8 @@ export function resolveProjectFolderAsCopy(
  * is what the editor writes for every new project; and the restore time for both dates. It writes nothing else, so the
  * record keeps its id, its place and its time. A folder that was moved, or that the registry does not name at this place,
  * is refused. So is a folder that already has its entry, a folder with documents but no entry, and a folder whose identity
- * more than one record names. A refusal writes nothing. The answer is `kept`: the folder keeps its id and its record,
+ * more than one record names, or a folder on a volume that is not verified as NTFS. A refusal writes nothing. The answer
+ * is `kept`: the folder keeps its id and its record,
  * and the caller may open it for editing after this. A copy that still holds the same id is renewed the next time it
  * opens, so this function does not look at other folders.
  */
@@ -479,6 +502,18 @@ export function resolveProjectFolderAsRestored(
       throw new ProjectRecordRefusedError(
         'unreadable-identity',
         'The folder identity cannot be read, so the project cannot be restored',
+      );
+    }
+    if (own.kind === 'unreadable-place') {
+      throw new ProjectRecordRefusedError(
+        'unreadable-place',
+        'The real path of the folder cannot be read, so the project cannot be restored',
+      );
+    }
+    if (own.kind === 'unverified-volume') {
+      throw new ProjectRecordRefusedError(
+        'unverified-volume',
+        'This drive is not verified as NTFS, so the project cannot be restored',
       );
     }
     if (own.kind === 'no-identity') {
@@ -761,13 +796,17 @@ function isInTransaction(database: DatabaseSync): boolean {
 /**
  * A folder's identity on its volume. `missing` means the path is not there. `unreadable` means the stat
  * failed for another reason, such as a share that is unreachable. `no-identity` means the volume gives no
- * identities. Nothing can be decided from any of the three.
+ * identities. `unverified-volume` means the volume is not verified as NTFS, so its identity is not trusted.
+ * `unreadable-place` means the real path cannot be read, so the volume under it cannot be checked.
+ * Nothing can be decided from any of these.
  */
 type IdentityRead =
   | { readonly kind: 'known'; readonly identity: string }
   | { readonly kind: 'missing' }
   | { readonly kind: 'unreadable' }
-  | { readonly kind: 'no-identity' };
+  | { readonly kind: 'no-identity' }
+  | { readonly kind: 'unverified-volume' }
+  | { readonly kind: 'unreadable-place' };
 
 function readIdentity(root: string): IdentityRead {
   let stats: { readonly dev: bigint; readonly ino: bigint };
@@ -777,6 +816,11 @@ function readIdentity(root: string): IdentityRead {
     const code = (error as { readonly code?: unknown }).code;
     return code === 'ENOENT' || code === 'ENOTDIR' ? { kind: 'missing' } : { kind: 'unreadable' };
   }
+  // A real path that cannot be read is never trusted, because the volume under it cannot be checked.
+  const place = realPathOrUndefined(root);
+  if (place === undefined) return { kind: 'unreadable-place' };
+  // A volume that is not verified as NTFS gives no identity this module trusts, whatever number it reports.
+  if (!isVerifiedNtfsVolume(place, stats.dev)) return { kind: 'unverified-volume' };
   const identity = identityFromStats(stats);
   return identity === undefined ? { kind: 'no-identity' } : { kind: 'known', identity };
 }
@@ -784,14 +828,21 @@ function readIdentity(root: string): IdentityRead {
 /**
  * Where a recorded folder is now. `live`: its place still holds the recorded identity, on whatever drive it
  * is. `gone`: the place is missing, or holds another identity, and the drive at the place is the volume the
- * record was made on, which is mounted. `unknown`: the place cannot be read, its volume gives no identities,
+ * record was made on, which is mounted. `unknown`: the place cannot be read, its volume gives no identities or is not verified as NTFS,
  * or its drive is another volume or is not mounted at all, so nothing says whether the record's own volume
  * is there.
  */
 function recordedPlace(record: ProjectClaim): 'live' | 'gone' | 'unknown' {
   const read = readIdentity(record.folderPath);
   if (read.kind === 'known' && read.identity === record.folderIdentity) return 'live';
-  if (read.kind === 'unreadable' || read.kind === 'no-identity') return 'unknown';
+  if (
+    read.kind === 'unreadable' ||
+    read.kind === 'unreadable-place' ||
+    read.kind === 'no-identity' ||
+    read.kind === 'unverified-volume'
+  ) {
+    return 'unknown';
+  }
   return volumeIsPresent(record) ? 'gone' : 'unknown';
 }
 
@@ -928,7 +979,14 @@ function folderRecordedUnderOtherId(
 function entryLessClaim(registry: ProjectClaimRegistry, root: string): ProjectFolderClaim {
   const own = readIdentity(root);
   // Without an identity no record can be ruled out, so the folder stays closed.
-  if (own.kind === 'missing' || own.kind === 'unreadable') return { kind: 'unverifiable' };
+  if (
+    own.kind === 'missing' ||
+    own.kind === 'unreadable' ||
+    own.kind === 'unreadable-place' ||
+    own.kind === 'unverified-volume'
+  ) {
+    return { kind: 'unverifiable' };
+  }
   // A volume that gives no identities can hold no record.
   if (own.kind === 'no-identity') return { kind: 'none' };
   const row = registry.database
