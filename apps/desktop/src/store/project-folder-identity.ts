@@ -46,6 +46,8 @@ import {
  * id first, so an editable folder never carries an id that has not been settled. The raw `openProjectFolder`
  * stays exported until the app stops importing it, and nothing in this module stops a caller from using it.
  * The owner's answer to an ask goes through `answerProjectFolderAsk`, which never hands out an editable folder.
+ * A held folder whose entry was lost is restored by `resolveProjectFolderAsRestored` instead, with a title. The
+ * answer function does not take that answer yet.
  *
  * Every claim takes the registry's write lock first, then the folder's, each in one transaction, and
  * commits the registry first. Each of the four lock steps (the two begins and the two commits) waits at
@@ -137,7 +139,7 @@ export class ProjectClaimRefusedError extends Error {
 }
 
 /**
- * A folder could not be recorded, or an id could not be taken, because a rule refused it. `reason`
+ * A folder could not be recorded, restored, or given an id, because a rule refused it. `reason`
  * says which rule. Nothing was written.
  */
 export class ProjectRecordRefusedError extends Error {
@@ -150,7 +152,11 @@ export class ProjectRecordRefusedError extends Error {
     | 'id-recorded-elsewhere'
     | 'folder-recorded-under-other-id'
     | 'id-held-unrecorded'
-    | 'id-in-use';
+    | 'id-in-use'
+    | 'no-title'
+    | 'has-entry'
+    | 'has-documents'
+    | 'no-record-here';
 
   constructor(reason: ProjectRecordRefusedError['reason'], message: string) {
     super(message);
@@ -281,7 +287,8 @@ export function claimProjectFolderId(
 /**
  * Opens a project folder for editing. The id is settled first. An editable folder comes back only
  * for a claim that is kept, claimed, renewed or none. An `ask` or an unverifiable claim gives no
- * folder: it is closed, and the owner's answer goes through `answerProjectFolderAsk`.
+ * folder: it is closed, and the owner's answer goes through `answerProjectFolderAsk`, or, for a held entry-less
+ * folder, through `resolveProjectFolderAsRestored`.
  *
  * Opening sets up the folder's cache and schema before the claim runs, so the folder is written to
  * even when it is held. The claim itself writes nothing for a held folder, and a busy error from the open
@@ -430,6 +437,92 @@ export function resolveProjectFolderAsCopy(
       }
     }
     return renewAsCopy(folder, registry, entry, own.identity, root, createId);
+  });
+}
+
+/**
+ * The owner's answer to a held folder whose entry was lost: restore it. The registry names this folder by its
+ * identity at this place, and the folder has no entry and no documents. The restore writes a new entry under the
+ * record's project id: the owner's title, trimmed; the project's own id as both the timeline and the visual id, which
+ * is what the editor writes for every new project; and the restore time for both dates. It writes nothing else, so the
+ * record keeps its id, its place and its time. A folder that was moved, or that the registry does not name at this place,
+ * is refused. So is a folder that already has its entry, a folder with documents but no entry, and a folder whose identity
+ * more than one record names. A refusal writes nothing. The answer is `kept`: the folder keeps its id and its record,
+ * and the app opens it for editing after this. A copy that still holds the same id is renewed the next time it
+ * opens, so this function does not look at other folders.
+ */
+export function resolveProjectFolderAsRestored(
+  folder: ProjectFolder,
+  registry: ProjectClaimRegistry,
+  restore: { readonly title: string; readonly now?: string },
+): ProjectFolderClaim {
+  const title = restore.title.trim();
+  if (title === '') {
+    throw new ProjectRecordRefusedError('no-title', 'The restored project needs a title');
+  }
+  return inClaimTransactions<ProjectFolderClaim>(folder, registry, () => {
+    // Read inside the transaction, as recordClaim reads its own time.
+    const now = restore.now ?? new Date().toISOString();
+    const root = resolve(folder.root);
+    const own = readIdentity(root);
+    if (own.kind === 'missing') {
+      throw new ProjectRecordRefusedError(
+        'missing-folder',
+        'The folder is missing, so the project cannot be restored',
+      );
+    }
+    if (own.kind === 'unreadable') {
+      throw new ProjectRecordRefusedError(
+        'unreadable-identity',
+        'The folder identity cannot be read, so the project cannot be restored',
+      );
+    }
+    if (own.kind === 'no-identity') {
+      throw new ProjectRecordRefusedError(
+        'no-folder-identity',
+        'The volume gives no folder identity, so the project cannot be restored',
+      );
+    }
+    const home = storedPlace(root);
+    if (readProjectFolderEntry(folder) !== undefined) {
+      throw new ProjectRecordRefusedError(
+        'has-entry',
+        'This folder already has its project entry, so there is nothing to restore',
+      );
+    }
+    if (holdsAnyDocuments(folder)) {
+      throw new ProjectRecordRefusedError(
+        'has-documents',
+        'This folder holds documents but no entry, so it cannot be restored',
+      );
+    }
+    const rows = registry.database
+      .prepare('SELECT project_id, folder_path FROM project_claims WHERE folder_identity = ?')
+      .all(own.identity) as { project_id: string; folder_path: string }[];
+    if (rows.length > 1) {
+      throw new ProjectRecordRefusedError(
+        'folder-recorded-under-other-id',
+        'This folder already has a record under another project id',
+      );
+    }
+    const record = rows[0] as { project_id: string; folder_path: string } | undefined;
+    if (record === undefined || !isSamePlace(record.folder_path, root)) {
+      throw new ProjectRecordRefusedError(
+        'no-record-here',
+        'The registry does not name this folder at this place, so it cannot be restored',
+      );
+    }
+    const id = record.project_id;
+    writeProjectFolderEntry(folder, {
+      id,
+      title,
+      createdAt: now,
+      updatedAt: now,
+      timelineProjectId: id,
+      visualProjectId: id,
+      homeRoot: home,
+    });
+    return { kind: 'kept' };
   });
 }
 

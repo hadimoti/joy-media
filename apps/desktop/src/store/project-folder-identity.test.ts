@@ -26,6 +26,7 @@ import {
   recordNewProjectFolder,
   resolveProjectFolderAsCopy,
   resolveProjectFolderAsOriginal,
+  resolveProjectFolderAsRestored,
 } from './project-folder-identity.js';
 import {
   PROJECT_DATABASE_FILE,
@@ -107,6 +108,9 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 const ID = 'project-trip';
+
+/** The time a restore writes for both dates in these tests. */
+const RESTORED_AT = '2026-11-10T12:00:00.000Z';
 
 /** The real path of a folder: where the registry and the home path store it. */
 const real = (path: string): string => realpathSync.native(path);
@@ -1671,6 +1675,152 @@ describe('new id on open', () => {
 
     expect(readProjectFolderEntry(original)?.id).toBe(ID);
     expect(claimProjectFolderId(original, registry)).toEqual({ kind: 'kept' });
+  });
+
+  it('restoring a held folder writes its entry under the recorded id, keeps the record, and opens for editing', async () => {
+    const original = await createOriginal('Trip', ID);
+    const originalRoot = original.root;
+    const recorded = readProjectClaim(registry, ID);
+    if (recorded === undefined) throw new Error('expected the original to be recorded');
+    // The entry and the documents are lost, but the registry still names the folder by its identity.
+    original.database.exec('DELETE FROM project_folder_entry');
+    original.database.exec('DELETE FROM project_documents');
+
+    expect(
+      resolveProjectFolderAsRestored(original, registry, {
+        title: '  Trip restored  ',
+        now: RESTORED_AT,
+      }),
+    ).toEqual({ kind: 'kept' });
+    expect(readProjectFolderEntry(original)).toEqual({
+      id: ID,
+      title: 'Trip restored',
+      createdAt: RESTORED_AT,
+      updatedAt: RESTORED_AT,
+      timelineProjectId: ID,
+      visualProjectId: ID,
+      homeRoot: real(originalRoot),
+    });
+    expect(readProjectClaim(registry, ID)).toEqual(recorded);
+    expect(claimProjectFolderId(original, registry)).toEqual({ kind: 'kept' });
+    const editable = await openProjectFolderForEditing(originalRoot, registry);
+    if (editable.kind === 'editable') track(editable.folder);
+    expect(editable.kind).toBe('editable');
+  });
+
+  it('a restore refuses a blank title, a folder that has its entry, and a folder with documents, and writes nothing', async () => {
+    const original = await createOriginal('Trip', ID);
+    const entry = readProjectFolderEntry(original);
+
+    expect(
+      reasonOf(() => resolveProjectFolderAsRestored(original, registry, { title: '   ' })),
+    ).toBe('no-title');
+    expect(
+      reasonOf(() =>
+        resolveProjectFolderAsRestored(original, registry, { title: 'Trip', now: RESTORED_AT }),
+      ),
+    ).toBe('has-entry');
+    expect(readProjectFolderEntry(original)).toEqual(entry);
+    original.database.exec('DELETE FROM project_folder_entry');
+    expect(
+      reasonOf(() =>
+        resolveProjectFolderAsRestored(original, registry, { title: 'Trip', now: RESTORED_AT }),
+      ),
+    ).toBe('has-documents');
+    expect(readProjectFolderEntry(original)).toBeUndefined();
+  });
+
+  it('a restore refuses a held folder that the registry does not name at its place, and writes nothing', async () => {
+    const original = await createOriginal('Trip', ID);
+    const originalRoot = original.root;
+    original.database.exec('DELETE FROM project_folder_entry');
+    original.database.exec('DELETE FROM project_documents');
+    forget(original);
+    // The folder moves on the same drive, so its identity holds, but the recorded place is gone.
+    const movedRoot = join(scratch, 'Moved trip.joyproj');
+    await rename(originalRoot, movedRoot);
+    const moved = track(await openProjectFolder(movedRoot));
+
+    expect(claimProjectFolderId(moved, registry)).toMatchObject({
+      kind: 'ask',
+      reason: 'entry-missing',
+    });
+    expect(
+      reasonOf(() =>
+        resolveProjectFolderAsRestored(moved, registry, { title: 'Trip', now: RESTORED_AT }),
+      ),
+    ).toBe('no-record-here');
+    expect(readProjectFolderEntry(moved)).toBeUndefined();
+  });
+
+  it('a restore refuses a folder whose identity another project id also holds, and writes nothing', async () => {
+    const original = await createOriginal('Trip', ID);
+    const recorded = readProjectClaim(registry, ID);
+    if (recorded === undefined) throw new Error('expected the original to be recorded');
+    original.database.exec('DELETE FROM project_folder_entry');
+    original.database.exec('DELETE FROM project_documents');
+    writeProjectClaim(registry, {
+      projectId: 'project-other',
+      folderIdentity: recorded.folderIdentity,
+      folderPath: join(scratch, 'Elsewhere.joyproj'),
+      recordedAt: RESTORED_AT,
+    });
+
+    expect(
+      reasonOf(() =>
+        resolveProjectFolderAsRestored(original, registry, { title: 'Trip', now: RESTORED_AT }),
+      ),
+    ).toBe('folder-recorded-under-other-id');
+    expect(readProjectFolderEntry(original)).toBeUndefined();
+    expect(readProjectClaim(registry, ID)).toEqual(recorded);
+  });
+
+  it('a restore refuses a folder whose identity cannot be read, and writes nothing', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Restore unreadable'));
+    identityFaults.set(faultKey(folder.root), { code: 'EIO' });
+
+    expect(
+      reasonOf(() =>
+        resolveProjectFolderAsRestored(folder, registry, { title: 'Trip', now: RESTORED_AT }),
+      ),
+    ).toBe('unreadable-identity');
+    expect(readProjectFolderEntry(folder)).toBeUndefined();
+  });
+
+  it('a restore refuses a folder that is missing, and writes nothing', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Restore gone'));
+    const missing: ProjectFolder = { ...folder, root: join(scratch, 'Not here.joyproj') };
+
+    expect(
+      reasonOf(() =>
+        resolveProjectFolderAsRestored(missing, registry, { title: 'Trip', now: RESTORED_AT }),
+      ),
+    ).toBe('missing-folder');
+    expect(readProjectFolderEntry(folder)).toBeUndefined();
+  });
+
+  it('a restore refuses a volume that gives no folder identities, and writes nothing', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Restore no identity'));
+    identityFaults.set(faultKey(folder.root), { identity: { dev: 1n, ino: 0n } });
+
+    expect(
+      reasonOf(() =>
+        resolveProjectFolderAsRestored(folder, registry, { title: 'Trip', now: RESTORED_AT }),
+      ),
+    ).toBe('no-folder-identity');
+    expect(readProjectFolderEntry(folder)).toBeUndefined();
+  });
+
+  it('a restore refuses a folder whose real path cannot be read, and writes nothing', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Restore unreadable place'));
+    realpathFaults.add(faultKey(folder.root));
+
+    expect(
+      reasonOf(() =>
+        resolveProjectFolderAsRestored(folder, registry, { title: 'Trip', now: RESTORED_AT }),
+      ),
+    ).toBe('unreadable-place');
+    expect(readProjectFolderEntry(folder)).toBeUndefined();
   });
 
   it('a folder whose path is missing is unverifiable, and nothing is written', async () => {
