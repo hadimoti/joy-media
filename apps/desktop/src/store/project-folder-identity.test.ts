@@ -6,6 +6,7 @@ import { join, parse, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  CLAIM_WAIT_MS,
   openProjectClaimRegistry,
   readProjectClaim,
   writeProjectClaim,
@@ -27,6 +28,7 @@ import {
 } from './project-folder-identity.js';
 import {
   PROJECT_DATABASE_FILE,
+  PROJECT_FOLDER_BUSY_WAIT_MS,
   createProjectFolder,
   openProjectFolder,
   readProjectFolderEntry,
@@ -485,8 +487,8 @@ describe('new id on open', () => {
 
     expect(claimProjectFolderId(first, registry)).toEqual({ kind: 'ask', reason: 'no-record' });
     expect(resolveProjectFolderAsOriginal(first, registry)).toEqual({ kind: 'claimed' });
-    // The hazard in wiring requirement k: after an 'original' answer, the other folder renews on its next
-    // open without an ask. The wiring must list the sibling folders before it accepts that answer.
+    // The hazard: after an 'original' answer, the other folder renews on its next open without an ask.
+    // An app that takes that answer must list the sibling folders first.
     expect(claimProjectFolderId(second, registry)).toMatchObject({
       kind: 'renewed',
       previousId: 'project-stray',
@@ -545,6 +547,16 @@ describe('new id on open', () => {
     const empty = track(await createProjectFolder(scratch, 'Empty'));
 
     expect(claimProjectFolderId(empty, registry)).toEqual({ kind: 'none' });
+    expect(resolveProjectFolderAsOriginal(empty, registry)).toEqual({ kind: 'none' });
+    expect(resolveProjectFolderAsCopy(empty, registry)).toEqual({ kind: 'none' });
+    // Nothing was written: no entry, no record, and no document.
+    expect(readProjectFolderEntry(empty)).toBeUndefined();
+    expect(registry.database.prepare('SELECT COUNT(*) AS n FROM project_claims').get()).toEqual({
+      n: 0,
+    });
+    expect(empty.database.prepare('SELECT COUNT(*) AS n FROM project_documents').get()).toEqual({
+      n: 0,
+    });
   });
 
   it('a claim cannot run inside another claim on the same copy, so the copy keeps one id', async () => {
@@ -1013,6 +1025,52 @@ describe('new id on open', () => {
     expect(readProjectClaim(registry, ID)?.folderPath).toBe(share);
   });
 
+  it('a busy error that says the record is in place is kept when the rollback after it also fails', async () => {
+    const { copy, copyRoot } = await openedCopyOfOriginal();
+    const reader = new DatabaseSync(join(copyRoot, PROJECT_DATABASE_FILE));
+    let failRollback = true;
+    // A connection whose ROLLBACK fails, so the folder's failed transaction stays open.
+    const failingRollback = new Proxy(copy.database, {
+      get(target, property) {
+        if (property === 'exec') {
+          return (sql: string) => {
+            if (failRollback && sql === 'ROLLBACK') throw new Error('simulated rollback failure');
+            return target.exec(sql);
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const stub: ProjectFolder = { ...copy, database: failingRollback };
+
+    let failure: unknown;
+    try {
+      // A read that stays open blocks the folder's commit, which comes after the registry has committed.
+      reader.exec('BEGIN');
+      reader.prepare('SELECT COUNT(*) AS n FROM project_folder_entry').get();
+      try {
+        claimProjectFolderId(stub, registry, () => 'project-next');
+      } catch (error) {
+        failure = error;
+      }
+    } finally {
+      reader.exec('ROLLBACK');
+      reader.close();
+    }
+
+    expect(failure).toBeInstanceOf(ProjectClaimRollbackError);
+    const original = (failure as ProjectClaimRollbackError).original;
+    expect(original).toBeInstanceOf(ProjectClaimBusyError);
+    expect((original as ProjectClaimBusyError).appliedInRegistry).toBe(true);
+    expect((failure as ProjectClaimRollbackError).rollbackFailures).toHaveLength(1);
+
+    // The copy's transaction is still open, because its rollback was made to fail. Run the real one.
+    failRollback = false;
+    copy.database.exec('ROLLBACK');
+    expect(readProjectClaim(registry, 'project-next')?.folderPath).toBe(real(copyRoot));
+  });
+
   it('a rollback that cannot say whether its connection is still in a transaction is reported', async () => {
     const { copy, originalRoot } = await openedCopyOfOriginal();
     let failRollback = true;
@@ -1118,6 +1176,346 @@ describe('new id on open', () => {
     expect(busy).toBeInstanceOf(ProjectClaimBusyError);
     expect((busy as ProjectClaimBusyError).appliedInRegistry).toBe(false);
     expect(readProjectClaim(registry, 'project-next')).toBeUndefined();
+  });
+
+  it('a claim that only rewrites the home path says nothing was applied when its folder commit is busy', async () => {
+    const original = await createOriginal('Trip', ID);
+    const stored = readProjectFolderEntry(original);
+    if (stored === undefined) throw new Error('expected a stored entry');
+    const staleHome = join(scratch, 'Trip before the move');
+    writeProjectFolderEntry(original, { ...stored, homeRoot: staleHome });
+    const reader = new DatabaseSync(join(original.root, PROJECT_DATABASE_FILE));
+    let busy: unknown;
+    try {
+      // A read that stays open blocks the folder's commit. The registry record is already right, so the
+      // claim writes nothing there, and the home path rewrite is the only write.
+      reader.exec('BEGIN');
+      reader.prepare('SELECT COUNT(*) AS n FROM project_folder_entry').get();
+      try {
+        claimProjectFolderId(original, registry);
+      } catch (error) {
+        busy = error;
+      }
+    } finally {
+      reader.exec('ROLLBACK');
+      reader.close();
+    }
+    expect(busy).toBeInstanceOf(ProjectClaimBusyError);
+    expect((busy as ProjectClaimBusyError).appliedInRegistry).toBe(false);
+    // The rewrite was rolled back with the folder commit, so the stored home path is the old one.
+    expect(readProjectFolderEntry(original)?.homeRoot).toBe(staleHome);
+  });
+
+  it('a document whose key is NULL is held like one that names another id', async () => {
+    const { copy, copyRoot, originalRoot } = await openedCopyOfOriginal();
+    copy.database.exec('UPDATE project_documents SET project_id = NULL');
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(resolveProjectFolderAsOriginal(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(resolveProjectFolderAsCopy(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(reasonOf(() => recordNewProjectFolder(copy, entryFor(copyRoot, ID), registry))).toBe(
+      'other-id-held',
+    );
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+    expect(copy.database.prepare('SELECT project_id FROM project_documents').all()).toEqual([
+      { project_id: null },
+    ]);
+  });
+
+  it('a document whose key is NULL, in a folder with no entry, is held', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    copy.database.exec('DELETE FROM project_folder_entry');
+    copy.database.exec('UPDATE project_documents SET project_id = NULL');
+
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(resolveProjectFolderAsOriginal(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(resolveProjectFolderAsCopy(copy, registry)).toEqual({ kind: 'unverifiable' });
+    expect(readProjectFolderEntry(copy)).toBeUndefined();
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a stored document that is not text stops the rename before anything is written', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    // A BLOB in a text column: the rename must refuse it, not parse it.
+    copy.database.prepare('UPDATE project_documents SET document_json = ?').run(Buffer.from('{}'));
+
+    expect(() => claimProjectFolderId(copy, registry)).toThrow('not text');
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(copy.database.prepare('SELECT project_id FROM project_documents').all()).toEqual([
+      { project_id: ID },
+    ]);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('stored look instances that are not text stop the rename before anything is written', async () => {
+    const { copy, originalRoot } = await openedCopyOfOriginal();
+    copy.database
+      .prepare('UPDATE project_documents SET look_instances_json = ?')
+      .run(Buffer.from('{}'));
+
+    expect(() => claimProjectFolderId(copy, registry)).toThrow('not text');
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(copy.database.prepare('SELECT project_id FROM project_documents').all()).toEqual([
+      { project_id: ID },
+    ]);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a claim nested inside another on the same folder keeps the outer wait until the outer claim ends', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    const rival = openProjectClaimRegistry(registryPath);
+    rivals.push(rival);
+    let inner: unknown;
+    let waitInside: unknown;
+
+    claimProjectFolderId(copy, registry, () => {
+      try {
+        // The outer claim holds the registry's lock, so the nested claim is busy on it.
+        claimProjectFolderId(copy, rival, () => 'project-inner');
+      } catch (error) {
+        inner = error;
+      }
+      waitInside = copy.database.prepare('PRAGMA busy_timeout').get();
+      return 'project-outer';
+    });
+
+    expect(inner).toBeInstanceOf(ProjectClaimBusyError);
+    expect(waitInside).toEqual({ timeout: CLAIM_WAIT_MS });
+    expect(copy.database.prepare('PRAGMA busy_timeout').get()).toEqual({
+      timeout: PROJECT_FOLDER_BUSY_WAIT_MS,
+    });
+  });
+
+  it('a folder that already has a record under another id is not recorded again under a new one', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Recorded once'));
+    recordNewProjectFolder(folder, entryFor(folder.root, 'project-first'), registry);
+    // The entry is gone, and there are no documents, so nothing in the folder names the first id.
+    folder.database.exec('DELETE FROM project_folder_entry');
+
+    expect(
+      reasonOf(() =>
+        recordNewProjectFolder(folder, entryFor(folder.root, 'project-second'), registry),
+      ),
+    ).toBe('folder-recorded-under-other-id');
+    expect(readProjectClaim(registry, 'project-second')).toBeUndefined();
+    expect(readProjectClaim(registry, 'project-first')?.folderPath).toBe(real(folder.root));
+  });
+
+  it('a retry of the original is refused while a renewed clone shares its identity, and writes nothing', async () => {
+    const original = await createOriginal('Trip', ID);
+    const recorded = readProjectClaim(registry, ID);
+    if (recorded === undefined) throw new Error('expected the original to be recorded');
+    // A renewed clone shares the original's identity, and holds a record of its own under another id.
+    writeProjectClaim(registry, {
+      projectId: 'project-clone',
+      folderIdentity: recorded.folderIdentity,
+      folderPath: join(scratch, 'Trip clone'),
+      recordedAt: '2026-11-10T00:00:00.000Z',
+    });
+
+    expect(
+      reasonOf(() => recordNewProjectFolder(original, entryFor(original.root, ID), registry)),
+    ).toBe('folder-recorded-under-other-id');
+    expect(readProjectClaim(registry, ID)).toEqual(recorded);
+  });
+
+  it('an outer claim that fails after a nested claim restores the folder wait', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    const rival = openProjectClaimRegistry(registryPath);
+    rivals.push(rival);
+    let inner: unknown;
+    let failure: unknown;
+
+    try {
+      claimProjectFolderId(copy, registry, () => {
+        try {
+          // The outer claim holds the registry's lock, so the nested claim is busy on it.
+          claimProjectFolderId(copy, rival, () => 'project-inner');
+        } catch (error) {
+          inner = error;
+        }
+        throw new Error('outer work failed');
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(inner).toBeInstanceOf(ProjectClaimBusyError);
+    expect((failure as Error).message).toBe('outer work failed');
+    expect(copy.database.prepare('PRAGMA busy_timeout').get()).toEqual({
+      timeout: PROJECT_FOLDER_BUSY_WAIT_MS,
+    });
+  });
+
+  it('an original answer on a folder already recorded here keeps its record and its time', async () => {
+    const original = await createOriginal('Trip', ID);
+    const before = readProjectClaim(registry, ID);
+    await new Promise((done) => setTimeout(done, 5));
+
+    expect(resolveProjectFolderAsOriginal(original, registry)).toEqual({ kind: 'claimed' });
+    expect(readProjectClaim(registry, ID)).toEqual(before);
+  });
+
+  it('a claim nested on the same registry connection fails plainly, and the outer claim stands', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    let inner: unknown;
+
+    const claim = claimProjectFolderId(copy, registry, () => {
+      try {
+        claimProjectFolderId(copy, registry, () => 'project-inner');
+      } catch (error) {
+        inner = error;
+      }
+      return 'project-outer';
+    });
+
+    // A second BEGIN on the same connection is a plain SQLite error, not a busy error.
+    expect(inner).toBeInstanceOf(Error);
+    expect(inner).not.toBeInstanceOf(ProjectClaimBusyError);
+    expect(claim).toEqual({ kind: 'renewed', previousId: ID, id: 'project-outer' });
+    expect(readProjectFolderEntry(copy)?.id).toBe('project-outer');
+    expect(copy.database.prepare('PRAGMA busy_timeout').get()).toEqual({
+      timeout: PROJECT_FOLDER_BUSY_WAIT_MS,
+    });
+  });
+
+  it('a failure after the registry commit that is not busy is rethrown as it is, and the record stays', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    // The folder's own COMMIT fails with a plain error, after the registry has committed.
+    const failingCommit: ProjectFolder = {
+      ...copy,
+      database: new Proxy(copy.database, {
+        get(target, property) {
+          if (property === 'exec') {
+            return (sql: string) => {
+              if (sql === 'COMMIT') throw new Error('simulated disk failure');
+              return target.exec(sql);
+            };
+          }
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      }),
+    };
+
+    let failure: unknown;
+    try {
+      claimProjectFolderId(failingCommit, registry, () => 'project-next');
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe('simulated disk failure');
+    expect(failure).not.toBeInstanceOf(ProjectClaimBusyError);
+    // The registry committed first, so its record for the new id is in place.
+    expect(readProjectClaim(registry, 'project-next')).toBeDefined();
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+  });
+
+  it('a new folder at a place with a stale record under another id is recorded', async () => {
+    const original = await createOriginal('Trip', ID);
+    const originalRoot = original.root;
+    forget(original);
+    // The original moves away, and its record stays at the old place.
+    await rename(originalRoot, join(scratch, 'Moved trip.joyproj'));
+    // A new project is made at the old place.
+    const fresh = track(await createProjectFolder(scratch, 'Trip'));
+
+    recordNewProjectFolder(fresh, entryFor(fresh.root, 'project-fresh'), registry);
+
+    // The record is there, at the fresh folder's real place, with the fresh folder's own identity.
+    const freshRecord = readProjectClaim(registry, 'project-fresh');
+    expect(freshRecord?.folderPath).toBe(real(fresh.root));
+    expect(freshRecord?.folderIdentity).toBe(
+      identityFromStats(statSync(fresh.root, { bigint: true })),
+    );
+  });
+
+  it('an owner copy answer on a recorded original whose stored path cannot be resolved changes nothing', async () => {
+    const original = await createOriginal('Trip', ID);
+    const recorded = readProjectClaim(registry, ID);
+    if (recorded === undefined) throw new Error('expected the original to be recorded');
+    // The record names an alias of the original's place. The alias cannot be resolved, but it still stats as
+    // the same identity, so the folder may be the original. The folder's own root resolves as usual.
+    const alias = join(scratch, 'Trip alias');
+    await symlink(original.root, alias, 'junction');
+    try {
+      writeProjectClaim(registry, { ...recorded, folderPath: alias });
+      realpathFaults.add(resolve(alias));
+
+      expect(resolveProjectFolderAsCopy(original, registry)).toEqual({ kind: 'unverifiable' });
+      expect(readProjectFolderEntry(original)?.id).toBe(ID);
+      expect(readProjectClaim(registry, ID)).toEqual({ ...recorded, folderPath: alias });
+    } finally {
+      // Removes the junction itself, not the folder it points to.
+      await rmdir(alias);
+    }
+  });
+
+  it('a retry of recording keeps the record and its time', async () => {
+    const folder = track(await createProjectFolder(scratch, 'Retry time'));
+    recordNewProjectFolder(folder, entryFor(folder.root, ID), registry);
+    const recorded = readProjectClaim(registry, ID);
+    await new Promise((done) => setTimeout(done, 5));
+
+    recordNewProjectFolder(folder, entryFor(folder.root, ID), registry);
+
+    expect(readProjectClaim(registry, ID)).toEqual(recorded);
+  });
+
+  it('a copy answer that fails after the registry commit, with an error that is not busy, is rethrown and the record stays', async () => {
+    const { copy } = await openedCopyOfOriginal();
+    // The folder's own COMMIT fails with a plain error, after the registry has committed.
+    const failingCommit: ProjectFolder = {
+      ...copy,
+      database: new Proxy(copy.database, {
+        get(target, property) {
+          if (property === 'exec') {
+            return (sql: string) => {
+              if (sql === 'COMMIT') throw new Error('simulated disk failure');
+              return target.exec(sql);
+            };
+          }
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      }),
+    };
+
+    let failure: unknown;
+    try {
+      resolveProjectFolderAsCopy(failingCommit, registry, () => 'project-next');
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe('simulated disk failure');
+    expect(failure).not.toBeInstanceOf(ProjectClaimBusyError);
+    // The registry committed first, so its record for the new id is in place: the answer is partly applied.
+    expect(readProjectClaim(registry, 'project-next')).toBeDefined();
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+  });
+
+  it('a copy answer that is busy after its registry record is committed says the record is in place', async () => {
+    const { copy, copyRoot } = await openedCopyOfOriginal();
+    const reader = new DatabaseSync(join(copyRoot, PROJECT_DATABASE_FILE));
+    let busy: unknown;
+    try {
+      // A read that stays open blocks the folder's commit, which comes after the registry's.
+      reader.exec('BEGIN');
+      reader.prepare('SELECT COUNT(*) AS n FROM project_folder_entry').get();
+      try {
+        resolveProjectFolderAsCopy(copy, registry, () => 'project-next');
+      } catch (error) {
+        busy = error;
+      }
+    } finally {
+      reader.exec('ROLLBACK');
+      reader.close();
+    }
+    expect(busy).toBeInstanceOf(ProjectClaimBusyError);
+    expect((busy as ProjectClaimBusyError).appliedInRegistry).toBe(true);
   });
 
   it('a folder whose path is missing is unverifiable, and nothing is written', async () => {
