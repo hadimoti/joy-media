@@ -62,6 +62,8 @@ export interface ProjectFolderEntry {
   readonly timelineProjectId: string;
   readonly visualProjectId: string;
   readonly trashedAt?: string;
+  /** The folder that last claimed this id. A copy's home still points at the original's folder. */
+  readonly homeRoot?: string;
 }
 
 /** One `NAME.joyproj` folder as the listing found it: its entry, or why it has none. */
@@ -317,7 +319,8 @@ function isProjectFolderEntry(value: unknown): value is ProjectFolderEntry {
   const candidate = value as Record<string, unknown>;
   return (
     ENTRY_TEXT_FIELDS.every((field) => typeof candidate[field] === 'string') &&
-    (candidate['trashedAt'] === undefined || typeof candidate['trashedAt'] === 'string')
+    (candidate['trashedAt'] === undefined || typeof candidate['trashedAt'] === 'string') &&
+    (candidate['homeRoot'] === undefined || typeof candidate['homeRoot'] === 'string')
   );
 }
 
