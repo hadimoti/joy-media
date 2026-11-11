@@ -18,7 +18,7 @@ The Joy Code tab has a close button. It is disabled while Joy Code is running a 
 - **GPU crash, cause unknown.** An NVIDIA hardware-encoder crash (the GPU process exiting during an export) was seen on one machine before this release. It has not been seen again since 24 Oct 2026 in the checks we ran, and its cause was not found. If the GPU process exits, the app restarts once with a safe encoder setting.
 - **Not merged with v1.0.2.** v1.1.0 was cut from the main line on 14 Oct 2026 and was not merged with v1.0.2. Only the two items above were carried over from it. Other v1.0.2 changes are not in v1.1.0, among them the shared title compiler and motion templates, the desktop title handoff, and the Desktop thumbnail action on Assets cards.
 - **Export leaves a staged copy in the asset library.** Each MP4 export can leave a hidden working copy in the asset library, listed as `<export name>.mp4.stage` (1.5 MB for a 4-second clip). It is not deleted after the export. Delete it from the Assets panel with the card's Delete button. It does not change the exported file.
-- **Not tested in the app.** Use different file with Undo, and cancelling the file picker, are covered by unit tests only. The packaged test files for Missing media (8 of 9 tests) did not run, because they need a test mode that this version does not have.
+- **Packaged tests for Missing media did not run.** The packaged test files for Missing media and project packages (8 of 9 tests) need a test mode that this version does not have. The relink, the refusal of a wrong file, Use different file with Undo, and cancelling the file picker were checked by hand in the app instead, in one session on one PC.
 
 ---
 
