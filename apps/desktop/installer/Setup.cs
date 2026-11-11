@@ -168,20 +168,10 @@ namespace JoyMedia.Setup
                     if (envKey != null)
                     {
                         string path = envKey.GetValue("Path", "", RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
-                        string[] parts = path.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-                        bool exists = false;
-                        foreach (string p in parts)
+                        string updated = UserPathEditor.WithInstallDir(path, installPath);
+                        if (updated != null)
                         {
-                            if (p.Trim().Equals(installPath, StringComparison.OrdinalIgnoreCase))
-                            {
-                                exists = true;
-                                break;
-                            }
-                        }
-                        if (!exists)
-                        {
-                            string newPath = string.IsNullOrEmpty(path) ? installPath : path + ";" + installPath;
-                            envKey.SetValue("Path", newPath, RegistryValueKind.ExpandString);
+                            envKey.SetValue("Path", updated, RegistryValueKind.ExpandString);
                         }
                     }
                 }

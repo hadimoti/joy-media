@@ -10,6 +10,7 @@ $distReleases = Join-Path $repoRoot "apps\desktop\dist\releases"
 $zipPath = Join-Path $distReleases "joy-media-windows-x64-v$Version.zip"
 $outExe = Join-Path $distReleases "joy-media-setup.exe"
 $srcCs = Join-Path $PSScriptRoot "Setup.cs"
+$srcUserPath = Join-Path $PSScriptRoot "UserPath.cs"
 
 # The installer displays and registers InstallerEngine.ProductVersion; refuse to embed a payload
 # whose version does not match it so the Add/Remove Programs entry can never lie.
@@ -38,7 +39,7 @@ if (-not $csc -or -not (Test-Path $csc)) {
 Write-Host "Compiling $outExe with payload $zipPath..."
 & $csc /target:winexe /optimize+ /platform:x64 `
     /reference:System.dll,System.Core.dll,Microsoft.CSharp.dll,System.Drawing.dll,System.Windows.Forms.dll,System.IO.Compression.dll,System.IO.Compression.FileSystem.dll `
-    "/resource:$zipPath,payload.zip" "/out:$outExe" $srcCs
+    "/resource:$zipPath,payload.zip" "/out:$outExe" $srcCs $srcUserPath
 
 if ($LASTEXITCODE -ne 0) {
     throw "Compilation failed with code $LASTEXITCODE"

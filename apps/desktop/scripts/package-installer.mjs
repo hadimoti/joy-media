@@ -160,10 +160,19 @@ $smShortcut.Description = "JOY Media Desktop Application"
 $smShortcut.Save()
 
 # Register InstallPath in User PATH environment variable
+function Get-PathWithInstallDir([string]$PathValue, [string]$Install) {
+    # @() keeps a single entry an array. Without it, "$parts + $Install" joined a one-entry PATH and the
+    # install folder into one string with no separator.
+    $parts = @(if ($PathValue) { $PathValue -split ';' | Where-Object { $_ -ne '' } })
+    $target = $Install.TrimEnd('\\')
+    foreach ($part in $parts) {
+        if ($part.TrimEnd('\\') -ieq $target) { return $null }
+    }
+    return (($parts + $Install) -join ';')
+}
 $userPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
-$pathParts = if ($userPath) { $userPath -split ';' | Where-Object { $_ -ne '' } } else { @() }
-if ($pathParts -notcontains $InstallPath) {
-    $newPath = ($pathParts + $InstallPath) -join ';'
+$newPath = Get-PathWithInstallDir $userPath $InstallPath
+if ($null -ne $newPath) {
     [Environment]::SetEnvironmentVariable("Path", $newPath, [EnvironmentVariableTarget]::User)
     $env:Path = "$env:Path;$InstallPath"
     Write-Host "Added $InstallPath to User PATH ('joy' and 'joy-media' commands registered globally)." -ForegroundColor Green

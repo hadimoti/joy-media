@@ -288,6 +288,111 @@ try {
   rmSync(setupSandboxRoot, { recursive: true, force: true });
 }
 
+// 5b. The user PATH merge. A v1.0.x script joined a one-entry PATH and the install folder into one
+// entry with no separator ("...\WindowsAppsC:\...\JOY Media"). These cases run the merge on plain strings
+// and never touch the registry or the process PATH.
+console.log('5b. Testing the user PATH merge in Setup-JoyMedia.ps1 and in the setup exe source...');
+{
+  const installDir = 'C:\\Users\\T\\AppData\\Local\\Programs\\JOY Media';
+  const apps = 'C:\\Users\\T\\AppData\\Local\\Microsoft\\WindowsApps';
+  const setupSource = readFileSync(resolve(standaloneDir, 'Setup-JoyMedia.ps1'), 'utf8');
+  const fnStart = setupSource.indexOf('function Get-PathWithInstallDir');
+  const fnEnd = setupSource.indexOf('$userPath = [Environment]::GetEnvironmentVariable', fnStart);
+  assert.ok(
+    fnStart >= 0 && fnEnd > fnStart,
+    'Get-PathWithInstallDir was not found in the setup script',
+  );
+  const psCases = [
+    ['', installDir],
+    [apps, `${apps};${installDir}`],
+    [`${apps};C:\\B`, `${apps};C:\\B;${installDir}`],
+    [`${apps};${installDir}`, '<unchanged>'],
+    [`${apps};${installDir.toLowerCase()}\\`, '<unchanged>'],
+  ];
+  const psScript =
+    setupSource.slice(fnStart, fnEnd) +
+    `\n$i = '${installDir}'\n` +
+    psCases
+      .map(
+        ([input]) =>
+          `$r = Get-PathWithInstallDir '${input}' $i; if ($null -eq $r) { '<unchanged>' } else { $r }`,
+      )
+      .join('\n');
+  const psRun = spawnSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', psScript],
+    {
+      encoding: 'utf8',
+      timeout: 30000,
+      windowsHide: true,
+    },
+  );
+  assert.strictEqual(psRun.status, 0, `PATH merge script failed: ${psRun.stderr}`);
+  assert.deepStrictEqual(
+    psRun.stdout.split(/\r?\n/).filter((line) => line.length > 0),
+    psCases.map(([, expected]) => expected),
+    'Setup-JoyMedia.ps1 PATH merge gave the wrong result',
+  );
+
+  const csc = 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe';
+  if (!existsSync(csc)) {
+    console.log('  (csc.exe not found: the setup exe PATH merge check was skipped)');
+  } else {
+    const csRoot = mkdtempSync(join(tmpdir(), 'joy-userpath-'));
+    try {
+      const esc = (text) => text.replace(/\\/g, '\\\\');
+      const csCases = [
+        ['', installDir],
+        ['C:\\A', `C:\\A;${installDir}`],
+        [`${apps}${installDir}`, `${apps};${installDir}`],
+        [`C:\\X;${apps}${installDir};C:\\Y`, `C:\\X;${apps};${installDir};C:\\Y`],
+        [`${apps};${installDir.toUpperCase()}\\`, '<unchanged>'],
+        [`${installDir};${installDir}`, installDir],
+        ['%LOCALAPPDATA%\\Programs\\JOY Media', '<unchanged>'],
+        ['C:\\Programs\\JOY Media Tools', `C:\\Programs\\JOY Media Tools;${installDir}`],
+      ];
+      const harness = `using System;
+using JoyMedia.Setup;
+static class T {
+  static void Main() {
+    Environment.SetEnvironmentVariable("LOCALAPPDATA", @"C:\\Users\\T\\AppData\\Local");
+    string i = "${esc(installDir)}";
+${csCases
+  .map(
+    ([input]) =>
+      `    { string r = UserPathEditor.WithInstallDir("${esc(input)}", i); Console.WriteLine(r == null ? "<unchanged>" : r); }`,
+  )
+  .join('\n')}
+  }
+}
+`;
+      writeFileSync(join(csRoot, 'T.cs'), harness);
+      const exe = join(csRoot, 'T.exe');
+      const compile = spawnSync(
+        csc,
+        [
+          '/nologo',
+          `/out:${exe}`,
+          join(csRoot, 'T.cs'),
+          resolve('apps/desktop/installer/UserPath.cs'),
+        ],
+        { encoding: 'utf8', timeout: 60000, windowsHide: true },
+      );
+      assert.strictEqual(compile.status, 0, `UserPath.cs did not compile: ${compile.stdout}`);
+      const csRun = spawnSync(exe, [], { encoding: 'utf8', timeout: 30000, windowsHide: true });
+      assert.strictEqual(csRun.status, 0, `PATH merge harness failed: ${csRun.stderr}`);
+      assert.deepStrictEqual(
+        csRun.stdout.split(/\r?\n/).filter((line) => line.length > 0),
+        csCases.map(([, expected]) => expected),
+        'Setup.cs PATH merge gave the wrong result',
+      );
+    } finally {
+      rmSync(csRoot, { recursive: true, force: true });
+    }
+  }
+  console.log('✔ User PATH merge passed.');
+}
+
 // 6. Verify Release Artifacts & Manifest Parity
 console.log('6. Verifying release manifest & SHA256 checksums...');
 const manifestPath = resolve(releasesDir, 'joy-media-release-manifest.json');
