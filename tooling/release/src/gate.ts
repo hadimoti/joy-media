@@ -84,6 +84,8 @@ export interface ReleaseAttendedEvidence {
   readonly receipts: Readonly<Record<string, unknown>>;
   readonly sandboxLifecycle: unknown;
   readonly sandboxUpgrade: unknown;
+  /** Reasons the receipts can not be tied to the commit under test (see resolveAttendedCandidate). Empty when they can. */
+  readonly bindingProblems?: readonly string[];
 }
 
 export interface ReleaseGateInput {
@@ -387,7 +389,7 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
 function attendedJourneyBlockers(evidence: ReleaseAttendedEvidence | null | undefined): string[] {
   if (evidence === undefined) return [];
   if (evidence === null) return ['no attended receipts were found for this candidate'];
-  const blockers: string[] = [];
+  const blockers: string[] = [...(evidence.bindingProblems ?? [])];
   for (const scenarioId of Object.keys(LOCAL_ONLY_ATTENDED_SCENARIOS)) {
     const receipt = evidence.receipts[scenarioId];
     if (receipt === undefined) {
@@ -414,7 +416,7 @@ function attendedJourneyMessage(evidence: ReleaseAttendedEvidence | null | undef
 function lifecycleBlockers(evidence: ReleaseAttendedEvidence | null | undefined): string[] {
   if (evidence === undefined) return [];
   if (evidence === null) return ['no Sandbox receipts were found for this candidate'];
-  const blockers: string[] = [];
+  const blockers: string[] = [...(evidence.bindingProblems ?? [])];
   if (evidence.sandboxLifecycle === undefined) blockers.push('lifecycle: the receipt is missing');
   else
     for (const reason of validateSandboxLifecycle(evidence.sandboxLifecycle, {
@@ -1329,9 +1331,66 @@ export function hostedVerifyFromEnvironment(root: string): HostedVerifyOutcome |
   };
 }
 
+/** The folder under the repository that holds the attended and Sandbox receipts, one folder per candidate commit. */
+export const ATTENDED_RECEIPT_ROOT = 'docs/release/attended/';
+
+/**
+ * Receipts are committed after the candidate was built and tested, so the checked-out commit is later than the candidate.
+ * The candidate is the commit named by JOY_RELEASE_CANDIDATE_SHA (or --candidate=); without one it is HEAD. A named
+ * candidate must be an ancestor of HEAD, and every commit after it may change only files under ATTENDED_RECEIPT_ROOT, so
+ * the tested tree and the released tree are the same except for the receipts.
+ */
+export function resolveAttendedCandidate(
+  root: string,
+  head: string,
+  requested: string | undefined,
+): { readonly candidateSha: string; readonly problems: readonly string[] } {
+  const wanted = (requested ?? '').trim().toLowerCase();
+  if (wanted === '' || wanted === head) return { candidateSha: head, problems: [] };
+  if (!/^[0-9a-f]{40}$/u.test(wanted)) {
+    return { candidateSha: wanted, problems: ['the candidate is not a full commit SHA'] };
+  }
+  const git = process.platform === 'win32' ? 'git.exe' : 'git';
+  const run = (args: readonly string[]) =>
+    spawnSync(git, args, { cwd: root, encoding: 'utf8', shell: false });
+  if (run(['cat-file', '-e', `${wanted}^{commit}`]).status !== 0) {
+    return {
+      candidateSha: wanted,
+      problems: ['the candidate commit does not exist in this clone'],
+    };
+  }
+  if (run(['merge-base', '--is-ancestor', wanted, head]).status !== 0) {
+    return {
+      candidateSha: wanted,
+      problems: ['the candidate is not an ancestor of the checked-out commit'],
+    };
+  }
+  const diff = run(['diff', '--name-only', wanted, head]);
+  if (diff.status !== 0) {
+    return {
+      candidateSha: wanted,
+      problems: ['the changes after the candidate could not be read'],
+    };
+  }
+  const outside = String(diff.stdout)
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith(ATTENDED_RECEIPT_ROOT));
+  return {
+    candidateSha: wanted,
+    problems:
+      outside.length === 0
+        ? []
+        : [
+            `commits after the candidate change files outside ${ATTENDED_RECEIPT_ROOT}: ${outside.slice(0, 5).join(', ')}`,
+          ],
+  };
+}
+
 export function readAttendedEvidence(
   root: string,
   candidateSha: string,
+  bindingProblems: readonly string[] = [],
 ): ReleaseAttendedEvidence | null {
   const folder = join(root, 'docs', 'release', 'attended', candidateSha);
   if (!existsSync(folder)) return null;
@@ -1364,12 +1423,13 @@ export function readAttendedEvidence(
     receipts,
     sandboxLifecycle: readJson('sandbox-lifecycle.json'),
     sandboxUpgrade: readJson('sandbox-upgrade.json'),
+    bindingProblems,
   };
 }
 
 export function buildEvidenceFromWorkspace(
   root: string,
-  options: { readonly profile?: ReleaseGateProfile } = {},
+  options: { readonly profile?: ReleaseGateProfile; readonly candidateSha?: string } = {},
 ): ReleaseEvidence {
   const hostedVerify = hostedVerifyFromEnvironment(root);
   const commandResults =
@@ -1443,7 +1503,10 @@ export function buildEvidenceFromWorkspace(
     ...(options.profile === 'local-only'
       ? {
           profile: 'local-only' as const,
-          attendedEvidence: readAttendedEvidence(root, sourceProvenance.commitSha),
+          attendedEvidence: ((candidate) =>
+            readAttendedEvidence(root, candidate.candidateSha, candidate.problems))(
+            resolveAttendedCandidate(root, sourceProvenance.commitSha, options.candidateSha),
+          ),
         }
       : {}),
     featureStatus: {
@@ -2053,7 +2116,14 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     'standard';
   if (profileName !== 'standard' && profileName !== 'local-only')
     throw new Error('the gate profile must be standard or local-only');
-  const workspaceEvidence = buildEvidenceFromWorkspace(root, { profile: profileName });
+  const candidateSha =
+    process.argv
+      .find((argument) => argument.startsWith('--candidate='))
+      ?.slice('--candidate='.length) ?? process.env.JOY_RELEASE_CANDIDATE_SHA;
+  const workspaceEvidence = buildEvidenceFromWorkspace(root, {
+    profile: profileName,
+    ...(candidateSha === undefined ? {} : { candidateSha }),
+  });
   const supplied =
     evidencePath !== undefined && evidencePath.length > 0
       ? (JSON.parse(readFileSync(resolve(root, evidencePath), 'utf8')) as Partial<ReleaseEvidence>)
