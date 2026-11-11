@@ -113,22 +113,41 @@ export class ProjectClaimBusyError extends Error {
 }
 
 /**
+ * A claim failed for a reason other than a lock, after its registry record was committed. The record is in place, so
+ * the change is partly applied, and the same answer must be run again before the other folder is opened (see
+ * inClaimTransactions). The failure that started it is kept in `original`.
+ */
+export class ProjectClaimPartlyAppliedError extends Error {
+  /** Always true: the registry committed a record before this failure. */
+  readonly appliedInRegistry = true as const;
+  readonly original: unknown;
+
+  constructor(original: unknown) {
+    super('The project change failed after part of it was saved.');
+    this.name = 'ProjectClaimPartlyAppliedError';
+    this.original = original;
+  }
+}
+
+/**
  * A claim failed, and a rollback failed too, so a connection may still be inside a transaction. The
  * app should restart before it claims again. The failure that started it is kept in `original`, and
- * every rollback that failed is in `rollbackFailures`. When `original` is a ProjectClaimBusyError, its
- * appliedInRegistry flag still says whether the registry record was committed.
+ * every rollback that failed is in `rollbackFailures`. `appliedInRegistry` says whether a registry record
+ * was committed, whatever the failure was: the change is then partly applied.
  */
 export class ProjectClaimRollbackError extends Error {
   readonly original: unknown;
   readonly rollbackFailures: readonly unknown[];
+  readonly appliedInRegistry: boolean;
 
-  constructor(original: unknown, rollbackFailures: readonly unknown[]) {
+  constructor(original: unknown, rollbackFailures: readonly unknown[], appliedInRegistry = false) {
     super(
       'A project claim failed and could not be rolled back. Restart the app before claiming again.',
     );
     this.name = 'ProjectClaimRollbackError';
     this.original = original;
     this.rollbackFailures = rollbackFailures;
+    this.appliedInRegistry = appliedInRegistry;
   }
 }
 
@@ -325,11 +344,12 @@ export async function openProjectFolderForEditing(
   try {
     claim = claimProjectFolderId(folder, registry);
   } catch (error) {
-    folder.close();
+    // The claim failed, so the original error is the one the caller needs. A failed close must not replace it.
+    closeAfterClaim(folder);
     throw error;
   }
   if (claim.kind === 'ask' || claim.kind === 'unverifiable') {
-    folder.close();
+    closeAfterClaim(folder);
     return { kind: 'held', claim };
   }
   return { kind: 'editable', folder, claim };
@@ -350,8 +370,42 @@ export async function answerProjectFolderAsk(
       ? resolveProjectFolderAsOriginal(folder, registry)
       : resolveProjectFolderAsCopy(folder, registry);
   } finally {
-    folder.close();
+    closeAfterClaim(folder);
   }
+}
+
+/**
+ * The owner's restore answer for a held folder whose entry was lost (see resolveProjectFolderAsRestored). The folder
+ * is opened for the answer only, and closed again. The caller opens it for editing afterwards, through
+ * openProjectFolderForEditing, which settles it as `kept`.
+ */
+export async function restoreProjectFolderRecord(
+  root: string,
+  registry: ProjectClaimRegistry,
+  restore: { readonly title: string },
+): Promise<ProjectFolderClaim> {
+  const folder = await openForClaim(root);
+  try {
+    return resolveProjectFolderAsRestored(folder, registry, restore);
+  } finally {
+    closeAfterClaim(folder);
+  }
+}
+
+/**
+ * Whether a directory can hold a project folder: its real path reads, and its volume is verified as NTFS and gives
+ * identities. Nothing is written. The create path asks first, so a refused drive leaves no folder behind.
+ */
+export function projectPlaceRefusal(
+  directory: string,
+): ProjectRecordRefusedError['reason'] | undefined {
+  const read = readIdentity(resolve(directory));
+  if (read.kind === 'known') return undefined;
+  if (read.kind === 'missing') return 'missing-folder';
+  if (read.kind === 'unreadable') return 'unreadable-identity';
+  if (read.kind === 'unreadable-place') return 'unreadable-place';
+  if (read.kind === 'unverified-volume') return 'unverified-volume';
+  return 'no-folder-identity';
 }
 
 /**
@@ -624,6 +678,11 @@ function askAboutPlace(
   return { kind: 'ask', reason, recordedPath: record.folderPath, recordedAt: record.recordedAt };
 }
 
+/**
+ * Gives a copy a new id, and records the new id for this folder. A renewal whose folder commit failed after its
+ * registry commit left its record under the id it meant to take (see partlySavedRenewal). That id is finished here,
+ * so the folder gets it and keeps one record, instead of a second id being made. Any other new id must not be in use.
+ */
 function renewAsCopy(
   folder: ProjectFolder,
   registry: ProjectClaimRegistry,
@@ -632,6 +691,16 @@ function renewAsCopy(
   root: string,
   createId: () => string,
 ): ProjectFolderClaim {
+  const partial = partlySavedRenewal(registry, identity, root, entry.id);
+  if (partial !== undefined) {
+    // The folder holds no key but its entry's: documentsNameOtherIds settled every other key before this point.
+    renewIdentity(folder, entry, partial.projectId, root);
+    // The record keeps its time. Only its place follows the folder, when the folder moved on its drive.
+    if (partial.folderPath !== storedPlace(root)) {
+      writeProjectClaim(registry, { ...partial, folderPath: storedPlace(root) });
+    }
+    return { kind: 'renewed', previousId: entry.id, id: partial.projectId };
+  }
   const id = createId();
   // A repeated id would overwrite the record of another folder, and an id that this folder's own rows
   // already carry would clash with them, so either is refused.
@@ -648,6 +717,43 @@ function renewAsCopy(
 }
 
 /**
+ * The record a renewal left when its folder commit failed after its registry commit (see inClaimTransactions). It names
+ * this folder's identity under an id other than the folder's own, which the folder still holds. A folder has at most one
+ * such record. Its place is either this folder's place, or a place that no longer holds this identity, because the
+ * folder moved on its drive. A record that another live place holds with this identity names another folder, so it is
+ * refused. So is a second record, since nothing says which id is this folder's. A refusal writes nothing.
+ */
+function partlySavedRenewal(
+  registry: ProjectClaimRegistry,
+  identity: string,
+  root: string,
+  entryId: string,
+): ProjectClaim | undefined {
+  const rows = registry.database
+    .prepare(
+      'SELECT project_id, folder_path, recorded_at FROM project_claims WHERE folder_identity = ? AND project_id <> ?',
+    )
+    .all(identity, entryId) as { project_id: string; folder_path: string; recorded_at: string }[];
+  const row = rows[0] as
+    { project_id: string; folder_path: string; recorded_at: string } | undefined;
+  if (row === undefined) return undefined;
+  const claim: ProjectClaim = {
+    projectId: row.project_id,
+    folderIdentity: identity,
+    folderPath: row.folder_path,
+    recordedAt: row.recorded_at,
+  };
+  const liveElsewhere = !isSamePlace(claim.folderPath, root) && recordedPlace(claim) === 'live';
+  if (rows.length > 1 || liveElsewhere) {
+    throw new ProjectRecordRefusedError(
+      'folder-recorded-under-other-id',
+      'This folder already has a record under another project id',
+    );
+  }
+  return claim;
+}
+
+/**
  * Runs `work` inside a write transaction on the registry and on the folder. The registry's lock is
  * taken first, so claims on this machine line up in one order, and the registry commits first. If
  * the registry's commit fails, both roll back and nothing changed. If the folder's commit fails
@@ -655,13 +761,13 @@ function renewAsCopy(
  * For a claim that renewed the folder, that record names an id no folder holds. For an original answer,
  * the record already names the answering folder, and a copy answer records its new id. Either way the
  * caller gets ProjectClaimBusyError and must run the claim again. Running it again is safe for an original
- * answer, which finds its own record and settles again. A copy answer, and any claim that renews the
- * folder, renews again and may leave one more record. A busy error with appliedInRegistry set means the
- * answer is partly applied: its record is in place, so the same answer must be run again before the other
- * folder is opened. Only a busy error says this. Any other failure after the registry commit is rethrown
- * as it is, so an answer that fails that way must also be treated as possibly partly applied. A claim must
- * not run inside another claim on the same registry connection: the second BEGIN fails with a plain SQLite
- * error, not a busy error.
+ * answer, which finds its own record and settles again. A renewal finishes the id that its partly saved
+ * record names, so a retry leaves one record for the folder, not two (see renewAsCopy). A busy error with
+ * appliedInRegistry set means the answer is partly applied: its record is in place, so the same answer must
+ * be run again before the other folder is opened. A ProjectClaimPartlyAppliedError says the same for any other
+ * failure after the registry commit, with the failure kept as `original`, so a partly applied change is never
+ * reported as unchanged. A claim must not run inside another claim on the same registry connection: the second
+ * BEGIN fails with a plain SQLite error, not a busy error.
  */
 function inClaimTransactions<T>(
   folder: ProjectFolder,
@@ -695,13 +801,14 @@ function inClaimTransactions<T>(
     // never leaves the registry inside a transaction. Every rollback that fails is reported.
     const folderFailure = folderOpen ? rollback(folder.database) : undefined;
     const registryFailure = registryOpen ? rollback(registry.database) : undefined;
-    // The flag counts only a record this claim wrote. A claim that wrote none has nothing in place.
-    const claimError = busyAsClaimError(error, registryCommitted && registryWrote);
+    // The flag counts only a record this claim wrote, and only once the registry committed it.
+    const appliedInRegistry = registryCommitted && registryWrote;
+    const claimError = claimFailure(error, appliedInRegistry);
     const rollbackFailures = [folderFailure, registryFailure].filter(
       (failure) => failure !== undefined,
     );
     if (rollbackFailures.length > 0) {
-      throw new ProjectClaimRollbackError(claimError, rollbackFailures);
+      throw new ProjectClaimRollbackError(claimError, rollbackFailures, appliedInRegistry);
     }
     throw claimError;
   } finally {
@@ -739,12 +846,25 @@ function leaveClaim(database: DatabaseSync): number {
   return left;
 }
 
+/**
+ * Closes a folder once its claim has run, whether the claim settled or threw. A failed close does not change that outcome,
+ * so it is not reported to the caller, which would otherwise say that nothing changed. It is logged with its error, so a
+ * leaked connection is visible.
+ */
+function closeAfterClaim(folder: ProjectFolder): void {
+  try {
+    folder.close();
+  } catch (error) {
+    console.error('[joy-desktop] a project folder could not be closed', error);
+  }
+}
+
 /** Opens a folder for a claim. A lock held by another connection during the open is reported as busy. */
 async function openForClaim(root: string): Promise<ProjectFolder> {
   try {
     return await openProjectFolder(root, undefined, CLAIM_WAIT_MS);
   } catch (error) {
-    throw busyAsClaimError(error);
+    throw claimFailure(error);
   }
 }
 
@@ -768,8 +888,13 @@ function totalChanges(database: DatabaseSync): number {
   return (database.prepare('SELECT total_changes() AS n').get() as { n: number }).n;
 }
 
-function busyAsClaimError(error: unknown, registryCommitted = false): unknown {
-  return isBusyError(error) ? new ProjectClaimBusyError(registryCommitted) : error;
+/**
+ * What a claim throws for a failure. A lock is busy, and says whether a record was committed. Any other failure after
+ * a record was committed is partly applied, so it is wrapped. Any other failure is thrown as it is.
+ */
+function claimFailure(error: unknown, appliedInRegistry = false): unknown {
+  if (isBusyError(error)) return new ProjectClaimBusyError(appliedInRegistry);
+  return appliedInRegistry ? new ProjectClaimPartlyAppliedError(error) : error;
 }
 
 /**

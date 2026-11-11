@@ -8,13 +8,13 @@ import type { CancelResult, JobOrchestrator, SubmitResult } from '../jobs/job-or
 import type {
   LocalAssetRegistration,
   LocalAssetRegistrationResult,
-} from '../store/local-assets.js';
+} from '@joy-media/local-asset-store';
 import type { AssetLibraryPort } from '../store/asset-library.js';
 import type {
   ProjectDocumentWrite,
   ProjectDocumentWriteResult,
   StoredProjectDocument,
-} from '../store/project-documents.js';
+} from '@joy-media/local-asset-store';
 import {
   MAX_LOCAL_ORIGINAL_BYTES,
   MAX_ORIGINAL_CHUNK_BYTES,

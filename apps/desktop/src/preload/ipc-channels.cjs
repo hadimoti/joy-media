@@ -52,6 +52,11 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.media.speech.transcribe',
   'desktop.media.preview.frame',
   'desktop.media.workers.list',
+  'desktop.project-folder.list',
+  'desktop.project-folder.create',
+  'desktop.project-folder.open',
+  'desktop.project-folder.answer',
+  'desktop.project-folder.restore',
 ]);
 
 module.exports = { IPC_CHANNELS };

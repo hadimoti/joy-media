@@ -43,6 +43,8 @@ export default defineConfig({
       '@joy-media/test-control-plane': pkg('./packages/test-control-plane/src/index.ts'),
       '@joy-media/property-system': pkg('./packages/property-system/src/index.ts'),
       '@joy-media/timeline-engine': pkg('./packages/timeline-engine/src/index.ts'),
+      '@joy-media/local-asset-store': pkg('./packages/local-asset-store/src/index.ts'),
+      '@joy-media/project-store': pkg('./packages/project-store/src/index.ts'),
       '@joy-media/provider-sdk': pkg('./packages/provider-sdk/src/index.ts'),
       '@joy-media/adapter-comfyui': pkg('./packages/adapter-comfyui/src/index.ts'),
       '@joy-media/adapter-noise-removal': pkg('./packages/adapter-noise-removal/src/index.ts'),

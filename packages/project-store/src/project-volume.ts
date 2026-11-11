@@ -14,11 +14,31 @@ import { execFileSync } from 'node:child_process';
 
 const VERIFIED_MS = 60_000;
 const REFUSED_MS = 5_000;
-const answers = new Map<string, { readonly verified: boolean; readonly at: number }>();
+
+/** What Windows said about one volume: whether it is verified, and the drive line it wrote for it. */
+interface VolumeAnswer {
+  readonly verified: boolean;
+  /**
+   * The `DriveType|FileSystem` line Windows wrote for the volume. An empty string means Windows wrote no local volume
+   * for the path. Undefined means the question could not be asked at all.
+   */
+  readonly found: string | undefined;
+}
+
+const answers = new Map<string, VolumeAnswer & { readonly at: number }>();
 
 /** Drops every kept answer, so that a test asks Windows again. The app itself never needs this. */
 export function forgetVolumeAnswers(): void {
   answers.clear();
+}
+
+/** Keeps an answer for a volume as if Windows had been asked at `at`. Only the tests use this. */
+export function keepVolumeAnswerForTests(
+  volumeKey: bigint,
+  answer: { readonly verified: boolean; readonly found: string | undefined },
+  at: number,
+): void {
+  answers.set(volumeKey.toString(), { ...answer, at });
 }
 
 /**
@@ -33,9 +53,47 @@ export function isVerifiedNtfsVolume(realPlace: string, volumeKey: bigint): bool
   if (known !== undefined && now - known.at < (known.verified ? VERIFIED_MS : REFUSED_MS)) {
     return known.verified;
   }
-  const verified = askWindows(realPlace);
-  answers.set(key, { verified, at: now });
-  return verified;
+  const answer = askWindows(realPlace);
+  answers.set(key, { ...answer, at: now });
+  return answer.verified;
+}
+
+/** A volume in words for the owner: its kind of drive, and its file system. */
+export interface VolumeDescription {
+  readonly drive: string;
+  readonly fileSystem: string;
+}
+
+/**
+ * The drive and file system Windows last reported for the volume with this device number, for the owner's message.
+ * Undefined when no answer is kept for it, or when the kept answer is too old to show. A verified answer is shown for a
+ * minute, and a refused one for five seconds, the same as the check itself.
+ */
+export function describeVolumeAnswer(volumeKey: bigint): VolumeDescription | undefined {
+  const known = answers.get(volumeKey.toString());
+  if (known === undefined || Date.now() - known.at >= (known.verified ? VERIFIED_MS : REFUSED_MS)) {
+    return undefined;
+  }
+  return describeFound(known.found);
+}
+
+const DRIVE_KIND_WORDS: Readonly<Record<string, string>> = {
+  '2': 'removable drive',
+  '3': 'fixed drive',
+  '4': 'network drive',
+  '5': 'CD or DVD drive',
+};
+
+/** Turns a `DriveType|FileSystem` line into words. `undefined` means the question was not answered. */
+export function describeFound(found: string | undefined): VolumeDescription {
+  if (found === undefined) return { drive: 'drive not checked', fileSystem: 'unknown' };
+  if (found === '') return { drive: 'no local drive', fileSystem: 'none' };
+  const [type = '', fileSystem = ''] = found.split('|');
+  const fileSystemName = fileSystem.trim();
+  return {
+    drive: DRIVE_KIND_WORDS[type.trim()] ?? 'drive of another kind',
+    fileSystem: fileSystemName === '' ? 'no file system' : fileSystemName,
+  };
 }
 
 /**
@@ -64,7 +122,7 @@ const SCRIPT = [
   'if ($v) { "$($v.DriveType)|$($v.FileSystem)" }',
 ].join('; ');
 
-function askWindows(realPlace: string): boolean {
+function askWindows(realPlace: string): VolumeAnswer {
   try {
     const output = execFileSync(
       'powershell.exe',
@@ -75,9 +133,10 @@ function askWindows(realPlace: string): boolean {
         windowsHide: true,
       },
     );
-    return isNtfsAnswer(decodeAnswer(output));
+    const text = decodeAnswer(output);
+    return { verified: isNtfsAnswer(text), found: firstVolumeLine(text) ?? '' };
   } catch {
-    return false;
+    return { verified: false, found: undefined };
   }
 }
 
@@ -86,6 +145,14 @@ export function decodeAnswer(output: Buffer): string {
   const text = output.includes(0) ? output.toString('utf16le') : output.toString('utf8');
   const byteOrderMark = 0xfeff;
   return text.charCodeAt(0) === byteOrderMark ? text.slice(1) : text;
+}
+
+/** The first `DriveType|FileSystem` line in PowerShell's answer, or undefined when there is none. */
+export function firstVolumeLine(text: string): string | undefined {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => /^\d+\|/.test(line));
 }
 
 /** True when a line names a local volume (drive type 2 removable or 3 fixed) with the NTFS file system. */

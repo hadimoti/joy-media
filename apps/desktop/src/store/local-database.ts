@@ -3,8 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { SqliteJobDispatchStore } from '../jobs/job-dispatch.js';
-import { ensureLocalAssetSchema, SqliteLocalAssetStore } from './local-assets.js';
-import { ensureProjectDocumentSchema, SqliteProjectDocumentStore } from './project-documents.js';
+import {
+  ensureLocalAssetSchema,
+  ensureProjectDocumentSchema,
+  SqliteLocalAssetStore,
+  SqliteProjectDocumentStore,
+} from '@joy-media/local-asset-store';
 import { PROFILE_BINDING_TABLE_SQL, secretVersionDigest } from './profile-binding.js';
 import {
   clearCredentialUnavailable,
@@ -125,7 +129,7 @@ export class LocalDatabase {
   private readonly idFactory: () => string;
   /** Dispatch and Worker presence for the local job API (jobs/job-dispatch.ts). */
   readonly jobDispatch: SqliteJobDispatchStore;
-  /** The project document the editor saves locally (store/project-documents.ts). */
+  /** The project document the editor saves locally (packages/local-asset-store/src/project-documents.ts). */
   readonly projectDocuments: SqliteProjectDocumentStore;
   /** Assets registered for a local render, and where their originals are stored. */
   readonly localAssets: SqliteLocalAssetStore;

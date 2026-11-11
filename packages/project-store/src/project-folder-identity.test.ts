@@ -1,6 +1,6 @@
 import type * as NodeFs from 'node:fs';
 import { realpathSync, statSync } from 'node:fs';
-import { cp, mkdtemp, rename, rm, rmdir, symlink } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rename, rm, rmdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, parse, resolve } from 'node:path';
@@ -15,6 +15,7 @@ import {
 } from './project-claim-registry.js';
 import {
   ProjectClaimBusyError,
+  ProjectClaimPartlyAppliedError,
   ProjectClaimRefusedError,
   ProjectClaimRollbackError,
   ProjectRecordRefusedError,
@@ -239,6 +240,24 @@ async function originalMovedAwayFromCopy(): Promise<{
   const movedRoot = join(scratch, 'Moved trip.joyproj');
   await rename(originalRoot, movedRoot);
   return { copy: track(await openProjectFolder(copyRoot)), movedRoot, originalRoot, originalReal };
+}
+
+/** A folder's identity on its volume, read from the disk. */
+function identityOf(root: string): string {
+  const identity = identityFromStats(statSync(root, { bigint: true }));
+  if (identity === undefined) throw new Error('expected the volume to give an identity');
+  return identity;
+}
+
+/** The project ids the registry records under one folder identity, in order. */
+function recordsUnder(identity: string): string[] {
+  return (
+    registry.database
+      .prepare(
+        'SELECT project_id FROM project_claims WHERE folder_identity = ? ORDER BY project_id',
+      )
+      .all(identity) as { project_id: string }[]
+  ).map((row) => row.project_id);
 }
 
 describe('new id on open', () => {
@@ -701,6 +720,141 @@ describe('new id on open', () => {
     });
   });
 
+  it('a partly saved copy finishes the id it recorded when the owner answers copy again', async () => {
+    const { copy, copyRoot, originalRoot } = await openedCopyOfOriginal();
+    const identity = identityOf(copyRoot);
+    const reader = new DatabaseSync(join(copyRoot, PROJECT_DATABASE_FILE));
+    try {
+      // A read that stays open blocks the folder's commit. The registry keeps the record for 'project-next'.
+      reader.exec('BEGIN');
+      reader.prepare('SELECT COUNT(*) AS n FROM project_folder_entry').get();
+
+      expect(() => claimProjectFolderId(copy, registry, () => 'project-next')).toThrow(
+        ProjectClaimBusyError,
+      );
+    } finally {
+      reader.exec('ROLLBACK');
+      reader.close();
+    }
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+
+    expect(resolveProjectFolderAsCopy(copy, registry, () => 'project-again')).toEqual({
+      kind: 'renewed',
+      previousId: ID,
+      id: 'project-next',
+    });
+
+    expect(readProjectFolderEntry(copy)?.id).toBe('project-next');
+    expect(copy.documents.get('project-next')?.document).toEqual({
+      id: 'project-next',
+      title: 'Trip',
+    });
+    expect(copy.documents.get(ID)).toBeUndefined();
+    expect(copy.documents.get('project-again')).toBeUndefined();
+    expect(recordsUnder(identity)).toEqual(['project-next']);
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+    expect(claimProjectFolderId(copy, registry)).toEqual({ kind: 'kept' });
+  });
+
+  it('a partly saved copy finishes the id it recorded when it is opened again', async () => {
+    const { copy, copyRoot } = await openedCopyOfOriginal();
+    const identity = identityOf(copyRoot);
+    const reader = new DatabaseSync(join(copyRoot, PROJECT_DATABASE_FILE));
+    try {
+      reader.exec('BEGIN');
+      reader.prepare('SELECT COUNT(*) AS n FROM project_folder_entry').get();
+
+      expect(() => claimProjectFolderId(copy, registry, () => 'project-next')).toThrow(
+        ProjectClaimBusyError,
+      );
+    } finally {
+      reader.exec('ROLLBACK');
+      reader.close();
+    }
+
+    const reopened = await openProjectFolderForEditing(copyRoot, registry);
+    if (reopened.kind !== 'editable') throw new Error('expected the copy to open for editing');
+    track(reopened.folder);
+
+    expect(reopened.claim).toEqual({ kind: 'renewed', previousId: ID, id: 'project-next' });
+    expect(readProjectFolderEntry(reopened.folder)?.id).toBe('project-next');
+    expect(recordsUnder(identity)).toEqual(['project-next']);
+    expect(claimProjectFolderId(reopened.folder, registry)).toEqual({ kind: 'kept' });
+  });
+
+  it('a partly saved copy that moved on its drive finishes its id, and its record follows it', async () => {
+    const { copy, copyRoot, originalRoot } = await openedCopyOfOriginal();
+    const identity = identityOf(copyRoot);
+    const reader = new DatabaseSync(join(copyRoot, PROJECT_DATABASE_FILE));
+    try {
+      reader.exec('BEGIN');
+      reader.prepare('SELECT COUNT(*) AS n FROM project_folder_entry').get();
+
+      expect(() => claimProjectFolderId(copy, registry, () => 'project-next')).toThrow(
+        ProjectClaimBusyError,
+      );
+    } finally {
+      reader.exec('ROLLBACK');
+      reader.close();
+    }
+    // The folder is closed before it moves, because an open file blocks a move on Windows.
+    forget(copy);
+    const movedRoot = join(scratch, 'Moved copy.joyproj');
+    await rename(copyRoot, movedRoot);
+    const moved = track(await openProjectFolder(movedRoot));
+
+    expect(claimProjectFolderId(moved, registry)).toEqual({
+      kind: 'renewed',
+      previousId: ID,
+      id: 'project-next',
+    });
+    expect(readProjectFolderEntry(moved)?.id).toBe('project-next');
+    expect(recordsUnder(identity)).toEqual(['project-next']);
+    expect(readProjectClaim(registry, 'project-next')?.folderPath).toBe(real(movedRoot));
+    expect(readProjectClaim(registry, ID)?.folderPath).toBe(real(originalRoot));
+  });
+
+  it('a copy with two records under other ids is refused, and nothing is written', async () => {
+    const { copy, copyRoot } = await openedCopyOfOriginal();
+    const identity = identityOf(copyRoot);
+    for (const projectId of ['project-stray-one', 'project-stray-two']) {
+      writeProjectClaim(registry, {
+        projectId,
+        folderIdentity: identity,
+        folderPath: real(copyRoot),
+        recordedAt: RESTORED_AT,
+      });
+    }
+
+    expect(reasonOf(() => claimProjectFolderId(copy, registry, () => 'project-next'))).toBe(
+      'folder-recorded-under-other-id',
+    );
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, 'project-next')).toBeUndefined();
+  });
+
+  it('a copy whose identity another live place holds under another id is refused, and nothing is written', async () => {
+    const { copy, copyRoot } = await openedCopyOfOriginal();
+    const identity = identityOf(copyRoot);
+    // A second place that reads as this folder's identity, which the tests fake (a clone that shares it).
+    const elsewhere = join(scratch, 'Elsewhere');
+    await mkdir(elsewhere);
+    const stats = statSync(copyRoot, { bigint: true });
+    identityFaults.set(faultKey(elsewhere), { identity: { dev: stats.dev, ino: stats.ino } });
+    writeProjectClaim(registry, {
+      projectId: 'project-elsewhere',
+      folderIdentity: identity,
+      folderPath: real(elsewhere),
+      recordedAt: RESTORED_AT,
+    });
+
+    expect(reasonOf(() => claimProjectFolderId(copy, registry, () => 'project-next'))).toBe(
+      'folder-recorded-under-other-id',
+    );
+    expect(readProjectFolderEntry(copy)?.id).toBe(ID);
+    expect(readProjectClaim(registry, 'project-next')).toBeUndefined();
+  });
+
   it('a registry commit that fails leaves the folder with its old id', async () => {
     const { copy } = await openedCopyOfOriginal();
     // A read blocks a commit only under the default rollback journal, which this test relies on.
@@ -1126,6 +1280,7 @@ describe('new id on open', () => {
     const original = (failure as ProjectClaimRollbackError).original;
     expect(original).toBeInstanceOf(ProjectClaimBusyError);
     expect((original as ProjectClaimBusyError).appliedInRegistry).toBe(true);
+    expect((failure as ProjectClaimRollbackError).appliedInRegistry).toBe(true);
     expect((failure as ProjectClaimRollbackError).rollbackFailures).toHaveLength(1);
 
     // The copy's transaction is still open, because its rollback was made to fail. Run the real one.
@@ -1443,7 +1598,7 @@ describe('new id on open', () => {
     });
   });
 
-  it('a failure after the registry commit that is not busy is rethrown as it is, and the record stays', async () => {
+  it('a failure after the registry commit that is not busy is wrapped as partly applied, and the record stays', async () => {
     const { copy } = await openedCopyOfOriginal();
     // The folder's own COMMIT fails with a plain error, after the registry has committed.
     const failingCommit: ProjectFolder = {
@@ -1468,8 +1623,11 @@ describe('new id on open', () => {
     } catch (error) {
       failure = error;
     }
-    expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toBe('simulated disk failure');
+    expect(failure).toBeInstanceOf(ProjectClaimPartlyAppliedError);
+    expect((failure as ProjectClaimPartlyAppliedError).appliedInRegistry).toBe(true);
+    expect(((failure as ProjectClaimPartlyAppliedError).original as Error).message).toBe(
+      'simulated disk failure',
+    );
     expect(failure).not.toBeInstanceOf(ProjectClaimBusyError);
     // The registry committed first, so its record for the new id is in place.
     expect(readProjectClaim(registry, 'project-next')).toBeDefined();
@@ -1527,7 +1685,7 @@ describe('new id on open', () => {
     expect(readProjectClaim(registry, ID)).toEqual(recorded);
   });
 
-  it('a copy answer that fails after the registry commit, with an error that is not busy, is rethrown and the record stays', async () => {
+  it('a copy answer that fails after the registry commit, with an error that is not busy, is wrapped as partly applied, and the record stays', async () => {
     const { copy } = await openedCopyOfOriginal();
     // The folder's own COMMIT fails with a plain error, after the registry has committed.
     const failingCommit: ProjectFolder = {
@@ -1552,8 +1710,11 @@ describe('new id on open', () => {
     } catch (error) {
       failure = error;
     }
-    expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toBe('simulated disk failure');
+    expect(failure).toBeInstanceOf(ProjectClaimPartlyAppliedError);
+    expect((failure as ProjectClaimPartlyAppliedError).appliedInRegistry).toBe(true);
+    expect(((failure as ProjectClaimPartlyAppliedError).original as Error).message).toBe(
+      'simulated disk failure',
+    );
     expect(failure).not.toBeInstanceOf(ProjectClaimBusyError);
     // The registry committed first, so its record for the new id is in place: the answer is partly applied.
     expect(readProjectClaim(registry, 'project-next')).toBeDefined();

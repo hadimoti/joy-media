@@ -4,7 +4,7 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ensureLocalAssetSchema, SqliteLocalAssetStore } from '../store/local-assets.js';
+import { ensureLocalAssetSchema, SqliteLocalAssetStore } from '@joy-media/local-asset-store';
 import { createLocalOriginalWriter } from './local-originals.js';
 
 const BYTES = new TextEncoder().encode('original bytes');

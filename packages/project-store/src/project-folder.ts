@@ -4,9 +4,13 @@ import { access, mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { DatabaseSync } from 'node:sqlite';
-import { MAX_LOCAL_ORIGINAL_BYTES } from '../main/local-originals.js';
-import { ensureLocalAssetSchema, SqliteLocalAssetStore } from './local-assets.js';
-import { ensureProjectDocumentSchema, SqliteProjectDocumentStore } from './project-documents.js';
+import {
+  ensureLocalAssetSchema,
+  ensureProjectDocumentSchema,
+  MAX_LOCAL_ORIGINAL_BYTES,
+  SqliteLocalAssetStore,
+  SqliteProjectDocumentStore,
+} from '@joy-media/local-asset-store';
 
 /**
  * A project folder (`NAME.joyproj`): the project's document, its asset index and its original

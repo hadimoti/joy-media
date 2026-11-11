@@ -19,6 +19,8 @@
     "test:smoke-standalone": "node scripts/smoke-standalone.mjs"
   },
   "dependencies": {
+    "@joy-media/local-asset-store": "workspace:*",
+    "@joy-media/project-store": "workspace:*",
     "@joy-media/provider-oauth": "workspace:*",
     "@joy-media/provider-sdk": "workspace:*"
   },

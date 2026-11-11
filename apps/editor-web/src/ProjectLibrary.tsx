@@ -20,8 +20,34 @@ import {
   TrashIcon,
 } from './icons.js';
 import { JOY_STUDIO_NAME } from './product-identity.js';
+import { ProjectFolderAskDialog } from './ProjectFolderDialogs.js';
+import {
+  answerProjectFolder,
+  createProjectFolder,
+  listProjectFolders,
+  openProjectFolder,
+  projectFoldersAvailable,
+  restoreProjectFolder,
+  type ProjectFolderAnswer,
+  type ProjectFolderAsk,
+  type ProjectFolderListedItem,
+} from './project-folder-client.js';
+import {
+  answerText,
+  createText,
+  openText,
+  problemWords,
+  restoreText,
+} from './project-folder-messages.js';
+import { projectListRows, type ProjectListRow } from './project-folder-rows.js';
 
 type ProjectOperationResult = void | ProjectCatalogEntry;
+/** How an answer or a restore ended: the words for the owner, and whether the question stays open. */
+type FolderQuestionOutcome = {
+  readonly kind: 'success' | 'error';
+  readonly text: string;
+  readonly keepOpen: boolean;
+};
 type ProjectAction = 'rename' | 'duplicate' | 'trash' | 'restore' | 'purge';
 type DialogState =
   | {
@@ -75,12 +101,36 @@ export function ProjectLibrary({
   const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string }>();
   const [highlightProjectId, setHighlightProjectId] = useState<string | null>(null);
+  // Folder projects exist only in the desktop app. Their list is read from the desktop, never from this browser.
+  const foldersAvailable = projectFoldersAvailable();
+  const [folderItems, setFolderItems] = useState<readonly ProjectFolderListedItem[]>([]);
+  const [folderBusyKey, setFolderBusyKey] = useState<string | null>(null);
+  const [folderDialog, setFolderDialog] = useState<
+    { readonly key: string; readonly name: string; readonly ask: ProjectFolderAsk } | undefined
+  >(undefined);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [folderDraftTitle, setFolderDraftTitle] = useState('');
+  // A refused answer or restore stays on the question as this notice, so the owner can choose again.
+  const [folderDialogNotice, setFolderDialogNotice] = useState<string | undefined>(undefined);
+  // The key of the question on screen. An answer that finishes after the owner moved on must not touch another question.
+  const folderDialogKey = useRef<string | undefined>(undefined);
+  // The number of the newest folder listing asked for. An older reply that arrives late is not shown.
+  const folderListingSequence = useRef(0);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const activeProjects = listCatalogProjects(storage);
   const trashedProjects = listTrashedCatalogProjects(storage);
   const trashedCount = trashedProjects.length;
-  const projectCount = activeProjects.length;
+  // The count is of the rows that are projects: a folder takes the place of a browser copy with the same id, and a
+  // folder with no entry is not a project.
+  const projectCount = foldersAvailable
+    ? projectListRows({
+        browser: activeProjects,
+        folders: folderItems,
+        query: '',
+        sort,
+      }).rows.filter((row) => row.kind !== 'folder-missing-entry').length
+    : activeProjects.length;
   const projects = (showTrash ? trashedProjects : activeProjects)
     .filter((entry) => {
       const normalized = query.trim().toLocaleLowerCase();
@@ -95,6 +145,20 @@ export function ProjectLibrary({
       if (sort === 'created-desc') return right.createdAt.localeCompare(left.createdAt);
       return right.updatedAt.localeCompare(left.updatedAt);
     });
+
+  // The rows the list shows: browser projects and folder projects in one list when the desktop has folders.
+  const folderList =
+    showTrash || !foldersAvailable
+      ? undefined
+      : projectListRows({ browser: activeProjects, folders: folderItems, query, sort });
+  const listRows: readonly ProjectListRow[] =
+    folderList?.rows ?? projects.map((entry) => ({ kind: 'browser' as const, entry }));
+  const folderProblemNotice =
+    folderList === undefined || folderList.problems.length === 0
+      ? undefined
+      : `Some folders could not be read: ${folderList.problems
+          .map((problem) => `${problem.name} (${problemWords(problem.problem)})`)
+          .join(', ')}.`;
 
   useEffect(() => {
     const current = loadEditorUiPreferences(storage);
@@ -172,6 +236,167 @@ export function ProjectLibrary({
       document.removeEventListener('keydown', handleKeys);
     };
   }, [closeMenu, menuProjectId]);
+
+  const refreshFolders = useCallback(async (): Promise<void> => {
+    const sequence = ++folderListingSequence.current;
+    try {
+      const listing = await listProjectFolders();
+      if (sequence === folderListingSequence.current) setFolderItems(listing.folders);
+    } catch {
+      // A failed refresh keeps the last listing on screen, so the rows do not vanish.
+      if (sequence === folderListingSequence.current) {
+        // A success notice from the operation that asked for the refresh stays. The error shows only when no notice does.
+        setNotice(
+          (current) => current ?? { kind: 'error', text: 'Project folders could not be listed.' },
+        );
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!foldersAvailable) return;
+    void refreshFolders();
+  }, [foldersAvailable, refreshFolders]);
+
+  /** Checks a folder project. Nothing is opened in the editor yet: this settles the folder, or asks the owner. */
+  const openFolder = async (folder: { readonly key: string; readonly name: string }) => {
+    setFolderBusyKey(folder.key);
+    setNotice(undefined);
+    try {
+      const reply = await openProjectFolder(folder.key);
+      if (reply.kind === 'ask') {
+        folderDialogKey.current = folder.key;
+        setFolderDialogNotice(undefined);
+        setFolderDialog({ key: folder.key, name: folder.name, ask: reply.ask });
+      } else {
+        setNotice({ kind: reply.kind === 'ready' ? 'success' : 'error', text: openText(reply) });
+      }
+    } catch {
+      setNotice({
+        kind: 'error',
+        text: 'The folder project could not be confirmed. Part of it may be saved. Open the folder again to check it.',
+      });
+    } finally {
+      // Only this folder's busy state ends here: another folder's operation may still be in flight.
+      setFolderBusyKey((current) => (current === folder.key ? null : current));
+      await refreshFolders();
+    }
+  };
+
+  /**
+   * Ends an answer or a restore for the question it was asked on. A refused reason stays on that question while it is
+   * open. If the owner closed it, or moved on, the reason goes to the page instead, so no other question is touched.
+   */
+  const finishFolderQuestion = (key: string, outcome: FolderQuestionOutcome) => {
+    setFolderBusyKey((current) => (current === key ? null : current));
+    const stillOpen = folderDialogKey.current === key;
+    if (stillOpen && outcome.keepOpen) {
+      setFolderDialogNotice(outcome.text);
+      return;
+    }
+    if (stillOpen) {
+      folderDialogKey.current = undefined;
+      setFolderDialog(undefined);
+      setFolderDialogNotice(undefined);
+    }
+    setNotice({ kind: outcome.kind, text: outcome.text });
+  };
+
+  const answerFolder = async (answer: ProjectFolderAnswer) => {
+    const dialog = folderDialog;
+    if (dialog === undefined) return;
+    setFolderBusyKey(dialog.key);
+    let outcome: FolderQuestionOutcome;
+    try {
+      const reply = await answerProjectFolder(dialog.key, answer);
+      if (reply.kind === 'refused' || reply.claim === 'undecided') {
+        // A refused or undecided answer changes nothing, so the question stays open with the reason on it. The one
+        // exception is an answer that settled but could not be shown: it is saved, so the question closes and the page says
+        // to open the folder again.
+        const settledNotShown = reply.kind === 'refused' && reply.code === 'settled-not-shown';
+        outcome = { kind: 'error', text: answerText(reply), keepOpen: !settledNotShown };
+      } else {
+        outcome = {
+          kind: reply.claim === 'unverifiable' || reply.claim === 'none' ? 'error' : 'success',
+          text: answerText(reply),
+          keepOpen: false,
+        };
+      }
+    } catch {
+      outcome = {
+        kind: 'error',
+        text: 'The answer could not be confirmed. It may have been saved. Open the folder again to check it.',
+        keepOpen: true,
+      };
+    }
+    finishFolderQuestion(dialog.key, outcome);
+    await refreshFolders();
+  };
+
+  const restoreFolderEntry = async (title: string) => {
+    const dialog = folderDialog;
+    if (dialog === undefined) return;
+    setFolderBusyKey(dialog.key);
+    let refusal: FolderQuestionOutcome | undefined;
+    try {
+      const reply = await restoreProjectFolder(dialog.key, title);
+      if (reply.kind !== 'restored') {
+        refusal = { kind: 'error', text: restoreText(reply), keepOpen: true };
+      }
+    } catch {
+      refusal = {
+        kind: 'error',
+        text: 'The restore could not be confirmed. It may have been done. Open the folder again to check it.',
+        keepOpen: true,
+      };
+    }
+    if (refusal !== undefined) {
+      finishFolderQuestion(dialog.key, refusal);
+      await refreshFolders();
+      return;
+    }
+    // Restored: the question closes if it is still on screen, and the folder is checked again.
+    setFolderBusyKey((current) => (current === dialog.key ? null : current));
+    if (folderDialogKey.current === dialog.key) {
+      folderDialogKey.current = undefined;
+      setFolderDialog(undefined);
+      setFolderDialogNotice(undefined);
+    }
+    await openFolder(dialog);
+  };
+
+  // A ref, so a second submit while the first is in flight is ignored, even within the same render.
+  const folderCreateInFlight = useRef(false);
+
+  const submitFolderCreate = async () => {
+    // One request makes one folder: a submit while the first is in flight does nothing.
+    if (folderCreateInFlight.current) return;
+    const title = folderDraftTitle.trim();
+    if (title === '') {
+      setNotice({ kind: 'error', text: 'Give the project a name first.' });
+      return;
+    }
+    folderCreateInFlight.current = true;
+    setNotice(undefined);
+    try {
+      const reply = await createProjectFolder(title);
+      // Only a created folder closes the form. A refused name stays in it, so the owner can change the name.
+      if (reply.kind === 'created') {
+        setCreatingFolder(false);
+        setFolderDraftTitle('');
+      }
+      setNotice({ kind: reply.kind === 'created' ? 'success' : 'error', text: createText(reply) });
+    } catch {
+      // The reply may have been lost after the folder was made, so the owner is asked to check the list first.
+      setNotice({
+        kind: 'error',
+        text: 'The folder project could not be confirmed. Refresh the list before creating it again.',
+      });
+    } finally {
+      folderCreateInFlight.current = false;
+    }
+    await refreshFolders();
+  };
 
   const runOperation = async (
     entry: ProjectCatalogEntry,
@@ -288,6 +513,20 @@ export function ProjectLibrary({
               <span>New project</span>
             </button>
           )}
+          {!showTrash && foldersAvailable && (
+            <button
+              type="button"
+              className="project-library-new"
+              aria-label="New folder project"
+              onClick={() => {
+                setFolderDraftTitle('');
+                setCreatingFolder(true);
+              }}
+            >
+              <PlusIcon />
+              <span>New folder project</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -304,6 +543,12 @@ export function ProjectLibrary({
         {notice !== undefined && (
           <p className={`project-library-notice is-${notice.kind}`} role="status">
             {notice.text}
+          </p>
+        )}
+
+        {folderProblemNotice !== undefined && (
+          <p className="project-library-notice is-error" role="status">
+            {folderProblemNotice}
           </p>
         )}
 
@@ -406,7 +651,42 @@ export function ProjectLibrary({
           </form>
         )}
 
-        {projects.length === 0 ? (
+        {!showTrash && creatingFolder && (
+          <form
+            className="project-library-create"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitFolderCreate();
+            }}
+          >
+            <label>
+              <span className="sr-only">Folder project title</span>
+              <input
+                autoFocus
+                value={folderDraftTitle}
+                placeholder="Folder project name"
+                maxLength={200}
+                onChange={(event) => setFolderDraftTitle(event.currentTarget.value)}
+              />
+            </label>
+            <button type="submit" className="icon-button" aria-label="Create folder project">
+              <CheckIcon />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Cancel folder project"
+              onClick={() => {
+                setCreatingFolder(false);
+                setFolderDraftTitle('');
+              }}
+            >
+              <CloseIcon />
+            </button>
+          </form>
+        )}
+
+        {listRows.length === 0 ? (
           <div className="project-library-empty" role="status">
             <strong>{showTrash ? 'Trash is empty' : 'No projects yet'}</strong>
             <span>
@@ -417,7 +697,55 @@ export function ProjectLibrary({
           </div>
         ) : (
           <ul className={`project-library-grid${view === 'list' ? ' is-list' : ''}`}>
-            {projects.map((entry) => {
+            {listRows.map((row) => {
+              if (row.kind === 'folder') {
+                const folder = row.folder;
+                return (
+                  <li key={`folder:${folder.key}`}>
+                    <button
+                      type="button"
+                      className="project-library-card project-library-card-folder"
+                      disabled={folderBusyKey !== null}
+                      onClick={() => void openFolder(folder)}
+                    >
+                      <span className="project-library-card-title">
+                        <strong dir="auto">{folder.entry.title}</strong>
+                      </span>
+                      <span className="project-library-card-thumb" aria-hidden="true" />
+                      <span className="project-library-card-body">
+                        <span>{`Last updated: ${formatUpdated(folder.entry.updatedAt)}`}</span>
+                        <span>{`Folder project · ${folder.name}`}</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              }
+              if (row.kind === 'folder-missing-entry') {
+                const folder = row.folder;
+                return (
+                  <li key={`folder-missing:${folder.key}`}>
+                    <button
+                      type="button"
+                      className="project-library-card project-library-card-folder"
+                      disabled={folderBusyKey !== null}
+                      onClick={() => void openFolder(folder)}
+                    >
+                      <span className="project-library-card-title">
+                        <strong dir="auto">{folder.name}</strong>
+                      </span>
+                      <span className="project-library-card-thumb" aria-hidden="true" />
+                      <span className="project-library-card-body">
+                        <span>
+                          No project entry yet. Open it: if the app remembers it, give it a title to
+                          finish it.
+                        </span>
+                        <span>{`Folder project · ${folder.name}`}</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              }
+              const entry = row.entry;
               const busy = busyProjectId === entry.id;
               return (
                 <li
@@ -594,6 +922,22 @@ export function ProjectLibrary({
           }}
         />
       ) : null}
+      {folderDialog !== undefined && (
+        <ProjectFolderAskDialog
+          key={`${folderDialog.key}:${folderDialog.ask.reason}`}
+          folderName={folderDialog.name}
+          ask={folderDialog.ask}
+          busy={folderBusyKey !== null}
+          notice={folderDialogNotice}
+          onAnswer={(answer) => void answerFolder(answer)}
+          onRestore={(title) => void restoreFolderEntry(title)}
+          onClose={() => {
+            folderDialogKey.current = undefined;
+            setFolderDialog(undefined);
+            setFolderDialogNotice(undefined);
+          }}
+        />
+      )}
     </div>
   );
 }

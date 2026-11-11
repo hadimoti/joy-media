@@ -61,6 +61,8 @@ import { createProviderSignIn, loadOrCreateInstallId } from './oauth/sign-in.js'
 import { revokeChatGptRefreshToken } from './oauth/chatgpt.js';
 import { createWorkerCompletion } from './providers/worker-completion.js';
 import { checkProfileCredentials } from './profile-credential-check.js';
+import { createProjectFolderClient } from './project-folder-client.js';
+import { defaultProjectFoldersDirectory } from '../store/project-folder-location.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
@@ -163,11 +165,27 @@ if (!app.requestSingleInstanceLock()) {
     directory: join(paths.mediaRoot, 'originals'),
     assets: localDatabase.localAssets,
   });
+  // The project-folder rules run on their own worker thread, so a claim that waits on a lock or on Windows' volume
+  // check never stalls the main process. The claim registry lives in the app data folder, outside every project.
+  const projectFolders = createProjectFolderClient({
+    workerFile: join(__dirname, 'project-folder-worker.js'),
+    registryPath: join(app.getPath('userData'), 'project-claims.sqlite'),
+    directory: defaultProjectFoldersDirectory({
+      documentsDirectory: app.getPath('documents'),
+      userProfileDirectory: app.getPath('home'),
+      oneDriveRoots: [
+        process.env['OneDrive'],
+        process.env['OneDriveConsumer'],
+        process.env['OneDriveCommercial'],
+      ].filter((root): root is string => typeof root === 'string' && root.trim() !== ''),
+    }),
+  });
   const ipcHandlers = createIpcHandlers({
     agentRequests,
     fileRegistry,
     workerSupervisor,
     localDatabase,
+    projectFolders,
     mediaChannel: createMediaChannelHandlers({
       orchestrator: jobOrchestrator,
       jobStore: localDatabase.jobDispatch,
@@ -292,6 +310,7 @@ if (!app.requestSingleInstanceLock()) {
     discardUploads: () => originals.abortAllOriginalUploads(),
     flush: async () => {
       await localJobApi?.close().catch(() => undefined);
+      await projectFolders.shutdown({ final: true }).catch(() => undefined);
       localDatabase.close();
     },
     quit: () => app.quit(),

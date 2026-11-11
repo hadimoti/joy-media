@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAssetLibrary } from './asset-library.js';
-import type { LocalAsset } from './local-assets.js';
+import type { LocalAsset } from '@joy-media/local-asset-store';
 
 const directories: string[] = [];
 

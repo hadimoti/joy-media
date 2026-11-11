@@ -7,6 +7,8 @@
     { "path": "packages/motion-core" },
     { "path": "packages/camera-core" },
     { "path": "packages/expression-core" },
+    { "path": "packages/local-asset-store" },
+    { "path": "packages/project-store" },
     { "path": "packages/provider-sdk" },
     { "path": "packages/adapter-comfyui" },
     { "path": "packages/adapter-mistral" },

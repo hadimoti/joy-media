@@ -26,6 +26,8 @@ import { OAuthFlowError } from './oauth/errors.js';
 import { decodeTokenRecord, type ChatGptTokenRecord } from './oauth/chatgpt.js';
 import type { ProviderSignInContext, SignInProvider, SignInResult } from './oauth/sign-in.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
+import type { ProjectFolderRequestPort } from '@joy-media/project-store';
+import { createProjectFolderHandlers } from './project-folder-ipc.js';
 import {
   isAgentSlotConfigured,
   isSignInProvider,
@@ -67,6 +69,8 @@ export interface IpcHandlerDeps {
   readonly mediaChannel?: Readonly<
     Record<MediaChannel, (payload: unknown) => MediaResult | Promise<MediaResult>>
   >;
+  /** The project-folder worker (project-folder-client.ts). Absent means every project-folder call is refused. */
+  readonly projectFolders?: ProjectFolderRequestPort;
   readonly showOpenDialog: ShowOpenDialog;
   readonly showOpenDirectoryDialog?: ShowOpenDialog;
   readonly localDatabase: LocalDatabase;
@@ -104,6 +108,7 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
 
   const handlers: Record<IpcChannel, IpcHandler> = {
     ...mediaChannelTable(deps.mediaChannel),
+    ...createProjectFolderHandlers(deps.projectFolders),
     'desktop.provider-profile.sign-in': async (payload): Promise<IpcResult> => {
       const request = asSignInRequest(payload);
       if (request === undefined) return { ok: false, error: 'Invalid sign-in request' };

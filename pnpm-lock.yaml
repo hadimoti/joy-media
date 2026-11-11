@@ -126,6 +126,12 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@joy-media/local-asset-store':
+        specifier: workspace:*
+        version: link:../../packages/local-asset-store
+      '@joy-media/project-store':
+        specifier: workspace:*
+        version: link:../../packages/project-store
       '@joy-media/provider-oauth':
         specifier: workspace:*
         version: link:../../packages/provider-oauth
@@ -462,6 +468,8 @@ importers:
         specifier: 4.6.6
         version: 4.6.6
 
+  packages/local-asset-store: {}
+
   packages/media-core: {}
 
   packages/motion-core:
@@ -495,6 +503,12 @@ importers:
         version: link:../test-fixtures
 
   packages/project-schema: {}
+
+  packages/project-store:
+    dependencies:
+      '@joy-media/local-asset-store':
+        specifier: workspace:*
+        version: link:../local-asset-store
 
   packages/property-system:
     dependencies:

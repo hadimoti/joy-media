@@ -2,10 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, readdirSync, unlinkSync } from 'node:fs';
 import { access, mkdir, open, rename, unlink, writeFile, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { SqliteLocalAssetStore } from '../store/local-assets.js';
+import { MAX_LOCAL_ORIGINAL_BYTES, type SqliteLocalAssetStore } from '@joy-media/local-asset-store';
 
-/** Largest original the editor may upload for a local render. */
-export const MAX_LOCAL_ORIGINAL_BYTES = 5 * 1024 * 1024 * 1024;
+/** Largest original the editor may upload for a local render. The limit lives in the local asset store package. */
+export { MAX_LOCAL_ORIGINAL_BYTES };
 
 /** Largest piece of an original that one chunked upload message may carry. */
 export const MAX_ORIGINAL_CHUNK_BYTES = 16 * 1024 * 1024;

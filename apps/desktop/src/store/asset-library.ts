@@ -3,7 +3,7 @@ import { constants } from 'node:fs';
 import { copyFile, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import type { LocalAsset } from './local-assets.js';
+import type { LocalAsset } from '@joy-media/local-asset-store';
 
 export interface AssetLibraryPort {
   addAsset(
