@@ -32,6 +32,7 @@ function lifecycle(overrides: Record<string, unknown> = {}): Record<string, unkn
       installFolderExists: false,
       uninstallKey: false,
       pathHasJoy: false,
+      joyKey: null,
       desktopShortcut: false,
       startMenuShortcut: false,
     },
@@ -49,7 +50,12 @@ function upgrade(overrides: Record<string, unknown> = {}): Record<string, unknow
     'S1-v102-installed': { appPackageVersion: '1.0.2' },
     'S3-upgraded': { appPackageVersion: '1.1.0', uninstallDisplayVersion: '1.1.0' },
     'S4-v110-after-run': { dataFolderExists: true },
-    'S5-uninstalled': { installFolderExists: false, dataFolderExists: true, pathEntries: 0 },
+    'S5-uninstalled': {
+      installFolderExists: false,
+      dataFolderExists: true,
+      pathEntries: 0,
+      joyKey: null,
+    },
     ...overrides,
   };
 }
@@ -122,6 +128,7 @@ describe('sandbox lifecycle receipt', () => {
         installFolderExists: true,
         uninstallKey: true,
         pathHasJoy: true,
+        joyKey: 'C:\gone\joy-media.exe',
         desktopShortcut: true,
         startMenuShortcut: false,
       },
@@ -130,6 +137,7 @@ describe('sandbox lifecycle receipt', () => {
     expect(text).toMatch(/install folder is still there/u);
     expect(text).toMatch(/registration is still there/u);
     expect(text).toMatch(/user PATH/u);
+    expect(text).toMatch(/joy:\/\/ registration/u);
     expect(text).toMatch(/shortcut/u);
   });
 });

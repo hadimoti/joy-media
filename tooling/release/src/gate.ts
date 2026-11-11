@@ -1339,7 +1339,8 @@ export function readAttendedEvidence(
     const path = join(folder, name);
     if (!existsSync(path)) return undefined;
     try {
-      return JSON.parse(readFileSync(path, 'utf8')) as unknown;
+      // Windows PowerShell 5 writes UTF-8 with a byte-order mark; the Sandbox scripts run on it.
+      return JSON.parse(readFileSync(path, 'utf8').replace(/^﻿/u, '')) as unknown;
     } catch {
       return null;
     }

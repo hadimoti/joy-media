@@ -162,6 +162,9 @@ export function validateSandboxLifecycle(
     blockers.push('the uninstaller registration is still there after the uninstall');
   if (removed.pathHasJoy !== false)
     blockers.push('a JOY Media entry is still on the user PATH after the uninstall');
+  if (removed.joyKey !== null) {
+    blockers.push('the joy:// registration is still there after the uninstall');
+  }
   if (removed.desktopShortcut !== false || removed.startMenuShortcut !== false) {
     blockers.push('a shortcut is still there after the uninstall');
   }
@@ -200,6 +203,9 @@ export function validateSandboxUpgrade(
   if (removed.installFolderExists !== false)
     blockers.push('the install folder is still there after the uninstall');
   if (removed.dataFolderExists !== true) blockers.push('the uninstall removed the app data folder');
+  if (removed.joyKey !== null) {
+    blockers.push('the joy:// registration is still there after the uninstall');
+  }
   if (removed.pathEntries !== 0) {
     blockers.push('a JOY Media entry is still on the user PATH after the uninstall');
   }

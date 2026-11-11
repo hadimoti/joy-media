@@ -72,6 +72,7 @@ function lifecycleReceipt() {
       installFolderExists: false,
       uninstallKey: false,
       pathHasJoy: false,
+      joyKey: null,
       desktopShortcut: false,
       startMenuShortcut: false,
     },
@@ -92,7 +93,12 @@ function upgradeReceipt() {
     'S1-v102-installed': { appPackageVersion: '1.0.2' },
     'S3-upgraded': { appPackageVersion: '1.1.0', uninstallDisplayVersion: '1.1.0' },
     'S4-v110-after-run': { dataFolderExists: true },
-    'S5-uninstalled': { installFolderExists: false, dataFolderExists: true, pathEntries: 0 },
+    'S5-uninstalled': {
+      installFolderExists: false,
+      dataFolderExists: true,
+      pathEntries: 0,
+      joyKey: null,
+    },
   };
 }
 
@@ -222,7 +228,8 @@ describe('readAttendedEvidence', () => {
       const folder = join(root, 'docs', 'release', 'attended', CANDIDATE);
       mkdirSync(folder, { recursive: true });
       writeFileSync(join(folder, 'restart-save-export.json'), JSON.stringify({ a: 1 }));
-      writeFileSync(join(folder, 'sandbox-lifecycle.json'), JSON.stringify({ b: 2 }));
+      // Windows PowerShell 5 writes a byte-order mark; the reader must accept it.
+      writeFileSync(join(folder, 'sandbox-lifecycle.json'), `﻿${JSON.stringify({ b: 2 })}`);
       writeFileSync(join(folder, 'sandbox-upgrade.json'), '{not json');
       const releases = join(root, 'apps', 'desktop', 'dist', 'releases');
       mkdirSync(releases, { recursive: true });

@@ -224,6 +224,8 @@ if errorlevel 1 (
 del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\JOY Media.lnk" 2>nul
 del "%USERPROFILE%\\Desktop\\JOY Media.lnk" 2>nul
 reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\JoyMedia" /f 2>nul
+rem Remove the joy:// handler only when it names this install, so another JOY Media build keeps its own.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$k = 'HKCU:\\Software\\Classes\\joy'; $c = (Get-ItemProperty -LiteralPath ($k + '\\shell\\open\\command') -ErrorAction SilentlyContinue).'(default)'; if ($c -and $env:JOY_MEDIA_INSTALL_DIR -and $c.IndexOf($env:JOY_MEDIA_INSTALL_DIR, [StringComparison]::OrdinalIgnoreCase) -ge 0) { Remove-Item -LiteralPath $k -Recurse -Force }" 2>nul
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); $target = $env:JOY_MEDIA_INSTALL_DIR.TrimEnd('\\'); if ($p) { $np = ($p -split ';' | Where-Object { $_ -ne '' -and $_.TrimEnd('\\') -ine $target }) -join ';'; [Environment]::SetEnvironmentVariable('Path', $np, 'User') }" 2>nul
 

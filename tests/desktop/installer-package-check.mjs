@@ -109,6 +109,11 @@ assert.match(
 );
 assert.match(hostIntegrationBlock, /reg\s+delete/i, 'Registry operation was not found');
 assert.match(hostIntegrationBlock, /powershell\.exe/i, 'User PATH operation was not found');
+assert.match(
+  hostIntegrationBlock,
+  /Software\\+Classes\\+joy[\s\S]*JOY_MEDIA_INSTALL_DIR[\s\S]*Remove-Item/i,
+  'The joy:// handler cleanup (only when it names this install) was not found',
+);
 
 // The test copy preserves the generated file-cleanup logic while removing all
 // commands that could modify the host profile, registry, shortcuts, or PATH.
