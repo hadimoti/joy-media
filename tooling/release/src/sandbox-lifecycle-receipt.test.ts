@@ -128,7 +128,7 @@ describe('sandbox lifecycle receipt', () => {
         installFolderExists: true,
         uninstallKey: true,
         pathHasJoy: true,
-        joyKey: 'C:\gone\joy-media.exe',
+        joyKey: 'C:/gone/joy-media.exe',
         desktopShortcut: true,
         startMenuShortcut: false,
       },
