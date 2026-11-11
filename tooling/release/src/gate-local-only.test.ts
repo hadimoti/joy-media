@@ -229,7 +229,10 @@ describe('readAttendedEvidence', () => {
       mkdirSync(folder, { recursive: true });
       writeFileSync(join(folder, 'restart-save-export.json'), JSON.stringify({ a: 1 }));
       // Windows PowerShell 5 writes a byte-order mark; the reader must accept it.
-      writeFileSync(join(folder, 'sandbox-lifecycle.json'), `﻿${JSON.stringify({ b: 2 })}`);
+      writeFileSync(
+        join(folder, 'sandbox-lifecycle.json'),
+        String.fromCharCode(0xfeff) + JSON.stringify({ b: 2 }),
+      );
       writeFileSync(join(folder, 'sandbox-upgrade.json'), '{not json');
       const releases = join(root, 'apps', 'desktop', 'dist', 'releases');
       mkdirSync(releases, { recursive: true });

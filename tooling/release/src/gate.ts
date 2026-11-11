@@ -1340,7 +1340,8 @@ export function readAttendedEvidence(
     if (!existsSync(path)) return undefined;
     try {
       // Windows PowerShell 5 writes UTF-8 with a byte-order mark; the Sandbox scripts run on it.
-      return JSON.parse(readFileSync(path, 'utf8').replace(/^﻿/u, '')) as unknown;
+      const text = readFileSync(path, 'utf8');
+      return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text) as unknown;
     } catch {
       return null;
     }
