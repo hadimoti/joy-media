@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 // Keep the explicit .ts extension so the release command works from a clean
 // checkout where no compiled font-assets.js sibling exists yet.
 import { scanFontAssets } from './font-assets.ts';
+import { validateAttendedReceipt } from './attended-receipt.ts';
+import { validateSandboxLifecycle, validateSandboxUpgrade } from './sandbox-lifecycle-receipt.ts';
 import { refusedInputs, verifyReport } from './hosted-verify.mjs';
 
 export const REQUIRED_BUILD_IDS = ['editor', 'worker'] as const;
@@ -60,7 +62,35 @@ export interface ReleaseWaiver {
   readonly expiresAt: string;
 }
 
+/**
+ * The gate profiles. 'standard' is the original gate: a real-service browser journey and server
+ * delivery, session and restore evidence. 'local-only' is for the local desktop release (v1.1.0), which has no
+ * server: browser-journey and operational-evidence are replaced by attended-journey and lifecycle-evidence,
+ * which read the attended receipts and the Windows Sandbox receipts under docs/release/attended/<candidate-sha>/.
+ */
+export type ReleaseGateProfile = 'standard' | 'local-only';
+
+/** Attended scenarios the local-only gate requires, with the file under the attended folder that holds each receipt. */
+export const LOCAL_ONLY_ATTENDED_SCENARIOS = {
+  'desktop.app.restart-save-export': 'restart-save-export.json',
+  'project.persistence.fresh-process': 'fresh-process.json',
+} as const;
+
+export interface ReleaseAttendedEvidence {
+  readonly candidateSha: string;
+  /** SHA-256 of the candidate's joy-media-setup.exe, from the release SHA256SUMS.txt. */
+  readonly setupSha256: string;
+  /** Attended receipts by scenario id; a missing receipt is undefined. */
+  readonly receipts: Readonly<Record<string, unknown>>;
+  readonly sandboxLifecycle: unknown;
+  readonly sandboxUpgrade: unknown;
+}
+
 export interface ReleaseGateInput {
+  /** Defaults to 'standard'. */
+  readonly profile?: ReleaseGateProfile;
+  /** Attended and Sandbox receipts. Used only by the local-only profile; null means none were found. */
+  readonly attendedEvidence?: ReleaseAttendedEvidence | null;
   readonly testSummary: { readonly collected: number; readonly failed: number };
   readonly dirtyGeneratedArtifacts: readonly string[];
   readonly fixtureHandlers: readonly string[];
@@ -210,6 +240,7 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
     requiredCommands.every((id) =>
       input.commandResults?.some((result) => result.id === id && result.exitCode === 0),
     );
+  const localOnly = input.profile === 'local-only';
   const checks: ReleaseCheck[] = [
     check(
       'command-health',
@@ -280,27 +311,47 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
       input.manifestGenerated ? 'release manifest generated' : 'release manifest is missing',
     ),
     check('sbom', input.sbomGenerated, input.sbomGenerated ? 'SBOM generated' : 'SBOM is missing'),
-    check(
-      'browser-journey',
-      input.browserJourneys.some(
-        (journey) =>
-          journey.id === REQUIRED_JOURNEY_ID &&
-          browserJourneyReleaseReady(journey, input.sourceProvenance, now),
-      ),
-      browserJourneyMessage(input.browserJourneys, input.sourceProvenance, now),
-    ),
+    ...(localOnly
+      ? [
+          check(
+            'attended-journey',
+            attendedJourneyBlockers(input.attendedEvidence).length === 0,
+            attendedJourneyMessage(input.attendedEvidence),
+          ),
+        ]
+      : [
+          check(
+            'browser-journey',
+            input.browserJourneys.some(
+              (journey) =>
+                journey.id === REQUIRED_JOURNEY_ID &&
+                browserJourneyReleaseReady(journey, input.sourceProvenance, now),
+            ),
+            browserJourneyMessage(input.browserJourneys, input.sourceProvenance, now),
+          ),
+        ]),
     check(
       'performance-evidence',
       performanceEvidenceReady(input.performanceEvidence, input.sourceProvenance, now),
       performanceEvidenceMessage(input.performanceEvidence, input.sourceProvenance, now),
     ),
-    check(
-      'operational-evidence',
-      input.operationalEvidence === undefined ||
-        (input.operationalEvidence !== null &&
-          operationalEvidenceReady(input.operationalEvidence, input.sourceProvenance)),
-      operationalEvidenceMessage(input.operationalEvidence, input.sourceProvenance),
-    ),
+    ...(localOnly
+      ? [
+          check(
+            'lifecycle-evidence',
+            lifecycleBlockers(input.attendedEvidence).length === 0,
+            lifecycleMessage(input.attendedEvidence),
+          ),
+        ]
+      : [
+          check(
+            'operational-evidence',
+            input.operationalEvidence === undefined ||
+              (input.operationalEvidence !== null &&
+                operationalEvidenceReady(input.operationalEvidence, input.sourceProvenance)),
+            operationalEvidenceMessage(input.operationalEvidence, input.sourceProvenance),
+          ),
+        ]),
     check(
       'feature-status',
       featureStatusReady(input.featureStatus, now) &&
@@ -329,6 +380,62 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
     generatedAt: now.toISOString(),
     checks: resolved,
   };
+}
+
+// The local-only profile reads receipts that scripted attended and Windows Sandbox runs wrote. Undefined means the pure
+// evaluator was not given evidence (as for the other evidence fields); null means the workspace held none.
+function attendedJourneyBlockers(evidence: ReleaseAttendedEvidence | null | undefined): string[] {
+  if (evidence === undefined) return [];
+  if (evidence === null) return ['no attended receipts were found for this candidate'];
+  const blockers: string[] = [];
+  for (const scenarioId of Object.keys(LOCAL_ONLY_ATTENDED_SCENARIOS)) {
+    const receipt = evidence.receipts[scenarioId];
+    if (receipt === undefined) {
+      blockers.push(`${scenarioId}: the receipt is missing`);
+      continue;
+    }
+    for (const reason of validateAttendedReceipt(receipt, {
+      scenarioId: scenarioId as keyof typeof LOCAL_ONLY_ATTENDED_SCENARIOS,
+      candidateSha: evidence.candidateSha,
+    }))
+      blockers.push(`${scenarioId}: ${reason}`);
+  }
+  return blockers;
+}
+
+function attendedJourneyMessage(evidence: ReleaseAttendedEvidence | null | undefined): string {
+  if (evidence === undefined) return 'attended evidence not supplied to pure evaluator';
+  const blockers = attendedJourneyBlockers(evidence);
+  return blockers.length === 0
+    ? 'attended restart, save, export and fresh-process receipts passed on the candidate'
+    : `attended receipts are incomplete: ${blockers.join('; ')}`;
+}
+
+function lifecycleBlockers(evidence: ReleaseAttendedEvidence | null | undefined): string[] {
+  if (evidence === undefined) return [];
+  if (evidence === null) return ['no Sandbox receipts were found for this candidate'];
+  const blockers: string[] = [];
+  if (evidence.sandboxLifecycle === undefined) blockers.push('lifecycle: the receipt is missing');
+  else
+    for (const reason of validateSandboxLifecycle(evidence.sandboxLifecycle, {
+      setupSha256: evidence.setupSha256,
+    }))
+      blockers.push(`lifecycle: ${reason}`);
+  if (evidence.sandboxUpgrade === undefined) blockers.push('upgrade: the receipt is missing');
+  else
+    for (const reason of validateSandboxUpgrade(evidence.sandboxUpgrade, {
+      setupSha256: evidence.setupSha256,
+    }))
+      blockers.push(`upgrade: ${reason}`);
+  return blockers;
+}
+
+function lifecycleMessage(evidence: ReleaseAttendedEvidence | null | undefined): string {
+  if (evidence === undefined) return 'Sandbox receipts not supplied to pure evaluator';
+  const blockers = lifecycleBlockers(evidence);
+  return blockers.length === 0
+    ? 'Windows Sandbox install, upgrade over v1.0.2 and uninstall passed on the candidate setup'
+    : `Sandbox receipts are incomplete: ${blockers.join('; ')}`;
 }
 
 function check(id: string, passed: boolean, message: string, critical = true): ReleaseCheck {
@@ -1222,7 +1329,46 @@ export function hostedVerifyFromEnvironment(root: string): HostedVerifyOutcome |
   };
 }
 
-export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
+export function readAttendedEvidence(
+  root: string,
+  candidateSha: string,
+): ReleaseAttendedEvidence | null {
+  const folder = join(root, 'docs', 'release', 'attended', candidateSha);
+  if (!existsSync(folder)) return null;
+  const readJson = (name: string): unknown => {
+    const path = join(folder, name);
+    if (!existsSync(path)) return undefined;
+    try {
+      return JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    } catch {
+      return null;
+    }
+  };
+  const sums = join(root, 'apps', 'desktop', 'dist', 'releases', 'SHA256SUMS.txt');
+  const line = existsSync(sums)
+    ? readFileSync(sums, 'utf8')
+        .split(/\r?\n/u)
+        .find((entry) => /\sjoy-media-setup\.exe$/u.test(entry))
+    : undefined;
+  const setupSha256 = line?.split(/\s+/u)[0]?.toLowerCase() ?? '';
+  const receipts: Record<string, unknown> = {};
+  for (const [scenarioId, fileName] of Object.entries(LOCAL_ONLY_ATTENDED_SCENARIOS)) {
+    const value = readJson(fileName);
+    if (value !== undefined) receipts[scenarioId] = value;
+  }
+  return {
+    candidateSha,
+    setupSha256,
+    receipts,
+    sandboxLifecycle: readJson('sandbox-lifecycle.json'),
+    sandboxUpgrade: readJson('sandbox-upgrade.json'),
+  };
+}
+
+export function buildEvidenceFromWorkspace(
+  root: string,
+  options: { readonly profile?: ReleaseGateProfile } = {},
+): ReleaseEvidence {
   const hostedVerify = hostedVerifyFromEnvironment(root);
   const commandResults =
     hostedVerify === null
@@ -1292,6 +1438,12 @@ export function buildEvidenceFromWorkspace(root: string): ReleaseEvidence {
     sbomGenerated: true,
     browserJourneys,
     operationalEvidence: readOperationalEvidence(root),
+    ...(options.profile === 'local-only'
+      ? {
+          profile: 'local-only' as const,
+          attendedEvidence: readAttendedEvidence(root, sourceProvenance.commitSha),
+        }
+      : {}),
     featureStatus: {
       auditedOn,
       statuses,
@@ -1891,7 +2043,15 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   const root = resolve(fileURLToPath(new URL('../../../', import.meta.url)));
   const output = resolve(root, process.env.JOY_RELEASE_OUTPUT ?? 'test-output/release-gate');
   const evidencePath = process.env.JOY_RELEASE_EVIDENCE?.trim();
-  const workspaceEvidence = buildEvidenceFromWorkspace(root);
+  const profileName =
+    process.argv
+      .find((argument) => argument.startsWith('--profile='))
+      ?.slice('--profile='.length) ??
+    process.env.JOY_RELEASE_GATE_PROFILE ??
+    'standard';
+  if (profileName !== 'standard' && profileName !== 'local-only')
+    throw new Error('the gate profile must be standard or local-only');
+  const workspaceEvidence = buildEvidenceFromWorkspace(root, { profile: profileName });
   const supplied =
     evidencePath !== undefined && evidencePath.length > 0
       ? (JSON.parse(readFileSync(resolve(root, evidencePath), 'utf8')) as Partial<ReleaseEvidence>)
