@@ -19,9 +19,6 @@ import { parseChecksumFile, verifyArtifacts } from './artifact-integrity.mjs';
 // from a constant.
 const RELEASE_LANES = [
   'linux-real-services',
-  'windows-p0-real-services',
-  'node-contracts',
-  'windows-worker-clean',
   'acceptance-primary',
   'acceptance-responsive',
   'prod-build-smoke',

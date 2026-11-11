@@ -14,9 +14,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS = join(resolve(HERE, '../../..'), '.github', 'workflows');
 const V2_PATH = join(WORKFLOWS, 'release-candidate-v2.yml');
 const V3_PATH = join(WORKFLOWS, 'release-candidate-v3.yml');
-// The sha256 of release-candidate-v2.yml on main when this suite landed (its v1.0.1 pins). v2 is the fallback gate, so any
-// change to it must be deliberate and must update this pin with the owner's approval.
-const V2_SHA256 = '35f914e77b7e7ee1319efc8175235b0322de838d4b9cbdc85228f1e429fb83ee';
+// The sha256 of release-candidate-v2.yml on the v1.1.0 line. v2 is kept as the legacy gate until the owner decides D22, so any
+// change to it must be deliberate and must update this pin with the owner's approval. The pin moved from the main-branch file
+// (35f914e7...) to the line's file on 12 Nov 2026 (owner: "Re-pin v2 (keep legacy)"), because commit 4cb35d7a retired v2's Windows
+// jobs, windows-p0-real-services and windows-worker-clean, when it retired the Windows-Docker runner.
+const V2_SHA256 = 'f3ff81afa7242973e2844697e11ea907bc79fdaefc02697dc0195d49dada4f9d';
 const yaml = createRequire(join(resolve(HERE, '../../..'), 'package.json'))('js-yaml') as {
   load(source: string): unknown;
 };
@@ -57,7 +59,8 @@ const PUBLISHING =
   /gh release|softprops|action-gh-release|git push|git tag|deploy|environment:|secrets\./iu;
 // The v2 jobs that the merged v3 jobs replace. Their names are pinned below, and each v3 job runs on the runner its v2 jobs used.
 const MERGED_FROM_V2: Record<string, string[]> = {
-  'windows-candidate': ['windows-p0-real-services', 'windows-worker-clean'],
+  // The line's v2 has no Windows job (4cb35d7a retired the Windows-Docker runner), so windows-candidate replaces no v2 lane.
+  'windows-candidate': [],
   'fixture-acceptance': ['acceptance-primary', 'prod-build-smoke'],
 };
 const SINGLE_PASS_LANES = SHAPES['single-pass'].lanes;
@@ -150,11 +153,6 @@ function v3Violations(source: string): string[] {
   // The acceptance runner's order, the Windows lane's runner, and the gate's lanes.
   if (needsOf(workflow.jobs['fixture-acceptance']).includes('windows-candidate'))
     violations.push('fixture-acceptance must not depend on the Windows lane');
-  if (
-    JSON.stringify(workflow.jobs['windows-candidate']?.['runs-on']) !==
-    JSON.stringify(v2.jobs['windows-worker-clean']?.['runs-on'])
-  )
-    violations.push('windows-candidate must run on the Windows runner v2 uses');
   if (
     JSON.stringify(workflow.jobs['fixture-acceptance']?.['runs-on']) !==
     JSON.stringify(v2.jobs['acceptance-primary']?.['runs-on'])
@@ -421,12 +419,6 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
   });
 
   it('keeps the merged jobs on the runners v2 used for the lanes they replace', () => {
-    expect(v3.jobs['windows-candidate']['runs-on']).toEqual(
-      v2.jobs['windows-worker-clean']['runs-on'],
-    );
-    expect(v3.jobs['windows-candidate']['runs-on']).toEqual(
-      v2.jobs['windows-p0-real-services']['runs-on'],
-    );
     expect(v3.jobs['fixture-acceptance']['runs-on']).toEqual(
       v2.jobs['acceptance-primary']['runs-on'],
     );
@@ -767,16 +759,6 @@ describe('release-candidate-v3 policy (single-pass, development branch)', () => 
         '        node-contracts,\n        linux-real-services,\n        windows-candidate,\n        real-service-acceptance,\n        fixture-acceptance,\n        acceptance-responsive,\n        p3-real-services,\n      ]',
       );
       expect(v3Violations(mutated).join(';')).toMatch(/exactly the eight single-pass lanes/u);
-    });
-
-    it('refuses a Windows job moved to a runner v2 does not use for Windows', () => {
-      const mutated = mutate(
-        '    runs-on: [self-hosted, windows, x64, joy-media-worker-docker]\n    needs: [validate-candidate, editor-web-bundle]',
-        '    runs-on: windows-latest\n    needs: [validate-candidate, editor-web-bundle]',
-      );
-      expect(v3Violations(mutated).join(';')).toMatch(
-        /windows-candidate must run on the Windows runner v2 uses/u,
-      );
     });
 
     it('refuses a verify:ci run left in the real-service lane, which would repeat the hosted static gates', () => {

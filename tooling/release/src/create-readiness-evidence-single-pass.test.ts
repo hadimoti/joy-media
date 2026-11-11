@@ -406,8 +406,8 @@ describe('single-pass readiness evidence (release-candidate-v3)', () => {
     const { SHAPES } = await import('./create-readiness-evidence.mjs');
     expect(SHAPES['single-pass'].lanes).toEqual(SINGLE_LANES);
     // The single-pass job graph merges v2's Windows, fixture and Linux verification lanes (plan section 3.4), so its lanes
-    // differ from the two-pass lanes. The two-pass lanes stay the nine v2 lanes.
-    expect(SHAPES['two-pass'].lanes).toHaveLength(9);
+    // differ from the two-pass lanes. The two-pass lanes are the six lanes of the line's v2 (its Windows jobs were retired by 4cb35d7a).
+    expect(SHAPES['two-pass'].lanes).toHaveLength(6);
     expect(SHAPES['single-pass'].lanes).not.toEqual(SHAPES['two-pass'].lanes);
     expect(SHAPES['single-pass'].sourceCount).toBe(2);
     expect(SHAPES['two-pass'].sourceCount).toBe(4);

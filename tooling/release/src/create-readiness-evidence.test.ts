@@ -13,9 +13,6 @@ const RUN_ID = '444';
 const ATTEMPT = '1';
 const LANES = [
   'linux-real-services',
-  'windows-p0-real-services',
-  'node-contracts',
-  'windows-worker-clean',
   'acceptance-primary',
   'acceptance-responsive',
   'prod-build-smoke',
