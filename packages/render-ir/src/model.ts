@@ -208,6 +208,7 @@ export interface ColorGradeIR {
   >;
   readonly hsl?: readonly {
     readonly hue: number;
+    readonly hueShift?: number;
     readonly hueWidth: number;
     readonly softness: number;
     readonly saturation: number;

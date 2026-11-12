@@ -28,6 +28,7 @@
 
 import { Application, Container, FillGradient, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import type {
+  ColorGradeIR,
   Rgba,
   RenderFrameIR,
   TextNode,
@@ -35,6 +36,7 @@ import type {
   VideoFrameNode,
   VisualRenderNode,
 } from '@joy-media/render-ir';
+import type { ParsedCubeLut } from './lut.js';
 import { flattenRenderNodes, textPlateBounds, validateRenderFrameIR } from '@joy-media/render-ir';
 import {
   buildPixiColorGradeFilter,
@@ -58,6 +60,8 @@ export interface BrowserPixiRendererOptions {
   readonly height?: number;
   /** Device pixel ratio passed to Pixi. Defaults to the frame's `viewport.dpr`. */
   readonly resolution?: number;
+  /** Resolves an integrity-checked project LUT into transient renderer data. */
+  readonly resolveColorLut?: (grade: ColorGradeIR) => ParsedCubeLut | undefined;
   /** When true, Pixi auto-runs its render loop. Off by default for caller-driven frames. */
   readonly autoStart?: boolean;
   /** Renderer preference. WebGL is broadly supported; WebGPU is faster when available. */
@@ -715,7 +719,9 @@ export async function createBrowserPixiRenderer(
       const gradeKey = colorGradeSignature(frame.colorGrade);
       if (gradeKey !== lastGradeKey) {
         lastGradeKey = gradeKey;
-        const gradeFilter = buildPixiColorGradeFilter(frame.colorGrade);
+        const resolvedLut =
+          frame.colorGrade === undefined ? undefined : options.resolveColorLut?.(frame.colorGrade);
+        const gradeFilter = buildPixiColorGradeFilter(frame.colorGrade, resolvedLut);
         content.filters = gradeFilter === undefined ? null : [gradeFilter];
       }
       const { drawCalls, created, reused } = paint(frame, videoBitmaps);
