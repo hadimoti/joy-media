@@ -48,23 +48,49 @@ export function defaultProjectFoldersDirectory(input: DefaultProjectFoldersInput
  */
 export const DEV_PROJECT_FOLDERS_ENV = 'JOY_PROJECTS_DIR';
 
-export interface ProjectFoldersDirectoryInput extends DefaultProjectFoldersInput {
+export interface ProjectFoldersDirectoryInput {
   /** `app.isPackaged`. When true, the environment is not read at all. */
   readonly isPackaged: boolean;
   /** The process environment; read only when the app is not packaged. */
   readonly environment: Readonly<Record<string, string | undefined>>;
+  /** `app.getPath('documents')`, which can throw. Not called when the development folder is set. */
+  readonly documentsDirectory: () => string;
+  /** `app.getPath('home')`, which can throw. Not called when the development folder is set. */
+  readonly userProfileDirectory: () => string;
+  /** `os.homedir()`: the fallback when Electron gives no path (Documents becomes `<home>\Documents`). */
+  readonly homeDirectory: () => string;
+  /** OneDrive sync roots, from the OneDrive, OneDriveConsumer and OneDriveCommercial variables. */
+  readonly oneDriveRoots: readonly string[];
+}
+
+/** A path from Electron, or the fallback when Electron throws or gives an empty path. */
+function pathOr(read: () => string, fallback: () => string): string {
+  try {
+    const value = read();
+    if (value.trim() !== '') return value;
+  } catch {
+    // Electron throws "Failed to get '<name>' path" when Windows has no such folder for this user.
+  }
+  return fallback();
 }
 
 /** The folder for folder projects: the development folder of an unpacked run, if set, or the default. */
 export function projectFoldersDirectory(input: ProjectFoldersDirectoryInput): string {
-  const { isPackaged, environment, ...defaults } = input;
-  if (isPackaged) return defaultProjectFoldersDirectory(defaults);
-  const override = environment[DEV_PROJECT_FOLDERS_ENV];
-  if (override === undefined || override.trim() === '')
-    return defaultProjectFoldersDirectory(defaults);
-  const trimmed = override.trim();
-  if (!/^[A-Za-z]:[\\/]/.test(trimmed) && !trimmed.startsWith('\\\\')) {
-    throw new Error(`${DEV_PROJECT_FOLDERS_ENV} must be an absolute Windows path.`);
+  if (!input.isPackaged) {
+    const override = input.environment[DEV_PROJECT_FOLDERS_ENV];
+    if (override !== undefined && override.trim() !== '') {
+      const trimmed = override.trim();
+      if (!/^[A-Za-z]:[\\/]/.test(trimmed) && !trimmed.startsWith('\\\\')) {
+        throw new Error(`${DEV_PROJECT_FOLDERS_ENV} must be an absolute Windows path.`);
+      }
+      return win32.normalize(trimmed);
+    }
   }
-  return win32.normalize(trimmed);
+  return defaultProjectFoldersDirectory({
+    documentsDirectory: pathOr(input.documentsDirectory, () =>
+      win32.join(input.homeDirectory(), 'Documents'),
+    ),
+    userProfileDirectory: pathOr(input.userProfileDirectory, input.homeDirectory),
+    oneDriveRoots: input.oneDriveRoots,
+  });
 }

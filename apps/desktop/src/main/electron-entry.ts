@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import path, { dirname, join } from 'node:path';
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
 import { parseProjectDeepLink } from '../deep-link.js';
 import { createFileRegistry } from './file-registry.js';
 import { createWorkerSupervisor } from './worker-supervisor.js';
@@ -174,8 +175,9 @@ if (!app.requestSingleInstanceLock()) {
     directory: projectFoldersDirectory({
       isPackaged: app.isPackaged,
       environment: process.env,
-      documentsDirectory: app.getPath('documents'),
-      userProfileDirectory: app.getPath('home'),
+      documentsDirectory: () => app.getPath('documents'),
+      userProfileDirectory: () => app.getPath('home'),
+      homeDirectory: () => homedir(),
       oneDriveRoots: [
         process.env['OneDrive'],
         process.env['OneDriveConsumer'],

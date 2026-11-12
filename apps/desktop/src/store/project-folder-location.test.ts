@@ -92,12 +92,16 @@ describe('defaultProjectFoldersDirectory', () => {
 });
 
 describe('projectFoldersDirectory', () => {
+  const SCRATCH = 'C:\\jgp\\bot-lane-b\\projects';
+  const fails = (name: string) => () => {
+    throw new Error(`Failed to get '${name}' path`);
+  };
   const defaults = {
-    documentsDirectory: DOCUMENTS,
-    userProfileDirectory: PROFILE,
+    documentsDirectory: () => DOCUMENTS,
+    userProfileDirectory: () => PROFILE,
+    homeDirectory: () => PROFILE,
     oneDriveRoots: [],
   };
-  const SCRATCH = 'C:\\jgp\\bot-lane-b\\projects';
 
   /** An environment that fails the test if anything reads it. */
   const unreadable = new Proxy({} as Record<string, string | undefined>, {
@@ -119,37 +123,64 @@ describe('projectFoldersDirectory', () => {
   });
 
   it('a packaged app ignores the development folder even when it is set', () => {
+    const environment = { [DEV_PROJECT_FOLDERS_ENV]: SCRATCH };
+    expect(projectFoldersDirectory({ ...defaults, isPackaged: true, environment })).toBe(
+      'C:\\Users\\Hadi\\Documents\\JOY Projects',
+    );
     expect(
       projectFoldersDirectory({
         ...defaults,
-        isPackaged: true,
-        environment: { [DEV_PROJECT_FOLDERS_ENV]: SCRATCH },
-      }),
-    ).toBe(defaultProjectFoldersDirectory(defaults));
-    expect(
-      projectFoldersDirectory({
-        documentsDirectory: 'C:\\Users\\Hadi\\OneDrive\\Documents',
-        userProfileDirectory: PROFILE,
+        documentsDirectory: () => 'C:\\Users\\Hadi\\OneDrive\\Documents',
         oneDriveRoots: ['C:\\Users\\Hadi\\OneDrive'],
         isPackaged: true,
-        environment: { [DEV_PROJECT_FOLDERS_ENV]: SCRATCH },
+        environment,
       }),
     ).toBe('C:\\Users\\Hadi\\JOY Projects');
   });
 
-  it('an unpacked run uses the development folder when it is set', () => {
+  it('an unpacked run uses the development folder and never asks Electron for Documents or home', () => {
     expect(
       projectFoldersDirectory({
-        ...defaults,
+        documentsDirectory: fails('documents'),
+        userProfileDirectory: fails('home'),
+        homeDirectory: fails('homedir'),
+        oneDriveRoots: [],
         isPackaged: false,
         environment: { [DEV_PROJECT_FOLDERS_ENV]: ` ${SCRATCH} ` },
       }),
     ).toBe(SCRATCH);
   });
 
+  it('falls back to the home folder when Electron can not give the Documents or home path', () => {
+    const noPaths = {
+      ...defaults,
+      documentsDirectory: fails('documents'),
+      userProfileDirectory: fails('home'),
+      homeDirectory: () => 'C:\\Users\\Scratch',
+    };
+    expect(projectFoldersDirectory({ ...noPaths, isPackaged: true, environment: unreadable })).toBe(
+      'C:\\Users\\Scratch\\Documents\\JOY Projects',
+    );
+    expect(projectFoldersDirectory({ ...noPaths, isPackaged: false, environment: {} })).toBe(
+      'C:\\Users\\Scratch\\Documents\\JOY Projects',
+    );
+    // With Documents in OneDrive and no home path from Electron, the fallback home is used.
+    expect(
+      projectFoldersDirectory({
+        ...defaults,
+        documentsDirectory: () => 'C:\\Users\\Scratch\\OneDrive\\Documents',
+        userProfileDirectory: fails('home'),
+        homeDirectory: () => 'C:\\Users\\Scratch',
+        oneDriveRoots: ['C:\\Users\\Scratch\\OneDrive'],
+        isPackaged: true,
+        environment: {},
+      }),
+    ).toBe('C:\\Users\\Scratch\\JOY Projects');
+  });
+
   it('an unpacked run with nothing set uses the default', () => {
     expect(projectFoldersDirectory({ ...defaults, isPackaged: false, environment: {} })).toBe(
-      defaultProjectFoldersDirectory(defaults),
+      'C:\\Users\\Hadi\\Documents\\JOY Projects',
     );
     expect(
       projectFoldersDirectory({
@@ -157,7 +188,7 @@ describe('projectFoldersDirectory', () => {
         isPackaged: false,
         environment: { [DEV_PROJECT_FOLDERS_ENV]: '  ' },
       }),
-    ).toBe(defaultProjectFoldersDirectory(defaults));
+    ).toBe('C:\\Users\\Hadi\\Documents\\JOY Projects');
   });
 
   it('a development folder that is not an absolute path stops the start instead of falling back', () => {
