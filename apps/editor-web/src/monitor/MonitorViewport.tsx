@@ -5,11 +5,22 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type DragEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
 } from 'react';
+import { isEditableTarget, isInteractiveTarget, scopedKeyTable } from '../keyboard-shortcuts.js';
+import {
+  effectiveMonitorTool,
+  monitorCursor,
+  monitorSpaceGesture,
+  type MonitorTool,
+} from './monitor-tools.js';
+import { panByDrag } from './monitor-hand.js';
+import { MonitorNavigation, type MonitorThumbnailReader } from './MonitorNavigator.js';
 import {
   clampPan,
   fitView,
@@ -26,8 +37,14 @@ import {
  * hosts the panel-sized canvas, plus the zoom and pan controller. The view is
  * drawn by the renderer (`setView`), never by a CSS scale. Wheel zooms toward the
  * cursor (Ctrl + wheel is a trackpad pinch); Ctrl+0, Ctrl+1, Ctrl+plus and
- * Ctrl+minus work while the pointer is over the Monitor or focus is inside it.
+ * Ctrl+minus work while the pointer is over the Monitor or focus is inside it
+ * (through the scoped key table, scope `monitor`). The viewport is also the
+ * pointer router for the tools (ADR-0046 section 3): the Hand pans, a Space
+ * hold lends the Hand, the middle button always pans.
  */
+
+/** The key-table scope of the Monitor: pointer over it or focus inside it. */
+export const MONITOR_KEY_SCOPE = 'monitor';
 
 export interface MonitorViewController {
   /** The view the Monitor shows now (Fit already resolved to numbers). */
@@ -43,6 +60,13 @@ export interface MonitorViewController {
   readonly setZoom: (zoom: number, anchor?: MonitorPoint) => void;
   /** One step along the Ctrl+plus / Ctrl+minus ladder, around the viewport centre. */
   readonly stepZoom: (direction: 1 | -1) => void;
+  /** Shows exactly this view (pan clamped); leaves Fit. Used by the Hand. */
+  readonly setView: (view: MonitorViewState) => void;
+  /** The chosen tool (Select by default). A Space hold lends the Hand on top of it. */
+  readonly tool: MonitorTool;
+  readonly setTool: (tool: MonitorTool) => void;
+  /** The frame size in authored px. */
+  readonly frame: MonitorSize;
 }
 
 const EMPTY_SIZE: MonitorSize = { width: 0, height: 0 };
@@ -71,6 +95,7 @@ export function useMonitorView(
   const [viewportSize, setViewportSize] = useState<MonitorSize>(EMPTY_SIZE);
   const [fit, setFitMode] = useState(true);
   const [manualView, setManualView] = useState<MonitorViewState>({ zoom: 1, panX: 0, panY: 0 });
+  const [tool, setTool] = useState<MonitorTool>('select');
 
   const view = useMemo(
     () => (fit ? fitView(viewportSize, frame) : clampPan(manualView, viewportSize, frame)),
@@ -105,6 +130,15 @@ export function useMonitorView(
 
   const setFit = useCallback(() => setFitMode(true), []);
 
+  const setView = useCallback((next: MonitorViewState) => {
+    const { viewportSize: size, frame: frameSize } = latest.current;
+    const clamped = clampPan(next, size, frameSize);
+    // Several pointer moves can land before the next render.
+    latest.current = { ...latest.current, view: clamped };
+    setManualView(clamped);
+    setFitMode(false);
+  }, []);
+
   const stepZoom = useCallback(
     (direction: 1 | -1) => setZoom(nextZoomStep(latest.current.view.zoom, direction)),
     [setZoom],
@@ -134,41 +168,58 @@ export function useMonitorView(
     return () => element.removeEventListener('wheel', onWheel);
   }, [setZoom]);
 
-  // Zoom shortcuts only while the pointer is over the Monitor or focus is in it.
+  // Zoom shortcuts only while the pointer is over the Monitor or focus is in
+  // it: the Monitor scope of the shared key table. Outside it the global keys apply.
   useEffect(() => {
     let pointerOver = false;
-    const scope = () => scopeRef.current;
+    const element = scopeRef.current;
     const onEnter = () => {
       pointerOver = true;
     };
     const onLeave = () => {
       pointerOver = false;
     };
-    const element = scope();
     element?.addEventListener('pointerenter', onEnter);
     element?.addEventListener('pointerleave', onLeave);
-    const onKeyDown = (event: KeyboardEvent) => {
-      const action = monitorZoomShortcut(event);
-      if (action === undefined) return;
-      const root = scope();
-      if (root === null) return;
+    const removeScope = scopedKeyTable.setScope(MONITOR_KEY_SCOPE, () => {
+      const root = scopeRef.current;
+      if (root === null) return false;
       const focused = document.activeElement;
-      const focusInside = focused !== null && root.contains(focused);
-      if (!pointerOver && !focusInside) return;
-      event.preventDefault();
-      if (action === 'fit') setFit();
-      else if (action === 'actual') setZoom(1);
-      else stepZoom(action === 'in' ? 1 : -1);
-    };
-    window.addEventListener('keydown', onKeyDown);
+      return pointerOver || (focused !== null && root.contains(focused));
+    });
+    const removeZoomKeys = scopedKeyTable.register({
+      scope: MONITOR_KEY_SCOPE,
+      // The zoom box and other fields in the Monitor keep these keys, as before.
+      inTextFields: true,
+      match: (event) => monitorZoomShortcut({ ...event, code: event.code ?? '' }) !== undefined,
+      run: (event) => {
+        const action = monitorZoomShortcut({ ...event, code: event.code ?? '' });
+        if (action === 'fit') setFit();
+        else if (action === 'actual') setZoom(1);
+        else if (action !== undefined) stepZoom(action === 'in' ? 1 : -1);
+      },
+    });
     return () => {
       element?.removeEventListener('pointerenter', onEnter);
       element?.removeEventListener('pointerleave', onLeave);
-      window.removeEventListener('keydown', onKeyDown);
+      removeScope();
+      removeZoomKeys();
     };
   }, [scopeRef, setFit, setZoom, stepZoom]);
 
-  return { view, fit, viewportSize, viewportRef, setFit, setZoom, stepZoom };
+  return {
+    view,
+    fit,
+    viewportSize,
+    viewportRef,
+    setFit,
+    setZoom,
+    stepZoom,
+    setView,
+    tool,
+    setTool,
+    frame,
+  };
 }
 
 /** The screen's device pixel ratio, updated when the window moves to another screen. */
@@ -208,28 +259,130 @@ export interface MonitorViewportProps {
   readonly onDragOver: (event: DragEvent) => void;
   readonly onDragLeave: () => void;
   readonly onDrop: (event: DragEvent) => void;
+  /** Reads a small Fit picture of the frame for the navigator. */
+  readonly readThumbnail?: MonitorThumbnailReader | undefined;
   readonly children: ReactNode;
 }
 
-/** The clipping viewport. Children are positioned inside it. */
+/** True while Space is held long enough (or with a pointer down) to lend the Hand. */
+export function useSpaceHold(): boolean {
+  return useSyncExternalStore(
+    monitorSpaceGesture.subscribe,
+    monitorSpaceGesture.isHolding,
+    monitorSpaceGesture.isHolding,
+  );
+}
+
+const MIDDLE_BUTTON = 1;
+const PRIMARY_BUTTON = 0;
+
+interface PanDrag {
+  readonly pointerId: number;
+  readonly startX: number;
+  readonly startY: number;
+  readonly startView: MonitorViewState;
+}
+
+/** The clipping viewport and pointer router. Children are positioned inside it. */
 export function MonitorViewport({
   controller,
   dragOver,
   onDragOver,
   onDragLeave,
   onDrop,
+  readThumbnail,
   children,
 }: MonitorViewportProps) {
+  const spaceHeld = useSpaceHold();
+  const tool = effectiveMonitorTool(controller.tool, spaceHeld);
+  const panRef = useRef<PanDrag | null>(null);
+  const [panning, setPanning] = useState(false);
+  const { setView, setFit } = controller;
+  const latest = useRef(controller);
+  latest.current = controller;
+
+  const endPan = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = panRef.current;
+    if (drag === null || drag.pointerId !== event.pointerId) return;
+    panRef.current = null;
+    setPanning(false);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+  }, []);
+
+  const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const middle = event.button === MIDDLE_BUTTON;
+    if (middle) event.preventDefault();
+    // Read the gesture directly: the window listener has just marked the hold,
+    // before React re-renders with the open hand.
+    const handNow = effectiveMonitorTool(latest.current.tool, monitorSpaceGesture.isHolding());
+    const primaryHand = event.button === PRIMARY_BUTTON && handNow === 'hand';
+    if (!middle && !primaryHand) return;
+    if (!middle && (isEditableTarget(event.target) || isInteractiveTarget(event.target))) return;
+    event.preventDefault();
+    panRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startView: latest.current.view,
+    };
+    setPanning(true);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, []);
+
+  const onPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const drag = panRef.current;
+      if (drag === null || drag.pointerId !== event.pointerId) return;
+      const { viewportSize, frame } = latest.current;
+      setView(
+        panByDrag(
+          drag.startView,
+          event.clientX - drag.startX,
+          event.clientY - drag.startY,
+          viewportSize,
+          frame,
+        ),
+      );
+    },
+    [setView],
+  );
+
+  const onDoubleClick = useCallback(() => {
+    if (effectiveMonitorTool(latest.current.tool, monitorSpaceGesture.isHolding()) === 'hand')
+      setFit();
+  }, [setFit]);
+
+  const cursor = monitorCursor(tool, panning);
   return (
     <div
       ref={controller.viewportRef}
       className={`monitor-canvas-wrap${dragOver ? ' drag-over' : ''}`}
       data-monitor-zoom={controller.view.zoom}
+      data-monitor-pan-x={Math.round(controller.view.panX)}
+      data-monitor-pan-y={Math.round(controller.view.panY)}
+      data-monitor-tool={tool}
+      data-monitor-cursor={cursor}
+      style={cursor === 'default' ? undefined : { cursor }}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endPan}
+      onPointerCancel={endPan}
+      onLostPointerCapture={endPan}
+      onMouseDown={(event) => {
+        // No autoscroll and no paste on the middle button.
+        if (event.button === MIDDLE_BUTTON) event.preventDefault();
+      }}
+      onAuxClick={(event) => {
+        if (event.button === MIDDLE_BUTTON) event.preventDefault();
+      }}
+      onDoubleClick={onDoubleClick}
     >
       {children}
+      <MonitorNavigation controller={controller} readThumbnail={readThumbnail} />
     </div>
   );
 }
