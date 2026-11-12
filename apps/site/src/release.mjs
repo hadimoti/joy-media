@@ -25,10 +25,12 @@ export function assertReleaseTag(tag) {
 export function payloadNames(tag) {
   const version = assertReleaseTag(tag).slice(1);
   return [
+    'joy-media-setup.exe',
     `joy-media-windows-x64-v${version}.zip`,
     'joy-media.exe',
-    'joy-media-bundle.mjs',
     'joy-worker.exe',
+    'joy-media-bundle.mjs',
+    'joy-media-release-manifest.json',
   ];
 }
 

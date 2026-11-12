@@ -24,7 +24,8 @@ describe('parseSha256Sums (PLAN-v4 7b)', () => {
   it('accepts a file whose names equal the payload set', () => {
     const parsed = parseSha256Sums(sumsText(), TAG);
     expect([...parsed.keys()].sort()).toEqual([...NAMES].sort());
-    expect(parsed.get('joy-media.exe')).toBe('2'.repeat(64));
+    expect(parsed.get('joy-media-setup.exe')).toBe('1'.repeat(64));
+    expect(parsed.get('joy-media.exe')).toBe('3'.repeat(64));
   });
 
   it('rejects a missing payload name', () => {
