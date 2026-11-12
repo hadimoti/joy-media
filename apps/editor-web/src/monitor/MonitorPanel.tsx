@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorPanelContext, type EditorPanelContextValue } from '../editor-panel-context.js';
 import { withVideoFrameNode } from '@joy-media/playback-engine';
 import type { RenderFrameIR } from '@joy-media/render-ir';
@@ -55,7 +55,8 @@ import {
   stickerImageCache,
 } from '../editor-runtime-singletons.js';
 import { MonitorTransport } from './MonitorTransport.js';
-import { monitorZoomLabel, monitorZoomScale, type MonitorViewerZoom } from './monitor-view.js';
+import { monitorZoomLabel } from './monitor-view.js';
+import { MonitorViewport, monitorFrameRect, useMonitorView } from './MonitorViewport.js';
 
 /**
  * The Program Monitor panel: the preview canvas, its renderer lifecycle and the
@@ -119,7 +120,6 @@ function MonitorPanelContent({
   const sceneCacheRef = useRef(new HtmlSceneSurfaceCache());
   const [sceneTick, setSceneTick] = useState(0);
   const [error, setError] = useState<string | undefined>(undefined);
-  const [viewerZoom, setViewerZoom] = useState<MonitorViewerZoom>('fit');
   // Fit is a monitor-only choice. Named presets are always derived from the
   // persisted root composition so Undo/Redo and reload cannot leave the
   // footer claiming a canvas ratio that no longer exists.
@@ -578,12 +578,13 @@ function MonitorPanelContent({
     visualProject,
     previewVisualProject,
     sceneTick,
-    viewerZoom,
   ]);
 
   const composition = previewVisualProject.compositions[previewVisualProject.rootCompositionId];
   const width = composition?.width ?? 1080;
   const height = composition?.height ?? 1920;
+  const frameSize = useMemo(() => ({ width, height }), [width, height]);
+  const monitorView = useMonitorView(frameSize, panelRef);
   const monitorAspectRatio: MonitorAspectRatio = monitorFitView
     ? 'fit'
     : monitorAspectRatioForDimensions(width, height);
@@ -594,8 +595,8 @@ function MonitorPanelContent({
       : timelineEffectiveDurationUs(timelineComposition);
   const hasTimelineContent =
     timelineComposition?.tracks.some((track) => track.clips.length > 0) ?? false;
-  const zoomScale = monitorZoomScale(viewerZoom);
-  const zoomLabel = monitorZoomLabel(viewerZoom);
+  const zoomLabel = monitorZoomLabel(monitorView.fit, monitorView.view.zoom);
+  const frameRect = monitorFrameRect(monitorView.view, frameSize);
 
   const toggleFullscreen = () => {
     const el = panelRef.current;
@@ -728,39 +729,40 @@ function MonitorPanelContent({
   return (
     <article className="monitor-panel" ref={panelRef}>
       {error !== undefined && <p className="monitor-error">{error}</p>}
-      <div
-        className={`monitor-canvas-wrap${monitorDragOver ? ' drag-over' : ''}`}
+      <MonitorViewport
+        controller={monitorView}
+        dragOver={monitorDragOver}
         onDragOver={handleMonitorEffectDragOver}
         onDragLeave={handleMonitorEffectDragLeave}
         onDrop={handleMonitorEffectDrop}
       >
-        <div
-          ref={containerRef}
-          className="monitor-canvas"
-          style={viewerZoom === 'fit' ? undefined : { transform: `scale(${zoomScale})` }}
-        />
-        {gpuPreviewUrl !== undefined && !state.playing && gpuPreviewStatus === 'hardware-gpu' && (
-          <img
-            ref={gpuPreviewImageRef}
-            className="monitor-gpu-frame"
-            src={gpuPreviewUrl}
-            alt="Hardware GPU Worker preview"
-            data-preview-renderer="hardware-gpu"
-          />
-        )}
+        <div className="monitor-frame" style={frameRect}>
+          <div ref={containerRef} className="monitor-canvas" />
+          {gpuPreviewUrl !== undefined && !state.playing && gpuPreviewStatus === 'hardware-gpu' && (
+            <img
+              ref={gpuPreviewImageRef}
+              className="monitor-gpu-frame"
+              src={gpuPreviewUrl}
+              alt="Hardware GPU Worker preview"
+              data-preview-renderer="hardware-gpu"
+            />
+          )}
+        </div>
         <AgentPreviewBadge
           surface="Program Monitor"
           before={agentPreviewBefore}
           beforeDisabled={documentPreviewInitialPaintPending}
           onBeforeChange={setAgentPreviewBefore}
         />
-      </div>
+      </MonitorViewport>
       <MonitorTransport
         transportRef={transportRef}
         zoomDrawerOpen={zoomDrawerOpen}
         setZoomDrawerOpen={setZoomDrawerOpen}
-        viewerZoom={viewerZoom}
-        setViewerZoom={setViewerZoom}
+        zoomFit={monitorView.fit}
+        zoom={monitorView.view.zoom}
+        onZoomFit={monitorView.setFit}
+        onZoomSet={monitorView.setZoom}
         zoomLabel={zoomLabel}
         fullscreen={fullscreen}
         toggleFullscreen={toggleFullscreen}

@@ -1,4 +1,4 @@
-import type { Dispatch, RefObject, SetStateAction } from 'react';
+import { useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import {
   MonitorAspectRatioSelector,
   type MonitorAspectRatio,
@@ -14,20 +14,20 @@ import {
   SkipForwardIcon,
   ZoomInIcon,
 } from '../icons.js';
-import {
-  MONITOR_ZOOM_PRESETS,
-  type MonitorGpuPreviewStatus,
-  type MonitorPreviewRenderer,
-  type MonitorViewerZoom,
-} from './monitor-view.js';
+import type { MonitorGpuPreviewStatus, MonitorPreviewRenderer } from './monitor-view.js';
+import { MONITOR_ZOOM_PRESETS, formatZoomPercent, parseZoomPercent } from './monitor-view-state.js';
 
 /** Props are the monitor's own state and setters, passed through unchanged. */
 export interface MonitorTransportProps {
   readonly transportRef: RefObject<HTMLDivElement | null>;
   readonly zoomDrawerOpen: boolean;
   readonly setZoomDrawerOpen: Dispatch<SetStateAction<boolean>>;
-  readonly viewerZoom: MonitorViewerZoom;
-  readonly setViewerZoom: Dispatch<SetStateAction<MonitorViewerZoom>>;
+  /** True while the view follows the panel size. */
+  readonly zoomFit: boolean;
+  /** The zoom shown now (1 = 100 %), also while Fit. */
+  readonly zoom: number;
+  readonly onZoomFit: () => void;
+  readonly onZoomSet: (zoom: number) => void;
   readonly zoomLabel: string;
   readonly fullscreen: boolean;
   readonly toggleFullscreen: () => void;
@@ -49,13 +49,15 @@ export interface MonitorTransportProps {
   readonly changeMonitorAspectRatio: (nextAspectRatio: MonitorAspectRatio) => void;
 }
 
-/** The bar under the monitor: scale drawer, play controls, quality, renderer, ratio. */
+/** The bar under the monitor: zoom drawer, play controls, quality, renderer, ratio. */
 export function MonitorTransport({
   transportRef,
   zoomDrawerOpen,
   setZoomDrawerOpen,
-  viewerZoom,
-  setViewerZoom,
+  zoomFit,
+  zoom,
+  onZoomFit,
+  onZoomSet,
   zoomLabel,
   fullscreen,
   toggleFullscreen,
@@ -76,6 +78,18 @@ export function MonitorTransport({
   height,
   changeMonitorAspectRatio,
 }: MonitorTransportProps) {
+  const zoomText = formatZoomPercent(zoom);
+  const [typedZoom, setTypedZoom] = useState(zoomText);
+  useEffect(() => setTypedZoom(zoomText), [zoomText]);
+  const commitTypedZoom = () => {
+    const parsed = parseZoomPercent(typedZoom);
+    if (parsed === undefined) {
+      setTypedZoom(zoomText);
+      return;
+    }
+    setTypedZoom(formatZoomPercent(parsed));
+    onZoomSet(parsed);
+  };
   return (
     <div className="monitor-transport" ref={transportRef}>
       {zoomDrawerOpen && (
@@ -86,7 +100,7 @@ export function MonitorTransport({
           aria-label="Preview scale"
         >
           <div className="monitor-zoom-drawer-head">
-            <strong>Preview scale</strong>
+            <strong>Zoom</strong>
             <button
               type="button"
               className="monitor-transport-btn"
@@ -98,22 +112,54 @@ export function MonitorTransport({
             </button>
           </div>
           <div className="monitor-zoom-group" role="group" aria-label="Preview zoom">
-            {MONITOR_ZOOM_PRESETS.map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className="monitor-zoom-chip"
-                aria-pressed={viewerZoom === id}
-                aria-label={`Zoom ${label}`}
-                title={`Zoom ${label}`}
-                onClick={() => {
-                  setViewerZoom(id);
-                  setZoomDrawerOpen(false);
-                }}
-              >
-                {label}
-              </button>
-            ))}
+            <button
+              type="button"
+              className="monitor-zoom-chip"
+              aria-pressed={zoomFit}
+              aria-label="Zoom Fit"
+              title="Fit the whole frame (Ctrl+0)"
+              onClick={() => {
+                onZoomFit();
+                setZoomDrawerOpen(false);
+              }}
+            >
+              Fit
+            </button>
+            {MONITOR_ZOOM_PRESETS.map((preset) => {
+              const label = formatZoomPercent(preset);
+              return (
+                <button
+                  key={preset}
+                  type="button"
+                  className="monitor-zoom-chip"
+                  aria-pressed={!zoomFit && Math.abs(zoom - preset) < 1e-6}
+                  aria-label={`Zoom ${label}`}
+                  title={preset === 1 ? `Zoom ${label} (Ctrl+1)` : `Zoom ${label}`}
+                  onClick={() => {
+                    onZoomSet(preset);
+                    setZoomDrawerOpen(false);
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+            <input
+              className="monitor-zoom-input"
+              type="text"
+              inputMode="decimal"
+              aria-label="Zoom percent"
+              title="Type a zoom from 10% to 800%. Ctrl+plus and Ctrl+minus also zoom."
+              value={typedZoom}
+              onChange={(event) => setTypedZoom(event.target.value)}
+              onBlur={commitTypedZoom}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitTypedZoom();
+                }
+              }}
+            />
             <button
               type="button"
               className="monitor-transport-btn"
