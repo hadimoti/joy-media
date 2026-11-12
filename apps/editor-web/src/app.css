@@ -1751,6 +1751,91 @@ h2 {
   box-shadow: 0 0.5rem 2rem #000a;
   pointer-events: none;
 }
+/* Selection outline and marquee (T-M04): editor-only HTML above the canvas,
+   never in the frame, the export or a read-back. */
+.monitor-selection-overlay {
+  position: absolute;
+  z-index: 2;
+  overflow: visible;
+  pointer-events: none;
+}
+.monitor-selection-outline {
+  fill: none;
+  stroke: var(--joy-accent);
+  stroke-width: 1px;
+}
+.monitor-marquee {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 1px dashed var(--joy-accent);
+  background: var(--joy-accent-dim);
+  pointer-events: none;
+}
+/* Free-transform box (T-M05a): editor-only HTML/SVG above the canvas, in
+   screen pixels so the handles keep their size at any zoom. Never in the frame,
+   the export or a read-back. Only the handles take the pointer. */
+.monitor-transform-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+}
+.monitor-transform-lines {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+.monitor-transform-outline {
+  fill: none;
+  stroke: var(--joy-accent);
+  stroke-width: 1px;
+}
+.monitor-transform-stem {
+  stroke: var(--joy-accent);
+  stroke-width: 1px;
+}
+.monitor-transform-handle {
+  position: absolute;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border: 1px solid var(--joy-accent);
+  background: #fff;
+  pointer-events: auto;
+  touch-action: none;
+}
+.monitor-transform-handle-nw,
+.monitor-transform-handle-se {
+  cursor: nwse-resize;
+}
+.monitor-transform-handle-ne,
+.monitor-transform-handle-sw {
+  cursor: nesw-resize;
+}
+.monitor-transform-handle-n,
+.monitor-transform-handle-s {
+  cursor: ns-resize;
+}
+.monitor-transform-handle-e,
+.monitor-transform-handle-w {
+  cursor: ew-resize;
+}
+.monitor-transform-handle-rotate {
+  border-radius: 50%;
+  cursor: grab;
+}
+.monitor-transform-handle.blocked {
+  border-color: var(--joy-text-muted);
+  background: var(--joy-text-muted);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.monitor-transform-layer.passive .monitor-transform-handle {
+  pointer-events: none;
+}
 .monitor-gpu-frame {
   position: absolute;
   inset: 0;

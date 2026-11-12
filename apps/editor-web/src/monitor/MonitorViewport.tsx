@@ -27,6 +27,7 @@ import {
   clampPan,
   fitView,
   nextZoomStep,
+  screenToCanvasPoint,
   wheelZoomFactor,
   zoomViewAt,
   type MonitorPoint,
@@ -42,7 +43,10 @@ import {
  * Ctrl+minus work while the pointer is over the Monitor or focus is inside it
  * (through the scoped key table, scope `monitor`). The viewport is also the
  * pointer router for the tools (ADR-0046 section 3): the Hand pans, a Space
- * hold lends the Hand, the middle button always pans.
+ * hold lends the Hand, the middle button always pans. With Select, a primary
+ * click selects through {@link MonitorViewportSelection}, a drag that
+ * starts on empty canvas draws a marquee (ADR-0046 section 4, T-M04) and a
+ * drag that starts on an element moves it (`dragElement`, T-M05a).
  */
 
 /** The key-table scope of the Monitor: pointer over it or focus inside it. */
@@ -263,7 +267,55 @@ export interface MonitorViewportProps {
   readonly onDrop: (event: DragEvent) => void;
   /** Reads a small Fit picture of the frame for the navigator. */
   readonly readThumbnail?: MonitorThumbnailReader | undefined;
+  /** Click and marquee selection with the Select tool (T-M04). */
+  readonly selection?: MonitorViewportSelection | undefined;
   readonly children: ReactNode;
+}
+
+/**
+ * What the Monitor selects with (T-M04). Points are canvas points in authored
+ * frame pixels. The viewport only routes the pointer; the hit test and the
+ * shared selection live in the panel.
+ */
+export interface MonitorViewportSelection {
+  /** True when a selectable element is under the point. */
+  readonly isElementAt: (canvasPoint: MonitorPoint) => boolean;
+  /** A plain press and release (no drag). */
+  readonly click: (canvasPoint: MonitorPoint, modifiers: { shift: boolean; alt: boolean }) => void;
+  /** A drag that started on empty canvas, released at `end`. */
+  readonly marquee: (start: MonitorPoint, end: MonitorPoint, modifiers: { shift: boolean }) => void;
+  /**
+   * A drag that started on an element moves it (T-M05a). Called once when the
+   * press becomes a drag; the result follows the pointer and ends on release.
+   */
+  readonly dragElement?: (
+    start: MonitorPoint,
+    modifiers: { shift: boolean; alt: boolean },
+  ) => MonitorElementDrag | undefined;
+}
+
+/** A move that follows the pointer (canvas points) and ends once. */
+export interface MonitorElementDrag {
+  readonly update: (canvasPoint: MonitorPoint, modifiers: { shift: boolean; alt: boolean }) => void;
+  readonly end: (commit: boolean) => void;
+}
+
+/** A press that moves less than this (CSS px) is still a click. */
+export const MONITOR_CLICK_SLOP_PX = 3;
+
+/** True once a press has moved far enough to be a drag. Exported for tests. */
+export function movedPastClickSlop(dx: number, dy: number): boolean {
+  return Math.hypot(dx, dy) > MONITOR_CLICK_SLOP_PX;
+}
+
+/** The marquee rectangle in viewport CSS px, from two screen points. */
+export function marqueeScreenRect(start: MonitorPoint, end: MonitorPoint): CSSProperties {
+  return {
+    left: `${Math.min(start.x, end.x)}px`,
+    top: `${Math.min(start.y, end.y)}px`,
+    width: `${Math.abs(end.x - start.x)}px`,
+    height: `${Math.abs(end.y - start.y)}px`,
+  };
 }
 
 /** True while Space is held long enough (or with a pointer down) to lend the Hand. */
@@ -285,6 +337,26 @@ interface PanDrag {
   readonly startView: MonitorViewState;
 }
 
+interface SelectPress {
+  readonly pointerId: number;
+  /** Press point in viewport CSS px. */
+  readonly start: MonitorPoint;
+  /** True when the press landed on an element (a drag there is not a marquee). */
+  readonly onElement: boolean;
+  moved: boolean;
+  /** The element move this press started (T-M05a); asked for once per press. */
+  drag?: MonitorElementDrag | undefined;
+  dragAsked?: boolean;
+}
+
+function viewportPoint(
+  event: { clientX: number; clientY: number },
+  element: Element,
+): MonitorPoint {
+  const rect = element.getBoundingClientRect();
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+}
+
 /** The clipping viewport and pointer router. Children are positioned inside it. */
 export function MonitorViewport({
   controller,
@@ -293,6 +365,7 @@ export function MonitorViewport({
   onDragLeave,
   onDrop,
   readThumbnail,
+  selection,
   children,
 }: MonitorViewportProps) {
   const spaceHeld = useSpaceHold();
@@ -302,6 +375,47 @@ export function MonitorViewport({
   const { setView, setFit } = controller;
   const latest = useRef(controller);
   latest.current = controller;
+  const latestSelection = useRef(selection);
+  latestSelection.current = selection;
+  const pressRef = useRef<SelectPress | null>(null);
+  const [marquee, setMarquee] = useState<{ start: MonitorPoint; end: MonitorPoint } | null>(null);
+
+  const endSelectPress = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>, commit: boolean) => {
+      const press = pressRef.current;
+      if (press === null || press.pointerId !== event.pointerId) return;
+      pressRef.current = null;
+      setMarquee(null);
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId))
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      const handler = latestSelection.current;
+      const view = latest.current.view;
+      const end = viewportPoint(event, event.currentTarget);
+      if (press.drag !== undefined) {
+        if (commit && !monitorSpaceGesture.isHolding())
+          press.drag.update(screenToCanvasPoint(view, end), {
+            shift: event.shiftKey,
+            alt: event.altKey,
+          });
+        press.drag.end(commit && !monitorSpaceGesture.isHolding());
+        return;
+      }
+      // A Space hold that began during the press turns it into the Hand: no selection.
+      if (!commit || handler === undefined || monitorSpaceGesture.isHolding()) return;
+      if (press.moved) {
+        if (press.onElement) return; // no mover was given: nothing to do
+        handler.marquee(screenToCanvasPoint(view, press.start), screenToCanvasPoint(view, end), {
+          shift: event.shiftKey,
+        });
+        return;
+      }
+      handler.click(screenToCanvasPoint(view, press.start), {
+        shift: event.shiftKey,
+        alt: event.altKey,
+      });
+    },
+    [],
+  );
 
   const endPan = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = panRef.current;
@@ -319,7 +433,25 @@ export function MonitorViewport({
     // before React re-renders with the open hand.
     const handNow = effectiveMonitorTool(latest.current.tool, monitorSpaceGesture.isHolding());
     const primaryHand = event.button === PRIMARY_BUTTON && handNow === 'hand';
-    if (!middle && !primaryHand) return;
+    if (!middle && !primaryHand) {
+      const handler = latestSelection.current;
+      if (
+        event.button !== PRIMARY_BUTTON ||
+        handler === undefined ||
+        isEditableTarget(event.target) ||
+        isInteractiveTarget(event.target)
+      )
+        return;
+      const start = viewportPoint(event, event.currentTarget);
+      pressRef.current = {
+        pointerId: event.pointerId,
+        start,
+        onElement: handler.isElementAt(screenToCanvasPoint(latest.current.view, start)),
+        moved: false,
+      };
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      return;
+    }
     if (!middle && (isEditableTarget(event.target) || isInteractiveTarget(event.target))) return;
     event.preventDefault();
     panRef.current = {
@@ -334,6 +466,26 @@ export function MonitorViewport({
 
   const onPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      const press = pressRef.current;
+      if (press !== null && press.pointerId === event.pointerId) {
+        const point = viewportPoint(event, event.currentTarget);
+        if (!press.moved && movedPastClickSlop(point.x - press.start.x, point.y - press.start.y))
+          press.moved = true;
+        if (press.moved && !press.onElement) setMarquee({ start: press.start, end: point });
+        if (press.moved && press.onElement) {
+          const view = latest.current.view;
+          const modifiers = { shift: event.shiftKey, alt: event.altKey };
+          if (press.dragAsked !== true && !monitorSpaceGesture.isHolding()) {
+            press.dragAsked = true;
+            press.drag = latestSelection.current?.dragElement?.(
+              screenToCanvasPoint(view, press.start),
+              modifiers,
+            );
+          }
+          press.drag?.update(screenToCanvasPoint(view, point), modifiers);
+        }
+        return;
+      }
       const drag = panRef.current;
       if (drag === null || drag.pointerId !== event.pointerId) return;
       const { viewportSize, frame } = latest.current;
@@ -354,8 +506,11 @@ export function MonitorViewport({
     (event: ReactMouseEvent<HTMLDivElement>) => {
       const fit = doubleClickReturnsToFit({
         tool: effectiveMonitorTool(latest.current.tool, monitorSpaceGesture.isHolding()),
-        // No element hit testing yet (T-M04): every non-control point is background.
-        onElement: false,
+        // A double-click on an element keeps its own meaning (T-M04 hit test).
+        onElement:
+          latestSelection.current?.isElementAt(
+            screenToCanvasPoint(latest.current.view, viewportPoint(event, event.currentTarget)),
+          ) ?? false,
         onControl: isEditableTarget(event.target) || isInteractiveTarget(event.target),
       });
       if (fit) setFit();
@@ -379,9 +534,18 @@ export function MonitorViewport({
       onDrop={onDrop}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={endPan}
-      onPointerCancel={endPan}
-      onLostPointerCapture={endPan}
+      onPointerUp={(event) => {
+        endSelectPress(event, true);
+        endPan(event);
+      }}
+      onPointerCancel={(event) => {
+        endSelectPress(event, false);
+        endPan(event);
+      }}
+      onLostPointerCapture={(event) => {
+        endSelectPress(event, false);
+        endPan(event);
+      }}
       onMouseDown={(event) => {
         // No autoscroll and no paste on the middle button.
         if (event.button === MIDDLE_BUTTON) event.preventDefault();
@@ -392,6 +556,13 @@ export function MonitorViewport({
       onDoubleClick={onDoubleClick}
     >
       {children}
+      {marquee !== null && (
+        <div
+          className="monitor-marquee"
+          data-monitor-marquee=""
+          style={marqueeScreenRect(marquee.start, marquee.end)}
+        />
+      )}
       <MonitorNavigation controller={controller} readThumbnail={readThumbnail} />
     </div>
   );

@@ -26,6 +26,17 @@ export interface Transform2D {
   readonly translateY: number;
   readonly scaleX: number;
   readonly scaleY: number;
+  /**
+   * Rotation in degrees, clockwise on screen, about {@link Transform2D.origin}.
+   * Absent or 0 draws exactly as before rotation existed (T-M15).
+   */
+  readonly rotationDeg?: number;
+  /**
+   * The origin (anchor point) the node rotates about, as a fraction of the
+   * node's local box: `{ x: 0.5, y: 0.5 }` (the centre) when absent. It does
+   * not move the node: with rotation 0 the origin changes nothing.
+   */
+  readonly origin?: { readonly x: number; readonly y: number };
 }
 
 interface RenderNodeBase {
@@ -249,6 +260,12 @@ export interface EditorOverlayIR {
     readonly y: number;
     readonly width: number;
     readonly height: number;
+    /**
+     * The drawn box's four corners in frame pixels (`NodeBounds.corners`), so
+     * a rotated element is outlined along its turned box. Absent: the
+     * rectangle above (T-M04).
+     */
+    readonly corners?: readonly { readonly x: number; readonly y: number }[];
   }[];
 }
 
@@ -296,6 +313,20 @@ function validateNodes(nodes: readonly RenderNode[], ids: Set<string>): void {
       node.transform.scaleY <= 0
     ) {
       throw new RangeError(`node "${node.id}" transform must be finite with positive scales`);
+    }
+    if (node.transform.rotationDeg !== undefined && !Number.isFinite(node.transform.rotationDeg)) {
+      throw new RangeError(`node "${node.id}" rotationDeg must be finite`);
+    }
+    if (
+      node.transform.origin !== undefined &&
+      (!Number.isFinite(node.transform.origin.x) || !Number.isFinite(node.transform.origin.y))
+    ) {
+      throw new RangeError(`node "${node.id}" origin must be finite`);
+    }
+    if (node.kind === 'group' && (node.transform.rotationDeg ?? 0) !== 0) {
+      // A group has no box of its own to rotate about; nothing builds rotated
+      // groups yet, so refuse instead of drawing something undefined.
+      throw new RangeError(`group "${node.id}" cannot be rotated`);
     }
     if (node.kind === 'sprite' || node.kind === 'video-frame') {
       if (
@@ -367,11 +398,15 @@ function flattenNode(
 }
 
 function composeTransform(parent: Transform2D, child: Transform2D): Transform2D {
+  // Groups are never rotated (validated), so the child's own rotation and
+  // origin carry over unchanged.
   return {
     translateX: parent.translateX + child.translateX * parent.scaleX,
     translateY: parent.translateY + child.translateY * parent.scaleY,
     scaleX: parent.scaleX * child.scaleX,
     scaleY: parent.scaleY * child.scaleY,
+    ...(child.rotationDeg === undefined ? {} : { rotationDeg: child.rotationDeg }),
+    ...(child.origin === undefined ? {} : { origin: child.origin }),
   };
 }
 

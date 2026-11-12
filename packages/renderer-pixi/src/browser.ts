@@ -15,9 +15,10 @@
  *   serializable and renderer-neutral while this browser adapter owns the
  *   transient GPU texture.
  * - `text` nodes → a `Text` object with fill color, the IR's `fontSizePx` /
- *   `maxWidth` constraints, and the resolved alignment. The IR does not
- *   currently expose rotation; the property is wired through so a future IR
- *   revision can populate it without an API change.
+ *   `maxWidth` constraints, and the resolved alignment.
+ * - Rotation (T-M15): a node with `transform.rotationDeg` turns about its
+ *   `transform.origin` (default the centre of its drawn box). Without rotation
+ *   the layer is placed exactly as before, so old frames draw the same.
  * - `group` nodes are flattened by `flattenRenderNodes` before paint; the
  *   group transform is composed into each child's transform upstream.
  *
@@ -29,6 +30,8 @@
 import { Application, Container, FillGradient, Graphics, Sprite, Text, Texture } from 'pixi.js';
 import type {
   ColorGradeIR,
+  NodeBounds,
+  NodeRect,
   Rgba,
   RenderFrameIR,
   TextNode,
@@ -37,7 +40,15 @@ import type {
   VisualRenderNode,
 } from '@joy-media/render-ir';
 import type { ParsedCubeLut } from './lut.js';
-import { flattenRenderNodes, textPlateBounds, validateRenderFrameIR } from '@joy-media/render-ir';
+import {
+  flattenRenderNodes,
+  isRotated,
+  nodeBoundsFromBox,
+  nodePivot,
+  nodeRotationDeg,
+  textPlateBounds,
+  validateRenderFrameIR,
+} from '@joy-media/render-ir';
 import {
   buildPixiColorGradeFilter,
   buildPixiEffectFilters,
@@ -126,6 +137,8 @@ interface LayerContainer extends Container {
   textBackground?: Graphics | undefined;
   /** Persistent GPU texture for a transition node. */
   transitionTexture?: Texture | undefined;
+  /** The flattened node this layer last drew (for `nodeBounds`). */
+  node?: VisualRenderNode | undefined;
 }
 
 /**
@@ -156,6 +169,13 @@ export interface BrowserPixiRenderer {
    * The IR is not touched.
    */
   setView(view: BrowserPixiMonitorView | undefined, surface?: BrowserPixiSurfaceSize): void;
+  /**
+   * The drawn rectangle of a node of the last rendered frame, in authored
+   * frame pixels (the Monitor view is not included): the rotated box when the
+   * node is rotated. Text is measured as drawn (its plate when it has one).
+   * `undefined` for an id that was not drawn (or a transition).
+   */
+  nodeBounds(id: string): NodeBounds | undefined;
   /**
    * Returns a bounded RGBA readback of the whole frame for diagnostics; overlays
    * are not painted into it. While a Monitor view is set, the read-back is a
@@ -437,13 +457,16 @@ export async function createBrowserPixiRenderer(
     layer.textBackground = undefined;
   };
 
+  const textPlatePadding = (node: TextNode): number =>
+    Math.max(2, Math.round((node.fontSizePx ?? 16) * 0.12));
+
   const syncTextBackground = (layer: LayerContainer, node: TextNode): void => {
     if (node.background === undefined || !(layer.visual instanceof Text)) {
       clearTextBackground(layer);
       return;
     }
     const text = layer.visual;
-    const padding = Math.max(2, Math.round((node.fontSizePx ?? 16) * 0.12));
+    const padding = textPlatePadding(node);
     const bounds = textPlateBounds(text.width, text.height, node.align, padding);
     const plate = layer.textBackground ?? new Graphics();
     plate
@@ -486,12 +509,35 @@ export async function createBrowserPixiRenderer(
     return undefined;
   };
 
+  /** The layer's drawn box in its own (unscaled) pixels: what bounds and the origin use. */
+  const layerLocalBox = (layer: LayerContainer, node: VisualRenderNode): NodeRect => {
+    if (node.kind === 'text') {
+      if (!(layer.visual instanceof Text)) return { x: 0, y: 0, width: 0, height: 0 };
+      const text = layer.visual;
+      return node.background === undefined
+        ? textPlateBounds(text.width, text.height, node.align)
+        : textPlateBounds(text.width, text.height, node.align, textPlatePadding(node));
+    }
+    return { x: 0, y: 0, width: node.width, height: node.height };
+  };
+
   const updateLayerTransform = (layer: LayerContainer, node: VisualRenderNode): void => {
-    layer.position.set(node.transform.translateX, node.transform.translateY);
-    layer.scale.set(node.transform.scaleX, node.transform.scaleY);
-    // `Transform2D` does not currently carry rotation; wired through so a
-    // future IR revision can populate it without an API change.
-    layer.rotation = 0;
+    const { translateX, translateY, scaleX, scaleY } = node.transform;
+    layer.node = node;
+    if (isRotated(node.transform)) {
+      // Turn about the origin: Pixi draws position + R * S * (p - pivot), so
+      // putting the pivot at the origin and moving the position by the scaled
+      // pivot keeps the unrotated placement translate + S * p (T-M15).
+      const pivot = nodePivot(node.transform, layerLocalBox(layer, node));
+      layer.pivot.set(pivot.x, pivot.y);
+      layer.position.set(translateX + pivot.x * scaleX, translateY + pivot.y * scaleY);
+      layer.rotation = (nodeRotationDeg(node.transform) * Math.PI) / 180;
+    } else {
+      layer.pivot.set(0, 0);
+      layer.position.set(translateX, translateY);
+      layer.rotation = 0;
+    }
+    layer.scale.set(scaleX, scaleY);
     layer.alpha = node.opacity;
     layer.zIndex = node.zIndex;
   };
@@ -712,6 +758,13 @@ export async function createBrowserPixiRenderer(
         app.canvas.style.height = '';
       }
       redraw();
+    },
+    nodeBounds(id: string): NodeBounds | undefined {
+      if (disposed) return undefined;
+      const layer = spriteMap.get(id);
+      const node = layer?.node;
+      if (layer === undefined || node === undefined) return undefined;
+      return nodeBoundsFromBox(id, node.transform, layerLocalBox(layer, node));
     },
     readPixels(maxWidth = 640, maxHeight = 360) {
       if (disposed || frameWidth <= 0 || frameHeight <= 0) return undefined;

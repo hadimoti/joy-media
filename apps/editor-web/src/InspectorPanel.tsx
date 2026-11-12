@@ -55,6 +55,7 @@ import { MaskInspector } from './MaskInspector.js';
 import { readMaskSettings, type MaskSettings, type MaskTarget } from './masking.js';
 import { EnhanceInspector } from './EnhanceInspector.js';
 import { readUpscaleSettings, type UpscaleSettings, type UpscaleTarget } from './upscaling.js';
+import { useMonitorTransformPreviewFor } from './monitor/monitor-transform-preview.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'visual', label: 'Visual', ariaLabel: 'Visual (Transform)' },
@@ -451,12 +452,18 @@ export function InspectorPanel({
     }
   };
 
-  const { transform: resolved, diagnostics } = idle
+  const { transform: documentTransform, diagnostics } = idle
     ? {
         transform: target.transform,
         diagnostics: [] as ReturnType<typeof resolveObjectTransformWithExpressions>['diagnostics'],
       }
     : resolveObjectTransformWithExpressions(target.id, allObjects, timeUs);
+  // While a Monitor drag moves this object, its numbers follow live (T-M05a).
+  const monitorDragValues = useMonitorTransformPreviewFor(idle ? undefined : target.id);
+  const resolved =
+    monitorDragValues === undefined
+      ? documentTransform
+      : { ...documentTransform, ...monitorDragValues };
 
   const replaceChannel = (
     property: AnimatablePropertyV1,

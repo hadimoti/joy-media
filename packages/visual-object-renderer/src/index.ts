@@ -449,14 +449,25 @@ function numericParams(
   );
 }
 
-/** Convert VisualObjectTransformV1 → render-ir Transform2D. */
+/**
+ * Convert VisualObjectTransformV1 → render-ir Transform2D.
+ *
+ * The evaluated rotation is passed on (T-M05a, ADR-0046 review B2), so the
+ * Monitor and the export draw a saved or animated `rotationDeg` the same way.
+ * A rotation of 0 (or a value that is not a finite number) adds nothing to the
+ * IR, so a frame without rotation is exactly the frame drawn before rotation
+ * was connected.
+ */
 export function transformToRenderTransform(t: VisualObjectTransformV1): Transform2D {
-  return {
+  const base: Transform2D = {
     translateX: t.x,
     translateY: t.y,
     scaleX: t.scaleX,
     scaleY: t.scaleY,
   };
+  return Number.isFinite(t.rotationDeg) && t.rotationDeg !== 0
+    ? { ...base, rotationDeg: t.rotationDeg }
+    : base;
 }
 
 export function evaluateEffectInstances(

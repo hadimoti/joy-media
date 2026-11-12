@@ -15,13 +15,20 @@
 import type {
   EditorOverlayIR,
   EffectInstanceIR,
+  NodeRect,
   RenderFrameIR,
   Rgba,
   TransitionNode,
   VisualRenderNode,
 } from '@joy-media/render-ir';
-import { flattenRenderNodes, textPlateBounds, validateRenderFrameIR } from '@joy-media/render-ir';
 import type { ParsedCubeLut } from './lut.js';
+import {
+  flattenRenderNodes,
+  frameToLocalPoint,
+  isRotated,
+  textPlateBounds,
+  validateRenderFrameIR,
+} from '@joy-media/render-ir';
 import {
   applyColorGradeToPixels,
   applyCpuEffectsToColor,
@@ -116,7 +123,8 @@ function paintRect(
   node: Exclude<VisualRenderNode, { kind: 'text' | 'transition' }>,
   effects: readonly EffectInstanceIR[] | undefined,
 ): void {
-  forEachLocalPixel(pixels, frameWidth, frameHeight, node, (localX, localY) => {
+  const box = { x: 0, y: 0, width: node.width, height: node.height };
+  forEachLocalPixel(pixels, frameWidth, frameHeight, node, box, (localX, localY) => {
     if (localX < 0 || localX >= node.width || localY < 0 || localY >= node.height) return null;
     return applyCpuEffectsToColor(node.color, effects, localX, localY);
   });
@@ -132,7 +140,9 @@ function paintText(
   const textWidth = node.text.length * 4;
   const textBounds = textPlateBounds(textWidth, 5, node.align);
   const plateBounds = textPlateBounds(textWidth, 5, node.align, 1);
-  forEachLocalPixel(pixels, frameWidth, frameHeight, node, (localX, localY) => {
+  // The drawn box (rotation origin): the plate when there is one, else the run.
+  const box = node.background === undefined ? textBounds : plateBounds;
+  forEachLocalPixel(pixels, frameWidth, frameHeight, node, box, (localX, localY) => {
     const x = Math.floor(localX - textBounds.x);
     const y = Math.floor(localY);
     const character = Math.floor(x / 4);
@@ -207,8 +217,21 @@ function forEachLocalPixel(
   frameWidth: number,
   frameHeight: number,
   node: VisualRenderNode,
+  box: NodeRect,
   sample: (localX: number, localY: number) => Rgba | null,
 ): void {
+  if (isRotated(node.transform)) {
+    // Rotated about the node's origin (T-M15). Unrotated nodes keep the exact
+    // arithmetic below, so frames without rotation stay bit-identical.
+    for (let y = 0; y < frameHeight; y++) {
+      for (let x = 0; x < frameWidth; x++) {
+        const local = frameToLocalPoint(node.transform, box, { x: x + 0.5, y: y + 0.5 });
+        const color = sample(local.x, local.y);
+        if (color !== null) blendPixel(pixels, (y * frameWidth + x) * 4, color, node.opacity);
+      }
+    }
+    return;
+  }
   for (let y = 0; y < frameHeight; y++) {
     for (let x = 0; x < frameWidth; x++) {
       const localX = (x + 0.5 - node.transform.translateX) / node.transform.scaleX;
