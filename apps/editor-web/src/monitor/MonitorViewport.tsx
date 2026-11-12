@@ -8,12 +8,14 @@ import {
   useSyncExternalStore,
   type CSSProperties,
   type DragEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
 } from 'react';
 import { isEditableTarget, isInteractiveTarget, scopedKeyTable } from '../keyboard-shortcuts.js';
 import {
+  doubleClickReturnsToFit,
   effectiveMonitorTool,
   monitorCursor,
   monitorSpaceGesture,
@@ -348,10 +350,18 @@ export function MonitorViewport({
     [setView],
   );
 
-  const onDoubleClick = useCallback(() => {
-    if (effectiveMonitorTool(latest.current.tool, monitorSpaceGesture.isHolding()) === 'hand')
-      setFit();
-  }, [setFit]);
+  const onDoubleClick = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      const fit = doubleClickReturnsToFit({
+        tool: effectiveMonitorTool(latest.current.tool, monitorSpaceGesture.isHolding()),
+        // No element hit testing yet (T-M04): every non-control point is background.
+        onElement: false,
+        onControl: isEditableTarget(event.target) || isInteractiveTarget(event.target),
+      });
+      if (fit) setFit();
+    },
+    [setFit],
+  );
 
   const cursor = monitorCursor(tool, panning);
   return (

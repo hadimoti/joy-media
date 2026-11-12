@@ -389,7 +389,11 @@ import {
   resolveShortcut,
   scopedKeyTable,
 } from './keyboard-shortcuts.js';
-import { createSpaceKeyHandlers, monitorSpaceGesture } from './monitor/monitor-tools.js';
+import {
+  createSpaceKeyHandlers,
+  hasKeyModifier,
+  monitorSpaceGesture,
+} from './monitor/monitor-tools.js';
 import {
   ChevronDownIcon,
   CloseIcon,
@@ -3552,6 +3556,8 @@ function EditorWorkspace({
         (isEditableTarget(event.target) || isInteractiveTarget(event.target))
       )
         return;
+      // Space with Shift, Ctrl, Alt or Meta does nothing (no play, no hold).
+      if (action === 'playback.toggle' && hasKeyModifier(event)) return;
       if (action === 'playback.toggle' && event.repeat) {
         event.preventDefault();
         return;

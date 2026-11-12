@@ -4,7 +4,9 @@ import {
   SPACE_HOLD_MS,
   createSpaceGesture,
   createSpaceKeyHandlers,
+  doubleClickReturnsToFit,
   effectiveMonitorTool,
+  hasKeyModifier,
   monitorCursor,
   resolveSpaceIntent,
 } from './monitor-tools.js';
@@ -182,6 +184,26 @@ describe('Space key handlers', () => {
     expect(onTap).not.toHaveBeenCalled();
   });
 
+  for (const modifier of ['shiftKey', 'ctrlKey', 'altKey', 'metaKey'] as const) {
+    it(`Space with ${modifier} does nothing: no play, no hold, nothing prevented`, () => {
+      const { onTap, down, up, gesture } = setup();
+      const pressed = down(document.body, { [modifier]: true });
+      expect(pressed.defaultPrevented).toBe(false);
+      expect(gesture.isDown()).toBe(false);
+      vi.advanceTimersByTime(400);
+      expect(gesture.isHolding()).toBe(false);
+      up(document.body);
+      expect(onTap).not.toHaveBeenCalled();
+    });
+  }
+
+  it('hasKeyModifier sees each modifier and none', () => {
+    const none = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
+    expect(hasKeyModifier(none)).toBe(false);
+    for (const modifier of ['shiftKey', 'ctrlKey', 'altKey', 'metaKey'] as const)
+      expect(hasKeyModifier({ ...none, [modifier]: true })).toBe(true);
+  });
+
   it('a focused button keeps Space for itself', () => {
     const { onTap, down, up } = setup();
     const button = document.createElement('button');
@@ -189,6 +211,25 @@ describe('Space key handlers', () => {
     expect(down(button).defaultPrevented).toBe(false);
     up(button);
     expect(onTap).not.toHaveBeenCalled();
+  });
+});
+
+describe('double-click in the Monitor', () => {
+  it('returns to Fit on the background in any tool', () => {
+    for (const tool of ['select', 'hand'] as const)
+      expect(doubleClickReturnsToFit({ tool, onElement: false, onControl: false })).toBe(true);
+  });
+
+  it('with Select, a double-click on an element keeps its own meaning', () => {
+    expect(doubleClickReturnsToFit({ tool: 'select', onElement: true, onControl: false })).toBe(
+      false,
+    );
+    expect(doubleClickReturnsToFit({ tool: 'hand', onElement: true, onControl: false })).toBe(true);
+  });
+
+  it('a double-click on a control belongs to the control', () => {
+    for (const tool of ['select', 'hand'] as const)
+      expect(doubleClickReturnsToFit({ tool, onElement: false, onControl: true })).toBe(false);
   });
 });
 

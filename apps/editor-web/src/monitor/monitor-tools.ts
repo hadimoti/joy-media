@@ -29,6 +29,23 @@ export function effectiveMonitorTool(tool: MonitorTool, spaceHeld: boolean): Mon
   return spaceHeld ? 'hand' : tool;
 }
 
+/**
+ * What a double-click in the Monitor does (ADR-0046 section 1.6): on the
+ * background it returns to Fit, whatever the tool. A double-click on a control
+ * (a button, a field) belongs to that control. With Select active, a
+ * double-click on an element keeps its own meaning (T-M04 adds element hit
+ * testing and passes `onElement`); with the Hand, every double-click is Fit.
+ */
+export function doubleClickReturnsToFit(input: {
+  readonly tool: MonitorTool;
+  readonly onElement: boolean;
+  readonly onControl: boolean;
+}): boolean {
+  if (input.onControl) return false;
+  if (input.tool === 'hand') return true;
+  return !input.onElement;
+}
+
 /** Open hand while the Hand is ready, closed hand while it drags. */
 export function monitorCursor(tool: MonitorTool, panning: boolean): MonitorCursor {
   if (panning) return 'grabbing';
@@ -125,14 +142,31 @@ export const monitorSpaceGesture: SpaceGesture = createSpaceGesture();
 
 type SpaceKeyEvent = Pick<
   KeyboardEvent,
-  'key' | 'repeat' | 'target' | 'defaultPrevented' | 'preventDefault'
+  | 'key'
+  | 'repeat'
+  | 'target'
+  | 'defaultPrevented'
+  | 'preventDefault'
+  | 'shiftKey'
+  | 'ctrlKey'
+  | 'altKey'
+  | 'metaKey'
 >;
+
+/** True when Shift, Ctrl, Alt or Meta is held with the key. */
+export function hasKeyModifier(
+  event: Pick<KeyboardEvent, 'shiftKey' | 'ctrlKey' | 'altKey' | 'metaKey'>,
+): boolean {
+  return event.shiftKey || event.ctrlKey || event.altKey || event.metaKey;
+}
 
 /**
  * Window key handlers for Space. In a text field (or an in-place text edit)
  * Space types a space: nothing is prevented and nothing else happens. A focused
- * button keeps Space for itself. Otherwise key-down starts the gesture and
- * key-up decides: a tap toggles playback (on key-up), a hold does not.
+ * button keeps Space for itself. Space with Shift, Ctrl, Alt or Meta does
+ * nothing here: it neither plays nor starts a hold. Otherwise key-down starts
+ * the gesture and key-up decides: a tap toggles playback (on key-up), a hold
+ * does not.
  */
 export function createSpaceKeyHandlers(
   gesture: SpaceGesture,
@@ -144,6 +178,7 @@ export function createSpaceKeyHandlers(
   return {
     keyDown(event) {
       if (event.key !== ' ' || event.defaultPrevented) return undefined;
+      if (hasKeyModifier(event)) return undefined;
       if (isEditableTarget(event.target)) return 'type';
       if (isInteractiveTarget(event.target)) return undefined;
       event.preventDefault();
