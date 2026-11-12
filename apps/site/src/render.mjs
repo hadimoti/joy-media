@@ -223,6 +223,18 @@ function homeBody(tag) {
       <img class="shot" src="/img/motion.png" width="1051" height="1056" alt="Built-in motion presets such as Fade In, Fade Out, Pop In, Zoom In and Slide Up.">
     </section>
 
+    <section class="feature feature-plain" aria-labelledby="cli">
+      <h2 id="cli">A command line for scripting</h2>
+      <p>The installer adds the <code>joy</code> and <code>joy-media</code> commands to your PATH. Manage projects and assets, edit the timeline, render without opening the editor, check the GPU worker, or talk to the Joy Agent from a terminal. Everything runs on your PC.</p>
+      <pre><code>joy-media project list
+joy-media assets list --kind image --json
+joy-media render --project &lt;project&gt; --out result.mp4
+joy-media worker status
+joy-media agent chat
+joy-media doctor</code></pre>
+      <p class="small">Add <code>--json</code> to any command for output that scripts can read. Run <code>joy-media help</code> for the full list.</p>
+    </section>
+
     <section class="feature feature-plain" aria-labelledby="ai">
       <h2 id="ai">Bring your own AI, or use none</h2>
       <p>The editor works with no internet connection. Joy Code, the optional assistant, uses a model that you connect yourself: an API key, or a sign-in with a supported plan. Your keys stay on this PC and nothing goes through a JOY server. <a href="/providers">See the providers</a> and the <a href="/privacy">privacy facts</a>.</p>
