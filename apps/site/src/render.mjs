@@ -62,7 +62,7 @@ function layout({ title, active, body, wide = false }) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${esc(title)} | JOY Media</title>
+  <title>${esc(title === 'Home' ? 'JOY Media: a free video editor for Windows' : `${title} | JOY Media`)}</title>
   <meta name="description" content="JOY Media is a free, open-source video editor for Windows. No account, no upload: your media stays on your PC.">
   <link rel="stylesheet" href="/site.css">
 </head>
@@ -187,7 +187,15 @@ function homeBody(tag) {
         <a class="button button-quiet" href="${REPOSITORY_URL}">View source on GitHub</a>
       </p>
       <p class="small">Windows x64. Free under the MIT License.</p>
-      <img class="shot shot-hero" src="/img/hero.png" width="2000" height="1082" alt="The JOY Media editor: media on the left, a large preview in the middle, motion presets on the right, and the timeline below.">
+      <img class="shot shot-hero" src="/img/hero.png" width="2000" height="620" alt="The JOY Media editor: photos and clips in the media panel, a large preview in the middle, and built-in motion presets on the right.">
+    </section>
+
+    <section class="feature feature-split feature-split-left" aria-labelledby="media">
+      <img class="shot" src="/img/media.png" width="964" height="1024" alt="The media panel with photos and clips as large thumbnails.">
+      <div class="feature-text">
+        <h2 id="media">Your photos and clips, ready to use</h2>
+        <p>Import video, photos and audio, see them as large thumbnails, and add any of them to the timeline with one click. Your files stay on your PC.</p>
+      </div>
     </section>
 
     <section class="feature" aria-labelledby="timeline">
@@ -195,7 +203,7 @@ function homeBody(tag) {
         <h2 id="timeline">Cut on a real timeline</h2>
         <p>Stack clips on video and audio tracks. Trim, split and zoom along a ruler you can read, and see your whole edit at a glance.</p>
       </div>
-      <img class="shot" src="/img/timeline.png" width="1600" height="228" alt="The timeline with three clips on a video track, a ruler, and the editing toolbar above it.">
+      <img class="shot" src="/img/timeline.png" width="1600" height="158" alt="The timeline with five clips on a video track, a ruler, and the editing toolbar above it.">
     </section>
 
     <section class="feature feature-split" aria-labelledby="control">
@@ -203,7 +211,7 @@ function homeBody(tag) {
         <h2 id="control">Fine control when you want it</h2>
         <p>Set position, scale, rotation and opacity for every clip, and animate any of them with keyframes. Effects, Mask, Enhance and Speed sit in tabs right next to it.</p>
       </div>
-      <img class="shot" src="/img/inspector.png" width="983" height="1076" alt="The Inspector panel with the Visual, Enhance, Mask, Effects, Audio and Speed tabs and the transform controls.">
+      <img class="shot" src="/img/inspector.png" width="972" height="1024" alt="The Inspector panel with the Visual, Enhance, Mask, Effects, Audio and Speed tabs and the transform controls.">
     </section>
 
     <section class="feature feature-pair" aria-labelledby="titles">
@@ -212,7 +220,7 @@ function homeBody(tag) {
         <p>Start from a title template, then add a motion preset such as Fade In, Pop or Slide. No plug-ins to hunt for.</p>
       </div>
       <img class="shot" src="/img/titles.png" width="979" height="558" alt="Title templates: Clean Title, Bold Stack, Cinematic Wide and more.">
-      <img class="shot" src="/img/motion.png" width="1056" height="1086" alt="Built-in motion presets such as Fade In, Fade Out, Pop In, Zoom In and Slide Up.">
+      <img class="shot" src="/img/motion.png" width="1051" height="1056" alt="Built-in motion presets such as Fade In, Fade Out, Pop In, Zoom In and Slide Up.">
     </section>
 
     <section class="feature feature-plain" aria-labelledby="ai">
@@ -323,6 +331,9 @@ p { margin: 0 0 16px; }
 .feature-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 360px); gap: 8px 48px; align-items: center; }
 .feature-split .feature-text { grid-column: 1; grid-row: 1; }
 .feature-split .shot { grid-column: 2; grid-row: 1; margin-top: 0; }
+.feature-split-left { grid-template-columns: minmax(0, 360px) minmax(0, 1fr); }
+.feature-split-left .shot { grid-column: 1; grid-row: 1; }
+.feature-split-left .feature-text { grid-column: 2; grid-row: 1; }
 .feature-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }
 .feature-pair .feature-text { grid-column: 1 / -1; }
 .feature-pair .shot { margin-top: 0; }
@@ -348,7 +359,8 @@ pre code { background: none; padding: 0; }
 .site-footer nav { margin-bottom: 12px; }
 @media (max-width: 760px) {
   .feature-split, .feature-pair, .cards { grid-template-columns: minmax(0, 1fr); }
-  .feature-split .feature-text, .feature-split .shot { grid-column: 1; grid-row: auto; }
+  .feature-split .feature-text, .feature-split .shot,
+  .feature-split-left .feature-text, .feature-split-left .shot { grid-column: 1; grid-row: auto; }
   .feature-split .shot { margin-top: 24px; max-width: 360px; }
   .feature { margin-top: 48px; }
 }
