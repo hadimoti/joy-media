@@ -86,6 +86,17 @@ describe('resolveAttendedCandidate', () => {
     expect(result.problems.join(';')).toMatch(/outside docs\/release\/attended\/.*src\/app\.txt/u);
   });
 
+  it('sees the old path of a file moved into the release tooling', () => {
+    run('checkout', '-q', '-b', 'renamed', shas.candidate);
+    mkdirSync(join(root, 'tooling', 'release'), { recursive: true });
+    run('mv', 'src/app.txt', 'tooling/release/moved.txt');
+    run('commit', '-q', '-m', 'move an app file into tooling');
+    const head = run('rev-parse', 'HEAD');
+    run('checkout', '-q', 'main');
+    const result = resolveAttendedCandidate(root, head, shas.candidate);
+    expect(result.problems.join(';')).toMatch(/src\/app\.txt/u);
+  });
+
   it('refuses a candidate that is not an ancestor, not a full SHA, or not in the clone', () => {
     expect(resolveAttendedCandidate(root, shas.code!, shas.other).problems.join(';')).toMatch(
       /not an ancestor/u,

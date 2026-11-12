@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -270,6 +271,19 @@ describe('readAttendedEvidence', () => {
       expect(found?.sandboxLifecycle).toEqual({ b: 2 });
       expect(found?.sandboxUpgrade).toBeNull();
       expect(readAttendedEvidence(root, 'b'.repeat(40))).toBeNull();
+      // The digest in SHA256SUMS.txt must describe the installer that is really there.
+      expect(found?.bindingProblems?.join(';')).toMatch(/missing from the releases folder/u);
+      writeFileSync(join(releases, 'joy-media-setup.exe'), 'not the tested installer');
+      expect(readAttendedEvidence(root, CANDIDATE)?.bindingProblems?.join(';')).toMatch(
+        /does not match its digest/u,
+      );
+      const bytes = 'the tested installer';
+      writeFileSync(join(releases, 'joy-media-setup.exe'), bytes);
+      writeFileSync(
+        join(releases, 'SHA256SUMS.txt'),
+        `${createHash('sha256').update(bytes).digest('hex')}  joy-media-setup.exe\n`,
+      );
+      expect(readAttendedEvidence(root, CANDIDATE)?.bindingProblems).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

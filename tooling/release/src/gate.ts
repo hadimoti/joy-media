@@ -1395,7 +1395,7 @@ export function resolveAttendedCandidate(
       problems: ['the candidate is not an ancestor of the checked-out commit'],
     };
   }
-  const diff = run(['diff', '--name-only', wanted, head]);
+  const diff = run(['diff', '--name-only', '--no-renames', wanted, head]);
   if (diff.status !== 0) {
     return {
       candidateSha: wanted,
@@ -1445,6 +1445,15 @@ export function readAttendedEvidence(
         .find((entry) => /\sjoy-media-setup\.exe$/u.test(entry))
     : undefined;
   const setupSha256 = line?.split(/\s+/u)[0]?.toLowerCase() ?? '';
+  // The digest in SHA256SUMS.txt is only a claim: the installer on disk must have those bytes.
+  const setupFile = join(root, 'apps', 'desktop', 'dist', 'releases', 'joy-media-setup.exe');
+  const setupProblems: string[] = [];
+  if (setupSha256 !== '') {
+    if (!existsSync(setupFile))
+      setupProblems.push('joy-media-setup.exe is missing from the releases folder');
+    else if (sha256File(setupFile) !== setupSha256)
+      setupProblems.push('joy-media-setup.exe on disk does not match its digest in SHA256SUMS.txt');
+  }
   const receipts: Record<string, unknown> = {};
   for (const [scenarioId, fileName] of Object.entries(LOCAL_ONLY_ATTENDED_SCENARIOS)) {
     const value = readJson(fileName);
@@ -1456,7 +1465,7 @@ export function readAttendedEvidence(
     receipts,
     sandboxLifecycle: readJson('sandbox-lifecycle.json'),
     sandboxUpgrade: readJson('sandbox-upgrade.json'),
-    bindingProblems,
+    bindingProblems: [...bindingProblems, ...setupProblems],
   };
 }
 
