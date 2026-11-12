@@ -2,12 +2,22 @@ import { describe, expect, it } from 'vitest';
 import {
   nodeBoundsFromBox,
   rotatePointAbout,
+  validateRenderFrameIR,
   type NodePoint,
   type NodeRect,
+  type RenderFrameIR,
   type Transform2D,
 } from '@joy-media/render-ir';
 import { composeTransforms } from '@joy-media/motion-core';
 import {
+  migrateV0ToV1,
+  validateJoyProjectV1,
+  type JoyProjectV1,
+  type VisualObjectV1,
+} from '@joy-media/project-schema';
+import { emptySpikeProject } from '@joy-media/test-fixtures';
+import {
+  MIN_SCALE,
   MONITOR_SCALE_HANDLES,
   applyWorldChange,
   boxGeometry,
@@ -66,8 +76,8 @@ const CASES: readonly (readonly [string, DrawnTransform])[] = [
   ['scaled', { ...BASE, scaleX: 2, scaleY: 0.5 }],
   ['rotated 30', { ...BASE, rotationDeg: 30 }],
   ['rotated -135 and scaled', { ...BASE, scaleX: 1.5, scaleY: 0.75, rotationDeg: -135 }],
-  ['flipped horizontally', { ...BASE, scaleX: -1 }],
-  ['flipped both ways and rotated 60', { ...BASE, scaleX: -0.8, scaleY: -1.2, rotationDeg: 60 }],
+  ['upside down (rotated 180)', { ...BASE, rotationDeg: 180 }],
+  ['scaled and rotated 60', { ...BASE, scaleX: 0.8, scaleY: 1.2, rotationDeg: 60 }],
 ];
 const DELTA: NodePoint = { x: 37, y: -23 };
 
@@ -83,15 +93,15 @@ describe('the handles', () => {
     expect(MONITOR_SCALE_HANDLES.filter(isCornerHandle)).toEqual(['nw', 'ne', 'se', 'sw']);
   });
 
-  it('the rotate handle sits beyond the top edge, also when turned or flipped', () => {
+  it('the rotate handle sits beyond the top edge, also when turned', () => {
     expectPoint(rotateHandlePoint(geometryOf(BASE), 24), { x: 200, y: 176 });
     const turned = geometryOf({ ...BASE, rotationDeg: 90 });
     // Turned a quarter clockwise: the top edge now faces right.
     const point = rotateHandlePoint(turned, 24);
     expect(point.x).toBeGreaterThan(handlePoint(turned, 'n').x);
-    // Flipped upside down: the element's own top edge is drawn at the bottom.
-    const flipped = geometryOf({ ...BASE, scaleY: -1 });
-    expect(rotateHandlePoint(flipped, 24).y).toBeGreaterThan(handlePoint(flipped, 'n').y);
+    // Turned upside down: the element's own top edge is drawn at the bottom.
+    const upsideDown = geometryOf({ ...BASE, rotationDeg: 180 });
+    expect(rotateHandlePoint(upsideDown, 24).y).toBeGreaterThan(handlePoint(upsideDown, 'n').y);
     const empty = geometryOf(BASE, { x: 0, y: 0, width: 0, height: 0 });
     expect(Number.isFinite(rotateHandlePoint(empty, 24).x)).toBe(true);
   });
@@ -112,7 +122,7 @@ describe('move', () => {
   });
 });
 
-describe('scale: every handle, with rotation, scale and flips', () => {
+describe('scale: every handle, with rotation and scale', () => {
   for (const [label, drawn] of CASES) {
     for (const handle of MONITOR_SCALE_HANDLES) {
       it(`${label}, ${handle}: the opposite handle stays, the handle follows its axes`, () => {
@@ -177,7 +187,7 @@ describe('scale: every handle, with rotation, scale and flips', () => {
     expectPoint(geometryOf(next).center, geometry.center);
   });
 
-  it('dragging across the opposite side flips the element', () => {
+  it('no flip in v1.1.1: dragging across the opposite side stops the box at the minimum scale', () => {
     const geometry = geometryOf(BASE);
     const next = scaleTransform(
       geometry,
@@ -186,8 +196,162 @@ describe('scale: every handle, with rotation, scale and flips', () => {
       { x: 0, y: 250 },
       { shift: false, alt: false },
     );
-    expect(next.scaleX).toBeCloseTo(-0.5, 9);
-    expectPoint(handlePoint(geometryOf(next), 'w'), { x: 100, y: 250 });
+    expect(next.scaleX).toBeCloseTo(MIN_SCALE, 9);
+    expect(next.scaleY).toBe(1);
+    const after = geometryOf(next);
+    expectPoint(handlePoint(after, 'w'), { x: 100, y: 250 });
+    // The box stops, two pixels wide, on the fixed side: it does not turn inside out.
+    expectPoint(handlePoint(after, 'e'), { x: 100 + 200 * MIN_SCALE, y: 250 });
+  });
+
+  it('every handle dragged far past the fixed point stops at the minimum, and the fixed point stays', () => {
+    for (const [label, drawn] of CASES) {
+      const geometry = geometryOf(drawn);
+      for (const handle of MONITOR_SCALE_HANDLES) {
+        for (const modifiers of [
+          { shift: false, alt: false },
+          { shift: true, alt: false },
+          { shift: false, alt: true },
+          { shift: true, alt: true },
+        ]) {
+          const start = handlePoint(geometry, handle);
+          const fixed = modifiers.alt
+            ? geometry.center
+            : handlePoint(geometry, oppositeHandle(handle));
+          // Three box-lengths across: well past the fixed point.
+          const now = {
+            x: start.x + 3 * (fixed.x - start.x),
+            y: start.y + 3 * (fixed.y - start.y),
+          };
+          const next = scaleTransform(geometry, handle, start, now, modifiers);
+          expect(next.scaleX, `${label} ${handle}`).toBeGreaterThanOrEqual(MIN_SCALE - 1e-12);
+          expect(next.scaleY, `${label} ${handle}`).toBeGreaterThanOrEqual(MIN_SCALE - 1e-12);
+          const smallest = Math.min(
+            handleAxes(handle).x || modifiers.shift ? next.scaleX : Infinity,
+            handleAxes(handle).y || modifiers.shift ? next.scaleY : Infinity,
+          );
+          expect(smallest).toBeCloseTo(MIN_SCALE, 9);
+          if (modifiers.shift)
+            expect(next.scaleX / next.scaleY).toBeCloseTo(drawn.scaleX / drawn.scaleY, 9);
+          const after = geometryOf(next);
+          expectPoint(
+            modifiers.alt ? after.center : handlePoint(after, oppositeHandle(handle)),
+            fixed,
+          );
+        }
+      }
+    }
+  });
+
+  it('a scale already below the minimum cannot shrink further, nor jumps up', () => {
+    const tiny = { ...BASE, scaleX: 0.005 };
+    const geometry = geometryOf(tiny);
+    const start = handlePoint(geometry, 'e');
+    const inwards = scaleTransform(
+      geometry,
+      'e',
+      start,
+      { x: 0, y: start.y },
+      {
+        shift: false,
+        alt: false,
+      },
+    );
+    expect(inwards.scaleX).toBeCloseTo(0.005, 12);
+    const outwards = scaleTransform(
+      geometry,
+      'e',
+      start,
+      { x: start.x + 9, y: start.y },
+      {
+        shift: false,
+        alt: false,
+      },
+    );
+    expect(outwards.scaleX).toBeCloseTo(0.005 * 10, 9);
+  });
+
+  it('the result passes the project validator and the render-frame validator', () => {
+    const crop = { left: 0, top: 0, right: 0, bottom: 0 };
+    const holderLocal = { x: 50, y: 60, scaleX: 2, scaleY: 0.5, rotationDeg: 90 };
+    const childLocal = { x: 30, y: -10, scaleX: 1.5, scaleY: 2, rotationDeg: 10 };
+    const parentWorld = composeTransforms(
+      { ...holderLocal, opacity: 1, crop },
+      { x: 0, y: 0, scaleX: 1, scaleY: 1, rotationDeg: 0, opacity: 1, crop },
+    );
+    const parent = {
+      x: parentWorld.x,
+      y: parentWorld.y,
+      scaleX: parentWorld.scaleX,
+      scaleY: parentWorld.scaleY,
+      rotationDeg: parentWorld.rotationDeg,
+    };
+    const world = composeTransforms(
+      { ...holderLocal, opacity: 1, crop },
+      { ...childLocal, opacity: 1, crop },
+    );
+    const drawn: DrawnTransform = {
+      x: world.x,
+      y: world.y,
+      scaleX: world.scaleX,
+      scaleY: world.scaleY,
+      rotationDeg: world.rotationDeg,
+    };
+    const base = migrateV0ToV1(emptySpikeProject()).project;
+    const projectWith = (local: DrawnTransform): JoyProjectV1 => ({
+      ...base,
+      visualObjects: {
+        holder: { id: 'holder', kind: 'null', transform: { ...holderLocal, opacity: 1, crop } },
+        child: {
+          id: 'child',
+          kind: 'shape',
+          parentId: 'holder',
+          transform: { ...local, opacity: 1, crop },
+        },
+      } as unknown as Record<string, VisualObjectV1>,
+    });
+    const frameWith = (value: DrawnTransform): RenderFrameIR => ({
+      version: 1,
+      compositionId: 'root',
+      timeUs: 0,
+      viewport: { width: 1080, height: 1920, dpr: 1 },
+      background: { r: 0, g: 0, b: 0, a: 1 },
+      nodes: [
+        {
+          id: 'child',
+          kind: 'sprite',
+          zIndex: 0,
+          opacity: 1,
+          transform: render(value),
+          width: BOX.width,
+          height: BOX.height,
+          color: { r: 1, g: 1, b: 1, a: 1 },
+        },
+      ],
+    });
+    expect(validateJoyProjectV1(projectWith(childLocal))).toEqual([]);
+    // The validators have teeth: a flipped (negative) scale is refused by both.
+    expect(validateJoyProjectV1(projectWith({ ...childLocal, scaleX: -1.5 }))).not.toEqual([]);
+    expect(() => validateRenderFrameIR(frameWith({ ...drawn, scaleX: -drawn.scaleX }))).toThrow();
+
+    const geometry = geometryOf(drawn);
+    for (const handle of MONITOR_SCALE_HANDLES) {
+      for (const modifiers of [
+        { shift: false, alt: false },
+        { shift: true, alt: true },
+      ]) {
+        const start = handlePoint(geometry, handle);
+        const fixed = modifiers.alt
+          ? geometry.center
+          : handlePoint(geometry, oppositeHandle(handle));
+        const now = { x: start.x + 3 * (fixed.x - start.x), y: start.y + 3 * (fixed.y - start.y) };
+        const next = scaleTransform(geometry, handle, start, now, modifiers);
+        expect(() => validateRenderFrameIR(frameWith(next))).not.toThrow();
+        const local = applyWorldChange(childLocal, drawn, next, parent)!;
+        expect(local).toBeDefined();
+        expect(validateJoyProjectV1(projectWith(local)), handle).toEqual([]);
+      }
+    }
   });
 
   it('a custom origin and an offset box (text) still keep the fixed point', () => {
