@@ -725,4 +725,126 @@ describe('v1 project schema and migration harness', () => {
       'propertyAnimations must be an object',
     );
   });
+
+  it('rejects non-finite and out-of-range color-grade values', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const identityCurve = [
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+    ];
+    const grade = {
+      version: 2,
+      enabled: true,
+      hsl: [
+        {
+          id: 'red',
+          hue: 0,
+          hueWidth: 35,
+          softness: 0.2,
+          saturation: 0,
+          luminance: 0,
+        },
+      ],
+      curves: {
+        rgb: identityCurve,
+        red: identityCurve,
+        green: identityCurve,
+        blue: identityCurve,
+      },
+    };
+    const invalidGrades = [
+      { ...grade, hsl: [{ ...grade.hsl[0], hueShift: Number.NaN }] },
+      { ...grade, hsl: [{ ...grade.hsl[0], hueShift: Number.POSITIVE_INFINITY }] },
+      { ...grade, hsl: [{ ...grade.hsl[0], hueShift: 181 }] },
+      { ...grade, hsl: [{ ...grade.hsl[0], hueWidth: 181 }] },
+      {
+        ...grade,
+        hsl: Array.from({ length: 9 }, (_, index) => ({
+          ...grade.hsl[0],
+          id: `band-${index}`,
+        })),
+      },
+      {
+        ...grade,
+        curves: {
+          ...grade.curves,
+          red: [
+            { x: 0, y: 0 },
+            { x: Number.POSITIVE_INFINITY, y: 1 },
+          ],
+        },
+      },
+      {
+        ...grade,
+        curves: {
+          ...grade.curves,
+          blue: [
+            { x: 0, y: 0 },
+            { x: 1.1, y: 1 },
+          ],
+        },
+      },
+    ];
+
+    for (const invalidGrade of invalidGrades) {
+      const diagnostics = validateJoyProjectV1({ ...base, colorGrade: invalidGrade });
+      expect(
+        diagnostics.some((diagnostic) => diagnostic.code === 'PROJECT_SCHEMA_V1_COLOR_GRADE'),
+      ).toBe(true);
+    }
+  });
+
+  it('requires both asset id and SHA-256 for custom LUT references', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const grade = { version: 2, enabled: true };
+    const incompleteReferences = [
+      { sha256: 'a'.repeat(64), intensity: 1 },
+      { assetId: 'lut-1', intensity: 1 },
+    ];
+
+    for (const lut of incompleteReferences) {
+      const diagnostics = validateJoyProjectV1({ ...base, colorGrade: { ...grade, lut } });
+      expect(diagnostics).toContainEqual(
+        expect.objectContaining({
+          code: 'PROJECT_SCHEMA_V1_COLOR_GRADE',
+          path: 'colorGrade.lut',
+          message: expect.stringContaining('both a non-empty asset id and a lowercase SHA-256'),
+        }),
+      );
+    }
+
+    expect(
+      validateJoyProjectV1({
+        ...base,
+        colorGrade: {
+          ...grade,
+          lut: { assetId: 'lut-1', sha256: 'a'.repeat(64), intensity: 1 },
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  it('accepts legacy v2 HSL bands without hueShift', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const project = {
+      ...base,
+      clipColorGrades: {
+        'clip-1': {
+          version: 2 as const,
+          enabled: true,
+          hsl: [
+            {
+              id: 'red' as const,
+              hue: 0,
+              hueWidth: 35,
+              softness: 0.2,
+              saturation: 0,
+              luminance: 0,
+            },
+          ],
+        },
+      },
+    };
+    expect(validateJoyProjectV1(project)).toEqual([]);
+  });
 });

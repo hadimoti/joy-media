@@ -14,7 +14,7 @@ import {
   type BuildRenderFrameOptions,
   type ClipTimingLookup,
 } from '@joy-media/visual-object-renderer';
-import { applyColorGradeToPixels } from '@joy-media/renderer-pixi';
+import { applyColorGradeToPixels, type ParsedCubeLut } from '@joy-media/renderer-pixi';
 import { rootTimelineVideoClipById } from './timeline-nested-playback.js';
 import { effectsByObjectIdAt } from './adjustment-render.js';
 import { stickerImageCache } from './editor-runtime-singletons.js';
@@ -123,6 +123,7 @@ export function applyClipGradesToTransitionBitmaps(
   transition: TransitionV1 | undefined,
   timeUs: number,
   bitmaps: Map<string, ImageDataLike>,
+  resolveColorLut?: (grade: ColorGradeIR) => ParsedCubeLut | undefined,
 ): void {
   if (transition === undefined) return;
   for (const clipId of [transition.leftClipId, transition.rightClipId]) {
@@ -132,7 +133,8 @@ export function applyClipGradesToTransitionBitmaps(
     const grade = colorGradeForClipAtTime(project, clip, timeUs);
     if (grade === undefined) continue;
     const data = new Uint8ClampedArray(bitmap.data);
-    applyColorGradeToPixels(data, normalizeColorGrade(grade));
+    const normalizedGrade = normalizeColorGrade(grade);
+    applyColorGradeToPixels(data, normalizedGrade, resolveColorLut?.(normalizedGrade));
     bitmaps.set(clipId, { ...bitmap, data });
   }
 }

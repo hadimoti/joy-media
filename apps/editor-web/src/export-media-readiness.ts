@@ -108,11 +108,7 @@ export function activePreparedExportClipsAt<T extends ExportVisualClipLike>(
     .sort((left, right) => priorityForClip(left) - priorityForClip(right));
 }
 
-/**
- * Export must never silently bypass a referenced custom LUT. This includes
- * static grades and every persisted hold key, even if that key is not active
- * at the current playhead.
- */
+/** Returns unavailable custom LUT references so export can warn before rendering. */
 export function missingColorLutExportDependencies(project: JoyProjectV1): readonly string[] {
   const missing = new Set<string>();
   const inspectGrade = (grade: JoyProjectV1['colorGrade']) => {

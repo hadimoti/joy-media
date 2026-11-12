@@ -516,6 +516,22 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
     for (const [assetId, asset] of Object.entries(value.assets))
       validateAsset(asset, `assets.${assetId}`, assetId, diagnostics);
   }
+  if (value.colorGrade !== undefined)
+    validateColorGrade(value.colorGrade, 'colorGrade', diagnostics);
+  if (value.clipColorGrades !== undefined) {
+    if (!isRecord(value.clipColorGrades)) {
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_COLOR_GRADE',
+          'clipColorGrades must be an object keyed by clip id',
+          'clipColorGrades',
+        ),
+      );
+    } else {
+      for (const [clipId, grade] of Object.entries(value.clipColorGrades))
+        validateColorGrade(grade, `clipColorGrades.${clipId}`, diagnostics);
+    }
+  }
   if (!isRecord(value.variables))
     diagnostics.push(
       diagnostic('PROJECT_SCHEMA_V1_VARIABLES', 'variables must be an object', 'variables'),
@@ -563,6 +579,193 @@ export function validateJoyProjectV1(value: unknown): ProjectDiagnostic[] {
   }
   diagnostics.push(...validatePropertyAnimations(value.propertyAnimations));
   return diagnostics;
+}
+
+const COLOR_CURVE_CHANNELS = ['rgb', 'red', 'green', 'blue'] as const;
+const COLOR_HSL_BAND_LIMIT = 8;
+const COLOR_CURVE_POINT_LIMIT = 256;
+
+function validateColorGrade(value: unknown, path: string, diagnostics: ProjectDiagnostic[]): void {
+  if (!isRecord(value)) {
+    diagnostics.push(
+      diagnostic('PROJECT_SCHEMA_V1_COLOR_GRADE', 'color grade must be an object', path),
+    );
+    return;
+  }
+
+  // Legacy v1 grades keep their four original controls and do not carry HSL.
+  if (value.version !== 2) {
+    if ('version' in value)
+      diagnostics.push(
+        diagnostic(
+          'PROJECT_SCHEMA_V1_COLOR_GRADE',
+          'color grade version must be 2',
+          `${path}.version`,
+        ),
+      );
+    for (const field of ['lift', 'gamma', 'gain', 'saturation']) {
+      if (value[field] !== undefined)
+        validateFiniteNumber(value[field], `${path}.${field}`, diagnostics);
+    }
+    return;
+  }
+
+  for (const field of ['lift', 'gamma', 'gain', 'saturation']) {
+    if (value[field] !== undefined)
+      validateFiniteNumber(value[field], `${path}.${field}`, diagnostics);
+  }
+  if (value.adjust !== undefined) validateFiniteRecord(value.adjust, `${path}.adjust`, diagnostics);
+  if (value.wheels !== undefined) {
+    if (!isRecord(value.wheels)) {
+      colorGradeError(diagnostics, `${path}.wheels`, 'must be an object');
+    } else {
+      for (const wheel of ['lift', 'gamma', 'gain', 'offset']) {
+        if (value.wheels[wheel] !== undefined)
+          validateFiniteRecord(value.wheels[wheel], `${path}.wheels.${wheel}`, diagnostics);
+      }
+    }
+  }
+
+  if (value.hsl !== undefined) {
+    if (!Array.isArray(value.hsl)) {
+      colorGradeError(diagnostics, `${path}.hsl`, 'must be an array');
+    } else {
+      if (value.hsl.length > COLOR_HSL_BAND_LIMIT)
+        colorGradeError(
+          diagnostics,
+          `${path}.hsl`,
+          `supports at most ${COLOR_HSL_BAND_LIMIT} bands`,
+        );
+      value.hsl.forEach((band, index) => {
+        const bandPath = `${path}.hsl[${index}]`;
+        if (!isRecord(band)) {
+          colorGradeError(diagnostics, bandPath, 'must be an object');
+          return;
+        }
+        validateFiniteNumber(band.hue, `${bandPath}.hue`, diagnostics, 0, 360);
+        validateFiniteNumber(band.hueWidth, `${bandPath}.hueWidth`, diagnostics, 0, 180);
+        if (band.hueShift !== undefined)
+          validateFiniteNumber(band.hueShift, `${bandPath}.hueShift`, diagnostics, -180, 180);
+        validateFiniteNumber(band.softness, `${bandPath}.softness`, diagnostics, 0, 1);
+        validateFiniteNumber(band.saturation, `${bandPath}.saturation`, diagnostics, -1, 1);
+        validateFiniteNumber(band.luminance, `${bandPath}.luminance`, diagnostics, -1, 1);
+      });
+    }
+  }
+
+  if (value.curves !== undefined) {
+    if (!isRecord(value.curves)) {
+      colorGradeError(diagnostics, `${path}.curves`, 'must be an object');
+    } else {
+      for (const channel of COLOR_CURVE_CHANNELS) {
+        const curve = value.curves[channel];
+        const curvePath = `${path}.curves.${channel}`;
+        if (!Array.isArray(curve)) {
+          colorGradeError(diagnostics, curvePath, 'must be an array of curve points');
+          continue;
+        }
+        if (curve.length < 2)
+          colorGradeError(diagnostics, curvePath, 'must contain at least two points');
+        if (curve.length > COLOR_CURVE_POINT_LIMIT)
+          colorGradeError(
+            diagnostics,
+            curvePath,
+            `supports at most ${COLOR_CURVE_POINT_LIMIT} points`,
+          );
+        curve.forEach((point, index) => {
+          const pointPath = `${curvePath}[${index}]`;
+          if (!isRecord(point)) {
+            colorGradeError(diagnostics, pointPath, 'must be an object');
+            return;
+          }
+          validateFiniteNumber(point.x, `${pointPath}.x`, diagnostics, 0, 1);
+          validateFiniteNumber(point.y, `${pointPath}.y`, diagnostics, 0, 1);
+        });
+      }
+    }
+  }
+
+  if (value.lut !== undefined) {
+    if (!isRecord(value.lut)) {
+      colorGradeError(diagnostics, `${path}.lut`, 'must be an object');
+    } else {
+      validateFiniteNumber(value.lut.intensity, `${path}.lut.intensity`, diagnostics, 0, 1);
+      if (
+        value.lut.assetId !== undefined &&
+        (typeof value.lut.assetId !== 'string' || value.lut.assetId.length === 0)
+      )
+        colorGradeError(diagnostics, `${path}.lut.assetId`, 'must be a non-empty asset id');
+      if (
+        value.lut.sha256 !== undefined &&
+        (typeof value.lut.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.lut.sha256))
+      )
+        colorGradeError(diagnostics, `${path}.lut.sha256`, 'must be a lowercase SHA-256 digest');
+      if (
+        (value.lut.assetId !== undefined || value.lut.sha256 !== undefined) &&
+        (typeof value.lut.assetId !== 'string' ||
+          value.lut.assetId.length === 0 ||
+          typeof value.lut.sha256 !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(value.lut.sha256))
+      )
+        colorGradeError(
+          diagnostics,
+          `${path}.lut`,
+          'custom LUT references require both a non-empty asset id and a lowercase SHA-256 digest',
+        );
+    }
+  }
+
+  if (value.outputSafety !== undefined) {
+    if (!isRecord(value.outputSafety)) {
+      colorGradeError(diagnostics, `${path}.outputSafety`, 'must be an object');
+    } else {
+      validateFiniteNumber(
+        value.outputSafety.softClip,
+        `${path}.outputSafety.softClip`,
+        diagnostics,
+      );
+      if (
+        value.outputSafety.legalRange !== undefined &&
+        typeof value.outputSafety.legalRange !== 'boolean'
+      )
+        colorGradeError(diagnostics, `${path}.outputSafety.legalRange`, 'must be a boolean');
+    }
+  }
+}
+
+function validateFiniteRecord(
+  value: unknown,
+  path: string,
+  diagnostics: ProjectDiagnostic[],
+): void {
+  if (!isRecord(value)) {
+    colorGradeError(diagnostics, path, 'must be an object of finite numbers');
+    return;
+  }
+  for (const [field, number] of Object.entries(value))
+    validateFiniteNumber(number, `${path}.${field}`, diagnostics);
+}
+
+function validateFiniteNumber(
+  value: unknown,
+  path: string,
+  diagnostics: ProjectDiagnostic[],
+  minimum?: number,
+  maximum?: number,
+): void {
+  const range =
+    minimum === undefined || maximum === undefined ? '' : ` and be in [${minimum}, ${maximum}]`;
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    (minimum !== undefined && value < minimum) ||
+    (maximum !== undefined && value > maximum)
+  )
+    colorGradeError(diagnostics, path, `must be finite${range}`);
+}
+
+function colorGradeError(diagnostics: ProjectDiagnostic[], path: string, message: string): void {
+  diagnostics.push(diagnostic('PROJECT_SCHEMA_V1_COLOR_GRADE', `color grade ${message}`, path));
 }
 
 function validateAsset(

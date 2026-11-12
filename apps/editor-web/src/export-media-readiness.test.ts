@@ -141,7 +141,7 @@ describe('missingColorLutExportDependencies', () => {
       pluginData: {},
     }) as JoyProjectV1;
 
-  it('blocks export for a missing static LUT or unresolved hold key', () => {
+  it('reports a missing static LUT or unresolved hold key for an export warning', () => {
     const binding = {
       ownerKind: 'color-output' as const,
       ownerId: 'output',

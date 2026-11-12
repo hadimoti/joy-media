@@ -67,6 +67,8 @@ export interface HslBand {
    */
   readonly id?: HslBandId;
   readonly hue: number;
+  /** Per-band hue rotation in degrees; `hue` remains the band's centre. */
+  readonly hueShift?: number;
   readonly hueWidth: number;
   readonly softness: number;
   readonly saturation: number;
@@ -284,6 +286,7 @@ export const IDENTITY_HSL_BANDS: readonly HslBand[] = Object.freeze(
     Object.freeze({
       id,
       hue: index * 45,
+      hueShift: 0,
       hueWidth: 35,
       softness: 0.2,
       saturation: 0,
@@ -335,6 +338,7 @@ const WHEEL_DESCRIPTORS: readonly ColorPropertyDescriptorV2[] = (
 
 const HSL_PROPERTY_DEFINITIONS = [
   ['hue', 'Hue', 'hue'],
+  ['hueShift', 'Hue shift', 'hue'],
   ['hueWidth', 'Range', 'hue'],
   ['softness', 'Softness', 'scalar'],
   ['saturation', 'Saturation', 'scalar'],

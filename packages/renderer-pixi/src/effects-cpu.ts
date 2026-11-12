@@ -5,6 +5,8 @@
  */
 
 import type { ColorGradeIR, EffectInstanceIR, Rgba } from '@joy-media/render-ir';
+import { applyColorGradeV2 } from './color-grade-math.js';
+import type { ParsedCubeLut } from './lut.js';
 
 export function isIdentityColorGrade(grade: ColorGradeIR | undefined): boolean {
   if (grade === undefined) return true;
@@ -32,19 +34,20 @@ export function isIdentityColorGrade(grade: ColorGradeIR | undefined): boolean {
       (grade.curves === undefined ||
         Object.values(grade.curves).every(
           (points) =>
-            points.length === 2 &&
+            points.length >= 2 &&
             points[0]?.x === 0 &&
-            points[0]?.y === 0 &&
-            points[1]?.x === 1 &&
-            points[1]?.y === 1,
+            points.at(-1)?.x === 1 &&
+            points.every((point) => point.x === point.y),
         )) &&
       (grade.hsl === undefined ||
         grade.hsl.every(
-          (band) => band.saturation === 0 && band.luminance === 0 && band.hue === 0,
+          (band) => band.saturation === 0 && band.luminance === 0 && (band.hueShift ?? 0) === 0,
         )) &&
       (grade.lut === undefined ||
-        grade.lut.builtIn === undefined ||
-        grade.lut.builtIn === 'none') &&
+        grade.lut.intensity === 0 ||
+        (grade.lut.assetId === undefined &&
+          (grade.lut.builtIn === undefined || grade.lut.builtIn === 'none'))) &&
+      (grade.lutId === undefined || grade.lutId === 'none') &&
       (grade.outputSafety === undefined ||
         (grade.outputSafety.softClip === 0 && !grade.outputSafety.legalRange));
     return sectionsIdentity;
@@ -75,6 +78,7 @@ export function colorGradeSignature(grade: ColorGradeIR | undefined): string {
 export function applyColorGradeToPixels(
   pixels: Uint8Array | Uint8ClampedArray,
   grade: ColorGradeIR | undefined,
+  cubeLut?: ParsedCubeLut,
 ): void {
   if (grade === undefined || isIdentityColorGrade(grade)) return;
   for (let offset = 0; offset < pixels.length; offset += 4) {
@@ -82,39 +86,26 @@ export function applyColorGradeToPixels(
     let g = pixels[offset + 1]! / 255;
     let b = pixels[offset + 2]! / 255;
     if (grade.version === 2) {
-      [r, g, b] = gradeV2Channels(r, g, b, grade);
+      [r, g, b] = applyColorGradeV2(r, g, b, grade, cubeLut);
     } else {
       r = gradeChannel(r, grade);
       g = gradeChannel(g, grade);
       b = gradeChannel(b, grade);
-    }
-    if (grade.saturation !== 1) {
-      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      r = lum + (r - lum) * grade.saturation;
-      g = lum + (g - lum) * grade.saturation;
-      b = lum + (b - lum) * grade.saturation;
-    }
-    const lutId = grade.version === 2 ? grade.lut?.builtIn : grade.lutId;
-    if (lutId === 'contrast' || lutId === 'clean-contrast') {
-      r = contrastChannel(r, 0.25);
-      g = contrastChannel(g, 0.25);
-      b = contrastChannel(b, 0.25);
-    } else if (lutId === 'rec709' || lutId === 'warm-cinema') {
-      r = contrastChannel(r, 0.1);
-      g = contrastChannel(g, 0.1);
-      b = contrastChannel(b, 0.1);
-    }
-    if (grade.version === 2 && grade.lut?.builtIn === 'monochrome') {
-      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      const amount = Math.max(0, Math.min(1, grade.lut.intensity));
-      r += (lum - r) * amount;
-      g += (lum - g) * amount;
-      b += (lum - b) * amount;
-    }
-    if (grade.version === 2 && grade.outputSafety?.legalRange) {
-      r = Math.max(16 / 255, Math.min(235 / 255, r));
-      g = Math.max(16 / 255, Math.min(235 / 255, g));
-      b = Math.max(16 / 255, Math.min(235 / 255, b));
+      if (grade.saturation !== 1) {
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        r = lum + (r - lum) * grade.saturation;
+        g = lum + (g - lum) * grade.saturation;
+        b = lum + (b - lum) * grade.saturation;
+      }
+      if (grade.lutId === 'contrast') {
+        r = contrastChannel(r, 0.25);
+        g = contrastChannel(g, 0.25);
+        b = contrastChannel(b, 0.25);
+      } else if (grade.lutId === 'rec709') {
+        r = contrastChannel(r, 0.1);
+        g = contrastChannel(g, 0.1);
+        b = contrastChannel(b, 0.1);
+      }
     }
     pixels[offset] = clampByte(r * 255);
     pixels[offset + 1] = clampByte(g * 255);
@@ -203,58 +194,6 @@ function gradeChannel(v: number, grade: ColorGradeIR): number {
     x = Math.pow(x, 1 / Math.max(0.01, grade.gamma));
   }
   return Math.min(1, Math.max(0, x));
-}
-
-function gradeV2Channels(
-  r: number,
-  g: number,
-  b: number,
-  grade: ColorGradeIR,
-): [number, number, number] {
-  const a = grade.adjust;
-  const w = grade.wheels;
-  const temperature = a?.temperature ?? 0;
-  const tint = a?.tint ?? 0;
-  const exposure = a?.exposure ?? 0;
-  const contrast = a?.contrast ?? 0;
-  const pivot = a?.pivot ?? 0.5;
-  r *= Math.pow(2, exposure);
-  g *= Math.pow(2, exposure);
-  b *= Math.pow(2, exposure);
-  r += temperature * 0.06 + tint * 0.02;
-  g += tint * -0.03;
-  b -= temperature * 0.06 + tint * 0.02;
-  const contrastScale = 1 + contrast;
-  r = (r - pivot) * contrastScale + pivot;
-  g = (g - pivot) * contrastScale + pivot;
-  b = (b - pivot) * contrastScale + pivot;
-  const applyWheel = (value: number, wheel: { r: number; g: number; b: number; master: number }) =>
-    value * (1 + wheel.master) + (wheel.r + wheel.g + wheel.b) / 3;
-  if (w) {
-    r = applyWheel(r, w.lift) + applyWheel(r, w.offset) - r;
-    g = applyWheel(g, w.lift) + applyWheel(g, w.offset) - g;
-    b = applyWheel(b, w.lift) + applyWheel(b, w.offset) - b;
-    r = applyWheel(r, w.gain);
-    g = applyWheel(g, w.gain);
-    b = applyWheel(b, w.gain);
-    r = Math.pow(Math.max(0, r), 1 / Math.max(0.05, 1 + w.gamma.master));
-    g = Math.pow(Math.max(0, g), 1 / Math.max(0.05, 1 + w.gamma.master));
-    b = Math.pow(Math.max(0, b), 1 / Math.max(0.05, 1 + w.gamma.master));
-  }
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  const shadows = a?.shadows ?? 0;
-  const highlights = a?.highlights ?? 0;
-  const shadowWeight = Math.max(0, 1 - lum * 2);
-  const highlightWeight = Math.max(0, lum * 2 - 1);
-  r += shadows * shadowWeight * 0.25 + highlights * highlightWeight * 0.25;
-  g += shadows * shadowWeight * 0.25 + highlights * highlightWeight * 0.25;
-  b += shadows * shadowWeight * 0.25 + highlights * highlightWeight * 0.25;
-  const vibrance = a?.vibrance ?? 0;
-  const saturation = (a?.saturation ?? grade.saturation) + vibrance * (1 - Math.abs(2 * lum - 1));
-  r = lum + (r - lum) * saturation;
-  g = lum + (g - lum) * saturation;
-  b = lum + (b - lum) * saturation;
-  return [Math.max(0, Math.min(1, r)), Math.max(0, Math.min(1, g)), Math.max(0, Math.min(1, b))];
 }
 
 function contrastChannel(v: number, amount: number): number {

@@ -63,6 +63,7 @@ import {
   useMonitorView,
 } from './MonitorViewport.js';
 import { monitorPixelScale } from './monitor-pixel-scale.js';
+import { createProjectColorLutResolver } from '../project-color-luts.js';
 
 /**
  * The Program Monitor panel: the preview canvas, its renderer lifecycle and the
@@ -122,6 +123,9 @@ function MonitorPanelContent({
   const rendererPromiseRef = useRef<Promise<BrowserPixiRenderer> | null>(null);
   const rendererDisposeTimerRef = useRef<number | undefined>(undefined);
   const paintRef = useRef<() => void>(() => {});
+  const colorLutResolverRef = useRef<ReturnType<typeof createProjectColorLutResolver> | undefined>(
+    undefined,
+  );
   const applyViewRef = useRef<(renderer: BrowserPixiRenderer) => void>(() => {});
   const currentFrameRef = useRef<RenderFrameIR | undefined>(undefined);
   const sceneCacheRef = useRef(new HtmlSceneSurfaceCache());
@@ -158,6 +162,17 @@ function MonitorPanelContent({
     agentPreviewState.document.baseRevision === session.projectRevisionId
       ? agentPreviewState.document.preview
       : visualProject;
+  const colorLutResolver = useMemo(
+    () =>
+      createProjectColorLutResolver({
+        project: previewVisualProject,
+        loadProjectAssetBlob,
+        onReady: () => paintRef.current(),
+        onWarning: (message) => showToast(message, 'info'),
+      }),
+    [loadProjectAssetBlob, previewVisualProject, showToast],
+  );
+  colorLutResolverRef.current = colorLutResolver;
   const renderedAgentDocumentPreview =
     !agentPreviewBefore &&
     agentPreviewState.document !== undefined &&
@@ -337,6 +352,7 @@ function MonitorPanelContent({
       ),
       state.playheadUs,
       videoBitmaps,
+      (grade) => colorLutResolverRef.current?.resolveColorLut(grade),
     );
     applyViewRef.current(renderer);
     renderer.render(frame, videoBitmaps);
@@ -370,6 +386,7 @@ function MonitorPanelContent({
       createBrowserPixiRenderer({
         parent: container,
         resolution: previewQualityResolution(previewQuality),
+        resolveColorLut: (grade) => colorLutResolverRef.current?.resolveColorLut(grade),
       });
     rendererPromiseRef.current = initialization;
     initialization

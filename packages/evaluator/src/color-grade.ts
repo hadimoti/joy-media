@@ -109,11 +109,15 @@ export function evaluateColorGradeAtTime(
   const hsl = staticBands.map((band, index) => {
     const id = band.id ?? HSL_BAND_IDS[index]!;
     const property = (
-      key: keyof Pick<HslBand, 'hue' | 'hueWidth' | 'softness' | 'saturation' | 'luminance'>,
-    ) => sampleNumber(`hsl.${id}.${key}`, band[key]);
+      key: keyof Pick<
+        HslBand,
+        'hue' | 'hueShift' | 'hueWidth' | 'softness' | 'saturation' | 'luminance'
+      >,
+    ) => sampleNumber(`hsl.${id}.${key}`, band[key] ?? 0);
     return {
       id,
       hue: property('hue'),
+      hueShift: property('hueShift'),
       hueWidth: property('hueWidth'),
       softness: property('softness'),
       saturation: property('saturation'),

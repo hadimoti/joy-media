@@ -21,6 +21,7 @@ import type {
   VisualRenderNode,
 } from '@joy-media/render-ir';
 import { flattenRenderNodes, textPlateBounds, validateRenderFrameIR } from '@joy-media/render-ir';
+import type { ParsedCubeLut } from './lut.js';
 import {
   applyColorGradeToPixels,
   applyCpuEffectsToColor,
@@ -28,6 +29,8 @@ import {
 } from './effects-cpu.js';
 
 export { applyColorGradeToPixels } from './effects-cpu.js';
+export { MAX_CUBE_LUT_BYTES, parseCubeLut, sampleCubeLut } from './lut.js';
+export type { ParsedCubeLut } from './lut.js';
 
 export const PACKAGE_NAME = '@joy-media/renderer-pixi' as const;
 
@@ -49,7 +52,7 @@ export interface EditorPreviewFrame extends PreviewFrame {
 }
 
 /** Renders a fixed-setting preview surface from IR; no browser or GPU dependency. */
-export function renderPixiPreview(frame: RenderFrameIR): PreviewFrame {
+export function renderPixiPreview(frame: RenderFrameIR, cubeLut?: ParsedCubeLut): PreviewFrame {
   validateRenderFrameIR(frame);
   const { width, height } = frame.viewport;
   const pixels = createSurface(width, height, frame.background);
@@ -76,7 +79,7 @@ export function renderPixiPreview(frame: RenderFrameIR): PreviewFrame {
       paintRect(pixels, width, height, node, effects);
     }
   }
-  applyColorGradeToPixels(pixels, frame.colorGrade);
+  applyColorGradeToPixels(pixels, frame.colorGrade, cubeLut);
   if (maxVignette > 0) applyVignetteToPixels(pixels, width, height, maxVignette);
   return { width, height, pixels, drawCalls };
 }
@@ -88,10 +91,11 @@ export function renderPixiPreview(frame: RenderFrameIR): PreviewFrame {
 export function renderPixiEditorPreview(
   frame: RenderFrameIR,
   overlay: EditorOverlayIR,
+  cubeLut?: ParsedCubeLut,
 ): EditorPreviewFrame {
   if (overlay.version !== 1)
     throw new RangeError(`unsupported editor overlay version ${overlay.version}`);
-  return { ...renderPixiPreview(frame), overlay };
+  return { ...renderPixiPreview(frame, cubeLut), overlay };
 }
 
 function createSurface(width: number, height: number, color: Rgba): Uint8Array {
