@@ -200,6 +200,10 @@ function MonitorPanelContent({
   const height = composition?.height ?? 1920;
   const frameSize = useMemo(() => ({ width, height }), [width, height]);
   const monitorView = useMonitorView(frameSize, panelRef);
+  const readNavigatorThumbnail = useCallback(
+    (maxWidth: number, maxHeight: number) => rendererRef.current?.readPixels(maxWidth, maxHeight),
+    [],
+  );
   const devicePixelRatio = useDevicePixelRatio();
   const monitorResourceTokenRef = useRef(
     `monitor:${crypto.randomUUID?.() ?? Date.now().toString(36)}`,
@@ -756,6 +760,7 @@ function MonitorPanelContent({
         onDragOver={handleMonitorEffectDragOver}
         onDragLeave={handleMonitorEffectDragLeave}
         onDrop={handleMonitorEffectDrop}
+        readThumbnail={readNavigatorThumbnail}
       >
         <div ref={containerRef} className="monitor-canvas" />
         <div className="monitor-frame" style={frameRect}>

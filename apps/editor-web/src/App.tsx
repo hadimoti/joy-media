@@ -383,7 +383,17 @@ import {
 } from './dock-layout.js';
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
 import { PanelShell } from './PanelShell.js';
-import { isEditableTarget, isInteractiveTarget, resolveShortcut } from './keyboard-shortcuts.js';
+import {
+  isEditableTarget,
+  isInteractiveTarget,
+  resolveShortcut,
+  scopedKeyTable,
+} from './keyboard-shortcuts.js';
+import {
+  createSpaceKeyHandlers,
+  hasKeyModifier,
+  monitorSpaceGesture,
+} from './monitor/monitor-tools.js';
 import {
   ChevronDownIcon,
   CloseIcon,
@@ -3526,8 +3536,18 @@ function EditorWorkspace({
     [projectId, storage],
   );
   useEffect(() => {
+    // Space (ADR-0046 section 3): a tap under 250 ms with no pointer down plays
+    // or pauses on key-up; a hold lends the Monitor the Hand and does not play;
+    // in a text field Space types a space.
+    const space = createSpaceKeyHandlers(monitorSpaceGesture, togglePlayback);
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      // A part of the editor that has the pointer or focus (the Monitor) wins;
+      // otherwise the global key applies (ADR-0046 B5).
+      if (scopedKeyTable.dispatch(event)) {
+        event.preventDefault();
+        return;
+      }
       const action = resolveShortcut(event);
       if (action === undefined) return;
       // Escape must close the palette even while its search input has focus.
@@ -3536,6 +3556,8 @@ function EditorWorkspace({
         (isEditableTarget(event.target) || isInteractiveTarget(event.target))
       )
         return;
+      // Space with Shift, Ctrl, Alt or Meta does nothing (no play, no hold).
+      if (action === 'playback.toggle' && hasKeyModifier(event)) return;
       if (action === 'playback.toggle' && event.repeat) {
         event.preventDefault();
         return;
@@ -3549,7 +3571,8 @@ function EditorWorkspace({
         .find((item) => current.selectedIds.includes(item.clip.id));
       switch (action) {
         case 'playback.toggle':
-          togglePlayback();
+          // Key-down only starts the Space gesture; key-up decides tap or hold.
+          space.keyDown(event);
           break;
         case 'history.undo':
           undo();
@@ -3655,8 +3678,22 @@ function EditorWorkspace({
       }
       event.preventDefault();
     };
+    const onKeyUp = (event: KeyboardEvent) => {
+      space.keyUp(event);
+    };
+    // Any pointer going down while Space is held makes it a hold, not a tap.
+    const onPointerDown = () => monitorSpaceGesture.pointerDown();
+    const onBlur = () => monitorSpaceGesture.cancel();
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('blur', onBlur);
+    };
   }, [dispatchTimeline, redo, seek, session, showToast, timelineTrackFlags, togglePlayback, undo]);
 
   const runSelectedClipAction = useCallback(

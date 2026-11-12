@@ -1670,6 +1670,70 @@ h2 {
   outline-offset: -3px;
   background-color: rgba(233, 185, 73, 0.08);
 }
+/* Hand tool (T-M03): no text selection or browser drag while panning. */
+.monitor-canvas-wrap {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.monitor-scrollbar {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+}
+.monitor-scrollbar-x {
+  left: 4px;
+  right: 12px;
+  bottom: 2px;
+  height: 6px;
+}
+.monitor-scrollbar-y {
+  top: 4px;
+  bottom: 12px;
+  right: 2px;
+  width: 6px;
+}
+.monitor-scrollbar-thumb {
+  position: absolute;
+  border-radius: 3px;
+  background: #ffffff59;
+  pointer-events: auto;
+  cursor: default;
+}
+.monitor-scrollbar-x .monitor-scrollbar-thumb {
+  top: 0;
+  bottom: 0;
+}
+.monitor-scrollbar-y .monitor-scrollbar-thumb {
+  left: 0;
+  right: 0;
+}
+.monitor-scrollbar-thumb:hover {
+  background: #ffffff8c;
+}
+.monitor-navigator {
+  position: absolute;
+  z-index: 4;
+  right: 14px;
+  bottom: 14px;
+  overflow: hidden;
+  border: 1px solid #ffffff40;
+  border-radius: 3px;
+  background: #000c;
+  box-shadow: 0 0.25rem 1rem #000a;
+  cursor: default;
+}
+.monitor-navigator canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.monitor-navigator-frame {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid var(--joy-accent);
+  box-shadow: 0 0 0 999px #0006;
+  cursor: grab;
+}
 /* The canvas is the size of the panel; the renderer draws the frame through
    the Monitor view (zoom and pan). No CSS scale. */
 .monitor-canvas {
