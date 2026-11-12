@@ -349,3 +349,7 @@ Status after the review: **Accepted with the changes below.** Where this section
 ### C. Not covered yet (assigned)
 
 Drop a file on the Monitor (T-H02), the offline frame for missing media (T-R03), frame-accurate scrubbing and fps/dropped-frames readout (T-M10, T-M11), mask handles (T-M07, v1.1.2), where the aspect control lives once the Format control exists (T-N01), how captions and the 3D element are hit (T-M04 reads T-M15), a second screen (not in v1.1.1).
+
+### D. Implementation note (T-M02c, 12 Nov 2026)
+
+`setView` takes the panel size as a second argument: `setView({ zoom, panX, panY }, { width, height })`, because the renderer must know the panel size to keep the canvas panel-sized. `setPixelScale` overrides `options.resolution`. The export-width test (`export canvas width = composition width after another instance calls setPixelScale(4)`) is a unit test with a mocked Pixi `Application`; the real-window check is part of the monitor live pass (T-M13, T-L03). A window-level zoom shortcut handler now exists in the Monitor; T-M03 must arbitrate keys with it.
