@@ -24,7 +24,7 @@ import {
   systemTool,
 } from '../../release/attended/scenario-rules.mjs';
 
-export const EXPECTED_JOY_HASH = 'AF05BE5522C86FECE27E738B7E8A931CB4261C9797261C67DDE3C71A4E5CAC0';
+export const EXPECTED_JOY_HASH = 'AF05BE55222C86FECE27E738B7E8A931CB4261C9797261C67DDE3C71A4E5CAC0';
 export const LOCK_PATH = 'C:\\jgp\\LOCK-app-run.txt';
 const APP_NAME = 'joy-media.exe';
 const CDP_HOST = '127.0.0.1';
