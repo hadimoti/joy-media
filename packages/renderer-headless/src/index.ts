@@ -5,8 +5,20 @@
  * P16: CPU-side effect pass applied per-node before compositing into the frame.
  */
 
-import type { RenderFrameIR, Rgba, VisualRenderNode, EffectInstanceIR } from '@joy-media/render-ir';
-import { flattenRenderNodes, textPlateBounds, validateRenderFrameIR } from '@joy-media/render-ir';
+import type {
+  RenderFrameIR,
+  Rgba,
+  VisualRenderNode,
+  EffectInstanceIR,
+  NodeRect,
+} from '@joy-media/render-ir';
+import {
+  flattenRenderNodes,
+  frameToLocalPoint,
+  isRotated,
+  textPlateBounds,
+  validateRenderFrameIR,
+} from '@joy-media/render-ir';
 import { applyCreativeEffect } from './creative-effects.js';
 
 export const PACKAGE_NAME = '@joy-media/renderer-headless' as const;
@@ -85,7 +97,8 @@ function drawSurfaceRaw(
   height: number,
   node: Exclude<VisualRenderNode, { kind: 'text' }>,
 ): void {
-  rasterizeRaw(pixels, width, height, node, (u, v) =>
+  const box = { x: 0, y: 0, width: node.width, height: node.height };
+  rasterizeRaw(pixels, width, height, node, box, (u, v) =>
     u >= 0 && u < node.width && v >= 0 && v < node.height ? node.color : undefined,
   );
 }
@@ -99,7 +112,9 @@ function drawTextRaw(
   const textWidth = node.text.length * 4;
   const textBounds = textPlateBounds(textWidth, 5, node.align);
   const plateBounds = textPlateBounds(textWidth, 5, node.align, 1);
-  rasterizeRaw(pixels, width, height, node, (u, v) => {
+  // The drawn box (rotation origin): the plate when there is one, else the run.
+  const box = node.background === undefined ? textBounds : plateBounds;
+  rasterizeRaw(pixels, width, height, node, box, (u, v) => {
     const textX = Math.floor(u - textBounds.x);
     const glyphColumn = textX % 4;
     const characterIndex = Math.floor(textX / 4);
@@ -122,8 +137,21 @@ function rasterizeRaw(
   width: number,
   height: number,
   node: VisualRenderNode,
+  box: NodeRect,
   lookup: (u: number, v: number) => Rgba | undefined,
 ): void {
+  if (isRotated(node.transform)) {
+    // Rotated about the node's origin (T-M15). Unrotated nodes keep the exact
+    // arithmetic below, so frames without rotation stay bit-identical.
+    for (let row = 0; row < height; row++) {
+      for (let column = 0; column < width; column++) {
+        const local = frameToLocalPoint(node.transform, box, { x: column + 0.5, y: row + 0.5 });
+        const color = lookup(local.x, local.y);
+        if (color !== undefined) composite(pixels, (row * width + column) * 4, color, 1);
+      }
+    }
+    return;
+  }
   for (let row = 0; row < height; row++) {
     for (let column = 0; column < width; column++) {
       const u = (column + 0.5 - node.transform.translateX) / node.transform.scaleX;
