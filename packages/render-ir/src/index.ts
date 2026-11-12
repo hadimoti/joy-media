@@ -31,4 +31,17 @@ export type {
 } from './model.js';
 export { flattenRenderNodes, validateRenderFrameIR } from './model.js';
 export type { TextPlateBounds } from './text-layout.js';
+export type { NodeBounds, NodePoint, NodeRect } from './node-geometry.js';
+export {
+  DEFAULT_NODE_ORIGIN,
+  frameToLocalPoint,
+  isRotated,
+  localToFramePoint,
+  nodeBoundsContain,
+  nodeBoundsFromBox,
+  nodeOrigin,
+  nodePivot,
+  nodeRotationDeg,
+  rotatePointAbout,
+} from './node-geometry.js';
 export { textPlateBounds } from './text-layout.js';
