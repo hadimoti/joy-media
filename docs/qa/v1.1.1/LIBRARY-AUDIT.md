@@ -273,3 +273,11 @@ The Animate surface is `MotionPanel.tsx`; there is no `AnimatePanel.tsx`. It ani
 - This file, `docs/qa/v1.1.1/LIBRARY-AUDIT.md`, on branch `v111/libs-ui`.
 - Counts were read from the code and re-counted here: 33 effects (25 + 8), 20 filters (6+5+5+4), 20 transitions, 34 preview PNGs, 19 motion loops, 4 effects with `ffmpeg: true`.
 - No code was changed by this card. No app was launched. Nothing was deployed.
+
+---
+
+## 7. Sign-off (CC, 12 Nov 2026)
+
+- **Decision: List A** (the strict rule). Filters 15, Effects 18. Five doubles move to Effects: `halftone`, `scatter-mosaic`, `contour-map`, `glyph-matrix`, `pixel-sort`. T-V06 applies this list; T-V05 therefore tests 18 effects that stay in Effects (not 13).
+- **Caution on "only 4 of 33 effects reach the export":** this reads the `backend.ffmpeg` flag. The editor's export draws through the same Pixi renderer as the preview (`App.tsx` export path, resolution 1), so the flag may only describe a second, ffmpeg-based path. **UNVERIFIED.** T-V03 settles it with a preview-against-export compare for every row (tool: T-A10a). If an effect really is missing from the export, it is a blocker defect and T-V05 fixes it.
+- Findings 2 and 3 of the result (wrong motion loops on 14 effect cards; 11 effects shown twice inside the Effects panel) go to T-V07 (card design) and T-V06.
