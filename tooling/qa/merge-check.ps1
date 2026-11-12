@@ -42,6 +42,7 @@ try {
   } else {
     $script:repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
   }
+  Set-Location -LiteralPath $script:repoRoot
   $null = Invoke-Git -Arguments @('rev-parse', '--verify', ($Base + '^{commit}'))
 
   $changedFiles = @(
