@@ -5,6 +5,7 @@ import { bindClipToObject } from '../sticker-bindings.js';
 import {
   captionNodeId,
   clipIdToObjectId,
+  clipIdToObjectIds,
   isCaptionNodeId,
   objectIdToClipId,
   objectIdToClipIds,
@@ -155,5 +156,80 @@ describe('drawn node id to the clip to select', () => {
     const p = project();
     expect(renderNodeIdToClipId(p, 'caption:gone:seg-1', timeline)).toBeUndefined();
     expect(renderNodeIdToClipId(p, 'unknown-node', timeline)).toBeUndefined();
+  });
+});
+
+/** The seed project's objects: `intro` and `product` each draw two, `outro` one. */
+function seedProject(): JoyProjectV1 {
+  const base = project();
+  const seedObjects: Record<string, VisualObjectV1> = {
+    'intro-title': { id: 'intro-title', kind: 'text', text: 'Intro', transform },
+    'scene-title': { id: 'scene-title', kind: 'text', text: 'Scene', transform },
+    'product-image': { id: 'product-image', kind: 'image', assetId: 'img', transform },
+    'scene-lower-third': { id: 'scene-lower-third', kind: 'text', text: 'Lower', transform },
+    'outro-shape': { id: 'outro-shape', kind: 'text', text: 'Outro', transform },
+  };
+  return { ...base, visualObjects: { ...base.visualObjects, ...seedObjects } };
+}
+
+const seedTimeline = new Set(['intro', 'product', 'outro', 'clip-title', 'cc-1']);
+
+describe('one clip with several objects (seed bindings)', () => {
+  it('the intro and product clips keep both of their objects', () => {
+    const p = seedProject();
+    expect(clipIdToObjectIds(p, 'intro')).toEqual(['intro-title', 'scene-title']);
+    expect(clipIdToObjectIds(p, 'product')).toEqual(['product-image', 'scene-lower-third']);
+  });
+
+  it('every object of intro and product maps back to exactly that one clip', () => {
+    const p = seedProject();
+    for (const [objectId, clipId] of [
+      ['intro-title', 'intro'],
+      ['scene-title', 'intro'],
+      ['product-image', 'product'],
+      ['scene-lower-third', 'product'],
+    ] as const) {
+      expect(objectIdToClipIds(p, objectId, seedTimeline)).toEqual([clipId]);
+      expect(objectIdToClipId(p, objectId, seedTimeline)).toBe(clipId);
+      expect(renderNodeIdToClipId(p, objectId, seedTimeline)).toBe(clipId);
+    }
+  });
+
+  it('a clip with one object (seed and user-bound)', () => {
+    const p = seedProject();
+    expect(clipIdToObjectIds(p, 'outro')).toEqual(['outro-shape']);
+    expect(renderNodeIdToClipId(p, 'outro-shape', seedTimeline)).toBe('outro');
+    expect(clipIdToObjectIds(p, 'clip-title')).toEqual(['title-1']);
+    expect(renderNodeIdToClipId(p, 'title-1', seedTimeline)).toBe('clip-title');
+  });
+
+  it('the first-object converter is unchanged', () => {
+    const p = seedProject();
+    expect(clipIdToObjectId(p, 'intro')).toBe('intro-title');
+    expect(clipIdToObjectId(p, 'product')).toBe('product-image');
+  });
+
+  it('a caption id maps to its caption clip, not through the object bindings', () => {
+    const p = seedProject();
+    expect(renderNodeIdToClipId(p, captionNodeId('cc-1', 'seg-1', 0), seedTimeline)).toBe('cc-1');
+    expect(clipIdToObjectIds(p, 'cc-1')).toEqual([]);
+  });
+
+  it('a missing id maps to nothing', () => {
+    const p = seedProject();
+    expect(clipIdToObjectIds(p, 'missing-clip')).toEqual([]);
+    expect(objectIdToClipIds(p, 'missing-object', seedTimeline)).toEqual([]);
+    expect(renderNodeIdToClipId(p, 'missing-object', seedTimeline)).toBeUndefined();
+    // A seed object the project does not have is not returned for its clip.
+    expect(clipIdToObjectIds(project(), 'intro')).toEqual([]);
+    // A seed clip that is not on the timeline is not returned for its object.
+    expect(renderNodeIdToClipId(p, 'scene-title', new Set(['outro']))).toBeUndefined();
+  });
+
+  it('rebinding a seed clip to another object replaces all of its seed objects', () => {
+    const p = bindClipToObject(seedProject(), 'intro', 'title-1');
+    expect(clipIdToObjectIds(p, 'intro')).toEqual(['title-1']);
+    expect(renderNodeIdToClipId(p, 'scene-title', seedTimeline)).toBeUndefined();
+    expect(objectIdToClipIds(p, 'title-1', seedTimeline)).toEqual(['intro', 'clip-title']);
   });
 });

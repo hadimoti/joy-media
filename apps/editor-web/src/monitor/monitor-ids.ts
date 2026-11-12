@@ -1,5 +1,5 @@
 import type { JoyProjectV1 } from '@joy-media/project-schema';
-import { readClipObjectMap } from '../sticker-bindings.js';
+import { readClipObjectIdsMap, readClipObjectMap } from '../sticker-bindings.js';
 
 /**
  * The Monitor's id converters (ADR-0046 section 4.5 and review B3, T-M15).
@@ -11,6 +11,13 @@ import { readClipObjectMap } from '../sticker-bindings.js';
  * - a caption id `caption:<clip id>:<segment id>[:line<n>]` (burned-in captions).
  *
  * Every Monitor module converts through this file and nowhere else.
+ *
+ * One clip can draw several visual objects (the seed `intro` clip draws
+ * `intro-title` and `scene-title`; `product` draws `product-image` and
+ * `scene-lower-third`). Each of those objects maps back to that one clip, so
+ * clicking any of the clip's nodes selects the clip, and selecting the clip
+ * outlines all of its nodes (monitor-selection.ts outlines every drawn node
+ * whose clip is selected).
  */
 
 const CAPTION_PREFIX = 'caption:';
@@ -35,6 +42,16 @@ export function clipIdToObjectId(project: JoyProjectV1, clipId: string): string 
 }
 
 /**
+ * Clip id to every visual object id it draws that exists in the project, in
+ * order. Empty when the clip draws no visual object.
+ */
+export function clipIdToObjectIds(project: JoyProjectV1, clipId: string): readonly string[] {
+  return (readClipObjectIdsMap(project)[clipId] ?? []).filter(
+    (objectId) => project.visualObjects[objectId] !== undefined,
+  );
+}
+
+/**
  * Visual object id to the clip ids bound to it, in binding order. Pass the
  * timeline's clip ids to keep only clips that exist (the default seed bindings
  * name clips a project may not have).
@@ -44,10 +61,10 @@ export function objectIdToClipIds(
   objectId: string,
   timelineClipIds?: ReadonlySet<string>,
 ): readonly string[] {
-  return Object.entries(readClipObjectMap(project))
+  return Object.entries(readClipObjectIdsMap(project))
     .filter(
-      ([clipId, boundObjectId]) =>
-        boundObjectId === objectId &&
+      ([clipId, boundObjectIds]) =>
+        boundObjectIds.includes(objectId) &&
         (timelineClipIds === undefined || timelineClipIds.has(clipId)),
     )
     .map(([clipId]) => clipId);

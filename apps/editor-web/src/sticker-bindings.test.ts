@@ -3,6 +3,7 @@ import type { JoyProjectV1 } from '@joy-media/project-schema';
 import {
   bindClipToObject,
   readClipMediaKindMap,
+  readClipObjectIdsMap,
   readClipObjectMap,
   resolveObjectIdForSelection,
   writeClipMediaKind,
@@ -69,5 +70,26 @@ describe('sticker-bindings', () => {
   it('persists the source kind for image clips that use the video schema', () => {
     const next = writeClipMediaKind(emptyProject(), 'clip-image-1', 'image');
     expect(readClipMediaKindMap(next)['clip-image-1']).toBe('image');
+  });
+});
+
+describe('one clip, several objects', () => {
+  it('seed clips keep every seed object; the first-object map is unchanged', () => {
+    const ids = readClipObjectIdsMap(emptyProject());
+    expect(ids.intro).toEqual(['intro-title', 'scene-title']);
+    expect(ids.product).toEqual(['product-image', 'scene-lower-third']);
+    expect(ids.outro).toEqual(['outro-shape']);
+    const first = readClipObjectMap(emptyProject());
+    expect(first.intro).toBe('intro-title');
+    expect(first.product).toBe('product-image');
+  });
+
+  it('a user-bound clip draws its one object; rebinding a seed clip replaces its list', () => {
+    let project = bindClipToObject(emptyProject(), 'clip-sticker-1', 'sticker-1');
+    project = bindClipToObject(project, 'intro', 'sticker-1');
+    const ids = readClipObjectIdsMap(project);
+    expect(ids['clip-sticker-1']).toEqual(['sticker-1']);
+    expect(ids.intro).toEqual(['sticker-1']);
+    expect(ids.product).toEqual(['product-image', 'scene-lower-third']);
   });
 });

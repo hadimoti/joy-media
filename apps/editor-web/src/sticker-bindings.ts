@@ -27,6 +27,29 @@ export function readClipObjectMap(project: JoyProjectV1): ClipObjectMap {
   return { ...seedClipObjectFlat(), ...fromPlugin };
 }
 
+/** Clip id to every visual object id the clip draws, in order (one clip, many objects). */
+export type ClipObjectIdsMap = Readonly<Record<string, readonly string[]>>;
+
+/**
+ * The one-to-many view of the clip bindings. A seed clip keeps all of its seed
+ * objects (`intro` draws `intro-title` and `scene-title`); a clip bound in
+ * pluginData to an object other than its first seed object draws that one
+ * object. `readClipObjectMap` stays the first-object view the rest of the
+ * editor uses; this does not change it.
+ */
+export function readClipObjectIdsMap(project: JoyProjectV1): ClipObjectIdsMap {
+  const seedFirst = seedClipObjectFlat();
+  const out: Record<string, readonly string[]> = {};
+  for (const [clipId, objectId] of Object.entries(readClipObjectMap(project))) {
+    const seedObjectIds = TIMELINE_OBJECT_IDS[clipId];
+    out[clipId] =
+      seedObjectIds !== undefined && seedFirst[clipId] === objectId
+        ? [...seedObjectIds]
+        : [objectId];
+  }
+  return out;
+}
+
 export function writeClipObjectMap(project: JoyProjectV1, map: ClipObjectMap): JoyProjectV1 {
   const withoutSeed: Record<string, string> = {};
   const seed = seedClipObjectFlat();

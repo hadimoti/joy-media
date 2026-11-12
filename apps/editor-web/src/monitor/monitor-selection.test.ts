@@ -376,3 +376,77 @@ describe('the selection is one shared state with the timeline', () => {
     expect(sameMonitorOverlay(a, monitorSelectionOverlay(list, ['clip-shape']))).toBe(false);
   });
 });
+
+describe('a clip that draws several objects (seed intro and product)', () => {
+  function seedElements() {
+    const base = visualProject();
+    const seedObjects = {
+      'intro-title': { id: 'intro-title', kind: 'text', text: 'I', transform: objectTransform },
+      'scene-title': { id: 'scene-title', kind: 'text', text: 'S', transform: objectTransform },
+      'product-image': {
+        id: 'product-image',
+        kind: 'image',
+        assetId: 'img',
+        transform: objectTransform,
+      },
+      'scene-lower-third': {
+        id: 'scene-lower-third',
+        kind: 'text',
+        text: 'L',
+        transform: objectTransform,
+      },
+    } as unknown as Record<string, VisualObjectV1>;
+    const project = { ...base, visualObjects: { ...base.visualObjects, ...seedObjects } };
+    const f: RenderFrameIR = {
+      ...frame(),
+      nodes: [
+        node('product-image', 0, 0),
+        node('scene-lower-third', 1, 300),
+        node('intro-title', 2, 600),
+        node('scene-title', 3, 900),
+      ],
+    };
+    return buildMonitorElements({
+      frame: f,
+      nodeBounds: boundsOf(f),
+      project,
+      timeline: timeline([{ id: 'v1', clips: ['intro', 'product'] }]),
+    });
+  }
+
+  it('every node of the clip maps to that clip', () => {
+    expect(seedElements().map((element) => [element.id, element.clipId])).toEqual([
+      ['scene-title', 'intro'],
+      ['intro-title', 'intro'],
+      ['scene-lower-third', 'product'],
+      ['product-image', 'product'],
+    ]);
+  });
+
+  it('clicking any node of the clip selects the clip', () => {
+    const list = seedElements();
+    expect(monitorHitClipIds({ x: 950, y: 950 }, list)).toEqual(['intro']);
+    expect(monitorHitClipIds({ x: 350, y: 350 }, list)).toEqual(['product']);
+    expect(
+      monitorClickAction(monitorHitClipIds({ x: 950, y: 950 }, list), [], {
+        shift: false,
+        alt: false,
+      }),
+    ).toEqual({
+      kind: 'select',
+      clipIds: ['intro'],
+    });
+  });
+
+  it('selecting the clip outlines all of its nodes', () => {
+    const list = seedElements();
+    expect(monitorSelectionOverlay(list, ['intro']).selections.map((s) => s.nodeId)).toEqual([
+      'scene-title',
+      'intro-title',
+    ]);
+    expect(monitorSelectionOverlay(list, ['product']).selections.map((s) => s.nodeId)).toEqual([
+      'scene-lower-third',
+      'product-image',
+    ]);
+  });
+});
