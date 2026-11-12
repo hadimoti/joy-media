@@ -44,8 +44,9 @@ import {
  * (through the scoped key table, scope `monitor`). The viewport is also the
  * pointer router for the tools (ADR-0046 section 3): the Hand pans, a Space
  * hold lends the Hand, the middle button always pans. With Select, a primary
- * click selects through {@link MonitorViewportSelection} and a drag that
- * starts on empty canvas draws a marquee (ADR-0046 section 4, T-M04).
+ * click selects through {@link MonitorViewportSelection}, a drag that
+ * starts on empty canvas draws a marquee (ADR-0046 section 4, T-M04) and a
+ * drag that starts on an element moves it (`dragElement`, T-M05a).
  */
 
 /** The key-table scope of the Monitor: pointer over it or focus inside it. */
@@ -283,6 +284,20 @@ export interface MonitorViewportSelection {
   readonly click: (canvasPoint: MonitorPoint, modifiers: { shift: boolean; alt: boolean }) => void;
   /** A drag that started on empty canvas, released at `end`. */
   readonly marquee: (start: MonitorPoint, end: MonitorPoint, modifiers: { shift: boolean }) => void;
+  /**
+   * A drag that started on an element moves it (T-M05a). Called once when the
+   * press becomes a drag; the result follows the pointer and ends on release.
+   */
+  readonly dragElement?: (
+    start: MonitorPoint,
+    modifiers: { shift: boolean; alt: boolean },
+  ) => MonitorElementDrag | undefined;
+}
+
+/** A move that follows the pointer (canvas points) and ends once. */
+export interface MonitorElementDrag {
+  readonly update: (canvasPoint: MonitorPoint, modifiers: { shift: boolean; alt: boolean }) => void;
+  readonly end: (commit: boolean) => void;
 }
 
 /** A press that moves less than this (CSS px) is still a click. */
@@ -329,6 +344,9 @@ interface SelectPress {
   /** True when the press landed on an element (a drag there is not a marquee). */
   readonly onElement: boolean;
   moved: boolean;
+  /** The element move this press started (T-M05a); asked for once per press. */
+  drag?: MonitorElementDrag | undefined;
+  dragAsked?: boolean;
 }
 
 function viewportPoint(
@@ -371,12 +389,21 @@ export function MonitorViewport({
       if (event.currentTarget.hasPointerCapture?.(event.pointerId))
         event.currentTarget.releasePointerCapture(event.pointerId);
       const handler = latestSelection.current;
-      // A Space hold that began during the press turns it into the Hand: no selection.
-      if (!commit || handler === undefined || monitorSpaceGesture.isHolding()) return;
       const view = latest.current.view;
       const end = viewportPoint(event, event.currentTarget);
+      if (press.drag !== undefined) {
+        if (commit && !monitorSpaceGesture.isHolding())
+          press.drag.update(screenToCanvasPoint(view, end), {
+            shift: event.shiftKey,
+            alt: event.altKey,
+          });
+        press.drag.end(commit && !monitorSpaceGesture.isHolding());
+        return;
+      }
+      // A Space hold that began during the press turns it into the Hand: no selection.
+      if (!commit || handler === undefined || monitorSpaceGesture.isHolding()) return;
       if (press.moved) {
-        if (press.onElement) return; // moving an element is T-M05
+        if (press.onElement) return; // no mover was given: nothing to do
         handler.marquee(screenToCanvasPoint(view, press.start), screenToCanvasPoint(view, end), {
           shift: event.shiftKey,
         });
@@ -445,6 +472,18 @@ export function MonitorViewport({
         if (!press.moved && movedPastClickSlop(point.x - press.start.x, point.y - press.start.y))
           press.moved = true;
         if (press.moved && !press.onElement) setMarquee({ start: press.start, end: point });
+        if (press.moved && press.onElement) {
+          const view = latest.current.view;
+          const modifiers = { shift: event.shiftKey, alt: event.altKey };
+          if (press.dragAsked !== true && !monitorSpaceGesture.isHolding()) {
+            press.dragAsked = true;
+            press.drag = latestSelection.current?.dragElement?.(
+              screenToCanvasPoint(view, press.start),
+              modifiers,
+            );
+          }
+          press.drag?.update(screenToCanvasPoint(view, point), modifiers);
+        }
         return;
       }
       const drag = panRef.current;

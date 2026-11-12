@@ -61,9 +61,22 @@ import {
   monitorFrameRect,
   useDevicePixelRatio,
   useMonitorView,
+  useSpaceHold,
   type MonitorViewportSelection,
 } from './MonitorViewport.js';
 import { MonitorSelectionOverlay } from './MonitorSelectionOverlay.js';
+import { MonitorTransformBox } from './MonitorTransformBox.js';
+import { boxContainsPoint } from './monitor-hit-test.js';
+import { buildMonitorOverlays } from './monitor-overlay-model.js';
+import type { MonitorTransformHost, TransformPatches } from './monitor-transform-drag.js';
+import {
+  monitorTransformPreview,
+  useMonitorTransformPreview,
+  withPreviewVideoNode,
+  withTransformPatches,
+} from './monitor-transform-preview.js';
+import { buildTransformTargets, type MonitorTransformTarget } from './monitor-transform-targets.js';
+import { useMonitorTransform } from './useMonitorTransform.js';
 import {
   EMPTY_MONITOR_OVERLAY,
   applyMonitorSelection,
@@ -246,6 +259,10 @@ function MonitorPanelContent({
   const refreshSelectionOutlineRef = useRef<() => void>(() => {});
   refreshSelectionOutlineRef.current = () => {
     const elements = readMonitorElementsRef.current();
+    const targets = readTransformTargetsRef.current();
+    setTransformTargets((current) =>
+      JSON.stringify(current) === JSON.stringify(targets) ? current : targets,
+    );
     const overlay = monitorSelectionOverlay(elements, state.selectedIds);
     setSelectionOutline((current) =>
       sameMonitorOverlay(current.overlay, overlay)
@@ -256,6 +273,59 @@ function MonitorPanelContent({
           },
     );
   };
+  // Free transform (T-M05a): the box edits the selected elements drawn on
+  // this frame. While an agent's staged preview is on screen nothing can be edited.
+  const agentPreviewOnScreen =
+    agentPreviewState.document !== undefined &&
+    agentPreviewState.document.baseRevision === session.projectRevisionId;
+  const readTransformTargetsRef = useRef<
+    (clipIds?: readonly string[]) => readonly MonitorTransformTarget[]
+  >(() => []);
+  readTransformTargetsRef.current = (clipIds) => {
+    const frame = currentFrameRef.current;
+    if (frame === undefined) return [];
+    return buildTransformTargets({
+      elements: readMonitorElementsRef.current(),
+      frame,
+      project: previewVisualProject,
+      selectedClipIds: clipIds ?? selectedIdsRef.current,
+      timeUs: state.playheadUs,
+      agentPreviewOnScreen,
+    });
+  };
+  const livePatches = useMonitorTransformPreview();
+  const transformHost = useMemo<MonitorTransformHost>(
+    () => ({
+      preview: (patches) => monitorTransformPreview.set(patches),
+      cancel: () => monitorTransformPreview.set(undefined),
+      commit: (label: string, patches: TransformPatches) => {
+        try {
+          // One undo step for the whole gesture, as the aspect-ratio change does.
+          session.dispatchCompound(label, {
+            document: {
+              ...withTransformPatches(session.visualProject, patches),
+              updatedAt: new Date().toISOString(),
+            },
+          });
+          bumpProjectRevision();
+        } catch (reason) {
+          showToast(
+            `Could not change the element: ${reason instanceof Error ? reason.message : String(reason)}`,
+            'error',
+          );
+        } finally {
+          monitorTransformPreview.set(undefined);
+        }
+      },
+    }),
+    [bumpProjectRevision, session, showToast],
+  );
+  const transformController = useMonitorTransform({
+    readTargets: (clipIds) => readTransformTargetsRef.current(clipIds),
+    host: transformHost,
+    onBlocked: (message) => showToast(message, 'info'),
+  });
+  const [transformTargets, setTransformTargets] = useState<readonly MonitorTransformTarget[]>([]);
   const monitorSelection = useMemo<MonitorViewportSelection>(() => {
     const setters = { selectClips, toggleSelection, clearSelection };
     return {
@@ -278,8 +348,28 @@ function MonitorPanelContent({
           ),
           setters,
         ),
+      // A drag inside a selected box moves the selection; a drag on another
+      // element selects it (Shift adds it) and moves it.
+      dragElement: (start, modifiers) => {
+        const elements = readMonitorElementsRef.current();
+        const selected = selectedIdsRef.current;
+        const insideSelected = elements.some(
+          (element) =>
+            selected.includes(element.clipId) &&
+            element.hidden !== true &&
+            boxContainsPoint(element.bounds.corners, start),
+        );
+        let clipIds = selected;
+        if (!insideSelected) {
+          const top = monitorHitClipIds(start, elements)[0];
+          if (top === undefined) return undefined;
+          clipIds = modifiers.shift && !selected.includes(top) ? [...selected, top] : [top];
+          selectClips(clipIds);
+        }
+        return transformController.startGesture({ kind: 'move' }, start, clipIds);
+      },
     };
-  }, [clearSelection, selectClips, toggleSelection]);
+  }, [clearSelection, selectClips, toggleSelection, transformController]);
   const monitorResourceTokenRef = useRef(
     `monitor:${crypto.randomUUID?.() ?? Date.now().toString(36)}`,
   );
@@ -357,21 +447,20 @@ function MonitorPanelContent({
     const composition = previewVisualProject.compositions[previewVisualProject.rootCompositionId];
     if (composition === undefined) return;
     const cameraId = composition.activeCameraId;
-    const objectsById = previewVisualProject.visualObjects as Readonly<
-      Record<string, VisualObjectV1>
-    >;
-    const resolved: ResolvedObject[] = Object.values(previewVisualProject.visualObjects).map(
-      (object) => ({
-        object,
-        transform: evaluateCameraExpressionTransform(
-          object.id,
-          cameraId,
-          objectsById,
-          state.playheadUs,
-          composition.height,
-        ).transform,
-      }),
-    );
+    // A Monitor drag in progress draws with its live values (never written yet).
+    const patches = monitorTransformPreview.get();
+    const drawnProject = withTransformPatches(previewVisualProject, patches);
+    const objectsById = drawnProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
+    const resolved: ResolvedObject[] = Object.values(drawnProject.visualObjects).map((object) => ({
+      object,
+      transform: evaluateCameraExpressionTransform(
+        object.id,
+        cameraId,
+        objectsById,
+        state.playheadUs,
+        composition.height,
+      ).transform,
+    }));
     const visualFrame = withCaptionBurnInNodes(
       buildRenderFrameIR(
         composition.id,
@@ -391,7 +480,10 @@ function MonitorPanelContent({
     const frame =
       previewVideoFrame === undefined
         ? visualFrame
-        : withVideoFrameNode(visualFrame, previewVideoFrame.node);
+        : withVideoFrameNode(
+            visualFrame,
+            withPreviewVideoNode(previewVideoFrame.node, drawnProject, patches, state.playheadUs),
+          );
     currentFrameRef.current = frame;
     const videoBitmaps = new Map(clipFrameCache);
     if (previewVideoFrame !== undefined) {
@@ -689,6 +781,7 @@ function MonitorPanelContent({
     visualProject,
     previewVisualProject,
     sceneTick,
+    livePatches,
   ]);
 
   const monitorAspectRatio: MonitorAspectRatio = monitorFitView
@@ -702,6 +795,11 @@ function MonitorPanelContent({
   const hasTimelineContent =
     timelineComposition?.tracks.some((track) => track.clips.length > 0) ?? false;
   const zoomLabel = monitorZoomLabel(monitorView.fit, monitorView.view.zoom);
+  const spaceHeld = useSpaceHold();
+  const transformOverlays = useMemo(
+    () => buildMonitorOverlays(transformTargets, monitorView.view.zoom),
+    [monitorView.view.zoom, transformTargets],
+  );
   const frameRect = monitorFrameRect(monitorView.view, frameSize);
 
   const toggleFullscreen = () => {
@@ -861,6 +959,13 @@ function MonitorPanelContent({
           frame={frameSize}
           frameRect={frameRect}
           clipIdOf={(nodeId) => selectionOutline.clipByNode.get(nodeId)}
+        />
+        <MonitorTransformBox
+          overlays={transformOverlays}
+          view={monitorView.view}
+          viewportSize={monitorView.viewportSize}
+          interactive={monitorView.tool === 'select' && !spaceHeld}
+          startGesture={transformController.startGesture}
         />
         <AgentPreviewBadge
           surface="Program Monitor"
