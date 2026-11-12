@@ -76,6 +76,28 @@ export interface BrowserPixiRenderStats {
   readonly created: number;
 }
 
+/**
+ * Monitor-only view (ADR-0046, review B1): zoom and pan of the canvas over the
+ * authored frame. It is never part of {@link RenderFrameIR} and never reaches
+ * an export: only the renderer instance it is set on draws through it.
+ */
+export interface BrowserPixiMonitorView {
+  /** 1 = one authored pixel per CSS pixel. */
+  readonly zoom: number;
+  /** CSS px, where the frame's top-left corner sits inside the canvas. */
+  readonly panX: number;
+  readonly panY: number;
+}
+
+/** CSS size of the panel the Monitor canvas fills while a view is set. */
+export interface BrowserPixiSurfaceSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Lowest pixel scale the renderer accepts (also the old resolution floor). */
+export const BROWSER_PIXI_MIN_PIXEL_SCALE = 0.1;
+
 /** Structural browser-safe mirror of a decoded RGBA frame. */
 export interface BrowserVideoFrameBitmap {
   readonly width: number;
@@ -106,15 +128,32 @@ interface LayerContainer extends Container {
 export interface BrowserPixiRenderer {
   /** The HTML canvas element backing the Pixi Application. */
   readonly canvas: HTMLCanvasElement;
-  /** Current canvas CSS width in pixels (tracks the last rendered frame). */
+  /** Authored width of the last rendered frame. */
   readonly width: number;
-  /** Current canvas CSS height in pixels (tracks the last rendered frame). */
+  /** Authored height of the last rendered frame. */
   readonly height: number;
-  /** Current internal render resolution multiplier; CSS dimensions stay authored. */
+  /** Device pixels per CSS pixel of the canvas backing store right now. */
   readonly resolution: number;
-  /** Change internal pixel density without changing the authored viewport. */
-  setResolution(resolution: number): void;
-  /** Returns a bounded RGBA readback for diagnostics; overlays are not painted into it. */
+  /**
+   * Monitor-only: device pixels per CSS pixel of the canvas. Not clamped to
+   * the old [0.1, 2] range (floor 0.1). Wins over `options.resolution`, and
+   * applies only to this renderer instance. `undefined` returns to
+   * `options.resolution`. If the browser shrinks the drawing buffer, the
+   * scale falls back to what the buffer really holds.
+   */
+  setPixelScale(pixelScale: number | undefined): void;
+  /**
+   * Monitor-only: draw the frame through a zoom and pan inside a canvas the
+   * size of `surface` (the panel, CSS px). `undefined` returns to drawing the
+   * frame at its authored size, which is what the export path always uses.
+   * The IR is not touched.
+   */
+  setView(view: BrowserPixiMonitorView | undefined, surface?: BrowserPixiSurfaceSize): void;
+  /**
+   * Returns a bounded RGBA readback of the whole frame for diagnostics; overlays
+   * are not painted into it. While a Monitor view is set, the read-back is a
+   * separate Fit render, so zoom and pan never change what the scopes see.
+   */
   readonly readPixels: (
     maxWidth?: number,
     maxHeight?: number,
@@ -178,16 +217,70 @@ export async function createBrowserPixiRenderer(
   let frameResolution = options.resolution ?? 1;
   let disposed = false;
   let lastGradeKey = '';
+  // Monitor-only state. The export path never sets these, so its canvas stays
+  // the authored size at `options.resolution`.
+  let pixelScale: number | undefined;
+  let monitorView: BrowserPixiMonitorView | undefined;
+  let surface: BrowserPixiSurfaceSize | undefined;
 
   const assertAlive = (): void => {
     if (disposed) throw new Error(`${BROWSER_PACKAGE_ENTRY}: renderer has been destroyed`);
   };
 
-  const resize = (width: number, height: number, resolution: number): void => {
-    frameWidth = width;
-    frameHeight = height;
-    frameResolution = Math.max(0.1, Math.min(2, resolution));
-    app.renderer.resize(width, height, frameResolution);
+  const viewActive = (): boolean => monitorView !== undefined && surface !== undefined;
+
+  const applyStageTransform = (): void => {
+    if (monitorView !== undefined && surface !== undefined) {
+      app.stage.position.set(monitorView.panX, monitorView.panY);
+      app.stage.scale.set(monitorView.zoom);
+    } else {
+      app.stage.position.set(0, 0);
+      app.stage.scale.set(1);
+    }
+  };
+
+  /** The drawing buffer the browser really gave us, when it can be read. */
+  const drawingBufferShrink = (): number => {
+    const gl = (app.renderer as unknown as { gl?: WebGLRenderingContext | WebGL2RenderingContext })
+      .gl;
+    const canvas = app.canvas;
+    if (gl === undefined || gl === null || canvas.width <= 0 || canvas.height <= 0) return 1;
+    const bufferWidth = gl.drawingBufferWidth;
+    const bufferHeight = gl.drawingBufferHeight;
+    if (!(bufferWidth > 0 && bufferHeight > 0)) return 1;
+    return Math.min(1, bufferWidth / canvas.width, bufferHeight / canvas.height);
+  };
+
+  /**
+   * Sizes the canvas. Without a pixel scale this is exactly the previous
+   * behaviour (authored size, resolution clamped to [0.1, 2]). With a pixel
+   * scale the scale wins, and with a Monitor view the canvas is the panel.
+   */
+  const layout = (): void => {
+    const logicalWidth = viewActive() ? surface!.width : frameWidth;
+    const logicalHeight = viewActive() ? surface!.height : frameHeight;
+    if (pixelScale === undefined) {
+      frameResolution = Math.max(0.1, Math.min(2, options.resolution ?? 1));
+      app.renderer.resize(logicalWidth, logicalHeight, frameResolution);
+    } else {
+      frameResolution = pixelScale;
+      app.renderer.resize(logicalWidth, logicalHeight, frameResolution);
+      const shrink = drawingBufferShrink();
+      if (shrink < 1) {
+        frameResolution = Math.max(BROWSER_PIXI_MIN_PIXEL_SCALE, frameResolution * shrink);
+        app.renderer.resize(logicalWidth, logicalHeight, frameResolution);
+      }
+    }
+    if (viewActive()) {
+      app.canvas.style.width = `${logicalWidth}px`;
+      app.canvas.style.height = `${logicalHeight}px`;
+    }
+    applyStageTransform();
+  };
+
+  const redraw = (): void => {
+    layout();
+    if (options.autoStart !== true) app.renderer.render(app.stage);
   };
 
   const updateRectVisual = (
@@ -534,10 +627,48 @@ export async function createBrowserPixiRenderer(
     get resolution() {
       return frameResolution;
     },
-    setResolution(nextResolution: number): void {
+    setPixelScale(nextPixelScale: number | undefined): void {
       assertAlive();
-      resize(frameWidth, frameHeight, nextResolution);
-      if (options.autoStart !== true) app.renderer.render(app.stage);
+      const next =
+        nextPixelScale === undefined || !Number.isFinite(nextPixelScale)
+          ? undefined
+          : Math.max(BROWSER_PIXI_MIN_PIXEL_SCALE, nextPixelScale);
+      if (next === pixelScale) return;
+      pixelScale = next;
+      redraw();
+    },
+    setView(
+      nextView: BrowserPixiMonitorView | undefined,
+      nextSurface?: BrowserPixiSurfaceSize,
+    ): void {
+      assertAlive();
+      const view =
+        nextView === undefined || nextSurface === undefined
+          ? undefined
+          : { zoom: nextView.zoom, panX: nextView.panX, panY: nextView.panY };
+      const size =
+        view === undefined
+          ? undefined
+          : {
+              width: Math.max(1, Math.round(nextSurface!.width)),
+              height: Math.max(1, Math.round(nextSurface!.height)),
+            };
+      if (
+        view?.zoom === monitorView?.zoom &&
+        view?.panX === monitorView?.panX &&
+        view?.panY === monitorView?.panY &&
+        size?.width === surface?.width &&
+        size?.height === surface?.height
+      )
+        return;
+      const wasActive = viewActive();
+      monitorView = view;
+      surface = size;
+      if (wasActive && !viewActive()) {
+        app.canvas.style.width = '';
+        app.canvas.style.height = '';
+      }
+      redraw();
     },
     readPixels(maxWidth = 640, maxHeight = 360) {
       if (disposed || frameWidth <= 0 || frameHeight <= 0) return undefined;
@@ -549,7 +680,21 @@ export async function createBrowserPixiRenderer(
       copy.height = height;
       const context = copy.getContext('2d', { willReadFrequently: true });
       if (context === null) return undefined;
-      context.drawImage(app.canvas, 0, 0, width, height);
+      if (monitorView !== undefined && surface !== undefined) {
+        // Separate Fit read-back: draw the whole frame at the top-left of the
+        // canvas, copy it, then put the user's view back.
+        const fit = Math.min(surface.width / frameWidth, surface.height / frameHeight);
+        app.stage.position.set(0, 0);
+        app.stage.scale.set(fit);
+        app.renderer.render(app.stage);
+        const sourceWidth = Math.max(1, frameWidth * fit * frameResolution);
+        const sourceHeight = Math.max(1, frameHeight * fit * frameResolution);
+        context.drawImage(app.canvas, 0, 0, sourceWidth, sourceHeight, 0, 0, width, height);
+        applyStageTransform();
+        app.renderer.render(app.stage);
+      } else {
+        context.drawImage(app.canvas, 0, 0, width, height);
+      }
       const image = context.getImageData(0, 0, width, height);
       return { width, height, data: image.data };
     },
@@ -559,9 +704,10 @@ export async function createBrowserPixiRenderer(
     ): BrowserPixiRenderStats {
       assertAlive();
       validateRenderFrameIR(frame);
-      const { width, height, dpr } = frame.viewport;
-      const resolution = options.resolution ?? frameResolution ?? dpr;
-      resize(width, height, resolution);
+      const { width, height } = frame.viewport;
+      frameWidth = width;
+      frameHeight = height;
+      layout();
       background
         .clear()
         .rect(0, 0, width, height)
