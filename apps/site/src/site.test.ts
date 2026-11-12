@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -121,6 +121,23 @@ describe('published build (SHA256SUMS.txt supplied)', () => {
     expect(() =>
       renderSite({ tag: TAG, commit: 'x', sums: parseSha256Sums(text, TAG), sumsSha256: null }),
     ).toThrow(/sumsSha256 must be given/);
+  });
+});
+
+describe('joyst.ir web root (apps/account-web)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+
+  it('has the published SHA256SUMS.txt of the tag committed, and it matches the payload set', () => {
+    const text = readFileSync(join(here, '..', 'release', TAG, 'SHA256SUMS.txt'), 'utf8');
+    expect([...parseSha256Sums(text, TAG).keys()].sort()).toEqual([...NAMES].sort());
+  });
+
+  it('builds the landing page, never the old account page, so a VPS deploy cannot bring it back', () => {
+    const pkg = JSON.parse(
+      readFileSync(join(here, '..', '..', 'account-web', 'package.json'), 'utf8'),
+    ) as { scripts: Record<string, string> };
+    expect(pkg.scripts.build).toContain('site/scripts/build.mjs');
+    expect(pkg.scripts.build).not.toContain('vite');
   });
 });
 

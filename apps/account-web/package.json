@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node ../site/scripts/build.mjs --out dist",
+    "build:legacy-account-page": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
