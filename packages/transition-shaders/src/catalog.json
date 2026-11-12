@@ -32,6 +32,66 @@
     }
   },
   {
+    "id": "joy:dipToBlack",
+    "glName": "dipToBlack",
+    "label": "Dip to Black",
+    "description": "Fades down to black, then up into the next clip.",
+    "category": "basic-fades",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "JOY Media contributors",
+    "credit": "JOY Media contributors (MIT), own shader dipToBlack.glsl, adapted from gl-transitions FadeColor.glsl by gre (MIT)",
+    "glslFile": "dipToBlack.glsl",
+    "defaultParams": {
+      "colorPhase": 0.4
+    },
+    "paramsTypes": {
+      "colorPhase": "float"
+    }
+  },
+  {
+    "id": "joy:dipToWhite",
+    "glName": "dipToWhite",
+    "label": "Dip to White",
+    "description": "Fades up to white, then down into the next clip.",
+    "category": "basic-fades",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "JOY Media contributors",
+    "credit": "JOY Media contributors (MIT), own shader dipToWhite.glsl, adapted from gl-transitions FadeColor.glsl by gre (MIT)",
+    "glslFile": "dipToWhite.glsl",
+    "defaultParams": {
+      "colorPhase": 0.4
+    },
+    "paramsTypes": {
+      "colorPhase": "float"
+    }
+  },
+  {
+    "id": "joy:dipToColour",
+    "glName": "dipToColour",
+    "label": "Dip to Colour",
+    "description": "Fades through a colour you choose, then into the next clip.",
+    "category": "basic-fades",
+    "options": ["duration", "colour"],
+    "license": "MIT",
+    "author": "JOY Media contributors",
+    "credit": "JOY Media contributors (MIT), own shader dipToColour.glsl, adapted from gl-transitions FadeColor.glsl by gre (MIT)",
+    "glslFile": "dipToColour.glsl",
+    "defaultParams": {
+      "colorR": 0.9,
+      "colorG": 0.4,
+      "colorB": 0.2,
+      "colorPhase": 0.4
+    },
+    "paramsTypes": {
+      "colorR": "float",
+      "colorG": "float",
+      "colorB": "float",
+      "colorPhase": "float"
+    }
+  },
+  {
     "id": "gl:wipeLeft",
     "glName": "wipeLeft",
     "label": "Wipe Left",
@@ -88,6 +148,48 @@
     "paramsTypes": {}
   },
   {
+    "id": "gl:RadialWipe",
+    "glName": "RadialWipe",
+    "label": "Radial Wipe",
+    "description": "A clock hand sweeps around the centre, uncovering the next clip.",
+    "category": "wipes",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "Xaychru",
+    "credit": "Xaychru (MIT), from gl-transitions RadialWipe.glsl",
+    "glslFile": "RadialWipe.glsl",
+    "defaultParams": {
+      "smoothness": 1
+    },
+    "paramsTypes": {
+      "smoothness": "float"
+    }
+  },
+  {
+    "id": "gl:BrushWipe",
+    "glName": "BrushWipe",
+    "label": "Brush Wipe",
+    "description": "Broad, streaky brush strokes paint in the next clip.",
+    "category": "wipes",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "gre",
+    "credit": "gre (MIT), from gl-transitions BrushWipe.glsl",
+    "glslFile": "BrushWipe.glsl",
+    "defaultParams": {
+      "strokes": 4,
+      "angle": -7,
+      "roughness": 0.6,
+      "waviness": 0.5
+    },
+    "paramsTypes": {
+      "strokes": "float",
+      "angle": "float",
+      "roughness": "float",
+      "waviness": "float"
+    }
+  },
+  {
     "id": "gl:Directional",
     "glName": "Directional",
     "label": "Slide",
@@ -103,6 +205,140 @@
     },
     "paramsTypes": {
       "direction": "vec2"
+    }
+  },
+  {
+    "id": "gl:SlideAwayRight",
+    "glName": "SlideAwayRight",
+    "label": "Slide Away",
+    "description": "The current clip slides off to the right over a crossfade.",
+    "category": "slides-pushes",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "lizhongjian",
+    "credit": "lizhongjian (MIT), from gl-transitions SlideAwayRight.glsl",
+    "glslFile": "SlideAwayRight.glsl",
+    "defaultParams": {},
+    "paramsTypes": {}
+  },
+  {
+    "id": "gl:LeftRight",
+    "glName": "LeftRight",
+    "label": "Push from Right",
+    "description": "The next clip slides in from the right as the current one shrinks away.",
+    "category": "slides-pushes",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "zhmy",
+    "credit": "zhmy (MIT), from gl-transitions LeftRight.glsl",
+    "glslFile": "LeftRight.glsl",
+    "defaultParams": {},
+    "paramsTypes": {}
+  },
+  {
+    "id": "gl:TopBottom",
+    "glName": "TopBottom",
+    "label": "Push from Bottom",
+    "description": "The next clip slides in from the bottom as the current one shrinks away.",
+    "category": "slides-pushes",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "zhmy",
+    "credit": "zhmy (MIT), from gl-transitions TopBottom.glsl",
+    "glslFile": "TopBottom.glsl",
+    "defaultParams": {},
+    "paramsTypes": {}
+  },
+  {
+    "id": "gl:CrossZoom",
+    "glName": "CrossZoom",
+    "label": "Cross Zoom",
+    "description": "A zoom blur rushes across the cut.",
+    "category": "zooms-spins",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "rectalogic",
+    "credit": "rectalogic (MIT), from gl-transitions CrossZoom.glsl",
+    "glslFile": "CrossZoom.glsl",
+    "defaultParams": {
+      "strength": 0.4
+    },
+    "paramsTypes": {
+      "strength": "float"
+    }
+  },
+  {
+    "id": "gl:SimpleZoom",
+    "glName": "SimpleZoom",
+    "label": "Simple Zoom",
+    "description": "Zooms into the current clip, then fades to the next.",
+    "category": "zooms-spins",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "0gust1",
+    "credit": "0gust1 (MIT), from gl-transitions SimpleZoom.glsl",
+    "glslFile": "SimpleZoom.glsl",
+    "defaultParams": {
+      "zoom_quickness": 0.8
+    },
+    "paramsTypes": {
+      "zoom_quickness": "float"
+    }
+  },
+  {
+    "id": "gl:ZoomInCircles",
+    "glName": "ZoomInCircles",
+    "label": "Zoom Circles",
+    "description": "Rings of the picture zoom at different speeds before the cut.",
+    "category": "zooms-spins",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "dycm8009",
+    "credit": "dycm8009 (MIT), from gl-transitions ZoomInCircles.glsl",
+    "glslFile": "ZoomInCircles.glsl",
+    "defaultParams": {},
+    "paramsTypes": {}
+  },
+  {
+    "id": "gl:Pinwheel",
+    "glName": "Pinwheel",
+    "label": "Pinwheel",
+    "description": "Spinning pinwheel blades reveal the next clip.",
+    "category": "zooms-spins",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "Mr Speaker",
+    "credit": "Mr Speaker (MIT), from gl-transitions Pinwheel.glsl",
+    "glslFile": "Pinwheel.glsl",
+    "defaultParams": {
+      "speed": 2
+    },
+    "paramsTypes": {
+      "speed": "float"
+    }
+  },
+  {
+    "id": "gl:WhipSpin",
+    "glName": "WhipSpin",
+    "label": "Whip Spin",
+    "description": "The camera rolls fast with a spin blur and lands on the next clip.",
+    "category": "zooms-spins",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "gre",
+    "credit": "gre (MIT), from gl-transitions WhipSpin.glsl",
+    "glslFile": "WhipSpin.glsl",
+    "defaultParams": {
+      "turns": 1,
+      "blur": 0.5,
+      "chroma": 0.6,
+      "zoom": 0.25
+    },
+    "paramsTypes": {
+      "turns": "float",
+      "blur": "float",
+      "chroma": "float",
+      "zoom": "float"
     }
   },
   {
@@ -124,53 +360,49 @@
     }
   },
   {
-    "id": "gl:morph",
-    "glName": "morph",
-    "label": "Morph",
-    "description": "Pixels drift by their colours as the two clips melt together.",
-    "category": "creative",
+    "id": "gl:HorizontalOpen",
+    "glName": "HorizontalOpen",
+    "label": "Horizontal Open",
+    "description": "The next clip opens from a line across the middle.",
+    "category": "shapes-masks",
     "options": ["duration"],
     "license": "MIT",
-    "author": "paniq",
-    "credit": "paniq (MIT), from gl-transitions morph.glsl",
-    "glslFile": "morph.glsl",
-    "defaultParams": {
-      "strength": 0.1
-    },
-    "paramsTypes": {
-      "strength": "float"
-    }
-  },
-  {
-    "id": "gl:Dreamy",
-    "glName": "Dreamy",
-    "label": "Dreamy",
-    "description": "A soft, wavy shimmer carries one clip into the next.",
-    "category": "light-glow",
-    "options": ["duration"],
-    "license": "MIT",
-    "author": "mikolalysenko",
-    "credit": "mikolalysenko (MIT), from gl-transitions Dreamy.glsl",
-    "glslFile": "Dreamy.glsl",
+    "author": "martiniti",
+    "credit": "martiniti (MIT), from gl-transitions HorizontalOpen.glsl",
+    "glslFile": "HorizontalOpen.glsl",
     "defaultParams": {},
     "paramsTypes": {}
   },
   {
-    "id": "gl:CrossZoom",
-    "glName": "CrossZoom",
-    "label": "Cross Zoom",
-    "description": "A zoom blur rushes across the cut.",
-    "category": "zooms-spins",
+    "id": "gl:VerticalOpen",
+    "glName": "VerticalOpen",
+    "label": "Vertical Open",
+    "description": "The next clip opens from a line down the middle.",
+    "category": "shapes-masks",
     "options": ["duration"],
     "license": "MIT",
-    "author": "rectalogic",
-    "credit": "rectalogic (MIT), from gl-transitions CrossZoom.glsl",
-    "glslFile": "CrossZoom.glsl",
+    "author": "martiniti",
+    "credit": "martiniti (MIT), from gl-transitions VerticalOpen.glsl",
+    "glslFile": "VerticalOpen.glsl",
+    "defaultParams": {},
+    "paramsTypes": {}
+  },
+  {
+    "id": "gl:Chessboard",
+    "glName": "Chessboard",
+    "label": "Chessboard",
+    "description": "Squares of a chessboard flip over to the next clip.",
+    "category": "shapes-masks",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "lql",
+    "credit": "lql (MIT), from gl-transitions Chessboard.glsl",
+    "glslFile": "Chessboard.glsl",
     "defaultParams": {
-      "strength": 0.4
+      "grid_num": 10
     },
     "paramsTypes": {
-      "strength": "float"
+      "grid_num": "float"
     }
   },
   {
@@ -194,34 +426,62 @@
     }
   },
   {
-    "id": "gl:SimpleZoom",
-    "glName": "SimpleZoom",
-    "label": "Simple Zoom",
-    "description": "Zooms into the current clip, then fades to the next.",
-    "category": "zooms-spins",
+    "id": "gl:GlitchDisplace",
+    "glName": "GlitchDisplace",
+    "label": "Glitch Displace",
+    "description": "Blocky digital displacement breaks one clip into the next.",
+    "category": "glitch-digital",
     "options": ["duration"],
     "license": "MIT",
-    "author": "0gust1",
-    "credit": "0gust1 (MIT), from gl-transitions SimpleZoom.glsl",
-    "glslFile": "SimpleZoom.glsl",
+    "author": "Matt DesLauriers",
+    "credit": "Matt DesLauriers (MIT), from gl-transitions GlitchDisplace.glsl",
+    "glslFile": "GlitchDisplace.glsl",
+    "defaultParams": {},
+    "paramsTypes": {}
+  },
+  {
+    "id": "gl:GlitchMemories",
+    "glName": "GlitchMemories",
+    "label": "Glitch Memories",
+    "description": "A crossfade broken by colour-shifted digital blocks.",
+    "category": "glitch-digital",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "Gunnar Roth",
+    "credit": "Gunnar Roth (MIT), from gl-transitions GlitchMemories.glsl",
+    "glslFile": "GlitchMemories.glsl",
+    "defaultParams": {},
+    "paramsTypes": {}
+  },
+  {
+    "id": "gl:TvStatic",
+    "glName": "TvStatic",
+    "label": "TV Static",
+    "description": "Cuts through a burst of TV static to the next clip.",
+    "category": "glitch-digital",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "Brandon Anzaldi",
+    "credit": "Brandon Anzaldi (MIT), from gl-transitions TvStatic.glsl",
+    "glslFile": "TvStatic.glsl",
     "defaultParams": {
-      "zoom_quickness": 0.8
+      "offset": 0.05
     },
     "paramsTypes": {
-      "zoom_quickness": "float"
+      "offset": "float"
     }
   },
   {
-    "id": "gl:crosswarp",
-    "glName": "crosswarp",
-    "label": "Cross Warp",
-    "description": "The two clips stretch and warp past each other.",
-    "category": "creative",
+    "id": "gl:Dreamy",
+    "glName": "Dreamy",
+    "label": "Dreamy",
+    "description": "A soft, wavy shimmer carries one clip into the next.",
+    "category": "light-glow",
     "options": ["duration"],
     "license": "MIT",
-    "author": "Eke Péter <peterekepeter@gmail.com>",
-    "credit": "Eke Péter <peterekepeter@gmail.com> (MIT), from gl-transitions crosswarp.glsl",
-    "glslFile": "crosswarp.glsl",
+    "author": "mikolalysenko",
+    "credit": "mikolalysenko (MIT), from gl-transitions Dreamy.glsl",
+    "glslFile": "Dreamy.glsl",
     "defaultParams": {},
     "paramsTypes": {}
   },
@@ -242,6 +502,76 @@
     "paramsTypes": {
       "intensity": "float"
     }
+  },
+  {
+    "id": "gl:Overexposure",
+    "glName": "Overexposure",
+    "label": "Overexposure",
+    "description": "A crossfade that washes out to bright, overexposed light.",
+    "category": "light-glow",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "Ben Zhang",
+    "credit": "Ben Zhang (MIT), from gl-transitions Overexposure.glsl",
+    "glslFile": "Overexposure.glsl",
+    "defaultParams": {
+      "strength": 0.6
+    },
+    "paramsTypes": {
+      "strength": "float"
+    }
+  },
+  {
+    "id": "gl:EdgeGlow",
+    "glName": "EdgeGlow",
+    "label": "Edge Glow",
+    "description": "Both clips fade through dark with their edges glowing.",
+    "category": "light-glow",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "Woohyun Kim",
+    "credit": "Woohyun Kim (MIT), from gl-transitions EdgeGlow.glsl",
+    "glslFile": "EdgeGlow.glsl",
+    "defaultParams": {
+      "edge_thickness": 0.001,
+      "edge_brightness": 8
+    },
+    "paramsTypes": {
+      "edge_thickness": "float",
+      "edge_brightness": "float"
+    }
+  },
+  {
+    "id": "gl:morph",
+    "glName": "morph",
+    "label": "Morph",
+    "description": "Pixels drift by their colours as the two clips melt together.",
+    "category": "creative",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "paniq",
+    "credit": "paniq (MIT), from gl-transitions morph.glsl",
+    "glslFile": "morph.glsl",
+    "defaultParams": {
+      "strength": 0.1
+    },
+    "paramsTypes": {
+      "strength": "float"
+    }
+  },
+  {
+    "id": "gl:crosswarp",
+    "glName": "crosswarp",
+    "label": "Cross Warp",
+    "description": "The two clips stretch and warp past each other.",
+    "category": "creative",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "Eke Péter <peterekepeter@gmail.com>",
+    "credit": "Eke Péter <peterekepeter@gmail.com> (MIT), from gl-transitions crosswarp.glsl",
+    "glslFile": "crosswarp.glsl",
+    "defaultParams": {},
+    "paramsTypes": {}
   },
   {
     "id": "gl:ButterflyWaveScrawler",
@@ -266,17 +596,69 @@
     }
   },
   {
-    "id": "gl:GlitchDisplace",
-    "glName": "GlitchDisplace",
-    "label": "Glitch Displace",
-    "description": "Blocky digital displacement breaks one clip into the next.",
-    "category": "glitch-digital",
+    "id": "gl:Kaleidoscope",
+    "glName": "Kaleidoscope",
+    "label": "Kaleidoscope",
+    "description": "A crossfade through a spinning kaleidoscope.",
+    "category": "creative",
     "options": ["duration"],
     "license": "MIT",
-    "author": "Matt DesLauriers",
-    "credit": "Matt DesLauriers (MIT), from gl-transitions GlitchDisplace.glsl",
-    "glslFile": "GlitchDisplace.glsl",
-    "defaultParams": {},
-    "paramsTypes": {}
+    "author": "nwoeanhinnogaehr",
+    "credit": "nwoeanhinnogaehr (MIT), from gl-transitions Kaleidoscope.glsl",
+    "glslFile": "Kaleidoscope.glsl",
+    "defaultParams": {
+      "speed": 1,
+      "angle": 1,
+      "power": 1.5
+    },
+    "paramsTypes": {
+      "speed": "float",
+      "angle": "float",
+      "power": "float"
+    }
+  },
+  {
+    "id": "gl:Ripple",
+    "glName": "Ripple",
+    "label": "Ripple",
+    "description": "Ripples spread from the centre while the clips crossfade.",
+    "category": "creative",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "gre",
+    "credit": "gre (MIT), from gl-transitions Ripple.glsl",
+    "glslFile": "Ripple.glsl",
+    "defaultParams": {
+      "amplitude": 100,
+      "speed": 50
+    },
+    "paramsTypes": {
+      "amplitude": "float",
+      "speed": "float"
+    }
+  },
+  {
+    "id": "gl:InkBleed",
+    "glName": "InkBleed",
+    "label": "Ink Bleed",
+    "description": "The next clip spreads like drops of ink in water.",
+    "category": "creative",
+    "options": ["duration"],
+    "license": "MIT",
+    "author": "gre",
+    "credit": "gre (MIT), from gl-transitions InkBleed.glsl",
+    "glslFile": "InkBleed.glsl",
+    "defaultParams": {
+      "drops": 4,
+      "tendrils": 0.7,
+      "rim": 0.5,
+      "seed": 3
+    },
+    "paramsTypes": {
+      "drops": "float",
+      "tendrils": "float",
+      "rim": "float",
+      "seed": "float"
+    }
   }
 ]

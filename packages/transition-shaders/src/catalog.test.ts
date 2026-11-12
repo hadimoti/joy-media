@@ -43,6 +43,13 @@ const KNOWN_UNFED_VECTOR_UNIFORMS: Readonly<Record<string, readonly string[]>> =
 };
 
 describe('transition catalogue (T-V08)', () => {
+  it('has at least 30 transitions for v1.1.1, including the three dips', () => {
+    expect(catalog.length).toBeGreaterThanOrEqual(30);
+    const labels = catalog.map((entry) => entry.label);
+    expect(labels).toEqual(
+      expect.arrayContaining(['Dip to Black', 'Dip to White', 'Dip to Colour']),
+    );
+  });
   it('has unique ids and unique names that fit two lines on a card', () => {
     const ids = catalog.map((entry) => entry.id);
     const labels = catalog.map((entry) => entry.label.toLowerCase());
