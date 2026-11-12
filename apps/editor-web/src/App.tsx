@@ -38,7 +38,12 @@ import {
   type VideoFramePresentationMetadata,
   type VideoClipSpec,
 } from '@joy-media/playback-engine';
-import type { ColorGradeIR, EffectInstanceIR, VideoFrameNode } from '@joy-media/render-ir';
+import type {
+  ColorGradeIR,
+  EffectInstanceIR,
+  Transform2D,
+  VideoFrameNode,
+} from '@joy-media/render-ir';
 import { toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
 import type {
@@ -73,6 +78,7 @@ import {
 import {
   buildRenderFrameIR,
   evaluateEffectInstances,
+  transformToRenderTransform,
   type ResolvedObject,
 } from '@joy-media/visual-object-renderer';
 import { registerBuiltins, effectRegistry } from '@joy-media/visual-effects';
@@ -569,12 +575,7 @@ function playbackAssetId(project: JoyProjectV1, clip: VideoClip): string {
 /** Resolve the currently playing timeline clip from the live media URL. */
 function videoClipSpec(
   clip: VideoClip,
-  transform: {
-    readonly translateX: number;
-    readonly translateY: number;
-    readonly scaleX: number;
-    readonly scaleY: number;
-  } = {
+  transform: Transform2D = {
     translateX: 0,
     translateY: 0,
     scaleX: 1,
@@ -620,14 +621,11 @@ function videoClipSpecAt(
     timeUs,
     height,
   ).transform;
+  // The same conversion as every other element (T-M05a): a saved rotation is
+  // drawn in the Monitor and the export; rotation 0 adds nothing.
   return videoClipSpec(
     clip,
-    {
-      translateX: evaluated.x,
-      translateY: evaluated.y,
-      scaleX: evaluated.scaleX,
-      scaleY: evaluated.scaleY,
-    },
+    transformToRenderTransform(evaluated),
     evaluated.opacity,
     colorGrade,
     effects,
