@@ -54,9 +54,17 @@ const READY = {
   siblings: [],
 };
 
-function installDesktop(openReply: unknown = READY) {
+const PROJECTS_DIRECTORY = 'C:\\Users\\Hadi\\Documents\\JOY Projects';
+
+function installDesktop(openReply: unknown = READY, directory: string | null = PROJECTS_DIRECTORY) {
   const invoke = vi.fn(async (channel: string) => {
-    if (channel === 'desktop.project-folder.list') return { kind: 'listed', folders: [FOLDER] };
+    if (channel === 'desktop.project-folder.list') {
+      return {
+        kind: 'listed',
+        folders: [FOLDER],
+        ...(directory === null ? {} : { directory }),
+      };
+    }
     if (channel === 'desktop.project-folder.open') return openReply;
     throw new Error(`unexpected channel ${channel}`);
   });
@@ -103,6 +111,32 @@ function folderCard(): HTMLButtonElement {
   if (card === undefined) throw new Error('no folder card');
   return card;
 }
+
+describe('where folder projects are saved', () => {
+  it('shows the full path of the projects folder, as the desktop app reports it', async () => {
+    installDesktop();
+    const view = await renderLibrary(async () => undefined);
+    const place = view.querySelector('[data-testid="project-folders-directory"]');
+    expect(place?.textContent).toBe(PROJECTS_DIRECTORY);
+    expect(view.querySelector('.project-library-folder-place')?.textContent).toContain(
+      'Folder projects are saved in: C:\\Users\\Hadi\\Documents\\JOY Projects',
+    );
+  });
+
+  it('still explains folder projects when an older desktop app sends no path', async () => {
+    installDesktop(READY, null);
+    const view = await renderLibrary(async () => undefined);
+    expect(view.querySelector('[data-testid="project-folders-directory"]')).toBeNull();
+    expect(view.querySelector('.project-library-folder-place')?.textContent).toContain(
+      'is saved as its own folder on this computer',
+    );
+  });
+
+  it('says nothing about folders outside the desktop app', async () => {
+    const view = await renderLibrary();
+    expect(view.querySelector('.project-library-folder-place')).toBeNull();
+  });
+});
 
 describe('folder projects in the project list', () => {
   it('shows a folder project next to the browser projects', async () => {

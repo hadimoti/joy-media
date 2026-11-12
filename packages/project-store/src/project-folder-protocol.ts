@@ -113,6 +113,11 @@ export interface ProjectFolderListedItem {
 export interface ProjectFolderListReply {
   readonly kind: 'listed';
   readonly folders: readonly ProjectFolderListedItem[];
+  /**
+   * The folder that holds the project folders, as a full path, so the Projects page can say where projects are saved
+   * (12 Nov 2026, lane B: there is no setting for it, and the owner needs to see it).
+   */
+  readonly directory: string;
 }
 
 /**

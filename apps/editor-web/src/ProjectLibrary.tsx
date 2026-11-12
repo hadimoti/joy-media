@@ -117,6 +117,8 @@ export function ProjectLibrary({
   // Folder projects exist only in the desktop app. Their list is read from the desktop, never from this browser.
   const foldersAvailable = projectFoldersAvailable();
   const [folderItems, setFolderItems] = useState<readonly ProjectFolderListedItem[]>([]);
+  // Where folder projects are saved, as the desktop app reports it. There is no setting for it (12 Nov 2026).
+  const [folderDirectory, setFolderDirectory] = useState<string | undefined>(undefined);
   const [folderBusyKey, setFolderBusyKey] = useState<string | null>(null);
   const [folderDialog, setFolderDialog] = useState<
     { readonly key: string; readonly name: string; readonly ask: ProjectFolderAsk } | undefined
@@ -254,7 +256,10 @@ export function ProjectLibrary({
     const sequence = ++folderListingSequence.current;
     try {
       const listing = await listProjectFolders();
-      if (sequence === folderListingSequence.current) setFolderItems(listing.folders);
+      if (sequence === folderListingSequence.current) {
+        setFolderItems(listing.folders);
+        setFolderDirectory(listing.directory);
+      }
     } catch {
       // A failed refresh keeps the last listing on screen, so the rows do not vanish.
       if (sequence === folderListingSequence.current) {
@@ -560,8 +565,23 @@ export function ProjectLibrary({
           <p>
             {showTrash
               ? 'Restore a project or permanently remove it.'
-              : 'Open a recent project or create a new one to enter the editor.'}
+              : 'Open a project, or start a new one.'}
           </p>
+          {!showTrash && foldersAvailable && (
+            <p className="project-library-folder-place">
+              A <strong>folder project</strong> is saved as its own folder on this computer, so you
+              can find it, copy it and back it up. A <strong>new project</strong> is kept inside the
+              app.
+              {folderDirectory !== undefined && (
+                <>
+                  {' Folder projects are saved in: '}
+                  <code dir="ltr" data-testid="project-folders-directory">
+                    {folderDirectory}
+                  </code>
+                </>
+              )}
+            </p>
+          )}
         </div>
 
         {notice !== undefined && (
@@ -760,8 +780,8 @@ export function ProjectLibrary({
                       <span className="project-library-card-thumb" aria-hidden="true" />
                       <span className="project-library-card-body">
                         <span>
-                          No project entry yet. Open it: if the app remembers it, give it a title to
-                          finish it.
+                          This folder is not finished as a project yet. Open it: if the app
+                          remembers it, give it a name to finish it.
                         </span>
                         <span>{`Folder project · ${folder.name}`}</span>
                       </span>
@@ -794,7 +814,7 @@ export function ProjectLibrary({
                           ? `Moved to Trash: ${formatUpdated(entry.trashedAt)}`
                           : `Last updated: ${formatUpdated(entry.updatedAt)}`}
                       </span>
-                      <span>Local project · Timeline ready</span>
+                      <span>Saved inside the app</span>
                     </span>
                   </button>
                   <button

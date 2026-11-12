@@ -13,6 +13,12 @@ instead, because cloud sync can damage a project while the app is writing it.
 Every project folder ends in `.joyproj`, for example `Summer.joyproj`. The Projects screen lists the
 folders it finds there, next to your other projects. Click one to open it in the editor.
 
+You do not have to remember any of this: the Projects screen shows the exact folder, under the word
+**Projects**, as "Folder projects are saved in: …". There is no setting to change this folder.
+
+To make a project that is a folder, click **New folder project**. A project made with **New project**
+is kept inside the app instead: it is not a folder you can see, copy or back up.
+
 ## What is inside a project folder
 
 | Inside           | What it is                                                                                               |

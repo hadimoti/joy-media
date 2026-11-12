@@ -10049,6 +10049,15 @@ label {
   color: #9d9da1;
   font-size: 0.92rem;
 }
+/* Where folder projects are saved (12 Nov 2026, lane B). */
+.project-library-intro .project-library-folder-place {
+  margin-top: -1rem;
+}
+.project-library-folder-place code {
+  color: #d6d6da;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
 .project-library-toolbar {
   display: flex;
   flex-wrap: wrap;

@@ -170,7 +170,11 @@ export function createProjectFolderService(
   async function list(): Promise<ProjectFolderListReply> {
     const listings = await listProjectFolders(directory);
     forgetKeysNotIn(listings);
-    return { kind: 'listed', folders: listings.map((listing) => listedItem(listing)) };
+    return {
+      kind: 'listed',
+      folders: listings.map((listing) => listedItem(listing)),
+      directory: resolve(directory),
+    };
   }
 
   /** A key names a folder only while that folder is in the last listing. A renamed or removed folder loses its key. */

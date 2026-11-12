@@ -1,7 +1,7 @@
 import { cpSync, existsSync, mkdirSync, realpathSync, renameSync, symlinkSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openProjectClaimRegistry } from './project-claim-registry.js';
 import {
@@ -484,7 +484,14 @@ describe('the worker message handler', () => {
     const service = serviceOn();
     await expect(
       handleProjectFolderMessage(service, { id: 7, op: 'list', payload: {} }),
-    ).resolves.toEqual({ id: 7, ok: true, value: { kind: 'listed', folders: [] } });
+    ).resolves.toEqual({ id: 7, ok: true, value: { kind: 'listed', folders: [], directory } });
+  });
+
+  it('says where the project folders are, as a full path, so the Projects page can show it', async () => {
+    const service = serviceOn();
+    const listed = await service.list();
+    expect(listed.directory).toBe(resolve(directory));
+    expect(isAbsolute(listed.directory)).toBe(true);
   });
 
   it('rejects a create request without a title, and an answer that is neither original nor copy', async () => {

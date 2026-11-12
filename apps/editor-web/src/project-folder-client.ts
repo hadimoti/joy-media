@@ -32,6 +32,8 @@ export interface ProjectFolderListedItem {
 export interface ProjectFolderListReply {
   readonly kind: 'listed';
   readonly folders: readonly ProjectFolderListedItem[];
+  /** The full path of the folder that holds the project folders. An older desktop app does not send it. */
+  readonly directory?: string;
 }
 
 export interface ProjectFolderSibling {
