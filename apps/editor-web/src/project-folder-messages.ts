@@ -175,7 +175,7 @@ export function openText(reply: Exclude<ProjectFolderOpenReply, { readonly kind:
   }
   if (reply.kind === 'refused') return refusalText(reply);
   if (reply.kind === 'unverifiable') return unverifiedText(reply.reason, reply.volume);
-  const ready = `Folder project ready: “${reply.title}”. Opening folder projects in the editor is not built yet.`;
+  const ready = `Opening “${reply.title}”.`;
   if (reply.claim !== 'renewed' || reply.previousId === undefined) return ready;
   const renewed = `This copy got a new id. Its old id was ${reply.previousId}.`;
   const others = siblingsSentence(reply.siblings);
@@ -356,4 +356,73 @@ export function askCopy(ask: ProjectFolderAsk): AskCopy {
         offersCopy: false,
       };
   }
+}
+
+/** A list of file names in plain words: “a”, “a and b”, “a, b and c”, or the first three and how many more. */
+function namesInWords(names: readonly string[]): string {
+  const shown = names.slice(0, 3);
+  const more = names.length - shown.length;
+  if (more > 0) return `${shown.join(', ')} and ${more} more`;
+  if (shown.length <= 1) return shown.join('');
+  return `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`;
+}
+
+/**
+ * The words when a folder project opens but some of its media is in neither the folder nor this computer's media
+ * cache. Media is named by checksum, so the very same file imported again fills its place by itself.
+ */
+export function folderMissingMediaText(
+  title: string,
+  names: readonly string[],
+): string | undefined {
+  if (names.length === 0) return undefined;
+  const one = names.length === 1;
+  return [
+    `“${title}” opened, but ${one ? '1 media file is' : `${names.length} media files are`} missing from its folder: ${namesInWords(names)}.`,
+    one ? 'Its place in the project is kept.' : 'Their places in the project are kept.',
+    one
+      ? 'Import the very same file again and it goes back in place.'
+      : 'Import the very same files again and they go back in place.',
+  ].join(' ');
+}
+
+/** The words when a save lands, but some media could not be copied into the folder. */
+export function folderNotStoredText(names: readonly string[]): string | undefined {
+  if (names.length === 0) return undefined;
+  const one = names.length === 1;
+  return [
+    `Saved, but ${one ? '1 media file' : `${names.length} media files`} could not be copied into the project folder: ${namesInWords(names)}.`,
+    one
+      ? 'It still plays here. Import it again, and the app copies it into the folder on the next save.'
+      : 'They still play here. Import them again, and the app copies them into the folder on the next save.',
+  ].join(' ');
+}
+
+/** The words when a save into the folder is refused or fails. The working copy in the app always keeps the changes. */
+export function folderSaveFailedText(code: string | undefined): string {
+  switch (code) {
+    case 'not-open':
+      return 'Your changes are kept in the app, but the project folder is closed. Go back to Projects and open the folder again to save into it.';
+    case 'save-conflict':
+    case 'wrong-project':
+      return 'This project folder was changed somewhere else. Your changes are kept in the app. Go back to Projects and open the folder again.';
+    default:
+      return 'Your changes could not be saved into the project folder. They are kept in the app, and the app tries again.';
+  }
+}
+
+/** The words when a folder was settled as ready, but its saved project could not be loaded into the editor. */
+export function folderLoadFailedText(code: string | undefined): string {
+  if (code === 'not-open') {
+    return 'The project folder was closed before it could open. Open it again.';
+  }
+  if (code === 'unreadable') {
+    return 'The saved project in this folder could not be read, so it was not opened. Nothing was changed in the folder.';
+  }
+  return 'The project folder could not be opened in the editor. Nothing was changed in the folder. Try again.';
+}
+
+/** The words when a copied folder opens: it is its own project now, and the folder it was copied from is untouched. */
+export function folderCopyOpenedText(): string {
+  return 'This folder is a copy, so it opened as a new project of its own. The folder it was copied from is left as it is.';
 }

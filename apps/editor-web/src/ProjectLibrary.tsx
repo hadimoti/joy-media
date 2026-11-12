@@ -31,6 +31,7 @@ import {
   type ProjectFolderAnswer,
   type ProjectFolderAsk,
   type ProjectFolderListedItem,
+  type ProjectFolderOpenReply,
 } from './project-folder-client.js';
 import {
   answerText,
@@ -57,6 +58,9 @@ type DialogState =
     }
   | { readonly kind: 'trash' | 'purge'; readonly entry: ProjectCatalogEntry };
 
+/** A folder the desktop settled as ready to edit. */
+export type ProjectFolderReady = Extract<ProjectFolderOpenReply, { readonly kind: 'ready' }>;
+
 export function ProjectLibrary({
   storage,
   onOpen,
@@ -66,9 +70,18 @@ export function ProjectLibrary({
   onTrash,
   onRestore,
   onPurge,
+  onOpenFolder,
 }: {
   readonly storage: BrowserKeyValueStore;
   readonly onOpen: (entry: ProjectCatalogEntry) => void;
+  /**
+   * Opens a folder the desktop settled as ready in the editor. It resolves to `undefined` when the editor took over,
+   * or to the words for why the folder did not open. Without it, the list only says the folder is ready.
+   */
+  readonly onOpenFolder?: (
+    folder: { readonly key: string; readonly name: string },
+    ready: ProjectFolderReady,
+  ) => Promise<string | undefined>;
   readonly onCreate: (title: string) => void;
   readonly onRename: (
     entry: ProjectCatalogEntry,
@@ -258,16 +271,25 @@ export function ProjectLibrary({
     void refreshFolders();
   }, [foldersAvailable, refreshFolders]);
 
-  /** Checks a folder project. Nothing is opened in the editor yet: this settles the folder, or asks the owner. */
+  /**
+   * Opens a folder project: the desktop settles the folder first, or asks the owner. A ready folder opens in the editor
+   * through `onOpenFolder`, and the list is left.
+   */
   const openFolder = async (folder: { readonly key: string; readonly name: string }) => {
     setFolderBusyKey(folder.key);
     setNotice(undefined);
+    let editorTookOver = false;
     try {
       const reply = await openProjectFolder(folder.key);
       if (reply.kind === 'ask') {
         folderDialogKey.current = folder.key;
         setFolderDialogNotice(undefined);
         setFolderDialog({ key: folder.key, name: folder.name, ask: reply.ask });
+      } else if (reply.kind === 'ready' && onOpenFolder !== undefined) {
+        const problem = await onOpenFolder(folder, reply);
+        // The editor took over, so this list is gone: nothing more to show or refresh here.
+        editorTookOver = problem === undefined;
+        if (problem !== undefined) setNotice({ kind: 'error', text: problem });
       } else {
         setNotice({ kind: reply.kind === 'ready' ? 'success' : 'error', text: openText(reply) });
       }
@@ -277,9 +299,11 @@ export function ProjectLibrary({
         text: 'The folder project could not be confirmed. Part of it may be saved. Open the folder again to check it.',
       });
     } finally {
-      // Only this folder's busy state ends here: another folder's operation may still be in flight.
-      setFolderBusyKey((current) => (current === folder.key ? null : current));
-      await refreshFolders();
+      if (!editorTookOver) {
+        // Only this folder's busy state ends here: another folder's operation may still be in flight.
+        setFolderBusyKey((current) => (current === folder.key ? null : current));
+        await refreshFolders();
+      }
     }
   };
 

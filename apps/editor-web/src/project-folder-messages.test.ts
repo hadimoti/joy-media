@@ -5,6 +5,11 @@ import {
   answerText,
   askCopy,
   createText,
+  folderCopyOpenedText,
+  folderLoadFailedText,
+  folderMissingMediaText,
+  folderNotStoredText,
+  folderSaveFailedText,
   openText,
   problemWords,
   refusalText,
@@ -115,7 +120,7 @@ describe('unverifiable folders', () => {
 });
 
 describe('ready and renewed folders', () => {
-  it('says a ready folder by its title, and that editing from folders is not built yet', () => {
+  it('says a ready folder is opening, by its title', () => {
     const text = openText({
       kind: 'ready',
       claim: 'kept',
@@ -123,8 +128,8 @@ describe('ready and renewed folders', () => {
       title: 'Summer Cut',
       siblings: [],
     });
-    expect(text).toContain('“Summer Cut”');
-    expect(text).toContain('not built yet');
+    expect(text).toBe('Opening “Summer Cut”.');
+    expect(text).not.toContain('not built yet');
   });
 
   it('says a renewed copy got a new id, its old id, and the folders that still hold the old id', () => {
@@ -471,5 +476,56 @@ describe('small helpers', () => {
     expect(problemWords('no-entry')).toBe('no project entry');
     expect(problemWords('unreadable')).toBe('could not be read');
     expect(problemWords('not-read-in-time')).toBe('busy, try again');
+  });
+});
+
+describe('folder project media and save words', () => {
+  it('say one missing media file by name, that its place is kept, and how to bring it back', () => {
+    expect(folderMissingMediaText('Summer', ['beach.mp4'])).toBe(
+      '“Summer” opened, but 1 media file is missing from its folder: beach.mp4. Its place in the project is kept. Import the very same file again and it goes back in place.',
+    );
+  });
+
+  it('say several missing files, and shorten a long list', () => {
+    expect(folderMissingMediaText('Summer', ['a.mp4', 'b.png'])).toBe(
+      '“Summer” opened, but 2 media files are missing from its folder: a.mp4 and b.png. Their places in the project are kept. Import the very same files again and they go back in place.',
+    );
+    expect(folderMissingMediaText('Summer', ['a', 'b', 'c', 'd', 'e'])).toContain(
+      '5 media files are missing from its folder: a, b, c and 2 more.',
+    );
+  });
+
+  it('say nothing when no media is missing', () => {
+    expect(folderMissingMediaText('Summer', [])).toBeUndefined();
+    expect(folderNotStoredText([])).toBeUndefined();
+  });
+
+  it('say which media a save could not copy into the folder', () => {
+    expect(folderNotStoredText(['logo.png'])).toBe(
+      'Saved, but 1 media file could not be copied into the project folder: logo.png. It still plays here. Import it again, and the app copies it into the folder on the next save.',
+    );
+  });
+
+  it('say a failed save keeps the changes in the app', () => {
+    for (const code of ['not-open', 'save-conflict', 'wrong-project', 'failed', undefined]) {
+      expect(folderSaveFailedText(code)).toMatch(/kept in the app/);
+    }
+  });
+
+  it('say a failed load changed nothing in the folder', () => {
+    expect(folderLoadFailedText('unreadable')).toContain('Nothing was changed in the folder.');
+    expect(folderLoadFailedText('failed')).toContain('Nothing was changed in the folder.');
+  });
+
+  it('use no developer words', () => {
+    const texts = [
+      folderMissingMediaText('Summer', ['a.mp4']),
+      folderNotStoredText(['a.mp4']),
+      folderSaveFailedText('save-conflict'),
+      folderSaveFailedText('not-open'),
+      folderLoadFailedText('unreadable'),
+      folderCopyOpenedText(),
+    ].join(' ');
+    expect(texts).not.toMatch(/sqlite|asset id|checksum|revision|IPC|database|cache/i);
   });
 });

@@ -162,3 +162,97 @@ export async function restoreProjectFolder(
     title,
   })) as ProjectFolderRestoreReply;
 }
+
+/** The saved project of the folder that is open in the editor. `document` is `null` before the first save. */
+export type ProjectFolderLoadReply =
+  | {
+      readonly kind: 'loaded';
+      readonly id: string;
+      readonly title: string;
+      readonly document: unknown;
+      readonly revisionId: string;
+      readonly documentProjectId: string;
+    }
+  | ProjectFolderRefused;
+
+export interface ProjectFolderSaveMedia {
+  readonly assetId: string;
+  readonly kind: string;
+  readonly displayName: string;
+  readonly sha256?: string;
+}
+
+export interface ProjectFolderSaveRequest {
+  readonly projectId: string;
+  readonly baseRevisionId: string;
+  readonly revisionId: string;
+  readonly title: string;
+  readonly document: unknown;
+  readonly media: readonly ProjectFolderSaveMedia[];
+}
+
+export type ProjectFolderSaveReply =
+  | { readonly kind: 'saved'; readonly revisionId: string; readonly notStored: readonly string[] }
+  | ProjectFolderRefused;
+
+export interface ProjectFolderMediaState {
+  readonly assetId: string;
+  readonly present: boolean;
+  readonly bytes?: number;
+  readonly sha256?: string;
+  readonly displayName?: string;
+}
+
+export type ProjectFolderMediaStatesReply =
+  | { readonly kind: 'media'; readonly states: readonly ProjectFolderMediaState[] }
+  | ProjectFolderRefused;
+
+export type ProjectFolderMediaBytesReply =
+  | {
+      readonly kind: 'media-bytes';
+      readonly assetId: string;
+      readonly offset: number;
+      readonly total: number;
+      readonly bytes: Uint8Array;
+    }
+  | ProjectFolderRefused;
+
+export async function loadProjectFolder(key: string): Promise<ProjectFolderLoadReply> {
+  return (await bridge().invoke('desktop.project-folder.load', { key })) as ProjectFolderLoadReply;
+}
+
+export async function saveProjectFolder(
+  key: string,
+  save: ProjectFolderSaveRequest,
+): Promise<ProjectFolderSaveReply> {
+  return (await bridge().invoke('desktop.project-folder.save', {
+    key,
+    ...save,
+  })) as ProjectFolderSaveReply;
+}
+
+export async function projectFolderMediaStates(
+  key: string,
+  assetIds: readonly string[],
+): Promise<ProjectFolderMediaStatesReply> {
+  return (await bridge().invoke('desktop.project-folder.media', {
+    key,
+    assetIds,
+  })) as ProjectFolderMediaStatesReply;
+}
+
+export async function readProjectFolderMedia(
+  key: string,
+  assetId: string,
+  offset: number,
+): Promise<ProjectFolderMediaBytesReply> {
+  return (await bridge().invoke('desktop.project-folder.media', {
+    key,
+    assetId,
+    offset,
+  })) as ProjectFolderMediaBytesReply;
+}
+
+export async function closeProjectFolder(key: string): Promise<void> {
+  await bridge().invoke('desktop.project-folder.close', { key });
+}

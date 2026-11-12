@@ -244,7 +244,25 @@ import { buildDualLensProjection } from './dual-lens-model.js';
 import { primaryNodeIdForClip, type LensRevealRequest } from './dual-lens-reveal.js';
 import { buildDataLanes } from './data-lanes.js';
 import { SpecialistReviewPanel } from './SpecialistReviewPanel.js';
-import { ProjectLibrary } from './ProjectLibrary.js';
+import { ProjectLibrary, type ProjectFolderReady } from './ProjectLibrary.js';
+import {
+  ACTIVE_FOLDER_PROJECT_KEY,
+  openFolderProject as openFolderProjectInEditor,
+  type FolderProjectPort,
+} from './folder-project.js';
+import { FolderProjectSync } from './folder-project-sync.js';
+import {
+  closeProjectFolder,
+  loadProjectFolder,
+  projectFolderMediaStates,
+  readProjectFolderMedia,
+  saveProjectFolder,
+} from './project-folder-client.js';
+import {
+  folderCopyOpenedText,
+  folderLoadFailedText,
+  folderMissingMediaText,
+} from './project-folder-messages.js';
 import {
   clearActiveProjectId,
   getCatalogProject,
@@ -568,6 +586,18 @@ const stickerImageCache = new StickerImageCache();
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
 const exportCachePromise = openOpfsExportCache();
 const mediaControlPlaneClient = new BrowserControlPlaneClient();
+/** The desktop's project-folder calls, for folder projects open in the editor (folder-project.ts). */
+const desktopFolderPort: FolderProjectPort & { close(key: string): Promise<void> } = {
+  load: loadProjectFolder,
+  save: saveProjectFolder,
+  mediaStates: projectFolderMediaStates,
+  readMedia: readProjectFolderMedia,
+  close: closeProjectFolder,
+};
+/** How often an open folder project is checked for changes to save into its folder. */
+const FOLDER_PROJECT_SAVE_INTERVAL_MS = 2000;
+/** How long a folder project notice stays on screen: long enough to read a list of file names. */
+const FOLDER_PROJECT_NOTICE_MS = 15_000;
 
 function imageSizesFromCache(
   timeUs = 0,
@@ -882,6 +912,13 @@ export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
     const id = loadActiveProjectId(storage);
     if (id === null) return null;
+    // A folder project opens only through its folder. After a restart the folder is closed, so the app starts on the
+    // project list, and opening the folder there brings the project back with any unsaved changes.
+    if (storage.getItem(ACTIVE_FOLDER_PROJECT_KEY) === id) {
+      storage.removeItem?.(ACTIVE_FOLDER_PROJECT_KEY);
+      clearActiveProjectId(storage);
+      return null;
+    }
     if (getCatalogProject(storage, id)?.trashedAt !== undefined) {
       clearActiveProjectId(storage);
       return null;
@@ -902,6 +939,81 @@ export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
     },
     [storage],
   );
+
+  /** The folder project open in the editor, and what keeps it saved. `null` for a browser project. */
+  const folderSyncRef = useRef<FolderProjectSync | null>(null);
+  const [folderProjectNotice, setFolderProjectNotice] = useState<
+    { readonly text: string; readonly kind: 'info' | 'error'; readonly id: number } | undefined
+  >(undefined);
+  const folderNoticeCounter = useRef(0);
+  const sayFolderNotice = useCallback((text: string, kind: 'info' | 'error') => {
+    folderNoticeCounter.current += 1;
+    setFolderProjectNotice({ text, kind, id: folderNoticeCounter.current });
+  }, []);
+
+  /**
+   * Opens a folder the desktop settled as ready: its saved project becomes the working copy, its media is brought into
+   * this computer's media cache, and the editor opens. Resolves to the words for a failure, or `undefined`.
+   */
+  const openFolderProject = useCallback(
+    async (
+      folder: { readonly key: string },
+      ready: ProjectFolderReady,
+    ): Promise<string | undefined> => {
+      let result: Awaited<ReturnType<typeof openFolderProjectInEditor>>;
+      try {
+        result = await openFolderProjectInEditor({
+          key: folder.key,
+          storage,
+          port: desktopFolderPort,
+          cache: await originalAssetCachePromise,
+        });
+      } catch {
+        await closeProjectFolder(folder.key).catch(() => undefined);
+        return folderLoadFailedText(undefined);
+      }
+      if (result.kind !== 'opened') {
+        await closeProjectFolder(folder.key).catch(() => undefined);
+        return folderLoadFailedText(result.kind === 'refused' ? result.code : 'unreadable');
+      }
+      folderSyncRef.current = new FolderProjectSync({
+        key: folder.key,
+        entry: result.entry,
+        storage,
+        port: desktopFolderPort,
+        revisionId: result.revisionId,
+        needsSave: result.needsSave,
+        onNotice: sayFolderNotice,
+      });
+      storage.setItem(ACTIVE_FOLDER_PROJECT_KEY, result.entry.id);
+      saveActiveProjectId(storage, result.entry.id);
+      setActiveProjectId(result.entry.id);
+      if (ready.claim === 'renewed') sayFolderNotice(folderCopyOpenedText(), 'info');
+      const missing = folderMissingMediaText(ready.title, result.missingMedia);
+      if (missing !== undefined) sayFolderNotice(missing, 'error');
+      void folderSyncRef.current.flush();
+      return undefined;
+    },
+    [sayFolderNotice, storage],
+  );
+
+  // While a folder project is open, its changes are saved into the folder every few seconds, and marked unsaved at once
+  // when the window closes, so a reopen keeps them even if the last save did not finish.
+  useEffect(() => {
+    const sync = folderSyncRef.current;
+    if (activeProjectId === null || sync === null || sync.projectId !== activeProjectId) return;
+    const timer = window.setInterval(() => {
+      if (sync.check()) void sync.flush();
+    }, FOLDER_PROJECT_SAVE_INTERVAL_MS);
+    const markBeforeClose = () => {
+      sync.check();
+    };
+    window.addEventListener('beforeunload', markBeforeClose);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('beforeunload', markBeforeClose);
+    };
+  }, [activeProjectId]);
 
   const importProjectFromFile = useCallback(
     async (file: File) => {
@@ -991,8 +1103,19 @@ export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
   );
 
   const backToLibrary = useCallback(() => {
-    clearActiveProjectId(storage);
-    setActiveProjectId(null);
+    const sync = folderSyncRef.current;
+    folderSyncRef.current = null;
+    const leave = () => {
+      storage.removeItem?.(ACTIVE_FOLDER_PROJECT_KEY);
+      clearActiveProjectId(storage);
+      setActiveProjectId(null);
+    };
+    if (sync === null) {
+      leave();
+      return;
+    }
+    // A folder project is saved a last time and its folder closed before the list shows, so the list reads it as saved.
+    void sync.close().finally(leave);
   }, [storage]);
 
   if (activeProjectId === null) {
@@ -1006,6 +1129,7 @@ export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
         onTrash={trashProject}
         onRestore={restoreProject}
         onPurge={purgeProject}
+        onOpenFolder={openFolderProject}
       />
     );
   }
@@ -1019,6 +1143,7 @@ export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
       onBackToLibrary={backToLibrary}
       onImportProjectFile={importProjectFromFile}
       projectPackageNotice={projectPackageNotice}
+      folderProjectNotice={folderProjectNotice}
     />
   );
 }
@@ -1036,6 +1161,7 @@ function EditorWorkspace({
   onBackToLibrary,
   onImportProjectFile,
   projectPackageNotice,
+  folderProjectNotice,
 }: {
   readonly projectId: string;
   readonly storage: GuardedBrowserStorage;
@@ -1043,6 +1169,9 @@ function EditorWorkspace({
   readonly onBackToLibrary: () => void;
   readonly onImportProjectFile: (file: File) => void | Promise<void>;
   readonly projectPackageNotice?: string | undefined;
+  /** Words about the open folder project: missing media, or a save that did not land. */
+  readonly folderProjectNotice?:
+    { readonly text: string; readonly kind: 'info' | 'error'; readonly id: number } | undefined;
 }) {
   const joyAgentRunLifecycleRef = useRef<ProjectJoyAgentRunLifecycle | null>(null);
   let joyAgentRunLifecycle = joyAgentRunLifecycleRef.current;
@@ -1276,15 +1405,22 @@ function EditorWorkspace({
       exportUrlRetentionRef.current?.dispose();
     };
   }, []);
-  const showToast = useCallback((message: string, kind: 'info' | 'success' | 'error' = 'info') => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    setToasts((prev) => [...prev, { id, message, kind }]);
-    const timer = window.setTimeout(() => {
-      toastTimersRef.current.delete(id);
-      setToasts((prev) => prev.filter((toast) => toast.id !== id));
-    }, 4000);
-    toastTimersRef.current.set(id, timer);
-  }, []);
+  const showToast = useCallback(
+    (message: string, kind: 'info' | 'success' | 'error' = 'info', durationMs = 4000) => {
+      const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setToasts((prev) => [...prev, { id, message, kind }]);
+      const timer = window.setTimeout(() => {
+        toastTimersRef.current.delete(id);
+        setToasts((prev) => prev.filter((toast) => toast.id !== id));
+      }, durationMs);
+      toastTimersRef.current.set(id, timer);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (folderProjectNotice === undefined) return;
+    showToast(folderProjectNotice.text, folderProjectNotice.kind, FOLDER_PROJECT_NOTICE_MS);
+  }, [folderProjectNotice, showToast]);
   useEffect(() => {
     if (projectPackageNotice === undefined) return;
     showToast(
