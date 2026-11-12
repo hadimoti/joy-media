@@ -108,7 +108,10 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
 
   const handlers: Record<IpcChannel, IpcHandler> = {
     ...mediaChannelTable(deps.mediaChannel),
-    ...createProjectFolderHandlers(deps.projectFolders),
+    // A folder save copies an asset's stored original into the folder. Its place is looked up here, by id.
+    ...createProjectFolderHandlers(deps.projectFolders, {
+      originalPath: (assetId) => deps.localDatabase.localAssets.storedPath(assetId),
+    }),
     'desktop.provider-profile.sign-in': async (payload): Promise<IpcResult> => {
       const request = asSignInRequest(payload);
       if (request === undefined) return { ok: false, error: 'Invalid sign-in request' };

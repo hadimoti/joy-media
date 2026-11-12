@@ -80,4 +80,107 @@ describe('the desktop.project-folder channels', () => {
     await handlers['desktop.project-folder.restore']({ key: 'folder-1', title: ' Back ' });
     expect(port.request).toHaveBeenLastCalledWith('restore', { key: 'folder-1', title: 'Back' });
   });
+
+  it('pass load and close with a key only', async () => {
+    const port = fakePort();
+    const handlers = createProjectFolderHandlers(port);
+    expect(await handlers['desktop.project-folder.load']({})).toEqual(INVALID);
+    await handlers['desktop.project-folder.load']({ key: 'folder-1', path: 'C:\\elsewhere' });
+    expect(port.request).toHaveBeenLastCalledWith('load', { key: 'folder-1' });
+    await handlers['desktop.project-folder.close']({ key: 'folder-1' });
+    expect(port.request).toHaveBeenLastCalledWith('close', { key: 'folder-1' });
+  });
+
+  const SHA = 'a'.repeat(64);
+  const save = {
+    key: 'folder-1',
+    projectId: 'project-1',
+    baseRevisionId: '',
+    revisionId: 'r1',
+    title: ' Summer ',
+    document: { visual: { id: 'project-1' } },
+    media: [{ assetId: `joylib-${SHA}`, kind: 'video', displayName: 'beach.mp4', sha256: SHA }],
+  };
+
+  it('add the stored original place to a save, looked up by id in the main process', async () => {
+    const port = fakePort();
+    const originalPath = vi.fn((id: string) =>
+      id === `joylib-${SHA}` ? 'D:\\originals\\a.bin' : undefined,
+    );
+    const handlers = createProjectFolderHandlers(port, { originalPath });
+    await handlers['desktop.project-folder.save']({
+      ...save,
+      media: [
+        { ...save.media[0], sourcePath: 'C:\\Windows\\secret.txt' },
+        { assetId: 'joylib-other', kind: 'image', displayName: 'logo.png' },
+      ],
+    });
+    expect(port.request).toHaveBeenLastCalledWith('save', {
+      key: 'folder-1',
+      projectId: 'project-1',
+      baseRevisionId: '',
+      revisionId: 'r1',
+      title: 'Summer',
+      document: { visual: { id: 'project-1' } },
+      media: [
+        {
+          assetId: `joylib-${SHA}`,
+          kind: 'video',
+          displayName: 'beach.mp4',
+          sha256: SHA,
+          sourcePath: 'D:\\originals\\a.bin',
+        },
+        { assetId: 'joylib-other', kind: 'image', displayName: 'logo.png' },
+      ],
+    });
+  });
+
+  it('refuse a malformed save without calling the worker', async () => {
+    const port = fakePort();
+    const handlers = createProjectFolderHandlers(port);
+    const bad = [
+      { ...save, key: '' },
+      { ...save, projectId: '../x' },
+      { ...save, revisionId: '' },
+      { ...save, title: '' },
+      { ...save, document: 'text' },
+      { ...save, document: [1] },
+      { ...save, media: 'none' },
+      { ...save, media: [{ assetId: 'a/b', kind: 'video', displayName: 'x' }] },
+      { ...save, media: [{ assetId: 'a', kind: 'Video!', displayName: 'x' }] },
+      { ...save, media: [{ assetId: 'a', kind: 'video', displayName: 'x', sha256: 'zz' }] },
+    ];
+    for (const payload of bad) {
+      expect(await handlers['desktop.project-folder.save'](payload)).toEqual(INVALID);
+    }
+    expect(port.request).not.toHaveBeenCalled();
+  });
+
+  it('pass a media check by ids, or a media read by id and offset', async () => {
+    const port = fakePort();
+    const handlers = createProjectFolderHandlers(port);
+    await handlers['desktop.project-folder.media']({ key: 'folder-1', assetIds: ['joylib-a'] });
+    expect(port.request).toHaveBeenLastCalledWith('media', {
+      key: 'folder-1',
+      assetIds: ['joylib-a'],
+    });
+    await handlers['desktop.project-folder.media']({
+      key: 'folder-1',
+      assetId: 'joylib-a',
+      offset: 16,
+    });
+    expect(port.request).toHaveBeenLastCalledWith('media', {
+      key: 'folder-1',
+      assetId: 'joylib-a',
+      offset: 16,
+    });
+    const calls = port.request.mock.calls.length;
+    expect(
+      await handlers['desktop.project-folder.media']({ key: 'folder-1', assetIds: ['../a'] }),
+    ).toEqual(INVALID);
+    expect(
+      await handlers['desktop.project-folder.media']({ key: 'folder-1', assetId: 'a', offset: -1 }),
+    ).toEqual(INVALID);
+    expect(port.request.mock.calls.length).toBe(calls);
+  });
 });

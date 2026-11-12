@@ -57,6 +57,10 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.project-folder.open',
   'desktop.project-folder.answer',
   'desktop.project-folder.restore',
+  'desktop.project-folder.load',
+  'desktop.project-folder.save',
+  'desktop.project-folder.media',
+  'desktop.project-folder.close',
 ]);
 
 module.exports = { IPC_CHANNELS };

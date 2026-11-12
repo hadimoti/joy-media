@@ -50,6 +50,10 @@ export const IPC_CHANNELS = [
   'desktop.project-folder.open',
   'desktop.project-folder.answer',
   'desktop.project-folder.restore',
+  'desktop.project-folder.load',
+  'desktop.project-folder.save',
+  'desktop.project-folder.media',
+  'desktop.project-folder.close',
 ] as const;
 export type IpcChannel = (typeof IPC_CHANNELS)[number];
 export interface IpcRequest {
