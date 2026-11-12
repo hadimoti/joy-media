@@ -44,9 +44,11 @@ try {
   }
   Set-Location -LiteralPath $script:repoRoot
   $null = Invoke-Git -Arguments @('rev-parse', '--verify', ($Base + '^{commit}'))
+  # Compare against the merge-base so changes that landed on the base after this branch left it are not counted as this branch's changes.
+  $mergeBase = (Invoke-Git -Arguments @('merge-base', $Base, 'HEAD') | Select-Object -First 1).Trim()
 
   $changedFiles = @(
-    Invoke-Git -Arguments @('diff', '--name-only', '--diff-filter=ACMRTUXB', '--no-renames', $Base) |
+    Invoke-Git -Arguments @('diff', '--name-only', '--diff-filter=ACMRTUXB', '--no-renames', $mergeBase) |
       ForEach-Object { $_.Trim() } |
       Where-Object { $_ -ne '' } |
       Sort-Object -Unique
@@ -77,7 +79,7 @@ try {
     }
   }
 
-  $diff = Invoke-Git -Arguments @('diff', '--no-ext-diff', '--no-color', '--no-renames', '--unified=0', $Base)
+  $diff = Invoke-Git -Arguments @('diff', '--no-ext-diff', '--no-color', '--no-renames', '--unified=0', $mergeBase)
   $forbiddenPaths = @(
     ('C:\Users\' + 'HadiMoti'),
     ('C:\Users\' + 'HadiMoti\joy-media'),
