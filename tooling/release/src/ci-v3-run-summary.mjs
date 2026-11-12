@@ -28,13 +28,10 @@ export const GATE_CHECKS = [
   'windows-acceptance',
   'feature-status',
 ];
-// The lanes of each topology, as the gate's needs list names them. The two-pass lanes are release-candidate-v2's nine lanes; the
+// The lanes of each topology, as the gate's needs list names them. The two-pass lanes are release-candidate-v2's six lanes (its Windows jobs were retired by 4cb35d7a); the
 // single-pass lanes are release-candidate-v3's eight (plan section 3.4). ci-v3-run-summary.test.ts pins both against the gate.
 export const TWO_PASS_LANES = [
   'linux-real-services',
-  'windows-p0-real-services',
-  'node-contracts',
-  'windows-worker-clean',
   'acceptance-primary',
   'acceptance-responsive',
   'prod-build-smoke',

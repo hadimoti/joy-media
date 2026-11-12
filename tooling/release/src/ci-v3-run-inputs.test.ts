@@ -65,10 +65,10 @@ describe('run inputs for the shadow comparison', () => {
     expect(summary.gateChecks.tests).toBe('passed');
   });
 
-  it('builds two-pass inputs for the v2 run, with its nine lanes and its own verdict scenario', () => {
+  it('builds two-pass inputs for the v2 run, with its six lanes and its own verdict scenario', () => {
     const inputs = buildRunInputs(fixture('two-pass'));
     const summary = buildRunSummary(inputs);
-    expect(Object.keys(summary.lanes)).toHaveLength(9);
+    expect(Object.keys(summary.lanes)).toHaveLength(6);
     expect(summary.scenarios['release.exact-candidate-two-pass']).toBeDefined();
     expect(summary.topology).toBe('two-pass');
   });
@@ -82,7 +82,7 @@ describe('run inputs for the shadow comparison', () => {
     );
   });
 
-  it('refuses a v2 run that is missing one of its nine lanes', () => {
+  it('refuses a v2 run that is missing one of its six lanes', () => {
     const base = fixture('two-pass');
     const needs: Record<string, unknown> = { ...base.needs };
     delete needs['prod-build-smoke'];

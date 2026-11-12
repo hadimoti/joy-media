@@ -10,6 +10,7 @@ $distReleases = Join-Path $repoRoot "apps\desktop\dist\releases"
 $zipPath = Join-Path $distReleases "joy-media-windows-x64-v$Version.zip"
 $outExe = Join-Path $distReleases "joy-media-setup.exe"
 $srcCs = Join-Path $PSScriptRoot "Setup.cs"
+$srcUserPath = Join-Path $PSScriptRoot "UserPath.cs"
 
 # The installer displays and registers InstallerEngine.ProductVersion; refuse to embed a payload
 # whose version does not match it so the Add/Remove Programs entry can never lie.
@@ -38,10 +39,28 @@ if (-not $csc -or -not (Test-Path $csc)) {
 Write-Host "Compiling $outExe with payload $zipPath..."
 & $csc /target:winexe /optimize+ /platform:x64 `
     /reference:System.dll,System.Core.dll,Microsoft.CSharp.dll,System.Drawing.dll,System.Windows.Forms.dll,System.IO.Compression.dll,System.IO.Compression.FileSystem.dll `
-    "/resource:$zipPath,payload.zip" "/out:$outExe" $srcCs
+    "/resource:$zipPath,payload.zip" "/out:$outExe" $srcCs $srcUserPath
 
 if ($LASTEXITCODE -ne 0) {
     throw "Compilation failed with code $LASTEXITCODE"
 }
 
 Write-Host "Successfully built $outExe ($((Get-Item $outExe).Length) bytes)."
+
+# The packager writes SHA256SUMS.txt before this script builds the setup, so the setup's digest is added
+# here. The release gate and the download check use that file as the checksum source, so a missing file
+# stops the build. A line for the setup from an earlier build is replaced, because a rebuild gives a new
+# file with a new digest. (SUMS-BLOCK-BEGIN)
+$sumsPath = Join-Path $distReleases "SHA256SUMS.txt"
+if (-not (Test-Path -LiteralPath $sumsPath -PathType Leaf)) {
+    throw "SHA256SUMS.txt not found at $sumsPath. Run desktop packager first."
+}
+$sumsEntries = [System.Collections.Generic.List[string]]::new()
+foreach ($line in (Get-Content -LiteralPath $sumsPath)) {
+    if ($line.Trim() -ne "" -and $line -notmatch '\sjoy-media-setup\.exe$') { $sumsEntries.Add($line) }
+}
+$setupSha256 = (Get-FileHash -LiteralPath $outExe -Algorithm SHA256).Hash.ToLowerInvariant()
+$sumsEntries.Add("$setupSha256  joy-media-setup.exe")
+[IO.File]::WriteAllText($sumsPath, (($sumsEntries -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+Write-Host "Recorded joy-media-setup.exe in $sumsPath."
+# (SUMS-BLOCK-END)

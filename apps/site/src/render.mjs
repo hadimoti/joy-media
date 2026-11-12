@@ -121,7 +121,8 @@ ${rows}
     <h2>Before you install</h2>
     <ul>
       <li>JOY Media does not update itself. Return to this page for newer versions.</li>
-      <li>Windows SmartScreen may warn about a file it does not recognise. Only continue when the hash matches the table.</li>
+      <li>The files are not code-signed, so Windows SmartScreen warns about them. Only continue when the hash matches the table.</li>
+      <li>Most people want <code>joy-media-setup.exe</code>. The zip is a portable copy that needs no install.</li>
     </ul>
 
     <h2>Older releases</h2>

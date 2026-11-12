@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { ATTENDED_SCENARIOS, REQUIRED_ATTENDED_CHECKS } from './attended-receipt.js';
 import { buildReadinessEvidence } from './create-readiness-evidence.mjs';
 import { REQUIRED_SCENARIOS, validateReadinessEvidence } from './readiness-evidence.js';
 
@@ -13,9 +14,6 @@ const RUN_ID = '444';
 const ATTEMPT = '1';
 const LANES = [
   'linux-real-services',
-  'windows-p0-real-services',
-  'node-contracts',
-  'windows-worker-clean',
   'acceptance-primary',
   'acceptance-responsive',
   'prod-build-smoke',
@@ -693,18 +691,15 @@ describe('createReadinessEvidence', () => {
     ).toThrow(/workflow run id is invalid/u);
   });
 
-  it('records project.persistence.fresh-process only from its measured Playwright step', () => {
-    const lifecycle = readFileSync(
-      fileURLToPath(new URL('../../../tests/desktop/windows-lifecycle.ps1', import.meta.url)),
-      'utf8',
-    );
-    const recordings = lifecycle
-      .split('\n')
-      .filter((line) => line.includes("'project.persistence.fresh-process'"));
-    expect(recordings).toHaveLength(1);
-    expect(recordings[0]).toContain('Set-ScenarioOutcome');
-    expect(recordings[0]).toContain('Get-PlaywrightAccountingExitCode $freshProcessReport');
-    expect(lifecycle).toContain('PLAYWRIGHT_JSON_OUTPUT_NAME = $freshProcessReport');
-    expect(lifecycle).toContain('tests/desktop/fresh-process-persistence.spec.ts');
+  it('records project.persistence.fresh-process only from the four measured checks of the attended receipt', () => {
+    // The Windows lifecycle script that used to record this scenario ran on the retired Docker runner. The attended
+    // harness replaces it: a receipt is accepted only when each of these four checks passed, once, on the first attempt.
+    expect(ATTENDED_SCENARIOS).toContain('project.persistence.fresh-process');
+    expect(REQUIRED_ATTENDED_CHECKS['project.persistence.fresh-process']).toEqual([
+      'editable-project-exported',
+      'fresh-profile-started',
+      'project-imported-in-fresh-profile',
+      'export-from-fresh-profile-probed',
+    ]);
   });
 });

@@ -160,10 +160,19 @@ $smShortcut.Description = "JOY Media Desktop Application"
 $smShortcut.Save()
 
 # Register InstallPath in User PATH environment variable
+function Get-PathWithInstallDir([string]$PathValue, [string]$Install) {
+    # @() keeps a single entry an array. Without it, "$parts + $Install" joined a one-entry PATH and the
+    # install folder into one string with no separator.
+    $parts = @(if ($PathValue) { $PathValue -split ';' | Where-Object { $_ -ne '' } })
+    $target = $Install.TrimEnd('\\')
+    foreach ($part in $parts) {
+        if ($part.TrimEnd('\\') -ieq $target) { return $null }
+    }
+    return (($parts + $Install) -join ';')
+}
 $userPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
-$pathParts = if ($userPath) { $userPath -split ';' | Where-Object { $_ -ne '' } } else { @() }
-if ($pathParts -notcontains $InstallPath) {
-    $newPath = ($pathParts + $InstallPath) -join ';'
+$newPath = Get-PathWithInstallDir $userPath $InstallPath
+if ($null -ne $newPath) {
     [Environment]::SetEnvironmentVariable("Path", $newPath, [EnvironmentVariableTarget]::User)
     $env:Path = "$env:Path;$InstallPath"
     Write-Host "Added $InstallPath to User PATH ('joy' and 'joy-media' commands registered globally)." -ForegroundColor Green
@@ -215,6 +224,8 @@ if errorlevel 1 (
 del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\JOY Media.lnk" 2>nul
 del "%USERPROFILE%\\Desktop\\JOY Media.lnk" 2>nul
 reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\JoyMedia" /f 2>nul
+rem Remove the joy:// handler only when it names this install, so another JOY Media build keeps its own.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$k = 'HKCU:\\Software\\Classes\\joy'; $c = (Get-ItemProperty -LiteralPath ($k + '\\shell\\open\\command') -ErrorAction SilentlyContinue).'(default)'; if ($c -and $env:JOY_MEDIA_INSTALL_DIR -and $c.IndexOf($env:JOY_MEDIA_INSTALL_DIR, [StringComparison]::OrdinalIgnoreCase) -ge 0) { Remove-Item -LiteralPath $k -Recurse -Force }" 2>nul
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p = [Environment]::GetEnvironmentVariable('Path', 'User'); $target = $env:JOY_MEDIA_INSTALL_DIR.TrimEnd('\\'); if ($p) { $np = ($p -split ';' | Where-Object { $_ -ne '' -and $_.TrimEnd('\\') -ine $target }) -join ';'; [Environment]::SetEnvironmentVariable('Path', $np, 'User') }" 2>nul
 
