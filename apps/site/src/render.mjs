@@ -187,11 +187,11 @@ function homeBody(tag) {
         <a class="button button-quiet" href="${REPOSITORY_URL}">View source on GitHub</a>
       </p>
       <p class="small">Windows x64. Free under the MIT License.</p>
-      <img class="shot shot-hero" src="/img/hero.png" width="2000" height="620" alt="The JOY Media editor: photos and clips in the media panel, a large preview in the middle, and built-in motion presets on the right.">
+      <img class="shot shot-hero" src="/img/hero.webp" width="2000" height="620" alt="The JOY Media editor: photos and clips in the media panel, a large preview in the middle, and built-in motion presets on the right.">
     </section>
 
     <section class="feature feature-split feature-split-left" aria-labelledby="media">
-      <img class="shot" src="/img/media.png" width="964" height="1024" alt="The media panel with photos and clips as large thumbnails.">
+      <img class="shot" src="/img/media.webp" width="964" height="1024" alt="The media panel with photos and clips as large thumbnails.">
       <div class="feature-text">
         <h2 id="media">Your photos and clips, ready to use</h2>
         <p>Import video, photos and audio, see them as large thumbnails, and add any of them to the timeline with one click. Your files stay on your PC.</p>
@@ -203,7 +203,7 @@ function homeBody(tag) {
         <h2 id="timeline">Cut on a real timeline</h2>
         <p>Stack clips on video and audio tracks. Trim, split and zoom along a ruler you can read, and see your whole edit at a glance.</p>
       </div>
-      <img class="shot" src="/img/timeline.png" width="1600" height="158" alt="The timeline with five clips on a video track, a ruler, and the editing toolbar above it.">
+      <img class="shot" src="/img/timeline.webp" width="1600" height="158" alt="The timeline with five clips on a video track, a ruler, and the editing toolbar above it.">
     </section>
 
     <section class="feature feature-split" aria-labelledby="control">
@@ -211,7 +211,7 @@ function homeBody(tag) {
         <h2 id="control">Fine control when you want it</h2>
         <p>Set position, scale, rotation and opacity for every clip, and animate any of them with keyframes. Effects, Mask, Enhance and Speed sit in tabs right next to it.</p>
       </div>
-      <img class="shot" src="/img/inspector.png" width="972" height="1024" alt="The Inspector panel with the Visual, Enhance, Mask, Effects, Audio and Speed tabs and the transform controls.">
+      <img class="shot" src="/img/inspector.webp" width="972" height="1024" alt="The Inspector panel with the Visual, Enhance, Mask, Effects, Audio and Speed tabs and the transform controls.">
     </section>
 
     <section class="feature feature-pair" aria-labelledby="titles">
@@ -219,8 +219,8 @@ function homeBody(tag) {
         <h2 id="titles">Titles and motion built in</h2>
         <p>Start from a title template, then add a motion preset such as Fade In, Pop or Slide. No plug-ins to hunt for.</p>
       </div>
-      <img class="shot" src="/img/titles.png" width="979" height="558" alt="Title templates: Clean Title, Bold Stack, Cinematic Wide and more.">
-      <img class="shot" src="/img/motion.png" width="1051" height="1056" alt="Built-in motion presets such as Fade In, Fade Out, Pop In, Zoom In and Slide Up.">
+      <img class="shot" src="/img/titles.webp" width="979" height="558" alt="Title templates: Clean Title, Bold Stack, Cinematic Wide and more.">
+      <img class="shot" src="/img/motion.webp" width="1051" height="1056" alt="Built-in motion presets such as Fade In, Fade Out, Pop In, Zoom In and Slide Up.">
     </section>
 
     <section class="feature feature-plain" aria-labelledby="cli">
