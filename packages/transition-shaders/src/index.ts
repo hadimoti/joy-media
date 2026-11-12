@@ -4,7 +4,20 @@
  */
 
 import { TRANSITION_CATALOG } from './catalog.js';
+import {
+  isTransitionCategoryId,
+  isTransitionOption,
+  type TransitionCategoryId,
+  type TransitionOption,
+} from './categories.js';
 import { TRANSITION_GLSL_BY_FILE } from './glsl-sources.js';
+
+export {
+  TRANSITION_CATEGORIES,
+  TRANSITION_OPTIONS,
+  type TransitionCategoryId,
+  type TransitionOption,
+} from './categories.js';
 
 export type TransitionParamValue = number | readonly number[];
 
@@ -19,6 +32,17 @@ export interface TransitionShaderEntry {
   readonly paramsTypes: Readonly<Record<string, string>>;
 }
 
+/** A catalogue entry as the panel lists it: the shader plus its card text and credit. */
+export interface TransitionCatalogEntry extends TransitionShaderEntry {
+  /** One-line description for the card and its tooltip. */
+  readonly description: string;
+  readonly category: TransitionCategoryId;
+  readonly options: readonly TransitionOption[];
+  /** Author and licence as written in the shader file's own header, plus where it came from. */
+  readonly credit: string;
+  readonly glslFile: string;
+}
+
 export interface TransitionUniformDescriptor {
   readonly propertyId: string;
   readonly type: string;
@@ -30,8 +54,12 @@ interface CatalogRow {
   readonly id: string;
   readonly glName: string;
   readonly label: string;
+  readonly description: string;
+  readonly category: string;
+  readonly options: readonly string[];
   readonly license: string;
   readonly author: string;
+  readonly credit: string;
   readonly glslFile: string;
   readonly defaultParams: Readonly<Record<string, TransitionParamValue>>;
   readonly paramsTypes: Readonly<Record<string, string>>;
@@ -39,15 +67,23 @@ interface CatalogRow {
 
 const catalog = TRANSITION_CATALOG as unknown as readonly CatalogRow[];
 
-const entries: readonly TransitionShaderEntry[] = catalog.map((row) => {
+const entries: readonly TransitionCatalogEntry[] = catalog.map((row) => {
   const glsl = TRANSITION_GLSL_BY_FILE[row.glslFile];
   if (glsl === undefined) throw new Error(`Missing GLSL for ${row.glslFile}`);
+  const category = row.category;
+  if (!isTransitionCategoryId(category)) throw new Error(`Unknown category for ${row.id}`);
+  const options = row.options.filter(isTransitionOption);
   return {
     id: row.id,
     glName: row.glName,
     label: row.label,
+    description: row.description,
+    category,
+    options,
     license: row.license,
     author: row.author,
+    credit: row.credit,
+    glslFile: row.glslFile,
     glsl,
     defaultParams: row.defaultParams,
     paramsTypes: row.paramsTypes,
@@ -68,7 +104,7 @@ export const LEGACY_TRANSITION_ALIASES: Readonly<Record<string, string>> = {
   slide: 'gl:Directional',
 };
 
-export function listTransitionShaders(): readonly TransitionShaderEntry[] {
+export function listTransitionShaders(): readonly TransitionCatalogEntry[] {
   return entries;
 }
 
@@ -76,7 +112,7 @@ export function resolveTransitionShaderId(type: string): string {
   return Object.hasOwn(LEGACY_TRANSITION_ALIASES, type) ? LEGACY_TRANSITION_ALIASES[type]! : type;
 }
 
-export function getTransitionShader(type: string): TransitionShaderEntry | undefined {
+export function getTransitionShader(type: string): TransitionCatalogEntry | undefined {
   return byId.get(resolveTransitionShaderId(type));
 }
 
