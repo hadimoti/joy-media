@@ -6,7 +6,7 @@
  * property the Inspector offers instead of a bare "Select a clip" sentence.
  */
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   audioClipPropertyBinding,
   canonicalBindingKey,
@@ -55,7 +55,13 @@ import { MaskInspector } from './MaskInspector.js';
 import { readMaskSettings, type MaskSettings, type MaskTarget } from './masking.js';
 import { EnhanceInspector } from './EnhanceInspector.js';
 import { readUpscaleSettings, type UpscaleSettings, type UpscaleTarget } from './upscaling.js';
-import { useMonitorTransformPreviewFor } from './monitor/monitor-transform-preview.js';
+import {
+  monitorTransformPreview,
+  useMonitorTransformPreviewFor,
+  type MonitorTransformPreviewStore,
+} from './monitor/monitor-transform-preview.js';
+import type { TransformPatches } from './monitor/monitor-transform-drag.js';
+import type { LocalTransform } from './monitor/monitor-transform-maths.js';
 
 const TABS: readonly PanelTabSpec[] = [
   { id: 'visual', label: 'Visual', ariaLabel: 'Visual (Transform)' },
@@ -204,6 +210,34 @@ const DEFAULTS: Record<string, number> = {
   opacity: 1,
 };
 
+/** The transform values the Monitor can preview live (the box and the picture). */
+const LIVE_PREVIEW_KEYS: ReadonlySet<string> = new Set([
+  'x',
+  'y',
+  'scaleX',
+  'scaleY',
+  'rotationDeg',
+]);
+
+/** A typed value the Monitor can draw: finite, and a scale above zero (no flip in v1.1.1). */
+function drawableLiveValue(key: string, value: number): boolean {
+  if (!Number.isFinite(value)) return false;
+  return key === 'scaleX' || key === 'scaleY' ? value > 0 : true;
+}
+
+/**
+ * Removes the values a row put into the live store, but only while they are
+ * still the store's current values (a Monitor drag that took over is left alone).
+ */
+function clearRowPreview(
+  published: { current: TransformPatches | undefined },
+  store: MonitorTransformPreviewStore,
+): void {
+  const patches = published.current;
+  published.current = undefined;
+  if (patches !== undefined && store.get() === patches) store.set(undefined);
+}
+
 function round(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
@@ -229,6 +263,8 @@ interface TransformPropertyRowProps {
   };
   readonly target: VisualObjectV1;
   readonly resolvedValue: number;
+  /** The object's own (local) values at the playhead, without any live preview. */
+  readonly previewBase: LocalTransform;
   readonly timeUs: number;
   readonly idle: boolean;
   readonly hasExpression: boolean;
@@ -255,6 +291,7 @@ function TransformPropertyRow({
   property,
   target,
   resolvedValue,
+  previewBase,
   timeUs,
   idle,
   hasExpression,
@@ -286,15 +323,53 @@ function TransformPropertyRow({
     if (animated) onReplaceChannel(property.key, setKeyframe(curve, onKeyframePayload(next)));
     else onSetStatic(target.id, property.key, next);
   };
-  const adapter = useTransientPropertyControl(
+  // Typing a transform value previews it in the Monitor too (T-M05a review):
+  // the value goes into the same live store a Monitor drag uses, so the picture
+  // and the box follow while typing. Commit (Enter or blur), Escape, or the row
+  // going away clears it. A keyframed value is written as a keyframe on commit
+  // and is not previewed (as its Monitor handles, until T-M05b).
+  const store = monitorTransformPreview;
+  const publishedRef = useRef<TransformPatches | undefined>(undefined);
+  const livePreview = !idle && !hasExpression && !animated && LIVE_PREVIEW_KEYS.has(property.key);
+  const publishPreview = (next: number) => {
+    if (!livePreview || !drawableLiveValue(property.key, next)) {
+      clearRowPreview(publishedRef, store);
+      return;
+    }
+    const patches: TransformPatches = new Map([
+      [target.id, { ...previewBase, [property.key]: next }],
+    ]);
+    publishedRef.current = patches;
+    store.set(patches);
+  };
+  useEffect(() => () => clearRowPreview(publishedRef, store), [store, target.id, property.key]);
+  const interaction = useTransientPropertyControl(
     {
       read: () => previewValue,
-      preview: setPreviewValue,
-      restore: setPreviewValue,
+      preview: (next) => {
+        setPreviewValue(next);
+        publishPreview(next);
+      },
+      restore: (previous) => {
+        setPreviewValue(previous);
+        clearRowPreview(publishedRef, store);
+      },
       commit: ({ next }) => commitValue(next),
     },
     `Set ${property.label}`,
   );
+  const adapter = {
+    ...interaction,
+    // The document now holds the value (or nothing changed): drop the preview.
+    commit: () => {
+      interaction.commit();
+      clearRowPreview(publishedRef, store);
+    },
+    cancel: () => {
+      interaction.cancel();
+      clearRowPreview(publishedRef, store);
+    },
+  };
   const disabled = idle || hasExpression;
   const modified = Math.abs(previewValue - (DEFAULTS[property.key] ?? 0)) > 0.0005;
 
@@ -458,7 +533,8 @@ export function InspectorPanel({
         diagnostics: [] as ReturnType<typeof resolveObjectTransformWithExpressions>['diagnostics'],
       }
     : resolveObjectTransformWithExpressions(target.id, allObjects, timeUs);
-  // While a Monitor drag moves this object, its numbers follow live (T-M05a).
+  // While a Monitor drag (or typing in a transform field) moves this object,
+  // its numbers follow live (T-M05a).
   const monitorDragValues = useMonitorTransformPreviewFor(idle ? undefined : target.id);
   const resolved =
     monitorDragValues === undefined
@@ -624,6 +700,13 @@ export function InspectorPanel({
                     property={{ key, label: property.label, min: property.min, max: property.max }}
                     target={target}
                     resolvedValue={resolved[key]}
+                    previewBase={{
+                      x: documentTransform.x,
+                      y: documentTransform.y,
+                      scaleX: documentTransform.scaleX,
+                      scaleY: documentTransform.scaleY,
+                      rotationDeg: documentTransform.rotationDeg,
+                    }}
                     timeUs={timeUs}
                     idle={idle}
                     hasExpression={hasExpression}
