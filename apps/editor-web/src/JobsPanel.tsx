@@ -16,6 +16,7 @@ import {
   retryDesktopWorker,
   type DesktopWorkerStatus,
 } from './desktop-client.js';
+import { confirmDialog } from './app-dialogs.js';
 import { BoundedPollingLoop } from './bounded-polling.js';
 import { CloseIcon, RefreshIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
@@ -224,8 +225,14 @@ export function JobsPanel({
                           aria-label={`Cancel job ${job.id}`}
                           title="Cancel"
                           data-guide="Cancel"
-                          onClick={() => {
-                            if (!window.confirm(`Cancel job ${job.id}?`)) return;
+                          onClick={async () => {
+                            const ok = await confirmDialog({
+                              message: `Cancel job ${job.id}?`,
+                              confirmLabel: 'Cancel job',
+                              cancelLabel: 'Keep job',
+                              tone: 'danger',
+                            });
+                            if (!ok) return;
                             void client.cancel(projectId, job.id).then(refresh).catch(report);
                           }}
                         >

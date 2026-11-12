@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { confirmDialog } from './app-dialogs.js';
 import {
   fetchDesktopProviderModels,
   isDesktopHost,
@@ -85,13 +86,13 @@ export function AgentSlotsSection({
   };
 
   const logOutChatGpt = async (profile: DesktopProviderProfile): Promise<void> => {
-    if (
-      !window.confirm(
+    const confirmed = await confirmDialog({
+      message:
         'Log out of ChatGPT? JOY Media revokes this connection, and the Workhorse slot stays empty until you connect again.',
-      )
-    ) {
-      return;
-    }
+      confirmLabel: 'Log out',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     setAccountBusy(true);
     setAccountStatus('Logging out of ChatGPT…');
     try {

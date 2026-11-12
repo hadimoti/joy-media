@@ -15,6 +15,7 @@ import '@fontsource/noto-naskh-arabic/latin-700.css';
 import '@fontsource/noto-naskh-arabic/latin-ext-400.css';
 import '@fontsource/noto-naskh-arabic/latin-ext-700.css';
 import { App } from './App.js';
+import { AppDialogHost } from './AppDialogs.js';
 import { EditorErrorBoundary } from './error-boundary.js';
 import { ProjectWriterGate } from './project-writer-gate.js';
 
@@ -22,6 +23,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <EditorErrorBoundary>
       <ProjectWriterGate>{(writer) => <App writer={writer} />}</ProjectWriterGate>
+      <AppDialogHost />
     </EditorErrorBoundary>
   </StrictMode>,
 );

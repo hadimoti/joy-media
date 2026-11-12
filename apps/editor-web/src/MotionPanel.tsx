@@ -53,6 +53,7 @@ import {
   TrashIcon,
   EditIcon,
 } from './icons.js';
+import { confirmDialog, promptDialog } from './app-dialogs.js';
 import { GraphEditor } from './GraphEditor.js';
 import { focusCoverTransform, getFirstPartySceneThumbUrl } from './html-scene-thumbs.js';
 import { EditorPanelContext } from './editor-panel-context.js';
@@ -434,8 +435,12 @@ function MotionSceneCard({
           className="icon-button"
           aria-label={`Rename ${entry.title}`}
           title="Rename"
-          onClick={() => {
-            const next = window.prompt('Rename motion', entry.title);
+          onClick={async () => {
+            const next = await promptDialog({
+              message: 'Rename motion',
+              defaultValue: entry.title,
+              confirmLabel: 'Rename',
+            });
             if (next !== null && next.trim().length > 0) onRename(entry.id, next.trim());
           }}
         >
@@ -455,12 +460,13 @@ function MotionSceneCard({
           className="icon-button"
           aria-label={`Delete ${entry.title}`}
           title="Delete"
-          onClick={() => {
-            if (
-              window.confirm(`Remove “${entry.title}” from your motions? This can't be undone.`)
-            ) {
-              onDelete(entry.id);
-            }
+          onClick={async () => {
+            const confirmed = await confirmDialog({
+              message: `Remove “${entry.title}” from your motions? This can't be undone.`,
+              confirmLabel: 'Remove',
+              tone: 'danger',
+            });
+            if (confirmed) onDelete(entry.id);
           }}
         >
           <TrashIcon />
