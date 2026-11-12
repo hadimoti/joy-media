@@ -100,17 +100,17 @@ Returns the report of section 6. It reads only reports the owner has kept; it ca
 
 Ten types, in two groups. Each finding carries: `id`, `type`, `severity`, `startUs`, `endUs`, `label` (one plain sentence for the owner), `measured` (the numbers), `layer` (`technical` or `seeing`), `confidence` (`confirmed` or `unconfirmed`), and `evidenceIds` (the frames or samples behind it).
 
-| Type | Layer | What it is | Where the number comes from |
-|---|---|---|---|
-| `black` | technical | A run of black frames | ffmpeg `blackdetect` |
-| `frozen` | technical | A run of still frames | ffmpeg `freezedetect` |
-| `scene-cut` | technical | A hard cut | ffmpeg `scdet` |
-| `loudness` | technical | The loudness of the whole cut | ffmpeg `ebur128` |
-| `silence` | technical | A silent stretch | ffmpeg `silencedetect`, or `detectSilence` |
-| `clipping` | technical | The loud samples that distort | ffmpeg `astats`, or `detectClipping` |
-| `exposure` | technical | Too dark or too bright | ffmpeg `signalstats` |
-| `colour-cast` | technical | The picture leans one way | ffmpeg `signalstats` on the U and V planes |
-| `safe-area` | technical | A title or caption outside the safe area | the title and caption boxes in the project |
+| Type              | Layer     | What it is                                | Where the number comes from                  |
+| ----------------- | --------- | ----------------------------------------- | -------------------------------------------- |
+| `black`           | technical | A run of black frames                     | ffmpeg `blackdetect`                         |
+| `frozen`          | technical | A run of still frames                     | ffmpeg `freezedetect`                        |
+| `scene-cut`       | technical | A hard cut                                | ffmpeg `scdet`                               |
+| `loudness`        | technical | The loudness of the whole cut             | ffmpeg `ebur128`                             |
+| `silence`         | technical | A silent stretch                          | ffmpeg `silencedetect`, or `detectSilence`   |
+| `clipping`        | technical | The loud samples that distort             | ffmpeg `astats`, or `detectClipping`         |
+| `exposure`        | technical | Too dark or too bright                    | ffmpeg `signalstats`                         |
+| `colour-cast`     | technical | The picture leans one way                 | ffmpeg `signalstats` on the U and V planes   |
+| `safe-area`       | technical | A title or caption outside the safe area  | the title and caption boxes in the project   |
 | `text-legibility` | technical | Text too close in value to its background | a contrast measure against the sampled frame |
 
 **Severity** is three words and nothing else: `blocker` (data loss, crash, wrong export, install failure), `major`, `minor`. The word list is the same one the defect log already uses (`03-TASK-CARDS.md:203`), so a QC finding and a test defect speak the same language.
@@ -121,12 +121,12 @@ Ten types, in two groups. Each finding carries: `id`, `type`, `severity`, `start
 
 Four numbers, each changeable in the Joy Code settings, each with a default:
 
-| Budget | Default | Bound | Why |
-|---|---|---|---|
-| Frames per check | **12** | 1 to 48 | 12 frames at 512 px is one screen of contact sheet and about the most a model can compare at once |
-| Frames per run | **48** | 12 to 96 | four checks, or one check plus two re-checks |
-| Fix rounds | **3** | 1 to 3 | the master plan's "at most 3 rounds" |
-| Long edge of a sent frame | **512 px** | 256 to 1024 | enough to judge a title's sharpness, small enough to send |
+| Budget                    | Default    | Bound       | Why                                                                                               |
+| ------------------------- | ---------- | ----------- | ------------------------------------------------------------------------------------------------- |
+| Frames per check          | **12**     | 1 to 48     | 12 frames at 512 px is one screen of contact sheet and about the most a model can compare at once |
+| Frames per run            | **48**     | 12 to 96    | four checks, or one check plus two re-checks                                                      |
+| Fix rounds                | **3**      | 1 to 3      | the master plan's "at most 3 rounds"                                                              |
+| Long edge of a sent frame | **512 px** | 256 to 1024 | enough to judge a title's sharpness, small enough to send                                         |
 
 The 512 px long edge is the number that matters: a frame is downscaled before it is sent, so the pixels the model receives are 512 px on the long edge, not 1080. The report says so, so nobody mistakes a soft frame for a soft render.
 
@@ -179,15 +179,15 @@ The report opens with the facts a reader needs to trust it: what was checked, ho
 
 ### 8. What each card builds
 
-| Card | Agent | Builds | Files |
-|---|---|---|---|
-| T-B02 | GB | Worker job `media.qc`: ffmpeg filters, one JSON report, time caps | `apps/worker/src/media-qc.ts`, `packages/job-protocol/src/protocol.ts`, `apps/worker/src/runtime.ts` |
-| T-B03 | GB | Timeline sampler and contact sheets, safe area and legibility pass | `apps/editor-web/src/media-observation/qc-sampler.ts`, `contact-sheet.ts` |
-| T-B04 | GB | The four tools, on the closed vocabulary | `host-tool-contract.ts:7-27`, `bounded-tool-loop.ts`, `tool-bridge.ts` |
-| T-B05 | MC | Budgets, consent and privacy settings | `apps/editor-web/src/JoyAgentSettingsDialog.tsx`, `agent-policy-settings.ts` |
-| T-B06 | GB | The fix, re-render, re-check loop with one Undo | `packages/agent-tools/src/atomic.ts`, `apps/editor-web/src/joy-agent/` |
-| T-B07 | MC | The report card and the filmstrip in Joy Code | `apps/editor-web/src/AgentEvidenceFilmstrip.tsx` (built, unused), `joy-code-history.ts` |
-| T-B08 | CX | `joy-media qc` command | `apps/cli/src/commands/qc-cmd.ts` |
+| Card  | Agent | Builds                                                             | Files                                                                                                |
+| ----- | ----- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| T-B02 | GB    | Worker job `media.qc`: ffmpeg filters, one JSON report, time caps  | `apps/worker/src/media-qc.ts`, `packages/job-protocol/src/protocol.ts`, `apps/worker/src/runtime.ts` |
+| T-B03 | GB    | Timeline sampler and contact sheets, safe area and legibility pass | `apps/editor-web/src/media-observation/qc-sampler.ts`, `contact-sheet.ts`                            |
+| T-B04 | GB    | The four tools, on the closed vocabulary                           | `host-tool-contract.ts:7-27`, `bounded-tool-loop.ts`, `tool-bridge.ts`                               |
+| T-B05 | MC    | Budgets, consent and privacy settings                              | `apps/editor-web/src/JoyAgentSettingsDialog.tsx`, `agent-policy-settings.ts`                         |
+| T-B06 | GB    | The fix, re-render, re-check loop with one Undo                    | `packages/agent-tools/src/atomic.ts`, `apps/editor-web/src/joy-agent/`                               |
+| T-B07 | MC    | The report card and the filmstrip in Joy Code                      | `apps/editor-web/src/AgentEvidenceFilmstrip.tsx` (built, unused), `joy-code-history.ts`              |
+| T-B08 | CX    | `joy-media qc` command                                             | `apps/cli/src/commands/qc-cmd.ts`                                                                    |
 
 **Two rules for the helpers.** First, the tool names in section 2 are the names: `media_qc_run`, `media_frames_view`, `media_contact_sheet`, `qc_report_read`. Second, every one of the four is added to `JOY_AGENT_HOST_TOOL_NAMES`, because a tool that is not in that list does not exist.
 
