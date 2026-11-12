@@ -3,10 +3,76 @@ import type { ParsedCubeLut } from './lut.js';
 import { sampleCubeLut } from './lut.js';
 
 export type Rgb = readonly [number, number, number];
-const curveLutCache = new WeakMap<
-  object,
-  Readonly<Record<'rgb' | 'red' | 'green' | 'blue', Uint8Array>>
->();
+export type ColorCurveLuts = Readonly<Record<'rgb' | 'red' | 'green' | 'blue', Uint8Array>>;
+export type NormalizedHslBand = {
+  readonly hue: number;
+  readonly hueShift: number;
+  readonly hueWidth: number;
+  readonly softness: number;
+  readonly saturation: number;
+  readonly luminance: number;
+};
+
+export const MAX_COLOR_GRADE_HSL_BANDS = 8;
+export const MAX_COLOR_GRADE_HUE_WIDTH = 180;
+export const MAX_COLOR_GRADE_HUE_SHIFT = 180;
+
+const CURVE_LUT_CACHE_LIMIT = 64;
+const curveLutCache = new Map<string, ColorCurveLuts>();
+
+/**
+ * Canonical content key for animated curve values. Evaluator snapshots often
+ * allocate new objects for unchanged points, so object identity is not stable.
+ */
+export function colorCurvesKey(curves: NonNullable<ColorGradeIR['curves']>): string {
+  return JSON.stringify(
+    (['rgb', 'red', 'green', 'blue'] as const).map((channel) =>
+      curves[channel].map((point) => [point.x, point.y]),
+    ),
+  );
+}
+
+/** Reuses CPU spline tables for equal curve points, including animated copies. */
+export function getColorCurveLuts(curves: NonNullable<ColorGradeIR['curves']>): ColorCurveLuts {
+  const key = colorCurvesKey(curves);
+  const cached = curveLutCache.get(key);
+  if (cached !== undefined) {
+    // Refresh insertion order so frequently animated curves stay in the cache.
+    curveLutCache.delete(key);
+    curveLutCache.set(key, cached);
+    return cached;
+  }
+  const tables: ColorCurveLuts = {
+    rgb: buildColorCurveLut(curves.rgb),
+    red: buildColorCurveLut(curves.red),
+    green: buildColorCurveLut(curves.green),
+    blue: buildColorCurveLut(curves.blue),
+  };
+  curveLutCache.set(key, tables);
+  if (curveLutCache.size > CURVE_LUT_CACHE_LIMIT) {
+    const oldest = curveLutCache.keys().next().value as string | undefined;
+    if (oldest !== undefined) curveLutCache.delete(oldest);
+  }
+  return tables;
+}
+
+/** Shared input normalization for both CPU pixels and GPU HSL uniforms. */
+export function normalizeColorGradeHslBands(
+  bands: ColorGradeIR['hsl'],
+): readonly NormalizedHslBand[] {
+  return (bands ?? []).slice(0, MAX_COLOR_GRADE_HSL_BANDS).map((band) => ({
+    hue: wrapHue(finiteOr(band.hue, 0)),
+    hueShift: clamp(
+      finiteOr(band.hueShift ?? 0, 0),
+      -MAX_COLOR_GRADE_HUE_SHIFT,
+      MAX_COLOR_GRADE_HUE_SHIFT,
+    ),
+    hueWidth: clamp(finiteOr(band.hueWidth, 0), 0, MAX_COLOR_GRADE_HUE_WIDTH),
+    softness: clamp(finiteOr(band.softness, 0), 0, 1),
+    saturation: finiteOr(band.saturation, 0),
+    luminance: finiteOr(band.luminance, 0),
+  }));
+}
 
 /** Applies the v2 grade in the documented, shared CPU/GPU operation order. */
 export function applyColorGradeV2(
@@ -66,34 +132,26 @@ export function applyColorGradeV2(
   // Curves are evaluated from a 256-sample monotone cubic spline LUT.
   const curves = grade.curves;
   if (curves !== undefined) {
-    let tables = curveLutCache.get(curves);
-    if (tables === undefined) {
-      tables = {
-        rgb: buildColorCurveLut(curves.rgb),
-        red: buildColorCurveLut(curves.red),
-        green: buildColorCurveLut(curves.green),
-        blue: buildColorCurveLut(curves.blue),
-      };
-      curveLutCache.set(curves, tables);
-    }
+    const tables = getColorCurveLuts(curves);
     rgb = rgb.map((value, channel) => {
       const channelName = (['red', 'green', 'blue'] as const)[channel]!;
-      const common = sampleCurveLut(tables!.rgb, value);
-      return sampleCurveLut(tables![channelName], common);
+      const common = sampleCurveLut(tables.rgb, value);
+      return sampleCurveLut(tables[channelName], common);
     }) as [number, number, number];
   }
 
   // HSL selectors use circular hue distance and a smooth edge around each band.
-  if (grade.hsl !== undefined && grade.hsl.length > 0) {
+  const hslBands = normalizeColorGradeHslBands(grade.hsl);
+  if (hslBands.length > 0) {
     let hsl = rgbToHsl(...rgb);
-    for (const band of grade.hsl) {
-      const distance = circularDistance(hsl[0], wrapHue(band.hue));
-      const halfWidth = Math.max(0.001, Math.min(180, band.hueWidth) / 2);
-      const softness = Math.max(0, Math.min(1, band.softness));
+    for (const band of hslBands) {
+      const distance = circularDistance(hsl[0], band.hue);
+      const halfWidth = Math.max(0.001, band.hueWidth / 2);
+      const softness = band.softness;
       const feather = Math.max(0.5, halfWidth * softness);
       const weight = 1 - smoothstep(halfWidth - feather, halfWidth + feather, distance);
       hsl = [
-        wrapHue(hsl[0] + (band.hueShift ?? 0) * weight),
+        wrapHue(hsl[0] + band.hueShift * weight),
         Math.max(0, Math.min(1, hsl[1] * (1 + band.saturation * weight))),
         Math.max(0, Math.min(1, hsl[2] + band.luminance * weight)),
       ];
@@ -287,4 +345,12 @@ function smoothstep(edge0: number, edge1: number, value: number): number {
 }
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+function finiteOr(value: number, fallback: number): number {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
 }

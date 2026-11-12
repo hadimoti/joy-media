@@ -13,7 +13,11 @@ import {
 } from 'pixi.js';
 import type { ColorGradeIR, EffectInstanceIR } from '@joy-media/render-ir';
 import { isIdentityColorGrade } from './effects-cpu.js';
-import { buildColorCurveLut } from './color-grade-math.js';
+import {
+  colorCurvesKey,
+  getColorCurveLuts,
+  normalizeColorGradeHslBands,
+} from './color-grade-math.js';
 import type { ParsedCubeLut } from './lut.js';
 import {
   createBrightnessContrastFilter,
@@ -212,20 +216,37 @@ export function buildPixiColorGradeFilter(
   return filter;
 }
 
-const curveTextureCache = new WeakMap<object, Texture>();
+interface CurveTextureEntry {
+  readonly texture: Texture;
+  references: number;
+}
+
+interface CurveTextureLease {
+  readonly texture: Texture;
+  release(): void;
+}
+
+const curveTextureCache = new Map<string, CurveTextureEntry>();
+const identityCurveTextureCache = new WeakMap<object, Texture>();
 const cubeTextureCache = new WeakMap<object, Texture>();
+
+/** Release the grade filter and the curve texture lease it owns. */
+export function disposePixiColorGradeFilter(filter: Filter | undefined): void {
+  filter?.destroy();
+}
 
 function createColorGradeV2Filter(grade: ColorGradeIR, cubeLut?: ParsedCubeLut): Filter {
   const adjust = grade.adjust;
   const lut = grade.lut;
   const curves = grade.curves;
-  const curveTexture = curves === undefined ? identityCurveTexture() : getCurveTexture(curves);
+  const curveLease = curves === undefined ? undefined : getCurveTexture(curves);
+  const curveTexture = curveLease?.texture ?? identityCurveTexture();
   const cubeTexture = cubeLut === undefined ? identityCubeTexture() : getCubeTexture(cubeLut);
   const wheel = (key: 'lift' | 'gamma' | 'gain' | 'offset') => {
     const value = grade.wheels?.[key];
     return new Float32Array([value?.r ?? 0, value?.g ?? 0, value?.b ?? 0, value?.master ?? 0]);
   };
-  const bands = Array.from({ length: 8 }, (_, index) => grade.hsl?.[index]);
+  const bands = normalizeColorGradeHslBands(grade.hsl);
   const bandData = new Float32Array(32);
   const adjustmentData = new Float32Array(32);
   bands.forEach((band, index) => {
@@ -254,74 +275,114 @@ function createColorGradeV2Filter(grade: ColorGradeIR, cubeLut?: ParsedCubeLut):
               : lookId === 'monochrome'
                 ? 5
                 : -1;
-  return new Filter({
-    glProgram: GlProgram.from({
-      vertex: DEFAULT_FILTER_VERT,
-      fragment: COLOR_GRADE_V2_FRAG,
-      name: 'joy-color-grade-v2',
-    }),
-    resources: {
-      colorGradeUniforms: {
-        uExposure: { value: adjust?.exposure ?? 0, type: 'f32' },
-        uContrast: { value: adjust?.contrast ?? 0, type: 'f32' },
-        uPivot: { value: adjust?.pivot ?? 0.5, type: 'f32' },
-        uTemperature: { value: adjust?.temperature ?? 0, type: 'f32' },
-        uTint: { value: adjust?.tint ?? 0, type: 'f32' },
-        uSaturation: { value: adjust?.saturation ?? grade.saturation, type: 'f32' },
-        uVibrance: { value: adjust?.vibrance ?? 0, type: 'f32' },
-        uHue: { value: adjust?.hue ?? 0, type: 'f32' },
-        uHighlights: { value: adjust?.highlights ?? 0, type: 'f32' },
-        uShadows: { value: adjust?.shadows ?? 0, type: 'f32' },
-        uWhites: { value: adjust?.whites ?? 0, type: 'f32' },
-        uBlacks: { value: adjust?.blacks ?? 0, type: 'f32' },
-        uSoftClip: { value: grade.outputSafety?.softClip ?? 0, type: 'f32' },
-        uLegalRange: { value: grade.outputSafety?.legalRange === true ? 1 : 0, type: 'f32' },
-        uLook: { value: lookIndex, type: 'f32' },
-        uLookIntensity: { value: lut?.intensity ?? 1, type: 'f32' },
-        uCubeEnabled: { value: cubeLut === undefined ? 0 : 1, type: 'f32' },
-        uCubeIntensity: { value: cubeLut === undefined ? 0 : (lut?.intensity ?? 1), type: 'f32' },
-        uCubeDomainMin: { value: cubeLut?.domainMin ?? [0, 0, 0], type: 'vec3<f32>' },
-        uCubeDomainMax: { value: cubeLut?.domainMax ?? [1, 1, 1], type: 'vec3<f32>' },
-        uCubeSize: { value: cubeLut?.size ?? 2, type: 'f32' },
-        uLift: { value: wheel('lift'), type: 'vec4<f32>' },
-        uGamma: { value: wheel('gamma'), type: 'vec4<f32>' },
-        uGain: { value: wheel('gain'), type: 'vec4<f32>' },
-        uOffset: { value: wheel('offset'), type: 'vec4<f32>' },
-        uHslBands: { value: bandData, type: 'vec4<f32>', size: 8 },
-        uHslAdjust: { value: adjustmentData, type: 'vec4<f32>', size: 8 },
+  try {
+    const filter = new Filter({
+      glProgram: GlProgram.from({
+        vertex: DEFAULT_FILTER_VERT,
+        fragment: COLOR_GRADE_V2_FRAG,
+        name: 'joy-color-grade-v2',
+      }),
+      resources: {
+        colorGradeUniforms: {
+          uExposure: { value: adjust?.exposure ?? 0, type: 'f32' },
+          uContrast: { value: adjust?.contrast ?? 0, type: 'f32' },
+          uPivot: { value: adjust?.pivot ?? 0.5, type: 'f32' },
+          uTemperature: { value: adjust?.temperature ?? 0, type: 'f32' },
+          uTint: { value: adjust?.tint ?? 0, type: 'f32' },
+          uSaturation: { value: adjust?.saturation ?? grade.saturation, type: 'f32' },
+          uVibrance: { value: adjust?.vibrance ?? 0, type: 'f32' },
+          uHue: { value: adjust?.hue ?? 0, type: 'f32' },
+          uHighlights: { value: adjust?.highlights ?? 0, type: 'f32' },
+          uShadows: { value: adjust?.shadows ?? 0, type: 'f32' },
+          uWhites: { value: adjust?.whites ?? 0, type: 'f32' },
+          uBlacks: { value: adjust?.blacks ?? 0, type: 'f32' },
+          uSoftClip: { value: grade.outputSafety?.softClip ?? 0, type: 'f32' },
+          uLegalRange: { value: grade.outputSafety?.legalRange === true ? 1 : 0, type: 'f32' },
+          uLook: { value: lookIndex, type: 'f32' },
+          uLookIntensity: { value: lut?.intensity ?? 1, type: 'f32' },
+          uCubeEnabled: { value: cubeLut === undefined ? 0 : 1, type: 'f32' },
+          uCubeIntensity: {
+            value: cubeLut === undefined ? 0 : (lut?.intensity ?? 1),
+            type: 'f32',
+          },
+          uCubeDomainMin: { value: cubeLut?.domainMin ?? [0, 0, 0], type: 'vec3<f32>' },
+          uCubeDomainMax: { value: cubeLut?.domainMax ?? [1, 1, 1], type: 'vec3<f32>' },
+          uCubeSize: { value: cubeLut?.size ?? 2, type: 'f32' },
+          uLift: { value: wheel('lift'), type: 'vec4<f32>' },
+          uGamma: { value: wheel('gamma'), type: 'vec4<f32>' },
+          uGain: { value: wheel('gain'), type: 'vec4<f32>' },
+          uOffset: { value: wheel('offset'), type: 'vec4<f32>' },
+          uHslBands: { value: bandData, type: 'vec4<f32>', size: 8 },
+          uHslAdjust: { value: adjustmentData, type: 'vec4<f32>', size: 8 },
+        },
+        uCurveTexture: curveTexture,
+        uCubeLutTexture: cubeTexture,
       },
-      uCurveTexture: curveTexture,
-      uCubeLutTexture: cubeTexture,
-    },
-  });
+    });
+    if (curveLease !== undefined) {
+      let released = false;
+      const destroy = filter.destroy.bind(filter);
+      filter.destroy = (destroyPrograms?: boolean): void => {
+        if (!released) {
+          released = true;
+          curveLease.release();
+        }
+        destroy(destroyPrograms);
+      };
+    }
+    return filter;
+  } catch (error) {
+    curveLease?.release();
+    throw error;
+  }
 }
 
 function identityCurveTexture(): Texture {
-  const key = identityCurveTexture;
-  const cached = curveTextureCache.get(key);
+  const cached = identityCurveTextureCache.get(identityCurveTexture);
   if (cached !== undefined) return cached;
   const pixels = new Uint8Array(256 * 4);
   for (let x = 0; x < 256; x += 1) pixels.fill(x, x * 4, x * 4 + 4);
   const texture = new Texture({
     source: new BufferImageSource({ resource: pixels, width: 256, height: 1 }),
   });
-  curveTextureCache.set(key, texture);
+  identityCurveTextureCache.set(identityCurveTexture, texture);
   return texture;
 }
 
-function getCurveTexture(curves: NonNullable<ColorGradeIR['curves']>): Texture {
-  const key = curves as object;
+function getCurveTexture(curves: NonNullable<ColorGradeIR['curves']>): CurveTextureLease {
+  const key = colorCurvesKey(curves);
   const cached = curveTextureCache.get(key);
-  if (cached !== undefined) return cached;
-  const tables = [curves.rgb, curves.red, curves.green, curves.blue].map(buildColorCurveLut);
+  if (cached !== undefined) {
+    cached.references += 1;
+    return curveTextureLease(key, cached);
+  }
+  const tables = getColorCurveLuts(curves);
   const pixels = new Uint8Array(256 * 4);
   for (let x = 0; x < 256; x += 1)
-    for (let channel = 0; channel < 4; channel += 1) pixels[x * 4 + channel] = tables[channel]![x]!;
+    for (let channel = 0; channel < 4; channel += 1)
+      pixels[x * 4 + channel] = tables[(['rgb', 'red', 'green', 'blue'] as const)[channel]!][x]!;
   const texture = new Texture({
     source: new BufferImageSource({ resource: pixels, width: 256, height: 1 }),
   });
-  curveTextureCache.set(key, texture);
-  return texture;
+  const entry = { texture, references: 1 };
+  curveTextureCache.set(key, entry);
+  return curveTextureLease(key, entry);
+}
+
+function curveTextureLease(key: string, entry: CurveTextureEntry): CurveTextureLease {
+  let released = false;
+  return {
+    texture: entry.texture,
+    release(): void {
+      if (released) return;
+      released = true;
+      entry.references -= 1;
+      if (entry.references === 0 && curveTextureCache.get(key) === entry) {
+        curveTextureCache.delete(key);
+        entry.texture.destroy(true);
+      }
+    },
+  };
 }
 
 function identityCubeTexture(): Texture {

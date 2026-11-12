@@ -42,6 +42,7 @@ import {
   buildPixiColorGradeFilter,
   buildPixiEffectFilters,
   colorGradeSignature,
+  disposePixiColorGradeFilter,
   effectsSignature,
 } from './effects-pixi.js';
 import { createGlTransitionFilter, type GlTransitionFilterHandle } from './gl-transition-filter.js';
@@ -116,6 +117,8 @@ interface LayerContainer extends Container {
   kind: VisualRenderNode['kind'];
   /** Last applied effect stack signature (skip filter rebuild when unchanged). */
   effectsKey?: string;
+  /** Grade filter is tracked separately so its curve texture can be released. */
+  colorGradeFilter?: ReturnType<typeof buildPixiColorGradeFilter>;
   /** Persistent CPU canvas and GPU texture for a decoded video node. */
   videoCanvas?: HTMLCanvasElement | undefined;
   videoTexture?: Texture | undefined;
@@ -221,6 +224,7 @@ export async function createBrowserPixiRenderer(
   let frameResolution = options.resolution ?? 1;
   let disposed = false;
   let lastGradeKey = '';
+  let masterGradeFilter: ReturnType<typeof buildPixiColorGradeFilter>;
   // Monitor-only state. The export path never sets these, so its canvas stays
   // the authored size at `options.resolution`.
   let pixelScale: number | undefined;
@@ -468,15 +472,20 @@ export async function createBrowserPixiRenderer(
         ? node.effects
         : undefined;
     const grade = node.kind === 'video-frame' ? node.colorGrade : undefined;
-    const key = `${colorGradeSignature(grade)}\n${effectsSignature(effects)}`;
+    const resolvedLut =
+      grade?.lut?.assetId === undefined ? undefined : options.resolveColorLut?.(grade);
+    const key = `${colorGradeSignature(grade)}\n${colorLutStateKey(grade, resolvedLut)}\n${effectsSignature(effects)}`;
     if (layer.effectsKey === key) return;
     layer.effectsKey = key;
-    const gradeFilter = buildPixiColorGradeFilter(grade);
+    const previousGradeFilter = layer.colorGradeFilter;
+    const gradeFilter = buildPixiColorGradeFilter(grade, resolvedLut);
+    layer.colorGradeFilter = gradeFilter;
     const filters = [
       ...(gradeFilter === undefined ? [] : [gradeFilter]),
       ...buildPixiEffectFilters(effects),
     ];
     layer.filters = filters.length > 0 ? filters : null;
+    if (previousGradeFilter !== gradeFilter) disposePixiColorGradeFilter(previousGradeFilter);
   };
 
   const createLayer = (
@@ -575,6 +584,7 @@ export async function createBrowserPixiRenderer(
     }
     for (const [id, layer] of spriteMap) {
       if (!seen.has(id)) {
+        disposePixiColorGradeFilter(layer.colorGradeFilter);
         layer.destroy({ children: true });
         spriteMap.delete(id);
       }
@@ -716,13 +726,18 @@ export async function createBrowserPixiRenderer(
         .clear()
         .rect(0, 0, width, height)
         .fill({ color: rgbaToHex(frame.background), alpha: frame.background.a / 255 });
-      const gradeKey = colorGradeSignature(frame.colorGrade);
+      const resolvedLut =
+        frame.colorGrade?.lut?.assetId === undefined
+          ? undefined
+          : options.resolveColorLut?.(frame.colorGrade);
+      const gradeKey = `${colorGradeSignature(frame.colorGrade)}\n${colorLutStateKey(frame.colorGrade, resolvedLut)}`;
       if (gradeKey !== lastGradeKey) {
         lastGradeKey = gradeKey;
-        const resolvedLut =
-          frame.colorGrade === undefined ? undefined : options.resolveColorLut?.(frame.colorGrade);
         const gradeFilter = buildPixiColorGradeFilter(frame.colorGrade, resolvedLut);
+        const previousGradeFilter = masterGradeFilter;
+        masterGradeFilter = gradeFilter;
         content.filters = gradeFilter === undefined ? null : [gradeFilter];
+        if (previousGradeFilter !== gradeFilter) disposePixiColorGradeFilter(previousGradeFilter);
       }
       const { drawCalls, created, reused } = paint(frame, videoBitmaps);
       if (options.autoStart !== true) app.renderer.render(app.stage);
@@ -731,6 +746,8 @@ export async function createBrowserPixiRenderer(
     destroy(): void {
       if (disposed) return;
       disposed = true;
+      disposePixiColorGradeFilter(masterGradeFilter);
+      for (const layer of spriteMap.values()) disposePixiColorGradeFilter(layer.colorGradeFilter);
       spriteMap.clear();
       // Pixi's boolean `true` destroy shorthand also releases its process-wide
       // resource pools. Multiple preview renderers can briefly coexist while
@@ -739,6 +756,11 @@ export async function createBrowserPixiRenderer(
       app.destroy({ removeView: true }, { children: true, texture: true });
     },
   };
+}
+
+function colorLutStateKey(grade: ColorGradeIR | undefined, lut: ParsedCubeLut | undefined): string {
+  if (grade?.lut?.assetId === undefined) return '';
+  return `${grade.lut.assetId}:${grade.lut.sha256 ?? ''}:${lut === undefined ? 'pending' : 'ready'}`;
 }
 
 interface TransitionLayerContainer extends Container {

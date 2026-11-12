@@ -29,7 +29,7 @@ import {
 } from './effects-cpu.js';
 
 export { applyColorGradeToPixels } from './effects-cpu.js';
-export { parseCubeLut, sampleCubeLut } from './lut.js';
+export { MAX_CUBE_LUT_BYTES, parseCubeLut, sampleCubeLut } from './lut.js';
 export type { ParsedCubeLut } from './lut.js';
 
 export const PACKAGE_NAME = '@joy-media/renderer-pixi' as const;

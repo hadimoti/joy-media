@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ColorGradeIR } from '@joy-media/render-ir';
 import { applyColorGradeToPixels, isIdentityColorGrade } from './effects-cpu.js';
 import { parseCubeLut } from './lut.js';
+import { getColorCurveLuts } from './color-grade-math.js';
 
 const identity: ColorGradeIR = {
   version: 2,
@@ -100,6 +101,28 @@ describe('v2 color grade tools', () => {
     expect(gradePixel(grade, [90, 180, 90])).toEqual([90, 180, 90]);
   });
 
+  it('ignores HSL bands beyond the shared eight-band limit', () => {
+    const neutralBand = {
+      hue: 0,
+      hueWidth: 35,
+      softness: 0.2,
+      saturation: 0,
+      luminance: 0,
+    };
+    const firstEight: ColorGradeIR = {
+      ...identity,
+      hsl: Array.from({ length: 8 }, () => neutralBand),
+    };
+    const withNinthBand: ColorGradeIR = {
+      ...identity,
+      hsl: [
+        ...Array.from({ length: 8 }, () => neutralBand),
+        { ...neutralBand, hueWidth: 360, hueShift: 120 },
+      ],
+    };
+    expect(gradePixel(withNinthBand, [255, 0, 0])).toEqual(gradePixel(firstEight, [255, 0, 0]));
+  });
+
   it('maps curve points with a monotone spline', () => {
     const grade: ColorGradeIR = {
       ...identity,
@@ -125,6 +148,30 @@ describe('v2 color grade tools', () => {
     };
     expect(gradePixel(grade, [128, 128, 128])[0]).toBeLessThan(128);
     expect(gradePixel(grade, [128, 128, 128])[0]).toBe(gradePixel(grade, [128, 128, 128])[1]);
+  });
+
+  it('reuses curve tables for unchanged points in newly evaluated grades', () => {
+    const curves: NonNullable<ColorGradeIR['curves']> = {
+      rgb: [
+        { x: 0, y: 0 },
+        { x: 0.5, y: 0.4 },
+        { x: 1, y: 1 },
+      ],
+      red: [
+        { x: 0, y: 0 },
+        { x: 1, y: 1 },
+      ],
+      green: [
+        { x: 0, y: 0 },
+        { x: 1, y: 1 },
+      ],
+      blue: [
+        { x: 0, y: 0 },
+        { x: 1, y: 1 },
+      ],
+    };
+
+    expect(getColorCurveLuts(structuredClone(curves))).toBe(getColorCurveLuts(curves));
   });
 
   it('applies hue adjustment while preserving neutral grey', () => {

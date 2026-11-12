@@ -5,14 +5,14 @@ export interface ParsedCubeLut {
   readonly data: Float32Array;
 }
 
-const MAX_BYTES = 32 * 1024 * 1024;
+export const MAX_CUBE_LUT_BYTES = 32 * 1024 * 1024;
 const MIN_SIZE = 2;
 const MAX_SIZE = 65;
 
 /** Strict, bounded parser for 3D .cube LUT files. */
 export function parseCubeLut(source: string | Uint8Array): ParsedCubeLut {
   const text = typeof source === 'string' ? source : new TextDecoder().decode(source);
-  if (new TextEncoder().encode(text).byteLength > MAX_BYTES)
+  if (new TextEncoder().encode(text).byteLength > MAX_CUBE_LUT_BYTES)
     throw new Error('LUT exceeds the 32 MiB limit');
   let size: number | undefined;
   let domainMin: [number, number, number] = [0, 0, 0];

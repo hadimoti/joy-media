@@ -353,6 +353,7 @@ import { resumeWorkflow, runWorkflow } from './workflow-runner.js';
 import { getOrCreateControlPlaneProjectBinding } from './project-control-plane.js';
 import { transcribeReferenceCaption } from './local-transcription.js';
 import { ProjectMediaResolver } from './project-media-resolver.js';
+import { createProjectColorLutResolver } from './project-color-luts.js';
 import { createObservationCache } from './media-observation/observation-cache.js';
 import { createEvidenceStore } from './media-observation/evidence-store.js';
 import { ObservationWorkerClient } from './media-observation/observation-worker-client.js';
@@ -3750,11 +3751,15 @@ function EditorWorkspace({
       const exportAudioState = structuredClone(audioState);
       const missingLuts = missingColorLutExportDependencies(exportVisualProject);
       if (missingLuts.length > 0) {
-        setExportStatus(
-          `Export blocked: restore the required LUT${missingLuts.length === 1 ? '' : 's'} (${missingLuts.join(', ')}).`,
+        showToast(
+          `Some custom LUTs are unavailable (${missingLuts.join(', ')}). Export will continue with the remaining color-grade controls.`,
         );
-        return;
       }
+      const exportColorLutResolver = createProjectColorLutResolver({
+        project: exportVisualProject,
+        loadProjectAssetBlob,
+        onWarning: (message) => showToast(message),
+      });
       const sourceProjectRevisionId = session.projectRevisionId;
       const sourceRevision = session.historyCursorSequence;
       let selectedMimeType: ReturnType<typeof selectBrowserMp4MimeType>;
@@ -4342,7 +4347,13 @@ function EditorWorkspace({
           activeExportAudioTrack = exportAudioTrack;
           recorderAudio = { source: mixedAudioSource, track: exportAudioTrack };
         }
-        const renderer = await createBrowserPixiRenderer({ width, height, resolution: 1 });
+        await exportColorLutResolver.prepareProjectColorLuts();
+        const renderer = await createBrowserPixiRenderer({
+          width,
+          height,
+          resolution: 1,
+          resolveColorLut: exportColorLutResolver.resolveColorLut,
+        });
         activeRenderer = renderer;
         const recorderCanvas = document.createElement('canvas');
         recorderCanvas.width = width;
@@ -4514,7 +4525,13 @@ function EditorWorkspace({
               for (const [id, bitmap] of scenes) bitmaps.set(id, bitmap);
             }
             for (const [id, bitmap] of stickerImageCache.bitmaps(timeUs)) bitmaps.set(id, bitmap);
-            applyClipGradesToTransitionBitmaps(exportVisualProject, transition, timeUs, bitmaps);
+            applyClipGradesToTransitionBitmaps(
+              exportVisualProject,
+              transition,
+              timeUs,
+              bitmaps,
+              exportColorLutResolver.resolveColorLut,
+            );
             const frame = buildFrame(timeUs);
             renderer.render(withVideoFrameNodes(frame, nodes), bitmaps);
             // CanvasCaptureMediaStreamTrack can sample a WebGL surface before
@@ -4943,11 +4960,13 @@ function EditorWorkspace({
       audioState,
       controlPlaneProject.controlPlaneProjectId,
       exportPreset,
+      loadProjectAssetBlob,
       mediaResolver,
       operationLedger,
       projectId,
       recordExportEntry,
       session,
+      showToast,
       syncStickerBitmaps,
     ],
   );
