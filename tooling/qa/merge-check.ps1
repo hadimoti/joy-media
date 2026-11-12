@@ -107,12 +107,19 @@ try {
 
   $hitCount = 0
   $diffLineNumber = 0
+  # Third-party attribution (an upstream author's name and public e-mail in a licence
+  # header) is required by licences such as MIT, so e-mail addresses are allowed in
+  # these paths only. Every other pattern still applies everywhere.
+  $attributionPaths = '^(packages/transition-shaders/|THIRD_PARTY_NOTICES|apps/desktop/THIRD_PARTY_NOTICES|LICENSES?/)'
+  $currentFile = ''
   foreach ($line in $diff) {
     $diffLineNumber++
+    if ($line -match '^\+\+\+ b/(.+)$') { $currentFile = $matches[1]; continue }
     if ($line -match '^(\+\+\+|---) ') { continue }
     if ($line -notmatch '^[+-]') { continue }
 
     foreach ($pattern in $forbiddenPatterns) {
+      if ($pattern.Label -eq 'e-mail address' -and $currentFile -match $attributionPaths) { continue }
       if ($line -match $pattern.Pattern) {
         $hitCount++
         Write-Output ("Sensitive {0} detected in diff near diff line {1}." -f $pattern.Label, $diffLineNumber)
