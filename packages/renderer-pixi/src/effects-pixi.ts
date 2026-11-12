@@ -226,11 +226,22 @@ interface CurveTextureLease {
   release(): void;
 }
 
+interface CubeTextureEntry {
+  readonly texture: Texture;
+  references: number;
+}
+
+interface CubeTextureLease {
+  readonly texture: Texture;
+  release(): void;
+}
+
 const curveTextureCache = new Map<string, CurveTextureEntry>();
 const identityCurveTextureCache = new WeakMap<object, Texture>();
-const cubeTextureCache = new WeakMap<object, Texture>();
+const identityCubeTextureCache = new WeakMap<object, Texture>();
+const cubeTextureCache = new WeakMap<object, CubeTextureEntry>();
 
-/** Release the grade filter and the curve texture lease it owns. */
+/** Release the grade filter and the curve/cube texture leases it owns. */
 export function disposePixiColorGradeFilter(filter: Filter | undefined): void {
   filter?.destroy();
 }
@@ -241,7 +252,7 @@ function createColorGradeV2Filter(grade: ColorGradeIR, cubeLut?: ParsedCubeLut):
   const curves = grade.curves;
   const curveLease = curves === undefined ? undefined : getCurveTexture(curves);
   const curveTexture = curveLease?.texture ?? identityCurveTexture();
-  const cubeTexture = cubeLut === undefined ? identityCubeTexture() : getCubeTexture(cubeLut);
+  let cubeLease: CubeTextureLease | undefined;
   const wheel = (key: 'lift' | 'gamma' | 'gain' | 'offset') => {
     const value = grade.wheels?.[key];
     return new Float32Array([value?.r ?? 0, value?.g ?? 0, value?.b ?? 0, value?.master ?? 0]);
@@ -276,6 +287,8 @@ function createColorGradeV2Filter(grade: ColorGradeIR, cubeLut?: ParsedCubeLut):
                 ? 5
                 : -1;
   try {
+    cubeLease = cubeLut === undefined ? undefined : getCubeTexture(cubeLut);
+    const cubeTexture = cubeLease?.texture ?? identityCubeTexture();
     const filter = new Filter({
       glProgram: GlProgram.from({
         vertex: DEFAULT_FILTER_VERT,
@@ -319,13 +332,14 @@ function createColorGradeV2Filter(grade: ColorGradeIR, cubeLut?: ParsedCubeLut):
         uCubeLutTexture: cubeTexture,
       },
     });
-    if (curveLease !== undefined) {
+    if (curveLease !== undefined || cubeLease !== undefined) {
       let released = false;
       const destroy = filter.destroy.bind(filter);
       filter.destroy = (destroyPrograms?: boolean): void => {
         if (!released) {
           released = true;
-          curveLease.release();
+          curveLease?.release();
+          cubeLease?.release();
         }
         destroy(destroyPrograms);
       };
@@ -333,6 +347,7 @@ function createColorGradeV2Filter(grade: ColorGradeIR, cubeLut?: ParsedCubeLut):
     return filter;
   } catch (error) {
     curveLease?.release();
+    cubeLease?.release();
     throw error;
   }
 }
@@ -386,7 +401,7 @@ function curveTextureLease(key: string, entry: CurveTextureEntry): CurveTextureL
 }
 
 function identityCubeTexture(): Texture {
-  const cached = cubeTextureCache.get(identityCubeTexture);
+  const cached = identityCubeTextureCache.get(identityCubeTexture);
   if (cached !== undefined) return cached;
   const texture = new Texture({
     source: new BufferImageSource({
@@ -399,14 +414,17 @@ function identityCubeTexture(): Texture {
       format: 'rgba32float',
     }),
   });
-  cubeTextureCache.set(identityCubeTexture, texture);
+  identityCubeTextureCache.set(identityCubeTexture, texture);
   return texture;
 }
 
-function getCubeTexture(lut: ParsedCubeLut): Texture {
+function getCubeTexture(lut: ParsedCubeLut): CubeTextureLease {
   const key = lut as object;
   const cached = cubeTextureCache.get(key);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    cached.references += 1;
+    return cubeTextureLease(key, cached);
+  }
   const pixels = new Float32Array(lut.size * lut.size * lut.size * 4);
   for (let r = 0; r < lut.size; r += 1)
     for (let g = 0; g < lut.size; g += 1)
@@ -424,8 +442,25 @@ function getCubeTexture(lut: ParsedCubeLut): Texture {
       format: 'rgba32float',
     }),
   });
-  cubeTextureCache.set(key, texture);
-  return texture;
+  const entry = { texture, references: 1 };
+  cubeTextureCache.set(key, entry);
+  return cubeTextureLease(key, entry);
+}
+
+function cubeTextureLease(key: object, entry: CubeTextureEntry): CubeTextureLease {
+  let released = false;
+  return {
+    texture: entry.texture,
+    release(): void {
+      if (released) return;
+      released = true;
+      entry.references -= 1;
+      if (entry.references === 0 && cubeTextureCache.get(key) === entry) {
+        cubeTextureCache.delete(key);
+        entry.texture.destroy(true);
+      }
+    },
+  };
 }
 
 export function applyColorGradeMatrix(filter: ColorMatrixFilter, grade: ColorGradeIR): void {

@@ -225,6 +225,7 @@ export async function createBrowserPixiRenderer(
   let disposed = false;
   let lastGradeKey = '';
   let masterGradeFilter: ReturnType<typeof buildPixiColorGradeFilter>;
+  const unresolvedLutWarnings = new Set<string>();
   // Monitor-only state. The export path never sets these, so its canvas stays
   // the authored size at `options.resolution`.
   let pixelScale: number | undefined;
@@ -456,6 +457,35 @@ export async function createBrowserPixiRenderer(
     }
   };
 
+  const resolveColorLut = (grade: ColorGradeIR | undefined): ParsedCubeLut | undefined => {
+    const reference = grade?.lut;
+    if (
+      grade === undefined ||
+      ((typeof reference?.assetId !== 'string' || reference.assetId.length === 0) &&
+        (typeof reference?.sha256 !== 'string' || reference.sha256.length === 0))
+    )
+      return undefined;
+
+    const key = `${reference.assetId ?? ''}:${reference.sha256 ?? ''}`;
+    const resolved = options.resolveColorLut?.(grade);
+    if (resolved !== undefined) {
+      unresolvedLutWarnings.delete(key);
+      return resolved;
+    }
+
+    if (!unresolvedLutWarnings.has(key)) {
+      unresolvedLutWarnings.add(key);
+      const label =
+        typeof reference.assetId === 'string' && reference.assetId.length > 0
+          ? ` '${reference.assetId}'`
+          : '';
+      console.warn(
+        `Custom color LUT${label} could not be resolved; the LUT effect will be skipped.`,
+      );
+    }
+    return undefined;
+  };
+
   const updateLayerTransform = (layer: LayerContainer, node: VisualRenderNode): void => {
     layer.position.set(node.transform.translateX, node.transform.translateY);
     layer.scale.set(node.transform.scaleX, node.transform.scaleY);
@@ -472,8 +502,7 @@ export async function createBrowserPixiRenderer(
         ? node.effects
         : undefined;
     const grade = node.kind === 'video-frame' ? node.colorGrade : undefined;
-    const resolvedLut =
-      grade?.lut?.assetId === undefined ? undefined : options.resolveColorLut?.(grade);
+    const resolvedLut = resolveColorLut(grade);
     const key = `${colorGradeSignature(grade)}\n${colorLutStateKey(grade, resolvedLut)}\n${effectsSignature(effects)}`;
     if (layer.effectsKey === key) return;
     layer.effectsKey = key;
@@ -726,10 +755,7 @@ export async function createBrowserPixiRenderer(
         .clear()
         .rect(0, 0, width, height)
         .fill({ color: rgbaToHex(frame.background), alpha: frame.background.a / 255 });
-      const resolvedLut =
-        frame.colorGrade?.lut?.assetId === undefined
-          ? undefined
-          : options.resolveColorLut?.(frame.colorGrade);
+      const resolvedLut = resolveColorLut(frame.colorGrade);
       const gradeKey = `${colorGradeSignature(frame.colorGrade)}\n${colorLutStateKey(frame.colorGrade, resolvedLut)}`;
       if (gradeKey !== lastGradeKey) {
         lastGradeKey = gradeKey;

@@ -96,4 +96,33 @@ describe('Pixi color-grade filter inputs', () => {
     second!.destroy();
     expect((texture as { destroyed?: boolean }).destroyed).toBe(true);
   });
+
+  it('reuses a custom cube texture until its last filter is destroyed', () => {
+    const cubeLut = {
+      size: 2,
+      domainMin: [0, 0, 0] as const,
+      domainMax: [1, 1, 1] as const,
+      data: new Float32Array([
+        0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1,
+      ]),
+    };
+    const grade: ColorGradeIR = {
+      ...identity,
+      lut: { assetId: 'lut-1', sha256: 'a'.repeat(64), intensity: 1 },
+    };
+    const first = buildPixiColorGradeFilter(grade, cubeLut)!;
+    const second = buildPixiColorGradeFilter(grade, cubeLut)!;
+    const texture = first.resources.uCubeLutTexture;
+
+    expect(second.resources.uCubeLutTexture).toBe(texture);
+    first.destroy();
+    expect((texture as { destroyed?: boolean }).destroyed).not.toBe(true);
+
+    const third = buildPixiColorGradeFilter(grade, cubeLut)!;
+    expect(third.resources.uCubeLutTexture).toBe(texture);
+    second.destroy();
+    expect((texture as { destroyed?: boolean }).destroyed).not.toBe(true);
+    third.destroy();
+    expect((texture as { destroyed?: boolean }).destroyed).toBe(true);
+  });
 });

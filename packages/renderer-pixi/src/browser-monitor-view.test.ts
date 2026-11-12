@@ -77,7 +77,10 @@ beforeEach(() => {
   harness.renders = 0;
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('export safety (ADR-0046 B7)', () => {
   it('keeps the export canvas at the composition width after another renderer calls setPixelScale(4)', async () => {
@@ -125,7 +128,13 @@ describe('project LUT resolution', () => {
       saturation: 1,
       lut: { assetId: 'lut-1', sha256: 'a'.repeat(64), intensity: 1 },
     };
-    const resolveColorLut = vi.fn(() => undefined);
+    const resolvedLut = {
+      size: 2,
+      domainMin: [0, 0, 0] as const,
+      domainMax: [1, 1, 1] as const,
+      data: new Float32Array(24),
+    };
+    const resolveColorLut = vi.fn(() => resolvedLut);
     const renderer = await createBrowserPixiRenderer({ resolveColorLut });
     const videoFrame = {
       id: 'clip-1',
@@ -143,6 +152,64 @@ describe('project LUT resolution', () => {
     renderer.render({ ...frame(16, 16), nodes: [videoFrame] });
 
     expect(resolveColorLut).toHaveBeenCalledWith(grade);
+    renderer.destroy();
+  });
+
+  it('warns when a hash-only master LUT reference cannot be resolved', async () => {
+    const grade: ColorGradeIR = {
+      version: 2,
+      enabled: true,
+      lift: 0,
+      gamma: 1,
+      gain: 1,
+      saturation: 1,
+      lut: { sha256: 'a'.repeat(64), intensity: 1 },
+    };
+    const resolveColorLut = vi.fn(() => undefined);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const renderer = await createBrowserPixiRenderer({ resolveColorLut });
+
+    renderer.render({ ...frame(16, 16), colorGrade: grade });
+
+    expect(resolveColorLut).toHaveBeenCalledWith(grade);
+    expect(warning).toHaveBeenCalledWith(
+      'Custom color LUT could not be resolved; the LUT effect will be skipped.',
+    );
+    renderer.destroy();
+  });
+
+  it('warns when an asset-only clip LUT reference cannot be resolved', async () => {
+    const grade: ColorGradeIR = {
+      version: 2,
+      enabled: true,
+      lift: 0,
+      gamma: 1,
+      gain: 1,
+      saturation: 1,
+      lut: { assetId: 'lut-1', intensity: 1 },
+    };
+    const resolveColorLut = vi.fn(() => undefined);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const renderer = await createBrowserPixiRenderer({ resolveColorLut });
+    const videoFrame = {
+      id: 'clip-1',
+      kind: 'video-frame' as const,
+      zIndex: 0,
+      opacity: 1,
+      transform: { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1 },
+      width: 16,
+      height: 16,
+      sourceTimeUs: 0,
+      color: { r: 0, g: 0, b: 0, a: 255 },
+      colorGrade: grade,
+    };
+
+    renderer.render({ ...frame(16, 16), nodes: [videoFrame] });
+
+    expect(resolveColorLut).toHaveBeenCalledWith(grade);
+    expect(warning).toHaveBeenCalledWith(
+      "Custom color LUT 'lut-1' could not be resolved; the LUT effect will be skipped.",
+    );
     renderer.destroy();
   });
 });

@@ -794,6 +794,36 @@ describe('v1 project schema and migration harness', () => {
     }
   });
 
+  it('requires both asset id and SHA-256 for custom LUT references', () => {
+    const base = migrateV0ToV1(v0Fixture()).project;
+    const grade = { version: 2, enabled: true };
+    const incompleteReferences = [
+      { sha256: 'a'.repeat(64), intensity: 1 },
+      { assetId: 'lut-1', intensity: 1 },
+    ];
+
+    for (const lut of incompleteReferences) {
+      const diagnostics = validateJoyProjectV1({ ...base, colorGrade: { ...grade, lut } });
+      expect(diagnostics).toContainEqual(
+        expect.objectContaining({
+          code: 'PROJECT_SCHEMA_V1_COLOR_GRADE',
+          path: 'colorGrade.lut',
+          message: expect.stringContaining('both a non-empty asset id and a lowercase SHA-256'),
+        }),
+      );
+    }
+
+    expect(
+      validateJoyProjectV1({
+        ...base,
+        colorGrade: {
+          ...grade,
+          lut: { assetId: 'lut-1', sha256: 'a'.repeat(64), intensity: 1 },
+        },
+      }),
+    ).toEqual([]);
+  });
+
   it('accepts legacy v2 HSL bands without hueShift', () => {
     const base = migrateV0ToV1(v0Fixture()).project;
     const project = {

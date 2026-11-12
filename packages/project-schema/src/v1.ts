@@ -700,6 +700,18 @@ function validateColorGrade(value: unknown, path: string, diagnostics: ProjectDi
         (typeof value.lut.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.lut.sha256))
       )
         colorGradeError(diagnostics, `${path}.lut.sha256`, 'must be a lowercase SHA-256 digest');
+      if (
+        (value.lut.assetId !== undefined || value.lut.sha256 !== undefined) &&
+        (typeof value.lut.assetId !== 'string' ||
+          value.lut.assetId.length === 0 ||
+          typeof value.lut.sha256 !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(value.lut.sha256))
+      )
+        colorGradeError(
+          diagnostics,
+          `${path}.lut`,
+          'custom LUT references require both a non-empty asset id and a lowercase SHA-256 digest',
+        );
     }
   }
 
