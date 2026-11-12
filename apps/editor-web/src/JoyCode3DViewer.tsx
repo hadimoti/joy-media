@@ -471,7 +471,11 @@ export function JoyCode3DViewer({
         />
         <span className="joy-code-3d-status">{adding ? 'Adding 3D render…' : status}</span>
       </div>
-      <div ref={containerRef} className="joy-code-3d-viewport" />
+      {/* The frame carries the padding; the measured element (containerRef) has none,
+          so clientWidth and the ResizeObserver contentRect are the card's inner box. */}
+      <div className="joy-code-3d-frame">
+        <div ref={containerRef} className="joy-code-3d-viewport" />
+      </div>
       {fileList.length > 0 && (
         <div className="joy-code-3d-footer">{fileList.length} model(s) loaded</div>
       )}

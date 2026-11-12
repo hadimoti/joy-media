@@ -42,9 +42,9 @@ export const PANEL_TAB_ICONS: Readonly<Partial<Record<PanelId, string>>> = {
   flow: iconUrl('timeline.png'),
   captions: iconUrl('captions.png'),
   inspector: iconUrl('ui/inspect_24x24.png'),
-  // This legacy 3D glyph is still served from public assets until its source
-  // artwork is moved into panel-icons alongside the other fingerprinted tabs.
-  scene3d: '/assets/24_3d.png',
+  // The 3D tab has its own cube outline (T-P01). It was the same file as the
+  // Animate glyph before, so the tab showed the wrong picture (OB-01a).
+  scene3d: iconUrl('ui/cube-3d_24x24.png'),
   motion: iconUrl('ui/motion_24x24.png'),
   camera: iconUrl('camera.png'),
   effects: iconUrl('ui/effects-org_24x24.png'),

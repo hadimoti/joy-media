@@ -11261,10 +11261,29 @@ label {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* T-P02 (OB-02): the scene sits in a rounded card with a 12px gutter inside the
+   tab. The frame owns the padding; the viewport (which the renderer measures
+   with its ResizeObserver) has none, so it measures the card's inner box. */
+.joy-code-3d-frame {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 12px;
+}
 .joy-code-3d-viewport {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--joy-border);
+  border-radius: 10px;
   cursor: grab;
+}
+.joy-code-3d-viewport canvas {
+  display: block;
+  border-radius: inherit;
 }
 .joy-code-3d-viewport:active {
   cursor: grabbing;
