@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { confirmDialog, promptDialog } from './app-dialogs.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { iconUrl } from './icon-assets.js';
@@ -28,8 +29,6 @@ interface TemplatesPanelProps {
   readonly showToast: (message: string, kind: 'info' | 'success' | 'error') => void;
   /** Supplied by LibraryPanel from the root project-writer gate. */
   readonly storage: BrowserKeyValueStore;
-  readonly promptForTemplateName?: (message: string, defaultValue: string) => string | null;
-  readonly confirmTemplateDelete?: (message: string) => boolean;
 }
 
 type TemplateView =
@@ -45,13 +44,7 @@ const SIDEBAR_VIEWS: readonly { readonly id: TemplateView; readonly iconUrl: str
   { id: 'Effects', iconUrl: iconUrl('ui/motion_24x24.png') },
 ];
 
-export function TemplatesPanel({
-  onApplyTemplate,
-  showToast,
-  storage,
-  promptForTemplateName,
-  confirmTemplateDelete,
-}: TemplatesPanelProps) {
+export function TemplatesPanel({ onApplyTemplate, showToast, storage }: TemplatesPanelProps) {
   const [view, setView] = useState<TemplateView>('library');
   const [catalogRevision, setCatalogRevision] = useState(0);
   const catalogStorage = storage;
@@ -86,27 +79,24 @@ export function TemplatesPanel({
   );
 
   const handleDeleteTemplate = useCallback(
-    (entry: TemplateCatalogEntry) => {
-      const confirmed = deleteTemplateWithConfirmation(
-        catalogStorage,
-        entry,
-        confirmTemplateDelete ??
-          ((message) => (typeof window === 'undefined' ? false : window.confirm(message))),
+    async (entry: TemplateCatalogEntry) => {
+      const confirmed = await deleteTemplateWithConfirmation(catalogStorage, entry, (message) =>
+        confirmDialog({ message, confirmLabel: 'Delete', tone: 'danger' }),
       );
       if (!confirmed) return;
       setCatalogRevision((revision) => revision + 1);
       showToast('Template deleted', 'info');
     },
-    [catalogStorage, confirmTemplateDelete, showToast],
+    [catalogStorage, showToast],
   );
 
   const handleAuthorTemplate = useCallback(
-    (template: ContentTemplateV1) => {
-      const requestedName = (
-        promptForTemplateName ??
-        ((message, defaultValue) =>
-          typeof window === 'undefined' ? null : window.prompt(message, defaultValue))
-      )(`Save “${template.label}” to My Templates`, `${template.label} Copy`);
+    async (template: ContentTemplateV1) => {
+      const requestedName = await promptDialog({
+        message: `Save “${template.label}” to My Templates`,
+        defaultValue: `${template.label} Copy`,
+        confirmLabel: 'Save',
+      });
       if (requestedName === null) return;
       try {
         const entry = authorTemplateCopy(catalogStorage, template, requestedName);
@@ -117,7 +107,7 @@ export function TemplatesPanel({
         showToast(error instanceof Error ? error.message : 'Could not save template', 'error');
       }
     },
-    [catalogStorage, promptForTemplateName, showToast],
+    [catalogStorage, showToast],
   );
 
   void catalogRevision;

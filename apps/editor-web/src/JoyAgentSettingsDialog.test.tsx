@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, Fragment } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { findRegistryProvider } from '@joy-media/provider-sdk';
 import { DEFAULT_AGENT_POLICY } from './agent-policy-settings.js';
+import { AppDialogHost } from './AppDialogs.js';
+import { getAppDialogQueue, settleAppDialog } from './app-dialogs.js';
 import { JoyAgentSettingsDialog } from './JoyAgentSettingsDialog.js';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus, JoyAgentMediaCapabilityReport } from './joy-agent/protocol.js';
@@ -53,17 +55,32 @@ async function render(
   root = createRoot(container);
   await act(async () => {
     root?.render(
-      <JoyAgentSettingsDialog
-        policy={DEFAULT_AGENT_POLICY}
-        onPolicyChange={vi.fn()}
-        engineClient={engineClient}
-        {...(onStatusChange === undefined ? {} : { onStatusChange })}
-        {...(status === undefined ? {} : { status })}
-        onClose={vi.fn()}
-      />,
+      <Fragment>
+        <JoyAgentSettingsDialog
+          policy={DEFAULT_AGENT_POLICY}
+          onPolicyChange={vi.fn()}
+          engineClient={engineClient}
+          {...(onStatusChange === undefined ? {} : { onStatusChange })}
+          {...(status === undefined ? {} : { status })}
+          onClose={vi.fn()}
+        />
+        <AppDialogHost />
+      </Fragment>,
     );
   });
   return container;
+}
+
+/** Clicks the button with this text in the open confirm dialog, then lets the pending sign-out work run. */
+async function answerDialog(rendered: HTMLElement, text: string): Promise<void> {
+  const button = [
+    ...rendered.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button'),
+  ].find((candidate) => candidate.textContent === text);
+  if (button === undefined) throw new Error(`Expected dialog button "${text}"`);
+  await act(async () => {
+    button.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 function buttonByText(rendered: HTMLElement, text: string): HTMLButtonElement {
@@ -108,6 +125,7 @@ function setInputValue(input: HTMLInputElement, value: string): void {
 }
 
 afterEach(async () => {
+  for (const entry of getAppDialogQueue()) settleAppDialog(entry.id, null);
   await act(async () => root?.unmount());
   container?.remove();
   root = undefined;
@@ -2121,8 +2139,6 @@ describe('JOY Agent Settings desktop profile persistence', () => {
       }
       return undefined;
     });
-    const confirm = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false);
-    vi.stubGlobal('confirm', confirm);
     window.joyDesktop = {
       channels: [
         'desktop.provider-profile.list',
@@ -2140,12 +2156,17 @@ describe('JOY Agent Settings desktop profile persistence', () => {
       buttonByText(rendered, 'Sign out & revoke').click();
       await Promise.resolve();
     });
+    await answerDialog(rendered, 'Sign out');
 
     expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.sign-out', {
       id: 'chatgpt-profile-1',
     });
-    expect(confirm).toHaveBeenCalledTimes(2);
-    expect(String(confirm.mock.calls[1]?.[0])).toContain('does not revoke');
+    // The revocation failed, so the local-only removal is offered in a second dialog and declined.
+    expect(rendered.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'does not revoke',
+    );
+    await answerDialog(rendered, 'Cancel');
+    expect(rendered.querySelector('[role="alertdialog"]')).toBeNull();
     expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.delete', {
       id: 'chatgpt-profile-1',
     });

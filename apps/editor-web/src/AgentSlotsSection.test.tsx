@@ -1,9 +1,23 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
+import { act, createElement, Fragment } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentSlotsSection, type AgentSlotsSectionProps } from './AgentSlotsSection.js';
+import { AppDialogHost } from './AppDialogs.js';
+import { getAppDialogQueue, settleAppDialog } from './app-dialogs.js';
 import type { DesktopAgentSlot, DesktopProviderProfile } from './desktop-client.js';
+
+/** Clicks the button with this text in the open confirm dialog. */
+async function answerDialog(panel: Element, text: string): Promise<void> {
+  const button = Array.from(
+    panel.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button'),
+  ).find((candidate) => candidate.textContent === text);
+  if (button === undefined) throw new Error(`Expected dialog button "${text}"`);
+  await act(async () => {
+    button.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
 
 const profile: DesktopProviderProfile = {
   id: 'profile-1',
@@ -61,6 +75,7 @@ describe('AgentSlotsSection', () => {
   let container: HTMLDivElement | undefined;
 
   afterEach(async () => {
+    for (const entry of getAppDialogQueue()) settleAppDialog(entry.id, null);
     await act(async () => root?.unmount());
     container?.remove();
     root = undefined;
@@ -74,7 +89,14 @@ describe('AgentSlotsSection', () => {
     document.body.append(container);
     root = createRoot(container);
     await act(async () => {
-      root?.render(createElement(AgentSlotsSection, props));
+      root?.render(
+        createElement(
+          Fragment,
+          null,
+          createElement(AgentSlotsSection, props),
+          createElement(AppDialogHost),
+        ),
+      );
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     return container;
@@ -272,7 +294,6 @@ describe('AgentSlotsSection', () => {
       channels: ['desktop.agent-slots.list', 'desktop.provider-profile.sign-out'],
       invoke,
     } as unknown as NonNullable<typeof window.joyDesktop>;
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const onProfilesChanged = vi.fn();
     const panel = await render({
       profiles: [chatGptProfile],
@@ -285,7 +306,12 @@ describe('AgentSlotsSection', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(confirm).toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.sign-out', expect.anything());
+    expect(panel.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'Log out of ChatGPT?',
+    );
+    await answerDialog(panel, 'Log out');
+
     expect(invoke).toHaveBeenCalledWith('desktop.provider-profile.sign-out', {
       id: 'chatgpt-profile-1',
     });
@@ -301,14 +327,15 @@ describe('AgentSlotsSection', () => {
       channels: ['desktop.agent-slots.list', 'desktop.provider-profile.sign-out'],
       invoke,
     } as unknown as NonNullable<typeof window.joyDesktop>;
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
     const panel = await render({ profiles: [chatGptProfile], onUseSlot: vi.fn() });
 
     await act(async () => {
       buttonNamed(panel, 'Log out')?.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
+    await answerDialog(panel, 'Cancel');
 
+    expect(panel.querySelector('[role="alertdialog"]')).toBeNull();
     expect(invoke).not.toHaveBeenCalledWith('desktop.provider-profile.sign-out', expect.anything());
   });
 

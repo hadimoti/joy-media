@@ -24,12 +24,12 @@ export function authorTemplateCopy(
   return entry;
 }
 
-export function deleteTemplateWithConfirmation(
+export async function deleteTemplateWithConfirmation(
   storage: BrowserKeyValueStore,
   entry: TemplateCatalogEntry,
-  confirmDelete: (message: string) => boolean,
-): boolean {
-  if (!confirmDelete(`Delete “${entry.label}” from My Templates?`)) return false;
+  confirmDelete: (message: string) => Promise<boolean>,
+): Promise<boolean> {
+  if (!(await confirmDelete(`Delete “${entry.label}” from My Templates?`))) return false;
   removeTemplate(storage, entry.id);
   return true;
 }

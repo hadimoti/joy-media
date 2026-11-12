@@ -29,7 +29,7 @@ describe('template catalog UI operations', () => {
     expect(listTemplates(storage)).toEqual([entry]);
   });
 
-  it('requires confirmation before deleting a catalog entry', () => {
+  it('requires confirmation before deleting a catalog entry', async () => {
     const storage = memoryStore();
     const entry = authorTemplateCopy(
       storage,
@@ -42,9 +42,9 @@ describe('template catalog UI operations', () => {
       },
       'My title',
     );
-    expect(deleteTemplateWithConfirmation(storage, entry, () => false)).toBe(false);
+    expect(await deleteTemplateWithConfirmation(storage, entry, async () => false)).toBe(false);
     expect(listTemplates(storage)).toHaveLength(1);
-    expect(deleteTemplateWithConfirmation(storage, entry, () => true)).toBe(true);
+    expect(await deleteTemplateWithConfirmation(storage, entry, async () => true)).toBe(true);
     expect(listTemplates(storage)).toHaveLength(0);
   });
 

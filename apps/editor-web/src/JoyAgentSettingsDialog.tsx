@@ -9,6 +9,7 @@ import type {
   JoyAgentMediaCapabilityState,
 } from './joy-agent/protocol.js';
 import { CloseIcon } from './icons.js';
+import { confirmDialog } from './app-dialogs.js';
 import { AgentSlotsSection } from './AgentSlotsSection.js';
 import type { DesktopAgentSlot } from './desktop-client.js';
 import { profileLabel } from './provider-labels.js';
@@ -865,13 +866,14 @@ export function JoyAgentSettingsDialog({
 
   const removeProfile = async (profile: DesktopProviderProfileState) => {
     if (!isDesktopHost()) return;
-    if (
-      profile.provider === 'chatgpt' &&
-      !window.confirm(
-        'Remove this ChatGPT connection from JOY Media without revoking its authorization? This does not revoke access in ChatGPT.',
-      )
-    ) {
-      return;
+    if (profile.provider === 'chatgpt') {
+      const confirmed = await confirmDialog({
+        message:
+          'Remove this ChatGPT connection from JOY Media without revoking its authorization? This does not revoke access in ChatGPT.',
+        confirmLabel: 'Remove',
+        tone: 'danger',
+      });
+      if (!confirmed) return;
     }
     try {
       await deleteDesktopProviderProfile(profile.id);
@@ -907,16 +909,16 @@ export function JoyAgentSettingsDialog({
   };
 
   const signOutChatGptProfile = async (profile: DesktopProviderProfileState) => {
-    if (
-      !isDesktopHost() ||
-      profile.provider !== 'chatgpt' ||
-      profileActionId !== undefined ||
-      !window.confirm(
-        'Sign out of this ChatGPT connection and revoke its saved authorization? JOY Media will remove the saved profile after ChatGPT confirms revocation.',
-      )
-    ) {
+    if (!isDesktopHost() || profile.provider !== 'chatgpt' || profileActionId !== undefined) {
       return;
     }
+    const confirmed = await confirmDialog({
+      message:
+        'Sign out of this ChatGPT connection and revoke its saved authorization? JOY Media will remove the saved profile after ChatGPT confirms revocation.',
+      confirmLabel: 'Sign out',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     setProfileActionId(profile.id);
     setConnectionNotice(undefined);
     try {
@@ -929,13 +931,12 @@ export function JoyAgentSettingsDialog({
       const message = err instanceof Error ? err.message : 'ChatGPT could not confirm sign-out.';
       setConnectionNotice({ kind: 'error', message });
       onNotice?.(message, 'error');
-      if (
-        !window.confirm(
-          `${message}\n\nRemove this connection from JOY Media locally without revoking it? This does not revoke access in ChatGPT.`,
-        )
-      ) {
-        return;
-      }
+      const removeLocally = await confirmDialog({
+        message: `${message}\n\nRemove this connection from JOY Media locally without revoking it? This does not revoke access in ChatGPT.`,
+        confirmLabel: 'Remove locally',
+        tone: 'danger',
+      });
+      if (!removeLocally) return;
       try {
         await deleteDesktopProviderProfile(profile.id);
         await loadProfiles();

@@ -1,4 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { confirmDialog } from './app-dialogs.js';
 import { AuthorizedDerivativeResolver } from './asset-resolver.js';
 import {
   BrowserControlPlaneClient,
@@ -605,7 +606,11 @@ export function AssetLibraryPanel({
 
   const deleteAsset = useCallback(
     async (asset: BrowserAsset) => {
-      const ok = window.confirm(`Delete “${asset.displayName}” from the catalog?`);
+      const ok = await confirmDialog({
+        message: `Delete “${asset.displayName}” from the catalog?`,
+        confirmLabel: 'Delete',
+        tone: 'danger',
+      });
       if (!ok) return;
       try {
         const result = await client.deleteAsset(asset.projectId || projectId, asset.id);
@@ -654,7 +659,11 @@ export function AssetLibraryPanel({
   const bulkDelete = useCallback(async () => {
     const targets = visible.filter(({ asset }) => selectedAssetIds.has(asset.id));
     if (targets.length === 0) return;
-    const ok = window.confirm(`Delete ${targets.length} selected media item(s) from the catalog?`);
+    const ok = await confirmDialog({
+      message: `Delete ${targets.length} selected media item(s) from the catalog?`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
     if (!ok) return;
     const outcomes: BulkDeleteOutcome[] = [];
     for (const { asset } of targets) {
