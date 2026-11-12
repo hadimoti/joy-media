@@ -13,31 +13,34 @@ textarea:focus:not(:focus-visible) {
 
 :root {
   /* Surfaces — CapCut shell: black canvas, gray panel tiles (DESIGN.md §1, §3b) */
-  --joy-bg-app: #000000;
-  --joy-bg-panel: #252525;
-  --joy-bg-chrome: #2d2d2d;
-  --joy-bg-elevated: #333333;
-  --joy-bg-raised: #383838;
-  --joy-bg-inset: #1e1e1e;
-  --joy-bg-control: #3a3a3a;
-  --joy-bg-hover: #323232;
-  --joy-bg-active: #404040;
-  --joy-bg-input: #1a1a1a;
+  /* UI polish 1 (12 Nov 2026, Fable 5.2 review): a quiet blue-graphite family instead of neutral
+     grays, an off-black app background, softer panel corners and wider gaps so the picture and the
+     timeline stand out. The accent stays the same. */
+  --joy-bg-app: #0c0c0e;
+  --joy-bg-panel: #1a1b1e;
+  --joy-bg-chrome: #222327;
+  --joy-bg-elevated: #2a2b30;
+  --joy-bg-raised: #303137;
+  --joy-bg-inset: #131416;
+  --joy-bg-control: #34353b;
+  --joy-bg-hover: #2c2d33;
+  --joy-bg-active: #3a3b42;
+  --joy-bg-input: #111214;
   --joy-bg-deep: #000000;
   --joy-border-subtle: rgba(255, 255, 255, 0.07);
-  --joy-border: #3a3a3a;
-  --joy-border-strong: #484848;
+  --joy-border: #2f3036;
+  --joy-border-strong: #3d3e46;
   --joy-border-hover: #5a5a62;
   --joy-border-soft: rgba(255, 255, 255, 0.08);
-  --joy-bg-surface: #252525;
-  --joy-gap: #000000;
-  --joy-shell-gap: 2px;
-  --joy-radius-panel: 16px;
-  --joy-radius-inner: 10px;
-  --joy-text: #ececef;
-  --joy-text-secondary: rgba(255, 255, 255, 0.64);
-  --joy-text-muted: #a8a8b0;
-  --joy-text-faint: #96969f;
+  --joy-bg-surface: #1a1b1e;
+  --joy-gap: #0c0c0e;
+  --joy-shell-gap: 6px;
+  --joy-radius-panel: 10px;
+  --joy-radius-inner: 8px;
+  --joy-text: #e9e9ed;
+  --joy-text-secondary: #a9abb4;
+  --joy-text-muted: #a9abb4;
+  --joy-text-faint: #8b8d97;
   --joy-text-disabled: rgba(255, 255, 255, 0.28);
   --joy-accent: #f4b72f;
   --joy-accent-hover: #ffc94f;
@@ -48,7 +51,8 @@ textarea:focus:not(:focus-visible) {
   --joy-danger: #ef6a6a;
   --joy-ok: #6fcf97;
   --joy-success: #6fcf97;
-  --joy-warning: #f4b72f;
+  /* A warning is no longer the brand colour. */
+  --joy-warning: #ff9f43;
 
   /* Spacing + controls */
   --space-1: 4px;
@@ -1009,8 +1013,8 @@ main {
   font-size: 0.82rem;
 }
 .header-export-preset-dropdown {
-  min-width: 12rem;
-  max-width: 12rem;
+  min-width: 15rem;
+  max-width: 15rem;
 }
 .account-dropdown {
   min-width: 17rem;
@@ -1237,8 +1241,14 @@ select,
 textarea {
   font: inherit;
 }
+/* Base look for any button that has no class styling of its own. Before this, such buttons showed the
+   browser's white default (export preset menu, dialogs). Every class rule below still wins. */
 button {
   cursor: pointer;
+  color: var(--joy-text);
+  background: var(--joy-bg-control);
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
 }
 button:disabled {
   cursor: not-allowed;
@@ -1505,7 +1515,20 @@ a.icon-button {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  gap: 0.6rem;
   min-height: 2rem;
+  padding: 0.35rem 0.6rem;
+  text-align: start;
+  white-space: nowrap;
+  background: transparent;
+  border-color: transparent;
+}
+.export-preset-list button:hover,
+.export-preset-list button:focus-visible {
+  background: var(--joy-bg-control);
+}
+.export-preset-list button[aria-checked='true'] {
+  border-color: var(--joy-accent);
 }
 .export-preset-option-label {
   display: block;
@@ -2673,7 +2696,8 @@ label {
 }
 .timeline-track--audio-first {
   margin-top: 0.45rem;
-  border-top: 2px solid color-mix(in srgb, var(--joy-accent) 55%, var(--joy-border));
+  /* A quiet divider between video and audio tracks: gold is kept for the playhead and the selection. */
+  border-top: 1px solid var(--joy-border-strong);
 }
 .timeline-track--audio .timeline-track-header {
   background: color-mix(in srgb, #3f7fd6 7%, transparent);
@@ -4840,6 +4864,7 @@ label {
 .inspector-row input[type='number']:disabled {
   opacity: 0.6;
 }
+.fx,
 .inspector-row .fx {
   width: 1.6rem;
   height: 1.4rem;
@@ -4847,12 +4872,18 @@ label {
   line-height: 1;
   font-size: 0.7rem;
   font-style: italic;
-  border: 1px solid #2e2e32;
+  border: 1px solid var(--joy-border);
   border-radius: 0.2rem;
   background: transparent;
-  color: #8c8c90;
+  color: var(--joy-text-faint);
   cursor: pointer;
 }
+.fx:hover,
+.inspector-row .fx:hover {
+  color: var(--joy-text);
+  border-color: var(--joy-border-hover);
+}
+.fx-on,
 .inspector-row .fx-on {
   color: #d4b06a;
   border-color: #d4b06a;
@@ -7367,6 +7398,62 @@ label {
 }
 .asset-library-storage-hint {
   margin-top: 0;
+}
+/* Layout the dialog never had: padded body, a readable hint, spaced sections, normal-size buttons. */
+.asset-library-storage-dialog .agent-settings-body {
+  display: grid;
+  gap: 16px;
+  padding: 20px 24px;
+  overflow: auto;
+}
+.asset-library-storage-dialog h2 {
+  color: var(--joy-text);
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.asset-library-storage-dialog h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--joy-text);
+}
+.asset-library-storage-dialog .agent-settings-hint {
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-md);
+  line-height: 1.5;
+}
+.asset-library-storage-dialog .agent-settings-section {
+  display: grid;
+  gap: 12px;
+}
+.asset-library-storage-dialog .agent-settings-section-heading {
+  align-items: center;
+}
+.asset-library-storage-dialog button {
+  font-size: var(--joy-type-md);
+}
+.asset-library-storage-dialog .agent-settings-dialog > footer,
+.asset-library-storage-dialog > footer {
+  justify-content: flex-end;
+  padding: 12px 24px;
+}
+.asset-library-storage-dialog .asset-library-storage-count-value {
+  color: var(--joy-text);
+}
+/* Primary action buttons (gold) and the quiet companion. */
+.button-primary {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--joy-accent);
+  border-radius: var(--radius-sm);
+  background: var(--joy-accent);
+  color: var(--joy-on-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+.button-primary:hover:not(:disabled) {
+  background: var(--joy-accent-hover);
+}
+.button-secondary {
+  font-size: var(--joy-type-md);
 }
 .asset-library-storage-path-row {
   display: flex;
