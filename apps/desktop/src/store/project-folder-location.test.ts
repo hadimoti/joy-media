@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   defaultProjectFoldersDirectory,
+  DEV_PROJECT_FOLDERS_ENV,
   isInsideWindowsFolder,
+  projectFoldersDirectory,
 } from './project-folder-location.js';
 
 const PROFILE = 'C:\\Users\\Hadi';
@@ -86,5 +88,85 @@ describe('defaultProjectFoldersDirectory', () => {
         oneDriveRoots: ['C:\\Users\\Hadi\\OneDrive'],
       }),
     ).toBe('C:\\Users\\Hadi\\OneDriveBackup\\Documents\\JOY Projects');
+  });
+});
+
+describe('projectFoldersDirectory', () => {
+  const defaults = {
+    documentsDirectory: DOCUMENTS,
+    userProfileDirectory: PROFILE,
+    oneDriveRoots: [],
+  };
+  const SCRATCH = 'C:\\jgp\\bot-lane-b\\projects';
+
+  /** An environment that fails the test if anything reads it. */
+  const unreadable = new Proxy({} as Record<string, string | undefined>, {
+    get: () => {
+      throw new Error('the environment was read');
+    },
+    has: () => {
+      throw new Error('the environment was read');
+    },
+    ownKeys: () => {
+      throw new Error('the environment was read');
+    },
+  });
+
+  it('a packaged app never reads the environment and keeps the real default', () => {
+    expect(
+      projectFoldersDirectory({ ...defaults, isPackaged: true, environment: unreadable }),
+    ).toBe('C:\\Users\\Hadi\\Documents\\JOY Projects');
+  });
+
+  it('a packaged app ignores the development folder even when it is set', () => {
+    expect(
+      projectFoldersDirectory({
+        ...defaults,
+        isPackaged: true,
+        environment: { [DEV_PROJECT_FOLDERS_ENV]: SCRATCH },
+      }),
+    ).toBe(defaultProjectFoldersDirectory(defaults));
+    expect(
+      projectFoldersDirectory({
+        documentsDirectory: 'C:\\Users\\Hadi\\OneDrive\\Documents',
+        userProfileDirectory: PROFILE,
+        oneDriveRoots: ['C:\\Users\\Hadi\\OneDrive'],
+        isPackaged: true,
+        environment: { [DEV_PROJECT_FOLDERS_ENV]: SCRATCH },
+      }),
+    ).toBe('C:\\Users\\Hadi\\JOY Projects');
+  });
+
+  it('an unpacked run uses the development folder when it is set', () => {
+    expect(
+      projectFoldersDirectory({
+        ...defaults,
+        isPackaged: false,
+        environment: { [DEV_PROJECT_FOLDERS_ENV]: ` ${SCRATCH} ` },
+      }),
+    ).toBe(SCRATCH);
+  });
+
+  it('an unpacked run with nothing set uses the default', () => {
+    expect(projectFoldersDirectory({ ...defaults, isPackaged: false, environment: {} })).toBe(
+      defaultProjectFoldersDirectory(defaults),
+    );
+    expect(
+      projectFoldersDirectory({
+        ...defaults,
+        isPackaged: false,
+        environment: { [DEV_PROJECT_FOLDERS_ENV]: '  ' },
+      }),
+    ).toBe(defaultProjectFoldersDirectory(defaults));
+  });
+
+  it('a development folder that is not an absolute path stops the start instead of falling back', () => {
+    expect(() =>
+      projectFoldersDirectory({
+        ...defaults,
+        isPackaged: false,
+        environment: { [DEV_PROJECT_FOLDERS_ENV]: 'projects' },
+      }),
+    ).toThrow(/absolute Windows path/);
   });
 });

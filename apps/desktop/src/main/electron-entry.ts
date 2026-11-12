@@ -62,7 +62,7 @@ import { revokeChatGptRefreshToken } from './oauth/chatgpt.js';
 import { createWorkerCompletion } from './providers/worker-completion.js';
 import { checkProfileCredentials } from './profile-credential-check.js';
 import { createProjectFolderClient } from './project-folder-client.js';
-import { defaultProjectFoldersDirectory } from '../store/project-folder-location.js';
+import { projectFoldersDirectory } from '../store/project-folder-location.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
@@ -170,7 +170,10 @@ if (!app.requestSingleInstanceLock()) {
   const projectFolders = createProjectFolderClient({
     workerFile: join(__dirname, 'project-folder-worker.js'),
     registryPath: join(app.getPath('userData'), 'project-claims.sqlite'),
-    directory: defaultProjectFoldersDirectory({
+    // An unpacked development run may set JOY_PROJECTS_DIR to keep test projects out of Documents; packaged apps ignore it.
+    directory: projectFoldersDirectory({
+      isPackaged: app.isPackaged,
+      environment: process.env,
       documentsDirectory: app.getPath('documents'),
       userProfileDirectory: app.getPath('home'),
       oneDriveRoots: [

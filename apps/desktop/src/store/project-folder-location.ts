@@ -40,3 +40,31 @@ export function defaultProjectFoldersDirectory(input: DefaultProjectFoldersInput
   const base = documentsAreSynced ? input.userProfileDirectory : input.documentsDirectory;
   return win32.join(base, DEFAULT_PROJECT_FOLDERS_NAME);
 }
+
+/**
+ * Development only: `JOY_PROJECTS_DIR` names another folder for folder projects, so a test run of an unpacked copy never
+ * touches the real `Documents\JOY Projects`. A packaged (installed) app never reads it. The value must be an absolute
+ * Windows path; anything else stops the start, so a typo can not fall back to the real folder.
+ */
+export const DEV_PROJECT_FOLDERS_ENV = 'JOY_PROJECTS_DIR';
+
+export interface ProjectFoldersDirectoryInput extends DefaultProjectFoldersInput {
+  /** `app.isPackaged`. When true, the environment is not read at all. */
+  readonly isPackaged: boolean;
+  /** The process environment; read only when the app is not packaged. */
+  readonly environment: Readonly<Record<string, string | undefined>>;
+}
+
+/** The folder for folder projects: the development folder of an unpacked run, if set, or the default. */
+export function projectFoldersDirectory(input: ProjectFoldersDirectoryInput): string {
+  const { isPackaged, environment, ...defaults } = input;
+  if (isPackaged) return defaultProjectFoldersDirectory(defaults);
+  const override = environment[DEV_PROJECT_FOLDERS_ENV];
+  if (override === undefined || override.trim() === '')
+    return defaultProjectFoldersDirectory(defaults);
+  const trimmed = override.trim();
+  if (!/^[A-Za-z]:[\\/]/.test(trimmed) && !trimmed.startsWith('\\\\')) {
+    throw new Error(`${DEV_PROJECT_FOLDERS_ENV} must be an absolute Windows path.`);
+  }
+  return win32.normalize(trimmed);
+}
