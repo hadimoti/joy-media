@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { PAGE_FILES, renderSite } from './render.mjs';
 import { REPOSITORY_URL, downloadUrl, parseSha256Sums, payloadNames } from './release.mjs';
@@ -90,7 +93,8 @@ describe('placeholder build (no SHA256SUMS.txt supplied)', () => {
     const links = hrefs(files['download.html']).filter((href) =>
       href.includes('/releases/download/'),
     );
-    expect(links.sort()).toEqual(NAMES.map((name) => downloadUrl(TAG, name)).sort());
+    // The page may link a file more than once (a button and the table row), but never anything else.
+    expect([...new Set(links)].sort()).toEqual(NAMES.map((name) => downloadUrl(TAG, name)).sort());
   });
 });
 
@@ -124,7 +128,7 @@ describe('static checks (PLAN-v4 7e, source and build)', () => {
   const files = build();
   const markup = Object.entries(files).filter(([path]) => path.endsWith('.html'));
 
-  it('contains no fetch, XHR, beacon, form, WebSocket, script or src attribute', () => {
+  it('contains no fetch, XHR, beacon, form, WebSocket or script', () => {
     for (const [path, html] of markup) {
       expect(html, path).not.toMatch(/fetch\(/);
       expect(html, path).not.toMatch(/XMLHttpRequest/);
@@ -132,7 +136,29 @@ describe('static checks (PLAN-v4 7e, source and build)', () => {
       expect(html, path).not.toMatch(/<form/i);
       expect(html, path).not.toMatch(/WebSocket/);
       expect(html, path).not.toMatch(/<script/i);
-      expect(html, path).not.toMatch(/\ssrc=/);
+    }
+  });
+
+  it('loads only same-site images from /img/, each with a description and an existing file', () => {
+    const assets = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets');
+    for (const [path, html] of markup) {
+      for (const tagText of html.match(/<[a-z]+[^>]*\ssrc=[^>]*>/gi) ?? []) {
+        expect(tagText, path).toMatch(/^<img\s/);
+        const src = /\ssrc="([^"]+)"/.exec(tagText)?.[1] ?? '';
+        expect(src.startsWith('/img/'), `${path} image ${src}`).toBe(true);
+        expect(/\salt="[^"]{8,}"/.test(tagText), `${path} image ${src} needs a description`).toBe(
+          true,
+        );
+        expect(existsSync(join(assets, src.slice(1))), `${path} image ${src} exists`).toBe(true);
+      }
+    }
+  });
+
+  it('has no account, sign-in or billing wording on any page', () => {
+    for (const [path, html] of markup) {
+      expect(html, path).not.toMatch(
+        /sign in \/ account|manage account|account &amp; devices|subscription/i,
+      );
     }
   });
 

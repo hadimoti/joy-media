@@ -8,7 +8,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderSite } from '../src/render.mjs';
@@ -44,6 +44,18 @@ for (const [path, contents] of Object.entries(files)) {
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, contents, 'utf8');
 }
+
+// A plain nginx (the joyst.ir host) serves /download as /download/index.html, while Cloudflare Pages
+// serves it from download.html. Write both, from the same text, so every host resolves the clean paths.
+for (const [path, contents] of Object.entries(files)) {
+  if (!path.endsWith('.html') || path === 'index.html' || path === '404.html') continue;
+  const target = join(outDir, path.slice(0, -'.html'.length), 'index.html');
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, contents, 'utf8');
+}
+
+// Static images (real screenshots of the app) are copied as they are.
+cpSync(join(siteDir, 'assets'), outDir, { recursive: true });
 
 console.log(
   `site built: ${Object.keys(files).length} files, release ${tag}, hashes ${sums ? 'from SHA256SUMS.txt' : 'PLACEHOLDER (no SHA256SUMS.txt supplied)'}`,
