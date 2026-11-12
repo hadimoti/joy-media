@@ -5,6 +5,13 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { createLiveDriver, EXPECTED_JOY_HASH, verifyAfterRun } from './driver.mjs';
 
+test('the expected joy protocol hash is the owner baseline', () => {
+  assert.equal(
+    EXPECTED_JOY_HASH,
+    'AF05BE55222C86FECE27E738B7E8A931CB4261C9797261C67DDE3C71A4E5CAC0',
+  );
+});
+
 function fakeRun() {
   const root = mkdtempSync(join(tmpdir(), 'live-driver-test-'));
   const app = join(root, 'app');
