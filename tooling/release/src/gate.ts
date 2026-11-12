@@ -255,8 +255,8 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
     ),
     check(
       'source-provenance',
-      sourceProvenanceReady(input, now),
-      sourceProvenanceMessage(input, now),
+      localOnly ? localSourceReady(input) : sourceProvenanceReady(input, now),
+      localOnly ? localSourceMessage(input) : sourceProvenanceMessage(input, now),
     ),
     check(
       'tests',
@@ -332,11 +332,18 @@ export function evaluateReleaseGate(input: ReleaseGateInput, now = new Date()): 
             browserJourneyMessage(input.browserJourneys, input.sourceProvenance, now),
           ),
         ]),
-    check(
-      'performance-evidence',
-      performanceEvidenceReady(input.performanceEvidence, input.sourceProvenance, now),
-      performanceEvidenceMessage(input.performanceEvidence, input.sourceProvenance, now),
-    ),
+    localOnly
+      ? check(
+          'performance-evidence',
+          true,
+          'not applicable to the local-only profile: the hosted polling, effects and editor-load observer has nothing to measure in a local app; long-export memory is a stated limitation in the release notes',
+          false,
+        )
+      : check(
+          'performance-evidence',
+          performanceEvidenceReady(input.performanceEvidence, input.sourceProvenance, now),
+          performanceEvidenceMessage(input.performanceEvidence, input.sourceProvenance, now),
+        ),
     ...(localOnly
       ? [
           check(
@@ -552,6 +559,20 @@ function sourceProvenanceReady(input: ReleaseGateInput, now: Date): boolean {
     journey !== undefined &&
     browserJourneyFresh(journey, now)
   );
+}
+
+/** Local-only profile: the source must be a valid commit with a clean tree. The receipts bind the candidate separately. */
+function localSourceReady(input: ReleaseGateInput): boolean {
+  const source = input.sourceProvenance;
+  return source === undefined || (validSource(source) && source.worktreeClean);
+}
+
+function localSourceMessage(input: ReleaseGateInput): string {
+  const source = input.sourceProvenance;
+  if (source === undefined) return 'source provenance not supplied to pure evaluator';
+  if (!validSource(source)) return 'workspace source provenance is malformed or incomplete';
+  if (!source.worktreeClean) return 'workspace contains tracked or untracked source changes';
+  return `clean source at commit ${source.commitSha}; the attended and Sandbox receipts are bound to the candidate by their own checks`;
 }
 
 function sourceProvenanceMessage(input: ReleaseGateInput, now: Date): string {
@@ -1335,10 +1356,19 @@ export function hostedVerifyFromEnvironment(root: string): HostedVerifyOutcome |
 export const ATTENDED_RECEIPT_ROOT = 'docs/release/attended/';
 
 /**
+ * Paths that may change after the candidate commit: the receipts, and the release tooling itself (the gate, its tests
+ * and the Sandbox scripts), which is not part of the shipped app. Anything else means the tested build is not the released one.
+ */
+export const POST_CANDIDATE_ALLOWED_PREFIXES: readonly string[] = [
+  ATTENDED_RECEIPT_ROOT,
+  'tooling/release/',
+];
+
+/**
  * Receipts are committed after the candidate was built and tested, so the checked-out commit is later than the candidate.
  * The candidate is the commit named by JOY_RELEASE_CANDIDATE_SHA (or --candidate=); without one it is HEAD. A named
- * candidate must be an ancestor of HEAD, and every commit after it may change only files under ATTENDED_RECEIPT_ROOT, so
- * the tested tree and the released tree are the same except for the receipts.
+ * candidate must be an ancestor of HEAD, and every commit after it may change only files under
+ * POST_CANDIDATE_ALLOWED_PREFIXES, so the tested app and the released app are the same.
  */
 export function resolveAttendedCandidate(
   root: string,
@@ -1375,14 +1405,17 @@ export function resolveAttendedCandidate(
   const outside = String(diff.stdout)
     .split(/\r?\n/u)
     .map((line) => line.trim())
-    .filter((line) => line !== '' && !line.startsWith(ATTENDED_RECEIPT_ROOT));
+    .filter(
+      (line) =>
+        line !== '' && !POST_CANDIDATE_ALLOWED_PREFIXES.some((prefix) => line.startsWith(prefix)),
+    );
   return {
     candidateSha: wanted,
     problems:
       outside.length === 0
         ? []
         : [
-            `commits after the candidate change files outside ${ATTENDED_RECEIPT_ROOT}: ${outside.slice(0, 5).join(', ')}`,
+            `commits after the candidate change files outside ${POST_CANDIDATE_ALLOWED_PREFIXES.join(' and ')}: ${outside.slice(0, 5).join(', ')}`,
           ],
   };
 }

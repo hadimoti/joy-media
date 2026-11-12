@@ -43,6 +43,7 @@ beforeAll(() => {
   shas.receipts = commit('receipts only', {
     [`${ATTENDED_RECEIPT_ROOT}${shas.candidate}/sandbox-lifecycle.json`]: '{}',
   });
+  shas.tooling = commit('release tooling only', { 'tooling/release/src/gate.txt': 'x' });
   shas.code = commit('code change', { 'src/app.txt': 'two' });
   run('checkout', '-q', '-b', 'other', shas.candidate);
   shas.other = commit('other branch', { 'src/other.txt': 'x' });
@@ -72,7 +73,14 @@ describe('resolveAttendedCandidate', () => {
     });
   });
 
-  it('refuses a candidate followed by a change outside the receipt folder', () => {
+  it('accepts a candidate followed by receipts and release tooling changes', () => {
+    expect(resolveAttendedCandidate(root, shas.tooling!, shas.candidate)).toEqual({
+      candidateSha: shas.candidate,
+      problems: [],
+    });
+  });
+
+  it('refuses a candidate followed by a change outside the receipt folder and the release tooling', () => {
     const result = resolveAttendedCandidate(root, shas.code!, shas.candidate);
     expect(result.candidateSha).toBe(shas.candidate);
     expect(result.problems.join(';')).toMatch(/outside docs\/release\/attended\/.*src\/app\.txt/u);

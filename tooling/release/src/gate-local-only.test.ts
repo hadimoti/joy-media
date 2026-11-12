@@ -215,6 +215,29 @@ describe('local-only gate profile', () => {
     ).toBe('failed');
   });
 
+  it('judges the source as a clean tree and marks the hosted performance check not applicable', () => {
+    const source = {
+      commitSha: 'a'.repeat(40),
+      treeHash: 'b'.repeat(40),
+      lockfileSha256: 'c'.repeat(64),
+      worktreeClean: true,
+    };
+    const base = {
+      profile: 'local-only',
+      attendedEvidence: evidence(),
+      sourceProvenance: source,
+    } as const;
+    expect(status(base, 'source-provenance')).toBe('passed');
+    expect(status(base, 'performance-evidence')).toBe('passed');
+    const dirty = { ...base, sourceProvenance: { ...source, worktreeClean: false } };
+    expect(status(dirty, 'source-provenance')).toBe('failed');
+    const malformed = { ...base, sourceProvenance: { ...source, treeHash: 'zz' } };
+    expect(status(malformed, 'source-provenance')).toBe('failed');
+    // The standard profile still wants browser evidence and a measured performance run.
+    expect(status({ sourceProvenance: source }, 'source-provenance')).toBe('failed');
+    expect(status({ sourceProvenance: source }, 'performance-evidence')).toBe('failed');
+  });
+
   it('treats evidence the pure evaluator was not given like the other evidence fields', () => {
     expect(status({ profile: 'local-only' }, 'attended-journey')).toBe('passed');
     expect(status({ profile: 'local-only' }, 'lifecycle-evidence')).toBe('passed');

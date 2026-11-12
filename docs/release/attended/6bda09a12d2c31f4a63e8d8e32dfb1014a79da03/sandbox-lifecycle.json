@@ -1,111 +1,111 @@
 ﻿{
-    "schema":  "joy-media.sandbox-lifecycle/1",
-    "startedAt":  "2026-11-11T23:35:49.2166946Z",
-    "steps":  [
-                  {
-                      "id":  "sandbox-identity",
-                      "result":  "pass",
-                      "detail":  "WDAGUtilityAccount on BCC0E703-6340-4"
-                  },
-                  {
-                      "id":  "setup-digest",
-                      "result":  "pass",
-                      "detail":  "17d2a3ca3c5b67c72f4de52c4518e9b29da19f3fa15372c85e92b37a9a0ad293"
-                  },
-                  {
-                      "id":  "setup-signature-status",
-                      "result":  "pass",
-                      "detail":  "NotSigned"
-                  },
-                  {
-                      "id":  "control-signed-program",
-                      "result":  "pass",
-                      "detail":  "exit 0"
-                  },
-                  {
-                      "id":  "install-silent",
-                      "result":  "pass",
-                      "detail":  "exit 0"
-                  },
-                  {
-                      "id":  "installed",
-                      "result":  "pass",
-                      "detail":  "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media"
-                  },
-                  {
-                      "id":  "exe-version",
-                      "result":  "pass",
-                      "detail":  "44.3.0"
-                  },
-                  {
-                      "id":  "open-window",
-                      "result":  "pass",
-                      "detail":  "title: JOY Studio"
-                  },
-                  {
-                      "id":  "close-app",
-                      "result":  "pass",
-                      "detail":  "exit 0"
-                  },
-                  {
-                      "id":  "no-process-after-close",
-                      "result":  "pass",
-                      "detail":  "processes left: 0"
-                  },
-                  {
-                      "id":  "uninstall",
-                      "result":  "pass",
-                      "detail":  "exit 0"
-                  },
-                  {
-                      "id":  "folder-removed",
-                      "result":  "pass",
-                      "detail":  "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media after 4 s"
-                  }
-              ],
-    "identity":  {
-                     "user":  "WDAGUtilityAccount",
-                     "computer":  "BCC0E703-6340-4"
-                 },
-    "beforeInstall":  {
-                          "name":  "beforeInstall",
-                          "installFolderExists":  false,
-                          "installFileCount":  0,
-                          "pathHasJoy":  false,
-                          "joyKey":  null,
-                          "uninstallKey":  false,
-                          "desktopShortcut":  false,
-                          "startMenuShortcut":  false
-                      },
-    "afterInstall":  {
-                         "name":  "afterInstall",
-                         "installFolderExists":  true,
-                         "installFileCount":  1025,
-                         "pathHasJoy":  true,
-                         "joyKey":  null,
-                         "uninstallKey":  true,
-                         "desktopShortcut":  true,
-                         "startMenuShortcut":  true
-                     },
-    "whileRunning":  {
-                         "name":  "whileRunning",
-                         "installFolderExists":  true,
-                         "installFileCount":  1025,
-                         "pathHasJoy":  true,
-                         "joyKey":  "\"C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media\\joy-media.exe\" \"%1\"",
-                         "uninstallKey":  true,
-                         "desktopShortcut":  true,
-                         "startMenuShortcut":  true
-                     },
-    "afterUninstall":  {
-                           "name":  "afterUninstall",
-                           "installFolderExists":  false,
-                           "installFileCount":  0,
-                           "pathHasJoy":  false,
-                           "joyKey":  null,
-                           "uninstallKey":  false,
-                           "desktopShortcut":  false,
-                           "startMenuShortcut":  false
-                       },
-    "finishedAt":  "2026-11-11T23:36:19.7265793Z"
+  "schema": "joy-media.sandbox-lifecycle/1",
+  "startedAt": "2026-11-11T23:35:49.2166946Z",
+  "steps": [
+    {
+      "id": "sandbox-identity",
+      "result": "pass",
+      "detail": "WDAGUtilityAccount on BCC0E703-6340-4"
+    },
+    {
+      "id": "setup-digest",
+      "result": "pass",
+      "detail": "17d2a3ca3c5b67c72f4de52c4518e9b29da19f3fa15372c85e92b37a9a0ad293"
+    },
+    {
+      "id": "setup-signature-status",
+      "result": "pass",
+      "detail": "NotSigned"
+    },
+    {
+      "id": "control-signed-program",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "install-silent",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "installed",
+      "result": "pass",
+      "detail": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media"
+    },
+    {
+      "id": "exe-version",
+      "result": "pass",
+      "detail": "44.3.0"
+    },
+    {
+      "id": "open-window",
+      "result": "pass",
+      "detail": "title: JOY Studio"
+    },
+    {
+      "id": "close-app",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "no-process-after-close",
+      "result": "pass",
+      "detail": "processes left: 0"
+    },
+    {
+      "id": "uninstall",
+      "result": "pass",
+      "detail": "exit 0"
+    },
+    {
+      "id": "folder-removed",
+      "result": "pass",
+      "detail": "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media after 4 s"
+    }
+  ],
+  "identity": {
+    "user": "WDAGUtilityAccount",
+    "computer": "BCC0E703-6340-4"
+  },
+  "beforeInstall": {
+    "name": "beforeInstall",
+    "installFolderExists": false,
+    "installFileCount": 0,
+    "pathHasJoy": false,
+    "joyKey": null,
+    "uninstallKey": false,
+    "desktopShortcut": false,
+    "startMenuShortcut": false
+  },
+  "afterInstall": {
+    "name": "afterInstall",
+    "installFolderExists": true,
+    "installFileCount": 1025,
+    "pathHasJoy": true,
+    "joyKey": null,
+    "uninstallKey": true,
+    "desktopShortcut": true,
+    "startMenuShortcut": true
+  },
+  "whileRunning": {
+    "name": "whileRunning",
+    "installFolderExists": true,
+    "installFileCount": 1025,
+    "pathHasJoy": true,
+    "joyKey": "\"C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media\\joy-media.exe\" \"%1\"",
+    "uninstallKey": true,
+    "desktopShortcut": true,
+    "startMenuShortcut": true
+  },
+  "afterUninstall": {
+    "name": "afterUninstall",
+    "installFolderExists": false,
+    "installFileCount": 0,
+    "pathHasJoy": false,
+    "joyKey": null,
+    "uninstallKey": false,
+    "desktopShortcut": false,
+    "startMenuShortcut": false
+  },
+  "finishedAt": "2026-11-11T23:36:19.7265793Z"
 }
