@@ -19,11 +19,15 @@ import {
   describeVolumeAnswer,
   listProjectFolders,
   openProjectFolderForEditing,
+  projectFolderMediaStates,
   projectFolderName,
   projectPlaceRefusal,
+  readProjectFolderDocument,
   readProjectFolderEntry,
+  readProjectFolderMedia,
   recordNewProjectFolder,
   restoreProjectFolderRecord,
+  saveProjectFolder,
 } from './gate.js';
 import {
   PROJECT_FOLDER_ANSWERS,
@@ -31,6 +35,11 @@ import {
   type ProjectFolderAnswer,
   type ProjectFolderAnswerReply,
   type ProjectFolderAsk,
+  type ProjectFolderCloseReply,
+  type ProjectFolderLoadReply,
+  type ProjectFolderMediaReply,
+  type ProjectFolderSaveMedia,
+  type ProjectFolderSaveReply,
   type ProjectFolderCreateReply,
   type ProjectFolderEntryView,
   type ProjectFolderListReply,
@@ -57,6 +66,22 @@ import {
  * cannot point the desktop at a path of its own choosing.
  */
 
+/** A save as the main process sends it: the renderer's fields, and the original's place the main process found. */
+export interface ProjectFolderSaveRequest {
+  readonly projectId: string;
+  readonly baseRevisionId: string;
+  readonly revisionId: string;
+  readonly title: string;
+  readonly document: unknown;
+  readonly media: readonly ProjectFolderSaveMedia[];
+}
+
+/** The folder that is open in the editor. One at a time: opening another folder closes it. */
+interface OpenFolderSession {
+  readonly key: string;
+  readonly folder: ProjectFolder;
+}
+
 export interface ProjectFolderServiceOptions {
   readonly registry: ProjectClaimRegistry;
   /** The folder that holds new project folders (defaultProjectFoldersDirectory). */
@@ -72,7 +97,17 @@ export interface ProjectFolderService {
   open(key: string): Promise<ProjectFolderOpenReply>;
   answer(key: string, answer: ProjectFolderAnswer): Promise<ProjectFolderAnswerReply>;
   restore(key: string, title: string): Promise<ProjectFolderRestoreReply>;
-  /** Closes the claim registry. Later calls fail, and nothing is written. */
+  /** The saved project of the folder that is open in the editor. */
+  load(key: string): Promise<ProjectFolderLoadReply | ProjectFolderRefused>;
+  /** Saves the editor's project and its media into the open folder. */
+  save(key: string, save: ProjectFolderSaveRequest): Promise<ProjectFolderSaveReply>;
+  /** Whether the open folder holds each media file. */
+  mediaStates(key: string, assetIds: readonly string[]): Promise<ProjectFolderMediaReply>;
+  /** One piece of a media file the open folder holds. */
+  mediaBytes(key: string, assetId: string, offset: number): Promise<ProjectFolderMediaReply>;
+  /** Closes the folder that is open in the editor. Closing a folder that is not open is harmless. */
+  closeFolder(key: string): ProjectFolderCloseReply;
+  /** Closes the open folder and the claim registry. Later calls fail, and nothing is written. */
   close(): void;
 }
 
@@ -97,7 +132,19 @@ export function createProjectFolderService(
   const newKey = options.newKey ?? (() => `folder-${randomUUID()}`);
   const keyByPlace = new Map<string, string>();
   const rootByKey = new Map<string, string>();
+  let session: OpenFolderSession | undefined;
   let closed = false;
+
+  /** Closes the folder that is open in the editor, if any. */
+  function endSession(): void {
+    const current = session;
+    session = undefined;
+    if (current !== undefined) closeQuietly(current.folder);
+  }
+
+  function sessionFor(key: string): OpenFolderSession | undefined {
+    return session !== undefined && session.key === key ? session : undefined;
+  }
 
   function keyFor(root: string): string {
     const place = placeOf(root);
@@ -212,18 +259,23 @@ export function createProjectFolderService(
     const root = rootFor(key);
     if (root === undefined) return refused('unknown-folder');
     if (!existsSync(root)) return { kind: 'unverifiable', reason: 'missing-folder' };
+    // One folder is open in the editor at a time. Opening any folder, this one too, closes the one before.
+    endSession();
     try {
       const result = await openProjectFolderForEditing(root, registry);
       if (result.kind === 'held') return await heldReply(root, result.claim);
+      let reply: ProjectFolderOpenReply;
       try {
-        return await readyReply(root, result.folder, result.claim);
+        reply = await readyReply(root, result.folder, result.claim);
       } catch {
         // The claim is settled before the reply is built, so the owner is asked to check the folder, not told nothing changed.
-        return refused('settled-not-shown');
-      } finally {
-        // The folder is opened for the claim only. Editing from folders is not wired yet.
         closeQuietly(result.folder);
+        return refused('settled-not-shown');
       }
+      // A ready folder stays open for the editor, which loads and saves it by this key until it closes it.
+      if (reply.kind === 'ready') session = { key, folder: result.folder };
+      else closeQuietly(result.folder);
+      return reply;
     } catch (error) {
       return refusedFrom(error, { root });
     }
@@ -350,6 +402,58 @@ export function createProjectFolderService(
     }
   }
 
+  async function load(key: string): Promise<ProjectFolderLoadReply | ProjectFolderRefused> {
+    const open = sessionFor(key);
+    if (open === undefined) return refused('not-open');
+    const entry = readProjectFolderEntry(open.folder);
+    if (entry === undefined) return refused('no-entry');
+    const saved = readProjectFolderDocument(open.folder);
+    return {
+      kind: 'loaded',
+      id: entry.id,
+      title: entry.title,
+      document: saved?.document ?? null,
+      revisionId: saved?.revisionId ?? '',
+      documentProjectId: saved?.projectId ?? entry.id,
+    };
+  }
+
+  async function save(
+    key: string,
+    request: ProjectFolderSaveRequest,
+  ): Promise<ProjectFolderSaveReply> {
+    const open = sessionFor(key);
+    if (open === undefined) return refused('not-open');
+    try {
+      const result = await saveProjectFolder(open.folder, request, now);
+      if (result.kind === 'saved') return result;
+      return refused(result.kind === 'wrong-project' ? 'wrong-project' : 'save-conflict');
+    } catch (error) {
+      return refusedFrom(error, { root: open.folder.root });
+    }
+  }
+
+  async function mediaStates(
+    key: string,
+    assetIds: readonly string[],
+  ): Promise<ProjectFolderMediaReply> {
+    const open = sessionFor(key);
+    if (open === undefined) return refused('not-open');
+    return { kind: 'media', states: projectFolderMediaStates(open.folder, assetIds) };
+  }
+
+  async function mediaBytes(
+    key: string,
+    assetId: string,
+    offset: number,
+  ): Promise<ProjectFolderMediaReply> {
+    const open = sessionFor(key);
+    if (open === undefined) return refused('not-open');
+    const chunk = await readProjectFolderMedia(open.folder, assetId, offset);
+    if (chunk === undefined) return refused('media-missing');
+    return { kind: 'media-bytes', assetId, ...chunk };
+  }
+
   /**
    * The other folders that hold an id. Best effort: the claim is already settled when this runs, so a listing that
    * fails must not turn a settled change into a refusal that says nothing changed.
@@ -384,9 +488,18 @@ export function createProjectFolderService(
     open,
     answer,
     restore,
+    load,
+    save,
+    mediaStates,
+    mediaBytes,
+    closeFolder(key: string): ProjectFolderCloseReply {
+      if (sessionFor(key) !== undefined) endSession();
+      return { kind: 'closed' };
+    },
     close(): void {
       if (closed) return;
       closed = true;
+      endSession();
       registry.close();
     },
   };
@@ -438,6 +551,21 @@ async function runOp(
       return service.answer(requiredString(payload, 'key'), requiredAnswer(payload));
     case 'restore':
       return service.restore(requiredString(payload, 'key'), requiredString(payload, 'title'));
+    case 'load':
+      return service.load(requiredString(payload, 'key'));
+    case 'save':
+      return service.save(requiredString(payload, 'key'), requiredSave(payload));
+    case 'media': {
+      const key = requiredString(payload, 'key');
+      const ids = (payload as Record<string, unknown>)['assetIds'];
+      if (Array.isArray(ids)) {
+        if (!ids.every((id) => typeof id === 'string')) throw new InvalidProjectFolderRequest();
+        return service.mediaStates(key, ids as string[]);
+      }
+      return service.mediaBytes(key, requiredString(payload, 'assetId'), requiredOffset(payload));
+    }
+    case 'close':
+      return service.closeFolder(requiredString(payload, 'key'));
     case 'shutdown':
       service.close();
       return { kind: 'stopped' };
@@ -465,6 +593,47 @@ function idOf(message: unknown): number {
 function requiredString(payload: unknown, field: string): string {
   if (typeof payload !== 'object' || payload === null) throw new InvalidProjectFolderRequest();
   const value = (payload as Record<string, unknown>)[field];
+  if (typeof value !== 'string') throw new InvalidProjectFolderRequest();
+  return value;
+}
+
+function requiredOffset(payload: unknown): number {
+  const value = (payload as Record<string, unknown>)['offset'];
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new InvalidProjectFolderRequest();
+  }
+  return value;
+}
+
+/** A save from the main process. Every field is checked; a media item may carry the place the main process found. */
+function requiredSave(payload: unknown): ProjectFolderSaveRequest {
+  const record = payload as Record<string, unknown>;
+  const media = record['media'];
+  if (!Array.isArray(media) || !('document' in record)) throw new InvalidProjectFolderRequest();
+  return {
+    projectId: requiredString(payload, 'projectId'),
+    baseRevisionId: requiredString(payload, 'baseRevisionId'),
+    revisionId: requiredString(payload, 'revisionId'),
+    title: requiredString(payload, 'title'),
+    document: record['document'],
+    media: media.map((item: unknown) => {
+      const sha256 = optionalString(item, 'sha256');
+      const sourcePath = optionalString(item, 'sourcePath');
+      return {
+        assetId: requiredString(item, 'assetId'),
+        kind: requiredString(item, 'kind'),
+        displayName: requiredString(item, 'displayName'),
+        ...(sha256 === undefined ? {} : { sha256 }),
+        ...(sourcePath === undefined ? {} : { sourcePath }),
+      };
+    }),
+  };
+}
+
+function optionalString(payload: unknown, field: string): string | undefined {
+  if (typeof payload !== 'object' || payload === null) throw new InvalidProjectFolderRequest();
+  const value = (payload as Record<string, unknown>)[field];
+  if (value === undefined) return undefined;
   if (typeof value !== 'string') throw new InvalidProjectFolderRequest();
   return value;
 }

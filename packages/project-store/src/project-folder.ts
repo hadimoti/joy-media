@@ -18,7 +18,7 @@ import {
  * v1.2 model review: `project.sqlite`, `assets/<sha256>.bin` and a rebuildable `cache/`.
  *
  * The folder also holds the project's catalog entry, so the merged project list can show it. The
- * folder is not wired into the editor or the IPC channels yet.
+ * editor opens and saves it through project-folder-editing.ts, after the folder's id is settled.
  */
 
 export const PROJECT_FOLDER_SUFFIX = '.joyproj';
@@ -50,6 +50,10 @@ export interface ProjectAssetSource {
   readonly path: string;
   readonly kind: string;
   readonly displayName: string;
+  /** The id the editor already uses for these bytes. Defaults to `asset-<sha256>`. */
+  readonly assetId?: string;
+  /** The checksum the editor expects. A copy with other bytes is dropped and refused. */
+  readonly expectedSha256?: string;
 }
 
 export interface ProjectAssetImport {
@@ -215,6 +219,11 @@ export async function importProjectAsset(
     throw error;
   }
 
+  if (source.expectedSha256 !== undefined && source.expectedSha256 !== copied.sha256) {
+    await unlink(partial).catch(() => undefined);
+    throw new Error('The original does not match its checksum');
+  }
+
   const fileName = `${copied.sha256}.bin`;
   const target = join(assetsDirectory, fileName);
   if (await pathExists(target)) {
@@ -229,7 +238,7 @@ export async function importProjectAsset(
     await rename(partial, target);
   }
 
-  const assetId = `asset-${copied.sha256}`;
+  const assetId = source.assetId ?? `asset-${copied.sha256}`;
   const storedPath = `${PROJECT_ASSETS_DIRECTORY}/${fileName}`;
   folder.database.exec('BEGIN IMMEDIATE');
   try {

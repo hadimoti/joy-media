@@ -22,6 +22,11 @@ const APPROVED_GATE_NAMES = [
   'readProjectFolderEntry',
   'recordNewProjectFolder',
   'restoreProjectFolderRecord',
+  // Added on 12 Nov 2026 for opening and saving folder projects in the editor (project-folder-editing.ts).
+  'projectFolderMediaStates',
+  'readProjectFolderDocument',
+  'readProjectFolderMedia',
+  'saveProjectFolder',
 ];
 
 describe('the project-store boundary, inside the package', () => {

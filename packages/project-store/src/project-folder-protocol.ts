@@ -13,6 +13,10 @@ export const PROJECT_FOLDER_OPS = [
   'open',
   'answer',
   'restore',
+  'load',
+  'save',
+  'media',
+  'close',
   'shutdown',
 ] as const;
 export type ProjectFolderOp = (typeof PROJECT_FOLDER_OPS)[number];
@@ -64,6 +68,14 @@ export const PROJECT_FOLDER_REFUSALS = [
   'failed',
   // The change is settled, but the reply could not be built. The owner checks the folder again.
   'settled-not-shown',
+  // The folder is not open in the editor: it was closed, or another folder was opened since.
+  'not-open',
+  // A save named another project id than the open folder's.
+  'wrong-project',
+  // A save was built on an older saved version than the one in the folder.
+  'save-conflict',
+  // The open folder does not hold this media file.
+  'media-missing',
 ] as const;
 export type ProjectFolderRefusal = (typeof PROJECT_FOLDER_REFUSALS)[number];
 
@@ -192,3 +204,51 @@ export type ProjectFolderCreateReply =
 /** The ask answers, as the renderer sends them. Never a default: the owner picks one. */
 export const PROJECT_FOLDER_ANSWERS = ['original', 'copy'] as const;
 export type ProjectFolderAnswer = (typeof PROJECT_FOLDER_ANSWERS)[number];
+
+/** The saved project in an open folder, and what the folder holds for each media file it names. */
+export interface ProjectFolderLoadReply {
+  readonly kind: 'loaded';
+  readonly id: string;
+  readonly title: string;
+  /** `null` when the project was never saved into the folder. */
+  readonly document: unknown;
+  /** The saved row's revision, or the empty string when there is none. */
+  readonly revisionId: string;
+  /** The id the saved row names. Differs from `id` only for a copy not saved since it got its new id. */
+  readonly documentProjectId: string;
+}
+
+/** One media file in a save, as the renderer sends it. The main process may add `sourcePath`. */
+export interface ProjectFolderSaveMedia {
+  readonly assetId: string;
+  readonly kind: string;
+  readonly displayName: string;
+  readonly sha256?: string;
+  readonly sourcePath?: string;
+}
+
+export type ProjectFolderSaveReply =
+  | { readonly kind: 'saved'; readonly revisionId: string; readonly notStored: readonly string[] }
+  | ProjectFolderRefused;
+
+export type ProjectFolderMediaReply =
+  | {
+      readonly kind: 'media';
+      readonly states: readonly {
+        readonly assetId: string;
+        readonly present: boolean;
+        readonly bytes?: number;
+        readonly sha256?: string;
+        readonly displayName?: string;
+      }[];
+    }
+  | {
+      readonly kind: 'media-bytes';
+      readonly assetId: string;
+      readonly offset: number;
+      readonly total: number;
+      readonly bytes: Uint8Array;
+    }
+  | ProjectFolderRefused;
+
+export type ProjectFolderCloseReply = { readonly kind: 'closed' };
