@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { createPortal } from 'react-dom';
 import type { ColorGradeV1, ColorGradeV2, JoyProjectV1 } from '@joy-media/project-schema';
 import {
   canonicalBindingKey,
@@ -18,7 +25,31 @@ import { PropertyRow, type PropertyAnimationState } from './components/PropertyR
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { readMonitorPixels as readLiveMonitorPixels } from './monitor-readback.js';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
-import { LayersIcon } from './icons.js';
+import { CloseIcon, LayersIcon } from './icons.js';
+import { EditorPanelContext } from './editor-panel-context.js';
+import {
+  computeHistogram,
+  computeParadeColumns,
+  computeVectorscopePoints,
+  computeWaveformColumns,
+  sampleScopePixels,
+  scopeAxisLabels,
+  scopeLabel,
+  VECTORSCOPE_HUE_MARKS,
+  vectorscopeOffset,
+  type ScopeKind,
+  type ScopePixels,
+  type ScopeSample,
+} from './color-scopes.js';
+import {
+  clampColorScopesWindowGeometry,
+  DEFAULT_COLOR_SCOPES_WINDOW_GEOMETRY,
+  loadColorScopesWindowGeometry,
+  saveColorScopesWindowGeometry,
+  type ColorScopesWindowGeometry,
+} from './color-scopes-window.js';
+
+export type { ScopePixels };
 
 type TabId = 'adjust' | 'wheels' | 'curves' | 'hsl' | 'looks' | 'scopes';
 const TABS: readonly PanelTabSpec[] = [
@@ -52,12 +83,6 @@ const HSL_CONTROL_DEFINITIONS = [
   ['saturation', 'Saturation', -1, 1, 0.01, 'scalar'],
   ['luminance', 'Luminance', -1, 1, 0.01, 'scalar'],
 ] as const;
-
-export interface ScopePixels {
-  readonly width: number;
-  readonly height: number;
-  readonly data: Uint8ClampedArray;
-}
 
 interface ColorPanelProps {
   readonly title?: string;
@@ -123,6 +148,13 @@ export function ColorPanel({
   const clipAvailable = selectedClipId !== undefined;
   const [target, setTarget] = useState<'clip' | 'output'>(clipAvailable ? 'clip' : 'output');
   const [tab, setTab] = useState<TabId>('adjust');
+  const editorContext = useContext(EditorPanelContext);
+  const showToast = editorContext?.showToast;
+  const [scopesWindowOpen, setScopesWindowOpen] = useState(false);
+  const [scopesWindowGeometry, setScopesWindowGeometry] = useState<ColorScopesWindowGeometry>(
+    () =>
+      loadColorScopesWindowGeometry(editorContext?.storage) ?? DEFAULT_COLOR_SCOPES_WINDOW_GEOMETRY,
+  );
   const source =
     target === 'clip'
       ? clipAvailable && selectedClipId !== undefined
@@ -139,6 +171,16 @@ export function ColorPanel({
       setDraft(committed);
     }
   }, [committedKey, committed, target, clipAvailable]);
+
+  // The floating scopes window keeps its place between sessions, so a colourist
+  // finds it where they left it. The write is debounced because dragging the
+  // window reports a new geometry on every pointer move.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      saveColorScopesWindowGeometry(editorContext?.storage, scopesWindowGeometry);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [editorContext?.storage, scopesWindowGeometry]);
 
   const commit = (next: ColorGradeV2 = draft) => {
     if (target === 'clip' && (!clipAvailable || selectedClipId === undefined)) return;
@@ -360,6 +402,21 @@ export function ColorPanel({
     setDraft(next);
     commit(next);
   };
+  /**
+   * A reset throws away every colour control at once, so it offers an Undo:
+   * the toast puts the grade the colourist had back.
+   */
+  const resetWithUndo = () => {
+    const previous = draft;
+    reset();
+    showToast?.('Colour grade reset.', 'info', {
+      label: 'Undo',
+      run: () => {
+        setDraft(previous);
+        commit(previous);
+      },
+    });
+  };
   const gradeIsIdentity = JSON.stringify(draft) === JSON.stringify(createIdentityColorGrade());
 
   return (
@@ -386,13 +443,22 @@ export function ColorPanel({
           )}
           <button
             type="button"
-            className="icon-button"
-            aria-label="Reset color grade"
+            className="color-header-button"
+            aria-pressed={scopesWindowOpen}
+            title="Open the scopes in a window you can move and resize"
+            onClick={() => setScopesWindowOpen((open) => !open)}
+          >
+            ◒ Scopes
+          </button>
+          <button
+            type="button"
+            className="color-header-button"
+            aria-label="Reset all color controls"
             title="Reset all color controls"
             disabled={gradeIsIdentity}
-            onClick={reset}
+            onClick={resetWithUndo}
           >
-            ↺
+            ↺ Reset all
           </button>
         </>
       }
@@ -401,6 +467,7 @@ export function ColorPanel({
         <button
           type="button"
           className={target === 'clip' ? 'is-active' : ''}
+          title="Grade only the selected clip"
           onClick={() => setTarget('clip')}
           disabled={!clipAvailable}
         >
@@ -409,6 +476,7 @@ export function ColorPanel({
         <button
           type="button"
           className={target === 'output' ? 'is-active' : ''}
+          title="Grade the whole program output"
           onClick={() => setTarget('output')}
         >
           Output
@@ -417,6 +485,7 @@ export function ColorPanel({
           type="button"
           className="color-bypass"
           aria-label="Bypass current grade"
+          title={draft.enabled ? 'Turn the grade off without losing it' : 'Turn the grade back on'}
           onClick={() => {
             const next = { ...draft, enabled: !draft.enabled };
             setDraft(next);
@@ -498,17 +567,17 @@ export function ColorPanel({
           <ScopeSection {...(readMonitorPixels === undefined ? {} : { readMonitorPixels })} />
         )}
       </fieldset>
-      <div className="color-utility-row">
-        <button type="button" onClick={() => setTab('scopes')}>
-          ◒ Open scopes
-        </button>
-        <button type="button" onClick={reset} disabled={gradeIsIdentity}>
-          Reset all
-        </button>
-      </div>
-      <div className="color-mini-scope">
-        <ScopeCanvas readMonitorPixels={readMonitorPixels ?? readLiveMonitorPixels} compact />
-      </div>
+      {scopesWindowOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <FloatingScopesWindow
+            readMonitorPixels={readMonitorPixels ?? readLiveMonitorPixels}
+            geometry={scopesWindowGeometry}
+            onGeometryChange={setScopesWindowGeometry}
+            onClose={() => setScopesWindowOpen(false)}
+          />,
+          document.body,
+        )}
     </PanelShell>
   );
 }
@@ -867,6 +936,21 @@ export function HslSection({
   );
 }
 
+/**
+ * One line per built-in look, describing what it actually does to the picture
+ * (`applyBuiltInLook` in the renderer). The Looks view used to show a row of
+ * bare swatches and leave the rest of the panel empty; the notes give the
+ * colourist something to choose by.
+ */
+const LOOK_NOTES = {
+  none: 'No look. The grade stays exactly as you set it.',
+  'clean-contrast': 'More contrast around the mid grey. Colours keep their hue.',
+  'soft-film': 'Lifted blacks and a soft roll-off, like a film print.',
+  'warm-cinema': 'Warm highlights over cooler shadows. A cinematic bias.',
+  'cool-fade': 'Cool highlights and a slightly faded, airy look.',
+  monochrome: 'The picture in grey, keeping the grade’s own contrast.',
+} as const;
+
 export function LooksSection({
   draft,
   onChange,
@@ -922,7 +1006,7 @@ export function LooksSection({
           {builtInLooks.map(([id, label]) => (
             <button
               type="button"
-              className={selected === id ? 'is-active' : ''}
+              className={`look-card${selected === id ? ' is-active' : ''}`}
               key={id}
               onClick={() => {
                 const next = { ...draft, lut: { builtIn: id, intensity: 1 } };
@@ -931,13 +1015,15 @@ export function LooksSection({
               }}
             >
               <span className={`look-thumb look-thumb--${id}`} />
-              {label}
+              <span className="look-card-label">{label}</span>
+              <span className="look-card-note">{LOOK_NOTES[id]}</span>
             </button>
           ))}
           {customId !== undefined && (
-            <div className="look-option is-active">
+            <div className="look-card look-option is-active">
               <span className="look-thumb look-thumb--custom" />
-              {customLutName ?? 'Custom LUT'}
+              <span className="look-card-label">{customLutName ?? 'Custom LUT'}</span>
+              <span className="look-card-note">A LUT file from the project library.</span>
             </div>
           )}
         </div>
@@ -988,9 +1074,7 @@ function ScopeSection({
 }: {
   readMonitorPixels?: () => ScopePixels | undefined;
 }) {
-  const [scope, setScope] = useState<'waveform' | 'parade' | 'vectorscope' | 'histogram'>(
-    'waveform',
-  );
+  const [scope, setScope] = useState<ScopeKind>('waveform');
   return (
     <section className="color-section">
       <h3>Program scopes</h3>
@@ -1006,138 +1090,448 @@ function ScopeSection({
           Selected clip
         </button>
       </div>
-      <div className="scope-source" role="group" aria-label="Scope type">
-        {(['waveform', 'parade', 'vectorscope', 'histogram'] as const).map((id) => (
-          <button
-            type="button"
-            className={scope === id ? 'is-active' : ''}
-            key={id}
-            onClick={() => setScope(id)}
-          >
-            {id === 'parade' ? 'RGB Parade' : `${id[0]!.toUpperCase()}${id.slice(1)}`}
-          </button>
-        ))}
-      </div>
+      <ScopeTypeButtons scope={scope} onScopeChange={setScope} />
       <ScopeCanvas scope={scope} readMonitorPixels={readMonitorPixels ?? readLiveMonitorPixels} />
     </section>
   );
 }
 
+/** The scope picker, shared by the Scopes tab and the floating window. */
+function ScopeTypeButtons({
+  scope,
+  onScopeChange,
+}: {
+  scope: ScopeKind;
+  onScopeChange: (scope: ScopeKind) => void;
+}) {
+  return (
+    <div className="scope-source" role="group" aria-label="Scope type">
+      {(['waveform', 'parade', 'vectorscope', 'histogram'] as const).map((id) => (
+        <button
+          type="button"
+          className={scope === id ? 'is-active' : ''}
+          key={id}
+          aria-pressed={scope === id}
+          onClick={() => onScopeChange(id)}
+        >
+          {scopeLabel(id)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const SCOPE_BACKGROUND = '#17181c';
+const SCOPE_GRID = '#45464c';
+const SCOPE_WAVEFORM = '#e9b529';
+const SCOPE_RED = '#e66b70';
+const SCOPE_GREEN = '#65c988';
+const SCOPE_BLUE = '#6e9fe8';
+const SCOPE_VECTOR = '#63d39b';
+const SCOPE_LABEL = 'rgba(224, 226, 232, 0.72)';
+const SCOPE_AXIS_FONT = '10px Inter, system-ui, sans-serif';
+
+interface ScopePlot {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+function drawScopeGrid(ctx: CanvasRenderingContext2D, plot: ScopePlot): void {
+  ctx.strokeStyle = SCOPE_GRID;
+  ctx.lineWidth = 1;
+  for (let index = 1; index < 4; index += 1) {
+    const y = Math.round((index * plot.height) / 4) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(plot.x, y);
+    ctx.lineTo(plot.x + plot.width, y);
+    ctx.stroke();
+  }
+}
+
+function drawWaveform(
+  ctx: CanvasRenderingContext2D,
+  plot: ScopePlot,
+  samples: readonly ScopeSample[],
+  width: number,
+): void {
+  ctx.fillStyle = SCOPE_WAVEFORM;
+  for (const column of computeWaveformColumns(samples, width)) {
+    const x = plot.x + column.x * plot.width;
+    const top = plot.y + (1 - column.high) * plot.height;
+    const bottom = plot.y + (1 - column.low) * plot.height;
+    ctx.fillRect(Math.round(x), Math.round(top), 1, Math.max(1, Math.round(bottom - top)));
+  }
+}
+
+function drawParade(
+  ctx: CanvasRenderingContext2D,
+  plot: ScopePlot,
+  samples: readonly ScopeSample[],
+  width: number,
+): void {
+  const panelWidth = plot.width / 3;
+  ctx.strokeStyle = SCOPE_GRID;
+  ctx.lineWidth = 1;
+  for (const panel of [1, 2]) {
+    const x = Math.round(plot.x + panel * panelWidth) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(x, plot.y);
+    ctx.lineTo(x, plot.y + plot.height);
+    ctx.stroke();
+  }
+  const colours = [SCOPE_RED, SCOPE_GREEN, SCOPE_BLUE];
+  for (const column of computeParadeColumns(samples, width)) {
+    const x = plot.x + column.panel * panelWidth + column.x * panelWidth;
+    const top = plot.y + (1 - column.high) * plot.height;
+    const bottom = plot.y + (1 - column.low) * plot.height;
+    ctx.fillStyle = colours[column.panel]!;
+    ctx.fillRect(Math.round(x), Math.round(top), 1, Math.max(1, Math.round(bottom - top)));
+  }
+}
+
+function drawHistogram(
+  ctx: CanvasRenderingContext2D,
+  plot: ScopePlot,
+  samples: readonly ScopeSample[],
+): void {
+  const bins = computeHistogram(samples, 64);
+  const peak = Math.max(1, ...bins);
+  const barWidth = plot.width / bins.length;
+  ctx.fillStyle = SCOPE_WAVEFORM;
+  bins.forEach((value, index) => {
+    const barHeight = (value / peak) * plot.height;
+    ctx.fillRect(
+      plot.x + index * barWidth,
+      plot.y + plot.height - barHeight,
+      Math.max(1, barWidth + 0.5),
+      barHeight,
+    );
+  });
+}
+
+/**
+ * The vectorscope plots chroma against a density grid: every sampled pixel
+ * lands in a cell and the cell is drawn once, so a full frame stays cheap
+ * enough to redraw twelve times a second.
+ */
+function drawVectorscope(
+  ctx: CanvasRenderingContext2D,
+  plot: ScopePlot,
+  samples: readonly ScopeSample[],
+): void {
+  const radius = Math.max(1, Math.min(plot.width, plot.height) / 2 - 14);
+  const centerX = plot.x + plot.width / 2;
+  const centerY = plot.y + plot.height / 2;
+  const grid = Math.max(8, Math.round(radius));
+  const density = new Float32Array(grid * grid);
+  for (const point of computeVectorscopePoints(samples)) {
+    const cellX = Math.min(grid - 1, Math.max(0, Math.floor((point.x * 0.5 + 0.5) * grid)));
+    const cellY = Math.min(grid - 1, Math.max(0, Math.floor((point.y * 0.5 + 0.5) * grid)));
+    density[cellY * grid + cellX] = (density[cellY * grid + cellX] ?? 0) + 1;
+  }
+  const cellSize = (radius * 2) / grid;
+  ctx.fillStyle = SCOPE_VECTOR;
+  for (let cellY = 0; cellY < grid; cellY += 1) {
+    for (let cellX = 0; cellX < grid; cellX += 1) {
+      const value = density[cellY * grid + cellX] ?? 0;
+      if (value === 0) continue;
+      ctx.globalAlpha = Math.min(1, 0.3 + value / 40);
+      ctx.fillRect(
+        centerX - radius + cellX * cellSize,
+        centerY - radius + cellY * cellSize,
+        Math.max(1, cellSize),
+        Math.max(1, cellSize),
+      );
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = SCOPE_GRID;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(centerX - radius, centerY);
+  ctx.lineTo(centerX + radius, centerY);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(centerX, centerY - radius);
+  ctx.lineTo(centerX, centerY + radius);
+  ctx.stroke();
+  ctx.font = SCOPE_AXIS_FONT;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const mark of VECTORSCOPE_HUE_MARKS) {
+    const offset = vectorscopeOffset(mark.red, mark.green, mark.blue);
+    const x = centerX + offset.x * radius;
+    const y = centerY + offset.y * radius;
+    ctx.strokeStyle = 'rgba(99, 211, 155, 0.4)';
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.fillStyle = SCOPE_VECTOR;
+    ctx.beginPath();
+    ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = SCOPE_LABEL;
+    ctx.fillText(mark.label, x + offset.x * 12, y + offset.y * 12);
+  }
+}
+
+function drawScopeAxes(
+  ctx: CanvasRenderingContext2D,
+  plot: ScopePlot,
+  scope: ScopeKind,
+  width: number,
+  height: number,
+): void {
+  ctx.fillStyle = SCOPE_LABEL;
+  ctx.font = SCOPE_AXIS_FONT;
+  if (scope === 'waveform' || scope === 'parade') {
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (const percent of [100, 75, 50, 25, 0]) {
+      const y = plot.y + (1 - percent / 100) * plot.height;
+      ctx.fillText(percent === 100 ? '100 %' : String(percent), plot.x - 6, y);
+    }
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(
+      scope === 'parade' ? 'red        green        blue' : 'image columns',
+      plot.x + plot.width / 2,
+      height - 4,
+    );
+    return;
+  }
+  if (scope === 'histogram') {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (const percent of [0, 25, 50, 75, 100]) {
+      const x = plot.x + (percent / 100) * plot.width;
+      ctx.fillText(`${percent} %`, Math.min(width - 12, Math.max(12, x)), plot.y + plot.height + 3);
+    }
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('luminance', plot.x + plot.width / 2, height - 3);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('pixels', plot.x + 3, plot.y + 2);
+    return;
+  }
+  // The vectorscope is labelled by its hue marks; the ring is the 100 % mark.
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('100 % ring', plot.x + 3, plot.y + 2);
+}
+
+function drawScope(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  scope: ScopeKind,
+  pixels: ScopePixels | undefined,
+): void {
+  ctx.fillStyle = SCOPE_BACKGROUND;
+  ctx.fillRect(0, 0, width, height);
+  const gutterLeft = scope === 'waveform' || scope === 'parade' ? 32 : 6;
+  const footer = scope === 'vectorscope' ? 4 : 16;
+  const plot: ScopePlot = {
+    x: gutterLeft,
+    y: 0,
+    width: Math.max(1, width - gutterLeft),
+    height: Math.max(1, height - footer),
+  };
+  drawScopeGrid(ctx, plot);
+  if (pixels !== undefined) {
+    const samples = sampleScopePixels(pixels);
+    if (scope === 'histogram') drawHistogram(ctx, plot, samples);
+    else if (scope === 'vectorscope') drawVectorscope(ctx, plot, samples);
+    else if (scope === 'parade') drawParade(ctx, plot, samples, pixels.width);
+    else drawWaveform(ctx, plot, samples, pixels.width);
+  }
+  drawScopeAxes(ctx, plot, scope, width, height);
+}
+
+/**
+ * The scope canvas. It draws at the screen's pixel ratio so the trace stays
+ * sharp on a high density display, and it labels its axes: 0 to 100 per cent
+ * on the level scopes, hue marks on the vectorscope.
+ */
 export function ScopeCanvas({
   readMonitorPixels,
-  compact = false,
   scope = 'waveform',
+  className,
 }: {
   readMonitorPixels?: () => ScopePixels | undefined;
-  compact?: boolean;
-  scope?: 'waveform' | 'parade' | 'vectorscope' | 'histogram';
+  scope?: ScopeKind;
+  className?: string;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
     const draw = () => {
-      const canvas = ref.current;
-      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width) || canvas.width);
+      const height = Math.max(1, Math.round(rect.height) || canvas.height);
+      const ratio = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+      const bufferWidth = Math.max(1, Math.round(width * ratio));
+      const bufferHeight = Math.max(1, Math.round(height * ratio));
+      if (canvas.width !== bufferWidth) canvas.width = bufferWidth;
+      if (canvas.height !== bufferHeight) canvas.height = bufferHeight;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      const pixels = readMonitorPixels?.();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#17181c';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = '#45464c';
-      ctx.lineWidth = 1;
-      for (let i = 1; i < 4; i++) {
-        ctx.beginPath();
-        ctx.moveTo(0, (i * canvas.height) / 4);
-        ctx.lineTo(canvas.width, (i * canvas.height) / 4);
-        ctx.stroke();
-      }
-      if (!pixels) return;
-      const scaleX = canvas.width / pixels.width;
-      if (scope === 'histogram') {
-        const bins = new Uint32Array(64);
-        for (let offset = 0; offset < pixels.data.length; offset += 4) {
-          const lum = Math.round(
-            ((0.2126 * pixels.data[offset]! +
-              0.7152 * pixels.data[offset + 1]! +
-              0.0722 * pixels.data[offset + 2]!) /
-              255) *
-              63,
-          );
-          bins[lum] = (bins[lum] ?? 0) + 1;
-        }
-        const peak = Math.max(1, ...bins);
-        ctx.fillStyle = '#e9b529';
-        bins.forEach((value, index) =>
-          ctx.fillRect(
-            (index * canvas.width) / bins.length,
-            canvas.height - (value / peak) * canvas.height,
-            canvas.width / bins.length + 1,
-            (value / peak) * canvas.height,
-          ),
-        );
-      } else {
-        for (let y = 0; y < pixels.height; y += 2)
-          for (let x = 0; x < pixels.width; x += 2) {
-            const offset = (y * pixels.width + x) * 4;
-            const red = pixels.data[offset]! / 255;
-            const green = pixels.data[offset + 1]! / 255;
-            const blue = pixels.data[offset + 2]! / 255;
-            const lum = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-            if (scope === 'vectorscope') {
-              ctx.fillStyle = '#63d39b';
-              ctx.fillRect(
-                canvas.width / 2 + (red - lum) * 0.7 * canvas.width,
-                canvas.height / 2 + (blue - lum) * 0.7 * canvas.height,
-                1,
-                1,
-              );
-            } else if (scope === 'parade') {
-              const channel =
-                x < pixels.width / 3 ? red : x < (pixels.width * 2) / 3 ? green : blue;
-              ctx.fillStyle =
-                x < pixels.width / 3
-                  ? '#e66b70'
-                  : x < (pixels.width * 2) / 3
-                    ? '#65c988'
-                    : '#6e9fe8';
-              ctx.fillRect(
-                x * scaleX,
-                (1 - channel) * canvas.height,
-                compact ? 1 : 2,
-                compact ? 1 : 2,
-              );
-            } else {
-              ctx.fillStyle = '#e9b529';
-              ctx.fillRect(x * scaleX, (1 - lum) * canvas.height, compact ? 1 : 2, compact ? 1 : 2);
-            }
-          }
-      }
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      drawScope(ctx, width, height, scope, readMonitorPixels?.());
     };
     draw();
     const timer = window.setInterval(draw, 84);
     return () => window.clearInterval(timer);
-  }, [readMonitorPixels, compact, scope]);
-  const scopeLabel =
-    scope === 'parade' ? 'RGB Parade' : `${scope[0]!.toUpperCase()}${scope.slice(1)}`;
+  }, [readMonitorPixels, scope]);
+  const axis = scopeAxisLabels(scope);
   return (
     <div className="scope-frame">
       <canvas
         ref={ref}
-        width={compact ? 240 : 420}
-        height={compact ? 64 : 180}
-        className="scope-canvas"
+        width={420}
+        height={180}
+        className={className === undefined ? 'scope-canvas' : `scope-canvas ${className}`}
         role="img"
-        aria-label={`${scopeLabel} scope analyzing final Program output`}
+        aria-label={`${scopeLabel(scope)} scope analyzing final Program output`}
       />
-      {!compact && (scope === 'waveform' || scope === 'parade') && (
-        <div className="scope-ire-scale" aria-hidden="true">
-          <span>100</span>
-          <span>75</span>
-          <span>50</span>
-          <span>25</span>
-          <span>0 IRE</span>
-        </div>
-      )}
+      <p className="sr-only">
+        {scopeLabel(scope)} scope. Horizontal axis: {axis.horizontal}. Vertical axis:{' '}
+        {axis.vertical}.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The floating scopes window (T-K05).
+ *
+ * It follows the colourist across the sub-tabs: it stays open while the wheels,
+ * curves or HSL bands are worked on, it can be dragged and resized, and it
+ * comes back where it was left.
+ */
+function FloatingScopesWindow({
+  readMonitorPixels,
+  geometry,
+  onGeometryChange,
+  onClose,
+}: {
+  readonly readMonitorPixels?: () => ScopePixels | undefined;
+  readonly geometry: ColorScopesWindowGeometry;
+  readonly onGeometryChange: (next: ColorScopesWindowGeometry) => void;
+  readonly onClose: () => void;
+}) {
+  const [scope, setScope] = useState<ScopeKind>('waveform');
+  const dragRef = useRef<
+    | {
+        readonly mode: 'move' | 'resize';
+        readonly startX: number;
+        readonly startY: number;
+        readonly origin: ColorScopesWindowGeometry;
+      }
+    | undefined
+  >(undefined);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  const startDrag = (mode: 'move' | 'resize') => (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return;
+    if ((event.target as HTMLElement).closest('button') !== null) return;
+    event.preventDefault();
+    dragRef.current = {
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: geometry,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (drag === undefined) return;
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    onGeometryChange(
+      clampColorScopesWindowGeometry(
+        drag.mode === 'move'
+          ? { ...drag.origin, x: drag.origin.x + deltaX, y: drag.origin.y + deltaY }
+          : {
+              ...drag.origin,
+              width: drag.origin.width + deltaX,
+              height: drag.origin.height + deltaY,
+            },
+        viewport,
+      ),
+    );
+  };
+
+  const stopDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    dragRef.current = undefined;
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  return (
+    <div
+      className="scope-window"
+      role="dialog"
+      aria-label="Program scopes"
+      style={{
+        left: `${geometry.x}px`,
+        top: `${geometry.y}px`,
+        width: `${geometry.width}px`,
+        height: `${geometry.height}px`,
+      }}
+    >
+      <div
+        className="scope-window-header"
+        onPointerDown={startDrag('move')}
+        onPointerMove={onPointerMove}
+        onPointerUp={stopDrag}
+        onPointerCancel={stopDrag}
+      >
+        <strong className="scope-window-title">Scopes</strong>
+        <span className="scope-window-hint">Drag to move</span>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Close scopes window"
+          title="Close the scopes window"
+          onClick={onClose}
+        >
+          <CloseIcon />
+        </button>
+      </div>
+      <div className="scope-window-body">
+        <ScopeTypeButtons scope={scope} onScopeChange={setScope} />
+        <ScopeCanvas
+          scope={scope}
+          {...(readMonitorPixels === undefined ? {} : { readMonitorPixels })}
+          className="scope-window-canvas"
+        />
+      </div>
+      <div
+        className="scope-window-resize"
+        aria-hidden="true"
+        onPointerDown={startDrag('resize')}
+        onPointerMove={onPointerMove}
+        onPointerUp={stopDrag}
+        onPointerCancel={stopDrag}
+      />
     </div>
   );
 }
