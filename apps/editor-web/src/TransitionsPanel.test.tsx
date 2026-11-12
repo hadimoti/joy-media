@@ -66,7 +66,9 @@ describe('TransitionsPanel junction operations', () => {
       />,
     );
 
-    expect(markup).toContain('data-transition-type="dissolve"');
+    // The project names the removed id `dissolve`; its card is the kept `gl:fade` (T-V08).
+    expect(markup).toContain('data-transition-type="gl:fade"');
+    expect(markup).not.toContain('data-transition-type="dissolve"');
     expect(markup).toContain('aria-label="Remove selected transition"');
     expect(markup).toContain('data-transition-id="transition-1"');
     expect(markup).toContain('transition-card is-active');

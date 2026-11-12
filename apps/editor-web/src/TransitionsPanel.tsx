@@ -11,6 +11,7 @@ import {
   listTransitionShaders,
   listTransitionUniformDescriptors,
   mergeTransitionParams,
+  resolveTransitionShaderId,
 } from '@joy-media/transition-shaders';
 import type { TransitionDragPayload } from '@joy-media/visual-effects';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
@@ -331,9 +332,14 @@ export function TransitionsPanel({
   storage,
 }: TransitionsPanelProps) {
   const rootComp = timelineProject.compositions[timelineProject.rootCompositionId];
-  const [pendingType, setPendingType] = useState('dissolve');
-  const [favorites, setFavorites] = useState<Set<string>>(() =>
+  const [pendingType, setPendingType] = useState('gl:fade');
+  const [storedFavorites, setFavorites] = useState<Set<string>>(() =>
     storage === undefined ? new Set() : readTransitionFavorites(storage),
+  );
+  // Favourites saved before T-V08 may name a removed id (`dissolve`, `wipe`, `slide`).
+  const favorites = useMemo(
+    () => new Set([...storedFavorites].map(resolveTransitionShaderId)),
+    [storedFavorites],
   );
   const [query, setQuery] = useState('');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
@@ -399,6 +405,10 @@ export function TransitionsPanel({
 
   const selectedJunction = availableJunctions[0] ?? null;
   const selectedTransition = transitionAtJunction(project.transitions ?? [], selectedJunction);
+  const selectedShaderId =
+    selectedTransition === undefined
+      ? undefined
+      : resolveTransitionShaderId(selectedTransition.type);
 
   const handleAddTransition = useCallback(
     (type: string) => {
@@ -518,7 +528,7 @@ export function TransitionsPanel({
                   key={entry.id}
                   entry={entry}
                   isActive={
-                    selectedTransition?.type === entry.id ||
+                    selectedShaderId === entry.id ||
                     (selectedTransition === undefined && pendingType === entry.id)
                   }
                   isFavorite={true}
@@ -541,7 +551,7 @@ export function TransitionsPanel({
                 key={entry.id}
                 entry={entry}
                 isActive={
-                  selectedTransition?.type === entry.id ||
+                  selectedShaderId === entry.id ||
                   (selectedTransition === undefined && pendingType === entry.id)
                 }
                 isFavorite={favorites.has(entry.id)}

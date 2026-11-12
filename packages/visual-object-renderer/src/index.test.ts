@@ -506,7 +506,8 @@ describe('transition timing', () => {
     if (node?.kind !== 'transition') throw new Error('expected transition');
     expect(node.progress).toBe(0.5);
     expect(node.transitionType).toBe('dissolve');
-    expect(node.shaderId).toBe('dissolve');
+    // `dissolve` was removed as a double in T-V08 and opens as the kept `gl:fade`.
+    expect(node.shaderId).toBe('gl:fade');
   });
 
   it('maps curated gl:* types onto TransitionNode.shaderId + params', () => {

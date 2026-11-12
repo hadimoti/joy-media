@@ -1,43 +1,9 @@
-/** Auto-generated catalog. */
+/** Auto-generated catalog. Edit catalog.json, then run scripts/generate-sources.mjs. */
 export const TRANSITION_CATALOG = [
-  {
-    id: 'dissolve',
-    glName: 'fade',
-    label: 'Dissolve',
-    license: 'MIT',
-    author: 'gre',
-    glslFile: 'fade.glsl',
-    defaultParams: {},
-    paramsTypes: {},
-  },
-  {
-    id: 'wipe',
-    glName: 'wipeLeft',
-    label: 'Wipe Left',
-    license: 'MIT',
-    author: 'gre',
-    glslFile: 'wipeLeft.glsl',
-    defaultParams: {},
-    paramsTypes: {},
-  },
-  {
-    id: 'slide',
-    glName: 'Directional',
-    label: 'Slide',
-    license: 'MIT',
-    author: 'lth',
-    glslFile: 'Directional.glsl',
-    defaultParams: {
-      direction: [1, 0],
-    },
-    paramsTypes: {
-      direction: 'vec2',
-    },
-  },
   {
     id: 'gl:fade',
     glName: 'fade',
-    label: 'Fade',
+    label: 'Dissolve',
     license: 'MIT',
     author: 'gre',
     glslFile: 'fade.glsl',
@@ -101,7 +67,7 @@ export const TRANSITION_CATALOG = [
   {
     id: 'gl:Directional',
     glName: 'Directional',
-    label: 'Directional',
+    label: 'Slide',
     license: 'MIT',
     author: 'lth',
     glslFile: 'Directional.glsl',

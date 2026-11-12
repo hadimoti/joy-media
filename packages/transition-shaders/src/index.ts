@@ -56,11 +56,16 @@ const entries: readonly TransitionShaderEntry[] = catalog.map((row) => {
 
 const byId = new Map(entries.map((entry) => [entry.id, entry]));
 
-/** Legacy project types map onto curated registry ids. */
+/**
+ * Removed catalogue ids and the kept entry each one now opens as (LIBRARY-AUDIT.md, T-V08).
+ * `dissolve`, `wipe` and `slide` were doubles of `gl:fade`, `gl:wipeLeft` and `gl:Directional`.
+ * Every place that reads a transition id goes through `resolveTransitionShaderId`, so old
+ * projects, favourites and agent plans that still name a removed id keep working.
+ */
 export const LEGACY_TRANSITION_ALIASES: Readonly<Record<string, string>> = {
-  dissolve: 'dissolve',
-  wipe: 'wipe',
-  slide: 'slide',
+  dissolve: 'gl:fade',
+  wipe: 'gl:wipeLeft',
+  slide: 'gl:Directional',
 };
 
 export function listTransitionShaders(): readonly TransitionShaderEntry[] {
@@ -68,7 +73,7 @@ export function listTransitionShaders(): readonly TransitionShaderEntry[] {
 }
 
 export function resolveTransitionShaderId(type: string): string {
-  return LEGACY_TRANSITION_ALIASES[type] ?? type;
+  return Object.hasOwn(LEGACY_TRANSITION_ALIASES, type) ? LEGACY_TRANSITION_ALIASES[type]! : type;
 }
 
 export function getTransitionShader(type: string): TransitionShaderEntry | undefined {

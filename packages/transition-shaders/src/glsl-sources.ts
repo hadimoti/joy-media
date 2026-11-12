@@ -1,19 +1,19 @@
-/** Auto-generated from curated gl-transitions (MIT). Do not edit by hand. */
+/** Auto-generated from the vendored .glsl files (gl-transitions, MIT, plus JOY Media's own dips). Do not edit by hand; run scripts/generate-sources.mjs. */
 export const TRANSITION_GLSL_BY_FILE: Readonly<Record<string, string>> = {
   'fade.glsl':
     '// Author: gre\n// License: MIT\n\nvec4 transition (vec2 uv) {\n  return mix(\n    getFromColor(uv),\n    getToColor(uv),\n    progress\n  );\n}\n\n',
-  'wipeLeft.glsl':
-    '// Author: Jake Nelson\n// License: MIT\n\nvec4 transition(vec2 uv) {\n  vec2 p=uv.xy/vec2(1.0).xy;\n  vec4 a=getFromColor(p);\n  vec4 b=getToColor(p);\n  return mix(a, b, step(1.0-p.x,progress));\n}\n\n',
-  'Directional.glsl':
-    '// Author: Gaëtan Renaudeau\n// License: MIT\n\nuniform vec2 direction; // = vec2(0.0, 1.0)\n\nvec4 transition (vec2 uv) {\n  vec2 p = uv + progress * sign(direction);\n  vec2 f = fract(p);\n  return mix(\n    getToColor(f),\n    getFromColor(f),\n    step(0.0, p.y) * step(p.y, 1.0) * step(0.0, p.x) * step(p.x, 1.0)\n  );\n}\n\n',
   'fadegrayscale.glsl':
     '// Author: gre\n// License: MIT\n\nuniform float intensity; // = 0.3; // if 0.0, the image directly turn grayscale, if 0.9, the grayscale transition phase is very important\n \nvec3 grayscale (vec3 color) {\n  return vec3(0.2126*color.r + 0.7152*color.g + 0.0722*color.b);\n}\n \nvec4 transition (vec2 uv) {\n  vec4 fc = getFromColor(uv);\n  vec4 tc = getToColor(uv);\n  return mix(\n    mix(vec4(grayscale(fc.rgb), 1.0), fc, smoothstep(1.0-intensity, 0.0, progress)),\n    mix(vec4(grayscale(tc.rgb), 1.0), tc, smoothstep(    intensity, 1.0, progress)),\n    progress);\n}\n\n',
+  'wipeLeft.glsl':
+    '// Author: Jake Nelson\n// License: MIT\n\nvec4 transition(vec2 uv) {\n  vec2 p=uv.xy/vec2(1.0).xy;\n  vec4 a=getFromColor(p);\n  vec4 b=getToColor(p);\n  return mix(a, b, step(1.0-p.x,progress));\n}\n\n',
   'wipeRight.glsl':
     '// Author: Jake Nelson\n// License: MIT\n\nvec4 transition(vec2 uv) {\n  vec2 p=uv.xy/vec2(1.0).xy;\n  vec4 a=getFromColor(p);\n  vec4 b=getToColor(p);\n  return mix(a, b, step(0.0+p.x,progress));\n}\n\n',
   'wipeUp.glsl':
     '// Author: Jake Nelson\n// License: MIT\n\nvec4 transition(vec2 uv) {\n  vec2 p=uv.xy/vec2(1.0).xy;\n  vec4 a=getFromColor(p);\n  vec4 b=getToColor(p);\n  return mix(a, b, step(0.0+p.y,progress));\n}\n\n',
   'wipeDown.glsl':
     '// Author: Jake Nelson\n// License: MIT\n\nvec4 transition(vec2 uv) {\n  vec2 p=uv.xy/vec2(1.0).xy;\n  vec4 a=getFromColor(p);\n  vec4 b=getToColor(p);\n  return mix(a, b, step(1.0-p.y,progress));\n}\n\n',
+  'Directional.glsl':
+    '// Author: Gaëtan Renaudeau\n// License: MIT\n\nuniform vec2 direction; // = vec2(0.0, 1.0)\n\nvec4 transition (vec2 uv) {\n  vec2 p = uv + progress * sign(direction);\n  vec2 f = fract(p);\n  return mix(\n    getToColor(f),\n    getFromColor(f),\n    step(0.0, p.y) * step(p.y, 1.0) * step(0.0, p.x) * step(p.x, 1.0)\n  );\n}\n\n',
   'CircleCrop.glsl':
     "// License: MIT\n// Author: fkuteken\n// ported by gre from https://gist.github.com/fkuteken/f63e3009c1143950dee9063c3b83fb88\n\nuniform vec4 bgcolor; // = vec4(0.0, 0.0, 0.0, 1.0)\n\nvec2 ratio2 = vec2(1.0, 1.0 / ratio);\nfloat s = pow(2.0 * abs(progress - 0.5), 3.0);\n\nvec4 transition(vec2 p) {\n  float dist = length((vec2(p) - 0.5) * ratio2);\n  return mix(\n    progress < 0.5 ? getFromColor(p) : getToColor(p), // branching is ok here as we statically depend on progress uniform (branching won't change over pixels)\n    bgcolor,\n    step(s, dist)\n  );\n}\n\n",
   'morph.glsl':
