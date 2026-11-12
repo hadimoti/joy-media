@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { EditorSession } from './editor-session.js';
-import { getCatalogProject } from './project-catalog.js';
+import { getCatalogProject, listCatalogProjects } from './project-catalog.js';
 import { readProjectBundle } from './project-lifecycle.js';
 import type {
   ProjectFolderLoadReply,
@@ -393,6 +393,105 @@ describe('opening a folder project in the editor', () => {
     expect(bundle.timeline.id).toBe('project-2');
     expect(bundle.visual.id).toBe('project-2');
     expect(Object.keys(bundle.visual.assets)).toEqual([CLIP_ID]);
+  });
+
+  it('opens a copied folder as a new project next to its original, and leaves the original alone', async () => {
+    const storage = memoryStorage();
+    const original = fakeFolder();
+    original.state.originals.set(CLIP_ID, CLIP);
+    const opened = await openFolderProject({
+      key: 'k1',
+      storage,
+      port: original.port,
+      cache: memoryCache(),
+    });
+    if (opened.kind !== 'opened') throw new Error('expected opened');
+    addClip(storage);
+    await saveFolderProject({
+      key: 'k1',
+      storage,
+      port: original.port,
+      entry: opened.entry,
+      baseRevisionId: '',
+      revisionId: 'r1',
+    });
+
+    // The copy, as the desktop hands it over: a new id, its saved work moved to that id, its media copied with it.
+    const copy = fakeFolder('project-2', 'Summer copy');
+    copy.state.document = JSON.parse(
+      JSON.stringify(original.state.document).replaceAll('project-1', 'project-2'),
+    );
+    copy.state.revisionId = 'r1';
+    copy.state.media = new Map(original.state.media);
+    const copyOpened = await openFolderProject({
+      key: 'k2',
+      storage,
+      port: copy.port,
+      cache: memoryCache(),
+    });
+    expect(copyOpened).toMatchObject({
+      kind: 'opened',
+      entry: { id: 'project-2', title: 'Summer copy' },
+      revisionId: 'r1',
+      needsSave: false,
+      missingMedia: [],
+    });
+    if (copyOpened.kind !== 'opened') throw new Error('expected opened');
+    expect(
+      listCatalogProjects(storage)
+        .map((entry) => entry.id)
+        .sort(),
+    ).toEqual(['project-1', 'project-2']);
+
+    // A change in the copy is saved into the copy's folder only.
+    addClip(storage, 'project-2', 'copy only.mp4');
+    await saveFolderProject({
+      key: 'k2',
+      storage,
+      port: copy.port,
+      entry: copyOpened.entry,
+      baseRevisionId: 'r1',
+      revisionId: 'c1',
+    });
+    expect(copy.state.saves.map((save) => save.projectId)).toEqual(['project-2']);
+    expect(original.state.saves).toHaveLength(1);
+    const originalBundle = readProjectBundle(storage, getCatalogProject(storage, 'project-1')!);
+    expect(originalBundle.timeline.id).toBe('project-1');
+    expect(originalBundle.visual.assets[CLIP_ID]?.displayName).toBe('beach.mp4');
+    const copyBundle = readProjectBundle(storage, getCatalogProject(storage, 'project-2')!);
+    expect(copyBundle.visual.assets[CLIP_ID]?.displayName).toBe('copy only.mp4');
+  });
+
+  it('opens a renamed or moved folder as the same project, with no second entry', async () => {
+    const storage = memoryStorage();
+    const folder = fakeFolder();
+    folder.state.originals.set(CLIP_ID, CLIP);
+    const opened = await openFolderProject({
+      key: 'k1',
+      storage,
+      port: folder.port,
+      cache: memoryCache(),
+    });
+    if (opened.kind !== 'opened') throw new Error('expected opened');
+    addClip(storage);
+    await saveFolderProject({
+      key: 'k1',
+      storage,
+      port: folder.port,
+      entry: opened.entry,
+      baseRevisionId: '',
+      revisionId: 'r1',
+    });
+
+    // After a rename the desktop lists the folder under a new key, with the same id.
+    const again = await openFolderProject({
+      key: 'k9',
+      storage,
+      port: folder.port,
+      cache: memoryCache(),
+    });
+    expect(again).toMatchObject({ kind: 'opened', entry: { id: 'project-1' }, revisionId: 'r1' });
+    expect(listCatalogProjects(storage).map((entry) => entry.id)).toEqual(['project-1']);
   });
 
   it('refuses a saved document it cannot read, and opens nothing', async () => {

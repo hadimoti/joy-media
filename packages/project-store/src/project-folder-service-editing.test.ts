@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, renameSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -289,6 +289,56 @@ describe('opening a folder project in the editor', () => {
     expect(existsSync(join(directory, 'Summer copy.joyproj', 'assets', `${CLIP_SHA}.bin`))).toBe(
       true,
     );
+  });
+
+  it('opens a renamed folder, and one moved away and back, as the same project with its work and media', async () => {
+    const service = serviceOn();
+    const created = await createdProject(service);
+    await service.open(created.key);
+    await service.save(created.key, {
+      projectId: created.id,
+      baseRevisionId: '',
+      revisionId: 'r1',
+      title: 'Summer',
+      document: documentFor(created.id),
+      media: [
+        { assetId: CLIP_ID, kind: 'video', displayName: 'beach.mp4', sourcePath: await original() },
+      ],
+    });
+    service.closeFolder(created.key);
+
+    // A rename inside the projects folder: the same folder, so the same project.
+    renameSync(join(directory, 'Summer.joyproj'), join(directory, 'Summer final.joyproj'));
+    const renamedKey = await keyOf(service, 'Summer final.joyproj');
+    await expect(service.open(renamedKey)).resolves.toMatchObject({
+      kind: 'ready',
+      claim: 'kept',
+      id: created.id,
+    });
+    await expect(service.load(renamedKey)).resolves.toMatchObject({
+      id: created.id,
+      documentProjectId: created.id,
+      revisionId: 'r1',
+      document: documentFor(created.id),
+    });
+    service.closeFolder(renamedKey);
+
+    // Moved out of the projects folder, it is not listed; moved back, it opens as the same project again.
+    const away = join(base, 'Desktop');
+    await mkdir(away, { recursive: true });
+    renameSync(join(directory, 'Summer final.joyproj'), join(away, 'Summer final.joyproj'));
+    expect((await service.list()).folders).toEqual([]);
+    renameSync(join(away, 'Summer final.joyproj'), join(directory, 'Summer final.joyproj'));
+    const backKey = await keyOf(service, 'Summer final.joyproj');
+    await expect(service.open(backKey)).resolves.toMatchObject({
+      kind: 'ready',
+      claim: 'kept',
+      id: created.id,
+    });
+    await expect(service.load(backKey)).resolves.toMatchObject({ revisionId: 'r1' });
+    await expect(service.mediaStates(backKey, [CLIP_ID])).resolves.toMatchObject({
+      states: [{ assetId: CLIP_ID, present: true }],
+    });
   });
 });
 
