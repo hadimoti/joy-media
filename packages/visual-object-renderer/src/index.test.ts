@@ -102,6 +102,36 @@ describe('transformToRenderTransform', () => {
     expect(result.scaleX).toBe(2);
     expect(result.scaleY).toBe(0.5);
   });
+
+  it('passes through non-zero crop fractions and omits a zero crop', () => {
+    const base = transformToRenderTransform({
+      x: 10,
+      y: 20,
+      scaleX: 2,
+      scaleY: 1.5,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0, top: 0, right: 0, bottom: 0 },
+    });
+    expect(base).not.toHaveProperty('crop');
+
+    const cropped = transformToRenderTransform({
+      x: 10,
+      y: 20,
+      scaleX: 2,
+      scaleY: 1.5,
+      rotationDeg: 0,
+      opacity: 1,
+      crop: { left: 0.25, top: 0.125, right: 0.1, bottom: 0.25 },
+    });
+    expect(cropped).toEqual({
+      translateX: 10,
+      translateY: 20,
+      scaleX: 2,
+      scaleY: 1.5,
+      crop: { left: 0.25, top: 0.125, right: 0.1, bottom: 0.25 },
+    });
+  });
 });
 
 describe('buildRenderFrameIR', () => {

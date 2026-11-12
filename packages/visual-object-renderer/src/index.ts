@@ -465,9 +465,19 @@ export function transformToRenderTransform(t: VisualObjectTransformV1): Transfor
     scaleX: t.scaleX,
     scaleY: t.scaleY,
   };
-  return Number.isFinite(t.rotationDeg) && t.rotationDeg !== 0
-    ? { ...base, rotationDeg: t.rotationDeg }
-    : base;
+  const crop = t.crop;
+  const hasCrop =
+    crop !== undefined &&
+    [crop.left, crop.top, crop.right, crop.bottom].some(
+      (edge) => Number.isFinite(edge) && edge > 0,
+    );
+  return {
+    ...base,
+    ...(Number.isFinite(t.rotationDeg) && t.rotationDeg !== 0
+      ? { rotationDeg: t.rotationDeg }
+      : {}),
+    ...(hasCrop ? { crop } : {}),
+  };
 }
 
 export function evaluateEffectInstances(

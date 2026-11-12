@@ -23,6 +23,7 @@ import type {
 } from '@joy-media/render-ir';
 import type { ParsedCubeLut } from './lut.js';
 import {
+  cropNodeBox,
   flattenRenderNodes,
   frameToLocalPoint,
   isRotated,
@@ -123,9 +124,18 @@ function paintRect(
   node: Exclude<VisualRenderNode, { kind: 'text' | 'transition' }>,
   effects: readonly EffectInstanceIR[] | undefined,
 ): void {
-  const box = { x: 0, y: 0, width: node.width, height: node.height };
+  const box = cropNodeBox(
+    { x: 0, y: 0, width: node.width, height: node.height },
+    node.transform.crop,
+  );
   forEachLocalPixel(pixels, frameWidth, frameHeight, node, box, (localX, localY) => {
-    if (localX < 0 || localX >= node.width || localY < 0 || localY >= node.height) return null;
+    if (
+      localX < box.x ||
+      localX >= box.x + box.width ||
+      localY < box.y ||
+      localY >= box.y + box.height
+    )
+      return null;
     return applyCpuEffectsToColor(node.color, effects, localX, localY);
   });
 }
@@ -141,8 +151,18 @@ function paintText(
   const textBounds = textPlateBounds(textWidth, 5, node.align);
   const plateBounds = textPlateBounds(textWidth, 5, node.align, 1);
   // The drawn box (rotation origin): the plate when there is one, else the run.
-  const box = node.background === undefined ? textBounds : plateBounds;
+  const box = cropNodeBox(
+    node.background === undefined ? textBounds : plateBounds,
+    node.transform.crop,
+  );
   forEachLocalPixel(pixels, frameWidth, frameHeight, node, box, (localX, localY) => {
+    if (
+      localX < box.x ||
+      localX >= box.x + box.width ||
+      localY < box.y ||
+      localY >= box.y + box.height
+    )
+      return null;
     const x = Math.floor(localX - textBounds.x);
     const y = Math.floor(localY);
     const character = Math.floor(x / 4);
