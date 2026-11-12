@@ -1670,11 +1670,8 @@ h2 {
   outline-offset: -3px;
   background-color: rgba(233, 185, 73, 0.08);
 }
-/* The authored frame inside the viewport; its box is the view (zoom and pan). */
-.monitor-frame {
-  position: absolute;
-  box-shadow: 0 0.5rem 2rem #000a;
-}
+/* The canvas is the size of the panel; the renderer draws the frame through
+   the Monitor view (zoom and pan). No CSS scale. */
 .monitor-canvas {
   position: absolute;
   inset: 0;
@@ -1682,8 +1679,13 @@ h2 {
 }
 .monitor-canvas canvas {
   display: block;
-  width: 100%;
-  height: 100%;
+}
+/* Where the authored frame sits under the view: its shadow and the GPU picture. */
+.monitor-frame {
+  position: absolute;
+  z-index: 1;
+  box-shadow: 0 0.5rem 2rem #000a;
+  pointer-events: none;
 }
 .monitor-gpu-frame {
   position: absolute;

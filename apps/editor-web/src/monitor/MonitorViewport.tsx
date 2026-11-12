@@ -23,7 +23,8 @@ import {
 
 /**
  * The Monitor viewport (ADR-0046 sections 1 and 8): the clipping frame that
- * hosts the canvas, plus the zoom and pan controller. Wheel zooms toward the
+ * hosts the panel-sized canvas, plus the zoom and pan controller. The view is
+ * drawn by the renderer (`setView`), never by a CSS scale. Wheel zooms toward the
  * cursor (Ctrl + wheel is a trackpad pinch); Ctrl+0, Ctrl+1, Ctrl+plus and
  * Ctrl+minus work while the pointer is over the Monitor or focus is inside it.
  */
@@ -168,6 +169,27 @@ export function useMonitorView(
   }, [scopeRef, setFit, setZoom, stepZoom]);
 
   return { view, fit, viewportSize, viewportRef, setFit, setZoom, stepZoom };
+}
+
+/** The screen's device pixel ratio, updated when the window moves to another screen. */
+export function useDevicePixelRatio(): number {
+  const [ratio, setRatio] = useState(() =>
+    typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    let query: MediaQueryList | undefined;
+    const update = () => {
+      query?.removeEventListener('change', update);
+      const next = window.devicePixelRatio || 1;
+      setRatio(next);
+      query = window.matchMedia(`(resolution: ${next}dppx)`);
+      query.addEventListener('change', update);
+    };
+    update();
+    return () => query?.removeEventListener('change', update);
+  }, []);
+  return ratio;
 }
 
 /** Where the authored frame sits inside the viewport, in CSS px. */
