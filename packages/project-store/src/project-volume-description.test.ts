@@ -47,6 +47,15 @@ describe('describing a volume in words', () => {
   it('keeps no description for a volume that was never asked about', () => {
     expect(describeVolumeAnswer(123n)).toBeUndefined();
   });
+
+  it('does not describe a share by the answer kept for a local drive with the same number', () => {
+    keepVolumeAnswerForTests(9n, { verified: true, found: '3|NTFS' }, Date.now());
+    expect(describeVolumeAnswer(9n, 'C:\\Trip')).toEqual({
+      drive: 'fixed drive',
+      fileSystem: 'NTFS',
+    });
+    expect(describeVolumeAnswer(9n, '\\\\localhost\\C$\\Trip')).toBeUndefined();
+  });
 });
 
 describe('a kept volume answer is shown only while it is fresh', () => {

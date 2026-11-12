@@ -801,7 +801,7 @@ function volumeOf(path: string): ProjectFolderVolume | undefined {
   } catch {
     return undefined;
   }
-  const description = describeVolumeAnswer(device);
+  const description = describeVolumeAnswer(device, realPlaceOf(path));
   return description === undefined
     ? undefined
     : { drive: description.drive, fileSystem: description.fileSystem };

@@ -8,6 +8,7 @@ import {
   isNtfsAnswer,
   isVerifiedNtfsVolume,
   forgetVolumeAnswers,
+  isNetworkPath,
   volumeListPath,
   warmVolumeAnswer,
 } from './project-volume.js';
@@ -56,6 +57,46 @@ describe('the path PowerShell is asked about', () => {
     expect(volumeListPath('\\\\?\\UNC\\server\\share\\Trip')).toBe('\\\\server\\share\\Trip\\');
     expect(volumeListPath('\\\\?\\Volume{abc}\\Trip\\')).toBe('\\\\?\\Volume{abc}\\Trip\\');
   });
+});
+
+describe('network paths (real-volume test, 12 Nov 2026)', () => {
+  it('names a share reached over the network, and nothing local', () => {
+    expect(isNetworkPath('\\\\server\\share\\Trip.joyproj')).toBe(true);
+    expect(isNetworkPath('\\\\localhost\\C$\\jgp\\Trip.joyproj')).toBe(true);
+    expect(isNetworkPath('\\\\?\\UNC\\server\\share\\Trip.joyproj')).toBe(true);
+    expect(isNetworkPath('\\\\?\\unc\\server\\share')).toBe(true);
+    expect(isNetworkPath('C:\\Users\\Hadi\\Trip.joyproj')).toBe(false);
+    expect(isNetworkPath('\\\\?\\C:\\Trip.joyproj')).toBe(false);
+    expect(isNetworkPath('\\\\?\\Volume{abc}\\Trip.joyproj')).toBe(false);
+    expect(isNetworkPath('\\\\.\\C:\\Trip.joyproj')).toBe(false);
+  });
+
+  it.skipIf(process.platform !== 'win32')(
+    'a share with the device number of a verified local drive is still asked, and refused',
+    () => {
+      answerWith('3|NTFS\r\n');
+      expect(isVerifiedNtfsVolume('C:\\Share Check\\One.joyproj', 9301n)).toBe(true);
+      answerWith('');
+      expect(isVerifiedNtfsVolume('\\\\localhost\\C$\\Share Check\\One.joyproj', 9301n)).toBe(
+        false,
+      );
+      expect(asked).toHaveBeenCalledTimes(2);
+      // The refused share does not refuse the local drive with the same number.
+      expect(isVerifiedNtfsVolume('C:\\Share Check\\Two.joyproj', 9301n)).toBe(true);
+      expect(asked).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'an answer warmed for a local drive does not decide a share with the same number',
+    async () => {
+      answerAsyncWith('3|NTFS\r\n');
+      await warmVolumeAnswer('C:\\Share Warm\\One.joyproj', 9302n);
+      answerWith('');
+      expect(isVerifiedNtfsVolume('\\\\?\\UNC\\localhost\\C$\\Share Warm', 9302n)).toBe(false);
+      expect(asked).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 describe('reading the answer', () => {

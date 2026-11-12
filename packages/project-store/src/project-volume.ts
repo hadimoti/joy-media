@@ -15,6 +15,10 @@ import { execFile, execFileSync } from 'node:child_process';
  * process or the renderer. Inside the worker, `warmVolumeAnswer` asks Windows without blocking (a child process the
  * thread waits for asynchronously) before each claim, so the check inside the claim finds the answer kept and asks
  * nothing. Only a place on another volume, such as a recorded original on another drive, is still asked inline.
+ *
+ * 12 Nov 2026 (lane B, real-volume test on the owner's PC): a share reached by a network path reports the volume serial
+ * of the disk behind it, so `\\localhost\C$\...` had the same device number as `C:\` and was accepted from the answer
+ * kept for `C:\`. A network path now has answers of its own, so a kept local answer never decides it, and the reverse.
  */
 
 const VERIFIED_MS = 60_000;
@@ -31,6 +35,21 @@ interface VolumeAnswer {
 }
 
 const answers = new Map<string, VolumeAnswer & { readonly at: number }>();
+
+/**
+ * Whether a real path reaches its folder over the network: `\\server\share\...` or `\\?\UNC\server\share\...`.
+ * A volume name (`\\?\Volume{...}\`) and a device path (`\\.\...`) are local.
+ */
+export function isNetworkPath(realPlace: string): boolean {
+  if (/^\\\\[?.]\\UNC\\/i.test(realPlace)) return true;
+  return realPlace.startsWith('\\\\') && !/^\\\\[?.]\\/.test(realPlace);
+}
+
+/** The key an answer is kept by: the device number, kept apart for network paths (see the header). */
+function answerKey(realPlace: string, volumeKey: bigint): string {
+  return isNetworkPath(realPlace) ? `network:${volumeKey}` : volumeKey.toString();
+}
+
 /** Questions to Windows still in flight, by volume, so two warms of one volume ask once. */
 const warming = new Map<string, Promise<void>>();
 
@@ -59,7 +78,7 @@ export function keepVolumeAnswerForTests(
  */
 export function isVerifiedNtfsVolume(realPlace: string, volumeKey: bigint): boolean {
   if (process.platform !== 'win32') return true;
-  const key = volumeKey.toString();
+  const key = answerKey(realPlace, volumeKey);
   const now = Date.now();
   const known = answers.get(key);
   if (known !== undefined && isFresh(known, now)) {
@@ -77,7 +96,7 @@ export function isVerifiedNtfsVolume(realPlace: string, volumeKey: bigint): bool
  */
 export function warmVolumeAnswer(realPlace: string, volumeKey: bigint): Promise<void> {
   if (process.platform !== 'win32') return Promise.resolve();
-  const key = volumeKey.toString();
+  const key = answerKey(realPlace, volumeKey);
   const known = answers.get(key);
   if (known !== undefined && isFresh(known, Date.now())) return Promise.resolve();
   const inFlight = warming.get(key);
@@ -99,10 +118,11 @@ export interface VolumeDescription {
 /**
  * The drive and file system Windows last reported for the volume with this device number, for the owner's message.
  * Undefined when no answer is kept for it, or when the kept answer is too old to show. A verified answer is shown for a
- * minute, and a refused one for five seconds, the same as the check itself.
+ * minute, and a refused one for five seconds, the same as the check itself. `place` is the folder's path, so a
+ * folder reached over the network is described by the answer kept for network paths.
  */
-export function describeVolumeAnswer(volumeKey: bigint): VolumeDescription | undefined {
-  const known = answers.get(volumeKey.toString());
+export function describeVolumeAnswer(volumeKey: bigint, place = ''): VolumeDescription | undefined {
+  const known = answers.get(answerKey(place, volumeKey));
   if (known === undefined || Date.now() - known.at >= (known.verified ? VERIFIED_MS : REFUSED_MS)) {
     return undefined;
   }
