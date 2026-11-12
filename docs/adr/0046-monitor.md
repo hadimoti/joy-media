@@ -319,3 +319,33 @@ Two rules for the whole track:
 5. S6 — is 6 screen pixels the right snap distance, and should the safe-area margins be snap targets or only guides?
 6. S1.5 — should the zoom range really reach 800 %, given the backing-store cap of S2.3?
 7. S5.5 — the Monitor's canvas drag reuses `TransientPropertyInteraction` (`apps/editor-web/src/property-interaction.ts:25-77`). Is that the right authority for a canvas gesture, or should canvas gestures get their own undo bus? Today `VisualObjectTransaction` has no `coalesceKey` (`packages/property-system/src/index.ts:637-640`), so the transient gesture is the only thing standing between a canvas drag and one undo entry per pointer move.
+
+## Review by Opus 5.5 (12 Nov 2026, read-only, one of the two Opus uses) and what we decide
+
+Status after the review: **Accepted with the changes below.** Where this section and the text above disagree, this section wins. The sections above are kept so the reasoning stays visible.
+
+### A. Corrections to the facts above (checked by the reviewer against `v111-ui` at `08ccae88`)
+
+1. Pixi does not set the canvas CSS size on resize (no `autoDensity` in `packages/renderer-pixi/src/browser.ts:141-152`); the canvas shows at its backing-store size, capped by `app.css:1668-1673`. So "Fit" today can only shrink, never enlarge. This is what the empty bars are, and part of the blur.
+2. The Quality select has no effect after the Monitor first loads: the renderer is created once with `options.resolution` (`App.tsx:7706-7709`) and `render()` prefers `options.resolution` (`browser.ts:563`) over `setResolution`. Any new setter must win over `options.resolution`.
+3. Quarter quality is 0.25 per side, which is 1/16 of the pixels, not a quarter.
+4. `packages/render-ir/src/browser.ts` does not exist; `Transform2D` is at `model.ts:23-29`.
+5. The editor never calls `buildRenderFrameIRFromProject`; the Monitor (`App.tsx:7637`) and the export (about `4063`) both use `buildRenderFrameIR` with `evaluateCameraExpressionTransform`.
+6. The text-field guard is `isEditableTarget` (`keyboard-shortcuts.ts:29-35`), and `App.tsx:3692` checks both; Space acts on key-down with key repeat ignored (`App.tsx:3695`).
+7. The Monitor already has handlers: effect drag-and-drop (`App.tsx:8051-8104`). The move must keep them. The bottom bar also has a Fullscreen button (`8171-8183`) and there is a GPU `<img>` overlay (`8111-8119`).
+8. `resolveObjectIdForSelection` maps one way and returns only the first match; video nodes are keyed by clip id (`App.tsx:663`), not by object id.
+9. The quality setting is a per-user preference (`ui-preferences.ts:61`), not project data. The component has 14 `useState`, about 13 refs and 10 effects (not "40 and 11").
+
+### B. Design changes (decisions)
+
+1. **Panel-sized canvas, zoom and pan inside the renderer.** The ADR section 2 plan (resize the whole frame by zoom, backing store up to 4096) is **replaced**. A 9:16 frame at 200 % on a 1.25 screen needs 2700x4800 and a 4K frame needs 4800x2700 already at 100 %: over the cap, and about 64 MB per buffer. Instead: the canvas stays the size of the panel; the Monitor gives the renderer a **Monitor-only view** (`setView({ zoom, panX, panY })`, outside the IR, never in the export). The backing store is panel size x screen pixel ratio x quality. No cap is needed; 800 % and the pixel grid come free. The scopes use a separate Fit read-back. `setView` and the pixel scale must win over `options.resolution`. (T-M02b and T-M02c follow this.)
+2. **Rotation.** `Transform2D` has no rotation and its origin is the top-left corner (for text it moves with alignment, `browser.ts:246-251`). New card **T-M15**: add rotation and origin to the IR, the browser renderer and the Node rasteriser, and let the renderer report `nodeBounds(id)`, before the rotate handle ships. If T-M15 is late, the box ships without the rotate handle and the owner is told.
+3. **Hit testing** uses `nodeBounds(id)` from the renderer (text has no width or height in the IR, shapes are fixed 100x100, html-scene is hard-coded 1080x1920) plus one id converter in each direction (clip id, object id, caption id). Both live in T-M15 and T-M04.
+4. **Drags** convert world movement back into the parent's space before writing the local value, and handles are disabled when the value comes from a camera or an expression. Editing is blocked while an agent's staged preview is on screen (`App.tsx:7509-7514`).
+5. **Keys.** Left and Right are global 1 s seek keys (`keyboard-shortcuts.ts:80-83`); nudge (arrow keys with a selection) and frame step (T-M10) must use a **focus-based key table** written into this ADR's task cards: pointer over or focus in the Monitor wins, otherwise the global seek applies. **T-M03 owns `keyboard-shortcuts.ts` and the Space handler at `App.tsx:3685`;** T-M10 and T-M12 add entries through it.
+6. **Collisions.** `MonitorViewport.tsx` becomes a pointer router plus one file per tool (hand, select, transform, guides). `monitorPixelScale` moves into its own file `monitor-pixel-scale.ts` (T-M02c, read by T-M09). `ui-preferences.ts` is shared by T-M08 and T-M09: T-M09 goes first. Helpers extracted in T-M02a (`preview-frame-helpers.ts`, `editor-runtime-singletons.ts`) are the shared ones. **Freeze `App.tsx:7426-8280` (now the monitor folder) for OB-17, T-R03, OB-12 work until T-M02a is merged.**
+7. **Export safety.** The export builds its own renderer with resolution 1 (`App.tsx:4501`) and encodes `renderer.canvas` (`4538`). Conditions: the override applies only to the renderer instance it is called on; a test checks the export canvas width equals the composition width after another instance calls `setPixelScale(4)`; keep the 0.1 floor; fall back if the browser shrinks the buffer (`drawingBufferWidth < canvas.width`).
+
+### C. Not covered yet (assigned)
+
+Drop a file on the Monitor (T-H02), the offline frame for missing media (T-R03), frame-accurate scrubbing and fps/dropped-frames readout (T-M10, T-M11), mask handles (T-M07, v1.1.2), where the aspect control lives once the Format control exists (T-N01), how captions and the 3D element are hit (T-M04 reads T-M15), a second screen (not in v1.1.1).
