@@ -95,8 +95,14 @@ try {
     @{ Label = 'owner path'; Pattern = [regex]::Escape($forbiddenPaths[4]) },
     @{ Label = 'owner path'; Pattern = [regex]::Escape($forbiddenPaths[5]) },
     @{ Label = 'e-mail address'; Pattern = '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b' },
-    @{ Label = 'key-like string'; Pattern = [regex]::Escape(('sk' + '-')) },
-    @{ Label = 'key-like string'; Pattern = [regex]::Escape(('Bearer ' + 'ey')) }
+    # Key-like strings must be credential-SHAPED, not merely share a prefix.
+    # A bare 'sk-' also matches ordinary words such as 'TASK-CARDS' and
+    # 'ask-before-remote', which are legitimate in documents. The same shape is
+    # already used for agent output in packages/agent-tools/src/creative-brief.ts.
+    # The dash is kept in the body so dashed key formats ('sk-proj-...') are
+    # still caught.
+    @{ Label = 'key-like string'; Pattern = '\bsk-[a-zA-Z0-9_-]{10,}\b' },
+    @{ Label = 'key-like string'; Pattern = '\bBearer\s+[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+' }
   )
 
   $hitCount = 0
