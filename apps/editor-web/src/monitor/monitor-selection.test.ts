@@ -275,12 +275,23 @@ describe('monitorClickAction', () => {
 });
 
 describe('monitorMarqueeAction', () => {
-  it('selects what the marquee touched; nothing touched deselects', () => {
+  it('selects what the marquee touched; nothing touched keeps the selection', () => {
     expect(monitorMarqueeAction(['a', 'b'], ['z'], false)).toEqual({
       kind: 'select',
       clipIds: ['a', 'b'],
     });
-    expect(monitorMarqueeAction([], ['z'], false)).toEqual({ kind: 'clear' });
+    expect(monitorMarqueeAction([], ['z'], false)).toEqual({ kind: 'none' });
+    expect(monitorMarqueeAction([], ['z'], true)).toEqual({ kind: 'none' });
+  });
+
+  it('only a plain click-and-release on empty canvas deselects', () => {
+    const shared = setters();
+    applyMonitorSelection(monitorMarqueeAction([], ['z'], false), shared);
+    expect(shared.clearSelection).not.toHaveBeenCalled();
+    applyMonitorSelection(monitorClickAction([], ['z'], { shift: false, alt: false }), shared);
+    expect(shared.clearSelection).toHaveBeenCalledTimes(1);
+    expect(shared.selectClips).not.toHaveBeenCalled();
+    expect(shared.toggleSelection).not.toHaveBeenCalled();
   });
 
   it('with Shift adds to the selection', () => {

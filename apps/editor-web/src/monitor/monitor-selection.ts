@@ -151,17 +151,19 @@ export function monitorClickAction(
   return { kind: 'select', clipIds: [target] };
 }
 
-/** What a marquee drag on empty canvas does (Shift adds to the selection). */
+/**
+ * What a marquee drag on empty canvas does (Shift adds to the selection).
+ * A marquee that touches nothing keeps the selection, with or without Shift:
+ * only a plain click-and-release on empty canvas deselects
+ * (`monitorClickAction`).
+ */
 export function monitorMarqueeAction(
   marqueeClipIds: readonly string[],
   selectedIds: readonly string[],
   shift: boolean,
 ): MonitorSelectionAction {
-  if (!shift) {
-    return marqueeClipIds.length === 0
-      ? { kind: 'clear' }
-      : { kind: 'select', clipIds: marqueeClipIds };
-  }
+  if (marqueeClipIds.length === 0) return { kind: 'none' };
+  if (!shift) return { kind: 'select', clipIds: marqueeClipIds };
   const added = marqueeClipIds.filter((clipId) => !selectedIds.includes(clipId));
   return added.length === 0
     ? { kind: 'none' }
