@@ -41,6 +41,40 @@ function v0Fixture(): SpikeProject {
   };
 }
 
+function v1ProjectWithCrop(crop: unknown): unknown {
+  const base = migrateV0ToV1(v0Fixture()).project;
+  return {
+    ...base,
+    visualObjects: {
+      'crop-clip': {
+        id: 'crop-clip',
+        kind: 'null',
+        transform: {
+          x: 0,
+          y: 0,
+          scaleX: 1,
+          scaleY: 1,
+          rotationDeg: 0,
+          opacity: 1,
+          ...(crop === undefined ? {} : { crop }),
+        },
+      },
+    },
+  };
+}
+
+function cropDiagnostics(crop: unknown) {
+  return validateJoyProjectV1(v1ProjectWithCrop(crop)).filter((entry) =>
+    entry.path.startsWith('visualObjects.crop-clip.transform.crop'),
+  );
+}
+
+function expectCropDiagnostic(crop: unknown, path: string, ...messageParts: string[]) {
+  const diagnostic = cropDiagnostics(crop).find((entry) => entry.path === path);
+  expect(diagnostic).toBeDefined();
+  for (const part of messageParts) expect(diagnostic!.message).toContain(part);
+}
+
 describe('v1 project schema and migration harness', () => {
   it('migrates the v0 fixture into a valid v1 document with explicit defaults', () => {
     const result = migrateV0ToV1(v0Fixture());
@@ -846,5 +880,94 @@ describe('v1 project schema and migration harness', () => {
       },
     };
     expect(validateJoyProjectV1(project)).toEqual([]);
+  });
+});
+
+describe('v1 visual object crop validation', () => {
+  it('rejects a negative crop edge with a repairable clip and edge message', () => {
+    expectCropDiagnostic(
+      { left: -0.01, top: 0, right: 0, bottom: 0 },
+      'visualObjects.crop-clip.transform.crop.left',
+      'crop-clip',
+      'left',
+      '[0, 0.49]',
+    );
+  });
+
+  it('rejects a crop edge above the Inspector maximum', () => {
+    expectCropDiagnostic(
+      { left: 0, top: 0, right: 0.5, bottom: 0 },
+      'visualObjects.crop-clip.transform.crop.right',
+      'crop-clip',
+      'right',
+      '[0, 0.49]',
+    );
+  });
+
+  it('rejects horizontal crop edges whose sum removes the whole width', () => {
+    expectCropDiagnostic(
+      { left: 0.6, top: 0, right: 0.4, bottom: 0 },
+      'visualObjects.crop-clip.transform.crop',
+      'crop-clip',
+      'left',
+      'right',
+      'less than 1',
+    );
+  });
+
+  it('rejects vertical crop edges whose sum removes the whole height', () => {
+    expectCropDiagnostic(
+      { left: 0, top: 0.6, right: 0, bottom: 0.4 },
+      'visualObjects.crop-clip.transform.crop',
+      'crop-clip',
+      'top',
+      'bottom',
+      'less than 1',
+    );
+  });
+
+  it('reports NaN on the exact crop edge', () => {
+    expectCropDiagnostic(
+      { left: Number.NaN, top: 0, right: 0, bottom: 0 },
+      'visualObjects.crop-clip.transform.crop.left',
+      'crop-clip',
+      'left',
+      'finite',
+    );
+  });
+
+  it('reports Infinity on the exact crop edge', () => {
+    expectCropDiagnostic(
+      { left: 0, top: 0, right: 0, bottom: Number.POSITIVE_INFINITY },
+      'visualObjects.crop-clip.transform.crop.bottom',
+      'crop-clip',
+      'bottom',
+      'finite',
+    );
+  });
+
+  it('accepts valid crop values including the 0.49 edge limit', () => {
+    expect(
+      validateJoyProjectV1(v1ProjectWithCrop({ left: 0.49, top: 0.2, right: 0.49, bottom: 0.3 })),
+    ).toEqual([]);
+  });
+
+  it('keeps legacy zero and absent crops valid as no crop', () => {
+    expect(
+      validateJoyProjectV1(v1ProjectWithCrop({ left: 0, top: 0, right: 0, bottom: 0 })),
+    ).toEqual([]);
+    expect(validateJoyProjectV1(v1ProjectWithCrop(undefined))).toEqual([]);
+  });
+
+  it('rejects legacy out-of-range crops with repairable schema diagnostics', () => {
+    // Older projects whose renderer-clamped crop is now invalid are rejected
+    // with the affected edges named so the owner can repair the saved values.
+    expectCropDiagnostic(
+      { left: 0.5, top: 0, right: 0, bottom: 0 },
+      'visualObjects.crop-clip.transform.crop.left',
+      'crop-clip',
+      'left',
+      'repair',
+    );
   });
 });
