@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JoyAgentEngineClient } from './joy-agent/engine-client.js';
 import type { ByokSessionStatus, JoyProviderMode } from './joy-agent/protocol.js';
+import { confirmDialog } from './app-dialogs.js';
 import { sessionProviderFor } from './joy-agent/provider-call.js';
 import { PROVIDER_REGISTRY, type RegistryProviderId } from '@joy-media/provider-sdk';
 import { CloseIcon, PlusIcon, CheckIcon } from './icons.js';
@@ -404,9 +405,12 @@ export function ModelDrawer({
 
   const handleDeleteProfile = async (profile: DesktopProviderProfileState) => {
     if (isDisabledLegacyProfile(profile)) return;
-    if (!window.confirm(`Delete provider connection "${profile.name || profile.provider}"?`)) {
-      return;
-    }
+    const confirmed = await confirmDialog({
+      message: `Delete provider connection "${profile.name || profile.provider}"?`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     try {
       await deleteDesktopProviderProfile(profile.id);
       onNotice?.(`Deleted provider ${profile.name || profile.provider}`, 'info');
