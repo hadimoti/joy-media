@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { Worker } from 'node:worker_threads';
+import { Worker } from 'node:worker_threads';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createProjectFolderClient,
@@ -189,5 +189,38 @@ describe('the project-folder client', () => {
     const { client, startWorker } = clientWith(workers, () => undefined);
     await client.shutdown();
     expect(startWorker).not.toHaveBeenCalled();
+  });
+});
+
+describe('the project-folder requests run off the main thread (condition (q))', () => {
+  it('keeps the main thread running while the worker is busy with a slow check', async () => {
+    // A real worker thread that blocks itself for 400 ms on each request, as a slow Windows volume check would.
+    const code = `
+      const { parentPort } = require('node:worker_threads');
+      parentPort.on('message', (message) => {
+        if (message.op === 'shutdown') { process.exit(0); }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
+        parentPort.postMessage({ id: message.id, ok: true, value: { kind: 'listed', folders: [] } });
+      });
+    `;
+    const client = createProjectFolderClient({
+      workerFile: 'unused.js',
+      registryPath: 'unused.sqlite',
+      directory: 'unused',
+      timeoutMs: 10_000,
+      startWorker: (_file, data) => new Worker(code, { eval: true, workerData: data }),
+    });
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks += 1;
+    }, 10);
+    try {
+      await expect(client.request('list', {})).resolves.toEqual({ kind: 'listed', folders: [] });
+    } finally {
+      clearInterval(timer);
+      await client.shutdown({ final: true });
+    }
+    // Had the 400 ms block run on this thread, no timer could have fired before the reply.
+    expect(ticks).toBeGreaterThanOrEqual(15);
   });
 });

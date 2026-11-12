@@ -27,6 +27,8 @@ const APPROVED_GATE_NAMES = [
   'readProjectFolderDocument',
   'readProjectFolderMedia',
   'saveProjectFolder',
+  // Added on 12 Nov 2026 for condition (q): the volume question asked without blocking the worker thread.
+  'warmVolumeAnswer',
 ];
 
 describe('the project-store boundary, inside the package', () => {

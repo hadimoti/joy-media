@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync, statSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import type {
   ProjectClaimRegistry,
@@ -28,6 +28,7 @@ import {
   recordNewProjectFolder,
   restoreProjectFolderRecord,
   saveProjectFolder,
+  warmVolumeAnswer,
 } from './gate.js';
 import {
   PROJECT_FOLDER_ANSWERS,
@@ -209,6 +210,7 @@ export function createProjectFolderService(
     // The place is checked before anything is written. The directory may not exist yet, so the nearest folder that
     // does exist is checked: it is on the same volume, and no folder is made on a refused drive.
     const existing = nearestExistingPlace(directory);
+    await warmVolumeOf(existing);
     const place = projectPlaceRefusal(existing);
     if (place !== undefined) return refused(place, { volume: volumeOf(existing) });
     try {
@@ -259,6 +261,7 @@ export function createProjectFolderService(
     const root = rootFor(key);
     if (root === undefined) return refused('unknown-folder');
     if (!existsSync(root)) return { kind: 'unverifiable', reason: 'missing-folder' };
+    await warmVolumeOf(root);
     // One folder is open in the editor at a time. Opening any folder, this one too, closes the one before.
     endSession();
     try {
@@ -347,6 +350,7 @@ export function createProjectFolderService(
     const root = rootFor(key);
     if (root === undefined) return refused('unknown-folder');
     if (!existsSync(root)) return refused('missing-folder');
+    await warmVolumeOf(root);
     let claim: ProjectFolderClaim;
     try {
       claim = await answerProjectFolderAsk(root, registry, choice);
@@ -394,6 +398,7 @@ export function createProjectFolderService(
     if (!existsSync(root)) return refused('missing-folder');
     const trimmed = title.trim();
     if (trimmed === '') return refused('no-title');
+    await warmVolumeOf(root);
     try {
       await restoreProjectFolderRecord(root, registry, { title: trimmed });
       return { kind: 'restored' };
@@ -742,6 +747,21 @@ function problemOf(problem: string): ProjectFolderProblem {
 }
 
 /** The nearest folder that exists on the way to `path`. A new folder's volume is decided by it. */
+/**
+ * Condition (q): asks Windows about the volume that holds `path` without blocking the worker thread, before a claim or
+ * a place check runs its own (blocking) check, which then finds the answer kept. Every folder in the projects folder
+ * is on one volume, so one question covers them. A path that cannot be read is left to the check itself.
+ */
+async function warmVolumeOf(path: string): Promise<void> {
+  try {
+    const place = await realpath(path);
+    const stats = await stat(place, { bigint: true });
+    await warmVolumeAnswer(place, stats.dev);
+  } catch {
+    // The claim's own check reads the place again and decides.
+  }
+}
+
 function nearestExistingPlace(path: string): string {
   let current = resolve(path);
   while (!existsSync(current)) {

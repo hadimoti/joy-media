@@ -5,6 +5,9 @@
  * 12 Nov 2026 (lane B, under the owner's autonomy grant): the four editing names from project-folder-editing.ts were
  * added, so a folder that `openProjectFolderForEditing` settled can be loaded and saved. None of them opens a folder by
  * path: each takes the folder the claim handed out.
+ *
+ * 12 Nov 2026 (lane B, condition (q)): `warmVolumeAnswer` was added. It only asks Windows about a volume, without
+ * blocking the worker thread, and keeps the answer for the claim's own check. It opens nothing and writes nothing.
  */
 export {
   ProjectClaimBusyError,
@@ -26,7 +29,7 @@ export {
 } from './project-folder.js';
 export type { ProjectFolder, ProjectFolderEntry, ProjectFolderListing } from './project-folder.js';
 export type { ProjectClaimRegistry } from './project-claim-registry.js';
-export { describeVolumeAnswer } from './project-volume.js';
+export { describeVolumeAnswer, warmVolumeAnswer } from './project-volume.js';
 export {
   projectFolderMediaStates,
   readProjectFolderDocument,

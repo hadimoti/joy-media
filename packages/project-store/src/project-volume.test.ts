@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,14 +9,34 @@ import {
   isVerifiedNtfsVolume,
   forgetVolumeAnswers,
   volumeListPath,
+  warmVolumeAnswer,
 } from './project-volume.js';
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, execFileSync: vi.fn(actual.execFileSync as typeof execFileSync) };
+  return {
+    ...actual,
+    execFileSync: vi.fn(actual.execFileSync as typeof execFileSync),
+    execFile: vi.fn(actual.execFile as typeof execFile),
+  };
 });
 
 const asked = vi.mocked(execFileSync);
+const askedAsync = vi.mocked(execFile);
+
+type AsyncCallback = (error: Error | null, stdout: Buffer, stderr: Buffer) => void;
+
+/** The next question asked without blocking gets this text back after `delayMs`, or fails when `text` is an Error. */
+function answerAsyncWith(text: string | Error, delayMs = 0): void {
+  askedAsync.mockImplementationOnce(((...args: unknown[]) => {
+    const callback = args[args.length - 1] as AsyncCallback;
+    setTimeout(() => {
+      if (text instanceof Error) callback(text, Buffer.alloc(0), Buffer.alloc(0));
+      else callback(null, Buffer.from(text), Buffer.alloc(0));
+    }, delayMs);
+    return {} as ChildProcess;
+  }) as unknown as typeof execFile);
+}
 
 /** The next question to Windows gets this text back, as its bytes. */
 function answerWith(text: string): void {
@@ -25,6 +45,7 @@ function answerWith(text: string): void {
 
 beforeEach(() => {
   asked.mockClear();
+  askedAsync.mockClear();
   forgetVolumeAnswers();
 });
 
@@ -149,4 +170,95 @@ describe('asking Windows', () => {
       }
     },
   );
+});
+
+describe('asking Windows without blocking (condition (q))', () => {
+  it.skipIf(process.platform !== 'win32')(
+    'a warmed volume is answered from the kept answer, so the check asks nothing inline',
+    async () => {
+      answerAsyncWith('3|NTFS\r\n');
+      await warmVolumeAnswer('C:\\Warm Check\\One.proj', 9101n);
+      expect(isVerifiedNtfsVolume('C:\\Warm Check\\Two.proj', 9101n)).toBe(true);
+      expect(askedAsync).toHaveBeenCalledTimes(1);
+      expect(asked).not.toHaveBeenCalled();
+      const [file, args, options] = askedAsync.mock.calls[0] as unknown as [
+        string,
+        string[],
+        { env: Record<string, string>; timeout: number },
+      ];
+      expect(file).toBe('powershell.exe');
+      expect(args.join(' ')).not.toContain('Warm Check');
+      expect(options.env.PROJECT_PATH).toBe(volumeListPath('C:\\Warm Check\\One.proj'));
+      expect(options.timeout).toBe(10_000);
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')('two warms of one volume ask Windows once', async () => {
+    answerAsyncWith('3|NTFS\r\n', 20);
+    await Promise.all([
+      warmVolumeAnswer('C:\\Twice\\One.proj', 9102n),
+      warmVolumeAnswer('C:\\Twice\\Two.proj', 9102n),
+    ]);
+    await warmVolumeAnswer('C:\\Twice\\Three.proj', 9102n);
+    expect(askedAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it.skipIf(process.platform !== 'win32')(
+    'the thread keeps running while Windows is asked',
+    async () => {
+      answerAsyncWith('3|NTFS\r\n', 300);
+      let ticks = 0;
+      const timer = setInterval(() => {
+        ticks += 1;
+      }, 10);
+      try {
+        await warmVolumeAnswer('C:\\Busy\\One.proj', 9103n);
+      } finally {
+        clearInterval(timer);
+      }
+      // A blocking question would have let no timer run until it returned.
+      expect(ticks).toBeGreaterThanOrEqual(10);
+      expect(isVerifiedNtfsVolume('C:\\Busy\\One.proj', 9103n)).toBe(true);
+      expect(asked).not.toHaveBeenCalled();
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'a failed question is kept as refused and never throws, and another file system is refused',
+    async () => {
+      answerAsyncWith(new Error('spawn powershell.exe ENOENT'));
+      await expect(warmVolumeAnswer('E:\\Fail\\One.proj', 9104n)).resolves.toBeUndefined();
+      expect(isVerifiedNtfsVolume('E:\\Fail\\One.proj', 9104n)).toBe(false);
+      answerAsyncWith('3|exFAT\r\n');
+      await warmVolumeAnswer('F:\\Stick\\One.proj', 9105n);
+      expect(isVerifiedNtfsVolume('F:\\Stick\\One.proj', 9105n)).toBe(false);
+      expect(asked).not.toHaveBeenCalled();
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'the real drive that holds the temporary folder is verified as NTFS without blocking',
+    async () => {
+      const place = realpathSync.native(tmpdir());
+      const device = statSync(place, { bigint: true }).dev;
+      let ticks = 0;
+      const timer = setInterval(() => {
+        ticks += 1;
+      }, 5);
+      try {
+        await warmVolumeAnswer(place, device);
+      } finally {
+        clearInterval(timer);
+      }
+      expect(ticks).toBeGreaterThan(0);
+      expect(isVerifiedNtfsVolume(place, device)).toBe(true);
+      expect(asked).not.toHaveBeenCalled();
+    },
+  );
+
+  it('asks nothing on other platforms, where every volume counts as verified', async () => {
+    if (process.platform === 'win32') return;
+    await warmVolumeAnswer('/tmp/One.proj', 9106n);
+    expect(askedAsync).not.toHaveBeenCalled();
+  });
 });

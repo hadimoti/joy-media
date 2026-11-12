@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 
 /**
  * Whether a folder's real place is on an NTFS volume that is verified. Only NTFS is verified. FAT, exFAT, SMB, ReFS
@@ -10,6 +10,11 @@ import { execFileSync } from 'node:child_process';
  * is kept by the volume's device number, which a file identity also carries (the volume serial on Windows). A verified
  * answer is kept for a minute, and a refused one for five seconds, so a transient failure is asked again soon.
  * Other platforms have no such rule and count as verified.
+ *
+ * Condition (q), 12 Nov 2026 (lane B): the whole check runs in the project-folder worker thread, never in the main
+ * process or the renderer. Inside the worker, `warmVolumeAnswer` asks Windows without blocking (a child process the
+ * thread waits for asynchronously) before each claim, so the check inside the claim finds the answer kept and asks
+ * nothing. Only a place on another volume, such as a recorded original on another drive, is still asked inline.
  */
 
 const VERIFIED_MS = 60_000;
@@ -26,10 +31,17 @@ interface VolumeAnswer {
 }
 
 const answers = new Map<string, VolumeAnswer & { readonly at: number }>();
+/** Questions to Windows still in flight, by volume, so two warms of one volume ask once. */
+const warming = new Map<string, Promise<void>>();
 
 /** Drops every kept answer, so that a test asks Windows again. The app itself never needs this. */
 export function forgetVolumeAnswers(): void {
   answers.clear();
+  warming.clear();
+}
+
+function isFresh(known: { readonly verified: boolean; readonly at: number }, now: number): boolean {
+  return now - known.at < (known.verified ? VERIFIED_MS : REFUSED_MS);
 }
 
 /** Keeps an answer for a volume as if Windows had been asked at `at`. Only the tests use this. */
@@ -50,12 +62,32 @@ export function isVerifiedNtfsVolume(realPlace: string, volumeKey: bigint): bool
   const key = volumeKey.toString();
   const now = Date.now();
   const known = answers.get(key);
-  if (known !== undefined && now - known.at < (known.verified ? VERIFIED_MS : REFUSED_MS)) {
+  if (known !== undefined && isFresh(known, now)) {
     return known.verified;
   }
   const answer = askWindows(realPlace);
   answers.set(key, { ...answer, at: now });
   return answer.verified;
+}
+
+/**
+ * Asks Windows about the volume that holds `realPlace` without blocking the thread: PowerShell runs as a child process,
+ * and the answer is kept as `isVerifiedNtfsVolume` keeps it. Nothing is asked when a fresh answer is kept, or while the
+ * same volume is being asked already. It never rejects: a failed question is kept as refused, like the inline check.
+ */
+export function warmVolumeAnswer(realPlace: string, volumeKey: bigint): Promise<void> {
+  if (process.platform !== 'win32') return Promise.resolve();
+  const key = volumeKey.toString();
+  const known = answers.get(key);
+  if (known !== undefined && isFresh(known, Date.now())) return Promise.resolve();
+  const inFlight = warming.get(key);
+  if (inFlight !== undefined) return inFlight;
+  const started = askWindowsAsync(realPlace).then((answer) => {
+    if (warming.get(key) === started) answers.set(key, { ...answer, at: Date.now() });
+    warming.delete(key);
+  });
+  warming.set(key, started);
+  return started;
 }
 
 /** A volume in words for the owner: its kind of drive, and its file system. */
@@ -122,22 +154,44 @@ const SCRIPT = [
   'if ($v) { "$($v.DriveType)|$($v.FileSystem)" }',
 ].join('; ');
 
+const POWERSHELL_ARGS = ['-NoProfile', '-NonInteractive', '-Command', SCRIPT];
+
+function askOptions(realPlace: string) {
+  return {
+    env: { ...process.env, PROJECT_PATH: volumeListPath(realPlace) },
+    timeout: 10_000,
+    windowsHide: true,
+  };
+}
+
+function answerFrom(output: Buffer): VolumeAnswer {
+  const text = decodeAnswer(output);
+  return { verified: isNtfsAnswer(text), found: firstVolumeLine(text) ?? '' };
+}
+
 function askWindows(realPlace: string): VolumeAnswer {
   try {
-    const output = execFileSync(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command', SCRIPT],
-      {
-        env: { ...process.env, PROJECT_PATH: volumeListPath(realPlace) },
-        timeout: 10_000,
-        windowsHide: true,
-      },
-    );
-    const text = decodeAnswer(output);
-    return { verified: isNtfsAnswer(text), found: firstVolumeLine(text) ?? '' };
+    return answerFrom(execFileSync('powershell.exe', POWERSHELL_ARGS, askOptions(realPlace)));
   } catch {
     return { verified: false, found: undefined };
   }
+}
+
+function askWindowsAsync(realPlace: string): Promise<VolumeAnswer> {
+  return new Promise((resolve) => {
+    try {
+      execFile(
+        'powershell.exe',
+        POWERSHELL_ARGS,
+        { ...askOptions(realPlace), encoding: 'buffer' },
+        (error, stdout) => {
+          resolve(error ? { verified: false, found: undefined } : answerFrom(stdout));
+        },
+      );
+    } catch {
+      resolve({ verified: false, found: undefined });
+    }
+  });
 }
 
 /** Reads the answer whether PowerShell wrote UTF-16 or single-byte text, and drops a byte order mark. */
