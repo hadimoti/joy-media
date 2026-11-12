@@ -259,6 +259,12 @@ export interface EditorOverlayIR {
     readonly y: number;
     readonly width: number;
     readonly height: number;
+    /**
+     * The drawn box's four corners in frame pixels (`NodeBounds.corners`), so
+     * a rotated element is outlined along its turned box. Absent: the
+     * rectangle above (T-M04).
+     */
+    readonly corners?: readonly { readonly x: number; readonly y: number }[];
   }[];
 }
 
