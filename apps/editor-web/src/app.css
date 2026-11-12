@@ -1751,6 +1751,27 @@ h2 {
   box-shadow: 0 0.5rem 2rem #000a;
   pointer-events: none;
 }
+/* Selection outline and marquee (T-M04): editor-only HTML above the canvas,
+   never in the frame, the export or a read-back. */
+.monitor-selection-overlay {
+  position: absolute;
+  z-index: 2;
+  overflow: visible;
+  pointer-events: none;
+}
+.monitor-selection-outline {
+  fill: none;
+  stroke: var(--joy-accent);
+  stroke-width: 1px;
+}
+.monitor-marquee {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 1px dashed var(--joy-accent);
+  background: var(--joy-accent-dim);
+  pointer-events: none;
+}
 .monitor-gpu-frame {
   position: absolute;
   inset: 0;

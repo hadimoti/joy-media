@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorPanelContext, type EditorPanelContextValue } from '../editor-panel-context.js';
 import { withVideoFrameNode } from '@joy-media/playback-engine';
-import type { RenderFrameIR } from '@joy-media/render-ir';
+import type { EditorOverlayIR, RenderFrameIR } from '@joy-media/render-ir';
 import { WORKER_PROTOCOL_VERSION } from '@joy-media/job-protocol';
 import type { VisualObjectV1 } from '@joy-media/project-schema';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
@@ -61,7 +61,21 @@ import {
   monitorFrameRect,
   useDevicePixelRatio,
   useMonitorView,
+  type MonitorViewportSelection,
 } from './MonitorViewport.js';
+import { MonitorSelectionOverlay } from './MonitorSelectionOverlay.js';
+import {
+  EMPTY_MONITOR_OVERLAY,
+  applyMonitorSelection,
+  buildMonitorElements,
+  monitorClickAction,
+  monitorHitClipIds,
+  monitorMarqueeAction,
+  monitorMarqueeClipIds,
+  monitorSelectionOverlay,
+  sameMonitorOverlay,
+  type MonitorElement,
+} from './monitor-selection.js';
 import { monitorPixelScale } from './monitor-pixel-scale.js';
 
 /**
@@ -114,6 +128,9 @@ function MonitorPanelContent({
     storage,
     bumpProjectRevision,
     showToast,
+    selectClips,
+    toggleSelection,
+    clearSelection,
   } = context;
   const agentPreviewState = useAgentPreviewSnapshot();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -205,6 +222,64 @@ function MonitorPanelContent({
     [],
   );
   const devicePixelRatio = useDevicePixelRatio();
+  // Selection (T-M04): the Monitor keeps none of its own. It reads the shared
+  // `state.selectedIds` and writes through the shared setters; the elements
+  // come from the frame that was drawn last and the renderer's nodeBounds.
+  const [selectionOutline, setSelectionOutline] = useState<{
+    readonly overlay: EditorOverlayIR;
+    readonly clipByNode: ReadonlyMap<string, string>;
+  }>({ overlay: EMPTY_MONITOR_OVERLAY, clipByNode: new Map() });
+  const readMonitorElementsRef = useRef<() => readonly MonitorElement[]>(() => []);
+  readMonitorElementsRef.current = () => {
+    const renderer = rendererRef.current;
+    const frame = currentFrameRef.current;
+    if (renderer === null || frame === undefined) return [];
+    return buildMonitorElements({
+      frame,
+      nodeBounds: (id) => renderer.nodeBounds(id),
+      project: previewVisualProject,
+      timeline: timelineProject,
+    });
+  };
+  const selectedIdsRef = useRef(state.selectedIds);
+  selectedIdsRef.current = state.selectedIds;
+  const refreshSelectionOutlineRef = useRef<() => void>(() => {});
+  refreshSelectionOutlineRef.current = () => {
+    const elements = readMonitorElementsRef.current();
+    const overlay = monitorSelectionOverlay(elements, state.selectedIds);
+    setSelectionOutline((current) =>
+      sameMonitorOverlay(current.overlay, overlay)
+        ? current
+        : {
+            overlay,
+            clipByNode: new Map(elements.map((element) => [element.id, element.clipId])),
+          },
+    );
+  };
+  const monitorSelection = useMemo<MonitorViewportSelection>(() => {
+    const setters = { selectClips, toggleSelection, clearSelection };
+    return {
+      isElementAt: (point) => monitorHitClipIds(point, readMonitorElementsRef.current()).length > 0,
+      click: (point, modifiers) =>
+        applyMonitorSelection(
+          monitorClickAction(
+            monitorHitClipIds(point, readMonitorElementsRef.current()),
+            selectedIdsRef.current,
+            modifiers,
+          ),
+          setters,
+        ),
+      marquee: (start, end, modifiers) =>
+        applyMonitorSelection(
+          monitorMarqueeAction(
+            monitorMarqueeClipIds(start, end, readMonitorElementsRef.current()),
+            selectedIdsRef.current,
+            modifiers.shift,
+          ),
+          setters,
+        ),
+    };
+  }, [clearSelection, selectClips, toggleSelection]);
   const monitorResourceTokenRef = useRef(
     `monitor:${crypto.randomUUID?.() ?? Date.now().toString(36)}`,
   );
@@ -340,6 +415,7 @@ function MonitorPanelContent({
     );
     applyViewRef.current(renderer);
     renderer.render(frame, videoBitmaps);
+    refreshSelectionOutlineRef.current();
     // A staged document becomes review-ready only after the real program
     // renderer has accepted it. This is not a commit/approval path.
     if (renderedAgentDocumentPreview !== undefined && agentPreviewSurfaceVisible) {
@@ -592,6 +668,11 @@ function MonitorPanelContent({
 
   useEffect(() => () => sceneCacheRef.current.destroy(), []);
 
+  // A timeline selection shows on the Monitor without a repaint.
+  useEffect(() => {
+    refreshSelectionOutlineRef.current();
+  }, [state.selectedIds, timelineProject, previewVisualProject]);
+
   useEffect(() => {
     const renderer = rendererRef.current;
     if (renderer !== null) applyViewRef.current(renderer);
@@ -761,6 +842,7 @@ function MonitorPanelContent({
         onDragLeave={handleMonitorEffectDragLeave}
         onDrop={handleMonitorEffectDrop}
         readThumbnail={readNavigatorThumbnail}
+        selection={monitorSelection}
       >
         <div ref={containerRef} className="monitor-canvas" />
         <div className="monitor-frame" style={frameRect}>
@@ -774,6 +856,12 @@ function MonitorPanelContent({
             />
           )}
         </div>
+        <MonitorSelectionOverlay
+          overlay={selectionOutline.overlay}
+          frame={frameSize}
+          frameRect={frameRect}
+          clipIdOf={(nodeId) => selectionOutline.clipByNode.get(nodeId)}
+        />
         <AgentPreviewBadge
           surface="Program Monitor"
           before={agentPreviewBefore}
