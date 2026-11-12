@@ -1,0 +1,66 @@
+{
+  "schema": "joy-media.attended-receipt/1",
+  "scenario": {
+    "id": "project.persistence.fresh-process",
+    "status": "passed",
+    "firstAttemptPassed": true,
+    "retries": 0
+  },
+  "candidateSha": "6bda09a12d2c31f4a63e8d8e32dfb1014a79da03",
+  "app": {
+    "exeSha256": "d1e7e6978ef4ae5a118580bd016461d2169213f88393c4002041dd7bd9cddbc1",
+    "unpackedDir": "C:\\jgp\\attended-6bda09a1-20261112\\app"
+  },
+  "run": {
+    "id": "8adb4332-80d5-4d69-8939-2868e46e742a",
+    "attempt": 1,
+    "startedAt": "2026-11-12T00:08:03.871Z",
+    "finishedAt": "2026-11-12T00:08:15.033Z",
+    "operator": "owner-at-pc",
+    "mode": "scripted",
+    "manual": false
+  },
+  "guards": {
+    "joyKeyBefore": "af05be55222c86fece27e738b7e8a931cb4261c9797261c67dde3c71a4e5cac0",
+    "joyKeyAfter": "af05be55222c86fece27e738b7e8a931cb4261c9797261c67dde3c71a4e5cac0",
+    "ownerLibraryFilesBefore": 3221,
+    "ownerLibraryFilesAfter": 3221,
+    "installedFolderTouched": false
+  },
+  "checks": [
+    {
+      "name": "editable-project-exported",
+      "status": "passed",
+      "detail": "FreshProcess-8adb4332 with fresh-process-8adb4332.mp4 exported as export-package.joyproject.json (64962 bytes); the source profile's saved state holds both"
+    },
+    {
+      "name": "fresh-profile-started",
+      "status": "passed",
+      "detail": "a new profile started on the scratch library C:\\jgp\\attended-6bda09a1-20261112\\library-fresh; host project FreshProcessHost-8adb4332 is open"
+    },
+    {
+      "name": "project-imported-in-fresh-profile",
+      "status": "passed",
+      "detail": "imported FreshProcess-8adb4332 as the open project; the fresh profile's saved state holds the project and a fresh-process-8adb4332.mp4 clip; the app showed no notice"
+    },
+    {
+      "name": "export-from-fresh-profile-probed",
+      "status": "passed",
+      "detail": "the app verified an MP4 rendered from the imported project: 1080x1920 video stream, 3.000 s, the imported clip's 3.000 s"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "export-package.joyproject.json",
+      "path": "export-package.joyproject.json",
+      "sha256": "1ea596a4cf153187e23f1e33680b5dc963f0e7e4942e61d90dc592bb336b4fbf",
+      "bytes": 64962
+    },
+    {
+      "name": "export.mp4",
+      "path": "export.mp4",
+      "sha256": "63b1b880611d0168d472e6f92a71bbbfafc671875c506d203a2fa2de5157e1e1",
+      "bytes": 72263
+    }
+  ]
+}

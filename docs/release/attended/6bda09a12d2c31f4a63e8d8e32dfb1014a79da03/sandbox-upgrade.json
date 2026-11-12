@@ -1,0 +1,167 @@
+﻿{
+    "schema":  "joy-media.sandbox-upgrade/1",
+    "startedAt":  "2026-11-12T00:03:04.4486200Z",
+    "steps":  [
+                  {
+                      "id":  "sandbox-identity",
+                      "result":  "pass",
+                      "detail":  "WDAGUtilityAccount on BCC0E703-6340-4"
+                  },
+                  {
+                      "id":  "v102-zip-digest",
+                      "result":  "pass",
+                      "detail":  "e59ee15f2f881cd6620ad59e9f1d9fdc4f9b82efaf221f4e6041c079978d59ca"
+                  },
+                  {
+                      "id":  "new-setup-digest",
+                      "result":  "pass",
+                      "detail":  "17d2a3ca3c5b67c72f4de52c4518e9b29da19f3fa15372c85e92b37a9a0ad293"
+                  },
+                  {
+                      "id":  "v102-install",
+                      "result":  "pass",
+                      "detail":  "exit 0"
+                  },
+                  {
+                      "id":  "v102-open-window",
+                      "result":  "pass",
+                      "detail":  "title: JOY Studio"
+                  },
+                  {
+                      "id":  "v102-still-running",
+                      "result":  "pass",
+                      "detail":  "after 20 s"
+                  },
+                  {
+                      "id":  "v102-close",
+                      "result":  "pass",
+                      "detail":  "exit 0"
+                  },
+                  {
+                      "id":  "v102-no-process-left",
+                      "result":  "pass",
+                      "detail":  "processes left: 0"
+                  },
+                  {
+                      "id":  "new-install-over",
+                      "result":  "pass",
+                      "detail":  "exit 0"
+                  },
+                  {
+                      "id":  "stale-files-from-v102",
+                      "result":  "pass",
+                      "detail":  "files in v1.0.2 but not in the upgraded folder: 0"
+                  },
+                  {
+                      "id":  "data-marker-kept",
+                      "result":  "pass",
+                      "detail":  "upgrade-marker.txt"
+                  },
+                  {
+                      "id":  "data-files-lost",
+                      "result":  "pass",
+                      "detail":  "files from before the upgrade missing afterwards: 0"
+                  },
+                  {
+                      "id":  "v110-open-window",
+                      "result":  "pass",
+                      "detail":  "title: JOY Studio"
+                  },
+                  {
+                      "id":  "v110-still-running",
+                      "result":  "pass",
+                      "detail":  "after 45 s"
+                  },
+                  {
+                      "id":  "v110-close",
+                      "result":  "pass",
+                      "detail":  "exit 0"
+                  },
+                  {
+                      "id":  "v110-no-process-left",
+                      "result":  "pass",
+                      "detail":  "processes left: 0"
+                  },
+                  {
+                      "id":  "uninstall",
+                      "result":  "pass",
+                      "detail":  "exit 0"
+                  },
+                  {
+                      "id":  "folder-removed",
+                      "result":  "pass",
+                      "detail":  "C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media"
+                  }
+              ],
+    "identity":  {
+                     "user":  "WDAGUtilityAccount",
+                     "computer":  "BCC0E703-6340-4"
+                 },
+    "S0-clean":  {
+                     "name":  "S0-clean",
+                     "installFolderExists":  false,
+                     "installFileCount":  0,
+                     "appPackageVersion":  null,
+                     "uninstallDisplayVersion":  null,
+                     "pathEntries":  0,
+                     "joyKey":  null,
+                     "dataFolderExists":  false,
+                     "dataFileCount":  0
+                 },
+    "S1-v102-installed":  {
+                              "name":  "S1-v102-installed",
+                              "installFolderExists":  true,
+                              "installFileCount":  817,
+                              "appPackageVersion":  "1.0.2",
+                              "uninstallDisplayVersion":  "1.0.2",
+                              "pathEntries":  1,
+                              "joyKey":  null,
+                              "dataFolderExists":  false,
+                              "dataFileCount":  0
+                          },
+    "S2-v102-after-run":  {
+                              "name":  "S2-v102-after-run",
+                              "installFolderExists":  true,
+                              "installFileCount":  817,
+                              "appPackageVersion":  "1.0.2",
+                              "uninstallDisplayVersion":  "1.0.2",
+                              "pathEntries":  1,
+                              "joyKey":  "\"C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media\\joy-media.exe\" \"%1\"",
+                              "dataFolderExists":  true,
+                              "dataFileCount":  51
+                          },
+    "S3-upgraded":  {
+                        "name":  "S3-upgraded",
+                        "installFolderExists":  true,
+                        "installFileCount":  1118,
+                        "appPackageVersion":  "1.1.0",
+                        "uninstallDisplayVersion":  "1.1.0",
+                        "pathEntries":  1,
+                        "joyKey":  "\"C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media\\joy-media.exe\" \"%1\"",
+                        "dataFolderExists":  true,
+                        "dataFileCount":  52
+                    },
+    "S4-v110-after-run":  {
+                              "name":  "S4-v110-after-run",
+                              "installFolderExists":  true,
+                              "installFileCount":  1118,
+                              "appPackageVersion":  "1.1.0",
+                              "uninstallDisplayVersion":  "1.1.0",
+                              "pathEntries":  1,
+                              "joyKey":  "\"C:\\Users\\WDAGUtilityAccount\\AppData\\Local\\Programs\\JOY Media\\joy-media.exe\" \"%1\"",
+                              "dataFolderExists":  true,
+                              "dataFileCount":  57
+                          },
+    "S5-uninstalled":  {
+                           "name":  "S5-uninstalled",
+                           "installFolderExists":  false,
+                           "installFileCount":  0,
+                           "appPackageVersion":  null,
+                           "uninstallDisplayVersion":  null,
+                           "pathEntries":  0,
+                           "joyKey":  null,
+                           "dataFolderExists":  true,
+                           "dataFileCount":  57
+                       },
+    "finishedAt":  "2026-11-12T00:05:07.7926917Z"
+}
