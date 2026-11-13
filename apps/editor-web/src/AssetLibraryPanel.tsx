@@ -36,7 +36,10 @@ import {
   useReleasableObjectUrl,
 } from './media-object-url.js';
 import {
+  AudioIcon,
   CloseIcon,
+  ImageIcon,
+  PlayIcon,
   PlusIcon,
   RefreshIcon,
   AiEffectIcon,
@@ -699,7 +702,7 @@ export function AssetLibraryPanel({
       id: entry.id,
       label: entry.label,
       count,
-      iconUrl: ASSET_CATEGORY_ICONS[entry.id],
+      icon: ASSET_CATEGORY_ICONS[entry.id],
       ariaLabel: `${entry.label}, ${count} ${count === 1 ? 'asset' : 'assets'}`,
       tooltip: `${entry.label}: ${count} ${count === 1 ? 'asset' : 'assets'}`,
     };
@@ -1451,7 +1454,13 @@ function AssetCardMedia({
         <img src={url} alt="" loading="lazy" decoding="async" />
       ) : (
         <span className="asset-card-placeholder" aria-hidden>
-          {asset.kind === 'video' ? '▶' : asset.kind === 'audio' ? '♪' : '▣'}
+          {asset.kind === 'video' ? (
+            <PlayIcon />
+          ) : asset.kind === 'audio' ? (
+            <AudioIcon />
+          ) : (
+            <ImageIcon />
+          )}
         </span>
       )}
     </button>

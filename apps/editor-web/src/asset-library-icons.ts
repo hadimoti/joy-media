@@ -1,16 +1,18 @@
+import type { ComponentType } from 'react';
 import { iconUrl } from './icon-assets.js';
+import { BrowseIcon, FilmIcon, ImageIcon, SpeakerOnIcon } from './icons.js';
 import type { AssetCategory, AssetCollectionId } from './asset-library-state.js';
 
 /**
- * Owner-supplied 24×24 black-on-transparent masks for Assets sections and
- * collection tabs. The art ships with the app and is imported through Vite so
- * redeploys bust browser caches.
+ * The section glyphs of the Asset Library. They come from the shared outline
+ * set (T-D09), so the library's tabs have the same weight and colour as the
+ * rest of the app.
  */
-export const ASSET_CATEGORY_ICONS: Readonly<Record<AssetCategory, string>> = {
-  all: iconUrl('asset/24_Browse.png'),
-  image: iconUrl('asset/24_Images.png'),
-  video: iconUrl('asset/24_video.png'),
-  audio: iconUrl('asset/24_Audio.png'),
+export const ASSET_CATEGORY_ICONS: Readonly<Record<AssetCategory, ComponentType>> = {
+  all: BrowseIcon,
+  image: ImageIcon,
+  video: FilmIcon,
+  audio: SpeakerOnIcon,
 };
 
 const COLLECTION_ICONS: Readonly<Record<string, string>> = {

@@ -153,13 +153,13 @@ describe('AssetLibraryPanel successful import contract', () => {
     expect(panelSource).toContain("{ id: 'image', label: 'Images' }");
     expect(panelSource).toContain("{ id: 'video', label: 'Video' }");
     expect(panelSource).toContain("{ id: 'audio', label: 'Audio' }");
-    expect(iconSource).toContain("all: iconUrl('asset/24_Browse.png')");
-    expect(iconSource).toContain("image: iconUrl('asset/24_Images.png')");
-    expect(iconSource).toContain("video: iconUrl('asset/24_video.png')");
-    expect(iconSource).toContain("audio: iconUrl('asset/24_Audio.png')");
+    expect(iconSource).toContain('all: BrowseIcon');
+    expect(iconSource).toContain('image: ImageIcon');
+    expect(iconSource).toContain('video: FilmIcon');
+    expect(iconSource).toContain('audio: SpeakerOnIcon');
     expect(panelSource).toContain('label: entry.label');
     expect(panelSource).toContain('count,');
-    expect(panelSource).toContain('iconUrl: ASSET_CATEGORY_ICONS[entry.id]');
+    expect(panelSource).toContain('icon: ASSET_CATEGORY_ICONS[entry.id]');
     expect(panelSource).toContain('ariaLabel:');
     expect(panelSource).toContain('tooltip:');
     expect(panelSource).toMatch(/entry\.id === 'all'\s*\?\s*sourceItems\.length/);

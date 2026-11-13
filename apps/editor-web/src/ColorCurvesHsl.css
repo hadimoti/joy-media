@@ -19,7 +19,7 @@
   padding: 0.28rem 0.55rem;
   background: #202125;
   color: #b8bac3;
-  font-size: 0.68rem;
+  font-size: var(--joy-type-xs);
 }
 
 .ccv-tabs button.is-active {
@@ -108,7 +108,7 @@
   display: block;
   min-height: 1rem;
   color: #b8bac3;
-  font-size: 0.68rem;
+  font-size: var(--joy-type-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -145,7 +145,7 @@
 .chsl-status {
   margin: 0;
   color: #c9cbd3;
-  font-size: 0.68rem;
+  font-size: var(--joy-type-xs);
 }
 
 .chsl-band {
@@ -167,8 +167,8 @@
   gap: 0.4rem;
   min-height: 2rem;
   padding: 0.25rem 0.45rem;
-  color: var(--joy-text-muted, #b8bac3);
-  font-size: 0.68rem;
+  color: var(--joy-text-secondary, #b8bac3);
+  font-size: var(--joy-type-xs);
   cursor: pointer;
   list-style: none;
 }
@@ -200,7 +200,7 @@
 
 .chsl-modified {
   color: #e4b42e;
-  font-size: 0.55rem;
+  font-size: var(--joy-type-xs);
 }
 
 .chsl-band-controls {
@@ -230,7 +230,7 @@
   padding: 0.12rem 0.25rem;
   background: #17181c;
   color: #e6e7ea;
-  font-size: 0.66rem;
+  font-size: var(--joy-type-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -243,7 +243,7 @@
 
 .chsl-shape-title {
   color: var(--joy-text-faint, #8d8f98);
-  font-size: 0.62rem;
+  font-size: var(--joy-type-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -275,7 +275,7 @@
   border-radius: 0.3rem;
   background: rgba(20, 21, 24, 0.94);
   color: #e6e7ea;
-  font-size: 0.64rem;
+  font-size: var(--joy-type-xs);
   pointer-events: none;
   white-space: nowrap;
 }

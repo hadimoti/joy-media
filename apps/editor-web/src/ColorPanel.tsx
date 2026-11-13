@@ -27,7 +27,7 @@ import { ColorCompareButton } from './ColorCompareButton.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { readMonitorPixels as readLiveMonitorPixels } from './monitor-readback.js';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
-import { CloseIcon, LayersIcon } from './icons.js';
+import { CloseIcon, LayersIcon, RefreshIcon } from './icons.js';
 import { EditorPanelContext } from './editor-panel-context.js';
 import {
   computeHistogram,
@@ -497,7 +497,7 @@ export function ColorPanel({
             disabled={gradeIsIdentity}
             onClick={resetWithUndo}
           >
-            ↺ Reset all
+            <RefreshIcon /> Reset all
           </button>
         </>
       }

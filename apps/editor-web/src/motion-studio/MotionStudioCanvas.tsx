@@ -14,7 +14,15 @@ import {
   type LayerWorldEvaluation,
 } from '@joy-media/motion-core';
 import { JOY_COLORS } from '../theme.js';
-import { TrashIcon, DuplicateIcon, LayersIcon, UnlockIcon, LockIcon } from '../icons.js';
+import {
+  TrashIcon,
+  DuplicateIcon,
+  FilmIcon,
+  ImageIcon,
+  LayersIcon,
+  UnlockIcon,
+  LockIcon,
+} from '../icons.js';
 import type { SceneCommand } from './state/sceneCommands.js';
 import { resolveMotionStudioFontFamily } from './font-family.js';
 
@@ -1300,13 +1308,13 @@ function ContextMenu({
           </button>
           <button className="ms-context-item" role="menuitem" onClick={() => onAction('add-image')}>
             <span className="ms-image-icon" aria-hidden="true">
-              🖼
+              <ImageIcon />
             </span>{' '}
             Add image
           </button>
           <button className="ms-context-item" role="menuitem" onClick={() => onAction('add-video')}>
             <span className="ms-video-icon" aria-hidden="true">
-              🎬
+              <FilmIcon />
             </span>{' '}
             Add video
           </button>

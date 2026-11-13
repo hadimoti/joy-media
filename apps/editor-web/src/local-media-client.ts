@@ -345,6 +345,34 @@ export class BrowserControlPlaneClient {
     return registered;
   }
 
+  /** Imports a main-process ticket by path; only catalog metadata returns to the renderer. */
+  async importDroppedAsset(
+    projectId: string,
+    ticketId: string,
+    descriptor: BrowserAsset['descriptor'],
+  ): Promise<BrowserAsset> {
+    const imported = await call<{
+      readonly id: string;
+      readonly kind: BrowserAsset['kind'];
+      readonly displayName: string;
+      readonly sha256: string;
+      readonly bytes: number;
+      readonly descriptor: BrowserAsset['descriptor'];
+    }>(this.bridge, 'desktop.media.asset.import-dropped', { ticketId, descriptor });
+    const asset: BrowserAsset = {
+      ...imported,
+      projectId,
+      createdAt: Date.now(),
+      cloudBacked: false,
+    };
+    registeredAssets.set(asset.id, asset);
+    return asset;
+  }
+
+  async cancelDroppedImport(ticketId: string): Promise<void> {
+    await call(this.bridge, 'desktop.media.asset.cancel-dropped-import', { ticketId });
+  }
+
   async associateAsset(_projectId: string, _assetId: string): Promise<BrowserAsset> {
     throw notAvailable('Associating a catalog asset');
   }

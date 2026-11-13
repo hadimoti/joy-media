@@ -108,7 +108,12 @@ export function EffectStudioPreview({
         </div>
       </div>
       <div className="es-preview-controls">
-        <button type="button" onClick={() => setZoom((value) => Math.max(40, value - 10))}>
+        <button
+          type="button"
+          aria-label="Zoom out"
+          title="Zoom out"
+          onClick={() => setZoom((value) => Math.max(40, value - 10))}
+        >
           <ZoomOutIcon />
         </button>
         <input
@@ -119,7 +124,12 @@ export function EffectStudioPreview({
           aria-label="Preview zoom"
           onChange={(event) => setZoom(Number(event.currentTarget.value))}
         />
-        <button type="button" onClick={() => setZoom((value) => Math.min(100, value + 10))}>
+        <button
+          type="button"
+          aria-label="Zoom in"
+          title="Zoom in"
+          onClick={() => setZoom((value) => Math.min(100, value + 10))}
+        >
           <ZoomInIcon />
         </button>
         <button type="button" onClick={() => setZoom(84)} title="Fit preview">

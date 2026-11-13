@@ -9,8 +9,8 @@
   margin: 0;
   padding: 0.35rem 0.45rem;
   border-bottom: 1px solid var(--joy-border);
-  color: var(--joy-text-muted);
-  font-size: var(--joy-type-2xs);
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
   line-height: 1.35;
 }
 
@@ -22,7 +22,7 @@
   padding: 0.25rem 0.45rem;
   border-bottom: 1px solid var(--joy-border);
   color: var(--joy-text);
-  font-size: var(--joy-type-2xs);
+  font-size: var(--joy-type-xs);
 }
 
 /* "Also in Filters" / "Also in Effects": the matches that live in the other panel. */
@@ -35,8 +35,8 @@
   margin: 0;
   padding: 0.35rem 0.45rem;
   border-top: 1px solid var(--joy-border);
-  color: var(--joy-text-muted);
-  font-size: var(--joy-type-2xs);
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
 }
 
 .library-also-link {
@@ -80,7 +80,7 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: rgb(20 21 24 / 62%);
-  color: var(--joy-text-muted);
+  color: var(--joy-text-secondary);
   cursor: pointer;
 }
 

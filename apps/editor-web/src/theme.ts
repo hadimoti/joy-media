@@ -16,7 +16,7 @@ interface JoyColors {
   readonly border: string;
   readonly borderHover: string;
   readonly text: string;
-  readonly textMuted: string;
+  readonly textSecondary: string;
   readonly ok: string;
   readonly danger: string;
 }
@@ -35,7 +35,7 @@ export const JOY_COLORS: JoyColors = {
   border: '#2f3036',
   borderHover: '#5a5a62',
   text: '#e9e9ed',
-  textMuted: '#a9abb4',
+  textSecondary: '#a9abb4',
   ok: '#6fcf97',
   danger: '#ef6a6a',
 };

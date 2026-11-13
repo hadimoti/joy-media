@@ -269,6 +269,26 @@ function colourOffendersIn(rules: readonly CssRule[]): string[] {
   return found;
 }
 
+/**
+ * The app-wide icon buttons. They are controls like any other, so the same
+ * rule applies to them: a colour of their own is an offender. The Effect
+ * Studio keeps its own palette behind its own `--es-*` scope, so
+ * `es-icon-button` is a different component and stays out of this check.
+ */
+const ICON_CLASSES = ['icon-button', 'icon-button-labeled', 'icon-tool'] as const;
+
+/** Is this rule one of the app-wide icon button rules? */
+function isIconRule(rule: CssRule): boolean {
+  const classes = [...rule.selector.matchAll(/\.(-?[_A-Za-z][\w-]*)/g)].map(
+    (match) => match[1] ?? '',
+  );
+  return classes.some((className) =>
+    ICON_CLASSES.some(
+      (iconClass) => className === iconClass || className.startsWith(`${iconClass}-`),
+    ),
+  );
+}
+
 describe('the Joy Code Settings dialog stylesheet (T-P06)', () => {
   it('holds no colour of its own in the two dialog stylesheets', () => {
     for (const stylesheet of DIALOG_STYLESHEETS) {
@@ -307,6 +327,67 @@ describe('the Joy Code Settings dialog stylesheet (T-P06)', () => {
     const source = sourceOf('./JoyAgentSettingsDialog.css');
     expect(source).toContain('var(--joy-');
     expect(source).toContain('var(--joy-accent)');
+  });
+});
+
+describe('the app-wide icon buttons (T-D09)', () => {
+  it('paints every icon button with the app tokens', () => {
+    const rules = cssRules(sourceOf(APP_STYLESHEET)).filter(isIconRule);
+    expect(
+      rules.length,
+      'the scope must find the icon button rules it is meant to check',
+    ).toBeGreaterThan(15);
+    expect(
+      colourOffendersIn(rules),
+      'the icon buttons must be built on the --joy-* tokens',
+    ).toEqual([]);
+  });
+
+  it('holds the idle glyph in the secondary colour and gold to the active one', () => {
+    const rules = cssRules(sourceOf(APP_STYLESHEET)).filter(isIconRule);
+    const idle = rules.find((rule) => rule.selector.trim() === '.icon-button');
+    expect(idle, 'the icon button rule must be found').toBeTruthy();
+    expect(idle?.declarations).toContainEqual({
+      property: 'color',
+      value: 'var(--joy-text-secondary)',
+    });
+
+    const active = rules.find((rule) => rule.selector.includes("[aria-pressed='true']"));
+    expect(active, 'the active icon button rule must be found').toBeTruthy();
+    expect(active?.declarations).toContainEqual({
+      property: 'color',
+      value: 'var(--joy-accent)',
+    });
+  });
+
+  it('keeps gold for the tool that is on, not for the one under the pointer', () => {
+    const rules = cssRules(sourceOf(APP_STYLESHEET)).filter(isIconRule);
+
+    // Hovering a tool shows it in the primary text colour: hovering is not
+    // the same as being on.
+    const hovered = rules.find((rule) => rule.selector.trim() === '.icon-tool:hover');
+    expect(hovered, 'the hovered icon tool rule must be found').toBeTruthy();
+    expect(hovered?.declarations).toContainEqual({
+      property: 'color',
+      value: 'var(--joy-text)',
+    });
+    expect(hovered?.declarations).not.toContainEqual({
+      property: 'color',
+      value: 'var(--joy-accent)',
+    });
+
+    // The tool that is on is the gold one.
+    const pressed = rules.find(
+      (rule) => rule.selector.trim() === ".icon-tool[aria-pressed='true']",
+    );
+    expect(pressed, 'the pressed icon tool rule must be found').toBeTruthy();
+    expect(pressed?.declarations).toContainEqual({
+      property: 'color',
+      value: 'var(--joy-accent)',
+    });
+
+    // The two rules are separate, so hovering cannot turn a tool gold.
+    expect(hovered).not.toBe(pressed);
   });
 });
 
