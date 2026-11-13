@@ -87,6 +87,49 @@ function leafViews(layout: LayoutWithPanels, id: string): string[] {
   return views;
 }
 
+function leafActiveView(layout: LayoutWithPanels, id: string): string | undefined {
+  let activeView: string | undefined;
+  const walk = (node: unknown): void => {
+    if (!isRecord(node)) return;
+    if (node.type === 'leaf' && isRecord(node.data) && node.data.id === id) {
+      activeView = typeof node.data.activeView === 'string' ? node.data.activeView : undefined;
+      return;
+    }
+    if (node.type === 'branch' && Array.isArray(node.data)) {
+      for (const child of node.data) walk(child);
+    }
+  };
+  walk(layout.grid?.root);
+  return activeView;
+}
+
+function serializedPanelViews(layout: unknown): string[] {
+  const panelIds: string[] = [];
+  const collectNode = (node: unknown): void => {
+    if (!isRecord(node)) return;
+    if (node.type === 'leaf' && isRecord(node.data) && Array.isArray(node.data.views)) {
+      panelIds.push(...node.data.views.filter((view): view is string => typeof view === 'string'));
+      return;
+    }
+    if (node.type === 'branch' && Array.isArray(node.data)) node.data.forEach(collectNode);
+  };
+
+  if (!isRecord(layout)) return panelIds;
+  if (isRecord(layout.grid)) collectNode(layout.grid.root);
+  for (const property of ['floatingGroups', 'popoutGroups']) {
+    const groups = layout[property];
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (isRecord(group) && isRecord(group.data) && Array.isArray(group.data.views)) {
+        panelIds.push(
+          ...group.data.views.filter((view): view is string => typeof view === 'string'),
+        );
+      }
+    }
+  }
+  return panelIds;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -183,9 +226,9 @@ describe('dock layout constraints', () => {
     });
   });
 
-  it('adds 3D Scene after Inspector without disturbing a saved context group', () => {
+  it('drops the retired Animate tab and adds 3D Scene to the saved context group', () => {
     const migrated = migrateDockLayout({
-      panels: { inspector: { id: 'inspector' } },
+      panels: { inspector: { id: 'inspector' }, motion: { id: 'motion' } },
       grid: {
         root: {
           type: 'leaf',
@@ -193,8 +236,239 @@ describe('dock layout constraints', () => {
         },
       },
     }) as LayoutWithPanels;
-    expect(leafViews(migrated, 'context')).toEqual(['inspector', 'scene3d', 'motion']);
+    expect(leafViews(migrated, 'context')).toEqual(['inspector', 'scene3d']);
+    expect(migrated.panels.motion).toBeUndefined();
+    expect(leafActiveView(migrated, 'context')).toBe('inspector');
     expect(migrated.panels.scene3d).toMatchObject({ id: 'scene3d' });
+  });
+
+  it('prunes an old Animate-only group and repairs the saved active group', () => {
+    const migrated = migrateDockLayout({
+      grid: {
+        orientation: 'HORIZONTAL',
+        root: {
+          type: 'branch',
+          size: 1000,
+          data: [
+            {
+              type: 'branch',
+              size: 500,
+              data: [
+                {
+                  type: 'leaf',
+                  size: 300,
+                  data: { id: 'context', views: ['inspector', 'motion'], activeView: 'motion' },
+                },
+                {
+                  type: 'leaf',
+                  size: 200,
+                  data: { id: 'motion-only', views: ['motion'], activeView: 'motion' },
+                },
+              ],
+            },
+            {
+              type: 'leaf',
+              size: 500,
+              data: { id: 'monitor-col', views: ['monitor'], activeView: 'monitor' },
+            },
+          ],
+        },
+      },
+      panels: {
+        inspector: { id: 'inspector' },
+        motion: { id: 'motion' },
+        monitor: { id: 'monitor' },
+      },
+      activeGroup: 'motion-only',
+    }) as LayoutWithPanels;
+
+    expect(leafIds(migrated)).not.toContain('motion-only');
+    expect(leafIds(migrated)).toContain('context');
+    expect(leafViews(migrated, 'context')).toEqual(['inspector', 'scene3d']);
+    expect(migrated.activeGroup).toBe('context');
+    expect(migrated.panels.motion).toBeUndefined();
+    expect(JSON.stringify(migrated)).not.toContain('"motion"');
+  });
+
+  it('removes retired Animate tabs without losing Dockview groups or anchors', () => {
+    const migrated = migrateDockLayout({
+      grid: {
+        orientation: 'HORIZONTAL',
+        root: {
+          type: 'branch',
+          data: [
+            {
+              type: 'leaf',
+              data: { id: 'timeline-col', views: ['timeline'], activeView: 'timeline' },
+            },
+            {
+              type: 'leaf',
+              data: { id: 'motion-only-grid', views: ['motion'], activeView: 'motion' },
+            },
+          ],
+        },
+      },
+      panels: {
+        inspector: { id: 'inspector' },
+        motion: { id: 'motion' },
+        monitor: { id: 'monitor' },
+        timeline: { id: 'timeline' },
+      },
+      activeGroup: 'motion-only-floating',
+      floatingGroups: [
+        {
+          data: {
+            id: 'floating-inspector',
+            views: ['inspector', 'motion'],
+            activeView: 'motion',
+          },
+          position: { width: 600, height: 400, top: 10, left: 20 },
+        },
+        {
+          data: { id: 'empty-floating-anchor', views: [] },
+          position: { width: 300, height: 200, top: 50, left: 60 },
+        },
+        {
+          data: { id: 'motion-only-floating', views: ['motion'], activeView: 'motion' },
+          position: { width: 400, height: 300, top: 30, left: 40 },
+        },
+      ],
+      popoutGroups: [
+        {
+          data: { id: 'popout-monitor', views: ['monitor', 'motion'], activeView: 'motion' },
+          position: null,
+          gridReferenceGroup: 'motion-only-grid',
+        },
+        {
+          data: { id: 'motion-only-popout', views: ['motion'], activeView: 'motion' },
+          position: null,
+        },
+        {
+          data: { id: 'empty-popout-anchor', views: [] },
+          position: null,
+        },
+      ],
+    }) as Record<string, unknown>;
+
+    const floatingGroups = migrated.floatingGroups as Array<{
+      data: { id: string; views: string[]; activeView?: string };
+    }>;
+    const popoutGroups = migrated.popoutGroups as Array<{
+      data: { id: string; views: string[]; activeView?: string };
+      gridReferenceGroup?: string;
+    }>;
+
+    expect((migrated.grid as { root: { type: string } }).root.type).toBe('branch');
+    expect(leafIds(migrated as LayoutWithPanels)).not.toContain('motion-only-grid');
+    expect(leafIds(migrated as LayoutWithPanels)).toContain('timeline-col');
+    expect(floatingGroups).toHaveLength(2);
+    expect(floatingGroups[0]?.data).toMatchObject({
+      id: 'floating-inspector',
+      views: ['inspector'],
+      activeView: 'inspector',
+    });
+    expect(floatingGroups[1]?.data).toMatchObject({ id: 'empty-floating-anchor', views: [] });
+    expect(popoutGroups).toHaveLength(2);
+    expect(popoutGroups[0]?.data).toMatchObject({
+      id: 'popout-monitor',
+      views: ['monitor'],
+      activeView: 'monitor',
+    });
+    expect(popoutGroups[0]?.gridReferenceGroup).toBe('timeline-col');
+    expect(popoutGroups[1]?.data).toMatchObject({ id: 'empty-popout-anchor', views: [] });
+    expect(migrated.activeGroup).toBe('timeline-col');
+    expect((migrated.panels as Record<string, unknown>).motion).toBeUndefined();
+    expect(JSON.stringify(migrated)).not.toContain('"motion"');
+    expect(migrateDockLayout(migrated)).toEqual(migrated);
+  });
+
+  it('keeps floating and popout panels unique when every grid tab is retired', () => {
+    const migrated = migrateDockLayout({
+      grid: {
+        orientation: 'HORIZONTAL',
+        root: {
+          type: 'branch',
+          data: [
+            {
+              type: 'leaf',
+              data: { id: 'motion-only-grid', views: ['motion'], activeView: 'motion' },
+            },
+          ],
+        },
+      },
+      panels: {
+        inspector: { id: 'inspector' },
+        motion: { id: 'motion' },
+        monitor: { id: 'monitor' },
+      },
+      activeGroup: 'motion-only-grid',
+      floatingGroups: [
+        {
+          data: { id: 'floating-inspector', views: ['inspector'], activeView: 'inspector' },
+          position: { width: 600, height: 400, top: 10, left: 20 },
+        },
+      ],
+      popoutGroups: [
+        {
+          data: { id: 'popout-monitor', views: ['monitor'], activeView: 'monitor' },
+          position: null,
+          gridReferenceGroup: 'motion-only-grid',
+        },
+      ],
+    }) as Record<string, unknown>;
+
+    const panelIds = serializedPanelViews(migrated);
+    const root = (migrated.grid as { root: { type: string; data: unknown[] } }).root;
+    const fallbackGridGroup = root.data[0] as {
+      type?: string;
+      data?: { id?: string; views?: string[] };
+    };
+    const popoutGroups = migrated.popoutGroups as Array<{
+      data: { id: string; views: string[] };
+      gridReferenceGroup?: string;
+    }>;
+
+    expect(root.type).toBe('branch');
+    expect(fallbackGridGroup).toMatchObject({
+      type: 'leaf',
+      data: { id: 'motion-migration-root', views: [] },
+    });
+    expect(leafIds(migrated as LayoutWithPanels)).not.toContain('motion-only-grid');
+    expect(panelIds).toEqual(['inspector', 'monitor']);
+    expect(new Set(panelIds).size).toBe(panelIds.length);
+    expect(popoutGroups[0]?.gridReferenceGroup).toBe(fallbackGridGroup.data?.id);
+    expect(migrated.activeGroup).toBe('floating-inspector');
+    expect(migrateDockLayout(migrated)).toEqual(migrated);
+  });
+
+  it('preserves existing single-child branches when no Animate group is removed', () => {
+    const migrated = migrateDockLayout({
+      grid: {
+        orientation: 'HORIZONTAL',
+        root: {
+          type: 'branch',
+          data: [
+            {
+              type: 'branch',
+              data: [
+                {
+                  type: 'leaf',
+                  data: { id: 'context', views: ['inspector'], activeView: 'inspector' },
+                },
+              ],
+            },
+            {
+              type: 'leaf',
+              data: { id: 'monitor-col', views: ['monitor'], activeView: 'monitor' },
+            },
+          ],
+        },
+      },
+      panels: { inspector: { id: 'inspector' }, monitor: { id: 'monitor' } },
+    }) as LayoutWithPanels;
+
+    const root = migrated.grid?.root as unknown as { data?: readonly { type?: string }[] };
+    expect(root.data?.[0]?.type).toBe('branch');
   });
 });
 

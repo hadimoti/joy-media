@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FEATURE_HUBS, featureActivationRoute } from './feature-architecture.js';
+import { PANEL_IDS } from './workspace.js';
 
 describe('feature architecture', () => {
   it('keeps the two compact hubs exhaustive and free of Stickers', () => {
@@ -54,5 +55,19 @@ describe('feature architecture', () => {
       toolId: 'color',
     });
     expect(featureActivationRoute('jobs')).toBeUndefined();
+  });
+
+  it('keeps Animate as one Enhance tool instead of a standalone dock panel', () => {
+    const animateTools = Object.values(FEATURE_HUBS).flatMap((hub) =>
+      hub.tools.filter((tool) => tool.id === 'motion'),
+    );
+
+    expect(animateTools).toHaveLength(1);
+    expect(PANEL_IDS).not.toContain('motion');
+    expect(featureActivationRoute('motion')).toEqual({
+      hub: 'enhance',
+      dockPanelId: 'effects',
+      toolId: 'motion',
+    });
   });
 });
