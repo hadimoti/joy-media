@@ -461,6 +461,7 @@ export function ProjectLibrary({
                     type="button"
                     className="project-library-actions-trigger"
                     aria-label={`Project actions for ${entry.title}`}
+                    title={`Project actions for ${entry.title}`}
                     aria-haspopup="menu"
                     aria-expanded={menuProjectId === entry.id}
                     disabled={busy}

@@ -7403,6 +7403,7 @@ function EditorWorkspace({
                     type="button"
                     className="toast-close"
                     aria-label="Dismiss"
+                    title="Dismiss"
                     onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
                   >
                     <CloseIcon />
@@ -7420,6 +7421,7 @@ function EditorWorkspace({
                     type="button"
                     className="icon-button"
                     aria-label="Close shortcuts"
+                    title="Close shortcuts"
                     onClick={() => setKeyboardShortcutsOpen(false)}
                   >
                     <CloseIcon />

@@ -1058,6 +1058,7 @@ export function JoyAgentSettingsDialog({
             className="joy-agent-settings-close-btn icon-button"
             type="button"
             aria-label="Close settings"
+            title="Close settings"
             onClick={close}
           >
             <CloseIcon />

@@ -39,10 +39,12 @@ export function PngMaskIcon({ src, size = 14 }: { readonly src: string; readonly
   );
 }
 
+/** The transport controls are drawn like the rest of the set: an outline,
+ *  not a filled shape, so every glyph in the app has the same weight. */
 export function PlayIcon() {
   return (
     <Svg>
-      <path d="M4 2.5 13 8 4 13.5Z" fill="currentColor" stroke="none" />
+      <path d="M5.25 3.25 12 8l-6.75 4.75Z" />
     </Svg>
   );
 }
@@ -50,8 +52,8 @@ export function PlayIcon() {
 export function PauseIcon() {
   return (
     <Svg>
-      <rect x="3.5" y="2.5" width="3" height="11" fill="currentColor" stroke="none" />
-      <rect x="9.5" y="2.5" width="3" height="11" fill="currentColor" stroke="none" />
+      <rect x="3.75" y="2.75" width="2.75" height="10.5" rx="0.75" />
+      <rect x="9.5" y="2.75" width="2.75" height="10.5" rx="0.75" />
     </Svg>
   );
 }
@@ -253,21 +255,14 @@ export function PlusIcon() {
   return <PngMaskIcon src={UI_ICONS.add} />;
 }
 
+/** A shelf of books — the Library panel. Drawn on the app's 16 px grid with
+ *  a 1.5 px stroke, like the rest of the set. */
 export function LibraryIcon() {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="2" y="3" width="20" height="18" rx="2" />
-      <path d="M7 3v18M17 3v18M2 9h20" />
-    </svg>
+    <Svg size={16}>
+      <rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.25" />
+      <path d="M6 2.75v10.5M10 2.75v10.5M2.25 6.5h11.5" />
+    </Svg>
   );
 }
 
@@ -1257,6 +1252,228 @@ export function ToolsIcon() {
     <Svg size={16}>
       <path d="M9.9 2.1a3.1 3.1 0 0 0-3.6 3.9L2 10.3a1.25 1.25 0 0 0 1.75 1.75l4.3-4.3a3.1 3.1 0 0 0 3.9-3.6l-1.8 1.8-1.6-.4-.4-1.6Z" />
       <path d="m10.6 9.4 4 4M13.2 6.8l-3.4 3.4" />
+    </Svg>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   The panel glyph set (T-D09).
+
+   One outline set: 16 px on a 16 px grid, a 1.5 px stroke, round caps and
+   joins, drawn in the secondary text colour and gold only when the panel is
+   the active one. Every panel gets its own glyph, so two panels in the same
+   dock group never show the same picture.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/** Four tiles — the Create panel. */
+export function MediaGridIcon() {
+  return (
+    <Svg size={16}>
+      <rect x="2.5" y="2.5" width="4.75" height="4.75" rx="1" />
+      <rect x="8.75" y="2.5" width="4.75" height="4.75" rx="1" />
+      <rect x="2.5" y="8.75" width="4.75" height="4.75" rx="1" />
+      <rect x="8.75" y="8.75" width="4.75" height="4.75" rx="1" />
+    </Svg>
+  );
+}
+
+/** A screen on a stand — the Program Monitor panel. */
+export function MonitorIcon() {
+  return (
+    <Svg size={16}>
+      <rect x="1.75" y="2.75" width="12.5" height="8.5" rx="1.25" />
+      <path d="M8 11.25v2.5M5.5 13.75h5" />
+    </Svg>
+  );
+}
+
+/** Three nodes and their links — the Flow panel. */
+export function FlowGraphIcon() {
+  return (
+    <Svg size={16}>
+      <circle cx="3.75" cy="4" r="1.75" />
+      <circle cx="12.25" cy="4" r="1.75" />
+      <circle cx="8" cy="11.75" r="1.75" />
+      <path d="M5.5 4h5M3.75 5.75 6.75 10.5M12.25 5.75 9.25 10.5" />
+    </Svg>
+  );
+}
+
+/** Three sliders — the Inspector panel. */
+export function InspectorIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M2.25 4.25h11.5M2.25 8h11.5M2.25 11.75h11.5" />
+      <circle cx="5.75" cy="4.25" r="1.6" />
+      <circle cx="10.25" cy="8" r="1.6" />
+      <circle cx="6.75" cy="11.75" r="1.6" />
+    </Svg>
+  );
+}
+
+/** A curve with a keyframe on it — the Animate panel. */
+export function MotionPathIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M2 12c2.75 0 3.25-7 6-7s3.25 7 6 7" />
+      <circle cx="8" cy="5" r="1.6" />
+    </Svg>
+  );
+}
+
+/** A camera body and its lens — the Camera panel. */
+export function CameraIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M2 6.25h2.5l1.1-2h4.8l1.1 2H14v6.5H2Z" />
+      <circle cx="8" cy="9.5" r="2.25" />
+    </Svg>
+  );
+}
+
+/** A four-point sparkle — the Enhance panel. */
+export function EnhanceIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M7 2.25 8.35 5.9l3.65 1.35L8.35 8.6 7 12.25 5.65 8.6 2 7.25 5.65 5.9Z" />
+      <path d="M12.25 9.75 12.85 11.4l1.65.6-1.65.6-.6 1.65-.6-1.65-1.65-.6 1.65-.6Z" />
+    </Svg>
+  );
+}
+
+/** A dial split down the middle — the Color panel. */
+export function ColorAdjustIcon() {
+  return (
+    <Svg size={16}>
+      <circle cx="8" cy="8" r="5.75" />
+      <path d="M8 2.25v11.5" />
+    </Svg>
+  );
+}
+
+/** A clock with an arrow going back — the History panel. */
+export function HistoryIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M3 8a5 5 0 1 0 1.6-3.65" />
+      <path d="M2.5 2.75v2.5H5" />
+      <path d="M8 5.25V8l2 1.25" />
+    </Svg>
+  );
+}
+
+/** A pulse line — the Diagnostics panel. */
+export function DiagnosticsIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M1.75 8h2.75l1.5-3.75 2.5 7.5 1.5-3.75h4.25" />
+    </Svg>
+  );
+}
+
+/** A queue of three rows — the Jobs panel. */
+export function JobsIcon() {
+  return (
+    <Svg size={16}>
+      <circle cx="3.75" cy="4" r="1.25" />
+      <circle cx="3.75" cy="8" r="1.25" />
+      <circle cx="3.75" cy="12" r="1.25" />
+      <path d="M7 4h6.25M7 8h6.25M7 12h4" />
+    </Svg>
+  );
+}
+
+/** A terminal — the Joy Code panel. */
+export function AgentIcon() {
+  return (
+    <Svg size={16}>
+      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5" />
+      <path d="M4.75 6.25 6.75 8.25l-2 2M8.5 10.5h2.75" />
+    </Svg>
+  );
+}
+
+/** A film strip — the glyph of a video clip. */
+export function FilmIcon() {
+  return (
+    <Svg size={16}>
+      <rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.25" />
+      <path d="M5.25 3.25v9.5M10.75 3.25v9.5" />
+      <path d="M3.5 6.25h.01M3.5 9.75h.01M12.5 6.25h.01M12.5 9.75h.01" />
+    </Svg>
+  );
+}
+
+/** A stack of sheets — the "All" section of the Asset Library. */
+export function BrowseIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M8 1.75 14.25 5 8 8.25 1.75 5Z" />
+      <path d="m1.75 8 6.25 3.25L14.25 8" />
+      <path d="m1.75 11 6.25 3.25L14.25 11" />
+    </Svg>
+  );
+}
+
+/** A framed page — the Scenes section of the Animate panel. */
+export function ScenesIcon() {
+  return (
+    <Svg size={16}>
+      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5" />
+      <path d="M1.75 6.25h12.5" />
+      <circle cx="4" cy="4.5" r=".75" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+/** Three axes from one point — the Spatial section of the Animate panel. */
+export function SpatialIcon() {
+  return (
+    <Svg size={16}>
+      <circle cx="8" cy="8" r="1.5" />
+      <path d="M8 6.5V2.25M8 8 3 11.75M8 8l5 3.75" />
+    </Svg>
+  );
+}
+
+/** A caption band under a picture — the Lower Thirds view. */
+export function LowerThirdIcon() {
+  return (
+    <Svg size={16}>
+      <rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.25" />
+      <path d="M4.5 9.75h7" />
+    </Svg>
+  );
+}
+
+/** A globe — the Social view. */
+export function SocialIcon() {
+  return (
+    <Svg size={16}>
+      <circle cx="8" cy="8" r="6.25" />
+      <path d="M1.75 8h12.5" />
+      <path d="M8 1.75c1.85 2 2.8 4 2.8 6.25S9.85 12.25 8 14.25C6.15 12.25 5.2 10.25 5.2 8s.95-4.25 2.8-6.25Z" />
+    </Svg>
+  );
+}
+
+/** A cog — the settings trigger. */
+export function GearIcon() {
+  return (
+    <Svg size={16}>
+      <circle cx="8" cy="8" r="2.25" />
+      <path d="M8 2v1.5M8 12.5V14M14 8h-1.5M3.5 8H2M12.24 3.76l-1.06 1.06M4.82 11.18l-1.06 1.06M12.24 12.24l-1.06-1.06M4.82 4.82 3.76 3.76" />
+    </Svg>
+  );
+}
+
+/** A triangle with a bang — a warning. */
+export function WarningIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M8 2.25 14.5 13.5h-13Z" />
+      <path d="M8 6.75v3" />
+      <circle cx="8" cy="11.6" r=".65" fill="currentColor" stroke="none" />
     </Svg>
   );
 }
