@@ -1,4 +1,4 @@
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { CONNECT_MODEL_FIRST_TITLE, runControlGate } from './joy-code-run-gate.js';
 
 /** The visible text of the connect step. */
@@ -34,6 +34,26 @@ export function JoyCodeConnectButton({ onConnect }: { readonly onConnect: () => 
       {CONNECT_MODEL_BUTTON_TEXT}
     </div>
   );
+}
+
+/**
+ * A click on the card body opens the connect step too (T-J02 review). The
+ * body is not a tab stop: the focusable connect button inside stays the one
+ * keyboard and screen reader control. A click that starts on that button is
+ * ignored here, because the button has its own handler, so one click opens
+ * the step once.
+ */
+export function connectOnCardClick(
+  onConnect: () => void,
+): (event: ReactMouseEvent<HTMLElement>) => void {
+  return (event) => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest('.joy-code-connect-button') !== null
+    )
+      return;
+    onConnect();
+  };
 }
 
 /**

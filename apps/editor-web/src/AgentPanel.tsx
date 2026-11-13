@@ -62,7 +62,7 @@ import {
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
 import { JoyCodeReadinessSlot } from './joy-code-connect-model-card.js';
 import { createRunStartAnnouncer } from './joy-code-run-gate.js';
-import { RecipeRunControls } from './joy-code-run-controls.js';
+import { RecipeRunControls, connectOnCardClick } from './joy-code-run-controls.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import {
@@ -3573,6 +3573,11 @@ export function AgentPanel({
                   <li
                     key={entry.skill.id}
                     className={`joy-code-recipe ${entry.available ? '' : 'is-unavailable'}`}
+                    onClick={
+                      capability === undefined && onOpenSettings !== undefined
+                        ? connectOnCardClick(onOpenSettings)
+                        : undefined
+                    }
                   >
                     <div className="joy-code-recipe-copy">
                       <strong>{entry.skill.title}</strong>

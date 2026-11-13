@@ -81,6 +81,15 @@ describe('Creative Brief without a connected model', () => {
     expect(onConnectModel).toHaveBeenCalledTimes(1);
   });
 
+  it('opens the connect step on a click on the card text, once', () => {
+    const onConnectModel = vi.fn();
+    render({ noModelConnected: true, onConnectModel });
+    act(() => container?.querySelector<HTMLElement>('.creative-brief-panel-input')?.click());
+    expect(onConnectModel).toHaveBeenCalledTimes(1);
+    act(() => connectControl()?.click());
+    expect(onConnectModel).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps the request box read-only until a model is connected', () => {
     render({ noModelConnected: true, onConnectModel: () => undefined });
     const textarea = container?.querySelector<HTMLTextAreaElement>('textarea');

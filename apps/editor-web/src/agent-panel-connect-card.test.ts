@@ -42,8 +42,8 @@ describe('Joy Code not-connected card wiring', () => {
     expect(panelSource).toContain('ready={isRecipeRunnerReady}');
     expect(panelSource).toContain('noModel={capability === undefined}');
     expect(panelSource).not.toContain('{isRecipeRunnerReady && (');
-    // The recipe row no longer carries a click handler on the card itself (T-J02 review).
-    expect(panelSource).not.toMatch(/joy-code-recipe \$\{entry\.available[^>]*onClick=/s);
+    // A click on the recipe card body opens the connect step, through the shared helper (T-J02 review).
+    expect(panelSource).toContain('connectOnCardClick(onOpenSettings)');
   });
 
   it('adds the "Run recipe" message only from the run start, never before the run', () => {

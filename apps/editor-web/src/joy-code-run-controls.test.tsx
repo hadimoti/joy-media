@@ -3,7 +3,11 @@ import { act, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CONNECT_MODEL_FIRST_TITLE } from './joy-code-run-gate.js';
-import { JoyCodeConnectButton, RecipeRunControls } from './joy-code-run-controls.js';
+import {
+  JoyCodeConnectButton,
+  RecipeRunControls,
+  connectOnCardClick,
+} from './joy-code-run-controls.js';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -153,5 +157,36 @@ describe('a recipe row through a connect and a disconnect, without a reload', ()
     expect(runButton().disabled).toBe(true);
     expect(runButton().textContent).toBe('Running…');
     expect(connectControl()).toBeNull();
+  });
+});
+
+describe('a click on the card body opens the connect step once', () => {
+  it('opens on a click on the card text, and on a click on the connect button, once each', () => {
+    const onConnect = vi.fn();
+    renderInto(
+      <div className="joy-code-recipe" data-testid="card" onClick={connectOnCardClick(onConnect)}>
+        <strong>Shorten intro</strong>
+        <JoyCodeConnectButton onConnect={onConnect} />
+      </div>,
+    );
+    act(() => container?.querySelector('strong')?.click());
+    expect(onConnect).toHaveBeenCalledTimes(1);
+    act(() => connectControl()?.click());
+    expect(onConnect).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps one tab stop: the card body is not focusable, the connect button is', () => {
+    renderInto(
+      <div className="joy-code-recipe" onClick={connectOnCardClick(() => undefined)}>
+        <strong>Shorten intro</strong>
+        <JoyCodeConnectButton onConnect={() => undefined} />
+      </div>,
+    );
+    const focusable = Array.from(container?.querySelectorAll('[tabindex]') ?? []).filter(
+      (node) => node.getAttribute('tabindex') === '0',
+    );
+    expect(focusable).toHaveLength(1);
+    expect(focusable[0]?.getAttribute('role')).toBe('button');
+    expect(container?.querySelector('strong')?.hasAttribute('tabindex')).toBe(false);
   });
 });
