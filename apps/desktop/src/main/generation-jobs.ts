@@ -14,6 +14,11 @@ import { MINIMAX_GENERATION_SETTINGS } from './providers/generation/minimax-sett
 import { pinnedFetch, type PinnedFetch } from './providers/pinned-transport.js';
 import type { ProviderBroker } from './providers/provider-broker.js';
 import {
+  GENERATION_DOWNLOAD_IDLE_TIMEOUT_MS,
+  GENERATION_DOWNLOAD_TIMEOUT_MS,
+  GENERATION_STATUS_ERROR_LIMIT,
+  MAX_ACTIVE_GENERATED_IMAGE_JOBS,
+  MAX_ACTIVE_GENERATED_VIDEO_JOBS,
   MAX_GENERATED_IMAGE_BYTES,
   MAX_GENERATED_VIDEO_BYTES,
 } from './providers/generation/limits.js';
@@ -63,7 +68,7 @@ export interface GenerationJobsOptions {
   >;
   readonly generatedDirectory: string;
   readonly download: (url: string, signal: AbortSignal) => Promise<GenerationDownload>;
-  readonly probe: (filePath: string) => Promise<ProbedGeneratedMedia>;
+  readonly probe: (filePath: string, signal?: AbortSignal) => Promise<ProbedGeneratedMedia>;
   readonly now?: () => number;
   readonly newId?: () => string;
   readonly maxImageBytes?: number;
@@ -168,7 +173,10 @@ export function createPinnedGenerationDownloader(
 }
 
 /** Classifies a finished file from ffprobe output, never from the provider's Content-Type header or filename. */
-export async function probeGeneratedMedia(filePath: string): Promise<ProbedGeneratedMedia> {
+export async function probeGeneratedMedia(
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<ProbedGeneratedMedia> {
   let stdout: string;
   try {
     ({ stdout } = await execFileAsync(
@@ -182,9 +190,18 @@ export async function probeGeneratedMedia(filePath: string): Promise<ProbedGener
         'json',
         filePath,
       ],
-      { encoding: 'utf8', windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024 },
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+        ...(signal === undefined ? {} : { signal }),
+      },
     ));
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      throw new Error('The media check tool is missing: ffprobe was not found.');
+    }
     throw new Error('The generated file could not be verified by ffprobe.');
   }
 
@@ -261,6 +278,7 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const timeoutTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const operations = new Map<string, AbortController>();
+  const statusFailures = new Map<string, number>();
 
   const read = (jobId: string): GenerationJobRecord | undefined => options.store.get(jobId);
   const save = (
@@ -293,6 +311,7 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
   const clearJobTimers = (jobId: string): void => {
     clearTimer(jobId);
     clearTimeoutTimer(jobId);
+    statusFailures.delete(jobId);
   };
   const markTimedOut = (jobId: string): void => {
     const job = read(jobId);
@@ -332,12 +351,23 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
     clearJobTimers(jobId);
     save(job, 'failed', { error: safeErrorMessage(error) });
   };
+  /** A failed status check keeps the job alive until the limit of checks in a row is reached. */
+  const statusFailed = (jobId: string, error: unknown): void => {
+    const failures = (statusFailures.get(jobId) ?? 0) + 1;
+    if (failures >= GENERATION_STATUS_ERROR_LIMIT) {
+      markFailed(jobId, error);
+      return;
+    }
+    statusFailures.set(jobId, failures);
+    if (active(read(jobId))) schedulePoll(jobId);
+  };
 
   const saveMedia = async (
     job: GenerationJobRecord,
     source: AsyncIterable<Uint8Array>,
     contentLength: number | undefined,
     signal: AbortSignal,
+    onData?: () => void,
   ): Promise<{ readonly filePath: string; readonly sha256: string }> => {
     const input = source instanceof Readable ? source : Readable.from(source);
     const limit = job.kind === 'image' ? maxImageBytes : maxVideoBytes;
@@ -366,6 +396,7 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
     let bytes = 0;
     const capAndHash = new Transform({
       transform(chunk: Buffer | Uint8Array, _encoding, callback) {
+        onData?.();
         const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         bytes += data.byteLength;
         if (bytes > limit) {
@@ -382,7 +413,8 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
         signal,
       });
       if (bytes === 0) throw new Error('The generated file was empty.');
-      const probed = await options.probe(temporaryPath);
+      const probed = await options.probe(temporaryPath, signal);
+      if (signal.aborted) throw new Error('The generation was cancelled.');
       const allowedExtensions = job.kind === 'image' ? IMAGE_EXTENSIONS : VIDEO_EXTENSIONS;
       const extension = probed.extension.toLowerCase().replace(/^\./, '');
       if (probed.kind !== job.kind || !allowedExtensions.has(extension)) {
@@ -390,6 +422,11 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
       }
       const filePath = path.join(options.generatedDirectory, `${job.id}.${extension}`);
       await rename(temporaryPath, filePath);
+      if (signal.aborted) {
+        // A cancel that lands after the rename must not leave a finished file with no completed job.
+        await rm(filePath, { force: true }).catch(() => undefined);
+        throw new Error('The generation was cancelled.');
+      }
       return { filePath, sha256: digest.digest('hex') };
     } catch (error) {
       await rm(temporaryPath, { force: true }).catch(() => undefined);
@@ -411,13 +448,56 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
     const current = read(job.id);
     if (current === undefined) return;
     save(current, 'downloading', { error: undefined });
-    const downloaded = await options.download(link.data.downloadUrl, signal);
-    if (!active(read(job.id))) return;
-    const saved = await saveMedia(job, downloaded.body, downloaded.contentLength, signal);
-    const latest = read(job.id);
-    if (!active(latest)) return;
-    clearJobTimers(job.id);
-    save(latest, 'completed', { ...saved, error: undefined });
+
+    // The download has its own deadline: an overall limit and an idle limit that restarts on every chunk.
+    const downloadAbort = new AbortController();
+    let limitError: Error | undefined;
+    const abortWithParent = (): void => downloadAbort.abort(signal.reason);
+    if (signal.aborted) abortWithParent();
+    else signal.addEventListener('abort', abortWithParent, { once: true });
+    let overallTimer: ReturnType<typeof setTimeout> | undefined;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const stopIdleTimer = (): void => {
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
+      idleTimer = undefined;
+    };
+    const restartIdleTimer = (): void => {
+      stopIdleTimer();
+      idleTimer = setTimeout(() => {
+        limitError = new Error('The video download stopped sending data for 30 seconds.');
+        downloadAbort.abort(limitError);
+      }, GENERATION_DOWNLOAD_IDLE_TIMEOUT_MS);
+    };
+    try {
+      overallTimer = setTimeout(() => {
+        limitError = new Error('The video download took longer than five minutes.');
+        downloadAbort.abort(limitError);
+      }, GENERATION_DOWNLOAD_TIMEOUT_MS);
+      restartIdleTimer();
+      const downloaded = await options.download(link.data.downloadUrl, downloadAbort.signal);
+      if (!active(read(job.id))) return;
+      const saved = await saveMedia(
+        job,
+        downloaded.body,
+        downloaded.contentLength,
+        downloadAbort.signal,
+        restartIdleTimer,
+      );
+      const latest = read(job.id);
+      if (!active(latest)) {
+        await rm(saved.filePath, { force: true }).catch(() => undefined);
+        return;
+      }
+      clearJobTimers(job.id);
+      save(latest, 'completed', { ...saved, error: undefined });
+    } catch (error) {
+      if (limitError !== undefined && !signal.aborted) throw limitError;
+      throw error;
+    } finally {
+      signal.removeEventListener('abort', abortWithParent);
+      if (overallTimer !== undefined) clearTimeout(overallTimer);
+      stopIdleTimer();
+    }
   };
 
   const pollVideo = async (jobId: string): Promise<void> => {
@@ -444,17 +524,24 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
     const controller = new AbortController();
     operations.set(jobId, controller);
     try {
-      const result = await options.broker.videoStatus({
-        profileId: profile.id,
-        taskId: job.providerTaskId,
-        route: job.route,
-        signal: controller.signal,
-      });
-      if (!active(read(jobId))) return;
-      if (!result.ok) {
-        markFailed(jobId, result.message);
+      let result: Awaited<ReturnType<ProviderBroker['videoStatus']>>;
+      try {
+        result = await options.broker.videoStatus({
+          profileId: profile.id,
+          taskId: job.providerTaskId,
+          route: job.route,
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (!controller.signal.aborted) statusFailed(jobId, error);
         return;
       }
+      if (!active(read(jobId))) return;
+      if (!result.ok) {
+        statusFailed(jobId, result.message);
+        return;
+      }
+      statusFailures.delete(jobId);
       switch (result.data.status) {
         case 'queued':
           save(job, 'queued', { error: undefined });
@@ -523,7 +610,10 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
       save(current, 'downloading', { model: image.model, route: image.route, error: undefined });
       const saved = await saveMedia(current, source, undefined, controller.signal);
       const latest = read(jobId);
-      if (!active(latest)) return;
+      if (!active(latest)) {
+        await rm(saved.filePath, { force: true }).catch(() => undefined);
+        return;
+      }
       clearJobTimers(jobId);
       save(latest, 'completed', {
         ...saved,
@@ -547,6 +637,16 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
       }
       const profile = options.getProfile(request.profileId);
       if (profile === undefined) throw new Error('Unknown provider profile.');
+      const limit =
+        request.kind === 'image'
+          ? MAX_ACTIVE_GENERATED_IMAGE_JOBS
+          : MAX_ACTIVE_GENERATED_VIDEO_JOBS;
+      const activeOfKind = options.store
+        .list()
+        .filter((job) => job.kind === request.kind && active(job)).length;
+      if (activeOfKind >= limit) {
+        throw new Error('Wait for the running picture or video to finish first.');
+      }
       let id = newId();
       for (
         let attempt = 0;
@@ -586,7 +686,21 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
           prompt: request.prompt,
         });
         const latest = read(id);
-        if (!active(latest)) return latest ?? job;
+        if (!active(latest)) {
+          // Cancelled while the task was being created: stop the provider task now that its id is known.
+          if (started.ok) {
+            try {
+              await options.broker.cancelVideo({
+                profileId: profile.id,
+                taskId: started.data.taskId,
+                route: started.data.route,
+              });
+            } catch {
+              // The provider could not confirm cancellation; the local job is already stopped.
+            }
+          }
+          return latest ?? job;
+        }
         if (!started.ok) {
           clearJobTimers(id);
           return save(latest, 'failed', { error: safeErrorMessage(started.message) });
@@ -618,6 +732,15 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
       if (!active(job)) return job;
       clearTimer(jobId);
 
+      if (job.state === 'downloading') {
+        // The provider has already finished, so only the local transfer is stopped.
+        operations.get(jobId)?.abort(new Error('Cancelled locally.'));
+        const latest = read(jobId);
+        if (!active(latest)) return latest;
+        clearJobTimers(jobId);
+        return save(latest, 'cancelled', { error: undefined });
+      }
+
       if (
         job.kind === 'video' &&
         job.state === 'queued' &&
@@ -636,7 +759,7 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
             if (!active(latest)) return latest;
             if (result.ok && result.data.cancelled) {
               operations.get(jobId)?.abort(new Error('Provider task cancelled.'));
-              clearTimeoutTimer(jobId);
+              clearJobTimers(jobId);
               return save(latest, 'cancelled');
             }
           } catch {
@@ -648,7 +771,7 @@ export function createGenerationJobs(options: GenerationJobsOptions): Generation
       operations.get(jobId)?.abort(new Error('Cancelled locally.'));
       const latest = read(jobId);
       if (!active(latest)) return latest;
-      clearTimeoutTimer(jobId);
+      clearJobTimers(jobId);
       return save(latest, 'abandoned-locally', {
         error: 'The local job was abandoned. Provider work may continue.',
       });

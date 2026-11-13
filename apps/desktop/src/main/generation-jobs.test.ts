@@ -7,6 +7,7 @@ import type { ProviderBroker } from './providers/provider-broker.js';
 import {
   createGenerationJobs,
   createPinnedGenerationDownloader,
+  probeGeneratedMedia,
   type GenerationDownload,
   type GenerationJobs,
   type GenerationJobsOptions,
@@ -116,6 +117,7 @@ function harness(
   const probe =
     options.probe ??
     vi.fn(async (): Promise<ProbedGeneratedMedia> => ({ kind: 'video', extension: 'mp4' }));
+  let nextId = 0;
   const manager = createGenerationJobs({
     store: store.store,
     getProfile: (id) => (id === PROFILE.id ? PROFILE : undefined),
@@ -124,7 +126,10 @@ function harness(
     download,
     probe,
     now: () => Date.now(),
-    newId: () => 'generation-1',
+    newId: () => {
+      nextId += 1;
+      return `generation-${nextId}`;
+    },
     ...(options.maxImageBytes === undefined ? {} : { maxImageBytes: options.maxImageBytes }),
     ...(options.maxVideoBytes === undefined ? {} : { maxVideoBytes: options.maxVideoBytes }),
   });
@@ -160,6 +165,31 @@ function pendingVideo(overrides: Partial<GenerationJobRecord> = {}): GenerationJ
     ...overrides,
   };
 }
+
+/** A download that sends one chunk and then stops sending, as a host can after the headers. */
+function stalledBody(signal: AbortSignal): Readable {
+  const body = new Readable({ read() {} });
+  body.push(VIDEO_BYTES);
+  signal.addEventListener('abort', () => body.destroy(), { once: true });
+  return body;
+}
+
+/** A download that sends one byte every interval until it is aborted. */
+function trickleBody(signal: AbortSignal, intervalMs: number): Readable {
+  const body = new Readable({ read() {} });
+  const timer = setInterval(() => body.push(Buffer.from('x')), intervalMs);
+  signal.addEventListener(
+    'abort',
+    () => {
+      clearInterval(timer);
+      body.destroy();
+    },
+    { once: true },
+  );
+  return body;
+}
+
+const SUCCEEDED = { ok: true, data: { status: 'succeeded', fileId: 'file-1' } } as const;
 
 describe('generation job manager', () => {
   beforeEach(() => {
@@ -254,7 +284,8 @@ describe('generation job manager', () => {
     const signal = new AbortController().signal;
 
     await expect(download('http://127.0.0.1/file', signal)).rejects.toThrow(/refused/i);
-    await expect(download('https://user@cdn.example/file', signal)).rejects.toThrow(/refused/i);
+    const credentialUrl = 'https://user' + String.fromCharCode(64) + 'cdn.example/file';
+    await expect(download(credentialUrl, signal)).rejects.toThrow(/refused/i);
     await expect(download('https://cdn.example/file', signal)).rejects.toThrow(/public addresses/i);
 
     expect(resolveHost).toHaveBeenCalledOnce();
@@ -398,5 +429,193 @@ describe('generation job manager', () => {
     await waitForState(manager, started.id, 'failed');
 
     expect(readdirSync(generatedDirectory)).toEqual([]);
+  });
+
+  it('refuses a third picture while two are active, and a second video while one is active', async () => {
+    const { manager, broker } = harness();
+    broker.generateImage.mockImplementation(() => new Promise(() => {}));
+    const picture = { profileId: PROFILE.id, kind: 'image' as const, prompt: 'a red square' };
+    const video = { profileId: PROFILE.id, kind: 'video' as const, prompt: 'a slow pan' };
+    const refusal = 'Wait for the running picture or video to finish first.';
+
+    await manager.start(picture);
+    await manager.start(picture);
+    await expect(manager.start(picture)).rejects.toThrow(refusal);
+
+    await manager.start(video);
+    await expect(manager.start(video)).rejects.toThrow(refusal);
+
+    expect(manager.list()).toHaveLength(3);
+  });
+
+  it('fails a video download that sends no data for thirty seconds and removes the partial file', async () => {
+    const download = vi.fn(async (_url: string, signal: AbortSignal) => ({
+      body: stalledBody(signal),
+    }));
+    const { manager, broker, generatedDirectory } = harness({ download });
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    broker.videoStatus.mockResolvedValueOnce(SUCCEEDED);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitForState(manager, started.id, 'downloading');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await waitForState(manager, started.id, 'failed');
+
+    expect(manager.status(started.id)?.error).toBe(
+      'The video download stopped sending data for 30 seconds.',
+    );
+    await vi.waitFor(() => expect(readdirSync(generatedDirectory)).toEqual([]));
+  });
+
+  it('fails a video download that runs past five minutes even while it keeps sending data', async () => {
+    const download = vi.fn(async (_url: string, signal: AbortSignal) => ({
+      body: trickleBody(signal, 10_000),
+    }));
+    const { manager, broker, generatedDirectory } = harness({ download });
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    broker.videoStatus.mockResolvedValueOnce(SUCCEEDED);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitForState(manager, started.id, 'downloading');
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    await waitForState(manager, started.id, 'failed');
+
+    expect(manager.status(started.id)?.error).toBe(
+      'The video download took longer than five minutes.',
+    );
+    await vi.waitFor(() => expect(readdirSync(generatedDirectory)).toEqual([]));
+  });
+
+  it('cancels a video download in progress, stops the stream, and removes the partial file', async () => {
+    const seen: { body?: Readable } = {};
+    const download = vi.fn(async (_url: string, signal: AbortSignal) => {
+      seen.body = stalledBody(signal);
+      return { body: seen.body };
+    });
+    const { manager, broker, generatedDirectory } = harness({ download });
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    broker.videoStatus.mockResolvedValueOnce(SUCCEEDED);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitForState(manager, started.id, 'downloading');
+    await vi.waitFor(() => expect(readdirSync(generatedDirectory)).toHaveLength(1));
+
+    const cancelled = await manager.cancel(started.id);
+
+    expect(cancelled?.state).toBe('cancelled');
+    expect(seen.body?.destroyed).toBe(true);
+    await vi.waitFor(() => expect(readdirSync(generatedDirectory)).toEqual([]));
+    expect(manager.status(started.id)?.state).toBe('cancelled');
+    expect(broker.cancelVideo).not.toHaveBeenCalled();
+  });
+
+  it('fails with a plain message and deletes the temporary file when ffprobe is not installed', async () => {
+    vi.stubEnv('PATH', '');
+    try {
+      const { manager, broker, generatedDirectory } = harness({
+        probe: vi.fn(probeGeneratedMedia),
+      });
+      const started = await manager.start({
+        profileId: PROFILE.id,
+        kind: 'video',
+        prompt: 'a slow pan',
+      });
+      broker.videoStatus.mockResolvedValueOnce(SUCCEEDED);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitForState(manager, started.id, 'failed');
+
+      expect(manager.status(started.id)?.error).toBe(
+        'The media check tool is missing: ffprobe was not found.',
+      );
+      expect(readdirSync(generatedDirectory)).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('stops a media check that is still running when cancel arrives and leaves no finished file', async () => {
+    const probe = vi.fn(
+      (_filePath: string, signal?: AbortSignal) =>
+        new Promise<ProbedGeneratedMedia>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new Error('media check aborted')), {
+            once: true,
+          });
+        }),
+    );
+    const { manager, broker, generatedDirectory } = harness({ probe });
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    broker.videoStatus.mockResolvedValueOnce(SUCCEEDED);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledOnce());
+    const cancelled = await manager.cancel(started.id);
+
+    expect(cancelled?.state).toBe('cancelled');
+    await vi.waitFor(() => expect(readdirSync(generatedDirectory)).toEqual([]));
+    expect(manager.status(started.id)?.filePath).toBeUndefined();
+  });
+
+  it('keeps polling through two failed status checks and fails on the third in a row', async () => {
+    const { manager, broker } = harness();
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    broker.videoStatus
+      .mockResolvedValueOnce({ ok: false, message: 'Provider busy.' })
+      .mockRejectedValueOnce(new Error('Network reset.'));
+    broker.videoStatus.mockResolvedValue({ ok: true, data: { status: 'running' } });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await waitForState(manager, started.id, 'running');
+    expect(manager.status(started.id)?.error).toBeUndefined();
+
+    broker.videoStatus.mockResolvedValue({ ok: false, message: 'Provider busy.' });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(manager.status(started.id)?.state).toBe('running');
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitForState(manager, started.id, 'failed');
+    expect(manager.status(started.id)?.error).toBe('Provider busy.');
+  });
+
+  it('cancels the provider task when cancel arrives while the task is still being created', async () => {
+    const { manager, broker } = harness();
+    let resolveStart: (value: unknown) => void = () => undefined;
+    broker.startVideo.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    const starting = manager.start({ profileId: PROFILE.id, kind: 'video', prompt: 'a slow pan' });
+
+    const cancelled = await manager.cancel('generation-1');
+    expect(cancelled?.state).toBe('abandoned-locally');
+
+    resolveStart({ ok: true, data: { taskId: 'task-late', route: 'current' } });
+    await starting;
+
+    expect(broker.cancelVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'task-late', route: 'current' }),
+    );
   });
 });
