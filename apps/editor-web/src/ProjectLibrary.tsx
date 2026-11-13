@@ -22,6 +22,17 @@ import {
   TrashIcon,
 } from './icons.js';
 import { JOY_MEDIA_NAME } from './product-identity.js';
+import {
+  CUSTOM_CANVAS_MAX_SIDE,
+  CUSTOM_CANVAS_MIN_SIDE,
+  CUSTOM_DEFAULT_CANVAS,
+  DEFAULT_NEW_PROJECT_FORMAT_ID,
+  NEW_PROJECT_FORMATS,
+  newProjectPresetLabel,
+  newProjectSpecFor,
+  type NewProjectFormatId,
+  type NewProjectSpec,
+} from './new-project-format.js';
 
 type ProjectOperationResult = void | ProjectCatalogEntry;
 type ProjectAction = 'rename' | 'duplicate' | 'trash' | 'restore' | 'purge';
@@ -45,7 +56,7 @@ export function ProjectLibrary({
 }: {
   readonly storage: BrowserKeyValueStore;
   readonly onOpen: (entry: ProjectCatalogEntry) => void;
-  readonly onCreate: (title: string) => void;
+  readonly onCreate: (title: string, spec: NewProjectSpec) => void;
   readonly onRename: (
     entry: ProjectCatalogEntry,
     title: string,
@@ -62,6 +73,9 @@ export function ProjectLibrary({
   const [draftTitle, setDraftTitle] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | undefined>(undefined);
+  const [formatId, setFormatId] = useState<NewProjectFormatId>(DEFAULT_NEW_PROJECT_FORMAT_ID);
+  const [customWidth, setCustomWidth] = useState(String(CUSTOM_DEFAULT_CANVAS.width));
+  const [customHeight, setCustomHeight] = useState(String(CUSTOM_DEFAULT_CANVAS.height));
   const [showTrash, setShowTrash] = useState(false);
   const initialUiPreferences = useRef(loadEditorUiPreferences(storage));
   const [query, setQuery] = useState('');
@@ -221,16 +235,28 @@ export function ProjectLibrary({
     }
   };
 
+  const resetCreateForm = () => {
+    setCreating(false);
+    setDraftTitle('');
+    setCreateError(undefined);
+    setFormatId(DEFAULT_NEW_PROJECT_FORMAT_ID);
+    setCustomWidth(String(CUSTOM_DEFAULT_CANVAS.width));
+    setCustomHeight(String(CUSTOM_DEFAULT_CANVAS.height));
+  };
+
   const submitCreate = () => {
+    const spec = newProjectSpecFor(formatId, customWidth, customHeight);
+    if ('error' in spec) {
+      setCreateError(spec.error);
+      return;
+    }
     const title = draftTitle.trim();
     if (title.length === 0) {
       setCreateError('Enter a project name before creating it.');
       return;
     }
-    onCreate(title);
-    setDraftTitle('');
-    setCreateError(undefined);
-    setCreating(false);
+    onCreate(title, spec);
+    resetCreateForm();
   };
 
   const openMenu = (entry: ProjectCatalogEntry, trigger: HTMLButtonElement) => {
@@ -370,51 +396,132 @@ export function ProjectLibrary({
         {!showTrash && creating && (
           <form
             className="project-library-create"
+            // Our own messages explain the limits; the browser's bubble would not match the app.
+            noValidate
             onSubmit={(event) => {
               event.preventDefault();
               submitCreate();
             }}
           >
-            <label>
-              <span className="sr-only">Project title</span>
-              <input
-                autoFocus
-                value={draftTitle}
-                placeholder="Project name"
-                aria-invalid={createError !== undefined}
-                aria-describedby={createError !== undefined ? 'project-create-error' : undefined}
-                onChange={(event) => {
-                  setDraftTitle(event.currentTarget.value);
-                  if (createError !== undefined) setCreateError(undefined);
-                }}
-              />
-            </label>
+            <fieldset className="new-project-formats">
+              <legend>Format</legend>
+              <div className="new-project-format-grid">
+                {NEW_PROJECT_FORMATS.map((choice) => {
+                  const selected = choice.id === formatId;
+                  const isCustom = choice.size === undefined;
+                  const shape = choice.size ?? CUSTOM_DEFAULT_CANVAS;
+                  return (
+                    <label
+                      key={choice.id}
+                      className={selected ? 'new-project-format is-selected' : 'new-project-format'}
+                    >
+                      <input
+                        type="radio"
+                        name="new-project-format"
+                        value={choice.id}
+                        checked={selected}
+                        autoFocus={choice.id === DEFAULT_NEW_PROJECT_FORMAT_ID}
+                        onChange={() => {
+                          setFormatId(choice.id);
+                          setCreateError(undefined);
+                        }}
+                      />
+                      <span className="new-project-format-frame" aria-hidden="true">
+                        <span
+                          className={
+                            isCustom
+                              ? 'new-project-format-picture is-custom'
+                              : 'new-project-format-picture'
+                          }
+                          style={{ aspectRatio: `${shape.width} / ${shape.height}` }}
+                        />
+                      </span>
+                      <span className="new-project-format-name">{choice.label}</span>
+                      <span className="new-project-format-detail">
+                        {isCustom
+                          ? 'Set your own size'
+                          : `${shape.width}×${shape.height} · ${newProjectPresetLabel(choice)}`}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+            {formatId === 'custom' && (
+              <div className="new-project-custom-size">
+                <label>
+                  <span>Width (px)</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={CUSTOM_CANVAS_MIN_SIDE}
+                    max={CUSTOM_CANVAS_MAX_SIDE}
+                    step={1}
+                    value={customWidth}
+                    aria-invalid={createError !== undefined}
+                    onChange={(event) => {
+                      setCustomWidth(event.currentTarget.value);
+                      if (createError !== undefined) setCreateError(undefined);
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Height (px)</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={CUSTOM_CANVAS_MIN_SIDE}
+                    max={CUSTOM_CANVAS_MAX_SIDE}
+                    step={1}
+                    value={customHeight}
+                    aria-invalid={createError !== undefined}
+                    onChange={(event) => {
+                      setCustomHeight(event.currentTarget.value);
+                      if (createError !== undefined) setCreateError(undefined);
+                    }}
+                  />
+                </label>
+              </div>
+            )}
+            <div className="new-project-name-row">
+              <label className="new-project-name">
+                <span>Project name</span>
+                <input
+                  value={draftTitle}
+                  placeholder="Project name"
+                  aria-invalid={createError !== undefined}
+                  aria-describedby={createError !== undefined ? 'project-create-error' : undefined}
+                  onChange={(event) => {
+                    setDraftTitle(event.currentTarget.value);
+                    if (createError !== undefined) setCreateError(undefined);
+                  }}
+                />
+              </label>
+              <button
+                type="submit"
+                className="icon-button"
+                aria-label="Create project"
+                title="Create project"
+                data-guide="Create"
+              >
+                <CheckIcon />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Cancel"
+                title="Cancel"
+                data-guide="Cancel"
+                onClick={resetCreateForm}
+              >
+                <CloseIcon />
+              </button>
+            </div>
             {createError !== undefined && (
               <p id="project-create-error" className="empty-hint" role="alert">
                 {createError}
               </p>
             )}
-            <button
-              type="submit"
-              className="icon-button"
-              aria-label="Create project"
-              data-guide="Create"
-            >
-              <CheckIcon />
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Cancel"
-              data-guide="Cancel"
-              onClick={() => {
-                setCreating(false);
-                setDraftTitle('');
-                setCreateError(undefined);
-              }}
-            >
-              <CloseIcon />
-            </button>
           </form>
         )}
 

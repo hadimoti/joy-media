@@ -11,7 +11,7 @@
 
 ## 1. Executive summary
 
-**JOY Studio** (product brand) is the CapCut-like browser editor shipped as **JOY Media** (repo/API/deploy names). The live surface is `editor-web` behind an independent OTP login gate, docked panels via Dockview, short-form default composition **1080×1920**, plus two fullscreen studio overlays (Motion Studio, Effect Studio).
+**JOY Studio** (product brand) is the CapCut-like browser editor shipped as **JOY Media** (repo/API/deploy names). The live surface is `editor-web` behind an independent OTP login gate, docked panels via Dockview, default composition for new projects **1920×1080** (YouTube 16:9; the New project form offers other formats), plus two fullscreen studio overlays (Motion Studio, Effect Studio).
 
 **Joy Code** (`AgentPanel`, dock id `agent`) looks like a chat composer but is **not** a live LLM today. It routes slash/keyword intents into `@joy-media/agent-tools` plans, dry-runs them, and applies via `runPlanAtomically` on the same timeline command bus as human edits. Free-form NL, KiloCode transport, and **MCP are unwired** (zero MCP references in the repo).
 
@@ -65,15 +65,15 @@ flowchart LR
 
 ### 2.1 Positioning & surfaces
 
-| Layer                | Reality                                                                                               |
-| -------------------- | ----------------------------------------------------------------------------------------------------- |
-| Brand in UI          | **Joy Studio** / **JOY Studio** (login lockup, menubar, Joy Code logos)                               |
-| Repo / API / systemd | Still **joy-media** (`<server-path>/joy-media/repo`, `<server-path>/joy-media/api.env`)               |
-| Domain               | Canonical **`joyst.ir`** / `www.joyst.ir`; `media.joyteam.ir` → 301 to joyst.ir                       |
-| First paint          | Project library gate (`ProjectLibrary.tsx`) then CapCut-tile Dockview workspace                       |
-| Auth                 | Independent allow-list OTP (Gmail / Telegram / Token) — ADR-0017 login                                |
-| Composition default  | `DEFAULT_COMPOSITION_SIZE = { width: 1080, height: 1920 }` in `editor-project.ts`                     |
-| Design system        | `DESIGN.md` — neutral gray CapCut shell, self-hosted Fontsource OFL typography, amber accent scarcity |
+| Layer                | Reality                                                                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Brand in UI          | **Joy Studio** / **JOY Studio** (login lockup, menubar, Joy Code logos)                                                               |
+| Repo / API / systemd | Still **joy-media** (`<server-path>/joy-media/repo`, `<server-path>/joy-media/api.env`)                                               |
+| Domain               | Canonical **`joyst.ir`** / `www.joyst.ir`; `media.joyteam.ir` → 301 to joyst.ir                                                       |
+| First paint          | Project library gate (`ProjectLibrary.tsx`) then CapCut-tile Dockview workspace                                                       |
+| Auth                 | Independent allow-list OTP (Gmail / Telegram / Token) — ADR-0017 login                                                                |
+| Composition default  | `DEFAULT_COMPOSITION_SIZE = { width: 1920, height: 1080 }` in `editor-project.ts` (new projects only; opening keeps the saved canvas) |
+| Design system        | `DESIGN.md` — neutral gray CapCut shell, self-hosted Fontsource OFL typography, amber accent scarcity                                 |
 
 Product docs that matter: `DESIGN.md`, `STATE.md`, `ARCHITECTURE_SUMMARY.md`, `docs/adr/*`, `AGENTIC_EDITING_NEXT_AGENT.md`, `JOY_MEDIA_UNIFIED_DATA_TIMELINE_AND_AGENT_FLOW_PLAN.md`.
 
@@ -901,7 +901,7 @@ Mark which issues are blocked on ADR decisions.
 | `apps/editor-web/src/App.tsx`                                                                         | Panel factory; `motionStudioSceneId`; `effectStudioSession`; context openers |
 | `apps/editor-web/src/workspace.ts` → `PANEL_IDS`                                                      | Panel registry                                                               |
 | `apps/editor-web/src/dock-layout.ts` → `EditorViewMode`, `verticalDockLayout`, `widescreenDockLayout` | Layout seeds                                                                 |
-| `apps/editor-web/src/editor-project.ts` → `DEFAULT_COMPOSITION_SIZE`                                  | 1080×1920                                                                    |
+| `apps/editor-web/src/editor-project.ts` → `DEFAULT_COMPOSITION_SIZE`                                  | 1920×1080 for new projects (opened projects keep their saved canvas)         |
 | `apps/editor-web/src/LoginGate.tsx`                                                                   | Joy Studio login gate                                                        |
 | `apps/editor-web/src/ProjectLibrary.tsx`                                                              | First-paint library                                                          |
 
