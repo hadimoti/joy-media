@@ -177,19 +177,22 @@ export function createGlTransitionFilter(
     },
     setParams(params: Readonly<Record<string, TransitionParamValue>>): void {
       if (uniforms?.uniforms === undefined) return;
+      // Vectors: re-resolve every vector uniform against the catalogue defaults on every update,
+      // so a component (or whole override) that is no longer in `params` returns to its default
+      // instead of keeping the last value written into the reused filter (T-V08 review 2).
+      for (const uniform of resolveTransitionUniforms(shaderId, params)) {
+        if (uniform.type === 'float' || typeof uniform.value === 'number') continue;
+        uniform.value.forEach((item, index) => writeComponent(uniform.name, index, item));
+      }
+      // Floats: unchanged, only the keys present in `params` are written.
       for (const [key, value] of Object.entries(params)) {
-        const current = uniforms.uniforms[key];
-        if (Array.isArray(value)) {
-          value.forEach((item, index) => writeComponent(key, index, item));
-          continue;
-        }
         if (typeof value !== 'number') continue;
         const component = parseTransitionComponentKey(key);
         if (component !== undefined && typeof uniforms.uniforms[component.name] !== 'number') {
-          writeComponent(component.name, component.index, value);
-        } else if (current === undefined || typeof current === 'number') {
-          uniforms.uniforms[key] = value;
+          continue;
         }
+        const current = uniforms.uniforms[key];
+        if (current === undefined || typeof current === 'number') uniforms.uniforms[key] = value;
       }
     },
     destroy(): void {
