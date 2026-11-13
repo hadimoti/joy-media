@@ -373,6 +373,63 @@ describe('importDroppedMediaFiles', () => {
     }
   });
 
+  it('does not cache or add an asset to the timeline when cancelled during the import await', async () => {
+    const dropped = installDroppedFileBridge(batch);
+    const controller = new AbortController();
+    const file = new File(['bytes'], 'clip.mp4', { type: 'video/mp4' });
+    const importedAsset = browserAsset({
+      id: 'asset-1',
+      kind: 'video',
+      displayName: 'clip.mp4',
+      sha256: 'a'.repeat(64),
+      bytes: file.size,
+      descriptor: { mimeType: 'video/mp4' },
+      locations: [],
+    });
+    let resolveImport!: (asset: BrowserAsset) => void;
+    let signalImportStarted!: () => void;
+    const pendingImport = new Promise<BrowserAsset>((resolve) => {
+      resolveImport = resolve;
+    });
+    const importStarted = new Promise<void>((resolve) => {
+      signalImportStarted = resolve;
+    });
+    const importDroppedAsset = vi.fn(() => {
+      signalImportStarted();
+      return pendingImport;
+    });
+    const cancelDroppedImport = vi.fn(async () => undefined);
+    const cache = { putFromVerifiedDesktopImport: vi.fn(async () => undefined) };
+    const onImported = vi.fn(async () => undefined);
+    try {
+      const importing = importDroppedMediaFiles({
+        projectId: 'project-1',
+        projectTitle: 'Project',
+        files: [file],
+        signal: controller.signal,
+        client: {
+          ensureProject: vi.fn(async () => undefined),
+          importDroppedAsset,
+          cancelDroppedImport,
+        },
+        originalAssetCache: cache,
+        onImported,
+      });
+
+      await importStarted;
+      controller.abort();
+      resolveImport(importedAsset);
+      const result = await importing;
+
+      expect(result).toMatchObject({ assets: [], cancelled: true });
+      expect(cancelDroppedImport).toHaveBeenCalledWith(ticket.id);
+      expect(cache.putFromVerifiedDesktopImport).not.toHaveBeenCalled();
+      expect(onImported).not.toHaveBeenCalled();
+    } finally {
+      dropped.restore();
+    }
+  });
+
   it('reports file name, batch count, percentage, and progress from the main-process stream', async () => {
     const dropped = installDroppedFileBridge(batch);
     const file = new File(['bytes'], 'clip.mp4', { type: 'video/mp4' });

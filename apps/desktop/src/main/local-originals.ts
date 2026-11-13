@@ -26,7 +26,9 @@ export interface LocalOriginalWriter {
   ): Promise<StoreOriginalResult>;
   /** Checks a finished chunked upload against its registration and commits it under its checksum. */
   finishOriginalUpload(assetId: string): Promise<StoreOriginalResult>;
-  /** Drops an unfinished chunked upload. Safe to call when there is none. */
+  /** Marks a finished upload as retained after its caller commits the surrounding operation. */
+  commitOriginalUpload(assetId: string): void;
+  /** Drops an unfinished upload, or rolls back a just-finished upload not yet committed by its caller. */
   abortOriginalUpload(assetId: string): Promise<void>;
   /** Drops every unfinished chunked upload and its temporary file. Called when the app quits. */
   abortAllOriginalUploads(): Promise<void>;
@@ -56,6 +58,7 @@ export function createLocalOriginalWriter(options: {
   readonly assets: SqliteLocalAssetStore;
 }): LocalOriginalWriter {
   const uploads = new Map<string, PartialUpload>();
+  const finishedUploads = new Map<string, { readonly path: string; readonly created: boolean }>();
   // The last step queued for each asset, so pieces, finish and abort for one asset never interleave.
   const queues = new Map<string, Promise<unknown>>();
 
@@ -186,21 +189,35 @@ export function createLocalOriginalWriter(options: {
           return { ok: false, error: 'Original does not match its registered checksum' };
         }
         const target = join(options.directory, `${sha256}.bin`);
+        let createdTarget = false;
         try {
           // The name is the checksum of the content, so a file already there holds these bytes.
           if (await exists(target)) await unlink(upload.path);
-          else await rename(upload.path, target);
+          else {
+            await rename(upload.path, target);
+            createdTarget = true;
+          }
         } catch {
           await unlink(upload.path).catch(() => undefined);
           return { ok: false, error: STORE_FAILED };
         }
         options.assets.markStored(assetId, target);
+        finishedUploads.set(assetId, { path: target, created: createdTarget });
         return { ok: true };
       });
     },
 
+    commitOriginalUpload(assetId) {
+      finishedUploads.delete(assetId);
+    },
+
     abortOriginalUpload(assetId) {
-      return inOrder<void>(assetId, () => discardUpload(assetId));
+      return inOrder<void>(assetId, async () => {
+        await discardUpload(assetId);
+        const finished = finishedUploads.get(assetId);
+        finishedUploads.delete(assetId);
+        if (finished?.created) await unlink(finished.path).catch(() => undefined);
+      });
     },
 
     async abortAllOriginalUploads() {

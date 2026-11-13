@@ -26,6 +26,17 @@ describe('resolveDroppedPath', () => {
     }
   });
 
+  const windowsSpecific = process.platform === 'win32' ? it : it.skip;
+  windowsSpecific.each([
+    ['an alternate data stream', 'C:\\Media\\clip.mp4:stream'],
+    ['an unnamed alternate data stream', 'C:\\Media\\clip.mp4::$DATA'],
+    ['a trailing dot', 'C:\\Media\\clip.mp4.'],
+    ['a trailing space', 'C:\\Media\\clip.mp4 '],
+    ['a reserved device name', 'C:\\Media\\CON.mp4'],
+  ])('Windows-only path check: rejects %s (requires Win32 path semantics)', (_label, value) => {
+    expect(fileBoundary.isSafeLocalPathSyntax(value)).toBe(false);
+  });
+
   it.each([
     ['a UNC path', '\\\\server\\share\\clip.mp4'],
     ['a device path', '\\\\.\\C:\\clip.mp4'],

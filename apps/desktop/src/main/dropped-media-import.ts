@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { access, readdir } from 'node:fs/promises';
+import { access, open, readdir, realpath, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import {
   resolveDroppedPath,
@@ -80,10 +79,18 @@ interface DroppedMediaImportDeps {
     value: string,
     source?: DroppedPathSource,
   ) => Promise<ResolvedDroppedPath>;
+  readonly fileSystem?: {
+    open(filePath: string, flags: 'r'): Promise<FileHandle>;
+    realpath(filePath: string): Promise<string>;
+  };
   readonly readDirectory?: (
     directory: string,
   ) => Promise<readonly { readonly name: string; readonly isFile: boolean }[]>;
-  readonly readChunks?: (filePath: string, signal: AbortSignal) => AsyncIterable<Uint8Array>;
+  readonly readChunks?: (
+    file: FileHandle,
+    signal: AbortSignal,
+    expectedBytes: number,
+  ) => AsyncIterable<Uint8Array>;
   readonly fileExists?: (filePath: string) => Promise<boolean>;
   readonly onProgress?: (progress: DroppedMediaProgress) => void;
 }
@@ -120,11 +127,27 @@ const STREAM_CHUNK_BYTES = 1024 * 1024;
 const DROPPED_TICKET_TTL_MS = 2 * 60 * 1000;
 
 async function* defaultReadChunks(
-  filePath: string,
+  file: FileHandle,
   signal: AbortSignal,
+  expectedBytes: number,
 ): AsyncIterable<Uint8Array> {
-  const stream = createReadStream(filePath, { highWaterMark: STREAM_CHUNK_BYTES, signal });
+  const stream = file.createReadStream({
+    autoClose: false,
+    end: expectedBytes - 1,
+    highWaterMark: STREAM_CHUNK_BYTES,
+    signal,
+    start: 0,
+  });
   for await (const chunk of stream) yield chunk;
+}
+
+function sameRealPath(left: string, right: string): boolean {
+  const normalize = process.platform === 'win32' ? path.win32.normalize : path.normalize;
+  const normalizedLeft = normalize(left);
+  const normalizedRight = normalize(right);
+  return process.platform === 'win32'
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
 }
 
 function defaultReadDirectory(
@@ -201,6 +224,7 @@ export function createDroppedMediaImportService(
   deps: DroppedMediaImportDeps,
 ): DroppedMediaImportService {
   const resolvePath = deps.resolveDroppedPath ?? resolveDroppedPath;
+  const fileSystem = deps.fileSystem ?? { open, realpath };
   const readDirectory = deps.readDirectory ?? defaultReadDirectory;
   const readChunks = deps.readChunks ?? defaultReadChunks;
   const fileExists = deps.fileExists ?? defaultFileExists;
@@ -361,8 +385,19 @@ export function createDroppedMediaImportService(
       active.set(ticketId, controller);
       let uploadStarted = false;
       let committed = false;
+      let originalFinished = false;
+      let openedFile: FileHandle | undefined;
       let assetId: string | undefined;
       let registeredAssetId: string | undefined;
+      const addToLibrary = async (id: string) => {
+        if (isCancelled(controller.signal)) throw cancellationError();
+        const result = await deps.library?.addAsset(id);
+        if (isCancelled(controller.signal)) {
+          if (result?.ok) await deps.library?.removeEntry(id).catch(() => undefined);
+          throw cancellationError();
+        }
+        return result;
+      };
       try {
         const info = await resolvePath(sourcePath, 'registered');
         const mimeType = pending.mimeType;
@@ -374,20 +409,44 @@ export function createDroppedMediaImportService(
           return { ok: false, error: 'The selected media file is too large' };
         }
 
+        if (isCancelled(controller.signal)) throw cancellationError();
+        openedFile = await fileSystem.open(sourcePath, 'r');
+        const openedInfo = await openedFile.stat();
+        if (!openedInfo.isFile()) {
+          return { ok: false, error: 'Dropped media ticket is invalid' };
+        }
+        if (openedInfo.size < 1) return { ok: false, error: 'Selected media file is empty' };
+        if (openedInfo.size > MAX_LOCAL_ORIGINAL_BYTES) {
+          return { ok: false, error: 'The selected media file is too large' };
+        }
+        if (openedInfo.size !== info.size) {
+          return { ok: false, error: 'The selected media file changed during import' };
+        }
+        const openedRealPath = await fileSystem.realpath(sourcePath);
+        // Native realpath expands a Windows 8.3 alias to the same long path, so a short-name drop is valid when it identifies this file.
+        if (!sameRealPath(openedRealPath, info.path)) {
+          return { ok: false, error: 'The selected media file changed during import' };
+        }
+        if (isCancelled(controller.signal)) throw cancellationError();
+
         const hash = createHash('sha256');
         let hashedBytes = 0;
-        for await (const piece of readChunks(sourcePath, controller.signal)) {
+        for await (const piece of readChunks(openedFile, controller.signal, openedInfo.size)) {
           if (isCancelled(controller.signal)) throw cancellationError();
           const bytes = Buffer.from(piece.buffer, piece.byteOffset, piece.byteLength);
           hashedBytes += bytes.byteLength;
-          if (hashedBytes > info.size || hashedBytes > MAX_LOCAL_ORIGINAL_BYTES) {
+          if (hashedBytes > openedInfo.size || hashedBytes > MAX_LOCAL_ORIGINAL_BYTES) {
             return { ok: false, error: 'The selected media file changed during import' };
           }
           hash.update(bytes);
-          reportProgress({ ticketId, stage: 'hash', ratio: Math.min(1, hashedBytes / info.size) });
+          reportProgress({
+            ticketId,
+            stage: 'hash',
+            ratio: Math.min(1, hashedBytes / openedInfo.size),
+          });
         }
         if (isCancelled(controller.signal)) throw cancellationError();
-        if (hashedBytes !== info.size) {
+        if (hashedBytes !== openedInfo.size) {
           return { ok: false, error: 'The selected media file changed during import' };
         }
         const sha256 = hash.digest('hex');
@@ -401,13 +460,18 @@ export function createDroppedMediaImportService(
           const existing = deps.assets.get(importAssetId);
           if (
             existing !== undefined &&
-            (existing.sha256 !== sha256 || existing.bytes !== info.size)
+            (existing.sha256 !== sha256 || existing.bytes !== openedInfo.size)
           ) {
             return { ok: false, error: 'Asset ID is already registered with other content' };
           }
 
           if (existing?.storedPath !== undefined && (await fileExists(existing.storedPath))) {
-            const libraryResult = await deps.library?.addAsset(importAssetId);
+            const libraryResult = await addToLibrary(importAssetId);
+            if (isCancelled(controller.signal)) {
+              if (libraryResult?.ok)
+                await deps.library?.removeEntry(importAssetId).catch(() => undefined);
+              throw cancellationError();
+            }
             if (libraryResult !== undefined && !libraryResult.ok) {
               return { ok: false, error: 'The asset library could not be updated' };
             }
@@ -418,7 +482,7 @@ export function createDroppedMediaImportService(
                 kind: existing.kind as 'video' | 'audio' | 'image',
                 displayName: existing.displayName,
                 sha256,
-                bytes: info.size,
+                bytes: openedInfo.size,
                 descriptor: existing.descriptor ?? descriptor,
                 deduplicated: true,
               },
@@ -430,7 +494,7 @@ export function createDroppedMediaImportService(
             kind,
             displayName,
             sha256,
-            bytes: info.size,
+            bytes: openedInfo.size,
             descriptor,
           });
           if (registration.kind === 'conflict') {
@@ -439,7 +503,7 @@ export function createDroppedMediaImportService(
           registeredAssetId = importAssetId;
 
           let written = 0;
-          for await (const piece of readChunks(sourcePath, controller.signal)) {
+          for await (const piece of readChunks(openedFile!, controller.signal, openedInfo.size)) {
             if (isCancelled(controller.signal)) throw cancellationError();
             const bytes = Buffer.from(piece.buffer, piece.byteOffset, piece.byteLength);
             for (let offset = 0; offset < bytes.byteLength; offset += MAX_ORIGINAL_CHUNK_BYTES) {
@@ -456,20 +520,35 @@ export function createDroppedMediaImportService(
               );
               if (!result.ok) return { ok: false, error: 'The original could not be stored' };
               written += chunk.byteLength;
-              reportProgress({ ticketId, stage: 'store', ratio: Math.min(1, written / info.size) });
+              reportProgress({
+                ticketId,
+                stage: 'store',
+                ratio: Math.min(1, written / openedInfo.size),
+              });
             }
           }
           if (isCancelled(controller.signal)) throw cancellationError();
-          if (written !== info.size) {
+          if (written !== openedInfo.size) {
             return { ok: false, error: 'The selected media file changed during import' };
           }
           const finished = await deps.originals.finishOriginalUpload(importAssetId);
-          if (!finished.ok) return { ok: false, error: 'The original could not be stored' };
-          committed = true;
-          const libraryResult = await deps.library?.addAsset(importAssetId);
+          if (!finished.ok) {
+            if (isCancelled(controller.signal)) throw cancellationError();
+            return { ok: false, error: 'The original could not be stored' };
+          }
+          originalFinished = true;
+          if (isCancelled(controller.signal)) throw cancellationError();
+          const libraryResult = await addToLibrary(importAssetId);
+          if (isCancelled(controller.signal)) {
+            if (libraryResult?.ok)
+              await deps.library?.removeEntry(importAssetId).catch(() => undefined);
+            throw cancellationError();
+          }
           if (libraryResult !== undefined && !libraryResult.ok) {
             return { ok: false, error: 'The asset library could not be updated' };
           }
+          deps.originals.commitOriginalUpload(importAssetId);
+          committed = true;
           return {
             ok: true,
             data: {
@@ -477,7 +556,7 @@ export function createDroppedMediaImportService(
               kind,
               displayName,
               sha256,
-              bytes: info.size,
+              bytes: openedInfo.size,
               descriptor,
               deduplicated: false,
             },
@@ -491,8 +570,13 @@ export function createDroppedMediaImportService(
             : 'The selected media file could not be imported',
         };
       } finally {
+        await openedFile?.close().catch(() => undefined);
         if (uploadStarted && !committed && assetId !== undefined) {
-          await deps.originals.abortOriginalUpload(assetId).catch(() => undefined);
+          if (originalFinished && !isCancelled(controller.signal)) {
+            deps.originals.commitOriginalUpload(assetId);
+          } else {
+            await deps.originals.abortOriginalUpload(assetId).catch(() => undefined);
+          }
         }
         if (isCancelled(controller.signal) && !committed && registeredAssetId !== undefined) {
           await deps.library?.removeEntry(registeredAssetId).catch(() => undefined);

@@ -259,7 +259,10 @@ export async function importDroppedMediaFiles(
           break;
         }
         const imported = await client.importDroppedAsset(options.projectId, ticket.id, descriptor);
-        assets.push(imported);
+        if (options.signal?.aborted) {
+          cancelled = true;
+          break;
+        }
         if (file !== undefined) {
           await cache
             .putFromVerifiedDesktopImport(
@@ -273,6 +276,11 @@ export async function importDroppedMediaFiles(
             )
             .catch(() => undefined);
         }
+        if (options.signal?.aborted) {
+          cancelled = true;
+          break;
+        }
+        assets.push(imported);
         await options.onImported?.(imported, ticket);
         reportTicketProgress(ticket, index, 1, `${activeName} stored in the local media library.`);
       } catch (error) {

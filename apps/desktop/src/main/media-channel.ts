@@ -653,11 +653,15 @@ export function createMediaChannelHandlers(
     if (request === undefined) return { ok: false, error: 'Invalid media request' };
     const result = await deps.originals.finishOriginalUpload(request.assetId);
     if (!result.ok) return { ok: false, error: result.error };
-    if (deps.library !== undefined) {
-      const libraryResult = await deps.library.addAsset(request.assetId);
-      if (!libraryResult.ok) return { ok: false, error: libraryResult.error };
+    try {
+      if (deps.library !== undefined) {
+        const libraryResult = await deps.library.addAsset(request.assetId);
+        if (!libraryResult.ok) return { ok: false, error: libraryResult.error };
+      }
+      return { ok: true, data: { assetId: request.assetId } };
+    } finally {
+      await deps.originals.commitOriginalUpload(request.assetId);
     }
-    return { ok: true, data: { assetId: request.assetId } };
   };
 
   const abortOriginalUpload = async (payload: unknown): Promise<MediaResult> => {

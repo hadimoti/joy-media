@@ -80,6 +80,9 @@ export function isSafeLocalPathSyntax(value: string): boolean {
     if (!/^[A-Za-z]:[\\/]/.test(value)) return false;
     const components = value.replaceAll('/', '\\').split('\\').filter(Boolean).slice(1);
     return !components.some((component) => {
+      if (component.includes(':') || component.endsWith('.') || component.endsWith(' ')) {
+        return true;
+      }
       const normalized = component.replace(/[ .]+$/g, '');
       const stem = normalized.split('.')[0] ?? '';
       return /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])$/i.test(stem);

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { FileHandle } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import { createFileRegistry } from './file-registry.js';
 import {
@@ -13,20 +14,47 @@ interface FakeFileInfo {
   readonly bytes?: Uint8Array;
 }
 
+interface TestFileSystem {
+  readonly open: (filePath: string) => Promise<FileHandle>;
+  readonly realpath: (filePath: string) => Promise<string>;
+}
+
 function makeHarness(
   options: {
     readonly onProgress?: (ticketId: string, stage: string) => void;
+    readonly onFinished?: (assetId: string) => void;
     readonly libraryError?: string;
+    readonly fileSystem?: TestFileSystem;
   } = {},
 ) {
   const files = new Map<string, FakeFileInfo>();
   const assets = new Map<string, LocalAssetRegistration & { readonly storedPath?: string }>();
   const partial = new Map<string, Uint8Array>();
   const readPaths: string[] = [];
+  const readHandles: FileHandle[] = [];
+  const openedPaths: string[] = [];
+  const pathByHandle = new WeakMap<object, string>();
   const storedAssetIds: string[] = [];
   const abortedAssetIds: string[] = [];
+  const libraryAddedAssetIds: string[] = [];
   let ticketSequence = 0;
   const ticketRegistry = createFileRegistry(() => `ticket-${++ticketSequence}`);
+  const fileSystem = options.fileSystem ?? {
+    open: async (filePath: string) => {
+      openedPaths.push(filePath);
+      const found = files.get(filePath);
+      const handle = {
+        stat: async () => ({
+          isFile: () => found?.kind === 'file',
+          size: found?.bytes?.byteLength ?? 0,
+        }),
+        close: vi.fn(async () => undefined),
+      } as unknown as FileHandle;
+      pathByHandle.set(handle as object, filePath);
+      return handle;
+    },
+    realpath: async (filePath: string) => filePath,
+  };
   const originals: LocalOriginalWriter = {
     storeOriginal: vi.fn(async (_assetId: string, _bytes: Uint8Array) => ({
       ok: false,
@@ -46,8 +74,10 @@ function makeHarness(
       const asset = assets.get(assetId);
       if (asset !== undefined) assets.set(assetId, { ...asset, storedPath: `stored:${assetId}` });
       storedAssetIds.push(assetId);
+      options.onFinished?.(assetId);
       return { ok: true as const };
     }),
+    commitOriginalUpload: vi.fn(() => undefined),
     abortOriginalUpload: vi.fn(async (assetId: string) => {
       partial.delete(assetId);
       abortedAssetIds.push(assetId);
@@ -92,11 +122,14 @@ function makeHarness(
       };
     },
     originals,
+    fileSystem,
     library: {
-      addAsset: async () =>
-        options.libraryError === undefined
+      addAsset: async (assetId: string) => {
+        libraryAddedAssetIds.push(assetId);
+        return options.libraryError === undefined
           ? { ok: true as const }
-          : { ok: false as const, error: options.libraryError },
+          : { ok: false as const, error: options.libraryError };
+      },
       removeEntry: async () => ({ removed: true }),
     },
     readDirectory: async (path) => {
@@ -111,9 +144,12 @@ function makeHarness(
           isDirectory: files.get(prefix + name)?.kind === 'directory',
         }));
     },
-    readChunks: async function* (path) {
-      readPaths.push(path);
-      const bytes = files.get(path)?.bytes ?? new Uint8Array();
+    readChunks: async function* (handle) {
+      readHandles.push(handle);
+      const sourcePath = pathByHandle.get(handle as object);
+      if (sourcePath === undefined) throw new Error('test file handle is not registered');
+      readPaths.push(sourcePath);
+      const bytes = files.get(sourcePath)?.bytes ?? new Uint8Array();
       const midpoint = Math.max(1, Math.floor(bytes.byteLength / 2));
       yield bytes.subarray(0, midpoint);
       yield bytes.subarray(midpoint);
@@ -126,8 +162,11 @@ function makeHarness(
     assets,
     partial,
     readPaths,
+    readHandles,
+    openedPaths,
     storedAssetIds,
     abortedAssetIds,
+    libraryAddedAssetIds,
     originals,
     service,
   };
@@ -298,6 +337,36 @@ describe('dropped media import', () => {
     expect(JSON.stringify(result)).not.toContain('C:\\private');
   });
 
+  it('refuses a path replaced between validation and opening', async () => {
+    const replacementPath = 'C:\\drop\\replacement.mp4';
+    const handle = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
+      close: vi.fn(async () => undefined),
+    } as unknown as FileHandle;
+    const fileSystem: TestFileSystem = {
+      open: vi.fn(async () => handle),
+      realpath: vi.fn(async () => replacementPath),
+    };
+    const harness = makeHarness({ fileSystem });
+    harness.files.set('C:\\drop\\clip.mp4', {
+      kind: 'file',
+      bytes: new Uint8Array([1, 2, 3]),
+    });
+    const batch = await harness.service.prepareDroppedPaths([
+      { path: 'C:\\drop\\clip.mp4', name: 'clip.mp4' },
+    ]);
+
+    const result = await harness.service.importTicket(batch.tickets[0]!.id);
+
+    expect(result).toMatchObject({ ok: false });
+    expect(fileSystem.open).toHaveBeenCalledOnce();
+    expect(fileSystem.realpath).toHaveBeenCalledWith('C:\\drop\\clip.mp4');
+    expect(handle.stat).toHaveBeenCalledOnce();
+    expect(handle.close).toHaveBeenCalledOnce();
+    expect(harness.readHandles).toEqual([]);
+    expect(harness.originals.appendOriginalChunk).not.toHaveBeenCalled();
+  });
+
   it('cancels an in-progress stream and removes its partial original', async () => {
     const serviceRef: { current?: DroppedMediaImportService } = {};
     const harness = makeHarness({
@@ -325,6 +394,27 @@ describe('dropped media import', () => {
     expect(harness.assets.size).toBe(0);
   });
 
+  it('cancels after finishing the original but before writing the library catalogue', async () => {
+    const serviceRef: { current?: DroppedMediaImportService } = {};
+    const harness = makeHarness({
+      onFinished: () => {
+        void serviceRef.current?.cancel('ticket-1');
+      },
+    });
+    serviceRef.current = harness.service;
+    harness.files.set('C:\\drop\\clip.mp4', { kind: 'file', bytes: new Uint8Array([4, 5, 6]) });
+    const batch = await harness.service.prepareDroppedPaths([
+      { path: 'C:\\drop\\clip.mp4', name: 'clip.mp4' },
+    ]);
+
+    const result = await harness.service.importTicket(batch.tickets[0]!.id);
+
+    expect(result).toEqual({ ok: false, error: 'Import cancelled' });
+    expect(harness.libraryAddedAssetIds).toEqual([]);
+    expect(harness.abortedAssetIds).toHaveLength(1);
+    expect(harness.assets.size).toBe(0);
+  });
+
   it('preserves Persian names and absolute paths longer than MAX_PATH', async () => {
     const harness = makeHarness();
     const directory = new Array(15).fill('long-directory-segment').join('\\');
@@ -338,5 +428,7 @@ describe('dropped media import', () => {
     expect(batch.tickets[0]).toMatchObject({ displayName: 'موسیقی.mp3', mediaKind: 'audio' });
     expect(result.ok).toBe(true);
     expect(harness.readPaths).toContain(path);
+    expect(harness.openedPaths).toEqual([path]);
+    expect(harness.readHandles[0]).toBe(harness.readHandles[1]);
   });
 });
