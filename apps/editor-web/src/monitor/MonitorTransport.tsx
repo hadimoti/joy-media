@@ -1,4 +1,5 @@
-import { useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
+import type { PopupControl } from '../popup-manager.js';
 import {
   MonitorAspectRatioSelector,
   type MonitorAspectRatio,
@@ -19,9 +20,7 @@ import { MONITOR_ZOOM_PRESETS, formatZoomPercent, parseZoomPercent } from './mon
 
 /** Props are the monitor's own state and setters, passed through unchanged. */
 export interface MonitorTransportProps {
-  readonly transportRef: RefObject<HTMLDivElement | null>;
-  readonly zoomDrawerOpen: boolean;
-  readonly setZoomDrawerOpen: Dispatch<SetStateAction<boolean>>;
+  readonly zoomDrawer: PopupControl;
   /** True while the view follows the panel size. */
   readonly zoomFit: boolean;
   /** The zoom shown now (1 = 100 %), also while Fit. */
@@ -51,9 +50,7 @@ export interface MonitorTransportProps {
 
 /** The bar under the monitor: zoom drawer, play controls, quality, renderer, ratio. */
 export function MonitorTransport({
-  transportRef,
-  zoomDrawerOpen,
-  setZoomDrawerOpen,
+  zoomDrawer,
   zoomFit,
   zoom,
   onZoomFit,
@@ -91,8 +88,8 @@ export function MonitorTransport({
     onZoomSet(parsed);
   };
   return (
-    <div className="monitor-transport" ref={transportRef}>
-      {zoomDrawerOpen && (
+    <div className="monitor-transport" ref={zoomDrawer.rootRef}>
+      {zoomDrawer.open && (
         <div
           className="monitor-zoom-drawer"
           id="monitor-zoom-drawer"
@@ -106,7 +103,7 @@ export function MonitorTransport({
               className="monitor-transport-btn"
               aria-label="Close scale options"
               title="Close"
-              onClick={() => setZoomDrawerOpen(false)}
+              onClick={() => zoomDrawer.close()}
             >
               <CloseIcon />
             </button>
@@ -120,7 +117,7 @@ export function MonitorTransport({
               title="Fit the whole frame (Ctrl+0)"
               onClick={() => {
                 onZoomFit();
-                setZoomDrawerOpen(false);
+                zoomDrawer.close();
               }}
             >
               Fit
@@ -137,7 +134,7 @@ export function MonitorTransport({
                   title={preset === 1 ? `Zoom ${label} (Ctrl+1)` : `Zoom ${label}`}
                   onClick={() => {
                     onZoomSet(preset);
-                    setZoomDrawerOpen(false);
+                    zoomDrawer.close();
                   }}
                 >
                   {label}
@@ -168,7 +165,7 @@ export function MonitorTransport({
               data-guide="Full"
               onClick={() => {
                 toggleFullscreen();
-                setZoomDrawerOpen(false);
+                zoomDrawer.close();
               }}
             >
               <FullscreenIcon />
@@ -251,11 +248,11 @@ export function MonitorTransport({
           type="button"
           className="monitor-transport-btn"
           aria-label={`Preview scale (${zoomLabel})`}
-          aria-expanded={zoomDrawerOpen}
+          aria-expanded={zoomDrawer.open}
           aria-controls="monitor-zoom-drawer"
-          aria-pressed={zoomDrawerOpen}
+          aria-pressed={zoomDrawer.open}
           data-guide="Scale"
-          onClick={() => setZoomDrawerOpen((open) => !open)}
+          onClick={(event) => zoomDrawer.toggle(event.currentTarget)}
         >
           <ZoomInIcon />
         </button>

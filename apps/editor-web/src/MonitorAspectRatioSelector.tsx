@@ -1,4 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
+import { usePopup } from './popup-manager.js';
+import { POPUP_IDS } from './popup-ids.js';
 import { AspectRatioIcon, CloseIcon } from './icons.js';
 
 /**
@@ -111,7 +113,9 @@ export function MonitorAspectRatioSelector({
   authoredHeight,
 }: MonitorAspectRatioSelectorProps) {
   const [uncontrolledAspectRatio, setUncontrolledAspectRatio] = useState(defaultAspectRatio);
-  const [open, setOpen] = useState(false);
+  // The "Canvas format" drawer is one popup (OB-18): outside click and Escape close it.
+  const popup = usePopup(POPUP_IDS.canvasFormat);
+  const open = popup.open;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuId = useId();
@@ -126,24 +130,6 @@ export function MonitorAspectRatioSelector({
           ? 'Landscape'
           : 'Portrait';
 
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      setOpen(false);
-      triggerRef.current?.focus();
-    };
-    window.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
-
   const focusOption = (nextIndex: number) => {
     const options = rootRef.current?.querySelectorAll<HTMLButtonElement>(
       '[data-monitor-aspect-ratio-option]',
@@ -154,7 +140,7 @@ export function MonitorAspectRatioSelector({
   };
 
   const openMenu = () => {
-    setOpen(true);
+    popup.show(triggerRef.current);
     window.requestAnimationFrame(() => {
       const currentIndex = MONITOR_ASPECT_RATIO_PRESETS.findIndex(
         (preset) => preset.id === aspectRatio,
@@ -166,7 +152,7 @@ export function MonitorAspectRatioSelector({
   const selectAspectRatio = (nextAspectRatio: MonitorAspectRatio) => {
     if (selectedAspectRatio === undefined) setUncontrolledAspectRatio(nextAspectRatio);
     onAspectRatioChange?.(nextAspectRatio);
-    setOpen(false);
+    popup.close();
     window.requestAnimationFrame(() => triggerRef.current?.focus());
   };
 
@@ -190,14 +176,19 @@ export function MonitorAspectRatioSelector({
         break;
       case 'Escape':
         event.preventDefault();
-        setOpen(false);
-        triggerRef.current?.focus();
+        popup.close();
         break;
     }
   };
 
   return (
-    <div className="monitor-aspect-ratio" ref={rootRef}>
+    <div
+      className="monitor-aspect-ratio"
+      ref={(element) => {
+        rootRef.current = element;
+        popup.rootRef(element);
+      }}
+    >
       <button
         ref={triggerRef}
         type="button"
@@ -209,7 +200,7 @@ export function MonitorAspectRatioSelector({
         aria-pressed={open}
         data-guide="Ratio"
         title={`Canvas format: ${currentLabel}${authoredWidth !== undefined && authoredHeight !== undefined ? ` · ${authoredWidth}×${authoredHeight}` : ''}`}
-        onClick={() => (open ? setOpen(false) : openMenu())}
+        onClick={() => (open ? popup.close() : openMenu())}
         onKeyDown={(event) => {
           if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
           event.preventDefault();
@@ -248,8 +239,7 @@ export function MonitorAspectRatioSelector({
             aria-label="Close aspect ratio options"
             title="Close"
             onClick={() => {
-              setOpen(false);
-              triggerRef.current?.focus();
+              popup.close();
             }}
           >
             <CloseIcon />

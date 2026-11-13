@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef } from 'react';
+import { usePopup } from './popup-manager.js';
+import { actionOverflowPopupId } from './popup-ids.js';
 
 export interface ActionOverflowMenuItem {
   readonly id: string;
@@ -16,23 +18,16 @@ export function ActionOverflowMenu({
   readonly label?: string;
   readonly items: readonly ActionOverflowMenuItem[];
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  // A panel-header menu is one popup among the app's popups (OB-18): opening
+  // another popup closes it, and outside click or Escape closes it.
+  const popupKey = useId();
+  const popup = usePopup(actionOverflowPopupId(popupKey));
+  const open = popup.open;
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    const close = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
     const keys = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setOpen(false);
-        triggerRef.current?.focus();
-        return;
-      }
       const buttons = [
         ...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
       ];
@@ -48,29 +43,26 @@ export function ActionOverflowMenu({
             : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
       buttons[next]?.focus();
     };
-    document.addEventListener('pointerdown', close);
     document.addEventListener('keydown', keys);
     window.setTimeout(
       () => menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus(),
       0,
     );
     return () => {
-      document.removeEventListener('pointerdown', close);
       document.removeEventListener('keydown', keys);
     };
   }, [open]);
 
   return (
-    <div className="action-overflow-menu" ref={rootRef}>
+    <div className="action-overflow-menu" ref={popup.rootRef}>
       <button
         type="button"
         className="icon-button icon-button-labeled action-overflow-trigger"
-        ref={triggerRef}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
         title={label}
-        onClick={() => setOpen((current) => !current)}
+        onClick={(event) => popup.toggle(event.currentTarget)}
       >
         <span aria-hidden="true">⋯</span>
         <span className="action-overflow-trigger-label">More</span>
@@ -88,8 +80,7 @@ export function ActionOverflowMenu({
               onClick={() => {
                 if (item.disabled) return;
                 item.onSelect();
-                setOpen(false);
-                triggerRef.current?.focus();
+                popup.close();
               }}
             >
               <span>{item.label}</span>

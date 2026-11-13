@@ -47,6 +47,7 @@ import type {
 } from '@joy-media/render-ir';
 import { toggleSelection, duplicateClipCommand } from '@joy-media/timeline-engine';
 import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-engine';
+import { validateH264ExportDimensions } from '@joy-media/job-protocol';
 import type {
   CommandTransaction,
   GraphTransaction,
@@ -91,6 +92,16 @@ import {
   canonicalStagedExportMimeType,
   createRenderExportJobPayload,
 } from './export-job-request.js';
+import { applyExportPresetSelection } from './export-format-actions.js';
+import {
+  EXPORT_PRESETS,
+  EXPORT_PRESET_MENU_IDS,
+  exportPresetMismatchMessage,
+  isExportPresetId,
+  reconcileExportPresetOnLoad,
+  resolveExportSettings,
+  type ExportPresetMismatch,
+} from './export-presets.js';
 import { inspectImageAnimation } from './animated-image-metadata.js';
 import {
   clearMediaSource,
@@ -301,7 +312,6 @@ import {
 } from './audio-session.js';
 import type { AudioState } from '@joy-media/commands';
 import { renderOfflineAudio } from '@joy-media/audio-core/offline';
-import type { ExportPresetId } from '@joy-media/project-schema';
 import {
   AgentPanel,
   type AgentPanelCommand,
@@ -376,6 +386,8 @@ import {
 } from './ui-preferences.js';
 import type { EditorUiPreferencesV2 } from './ui-preferences.js';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
+import { usePopup, usePopupManager, usePopupsClosedWhile } from './popup-manager.js';
+import { POPUP_IDS } from './popup-ids.js';
 import { workspacePresetLayout, workspacePresetLayoutKey } from './workspace-presets.js';
 import {
   DOCK_LAYOUT_KEY,
@@ -941,7 +953,15 @@ function EditorWorkspace({
   });
   const [timelineTrackFlags, setTimelineTrackFlags] = useState<readonly TimelineTrackView[]>([]);
   const [timelineAutoFit, setTimelineAutoFit] = useState(true);
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  // Header popups and the command palette share one open slot (OB-18): opening one closes the rest.
+  const {
+    openId: openPopupId,
+    open: openPopup,
+    close: closePopup,
+    toggle: togglePopup,
+  } = usePopupManager();
+  const paletteOpen = openPopupId === POPUP_IDS.commandPalette;
+  const paletteMenu = usePopup(POPUP_IDS.commandPalette);
   const [query, setQuery] = useState('');
   const [transcriptionError, setTranscriptionError] = useState<string>();
   const [exporting, setExporting] = useState(false);
@@ -976,17 +996,18 @@ function EditorWorkspace({
       .then((cache) => Promise.all(nonDownloadableIds.map((id) => cache.removeVerified(id))))
       .catch(() => undefined);
   }, [exportHistory]);
-  const [exportPreset, setExportPreset] = useState<ExportPresetId>('reels-1080');
+  const [exportPresetMismatch, setExportPresetMismatch] = useState<ExportPresetMismatch>();
+  const exportPresetLoadReconciledRef = useRef<string | undefined>(undefined);
   const [audioState, setAudioStateRaw] = useState<AudioState>(() =>
     loadAudioState(storage, projectId),
   );
   const [audioHydrated, setAudioHydrated] = useState(false);
-  const [processesOpen, setProcessesOpen] = useState(false);
+  const processesMenu = usePopup(POPUP_IDS.recentProcesses);
   const [processFilter, setProcessFilter] = useState<EditorUiPreferencesV2['processFilter']>(
     () => loadEditorUiPreferences(storage).processFilter,
   );
   const projectPackageInputRef = useRef<HTMLInputElement | null>(null);
-  const [exportPresetOpen, setExportPresetOpen] = useState(false);
+  const exportPresetMenu = usePopup(POPUP_IDS.exportPreset);
   const [stickerTick, setStickerTick] = useState(0);
   const [joyAgentAttachedAssets, setJoyAgentAttachedAssets] = useState<
     readonly JoyAgentAttachedAsset[]
@@ -1106,6 +1127,10 @@ function EditorWorkspace({
     }[]
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
+  // A dialog that opens closes every header popup and the palette (OB-18).
+  usePopupsClosedWhile(
+    keyboardShortcutsOpen || agentSettingsOpen || modelDrawerOpen || assetLibrarySettingsOpen,
+  );
   const [viewMode, setViewMode] = useState<EditorViewMode>(
     () => loadEditorUiPreferences(storage).viewMode,
   );
@@ -1118,7 +1143,6 @@ function EditorWorkspace({
   workspacePresetRef.current = workspacePreset;
   const [createTool, setCreateTool] = useState<FeatureToolId>('media');
   const [enhanceTool, setEnhanceTool] = useState<FeatureToolId>('effects');
-  const paletteRef = useRef<HTMLElement | null>(null);
   const [motionStudioSceneId, setMotionStudioSceneId] = useState<string | undefined>(undefined);
   const [effectStudioSession, setEffectStudioSession] = useState<
     { readonly recipeId: string; readonly objectId?: string } | undefined
@@ -1390,6 +1414,46 @@ function EditorWorkspace({
     sessionRef.current = new EditorSession(storage, seeds.timeline, seeds.visual, {}, writer);
   }
   const session = sessionRef.current;
+  const rootComposition =
+    session.visualProject.compositions[session.visualProject.rootCompositionId];
+  const exportCanvas = {
+    width: rootComposition?.width ?? 1080,
+    height: rootComposition?.height ?? 1920,
+  };
+  const exportPresetResolution = reconcileExportPresetOnLoad(
+    session.visualProject.exportPreset,
+    exportCanvas,
+  );
+  const exportPreset = exportPresetResolution.presetId;
+  const exportPresetLoadKey = `${session.visualProject.id}:${session.visualProject.exportPreset ?? 'unset'}:${exportCanvas.width}x${exportCanvas.height}`;
+  const exportPresetWarning =
+    exportPresetMismatch === undefined
+      ? undefined
+      : exportPresetMismatchMessage(exportPresetMismatch);
+  useEffect(() => {
+    if (exportPresetLoadReconciledRef.current === exportPresetLoadKey) return;
+    exportPresetLoadReconciledRef.current = exportPresetLoadKey;
+    if (exportPresetResolution.mismatch !== undefined) {
+      setExportPresetMismatch(exportPresetResolution.mismatch);
+      showToast(exportPresetMismatchMessage(exportPresetResolution.mismatch));
+    }
+    if (session.visualProject.exportPreset !== exportPresetResolution.presetId) {
+      session.synchronizeVisualProject({
+        ...session.visualProject,
+        exportPreset: exportPresetResolution.presetId,
+        updatedAt: new Date().toISOString(),
+      });
+      setRevision((revision) => revision + 1);
+    }
+  }, [exportPresetLoadKey, exportPresetResolution, session, showToast]);
+  useEffect(() => {
+    if (exportPresetMismatch === undefined) return;
+    if (
+      exportPresetMismatch.canvas.width !== exportCanvas.width ||
+      exportPresetMismatch.canvas.height !== exportCanvas.height
+    )
+      setExportPresetMismatch(undefined);
+  }, [exportCanvas.height, exportCanvas.width, exportPresetMismatch]);
   useEffect(() => {
     if (window.__JOY_RELEASE_OBSERVER__ !== true) return;
     window.__JOY_RELEASE_TIMELINE_PROBE__ = () =>
@@ -3289,9 +3353,9 @@ function EditorWorkspace({
     (id: string) => {
       if (id === 'history.undo') undo();
       if (id === 'history.redo') redo();
-      setPaletteOpen(false);
+      closePopup(POPUP_IDS.commandPalette);
     },
-    [redo, undo],
+    [closePopup, redo, undo],
   );
   const activatePanel = useCallback((panelId: string) => {
     const route = featureActivationRoute(panelId);
@@ -3530,18 +3594,6 @@ function EditorWorkspace({
     applyDockLayout(api, next, workspacePresetRef.current);
   }, [applyDockLayout, persistUiPreferences, storage]);
 
-  useEffect(() => {
-    if (!paletteOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const root = paletteRef.current;
-      if (root === null || root.contains(event.target as Node)) return;
-      setPaletteOpen(false);
-    };
-    // Capture so we close before other UI consumes the event; skip the same
-    // gesture that opened the palette by listening only after mount.
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [paletteOpen]);
   const recordExportEntry = useCallback(
     (entry: ProjectExportProcessEntry) => {
       const next = upsertProjectEntry(exportHistoryRef.current, entry);
@@ -3597,11 +3649,11 @@ function EditorWorkspace({
           redo();
           break;
         case 'palette.toggle':
-          setPaletteOpen((open) => !open);
+          togglePopup(POPUP_IDS.commandPalette);
           break;
         case 'palette.close':
-          setPaletteOpen(false);
-          setProcessesOpen(false);
+          closePopup(POPUP_IDS.commandPalette);
+          closePopup(POPUP_IDS.recentProcesses);
           break;
         case 'playhead.back':
           seek(Math.max(0, current.playheadUs - 1_000_000));
@@ -3710,7 +3762,18 @@ function EditorWorkspace({
       window.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('blur', onBlur);
     };
-  }, [dispatchTimeline, redo, seek, session, showToast, timelineTrackFlags, togglePlayback, undo]);
+  }, [
+    closePopup,
+    dispatchTimeline,
+    redo,
+    seek,
+    session,
+    showToast,
+    timelineTrackFlags,
+    togglePlayback,
+    togglePopup,
+    undo,
+  ]);
 
   const runSelectedClipAction = useCallback(
     (kind: 'split' | 'duplicate' | 'delete') => {
@@ -3787,13 +3850,7 @@ function EditorWorkspace({
     async (retryEntry?: ProjectExportProcessEntry) => {
       if (exportInFlightRef.current) return;
       const retryPreset = retryEntry?.presetId;
-      if (
-        retryPreset !== undefined &&
-        retryPreset !== 'reels-1080' &&
-        retryPreset !== 'shorts-1080' &&
-        retryPreset !== 'youtube-1080' &&
-        retryPreset !== 'high-bitrate'
-      ) {
+      if (retryPreset !== undefined && !isExportPresetId(retryPreset)) {
         setExportStatus('Export retry failed: the saved preset is no longer supported.');
         return;
       }
@@ -3801,6 +3858,23 @@ function EditorWorkspace({
       const exportTimelineProject = structuredClone(session.timelineProject);
       const exportVisualProject = structuredClone(session.visualProject);
       const exportAudioState = structuredClone(audioState);
+      const compositionV1 = exportVisualProject.compositions[exportVisualProject.rootCompositionId];
+      const exportSettings = resolveExportSettings(activeExportPreset, {
+        width: compositionV1?.width ?? 1080,
+        height: compositionV1?.height ?? 1920,
+      });
+      const { width, height, frameRate, videoBitrate, audio } = exportSettings;
+      const dimensionValidation = validateH264ExportDimensions(width, height);
+      if (!dimensionValidation.ok) {
+        window.clearTimeout(exportToastTimerRef.current);
+        showToast(dimensionValidation.reason, 'error');
+        setExportStatus(`Export failed: ${dimensionValidation.reason}`);
+        setExportProgress(undefined);
+        exportToastTimerRef.current = window.setTimeout(() => {
+          setExportStatus(undefined);
+        }, 8_000);
+        return;
+      }
       const missingLuts = missingColorLutExportDependencies(exportVisualProject);
       if (missingLuts.length > 0) {
         showToast(
@@ -3891,23 +3965,6 @@ function EditorWorkspace({
           throw new Error('Browser storage is almost full. Free space before exporting.');
         }
         await syncStickerBitmaps(exportVisualProject);
-        const compositionV1 =
-          exportVisualProject.compositions[exportVisualProject.rootCompositionId];
-        const baseWidth = compositionV1?.width ?? 1080;
-        const baseHeight = compositionV1?.height ?? 1920;
-        const { width, height } = (() => {
-          switch (activeExportPreset) {
-            case 'reels-1080':
-            case 'shorts-1080':
-              return { width: 1080, height: 1920 };
-            case 'youtube-1080':
-              return { width: 1920, height: 1080 };
-            case 'high-bitrate':
-              return { width: Math.max(baseWidth, 1920), height: Math.max(baseHeight, 1080) };
-            default:
-              return { width: baseWidth, height: baseHeight };
-          }
-        })();
         const compositionTimeline =
           exportTimelineProject.compositions[exportTimelineProject.rootCompositionId];
         const allTimelineClips = flattenRootTimelineVideoClips(exportTimelineProject);
@@ -3928,13 +3985,14 @@ function EditorWorkspace({
         );
         const durationUs =
           contentEndUs > 0 ? contentEndUs : (compositionTimeline?.durationUs ?? 30_000_000);
-        const frameRate = 30;
         const totalFrames = Math.max(1, Math.round((durationUs / 1_000_000) * frameRate));
         const manifest: BrowserExportManifest = Object.freeze({
           width,
           height,
           frameRate,
           durationUs,
+          videoBitrate,
+          audio,
         });
         // Extend the frozen Worker manifest once with the already-derived
         // authored cadence. This immutable value is the only expectation
@@ -3944,7 +4002,7 @@ function EditorWorkspace({
           frameCount: totalFrames,
         });
         retryManifest = manifest;
-        exportFingerprint = `${sourceProjectRevisionId}:${activeExportPreset}:${width}x${height}:${durationUs}:${frameRate}`;
+        exportFingerprint = `${sourceProjectRevisionId}:${activeExportPreset}:${width}x${height}:${durationUs}:${frameRate}:${videoBitrate}:${audio.sampleRate}:${audio.channels}:${audio.bitrate}`;
         if (
           retryEntry !== undefined &&
           (retryEntry.projectId !== projectId ||
@@ -4089,7 +4147,7 @@ function EditorWorkspace({
 
         setExportStatus('Preloading preview-equivalent video and audio…');
         setExportProgress(0.05);
-        const audioContext = new AudioContext();
+        const audioContext = new AudioContext({ sampleRate: audio.sampleRate });
         activeAudioContext = audioContext;
         const audioDestination = audioContext.createMediaStreamDestination();
         // Video elements opened late, for a clip whose forward-only source had to give up because
@@ -4368,6 +4426,9 @@ function EditorWorkspace({
             frameRate,
             needsAudio: true,
             audioSampleRate,
+            audioChannels: audio.channels,
+            audioBitrate: audio.bitrate,
+            bitrate: videoBitrate,
           });
         } catch (error) {
           offlineCapability = {
@@ -4625,6 +4686,7 @@ function EditorWorkspace({
               channelData: offlineAudio.channelData,
               sampleRate: audioSampleRate,
               durationUs,
+              bitrate: audio.bitrate,
             }),
           });
         } else {
@@ -4715,6 +4777,8 @@ function EditorWorkspace({
             frameRate,
             durationUs,
             preset: activeExportPreset,
+            videoBitrate,
+            audio,
           }),
         );
         setExportStatus('Waiting for Worker export verification…');
@@ -5069,7 +5133,7 @@ function EditorWorkspace({
           break;
         case 'edit.commandPalette':
         case 'view.commandPalette':
-          setPaletteOpen(true);
+          openPopup(POPUP_IDS.commandPalette);
           break;
         case 'clip.split':
           runSelectedClipAction('split');
@@ -5120,6 +5184,7 @@ function EditorWorkspace({
       handleExport,
       issueAgentPanelCommand,
       onBackToLibrary,
+      openPopup,
       redo,
       runSelectedClipAction,
       undo,
@@ -6792,7 +6857,10 @@ function EditorWorkspace({
               </button>
               <button
                 className="icon-button"
-                onClick={() => setPaletteOpen(true)}
+                aria-haspopup="dialog"
+                aria-expanded={paletteOpen}
+                data-popup-trigger={POPUP_IDS.commandPalette}
+                onClick={(event) => paletteMenu.toggle(event.currentTarget)}
                 aria-label="Command palette"
                 title="Command palette (Ctrl+K)"
               >
@@ -6835,11 +6903,28 @@ function EditorWorkspace({
                 className="header-export-btn"
                 onClick={() => void handleExport()}
                 disabled={exporting}
-                aria-label={exporting ? 'Exporting…' : 'Export MP4'}
+                aria-label={
+                  exporting
+                    ? 'Exporting…'
+                    : exportPresetWarning === undefined
+                      ? 'Export MP4'
+                      : `Export MP4. Warning: ${exportPresetWarning}`
+                }
+                title={exportPresetWarning}
                 data-guide={exporting ? 'Exporting…' : 'Export MP4'}
                 aria-busy={exporting}
               >
                 <ExportIcon />
+                {exportPresetWarning !== undefined && (
+                  <span
+                    className="header-export-warning-badge"
+                    role="img"
+                    aria-label={`Export format warning: ${exportPresetWarning}`}
+                    title={exportPresetWarning}
+                  >
+                    !
+                  </span>
+                )}
               </button>
               {exporting && (
                 <button
@@ -6852,53 +6937,47 @@ function EditorWorkspace({
                   <CloseIcon />
                 </button>
               )}
-              <div className="header-menu">
+              <div className="header-menu" ref={exportPresetMenu.rootRef}>
                 <button
                   type="button"
                   className="icon-button header-export-preset-trigger"
                   aria-label="Export preset"
                   aria-haspopup="menu"
-                  aria-expanded={exportPresetOpen}
-                  title={`Export preset: ${exportPreset}`}
-                  onClick={() => {
-                    setExportPresetOpen((open) => !open);
-                    setProcessesOpen(false);
-                  }}
+                  aria-expanded={exportPresetMenu.open}
+                  title={`Export preset: ${EXPORT_PRESETS[exportPreset].label} (${exportCanvas.width}×${exportCanvas.height})`}
+                  onClick={(event) => exportPresetMenu.toggle(event.currentTarget)}
                 >
                   <span className="header-export-preset-label">
-                    {exportPreset === 'reels-1080'
-                      ? 'Reels 1080p'
-                      : exportPreset === 'shorts-1080'
-                        ? 'Shorts 1080p'
-                        : exportPreset === 'youtube-1080'
-                          ? 'YouTube 1080p'
-                          : 'High bitrate'}
+                    {EXPORT_PRESETS[exportPreset].label}
                   </span>
                   <span className="header-disclosure-chevron">
                     <ChevronDownIcon />
                   </span>
                 </button>
-                {exportPresetOpen && (
+                {exportPresetMenu.open && (
                   <section
                     className="header-dropdown header-export-preset-dropdown"
                     aria-label="Export preset"
                   >
                     <h3>Export preset</h3>
                     <ul className="export-preset-list" role="menu">
-                      {[
-                        { id: 'reels-1080', label: 'Instagram Reels · 1080p' },
-                        { id: 'shorts-1080', label: 'YouTube Shorts · 1080p' },
-                        { id: 'youtube-1080', label: 'YouTube · 1080p' },
-                        { id: 'high-bitrate', label: 'High bitrate' },
-                      ].map(({ id, label }) => (
+                      {EXPORT_PRESET_MENU_IDS.map((id) => (
                         <li key={id} role="none">
                           <button
                             type="button"
                             role="menuitemradio"
                             aria-checked={exportPreset === id}
                             onClick={() => {
-                              setExportPreset(id as ExportPresetId);
-                              setExportPresetOpen(false);
+                              try {
+                                if (applyExportPresetSelection(session, id)) bumpProjectRevision();
+                                setExportPresetMismatch(undefined);
+                              } catch (reason) {
+                                showToast(
+                                  `Could not change export format: ${reason instanceof Error ? reason.message : String(reason)}`,
+                                  'error',
+                                );
+                              }
+                              exportPresetMenu.close();
                             }}
                           >
                             <span className="preset-icon-group" aria-hidden="true">
@@ -6910,7 +6989,9 @@ function EditorWorkspace({
                                 <ReelsIcon />
                               )}
                             </span>
-                            <span className="export-preset-option-label">{label}</span>
+                            <span className="export-preset-option-label">
+                              {EXPORT_PRESETS[id].label}
+                            </span>
                           </button>
                         </li>
                       ))}
@@ -6918,16 +6999,14 @@ function EditorWorkspace({
                   </section>
                 )}
               </div>
-              <div className="header-menu">
+              <div className="header-menu" ref={processesMenu.rootRef}>
                 <button
                   className="icon-button header-processes-trigger"
                   aria-label="Recent processes"
-                  aria-expanded={processesOpen}
+                  aria-haspopup="dialog"
+                  aria-expanded={processesMenu.open}
                   title="Recent processes"
-                  onClick={() => {
-                    setProcessesOpen((open) => !open);
-                    setExportPresetOpen(false);
-                  }}
+                  onClick={(event) => processesMenu.toggle(event.currentTarget)}
                 >
                   <PngMaskIcon src="/assets/24_recent-exports.png" size={14} />
                   {processCounts.active + processCounts.attention > 0 && (
@@ -6939,8 +7018,8 @@ function EditorWorkspace({
                     </span>
                   )}
                 </button>
-                {processesOpen && (
-                  <section className="header-dropdown" aria-label="Recent processes">
+                {processesMenu.open && (
+                  <section className="header-dropdown" role="dialog" aria-label="Recent processes">
                     <h3>Process Center</h3>
                     <div className="process-filter-row" role="group" aria-label="Process filter">
                       {(
@@ -7120,7 +7199,12 @@ function EditorWorkspace({
           </header>
 
           {paletteOpen && (
-            <section ref={paletteRef} className="palette" aria-label="Command palette">
+            <section
+              ref={paletteMenu.rootRef}
+              className="palette"
+              role="dialog"
+              aria-label="Command palette"
+            >
               <input
                 autoFocus
                 value={query}

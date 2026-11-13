@@ -730,7 +730,7 @@ describe('detectOfflineMp4Capability', () => {
       encoder,
     );
     const large = await detectOfflineMp4Capability(
-      { width: 7680, height: 4320, frameRate: 60, needsAudio: false },
+      { width: 3840, height: 2160, frameRate: 60, needsAudio: false },
       encoder,
     );
 
@@ -803,6 +803,25 @@ describe('detectOfflineMp4Capability', () => {
     expect(queries).toBe(0);
   });
 
+  it('refuses a canvas above the H.264 export limit before probing browser support', async () => {
+    let queries = 0;
+    const capability = await detectOfflineMp4Capability(
+      { ...input, width: 3840, height: 2162 },
+      {
+        videoEncoder: {
+          isConfigSupported: async () => {
+            queries += 1;
+            return { supported: true };
+          },
+        },
+      },
+    );
+
+    expect(capability.ok).toBe(false);
+    expect(reasonOf(capability)).toMatch(/8,294,400|export limit|maximum/i);
+    expect(queries).toBe(0);
+  });
+
   it('asks the AAC encoder about the sample rate of the mixed audio', async () => {
     const audioQueries: AudioEncoderConfig[] = [];
     await detectOfflineMp4Capability(
@@ -819,6 +838,43 @@ describe('detectOfflineMp4Capability', () => {
     );
 
     expect(audioQueries[0]).toMatchObject({ codec: 'mp4a.40.2', sampleRate: 44100 });
+  });
+
+  it('probes the preset video and audio bitrate and channel settings', async () => {
+    const videoQueries: VideoEncoderConfig[] = [];
+    const audioQueries: AudioEncoderConfig[] = [];
+    const capability = await detectOfflineMp4Capability(
+      {
+        ...input,
+        needsAudio: true,
+        bitrate: 8_000_000,
+        audioSampleRate: 44_100,
+        audioChannels: 1,
+        audioBitrate: 96_000,
+      },
+      {
+        videoEncoder: {
+          isConfigSupported: async (config) => {
+            videoQueries.push(config);
+            return { supported: true };
+          },
+        },
+        audioEncoder: {
+          isConfigSupported: async (config) => {
+            audioQueries.push(config);
+            return { supported: true };
+          },
+        },
+      },
+    );
+
+    expect(capability.ok).toBe(true);
+    expect(videoQueries[0]).toMatchObject({ bitrate: 8_000_000 });
+    expect(audioQueries[0]).toMatchObject({
+      sampleRate: 44_100,
+      numberOfChannels: 1,
+      bitrate: 96_000,
+    });
   });
 
   it('reports a missing WebCodecs encoder instead of throwing', async () => {

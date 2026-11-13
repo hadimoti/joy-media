@@ -209,7 +209,7 @@ describe('App export recovery contract', () => {
       'const exportFilename = retryEntry?.filename ?? `joy-media-export-${Date.now()}.mp4`',
     );
     expect(exportCallback).toContain(
-      'exportFingerprint = `${sourceProjectRevisionId}:${activeExportPreset}:${width}x${height}:${durationUs}:${frameRate}`',
+      'exportFingerprint = `${sourceProjectRevisionId}:${activeExportPreset}:${width}x${height}:${durationUs}:${frameRate}:${videoBitrate}:${audio.sampleRate}:${audio.channels}:${audio.bitrate}`',
     );
     expect(exportCallback).toContain('retryEntry.projectId !== projectId');
     expect(exportCallback).toContain('retryEntry.fingerprint !== exportFingerprint');

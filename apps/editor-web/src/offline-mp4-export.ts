@@ -16,6 +16,7 @@ import type {
   BrowserExportManifest,
   BrowserExportResult,
 } from '@joy-media/renderer-pixi/browser-export';
+import { validateH264ExportDimensions } from '@joy-media/job-protocol';
 import { avcCodecString, selectAvcLevels, type AvcProfile } from './avc-level.js';
 import { OFFLINE_AAC_CODEC } from './offline-aac-track.js';
 
@@ -68,6 +69,8 @@ export interface OfflineMp4CapabilityInput {
   readonly needsAudio: boolean;
   /** The sample rate of the mixed audio the AAC encoder will receive; 48 kHz when omitted. */
   readonly audioSampleRate?: number;
+  readonly audioChannels?: number;
+  readonly audioBitrate?: number;
 }
 
 /** The WebCodecs pieces the capability probe talks to. */
@@ -157,13 +160,8 @@ export async function detectOfflineMp4Capability(
 ): Promise<OfflineMp4Capability> {
   const { width, height, frameRate } = input;
   const bitrate = input.bitrate ?? defaultOfflineMp4Bitrate(width, height, frameRate);
-  // mediabunny refuses an odd width or height for H.264 when the first frame is added, which would
-  // fail the whole export. Say so here, so the recorder is used instead.
-  if (width % 2 !== 0 || height % 2 !== 0)
-    return {
-      ok: false,
-      reason: `H.264 needs an even width and height, and this export is ${width}x${height}.`,
-    };
+  const dimensions = validateH264ExportDimensions(width, height);
+  if (!dimensions.ok) return dimensions;
   const videoEncoder =
     deps.videoEncoder ?? (typeof VideoEncoder === 'undefined' ? undefined : VideoEncoder);
   if (videoEncoder === undefined)
@@ -202,6 +200,8 @@ export async function detectOfflineMp4Capability(
       const audioFailure = await checkAudioSupport(
         input.needsAudio,
         input.audioSampleRate ?? AUDIO_SAMPLE_RATE,
+        input.audioChannels ?? AUDIO_CHANNEL_COUNT,
+        input.audioBitrate ?? AUDIO_BITRATE,
         deps,
       );
       if (audioFailure !== undefined) return { ok: false, reason: audioFailure };
@@ -221,6 +221,8 @@ export async function detectOfflineMp4Capability(
 async function checkAudioSupport(
   needsAudio: boolean,
   sampleRate: number,
+  channels: number,
+  bitrate: number,
   deps: OfflineMp4CapabilityDeps,
 ): Promise<string | undefined> {
   if (!needsAudio) return undefined;
@@ -232,8 +234,8 @@ async function checkAudioSupport(
     audioEncoder.isConfigSupported({
       codec: AUDIO_CODEC,
       sampleRate,
-      numberOfChannels: AUDIO_CHANNEL_COUNT,
-      bitrate: AUDIO_BITRATE,
+      numberOfChannels: channels,
+      bitrate,
     }),
   );
   if (outcome.kind === 'timeout')
