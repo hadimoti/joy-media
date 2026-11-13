@@ -121,3 +121,179 @@
 .ccv-actions .section-reset:disabled {
   color: #6b6d75;
 }
+
+/* HSL bands (T-K04). */
+
+.chsl-section {
+  gap: 0.4rem;
+}
+
+.chsl-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.chsl-eyedropper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.9rem;
+}
+
+.chsl-status {
+  margin: 0;
+  color: #c9cbd3;
+  font-size: 0.68rem;
+}
+
+.chsl-band {
+  overflow: hidden;
+  border: 1px solid var(--joy-border-soft, #34353b);
+  border-radius: var(--radius-sm, 0.3rem);
+  background: var(--joy-bg-surface, #1c1d21);
+}
+
+.chsl-band.is-picked {
+  border-color: #e4b42e;
+  box-shadow: 0 0 0 1px #e4b42e inset;
+}
+
+.chsl-band summary {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.45rem;
+  color: var(--joy-text-muted, #b8bac3);
+  font-size: 0.68rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.chsl-band summary::-webkit-details-marker {
+  display: none;
+}
+
+.chsl-band summary:focus {
+  outline: none;
+}
+
+.chsl-band summary:focus-visible {
+  outline: 1px solid #e4b42e;
+  outline-offset: -1px;
+}
+
+.chsl-chip {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.chsl-centre {
+  color: var(--joy-text-faint, #8d8f98);
+  font-variant-numeric: tabular-nums;
+}
+
+.chsl-modified {
+  color: #e4b42e;
+  font-size: 0.55rem;
+}
+
+.chsl-band-controls {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.45rem;
+  border-top: 1px solid var(--joy-border-soft, #34353b);
+}
+
+.chsl-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3.6rem;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.chsl-control input[type='range'] {
+  width: 100%;
+  accent-color: #e4b42e;
+}
+
+.chsl-number {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #44454b;
+  border-radius: 0.25rem;
+  padding: 0.12rem 0.25rem;
+  background: #17181c;
+  color: #e6e7ea;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chsl-shape {
+  display: grid;
+  gap: 0.35rem;
+  padding-top: 0.3rem;
+  border-top: 1px dashed var(--joy-border-soft, #34353b);
+}
+
+.chsl-shape-title {
+  color: var(--joy-text-faint, #8d8f98);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Hold to compare: lit while held. */
+.chsl-compare[aria-pressed='true'] {
+  border-color: #dba925;
+  background: #3a321e;
+  color: #f0bd2d;
+}
+
+/* The eyedropper over the Monitor. */
+.monitor-eyedropper {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M3 21l1-4 9-9 3 3-9 9z' fill='%23fff' stroke='%23000' stroke-width='1.2'/%3E%3Cpath d='M14 6l2-2a2 2 0 0 1 3 3l-2 2 1 1-2 2-5-5 2-2z' fill='%23000' stroke='%23fff' stroke-width='1'/%3E%3C/svg%3E")
+      3 21,
+    crosshair;
+}
+
+.monitor-eyedropper-loupe {
+  position: absolute;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.3rem;
+  border: 1px solid #55565e;
+  border-radius: 0.3rem;
+  background: rgba(20, 21, 24, 0.94);
+  color: #e6e7ea;
+  font-size: 0.64rem;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.monitor-eyedropper-grid {
+  display: grid;
+  width: 5.6rem;
+  height: 5.6rem;
+  border: 1px solid #000;
+  image-rendering: pixelated;
+}
+
+.monitor-eyedropper-grid span.is-centre {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+  box-shadow: 0 0 0 1px #000 inset;
+}
+
+.monitor-eyedropper-text {
+  font-variant-numeric: tabular-nums;
+}
