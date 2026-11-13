@@ -359,7 +359,7 @@ These are the sentences the dialog says when it answers, refuses or reports. The
 | Rendering Backend                    | **How it draws**                        | Media support check page                        |                |
 | Local Asset Library                  | **Your media folder**                   | Media support check page                        |                |
 | See Asset Library settings           | **See the Asset Library settings**      | Media support check page                        |                |
-| Local Worker SEA                     | **Background worker**                   | Media support check page                        |                |
+| Local Worker SEA                     | **Background service**                  | Media support check page                        |                |
 
 ---
 
@@ -442,7 +442,7 @@ The `{label}`, `{model}`, `{provider}` and `{reason}` parts are filled in by the
 | Active: {model}                                                                                                                                    | Active: {model}                                                                                                                                    | Models page, active connection banner                      |                |
 | NVIDIA GeForce RTX 5070 Ti                                                                                                                         | NVIDIA GeForce RTX 5070 Ti                                                                                                                         | Media support check, graphics card value                   |                |
 | ANGLE D3D11                                                                                                                                        | ANGLE D3D11                                                                                                                                        | Media support check, drawing method value                  |                |
-| joy-worker.exe                                                                                                                                     | joy-worker.exe                                                                                                                                     | Media support check, background worker value               |                |
+| joy-worker.exe                                                                                                                                     | **JOY Media background service**                                                                                                                   | Media support check, background service value              |                |
 
 ---
 

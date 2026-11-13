@@ -252,8 +252,8 @@ export const SETTINGS_DIAGNOSTICS = {
   drawingMethodName: 'ANGLE D3D11',
   mediaFolder: 'Your media folder',
   mediaFolderHint: 'See the Asset Library settings',
-  backgroundWorker: 'Background worker',
-  backgroundWorkerName: 'joy-worker.exe',
+  backgroundWorker: 'Background service',
+  backgroundWorkerName: 'JOY Media background service',
 } as const;
 
 /** The models page: the connection, the key, the models and the check. */

@@ -423,7 +423,7 @@ describe('JOY Agent Engine client V2 lifecycle', () => {
     );
     const pendingFourth = fourth.next();
     replacementWorker.onerror?.();
-    await expect(pendingFourth).rejects.toThrow('JOY Agent Worker failed');
+    await expect(pendingFourth).rejects.toThrow('JOY Agent service failed');
     expect(failureHook).not.toHaveBeenCalled();
   });
 

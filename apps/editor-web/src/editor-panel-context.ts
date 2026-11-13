@@ -18,6 +18,7 @@ import type { TimelineTrackView, TimelineViewport } from '@joy-media/timeline-en
 import type { VideoFrameNode } from '@joy-media/render-ir';
 import type { VisualObjectTransaction } from '@joy-media/property-system';
 import type { AgentPanelCommand, JoyAgentAttachedAsset } from './AgentPanel.js';
+import type { InspectorTabRequest } from './InspectorPanel.js';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
 import type { TreatmentLayerEffectSeed, TreatmentLayerKind } from './adjustment-layer.js';
 import type { DataLane } from './data-lanes.js';
@@ -29,6 +30,7 @@ import type { createEditorPluginHost } from './plugin-host.js';
 import type { ControlPlaneProjectBinding } from './project-control-plane.js';
 import type { ProjectWriterStorage } from './project-writer.js';
 import type { JoyCode3DRenderAsset } from './JoyCode3DViewer.js';
+import type { MonitorTransportControls } from './monitor/useMonitorTransportControls.js';
 
 export interface EditorRuntimeState {
   readonly selectedIds: readonly string[];
@@ -145,6 +147,9 @@ export interface EditorPanelContextValue {
   readonly agentContext: EditorContext;
   readonly agentPolicy: AgentPolicyPreferences;
   readonly agentPanelCommand: AgentPanelCommand | undefined;
+  /** A pending request to show an Inspector tab (Clip > Speed), cleared once applied. */
+  readonly inspectorTabRequest: InspectorTabRequest | null;
+  readonly onInspectorTabRequestApplied: (serial: number) => void;
   readonly creativeBriefOptedIn: boolean;
   readonly creativeBriefRunner: (requestText: string) => Promise<CreativeBriefV1>;
   readonly onCreativeBriefOptIn: () => Promise<void>;
@@ -173,6 +178,10 @@ export interface EditorPanelContextValue {
   readonly onTimelineAutoFitChange: (next: boolean) => void;
   readonly activeTimelineCompositionId: string;
   readonly onActiveTimelineCompositionChange: (compositionId: string) => void;
+  /** The Monitor's frame, J K L, in and out, loop and timecode controls (T-M10). */
+  readonly monitorTransport?: MonitorTransportControls;
+  /** Reads the preview audio tap for the Monitor level meter; null until audio starts. */
+  readonly readPreviewMeterAnalyser?: () => AnalyserNode | null;
 }
 
 export const EditorPanelContext = createContext<EditorPanelContextValue | undefined>(undefined);

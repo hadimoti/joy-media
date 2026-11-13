@@ -49,14 +49,13 @@ export function WorkspaceSwitcher({
         className="workspace-switcher-trigger"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Workspace preset"
         title="Workspace preset"
         onClick={(event) => popup.toggle(event.currentTarget)}
       >
         <span className="workspace-switcher-chevron" aria-hidden="true">
           <ChevronDownIcon />
         </span>
-        <span className="workspace-switcher-label">{workspacePresetLabel(value)}</span>
+        <span className="workspace-switcher-label">{`Workspace: ${workspacePresetLabel(value)}`}</span>
       </button>
       {open && (
         <div className="workspace-switcher-menu" role="menu" aria-label="Workspace presets">

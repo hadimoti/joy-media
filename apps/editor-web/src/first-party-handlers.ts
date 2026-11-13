@@ -191,14 +191,14 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           const samples = generateNoisyFixturePcm(sampleRate);
           const strength = Math.min(1, Math.max(0, args.strength ?? 0.5));
           if (args.method === 'ml') {
-            // ADR-0018: ML denoise runs on a local GPU Worker, not the VPS.
+            // ADR-0018: ML denoise runs on a local GPU service, not the VPS.
             return {
               source: args.source,
               method: 'ml-denoise',
               strength,
               deferredJobType: 'audio.ml-denoise',
               requiredWorkerCapability: 'audio.ml-denoise',
-              note: 'ML denoise needs a paired local GPU Worker with audio.ml-denoise (DeepFilterNet via JOY_MEDIA_ML_DENOISE_CMD, otherwise ffmpeg arnndn/RNNoise).',
+              note: 'ML denoise needs a paired local GPU service with audio.ml-denoise (DeepFilterNet via JOY_MEDIA_ML_DENOISE_CMD, otherwise ffmpeg arnndn/RNNoise).',
             };
           }
           const preferSpectral = args.method === 'spectral' || strength >= 0.75;
@@ -332,7 +332,8 @@ export function createStubFirstPartyLibrary(): NodeLibrary {
           deferred: true,
           mode: args.mode,
           profile: args.profile ?? 'social-h264-aac',
-          reason: 'Use the editor Export with an output preset; Worker encoding is not wired yet.',
+          reason:
+            'Use the editor Export with an output preset; background encoding is not available yet.',
         }),
       },
       output: {

@@ -42,7 +42,7 @@ describe('transform.denoise port', () => {
     expect(Number.isFinite(output.outputPeakDb)).toBe(true);
   });
 
-  it('defers ML denoise to a local GPU Worker capability', () => {
+  it('defers ML denoise to a local GPU service capability', () => {
     const library = createStubFirstPartyLibrary();
     const handler = library.handlers['transform.denoise'];
     expect(handler).toBeDefined();

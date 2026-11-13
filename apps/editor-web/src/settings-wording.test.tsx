@@ -268,6 +268,11 @@ function wordingStrings(): readonly string[] {
 }
 
 describe('the Joy Code Settings wording (T-P07)', () => {
+  it('uses plain service wording in process diagnostics', () => {
+    expect(SETTINGS_DIAGNOSTICS.backgroundWorker).toBe('Background service');
+    expect(SETTINGS_DIAGNOSTICS.backgroundWorkerName).toBe('JOY Media background service');
+  });
+
   it('names the five pages the way the owner asked', () => {
     expect(SETTINGS_PAGE_IDS).toEqual([
       'models',
