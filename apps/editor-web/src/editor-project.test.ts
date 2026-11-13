@@ -17,9 +17,13 @@ describe('initial editor reference project', () => {
     expect(end.transform.x).toBe(300);
   });
 
-  it('defaults to portrait 1080×1920', () => {
+  it('keeps the sample project at its own 1080×1920 size', () => {
     const root = INITIAL_EDITOR_PROJECT.compositions.root;
-    expect(root?.width).toBe(DEFAULT_COMPOSITION_SIZE.width);
-    expect(root?.height).toBe(DEFAULT_COMPOSITION_SIZE.height);
+    expect(root?.width).toBe(1080);
+    expect(root?.height).toBe(1920);
+  });
+
+  it('gives a new project the YouTube 16:9 default, 1920×1080', () => {
+    expect(DEFAULT_COMPOSITION_SIZE).toEqual({ width: 1920, height: 1080 });
   });
 });

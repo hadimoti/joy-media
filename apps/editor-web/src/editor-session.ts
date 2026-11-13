@@ -92,8 +92,8 @@ interface PersistedArtifactDocument {
 export const WORKFLOW_GRAPH_LOG_KEY = 'joy-media.workflow-graph-log.v1';
 export const CREATIVE_ARTIFACT_LOG_KEY = 'joy-media.creative-artifact-log.v1';
 export const LOOK_INSTANCES_LOG_KEY = 'joy-media.look-instances-log.v1';
-const TIMELINE_PROJECT_LOG_KEY = 'joy-media.timeline-project-log.v1';
-const VISUAL_OBJECT_PROJECT_LOG_KEY = 'joy-media.visual-object-project-log.v1';
+export const TIMELINE_PROJECT_LOG_KEY = 'joy-media.timeline-project-log.v1';
+export const VISUAL_OBJECT_PROJECT_LOG_KEY = 'joy-media.visual-object-project-log.v1';
 const COMPOUND_WRITE_JOURNAL_PREFIX = 'joy-media.editor-compound-write.v1';
 
 type CompoundPersistenceStorageKind = 'project-log' | 'agent-idempotency';
@@ -330,11 +330,18 @@ export class EditorSession {
       new BrowserProjectStore(storage, VISUAL_OBJECT_PROJECT_LOG_KEY),
       visualObjectAdapter,
     );
-    const timeline = recoverOrInitialize(this.#timelinePersistence, initialTimeline);
+    // A missing log takes its canvas from the saved one, so the pair agrees.
+    const seeds = alignMissingLogSeed(
+      initialTimeline,
+      initialVisualProject,
+      storedProjectOrUndefined(this.#timelinePersistence, initialTimeline.id),
+      storedProjectOrUndefined(this.#visualObjectPersistence, initialVisualProject.id),
+    );
+    const timeline = recoverOrInitialize(this.#timelinePersistence, seeds.timeline);
     // Never normalize persisted canvas dimensions on open. A 1920×1080 canvas
     // may be an intentional user-selected 16:9 aspect ratio; rewriting it to
     // portrait here would make aspect-ratio changes disappear after refresh.
-    const visualObjects = recoverOrInitialize(this.#visualObjectPersistence, initialVisualProject);
+    const visualObjects = recoverOrInitialize(this.#visualObjectPersistence, seeds.visual);
     this.#lookInstancesPersistence = new LocalProjectPersistence(
       new BrowserProjectStore(storage, LOOK_INSTANCES_LOG_KEY),
       lookInstancesAdapter,
@@ -1919,6 +1926,65 @@ function recoverOrInitialize<P, T>(
     persistence.initialize(initial);
     return { project: initial, revision: 0, warnings: [] };
   }
+}
+
+/** The stored project in a log, or undefined when the log has no record of it. */
+function storedProjectOrUndefined<P, T>(
+  persistence: LocalProjectPersistence<P, T>,
+  projectId: string,
+): P | undefined {
+  try {
+    return persistence.recover(projectId).project;
+  } catch (error) {
+    if (!(error instanceof PersistenceError) || error.code !== 'PERSISTENCE_NOT_FOUND') throw error;
+    return undefined;
+  }
+}
+
+/**
+ * When exactly one of the two logs is stored, the missing log's seed takes the
+ * saved log's root canvas, so both documents open on the same size. With both
+ * logs stored, or both missing, the seeds are used as given.
+ */
+function alignMissingLogSeed(
+  timelineSeed: SpikeProject,
+  visualSeed: JoyProjectV1,
+  savedTimeline: SpikeProject | undefined,
+  savedVisual: JoyProjectV1 | undefined,
+): { readonly timeline: SpikeProject; readonly visual: JoyProjectV1 } {
+  if (savedTimeline !== undefined && savedVisual === undefined) {
+    const saved = savedTimeline.compositions[savedTimeline.rootCompositionId];
+    const seed = visualSeed.compositions[visualSeed.rootCompositionId];
+    if (saved !== undefined && seed !== undefined) {
+      return {
+        timeline: timelineSeed,
+        visual: {
+          ...visualSeed,
+          compositions: {
+            ...visualSeed.compositions,
+            [visualSeed.rootCompositionId]: { ...seed, width: saved.width, height: saved.height },
+          },
+        },
+      };
+    }
+  }
+  if (savedVisual !== undefined && savedTimeline === undefined) {
+    const saved = savedVisual.compositions[savedVisual.rootCompositionId];
+    const seed = timelineSeed.compositions[timelineSeed.rootCompositionId];
+    if (saved !== undefined && seed !== undefined) {
+      return {
+        timeline: {
+          ...timelineSeed,
+          compositions: {
+            ...timelineSeed.compositions,
+            [timelineSeed.rootCompositionId]: { ...seed, width: saved.width, height: saved.height },
+          },
+        },
+        visual: visualSeed,
+      };
+    }
+  }
+  return { timeline: timelineSeed, visual: visualSeed };
 }
 
 /**

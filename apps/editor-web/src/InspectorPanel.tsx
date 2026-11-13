@@ -203,6 +203,10 @@ interface InspectorPanelProps {
 }
 
 const NUMERIC_PROPERTIES = VISUAL_INSPECTOR.filter((property) => property.kind === 'number');
+function animationPropertyLabel(property: AnimatablePropertyV1): string {
+  return VISUAL_INSPECTOR.find((candidate) => candidate.key === property)?.label ?? property;
+}
+
 const DEFAULTS: Record<string, number> = {
   x: 0,
   y: 0,
@@ -477,6 +481,19 @@ export function InspectorPanel({
       : selectedClipId !== undefined
         ? selectedClipId
         : 'Nothing selected');
+  const animatedProperties = Object.entries(target.animations ?? {}).flatMap(
+    ([property, curve]) => {
+      if (curve === undefined || curve.keyframes.length === 0) return [];
+      const propertyId = property as AnimatablePropertyV1;
+      return [
+        {
+          property: propertyId,
+          label: animationPropertyLabel(propertyId),
+          keyframeCount: curve.keyframes.length,
+        },
+      ];
+    },
+  );
 
   const clipAudio =
     selectedClipId !== undefined && audioState !== undefined
@@ -561,6 +578,18 @@ export function InspectorPanel({
             curve === undefined
               ? { objectId: target.id, property }
               : { objectId: target.id, property, curve },
+        },
+      ],
+    });
+  };
+
+  const removeAnimation = (property: AnimatablePropertyV1, label: string) => {
+    onDispatch({
+      label: `Remove ${label} animation`,
+      commands: [
+        {
+          type: 'object.replaceAnimation',
+          payload: { objectId: target.id, property },
         },
       ],
     });
@@ -773,6 +802,52 @@ export function InspectorPanel({
                 );
               })}
             </>
+          )}
+        </section>
+      )}
+
+      {tab === 'visual' && !idle && (
+        <section className="inspector-section" aria-label="Animations">
+          <h3>Animations</h3>
+          {animatedProperties.length === 0 ? (
+            <p className="inspector-animation-empty">No keyframed properties.</p>
+          ) : (
+            <div className="inspector-animations-list">
+              {animatedProperties.map(({ property, label, keyframeCount }) => (
+                <div
+                  className="inspector-animation-entry"
+                  data-animation-property={property}
+                  key={property}
+                >
+                  <div className="inspector-animation-property">
+                    <strong>{label}</strong>
+                    <span>
+                      {keyframeCount} {keyframeCount === 1 ? 'keyframe' : 'keyframes'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="inspector-animation-action"
+                    aria-label={`Edit ${label} animation`}
+                    title={`Edit ${label} animation`}
+                    disabled={onOpenAnimationGraph === undefined}
+                    onClick={() => onOpenAnimationGraph?.(target.id, property)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="inspector-animation-action"
+                    aria-label={`Remove ${label} animation`}
+                    title={`Remove ${label} animation`}
+                    disabled={idle}
+                    onClick={() => removeAnimation(property, label)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </section>
       )}

@@ -290,6 +290,7 @@ import {
   type ProjectCatalogEntry,
 } from './project-catalog.js';
 import { createBlankProjectDocuments, seedsForCatalogEntry } from './project-factory.js';
+import type { NewProjectSpec } from './new-project-format.js';
 import {
   duplicateProject as duplicateProjectLifecycle,
   purgeProject as purgeProjectLifecycle,
@@ -857,13 +858,13 @@ export function App({ writer }: { readonly writer: ProjectWriterHandle }) {
   );
 
   const createProject = useCallback(
-    (title: string) => {
+    (title: string, spec: NewProjectSpec) => {
       const id =
         typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
           ? crypto.randomUUID()
           : `project-${Date.now()}`;
       const now = new Date().toISOString();
-      const seeds = createBlankProjectDocuments(id, title, now);
+      const seeds = createBlankProjectDocuments(id, title, now, spec.canvas, spec.presetId);
       // Materialize durable empty docs via recover-or-initialize.
       new EditorSession(storage, seeds.timeline, seeds.visual, {}, writer);
       const entry: ProjectCatalogEntry = {
@@ -3626,6 +3627,7 @@ function EditorWorkspace({
       }
       workspacePresetRef.current = next;
       setWorkspacePreset(next);
+      setEnhanceTool(next === 'enhance' ? 'motion' : 'effects');
       persistUiPreferences({ workspacePreset: next });
       if (api !== null) applyDockLayout(api, mode, next);
     },
@@ -3642,6 +3644,7 @@ function EditorWorkspace({
     storage.removeItem(EDITOR_UI_PREFERENCES_KEY);
     workspacePresetRef.current = DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset;
     setWorkspacePreset(DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset);
+    setEnhanceTool('effects');
     setViewMode(DEFAULT_EDITOR_UI_PREFERENCES.viewMode);
     viewModeRef.current = DEFAULT_EDITOR_UI_PREFERENCES.viewMode;
     const api = dockviewApiRef.current;
@@ -5272,6 +5275,7 @@ function EditorWorkspace({
       setViewMode(mode);
       setWorkspacePreset(preset);
       workspacePresetRef.current = preset;
+      setEnhanceTool(preset === 'enhance' ? 'motion' : 'effects');
       applyDockLayout(event.api, mode, preset);
 
       const persistDockLayout = () => {

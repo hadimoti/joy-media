@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 import { PopupProvider, usePopupManager } from './popup-manager.js';
 import { POPUP_IDS } from './popup-ids.js';
@@ -171,5 +171,138 @@ describe('ProjectLibrary project menu on the popup manager', () => {
 
     expect(projectMenu()).not.toBeNull();
     expect(openIdText()).toBe(POPUP_IDS.projectMenu);
+  });
+});
+
+describe('ProjectLibrary New project asks for the format first', () => {
+  function renderCreate(onCreate: (title: string, spec: unknown) => void) {
+    return render(
+      <PopupProvider>
+        <ProjectLibrary
+          storage={memoryStore()}
+          onOpen={noop}
+          onCreate={onCreate}
+          onRename={noop}
+          onDuplicate={noop}
+          onTrash={noop}
+          onRestore={noop}
+          onPurge={noop}
+        />
+      </PopupProvider>,
+    );
+  }
+
+  async function openNewProjectForm() {
+    const newButton = query<HTMLButtonElement>('button[aria-label="New project"]');
+    if (newButton === null) throw new Error('missing New project button');
+    await click(newButton);
+  }
+
+  function formatRadio(value: string): HTMLInputElement {
+    const radio = query<HTMLInputElement>(`input[name="new-project-format"][value="${value}"]`);
+    if (radio === null) throw new Error(`missing format ${value}`);
+    return radio;
+  }
+
+  function setInputValue(input: HTMLInputElement, value: string) {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  async function typeName(value: string) {
+    const input = query<HTMLInputElement>('input[placeholder="Project name"]');
+    if (input === null) throw new Error('missing project name input');
+    await act(async () => setInputValue(input, value));
+  }
+
+  async function submit() {
+    const button = query<HTMLButtonElement>('button[aria-label="Create project"]');
+    if (button === null) throw new Error('missing Create project button');
+    await click(button);
+  }
+
+  it('shows the five formats, with 16:9 selected, before the name field', async () => {
+    await renderCreate(vi.fn());
+    await openNewProjectForm();
+
+    const radios = Array.from(
+      container?.querySelectorAll<HTMLInputElement>('input[name="new-project-format"]') ?? [],
+    );
+    expect(radios.map((input) => input.value)).toEqual([
+      'youtube-16-9',
+      'reels-9-16',
+      'square-1-1',
+      'feed-4-5',
+      'custom',
+    ]);
+    expect(formatRadio('youtube-16-9').checked).toBe(true);
+
+    const nameInput = query<HTMLInputElement>('input[placeholder="Project name"]');
+    if (nameInput === null) throw new Error('missing project name input');
+    const lastFormat = formatRadio('custom');
+    expect(lastFormat.compareDocumentPosition(nameInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it('creates the project with the chosen format and name', async () => {
+    const onCreate = vi.fn();
+    await renderCreate(onCreate);
+    await openNewProjectForm();
+
+    await click(formatRadio('reels-9-16'));
+    await typeName('Reel');
+    await submit();
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate).toHaveBeenCalledWith('Reel', {
+      canvas: { width: 1080, height: 1920 },
+      presetId: 'reels-1080',
+    });
+  });
+
+  it('creates a 16:9 project at 1920×1080 with the default selection', async () => {
+    const onCreate = vi.fn();
+    await renderCreate(onCreate);
+    await openNewProjectForm();
+
+    await typeName('Landscape');
+    await submit();
+
+    expect(onCreate).toHaveBeenCalledWith('Landscape', {
+      canvas: { width: 1920, height: 1080 },
+      presetId: 'youtube-1080',
+    });
+  });
+
+  it('refuses a Custom size outside the limits and keeps the form open', async () => {
+    const onCreate = vi.fn();
+    await renderCreate(onCreate);
+    await openNewProjectForm();
+
+    await click(formatRadio('custom'));
+    const width = query<HTMLInputElement>('.new-project-custom-size input');
+    if (width === null) throw new Error('missing custom width');
+    await act(async () => setInputValue(width, '4'));
+    await typeName('Tiny');
+    await submit();
+
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(query('#project-create-error')?.textContent).toContain('16 to 7680');
+    expect(query('input[placeholder="Project name"]')).not.toBeNull();
+  });
+
+  it('asks for a name after a valid format is chosen', async () => {
+    const onCreate = vi.fn();
+    await renderCreate(onCreate);
+    await openNewProjectForm();
+
+    await click(formatRadio('square-1-1'));
+    await submit();
+
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(query('#project-create-error')?.textContent).toBe(
+      'Enter a project name before creating it.',
+    );
   });
 });
