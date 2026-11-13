@@ -2165,6 +2165,101 @@ h2 {
   justify-content: flex-end;
   align-items: stretch;
 }
+.monitor-time-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-left: 0.25rem;
+}
+.monitor-time-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0 0.2rem;
+  border-left: 1px solid var(--joy-border);
+  flex: none;
+}
+.monitor-time-btn {
+  min-width: 1.5rem;
+  height: 1.25rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--joy-border);
+  border-radius: 0.2rem;
+  background: transparent;
+  color: var(--joy-text-secondary);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.monitor-time-btn:hover {
+  color: var(--joy-text);
+}
+.monitor-time-btn[aria-pressed='true'] {
+  color: var(--joy-accent);
+  border-color: var(--joy-accent);
+}
+.monitor-timecode {
+  width: 7.5rem;
+  height: 1.25rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--joy-border);
+  border-radius: 0.2rem;
+  background: var(--joy-bg-panel);
+  color: var(--joy-text);
+  font: inherit;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.monitor-timecode.is-invalid {
+  border-color: #ff7b72;
+}
+.monitor-time-speed {
+  min-width: 2.2rem;
+  color: var(--joy-accent);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.monitor-time-marks {
+  color: var(--joy-text-secondary);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.monitor-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0 0.3rem;
+  flex: none;
+}
+.monitor-meter-track {
+  position: relative;
+  width: 4rem;
+  height: 0.5rem;
+  border-radius: 0.1rem;
+  background: var(--joy-border);
+  overflow: hidden;
+}
+.monitor-meter-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--joy-accent);
+}
+.monitor-meter-clip {
+  color: var(--joy-text-secondary);
+  font-size: 0.75rem;
+  opacity: 0.4;
+}
+.monitor-meter-clip.is-lit {
+  color: #ff5c5c;
+  font-weight: 600;
+  opacity: 1;
+}
 .monitor-preview-control {
   display: inline-flex;
   align-items: center;

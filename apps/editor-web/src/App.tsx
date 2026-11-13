@@ -567,6 +567,9 @@ import {
   stickerImageCache,
 } from './editor-runtime-singletons.js';
 import { MonitorPanel } from './monitor/index.js';
+import { useMonitorTransportControls } from './monitor/useMonitorTransportControls.js';
+import { monitorFps } from './monitor/monitor-timecode.js';
+import { MONITOR_FULLSCREEN_EVENT } from './monitor/monitor-transport-model.js';
 
 const originalAssetCachePromise = openOpfsOriginalAssetCache();
 // One missing-media host per editor session, so the panel's list and operations share state.
@@ -1357,6 +1360,8 @@ function EditorWorkspace({
   const replacementAudioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const previewGainNodeRef = useRef<GainNode | null>(null);
   const previewPanNodeRef = useRef<StereoPannerNode | null>(null);
+  // Tap for the Monitor's level meter (T-M10); it only reads, never changes the output.
+  const previewMeterAnalyserRef = useRef<AnalyserNode | null>(null);
   const replacementGainNodeRef = useRef<GainNode | null>(null);
   const replacementPanNodeRef = useRef<StereoPannerNode | null>(null);
   const previewAudioDisposeTimerRef = useRef<number | undefined>(undefined);
@@ -1391,6 +1396,13 @@ function EditorWorkspace({
         .connect(replacementPanNodeRef.current)
         .connect(audioContext.destination);
     }
+    if (previewMeterAnalyserRef.current === null) {
+      const meter = audioContext.createAnalyser();
+      meter.fftSize = 2048;
+      previewPanNodeRef.current?.connect(meter);
+      replacementPanNodeRef.current?.connect(meter);
+      previewMeterAnalyserRef.current = meter;
+    }
   }, []);
   const disposePreviewAudioGraph = useCallback(() => {
     previewAudioSourceRef.current?.disconnect();
@@ -1399,6 +1411,7 @@ function EditorWorkspace({
     replacementGainNodeRef.current?.disconnect();
     previewPanNodeRef.current?.disconnect();
     replacementPanNodeRef.current?.disconnect();
+    previewMeterAnalyserRef.current = null;
     const audioContext = audioContextRef.current;
     audioContextRef.current = null;
     previewAudioSourceRef.current = null;
@@ -2776,6 +2789,23 @@ function EditorWorkspace({
         setState((active) => ({ ...active, playing: false }));
       });
   }, [ensurePreviewAudioGraph, session, syncMediaToPlayhead]);
+  // Monitor transport (T-M10): one frame step, J K L, in and out, loop, timecode.
+  const monitorRootComposition =
+    session.timelineProject.compositions[session.timelineProject.rootCompositionId];
+  const monitorTransport = useMonitorTransportControls({
+    playheadUs: state.playheadUs,
+    playing: state.playing,
+    durationUs:
+      monitorRootComposition === undefined
+        ? 0
+        : timelineEffectiveDurationUs(monitorRootComposition),
+    fps: monitorFps(monitorRootComposition?.frameRate),
+    seek,
+    togglePlayback,
+  });
+  // Key and palette handlers read the latest controls without re-subscribing.
+  const monitorTransportRef = useRef(monitorTransport);
+  monitorTransportRef.current = monitorTransport;
   const dispatchTimeline = useCallback(
     (transaction: CommandTransaction) => {
       const prepared = prepareTimelinePresentation(
@@ -3395,6 +3425,18 @@ function EditorWorkspace({
     (id: string) => {
       if (id === 'history.undo') undo();
       if (id === 'history.redo') redo();
+      const monitor = monitorTransportRef.current;
+      if (id === 'monitor.frameBack') monitor.stepFrame(-1);
+      if (id === 'monitor.frameForward') monitor.stepFrame(1);
+      if (id === 'monitor.reverse') monitor.pressJkl('j');
+      if (id === 'monitor.stop') monitor.pressJkl('k');
+      if (id === 'monitor.forward') monitor.pressJkl('l');
+      if (id === 'monitor.loop') monitor.toggleLoop();
+      if (id === 'monitor.setIn') monitor.setInPoint();
+      if (id === 'monitor.setOut') monitor.setOutPoint();
+      if (id === 'monitor.clearMarks') monitor.clearMarks();
+      if (id === 'monitor.playInToOut') monitor.playInToOut();
+      if (id === 'monitor.fullscreen') window.dispatchEvent(new Event(MONITOR_FULLSCREEN_EVENT));
       closePopup(POPUP_IDS.commandPalette);
     },
     [closePopup, redo, undo],
@@ -3745,6 +3787,39 @@ function EditorWorkspace({
           break;
         case 'shortcuts.toggle':
           setKeyboardShortcutsOpen((open) => !open);
+          break;
+        case 'playhead.frameBack':
+          monitorTransportRef.current.stepFrame(-1);
+          break;
+        case 'playhead.frameForward':
+          monitorTransportRef.current.stepFrame(1);
+          break;
+        case 'jkl.reverse':
+          monitorTransportRef.current.pressJkl('j');
+          break;
+        case 'jkl.stop':
+          monitorTransportRef.current.pressJkl('k');
+          break;
+        case 'jkl.forward':
+          monitorTransportRef.current.pressJkl('l');
+          break;
+        case 'playback.loop':
+          monitorTransportRef.current.toggleLoop();
+          break;
+        case 'range.in':
+          monitorTransportRef.current.setInPoint();
+          break;
+        case 'range.out':
+          monitorTransportRef.current.setOutPoint();
+          break;
+        case 'range.clear':
+          monitorTransportRef.current.clearMarks();
+          break;
+        case 'range.playInOut':
+          monitorTransportRef.current.playInToOut();
+          break;
+        case 'monitor.fullscreen':
+          window.dispatchEvent(new Event(MONITOR_FULLSCREEN_EVENT));
           break;
         case 'clip.split': {
           if (composition === undefined || selection === undefined) return;
@@ -7519,6 +7594,8 @@ function EditorWorkspace({
               onTimelineAutoFitChange: setTimelineAutoFit,
               activeTimelineCompositionId,
               onActiveTimelineCompositionChange: setActiveTimelineCompositionId,
+              monitorTransport,
+              readPreviewMeterAnalyser: () => previewMeterAnalyserRef.current,
             }}
           >
             <DockviewReact
@@ -7682,6 +7759,21 @@ function EditorWorkspace({
                     { keys: '← / →', action: 'Step back / forward 1s' },
                     { keys: 'Shift+← / Shift+→', action: 'Fine step 100ms' },
                     { keys: 'Home / End', action: 'Go to start / end' },
+                    { keys: ', / .', action: 'Step back / forward one frame' },
+                    {
+                      keys: '← / → (Monitor)',
+                      action: 'Step one frame when the Monitor has focus',
+                    },
+                    {
+                      keys: 'J / K / L',
+                      action:
+                        'Reverse / stop / forward; press J or L again to go faster (up to 8x)',
+                    },
+                    { keys: 'I / O', action: 'Set in point / out point' },
+                    { keys: 'Shift+X', action: 'Clear in and out points' },
+                    { keys: '/', action: 'Play in to out' },
+                    { keys: '\\', action: 'Loop on or off' },
+                    { keys: 'F', action: 'Full-screen preview (Esc leaves)' },
                     { keys: 'Delete / Backspace', action: 'Delete selected clip or marker' },
                     { keys: 'S', action: 'Split clip at playhead' },
                     { keys: '?', action: 'Toggle this panel' },
