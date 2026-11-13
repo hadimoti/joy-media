@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Electron IPC, Node fetch/AbortSignal, Vitest fake fetches and timers, React settings panel.
 
-**Spec:** `C:\jgp\v111\evidence\T-J03\prompt-fix-cx.txt`; task card `C:\Users\HadiMoti\Desktop\joy-media-temps\fable-plan\07b-NEW-TASK-CARDS-part2.md` (T-J03).
+**Spec:** the T-J03 card (`07b-NEW-TASK-CARDS-part2.md` in the plan folder) and its fix prompt.
 
 ## Global Constraints
 
