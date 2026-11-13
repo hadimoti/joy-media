@@ -16,8 +16,8 @@
  * mask handles, right-click menu).
  *
  * Cases in MONITOR_MEDIA_IDS need a clip on the timeline (Play is disabled on an
- * empty timeline). `run.mjs` imports the `--media` fixture before them and
- * reports `BLOCKED-on-fixture` when no fixture was given. D-M03 also needs a
+ * empty timeline). `run.mjs` imports the `--media` fixture and adds it to the
+ * timeline before them, and reports `BLOCKED-on-fixture` when no fixture was given. D-M03 also needs a
  * picture, a video, a text and a shape clip plus `ctx.readTransform`, which one
  * fixture cannot give, so it reports `BLOCKED-on-fixture` until a runner supplies them.
  */

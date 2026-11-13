@@ -3,7 +3,13 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createLiveDriver } from './driver.mjs';
-import { importThroughLeftPanel, newProject, screenshot, setScratchLibrary } from './steps.mjs';
+import {
+  addToTimelineThroughLeftPanel,
+  importThroughLeftPanel,
+  newProject,
+  screenshot,
+  setScratchLibrary,
+} from './steps.mjs';
 import {
   MONITOR_MEDIA_IDS,
   MONITOR_SUITE_CASES,
@@ -141,10 +147,11 @@ async function run() {
           if (MONITOR_MEDIA_IDS.has(id)) {
             if (!options.media)
               throw new Error(
-                `BLOCKED-on-fixture ${id}: needs --media <file in C:\\jgp\\v111\\fixtures>; Play is disabled on an empty timeline`,
+                `BLOCKED-on-fixture ${id}: needs --media <file in C:\\jgp\\v111\\fixtures>; run.mjs imports it and adds it to the timeline first, because Play is disabled on an empty timeline`,
               );
             if (!mediaImported) {
               await importThroughLeftPanel(session.page, options.media);
+              await addToTimelineThroughLeftPanel(session.page, options.media);
               mediaImported = true;
             }
           }
