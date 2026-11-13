@@ -15,6 +15,7 @@ import type {
   ProjectDocumentWriteResult,
   StoredProjectDocument,
 } from '../store/project-documents.js';
+import type { DroppedMediaImportService } from './dropped-media-import.js';
 import {
   MAX_LOCAL_ORIGINAL_BYTES,
   MAX_ORIGINAL_CHUNK_BYTES,
@@ -44,6 +45,9 @@ export const MEDIA_CHANNELS = [
   'desktop.media.asset.upload-original-chunk',
   'desktop.media.asset.upload-original-finish',
   'desktop.media.asset.upload-original-abort',
+  'desktop.media.asset.import-dropped',
+  'desktop.media.asset.cancel-dropped-import',
+  'desktop.media.asset.revoke-dropped',
   'desktop.media.project.document.get',
   'desktop.media.project.document.put',
   'desktop.media.render.enqueue',
@@ -72,6 +76,11 @@ export interface MediaChannelDeps {
   readonly projectDocuments: ProjectDocumentPort;
   readonly assets: LocalAssetPort;
   readonly originals: LocalOriginalWriter;
+  /** Main-process drop tickets and streaming imports. Absent means the import route refuses. */
+  readonly droppedMediaImports?: Pick<
+    DroppedMediaImportService,
+    'importTicket' | 'cancel' | 'revokeTickets'
+  >;
   readonly library?: AssetLibraryPort;
   readonly whisper?: {
     readonly getEndpoint: () => { readonly endpoint: string; readonly modelId: string } | undefined;
@@ -644,11 +653,15 @@ export function createMediaChannelHandlers(
     if (request === undefined) return { ok: false, error: 'Invalid media request' };
     const result = await deps.originals.finishOriginalUpload(request.assetId);
     if (!result.ok) return { ok: false, error: result.error };
-    if (deps.library !== undefined) {
-      const libraryResult = await deps.library.addAsset(request.assetId);
-      if (!libraryResult.ok) return { ok: false, error: libraryResult.error };
+    try {
+      if (deps.library !== undefined) {
+        const libraryResult = await deps.library.addAsset(request.assetId);
+        if (!libraryResult.ok) return { ok: false, error: libraryResult.error };
+      }
+      return { ok: true, data: { assetId: request.assetId } };
+    } finally {
+      await deps.originals.commitOriginalUpload(request.assetId);
     }
-    return { ok: true, data: { assetId: request.assetId } };
   };
 
   const abortOriginalUpload = async (payload: unknown): Promise<MediaResult> => {
@@ -656,6 +669,47 @@ export function createMediaChannelHandlers(
     if (request === undefined) return { ok: false, error: 'Invalid media request' };
     await deps.originals.abortOriginalUpload(request.assetId);
     return { ok: true, data: { assetId: request.assetId } };
+  };
+
+  const importDroppedMedia = async (payload: unknown): Promise<MediaResult> => {
+    if (deps.droppedMediaImports === undefined) return notAvailable();
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, error: 'Invalid dropped media ticket' };
+    }
+    const candidate = payload as Record<string, unknown>;
+    const ticketId = asId(candidate['ticketId']);
+    if (ticketId === undefined) return { ok: false, error: 'Invalid dropped media ticket' };
+    return deps.droppedMediaImports.importTicket(ticketId, candidate['descriptor']);
+  };
+
+  const cancelDroppedMediaImport = async (payload: unknown): Promise<MediaResult> => {
+    if (deps.droppedMediaImports === undefined) return notAvailable();
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, error: 'Invalid dropped media ticket' };
+    }
+    const ticketId = asId((payload as Record<string, unknown>)['ticketId']);
+    if (ticketId === undefined) return { ok: false, error: 'Invalid dropped media ticket' };
+    const result = await deps.droppedMediaImports.cancel(ticketId);
+    return result.ok
+      ? { ok: true, data: { cancelled: true } }
+      : { ok: false, error: 'Import is not running' };
+  };
+
+  const revokeDroppedMediaTickets = (payload: unknown): MediaResult => {
+    if (deps.droppedMediaImports === undefined) return notAvailable();
+    if (typeof payload !== 'object' || payload === null) {
+      return { ok: false, error: 'Invalid dropped media ticket batch' };
+    }
+    const ticketIds = (payload as Record<string, unknown>)['ticketIds'];
+    if (
+      !Array.isArray(ticketIds) ||
+      ticketIds.length > 512 ||
+      !ticketIds.every((ticketId) => typeof ticketId === 'string' && ID_PATTERN.test(ticketId))
+    ) {
+      return { ok: false, error: 'Invalid dropped media ticket batch' };
+    }
+    deps.droppedMediaImports.revokeTickets(ticketIds);
+    return { ok: true, data: { revoked: true } };
   };
 
   const getDocument = (payload: unknown): MediaResult => {
@@ -691,6 +745,9 @@ export function createMediaChannelHandlers(
     'desktop.media.asset.upload-original-chunk': appendOriginalChunk,
     'desktop.media.asset.upload-original-finish': finishOriginalUpload,
     'desktop.media.asset.upload-original-abort': abortOriginalUpload,
+    'desktop.media.asset.import-dropped': importDroppedMedia,
+    'desktop.media.asset.cancel-dropped-import': cancelDroppedMediaImport,
+    'desktop.media.asset.revoke-dropped': revokeDroppedMediaTickets,
     'desktop.media.project.document.get': getDocument,
     'desktop.media.project.document.put': putDocument,
     'desktop.media.preview.frame': notAvailable,

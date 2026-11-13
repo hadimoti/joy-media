@@ -1,5 +1,26 @@
 import type { ComponentType } from 'react';
-import { SpeakerOnIcon, TextTabIcon, TimelineClassicIcon } from './icons.js';
+import {
+  AgentIcon,
+  AutoCaptionIcon,
+  CameraIcon,
+  ColorAdjustIcon,
+  DiagnosticsIcon,
+  DissolveIcon,
+  EnhanceIcon,
+  FlowGraphIcon,
+  HistoryIcon,
+  InspectorIcon,
+  JobsIcon,
+  LibraryIcon,
+  MediaGridIcon,
+  MonitorIcon,
+  MotionPathIcon,
+  PlugIcon,
+  SpeakerOnIcon,
+  TextTabIcon,
+  TimelineClassicIcon,
+  WorkflowPathIcon,
+} from './icons.js';
 import type { PanelId } from './workspace.js';
 import { iconUrl } from './icon-assets.js';
 
@@ -30,40 +51,40 @@ export const PANEL_LABELS: Readonly<Record<PanelId, string>> = {
 };
 
 /**
- * Dockview panel tab glyphs. Prefer uploaded `ui/` 24×24 PNGs where they map
- * cleanly; fall back to the older black-on-transparent set. Masked with
- * `currentColor` so active/inactive tab colors from DESIGN.md §1 apply.
+ * The one PNG mask that stays: the 3D tab has its own cube outline (T-P01).
+ * Every other panel draws an inline SVG from the shared outline set, so the
+ * whole app has one weight, one grid and one colour.
  */
 export const PANEL_TAB_ICONS: Readonly<Partial<Record<PanelId, string>>> = {
-  media: iconUrl('assets.png'),
-  monitor: iconUrl('monitor.png'),
-  // Timeline draws from the shared SVG set below; Flow keeps the node-graph
-  // mask. The two lenses sit in one dock group and must not share a glyph.
-  flow: iconUrl('timeline.png'),
-  captions: iconUrl('captions.png'),
-  inspector: iconUrl('ui/inspect_24x24.png'),
-  // The 3D tab has its own cube outline (T-P01). It was the same file as the
-  // Animate glyph before, so the tab showed the wrong picture (OB-01a).
   scene3d: iconUrl('ui/cube-3d_24x24.png'),
-  motion: iconUrl('ui/motion_24x24.png'),
-  camera: iconUrl('camera.png'),
-  effects: iconUrl('ui/effects-org_24x24.png'),
-  transitions: iconUrl('ui/blend_24x24.png'),
-  color: iconUrl('ui/contrast_24x24.png'),
-  history: iconUrl('history2.png'),
-  diagnostics: iconUrl('diagnostic.png'),
-  jobs: iconUrl('job.png'),
-  agent: iconUrl('ui/agent-ai_24x24.png'),
-  workflows: iconUrl('workflow.png'),
-  plugins: iconUrl('plugin.png'),
-  templates: iconUrl('24_library.png'),
 };
 
-/** Inline SVG tab icons (preferred over PNG masks when present). */
+/**
+ * The panel tab glyphs: one outline set at 16 px with a 1.5 px stroke. Every
+ * panel gets its own glyph, so two panels in the same dock group never show
+ * the same picture.
+ */
 export const PANEL_TAB_SVG_ICONS: Readonly<Partial<Record<PanelId, ComponentType>>> = {
-  audio: SpeakerOnIcon,
+  media: MediaGridIcon,
+  monitor: MonitorIcon,
   timeline: TimelineClassicIcon,
+  flow: FlowGraphIcon,
+  captions: AutoCaptionIcon,
   text: TextTabIcon,
+  inspector: InspectorIcon,
+  motion: MotionPathIcon,
+  camera: CameraIcon,
+  audio: SpeakerOnIcon,
+  effects: EnhanceIcon,
+  transitions: DissolveIcon,
+  color: ColorAdjustIcon,
+  history: HistoryIcon,
+  diagnostics: DiagnosticsIcon,
+  jobs: JobsIcon,
+  agent: AgentIcon,
+  workflows: WorkflowPathIcon,
+  plugins: PlugIcon,
+  templates: LibraryIcon,
 };
 
 export function panelLabel(panelId: string): string {

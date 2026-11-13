@@ -11,7 +11,15 @@
  * only the body goes quiet. It never swaps itself for a sentence.
  */
 
-import { useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react';
 import { SearchIcon } from './icons.js';
 import {
   PanelIdentityContext,
@@ -25,6 +33,8 @@ export interface PanelTabSpec {
   readonly label: string;
   /** Optional 24×24 black-on-transparent mask, tinted with currentColor. */
   readonly iconUrl?: string;
+  /** The tab's glyph from the shared outline set (T-D09). */
+  readonly icon?: ComponentType;
   /** Tabs stay clickable while the body is inactive (§3c.5). */
   readonly disabled?: boolean;
   /** Optional migration/accessibility alias for a renamed tab. */
@@ -95,6 +105,7 @@ function PanelSectionTab({
   readonly onTabChange: ((id: string) => void) | undefined;
 }) {
   const presence = useAgentSectionPresence(panelId ?? 'agent', tab.id);
+  const TabIcon = tab.icon;
   return (
     <button
       type="button"
@@ -131,7 +142,11 @@ function PanelSectionTab({
         if (nextId !== undefined) onTabChange?.(nextId);
       }}
     >
-      {tab.iconUrl !== undefined && (
+      {TabIcon !== undefined ? (
+        <span className="joy-panel-tab-svg" aria-hidden="true">
+          <TabIcon />
+        </span>
+      ) : tab.iconUrl !== undefined ? (
         <span
           className="joy-panel-tab-icon"
           style={{
@@ -140,7 +155,7 @@ function PanelSectionTab({
           }}
           aria-hidden="true"
         />
-      )}
+      ) : null}
       {tab.count !== undefined || tab.tooltip !== undefined ? (
         <span className="joy-panel-tab-label">{tab.label}</span>
       ) : (

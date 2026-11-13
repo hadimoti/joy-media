@@ -1,8 +1,16 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect, type ComponentType } from 'react';
 import { confirmDialog, promptDialog } from './app-dialogs.js';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
-import { iconUrl } from './icon-assets.js';
+import {
+  EnhanceIcon,
+  LibraryIcon,
+  LowerThirdIcon,
+  SocialIcon,
+  TextTabIcon,
+  ToolsIcon,
+  UserIcon,
+} from './icons.js';
 import { CONTENT_TEMPLATES, contentTemplateById } from './content-template-catalog.js';
 import { listTemplates, type TemplateCatalogEntry } from './template-catalog.js';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
@@ -34,14 +42,18 @@ interface TemplatesPanelProps {
 type TemplateView =
   'library' | 'mine' | 'Titles' | 'Lower Thirds' | 'Utility' | 'Effects' | 'Social';
 
-const SIDEBAR_VIEWS: readonly { readonly id: TemplateView; readonly iconUrl: string }[] = [
-  { id: 'library', iconUrl: iconUrl('24_library.png') },
-  { id: 'mine', iconUrl: iconUrl('24_my-media.png') },
-  { id: 'Titles', iconUrl: iconUrl('24_titles.png') },
-  { id: 'Lower Thirds', iconUrl: iconUrl('24_lowerthird.png') },
-  { id: 'Social', iconUrl: iconUrl('24_socials.png') },
-  { id: 'Utility', iconUrl: iconUrl('24_utility.png') },
-  { id: 'Effects', iconUrl: iconUrl('ui/motion_24x24.png') },
+const SIDEBAR_VIEWS: readonly {
+  readonly id: TemplateView;
+  readonly label: string;
+  readonly icon: ComponentType;
+}[] = [
+  { id: 'library', label: 'Library', icon: LibraryIcon },
+  { id: 'mine', label: 'My Templates', icon: UserIcon },
+  { id: 'Titles', label: 'Titles', icon: TextTabIcon },
+  { id: 'Lower Thirds', label: 'Lower Thirds', icon: LowerThirdIcon },
+  { id: 'Social', label: 'Social', icon: SocialIcon },
+  { id: 'Utility', label: 'Utility', icon: ToolsIcon },
+  { id: 'Effects', label: 'Effects', icon: EnhanceIcon },
 ];
 
 export function TemplatesPanel({ onApplyTemplate, showToast, storage }: TemplatesPanelProps) {
@@ -172,31 +184,25 @@ export function TemplatesPanel({ onApplyTemplate, showToast, storage }: Template
       <div className="templates-content">
         <aside className="templates-sidebar" aria-label="Template views">
           <div className="templates-sidebar-tabs" role="tablist" aria-label="Template views">
-            {SIDEBAR_VIEWS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                role="tab"
-                className="templates-sidebar-tab"
-                aria-label={
-                  item.id === 'library' ? 'Library' : item.id === 'mine' ? 'My Templates' : item.id
-                }
-                title={
-                  item.id === 'library' ? 'Library' : item.id === 'mine' ? 'My Templates' : item.id
-                }
-                aria-selected={view === item.id}
-                onClick={() => setView(item.id)}
-              >
-                <span
-                  className="templates-sidebar-tab-icon"
-                  style={{
-                    maskImage: `url(${item.iconUrl})`,
-                    WebkitMaskImage: `url(${item.iconUrl})`,
-                  }}
-                  aria-hidden="true"
-                />
-              </button>
-            ))}
+            {SIDEBAR_VIEWS.map((item) => {
+              const ViewIcon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  className="templates-sidebar-tab"
+                  aria-label={item.label}
+                  title={item.label}
+                  aria-selected={view === item.id}
+                  onClick={() => setView(item.id)}
+                >
+                  <span className="templates-sidebar-tab-svg" aria-hidden="true">
+                    <ViewIcon />
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </aside>
         <div className="templates-main">{body}</div>

@@ -374,7 +374,7 @@ export function GraphEditor({
           cancelDrag();
         }}
       >
-        <polyline points={path} fill="none" stroke={JOY_COLORS.textMuted} strokeWidth={1.5} />
+        <polyline points={path} fill="none" stroke={JOY_COLORS.textSecondary} strokeWidth={1.5} />
         <line
           x1={x(playheadUs)}
           y1={0}
@@ -427,7 +427,7 @@ export function GraphEditor({
                 width={8}
                 height={8}
                 transform={`rotate(45 ${cx} ${cy})`}
-                fill={active ? JOY_COLORS.accent : JOY_COLORS.textMuted}
+                fill={active ? JOY_COLORS.accent : JOY_COLORS.textSecondary}
                 stroke={JOY_COLORS.bgPanel}
                 strokeWidth={1}
                 onPointerDown={(event) => {

@@ -31,7 +31,13 @@ export function EffectStudioTimeline({
           <span className="es-panel-eyebrow">Time domain</span>
           <strong>Parameter automation</strong>
         </div>
-        <button type="button" className="es-play-button" onClick={onTogglePlayback}>
+        <button
+          type="button"
+          className="es-play-button"
+          aria-label={playing ? 'Pause' : 'Play'}
+          title={playing ? 'Pause' : 'Play'}
+          onClick={onTogglePlayback}
+        >
           {playing ? <PauseIcon /> : <PlayIcon />}
         </button>
         <span className="es-automation-time">
@@ -55,7 +61,12 @@ export function EffectStudioTimeline({
             const keyframes = effect.animations?.[param.key]?.keyframes ?? [];
             return (
               <div className="es-lane" key={param.key}>
-                <button type="button" onClick={() => onToggleKeyframe(param.key)}>
+                <button
+                  type="button"
+                  aria-label="Toggle keyframe"
+                  title="Toggle keyframe"
+                  onClick={() => onToggleKeyframe(param.key)}
+                >
                   <KeyframeActiveIcon />
                 </button>
                 <span>{param.label}</span>
