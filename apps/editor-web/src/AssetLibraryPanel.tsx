@@ -59,6 +59,7 @@ import {
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
+import { DroppedImportProgress, type DroppedImportProgressState } from './DroppedImportProgress.js';
 import { MissingMediaSection } from './MissingMediaSection.js';
 import type { MissingMediaHost } from './missing-media-host.js';
 import { ASSET_CATEGORY_ICONS, assetCollectionIconUrl } from './asset-library-icons.js';
@@ -137,6 +138,9 @@ export function AssetLibraryPanel({
   onAddToTimeline,
   onEditWithAi,
   onOpenAssetSettings,
+  onFilesDrop,
+  droppedImportProgress,
+  onCancelDroppedImport,
   missingMedia,
 }: {
   readonly projectId: string;
@@ -164,6 +168,9 @@ export function AssetLibraryPanel({
     readonly displayName: string;
   }) => void;
   readonly onOpenAssetSettings?: () => void;
+  readonly onFilesDrop?: (files: readonly File[]) => void | Promise<void>;
+  readonly droppedImportProgress?: DroppedImportProgressState;
+  readonly onCancelDroppedImport?: () => void;
   /** Missing project media, relinked from the panel's Missing media section. */
   readonly missingMedia?: {
     readonly host: MissingMediaHost;
@@ -216,6 +223,7 @@ export function AssetLibraryPanel({
   const [filterOpen, setFilterOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importProgress, setImportProgress] = useState<number | undefined>(undefined);
+  const [fileDragOver, setFileDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const assetLibraryContentRef = useRef<HTMLDivElement | null>(null);
   const filterActive = availability !== 'all' || sort !== 'name';
@@ -289,6 +297,34 @@ export function AssetLibraryPanel({
       setStatus(`Failed to load media catalog: ${detail}`);
     }
   }, [client, projectId]);
+
+  const handleFilesDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setFileDragOver(true);
+  }, []);
+  const handleFilesDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+    setFileDragOver(false);
+  }, []);
+  const handleFilesDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (!event.dataTransfer.types.includes('Files') && event.dataTransfer.files.length === 0)
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      setFileDragOver(false);
+      const files = Array.from(event.dataTransfer.files);
+      if (files.length === 0 || onFilesDrop === undefined) return;
+      void Promise.resolve(onFilesDrop(files))
+        .then(() => refresh())
+        .catch((error: unknown) =>
+          setStatus(`Dropped media could not be imported: ${message(error)}`),
+        );
+    },
+    [onFilesDrop, refresh],
+  );
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -864,7 +900,18 @@ export function AssetLibraryPanel({
             })}
           </div>
         </aside>
-        <div className="asset-library-main">
+        <div
+          className={`asset-library-main${fileDragOver ? ' is-file-drop-target' : ''}`}
+          onDragOver={handleFilesDragOver}
+          onDragLeave={handleFilesDragLeave}
+          onDrop={handleFilesDrop}
+        >
+          {droppedImportProgress !== undefined && onCancelDroppedImport !== undefined && (
+            <DroppedImportProgress
+              progress={droppedImportProgress}
+              onCancel={onCancelDroppedImport}
+            />
+          )}
           {missingMedia !== undefined && (
             <MissingMediaSection
               host={missingMedia.host}

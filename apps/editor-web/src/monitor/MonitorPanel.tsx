@@ -106,6 +106,10 @@ import {
 import { monitorPixelScale } from './monitor-pixel-scale.js';
 import { createProjectColorLutResolver } from '../project-color-luts.js';
 import { applyCanvasDimensions } from '../export-format-actions.js';
+import {
+  DroppedImportProgress,
+  type DroppedImportProgressState,
+} from '../DroppedImportProgress.js';
 
 /**
  * The Program Monitor panel: the preview canvas, its renderer lifecycle and the
@@ -114,8 +118,14 @@ import { applyCanvasDimensions } from '../export-format-actions.js';
 
 export function MonitorPanel({
   agentPreviewSurfaceVisible = true,
+  onFilesDrop,
+  droppedImportProgress,
+  onCancelDroppedImport,
 }: {
   readonly agentPreviewSurfaceVisible?: boolean;
+  readonly onFilesDrop?: (files: readonly File[]) => void;
+  readonly droppedImportProgress?: DroppedImportProgressState;
+  readonly onCancelDroppedImport?: () => void;
 }) {
   const context = useContext(EditorPanelContext);
   if (context === undefined)
@@ -128,6 +138,9 @@ export function MonitorPanel({
     <MonitorPanelContent
       context={context}
       agentPreviewSurfaceVisible={agentPreviewSurfaceVisible}
+      onFilesDrop={onFilesDrop}
+      droppedImportProgress={droppedImportProgress}
+      onCancelDroppedImport={onCancelDroppedImport}
     />
   );
 }
@@ -135,9 +148,15 @@ export function MonitorPanel({
 function MonitorPanelContent({
   context,
   agentPreviewSurfaceVisible,
+  onFilesDrop,
+  droppedImportProgress,
+  onCancelDroppedImport,
 }: {
   readonly context: EditorPanelContextValue;
   readonly agentPreviewSurfaceVisible: boolean;
+  readonly onFilesDrop?: ((files: readonly File[]) => void) | undefined;
+  readonly droppedImportProgress?: DroppedImportProgressState | undefined;
+  readonly onCancelDroppedImport?: (() => void) | undefined;
 }) {
   const {
     state,
@@ -917,7 +936,11 @@ function MonitorPanelContent({
   );
 
   const handleMonitorEffectDragOver = useCallback((event: React.DragEvent) => {
-    if (!event.dataTransfer.types.includes('application/x-joy-effect')) return;
+    if (
+      !event.dataTransfer.types.includes('application/x-joy-effect') &&
+      !event.dataTransfer.types.includes('Files')
+    )
+      return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
     setMonitorDragOver(true);
@@ -931,6 +954,11 @@ function MonitorPanelContent({
     (event: React.DragEvent) => {
       event.preventDefault();
       setMonitorDragOver(false);
+      if (event.dataTransfer.types.includes('Files') || event.dataTransfer.files.length > 0) {
+        event.stopPropagation();
+        onFilesDrop?.(Array.from(event.dataTransfer.files));
+        return;
+      }
       const raw = event.dataTransfer.getData('application/x-joy-effect');
       if (!raw) return;
       try {
@@ -959,12 +987,15 @@ function MonitorPanelContent({
         /* ignore malformed */
       }
     },
-    [dispatchProject, timelineProject, visualProject, state.selectedIds, showToast],
+    [dispatchProject, onFilesDrop, timelineProject, visualProject, state.selectedIds, showToast],
   );
 
   return (
     <article className="monitor-panel" ref={panelRef}>
       {error !== undefined && <p className="monitor-error">{error}</p>}
+      {droppedImportProgress !== undefined && onCancelDroppedImport !== undefined && (
+        <DroppedImportProgress progress={droppedImportProgress} onCancel={onCancelDroppedImport} />
+      )}
       <MonitorViewport
         controller={monitorView}
         dragOver={monitorDragOver}
