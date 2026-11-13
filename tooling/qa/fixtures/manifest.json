@@ -8,7 +8,7 @@
     "a lossy item can still be reproducible when the encoder gives the same bytes."
   ],
   "generator": "ffmpeg version n8.1.3-20260922 Copyright (c) 2000-2026 the FFmpeg developers",
-  "comparedAgainst": "C:/jgp/v111/evidence/T-A04/review-manifest-run1.json",
+  "comparedAgainstSha256": "11681cbf3bf3623e317a8d57810208098995ab85a65be0012367008afbf191c3",
   "items": [
     {
       "file": "h264-16x9-audio.mp4",
@@ -306,7 +306,7 @@
       "lossless": false,
       "reproducible": false,
       "bytes": 417481,
-      "sha256": "cadd62be28441f00871cd1288a416e63de27cb7bbf643ea1d3a7556d94b25f39",
+      "sha256": "3fbe56a31935e46d3f41cfe34fbdecbde29b52ab54189073d157648158721a02",
       "formatName": "matroska,webm",
       "durationSeconds": 3.008,
       "streams": [
