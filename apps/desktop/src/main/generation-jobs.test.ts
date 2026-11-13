@@ -1,0 +1,402 @@
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ProviderBroker } from './providers/provider-broker.js';
+import {
+  createGenerationJobs,
+  createPinnedGenerationDownloader,
+  type GenerationDownload,
+  type GenerationJobs,
+  type GenerationJobsOptions,
+  type ProbedGeneratedMedia,
+} from './generation-jobs.js';
+import type { GenerationJobRecord, GenerationJobStore } from '../store/generation-job-store.js';
+import type { ProviderProfile } from '../store/local-database.js';
+
+const NOW = Date.UTC(2026, 10, 14);
+const IMAGE_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
+const VIDEO_BYTES = Buffer.from('generated-video');
+
+const PROFILE: ProviderProfile = {
+  id: 'profile-1',
+  provider: 'minimax',
+  baseUrl: 'https://api.minimax.io/v1',
+  modelId: 'chat-model',
+  secretHandleId: 'secret-handle',
+  createdAt: new Date(NOW).toISOString(),
+  updatedAt: new Date(NOW).toISOString(),
+};
+
+function memoryStore(seed: readonly GenerationJobRecord[] = []) {
+  const rows = new Map(seed.map((job) => [job.id, job]));
+  const history = new Map<string, string[]>();
+  const store: GenerationJobStore = {
+    save(job) {
+      rows.set(job.id, { ...job });
+      const states = history.get(job.id) ?? [];
+      if (states.at(-1) !== job.state) states.push(job.state);
+      history.set(job.id, states);
+    },
+    get(id) {
+      const job = rows.get(id);
+      return job === undefined ? undefined : { ...job };
+    },
+    list() {
+      return [...rows.values()].map((job) => ({ ...job }));
+    },
+  };
+  return { store, history, rows };
+}
+
+interface Harness {
+  readonly manager: GenerationJobs;
+  readonly store: ReturnType<typeof memoryStore>;
+  readonly directory: string;
+  readonly generatedDirectory: string;
+  readonly broker: {
+    readonly generateImage: ReturnType<typeof vi.fn>;
+    readonly startVideo: ReturnType<typeof vi.fn>;
+    readonly videoStatus: ReturnType<typeof vi.fn>;
+    readonly cancelVideo: ReturnType<typeof vi.fn>;
+    readonly videoFileLink: ReturnType<typeof vi.fn>;
+  };
+  readonly download: ReturnType<typeof vi.fn>;
+  readonly probe: ReturnType<typeof vi.fn>;
+}
+
+const directories: string[] = [];
+const managers: GenerationJobs[] = [];
+
+function harness(
+  options: {
+    readonly seed?: readonly GenerationJobRecord[];
+    readonly maxImageBytes?: number;
+    readonly maxVideoBytes?: number;
+    readonly imageBytes?: Buffer;
+    readonly videoBytes?: Buffer;
+    readonly download?: ReturnType<typeof vi.fn>;
+    readonly probe?: ReturnType<typeof vi.fn>;
+  } = {},
+): Harness {
+  const directory = mkdtempSync(path.join(process.cwd(), '.joy-generated-'));
+  directories.push(directory);
+  const generatedDirectory = path.join(directory, 'generated');
+  const store = memoryStore(options.seed);
+  const imageBytes = options.imageBytes ?? IMAGE_BYTES;
+  const videoBytes = options.videoBytes ?? VIDEO_BYTES;
+  const broker = {
+    generateImage: vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        base64: imageBytes.toString('base64'),
+        mimeType: 'image/png' as const,
+        model: 'MiniMax-H3-Image',
+        route: 'current' as const,
+      },
+    })),
+    startVideo: vi.fn(async () => ({
+      ok: true as const,
+      data: { taskId: 'task-1', route: 'current' as const },
+    })),
+    videoStatus: vi.fn(async () => ({ ok: true as const, data: { status: 'queued' as const } })),
+    cancelVideo: vi.fn(async () => ({ ok: true as const, data: { cancelled: true } })),
+    videoFileLink: vi.fn(async () => ({
+      ok: true as const,
+      data: { downloadUrl: 'https://assets.example/generated-file' },
+    })),
+  };
+  const download =
+    options.download ??
+    vi.fn(async (): Promise<GenerationDownload> => ({
+      body: Readable.from([videoBytes]),
+      contentLength: videoBytes.byteLength,
+    }));
+  const probe =
+    options.probe ??
+    vi.fn(async (): Promise<ProbedGeneratedMedia> => ({ kind: 'video', extension: 'mp4' }));
+  const manager = createGenerationJobs({
+    store: store.store,
+    getProfile: (id) => (id === PROFILE.id ? PROFILE : undefined),
+    broker: broker as unknown as GenerationJobsOptions['broker'],
+    generatedDirectory,
+    download,
+    probe,
+    now: () => Date.now(),
+    newId: () => 'generation-1',
+    ...(options.maxImageBytes === undefined ? {} : { maxImageBytes: options.maxImageBytes }),
+    ...(options.maxVideoBytes === undefined ? {} : { maxVideoBytes: options.maxVideoBytes }),
+  });
+  managers.push(manager);
+  return { manager, store, directory, generatedDirectory, broker, download, probe };
+}
+
+async function waitForState(
+  manager: GenerationJobs,
+  jobId: string,
+  expected: GenerationJobRecord['state'],
+): Promise<void> {
+  await vi.waitFor(() => expect(manager.status(jobId)?.state).toBe(expected), {
+    interval: 5,
+    timeout: 3_000,
+  });
+}
+
+function pendingVideo(overrides: Partial<GenerationJobRecord> = {}): GenerationJobRecord {
+  return {
+    id: 'generation-1',
+    kind: 'video',
+    provider: 'minimax',
+    profileId: PROFILE.id,
+    model: 'MiniMax-H3-Lite',
+    prompt: 'A quiet lake at dawn',
+    state: 'queued',
+    costNote: 'Provider pricing applies; JOY Media does not estimate the charge.',
+    providerTaskId: 'task-1',
+    route: 'current',
+    createdAt: new Date(NOW).toISOString(),
+    updatedAt: new Date(NOW).toISOString(),
+    ...overrides,
+  };
+}
+
+describe('generation job manager', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW });
+  });
+
+  afterEach(() => {
+    for (const manager of managers.splice(0)) manager.stop();
+    vi.useRealTimers();
+    const workspace = path.resolve(process.cwd());
+    for (const directory of directories.splice(0)) {
+      const resolved = path.resolve(directory);
+      if (!resolved.startsWith(`${workspace}${path.sep}`)) {
+        throw new Error('Refusing to remove a test directory outside the workspace');
+      }
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('streams a picture to user data, checks it, hashes it, and records each state change', async () => {
+    const probe = vi.fn(async (): Promise<ProbedGeneratedMedia> => ({
+      kind: 'image',
+      extension: 'png',
+    }));
+    const { manager, store, generatedDirectory } = harness({ probe });
+
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'image',
+      prompt: 'a red square',
+    });
+    await waitForState(manager, started.id, 'completed');
+
+    const job = manager.status(started.id);
+    expect(job).toMatchObject({
+      state: 'completed',
+      model: 'MiniMax-H3-Image',
+      filePath: path.join(generatedDirectory, 'generation-1.png'),
+      sha256: createHash('sha256').update(IMAGE_BYTES).digest('hex'),
+    });
+    expect(readFileSync(job?.filePath ?? '')).toEqual(IMAGE_BYTES);
+    expect(store.history.get(started.id)).toEqual([
+      'queued',
+      'running',
+      'downloading',
+      'completed',
+    ]);
+    expect(probe).toHaveBeenCalledOnce();
+  });
+
+  it('polls a video every ten seconds and downloads it as soon as the provider reports success', async () => {
+    const { manager, store, broker, generatedDirectory } = harness();
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    expect(started.state).toBe('queued');
+
+    broker.videoStatus.mockResolvedValueOnce({ ok: true, data: { status: 'running' } });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitForState(manager, started.id, 'running');
+    expect(broker.videoStatus).toHaveBeenCalledTimes(1);
+
+    broker.videoStatus.mockResolvedValueOnce({
+      ok: true,
+      data: { status: 'succeeded', fileId: 'file-1' },
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitForState(manager, started.id, 'completed');
+
+    const job = manager.status(started.id);
+    expect(job).toMatchObject({
+      filePath: path.join(generatedDirectory, 'generation-1.mp4'),
+      sha256: createHash('sha256').update(VIDEO_BYTES).digest('hex'),
+    });
+    expect(readFileSync(job?.filePath ?? '')).toEqual(VIDEO_BYTES);
+    expect(store.history.get(started.id)).toEqual([
+      'queued',
+      'running',
+      'downloading',
+      'completed',
+    ]);
+    expect(broker.videoFileLink).toHaveBeenCalledWith({ profileId: PROFILE.id, fileId: 'file-1' });
+    expect(JSON.stringify(job)).not.toContain('https://assets.example');
+  });
+
+  it('refuses insecure, credential-bearing, and private video download addresses before fetching', async () => {
+    const resolveHost = vi.fn(async () => ['10.0.0.8']);
+    const fallbackFetch = vi.fn(async () => new Response('unused'));
+    const download = createPinnedGenerationDownloader({ resolveHost, fallbackFetch });
+    const signal = new AbortController().signal;
+
+    await expect(download('http://127.0.0.1/file', signal)).rejects.toThrow(/refused/i);
+    await expect(download('https://user@cdn.example/file', signal)).rejects.toThrow(/refused/i);
+    await expect(download('https://cdn.example/file', signal)).rejects.toThrow(/public addresses/i);
+
+    expect(resolveHost).toHaveBeenCalledOnce();
+    expect(fallbackFetch).not.toHaveBeenCalled();
+  });
+
+  it('asks the provider to cancel a queued task', async () => {
+    const { manager, broker } = harness();
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+
+    const cancelled = await manager.cancel(started.id);
+
+    expect(broker.cancelVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ profileId: PROFILE.id, taskId: 'task-1', route: 'current' }),
+    );
+    expect(cancelled?.state).toBe('cancelled');
+  });
+
+  it('abandons a running video locally without calling provider cancellation', async () => {
+    const { manager, broker } = harness();
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    broker.videoStatus.mockResolvedValue({ ok: true, data: { status: 'running' } });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitForState(manager, started.id, 'running');
+
+    const abandoned = await manager.cancel(started.id);
+
+    expect(abandoned?.state).toBe('abandoned-locally');
+    expect(broker.cancelVideo).not.toHaveBeenCalled();
+  });
+
+  it('times out an unfinished video after fifteen minutes', async () => {
+    const { manager, broker } = harness();
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+    await waitForState(manager, started.id, 'timed-out');
+
+    expect(broker.videoStatus.mock.calls.length).toBeLessThanOrEqual(90);
+    expect(manager.status(started.id)?.state).toBe('timed-out');
+  });
+
+  it('aborts a status request that is still pending at the fifteen-minute deadline', async () => {
+    const { manager, broker } = harness();
+    broker.videoStatus.mockImplementation(() => new Promise(() => {}));
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+
+    await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+
+    expect(manager.status(started.id)?.state).toBe('timed-out');
+    expect(broker.videoStatus.mock.calls[0]?.[0].signal?.aborted).toBe(true);
+  });
+
+  it('resumes polling for a queued provider task after restart', async () => {
+    const h = harness({ seed: [pendingVideo()] });
+    const manager = h.manager;
+    h.broker.videoStatus.mockResolvedValue({ ok: true, data: { status: 'running' } });
+
+    manager.resume();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitForState(manager, 'generation-1', 'running');
+
+    expect(h.broker.videoStatus).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a downloaded video over the configured cap and leaves no result file', async () => {
+    const tooLarge = Buffer.alloc(5);
+    const download = vi.fn(async (): Promise<GenerationDownload> => ({
+      body: Readable.from([tooLarge]),
+    }));
+    const { manager, broker, generatedDirectory } = harness({ maxVideoBytes: 4, download });
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    broker.videoStatus.mockResolvedValueOnce({
+      ok: true,
+      data: { status: 'succeeded', fileId: 'file-1' },
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitForState(manager, started.id, 'failed');
+
+    expect(readdirSync(generatedDirectory)).toEqual([]);
+  });
+
+  it('refuses an image over the configured cap and leaves no result file', async () => {
+    const probe = vi.fn(async (): Promise<ProbedGeneratedMedia> => ({
+      kind: 'image',
+      extension: 'png',
+    }));
+    const { manager, generatedDirectory } = harness({
+      maxImageBytes: 4,
+      imageBytes: Buffer.alloc(5),
+      probe,
+    });
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'image',
+      prompt: 'a red square',
+    });
+
+    await waitForState(manager, started.id, 'failed');
+
+    expect(readdirSync(generatedDirectory)).toEqual([]);
+    expect(manager.status(started.id)?.filePath).toBeUndefined();
+  });
+
+  it('rejects a result whose ffprobe classification does not match the requested kind', async () => {
+    const probe = vi.fn(async (): Promise<ProbedGeneratedMedia> => ({
+      kind: 'image',
+      extension: 'png',
+    }));
+    const { manager, broker, generatedDirectory } = harness({ probe });
+    const started = await manager.start({
+      profileId: PROFILE.id,
+      kind: 'video',
+      prompt: 'a slow pan',
+    });
+    broker.videoStatus.mockResolvedValueOnce({
+      ok: true,
+      data: { status: 'succeeded', fileId: 'file-1' },
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitForState(manager, started.id, 'failed');
+
+    expect(readdirSync(generatedDirectory)).toEqual([]);
+  });
+});

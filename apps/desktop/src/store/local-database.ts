@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { SqliteJobDispatchStore } from '../jobs/job-dispatch.js';
+import { SqliteGenerationJobStore } from './generation-job-store.js';
 import { ensureLocalAssetSchema, SqliteLocalAssetStore } from './local-assets.js';
 import { ensureProjectDocumentSchema, SqliteProjectDocumentStore } from './project-documents.js';
 import { PROFILE_BINDING_TABLE_SQL, secretVersionDigest } from './profile-binding.js';
@@ -132,6 +133,8 @@ export class LocalDatabase {
   private readonly idFactory: () => string;
   /** Dispatch and Worker presence for the local job API (jobs/job-dispatch.ts). */
   readonly jobDispatch: SqliteJobDispatchStore;
+  /** Provider-backed image and video generation jobs. */
+  readonly generationJobs: SqliteGenerationJobStore;
   /** The project document the editor saves locally (store/project-documents.ts). */
   readonly projectDocuments: SqliteProjectDocumentStore;
   /** Assets registered for a local render, and where their originals are stored. */
@@ -143,6 +146,7 @@ export class LocalDatabase {
     this.db = new DatabaseSync(options.filePath);
     this.db.exec('PRAGMA journal_mode = WAL');
     this.jobDispatch = new SqliteJobDispatchStore(this.db);
+    this.generationJobs = new SqliteGenerationJobStore(this.db);
     ensureProjectDocumentSchema(this.db);
     ensureLocalAssetSchema(this.db);
     this.projectDocuments = new SqliteProjectDocumentStore(this.db, this.now);

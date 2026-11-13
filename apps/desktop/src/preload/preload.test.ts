@@ -49,6 +49,17 @@ function loadPreloadForTest() {
 }
 
 describe('preload channel allow-list', () => {
+  it('exposes the generation job lifecycle through the shared channel list', () => {
+    expect(IPC_CHANNELS).toEqual(
+      expect.arrayContaining([
+        'desktop.generation.start',
+        'desktop.generation.status',
+        'desktop.generation.cancel',
+        'desktop.generation.list',
+      ]),
+    );
+  });
+
   it('ipc-channels.cjs (shared by preload.cjs) matches ../ipc.ts IPC_CHANNELS exactly', () => {
     // preload.cjs itself is not require()-able outside a real Electron process: requiring
     // 'electron' from plain Node resolves to a binary path, not the API, so the module-level

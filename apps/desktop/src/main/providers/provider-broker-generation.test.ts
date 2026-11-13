@@ -129,6 +129,19 @@ describe('provider broker: generation refusals', () => {
 });
 
 describe('provider broker: MiniMax pictures', () => {
+  it('accepts an image reply above the general response cap but within the generation cap', async () => {
+    const image = Buffer.alloc(5 * 1024 * 1024);
+    image.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const { fetch } = scripted([
+      { status: 200, body: { data: [{ b64_json: image.toString('base64') }] } },
+    ]);
+    const broker = await harness('minimax', MINIMAX, fetch);
+
+    const result = await broker.generateImage({ profileId: 'profile-1', prompt: 'a red square' });
+
+    expect(result).toMatchObject({ ok: true, data: { mimeType: 'image/png' } });
+  });
+
   it('returns a checked base64 picture from the current route, with the bearer key sent once', async () => {
     const { fetch, calls } = scripted([
       { status: 200, body: { data: [{ b64_json: PNG_BASE64 }] } },
