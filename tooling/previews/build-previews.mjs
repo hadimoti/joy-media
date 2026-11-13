@@ -22,7 +22,6 @@ import {
   SECOND_SOURCE_PHOTO,
   TRANSITION_PIC1_SOURCE,
   TRANSITION_PIC2_SOURCE,
-  TRANSITION_PREVIEW_PUBLIC_DIR,
   TRANSITION_STRIP_SPEC,
   computeExpectedPreviewHashes,
   sha256Hex,
@@ -37,9 +36,7 @@ const require = createRequire(import.meta.url);
 const viteEntry = pathToFileURL(
   require.resolve('vite', { paths: [resolve(REPO_ROOT, 'apps/editor-web'), REPO_ROOT] }),
 ).href;
-const playwrightEntry = pathToFileURL(
-  require.resolve('playwright', { paths: [REPO_ROOT] }),
-).href;
+const playwrightEntry = pathToFileURL(require.resolve('playwright', { paths: [REPO_ROOT] })).href;
 
 function parseArgs(argv) {
   const secondSource = new Set(DEFAULT_SECOND_SOURCE_EFFECT_IDS);
@@ -394,7 +391,10 @@ async function main() {
     optimizeDeps: { include: ['pixi.js'] },
     resolve: {
       alias: {
-        '@joy-media/renderer-pixi/browser': resolve(REPO_ROOT, 'packages/renderer-pixi/src/browser.ts'),
+        '@joy-media/renderer-pixi/browser': resolve(
+          REPO_ROOT,
+          'packages/renderer-pixi/src/browser.ts',
+        ),
         '@joy-media/renderer-pixi': resolve(REPO_ROOT, 'packages/renderer-pixi/src/index.ts'),
         '@joy-media/render-ir': resolve(REPO_ROOT, 'packages/render-ir/src/index.ts'),
         '@joy-media/visual-effects': resolve(REPO_ROOT, 'packages/visual-effects/src/index.ts'),
@@ -416,7 +416,9 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
   const visualEffectsMod = await server.ssrLoadModule('/packages/visual-effects/src/index.ts');
-  const transitionShadersMod = await server.ssrLoadModule('/packages/transition-shaders/src/index.ts');
+  const transitionShadersMod = await server.ssrLoadModule(
+    '/packages/transition-shaders/src/index.ts',
+  );
 
   const effects = visualEffectsMod.listBuiltinEffects();
   const transitions = transitionShadersMod.listTransitionShaders();
@@ -447,7 +449,7 @@ async function main() {
       console.error('[harness pageerror]', err);
     });
     await page.goto(`${baseUrl}/__joy_preview_harness.html`, { waitUntil: 'networkidle' });
-    await page.waitForFunction(() => typeof window.__joyRenderEffect === 'function');
+    await page.waitForFunction("typeof globalThis.__joyRenderEffect === 'function'");
 
     let beforeEntry = previousManifest?.before;
     const effectEntries = [];
@@ -455,17 +457,14 @@ async function main() {
 
     if (only === 'all' || only === 'effects') {
       if (!filterPattern) {
-        const beforeDataUrl = await page.evaluate(
-          (args) => window.__joyRenderEffect(args),
-          {
-            width: EFFECT_STILL_SPEC.width,
-            height: EFFECT_STILL_SPEC.height,
-            sourceKey: 'effect-default',
-            sourceUrl: `${baseUrl}/__sources/effect-default.png`,
-            effectId: null,
-            params: {},
-          },
-        );
+        const beforeDataUrl = await page.evaluate((args) => globalThis['__joyRenderEffect'](args), {
+          width: EFFECT_STILL_SPEC.width,
+          height: EFFECT_STILL_SPEC.height,
+          sourceKey: 'effect-default',
+          sourceUrl: `${baseUrl}/__sources/effect-default.png`,
+          effectId: null,
+          params: {},
+        });
         const beforeRelPath = `${EFFECT_PREVIEW_PUBLIC_DIR}/before.webp`;
         const beforeAbsPath = resolve(REPO_ROOT, beforeRelPath);
         encodePngToWebp(decodeDataUrlPng(beforeDataUrl), beforeAbsPath, EFFECT_STILL_SPEC.quality);
@@ -485,17 +484,14 @@ async function main() {
         if (filterPattern && !effect.id.includes(filterPattern)) continue;
         const exp = expected.effects.get(effect.id);
         const useSecond = exp.inputs.secondSource;
-        const dataUrl = await page.evaluate(
-          (args) => window.__joyRenderEffect(args),
-          {
-            width: EFFECT_STILL_SPEC.width,
-            height: EFFECT_STILL_SPEC.height,
-            sourceKey: useSecond ? 'effect-photo' : 'effect-default',
-            sourceUrl: `${baseUrl}/__sources/${useSecond ? 'effect-photo' : 'effect-default'}.png`,
-            effectId: effect.id,
-            params: exp.inputs.defaultValues,
-          },
-        );
+        const dataUrl = await page.evaluate((args) => globalThis['__joyRenderEffect'](args), {
+          width: EFFECT_STILL_SPEC.width,
+          height: EFFECT_STILL_SPEC.height,
+          sourceKey: useSecond ? 'effect-photo' : 'effect-default',
+          sourceUrl: `${baseUrl}/__sources/${useSecond ? 'effect-photo' : 'effect-default'}.png`,
+          effectId: effect.id,
+          params: exp.inputs.defaultValues,
+        });
         const absOut = resolve(REPO_ROOT, exp.outputPath);
         encodePngToWebp(decodeDataUrlPng(dataUrl), absOut, EFFECT_STILL_SPEC.quality);
         const webp = readFileSync(absOut);
@@ -520,7 +516,7 @@ async function main() {
         if (filterPattern && !transition.id.includes(filterPattern)) continue;
         const exp = expected.transitions.get(transition.id);
         const stripDataUrl = await page.evaluate(
-          (args) => window.__joyRenderTransitionStrip(args),
+          (args) => globalThis['__joyRenderTransitionStrip'](args),
           {
             frameWidth: TRANSITION_STRIP_SPEC.frameWidth,
             frameHeight: TRANSITION_STRIP_SPEC.frameHeight,

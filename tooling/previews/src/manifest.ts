@@ -387,7 +387,12 @@ export function verifyPreviewManifest(
     );
   }
 
-  const checkFile = (label: string, relPath: string, expectedSha: string, expectedBytes: number) => {
+  const checkFile = (
+    label: string,
+    relPath: string,
+    expectedSha: string,
+    expectedBytes: number,
+  ) => {
     const absPath = resolve(repoRoot, relPath);
     if (!existsSync(absPath)) {
       errors.push(`${label}: missing file ${relPath}`);
@@ -395,7 +400,9 @@ export function verifyPreviewManifest(
     }
     const stat = statSync(absPath);
     if (stat.size !== expectedBytes) {
-      errors.push(`${label}: byte size mismatch for ${relPath} (${stat.size} !== ${expectedBytes})`);
+      errors.push(
+        `${label}: byte size mismatch for ${relPath} (${stat.size} !== ${expectedBytes})`,
+      );
     }
     const buf = readFileSync(absPath);
     const header = buf.subarray(0, 4).toString('ascii');
@@ -412,7 +419,12 @@ export function verifyPreviewManifest(
   if (manifest.before.inputHash !== expected.beforeInputHash) {
     errors.push('before: stale inputHash (source picture or builder changed)');
   }
-  checkFile('before', manifest.before.outputPath, manifest.before.outputSha256, manifest.before.bytes);
+  checkFile(
+    'before',
+    manifest.before.outputPath,
+    manifest.before.outputSha256,
+    manifest.before.bytes,
+  );
 
   const byEffectId = new Map(manifest.effects.map((entry) => [entry.id, entry]));
   for (const [id, exp] of expected.effects) {
