@@ -16860,6 +16860,16 @@ label {
 .shortcut-row:hover {
   background: var(--joy-bg-hover);
 }
+.shortcut-group + .shortcut-group {
+  margin-top: var(--space-2);
+}
+.shortcut-group-heading {
+  margin: 0;
+  padding: 4px var(--space-3);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--joy-text-secondary);
+}
 .shortcut-action {
   font-size: 13px;
   color: var(--joy-text);

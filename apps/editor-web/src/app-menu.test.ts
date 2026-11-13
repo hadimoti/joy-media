@@ -1,7 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import { APP_MENU_GROUPS, panelIdFromMenuAction, isPanelMenuAction } from './app-menu.js';
+import { paletteActionsFromMenu, searchActions } from './editor-state.js';
 
 describe('app-menu catalog', () => {
+  it('puts every menu action id in the command palette', () => {
+    const menuIds = APP_MENU_GROUPS.flatMap((group) => group.items.map((item) => item.id));
+    const paletteIds = paletteActionsFromMenu().map((action) => action.id);
+    expect(menuIds.filter((id) => !paletteIds.includes(id))).toEqual([]);
+    // Each id appears once in the palette, even when two menus share it.
+    expect(new Set(paletteIds).size).toBe(paletteIds.length);
+  });
+
+  it('builds the Clip menu from the clip commands that exist, with Delete shared with Edit', () => {
+    const clip = APP_MENU_GROUPS.find((group) => group.id === 'clip');
+    expect(clip?.items.map((item) => item.label)).toEqual([
+      'Split at Playhead',
+      'Duplicate Clip',
+      'Delete',
+      'Speed…',
+    ]);
+    const edit = APP_MENU_GROUPS.find((group) => group.id === 'edit');
+    expect(edit?.items.map((item) => item.label)).toContain('Delete');
+    expect(edit?.items.map((item) => item.label).join('|')).not.toContain('Cut');
+    expect(clip?.items.find((item) => item.label === 'Delete')?.id).toBe('clip.delete');
+    expect(edit?.items.find((item) => item.label === 'Delete')?.id).toBe('clip.delete');
+  });
+
+  it('finds palette entries by menu label', () => {
+    expect(searchActions('split')).toMatchObject([
+      { id: 'clip.split', title: 'Split at Playhead', shortcut: 'S' },
+    ]);
+  });
+
   it('exposes Adobe-style top-level menus', () => {
     expect(APP_MENU_GROUPS.map((group) => group.id)).toEqual([
       'file',

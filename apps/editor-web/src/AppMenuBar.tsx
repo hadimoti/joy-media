@@ -12,7 +12,8 @@ export interface AppMenuBarProps {
   readonly onAction: (id: AppMenuActionId) => void;
 }
 
-function itemDisabled(
+/** Whether a menu item is greyed out right now. The command palette uses the same rule. */
+export function itemDisabled(
   item: AppMenuItem,
   props: Pick<AppMenuBarProps, 'canUndo' | 'canRedo' | 'hasSelection' | 'exporting'>,
 ): boolean {
@@ -22,9 +23,10 @@ function itemDisabled(
       return !props.canUndo;
     case 'edit.redo':
       return !props.canRedo;
-    case 'edit.delete':
-    case 'edit.duplicate':
+    case 'clip.delete':
+    case 'clip.duplicate':
     case 'clip.split':
+    case 'clip.speed':
       return !props.hasSelection;
     case 'file.export':
       return props.exporting;

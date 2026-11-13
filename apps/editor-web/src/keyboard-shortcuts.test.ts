@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isEditableTarget, isInteractiveTarget, resolveShortcut } from './keyboard-shortcuts.js';
+import {
+  SHORTCUT_REFERENCE,
+  isEditableTarget,
+  isInteractiveTarget,
+  resolveShortcut,
+} from './keyboard-shortcuts.js';
 
 const key = (
   k: string,
@@ -73,5 +78,16 @@ describe('isInteractiveTarget', () => {
     const button = { tagName: 'BUTTON', parentElement: null };
     const icon = { tagName: 'SPAN', parentElement: button };
     expect(isInteractiveTarget(icon as unknown as EventTarget)).toBe(true);
+  });
+});
+
+describe('shortcut reference', () => {
+  it('groups the shortcuts under Playback, Editing and View, in that order', () => {
+    expect(SHORTCUT_REFERENCE.map((group) => group.title)).toEqual(['Playback', 'Editing', 'View']);
+    const keysIn = (title: string) =>
+      SHORTCUT_REFERENCE.find((group) => group.title === title)?.rows.map((row) => row.keys);
+    expect(keysIn('Playback')).toContain('Space');
+    expect(keysIn('Editing')).toContain('Ctrl+Z');
+    expect(keysIn('View')).toContain('Ctrl+K');
   });
 });

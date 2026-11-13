@@ -15,6 +15,6 @@ describe('editor workspace contracts', () => {
     expect(recoverWorkspaceLayout(legacy).panels).toContain('scene3d');
   });
   it('exposes command-palette actions through one shortcut registry', () => {
-    expect(searchActions('undo')).toMatchObject([{ id: 'history.undo', shortcut: 'Ctrl+Z' }]);
+    expect(searchActions('undo')).toMatchObject([{ id: 'edit.undo', shortcut: 'Ctrl+Z' }]);
   });
 });
