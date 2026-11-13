@@ -416,6 +416,10 @@ importers:
         version: link:../project-schema
 
   packages/export-core:
+    dependencies:
+      '@joy-media/job-protocol':
+        specifier: workspace:*
+        version: link:../job-protocol
     devDependencies:
       '@joy-media/test-fixtures':
         specifier: workspace:*

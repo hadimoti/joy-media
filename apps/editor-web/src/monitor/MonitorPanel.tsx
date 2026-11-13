@@ -25,7 +25,7 @@ import {
   type MonitorAspectRatio,
 } from '../MonitorAspectRatioSelector.js';
 import type { BrowserGpuPreviewSession } from '../control-plane-client.js';
-import { setMonitorPixelReader } from '../monitor-readback.js';
+import { setMonitorPixelReader, setMonitorUngradedPixelReader } from '../monitor-readback.js';
 import { readImageMatteMap, resolveObjectIdForSelection } from '../sticker-bindings.js';
 import { isSingleVideoClipSelected } from '../effects-apply-state.js';
 import {
@@ -56,10 +56,18 @@ import {
   withColorGradePreviewNode,
 } from '../color-grade-preview.js';
 import {
+  useColorGradeBypass,
+  withoutColorGrades,
+  withoutVideoNodeGrade,
+} from '../color-grade-bypass.js';
+import { MonitorEyedropper } from './MonitorEyedropper.js';
+import {
   appAgentPreviewStore,
   mediaControlPlaneClient,
   stickerImageCache,
 } from '../editor-runtime-singletons.js';
+import { usePopup } from '../popup-manager.js';
+import { POPUP_IDS } from '../popup-ids.js';
 import { MonitorTransport } from './MonitorTransport.js';
 import { monitorZoomLabel } from './monitor-view.js';
 import {
@@ -97,6 +105,7 @@ import {
 } from './monitor-selection.js';
 import { monitorPixelScale } from './monitor-pixel-scale.js';
 import { createProjectColorLutResolver } from '../project-color-luts.js';
+import { applyCanvasDimensions } from '../export-format-actions.js';
 
 /**
  * The Program Monitor panel: the preview canvas, its renderer lifecycle and the
@@ -216,9 +225,9 @@ function MonitorPanelContent({
     agentPreviewState.document.preview === previewVisualProject
       ? agentPreviewState.document
       : undefined;
-  const [zoomDrawerOpen, setZoomDrawerOpen] = useState(false);
+  // The zoom drawer is one popup (OB-18): outside click, Escape and a second popup close it.
+  const zoomDrawer = usePopup(POPUP_IDS.monitorZoom);
   const panelRef = useRef<HTMLElement | null>(null);
-  const transportRef = useRef<HTMLDivElement | null>(null);
   const initialPreviewPreference = useRef(
     loadEditorUiPreferences(storage).monitorPreview ??
       DEFAULT_EDITOR_UI_PREFERENCES.monitorPreview!,
@@ -320,6 +329,10 @@ function MonitorPanelContent({
   const livePatches = useMonitorTransformPreview();
   // A colour gesture in progress draws with its live grade (never written yet).
   const liveGrade = useColorGradePreview();
+  // Hold to compare (T-K04) draws the picture without any colour grade; the
+  // eyedropper's read-back draws one such frame, copies it and draws again.
+  const gradeBypassed = useColorGradeBypass();
+  const ungradedPaintRef = useRef(false);
   const transformHost = useMemo<MonitorTransformHost>(
     () => ({
       preview: (patches) => monitorTransformPreview.set(patches),
@@ -409,24 +422,6 @@ function MonitorPanelContent({
   }, []);
 
   useEffect(() => {
-    if (!zoomDrawerOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const root = transportRef.current;
-      if (root === null || root.contains(event.target as Node)) return;
-      setZoomDrawerOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setZoomDrawerOpen(false);
-    };
-    window.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [zoomDrawerOpen]);
-
-  useEffect(() => {
     let cancelled = false;
     const mattes = readImageMatteMap(previewVisualProject);
     const activeStickerIds = new Set(
@@ -478,10 +473,14 @@ function MonitorPanelContent({
     const patches = monitorTransformPreview.get();
     const drawnProject = withTransformPatches(previewVisualProject, patches, state.playheadUs);
     // A colour gesture in progress draws with its live grade (never written yet).
-    const gradedProject = withColorGradePreview(previewVisualProject, liveGrade);
+    const withoutGrade = gradeBypassed || ungradedPaintRef.current;
+    const drawnGrade = withoutGrade ? undefined : liveGrade;
+    const gradedProject = withoutGrade
+      ? withoutColorGrades(previewVisualProject)
+      : withColorGradePreview(previewVisualProject, liveGrade);
     const gradedClip =
-      liveGrade?.scope === 'clip' && liveGrade.clipId !== undefined
-        ? findVideoClipById(timelineProject, liveGrade.clipId)
+      drawnGrade?.scope === 'clip' && drawnGrade.clipId !== undefined
+        ? findVideoClipById(timelineProject, drawnGrade.clipId)
         : undefined;
     const objectsById = drawnProject.visualObjects as Readonly<Record<string, VisualObjectV1>>;
     const resolved: ResolvedObject[] = Object.values(drawnProject.visualObjects).map((object) => ({
@@ -517,8 +516,10 @@ function MonitorPanelContent({
             visualFrame,
             withPreviewVideoNode(
               withColorGradePreviewNode(
-                previewVideoFrame.node,
-                liveGrade,
+                withoutGrade
+                  ? withoutVideoNodeGrade(previewVideoFrame.node)
+                  : previewVideoFrame.node,
+                drawnGrade,
                 gradedProject,
                 state.playheadUs,
                 gradedClip === undefined
@@ -590,6 +591,16 @@ function MonitorPanelContent({
         rendererRef.current = created;
         recordPreviewResourceCreated('pixi-renderer', rendererResourceToken);
         setMonitorPixelReader(() => created.readPixels());
+        setMonitorUngradedPixelReader((maxWidth, maxHeight, region) => {
+          ungradedPaintRef.current = true;
+          try {
+            paintRef.current();
+            return created.readPixels(maxWidth, maxHeight, region);
+          } finally {
+            ungradedPaintRef.current = false;
+            paintRef.current();
+          }
+        });
         paintRef.current();
       })
       .catch((reason: unknown) => {
@@ -609,6 +620,7 @@ function MonitorPanelContent({
         rendererPromiseRef.current = null;
         rendererRef.current = null;
         setMonitorPixelReader(undefined);
+        setMonitorUngradedPixelReader(undefined);
         if (pending !== null)
           void pending
             .then((created) => created.destroy())
@@ -827,6 +839,7 @@ function MonitorPanelContent({
     sceneTick,
     livePatches,
     liveGrade,
+    gradeBypassed,
   ]);
 
   const monitorAspectRatio: MonitorAspectRatio = monitorFitView
@@ -881,43 +894,13 @@ function MonitorPanelContent({
         showToast('The root composition is unavailable for this aspect-ratio change.', 'error');
         return;
       }
-      if (
-        visualComposition.width === dimensions.width &&
-        visualComposition.height === dimensions.height &&
-        timelineComposition.width === dimensions.width &&
-        timelineComposition.height === dimensions.height
-      ) {
-        setMonitorFitView(false);
-        return;
-      }
       try {
-        session.dispatchCompound(`Change canvas aspect ratio to ${nextAspectRatio}`, {
-          document: {
-            ...visualProject,
-            updatedAt: new Date().toISOString(),
-            compositions: {
-              ...visualProject.compositions,
-              [visualComposition.id]: {
-                ...visualComposition,
-                width: dimensions.width,
-                height: dimensions.height,
-              },
-            },
-          },
-          timeline: {
-            label: `Change canvas aspect ratio to ${nextAspectRatio}`,
-            commands: [
-              {
-                type: 'timeline.setCompositionDimensions',
-                payload: {
-                  compositionId: timelineComposition.id,
-                  width: dimensions.width,
-                  height: dimensions.height,
-                },
-              },
-            ],
-          },
-        });
+        applyCanvasDimensions(
+          session,
+          dimensions.width,
+          dimensions.height,
+          `Change canvas aspect ratio to ${nextAspectRatio}`,
+        );
         setMonitorFitView(false);
         bumpProjectRevision();
         showToast(`Canvas changed to ${nextAspectRatio}.`, 'success');
@@ -1017,6 +1000,11 @@ function MonitorPanelContent({
           interactive={monitorView.tool === 'select' && !spaceHeld}
           startGesture={transformController.startGesture}
         />
+        <MonitorEyedropper
+          view={monitorView.view}
+          frame={frameSize}
+          playheadUs={state.playheadUs}
+        />
         <AgentPreviewBadge
           surface="Program Monitor"
           before={agentPreviewBefore}
@@ -1025,9 +1013,7 @@ function MonitorPanelContent({
         />
       </MonitorViewport>
       <MonitorTransport
-        transportRef={transportRef}
-        zoomDrawerOpen={zoomDrawerOpen}
-        setZoomDrawerOpen={setZoomDrawerOpen}
+        zoomDrawer={zoomDrawer}
         zoomFit={monitorView.fit}
         zoom={monitorView.view.zoom}
         onZoomFit={monitorView.setFit}

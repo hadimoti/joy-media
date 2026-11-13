@@ -1,5 +1,21 @@
 export type BrowserExportPresetId =
-  'social-h264-aac' | 'reels-1080' | 'shorts-1080' | 'youtube-1080' | 'high-bitrate';
+  | 'social-h264-aac'
+  | 'reels-1080'
+  | 'shorts-1080'
+  | 'youtube-1080'
+  | 'high-bitrate'
+  | 'tiktok-1080'
+  | 'instagram-feed-4x5'
+  | 'square-1080'
+  | 'landscape-4k'
+  | 'custom';
+
+export interface BrowserExportAudioSettings {
+  readonly codec: 'aac';
+  readonly sampleRate: number;
+  readonly channels: number;
+  readonly bitrate: number;
+}
 
 export interface BrowserRenderExportJobInput {
   readonly controlPlaneProjectId: string;
@@ -10,6 +26,8 @@ export interface BrowserRenderExportJobInput {
   readonly frameRate: number;
   readonly durationUs: number;
   readonly preset: BrowserExportPresetId;
+  readonly videoBitrate: number;
+  readonly audio: BrowserExportAudioSettings;
 }
 
 /**
@@ -39,6 +57,8 @@ export function createRenderExportJobPayload(
       frameRate: input.frameRate,
       durationUs: input.durationUs,
       preset: input.preset,
+      videoBitrate: input.videoBitrate,
+      audio: input.audio,
     },
   };
 }
