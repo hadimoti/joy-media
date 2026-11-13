@@ -1606,7 +1606,10 @@ const gradientSweep: FirstPartyScenePackage = {
   manifest: sharedManifest('joy.firstparty.gradient-sweep'),
   variableSchema: {
     headline: { type: 'string', label: 'Headline', default: 'Made for the night shift' },
-    subtitle: { type: 'string', label: 'Subtitle', default: 'New tools for JOY Media' },
+    // Kept as the old name on purpose: saved scenes store only scenePackageId and resolve
+    // this default at render time, so changing it would change their output. Follow-up: a
+    // versioned template change.
+    subtitle: { type: 'string', label: 'Subtitle', default: 'New tools for JOY Studio' },
     meta: { type: 'string', label: 'Meta', default: 'joyteam.ir' },
     accent: { type: 'color', label: 'Accent', default: '#ff9340' },
     glow: { type: 'color', label: 'Glow', default: '#7cc4ff' },
