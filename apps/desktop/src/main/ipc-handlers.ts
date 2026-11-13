@@ -34,6 +34,8 @@ import type {
   SignInResult,
 } from './oauth/sign-in.js';
 import type { SignInAttemptContext, SignInAttempts } from './oauth/sign-in-attempts.js';
+import type { GenerationJobs } from './generation-jobs.js';
+import type { GenerationJobKind } from '../store/generation-job-store.js';
 import { MEDIA_CHANNELS, type MediaChannel, type MediaResult } from './media-channel.js';
 import {
   isAgentSlotConfigured,
@@ -91,6 +93,8 @@ export interface IpcHandlerDeps {
   readonly secretStore: SecretStore;
   /** Every provider call goes through the broker (providers/provider-broker.ts). */
   readonly providerBroker: ProviderBroker;
+  /** The persisted picture/video job manager. Absent means generation is unavailable. */
+  readonly generationJobs?: GenerationJobs;
   /** Runs a sign-in (oauth/sign-in.ts). Absent means sign-in is refused. The result is saved as a profile. */
   readonly providerSignIn?: (
     provider: SignInProvider,
@@ -376,6 +380,41 @@ export function createIpcHandlers(deps: IpcHandlerDeps): Record<IpcChannel, IpcH
         'cancelled by user',
       );
       return { ok: true, data: updated };
+    },
+    'desktop.generation.start': async (payload): Promise<IpcResult> => {
+      const request = asGenerationStartRequest(payload);
+      if (request === undefined) return { ok: false, error: 'Invalid generation request' };
+      if (deps.generationJobs === undefined) {
+        return { ok: false, error: 'Generation is not available in this build' };
+      }
+      try {
+        return { ok: true, data: await deps.generationJobs.start(request) };
+      } catch {
+        return { ok: false, error: 'The generation job could not be started' };
+      }
+    },
+    'desktop.generation.status': (payload): IpcResult => {
+      const jobId = asJobId(payload);
+      if (jobId === undefined) return { ok: false, error: 'Invalid generation job id' };
+      const job = deps.generationJobs?.status(jobId);
+      if (job === undefined) return { ok: false, error: 'Unknown generation job id' };
+      return { ok: true, data: job };
+    },
+    'desktop.generation.cancel': async (payload): Promise<IpcResult> => {
+      const jobId = asJobId(payload);
+      if (jobId === undefined) return { ok: false, error: 'Invalid generation job id' };
+      if (deps.generationJobs === undefined) {
+        return { ok: false, error: 'Generation is not available in this build' };
+      }
+      const job = await deps.generationJobs.cancel(jobId);
+      if (job === undefined) return { ok: false, error: 'Unknown generation job id' };
+      return { ok: true, data: job };
+    },
+    'desktop.generation.list': (): IpcResult => {
+      if (deps.generationJobs === undefined) {
+        return { ok: false, error: 'Generation is not available in this build' };
+      }
+      return { ok: true, data: deps.generationJobs.list() };
     },
     'desktop.provider-profile.save': async (payload, saveContext): Promise<IpcResult> => {
       throwIfAttemptSignalCancelled(saveContext?.signal);
@@ -880,6 +919,31 @@ function asJobId(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = (value as { jobId?: unknown }).jobId;
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
+}
+
+function asGenerationStartRequest(
+  value: unknown,
+):
+  | { readonly profileId: string; readonly kind: GenerationJobKind; readonly prompt: string }
+  | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.profileId !== 'string' ||
+    candidate.profileId.length === 0 ||
+    candidate.profileId.length > 128 ||
+    (candidate.kind !== 'image' && candidate.kind !== 'video') ||
+    typeof candidate.prompt !== 'string' ||
+    candidate.prompt.length === 0 ||
+    candidate.prompt.length > 10_000
+  ) {
+    return undefined;
+  }
+  return {
+    profileId: candidate.profileId,
+    kind: candidate.kind,
+    prompt: candidate.prompt,
+  };
 }
 
 /** The provider to sign in to, and the saved profile to update, when there is one. */

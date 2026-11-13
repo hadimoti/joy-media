@@ -65,6 +65,11 @@ import { CALLBACK_TIMEOUT_MS } from '@joy-media/provider-oauth';
 import { revokeChatGptRefreshToken } from './oauth/chatgpt.js';
 import { createWorkerCompletion } from './providers/worker-completion.js';
 import { checkProfileCredentials } from './profile-credential-check.js';
+import {
+  createGenerationJobs,
+  createPinnedGenerationDownloader,
+  probeGeneratedMedia,
+} from './generation-jobs.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
@@ -163,6 +168,14 @@ if (!app.requestSingleInstanceLock()) {
       publicHostPins.set(hostname, addresses);
     },
   });
+  const generationJobs = createGenerationJobs({
+    store: localDatabase.generationJobs,
+    getProfile: (id) => localDatabase.getProviderProfile(id),
+    broker: providerBroker,
+    generatedDirectory: join(app.getPath('userData'), 'generated'),
+    download: createPinnedGenerationDownloader(),
+    probe: probeGeneratedMedia,
+  });
   // The provider calls in progress. A reload of the page ends them, since nothing will read their replies.
   const agentRequests = new AgentRequestRegistry();
   const originals = createLocalOriginalWriter({
@@ -205,6 +218,7 @@ if (!app.requestSingleInstanceLock()) {
     fileRegistry,
     workerSupervisor,
     localDatabase,
+    generationJobs,
     mediaChannel: createMediaChannelHandlers({
       orchestrator: jobOrchestrator,
       jobStore: localDatabase.jobDispatch,
@@ -334,6 +348,7 @@ if (!app.requestSingleInstanceLock()) {
     onProcessSignal: (signalName, listener) => process.on(signalName, listener),
     stopWorker: async () => {
       shuttingDown = true;
+      generationJobs.stop();
       await localJobApiStart?.catch(() => undefined);
       await workerSupervisor.stopAndWait();
     },
@@ -368,6 +383,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     if (shuttingDown) return;
+    generationJobs.resume();
     void assetLibrary.removeInternalEntries().catch((error) => {
       console.error('Internal asset startup cleanup failed', error);
     });

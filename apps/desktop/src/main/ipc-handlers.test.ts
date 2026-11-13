@@ -9,6 +9,7 @@ import { createMemorySecretStore, findRegistryProvider } from '@joy-media/provid
 import { createProviderBroker } from './providers/provider-broker.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
 import { encodeTokenRecord, type ChatGptTokenRecord } from './oauth/chatgpt.js';
+import type { GenerationJobs } from './generation-jobs.js';
 
 function deps() {
   const fileRegistry = createFileRegistry(() => 'ref-1');
@@ -93,6 +94,80 @@ async function storeChatGptProfile(
 }
 
 describe('IPC dispatch', () => {
+  it('registers every generation job operation in the main-process handler table', () => {
+    const handlers = createIpcHandlers(deps());
+    for (const channel of [
+      'desktop.generation.start',
+      'desktop.generation.status',
+      'desktop.generation.cancel',
+      'desktop.generation.list',
+    ]) {
+      expect(handlers[channel as keyof typeof handlers]).toBeTypeOf('function');
+    }
+  });
+
+  it('routes generation start, status, cancel, and list through the main-process manager', async () => {
+    const d = deps();
+    const row = {
+      id: 'generation-1',
+      kind: 'image' as const,
+      provider: 'minimax',
+      profileId: 'profile-1',
+      model: 'MiniMax-H3-Image',
+      prompt: 'a red square',
+      state: 'queued' as const,
+      costNote: 'Provider pricing applies.',
+      createdAt: 'T0',
+      updatedAt: 'T0',
+    };
+    const generationJobs = {
+      start: vi.fn(async () => row),
+      status: vi.fn(() => row),
+      cancel: vi.fn(async () => ({ ...row, state: 'abandoned-locally' as const })),
+      list: vi.fn(() => [row]),
+      resume: vi.fn(),
+      stop: vi.fn(),
+    } as unknown as GenerationJobs;
+    const handlers = createIpcHandlers({ ...d, generationJobs });
+    const origin = 'joy-media-app://renderer';
+
+    const started = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.generation.start',
+      payload: {
+        profileId: 'profile-1',
+        kind: 'image',
+        prompt: 'a red square',
+        provider: 'attacker-choice',
+        model: 'attacker-model',
+      },
+    });
+    const status = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.generation.status',
+      payload: { jobId: row.id },
+    });
+    const cancelled = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.generation.cancel',
+      payload: { jobId: row.id },
+    });
+    const listed = await dispatchIpcRequest(handlers, {
+      origin,
+      channel: 'desktop.generation.list',
+    });
+
+    expect(started).toEqual({ ok: true, data: row });
+    expect(generationJobs.start).toHaveBeenCalledWith({
+      profileId: 'profile-1',
+      kind: 'image',
+      prompt: 'a red square',
+    });
+    expect(status).toEqual({ ok: true, data: row });
+    expect(cancelled).toMatchObject({ ok: true, data: { state: 'abandoned-locally' } });
+    expect(listed).toEqual({ ok: true, data: [row] });
+  });
+
   it('rejects requests from an origin outside the allow-list before any handler runs', async () => {
     const d = deps();
     const handlers = createIpcHandlers(d);

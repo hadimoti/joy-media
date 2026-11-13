@@ -67,6 +67,7 @@ import { OAuthFlowError } from '../oauth/errors.js';
 import { prepareMiniMaxImage, readMiniMaxImage } from './generation/minimax-image.js';
 import { replyFailure } from './generation/minimax-reply.js';
 import { MINIMAX_GENERATION_SETTINGS } from './generation/minimax-settings.js';
+import { MAX_GENERATED_IMAGE_RESPONSE_BYTES } from './generation/limits.js';
 import {
   prepareVideoCancel,
   prepareVideoCreate,
@@ -420,8 +421,16 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     endpoint: Endpoint,
     call: PreparedCall,
     signal: AbortSignal | undefined,
+    maxResponseBytes = MAX_RESPONSE_BYTES,
   ): Promise<GenerationReply> {
-    const reply = await sendGeneration(deps.fetch, call, completeMs, screenedOf(endpoint), signal);
+    const reply = await sendGeneration(
+      deps.fetch,
+      call,
+      completeMs,
+      screenedOf(endpoint),
+      signal,
+      maxResponseBytes,
+    );
     assertNoCredential(reply.text, endpoint);
     return reply;
   }
@@ -431,12 +440,13 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
     endpoint: Endpoint,
     prepare: (route: GenerationRoute) => PreparedCall,
     signal: AbortSignal | undefined,
+    maxResponseBytes = MAX_RESPONSE_BYTES,
   ): Promise<{ readonly route: GenerationRoute; readonly text: string }> {
-    const first = await generationReply(endpoint, prepare('current'), signal);
+    const first = await generationReply(endpoint, prepare('current'), signal, maxResponseBytes);
     if (replyFailure(first.status, first.text)?.code !== 'ROUTE_MISSING') {
       return { route: 'current', text: checkedText(first) };
     }
-    const legacy = await generationReply(endpoint, prepare('legacy'), signal);
+    const legacy = await generationReply(endpoint, prepare('legacy'), signal, maxResponseBytes);
     return { route: 'legacy', text: checkedText(legacy) };
   }
 
@@ -829,6 +839,7 @@ export function createProviderBroker(deps: ProviderBrokerDeps): ProviderBroker {
           endpoint,
           (picked) => prepareMiniMaxImage(picked, input),
           request.signal,
+          MAX_GENERATED_IMAGE_RESPONSE_BYTES,
         );
         const image = unwrapOutcome(readMiniMaxImage(text));
         const settings = MINIMAX_GENERATION_SETTINGS.image;
@@ -1544,10 +1555,11 @@ async function sendGeneration(
   timeoutMs: number,
   secrets: readonly string[],
   signal?: AbortSignal,
+  maxResponseBytes = MAX_RESPONSE_BYTES,
 ): Promise<GenerationReply> {
   return exchange(fetchImpl, call, timeoutMs, secrets, signal, async (response) => ({
     status: response.status,
-    text: await readBounded(response, MAX_RESPONSE_BYTES),
+    text: await readBounded(response, maxResponseBytes),
   }));
 }
 
