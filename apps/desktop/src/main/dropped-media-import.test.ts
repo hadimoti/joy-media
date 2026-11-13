@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
+import type { BigIntStats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import { createFileRegistry } from './file-registry.js';
 import {
   createDroppedMediaImportService,
+  sameCanonicalRealPath,
   type DroppedMediaImportService,
 } from './dropped-media-import.js';
 import type { LocalOriginalWriter } from './local-originals.js';
@@ -12,11 +14,13 @@ import type { LocalAssetRegistration } from '../store/local-assets.js';
 interface FakeFileInfo {
   readonly kind: 'file' | 'directory';
   readonly bytes?: Uint8Array;
+  mtimeNs?: bigint;
 }
 
 interface TestFileSystem {
-  readonly open: (filePath: string) => Promise<FileHandle>;
-  readonly realpath: (filePath: string) => Promise<string>;
+  readonly open: (filePath: string, flags: 'r') => Promise<FileHandle>;
+  readonly stat: (filePath: string) => Promise<BigIntStats>;
+  readonly realpathNative: (filePath: string) => Promise<string>;
 }
 
 function makeHarness(
@@ -25,6 +29,8 @@ function makeHarness(
     readonly onFinished?: (assetId: string) => void;
     readonly libraryError?: string;
     readonly fileSystem?: TestFileSystem;
+    readonly afterOpen?: (filePath: string, files: Map<string, FakeFileInfo>) => void;
+    readonly afterStream?: (file: FakeFileInfo, streamNumber: number) => void;
   } = {},
 ) {
   const files = new Map<string, FakeFileInfo>();
@@ -34,26 +40,48 @@ function makeHarness(
   const readHandles: FileHandle[] = [];
   const openedPaths: string[] = [];
   const pathByHandle = new WeakMap<object, string>();
+  const fileByHandle = new WeakMap<object, FakeFileInfo>();
+  const inodeByFile = new WeakMap<FakeFileInfo, bigint>();
+  let nextInode = 1n;
+  let streamNumber = 0;
+  const getInode = (file: FakeFileInfo | undefined): bigint => {
+    if (file === undefined) return 0n;
+    let inode = inodeByFile.get(file);
+    if (inode === undefined) {
+      inode = nextInode++;
+      inodeByFile.set(file, inode);
+    }
+    return inode;
+  };
+  const makeStats = (file: FakeFileInfo | undefined): BigIntStats =>
+    ({
+      dev: 1n,
+      ino: getInode(file),
+      size: BigInt(file?.bytes?.byteLength ?? 0),
+      mtimeNs: file?.mtimeNs ?? 1n,
+      isFile: () => file?.kind === 'file',
+    }) as unknown as BigIntStats;
   const storedAssetIds: string[] = [];
   const abortedAssetIds: string[] = [];
   const libraryAddedAssetIds: string[] = [];
   let ticketSequence = 0;
   const ticketRegistry = createFileRegistry(() => `ticket-${++ticketSequence}`);
   const fileSystem = options.fileSystem ?? {
-    open: async (filePath: string) => {
+    open: async (filePath: string, _flags: 'r') => {
       openedPaths.push(filePath);
       const found = files.get(filePath);
+      if (found === undefined) throw new Error('test file does not exist');
       const handle = {
-        stat: async () => ({
-          isFile: () => found?.kind === 'file',
-          size: found?.bytes?.byteLength ?? 0,
-        }),
+        stat: async () => makeStats(found),
         close: vi.fn(async () => undefined),
       } as unknown as FileHandle;
       pathByHandle.set(handle as object, filePath);
+      fileByHandle.set(handle as object, found);
+      options.afterOpen?.(filePath, files);
       return handle;
     },
-    realpath: async (filePath: string) => filePath,
+    stat: async (filePath: string) => makeStats(files.get(filePath)),
+    realpathNative: async (filePath: string) => filePath,
   };
   const originals: LocalOriginalWriter = {
     storeOriginal: vi.fn(async (_assetId: string, _bytes: Uint8Array) => ({
@@ -147,12 +175,15 @@ function makeHarness(
     readChunks: async function* (handle) {
       readHandles.push(handle);
       const sourcePath = pathByHandle.get(handle as object);
-      if (sourcePath === undefined) throw new Error('test file handle is not registered');
+      const file = fileByHandle.get(handle as object);
+      if (sourcePath === undefined || file === undefined)
+        throw new Error('test file handle is not registered');
       readPaths.push(sourcePath);
-      const bytes = files.get(sourcePath)?.bytes ?? new Uint8Array();
+      const bytes = file.bytes ?? new Uint8Array();
       const midpoint = Math.max(1, Math.floor(bytes.byteLength / 2));
       yield bytes.subarray(0, midpoint);
       yield bytes.subarray(midpoint);
+      options.afterStream?.(file, ++streamNumber);
     },
     fileExists: async (path) => [...assets.values()].some((asset) => asset.storedPath === path),
     onProgress: (event) => options.onProgress?.(event.ticketId, event.stage),
@@ -337,20 +368,33 @@ describe('dropped media import', () => {
     expect(JSON.stringify(result)).not.toContain('C:\\private');
   });
 
-  it('refuses a path replaced between validation and opening', async () => {
-    const replacementPath = 'C:\\drop\\replacement.mp4';
-    const handle = {
-      stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
-      close: vi.fn(async () => undefined),
-    } as unknown as FileHandle;
-    const fileSystem: TestFileSystem = {
-      open: vi.fn(async () => handle),
-      realpath: vi.fn(async () => replacementPath),
-    };
-    const harness = makeHarness({ fileSystem });
+  it('refuses a same-size target replacement after opening the file handle', async () => {
+    const path = 'C:\\drop\\clip.mp4';
+    const harness = makeHarness({
+      afterOpen: (openedPath, files) => {
+        expect(openedPath).toBe(path);
+        files.set(path, { kind: 'file', bytes: new Uint8Array([4, 5, 6]) });
+      },
+    });
+    harness.files.set(path, { kind: 'file', bytes: new Uint8Array([1, 2, 3]) });
+    const batch = await harness.service.prepareDroppedPaths([{ path, name: 'clip.mp4' }]);
+
+    const result = await harness.service.importTicket(batch.tickets[0]!.id);
+
+    expect(result).toEqual({ ok: false, error: 'The selected media file changed during import' });
+    expect(harness.readHandles).toHaveLength(1);
+    expect(harness.originals.appendOriginalChunk).not.toHaveBeenCalled();
+  });
+
+  it('aborts the staged copy when the opened file changes during streaming', async () => {
+    const harness = makeHarness({
+      afterStream: (file, streamIndex) => {
+        if (streamIndex === 2) file.mtimeNs = 2n;
+      },
+    });
     harness.files.set('C:\\drop\\clip.mp4', {
       kind: 'file',
-      bytes: new Uint8Array([1, 2, 3]),
+      bytes: new Uint8Array([1, 2, 3, 4]),
     });
     const batch = await harness.service.prepareDroppedPaths([
       { path: 'C:\\drop\\clip.mp4', name: 'clip.mp4' },
@@ -358,13 +402,20 @@ describe('dropped media import', () => {
 
     const result = await harness.service.importTicket(batch.tickets[0]!.id);
 
-    expect(result).toMatchObject({ ok: false });
-    expect(fileSystem.open).toHaveBeenCalledOnce();
-    expect(fileSystem.realpath).toHaveBeenCalledWith('C:\\drop\\clip.mp4');
-    expect(handle.stat).toHaveBeenCalledOnce();
-    expect(handle.close).toHaveBeenCalledOnce();
-    expect(harness.readHandles).toEqual([]);
-    expect(harness.originals.appendOriginalChunk).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: false, error: 'The selected media file changed during import' });
+    expect(harness.originals.appendOriginalChunk).toHaveBeenCalled();
+    expect(harness.abortedAssetIds).toHaveLength(1);
+    expect(harness.storedAssetIds).toEqual([]);
+    expect(harness.assets.size).toBe(0);
+  });
+
+  it('accepts a Windows short-name alias only when native canonicalization resolves to the same real path', async () => {
+    const shortPath = 'C:\\MEDIA~1\\clip.mp4';
+    const realPath = 'C:\\Media Folder\\clip.mp4';
+    const otherPath = 'C:\\Other Folder\\clip.mp4';
+    const canonicalize = async (filePath: string) => (filePath === shortPath ? realPath : filePath);
+    await expect(sameCanonicalRealPath(shortPath, realPath, canonicalize)).resolves.toBe(true);
+    await expect(sameCanonicalRealPath(shortPath, otherPath, canonicalize)).resolves.toBe(false);
   });
 
   it('cancels an in-progress stream and removes its partial original', async () => {

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { access, open, readdir, realpath, type FileHandle } from 'node:fs/promises';
+import { realpath as realpathCallback, type BigIntStats } from 'node:fs';
+import { access, open, readdir, stat, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import {
   resolveDroppedPath,
@@ -81,7 +82,8 @@ interface DroppedMediaImportDeps {
   ) => Promise<ResolvedDroppedPath>;
   readonly fileSystem?: {
     open(filePath: string, flags: 'r'): Promise<FileHandle>;
-    realpath(filePath: string): Promise<string>;
+    stat(filePath: string): Promise<BigIntStats>;
+    realpathNative(filePath: string): Promise<string>;
   };
   readonly readDirectory?: (
     directory: string,
@@ -148,6 +150,74 @@ function sameRealPath(left: string, right: string): boolean {
   return process.platform === 'win32'
     ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
     : normalizedLeft === normalizedRight;
+}
+
+function nativeRealpath(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    realpathCallback.native(filePath, (error, resolvedPath) => {
+      if (error !== null) reject(error);
+      else resolve(resolvedPath);
+    });
+  });
+}
+
+/**
+ * Resolving both spellings with fs.realpath.native accepts a Windows 8.3 alias
+ * only when it identifies the same canonical real path.
+ */
+export async function sameCanonicalRealPath(
+  left: string,
+  right: string,
+  canonicalize: (filePath: string) => Promise<string> = nativeRealpath,
+): Promise<boolean> {
+  try {
+    const [canonicalLeft, canonicalRight] = await Promise.all([
+      canonicalize(left),
+      canonicalize(right),
+    ]);
+    return sameRealPath(canonicalLeft, canonicalRight);
+  } catch {
+    return false;
+  }
+}
+
+function sameFileVersion(left: BigIntStats, right: BigIntStats): boolean {
+  const sameSizeAndMtime = left.size === right.size && left.mtimeNs === right.mtimeNs;
+  if (left.ino === 0n || right.ino === 0n) {
+    // Some filesystems report ino=0; callers also require matching realpaths and metadata.
+    return sameSizeAndMtime;
+  }
+  return left.dev === right.dev && left.ino === right.ino && sameSizeAndMtime;
+}
+
+async function stillMatchesOpenedFile(
+  fileSystem: NonNullable<DroppedMediaImportDeps['fileSystem']>,
+  file: FileHandle,
+  sourcePath: string,
+  validatedPath: string,
+  initialPathInfo: BigIntStats,
+  initialHandleInfo: BigIntStats,
+): Promise<boolean> {
+  try {
+    const [currentHandleInfo, currentPathInfo] = await Promise.all([
+      file.stat({ bigint: true }),
+      fileSystem.stat(validatedPath),
+    ]);
+    if (!currentHandleInfo.isFile() || !currentPathInfo.isFile()) return false;
+    const pathStillResolvesToTarget = await sameCanonicalRealPath(
+      sourcePath,
+      validatedPath,
+      fileSystem.realpathNative,
+    );
+    return (
+      pathStillResolvesToTarget &&
+      sameFileVersion(initialPathInfo, initialHandleInfo) &&
+      sameFileVersion(initialHandleInfo, currentHandleInfo) &&
+      sameFileVersion(initialHandleInfo, currentPathInfo)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function defaultReadDirectory(
@@ -224,7 +294,11 @@ export function createDroppedMediaImportService(
   deps: DroppedMediaImportDeps,
 ): DroppedMediaImportService {
   const resolvePath = deps.resolveDroppedPath ?? resolveDroppedPath;
-  const fileSystem = deps.fileSystem ?? { open, realpath };
+  const fileSystem = deps.fileSystem ?? {
+    open,
+    stat: (filePath: string) => stat(filePath, { bigint: true }),
+    realpathNative: nativeRealpath,
+  };
   const readDirectory = deps.readDirectory ?? defaultReadDirectory;
   const readChunks = deps.readChunks ?? defaultReadChunks;
   const fileExists = deps.fileExists ?? defaultFileExists;
@@ -410,43 +484,69 @@ export function createDroppedMediaImportService(
         }
 
         if (isCancelled(controller.signal)) throw cancellationError();
+        const validatedPathInfo = await fileSystem.stat(info.path);
+        if (!validatedPathInfo.isFile()) {
+          return { ok: false, error: 'Dropped media ticket is invalid' };
+        }
+        if (validatedPathInfo.size < 1n) {
+          return { ok: false, error: 'Selected media file is empty' };
+        }
+        if (validatedPathInfo.size > BigInt(MAX_LOCAL_ORIGINAL_BYTES)) {
+          return { ok: false, error: 'The selected media file is too large' };
+        }
+        if (validatedPathInfo.size !== BigInt(info.size)) {
+          return { ok: false, error: 'The selected media file changed during import' };
+        }
+        if (!(await sameCanonicalRealPath(sourcePath, info.path, fileSystem.realpathNative))) {
+          return { ok: false, error: 'The selected media file changed during import' };
+        }
+
         openedFile = await fileSystem.open(sourcePath, 'r');
-        const openedInfo = await openedFile.stat();
+        const openedInfo = await openedFile.stat({ bigint: true });
         if (!openedInfo.isFile()) {
           return { ok: false, error: 'Dropped media ticket is invalid' };
         }
-        if (openedInfo.size < 1) return { ok: false, error: 'Selected media file is empty' };
-        if (openedInfo.size > MAX_LOCAL_ORIGINAL_BYTES) {
+        if (openedInfo.size < 1n) return { ok: false, error: 'Selected media file is empty' };
+        if (openedInfo.size > BigInt(MAX_LOCAL_ORIGINAL_BYTES)) {
           return { ok: false, error: 'The selected media file is too large' };
         }
-        if (openedInfo.size !== info.size) {
+        if (
+          openedInfo.size !== BigInt(info.size) ||
+          !sameFileVersion(validatedPathInfo, openedInfo)
+        ) {
           return { ok: false, error: 'The selected media file changed during import' };
         }
-        const openedRealPath = await fileSystem.realpath(sourcePath);
-        // Native realpath expands a Windows 8.3 alias to the same long path, so a short-name drop is valid when it identifies this file.
-        if (!sameRealPath(openedRealPath, info.path)) {
-          return { ok: false, error: 'The selected media file changed during import' };
-        }
+        const openedSize = Number(openedInfo.size);
         if (isCancelled(controller.signal)) throw cancellationError();
 
         const hash = createHash('sha256');
         let hashedBytes = 0;
-        for await (const piece of readChunks(openedFile, controller.signal, openedInfo.size)) {
+        for await (const piece of readChunks(openedFile, controller.signal, openedSize)) {
           if (isCancelled(controller.signal)) throw cancellationError();
           const bytes = Buffer.from(piece.buffer, piece.byteOffset, piece.byteLength);
           hashedBytes += bytes.byteLength;
-          if (hashedBytes > openedInfo.size || hashedBytes > MAX_LOCAL_ORIGINAL_BYTES) {
+          if (hashedBytes > openedSize || hashedBytes > MAX_LOCAL_ORIGINAL_BYTES) {
             return { ok: false, error: 'The selected media file changed during import' };
           }
           hash.update(bytes);
           reportProgress({
             ticketId,
             stage: 'hash',
-            ratio: Math.min(1, hashedBytes / openedInfo.size),
+            ratio: Math.min(1, hashedBytes / openedSize),
           });
         }
         if (isCancelled(controller.signal)) throw cancellationError();
-        if (hashedBytes !== openedInfo.size) {
+        if (
+          hashedBytes !== openedSize ||
+          !(await stillMatchesOpenedFile(
+            fileSystem,
+            openedFile,
+            sourcePath,
+            info.path,
+            validatedPathInfo,
+            openedInfo,
+          ))
+        ) {
           return { ok: false, error: 'The selected media file changed during import' };
         }
         const sha256 = hash.digest('hex');
@@ -460,7 +560,7 @@ export function createDroppedMediaImportService(
           const existing = deps.assets.get(importAssetId);
           if (
             existing !== undefined &&
-            (existing.sha256 !== sha256 || existing.bytes !== openedInfo.size)
+            (existing.sha256 !== sha256 || existing.bytes !== openedSize)
           ) {
             return { ok: false, error: 'Asset ID is already registered with other content' };
           }
@@ -482,7 +582,7 @@ export function createDroppedMediaImportService(
                 kind: existing.kind as 'video' | 'audio' | 'image',
                 displayName: existing.displayName,
                 sha256,
-                bytes: openedInfo.size,
+                bytes: openedSize,
                 descriptor: existing.descriptor ?? descriptor,
                 deduplicated: true,
               },
@@ -494,7 +594,7 @@ export function createDroppedMediaImportService(
             kind,
             displayName,
             sha256,
-            bytes: openedInfo.size,
+            bytes: openedSize,
             descriptor,
           });
           if (registration.kind === 'conflict') {
@@ -503,7 +603,7 @@ export function createDroppedMediaImportService(
           registeredAssetId = importAssetId;
 
           let written = 0;
-          for await (const piece of readChunks(openedFile!, controller.signal, openedInfo.size)) {
+          for await (const piece of readChunks(openedFile!, controller.signal, openedSize)) {
             if (isCancelled(controller.signal)) throw cancellationError();
             const bytes = Buffer.from(piece.buffer, piece.byteOffset, piece.byteLength);
             for (let offset = 0; offset < bytes.byteLength; offset += MAX_ORIGINAL_CHUNK_BYTES) {
@@ -523,12 +623,22 @@ export function createDroppedMediaImportService(
               reportProgress({
                 ticketId,
                 stage: 'store',
-                ratio: Math.min(1, written / openedInfo.size),
+                ratio: Math.min(1, written / openedSize),
               });
             }
           }
           if (isCancelled(controller.signal)) throw cancellationError();
-          if (written !== openedInfo.size) {
+          if (
+            written !== openedSize ||
+            !(await stillMatchesOpenedFile(
+              fileSystem,
+              openedFile!,
+              sourcePath,
+              info.path,
+              validatedPathInfo,
+              openedInfo,
+            ))
+          ) {
             return { ok: false, error: 'The selected media file changed during import' };
           }
           const finished = await deps.originals.finishOriginalUpload(importAssetId);
@@ -556,7 +666,7 @@ export function createDroppedMediaImportService(
               kind,
               displayName,
               sha256,
-              bytes: openedInfo.size,
+              bytes: openedSize,
               descriptor,
               deduplicated: false,
             },
@@ -578,8 +688,14 @@ export function createDroppedMediaImportService(
             await deps.originals.abortOriginalUpload(assetId).catch(() => undefined);
           }
         }
-        if (isCancelled(controller.signal) && !committed && registeredAssetId !== undefined) {
-          await deps.library?.removeEntry(registeredAssetId).catch(() => undefined);
+        if (
+          registeredAssetId !== undefined &&
+          !committed &&
+          (!originalFinished || isCancelled(controller.signal))
+        ) {
+          if (isCancelled(controller.signal)) {
+            await deps.library?.removeEntry(registeredAssetId).catch(() => undefined);
+          }
           deps.assets.remove(registeredAssetId);
         }
         deps.fileRegistry.revoke(ref);
