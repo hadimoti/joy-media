@@ -379,7 +379,7 @@ test.describe('desktop.file-project-package', () => {
     try {
       writeFileSync(
         badPackage,
-        '{"format":"joy-media-project","schemaVersion":1,"app":"JOY Studio"',
+        '{"format":"joy-media-project","schemaVersion":1,"app":"JOY Media"',
       );
       app = await launchPackagedEditor(profile);
       const page = await openEditorPage(app);

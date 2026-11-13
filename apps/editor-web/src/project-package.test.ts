@@ -164,4 +164,23 @@ describe('portable project packages', () => {
     );
     expect(getCatalogProject(storage, entry.id)).toMatchObject({ title: 'Source project' });
   });
+
+  it('writes JOY Media and still reads packages written under the old name', async () => {
+    const storage = memoryStorage();
+    const entry = createEntry(storage);
+    const pkg = await createProjectPackage(entry, storage);
+    expect(pkg.app).toBe('JOY Media');
+
+    const legacy = { ...JSON.parse(serializeProjectPackage(pkg)), app: 'JOY Studio' };
+    expect(parseProjectPackage(legacy).app).toBe('JOY Studio');
+    expect(parseProjectPackage(JSON.parse(serializeProjectPackage(pkg))).app).toBe('JOY Media');
+  });
+
+  it('rejects a package written by some other app', async () => {
+    const storage = memoryStorage();
+    const entry = createEntry(storage);
+    const pkg = await createProjectPackage(entry, storage);
+    const foreign = { ...JSON.parse(serializeProjectPackage(pkg)), app: 'Some Other Editor' };
+    expect(() => parseProjectPackage(foreign)).toThrow('metadata is invalid');
+  });
 });

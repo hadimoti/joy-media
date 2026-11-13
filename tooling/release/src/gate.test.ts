@@ -265,7 +265,7 @@ const passingInput = (): ReleaseGateInput => ({
   performanceEvidence: performanceEvidence(),
 });
 
-describe('JOY Studio 1.0 release gate', () => {
+describe('JOY Media 1.0 release gate', () => {
   let priorJoyReleaseEnv: Record<string, string>;
 
   beforeEach(() => {

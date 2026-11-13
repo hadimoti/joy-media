@@ -1606,7 +1606,7 @@ const gradientSweep: FirstPartyScenePackage = {
   manifest: sharedManifest('joy.firstparty.gradient-sweep'),
   variableSchema: {
     headline: { type: 'string', label: 'Headline', default: 'Made for the night shift' },
-    subtitle: { type: 'string', label: 'Subtitle', default: 'New tools for JOY Studio' },
+    subtitle: { type: 'string', label: 'Subtitle', default: 'New tools for JOY Media' },
     meta: { type: 'string', label: 'Meta', default: 'joyteam.ir' },
     accent: { type: 'color', label: 'Accent', default: '#ff9340' },
     glow: { type: 'color', label: 'Glow', default: '#7cc4ff' },

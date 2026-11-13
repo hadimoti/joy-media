@@ -1,7 +1,7 @@
 {
-  "name": "JOY Studio",
-  "short_name": "JOY Studio",
-  "description": "JOY Studio browser video editor",
+  "name": "JOY Media",
+  "short_name": "JOY Media",
+  "description": "JOY Media browser video editor",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",

@@ -512,7 +512,7 @@ import {
 import './app.css';
 import 'dockview/dist/styles/dockview.css';
 import { JOY_COLORS } from './theme.js';
-import { JOY_STUDIO_NAME } from './product-identity.js';
+import { JOY_MEDIA_NAME } from './product-identity.js';
 import { effectInstancesForTimelineClip } from './adjustment-render.js';
 import {
   buildTreatmentLayerInsertion,
@@ -6850,7 +6850,7 @@ function EditorWorkspace({
                   height={24}
                   decoding="async"
                 />
-                <strong>{JOY_STUDIO_NAME}</strong>
+                <strong>{JOY_MEDIA_NAME}</strong>
               </span>
               <AppMenuBar
                 canUndo={session.canUndo}

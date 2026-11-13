@@ -57,6 +57,6 @@ export function structuralCheck(id: string, summary: string): LookVerificationPr
 }
 
 export const JOY_PROVENANCE = {
-  author: 'JOY Studio',
+  author: 'JOY Media',
   license: 'OFL-1.1 (fonts) · JOY internal (pack data)',
 } as const;

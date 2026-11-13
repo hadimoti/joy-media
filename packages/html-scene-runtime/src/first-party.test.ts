@@ -39,7 +39,7 @@ const REFERENCE_FRAME_SHA256: Readonly<Record<string, string>> = {
   'joy.firstparty.neon-sign': '8daefb34a98b92b289faecfabb36485b4fd9d2e893ea336d4a592962e59bb68f',
   'joy.firstparty.chrome-title': '4036f5a71c1aeacb1bad2de469b217e8a9121f61b1669f203d2becab8c26a265',
   'joy.firstparty.gradient-sweep':
-    'ea252c18427ee2478dfb25045eafa62416c15f336b38811a185f97fa9d6b33f2',
+    '7cd877c1a18c6f4fab65ae4499fb7434c56a657a9f9d3010ae1cec03bb9a5426',
   'joy.firstparty.photo-stack': '590fcce8ba31027815d5ba859d98edcc9a68c4ab7d63f5fe46ab78727250523a',
   'joy.firstparty.spotlight-quote':
     'edac95cc2f99c4ed8a9050ce42ac5cf7e744b88a8f45f623e1965b414df8b6db',

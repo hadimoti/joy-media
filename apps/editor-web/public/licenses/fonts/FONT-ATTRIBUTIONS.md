@@ -1,4 +1,4 @@
-# JOY Studio bundled font attributions
+# JOY Media bundled font attributions
 
 The following Fontsource packages are bundled by the editor. Their font
 files are redistributed under the SIL Open Font License 1.1, reproduced in
