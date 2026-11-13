@@ -187,11 +187,26 @@ export interface BrowserPixiRenderer {
   readonly readPixels: (
     maxWidth?: number,
     maxHeight?: number,
+    /**
+     * Only this window of the frame (frame pixels), on the same pixel grid
+     * as the whole read-back: `left`/`top` say where it sits in that grid of
+     * `gridWidth` × `gridHeight` (the T-K04 eyedropper reads a small window).
+     */
+    region?: {
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    },
   ) =>
     | {
         readonly width: number;
         readonly height: number;
         readonly data: Uint8ClampedArray;
+        readonly left?: number;
+        readonly top?: number;
+        readonly gridWidth?: number;
+        readonly gridHeight?: number;
       }
     | undefined;
   /** Paints a {@link RenderFrameIR} into the canvas and returns per-frame stats. */
@@ -813,14 +828,34 @@ export async function createBrowserPixiRenderer(
       if (layer === undefined || node === undefined) return undefined;
       return nodeBoundsFromBox(id, node.transform, layerLocalBox(layer, node));
     },
-    readPixels(maxWidth = 640, maxHeight = 360) {
+    readPixels(maxWidth = 640, maxHeight = 360, region) {
       if (disposed || frameWidth <= 0 || frameHeight <= 0) return undefined;
       const scale = Math.min(1, maxWidth / frameWidth, maxHeight / frameHeight);
       const width = Math.max(1, Math.round(frameWidth * scale));
       const height = Math.max(1, Math.round(frameHeight * scale));
+      // A window is cut out of the same grid: the whole read-back is drawn
+      // shifted by the window's corner and only the window is kept.
+      let left = 0;
+      let top = 0;
+      let copyWidth = width;
+      let copyHeight = height;
+      if (region !== undefined) {
+        const cellsX = width / frameWidth;
+        const cellsY = height / frameHeight;
+        left = Math.max(0, Math.min(width - 1, Math.floor(region.x * cellsX)));
+        top = Math.max(0, Math.min(height - 1, Math.floor(region.y * cellsY)));
+        copyWidth = Math.max(
+          1,
+          Math.min(width, Math.ceil((region.x + region.width) * cellsX)) - left,
+        );
+        copyHeight = Math.max(
+          1,
+          Math.min(height, Math.ceil((region.y + region.height) * cellsY)) - top,
+        );
+      }
       const copy = document.createElement('canvas');
-      copy.width = width;
-      copy.height = height;
+      copy.width = copyWidth;
+      copy.height = copyHeight;
       const context = copy.getContext('2d', { willReadFrequently: true });
       if (context === null) return undefined;
       if (monitorView !== undefined && surface !== undefined) {
@@ -832,14 +867,23 @@ export async function createBrowserPixiRenderer(
         app.renderer.render(app.stage);
         const sourceWidth = Math.max(1, frameWidth * fit * frameResolution);
         const sourceHeight = Math.max(1, frameHeight * fit * frameResolution);
-        context.drawImage(app.canvas, 0, 0, sourceWidth, sourceHeight, 0, 0, width, height);
+        context.drawImage(app.canvas, 0, 0, sourceWidth, sourceHeight, -left, -top, width, height);
         applyStageTransform();
         app.renderer.render(app.stage);
       } else {
-        context.drawImage(app.canvas, 0, 0, width, height);
+        context.drawImage(app.canvas, -left, -top, width, height);
       }
-      const image = context.getImageData(0, 0, width, height);
-      return { width, height, data: image.data };
+      const image = context.getImageData(0, 0, copyWidth, copyHeight);
+      if (region === undefined) return { width, height, data: image.data };
+      return {
+        width: copyWidth,
+        height: copyHeight,
+        data: image.data,
+        left,
+        top,
+        gridWidth: width,
+        gridHeight: height,
+      };
     },
     render(
       frame: RenderFrameIR,

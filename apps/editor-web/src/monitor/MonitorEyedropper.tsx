@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { ScopePixels } from '../color-scopes.js';
 import {
   colorEyedropper,
+  createMagnifierCells,
   pixelAt,
   pixelNeighbourhood,
+  readBackCovers,
+  readWindowAround,
   useColorEyedropperActive,
   type ColorEyedropperStore,
+  type UngradedPixelReader,
+  type WindowPixels,
 } from '../color-eyedropper.js';
 import { hasPickableHue, pixelHue, type PickedColour } from '../color-hsl-math.js';
 import { readUngradedMonitorPixels } from '../monitor-readback.js';
@@ -20,15 +24,20 @@ import '../ColorCurvesHsl.css';
 const MAGNIFIER_RADIUS = 3;
 /** The read-back is never larger than this on a side. */
 const MAX_READ_SIZE = 2048;
+/**
+ * While picking during playback, a new frame is read again at most this often
+ * (each read draws the frame without the grade, copies it and draws it again).
+ */
+export const EYEDROPPER_REREAD_INTERVAL_MS = 120;
 
 export interface MonitorEyedropperProps {
   readonly view: MonitorViewState;
   readonly frame: MonitorSize;
-  /** A new frame under the playhead is read again. */
+  /** A new frame under the playhead is read again (when the pointer is over the picture). */
   readonly playheadUs: number;
   readonly store?: ColorEyedropperStore;
   /** The picture before the grade; the Monitor's own read-back by default. */
-  readonly readPixels?: (maxWidth: number, maxHeight: number) => ScopePixels | undefined;
+  readonly readPixels?: UngradedPixelReader;
 }
 
 interface Hover {
@@ -36,6 +45,11 @@ interface Hover {
   readonly y: number;
   readonly colour: PickedColour | undefined;
   readonly cells: readonly (PickedColour | undefined)[];
+}
+
+interface PointerAt {
+  readonly screen: { readonly x: number; readonly y: number };
+  readonly canvas: { readonly x: number; readonly y: number };
 }
 
 function rgb(colour: PickedColour): string {
@@ -48,6 +62,12 @@ function rgb(colour: PickedColour): string {
  * and its hue, a click picks the pixel and Esc cancels. The pixels are read
  * from the picture before the colour grade, so the pick does not move while
  * the grade changes.
+ *
+ * Reading is kept cheap: the picture is read when the pick starts, and after
+ * that only when the pointer moves or the frame changes while the pointer is
+ * over the picture, at most every `EYEDROPPER_REREAD_INTERVAL_MS` for a new
+ * frame. A large frame is read as a window of at most 512 frame pixels around
+ * the pointer, read again when the pointer leaves it.
  */
 export function MonitorEyedropper({
   view,
@@ -57,28 +77,131 @@ export function MonitorEyedropper({
   readPixels = readUngradedMonitorPixels,
 }: MonitorEyedropperProps) {
   const active = useColorEyedropperActive(store);
-  const pixelsRef = useRef<ScopePixels | undefined>(undefined);
+  const pixelsRef = useRef<WindowPixels | undefined>(undefined);
+  /** The playhead and frame size the pixels were read at. */
+  const readAtRef = useRef<{ playheadUs: number; width: number; height: number } | undefined>(
+    undefined,
+  );
+  /** When the last read happened (for the throttle). */
+  const lastReadMsRef = useRef(Number.NEGATIVE_INFINITY);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pointerRef = useRef<PointerAt | undefined>(undefined);
+  /** One cell array (and one set of colour objects) for every magnifier update. */
+  const cellsRef = useRef(createMagnifierCells());
   const [hover, setHover] = useState<Hover | undefined>(undefined);
+  /** The latest render's handlers, for the effects and the throttle timer. */
+  const syncRef = useRef<{ readonly changed: () => void; readonly reread: () => void }>({
+    changed: () => undefined,
+    reread: () => undefined,
+  });
 
-  const read = () => {
-    pixelsRef.current = readPixels(
-      Math.min(frame.width, MAX_READ_SIZE),
-      Math.min(frame.height, MAX_READ_SIZE),
-    );
+  const read = (around: { readonly x: number; readonly y: number } | undefined) => {
+    const maxWidth = Math.min(frame.width, MAX_READ_SIZE);
+    const maxHeight = Math.min(frame.height, MAX_READ_SIZE);
+    const region = readWindowAround(frame, around);
+    pixelsRef.current =
+      region === undefined
+        ? readPixels(maxWidth, maxHeight)
+        : readPixels(maxWidth, maxHeight, region);
+    readAtRef.current = { playheadUs, width: frame.width, height: frame.height };
+    lastReadMsRef.current = Date.now();
     return pixelsRef.current;
   };
-  const readRef = useRef(read);
-  readRef.current = read;
 
-  // The picture is read once when the pick starts, and again for a new frame.
-  useEffect(() => {
-    if (!active) {
-      pixelsRef.current = undefined;
-      setHover(undefined);
+  const isStale = () => {
+    const at = readAtRef.current;
+    return (
+      at === undefined ||
+      at.playheadUs !== playheadUs ||
+      at.width !== frame.width ||
+      at.height !== frame.height
+    );
+  };
+
+  /** The pixels that hold the point: read again when there are none, or they are old or elsewhere. */
+  const pixelsFor = (canvas: { readonly x: number; readonly y: number }, fresh: boolean) => {
+    const pixels = pixelsRef.current;
+    if (
+      pixels === undefined ||
+      (fresh && isStale()) ||
+      !readBackCovers(pixels, frame, canvas, MAGNIFIER_RADIUS)
+    )
+      return read(canvas);
+    return pixels;
+  };
+
+  const showHover = (pointer: PointerAt) => {
+    const pixels = pixelsRef.current;
+    if (pixels === undefined) {
+      setHover({ x: pointer.screen.x, y: pointer.screen.y, colour: undefined, cells: [] });
       return;
     }
-    readRef.current();
+    setHover({
+      x: pointer.screen.x,
+      y: pointer.screen.y,
+      colour: pixelAt(pixels, frame, pointer.canvas),
+      cells: pixelNeighbourhood(pixels, frame, pointer.canvas, MAGNIFIER_RADIUS, cellsRef.current),
+    });
+  };
+
+  /** Reads a new frame again soon, at most once per interval, while the pointer is over it. */
+  const scheduleReread = () => {
+    if (timerRef.current !== undefined || pointerRef.current === undefined) return;
+    const wait = Math.max(0, lastReadMsRef.current + EYEDROPPER_REREAD_INTERVAL_MS - Date.now());
+    timerRef.current = setTimeout(() => {
+      timerRef.current = undefined;
+      syncRef.current.reread();
+    }, wait);
+  };
+
+  const sync = {
+    /** The pick, the frame size or the frame under the playhead changed. */
+    changed() {
+      if (!active) {
+        if (timerRef.current !== undefined) clearTimeout(timerRef.current);
+        timerRef.current = undefined;
+        pixelsRef.current = undefined;
+        readAtRef.current = undefined;
+        pointerRef.current = undefined;
+        setHover(undefined);
+        return;
+      }
+      const at = readAtRef.current;
+      // The picture is read once when the pick starts (or the frame size changes).
+      if (
+        pixelsRef.current === undefined ||
+        at === undefined ||
+        at.width !== frame.width ||
+        at.height !== frame.height
+      ) {
+        read(pointerRef.current?.canvas);
+        if (pointerRef.current !== undefined) showHover(pointerRef.current);
+        return;
+      }
+      // A new frame: read again only while the pointer is over the picture, throttled.
+      if (at.playheadUs !== playheadUs) scheduleReread();
+    },
+    /** The throttled read of a new frame. */
+    reread() {
+      const pointer = pointerRef.current;
+      if (!active || pointer === undefined || !isStale()) return;
+      read(pointer.canvas);
+      showHover(pointer);
+    },
+  };
+  syncRef.current = sync;
+
+  useEffect(() => {
+    syncRef.current.changed();
   }, [active, playheadUs, frame.width, frame.height]);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== undefined) clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!active) return;
@@ -96,33 +219,30 @@ export function MonitorEyedropper({
 
   const canvasPoint = (
     event: ReactPointerEvent<HTMLDivElement> | React.MouseEvent<HTMLDivElement>,
-  ) => {
+  ): PointerAt => {
     const rect = event.currentTarget.getBoundingClientRect();
     const screen = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     return { screen, canvas: screenToCanvasPoint(view, screen) };
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const pixels = pixelsRef.current ?? read();
-    const { screen, canvas } = canvasPoint(event);
-    if (pixels === undefined) {
-      setHover({ x: screen.x, y: screen.y, colour: undefined, cells: [] });
-      return;
-    }
-    setHover({
-      x: screen.x,
-      y: screen.y,
-      colour: pixelAt(pixels, frame, canvas),
-      cells: pixelNeighbourhood(pixels, frame, canvas, MAGNIFIER_RADIUS),
-    });
+    const pointer = canvasPoint(event);
+    pointerRef.current = pointer;
+    // Read now only when there is nothing to show for this point; a new frame
+    // under a moving pointer is read again on the throttle.
+    pixelsFor(pointer.canvas, false);
+    if (isStale()) scheduleReread();
+    showHover(pointer);
   };
 
   const onClick = (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const pixels = pixelsRef.current ?? read();
+    const { canvas } = canvasPoint(event);
+    // A click always picks from the frame shown now.
+    const pixels = pixelsFor(canvas, true);
     if (pixels === undefined) return;
-    const colour = pixelAt(pixels, frame, canvasPoint(event).canvas);
+    const colour = pixelAt(pixels, frame, canvas);
     // A click beside the picture picks nothing; the pick stays on.
     if (colour === undefined) return;
     store.pick(colour);
@@ -146,7 +266,10 @@ export function MonitorEyedropper({
       }}
       onPointerUp={stop}
       onPointerMove={onPointerMove}
-      onPointerLeave={() => setHover(undefined)}
+      onPointerLeave={() => {
+        pointerRef.current = undefined;
+        setHover(undefined);
+      }}
       onClick={onClick}
       onDoubleClick={stop}
       onWheel={stop}

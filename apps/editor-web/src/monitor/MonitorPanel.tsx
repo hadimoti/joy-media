@@ -602,11 +602,11 @@ function MonitorPanelContent({
         rendererRef.current = created;
         recordPreviewResourceCreated('pixi-renderer', rendererResourceToken);
         setMonitorPixelReader(() => created.readPixels());
-        setMonitorUngradedPixelReader((maxWidth, maxHeight) => {
+        setMonitorUngradedPixelReader((maxWidth, maxHeight, region) => {
           ungradedPaintRef.current = true;
           try {
             paintRef.current();
-            return created.readPixels(maxWidth, maxHeight);
+            return created.readPixels(maxWidth, maxHeight, region);
           } finally {
             ungradedPaintRef.current = false;
             paintRef.current();
