@@ -34,4 +34,27 @@ describe('FiltersPanel', () => {
     expect(markup).toContain('Add Tilt Shift Filters layer');
     expect(markup).toContain('<strong>Product</strong>');
   });
+
+  it('shows the five groups of the audit, plus favourites, and states the rule', () => {
+    const markup = renderToStaticMarkup(
+      <FiltersPanel canCreate={true} targetLabel="Product" onAddFilter={() => undefined} />,
+    );
+
+    for (const group of [
+      'Favorites',
+      'Black &amp; White',
+      'Blur &amp; Focus',
+      'Grain &amp; Texture',
+      'Light &amp; Glow',
+      'Tone &amp; Colour',
+    ])
+      expect(markup, group).toContain(group);
+    expect(markup).toContain('A Filter changes the look of the picture');
+  });
+
+  it('does not offer the five items that moved to Effects', () => {
+    const ids = [...new Set(Object.values(FILTER_LIBRARY).flat())];
+    for (const id of ['halftone', 'scatter-mosaic', 'contour-map', 'glyph-matrix', 'pixel-sort'])
+      expect(ids, id).not.toContain(id);
+  });
 });

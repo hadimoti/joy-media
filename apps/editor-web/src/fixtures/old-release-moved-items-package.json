@@ -1,0 +1,449 @@
+{
+  "format": "joy-media-project",
+  "schemaVersion": 1,
+  "app": "JOY Studio",
+  "exportedAt": "2026-10-20T09:00:00.000Z",
+  "source": {
+    "id": "old-release-moved-items",
+    "title": "Old release: moved items",
+    "createdAt": "2026-10-20T09:00:00.000Z",
+    "updatedAt": "2026-10-20T09:00:00.000Z"
+  },
+  "documents": {
+    "timeline": {
+      "schemaVersion": 0,
+      "id": "old-release-moved-items",
+      "rootCompositionId": "root",
+      "compositions": {
+        "root": {
+          "id": "root",
+          "name": "Root composition",
+          "width": 1080,
+          "height": 1920,
+          "frameRate": {
+            "num": 30,
+            "den": 1
+          },
+          "durationUs": 3000000,
+          "tracks": [
+            {
+              "id": "track-video",
+              "kind": "video",
+              "family": "visual",
+              "name": "Video 1",
+              "order": 0,
+              "enabled": true,
+              "clips": [
+                {
+                  "id": "clip-video",
+                  "kind": "video",
+                  "assetId": "asset-video",
+                  "startUs": 0,
+                  "durationUs": 3000000,
+                  "sourceInUs": 0
+                }
+              ]
+            },
+            {
+              "id": "track-image",
+              "kind": "video",
+              "family": "visual",
+              "name": "Image 1",
+              "order": 1,
+              "enabled": true,
+              "clips": [
+                {
+                  "id": "clip-image",
+                  "kind": "video",
+                  "assetId": "asset-image",
+                  "startUs": 0,
+                  "durationUs": 3000000,
+                  "sourceInUs": 0
+                }
+              ]
+            },
+            {
+              "id": "track-audio",
+              "kind": "video",
+              "family": "audio",
+              "name": "Audio 1",
+              "order": 2,
+              "enabled": true,
+              "clips": [
+                {
+                  "id": "clip-audio",
+                  "kind": "video",
+                  "assetId": "asset-audio",
+                  "startUs": 0,
+                  "durationUs": 3000000,
+                  "sourceInUs": 0
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "visual": {
+      "schemaVersion": 1,
+      "id": "old-release-moved-items",
+      "title": "Old release: moved items",
+      "createdAt": "2026-10-20T09:00:00.000Z",
+      "updatedAt": "2026-10-20T09:00:00.000Z",
+      "rootCompositionId": "root",
+      "settings": {
+        "defaultLocale": "en"
+      },
+      "compositions": {
+        "root": {
+          "id": "root",
+          "name": "Root composition",
+          "width": 1080,
+          "height": 1920,
+          "pixelAspectRatio": {
+            "num": 1,
+            "den": 1
+          },
+          "frameRate": {
+            "num": 30,
+            "den": 1
+          },
+          "durationUs": 3000000,
+          "background": "#000000",
+          "tracks": [
+            {
+              "id": "track-video",
+              "kind": "video",
+              "family": "visual",
+              "name": "Video 1",
+              "order": 0,
+              "enabled": true,
+              "locked": false,
+              "clips": [
+                {
+                  "id": "clip-video",
+                  "kind": "video",
+                  "assetId": "asset-video",
+                  "startUs": 0,
+                  "durationUs": 3000000,
+                  "sourceInUs": 0
+                }
+              ]
+            },
+            {
+              "id": "track-image",
+              "kind": "video",
+              "family": "visual",
+              "name": "Image 1",
+              "order": 1,
+              "enabled": true,
+              "locked": false,
+              "clips": [
+                {
+                  "id": "clip-image",
+                  "kind": "video",
+                  "assetId": "asset-image",
+                  "startUs": 0,
+                  "durationUs": 3000000,
+                  "sourceInUs": 0
+                }
+              ]
+            },
+            {
+              "id": "track-audio",
+              "kind": "audio",
+              "family": "audio",
+              "name": "Audio 1",
+              "order": 2,
+              "enabled": true,
+              "locked": false,
+              "clips": [
+                {
+                  "id": "clip-audio",
+                  "kind": "video",
+                  "assetId": "asset-audio",
+                  "startUs": 0,
+                  "durationUs": 3000000,
+                  "sourceInUs": 0
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "assets": {
+        "asset-video": {
+          "id": "asset-video",
+          "kind": "video",
+          "displayName": "video.mp4",
+          "sha256": "f4879ec24ebac10f94e5e7273f146444d8b4fb26528c7fc1e22f82d1dfa0c0ee",
+          "bytes": 43912,
+          "descriptor": {
+            "mimeType": "video/mp4",
+            "durationUs": 3000000,
+            "width": 320,
+            "height": 180
+          }
+        },
+        "asset-image": {
+          "id": "asset-image",
+          "kind": "image",
+          "displayName": "image.png",
+          "sha256": "8f24a572b2b05c02eee94666f40d87134c67abd637e2e0c2b74079566d75052b",
+          "bytes": 629,
+          "descriptor": {
+            "mimeType": "image/png",
+            "width": 320,
+            "height": 180
+          }
+        },
+        "asset-audio": {
+          "id": "asset-audio",
+          "kind": "audio",
+          "displayName": "audio.wav",
+          "sha256": "66708fb217f7944cc68e6000a1d07d73d7fd87a8ee6786660df36a5d3c0b45af",
+          "bytes": 288078,
+          "descriptor": {
+            "mimeType": "audio/wav",
+            "durationUs": 3000000
+          }
+        }
+      },
+      "variables": {},
+      "markers": [],
+      "visualObjects": {
+        "video-controller": {
+          "id": "video-controller",
+          "kind": "null",
+          "assetId": "asset-video",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scaleX": 1,
+            "scaleY": 1,
+            "rotationDeg": 0,
+            "opacity": 1,
+            "crop": {
+              "left": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0
+            }
+          }
+        },
+        "image-object": {
+          "id": "image-object",
+          "kind": "image",
+          "assetId": "asset-image",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scaleX": 1,
+            "scaleY": 1,
+            "rotationDeg": 0,
+            "opacity": 1,
+            "crop": {
+              "left": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0
+            }
+          },
+          "effects": [
+            {
+              "id": "old-halftone",
+              "effectId": "halftone",
+              "enabled": true,
+              "params": {
+                "cellSize": 10,
+                "angle": 22.5,
+                "dotScale": 1,
+                "shape": 0,
+                "colorMode": 0,
+                "invert": 0
+              }
+            },
+            {
+              "id": "old-brightness",
+              "effectId": "brightness-contrast",
+              "enabled": true,
+              "params": {
+                "brightness": 0.1,
+                "contrast": -0.2
+              }
+            },
+            {
+              "id": "old-blur",
+              "effectId": "gaussian-blur",
+              "enabled": true,
+              "params": {
+                "amount": 4
+              }
+            }
+          ]
+        },
+        "audio-controller": {
+          "id": "audio-controller",
+          "kind": "null",
+          "assetId": "asset-audio",
+          "transform": {
+            "x": 0,
+            "y": 0,
+            "scaleX": 1,
+            "scaleY": 1,
+            "rotationDeg": 0,
+            "opacity": 1,
+            "crop": {
+              "left": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0
+            }
+          }
+        }
+      },
+      "captionDocuments": {},
+      "pluginData": {
+        "joy.clipObjects": {
+          "clip-video": "video-controller",
+          "clip-image": "image-object",
+          "clip-audio": "audio-controller"
+        },
+        "joy.timelineElementKinds": {
+          "clip-video": "video",
+          "clip-image": "image",
+          "clip-audio": "audio"
+        }
+      },
+      "audio": {
+        "clips": {
+          "clip-video": {
+            "gain": 1,
+            "pan": 0,
+            "mute": false,
+            "solo": false
+          },
+          "clip-audio": {
+            "gain": 1,
+            "pan": 0,
+            "mute": false,
+            "solo": false
+          }
+        },
+        "buses": [
+          {
+            "id": "master",
+            "name": "Master",
+            "gain": 1,
+            "pan": 0,
+            "mute": false,
+            "solo": false,
+            "inputs": []
+          }
+        ],
+        "effects": []
+      },
+      "universalTimeline": {
+        "schemaVersion": 1,
+        "items": [
+          {
+            "id": "clip-video",
+            "compositionId": "root",
+            "trackId": "track-video",
+            "elementKind": "video",
+            "startUs": 0,
+            "durationUs": 3000000,
+            "source": {
+              "kind": "asset",
+              "id": "asset-video"
+            },
+            "sourceInUs": 0,
+            "withinTrackOrder": 0
+          },
+          {
+            "id": "clip-image",
+            "compositionId": "root",
+            "trackId": "track-image",
+            "elementKind": "image",
+            "startUs": 0,
+            "durationUs": 3000000,
+            "source": {
+              "kind": "object",
+              "id": "image-object"
+            },
+            "withinTrackOrder": 0
+          },
+          {
+            "id": "clip-audio",
+            "compositionId": "root",
+            "trackId": "track-audio",
+            "elementKind": "audio",
+            "startUs": 0,
+            "durationUs": 3000000,
+            "source": {
+              "kind": "asset",
+              "id": "asset-audio"
+            },
+            "sourceInUs": 0,
+            "withinTrackOrder": 0
+          }
+        ]
+      }
+    },
+    "lookInstances": {
+      "id": "old-release-moved-items",
+      "schemaVersion": 1,
+      "instances": {}
+    }
+  },
+  "media": [
+    {
+      "asset": {
+        "id": "asset-video",
+        "kind": "video",
+        "displayName": "video.mp4",
+        "sha256": "f4879ec24ebac10f94e5e7273f146444d8b4fb26528c7fc1e22f82d1dfa0c0ee",
+        "bytes": 43912,
+        "descriptor": {
+          "mimeType": "video/mp4",
+          "durationUs": 3000000,
+          "width": 320,
+          "height": 180
+        }
+      },
+      "status": "missing",
+      "missingReason": "unavailable"
+    },
+    {
+      "asset": {
+        "id": "asset-image",
+        "kind": "image",
+        "displayName": "image.png",
+        "sha256": "8f24a572b2b05c02eee94666f40d87134c67abd637e2e0c2b74079566d75052b",
+        "bytes": 629,
+        "descriptor": {
+          "mimeType": "image/png",
+          "width": 320,
+          "height": 180
+        }
+      },
+      "status": "missing",
+      "missingReason": "unavailable"
+    },
+    {
+      "asset": {
+        "id": "asset-audio",
+        "kind": "audio",
+        "displayName": "audio.wav",
+        "sha256": "66708fb217f7944cc68e6000a1d07d73d7fd87a8ee6786660df36a5d3c0b45af",
+        "bytes": 288078,
+        "descriptor": {
+          "mimeType": "audio/wav",
+          "durationUs": 3000000
+        }
+      },
+      "status": "missing",
+      "missingReason": "unavailable"
+    }
+  ]
+}

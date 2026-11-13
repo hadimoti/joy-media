@@ -9,7 +9,7 @@
  */
 
 import { useMemo, useState, type ReactElement } from 'react';
-import { PlayIcon } from './icons.js';
+import { BoltIcon, ChevronLeftIcon, PlayIcon } from './icons.js';
 import type { LookCatalogEntry } from './joy-agent/look-operations.js';
 import type { LookAudioBakeInput, LookControl } from '@joy-media/motion-core';
 
@@ -428,7 +428,7 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
                     });
                   }}
                 >
-                  ⚡ Apply Look to Track V2
+                  <BoltIcon /> Apply Look to Track V2
                 </button>
               )}
             </li>
@@ -476,7 +476,7 @@ export function LivingLooksPanel(props: LivingLooksPanelProps): ReactElement {
               className="living-look-back"
               onClick={() => setActiveTab('browse')}
             >
-              ← Browse Looks
+              <ChevronLeftIcon /> Browse Looks
             </button>
             <strong>{selected.definition.title}</strong>
           </div>

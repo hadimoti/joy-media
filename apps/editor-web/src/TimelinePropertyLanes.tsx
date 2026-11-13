@@ -177,6 +177,7 @@ export function TimelinePropertyLanes({
                   <button
                     type="button"
                     aria-label={`Previous ${lane.label} keyframe`}
+                    title={`Previous ${lane.label} keyframe`}
                     onClick={() => seekKey(lane.keys, -1)}
                   >
                     <KeyPrevIcon />
@@ -184,6 +185,7 @@ export function TimelinePropertyLanes({
                   <button
                     type="button"
                     aria-label={`${keyed ? 'Remove' : 'Add'} ${lane.label} keyframe`}
+                    title={`${keyed ? 'Remove' : 'Add'} ${lane.label} keyframe`}
                     aria-pressed={keyed}
                     onClick={() => addOrRemove(lane)}
                   >
@@ -192,6 +194,7 @@ export function TimelinePropertyLanes({
                   <button
                     type="button"
                     aria-label={`Next ${lane.label} keyframe`}
+                    title={`Next ${lane.label} keyframe`}
                     onClick={() => seekKey(lane.keys, 1)}
                   >
                     <KeyNextIcon />

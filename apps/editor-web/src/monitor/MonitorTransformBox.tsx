@@ -1,6 +1,10 @@
 import { useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import type { NodePoint } from '@joy-media/render-ir';
-import type { MonitorOverlay, MonitorOverlayHandle } from './monitor-overlay-model.js';
+import type {
+  MonitorOverlay,
+  MonitorOverlayAnchor,
+  MonitorOverlayHandle,
+} from './monitor-overlay-model.js';
 import type { MonitorHandle } from './monitor-transform-maths.js';
 import type { MonitorTransformDrag, MonitorTransformGesture } from './monitor-transform-drag.js';
 import { TRANSFORM_BLOCK_MESSAGES } from './monitor-transform-targets.js';
@@ -18,6 +22,10 @@ import {
  * at any zoom). It is never drawn into the picture, the export or
  * `readPixels`. Only the handles take the pointer; a drag inside the box is
  * routed by the viewport (`MonitorViewportSelection.dragElement`).
+ *
+ * T-M05b: one element also shows its anchor point, which can be dragged; with
+ * several elements selected a group box around them carries the handles, which
+ * scale and turn the group as one.
  */
 
 const PRIMARY_BUTTON = 0;
@@ -34,12 +42,18 @@ const HANDLE_LABELS: Readonly<Record<MonitorHandle, string>> = {
   rotate: 'Rotate (Shift snaps to 15 degrees)',
 };
 
-function gestureFor(handle: MonitorHandle): MonitorTransformGesture {
+const ANCHOR_LABEL = 'Anchor point: drag to move the point the element turns about';
+
+function gestureFor(handle: MonitorHandle, group: boolean): MonitorTransformGesture {
+  if (group)
+    return handle === 'rotate' ? { kind: 'group-rotate' } : { kind: 'group-scale', handle };
   return handle === 'rotate' ? { kind: 'rotate' } : { kind: 'scale', handle };
 }
 
 export interface MonitorTransformBoxProps {
   readonly overlays: readonly MonitorOverlay[];
+  /** The group box when several elements are selected (T-M05b). */
+  readonly group?: MonitorOverlay | undefined;
   readonly view: MonitorViewState;
   readonly viewportSize: MonitorSize;
   /** False while the Hand is in use: the handles let the pointer through. */
@@ -53,6 +67,7 @@ export interface MonitorTransformBoxProps {
 
 export function MonitorTransformBox({
   overlays,
+  group,
   view,
   viewportSize,
   interactive,
@@ -74,13 +89,17 @@ export function MonitorTransformBox({
   };
   const screen = (point: NodePoint) => canvasToScreenPoint(view, point);
 
-  const onPointerDown = (handle: MonitorOverlayHandle, event: ReactPointerEvent<HTMLElement>) => {
+  const onPointerDown = (
+    gesture: MonitorTransformGesture,
+    blocked: MonitorOverlayHandle['blocked'],
+    event: ReactPointerEvent<HTMLElement>,
+  ) => {
     if (event.button !== PRIMARY_BUTTON || !interactive) return;
     // The handle owns this press: no selection click and no marquee.
     event.stopPropagation();
     event.preventDefault();
-    if (handle.blocked !== undefined) return;
-    const drag = startGesture(gestureFor(handle.id), canvasPoint(event));
+    if (blocked !== undefined) return;
+    const drag = startGesture(gesture, canvasPoint(event));
     if (drag === undefined) return;
     dragRef.current = { pointerId: event.pointerId, drag };
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -101,6 +120,34 @@ export function MonitorTransformBox({
       event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
+  const boxes = group === undefined ? overlays : [...overlays, group];
+  const anchorOf = (overlay: MonitorOverlay, anchor: MonitorOverlayAnchor) => {
+    const point = screen(anchor.point);
+    const blocked = anchor.blocked !== undefined;
+    return (
+      <div
+        key={`${overlay.elementId}:anchor`}
+        role="button"
+        tabIndex={-1}
+        className={`monitor-transform-anchor${blocked ? ' blocked' : ''}`}
+        data-monitor-anchor={overlay.elementId}
+        data-node-id={overlay.elementId}
+        data-clip-id={overlay.clipId}
+        aria-label={ANCHOR_LABEL}
+        aria-disabled={blocked ? 'true' : undefined}
+        title={
+          anchor.blocked === undefined ? ANCHOR_LABEL : TRANSFORM_BLOCK_MESSAGES[anchor.blocked]
+        }
+        style={{ left: `${point.x}px`, top: `${point.y}px` }}
+        onPointerDown={(event) => onPointerDown({ kind: 'anchor' }, anchor.blocked, event)}
+        onPointerMove={onPointerMove}
+        onPointerUp={(event) => finish(event, true)}
+        onPointerCancel={(event) => finish(event, false)}
+        onLostPointerCapture={(event) => finish(event, false)}
+      />
+    );
+  };
+
   return (
     <div
       ref={layerRef}
@@ -113,14 +160,14 @@ export function MonitorTransformBox({
         height={viewportSize.height}
         aria-hidden="true"
       >
-        {overlays.map((overlay) => {
+        {boxes.map((overlay) => {
           const rotate = overlay.handles.find((handle) => handle.id === 'rotate');
           const top = screen(overlay.topCenter);
           const knob = rotate === undefined ? undefined : screen(rotate.point);
           return (
             <g key={overlay.elementId} data-node-id={overlay.elementId}>
               <polygon
-                className="monitor-transform-outline"
+                className={`monitor-transform-outline${overlay.group === true ? ' group' : ''}`}
                 points={overlay.corners
                   .map((corner) => {
                     const point = screen(corner);
@@ -141,7 +188,7 @@ export function MonitorTransformBox({
           );
         })}
       </svg>
-      {overlays.flatMap((overlay) =>
+      {boxes.flatMap((overlay) =>
         overlay.handles.map((handle) => {
           const point = screen(handle.point);
           const blocked = handle.blocked !== undefined;
@@ -164,7 +211,9 @@ export function MonitorTransformBox({
                   : TRANSFORM_BLOCK_MESSAGES[handle.blocked]
               }
               style={{ left: `${point.x}px`, top: `${point.y}px` }}
-              onPointerDown={(event) => onPointerDown(handle, event)}
+              onPointerDown={(event) =>
+                onPointerDown(gestureFor(handle.id, overlay.group === true), handle.blocked, event)
+              }
               onPointerMove={onPointerMove}
               onPointerUp={(event) => finish(event, true)}
               onPointerCancel={(event) => finish(event, false)}
@@ -172,6 +221,9 @@ export function MonitorTransformBox({
             />
           );
         }),
+      )}
+      {boxes.flatMap((overlay) =>
+        overlay.anchor === undefined ? [] : [anchorOf(overlay, overlay.anchor)],
       )}
     </div>
   );

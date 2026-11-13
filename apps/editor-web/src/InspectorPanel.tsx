@@ -30,6 +30,8 @@ import {
 } from '@joy-media/motion-core';
 import type { KeyframeInterpolationV1 } from '@joy-media/project-schema';
 import {
+  ChevronDownIcon,
+  ChevronUpIcon,
   InterpBezierIcon,
   InterpEasedIcon,
   InterpHoldIcon,
@@ -268,6 +270,8 @@ interface TransformPropertyRowProps {
   readonly timeUs: number;
   readonly idle: boolean;
   readonly hasExpression: boolean;
+  /** True while a Monitor drag shows live values for this object (T-M05b). */
+  readonly monitorLive?: boolean;
   readonly diagnostic?: string | undefined;
   readonly onSetStatic: InspectorPanelProps['onSetStatic'];
   readonly onReplaceChannel: (
@@ -295,6 +299,7 @@ function TransformPropertyRow({
   timeUs,
   idle,
   hasExpression,
+  monitorLive = false,
   diagnostic,
   onSetStatic,
   onReplaceChannel,
@@ -308,9 +313,11 @@ function TransformPropertyRow({
   const curve = target.animations?.[property.key];
   const animated = curve !== undefined;
   const keyed = animated && hasKeyframeAtCurve(curve, timeUs);
+  // A Monitor drag on a keyframed value shows the value it will key on
+  // release (T-M05b), so the number follows the drag like a static one does.
   const sourceValue = hasExpression
     ? resolvedValue
-    : animated
+    : animated && !monitorLive
       ? sampleCurve(curve, timeUs)
       : resolvedValue;
   const [previewValue, setPreviewValue] = useState(sourceValue);
@@ -327,7 +334,7 @@ function TransformPropertyRow({
   // the value goes into the same live store a Monitor drag uses, so the picture
   // and the box follow while typing. Commit (Enter or blur), Escape, or the row
   // going away clears it. A keyframed value is written as a keyframe on commit
-  // and is not previewed (as its Monitor handles, until T-M05b).
+  // and is not previewed while typed (a Monitor drag on it keys on release, T-M05b).
   const store = monitorTransformPreview;
   const publishedRef = useRef<TransformPatches | undefined>(undefined);
   const livePreview = !idle && !hasExpression && !animated && LIVE_PREVIEW_KEYS.has(property.key);
@@ -710,6 +717,7 @@ export function InspectorPanel({
                     timeUs={timeUs}
                     idle={idle}
                     hasExpression={hasExpression}
+                    monitorLive={monitorDragValues !== undefined && key in monitorDragValues}
                     diagnostic={channelDiagnostic?.message}
                     onSetStatic={onSetStatic}
                     onReplaceChannel={replaceChannel}
@@ -1116,7 +1124,7 @@ export function EffectsSection({
                         );
                       }}
                     >
-                      ↑
+                      <ChevronUpIcon />
                     </button>
                     <button
                       type="button"
@@ -1130,7 +1138,7 @@ export function EffectsSection({
                         );
                       }}
                     >
-                      ↓
+                      <ChevronDownIcon />
                     </button>
                     <button
                       type="button"

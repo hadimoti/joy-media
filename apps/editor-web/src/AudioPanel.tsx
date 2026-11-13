@@ -15,6 +15,7 @@ import {
   AudioIcon,
   AudioWorkerIcon,
   CheckIcon,
+  ChevronRightIcon,
   CloseIcon,
   CloudIcon,
   DeviceProcessorIcon,
@@ -624,7 +625,7 @@ export function AudioPanel({
                     <span className="audio-workflow-step-label">{node.label}</span>
                     {index < workflowGraph.nodes.length - 1 && (
                       <span className="audio-workflow-step-connector" aria-hidden="true">
-                        →
+                        <ChevronRightIcon />
                       </span>
                     )}
                   </li>

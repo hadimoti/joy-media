@@ -198,6 +198,7 @@ export function MotionStudioLayersPanel({
                   type="button"
                   className="ms-layer-toggle"
                   aria-label={layer.visible ? 'Hide layer' : 'Show layer'}
+                  title={layer.visible ? 'Hide layer' : 'Show layer'}
                   onClick={(e) => {
                     e.stopPropagation();
                     onToggleVisibility(layer.id);
@@ -209,6 +210,7 @@ export function MotionStudioLayersPanel({
                   type="button"
                   className="ms-layer-toggle"
                   aria-label={layer.locked ? 'Unlock layer' : 'Lock layer'}
+                  title={layer.locked ? 'Unlock layer' : 'Lock layer'}
                   onClick={(e) => {
                     e.stopPropagation();
                     onToggleLocked(layer.id);
@@ -220,6 +222,7 @@ export function MotionStudioLayersPanel({
                   type="button"
                   className="ms-layer-toggle ms-layer-delete"
                   aria-label="Delete layer"
+                  title="Delete layer"
                   onClick={(e) => {
                     e.stopPropagation();
                     onRemoveLayer(layer.id);

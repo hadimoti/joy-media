@@ -21,7 +21,7 @@
   border-radius: var(--radius-md, 0.35rem);
   background: color-mix(in srgb, var(--joy-bg-elevated, #1c1d21) 92%, var(--joy-bg, #151619));
   color: var(--joy-text, #d4d5db);
-  font-size: var(--joy-type-2xs, 0.68rem);
+  font-size: var(--joy-type-xs, 0.75rem);
 }
 
 .cw-card.is-dragging {
@@ -36,13 +36,13 @@
 
 .cw-title {
   color: #e6e7ea;
-  font-size: 0.74rem;
+  font-size: var(--joy-type-xs);
   letter-spacing: 0.02em;
 }
 
 .cw-hint {
-  color: var(--joy-text-muted, #9c9ea7);
-  font-size: 0.64rem;
+  color: var(--joy-text-secondary, #9c9ea7);
+  font-size: var(--joy-type-xs);
 }
 
 .cw-face {
@@ -65,8 +65,8 @@
 
 .cw-hue {
   margin: 0;
-  color: var(--joy-text-muted, #9c9ea7);
-  font-size: 0.62rem;
+  color: var(--joy-text-secondary, #9c9ea7);
+  font-size: var(--joy-type-xs);
   text-align: center;
   text-transform: capitalize;
 }
@@ -95,23 +95,23 @@
 }
 
 .cw-number-label {
-  color: var(--joy-text-muted, #9c9ea7);
-  font-size: 0.62rem;
+  color: var(--joy-text-secondary, #9c9ea7);
+  font-size: var(--joy-type-xs);
 }
 
 .cw-numbers output {
   color: #e4b42e;
-  font-size: 0.66rem;
+  font-size: var(--joy-type-xs);
 }
 
 .cw-reset {
   justify-self: start;
-  font-size: 0.64rem;
+  font-size: var(--joy-type-xs);
 }
 
 .cw-note {
   margin: 0;
   color: var(--joy-text-faint, #8f919a);
-  font-size: 0.64rem;
+  font-size: var(--joy-type-xs);
   line-height: 1.35;
 }

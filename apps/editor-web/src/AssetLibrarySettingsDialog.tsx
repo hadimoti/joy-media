@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { CloseIcon, RefreshIcon } from './icons.js';
+import { CheckIcon, CloseIcon, InfoIcon, RefreshIcon, WarningIcon } from './icons.js';
 import {
   isDesktopHost,
   getDesktopAssetLibrarySettings,
   setDesktopAssetLibraryDirectory,
   selectDesktopAssetLibraryDirectory,
   resetDesktopAssetLibraryDirectory,
+  openDesktopAssetLibraryDirectory,
   type DesktopAssetLibrarySettings,
 } from './desktop-client.js';
+import {
+  INTERMITTENT_DRIVE_WARNING,
+  isIntermittentAssetLibraryDrive,
+} from './asset-library-drive.js';
 
 export interface AssetLibrarySettingsDialogProps {
   readonly open: boolean;
@@ -132,6 +137,20 @@ export function AssetLibrarySettingsDialog({
     }
   };
 
+  // The desktop opens the folder the library is configured to use; the
+  // renderer never names a path here.
+  const handleOpenFolder = async () => {
+    setNotice(undefined);
+    try {
+      await openDesktopAssetLibraryDirectory();
+    } catch (err: unknown) {
+      setNotice({
+        kind: 'error',
+        message: err instanceof Error ? err.message : 'Failed to open the asset library folder',
+      });
+    }
+  };
+
   return (
     <div className="agent-settings-backdrop" role="presentation" onMouseDown={onClose}>
       <section
@@ -151,6 +170,7 @@ export function AssetLibrarySettingsDialog({
             className="agent-settings-close"
             onClick={onClose}
             aria-label="Close dialog"
+            title="Close dialog"
           >
             <CloseIcon />
           </button>
@@ -158,8 +178,7 @@ export function AssetLibrarySettingsDialog({
 
         <div className="agent-settings-body">
           <p className="agent-settings-hint asset-library-storage-hint">
-            Configure the local folder where your audio, SFX, and graphic library assets are stored.
-            You can change this path or point to an external drive at any time.
+            Choose the folder where JOY Media keeps your imported media.
           </p>
 
           {!isDesktopHost() ? (
@@ -190,6 +209,15 @@ export function AssetLibrarySettingsDialog({
                     placeholder="/path/to/asset/library"
                     className="asset-library-storage-path-input"
                   />
+                  <button
+                    type="button"
+                    className="button-secondary asset-library-storage-open-btn"
+                    onClick={() => void handleOpenFolder()}
+                    disabled={saving || loading || !settings?.exists}
+                    title="Open the asset library folder"
+                  >
+                    Open folder
+                  </button>
                   <button
                     type="button"
                     className="button-primary asset-library-storage-picker-btn"
@@ -237,7 +265,13 @@ export function AssetLibrarySettingsDialog({
                   aria-live="polite"
                 >
                   <span className="agent-settings-notice-icon" aria-hidden="true">
-                    {notice.kind === 'success' ? '✓' : notice.kind === 'error' ? '!' : 'i'}
+                    {notice.kind === 'success' ? (
+                      <CheckIcon />
+                    ) : notice.kind === 'error' ? (
+                      <WarningIcon />
+                    ) : (
+                      <InfoIcon />
+                    )}
                   </span>
                   <span>{notice.message}</span>
                 </div>
@@ -261,23 +295,43 @@ export function AssetLibrarySettingsDialog({
                 <div className="asset-library-storage-count-grid">
                   <div className="asset-library-storage-count-card">
                     <div className="asset-library-storage-count-value">
-                      {settings?.counts.total ?? 0}
+                      {settings?.counts.video ?? 0}
                     </div>
-                    <div className="asset-library-storage-count-label">Total Assets</div>
-                  </div>
-                  <div className="asset-library-storage-count-card">
-                    <div className="asset-library-storage-count-value">
-                      {settings?.counts.audio ?? 0}
-                    </div>
-                    <div className="asset-library-storage-count-label">Audio &amp; SFX</div>
+                    <div className="asset-library-storage-count-label">Video</div>
                   </div>
                   <div className="asset-library-storage-count-card">
                     <div className="asset-library-storage-count-value">
                       {settings?.counts.image ?? 0}
                     </div>
-                    <div className="asset-library-storage-count-label">Graphic Images</div>
+                    <div className="asset-library-storage-count-label">Images</div>
+                  </div>
+                  <div className="asset-library-storage-count-card">
+                    <div className="asset-library-storage-count-value">
+                      {settings?.counts.audio ?? 0}
+                    </div>
+                    <div className="asset-library-storage-count-label">Audio</div>
+                  </div>
+                  {(settings?.counts.other ?? 0) > 0 && (
+                    <div className="asset-library-storage-count-card">
+                      <div className="asset-library-storage-count-value">
+                        {settings?.counts.other ?? 0}
+                      </div>
+                      <div className="asset-library-storage-count-label">Other</div>
+                    </div>
+                  )}
+                  <div className="asset-library-storage-count-card is-total">
+                    <div className="asset-library-storage-count-value">
+                      {settings?.counts.total ?? 0}
+                    </div>
+                    <div className="asset-library-storage-count-label">Total</div>
                   </div>
                 </div>
+
+                {isIntermittentAssetLibraryDrive(settings?.driveType) && (
+                  <p className="asset-library-storage-drive-notice" role="note">
+                    {INTERMITTENT_DRIVE_WARNING}
+                  </p>
+                )}
 
                 {!settings?.exists && (
                   <p className="asset-library-storage-warning">

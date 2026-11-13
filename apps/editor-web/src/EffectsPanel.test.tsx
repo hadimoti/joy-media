@@ -6,19 +6,25 @@ import { INITIAL_EDITOR_PROJECT } from './editor-project.js';
 
 vi.mock('@joy-media/visual-effects', () => {
   let ready = false;
-  const descriptor = {
-    id: 'pixelate',
-    label: 'Pixelate',
-    category: 'stylize',
+  const descriptor = (id: string, label: string, category: string, tags: readonly string[]) => ({
+    id,
+    label,
+    category,
     description: 'Pixel preview',
     params: [],
-    tags: ['pixel'],
+    tags,
     backend: { pixiPreview: true, headless: true, ffmpeg: true, deterministic: true },
     cost: 'low',
-  };
+  });
+  // `pixelate` is a Filter now (T-V06): the Effects panel must not show it.
+  const descriptors = new Map<string, ReturnType<typeof descriptor>>([
+    ['curves', descriptor('curves', 'Curves', 'color', ['color', 'curves'])],
+    ['bulge', descriptor('bulge', 'Bulge / Pinch', 'distort', ['distort', 'bulge'])],
+    ['pixelate', descriptor('pixelate', 'Pixelate', 'stylize', ['stylize', 'pixelate'])],
+  ]);
   return {
-    effectRegistry: { getEffect: () => descriptor },
-    listEffects: () => (ready ? [descriptor] : []),
+    effectRegistry: { getEffect: (id: string) => descriptors.get(id) },
+    listEffects: () => (ready ? [...descriptors.values()] : []),
     registerBuiltins: () => {
       ready = true;
     },
@@ -54,53 +60,77 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+async function mountPanel(
+  props: Partial<React.ComponentProps<typeof EffectsPanel>> = {},
+): Promise<HTMLDivElement> {
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+
+  await act(async () => {
+    root?.render(
+      <EffectsPanel
+        project={INITIAL_EDITOR_PROJECT}
+        objectId={undefined}
+        canApplyEffects={false}
+        onDispatch={vi.fn()}
+        showToast={vi.fn()}
+        {...props}
+      />,
+    );
+    await Promise.resolve();
+  });
+  return container;
+}
+
 describe('EffectsPanel', () => {
   it('shows the default built-in catalog and real category counts after registration', async () => {
-    container = document.createElement('div');
-    document.body.append(container);
-    root = createRoot(container);
+    await mountPanel();
 
-    await act(async () => {
-      root?.render(
-        <EffectsPanel
-          project={INITIAL_EDITOR_PROJECT}
-          objectId={undefined}
-          canApplyEffects={false}
-          onDispatch={vi.fn()}
-          showToast={vi.fn()}
-        />,
-      );
-      await Promise.resolve();
-    });
-
-    const pixelTab = container.querySelector<HTMLButtonElement>(
+    const selected = container!.querySelector<HTMLButtonElement>(
       'button.effects-panel-category-tab[aria-selected="true"]',
     );
-    expect(pixelTab?.getAttribute('aria-label')).toMatch(/^Pixel \/ B&W \([1-9]\d*\)$/);
-    expect(container.textContent).toContain('Pixelate');
-    expect(container.textContent).not.toContain('No effects match your search.');
+    expect(selected?.getAttribute('aria-label')).toMatch(/^Colour & Light \([1-9]\d*\)$/);
+    expect(container!.textContent).toContain('Curves');
+    expect(container!.textContent).not.toContain('No effects match your search.');
+  });
+
+  it('states the Filter or Effect rule under the title', async () => {
+    await mountPanel();
+    expect(container!.querySelector('.library-rule')?.textContent).toMatch(
+      /^An Effect changes the shape, motion or marks of the picture/,
+    );
+  });
+
+  it('shows an item that lives in Filters nowhere in the panel', async () => {
+    await mountPanel();
+    // Pixelate is a Filter (T-V06): it is not in any Effects category.
+    expect(container!.textContent).not.toContain('Pixelate');
+  });
+
+  it('shows each effect once, with no second group of the same items', async () => {
+    await mountPanel();
+    const categories = [...container!.querySelectorAll('.effects-panel-category-tab')].map((tab) =>
+      tab.getAttribute('aria-label')?.replace(/ \(\d+\)$/u, ''),
+    );
+    expect(categories.join(' ')).not.toContain('Pixel / B&W');
+    expect(categories).toEqual([
+      'Recipes',
+      'Favorites',
+      'Colour & Light',
+      'Depth & Shadow',
+      'Distort & Move',
+      'Drawn & Printed',
+      'Edge & Detail',
+      'Retro & Screen',
+    ]);
   });
 
   it('adds the focused effect card with Enter or Space', async () => {
-    container = document.createElement('div');
-    document.body.append(container);
-    root = createRoot(container);
     const onDispatch = vi.fn();
+    await mountPanel({ objectId: 'intro-title', canApplyEffects: true, onDispatch });
 
-    await act(async () => {
-      root?.render(
-        <EffectsPanel
-          project={INITIAL_EDITOR_PROJECT}
-          objectId="intro-title"
-          canApplyEffects={true}
-          onDispatch={onDispatch}
-          showToast={vi.fn()}
-        />,
-      );
-      await Promise.resolve();
-    });
-
-    const card = container.querySelector<HTMLElement>('.effect-card');
+    const card = container!.querySelector<HTMLElement>('.effect-card');
     expect(card?.getAttribute('role')).toBe('group');
     expect(card?.getAttribute('aria-keyshortcuts')).toBe('Enter Space');
     await act(async () => {
@@ -112,55 +142,25 @@ describe('EffectsPanel', () => {
       type: 'effect.add',
       payload: {
         objectId: 'intro-title',
-        effectId: 'pixelate',
+        effectId: 'curves',
         params: {},
       },
     });
   });
 
   it('exposes why an effect is unavailable instead of silently disabling it', async () => {
-    container = document.createElement('div');
-    document.body.append(container);
-    root = createRoot(container);
+    await mountPanel();
 
-    await act(async () => {
-      root?.render(
-        <EffectsPanel
-          project={INITIAL_EDITOR_PROJECT}
-          objectId={undefined}
-          canApplyEffects={false}
-          onDispatch={vi.fn()}
-          showToast={vi.fn()}
-        />,
-      );
-      await Promise.resolve();
-    });
-
-    const card = container.querySelector<HTMLElement>('.effect-card');
+    const card = container!.querySelector<HTMLElement>('.effect-card');
     const reasonId = card?.getAttribute('aria-describedby');
     expect(card?.getAttribute('aria-disabled')).toBeNull();
     expect(reasonId).toBeTruthy();
-    expect(container.querySelector(`#${reasonId}`)?.textContent).toContain('Select a video clip');
+    expect(container!.querySelector(`#${reasonId}`)?.textContent).toContain('Select a video clip');
   });
 
   it('does not fall back to raw browser storage when no writer-gated context exists', async () => {
-    container = document.createElement('div');
-    document.body.append(container);
-    root = createRoot(container);
     const showToast = vi.fn();
-
-    await act(async () => {
-      root?.render(
-        <EffectsPanel
-          project={INITIAL_EDITOR_PROJECT}
-          objectId={undefined}
-          canApplyEffects={false}
-          onDispatch={vi.fn()}
-          showToast={showToast}
-        />,
-      );
-      await Promise.resolve();
-    });
+    await mountPanel({ showToast });
 
     await act(async () => {
       container!

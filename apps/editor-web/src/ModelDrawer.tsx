@@ -4,7 +4,7 @@ import type { ByokSessionStatus, JoyProviderMode } from './joy-agent/protocol.js
 import { confirmDialog } from './app-dialogs.js';
 import { sessionProviderFor } from './joy-agent/provider-call.js';
 import { PROVIDER_REGISTRY, type RegistryProviderId } from '@joy-media/provider-sdk';
-import { CloseIcon, PlusIcon, CheckIcon } from './icons.js';
+import { BoltIcon, CloseIcon, PlusIcon, CheckIcon, SearchIcon } from './icons.js';
 import {
   isDesktopHost,
   saveDesktopProviderProfile,
@@ -464,7 +464,9 @@ export function ModelDrawer({
         <header className="model-drawer-header">
           <div className="model-drawer-title-group">
             <h2>
-              <span>⚡ Model Drawer</span>
+              <span>
+                <BoltIcon /> Model Drawer
+              </span>
               <span className={`model-drawer-active-badge ${status ? '' : 'is-disconnected'}`}>
                 {status ? `${status.provider}: ${status.modelId}` : 'Disconnected'}
               </span>
@@ -474,6 +476,7 @@ export function ModelDrawer({
             type="button"
             className="model-drawer-close-btn"
             aria-label="Close Model Drawer"
+            title="Close Model Drawer"
             onClick={onClose}
           >
             <CloseIcon />
@@ -597,7 +600,13 @@ export function ModelDrawer({
                   disabled={isDiscovering || newProvider === '' || !newBaseUrl.trim()}
                   onClick={() => void handleDiscoverModels()}
                 >
-                  {isDiscovering ? 'Discovering Models…' : '🔍 Discover Models Behind Link'}
+                  {isDiscovering ? (
+                    'Discovering Models…'
+                  ) : (
+                    <>
+                      <SearchIcon /> Discover Models Behind Link
+                    </>
+                  )}
                 </button>
                 {discoveredModels.length > 0 && (
                   <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 600 }}>

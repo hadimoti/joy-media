@@ -1,0 +1,95 @@
+/* The Filters and the Effects panels (T-V06).
+   They are two views of one library: each item has one home, the panel states
+   the rule in one line under its title, and a search offers the other panel's
+   matches. */
+
+/* The one-line rule under the panel title. */
+.library-rule {
+  flex: none;
+  margin: 0;
+  padding: 0.35rem 0.45rem;
+  border-bottom: 1px solid var(--joy-border);
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+  line-height: 1.35;
+}
+
+/* The search the two panels share: the owner can always see why the list is
+   filtered, whichever panel they are in. */
+.library-search-note {
+  flex: none;
+  margin: 0;
+  padding: 0.25rem 0.45rem;
+  border-bottom: 1px solid var(--joy-border);
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+}
+
+/* "Also in Filters" / "Also in Effects": the matches that live in the other panel. */
+.library-also {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.35rem 0.45rem;
+  border-top: 1px solid var(--joy-border);
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+}
+
+.library-also-link {
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--joy-border-soft);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--joy-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.library-also-link:hover,
+.library-also-link:focus-visible {
+  border-color: var(--joy-accent);
+  background: var(--joy-bg-raised);
+}
+
+/* The item the other panel pointed at. */
+.filter-library-card[data-library-linked='true'],
+.effect-card.is-linked {
+  border-color: var(--joy-accent);
+  box-shadow: 0 0 0 1px var(--joy-accent);
+}
+
+/* A favourite star on a filter card. */
+.filter-library-card-wrap {
+  position: relative;
+  display: grid;
+  min-width: 0;
+}
+
+.filter-library-card-fav {
+  position: absolute;
+  top: 0.2rem;
+  right: 0.2rem;
+  z-index: 1;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: rgb(20 21 24 / 62%);
+  color: var(--joy-text-secondary);
+  cursor: pointer;
+}
+
+.filter-library-card-fav:hover,
+.filter-library-card-fav:focus-visible {
+  color: var(--joy-accent);
+}
+
+.filter-library-card-fav svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}

@@ -47,8 +47,20 @@ import {
   setJoyCodeConversationStatus,
   type JoyCodeConversation,
 } from './joy-code-conversation.js';
-import { CheckIcon, CloseIcon, PlayIcon, PlusIcon, SaveIcon, UndoIcon } from './icons.js';
+import {
+  CheckIcon,
+  CloseIcon,
+  ColorAdjustIcon,
+  EnhanceIcon,
+  GearIcon,
+  ListIcon,
+  PlayIcon,
+  PlusIcon,
+  SaveIcon,
+  UndoIcon,
+} from './icons.js';
 import { CreativeBriefPanel } from './CreativeBriefPanel.js';
+import { JoyCodeReadinessSlot } from './joy-code-connect-model-card.js';
 import { JoyCodeCompoundRunner } from './joy-code-compound-runner.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import {
@@ -567,7 +579,6 @@ export function AgentPanel({
   const privacyMode = settings.privacyMode;
   const isEditReady = capability === 'tool-loop' && privacyMode !== 'local-only';
   const isDisconnected = !isEditReady;
-  const canConfigureDisconnectedAgent = isDisconnected && onOpenSettings !== undefined;
   let readinessText = '';
   if (capability === undefined) {
     readinessText =
@@ -1504,6 +1515,10 @@ export function AgentPanel({
   ]);
 
   const isRecipeRunnerReady = isEditReady && creativeSkillDeps !== undefined;
+  // No model is connected: one calm card says so once, on every Joy Code
+  // surface. The other disconnected states keep their own wording, because
+  // there the user has to know what is wrong with the model they connected.
+  const showConnectCard = capability === undefined && creativeSkillDeps !== undefined;
   let recipeReadinessText = '';
   if (creativeSkillDeps === undefined) {
     recipeReadinessText =
@@ -1835,24 +1850,25 @@ export function AgentPanel({
     }
     if (intent === undefined && joyAgentEngineClient !== undefined) {
       const connectionStatus = joyAgentEngineClient.getStatus();
+      if (connectionStatus === undefined) {
+        // No model is connected. The calm card above the composer already says
+        // so, so the chat stays quiet instead of repeating it (OB-13c).
+        return;
+      }
       if (
-        connectionStatus === undefined ||
         connectionStatus.capability === 'incompatible' ||
         connectionStatus.capability === 'untested' ||
         connectionStatus.capability === 'plan-only'
       ) {
         let message: string;
-        if (connectionStatus?.capability === 'incompatible') {
+        if (connectionStatus.capability === 'incompatible') {
           message =
             'The configured model is incompatible. Test another model in Agent Settings; no fallback provider was selected.';
-        } else if (connectionStatus?.capability === 'untested') {
+        } else if (connectionStatus.capability === 'untested') {
           message = 'The model capability is untested. Test a model in Agent Settings.';
-        } else if (connectionStatus?.capability === 'plan-only') {
-          message =
-            'This model supports Creative Brief only. Connect a model with JOY edit tools in Agent Settings to run natural-language edits.';
         } else {
           message =
-            'Connect a model with JOY edit tools in Agent Settings to run natural-language JOY edits. No fallback provider was selected.';
+            'This model supports Creative Brief only. Connect a model with JOY edit tools in Agent Settings to run natural-language edits.';
         }
         appendMessage(threadId, 'assistant', message);
         return;
@@ -3379,7 +3395,7 @@ export function AgentPanel({
               onClick={() => setComposerCapability('creative-brief')}
             >
               <span className="joy-code-capability-spark" aria-hidden="true">
-                ✦
+                <EnhanceIcon />
               </span>
               Creative Brief
               {creativeBriefContext !== undefined && (
@@ -3393,7 +3409,7 @@ export function AgentPanel({
               onClick={() => setComposerCapability('recipes')}
             >
               <span className="joy-code-capability-spark" aria-hidden="true">
-                ☰
+                <ListIcon />
               </span>
               Recipes
             </button>
@@ -3404,7 +3420,7 @@ export function AgentPanel({
               onClick={() => setComposerCapability('looks')}
             >
               <span className="joy-code-capability-spark" aria-hidden="true">
-                ◑
+                <ColorAdjustIcon />
               </span>
               Looks
             </button>
@@ -3417,7 +3433,7 @@ export function AgentPanel({
                 title="Joy Code Settings"
                 onClick={onOpenSettings}
               >
-                ⚙️
+                <GearIcon />
               </button>
             )}
           </div>
@@ -3425,7 +3441,10 @@ export function AgentPanel({
             <section className="joy-code-brief-artifact" aria-label="Attached Creative Brief">
               <div className="joy-code-brief-artifact-copy">
                 <span className="joy-code-brief-artifact-kicker">
-                  <span aria-hidden="true">✦</span> Creative Brief attached
+                  <span aria-hidden="true">
+                    <EnhanceIcon />
+                  </span>{' '}
+                  Creative Brief attached
                 </span>
                 <strong>{creativeBriefContext.request}</strong>
                 <span>
@@ -3460,22 +3479,12 @@ export function AgentPanel({
               and approval as a direct edit.
             </p>
             {!isRecipeRunnerReady && (
-              <div
-                className="joy-code-disconnected-banner"
-                role="status"
-                aria-label="Recipes readiness"
-              >
-                <span>{recipeReadinessText}</span>
-                {onOpenSettings !== undefined && (
-                  <button
-                    type="button"
-                    className="button-secondary joy-code-configure-agent-btn"
-                    onClick={onOpenSettings}
-                  >
-                    Open JOY Agent Settings
-                  </button>
-                )}
-              </div>
+              <JoyCodeReadinessSlot
+                showConnectCard={showConnectCard}
+                readinessText={recipeReadinessText}
+                ariaLabel="Recipes readiness"
+                onOpenSettings={onOpenSettings}
+              />
             )}
             <ul className="joy-code-recipes-list">
               {creativeSkills.map((entry) => {
@@ -3493,42 +3502,31 @@ export function AgentPanel({
                         <span className="joy-code-recipe-missing">Needs: {missing.join(', ')}</span>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      className="joy-code-recipe-run"
-                      disabled={
-                        !entry.available ||
-                        !isRecipeRunnerReady ||
-                        recipeRunningId !== undefined ||
-                        liveAgentBusy
-                      }
-                      aria-label={`Run ${entry.skill.title}`}
-                      onClick={() => void runRecipe(entry.skill.id)}
-                    >
-                      {running ? 'Running…' : 'Run'}
-                    </button>
+                    {isRecipeRunnerReady && (
+                      <button
+                        type="button"
+                        className="joy-code-recipe-run"
+                        disabled={
+                          !entry.available || recipeRunningId !== undefined || liveAgentBusy
+                        }
+                        aria-label={`Run ${entry.skill.title}`}
+                        onClick={() => void runRecipe(entry.skill.id)}
+                      >
+                        {running ? 'Running…' : 'Run'}
+                      </button>
+                    )}
                   </li>
                 );
               })}
             </ul>
           </div>
           {composerCapability === 'looks' && !isAgentLookRunnerReady && (
-            <div
-              className="joy-code-disconnected-banner"
-              role="status"
-              aria-label="Looks readiness"
-            >
-              <span>{lookReadinessText}</span>
-              {onOpenSettings !== undefined && (
-                <button
-                  type="button"
-                  className="button-secondary joy-code-configure-agent-btn"
-                  onClick={onOpenSettings}
-                >
-                  Open JOY Agent Settings
-                </button>
-              )}
-            </div>
+            <JoyCodeReadinessSlot
+              showConnectCard={showConnectCard}
+              readinessText={lookReadinessText}
+              ariaLabel="Looks readiness"
+              onOpenSettings={onOpenSettings}
+            />
           )}
           <LivingLooksPanel
             hidden={composerCapability !== 'looks'}
@@ -3876,21 +3874,13 @@ export function AgentPanel({
 
           {composerCapability === 'edit' && (
             <div className="joy-code-compose-dock">
-              {canConfigureDisconnectedAgent && (
-                <div
-                  className="joy-code-disconnected-banner"
-                  role="status"
-                  aria-label="Edit readiness"
-                >
-                  <span>{readinessText}</span>
-                  <button
-                    type="button"
-                    className="button-secondary joy-code-configure-agent-btn"
-                    onClick={onOpenSettings}
-                  >
-                    Open JOY Agent Settings
-                  </button>
-                </div>
+              {isDisconnected && (
+                <JoyCodeReadinessSlot
+                  showConnectCard={showConnectCard}
+                  readinessText={readinessText}
+                  ariaLabel="Edit readiness"
+                  onOpenSettings={onOpenSettings}
+                />
               )}
               {attachedAssets.length > 0 && (
                 <ul className="joy-code-attachments" aria-label="Attached media">
@@ -3902,6 +3892,7 @@ export function AgentPanel({
                         <button
                           type="button"
                           aria-label={`Detach ${asset.displayName}`}
+                          title={`Detach ${asset.displayName}`}
                           onClick={() => onDetachAsset(asset.assetId)}
                         >
                           <CloseIcon />

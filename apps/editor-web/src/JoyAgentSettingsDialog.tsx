@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AgentExecutionMode, ToolCapability } from '@joy-media/agent-tools';
 import { ALL_TOOL_CAPABILITIES } from '@joy-media/agent-tools';
 import type { AgentPolicyPreferences } from './agent-policy-settings.js';
@@ -8,7 +8,24 @@ import type {
   JoyAgentMediaCapabilityReport,
   JoyAgentMediaCapabilityState,
 } from './joy-agent/protocol.js';
-import { CloseIcon } from './icons.js';
+import {
+  BoltIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  CloseIcon,
+  CoinIcon,
+  EyeIcon,
+  FlaskIcon,
+  LockIcon,
+  PaletteIcon,
+  PlugIcon,
+  RefreshIcon,
+  SearchIcon,
+  ShieldIcon,
+  ToolsIcon,
+  WrenchIcon,
+} from './icons.js';
 import { confirmDialog } from './app-dialogs.js';
 import { AgentSlotsSection } from './AgentSlotsSection.js';
 import type { DesktopAgentSlot } from './desktop-client.js';
@@ -156,7 +173,7 @@ const MODE_DESCRIPTIONS: Readonly<Record<AgentExecutionMode, string>> = {
 const TAB_CONFIG: {
   readonly id: JoyAgentSettingsTab;
   readonly label: string;
-  readonly icon: string;
+  readonly icon: ReactNode;
   readonly kicker: string;
   readonly title: string;
   readonly description: string;
@@ -164,7 +181,7 @@ const TAB_CONFIG: {
   {
     id: 'models',
     label: 'AI Models & APIs',
-    icon: '⚡',
+    icon: <BoltIcon />,
     kicker: 'Provider & Model Configuration',
     title: 'AI Models & Custom Links',
     description:
@@ -173,7 +190,7 @@ const TAB_CONFIG: {
   {
     id: 'execution',
     label: 'Execution & Safety',
-    icon: '🛡️',
+    icon: <ShieldIcon />,
     kicker: 'Autonomy & Cost Limits',
     title: 'Execution Policy & Run Budgets',
     description:
@@ -182,7 +199,7 @@ const TAB_CONFIG: {
   {
     id: 'experience',
     label: 'Live Experience',
-    icon: '👁️',
+    icon: <EyeIcon />,
     kicker: 'Real-time Interaction',
     title: 'Live Previews & Experience',
     description: 'Tune real-time visual ghost overlays and editor presence during agent runs.',
@@ -190,7 +207,7 @@ const TAB_CONFIG: {
   {
     id: 'permissions',
     label: 'Tools & Perms',
-    icon: '🔧',
+    icon: <WrenchIcon />,
     kicker: 'Granular Engine Access',
     title: 'Tool Capabilities & Access Gates',
     description:
@@ -199,7 +216,7 @@ const TAB_CONFIG: {
   {
     id: 'diagnostics',
     label: 'Media Diagnostics',
-    icon: '🧪',
+    icon: <FlaskIcon />,
     kicker: 'Engine & Probe Telemetry',
     title: 'System Health & Modality Probes',
     description:
@@ -1018,26 +1035,30 @@ export function JoyAgentSettingsDialog({
   return (
     <div className="agent-settings-backdrop" role="presentation" onMouseDown={close}>
       <section
-        className="joy-agent-settings-dialog-v2"
+        className="agent-settings-dialog joy-agent-settings-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="joy-agent-settings-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        {/* Header */}
-        <header className="joy-agent-settings-header">
+        {/* Header — the shared dialog frame: title, one-line description, close. */}
+        <header className="agent-settings-header joy-agent-settings-header">
           <div className="joy-agent-settings-header-title">
-            <div className="joy-settings-logo-mark">⚡</div>
+            <span className="joy-settings-logo-mark">
+              <BoltIcon />
+            </span>
             <div>
               <h2 id="joy-agent-settings-title">Joy Code Settings</h2>
-              <span className="joy-settings-header-sub">Professional AI Engine Workspace</span>
+              <span className="agent-settings-hint joy-settings-header-sub">
+                Professional AI Engine Workspace
+              </span>
             </div>
-            <span className="joy-settings-badge">v2.0 Workspace</span>
           </div>
           <button
             className="joy-agent-settings-close-btn icon-button"
             type="button"
             aria-label="Close settings"
+            title="Close settings"
             onClick={close}
           >
             <CloseIcon />
@@ -1045,7 +1066,7 @@ export function JoyAgentSettingsDialog({
         </header>
 
         {/* Two-Pane Body */}
-        <div className="joy-agent-settings-body">
+        <div className="agent-settings-body joy-agent-settings-body">
           {/* Left Vertical Sidebar (faq-theme tabs navigation) */}
           <nav className="joy-agent-settings-sidebar" aria-label="Settings categories">
             <div className="joy-settings-sidebar-section-label">Categories</div>
@@ -1054,7 +1075,7 @@ export function JoyAgentSettingsDialog({
                 <button
                   key={id}
                   type="button"
-                  className={`joy-settings-nav-item ${activeTab === id ? 'is-active' : ''}`}
+                  className={`button-secondary joy-settings-nav-item ${activeTab === id ? 'is-active' : ''}`}
                   onClick={() => setActiveTab(id)}
                 >
                   <span className="joy-settings-nav-icon">{icon}</span>
@@ -1085,7 +1106,7 @@ export function JoyAgentSettingsDialog({
               <div className="joy-accordion">
                 {onOpenModelDrawer && (
                   <button
-                    className="joy-btn-secondary"
+                    className="button-secondary"
                     onClick={onOpenModelDrawer}
                     aria-label="Browse models & API connections"
                   >
@@ -1094,8 +1115,10 @@ export function JoyAgentSettingsDialog({
                 )}
                 {/* Studio Presets Picker */}
                 <div className="joy-studio-preset-bar">
-                  <button type="button" className="joy-preset-tab is-active">
-                    <span className="joy-preset-icon">🛠️</span>
+                  <button type="button" className="button-secondary joy-preset-tab is-active">
+                    <span className="joy-preset-icon">
+                      <ToolsIcon />
+                    </span>
                     <div className="joy-preset-text">
                       <strong>Custom BYOK</strong>
                       <span>One API-key provider (OpenRouter or a custom endpoint)</span>
@@ -1106,7 +1129,9 @@ export function JoyAgentSettingsDialog({
                 {/* Active Connection Banner */}
                 <div className="joy-settings-active-banner">
                   <div className="joy-settings-active-info">
-                    <div className="joy-settings-active-icon">⚡</div>
+                    <div className="joy-settings-active-icon">
+                      <BoltIcon />
+                    </div>
                     <div className="joy-settings-active-details">
                       <strong>
                         {connectionStatus?.modelId
@@ -1125,7 +1150,7 @@ export function JoyAgentSettingsDialog({
                     </div>
                   </div>
                   {connectionStatus?.modelId && (
-                    <button type="button" className="joy-btn-secondary joy-btn-sm" onClick={clear}>
+                    <button type="button" className="button-secondary button-sm" onClick={clear}>
                       Disconnect
                     </button>
                   )}
@@ -1167,18 +1192,11 @@ export function JoyAgentSettingsDialog({
                                   </span>
                                 )}
                             </div>
-                            <div
-                              style={{
-                                display: 'flex',
-                                gap: '6px',
-                                flexWrap: 'wrap',
-                                justifyContent: 'flex-end',
-                              }}
-                            >
+                            <div className="joy-settings-provider-actions">
                               {disabledLegacy ? (
                                 <button
                                   type="button"
-                                  className="joy-btn-secondary joy-btn-sm"
+                                  className="button-secondary button-sm"
                                   onClick={() => void deferLegacyProfile(prof)}
                                   disabled={working || prof.decision === 'later'}
                                 >
@@ -1188,7 +1206,7 @@ export function JoyAgentSettingsDialog({
                                 <>
                                   <button
                                     type="button"
-                                    className="joy-btn-secondary joy-btn-sm"
+                                    className="button-secondary button-sm"
                                     disabled={working || profileActionId !== undefined}
                                     onClick={() => void connectSavedProfile(prof)}
                                   >
@@ -1198,7 +1216,7 @@ export function JoyAgentSettingsDialog({
                                     <>
                                       <button
                                         type="button"
-                                        className="joy-btn-secondary joy-btn-sm"
+                                        className="button-secondary button-sm"
                                         disabled={working || profileActionId !== undefined}
                                         onClick={() => void reauthorizeChatGptProfile(prof)}
                                       >
@@ -1206,7 +1224,7 @@ export function JoyAgentSettingsDialog({
                                       </button>
                                       <button
                                         type="button"
-                                        className="joy-btn-danger joy-btn-sm"
+                                        className="button-danger button-sm"
                                         disabled={working || profileActionId !== undefined}
                                         onClick={() => void signOutChatGptProfile(prof)}
                                       >
@@ -1216,7 +1234,7 @@ export function JoyAgentSettingsDialog({
                                   )}
                                   <button
                                     type="button"
-                                    className="joy-btn-danger joy-btn-sm"
+                                    className="icon-button joy-settings-remove-btn"
                                     disabled={profileActionId !== undefined}
                                     onClick={() => void removeProfile(prof)}
                                     aria-label={
@@ -1239,16 +1257,18 @@ export function JoyAgentSettingsDialog({
 
                 {/* ACCORDION 1: Connection Endpoint & Credentials */}
                 <div
-                  className={`joy-accordion-item ${openAccordions['models-endpoint'] ? 'is-open' : ''}`}
+                  className={`agent-settings-section joy-accordion-item ${openAccordions['models-endpoint'] ? 'is-open' : ''}`}
                 >
                   <button
                     type="button"
-                    className="joy-accordion-trigger"
+                    className="button-secondary joy-accordion-trigger"
                     onClick={() => toggleAccordion('models-endpoint')}
                     aria-expanded={openAccordions['models-endpoint']}
                   >
                     <div className="joy-accordion-trigger-title">
-                      <span className="joy-accordion-icon">🔌</span>
+                      <span className="joy-accordion-icon">
+                        <PlugIcon />
+                      </span>
                       <span>API Connection &amp; Authentication</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
@@ -1259,7 +1279,9 @@ export function JoyAgentSettingsDialog({
                             ? 'OpenRouter'
                             : 'Custom Endpoint'}
                       </span>
-                      <span className="joy-accordion-chevron">▾</span>
+                      <span className="joy-accordion-chevron">
+                        <ChevronDownIcon />
+                      </span>
                     </div>
                   </button>
 
@@ -1387,23 +1409,19 @@ export function JoyAgentSettingsDialog({
                           </label>
                           {matchedProfile !== undefined &&
                             matchedProfile.state !== 'credential-unavailable' && (
-                              <span
-                                style={{ fontSize: '11px', color: '#10b981', marginTop: '2px' }}
-                              >
+                              <span className="joy-settings-hint-success">
                                 (Saved in desktop vault)
                               </span>
                             )}
-                          <span style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
-                            🔒 Keys are encrypted via Windows DPAPI and never logged or proxied.
+                          <span className="joy-settings-hint-muted">
+                            <LockIcon /> Keys are encrypted via Windows DPAPI and never logged or
+                            proxied.
                           </span>
                         </div>
 
                         {requiresCustomEndpointConsent(provider, baseUrl) && (
                           <div className="joy-settings-field-full joy-settings-field">
-                            <label
-                              className="agent-toggle"
-                              style={{ fontSize: '12px', color: '#aaa' }}
-                            >
+                            <label className="agent-toggle joy-settings-hint-muted">
                               <input
                                 type="checkbox"
                                 checked={customDisclosure}
@@ -1440,17 +1458,11 @@ export function JoyAgentSettingsDialog({
                         {/* Model ID Text Input with Model Drawer Trigger */}
                         <div className="joy-settings-field-full joy-settings-field">
                           <label>
-                            <div
-                              style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                              }}
-                            >
+                            <div className="joy-settings-field-row">
                               <span>Model ID (User Editable)</span>
                               <button
                                 type="button"
-                                className="joy-settings-text-btn"
+                                className="button-link joy-settings-text-btn"
                                 onClick={() => {
                                   toggleAccordion('models-drawer');
                                   if (discoveredModels.length === 0) {
@@ -1458,9 +1470,15 @@ export function JoyAgentSettingsDialog({
                                   }
                                 }}
                               >
-                                {openAccordions['models-drawer']
-                                  ? '▲ Hide Model Drawer'
-                                  : '⚡ Open Model Drawer ▾'}
+                                {openAccordions['models-drawer'] ? (
+                                  <>
+                                    <ChevronUpIcon /> Hide Model Drawer
+                                  </>
+                                ) : (
+                                  <>
+                                    <BoltIcon /> Open Model Drawer <ChevronDownIcon />
+                                  </>
+                                )}
                               </button>
                             </div>
                             <div className="joy-settings-input-with-action">
@@ -1473,12 +1491,12 @@ export function JoyAgentSettingsDialog({
                               />
                               <button
                                 type="button"
-                                className="joy-btn-secondary"
+                                className="button-secondary"
                                 onClick={() => void discoverModels()}
                                 disabled={isDiscovering || working}
                                 title="Discover models behind API endpoint"
                               >
-                                {isDiscovering ? '🔍 Scanning…' : '🔍 Discover Models'}
+                                <SearchIcon /> {isDiscovering ? 'Scanning…' : 'Discover Models'}
                               </button>
                             </div>
                           </label>
@@ -1487,10 +1505,10 @@ export function JoyAgentSettingsDialog({
 
                       {/* Connection Actions */}
                       <div className="joy-settings-actions-bar">
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <div className="joy-settings-actions-row">
                           <button
                             type="button"
-                            className="joy-btn-primary"
+                            className="button-primary"
                             onClick={() => void connect()}
                             disabled={working}
                           >
@@ -1499,7 +1517,7 @@ export function JoyAgentSettingsDialog({
                           {connectionStatus?.capability && (
                             <button
                               type="button"
-                              className="joy-btn-secondary"
+                              className="button-secondary"
                               onClick={clear}
                               disabled={working}
                             >
@@ -1523,27 +1541,31 @@ export function JoyAgentSettingsDialog({
 
                 {/* ACCORDION 2: Discovered Models Palette / Selection Drawer */}
                 <div
-                  className={`joy-accordion-item joy-model-drawer-item ${openAccordions['models-drawer'] ? 'is-open' : ''}`}
+                  className={`agent-settings-section joy-accordion-item joy-model-drawer-item ${openAccordions['models-drawer'] ? 'is-open' : ''}`}
                 >
                   <button
                     type="button"
-                    className="joy-accordion-trigger"
+                    className="button-secondary joy-accordion-trigger"
                     onClick={() => toggleAccordion('models-drawer')}
                     aria-expanded={openAccordions['models-drawer']}
                   >
                     <div className="joy-accordion-trigger-title">
-                      <span className="joy-accordion-icon">🎨</span>
+                      <span className="joy-accordion-icon">
+                        <PaletteIcon />
+                      </span>
                       <span>Discovered Models Drawer</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       {discoveredModels.length > 0 ? (
                         <span className="joy-accordion-tag is-success">
-                          ✓ {discoveredModels.length} Models Ready
+                          <CheckIcon /> {discoveredModels.length} Models Ready
                         </span>
                       ) : (
                         <span className="joy-accordion-tag">Click to Resolve</span>
                       )}
-                      <span className="joy-accordion-chevron">▾</span>
+                      <span className="joy-accordion-chevron">
+                        <ChevronDownIcon />
+                      </span>
                     </div>
                   </button>
 
@@ -1554,23 +1576,20 @@ export function JoyAgentSettingsDialog({
                           Select a discovered model chip to populate the Model ID, or filter by
                           keyword:
                         </p>
-                        <div style={{ display: 'flex', gap: '8px' }}>
+                        <div className="joy-settings-actions-row-tight">
                           <button
                             type="button"
-                            className="joy-btn-secondary joy-btn-sm"
+                            className="button-secondary button-sm"
                             onClick={() => void discoverModels()}
                             disabled={isDiscovering || working}
                           >
-                            {isDiscovering ? 'Refreshing…' : '🔄 Refresh Models'}
+                            <RefreshIcon /> {isDiscovering ? 'Refreshing…' : 'Refresh Models'}
                           </button>
                         </div>
                       </div>
 
                       {discoveryError && (
-                        <div
-                          className="joy-settings-notice is-error"
-                          style={{ marginBottom: '10px' }}
-                        >
+                        <div className="joy-settings-notice is-error joy-settings-block-gap">
                           {discoveryError}
                         </div>
                       )}
@@ -1588,28 +1607,28 @@ export function JoyAgentSettingsDialog({
                       <div className="joy-model-drawer-tags">
                         <button
                           type="button"
-                          className={`joy-model-tag ${modelFilter === '' ? 'is-active' : ''}`}
+                          className={`button-secondary joy-model-tag ${modelFilter === '' ? 'is-active' : ''}`}
                           onClick={() => setModelFilter('')}
                         >
                           All
                         </button>
                         <button
                           type="button"
-                          className={`joy-model-tag ${modelFilter === 'free' ? 'is-active' : ''}`}
+                          className={`button-secondary joy-model-tag ${modelFilter === 'free' ? 'is-active' : ''}`}
                           onClick={() => setModelFilter('free')}
                         >
                           Free
                         </button>
                         <button
                           type="button"
-                          className={`joy-model-tag ${modelFilter === 'claude' ? 'is-active' : ''}`}
+                          className={`button-secondary joy-model-tag ${modelFilter === 'claude' ? 'is-active' : ''}`}
                           onClick={() => setModelFilter('claude')}
                         >
                           Claude
                         </button>
                         <button
                           type="button"
-                          className={`joy-model-tag ${modelFilter === 'gpt' ? 'is-active' : ''}`}
+                          className={`button-secondary joy-model-tag ${modelFilter === 'gpt' ? 'is-active' : ''}`}
                           onClick={() => setModelFilter('gpt')}
                         >
                           GPT
@@ -1623,7 +1642,7 @@ export function JoyAgentSettingsDialog({
                             <button
                               key={m}
                               type="button"
-                              className={`joy-settings-model-chip ${modelId === m ? 'is-selected' : ''}`}
+                              className={`button-secondary joy-settings-model-chip ${modelId === m ? 'is-selected' : ''}`}
                               onClick={() => setModelId(m)}
                             >
                               {m}
@@ -1645,16 +1664,18 @@ export function JoyAgentSettingsDialog({
 
                 {/* ACCORDION 3: Synthetic Media Capability Diagnostics */}
                 <div
-                  className={`joy-accordion-item ${openAccordions['models-probe'] ? 'is-open' : ''}`}
+                  className={`agent-settings-section joy-accordion-item ${openAccordions['models-probe'] ? 'is-open' : ''}`}
                 >
                   <button
                     type="button"
-                    className="joy-accordion-trigger"
+                    className="button-secondary joy-accordion-trigger"
                     onClick={() => toggleAccordion('models-probe')}
                     aria-expanded={openAccordions['models-probe']}
                   >
                     <div className="joy-accordion-trigger-title">
-                      <span className="joy-accordion-icon">👁️</span>
+                      <span className="joy-accordion-icon">
+                        <EyeIcon />
+                      </span>
                       <span>Synthetic Media Capability Probe</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
@@ -1663,37 +1684,25 @@ export function JoyAgentSettingsDialog({
                       ) : (
                         <span className="joy-accordion-tag">Unprobed</span>
                       )}
-                      <span className="joy-accordion-chevron">▾</span>
+                      <span className="joy-accordion-chevron">
+                        <ChevronDownIcon />
+                      </span>
                     </div>
                   </button>
 
                   {openAccordions['models-probe'] && (
                     <div className="joy-accordion-content">
-                      <p
-                        style={{
-                          margin: '0 0 12px',
-                          fontSize: '12px',
-                          color: '#999',
-                          lineHeight: 1.4,
-                        }}
-                      >
+                      <p className="joy-settings-hint-muted joy-settings-hint-block">
                         Runs three tiny product-owned synthetic samples to verify multimodal image,
                         audio, and video understanding. This check never sends your project, owner,
                         or uploaded media to the provider, but your provider may charge or log these
                         requests under its standard usage terms.
                       </p>
 
-                      <div
-                        style={{
-                          display: 'flex',
-                          gap: '10px',
-                          alignItems: 'center',
-                          marginBottom: '12px',
-                        }}
-                      >
+                      <div className="joy-settings-actions-row joy-settings-block-gap">
                         <button
                           type="button"
-                          className="joy-btn-secondary"
+                          className="button-secondary"
                           onClick={() => void probeMediaCapabilities()}
                           disabled={!canProbeMediaCapabilities || working || mediaProbeWorking}
                         >
@@ -1710,14 +1719,7 @@ export function JoyAgentSettingsDialog({
 
                       {mediaCapabilities !== undefined && (
                         <div className="agent-media-capability-result joy-settings-media-result">
-                          <p
-                            style={{
-                              margin: '0 0 8px',
-                              fontSize: '12px',
-                              color: '#ccc',
-                              fontWeight: 600,
-                            }}
-                          >
+                          <p className="joy-settings-hint-strong joy-settings-hint-block">
                             Configured model: {mediaCapabilities.modelId}
                           </p>
                           <dl className="agent-media-capability-list joy-settings-probe-grid">
@@ -1737,21 +1739,25 @@ export function JoyAgentSettingsDialog({
             {activeTab === 'execution' && (
               <div className="joy-accordion">
                 <div
-                  className={`joy-accordion-item ${openAccordions['exec-mode'] ? 'is-open' : ''}`}
+                  className={`agent-settings-section joy-accordion-item ${openAccordions['exec-mode'] ? 'is-open' : ''}`}
                 >
                   <button
                     type="button"
-                    className="joy-accordion-trigger"
+                    className="button-secondary joy-accordion-trigger"
                     onClick={() => toggleAccordion('exec-mode')}
                     aria-expanded={openAccordions['exec-mode']}
                   >
                     <div className="joy-accordion-trigger-title">
-                      <span className="joy-accordion-icon">🛡️</span>
+                      <span className="joy-accordion-icon">
+                        <ShieldIcon />
+                      </span>
                       <span>Execution Mode</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-tag">{MODES[policy.executionMode]}</span>
-                      <span className="joy-accordion-chevron">▾</span>
+                      <span className="joy-accordion-chevron">
+                        <ChevronDownIcon />
+                      </span>
                     </div>
                   </button>
 
@@ -1784,23 +1790,27 @@ export function JoyAgentSettingsDialog({
                 </div>
 
                 <div
-                  className={`joy-accordion-item ${openAccordions['exec-budget'] ? 'is-open' : ''}`}
+                  className={`agent-settings-section joy-accordion-item ${openAccordions['exec-budget'] ? 'is-open' : ''}`}
                 >
                   <button
                     type="button"
-                    className="joy-accordion-trigger"
+                    className="button-secondary joy-accordion-trigger"
                     onClick={() => toggleAccordion('exec-budget')}
                     aria-expanded={openAccordions['exec-budget']}
                   >
                     <div className="joy-accordion-trigger-title">
-                      <span className="joy-accordion-icon">💰</span>
+                      <span className="joy-accordion-icon">
+                        <CoinIcon />
+                      </span>
                       <span>Run Budget &amp; Spend Safety</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-tag">
                         Max ${policy.maxCostPerRunUsd.toFixed(2)}/run
                       </span>
-                      <span className="joy-accordion-chevron">▾</span>
+                      <span className="joy-accordion-chevron">
+                        <ChevronDownIcon />
+                      </span>
                     </div>
                   </button>
 
@@ -1823,7 +1833,7 @@ export function JoyAgentSettingsDialog({
                             }
                           />
                         </label>
-                        <span style={{ fontSize: '11.5px', color: '#888', marginTop: '4px' }}>
+                        <span className="joy-settings-hint-muted">
                           Limits API provider token consumption per autonomous execution session.
                         </span>
                       </div>
@@ -1837,26 +1847,30 @@ export function JoyAgentSettingsDialog({
             {activeTab === 'experience' && (
               <div className="joy-accordion">
                 <div
-                  className={`joy-accordion-item ${openAccordions['exp-previews'] ? 'is-open' : ''}`}
+                  className={`agent-settings-section joy-accordion-item ${openAccordions['exp-previews'] ? 'is-open' : ''}`}
                 >
                   <button
                     type="button"
-                    className="joy-accordion-trigger"
+                    className="button-secondary joy-accordion-trigger"
                     onClick={() => toggleAccordion('exp-previews')}
                     aria-expanded={openAccordions['exp-previews']}
                   >
                     <div className="joy-accordion-trigger-title">
-                      <span className="joy-accordion-icon">👁️</span>
+                      <span className="joy-accordion-icon">
+                        <EyeIcon />
+                      </span>
                       <span>Real-time Previews &amp; Ghost Overlays</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
-                      <span className="joy-accordion-chevron">▾</span>
+                      <span className="joy-accordion-chevron">
+                        <ChevronDownIcon />
+                      </span>
                     </div>
                   </button>
 
                   {openAccordions['exp-previews'] && (
                     <div className="joy-accordion-content">
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div className="joy-settings-actions-column-wide">
                         <label className="joy-settings-cap-item">
                           <input
                             type="checkbox"
@@ -1880,23 +1894,27 @@ export function JoyAgentSettingsDialog({
             {activeTab === 'permissions' && (
               <div className="joy-accordion">
                 <div
-                  className={`joy-accordion-item ${openAccordions['perms-timeline'] ? 'is-open' : ''}`}
+                  className={`agent-settings-section joy-accordion-item ${openAccordions['perms-timeline'] ? 'is-open' : ''}`}
                 >
                   <button
                     type="button"
-                    className="joy-accordion-trigger"
+                    className="button-secondary joy-accordion-trigger"
                     onClick={() => toggleAccordion('perms-timeline')}
                     aria-expanded={openAccordions['perms-timeline']}
                   >
                     <div className="joy-accordion-trigger-title">
-                      <span className="joy-accordion-icon">🔧</span>
+                      <span className="joy-accordion-icon">
+                        <WrenchIcon />
+                      </span>
                       <span>Tool Capabilities Grid</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-tag">
                         {policy.allowedCapabilities.length}/{ALL_TOOL_CAPABILITIES.length} Allowed
                       </span>
-                      <span className="joy-accordion-chevron">▾</span>
+                      <span className="joy-accordion-chevron">
+                        <ChevronDownIcon />
+                      </span>
                     </div>
                   </button>
 
@@ -1934,30 +1952,34 @@ export function JoyAgentSettingsDialog({
             {activeTab === 'diagnostics' && (
               <div className="joy-accordion">
                 <div
-                  className={`joy-accordion-item ${openAccordions['diag-health'] ? 'is-open' : ''}`}
+                  className={`agent-settings-section joy-accordion-item ${openAccordions['diag-health'] ? 'is-open' : ''}`}
                 >
                   <button
                     type="button"
-                    className="joy-accordion-trigger"
+                    className="button-secondary joy-accordion-trigger"
                     onClick={() => toggleAccordion('diag-health')}
                     aria-expanded={openAccordions['diag-health']}
                   >
                     <div className="joy-accordion-trigger-title">
-                      <span className="joy-accordion-icon">⚡</span>
+                      <span className="joy-accordion-icon">
+                        <BoltIcon />
+                      </span>
                       <span>Local Hardware &amp; Worker Acceleration</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
                       <span className="joy-accordion-tag is-success">Direct3D 11 Active</span>
-                      <span className="joy-accordion-chevron">▾</span>
+                      <span className="joy-accordion-chevron">
+                        <ChevronDownIcon />
+                      </span>
                     </div>
                   </button>
 
                   {openAccordions['diag-health'] && (
                     <div className="joy-accordion-content">
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div className="joy-settings-actions-column">
                         <div className="joy-settings-diagnostic-row">
                           <span>GPU Device</span>
-                          <span style={{ color: '#ffb020', fontWeight: 600 }}>
+                          <span className="joy-settings-hint-accent">
                             NVIDIA GeForce RTX 5070 Ti
                           </span>
                         </div>
@@ -1969,7 +1991,9 @@ export function JoyAgentSettingsDialog({
                         </div>
                         <div className="joy-settings-diagnostic-row">
                           <span>Local Asset Library</span>
-                          <span style={{ color: '#ccc' }}>See Asset Library settings</span>
+                          <span className="joy-settings-hint-strong">
+                            See Asset Library settings
+                          </span>
                         </div>
                         <div className="joy-settings-diagnostic-row">
                           <span>Local Worker SEA</span>
@@ -1983,40 +2007,37 @@ export function JoyAgentSettingsDialog({
                 </div>
 
                 <div
-                  className={`joy-accordion-item ${openAccordions['diag-probe'] ? 'is-open' : ''}`}
+                  className={`agent-settings-section joy-accordion-item ${openAccordions['diag-probe'] ? 'is-open' : ''}`}
                 >
                   <button
                     type="button"
-                    className="joy-accordion-trigger"
+                    className="button-secondary joy-accordion-trigger"
                     onClick={() => toggleAccordion('diag-probe')}
                     aria-expanded={openAccordions['diag-probe']}
                   >
                     <div className="joy-accordion-trigger-title">
-                      <span className="joy-accordion-icon">🧪</span>
+                      <span className="joy-accordion-icon">
+                        <FlaskIcon />
+                      </span>
                       <span>Active Model Synthetic Modality Probe</span>
                     </div>
                     <div className="joy-accordion-trigger-meta">
-                      <span className="joy-accordion-chevron">▾</span>
+                      <span className="joy-accordion-chevron">
+                        <ChevronDownIcon />
+                      </span>
                     </div>
                   </button>
 
                   {openAccordions['diag-probe'] && (
                     <div className="joy-accordion-content">
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          marginBottom: '10px',
-                        }}
-                      >
-                        <span style={{ fontSize: '12px', color: '#999' }}>
+                      <div className="joy-settings-field-row joy-settings-block-gap">
+                        <span className="joy-settings-hint-muted">
                           Tests whether the active reasoning model parses image, audio, and video
                           inputs.
                         </span>
                         <button
                           type="button"
-                          className="joy-btn-secondary joy-btn-sm"
+                          className="button-secondary button-sm"
                           onClick={() => void probeMediaCapabilities()}
                           disabled={!canProbeMediaCapabilities || working || mediaProbeWorking}
                         >
@@ -2026,14 +2047,7 @@ export function JoyAgentSettingsDialog({
 
                       {mediaCapabilities !== undefined ? (
                         <div className="agent-media-capability-result joy-settings-media-result">
-                          <p
-                            style={{
-                              margin: '0 0 8px',
-                              fontSize: '12px',
-                              color: '#ccc',
-                              fontWeight: 600,
-                            }}
-                          >
+                          <p className="joy-settings-hint-strong joy-settings-hint-block">
                             Configured model: {mediaCapabilities.modelId}
                           </p>
                           <dl className="agent-media-capability-list joy-settings-probe-grid">
@@ -2043,7 +2057,7 @@ export function JoyAgentSettingsDialog({
                           </dl>
                         </div>
                       ) : (
-                        <p style={{ margin: 0, fontSize: '12px', color: '#888' }}>
+                        <p className="joy-settings-hint-muted">
                           No probe run yet for the active model.
                         </p>
                       )}
@@ -2059,10 +2073,11 @@ export function JoyAgentSettingsDialog({
         <footer className="joy-agent-settings-footer">
           <div className="joy-agent-settings-footer-vault">
             <span>
-              🔒 Policy saved locally in browser. Sensitive keys secured in Windows DPAPI vault.
+              <LockIcon /> Policy saved locally in browser. Sensitive keys secured in Windows DPAPI
+              vault.
             </span>
           </div>
-          <button type="button" className="agent-settings-done joy-btn-primary" onClick={close}>
+          <button type="button" className="agent-settings-done button-primary" onClick={close}>
             Done
           </button>
         </footer>

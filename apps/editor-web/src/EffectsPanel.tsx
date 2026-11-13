@@ -2,20 +2,23 @@
  * Effects browser panel — registry-driven catalog with search, categories,
  * favorites, and typed drag-and-drop. Dispatches effect commands through
  * EditorSession for undo/redo support.
+ *
+ * Every item lives in exactly one panel (T-V06): the twenty doubles that used
+ * to sit in both the Filters and the Effects panel have one home each, and the
+ * five that draw over the picture moved to Effects. See `library-homes.ts`.
  */
 
 import { useState, useMemo, useCallback, useContext, useEffect, useRef } from 'react';
 import type { JoyProjectV1 } from '@joy-media/project-schema';
 import {
   effectRegistry,
-  listEffects,
   registerBuiltins,
   type EffectDescriptor,
   type EffectDragPayload,
 } from '@joy-media/visual-effects';
 import { PanelShell } from './PanelShell.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
-import { LayersIcon, PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
+import { BoltIcon, LayersIcon, PlusIcon, StarFilledIcon, StarIcon, WarningIcon } from './icons.js';
 import { effectCategoryIconUrl } from './effect-category-icons.js';
 import { EditorPanelContext } from './editor-panel-context.js';
 import { EffectPreviewMedia } from './EffectPreviewMedia.js';
@@ -24,44 +27,48 @@ import {
   listEffectRecipes,
   type EffectRecipeCatalogEntry,
 } from './effect-recipe-catalog.js';
+import { readEffectFavorites, toggleEffectFavorite } from './effect-favorites.js';
+import {
+  allLibraryEffectIds,
+  EFFECT_CATEGORIES,
+  EFFECT_LIBRARY,
+  EFFECT_PANEL_RULE,
+  effectEffectIds,
+  filterEffectIds,
+  matchesLibraryQuery,
+} from './library-homes.js';
+import {
+  librarySearch,
+  pointLibraryAt,
+  setLibraryQuery,
+  useLibrarySearch,
+} from './library-search.js';
+import './library-panels.css';
+
+/** The panel opens on Colour & Light, its first group. */
+const DEFAULT_EFFECT_CATEGORY = 'colour-light';
 
 const CATEGORIES: readonly { readonly id: string; readonly label: string }[] = [
   { id: 'recipes', label: 'Recipes' },
   { id: 'favorites', label: 'Favorites' },
-  { id: 'pixel-bw', label: 'Pixel / B&W' },
-  { id: 'color', label: 'Color' },
-  { id: 'stylize', label: 'Stylize' },
-  { id: 'artistic', label: 'Artistic' },
-  { id: 'blur', label: 'Blur' },
-  { id: 'distort', label: 'Distort' },
-  { id: 'depth', label: 'Depth' },
+  ...EFFECT_CATEGORIES.map((category) => ({ id: category.id, label: category.label })),
 ];
+
+function descriptorsFor(ids: readonly string[]): readonly EffectDescriptor[] {
+  return ids.flatMap((id) => {
+    const descriptor = effectRegistry.getEffect(id);
+    return descriptor === undefined ? [] : [descriptor];
+  });
+}
 
 function effectsInCategory(
   categoryId: string,
   favorites: ReadonlySet<string>,
 ): readonly EffectDescriptor[] {
-  const all = listEffects();
   if (categoryId === 'recipes') return [];
-  if (categoryId === 'favorites') return all.filter((d) => favorites.has(d.id));
-  if (categoryId === 'pixel-bw') {
-    const signals = [
-      'pixel',
-      'bw',
-      'black and white',
-      'halftone',
-      'dither',
-      'glyph',
-      'ascii',
-      'contour',
-      'mosaic',
-      'posterize',
-    ];
-    return all.filter((descriptor) =>
-      descriptor.tags.some((tag) => signals.some((signal) => tag.includes(signal))),
-    );
-  }
-  return all.filter((d) => d.category === categoryId);
+  if (categoryId === 'favorites')
+    return descriptorsFor(effectEffectIds().filter((id) => favorites.has(id)));
+  return descriptorsFor(EFFECT_LIBRARY[categoryId] ?? []);
 }
 
 interface EffectsPanelProps {
@@ -92,8 +99,8 @@ export function EffectsPanel({
 }: EffectsPanelProps) {
   const editorContext = useContext(EditorPanelContext);
   const storage = editorContext?.storage;
-  const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('pixel-bw');
+  const { query, linkedId, linkedPanel, linkToken } = useLibrarySearch();
+  const [category, setCategory] = useState(DEFAULT_EFFECT_CATEGORY);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [builtinsReady, setBuiltinsReady] = useState(false);
   const [recipes, setRecipes] = useState<readonly EffectRecipeCatalogEntry[]>(() =>
@@ -120,10 +127,42 @@ export function EffectsPanel({
     if (storage !== undefined) setRecipes(listEffectRecipes(storage));
   }, [storage]);
 
-  const descriptors = useMemo(
-    () => (builtinsReady ? effectsInCategory(category, favorites) : []),
-    [builtinsReady, category, favorites],
-  );
+  // Favourites belong to the item, so they are read from the shared list the
+  // Filters panel writes. A favourite for an item that moved panels is still
+  // that item: its registry id did not change.
+  useEffect(() => {
+    if (storage !== undefined) setFavorites(readEffectFavorites(storage, allLibraryEffectIds()));
+  }, [storage]);
+
+  // A link from the Filters panel opens this one: leave the Favorites view, so the
+  // item the link points at is in the list (the search then applies to every effect).
+  useEffect(() => {
+    if (linkedPanel === 'effects' && linkToken !== undefined) setCategory(DEFAULT_EFFECT_CATEGORY);
+  }, [linkedPanel, linkToken]);
+
+  const searching = query.trim().length > 0;
+
+  const filtered = useMemo(() => {
+    if (!builtinsReady) return [];
+    const scope =
+      category === 'favorites'
+        ? effectEffectIds().filter((id) => favorites.has(id))
+        : searching
+          ? effectEffectIds()
+          : (EFFECT_LIBRARY[category] ?? []);
+    const descriptors = descriptorsFor(scope);
+    return searching
+      ? descriptors.filter((descriptor) => matchesLibraryQuery(descriptor, query))
+      : descriptors;
+  }, [builtinsReady, category, favorites, query, searching]);
+
+  // The other panel's matches: the item lives there, not here.
+  const alsoInFilters = useMemo(() => {
+    if (!searching) return [];
+    return descriptorsFor(filterEffectIds()).filter((descriptor) =>
+      matchesLibraryQuery(descriptor, query),
+    );
+  }, [query, searching]);
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = { recipes: recipes.length };
@@ -135,26 +174,20 @@ export function EffectsPanel({
     return counts;
   }, [builtinsReady, favorites, recipes.length]);
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return descriptors;
-    const q = search.toLowerCase();
-    return descriptors.filter(
-      (d) =>
-        d.label.toLowerCase().includes(q) ||
-        d.id.toLowerCase().includes(q) ||
-        d.category.toLowerCase().includes(q) ||
-        d.tags.some((t) => t.toLowerCase().includes(q)),
-    );
-  }, [descriptors, search]);
+  const toggleFavorite = useCallback(
+    (effectId: string) => {
+      setFavorites(toggleEffectFavorite(storage, favorites, effectId));
+    },
+    [favorites, storage],
+  );
 
-  const toggleFavorite = useCallback((effectId: string) => {
-    setFavorites((prev) => {
-      const next = new Set(prev);
-      if (next.has(effectId)) next.delete(effectId);
-      else next.add(effectId);
-      return next;
-    });
-  }, []);
+  const openInFilters = useCallback(
+    (effectId: string) => {
+      pointLibraryAt(effectId, 'filters');
+      editorContext?.onEnhanceToolChange('filters');
+    },
+    [editorContext],
+  );
 
   const handleAdd = useCallback(
     (effectId: string) => {
@@ -236,8 +269,16 @@ export function EffectsPanel({
           </button>
         </>
       }
-      search={{ value: search, onChange: setSearch, placeholder: 'Search effects…' }}
+      search={{
+        value: query,
+        onChange: (next) => setLibraryQuery(next, librarySearch),
+        placeholder: 'Search effects…',
+      }}
     >
+      <p className="library-rule">{EFFECT_PANEL_RULE}</p>
+      {query.trim().length > 0 && (
+        <p className="library-search-note">Searching for “{query.trim()}”</p>
+      )}
       <div className="effects-panel-content">
         <aside className="effects-panel-sidebar" aria-label="Effect categories">
           <span className="effects-panel-sidebar-title">Categories</span>
@@ -312,23 +353,41 @@ export function EffectsPanel({
               )}
             </div>
           ) : (
-            <div className={`effects-grid${filtered.length === 0 ? ' is-empty' : ''}`}>
-              {filtered.length === 0 ? (
-                <p className="empty-hint">{emptyHint}</p>
-              ) : (
-                filtered.map((desc) => (
-                  <EffectCard
-                    key={desc.id}
-                    descriptor={desc}
-                    isFavorite={favorites.has(desc.id)}
-                    canApply={canApplyEffects}
-                    onAdd={() => handleAdd(desc.id)}
-                    onToggleFavorite={() => toggleFavorite(desc.id)}
-                    onDragStart={(e) => handleDragStart(desc.id, e)}
-                  />
-                ))
+            <>
+              <div className={`effects-grid${filtered.length === 0 ? ' is-empty' : ''}`}>
+                {filtered.length === 0 ? (
+                  <p className="empty-hint">{emptyHint}</p>
+                ) : (
+                  filtered.map((desc) => (
+                    <EffectCard
+                      key={desc.id}
+                      descriptor={desc}
+                      isFavorite={favorites.has(desc.id)}
+                      canApply={canApplyEffects}
+                      linked={linkedId === desc.id}
+                      onAdd={() => handleAdd(desc.id)}
+                      onToggleFavorite={() => toggleFavorite(desc.id)}
+                      onDragStart={(e) => handleDragStart(desc.id, e)}
+                    />
+                  ))
+                )}
+              </div>
+              {alsoInFilters.length > 0 && (
+                <p className="library-also">
+                  <span>Also in Filters:</span>
+                  {alsoInFilters.map((descriptor) => (
+                    <button
+                      key={descriptor.id}
+                      type="button"
+                      className="library-also-link"
+                      onClick={() => openInFilters(descriptor.id)}
+                    >
+                      {descriptor.label}
+                    </button>
+                  ))}
+                </p>
               )}
-            </div>
+            </>
           )}
         </div>
       </div>
@@ -340,6 +399,7 @@ function EffectCard({
   descriptor,
   isFavorite,
   canApply,
+  linked,
   onAdd,
   onToggleFavorite,
   onDragStart,
@@ -347,6 +407,7 @@ function EffectCard({
   readonly descriptor: EffectDescriptor;
   readonly isFavorite: boolean;
   readonly canApply: boolean;
+  readonly linked: boolean;
   readonly onAdd: () => void;
   readonly onToggleFavorite: () => void;
   readonly onDragStart: (event: React.DragEvent) => void;
@@ -358,11 +419,12 @@ function EffectCard({
 
   return (
     <div
-      className={`effect-card${canApply ? '' : ' is-unavailable'}`}
+      className={`effect-card${canApply ? '' : ' is-unavailable'}${linked ? ' is-linked' : ''}`}
       role="group"
       tabIndex={0}
       aria-label={`${descriptor.label} effect`}
       aria-keyshortcuts="Enter Space"
+      data-library-linked={linked ? 'true' : undefined}
       {...(unavailableReason === undefined
         ? {}
         : {
@@ -392,7 +454,7 @@ function EffectCard({
         <div className="effect-card-icon">
           {descriptor.cost !== 'low' && (
             <span className="effect-card-cost" data-cost={descriptor.cost}>
-              {descriptor.cost === 'high' ? '⚠' : '⚡'}
+              {descriptor.cost === 'high' ? <WarningIcon /> : <BoltIcon />}
             </span>
           )}
           <span className="effect-card-label">{descriptor.label}</span>

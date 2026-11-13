@@ -2,6 +2,7 @@ import type { JoyProjectV1 } from '@joy-media/project-schema';
 import type { BrowserAsset, BrowserControlPlaneClient } from './control-plane-client.js';
 import type { OpfsOriginalAssetCache } from './opfs-original-asset-cache.js';
 import { sha256OfBlob } from './blob-sha256.js';
+import { isDesktopHost, resolveDesktopAssetUrl } from './desktop-client.js';
 import {
   clearMediaSource,
   revokeDetachedObjectUrl,
@@ -11,7 +12,7 @@ import {
 export interface ProjectMediaSource {
   readonly url: string;
   readonly mimeType: string;
-  readonly source: 'opfs' | 'cloud' | 'reference';
+  readonly source: 'opfs' | 'cloud' | 'reference' | 'desktop';
 }
 
 /**
@@ -127,7 +128,7 @@ export class ProjectMediaResolver {
     this.#epoch += 1;
     beforeRevoke?.();
     for (const source of this.#sources.values()) {
-      if (source.source !== 'reference') revokeDetachedObjectUrl(source.url);
+      if (source.source === 'opfs') revokeDetachedObjectUrl(source.url);
     }
     this.#sources.clear();
     this.#observationSources.clear();
@@ -170,6 +171,18 @@ export class ProjectMediaResolver {
         epoch,
       );
     }
+    if (isDesktopHost() && /^joylib-[a-f0-9]{64}$/.test(assetId) && descriptor !== undefined) {
+      const folder = descriptor.kind === 'image' ? 'images' : descriptor.kind;
+      return this.#remember(
+        assetId,
+        {
+          url: resolveDesktopAssetUrl(`${folder}/${assetId}`),
+          mimeType: descriptor.descriptor.mimeType,
+          source: 'desktop',
+        },
+        epoch,
+      );
+    }
     throw new Error(
       `Media ${descriptor?.displayName ?? assetId} is unavailable in the local cache`,
     );
@@ -196,12 +209,12 @@ export class ProjectMediaResolver {
 
   #remember(assetId: string, source: ProjectMediaSource, epoch: number): ProjectMediaSource {
     if (epoch !== this.#epoch) {
-      if (source.source !== 'reference') revokeDetachedObjectUrl(source.url);
+      if (source.source === 'opfs') revokeDetachedObjectUrl(source.url);
       this.#assertEpoch(epoch);
     }
     const existing = this.#sources.get(assetId);
     if (existing !== undefined) {
-      if (source.source !== 'reference') revokeDetachedObjectUrl(source.url);
+      if (source.source === 'opfs') revokeDetachedObjectUrl(source.url);
       return existing;
     }
     this.#sources.set(assetId, source);
@@ -224,7 +237,11 @@ export class ProjectMediaResolver {
     if (existing !== undefined) return;
     this.#observationSources.set(
       assetId,
-      Object.freeze({ blob, mimeType: source.mimeType, source: source.source }),
+      Object.freeze({
+        blob,
+        mimeType: source.mimeType,
+        source: source.source === 'desktop' ? 'opfs' : source.source,
+      }),
     );
   }
 }

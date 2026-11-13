@@ -115,4 +115,9 @@ export class SqliteLocalAssetStore {
       .run(storedPath, assetId);
     return Number(result.changes) === 1;
   }
+
+  remove(assetId: string): boolean {
+    const result = this.db.prepare('DELETE FROM local_assets WHERE asset_id = ?').run(assetId);
+    return Number(result.changes) === 1;
+  }
 }

@@ -1,27 +1,47 @@
-import { useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useState } from 'react';
 import {
   effectRegistry,
+  registerBuiltins,
   type EffectDescriptor,
   type EffectParamValue,
 } from '@joy-media/visual-effects';
 import { EffectPreviewMedia } from './EffectPreviewMedia.js';
-import { FilterIcon, LayersIcon, PlusIcon } from './icons.js';
+import { FilterIcon, LayersIcon, PlusIcon, StarFilledIcon, StarIcon } from './icons.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { EditorPanelContext } from './editor-panel-context.js';
+import { readEffectFavorites, toggleEffectFavorite } from './effect-favorites.js';
+import {
+  allLibraryEffectIds,
+  effectEffectIds,
+  FILTER_CATEGORIES,
+  FILTER_LIBRARY,
+  FILTER_PANEL_RULE,
+  filterEffectIds,
+  matchesLibraryQuery,
+  type FilterCategoryId,
+} from './library-homes.js';
+import {
+  librarySearch,
+  pointLibraryAt,
+  setLibraryQuery,
+  useLibrarySearch,
+} from './library-search.js';
+import './library-panels.css';
 
-export type FilterLibraryGroupId = 'blur' | 'texture' | 'creative' | 'looks';
+// The registry is the one catalogue both panels read; the app registers it at
+// start-up, and a panel rendered on its own registers it too.
+registerBuiltins();
 
-export const FILTER_LIBRARY: Readonly<Record<FilterLibraryGroupId, readonly string[]>> = {
-  blur: ['gaussian-blur', 'zoom-blur', 'radial-blur', 'tilt-shift', 'bloom', 'glow'],
-  texture: ['noise', 'pixelate', 'halftone', 'bayer-dither', 'scatter-mosaic'],
-  creative: ['posterize', 'monochrome', 'contour-map', 'glyph-matrix', 'pixel-sort'],
-  looks: ['vignette', 'sepia', 'hue-saturation', 'vibrance'],
-};
+export type FilterLibraryGroupId = FilterCategoryId | 'favorites';
+
+export { FILTER_LIBRARY };
+
+/** The panel opens on Blur & Focus, the group the panel used to open on. */
+const DEFAULT_FILTER_GROUP: FilterLibraryGroupId = 'blur-focus';
 
 const FILTER_TABS: readonly PanelTabSpec[] = [
-  { id: 'blur', label: 'Blur' },
-  { id: 'texture', label: 'Texture' },
-  { id: 'creative', label: 'Creative' },
-  { id: 'looks', label: 'Looks' },
+  { id: 'favorites', label: 'Favorites' },
+  ...FILTER_CATEGORIES.map((category) => ({ id: category.id, label: category.label })),
 ];
 
 function defaultsForEffect(
@@ -53,23 +73,56 @@ export function FiltersPanel({
     params: Readonly<Record<string, EffectParamValue>>,
   ) => void;
 }) {
-  const [group, setGroup] = useState<FilterLibraryGroupId>('blur');
-  const [search, setSearch] = useState('');
+  const editorContext = useContext(EditorPanelContext);
+  const storage = editorContext?.storage;
+  const [group, setGroup] = useState<FilterLibraryGroupId>(DEFAULT_FILTER_GROUP);
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const { query, linkedId, linkedPanel, linkToken } = useLibrarySearch();
+
+  // Favourites belong to the item, so they are read from the shared list the
+  // Effects panel writes. The list is only read once the writer-gated storage
+  // is available.
+  useEffect(() => {
+    if (storage !== undefined) setFavorites(readEffectFavorites(storage, allLibraryEffectIds()));
+  }, [storage]);
+
+  // A link from the Effects panel opens this one: leave the Favorites view, so the
+  // item the link points at is in the list (the search then applies to every filter).
+  useEffect(() => {
+    if (linkedPanel === 'filters' && linkToken !== undefined) setGroup(DEFAULT_FILTER_GROUP);
+  }, [linkedPanel, linkToken]);
+
+  const searching = query.trim().length > 0;
 
   const descriptors = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    const ids =
-      query.length === 0
-        ? FILTER_LIBRARY[group]
-        : [...new Set(Object.values(FILTER_LIBRARY).flat())];
-    return descriptorsFor(ids).filter(
-      (descriptor) =>
-        query.length === 0 ||
-        descriptor.label.toLowerCase().includes(query) ||
-        descriptor.description?.toLowerCase().includes(query) === true ||
-        descriptor.tags.some((tag) => tag.toLowerCase().includes(query)),
+    const favouriteIds = filterEffectIds().filter((id) => favorites.has(id));
+    const scope =
+      group === 'favorites'
+        ? favouriteIds
+        : searching
+          ? filterEffectIds()
+          : (FILTER_LIBRARY[group] ?? []);
+    return descriptorsFor(scope).filter((descriptor) =>
+      searching ? matchesLibraryQuery(descriptor, query) : true,
     );
-  }, [group, search]);
+  }, [favorites, group, query, searching]);
+
+  // The other panel's matches: the item lives there, not here.
+  const alsoInEffects = useMemo(() => {
+    if (!searching) return [];
+    return descriptorsFor(effectEffectIds()).filter((descriptor) =>
+      matchesLibraryQuery(descriptor, query),
+    );
+  }, [query, searching]);
+
+  const toggleFavorite = (effectId: string) => {
+    setFavorites(toggleEffectFavorite(storage, favorites, effectId));
+  };
+
+  const openInEffects = (effectId: string) => {
+    pointLibraryAt(effectId, 'effects');
+    editorContext?.onEnhanceToolChange('effects');
+  };
 
   return (
     <PanelShell
@@ -88,46 +141,89 @@ export function FiltersPanel({
           <LayersIcon />
         </button>
       }
-      search={{ value: search, onChange: setSearch, placeholder: 'Search filters…' }}
+      search={{
+        value: query,
+        onChange: (next) => setLibraryQuery(next, librarySearch),
+        placeholder: 'Search filters…',
+      }}
       tabs={FILTER_TABS}
       activeTab={group}
       onTabChange={(id) => setGroup(id as FilterLibraryGroupId)}
     >
+      <p className="library-rule">{FILTER_PANEL_RULE}</p>
+      {query.trim().length > 0 && (
+        <p className="library-search-note">Searching for “{query.trim()}”</p>
+      )}
       <div className="filters-target" aria-live="polite">
         <span>Target</span>
         <strong>{targetLabel ?? 'No media selected'}</strong>
       </div>
       <div className={`filters-grid${descriptors.length === 0 ? ' is-empty' : ''}`}>
         {descriptors.length === 0 ? (
-          <p className="empty-hint">No filters match your search.</p>
+          <p className="empty-hint">
+            {group === 'favorites' && favorites.size === 0
+              ? 'No filters in favorites yet.'
+              : 'No filters match your search.'}
+          </p>
         ) : (
           descriptors.map((descriptor) => (
-            <button
-              key={descriptor.id}
-              type="button"
-              className="filter-library-card"
-              disabled={!canCreate}
-              aria-label={`Add ${descriptor.label} Filters layer`}
-              title={`${descriptor.label} — ${descriptor.description ?? 'Creative filter'}`}
-              onClick={() => onAddFilter(descriptor.id, defaultsForEffect(descriptor))}
-            >
-              <span className="filter-library-card-preview">
-                <EffectPreviewMedia
-                  effectId={descriptor.id}
-                  className="filter-library-card-preview-media"
-                />
-              </span>
-              <span className="filter-library-card-copy">
-                <strong>{descriptor.label}</strong>
-                <small>{descriptor.description ?? descriptor.category}</small>
-              </span>
-              <span className="filter-library-card-add" aria-hidden="true">
-                <PlusIcon />
-              </span>
-            </button>
+            <div className="filter-library-card-wrap" key={descriptor.id}>
+              <button
+                type="button"
+                className="filter-library-card"
+                disabled={!canCreate}
+                aria-label={`Add ${descriptor.label} Filters layer`}
+                title={`${descriptor.label} — ${descriptor.description ?? 'Creative filter'}`}
+                data-library-linked={linkedId === descriptor.id ? 'true' : undefined}
+                onClick={() => onAddFilter(descriptor.id, defaultsForEffect(descriptor))}
+              >
+                <span className="filter-library-card-preview">
+                  <EffectPreviewMedia
+                    effectId={descriptor.id}
+                    className="filter-library-card-preview-media"
+                  />
+                </span>
+                <span className="filter-library-card-copy">
+                  <strong>{descriptor.label}</strong>
+                  <small>{descriptor.description ?? descriptor.category}</small>
+                </span>
+                <span className="filter-library-card-add" aria-hidden="true">
+                  <PlusIcon />
+                </span>
+              </button>
+              <button
+                type="button"
+                className="icon-button filter-library-card-fav"
+                data-release-observer-favorite="true"
+                aria-label={
+                  favorites.has(descriptor.id)
+                    ? `Remove ${descriptor.label} from favorites`
+                    : `Add ${descriptor.label} to favorites`
+                }
+                title={favorites.has(descriptor.id) ? 'Remove favorite' : 'Add favorite'}
+                onClick={() => toggleFavorite(descriptor.id)}
+              >
+                {favorites.has(descriptor.id) ? <StarFilledIcon /> : <StarIcon />}
+              </button>
+            </div>
           ))
         )}
       </div>
+      {alsoInEffects.length > 0 && (
+        <p className="library-also">
+          <span>Also in Effects:</span>
+          {alsoInEffects.map((descriptor) => (
+            <button
+              key={descriptor.id}
+              type="button"
+              className="library-also-link"
+              onClick={() => openInEffects(descriptor.id)}
+            >
+              {descriptor.label}
+            </button>
+          ))}
+        </p>
+      )}
     </PanelShell>
   );
 }

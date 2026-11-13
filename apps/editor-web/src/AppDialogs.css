@@ -1,4 +1,7 @@
-/* Confirm and prompt dialogs (AppDialogs.tsx). Above the editor chrome and the settings dialogs (z-index 1000). */
+/* Confirm and prompt dialogs (AppDialogs.tsx). Above the editor chrome and the
+   settings dialogs (z-index 1000).
+   The frame matches the shared settings dialog: the same border, radius,
+   surface and shadow, all from the app's `--joy-*` tokens. */
 
 .app-dialog-backdrop {
   position: fixed;
@@ -7,7 +10,7 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgb(0 0 0 / 60%);
+  background: color-mix(in srgb, var(--joy-bg-deep) 60%, transparent);
 }
 
 .app-dialog {
@@ -20,7 +23,7 @@
   border: 1px solid var(--joy-border-strong);
   border-radius: var(--radius-lg);
   background: var(--joy-bg-elevated);
-  box-shadow: 0 24px 60px rgb(0 0 0 / 52%);
+  box-shadow: 0 24px 60px color-mix(in srgb, var(--joy-bg-deep) 52%, transparent);
   color: var(--joy-text);
   font-family: var(--joy-font-ui);
 }
@@ -107,10 +110,10 @@ label.app-dialog-message {
 .app-dialog-button-danger {
   border-color: var(--joy-danger);
   background: var(--joy-danger);
-  color: #1a0a0a;
+  color: var(--joy-on-accent);
 }
 
 .app-dialog-button-danger:hover {
-  border-color: #ff8a8a;
-  background: #ff8a8a;
+  border-color: color-mix(in srgb, var(--joy-danger) 78%, var(--joy-text));
+  background: color-mix(in srgb, var(--joy-danger) 78%, var(--joy-text));
 }

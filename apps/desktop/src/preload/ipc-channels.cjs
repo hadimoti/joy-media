@@ -37,11 +37,15 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.asset-library.get-catalog',
   'desktop.asset-library.reset-directory',
   'desktop.asset-library.remove-entry',
+  'desktop.asset-library.open-directory',
   'desktop.media.asset.register',
   'desktop.media.asset.upload-original',
   'desktop.media.asset.upload-original-chunk',
   'desktop.media.asset.upload-original-finish',
   'desktop.media.asset.upload-original-abort',
+  'desktop.media.asset.import-dropped',
+  'desktop.media.asset.cancel-dropped-import',
+  'desktop.media.asset.revoke-dropped',
   'desktop.media.project.document.get',
   'desktop.media.project.document.put',
   'desktop.media.render.enqueue',
@@ -54,4 +58,7 @@ const IPC_CHANNELS = Object.freeze([
   'desktop.media.workers.list',
 ]);
 
-module.exports = { IPC_CHANNELS };
+const DROP_FILES_ENDPOINT = 'joy-desktop-drop-files';
+const DROPPED_IMPORT_PROGRESS_CHANNEL = 'joy-desktop-dropped-import-progress';
+
+module.exports = { IPC_CHANNELS, DROP_FILES_ENDPOINT, DROPPED_IMPORT_PROGRESS_CHANNEL };

@@ -24,6 +24,30 @@ import { ProviderCallError, type ProviderCallRequest } from './joy-agent/provide
 export interface DesktopJoyBridge {
   readonly channels: readonly string[];
   invoke(channel: string, payload?: unknown): Promise<unknown>;
+  importDroppedFiles?(files: readonly File[]): Promise<DesktopDroppedFileBatch>;
+  onDroppedImportProgress?(listener: (progress: DesktopDroppedImportProgress) => void): () => void;
+}
+
+export interface DesktopDroppedFileTicket {
+  readonly kind: 'local-file';
+  readonly id: string;
+  readonly displayName: string;
+  readonly mediaKind: 'video' | 'audio' | 'image';
+  readonly mimeType: string;
+  readonly sourceIndex: number;
+}
+
+export interface DesktopDroppedFileBatch {
+  readonly tickets: readonly DesktopDroppedFileTicket[];
+  readonly skippedMessage?: string;
+  readonly folderDepth: 1;
+  readonly folderCount: number;
+}
+
+export interface DesktopDroppedImportProgress {
+  readonly ticketId: string;
+  readonly stage: 'hash' | 'store';
+  readonly ratio: number;
 }
 
 declare global {
@@ -57,6 +81,30 @@ export interface DesktopFileSelection {
  * server-side rendering, where `window` itself may not exist. */
 export function isDesktopHost(): boolean {
   return typeof window !== 'undefined' && window.joyDesktop !== undefined;
+}
+
+/** Gets filesystem-backed import tickets from the preload without exposing their paths. */
+export async function prepareDesktopDroppedFiles(
+  files: readonly File[],
+): Promise<DesktopDroppedFileBatch | undefined> {
+  if (!isDesktopHost()) return undefined;
+  const prepare = requireBridge().importDroppedFiles;
+  return prepare === undefined ? undefined : prepare(files);
+}
+
+/** Subscribes to sanitized progress emitted by the main-process streaming importer. */
+export function onDesktopDroppedImportProgress(
+  listener: (progress: DesktopDroppedImportProgress) => void,
+): () => void {
+  const subscribe =
+    typeof window === 'undefined' ? undefined : window.joyDesktop?.onDroppedImportProgress;
+  return subscribe?.(listener) ?? (() => undefined);
+}
+
+/** Revokes every unused ticket returned for a dropped batch. */
+export async function revokeDesktopDroppedFileTickets(ticketIds: readonly string[]): Promise<void> {
+  if (!isDesktopHost() || ticketIds.length === 0) return;
+  await requireBridge().invoke('desktop.media.asset.revoke-dropped', { ticketIds });
 }
 
 function requireBridge(): DesktopJoyBridge {
@@ -308,16 +356,30 @@ export async function isDesktopWindowMaximized(): Promise<boolean> {
   return Boolean(isMax);
 }
 
+/**
+ * The kind of drive the asset library sits on. "removable" and "network" come
+ * and go, so the library warns about them; "unknown" means we could not tell,
+ * and stays quiet.
+ */
+export type DesktopAssetLibraryDriveType = 'fixed' | 'removable' | 'network' | 'unknown';
+
+export interface DesktopAssetLibraryCounts {
+  readonly total: number;
+  readonly video: number;
+  readonly image: number;
+  readonly audio: number;
+  /** Items of a kind the dialog does not name separately. */
+  readonly other: number;
+}
+
 export interface DesktopAssetLibrarySettings {
   readonly directory: string;
   readonly exists: boolean;
   readonly hasCatalog: boolean;
   readonly isDefault: boolean;
-  readonly counts: {
-    readonly total: number;
-    readonly audio: number;
-    readonly image: number;
-  };
+  readonly counts: DesktopAssetLibraryCounts;
+  /** Absent on builds that cannot tell, which is treated as "unknown". */
+  readonly driveType?: DesktopAssetLibraryDriveType;
 }
 
 export interface DesktopAssetCatalog {
@@ -327,6 +389,7 @@ export interface DesktopAssetCatalog {
     readonly total: number;
     readonly audio: number;
     readonly image: number;
+    readonly video?: number;
   };
   readonly assets: readonly unknown[];
 }
@@ -373,6 +436,14 @@ export async function resetDesktopAssetLibraryDirectory(): Promise<DesktopAssetL
  */
 export async function getDesktopAssetLibraryCatalog(): Promise<DesktopAssetCatalog> {
   return (await requireBridge().invoke('desktop.asset-library.get-catalog')) as DesktopAssetCatalog;
+}
+
+/**
+ * Opens the asset library folder in the OS file browser. The desktop decides
+ * which folder that is; the renderer never names a path.
+ */
+export async function openDesktopAssetLibraryDirectory(): Promise<void> {
+  await requireBridge().invoke('desktop.asset-library.open-directory');
 }
 
 /**
