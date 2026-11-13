@@ -57,6 +57,7 @@ import {
   resolveDesktopAssetUrl,
 } from './desktop-client.js';
 import { PanelShell, type PanelTabSpec } from './PanelShell.js';
+import { DroppedImportProgress, type DroppedImportProgressState } from './DroppedImportProgress.js';
 import { panelTabIconUrl } from './panel-tab-icons.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import { MissingMediaSection } from './MissingMediaSection.js';
@@ -137,6 +138,9 @@ export function AssetLibraryPanel({
   onAddToTimeline,
   onEditWithAi,
   onOpenAssetSettings,
+  onImportFiles,
+  droppedImportProgress,
+  onCancelDroppedImport,
   missingMedia,
 }: {
   readonly projectId: string;
@@ -164,6 +168,10 @@ export function AssetLibraryPanel({
     readonly displayName: string;
   }) => void;
   readonly onOpenAssetSettings?: () => void;
+  /** Import OS-dropped files through the shared desktop bridge flow. */
+  readonly onImportFiles?: (files: readonly File[]) => void | Promise<void>;
+  readonly droppedImportProgress?: DroppedImportProgressState;
+  readonly onCancelDroppedImport?: () => void;
   /** Missing project media, relinked from the panel's Missing media section. */
   readonly missingMedia?: {
     readonly host: MissingMediaHost;
@@ -216,6 +224,7 @@ export function AssetLibraryPanel({
   const [filterOpen, setFilterOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importProgress, setImportProgress] = useState<number | undefined>(undefined);
+  const [dropActive, setDropActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const assetLibraryContentRef = useRef<HTMLDivElement | null>(null);
   const filterActive = availability !== 'all' || sort !== 'name';
@@ -259,7 +268,8 @@ export function AssetLibraryPanel({
       // their requests settle.
       setItems(assets.map((asset) => ({ asset, derivatives: [] })));
       setStatus(undefined);
-      if (assets.length === 0) setImportOpen(true);
+      // The empty library shows its drop zone, which is the one way in. The
+      // import drawer does not open on its own: one empty state, one message.
 
       void Promise.all(
         assets.map(async (asset) => {
@@ -359,43 +369,79 @@ export function AssetLibraryPanel({
     setRenderLimit(ASSET_RENDER_PAGE_SIZE);
   }, [sourceItems, category, collection, deferredQuery, availability, sort]);
   const rendered = useMemo(() => visible.slice(0, renderLimit), [visible, renderLimit]);
+  /** Imports one media file: the same path the import drawer uses. */
+  const importFile = useCallback(
+    async (file: File) => {
+      try {
+        const imported = await importMediaFile({
+          projectId,
+          projectTitle,
+          file,
+          client,
+          originalAssetCache,
+          onProgress: ({ ratio, message: progressMessage }) => {
+            setImportProgress(ratio);
+            setStatus(progressMessage);
+          },
+        });
+        setItems((current) => includeOwnedAsset(current, new Set(), imported).items);
+        const reveal = importedAssetRevealState(imported);
+        setCategory(reveal.category);
+        setCollection(reveal.collection);
+        setQuery(reveal.query);
+        setAvailability(reveal.availability);
+        setSort(reveal.sort);
+        setRenderLimit(reveal.renderLimit);
+        setStatus(`${file.name} imported. Agent tags applied; catalog refreshing.`);
+        setImportProgress(1);
+        setSelectedFile(undefined);
+        if (fileInputRef.current !== null) fileInputRef.current.value = '';
+        setImportOpen(false);
+        await refresh();
+        window.setTimeout(() => setImportProgress(undefined), 350);
+      } catch (error) {
+        setImportProgress(undefined);
+        setStatus(`Media import failed: ${message(error)}`);
+      }
+    },
+    [client, originalAssetCache, projectId, projectTitle, refresh],
+  );
   const registerSelectedAsset = useCallback(async () => {
     if (selectedFile === undefined) {
       setStatus('Choose a media file to register.');
       return;
     }
-    try {
-      const imported = await importMediaFile({
-        projectId,
-        projectTitle,
-        file: selectedFile,
-        client,
-        originalAssetCache,
-        onProgress: ({ ratio, message: progressMessage }) => {
-          setImportProgress(ratio);
-          setStatus(progressMessage);
-        },
-      });
-      setItems((current) => includeOwnedAsset(current, new Set(), imported).items);
-      const reveal = importedAssetRevealState(imported);
-      setCategory(reveal.category);
-      setCollection(reveal.collection);
-      setQuery(reveal.query);
-      setAvailability(reveal.availability);
-      setSort(reveal.sort);
-      setRenderLimit(reveal.renderLimit);
-      setStatus(`${selectedFile.name} imported. Agent tags applied; catalog refreshing.`);
-      setImportProgress(1);
-      setSelectedFile(undefined);
-      if (fileInputRef.current !== null) fileInputRef.current.value = '';
-      setImportOpen(false);
-      await refresh();
-      window.setTimeout(() => setImportProgress(undefined), 350);
-    } catch (error) {
-      setImportProgress(undefined);
-      setStatus(`Media import failed: ${message(error)}`);
-    }
-  }, [client, originalAssetCache, projectId, projectTitle, refresh, selectedFile]);
+    await importFile(selectedFile);
+  }, [importFile, selectedFile]);
+
+  /** The empty library is a drop zone: a file dropped on it is imported. */
+  const handleDropOver = useCallback((event: React.DragEvent) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setDropActive(true);
+  }, []);
+  const handleDropLeave = useCallback(() => {
+    setDropActive(false);
+  }, []);
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      event.preventDefault();
+      setDropActive(false);
+      const files = Array.from(event.dataTransfer.files ?? []);
+      if (files.length === 0) return;
+      if (onImportFiles !== undefined) {
+        void Promise.resolve(onImportFiles(files))
+          .then(refresh)
+          .catch((error: unknown) => {
+            setStatus(`Media import failed: ${message(error)}`);
+          });
+        return;
+      }
+      for (const file of files) void importFile(file);
+    },
+    [importFile, onImportFiles, refresh],
+  );
   const addAssetToTimeline = useCallback(
     async (asset: {
       readonly assetId: string;
@@ -865,6 +911,12 @@ export function AssetLibraryPanel({
           </div>
         </aside>
         <div className="asset-library-main">
+          {droppedImportProgress !== undefined && onCancelDroppedImport !== undefined && (
+            <DroppedImportProgress
+              progress={droppedImportProgress}
+              onCancel={onCancelDroppedImport}
+            />
+          )}
           {missingMedia !== undefined && (
             <MissingMediaSection
               host={missingMedia.host}
@@ -1099,23 +1151,31 @@ export function AssetLibraryPanel({
           )}
           {visible.length === 0 ? (
             <div className="asset-library-empty">
-              {isDesktopHost() &&
-                (status?.includes('Failed to load media catalog') ? (
-                  // The status line is the shell's note now — do not print it twice.
-                  <p>Failed to load media catalog.</p>
-                ) : (
-                  <p>No library assets match the current filters.</p>
-                ))}
-              <button
-                type="button"
-                className="icon-button icon-button-labeled"
-                onClick={() => setImportOpen(true)}
-                aria-label="Import media"
-                title="Import media"
-              >
-                <UploadIcon />
-                Import
-              </button>
+              {isDesktopHost() && status?.includes('Failed to load media catalog') ? (
+                // The status line is the shell's note now — do not print it twice.
+                <p>Failed to load media catalog.</p>
+              ) : items.length === 0 ? (
+                // An empty library says one thing and offers one way out: drop a
+                // file here, or use the gold Import button.
+                <div
+                  className={`asset-library-drop-zone${dropActive ? ' is-drag-active' : ''}`}
+                  onDragOver={handleDropOver}
+                  onDragLeave={handleDropLeave}
+                  onDrop={(event) => void handleDrop(event)}
+                >
+                  <p className="asset-library-drop-hint">Drop video, audio or images here</p>
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={() => setImportOpen(true)}
+                    disabled={importProgress !== undefined}
+                  >
+                    Import
+                  </button>
+                </div>
+              ) : (
+                <p>No library assets match the current filters.</p>
+              )}
             </div>
           ) : (
             <>

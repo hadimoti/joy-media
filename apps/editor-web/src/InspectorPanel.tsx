@@ -619,7 +619,7 @@ export function InspectorPanel({
       activeTab={tab}
       onTabChange={setTab}
       inactive={inspectorInactive}
-      note={inspectorInactive ? 'Select a clip to edit its properties.' : undefined}
+      note={inspectorInactive ? 'Select a clip' : undefined}
       noteMode={inspectorInactive ? 'hint' : undefined}
     >
       <AgentPreviewBadge surface="Inspector" />
