@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MONITOR_FIT_PADDING_PX,
   MONITOR_MAX_ZOOM,
   MONITOR_MIN_ZOOM,
   MONITOR_PAN_KEEP_VISIBLE_PX,
@@ -119,14 +120,26 @@ describe('wheel zoom factor', () => {
 describe('fit', () => {
   it('fits a portrait frame in a landscape viewport and centres it', () => {
     const zoom = fitZoom(viewport, portrait);
-    expect(zoom).toBeCloseTo(450 / 1920, 12);
+    // Fit leaves 16 px on each side of the viewport (T-D12).
+    expect(zoom).toBeCloseTo((450 - 2 * MONITOR_FIT_PADDING_PX) / 1920, 12);
     const view = fitView(viewport, portrait);
-    expect(view.panY).toBeCloseTo(0, 9);
+    // The height fills the padded viewport, so the frame starts one padding in from the top.
+    expect(view.panY).toBeCloseTo(MONITOR_FIT_PADDING_PX, 9);
     expect(view.panX).toBeCloseTo((800 - 1080 * zoom) / 2, 9);
   });
 
   it('can enlarge a small frame', () => {
-    expect(fitZoom(viewport, { width: 160, height: 90 })).toBeCloseTo(5, 12);
+    expect(fitZoom(viewport, { width: 160, height: 90 })).toBeCloseTo(
+      (450 - 2 * MONITOR_FIT_PADDING_PX) / 90,
+      12,
+    );
+  });
+
+  it('leaves exactly the padding between the fitted frame and the viewport edge', () => {
+    // 100 x 50 in 200 x 100: the height limits the fit, so the top and bottom margins are 16 px.
+    const view = fitView({ width: 200, height: 100 }, { width: 100, height: 50 });
+    const drawnHeight = 50 * view.zoom;
+    expect((100 - drawnHeight) / 2).toBeCloseTo(MONITOR_FIT_PADDING_PX, 9);
   });
 
   it('is clamped to the zoom range and safe for an empty viewport', () => {
