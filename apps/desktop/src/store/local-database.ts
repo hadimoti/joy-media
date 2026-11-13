@@ -7,6 +7,13 @@ import { ensureLocalAssetSchema, SqliteLocalAssetStore } from './local-assets.js
 import { ensureProjectDocumentSchema, SqliteProjectDocumentStore } from './project-documents.js';
 import { PROFILE_BINDING_TABLE_SQL, secretVersionDigest } from './profile-binding.js';
 import {
+  countLibraryAssets,
+  countsFromStoredCounts,
+  EMPTY_ASSET_LIBRARY_COUNTS,
+  type AssetLibraryCounts,
+} from './asset-library-counts.js';
+import type { AssetLibraryDriveType } from './asset-library-drive.js';
+import {
   clearCredentialUnavailable,
   forgetProfileState,
   listProfileStates,
@@ -23,11 +30,12 @@ export interface AssetLibraryInfo {
   readonly exists: boolean;
   readonly hasCatalog: boolean;
   readonly isDefault: boolean;
-  readonly counts: {
-    readonly total: number;
-    readonly audio: number;
-    readonly image: number;
-  };
+  readonly counts: AssetLibraryCounts;
+}
+
+/** The settings the dialog reads: the library's state and the drive it is on. */
+export interface AssetLibrarySettings extends AssetLibraryInfo {
+  readonly driveType: AssetLibraryDriveType;
 }
 
 export type MediaKind = 'video' | 'audio' | 'image' | 'other';
@@ -463,25 +471,17 @@ export class LocalDatabase {
     const exists = fs.existsSync(dir);
     const catalogPath = path.join(dir, 'catalog.json');
     const hasCatalog = fs.existsSync(catalogPath);
-    let counts = { total: 0, audio: 0, image: 0 };
+    let counts = EMPTY_ASSET_LIBRARY_COUNTS;
     if (hasCatalog) {
       try {
         const raw = fs.readFileSync(catalogPath, 'utf8');
         const parsed = JSON.parse(raw);
-        if (parsed.counts) {
-          counts = {
-            total: Number(parsed.counts.total ?? 0),
-            audio: Number(parsed.counts.audio ?? 0),
-            image: Number(parsed.counts.image ?? 0),
-          };
-        } else if (Array.isArray(parsed.assets)) {
-          let audio = 0;
-          let image = 0;
-          for (const a of parsed.assets) {
-            if (a.kind === 'audio') audio++;
-            else if (a.kind === 'image') image++;
-          }
-          counts = { total: parsed.assets.length, audio, image };
+        // The asset list is the catalogue itself, so the kinds are read from it.
+        // A stored count is only used when there is no list to count.
+        if (Array.isArray(parsed.assets)) {
+          counts = countLibraryAssets(parsed.assets);
+        } else if (parsed.counts) {
+          counts = countsFromStoredCounts(parsed.counts);
         }
       } catch {
         // ignore read error
