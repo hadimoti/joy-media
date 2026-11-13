@@ -44,15 +44,29 @@ import {
   SelectIcon,
   LayersIcon,
   ChevronLeftIcon,
+  CopyIcon,
+  PasteIcon,
 } from './icons.js';
 import {
   buildClipContextMenu,
   buildEmptyCanvasContextMenu,
   buildTrackHeaderContextMenu,
   buildRulerContextMenu,
+  MagnetIcon,
   type CommandContext,
   type ContextMenuItem,
 } from './commands/timeline-commands.js';
+import {
+  DEFAULT_SNAP_THRESHOLD_PX,
+  collectTimelineSnapAnchors,
+  snapTimelineTimeUs,
+} from './timeline-snapping.js';
+import {
+  buildTimelineCutPlan,
+  buildTimelinePastePlan,
+  copyTimelineClips,
+  getTimelineClipClipboard,
+} from './timeline-clip-clipboard.js';
 import { TimelineContextMenu } from './TimelineContextMenu.js';
 import { ActionOverflowMenu, type ActionOverflowMenuItem } from './ActionOverflowMenu.js';
 import {
@@ -92,7 +106,6 @@ import { DataLaneDrawer } from './DataLaneDrawer.js';
 import { clipNameFromMedia, clipNameWithoutExtension } from './media-label.js';
 import {
   buildTimelineMediaImportTransaction,
-  snapTimelineDropTimeUs,
   type DroppedFilesTarget,
   type TimelineMediaAsset,
 } from './timeline-media-import.js';
@@ -125,8 +138,6 @@ import { nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { AgentTimelineOverlay, hasRenderableAgentTimelineOverlay } from './AgentTimelineOverlay.js';
 import { AgentPreviewBadge } from './AgentPreviewBadge.js';
 import { diffAgentTimeline, type AgentPreviewTimeline } from './agent-timeline-preview.js';
-/** Drags snap to a 100 ms grid, matching the playhead slider's step. */
-const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
 
 /** History entries name a clip by its media name, never by its id. */
@@ -214,6 +225,8 @@ function TimelineClip({
   laneIndex,
   splitToolActive,
   frameUs,
+  snapping = true,
+  snapAnchors = [],
   onSelect,
   onMove,
   onTrim,
@@ -233,6 +246,8 @@ function TimelineClip({
   readonly laneIndex: number;
   readonly splitToolActive: boolean;
   readonly frameUs: number;
+  readonly snapping?: boolean;
+  readonly snapAnchors?: readonly number[];
   /** Plain selection replaces; only Ctrl/Command deliberately toggles. */
   readonly onSelect: (id: string, additive: boolean) => void;
   readonly onMove: (clipId: string, newStartUs: number, targetTrackId?: string) => boolean;
@@ -261,21 +276,42 @@ function TimelineClip({
 
   const dropTimeUs = (deltaPx: number): number => {
     const rawUs = clip.startUs + deltaPx / pxPerUs;
-    const snapped = Math.round(rawUs / SNAP_US) * SNAP_US;
+    const toleranceUs = DEFAULT_SNAP_THRESHOLD_PX / pxPerUs;
+    const snapped = snapTimelineTimeUs({
+      rawTimeUs: rawUs,
+      snapping,
+      anchorsUs: snapAnchors,
+      frameUs,
+      toleranceUs,
+    });
     return Math.min(maxStartUs, Math.max(0, snapped));
   };
 
   const trimTimeUs = (edge: 'start' | 'end', clientX: number, originX: number): number => {
     const deltaUs = (clientX - originX) / pxPerUs;
+    const toleranceUs = DEFAULT_SNAP_THRESHOLD_PX / pxPerUs;
+    const frameStep = frameUs > 0 ? frameUs : 33_333;
     if (edge === 'start') {
       const raw = clip.startUs + deltaUs;
-      const snapped = Math.round(raw / SNAP_US) * SNAP_US;
-      const maxStart = clip.startUs + clip.durationUs - SNAP_US;
+      const snapped = snapTimelineTimeUs({
+        rawTimeUs: raw,
+        snapping,
+        anchorsUs: snapAnchors,
+        frameUs: frameStep,
+        toleranceUs,
+      });
+      const maxStart = clip.startUs + clip.durationUs - frameStep;
       return Math.min(maxStart, Math.max(0, snapped));
     }
     const raw = clip.startUs + clip.durationUs + deltaUs;
-    const snapped = Math.round(raw / SNAP_US) * SNAP_US;
-    const minEnd = clip.startUs + SNAP_US;
+    const snapped = snapTimelineTimeUs({
+      rawTimeUs: raw,
+      snapping,
+      anchorsUs: snapAnchors,
+      frameUs: frameStep,
+      toleranceUs,
+    });
+    const minEnd = clip.startUs + frameStep;
     return Math.max(minEnd, snapped);
   };
 
@@ -712,11 +748,15 @@ export function TimelinePanel({
   selectedObject,
   onPropertyDispatch,
   trackLabelColors,
+  snapping: snappingProp = true,
+  onSnappingChange,
   agentPreview,
   agentPreviewSurfaceVisible = true,
   onAgentPreviewRendered,
 }: {
   readonly project: SpikeProject;
+  readonly snapping?: boolean;
+  readonly onSnappingChange?: (snapping: boolean) => void;
   /** Durable clip presentation kinds from the paired creative project. */
   readonly elementKinds?: TimelineElementKindMap;
   readonly transitions?: readonly TransitionV1[];
@@ -803,6 +843,15 @@ export function TimelinePanel({
   const setTrackFlags = onTrackFlagsChange ?? setLocalTrackFlags;
   const [selectToolActive, setSelectToolActive] = useState(true);
   const [splitToolActive, setSplitToolActive] = useState(false);
+  const [internalSnapping, setInternalSnapping] = useState(true);
+  const snapping = snappingProp ?? internalSnapping;
+  const handleToggleSnapping = () => {
+    if (onSnappingChange) {
+      onSnappingChange(!snapping);
+    } else {
+      setInternalSnapping(!snapping);
+    }
+  };
   const [splitGuideUs, setSplitGuideUs] = useState<number | undefined>(undefined);
   const [tracksViewportWidthPx, setTracksViewportWidthPx] = useState(0);
   const [tracksScrollLeft, setTracksScrollLeft] = useState(0);
@@ -1277,31 +1326,88 @@ export function TimelinePanel({
   const canDuplicate = selected !== undefined && !selectedLocked;
   const canDelete = selected !== undefined && !selectedLocked;
 
-  const frameUs = useMemo(() => frameDurationUs(composition.frameRate), [composition.frameRate]);
-  const timelineDropAnchorsUs = useMemo(
-    () => [
+  const hasSelection = selected !== undefined || selectedIds.length > 0;
+  const canCopy = hasSelection;
+  const canCut = hasSelection && !selectedLocked;
+  const clipboardData = getTimelineClipClipboard();
+  const canPaste = clipboardData !== undefined && clipboardData.items.length > 0;
+
+  const handleCopy = () => {
+    const ids = selectedIds.length > 0 ? selectedIds : selected ? [selected.clip.id] : [];
+    if (ids.length === 0) return;
+    const copied = copyTimelineClips(composition, ids);
+    if (copied) {
+      showToast?.(
+        `Copied ${copied.items.length} clip${copied.items.length === 1 ? '' : 's'}.`,
+        'info',
+      );
+    }
+  };
+
+  const handleCut = () => {
+    const ids = selectedIds.length > 0 ? selectedIds : selected ? [selected.clip.id] : [];
+    if (ids.length === 0) return;
+    const plan = buildTimelineCutPlan({
+      composition,
+      selectedClipIds: ids,
+      tracks,
+    });
+    if (plan.ok) {
+      onDispatch(plan.transaction);
+      onClearSelection();
+      showToast?.(
+        `Cut ${plan.removedClipIds.length} clip${plan.removedClipIds.length === 1 ? '' : 's'}.`,
+        'info',
+      );
+    } else {
+      showToast?.(plan.reason, 'info');
+    }
+  };
+
+  const handlePaste = () => {
+    const plan = buildTimelinePastePlan({
+      composition,
       playheadUs,
-      ...markers.map((marker) => marker.timeUs),
-      ...composition.tracks.flatMap((track) =>
-        track.clips.flatMap((clip) => [clip.startUs, clip.startUs + clip.durationUs]),
-      ),
-    ],
-    [composition.tracks, markers, playheadUs],
+      tracks,
+    });
+    if (plan.ok) {
+      onDispatch(plan.transaction);
+      onSelectClips?.(plan.pastedClipIds);
+      showToast?.(
+        `Pasted ${plan.pastedClipIds.length} clip${plan.pastedClipIds.length === 1 ? '' : 's'}.`,
+        'info',
+      );
+    } else {
+      showToast?.(plan.reason, 'info');
+    }
+  };
+
+  const frameUs = useMemo(() => frameDurationUs(composition.frameRate), [composition.frameRate]);
+  const snapAnchors = useMemo(
+    () =>
+      collectTimelineSnapAnchors({
+        composition,
+        markers,
+        playheadUs,
+      }),
+    [composition, markers, playheadUs],
   );
   const timelineDropTimeAt = useCallback(
     (clientX: number, rect: DOMRect) => {
       const pixelsPerSecond = Math.max(1, viewport.pixelsPerSecond);
-      return snapTimelineDropTimeUs({
+      const pxPerUs = pixelsPerSecond / 1_000_000;
+      return snapTimelineTimeUs({
         rawTimeUs: pixelToTime(clientX - rect.left, {
           originUs: 0,
           pixelsPerSecond,
         }),
-        anchorsUs: timelineDropAnchorsUs,
+        snapping,
+        anchorsUs: snapAnchors,
         frameUs,
-        toleranceUs: (8 * 1_000_000) / pixelsPerSecond,
+        toleranceUs: DEFAULT_SNAP_THRESHOLD_PX / pxPerUs,
       });
     },
-    [frameUs, timelineDropAnchorsUs, viewport.pixelsPerSecond],
+    [frameUs, snapAnchors, snapping, viewport.pixelsPerSecond],
   );
 
   const dispatchSplitAt = useCallback(
@@ -1457,7 +1563,14 @@ export function TimelinePanel({
         return;
       }
       const durationUs = safeAssetDuration(asset);
-      const snapped = Math.round(dropUs / SNAP_US) * SNAP_US;
+      const pxPerUs = viewport.pixelsPerSecond / 1_000_000;
+      const snapped = snapTimelineTimeUs({
+        rawTimeUs: dropUs,
+        snapping,
+        anchorsUs: snapAnchors,
+        frameUs,
+        toleranceUs: DEFAULT_SNAP_THRESHOLD_PX / pxPerUs,
+      });
       let startUs = Math.max(0, snapped);
       const sorted = [...source.clips].sort((a, b) => a.startUs - b.startUs);
       for (const existing of sorted) {
@@ -1496,7 +1609,18 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, composition.tracks, elementKinds, onDispatch, onMediaPlaced, showToast],
+    [
+      composition.id,
+      composition.tracks,
+      elementKinds,
+      frameUs,
+      onDispatch,
+      onMediaPlaced,
+      showToast,
+      snapAnchors,
+      snapping,
+      viewport.pixelsPerSecond,
+    ],
   );
 
   /** Create a NEW real track for a dropped asset and place the clip on it. */
@@ -1518,7 +1642,17 @@ export function TimelinePanel({
           .length + 1;
       const trackId = nextProfessionalTrackId(composition.tracks, family);
       const durationUs = safeAssetDuration(asset);
-      const startUs = Math.max(0, Math.round(dropUs / SNAP_US) * SNAP_US);
+      const pxPerUs = viewport.pixelsPerSecond / 1_000_000;
+      const startUs = Math.max(
+        0,
+        snapTimelineTimeUs({
+          rawTimeUs: dropUs,
+          snapping,
+          anchorsUs: snapAnchors,
+          frameUs,
+          toleranceUs: DEFAULT_SNAP_THRESHOLD_PX / pxPerUs,
+        }),
+      );
       const clipId = `${family === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
       onMediaPlaced?.(
         {
@@ -1565,7 +1699,17 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, composition.tracks, elementKinds, onDispatch, onMediaPlaced],
+    [
+      composition.id,
+      composition.tracks,
+      elementKinds,
+      frameUs,
+      onDispatch,
+      onMediaPlaced,
+      snapAnchors,
+      snapping,
+      viewport.pixelsPerSecond,
+    ],
   );
 
   const dispatchSplit = (trackId: string, clipId: string) => {
@@ -1896,8 +2040,15 @@ export function TimelinePanel({
   const seekFromLane = (event: React.PointerEvent<HTMLElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const localX = event.clientX - rect.left;
-    const timeUs =
-      Math.round(pixelToTime(localX, { ...viewport, originUs: 0 }) / SNAP_US) * SNAP_US;
+    const pxPerUs = viewport.pixelsPerSecond / 1_000_000;
+    const rawTimeUs = pixelToTime(localX, { ...viewport, originUs: 0 });
+    const timeUs = snapTimelineTimeUs({
+      rawTimeUs,
+      snapping,
+      anchorsUs: snapAnchors,
+      frameUs,
+      toleranceUs: DEFAULT_SNAP_THRESHOLD_PX / pxPerUs,
+    });
     onSeek(Math.min(timelineDurationUs, Math.max(0, timeUs)));
   };
 
@@ -2431,11 +2582,49 @@ export function TimelinePanel({
           >
             <ScissorsIcon />
           </button>
+          <button
+            type="button"
+            className="icon-button"
+            data-guide="Snapping"
+            aria-label={snapping ? 'Snapping enabled' : 'Snapping disabled'}
+            title={snapping ? 'Disable snapping (N)' : 'Enable snapping (N)'}
+            aria-pressed={snapping}
+            onClick={handleToggleSnapping}
+          >
+            <MagnetIcon />
+          </button>
         </div>
 
         <span className="timeline-toolbar-sep" aria-hidden="true" />
 
         <div className="timeline-toolbar-group timeline-toolbar-secondary timeline-toolbar-edit">
+          <button
+            className="icon-button"
+            disabled={!canCopy}
+            aria-label="Copy clip"
+            title="Copy (Ctrl+C)"
+            onClick={handleCopy}
+          >
+            <CopyIcon />
+          </button>
+          <button
+            className="icon-button"
+            disabled={!canCut}
+            aria-label="Cut clip"
+            title="Cut (Ctrl+X)"
+            onClick={handleCut}
+          >
+            <ScissorsIcon />
+          </button>
+          <button
+            className="icon-button"
+            disabled={!canPaste}
+            aria-label="Paste clip"
+            title="Paste (Ctrl+V)"
+            onClick={handlePaste}
+          >
+            <PasteIcon />
+          </button>
           <button
             className="icon-button"
             disabled={!canDuplicate}
@@ -2549,7 +2738,11 @@ export function TimelinePanel({
         onFilesDrop={handleFilesDrop}
         onAssetDrop={handleAssetDrop}
         onContextMenu={(x, y) => {
-          const items = buildEmptyCanvasContextMenu(handleImportClick, handleAddFromLibrary);
+          const items = buildEmptyCanvasContextMenu(
+            handleImportClick,
+            handleAddFromLibrary,
+            handlePaste,
+          );
           setMenu({ x, y, items });
         }}
         onToast={(message) => showToast?.(message, 'info')}
@@ -3180,6 +3373,8 @@ export function TimelinePanel({
                       laneIndex={index}
                       splitToolActive={splitToolActive}
                       frameUs={frameUs}
+                      snapping={snapping}
+                      snapAnchors={snapAnchors}
                       onSelect={selectClip}
                       onMove={track.locked ? () => false : moveClip(track.id)}
                       onTrim={track.locked ? () => false : trimClip(track.id)}

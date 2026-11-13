@@ -275,6 +275,11 @@ import { clipNameFromMedia, clipNameWithoutExtension } from './media-label.js';
 import { findFirstPartyScene } from '@joy-media/html-scene-runtime/first-party';
 import { nextTimelineMarkerId, nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
+import {
+  buildTimelineCutPlan,
+  buildTimelinePastePlan,
+  copyTimelineClips,
+} from './timeline-clip-clipboard.js';
 import { DualLensPanel } from './DualLensPanel.js';
 import { buildDualLensProjection } from './dual-lens-model.js';
 import { primaryNodeIdForClip, type LensRevealRequest } from './dual-lens-reveal.js';
@@ -1191,6 +1196,7 @@ function EditorWorkspace({
     }[]
   >([]);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
+  const [snapping, setSnapping] = useState(true);
   // A dialog that opens closes every header popup and the palette (OB-18).
   usePopupsClosedWhile(
     keyboardShortcutsOpen || agentSettingsOpen || modelDrawerOpen || assetLibrarySettingsOpen,
@@ -3903,6 +3909,69 @@ function EditorWorkspace({
                 `${selection.clip.id}-copy-${Date.now()}`,
               ),
             ],
+          });
+          break;
+        }
+        case 'clip.copy': {
+          if (composition === undefined || current.selectedIds.length === 0) return;
+          const data = copyTimelineClips(composition, current.selectedIds);
+          if (data && data.items.length > 0) {
+            showToast(
+              `Copied ${data.items.length} clip${data.items.length === 1 ? '' : 's'}.`,
+              'info',
+            );
+          }
+          break;
+        }
+        case 'clip.cut': {
+          if (composition === undefined || current.selectedIds.length === 0) return;
+          const plan = buildTimelineCutPlan({
+            composition,
+            selectedClipIds: current.selectedIds,
+            tracks: timelineTrackFlags,
+          });
+          if (!plan.ok) {
+            showToast(plan.reason, 'info');
+            return;
+          }
+          dispatchTimeline(plan.transaction);
+          setState((active) => ({
+            ...active,
+            selectedIds: active.selectedIds.filter((id) => !plan.removedClipIds.includes(id)),
+          }));
+          showToast(
+            `Cut ${plan.removedClipIds.length} clip${plan.removedClipIds.length === 1 ? '' : 's'}.`,
+            'info',
+          );
+          break;
+        }
+        case 'clip.paste': {
+          if (composition === undefined) return;
+          const plan = buildTimelinePastePlan({
+            composition,
+            playheadUs: current.playheadUs,
+            tracks: timelineTrackFlags,
+          });
+          if (!plan.ok) {
+            showToast(plan.reason, 'info');
+            return;
+          }
+          dispatchTimeline(plan.transaction);
+          setState((active) => ({
+            ...active,
+            selectedIds: plan.pastedClipIds,
+          }));
+          showToast(
+            `Pasted ${plan.pastedClipIds.length} clip${plan.pastedClipIds.length === 1 ? '' : 's'}.`,
+            'info',
+          );
+          break;
+        }
+        case 'snapping.toggle': {
+          setSnapping((prev) => {
+            const next = !prev;
+            showToast(`Snapping ${next ? 'enabled' : 'disabled'}.`, 'info');
+            return next;
           });
           break;
         }
@@ -6692,6 +6761,8 @@ function EditorWorkspace({
           onTrackFlagsChange={context.onTimelineTrackFlagsChange}
           autoFit={context.timelineAutoFit}
           onAutoFitChange={context.onTimelineAutoFitChange}
+          snapping={snapping}
+          onSnappingChange={setSnapping}
           markers={activeTimelineMarkers}
           onRevealInFlow={context.revealInFlow}
           {...(context.dataLanes === undefined || context.artifacts === undefined
