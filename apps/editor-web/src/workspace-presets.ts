@@ -3,6 +3,7 @@ import {
   collapseJoyCodeGroup,
   dockLayoutKey,
   migrateDockLayout,
+  serializeDockLayout,
   seedDockLayout,
 } from './dock-layout.js';
 import type { WorkspacePresetId } from './panel-metadata.js';
@@ -38,6 +39,18 @@ export function workspacePresetLabel(id: WorkspacePresetId): string {
 export function workspacePresetLayoutKey(mode: EditorViewMode, preset: WorkspacePresetId): string {
   if (preset === 'edit') return dockLayoutKey(mode);
   return `joy-media.workspace.${preset}.${mode}.v2`;
+}
+
+/** Persists one dock layout under the owning preset's key for that view mode. */
+export function persistWorkspacePresetLayout(
+  storage: ViewModeStorage,
+  preset: WorkspacePresetId,
+  mode: EditorViewMode,
+  layout: unknown,
+): string {
+  const key = workspacePresetLayoutKey(mode, preset);
+  storage.setItem(key, serializeDockLayout(layout));
+  return key;
 }
 
 export function workspacePresetLayout(preset: WorkspacePresetId, mode: EditorViewMode): unknown {

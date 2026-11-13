@@ -1,8 +1,10 @@
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { dockLayoutKey, verticalDockLayout } from './dock-layout.js';
 import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
+  persistWorkspacePresetLayout,
   workspacePresetLayoutKey,
   workspacePresetLayout,
 } from './workspace-presets.js';
@@ -38,6 +40,9 @@ function memoryStorage(initial: Record<string, string> = {}) {
     },
     removeItem(key: string) {
       map.delete(key);
+    },
+    entries() {
+      return [...map.entries()];
     },
   };
 }
@@ -208,5 +213,57 @@ describe('workspace preset layout persistence', () => {
     expect(edit.key).toBe(editKey);
     expect(edit.restored).toBe(true);
     expect(leafIds(edit.layout)).toContain('agent-col');
+  });
+
+  it('keeps the saved Edit layout byte-for-byte intact while Automate persists its layout', () => {
+    const storage = memoryStorage();
+    const editKey = workspacePresetLayoutKey('vertical', 'edit');
+    const automateKey = workspacePresetLayoutKey('vertical', 'automate');
+    const savedEdit = JSON.stringify(firstRunWorkspaceLayout('edit', 'vertical'));
+    storage.setItem(editKey, savedEdit);
+
+    const changedAutomateLayout = {
+      ...(workspacePresetLayout('automate', 'vertical') as Record<string, unknown>),
+      layoutMarker: 'automate layout changed',
+    };
+    persistWorkspacePresetLayout(storage, 'automate', 'vertical', changedAutomateLayout);
+
+    expect(storage.getItem(editKey)).toBe(savedEdit);
+    expect(
+      storage
+        .entries()
+        .map(([key]) => key)
+        .sort(),
+    ).toEqual([editKey, automateKey].sort());
+    expect(JSON.parse(storage.getItem(automateKey) ?? 'null').layoutMarker).toBe(
+      'automate layout changed',
+    );
+
+    const editAfterAutomate = planWorkspaceLayout(storage, 'edit', 'vertical');
+    expect(editAfterAutomate.restored).toBe(true);
+    expect(leafIds(editAfterAutomate.layout)).not.toContain('agent-col');
+    expect(storage.getItem(editKey)).toBe(savedEdit);
+  });
+
+  it('routes App layout-change and view-mode saves through preset-aware persistence', async () => {
+    const appSource = await readFile(new URL('./App.tsx', import.meta.url), 'utf8');
+    const switchStart = appSource.indexOf('const switchEditorView = useCallback');
+    const switchEnd = appSource.indexOf('const recordExportEntry = useCallback', switchStart);
+    const layoutListenerStart = appSource.indexOf('const persistDockLayout = () =>');
+    const layoutListenerEnd = appSource.indexOf(
+      'event.api.onDidLayoutChange(persistDockLayout)',
+      layoutListenerStart,
+    );
+
+    expect(switchStart).toBeGreaterThanOrEqual(0);
+    expect(switchEnd).toBeGreaterThan(switchStart);
+    expect(layoutListenerStart).toBeGreaterThanOrEqual(0);
+    expect(layoutListenerEnd).toBeGreaterThan(layoutListenerStart);
+    expect(appSource.slice(switchStart, switchEnd)).toMatch(
+      /persistWorkspacePresetLayout\(\s*storage,\s*workspacePresetRef\.current,\s*current,\s*api\.toJSON\(\),?\s*\)/,
+    );
+    expect(appSource.slice(layoutListenerStart, layoutListenerEnd)).toMatch(
+      /persistWorkspacePresetLayout\(\s*storage,\s*workspacePresetRef\.current,\s*viewModeRef\.current,\s*event\.api\.toJSON\(\),?\s*\)/,
+    );
   });
 });

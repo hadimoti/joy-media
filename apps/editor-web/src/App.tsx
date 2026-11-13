@@ -415,6 +415,7 @@ import { POPUP_IDS } from './popup-ids.js';
 import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
+  persistWorkspacePresetLayout,
   workspacePresetLayoutKey,
 } from './workspace-presets.js';
 import {
@@ -425,7 +426,6 @@ import {
   type EditorViewMode,
   dockLayoutKey,
   migrateLegacyDockLayout,
-  serializeDockLayout,
   saveViewMode,
 } from './dock-layout.js';
 import { panelLabel, panelTabIconUrl } from './panel-tab-icons.js';
@@ -3550,7 +3550,7 @@ function EditorWorkspace({
       }
       ensureDockPanels(api);
       api.getPanel('monitor')?.api.setActive();
-      storage.setItem(plan.key, serializeDockLayout(api.toJSON()));
+      persistWorkspacePresetLayout(storage, preset, mode, api.toJSON());
     },
     [ensureDockPanels, storage],
   );
@@ -3573,7 +3573,7 @@ function EditorWorkspace({
       const current = workspacePresetRef.current;
       const mode = viewModeRef.current;
       if (api !== null) {
-        storage.setItem(workspacePresetLayoutKey(mode, current), serializeDockLayout(api.toJSON()));
+        persistWorkspacePresetLayout(storage, current, mode, api.toJSON());
       }
       workspacePresetRef.current = next;
       setWorkspacePreset(next);
@@ -3603,10 +3603,7 @@ function EditorWorkspace({
     const api = dockviewApiRef.current;
     if (api === null) return;
     const current = viewModeRef.current;
-    storage.setItem(
-      workspacePresetLayoutKey(current, workspacePresetRef.current),
-      serializeDockLayout(api.toJSON()),
-    );
+    persistWorkspacePresetLayout(storage, workspacePresetRef.current, current, api.toJSON());
     const next: EditorViewMode = current === 'vertical' ? 'widescreen' : 'vertical';
     saveViewMode(storage, next);
     persistUiPreferences({ viewMode: next });
@@ -5229,9 +5226,11 @@ function EditorWorkspace({
       applyDockLayout(event.api, mode, preset);
 
       const persistDockLayout = () => {
-        storage.setItem(
-          workspacePresetLayoutKey(viewModeRef.current, workspacePresetRef.current),
-          serializeDockLayout(event.api.toJSON()),
+        persistWorkspacePresetLayout(
+          storage,
+          workspacePresetRef.current,
+          viewModeRef.current,
+          event.api.toJSON(),
         );
       };
       event.api.onDidLayoutChange(persistDockLayout);
