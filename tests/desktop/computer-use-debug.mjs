@@ -145,7 +145,7 @@ try {
           JSON.stringify({
             data: {
               contact: 'operator@joy-media.local',
-              displayName: 'JOY Studio Operator',
+              displayName: 'JOY Media Operator',
               method: 'gmail',
               avatarAvailable: false,
             },

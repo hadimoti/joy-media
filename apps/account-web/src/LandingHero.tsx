@@ -81,7 +81,7 @@ export function LandingHero({ release }: LandingHeroProps): ReactNode {
               <span className="p-dot is-green" />
             </div>
             <div className="preview-window-title">
-              JOY Studio — [Project: 4K_Commercial_Editorial.joy] — WebGL2 GPU Engine
+              JOY Media — [Project: 4K_Commercial_Editorial.joy] — WebGL2 GPU Engine
             </div>
           </div>
           <div className="preview-window-body">

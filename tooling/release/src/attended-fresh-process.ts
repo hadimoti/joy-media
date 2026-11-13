@@ -215,7 +215,9 @@ export function packageBlockers(value: unknown, expected: PackageExpectation): s
   if (value.format !== PACKAGE_FORMAT)
     blockers.push(`the package format is ${String(value.format)}`);
   if (value.schemaVersion !== 1) blockers.push('the package schema version is not 1');
-  if (value.app !== 'JOY Studio') blockers.push('the package was not written by JOY Studio');
+  // JOY Media writes this name now; JOY Studio is the name of packages written before the rename.
+  if (value.app !== 'JOY Media' && value.app !== 'JOY Studio')
+    blockers.push('the package was not written by JOY Media');
   const source = isRecord(value.source) ? value.source : undefined;
   if (source === undefined || typeof source.id !== 'string' || source.id.trim() === '') {
     blockers.push('the package has no source project id');

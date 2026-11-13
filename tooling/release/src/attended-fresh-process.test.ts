@@ -133,7 +133,7 @@ class FakePage implements FreshEditorPage {
     const pkg = {
       format: 'joy-media-project',
       schemaVersion: 1,
-      app: 'JOY Studio',
+      app: 'JOY Media',
       exportedAt: '2026-11-09T10:00:00.000Z',
       source: {
         id: 'project-src',
@@ -748,7 +748,7 @@ describe('the package and store helpers', () => {
     return {
       format: 'joy-media-project',
       schemaVersion: 1,
-      app: 'JOY Studio',
+      app: 'JOY Media',
       source: { id: 'project-src', title: names.sourceTitle },
       documents: {
         timeline: { compositions: { root: { tracks: [{ clips: [{ assetId: 'asset-src' }] }] } } },
@@ -769,6 +769,16 @@ describe('the package and store helpers', () => {
     expect(
       packageProblems(new Uint8Array(Buffer.from(JSON.stringify(packageValue()))), expectation),
     ).toEqual([]);
+  });
+
+  it('still accepts a package written under the old JOY Studio name', () => {
+    expect(packageBlockers({ ...packageValue(), app: 'JOY Studio' }, expectation)).toEqual([]);
+  });
+
+  it('refuses a package written by another app', () => {
+    expect(packageBlockers({ ...packageValue(), app: 'Other Editor' }, expectation)).toEqual([
+      'the package was not written by JOY Media',
+    ]);
   });
 
   it('refuses text that is not JSON, and a value that is not an object', () => {

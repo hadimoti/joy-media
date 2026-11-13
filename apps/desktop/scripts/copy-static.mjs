@@ -25,20 +25,24 @@ const srcPreloadDir = resolve(desktopRoot, 'src', 'preload');
 const distPreloadDir = resolve(desktopRoot, 'dist', 'preload');
 
 const require = createRequire(import.meta.url);
-/** @type {{ IPC_CHANNELS: readonly string[] }} */
-const { IPC_CHANNELS } = require(resolve(srcPreloadDir, 'ipc-channels.cjs'));
+/** @type {Record<string, unknown>} */
+const ipcChannelsModule = require(resolve(srcPreloadDir, 'ipc-channels.cjs'));
 
 const preloadSource = await readFile(resolve(srcPreloadDir, 'preload.cjs'), 'utf8');
-const requireLine = "const { IPC_CHANNELS } = require('./ipc-channels.cjs');";
-if (!preloadSource.includes(requireLine)) {
+// The preload destructures what it needs from ipc-channels.cjs and the list of names grows (T-H01
+// added two), so match the whole statement and inline every export instead of one fixed line.
+const requirePattern = /const \{[^}]*\} = require\('\.\/ipc-channels\.cjs'\);/;
+const requireMatch = requirePattern.exec(preloadSource);
+if (requireMatch === null) {
   throw new Error(
-    `src/preload/preload.cjs no longer contains the expected line:\n  ${requireLine}\n` +
+    "src/preload/preload.cjs no longer destructures from require('./ipc-channels.cjs').\n" +
       'Update copy-static.mjs to match before shipping a packaged build.',
   );
 }
+const destructured = requireMatch[0].slice(0, requireMatch[0].indexOf('=')).trim();
 const inlinedPreload = preloadSource.replace(
-  requireLine,
-  `const IPC_CHANNELS = Object.freeze(${JSON.stringify(IPC_CHANNELS)});`,
+  requirePattern,
+  () => `${destructured} = Object.freeze(${JSON.stringify(ipcChannelsModule)});`,
 );
 
 await mkdir(distPreloadDir, { recursive: true });

@@ -18,4 +18,25 @@ describe('App asset timeline integrity contract', () => {
     expect(callback).toContain('bytes: asset.bytes,');
     expect(callback).toContain('id: asset.assetId,');
   });
+
+  it('uses one drop handler and keeps Media drops off the timeline', () => {
+    const handlerStart = appSource.indexOf('const handleDroppedFiles =');
+    const handlerEnd = appSource.indexOf("\n    if (api.id === 'timeline')", handlerStart);
+    const handler = appSource.slice(handlerStart, handlerEnd);
+
+    expect(handlerStart).toBeGreaterThanOrEqual(0);
+    expect(handlerEnd).toBeGreaterThan(handlerStart);
+    expect(handler).toContain("target.surface !== 'media' && composition !== undefined");
+    expect(handler).toContain('if (!shouldPlace) continue;');
+    expect(handler).toContain("target.surface === 'media'");
+    expect(appSource.match(/const handleDroppedFiles =/g)).toHaveLength(1);
+    expect(appSource).toContain('onImportFiles={handleDroppedFiles}');
+    expect(appSource).toContain(
+      "onImportFiles={(files) => handleDroppedFiles(files, { surface: 'media' })}",
+    );
+    expect(appSource).toContain(
+      "handleDroppedFiles(files, { surface: 'monitor', timeUs: activeTimelinePlayheadUs })",
+    );
+    expect(appSource).not.toContain('handleImportDroppedFiles');
+  });
 });

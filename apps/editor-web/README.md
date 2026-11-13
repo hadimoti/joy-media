@@ -10,7 +10,7 @@ guidance, empty states, live status, and placeholders are Persian and use
 `lang="fa"`. They are centered with the bundled Vazirmatn/Noto Arabic stack and must not set an explicit RTL
 or LTR direction; isolate inline technical tokens with `<bdi>` or `<code>`.
 See [`DESIGN.md`](../../DESIGN.md) §4d–§4f. The visible shell lockup reads
-**JOY Studio**; repository, API, storage, package, and domain identifiers remain
+**JOY Media**; repository, API, storage, package, and domain identifiers remain
 JOY Media.
 
 **First built in part:** P01. Do not scaffold code here before that part is marked active in [`STATE.md`](../../STATE.md).

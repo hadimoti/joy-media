@@ -92,10 +92,30 @@ export interface CreativeSkillHostPrimitives {
 
 const MAX_ARTIFACT_SUMMARY = 512;
 
+/**
+ * Every failure code this adapter throws. `NO_PREPARED_CHANGE` carries the
+ * primitive's reason after a colon; the reason is for the log, not the user.
+ */
+export const CREATIVE_SKILL_HOST_FAILURE_CODES = [
+  'OBSERVATION_MISSING_EVIDENCE',
+  'OBSERVATION_MISSING_COVERAGE',
+  'OBSERVATION_INCOMPLETE_COVERAGE',
+  'OBSERVATION_MISSING_MOMENT',
+  'NO_PREPARED_CHANGE',
+  'PREVIEW_WITHOUT_PREPARED_CHANGE',
+  'PREVIEW_NOT_RENDERED',
+] as const;
+
+export type CreativeSkillHostFailureCode = (typeof CREATIVE_SKILL_HOST_FAILURE_CODES)[number];
+
 class CreativeSkillHostAdapterFailure extends Error {
-  constructor(message: string) {
-    super(`JOY_CREATIVE_SKILL_HOST_${message}`);
+  /** The failure code the runner keeps, so the chat can show the message for this code. */
+  readonly code: CreativeSkillHostFailureCode;
+
+  constructor(code: CreativeSkillHostFailureCode, reason?: string) {
+    super(`JOY_CREATIVE_SKILL_HOST_${code}${reason === undefined ? '' : `:${reason}`}`);
     this.name = 'CreativeSkillHostAdapterFailure';
+    this.code = code;
   }
 }
 
@@ -213,7 +233,7 @@ export function createCreativeSkillHostAdapter(
         priorSummaries: Object.freeze([...priorSummaries]),
       });
       if (result.kind === 'unavailable')
-        throw new CreativeSkillHostAdapterFailure(`NO_PREPARED_CHANGE:${result.reason}`);
+        throw new CreativeSkillHostAdapterFailure('NO_PREPARED_CHANGE', result.reason);
       preparedChangeSetId = result.changeSetId;
       const summary =
         result.repairAttempts > 0
