@@ -137,7 +137,6 @@ registerBuiltins();
 
 /** One in-memory activity store for this editor instance; never persisted. */
 export const appAgentPresenceStore = createAgentPresenceStore();
-export { appAgentPreviewStore };
 
 /**
  * A human document edit invalidates any staged agent preview. Keep the
