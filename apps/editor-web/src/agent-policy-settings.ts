@@ -28,11 +28,14 @@ export interface AgentPolicyPreferences {
   readonly livePreview: boolean;
 }
 
+/** Fresh-install threshold for asking before a step is auto-approved. */
+export const DEFAULT_MAX_COST_PER_RUN_USD = 10;
+
 export const DEFAULT_AGENT_POLICY: AgentPolicyPreferences = {
   version: 2,
   executionMode: 'preview-and-approve',
   allowedCapabilities: ALL_TOOL_CAPABILITIES,
-  maxCostPerRunUsd: 10,
+  maxCostPerRunUsd: DEFAULT_MAX_COST_PER_RUN_USD,
   privacyMode: 'ask-before-remote',
   workerPreference: 'browser-worker',
   mediaProvider: 'Approved provider',

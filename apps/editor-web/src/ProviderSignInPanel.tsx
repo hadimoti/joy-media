@@ -15,10 +15,7 @@ import {
 } from './desktop-client.js';
 import { providerLabel } from './provider-labels.js';
 import { ChevronDownIcon } from './icons.js';
-
-/** Owner wording for the xAI sign-in route, reworded 2026-11-01 to say the route may be disabled and the API key is better. */
-const OAUTH_RISK_NOTICE =
-  'Signing in uses a third-party public app, and the provider may disable it in the future. An API key is the better, more dependable way to connect.';
+import { SETTINGS_PROVIDER_SIGN_IN } from './settings-wording.js';
 
 /** Only xAI's sign-in shows the risk notice (owner decision 2026-11-05). ChatGPT and Kimi show none. */
 const RISK_NOTICE_PROVIDERS: ReadonlySet<RegistryProviderId> = new Set<RegistryProviderId>(['xai']);
@@ -68,14 +65,21 @@ export function ProviderSignInPanel({
     try {
       const profile = await signInDesktopProviderProfile({ provider: target });
       onSignedIn(profile);
-      setSignInStatus({ provider: target, message: 'Signed in to ' + providerLabel(target) + '.' });
+      setSignInStatus({
+        provider: target,
+        message: SETTINGS_PROVIDER_SIGN_IN.signedIn.replace('{provider}', () =>
+          providerLabel(target),
+        ),
+      });
     } catch (error) {
       setSignInStatus({
         provider: target,
         message:
           error instanceof Error
             ? error.message
-            : 'The ' + providerLabel(target) + ' sign-in did not complete.',
+            : SETTINGS_PROVIDER_SIGN_IN.signInFailed.replace('{provider}', () =>
+                providerLabel(target),
+              ),
       });
     } finally {
       setBusy(undefined);
@@ -136,12 +140,12 @@ function ProviderRouteAccordion({
     if (selectedRegion === undefined) return;
     const normalizedModelId = modelId.trim();
     if (normalizedModelId === '') {
-      setApiKeyMessage('Enter a model ID before saving.');
+      setApiKeyMessage(SETTINGS_PROVIDER_SIGN_IN.modelIdRequired);
       return;
     }
     const apiKey = apiKeyRef.current?.value ?? '';
     if (apiKey.length === 0) {
-      setApiKeyMessage('Enter an API key before saving.');
+      setApiKeyMessage(SETTINGS_PROVIDER_SIGN_IN.apiKeyRequired);
       return;
     }
 
@@ -154,10 +158,10 @@ function ProviderRouteAccordion({
         apiKey,
       });
       if (apiKeyRef.current !== null) apiKeyRef.current.value = '';
-      setApiKeyMessage('API key saved in the desktop vault.');
+      setApiKeyMessage(SETTINGS_PROVIDER_SIGN_IN.apiKeySaved);
       onSaved?.(profile);
     } catch {
-      setApiKeyMessage('API key could not be saved. Check the fields and try again.');
+      setApiKeyMessage(SETTINGS_PROVIDER_SIGN_IN.apiKeySaveFailed);
     } finally {
       setSaving(false);
     }
@@ -168,7 +172,7 @@ function ProviderRouteAccordion({
       <button
         type="button"
         className="button-secondary joy-accordion-trigger"
-        aria-label={'Toggle ' + label + ' connection routes'}
+        aria-label={SETTINGS_PROVIDER_SIGN_IN.toggleRoutesLabel.replace('{provider}', () => label)}
         aria-expanded={open}
         aria-controls={'joy-provider-routes-' + provider.id}
         onClick={toggle}
@@ -176,7 +180,9 @@ function ProviderRouteAccordion({
         <span className="joy-accordion-trigger-title">{label}</span>
         <span className="joy-accordion-trigger-meta">
           <span className="joy-accordion-tag">
-            {regions.length > 0 ? 'Sign-in + API key' : 'Sign-in only'}
+            {regions.length > 0
+              ? SETTINGS_PROVIDER_SIGN_IN.bothRoutesTag
+              : SETTINGS_PROVIDER_SIGN_IN.signInOnlyTag}
           </span>
           <span className="joy-accordion-chevron">
             <ChevronDownIcon />
@@ -186,38 +192,63 @@ function ProviderRouteAccordion({
 
       {open && (
         <div id={'joy-provider-routes-' + provider.id} className="joy-accordion-content">
-          <section className="joy-provider-route" aria-label={label + ' OAuth route'}>
-            <h4 className="joy-provider-route-title">Sign-in route (Primary)</h4>
+          <section
+            className="joy-provider-route"
+            aria-label={SETTINGS_PROVIDER_SIGN_IN.oauthRouteLabel.replace(
+              '{provider}',
+              () => label,
+            )}
+          >
+            <h4 className="joy-provider-route-title">
+              {SETTINGS_PROVIDER_SIGN_IN.oauthRouteTitle}
+            </h4>
             <button
               type="button"
               className="button-primary"
               disabled={signInDisabled || saving}
               onClick={onSignIn}
             >
-              Sign in with {label}
-              {signInBusy ? '…' : ''}
+              {(signInBusy
+                ? SETTINGS_PROVIDER_SIGN_IN.signInButtonBusy
+                : SETTINGS_PROVIDER_SIGN_IN.signInButton
+              ).replace('{provider}', () => label)}
             </button>
             {RISK_NOTICE_PROVIDERS.has(provider.id) && (
-              <p className="joy-provider-risk-notice">{OAUTH_RISK_NOTICE}</p>
+              <p className="joy-provider-risk-notice">
+                {SETTINGS_PROVIDER_SIGN_IN.oauthRiskNotice}
+              </p>
             )}
             {signInMessage !== undefined && <p role="status">{signInMessage}</p>}
           </section>
 
-          <section className="joy-provider-route" aria-label={label + ' API-key route'}>
-            <h4 className="joy-provider-route-title">API key route (Secondary)</h4>
+          <section
+            className="joy-provider-route"
+            aria-label={SETTINGS_PROVIDER_SIGN_IN.apiKeyRouteLabel.replace(
+              '{provider}',
+              () => label,
+            )}
+          >
+            <h4 className="joy-provider-route-title">
+              {SETTINGS_PROVIDER_SIGN_IN.apiKeyRouteTitle}
+            </h4>
             {selectedRegion === undefined ? (
-              <p>
-                No API-key endpoint is registered for this provider. OpenAI API keys remain under
-                the separate OpenAI provider.
-              </p>
+              <p>{SETTINGS_PROVIDER_SIGN_IN.noApiKeyEndpoint}</p>
             ) : (
               <div className="joy-settings-form-grid">
                 {regions.length > 1 && (
                   <div className="joy-settings-field">
                     <label>
-                      <span>{label} API key region</span>
+                      <span>
+                        {SETTINGS_PROVIDER_SIGN_IN.apiKeyRegionLabel.replace(
+                          '{provider}',
+                          () => label,
+                        )}
+                      </span>
                       <select
-                        aria-label={label + ' API key region'}
+                        aria-label={SETTINGS_PROVIDER_SIGN_IN.apiKeyRegionLabel.replace(
+                          '{provider}',
+                          () => label,
+                        )}
                         value={selectedRegion.id}
                         onChange={(event) => {
                           const next = regions.find(
@@ -241,9 +272,12 @@ function ProviderRouteAccordion({
 
                 <div className="joy-settings-field">
                   <label>
-                    <span>OpenAI-compatible base URL</span>
+                    <span>{SETTINGS_PROVIDER_SIGN_IN.baseUrlLabel}</span>
                     <input
-                      aria-label={label + ' API key base URL'}
+                      aria-label={SETTINGS_PROVIDER_SIGN_IN.baseUrlAriaLabel.replace(
+                        '{provider}',
+                        () => label,
+                      )}
                       type="text"
                       value={selectedRegion.baseUrl}
                       readOnly
@@ -252,18 +286,21 @@ function ProviderRouteAccordion({
                 </div>
 
                 <div className="joy-settings-field">
-                  <span>API key</span>
+                  <span>{SETTINGS_PROVIDER_SIGN_IN.apiKeyLabel}</span>
                   <a href={selectedRegion.keyUrl} target="_blank" rel="noreferrer">
-                    Create API key
+                    {SETTINGS_PROVIDER_SIGN_IN.createApiKey}
                   </a>
                 </div>
 
                 <div className="joy-settings-field-full joy-settings-field">
                   <label>
-                    <span>API Secret Key</span>
+                    <span>{SETTINGS_PROVIDER_SIGN_IN.apiSecretKeyLabel}</span>
                     <input
                       ref={apiKeyRef}
-                      aria-label={label + ' API key'}
+                      aria-label={SETTINGS_PROVIDER_SIGN_IN.apiKeyAriaLabel.replace(
+                        '{provider}',
+                        () => label,
+                      )}
                       type="password"
                       defaultValue=""
                       autoComplete="off"
@@ -275,9 +312,12 @@ function ProviderRouteAccordion({
 
                 <div className="joy-settings-field-full joy-settings-field">
                   <label>
-                    <span>Model ID</span>
+                    <span>{SETTINGS_PROVIDER_SIGN_IN.modelIdLabel}</span>
                     <input
-                      aria-label={label + ' Model ID'}
+                      aria-label={SETTINGS_PROVIDER_SIGN_IN.modelIdAriaLabel.replace(
+                        '{provider}',
+                        () => label,
+                      )}
                       type="text"
                       value={modelId}
                       required
@@ -296,7 +336,7 @@ function ProviderRouteAccordion({
                     disabled={saving}
                     onClick={() => void saveApiKey()}
                   >
-                    Save API key
+                    {SETTINGS_PROVIDER_SIGN_IN.saveApiKey}
                   </button>
                   {apiKeyMessage !== undefined && <p role="status">{apiKeyMessage}</p>}
                 </div>

@@ -517,11 +517,11 @@ describe('every control in the Joy Code Settings dialog (T-P06)', () => {
   it('gives every button on every page one of the standard button classes', async () => {
     const rendered = await render();
     const pages = [
-      'AI Models & APIs',
-      'Execution & Safety',
-      'Live Experience',
-      'Tools & Perms',
-      'Media Diagnostics',
+      'AI models',
+      'Safety and limits',
+      'Live preview',
+      'Tools and permissions',
+      'Media support check',
     ];
     const offenders: string[] = [];
     let checked = 0;
