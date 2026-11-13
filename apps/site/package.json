@@ -1,6 +1,6 @@
 {
   "name": "@joy-media/site",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Static English landing site for joyst.ir: download links, checksums, providers, privacy and licence",
   "type": "module",
