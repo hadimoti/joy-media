@@ -3612,6 +3612,7 @@ function EditorWorkspace({
       }
       workspacePresetRef.current = next;
       setWorkspacePreset(next);
+      setEnhanceTool(next === 'enhance' ? 'motion' : 'effects');
       persistUiPreferences({ workspacePreset: next });
       if (api !== null) applyDockLayout(api, mode, next);
     },
@@ -3628,6 +3629,7 @@ function EditorWorkspace({
     storage.removeItem(EDITOR_UI_PREFERENCES_KEY);
     workspacePresetRef.current = DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset;
     setWorkspacePreset(DEFAULT_EDITOR_UI_PREFERENCES.workspacePreset);
+    setEnhanceTool('effects');
     setViewMode(DEFAULT_EDITOR_UI_PREFERENCES.viewMode);
     viewModeRef.current = DEFAULT_EDITOR_UI_PREFERENCES.viewMode;
     const api = dockviewApiRef.current;
@@ -5258,6 +5260,7 @@ function EditorWorkspace({
       setViewMode(mode);
       setWorkspacePreset(preset);
       workspacePresetRef.current = preset;
+      setEnhanceTool(preset === 'enhance' ? 'motion' : 'effects');
       applyDockLayout(event.api, mode, preset);
 
       const persistDockLayout = () => {

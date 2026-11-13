@@ -87,6 +87,22 @@ function leafViews(layout: LayoutWithPanels, id: string): string[] {
   return views;
 }
 
+function leafActiveView(layout: LayoutWithPanels, id: string): string | undefined {
+  let activeView: string | undefined;
+  const walk = (node: unknown): void => {
+    if (!isRecord(node)) return;
+    if (node.type === 'leaf' && isRecord(node.data) && node.data.id === id) {
+      activeView = typeof node.data.activeView === 'string' ? node.data.activeView : undefined;
+      return;
+    }
+    if (node.type === 'branch' && Array.isArray(node.data)) {
+      for (const child of node.data) walk(child);
+    }
+  };
+  walk(layout.grid?.root);
+  return activeView;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -183,9 +199,9 @@ describe('dock layout constraints', () => {
     });
   });
 
-  it('adds 3D Scene after Inspector without disturbing a saved context group', () => {
+  it('drops the retired Animate tab and adds 3D Scene to the saved context group', () => {
     const migrated = migrateDockLayout({
-      panels: { inspector: { id: 'inspector' } },
+      panels: { inspector: { id: 'inspector' }, motion: { id: 'motion' } },
       grid: {
         root: {
           type: 'leaf',
@@ -193,8 +209,88 @@ describe('dock layout constraints', () => {
         },
       },
     }) as LayoutWithPanels;
-    expect(leafViews(migrated, 'context')).toEqual(['inspector', 'scene3d', 'motion']);
+    expect(leafViews(migrated, 'context')).toEqual(['inspector', 'scene3d']);
+    expect(migrated.panels.motion).toBeUndefined();
+    expect(leafActiveView(migrated, 'context')).toBe('inspector');
     expect(migrated.panels.scene3d).toMatchObject({ id: 'scene3d' });
+  });
+
+  it('prunes an old Animate-only group and repairs the saved active group', () => {
+    const migrated = migrateDockLayout({
+      grid: {
+        orientation: 'HORIZONTAL',
+        root: {
+          type: 'branch',
+          size: 1000,
+          data: [
+            {
+              type: 'branch',
+              size: 500,
+              data: [
+                {
+                  type: 'leaf',
+                  size: 300,
+                  data: { id: 'context', views: ['inspector', 'motion'], activeView: 'motion' },
+                },
+                {
+                  type: 'leaf',
+                  size: 200,
+                  data: { id: 'motion-only', views: ['motion'], activeView: 'motion' },
+                },
+              ],
+            },
+            {
+              type: 'leaf',
+              size: 500,
+              data: { id: 'monitor-col', views: ['monitor'], activeView: 'monitor' },
+            },
+          ],
+        },
+      },
+      panels: {
+        inspector: { id: 'inspector' },
+        motion: { id: 'motion' },
+        monitor: { id: 'monitor' },
+      },
+      activeGroup: 'motion-only',
+    }) as LayoutWithPanels;
+
+    expect(leafIds(migrated)).not.toContain('motion-only');
+    expect(leafIds(migrated)).toContain('context');
+    expect(leafViews(migrated, 'context')).toEqual(['inspector', 'scene3d']);
+    expect(migrated.activeGroup).toBe('context');
+    expect(migrated.panels.motion).toBeUndefined();
+    expect(JSON.stringify(migrated)).not.toContain('"motion"');
+  });
+
+  it('preserves existing single-child branches when no Animate group is removed', () => {
+    const migrated = migrateDockLayout({
+      grid: {
+        orientation: 'HORIZONTAL',
+        root: {
+          type: 'branch',
+          data: [
+            {
+              type: 'branch',
+              data: [
+                {
+                  type: 'leaf',
+                  data: { id: 'context', views: ['inspector'], activeView: 'inspector' },
+                },
+              ],
+            },
+            {
+              type: 'leaf',
+              data: { id: 'monitor-col', views: ['monitor'], activeView: 'monitor' },
+            },
+          ],
+        },
+      },
+      panels: { inspector: { id: 'inspector' }, monitor: { id: 'monitor' } },
+    }) as LayoutWithPanels;
+
+    const root = migrated.grid?.root as unknown as { data?: readonly { type?: string }[] };
+    expect(root.data?.[0]?.type).toBe('branch');
   });
 });
 

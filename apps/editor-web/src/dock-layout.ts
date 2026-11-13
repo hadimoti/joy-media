@@ -64,11 +64,9 @@ export const DOCK_PANEL_MINIMUM_HEIGHT = 72;
 
 const BROWSER_GROUP = ['media', 'effects'] as const;
 
-// Keep specialist context panels in one reachable tab group. Named workspace
-// presets select these views (Enhance → Motion, Audio & Captions → Audio,
-// Automate → Jobs); omitting a view here makes that preset silently fall back
-// to Inspector even though the panel is registered.
-const CONTEXT_GROUP = ['inspector', 'scene3d', 'motion', 'audio', 'jobs'] as const;
+// Keep specialist context panels in one reachable tab group. Animate is a tool
+// inside the Enhance hub; the context group keeps its normal Inspector tab.
+const CONTEXT_GROUP = ['inspector', 'scene3d', 'audio', 'jobs'] as const;
 
 export interface ViewModeStorage {
   getItem(key: string): string | null;
@@ -234,7 +232,7 @@ export function migrateDockLayoutAliases(layout: unknown): unknown {
 /** Applies aliases, compact constraints, and the explicit saved-layout marker. */
 export function migrateDockLayout(layout: unknown): unknown {
   return ensureScene3DInContextGroup(
-    normalizeDockLayoutConstraints(migrateDockLayoutAliases(layout)),
+    normalizeDockLayoutConstraints(removeRetiredMotionPanel(migrateDockLayoutAliases(layout))),
   );
 }
 
@@ -326,7 +324,7 @@ export function widescreenDockLayout(): unknown {
               {
                 type: 'leaf',
                 size: 616,
-                data: { views: [...CONTEXT_GROUP], activeView: 'motion', id: 'context' },
+                data: { views: [...CONTEXT_GROUP], activeView: 'inspector', id: 'context' },
               },
             ],
           },
@@ -377,6 +375,79 @@ function dedupeViewIds(values: readonly unknown[]): readonly unknown[] {
  * Existing Dockview saves are user-owned. Add the new 3D workspace tab to its
  * familiar Inspector group without replacing a custom grid or moving any tab.
  */
+function removeRetiredMotionPanel(layout: unknown): unknown {
+  if (!isRecord(layout)) return layout;
+  const nextLayout: Record<string, unknown> = { ...layout };
+  if (isRecord(layout.panels)) {
+    const panels = { ...layout.panels };
+    delete panels.motion;
+    nextLayout.panels = panels;
+  }
+
+  const grid = layout.grid;
+  if (!isRecord(grid) || !('root' in grid)) return nextLayout;
+
+  const removedGroupIds = new Set<string>();
+  const strip = (node: unknown): unknown | undefined => {
+    if (!isRecord(node)) return node;
+    if (node.type === 'leaf' && isRecord(node.data) && Array.isArray(node.data.views)) {
+      const views = node.data.views.filter((view) => view !== 'motion');
+      const id = typeof node.data.id === 'string' ? node.data.id : undefined;
+      if (views.length === 0) {
+        if (id === 'context') {
+          return { ...node, data: { ...node.data, views: ['inspector'], activeView: 'inspector' } };
+        }
+        if (id !== undefined) removedGroupIds.add(id);
+        return undefined;
+      }
+
+      const activeView =
+        typeof node.data.activeView === 'string' && views.includes(node.data.activeView)
+          ? node.data.activeView
+          : views.includes('inspector')
+            ? 'inspector'
+            : views[0];
+      return {
+        ...node,
+        data: { ...node.data, views, ...(activeView === undefined ? {} : { activeView }) },
+      };
+    }
+    if (node.type === 'branch' && Array.isArray(node.data)) {
+      const children = node.data.map(strip).filter((child) => child !== undefined);
+      if (children.length === 0) return undefined;
+      if (children.length === 1 && children.length < node.data.length) return children[0];
+      return { ...node, data: children };
+    }
+    return node;
+  };
+
+  const root = strip(grid.root);
+  if (root === undefined) {
+    const mode = grid.orientation === 'VERTICAL' ? 'widescreen' : 'vertical';
+    return seedDockLayout(mode);
+  }
+
+  nextLayout.grid = { ...grid, root };
+
+  if (typeof layout.activeGroup === 'string' && removedGroupIds.has(layout.activeGroup)) {
+    const groups: string[] = [];
+    const collectGroups = (node: unknown): void => {
+      if (!isRecord(node)) return;
+      if (node.type === 'leaf' && isRecord(node.data) && typeof node.data.id === 'string') {
+        groups.push(node.data.id);
+        return;
+      }
+      if (node.type === 'branch' && Array.isArray(node.data)) node.data.forEach(collectGroups);
+    };
+    collectGroups(root);
+    const activeGroup = groups.includes('context') ? 'context' : groups[0];
+    if (activeGroup === undefined) delete nextLayout.activeGroup;
+    else nextLayout.activeGroup = activeGroup;
+  }
+
+  return nextLayout;
+}
+
 function ensureScene3DInContextGroup(layout: unknown): unknown {
   if (!isRecord(layout)) return layout;
   const migrate = (value: unknown): unknown => {

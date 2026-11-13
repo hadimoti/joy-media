@@ -47,6 +47,7 @@ import {
   CloseIcon,
   InfoIcon,
   LibraryIcon,
+  MotionPathIcon,
   PlusIcon,
   SaveIcon,
   DuplicateIcon,
@@ -63,7 +64,6 @@ import { focusCoverTransform, getFirstPartySceneThumbUrl } from './html-scene-th
 import { EditorPanelContext } from './editor-panel-context.js';
 import { JOY_COLORS } from './theme.js';
 import { PanelShell } from './PanelShell.js';
-import { panelTabIconUrl } from './panel-tab-icons.js';
 import { createMotionScene, type MotionSceneCatalogEntry } from './motion-scene-catalog.js';
 import type { BrowserKeyValueStore } from '@joy-media/project-persistence';
 
@@ -1181,7 +1181,7 @@ export function MotionPanel({
   return (
     <PanelShell
       title="Animate"
-      iconUrl={panelTabIconUrl('motion')}
+      icon={<MotionPathIcon />}
       className="motion-panel"
       inactive={inactive}
       search={{ value: query, onChange: setQuery, placeholder: 'Search motions…' }}

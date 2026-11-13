@@ -16,7 +16,7 @@ export interface WorkspacePresetSpec {
 
 export const WORKSPACE_PRESETS: readonly WorkspacePresetSpec[] = [
   { id: 'edit', label: 'Edit', description: 'Assets, Monitor, Inspector, and Timeline' },
-  { id: 'enhance', label: 'Enhance', description: 'Effects, Transitions, Color, and Motion' },
+  { id: 'enhance', label: 'Enhance', description: 'Animate, Effects, Transitions, and Color' },
   {
     id: 'audio-captions',
     label: 'Audio & Captions',
@@ -61,7 +61,7 @@ export function workspacePresetLayout(preset: WorkspacePresetId, mode: EditorVie
     preset === 'enhance'
       ? {
           browser: 'effects',
-          context: 'motion',
+          context: 'inspector',
           'monitor-row': 'monitor',
           'monitor-col': 'monitor',
         }

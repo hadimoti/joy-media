@@ -7,7 +7,6 @@ export const PANEL_IDS = [
   'text',
   'inspector',
   'scene3d',
-  'motion',
   'camera',
   'audio',
   'effects',
@@ -51,7 +50,6 @@ export const DEFAULT_WORKSPACE: WorkspaceLayout = {
     'text',
     'inspector',
     'scene3d',
-    'motion',
     'camera',
     'audio',
     'effects',
@@ -76,8 +74,16 @@ export interface WorkspaceStorage {
 /** Layout is a user preference, isolated from the creative project document. */
 export function recoverWorkspaceLayout(value: unknown): WorkspaceLayout {
   if (isLayout(value)) return value;
+  if (isLayoutWithRetiredMotion(value)) {
+    return { version: 2, panels: value.panels.filter((panel) => panel !== 'motion') as PanelId[] };
+  }
   if (isLegacyLayout(value)) {
     const panels: PanelId[] = [...value.panels];
+    panels.splice(panels.indexOf('inspector') + 1, 0, 'scene3d');
+    return { version: 2, panels };
+  }
+  if (isLegacyLayoutWithRetiredMotion(value)) {
+    const panels = value.panels.filter((panel) => panel !== 'motion') as PanelId[];
     panels.splice(panels.indexOf('inspector') + 1, 0, 'scene3d');
     return { version: 2, panels };
   }
@@ -111,6 +117,23 @@ function isLayout(value: unknown): value is WorkspaceLayout {
   );
 }
 
+function isLayoutWithRetiredMotion(
+  value: unknown,
+): value is { readonly version: 2; readonly panels: readonly (PanelId | 'motion')[] } {
+  if (value === null || typeof value !== 'object') return false;
+  const candidate = value as { version?: unknown; panels?: unknown };
+  const priorPanelIds = [...PANEL_IDS, 'motion'];
+  return (
+    candidate.version === 2 &&
+    Array.isArray(candidate.panels) &&
+    candidate.panels.length === priorPanelIds.length &&
+    new Set(candidate.panels).size === priorPanelIds.length &&
+    candidate.panels.every(
+      (panel) => typeof panel === 'string' && priorPanelIds.includes(panel as PanelId | 'motion'),
+    )
+  );
+}
+
 function isLegacyLayout(
   value: unknown,
 ): value is { readonly version: 1; readonly panels: readonly Exclude<PanelId, 'scene3d'>[] } {
@@ -125,6 +148,26 @@ function isLegacyLayout(
     candidate.panels.every(
       (panel) =>
         typeof panel === 'string' && legacyPanelIds.includes(panel as Exclude<PanelId, 'scene3d'>),
+    )
+  );
+}
+
+function isLegacyLayoutWithRetiredMotion(value: unknown): value is {
+  readonly version: 1;
+  readonly panels: readonly (Exclude<PanelId, 'scene3d'> | 'motion')[];
+} {
+  if (value === null || typeof value !== 'object') return false;
+  const candidate = value as { version?: unknown; panels?: unknown };
+  const legacyPanelIds = [...PANEL_IDS.filter((panelId) => panelId !== 'scene3d'), 'motion'];
+  return (
+    candidate.version === 1 &&
+    Array.isArray(candidate.panels) &&
+    candidate.panels.length === legacyPanelIds.length &&
+    new Set(candidate.panels).size === legacyPanelIds.length &&
+    candidate.panels.every(
+      (panel) =>
+        typeof panel === 'string' &&
+        legacyPanelIds.includes(panel as Exclude<PanelId, 'scene3d'> | 'motion'),
     )
   );
 }

@@ -13624,6 +13624,46 @@ label {
   text-transform: uppercase;
   color: #8a8a90;
 }
+.inspector-animations-list {
+  display: grid;
+  gap: var(--space-2);
+}
+.inspector-animation-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.inspector-animation-property {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.inspector-animation-property strong {
+  overflow: hidden;
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector-animation-property span {
+  color: var(--joy-text-secondary);
+  font-size: var(--joy-type-xs);
+}
+.inspector-animation-action {
+  min-height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-input);
+  color: var(--joy-text);
+  font-size: var(--joy-type-xs);
+}
+.inspector-animation-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 .inspector-prop {
   display: grid;
   grid-template-columns: 1fr auto;
