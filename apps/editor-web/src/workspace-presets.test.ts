@@ -1,6 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { dockLayoutKey, verticalDockLayout } from './dock-layout.js';
+import {
+  DEFAULT_VIEW_MODE,
+  dockLayoutKey,
+  migrateDockLayout,
+  verticalDockLayout,
+} from './dock-layout.js';
 import {
   firstRunWorkspaceLayout,
   planWorkspaceLayout,
@@ -174,6 +179,44 @@ describe('first-run layout', () => {
     expect(plan.restored).toBe(false);
     expect(storage.getItem(dockLayoutKey('vertical'))).toBeNull();
     expect(leafIds(plan.layout)).not.toContain('agent-col');
+  });
+
+  it('gives a fresh profile the preview-first Edit layout (T-D12)', () => {
+    const storage = memoryStorage();
+
+    const plan = planWorkspaceLayout(storage, 'edit', DEFAULT_VIEW_MODE);
+
+    expect(DEFAULT_VIEW_MODE).toBe('widescreen');
+    expect(plan.restored).toBe(false);
+    expect(plan.key).toBe(dockLayoutKey('widescreen'));
+    // The widescreen seed puts the monitor in the top row, centre of the screen.
+    expect(leafIds(plan.layout)).toContain('monitor-row');
+    expect(leafIds(plan.layout)).not.toContain('agent-col');
+  });
+
+  it('restores a stored layout from the old default exactly as it was saved (T-D12)', () => {
+    // A layout saved before this change: the old vertical default, Joy Code in its column.
+    const oldLayout = JSON.stringify(verticalDockLayout());
+    const storage = memoryStorage({ [dockLayoutKey('vertical')]: oldLayout });
+
+    const plan = planWorkspaceLayout(storage, 'edit', 'vertical');
+
+    expect(plan.restored).toBe(true);
+    expect(plan.layout).toEqual(migrateDockLayout(JSON.parse(oldLayout)));
+    expect(leafIds(plan.layout)).toContain('monitor-col');
+    expect(leafIds(plan.layout)).toContain('agent-col');
+    // The stored bytes are not rewritten by the restore.
+    expect(storage.getItem(dockLayoutKey('vertical'))).toBe(oldLayout);
+  });
+
+  it('a stored widescreen layout also loads unchanged (T-D12)', () => {
+    const savedWidescreen = JSON.stringify(firstRunWorkspaceLayout('edit', 'widescreen'));
+    const storage = memoryStorage({ [dockLayoutKey('widescreen')]: savedWidescreen });
+
+    const plan = planWorkspaceLayout(storage, 'edit', 'widescreen');
+
+    expect(plan.restored).toBe(true);
+    expect(storage.getItem(dockLayoutKey('widescreen'))).toBe(savedWidescreen);
   });
 });
 

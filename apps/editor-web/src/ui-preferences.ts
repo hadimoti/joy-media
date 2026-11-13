@@ -51,7 +51,8 @@ export interface UiPreferenceStorage {
 export const DEFAULT_EDITOR_UI_PREFERENCES: EditorUiPreferencesV2 = {
   version: 2,
   workspacePreset: 'edit',
-  viewMode: 'vertical',
+  // Preview-first: the widescreen seed puts the monitor top-centre (T-D12).
+  viewMode: 'widescreen',
   projectLibrary: { view: 'grid', sort: 'updated-desc' },
   assetLibrary: {
     source: 'cloud',
@@ -90,10 +91,15 @@ export function loadEditorUiPreferences(storage: UiPreferenceStorage): EditorUiP
     }
   }
 
+  // A profile with no saved preferences gets the default view mode; an older
+  // saved choice (the legacy key) is still honoured.
   const legacyViewMode = storage.getItem('joy-media.view-mode.v1');
   return {
     ...DEFAULT_EDITOR_UI_PREFERENCES,
-    viewMode: legacyViewMode === 'widescreen' ? 'widescreen' : 'vertical',
+    viewMode:
+      legacyViewMode === 'widescreen' || legacyViewMode === 'vertical'
+        ? legacyViewMode
+        : DEFAULT_EDITOR_UI_PREFERENCES.viewMode,
   };
 }
 

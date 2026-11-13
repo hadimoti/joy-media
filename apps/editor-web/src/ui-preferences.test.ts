@@ -40,3 +40,16 @@ describe('editor UI preferences', () => {
     expect(resetEditorUiPreferences(store)).toEqual(DEFAULT_EDITOR_UI_PREFERENCES);
   });
 });
+
+describe('the default view mode is preview-first (T-D12)', () => {
+  it('gives a fresh profile the widescreen view mode', () => {
+    expect(loadEditorUiPreferences(storage()).viewMode).toBe('widescreen');
+    expect(DEFAULT_EDITOR_UI_PREFERENCES.viewMode).toBe('widescreen');
+  });
+
+  it('keeps a legacy saved vertical choice', () => {
+    expect(
+      loadEditorUiPreferences(storage({ 'joy-media.view-mode.v1': 'vertical' })).viewMode,
+    ).toBe('vertical');
+  });
+});

@@ -82,10 +82,13 @@ export function isEditorViewMode(value: unknown): value is EditorViewMode {
   return value === 'vertical' || value === 'widescreen';
 }
 
+/** The view mode of a profile with no saved choice: widescreen, the preview-first layout (T-D12). */
+export const DEFAULT_VIEW_MODE: EditorViewMode = 'widescreen';
+
 export function loadViewMode(storage: ViewModeStorage): EditorViewMode {
   const raw = storage.getItem(VIEW_MODE_KEY);
   if (isEditorViewMode(raw)) return raw;
-  return 'vertical';
+  return DEFAULT_VIEW_MODE;
 }
 
 export function saveViewMode(storage: ViewModeStorage, mode: EditorViewMode): void {
