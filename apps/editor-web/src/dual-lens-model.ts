@@ -1,6 +1,6 @@
-import type { Clip, JoyProjectV1, SpikeProject } from '@joy-media/project-schema';
+import type { Clip, JoyProjectV1, SpikeProject, VisualObjectV1 } from '@joy-media/project-schema';
 import type { HistoryEntry } from './editor-session.js';
-import { clipNameWithoutExtension, polishMediaLabel } from './media-label.js';
+import { clipNameFromMedia, polishMediaLabel } from './media-label.js';
 import { objectDisplayLabel } from './object-display-label.js';
 import { readClipObjectMap } from './sticker-bindings.js';
 import {
@@ -196,7 +196,7 @@ export function buildDualLensProjection(
         {
           id: visualId,
           kind: 'visual',
-          label: polishMediaLabel(object.kind === 'text' ? (object.text ?? object.id) : object.id),
+          label: visualDisplayName(creative, object),
           detail: `${object.kind} layer`,
           column: 2,
           startUs: clip.startUs,
@@ -299,8 +299,20 @@ export function buildDualLensProjection(
  * timeline uses. Ids are never shown; a clip with no named media gets `fallback`.
  */
 function clipDisplayName(creative: JoyProjectV1, clip: Clip, fallback: string): string {
-  const displayName = 'assetId' in clip ? creative.assets[clip.assetId]?.displayName : undefined;
-  return clipNameWithoutExtension(displayName ?? '') || fallback;
+  const mediaName = 'assetId' in clip ? creative.assets[clip.assetId]?.displayName : undefined;
+  return clipNameFromMedia(mediaName, fallback);
+}
+
+/**
+ * A visual node's name: its text for a text object, else the media name of its
+ * source, else its kind ("Picture", "Null"). Object ids are never shown.
+ */
+function visualDisplayName(creative: JoyProjectV1, object: VisualObjectV1): string {
+  if (object.kind === 'text') return polishMediaLabel(objectDisplayLabel(object));
+  const mediaName =
+    object.assetId === undefined ? undefined : creative.assets[object.assetId]?.displayName;
+  const name = clipNameFromMedia(mediaName, '');
+  return name.length > 0 ? polishMediaLabel(name) : objectDisplayLabel(object);
 }
 
 function buildLanes(
@@ -358,12 +370,19 @@ function buildLanes(
       ];
     },
   );
-  const audioItems: DualLensLaneItem[] = Object.keys(creative.audio?.clips ?? {}).map((clipId) => ({
-    id: clipId,
-    label: polishMediaLabel(clipId),
-    icon: 'audio' as const,
-    ...rangeForClip(clipId),
-  }));
+  const audioItems: DualLensLaneItem[] = Object.keys(creative.audio?.clips ?? {}).map(
+    (clipId, index) => {
+      const fallback = `Audio ${index + 1}`;
+      const timelineClip = clips.find(({ clip }) => clip.id === clipId)?.clip;
+      return {
+        id: clipId,
+        label:
+          timelineClip === undefined ? fallback : clipDisplayName(creative, timelineClip, fallback),
+        icon: 'audio' as const,
+        ...rangeForClip(clipId),
+      };
+    },
+  );
   const creativeComposition = creative.compositions[creative.rootCompositionId];
   const captionClipIdsInCore = new Set(
     tracks.flatMap((track) =>

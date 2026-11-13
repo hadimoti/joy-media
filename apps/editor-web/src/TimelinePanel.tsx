@@ -86,7 +86,7 @@ import type { ArtifactStore, ArtifactTransaction } from '@joy-media/commands';
 import type { DataLane } from './data-lanes.js';
 import { countLaneItems } from './data-lanes.js';
 import { DataLaneDrawer } from './DataLaneDrawer.js';
-import { clipNameWithoutExtension } from './media-label.js';
+import { clipNameFromMedia, clipNameWithoutExtension } from './media-label.js';
 import {
   buildTimelineMediaImportTransaction,
   type TimelineMediaAsset,
@@ -123,6 +123,18 @@ import { diffAgentTimeline, type AgentPreviewTimeline } from './agent-timeline-p
 /** Drags snap to a 100 ms grid, matching the playhead slider's step. */
 const SNAP_US = 100_000;
 const DRAG_THRESHOLD_PX = 4;
+
+/** History entries name a clip by its media name, never by its id. */
+function clipHistoryName(
+  tracks: readonly { readonly clips: readonly Clip[] }[],
+  clipId: string,
+  assetDisplayNames: Readonly<Record<string, string>> | undefined,
+): string {
+  const clip = tracks.flatMap((track) => track.clips).find((item) => item.id === clipId);
+  const mediaName =
+    clip !== undefined && 'assetId' in clip ? assetDisplayNames?.[clip.assetId] : undefined;
+  return clipNameFromMedia(mediaName, 'clip');
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -1238,7 +1250,7 @@ export function TimelinePanel({
     (trackId: string, clipId: string, atUs: number) => {
       if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return;
       onDispatch({
-        label: `Split ${clipId}`,
+        label: `Split ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
         commands: [
           {
             type: 'timeline.splitClip',
@@ -1253,7 +1265,7 @@ export function TimelinePanel({
         ],
       });
     },
-    [composition.id, composition.tracks, onDispatch],
+    [assetDisplayNames, composition.id, composition.tracks, onDispatch],
   );
 
   const moveClip =
@@ -1355,7 +1367,7 @@ export function TimelinePanel({
       try {
         if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return false;
         onDispatch({
-          label: `Trim ${edge} ${clipId}`,
+          label: `Trim ${edge} ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
           commands: [trimCommand(composition.id, trackId, clipId, edge, timeUs)],
         });
         return true;
@@ -1406,7 +1418,7 @@ export function TimelinePanel({
         clipId,
       );
       onDispatch({
-        label: `Insert ${asset.displayName ?? asset.assetId}`,
+        label: `Insert ${asset.displayName ?? 'media'}`,
         commands: [
           {
             type: 'timeline.insertClip',
@@ -1460,7 +1472,7 @@ export function TimelinePanel({
         clipId,
       );
       onDispatch({
-        label: `Add ${asset.displayName ?? asset.assetId}`,
+        label: `Add ${asset.displayName ?? 'media'}`,
         commands: [
           {
             type: 'timeline.addTrack',
@@ -1728,7 +1740,7 @@ export function TimelinePanel({
       return;
     }
     onDispatch({
-      label: `Freeze ${clipId}`,
+      label: `Freeze ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
       commands: [
         freezeFrameCommand(
           composition.id,
@@ -1745,7 +1757,7 @@ export function TimelinePanel({
   const dispatchReverse = (trackId: string, clipId: string) => {
     if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return;
     onDispatch({
-      label: `Reverse ${clipId}`,
+      label: `Reverse ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)}`,
       commands: [toggleClipReverseCommand(composition.id, trackId, clipId)],
     });
     showToast?.(
@@ -1792,7 +1804,7 @@ export function TimelinePanel({
     const clip = track?.clips.find((c) => c.id === clipId);
     const fromFreeze = clip?.kind === 'video' && normalizePlaybackRate(clip.playbackRate) === 0;
     onDispatch({
-      label: `Speed ${clipId} → ${playbackRate}×`,
+      label: `Speed ${clipHistoryName(composition.tracks, clipId, assetDisplayNames)} → ${playbackRate}×`,
       commands: [
         {
           type: 'timeline.setClipRate',
@@ -2563,7 +2575,7 @@ export function TimelinePanel({
                       () => {},
                       () =>
                         onDispatch({
-                          label: `Remove ${source.name ?? source.id}`,
+                          label: `Remove ${trackName}`,
                           commands: [
                             {
                               type: 'timeline.removeTrack',
@@ -2648,7 +2660,7 @@ export function TimelinePanel({
                       <LockIcon />
                     </button>
                     <TimelineTrackVisibilityButton
-                      trackId={track.id}
+                      trackLabel={trackCode}
                       visible={track.visible}
                       onToggle={(visible) => setVisibility(track.id, visible)}
                     />
@@ -2681,7 +2693,7 @@ export function TimelinePanel({
                             [track.id]: labelColor,
                           }));
                           onDispatch({
-                            label: `Color ${source.name ?? source.id}`,
+                            label: `Color ${trackName}`,
                             commands: [
                               {
                                 type: 'timeline.setTrackLabelColor',

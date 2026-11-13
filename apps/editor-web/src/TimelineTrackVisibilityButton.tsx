@@ -1,11 +1,12 @@
 import { EyeIcon, EyeOffIcon } from './icons.js';
 
+/** `trackLabel` is the track's code or name (V1, A1), never its id. */
 export function TimelineTrackVisibilityButton({
-  trackId,
+  trackLabel,
   visible,
   onToggle,
 }: {
-  readonly trackId: string;
+  readonly trackLabel: string;
   readonly visible: boolean;
   readonly onToggle: (visible: boolean) => void;
 }) {
@@ -14,7 +15,7 @@ export function TimelineTrackVisibilityButton({
       type="button"
       className="icon-button"
       aria-pressed={visible}
-      aria-label={visible ? `Hide ${trackId}` : `Show ${trackId}`}
+      aria-label={visible ? `Hide ${trackLabel}` : `Show ${trackLabel}`}
       title={visible ? 'Hide track' : 'Show track'}
       onClick={() => onToggle(!visible)}
     >

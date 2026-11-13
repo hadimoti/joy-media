@@ -78,6 +78,8 @@ const CAPABILITY_FILTERS: readonly {
 
 interface AudioPanelProps {
   readonly clipIds: readonly string[];
+  /** Clip names by clip id (media name without extension). Unnamed clips read "Audio N". */
+  readonly clipLabels?: Readonly<Record<string, string>>;
   readonly enhanceScopes?: readonly AudioEnhanceScopeOption[];
   readonly audioState: AudioState;
   readonly onAudioChange: (next: AudioState, label: string) => void;
@@ -250,6 +252,7 @@ function ModelRow({ model }: { readonly model: AudioModelSpec }) {
 
 export function AudioPanel({
   clipIds,
+  clipLabels,
   enhanceScopes,
   audioState,
   onAudioChange,
@@ -1068,7 +1071,9 @@ export function AudioPanel({
         </div>
       )}
       {tab === 'mix' &&
-        (noClips ? ['-'] : clipIds).map((clipId) => {
+        (noClips ? ['-'] : clipIds).map((clipId, index) => {
+          // Names are shown and announced; the clip id only keys the commands.
+          const clipName = noClips ? '-' : (clipLabels?.[clipId] ?? `Audio ${index + 1}`);
           const clip = audioState.clips[clipId] ?? {
             gain: 1,
             pan: 0,
@@ -1078,22 +1083,22 @@ export function AudioPanel({
           return (
             <div className="audio-strip" key={clipId}>
               <div className="audio-strip-flags">
-                <strong className="sr-only">{clipId}</strong>
-                <span className="audio-clip-id" title={clipId}>
-                  {clipId.length > 14 ? `${clipId.slice(0, 12)}...` : clipId}
+                <strong className="sr-only">{clipName}</strong>
+                <span className="audio-clip-id" title={clipName}>
+                  {clipName.length > 14 ? `${clipName.slice(0, 12)}...` : clipName}
                 </span>
                 <button
                   type="button"
                   className="icon-button"
                   aria-pressed={clip.solo}
-                  aria-label={`Solo ${clipId}`}
-                  title={`Solo ${clipId}`}
+                  aria-label={`Solo ${clipName}`}
+                  title={`Solo ${clipName}`}
                   data-guide="Solo"
                   disabled={noClips}
                   onClick={() =>
                     dispatch(
                       { type: 'audioClip.setSolo', payload: { clipId, solo: !clip.solo } },
-                      `Solo ${clipId}`,
+                      `Solo ${clipName}`,
                     )
                   }
                 >
@@ -1114,7 +1119,7 @@ export function AudioPanel({
                     max={2}
                     step={0.01}
                     value={clip.gain}
-                    aria-label={`Gain ${clipId}`}
+                    aria-label={`Gain ${clipName}`}
                     title="Gain"
                     disabled={noClips}
                     onChange={(event) =>
@@ -1123,7 +1128,7 @@ export function AudioPanel({
                           type: 'audioClip.setGain',
                           payload: { clipId, gain: event.currentTarget.valueAsNumber },
                         },
-                        `Gain ${clipId}`,
+                        `Gain ${clipName}`,
                       )
                     }
                   />
@@ -1143,7 +1148,7 @@ export function AudioPanel({
                     max={1}
                     step={0.01}
                     value={clip.pan}
-                    aria-label={`Pan ${clipId}`}
+                    aria-label={`Pan ${clipName}`}
                     title="Pan"
                     disabled={noClips}
                     onChange={(event) =>
@@ -1152,7 +1157,7 @@ export function AudioPanel({
                           type: 'audioClip.setPan',
                           payload: { clipId, pan: event.currentTarget.valueAsNumber },
                         },
-                        `Pan ${clipId}`,
+                        `Pan ${clipName}`,
                       )
                     }
                   />
@@ -1169,14 +1174,14 @@ export function AudioPanel({
                   type="button"
                   className="icon-button audio-mix-toggle"
                   aria-pressed={clip.mute}
-                  aria-label={`Mute ${clipId}`}
-                  title={`Mute ${clipId}`}
+                  aria-label={`Mute ${clipName}`}
+                  title={`Mute ${clipName}`}
                   data-guide="Mute"
                   disabled={noClips}
                   onClick={() =>
                     dispatch(
                       { type: 'audioClip.setMute', payload: { clipId, mute: !clip.mute } },
-                      `Mute ${clipId}`,
+                      `Mute ${clipName}`,
                     )
                   }
                 >
@@ -1190,7 +1195,7 @@ export function AudioPanel({
                     min={0}
                     step={50}
                     value={Math.round((clip.fadeInUs ?? 0) / 1000)}
-                    aria-label={`Fade in ${clipId} (ms)`}
+                    aria-label={`Fade in ${clipName} (ms)`}
                     title="Fade in (ms)"
                     disabled={noClips}
                     onChange={(event) =>
@@ -1203,7 +1208,7 @@ export function AudioPanel({
                             fadeInUsWasSet: true,
                           },
                         },
-                        `Fade in ${clipId}`,
+                        `Fade in ${clipName}`,
                       )
                     }
                   />
@@ -1217,7 +1222,7 @@ export function AudioPanel({
                     min={0}
                     step={50}
                     value={Math.round((clip.fadeOutUs ?? 0) / 1000)}
-                    aria-label={`Fade out ${clipId} (ms)`}
+                    aria-label={`Fade out ${clipName} (ms)`}
                     title="Fade out (ms)"
                     disabled={noClips}
                     onChange={(event) =>
@@ -1230,7 +1235,7 @@ export function AudioPanel({
                             fadeOutUsWasSet: true,
                           },
                         },
-                        `Fade out ${clipId}`,
+                        `Fade out ${clipName}`,
                       )
                     }
                   />

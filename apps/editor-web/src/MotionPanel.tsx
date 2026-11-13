@@ -916,7 +916,9 @@ function HtmlScenesSection({
             {existing.map((scene) => {
               const packageId = scene.scenePackageId ?? '';
               const pkg = findFirstPartyScene(packageId);
-              const label = pkg?.name ?? packageId;
+              // Names only: the scene's name, or "HTML scene" when its package is unknown.
+              const label = pkg?.name ?? 'HTML scene';
+              const removeName = pkg === undefined ? label : `HTML scene ${pkg.name}`;
               const listInfoActive = infoSceneId === `inst:${scene.id}`;
               return (
                 <li key={scene.id} dir="ltr">
@@ -938,11 +940,11 @@ function HtmlScenesSection({
                   <button
                     type="button"
                     className="icon-button"
-                    title={`Remove ${scene.id}`}
-                    aria-label={`Remove HTML scene ${scene.id}`}
+                    title={`Remove ${removeName}`}
+                    aria-label={`Remove ${removeName}`}
                     onClick={() =>
                       onDispatch({
-                        label: `Remove HTML scene ${scene.id}`,
+                        label: `Remove ${removeName}`,
                         commands: [{ type: 'htmlScene.remove', payload: { objectId: scene.id } }],
                       })
                     }

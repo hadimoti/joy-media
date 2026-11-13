@@ -59,6 +59,7 @@ import type {
   AnimationDescriptorV1,
   AssetRecordV1,
   AnimatablePropertyV1,
+  Clip,
   ExportPresetId,
   JoyProjectV1,
   SpikeProject,
@@ -265,7 +266,8 @@ import type { DroppedImportProgressState } from './DroppedImportProgress.js';
 import { buildTimelineMediaImportTransaction } from './timeline-media-import.js';
 import { buildTimelineElementDocument } from './place-timeline-element.js';
 import { nextProfessionalTrackId } from './timeline-track-family.js';
-import { clipNameWithoutExtension } from './media-label.js';
+import { clipNameFromMedia, clipNameWithoutExtension } from './media-label.js';
+import { findFirstPartyScene } from '@joy-media/html-scene-runtime/first-party';
 import { nextTimelineMarkerId, nextTimelineMarkerLabel } from './timeline-marker-id.js';
 import { buildTimelineDeletePlan } from './delete-timeline-elements.js';
 import { DualLensPanel } from './DualLensPanel.js';
@@ -933,6 +935,12 @@ const CONTROL_PLANE_PROJECT_ENSURE_RETRY_INITIAL_MS = 2_000;
 const CONTROL_PLANE_PROJECT_ENSURE_RETRY_MAX_MS = 60_000;
 /** Bounded, ephemeral derived bytes for one active local observation run. */
 const JOY_AGENT_OBSERVATION_CACHE_MAX_BYTES = 16 * 1024 * 1024;
+
+/** History entries name a clip by its media name, never by its id. */
+function historyClipName(project: JoyProjectV1, clip: Clip): string {
+  const mediaName = 'assetId' in clip ? project.assets[clip.assetId]?.displayName : undefined;
+  return clipNameFromMedia(mediaName, 'clip');
+}
 
 function EditorWorkspace({
   projectId,
@@ -2951,7 +2959,7 @@ function EditorWorkspace({
       const stickerCount = Object.values(session.visualProject.visualObjects).filter(
         (item) => item.kind === 'image',
       ).length;
-      const label = `Add sticker ${asset.displayName ?? asset.assetId}`;
+      const label = asset.displayName ? `Add sticker ${asset.displayName}` : 'Add sticker';
       const clip: VideoClip = {
         id: clipId,
         kind: 'video',
@@ -3240,7 +3248,7 @@ function EditorWorkspace({
         source: { kind: 'object', id: objectId },
         visualObject: object,
       });
-      const label = `Place HTML scene ${scenePackageId}`;
+      const label = `Place ${findFirstPartyScene(scenePackageId)?.name ?? 'HTML scene'}`;
       session.dispatchCompound(label, {
         document,
         timeline: { label, commands: timelineCommands },
@@ -3739,7 +3747,7 @@ function EditorWorkspace({
           const endUs = selection.clip.startUs + selection.clip.durationUs;
           if (current.playheadUs <= selection.clip.startUs || current.playheadUs >= endUs) return;
           dispatchTimeline({
-            label: `Split ${selection.clip.id}`,
+            label: `Split ${historyClipName(session.visualProject, selection.clip)}`,
             commands: [
               {
                 type: 'timeline.splitClip',
@@ -3780,7 +3788,7 @@ function EditorWorkspace({
             return;
           }
           dispatchTimeline({
-            label: `Duplicate ${selection.clip.id}`,
+            label: `Duplicate ${historyClipName(session.visualProject, selection.clip)}`,
             commands: [
               duplicateClipCommand(
                 composition.id,
@@ -3847,7 +3855,7 @@ function EditorWorkspace({
         const endUs = selection.clip.startUs + selection.clip.durationUs;
         if (current.playheadUs <= selection.clip.startUs || current.playheadUs >= endUs) return;
         dispatchTimeline({
-          label: `Split ${selection.clip.id}`,
+          label: `Split ${historyClipName(session.visualProject, selection.clip)}`,
           commands: [
             {
               type: 'timeline.splitClip',
@@ -3865,7 +3873,7 @@ function EditorWorkspace({
       }
       if (kind === 'duplicate') {
         dispatchTimeline({
-          label: `Duplicate ${selection.clip.id}`,
+          label: `Duplicate ${historyClipName(session.visualProject, selection.clip)}`,
           commands: [
             duplicateClipCommand(
               composition.id,
@@ -6185,6 +6193,14 @@ function EditorWorkspace({
       const audioTracks = audioComposition?.tracks ?? [];
       const audioClips = audioTracks.flatMap((track) => track.clips);
       const clipIds = audioClips.map((clip) => clip.id);
+      // Clip names for the mixer rows: the media name, or "Audio N" in AudioPanel.
+      const audioClipLabels: Record<string, string> = {};
+      for (const clip of audioClips) {
+        const mediaName =
+          'assetId' in clip ? visualProject.assets[clip.assetId]?.displayName : undefined;
+        const name = clipNameFromMedia(mediaName, '');
+        if (name.length > 0) audioClipLabels[clip.id] = name;
+      }
       const selectedClipIds = audioClips
         .filter((clip) => state.selectedIds.includes(clip.id))
         .map((clip) => clip.id);
@@ -6220,6 +6236,7 @@ function EditorWorkspace({
       return withFeatureHub(
         <AudioPanel
           clipIds={clipIds}
+          clipLabels={audioClipLabels}
           enhanceScopes={enhanceScopes}
           audioState={context.audioState}
           onAudioChange={(next, label) => context.setAudioState(next, label)}

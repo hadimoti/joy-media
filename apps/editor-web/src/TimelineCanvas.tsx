@@ -216,7 +216,7 @@ function TrackHeaderChrome({
               <LockIcon />
             </button>
             <TimelineTrackVisibilityButton
-              trackId={controls.trackId}
+              trackLabel={trackId}
               visible={controls.visible}
               onToggle={() => controls.onToggle('visible')}
             />
