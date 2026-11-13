@@ -99,8 +99,10 @@ export async function wheelZoom(page) {
   await page.waitForTimeout(200);
   const plainAfter = await viewportZoom(page);
   if (plainAfter !== plainBefore) throw new Error('a plain wheel changed the zoom');
-  return `zoom ${start} -> ${zoomedIn} (Ctrl+wheel up) -> ${zoomedBack} (down); `
-    + `plain wheel keeps ${plainAfter}`;
+  return (
+    `zoom ${start} -> ${zoomedIn} (Ctrl+wheel up) -> ${zoomedBack} (down); ` +
+    `plain wheel keeps ${plainAfter}`
+  );
 }
 
 /** D-M08: View menu toggles the rulers; the overlay layer follows. */
