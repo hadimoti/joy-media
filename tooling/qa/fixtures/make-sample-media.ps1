@@ -19,10 +19,17 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'fixture-path.ps1')
 
 $OutDir = Resolve-FixtureOutDir -Path $OutDir
+$repoAppDir = [System.IO.Path]::GetFullPath(
+  (Join-Path $PSScriptRoot '..\..\..\apps\editor-web\public\media\reference')
+)
 if ($AppDir -eq '') {
-  $AppDir = Join-Path $PSScriptRoot '..\..\..\apps\editor-web\public\media\reference'
+  $AppDir = $repoAppDir
 }
 $AppDir = [System.IO.Path]::GetFullPath($AppDir)
+# The copy target is restricted to the repo's own reference folder; any other -AppDir is refused.
+if ($AppDir -ne $repoAppDir) {
+  throw "-AppDir must be the repo folder $repoAppDir, not $AppDir"
+}
 
 $work = Join-Path $OutDir 'sample-media'
 New-Item -ItemType Directory -Path $work -Force | Out-Null
