@@ -65,6 +65,7 @@ import { useMonitorViewOptions } from './MonitorViewMenu.js';
 import { createMonitorPerformanceTracker, recordMonitorFrame } from './monitor-performance.js';
 import { monitorZoomLabel } from './monitor-view.js';
 import {
+  MONITOR_KEY_SCOPE,
   MonitorViewport,
   monitorFrameRect,
   useDevicePixelRatio,
@@ -72,6 +73,8 @@ import {
   useSpaceHold,
   type MonitorViewportSelection,
 } from './MonitorViewport.js';
+import { nextElementClipId } from './monitor-keyboard.js';
+import { scopedKeyTable } from '../keyboard-shortcuts.js';
 import { MonitorSelectionOverlay } from './MonitorSelectionOverlay.js';
 import { MonitorTransformBox } from './MonitorTransformBox.js';
 import { boxContainsPoint } from './monitor-hit-test.js';
@@ -426,6 +429,51 @@ function MonitorPanelContent({
       },
     };
   }, [clearSelection, selectClips, toggleSelection, transformController]);
+  // Announced to screen readers (polite) when Tab changes the selected element (T-M12).
+  const [keyAnnouncement, setKeyAnnouncement] = useState('');
+  // Keyboard-only editing of the picture (T-M12): with focus on the picture (its
+  // stage), Tab and Shift+Tab select the next and previous element and, at the first or last
+  // element, let focus leave the picture. Esc leaves it.
+  useEffect(() => {
+    const onStage = (target: EventTarget | null) =>
+      target instanceof HTMLElement && target.hasAttribute('data-monitor-stage');
+    const visibleIds = () =>
+      readMonitorElementsRef
+        .current()
+        .filter((element) => element.hidden !== true)
+        .map((element) => element.clipId);
+    const stepFor = (backwards: boolean) =>
+      nextElementClipId(visibleIds(), selectedIdsRef.current, backwards);
+    const removeTab = scopedKeyTable.register({
+      scope: MONITOR_KEY_SCOPE,
+      // No step (the first or last element) means no match: the browser's Tab moves focus out.
+      match: (event) =>
+        event.key === 'Tab' &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        onStage(event.target ?? null) &&
+        stepFor(event.shiftKey) !== undefined,
+      run: (event) => {
+        const ids = visibleIds();
+        const next = stepFor(event.shiftKey);
+        if (next === undefined) return;
+        selectClips([next]);
+        setKeyAnnouncement(`Element ${ids.indexOf(next) + 1} of ${ids.length} selected`);
+      },
+    });
+    const removeEscape = scopedKeyTable.register({
+      scope: MONITOR_KEY_SCOPE,
+      match: (event) => event.key === 'Escape' && onStage(event.target ?? null),
+      run: (event) => {
+        if (event.target instanceof HTMLElement) event.target.blur();
+      },
+    });
+    return () => {
+      removeTab();
+      removeEscape();
+    };
+  }, [selectClips]);
   const monitorResourceTokenRef = useRef(
     `monitor:${crypto.randomUUID?.() ?? Date.now().toString(36)}`,
   );
@@ -819,6 +867,9 @@ function MonitorPanelContent({
 
   return (
     <article className="monitor-panel" ref={panelRef}>
+      <p className="sr-only" role="status" aria-live="polite" data-monitor-announcement>
+        {keyAnnouncement}
+      </p>
       {error !== undefined && <p className="monitor-error">{error}</p>}
       {droppedImportProgress !== undefined && onCancelDroppedImport !== undefined && (
         <DroppedImportProgress progress={droppedImportProgress} onCancel={onCancelDroppedImport} />

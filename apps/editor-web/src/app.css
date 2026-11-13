@@ -2049,6 +2049,12 @@ h2 {
   stroke: var(--joy-accent);
   stroke-width: 1px;
 }
+/* T-M12: with keyboard focus on the Monitor picture, the selected element's box is drawn with a
+   thicker, dashed stroke, so the focus shows on the element (the box itself is not focusable). */
+.monitor-panel:has(.monitor-canvas-wrap:focus-visible) .monitor-transform-outline {
+  stroke-width: 3px;
+  stroke-dasharray: 6 3;
+}
 .monitor-transform-stem {
   stroke: var(--joy-accent);
   stroke-width: 1px;
