@@ -29,6 +29,30 @@ export class OpfsOriginalAssetCache {
     }
   }
 
+  /**
+   * Caches the same disk-backed File after the desktop main process has verified its ticket path
+   * and SHA-256. Writing the Blob directly avoids copying the whole dropped file into a renderer
+   * ArrayBuffer; this method must only be used with the matching desktop import reply.
+   */
+  async putFromVerifiedDesktopImport(
+    descriptor: OriginalAssetDescriptor,
+    file: Blob,
+  ): Promise<void> {
+    validate(descriptor, file);
+    if (this.root === undefined) throw new Error('OPFS is unavailable in this browser');
+    const directory = await this.root.getDirectoryHandle('joy-media-assets', { create: true });
+    const writable = await (
+      await directory.getFileHandle(`${descriptor.assetId}.bin`, { create: true })
+    ).createWritable();
+    try {
+      await writable.write(file);
+      await writable.close();
+    } catch (error) {
+      await writable.abort?.().catch(() => undefined);
+      throw error;
+    }
+  }
+
   /** Returns the cached original blob when present in this browser profile. */
   async get(assetId: string): Promise<Blob | undefined> {
     if (this.root === undefined) return undefined;

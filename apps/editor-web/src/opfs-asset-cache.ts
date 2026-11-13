@@ -9,6 +9,7 @@ export interface PlayableDerivativeDescriptor {
 export interface WritableOpfsFile {
   write(data: Blob): Promise<void>;
   close(): Promise<void>;
+  abort?(): Promise<void>;
 }
 
 export interface OpfsFileHandle {

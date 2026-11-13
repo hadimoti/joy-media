@@ -24,6 +24,30 @@ import { ProviderCallError, type ProviderCallRequest } from './joy-agent/provide
 export interface DesktopJoyBridge {
   readonly channels: readonly string[];
   invoke(channel: string, payload?: unknown): Promise<unknown>;
+  importDroppedFiles?(files: readonly File[]): Promise<DesktopDroppedFileBatch>;
+  onDroppedImportProgress?(listener: (progress: DesktopDroppedImportProgress) => void): () => void;
+}
+
+export interface DesktopDroppedFileTicket {
+  readonly kind: 'local-file';
+  readonly id: string;
+  readonly displayName: string;
+  readonly mediaKind: 'video' | 'audio' | 'image';
+  readonly mimeType: string;
+  readonly sourceIndex: number;
+}
+
+export interface DesktopDroppedFileBatch {
+  readonly tickets: readonly DesktopDroppedFileTicket[];
+  readonly skippedMessage?: string;
+  readonly folderDepth: 1;
+  readonly folderCount: number;
+}
+
+export interface DesktopDroppedImportProgress {
+  readonly ticketId: string;
+  readonly stage: 'hash' | 'store';
+  readonly ratio: number;
 }
 
 declare global {
@@ -57,6 +81,24 @@ export interface DesktopFileSelection {
  * server-side rendering, where `window` itself may not exist. */
 export function isDesktopHost(): boolean {
   return typeof window !== 'undefined' && window.joyDesktop !== undefined;
+}
+
+/** Gets filesystem-backed import tickets from the preload without exposing their paths. */
+export async function prepareDesktopDroppedFiles(
+  files: readonly File[],
+): Promise<DesktopDroppedFileBatch | undefined> {
+  if (!isDesktopHost()) return undefined;
+  const prepare = requireBridge().importDroppedFiles;
+  return prepare === undefined ? undefined : prepare(files);
+}
+
+/** Subscribes to sanitized progress emitted by the main-process streaming importer. */
+export function onDesktopDroppedImportProgress(
+  listener: (progress: DesktopDroppedImportProgress) => void,
+): () => void {
+  const subscribe =
+    typeof window === 'undefined' ? undefined : window.joyDesktop?.onDroppedImportProgress;
+  return subscribe?.(listener) ?? (() => undefined);
 }
 
 function requireBridge(): DesktopJoyBridge {

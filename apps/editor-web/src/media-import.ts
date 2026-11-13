@@ -10,6 +10,11 @@ import {
 } from './opfs-original-asset-cache.js';
 import { inspectImageAnimation, validateImageAnimationBudget } from './animated-image-metadata.js';
 import { revokeDetachedObjectUrl } from './media-object-url.js';
+import {
+  onDesktopDroppedImportProgress,
+  prepareDesktopDroppedFiles,
+  type DesktopDroppedFileTicket,
+} from './desktop-client.js';
 
 export interface MediaImportProgress {
   readonly ratio: number;
@@ -36,6 +41,33 @@ export interface MediaImportOptions {
     mimeType: string,
   ) => Promise<BrowserMediaDescriptor>;
   readonly createAssetId?: () => string;
+}
+
+export interface DroppedMediaImportOptions {
+  readonly projectId: string;
+  readonly projectTitle: string;
+  readonly files: readonly File[];
+  readonly client?: Pick<
+    BrowserControlPlaneClient,
+    'ensureProject' | 'importDroppedAsset' | 'cancelDroppedImport'
+  >;
+  readonly originalAssetCache?:
+    | Pick<OpfsOriginalAssetCache, 'putFromVerifiedDesktopImport'>
+    | Promise<Pick<OpfsOriginalAssetCache, 'putFromVerifiedDesktopImport'>>;
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (progress: MediaImportProgress) => void;
+  readonly onImported?: (
+    asset: BrowserAsset,
+    ticket: DesktopDroppedFileTicket,
+  ) => void | Promise<void>;
+}
+
+export interface DroppedMediaImportBatchResult {
+  readonly assets: readonly BrowserAsset[];
+  readonly failures: readonly { readonly displayName: string; readonly message: string }[];
+  readonly skippedMessage?: string;
+  readonly folderDepth: 1;
+  readonly folderCount: number;
 }
 
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
@@ -149,6 +181,90 @@ export async function importMediaFile(options: MediaImportOptions): Promise<Brow
   return uploaded;
 }
 
+/** Imports OS-dropped files through main-process tickets; browser imports keep the regular path. */
+export async function importDroppedMediaFiles(
+  options: DroppedMediaImportOptions,
+): Promise<DroppedMediaImportBatchResult | undefined> {
+  const batch = await prepareDesktopDroppedFiles(options.files);
+  if (batch === undefined) return undefined;
+  const client = options.client ?? new BrowserControlPlaneClient();
+  const cache = await (options.originalAssetCache ?? openOpfsOriginalAssetCache());
+  await client.ensureProject(options.projectId, options.projectTitle);
+
+  const assets: BrowserAsset[] = [];
+  const failures: { displayName: string; message: string }[] = [];
+  let activeTicketId: string | undefined;
+  let activeName = '';
+  const unsubscribe = onDesktopDroppedImportProgress((progress) => {
+    if (progress.ticketId !== activeTicketId) return;
+    const ratio = progress.stage === 'hash' ? 0.4 * progress.ratio : 0.4 + 0.55 * progress.ratio;
+    options.onProgress?.({
+      ratio: Math.min(1, Math.max(0, ratio)),
+      message: `Importing ${activeName} locally...`,
+    });
+  });
+  const cancelActive = (): void => {
+    if (activeTicketId !== undefined) {
+      void client.cancelDroppedImport(activeTicketId).catch(() => undefined);
+    }
+  };
+  options.signal?.addEventListener('abort', cancelActive);
+  try {
+    for (const ticket of batch.tickets) {
+      if (options.signal?.aborted) throw new Error('Import cancelled');
+      activeTicketId = ticket.id;
+      activeName = ticket.displayName;
+      const source = options.files[ticket.sourceIndex];
+      const file = source?.name === ticket.displayName ? source : undefined;
+      try {
+        const descriptor =
+          file === undefined
+            ? { mimeType: ticket.mimeType }
+            : await describeDroppedMedia(file, ticket.mediaKind, ticket.mimeType);
+        options.onProgress?.({ ratio: 0.02, message: `Importing ${activeName} locally...` });
+        const imported = await client.importDroppedAsset(options.projectId, ticket.id, descriptor);
+        assets.push(imported);
+        if (file !== undefined) {
+          await cache
+            .putFromVerifiedDesktopImport(
+              {
+                assetId: imported.id,
+                sha256: imported.sha256,
+                bytes: imported.bytes,
+                mimeType: imported.descriptor.mimeType,
+              },
+              file,
+            )
+            .catch(() => undefined);
+        }
+        await options.onImported?.(imported, ticket);
+        options.onProgress?.({
+          ratio: 1,
+          message: `${activeName} stored in the local media library.`,
+        });
+      } catch (error) {
+        failures.push({
+          displayName: ticket.displayName,
+          message: message(error),
+        });
+      } finally {
+        activeTicketId = undefined;
+      }
+    }
+  } finally {
+    options.signal?.removeEventListener('abort', cancelActive);
+    unsubscribe();
+  }
+
+  return {
+    assets,
+    failures,
+    ...(batch.skippedMessage === undefined ? {} : { skippedMessage: batch.skippedMessage }),
+    folderDepth: batch.folderDepth,
+    folderCount: batch.folderCount,
+  };
+}
+
 /** Content-addressed IDs are shared with the asset library. */
 export function createImportedAssetId(sha256: string): string {
   return `joylib-${sha256}`;
@@ -218,6 +334,26 @@ async function describeImage(file: File, mimeType: string): Promise<BrowserMedia
         height: bitmap.height,
         ...(animation === undefined ? {} : { animation, durationUs: animation.cycleDurationUs }),
       };
+    } finally {
+      bitmap.close();
+    }
+  } catch {
+    throw new Error(`unable to decode ${file.name} as ${mimeType}`);
+  }
+}
+
+/** Uses image dimensions without reading the full dropped file into a renderer ArrayBuffer. */
+async function describeDroppedMedia(
+  file: File,
+  kind: BrowserAsset['kind'],
+  mimeType: string,
+): Promise<BrowserMediaDescriptor> {
+  if (kind !== 'image') return describeTimedMedia(file, kind);
+  if (typeof createImageBitmap !== 'function') return { mimeType };
+  try {
+    const bitmap = await createImageBitmap(file);
+    try {
+      return { mimeType, width: bitmap.width, height: bitmap.height };
     } finally {
       bitmap.close();
     }

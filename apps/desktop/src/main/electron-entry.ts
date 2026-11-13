@@ -52,6 +52,7 @@ import { startLocalJobApi, type LocalJobApi } from '../jobs/local-job-api.js';
 import { localWorkerEnv } from '../jobs/worker-env.js';
 import { createLocalOriginalWriter } from './local-originals.js';
 import { createMediaChannelHandlers } from './media-channel.js';
+import { createDroppedMediaImportService } from './dropped-media-import.js';
 import { createAssetLibrary } from '../store/asset-library.js';
 import { checksumFile, classifyMediaKind } from './media-checksum.js';
 import { createElectronSecretStore } from './secrets/electron-secret-store.js';
@@ -64,6 +65,8 @@ import { checkProfileCredentials } from './profile-credential-check.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged && process.env['NODE_ENV'] !== 'production';
+const DROP_FILES_ENDPOINT = 'joy-desktop-drop-files';
+const DROPPED_IMPORT_PROGRESS_CHANNEL = 'joy-desktop-dropped-import-progress';
 
 /** The JOY brand mark the editor shows in its header, for the development loading page (undefined if absent). */
 function readDevLogoDataUrl(): string | undefined {
@@ -163,6 +166,22 @@ if (!app.requestSingleInstanceLock()) {
     directory: join(paths.mediaRoot, 'originals'),
     assets: localDatabase.localAssets,
   });
+  const assetLibrary = createAssetLibrary({
+    directory: () => localDatabase.getAssetLibraryDirectory(),
+    registrations: localDatabase.localAssets,
+  });
+  const droppedMediaImports = createDroppedMediaImportService({
+    fileRegistry,
+    assets: localDatabase.localAssets,
+    originals,
+    library: assetLibrary,
+    onProgress: (progress) => {
+      const win = mainWindow;
+      if (win !== undefined && !win.isDestroyed()) {
+        win.webContents.send(DROPPED_IMPORT_PROGRESS_CHANNEL, progress);
+      }
+    },
+  });
   const ipcHandlers = createIpcHandlers({
     agentRequests,
     fileRegistry,
@@ -174,10 +193,8 @@ if (!app.requestSingleInstanceLock()) {
       projectDocuments: localDatabase.projectDocuments,
       assets: localDatabase.localAssets,
       originals,
-      library: createAssetLibrary({
-        directory: () => localDatabase.getAssetLibraryDirectory(),
-        registrations: localDatabase.localAssets,
-      }),
+      library: assetLibrary,
+      droppedMediaImports,
       whisper: {
         getEndpoint: () => {
           const profile = localDatabase
@@ -244,6 +261,20 @@ if (!app.requestSingleInstanceLock()) {
           return win.isMaximized();
       }
     },
+  });
+
+  ipcMain.handle(DROP_FILES_ENDPOINT, async (event, files: unknown) => {
+    if (shuttingDown) return { ok: false, error: 'Application is shutting down' };
+    const senderOrigin = originOfPageUrl(event.senderFrame?.url ?? '');
+    if (senderOrigin === undefined || !isAllowedEditorOrigin(senderOrigin)) {
+      console.error(`[joy-desktop] refused IPC from ${senderOrigin ?? 'an unreadable frame'}`);
+      return { ok: false, error: 'Blocked IPC request' };
+    }
+    try {
+      return { ok: true, data: await droppedMediaImports.prepareDroppedPaths(files) };
+    } catch {
+      return { ok: false, error: 'Dropped files could not be prepared' };
+    }
   });
 
   // The sender frame is what the browser reports, so it decides whether a page may call at all.

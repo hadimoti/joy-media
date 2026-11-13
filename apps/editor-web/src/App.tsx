@@ -266,7 +266,7 @@ import { JobsPanel } from './JobsPanel.js';
 import { AssetLibraryPanel } from './AssetLibraryPanel.js';
 import { BrowserControlPlaneRequestError, type BrowserJob } from './control-plane-client.js';
 import { ProjectDocumentAutosync } from './project-document-autosync.js';
-import { importMediaFile } from './media-import.js';
+import { importDroppedMediaFiles, importMediaFile } from './media-import.js';
 import { AudioPanel, type AudioEnhanceScopeOption } from './AudioPanel.js';
 import { EffectsPanel } from './EffectsPanel.js';
 import { FiltersPanel } from './FiltersPanel.js';
@@ -6226,39 +6226,70 @@ function EditorWorkspace({
             Object.values(visualProject.assets).map((asset) => [asset.id, asset.displayName]),
           )}
           onImportFiles={(files) => {
-            for (const file of files) {
-              void importMediaFile({
+            const addImportedAsset = (asset: Awaited<ReturnType<typeof importMediaFile>>) => {
+              rememberImportedAsset(asset);
+              const composition = activeTimelineView.composition;
+              if (composition !== undefined) {
+                const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${Date.now()}`;
+                bindMediaClip(asset, clipId);
+                context.dispatchTimeline(
+                  buildTimelineMediaImportTransaction(
+                    composition,
+                    [asset],
+                    activeTimelinePlayheadUs,
+                    new Set(),
+                    () => clipId,
+                  ),
+                );
+              }
+              context.showToast(`${asset.displayName} added to the timeline.`, 'success');
+            };
+            void (async () => {
+              const imported = await importDroppedMediaFiles({
                 projectId: controlPlaneProject.controlPlaneProjectId,
                 projectTitle: controlPlaneProject.title,
-                file,
+                files,
                 client: mediaControlPlaneClient,
                 originalAssetCache: originalAssetCachePromise,
-              })
-                .then((asset) => {
-                  rememberImportedAsset(asset);
-                  const composition = activeTimelineView.composition;
-                  if (composition !== undefined) {
-                    const clipId = `${asset.kind === 'audio' ? 'voice' : 'clip'}-${asset.id}-${Date.now()}`;
-                    bindMediaClip(asset, clipId);
-                    context.dispatchTimeline(
-                      buildTimelineMediaImportTransaction(
-                        composition,
-                        [asset],
-                        activeTimelinePlayheadUs,
-                        new Set(),
-                        () => clipId,
-                      ),
-                    );
-                  }
-                  context.showToast(`${file.name} added to the timeline.`, 'success');
-                })
-                .catch((error) => {
+                onImported: (asset) => addImportedAsset(asset),
+              });
+              if (imported !== undefined) {
+                if (imported.folderCount > 0) {
+                  context.showToast('Folders are read one level deep.', 'info');
+                }
+                if (imported.skippedMessage !== undefined) {
+                  context.showToast(imported.skippedMessage, 'info');
+                }
+                for (const failure of imported.failures) {
                   context.showToast(
-                    `Failed to import ${file.name}: ${error instanceof Error ? error.message : String(error)}`,
+                    `Failed to import ${failure.displayName}: ${failure.message}`,
                     'error',
                   );
-                });
-            }
+                }
+                return;
+              }
+              for (const file of files) {
+                void importMediaFile({
+                  projectId: controlPlaneProject.controlPlaneProjectId,
+                  projectTitle: controlPlaneProject.title,
+                  file,
+                  client: mediaControlPlaneClient,
+                  originalAssetCache: originalAssetCachePromise,
+                })
+                  .then(addImportedAsset)
+                  .catch((error) => {
+                    context.showToast(
+                      `Failed to import ${file.name}: ${error instanceof Error ? error.message : String(error)}`,
+                      'error',
+                    );
+                  });
+              }
+            })().catch((error: unknown) => {
+              context.showToast(
+                `Dropped media could not be imported: ${error instanceof Error ? error.message : String(error)}`,
+                'error',
+              );
+            });
           }}
           onMediaPlaced={(asset, clipId) => bindMediaClip(asset, clipId)}
           onTogglePlayback={context.togglePlayback}

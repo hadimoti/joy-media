@@ -43,7 +43,10 @@ function deferred<T>() {
 }
 
 describe('ProjectMediaResolver', () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
   it('invalidates a pending local read on clear without creating or caching a stale URL', async () => {
     const local = deferred<Blob | undefined>();
@@ -362,5 +365,28 @@ describe('ProjectMediaResolver', () => {
     });
 
     expect(revokedUrls).toEqual(['blob:detached-partner']);
+  });
+
+  it('resolves a desktop-library asset without requiring an OPFS renderer copy', async () => {
+    vi.stubGlobal('window', { joyDesktop: {} });
+    const id = `joylib-${'a'.repeat(64)}`;
+    const asset: BrowserAsset = {
+      ...catalogAsset('a'.repeat(64), 12),
+      id,
+      displayName: 'clip.mp4',
+    };
+    const resolver = new ProjectMediaResolver({
+      projectId: 'project-1',
+      controlPlaneReady: true,
+      client: { assets: vi.fn(async () => [asset]) },
+      originalCache: { get: vi.fn(async () => undefined) },
+    });
+
+    await expect(resolver.resolve(id)).resolves.toEqual({
+      url: `joy-asset://library/video/${id}`,
+      mimeType: 'video/mp4',
+      source: 'desktop',
+    });
+    resolver.clear();
   });
 });

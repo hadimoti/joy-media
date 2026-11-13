@@ -14,4 +14,12 @@ describe('preload channel allow-list', () => {
     const channels = require('./ipc-channels.cjs') as { IPC_CHANNELS: readonly string[] };
     expect(channels.IPC_CHANNELS).toEqual(IPC_CHANNELS);
   });
+
+  it('keeps the drop-path endpoint outside the generic renderer invoke list', () => {
+    const channels = require('./ipc-channels.cjs') as {
+      IPC_CHANNELS: readonly string[];
+      DROP_FILES_ENDPOINT: string;
+    };
+    expect(channels.IPC_CHANNELS).not.toContain(channels.DROP_FILES_ENDPOINT);
+  });
 });
