@@ -174,11 +174,17 @@ $header = @(
   'lossless: the format keeps every sample or pixel exactly. It does not by itself mean reproducible;',
   'a lossy item can still be reproducible when the encoder gives the same bytes.'
 )
+# The earlier manifest is identified by its content hash, never by its path: a path
+# is specific to one machine and must not be committed.
+$comparedAgainstSha256 = $null
+if ($null -ne $older) {
+  $comparedAgainstSha256 = (Get-FileHash -LiteralPath $CheckAgainst -Algorithm SHA256).Hash.ToLowerInvariant()
+}
 $manifest = [ordered]@{
   task = 'T-A04'
   header = $header
   generator = $ffmpegVersion
-  comparedAgainst = $(if ($null -ne $older) { $CheckAgainst } else { $null })
+  comparedAgainstSha256 = $comparedAgainstSha256
   items = @($items)
 }
 $manifestPath = Join-Path $OutDir 'manifest.json'

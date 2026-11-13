@@ -51,11 +51,15 @@ function Resolve-FixtureOutDir {
   }
 
   # No symbolic link or junction on the way from the output folder up to the drive root.
+  # The walk goes through folders that do not exist yet: a missing child of a junction
+  # must be refused too, or mkdir would create it through the link.
   $cursor = $full
-  while ($cursor -and (Test-Path -LiteralPath $cursor)) {
-    $item = Get-Item -LiteralPath $cursor -Force
-    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-      throw "Refused: $cursor is a symbolic link or junction."
+  while ($true) {
+    if (Test-Path -LiteralPath $cursor) {
+      $item = Get-Item -LiteralPath $cursor -Force
+      if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        throw "Refused: $cursor is a symbolic link or junction."
+      }
     }
     $parent = Split-Path -Path $cursor -Parent
     if ([string]::IsNullOrEmpty($parent) -or $parent -eq $cursor) { break }
