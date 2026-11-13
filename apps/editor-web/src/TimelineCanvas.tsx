@@ -520,6 +520,9 @@ export function TimelineCanvas({
                     <TimelineTransitionJunction
                       key={transition.id}
                       transition={transition}
+                      trackId={transition.trackId}
+                      leftClipId={transition.leftClipId}
+                      rightClipId={transition.rightClipId}
                       boundaryUs={right.startUs}
                       viewport={viewport}
                       onSeek={onSeek}

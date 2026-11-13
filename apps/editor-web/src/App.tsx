@@ -5643,20 +5643,37 @@ function EditorWorkspace({
       clipId: string,
     ) => {
       const controllerId = `media-controller-${clipId}`;
-      if (context.visualProject.visualObjects[controllerId] !== undefined) return;
+      const importedProject = projectWithImportedAsset(context.visualProject, {
+        id: asset.id,
+        kind: asset.kind,
+        displayName: asset.displayName ?? asset.id,
+        ...(asset.sha256 === undefined ? {} : { sha256: asset.sha256 }),
+        ...(asset.bytes === undefined ? {} : { bytes: asset.bytes }),
+        ...(asset.descriptor === undefined ? {} : { descriptor: asset.descriptor }),
+      });
+      const existingController = importedProject.visualObjects[controllerId];
+      if (existingController !== undefined) {
+        context.replaceVisualProject(
+          writeClipMediaKind(
+            {
+              ...importedProject,
+              visualObjects: {
+                ...importedProject.visualObjects,
+                [controllerId]: { ...existingController, assetId: asset.id },
+              },
+            },
+            clipId,
+            asset.kind,
+          ),
+        );
+        return;
+      }
       context.replaceVisualProject(
         bindClipToObject(
           {
-            ...projectWithImportedAsset(context.visualProject, {
-              id: asset.id,
-              kind: asset.kind,
-              displayName: asset.displayName ?? asset.id,
-              ...(asset.sha256 === undefined ? {} : { sha256: asset.sha256 }),
-              ...(asset.bytes === undefined ? {} : { bytes: asset.bytes }),
-              ...(asset.descriptor === undefined ? {} : { descriptor: asset.descriptor }),
-            }),
+            ...importedProject,
             visualObjects: {
-              ...context.visualProject.visualObjects,
+              ...importedProject.visualObjects,
               [controllerId]: {
                 id: controllerId,
                 kind: 'null',
@@ -6860,6 +6877,7 @@ function EditorWorkspace({
       return (
         <MonitorPanel
           agentPreviewSurfaceVisible={agentPreviewSurfaceVisible}
+          onAssetDrop={(asset) => addAssetToTimeline(asset)}
           onFilesDrop={(files) =>
             handleDroppedFiles(files, { surface: 'monitor', timeUs: activeTimelinePlayheadUs })
           }

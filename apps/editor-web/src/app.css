@@ -7365,6 +7365,35 @@ label {
   border-radius: 0.35rem;
   background: #1f1f21;
 }
+.asset-card,
+.effect-card,
+.transitions-panel .transition-card {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+.editor-pointer-dnd-source-active {
+  cursor: grabbing !important;
+  opacity: 0.62;
+}
+.editor-pointer-dnd-hint {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--joy-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--joy-bg-raised);
+  color: var(--joy-text);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 35%);
+  font-size: var(--joy-type-xs);
+  white-space: nowrap;
+}
+[data-editor-pointer-dnd-over='true'] {
+  outline: 2px solid var(--joy-accent);
+  outline-offset: -2px;
+}
 .asset-card-media {
   display: grid;
   place-items: center;
@@ -18671,6 +18700,21 @@ label {
 .timeline-transition-junction svg {
   width: 0.8rem;
   height: 0.8rem;
+}
+.timeline-transition-junction.timeline-transition-junction--empty {
+  z-index: 6;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--joy-text);
+  opacity: 0;
+}
+.timeline-transition-junction.timeline-transition-junction--empty:hover,
+.timeline-transition-junction.timeline-transition-junction--empty[data-editor-pointer-dnd-over='true'] {
+  border-color: var(--joy-accent);
+  background: var(--joy-bg-raised);
+  box-shadow: 0 2px 7px rgb(0 0 0 / 55%);
+  opacity: 1;
 }
 
 /* Adjustment-layer library: one clear target, one primary action. */

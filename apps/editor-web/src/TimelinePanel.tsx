@@ -98,10 +98,17 @@ import {
 } from './timeline-media-import.js';
 import {
   buildTimelineClipGroupMoveTransaction,
+  buildTimelineClipInsertTransaction,
   buildTimelineClipMoveTransaction,
+  buildTimelineClipReplaceTransaction,
   hasExceededDragThreshold,
   keyboardTrimTimeUs,
 } from './timeline-clip-interaction.js';
+import {
+  registerEditorPointerDndRoot,
+  type EditorPointerDropTarget,
+  type EditorPointerDragPayload,
+} from './editor-pointer-dnd.js';
 import { TimelinePropertyLanes } from './TimelinePropertyLanes.js';
 import { TimelineElementGlyph, TimelineElementMedia } from './TimelineElementVisual.js';
 import {
@@ -221,6 +228,9 @@ function TimelineClip({
   onOpenComposition,
   onSplitHover,
   onSplitAt,
+  snapClipStartUs,
+  onDragMove,
+  onRestoreSelection,
 }: {
   readonly clip: Clip;
   readonly elementKind: TimelineElementKind;
@@ -241,14 +251,36 @@ function TimelineClip({
   readonly onOpenComposition?: (compositionId: string) => void;
   readonly onSplitHover: (atUs: number | undefined) => void;
   readonly onSplitAt: (atUs: number) => void;
+  readonly snapClipStartUs: (clipId: string, rawStartUs: number) => number;
+  readonly onDragMove: (clientX: number, clientY: number) => number | undefined;
+  readonly onRestoreSelection: () => void;
 }) {
   const [dragPx, setDragPx] = useState<number | undefined>(undefined);
   const [trimPreview, setTrimPreview] = useState<
     { edge: 'start' | 'end'; timeUs: number } | undefined
   >(undefined);
-  const dragRef = useRef<{ originX: number; originY: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{
+    originX: number;
+    originY: number;
+    moved: boolean;
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    scrollDeltaPx: number;
+    cleanupEscape: () => void;
+  } | null>(null);
+  const autoScrollFrameRef = useRef<number | undefined>(undefined);
+  const suppressClickRef = useRef(false);
   const trimRef = useRef<{ edge: 'start' | 'end'; originX: number } | null>(null);
   const lastCompoundOpenAtRef = useRef(0);
+  useEffect(
+    () => () => {
+      dragRef.current?.cleanupEscape();
+      if (autoScrollFrameRef.current !== undefined)
+        cancelAnimationFrame(autoScrollFrameRef.current);
+    },
+    [],
+  );
   const pxPerUs = viewport.pixelsPerSecond / 1_000_000;
   const rateBadge = clipRateLabel(clip);
 
@@ -261,8 +293,30 @@ function TimelineClip({
 
   const dropTimeUs = (deltaPx: number): number => {
     const rawUs = clip.startUs + deltaPx / pxPerUs;
-    const snapped = Math.round(rawUs / SNAP_US) * SNAP_US;
+    const snapped = snapClipStartUs(clip.id, rawUs);
     return Math.min(maxStartUs, Math.max(0, snapped));
+  };
+
+  const stopAutoScroll = () => {
+    if (autoScrollFrameRef.current !== undefined) {
+      cancelAnimationFrame(autoScrollFrameRef.current);
+      autoScrollFrameRef.current = undefined;
+    }
+  };
+
+  const scheduleAutoScroll = () => {
+    if (autoScrollFrameRef.current !== undefined) return;
+    const tick = () => {
+      autoScrollFrameRef.current = undefined;
+      const drag = dragRef.current;
+      if (drag === null || !drag.moved) return;
+      const scrollDeltaPx = onDragMove(drag.clientX, drag.clientY);
+      if (scrollDeltaPx === undefined) return;
+      drag.scrollDeltaPx += scrollDeltaPx;
+      setDragPx(drag.clientX - drag.originX + drag.scrollDeltaPx);
+      autoScrollFrameRef.current = requestAnimationFrame(tick);
+    };
+    autoScrollFrameRef.current = requestAnimationFrame(tick);
   };
 
   const trimTimeUs = (edge: 'start' | 'end', clientX: number, originX: number): number => {
@@ -328,6 +382,9 @@ function TimelineClip({
       aria-label={`${label}, ${durationLabel}, ${startLabel}–${endLabel}`}
       aria-roledescription="timeline clip"
       data-clip-id={clip.id}
+      data-asset-id={'assetId' in clip ? clip.assetId : undefined}
+      data-start-us={clip.startUs}
+      data-editor-pointer-dnd-target="timeline-clip"
       data-element-kind={elementKind}
       title={`${label} · ${(clip.startUs / 1_000_000).toFixed(1)}s–${((clip.startUs + clip.durationUs) / 1_000_000).toFixed(1)}s${clip.kind === 'composition' ? ' · Double-click to edit the merged timeline' : ''}`}
       style={{
@@ -335,6 +392,12 @@ function TimelineClip({
         width: `${layoutWidthPx}px`,
       }}
       onClick={(event) => {
+        if (suppressClickRef.current) {
+          suppressClickRef.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         // Selection can remount Dockview between physical clicks. Preserve the
         // browser's second-click intent without treating one click on a member
         // of a multi-selection as an accidental "open composition" action.
@@ -391,6 +454,7 @@ function TimelineClip({
       }}
       onPointerDown={(event) => {
         if (event.button !== 0 || locked) return;
+        suppressClickRef.current = false;
         if ((event.target as HTMLElement).dataset.trimEdge) return;
         if (splitToolActive) {
           event.preventDefault();
@@ -407,7 +471,33 @@ function TimelineClip({
           onSelect(clip.id, false);
         }
         event.currentTarget.setPointerCapture(event.pointerId);
-        dragRef.current = { originX: event.clientX, originY: event.clientY, moved: false };
+        const pointerId = event.pointerId;
+        const element = event.currentTarget;
+        const onEscape = (keyEvent: KeyboardEvent) => {
+          const drag = dragRef.current;
+          if (keyEvent.key !== 'Escape' || drag?.pointerId !== pointerId || !drag.moved) return;
+          keyEvent.preventDefault();
+          keyEvent.stopPropagation();
+          drag.cleanupEscape();
+          dragRef.current = null;
+          stopAutoScroll();
+          setDragPx(undefined);
+          setTrimPreview(undefined);
+          onRestoreSelection();
+          suppressClickRef.current = true;
+          if (element.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId);
+        };
+        document.addEventListener('keydown', onEscape, true);
+        dragRef.current = {
+          originX: event.clientX,
+          originY: event.clientY,
+          moved: false,
+          pointerId,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          scrollDeltaPx: 0,
+          cleanupEscape: () => document.removeEventListener('keydown', onEscape, true),
+        };
       }}
       onPointerMove={(event) => {
         if (splitToolActive) {
@@ -428,7 +518,18 @@ function TimelineClip({
         const deltaPx = event.clientX - drag.originX;
         if (hasExceededDragThreshold(deltaPx, event.clientY - drag.originY, DRAG_THRESHOLD_PX))
           drag.moved = true;
-        if (drag.moved) setDragPx(deltaPx);
+        if (drag.moved) {
+          drag.clientX = event.clientX;
+          drag.clientY = event.clientY;
+          const scrollDeltaPx = onDragMove(event.clientX, event.clientY);
+          if (scrollDeltaPx !== undefined) {
+            drag.scrollDeltaPx += scrollDeltaPx;
+            scheduleAutoScroll();
+          } else {
+            stopAutoScroll();
+          }
+          setDragPx(deltaPx + drag.scrollDeltaPx);
+        }
       }}
       onPointerUp={(event) => {
         // Always release capture, including ordinary clicks and trim gestures.
@@ -446,6 +547,8 @@ function TimelineClip({
           return;
         }
         const drag = dragRef.current;
+        drag?.cleanupEscape();
+        stopAutoScroll();
         setDragPx(undefined);
         if (drag === null || !drag.moved) return;
         const hitTrack = document
@@ -459,9 +562,15 @@ function TimelineClip({
           return event.clientY >= rect.top && event.clientY <= rect.bottom;
         });
         const targetTrackId = (hitTrack ?? fallbackTrack)?.dataset.trackId;
-        onMove(clip.id, dropTimeUs(event.clientX - drag.originX), targetTrackId);
+        onMove(
+          clip.id,
+          dropTimeUs(event.clientX - drag.originX + drag.scrollDeltaPx),
+          targetTrackId,
+        );
       }}
       onPointerCancel={() => {
+        dragRef.current?.cleanupEscape();
+        stopAutoScroll();
         setDragPx(undefined);
         setTrimPreview(undefined);
         dragRef.current = null;
@@ -638,6 +747,7 @@ function TimelineRunway({
       </div>
       <span
         className="timeline-lane timeline-runway-canvas"
+        data-editor-pointer-dnd-target="timeline-runway"
         style={{ minWidth: `${laneWidthPx}px` }}
       >
         Drop compatible media here to create a new layer
@@ -659,6 +769,14 @@ function safeAssetDuration(asset: {
   return durationUs !== undefined && Number.isSafeInteger(durationUs) && durationUs > 0
     ? durationUs
     : 5_000_000;
+}
+
+function pointerTimelineDropRect(target: EditorPointerDropTarget): DOMRect {
+  const lane =
+    target.kind === 'timeline-clip' || target.kind === 'timeline-cut'
+      ? target.element.closest<HTMLElement>('.timeline-lane')
+      : null;
+  return (lane ?? target.element).getBoundingClientRect();
 }
 
 function parentCompositionFor(project: SpikeProject, compositionId: string): string | undefined {
@@ -841,6 +959,7 @@ export function TimelinePanel({
     capture: HTMLElement;
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const pointerDndRootRef = useRef<HTMLElement | null>(null);
   const laneMeasureRef = useRef<HTMLDivElement | null>(null);
   const activeTrackDragRef = useRef<
     { readonly trackId: string; readonly family: ProfessionalTrackFamily } | undefined
@@ -1304,6 +1423,52 @@ export function TimelinePanel({
     [frameUs, timelineDropAnchorsUs, viewport.pixelsPerSecond],
   );
 
+  const snapClipStartUs = useCallback(
+    (clipId: string, rawStartUs: number) => {
+      const movingIds = new Set(selectedIds.includes(clipId) ? selectedIds : [clipId]);
+      const anchorsUs = [
+        playheadUs,
+        ...markers.map((marker) => marker.timeUs),
+        ...composition.tracks.flatMap((track) =>
+          track.clips
+            .filter((clip) => !movingIds.has(clip.id))
+            .flatMap((clip) => [clip.startUs, clip.startUs + clip.durationUs]),
+        ),
+      ];
+      return snapTimelineDropTimeUs({
+        rawTimeUs: rawStartUs,
+        anchorsUs,
+        frameUs,
+        toleranceUs: (8 * 1_000_000) / Math.max(1, viewport.pixelsPerSecond),
+      });
+    },
+    [composition.tracks, frameUs, markers, playheadUs, selectedIds, viewport.pixelsPerSecond],
+  );
+
+  const scrollTimelineNearPointer = useCallback((clientX: number, clientY: number) => {
+    const root = scrollRef.current;
+    if (root === null) return undefined;
+    const rect = root.getBoundingClientRect();
+    const edgePx = 40;
+    let nearEdge = false;
+    const previousScrollLeft = root.scrollLeft;
+    if (clientX < rect.left + edgePx) {
+      nearEdge = true;
+      root.scrollLeft = Math.max(0, root.scrollLeft - Math.max(8, rect.left + edgePx - clientX));
+    } else if (clientX > rect.right - edgePx) {
+      nearEdge = true;
+      root.scrollLeft += Math.max(8, clientX - (rect.right - edgePx));
+    }
+    if (clientY < rect.top + edgePx) {
+      nearEdge = true;
+      root.scrollTop = Math.max(0, root.scrollTop - Math.max(8, rect.top + edgePx - clientY));
+    } else if (clientY > rect.bottom - edgePx) {
+      nearEdge = true;
+      root.scrollTop += Math.max(8, clientY - (rect.bottom - edgePx));
+    }
+    return nearEdge ? root.scrollLeft - previousScrollLeft : undefined;
+  }, []);
+
   const dispatchSplitAt = useCallback(
     (trackId: string, clipId: string, atUs: number) => {
       if (composition.tracks.find((track) => track.id === trackId)?.locked === true) return;
@@ -1457,8 +1622,7 @@ export function TimelinePanel({
         return;
       }
       const durationUs = safeAssetDuration(asset);
-      const snapped = Math.round(dropUs / SNAP_US) * SNAP_US;
-      let startUs = Math.max(0, snapped);
+      let startUs = Math.max(0, Math.round(dropUs));
       const sorted = [...source.clips].sort((a, b) => a.startUs - b.startUs);
       for (const existing of sorted) {
         const end = existing.startUs + existing.durationUs;
@@ -1518,7 +1682,7 @@ export function TimelinePanel({
           .length + 1;
       const trackId = nextProfessionalTrackId(composition.tracks, family);
       const durationUs = safeAssetDuration(asset);
-      const startUs = Math.max(0, Math.round(dropUs / SNAP_US) * SNAP_US);
+      const startUs = Math.max(0, Math.round(dropUs));
       const clipId = `${family === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
       onMediaPlaced?.(
         {
@@ -1679,15 +1843,9 @@ export function TimelinePanel({
       clientX: number,
       rect: DOMRect,
     ) => {
-      createTrackFromAssetDrop(
-        asset,
-        pixelToTime(clientX - rect.left, {
-          originUs: 0,
-          pixelsPerSecond: viewport.pixelsPerSecond,
-        }),
-      );
+      createTrackFromAssetDrop(asset, timelineDropTimeAt(clientX, rect));
     },
-    [createTrackFromAssetDrop, viewport.pixelsPerSecond],
+    [createTrackFromAssetDrop, timelineDropTimeAt],
   );
 
   const dispatchDelete = (trackId: string, clipId: string) => {
@@ -2263,6 +2421,183 @@ export function TimelinePanel({
     [composition, onDispatch, onMediaPlaced, playheadUs],
   );
 
+  const handleEditorPointerDndMove = useCallback(
+    (
+      payload: EditorPointerDragPayload,
+      target: EditorPointerDropTarget | undefined,
+      event: globalThis.PointerEvent | undefined,
+    ) => {
+      if (event === undefined) {
+        setDragEffectOverClipId(null);
+        setFileDropIndicator(undefined);
+        return;
+      }
+      scrollTimelineNearPointer(event.clientX, event.clientY);
+      setDragEffectOverClipId(
+        payload.kind === 'effect' && target?.kind === 'timeline-clip'
+          ? (target.clipId ?? null)
+          : null,
+      );
+      if (
+        payload.kind === 'media' &&
+        (target?.kind === 'timeline-track' || target?.kind === 'timeline-clip')
+      ) {
+        setFileDropIndicator({
+          trackId: target.trackId,
+          timeUs: timelineDropTimeAt(event.clientX, pointerTimelineDropRect(target)),
+          newTrack: false,
+        });
+      } else {
+        setFileDropIndicator(undefined);
+      }
+    },
+    [scrollTimelineNearPointer, timelineDropTimeAt],
+  );
+
+  const handleEditorPointerDndDrop = useCallback(
+    (
+      payload: EditorPointerDragPayload,
+      target: EditorPointerDropTarget,
+      event: globalThis.PointerEvent,
+    ) => {
+      setDragEffectOverClipId(null);
+      setFileDropIndicator(undefined);
+
+      if (payload.kind === 'media') {
+        const asset = payload.asset;
+        const kind: TimelineMediaAsset['kind'] =
+          asset.kind === 'audio' ? 'audio' : asset.kind === 'image' ? 'image' : 'video';
+        const timelineAsset: TimelineMediaAsset = {
+          id: asset.assetId,
+          kind,
+          displayName: asset.displayName ?? asset.assetId,
+          descriptor: asset.descriptor ?? {},
+        };
+
+        if (target.kind === 'timeline-empty') {
+          handleAssetDrop(asset);
+          return;
+        }
+        if (target.kind === 'timeline-runway') {
+          if ((kind === 'audio' ? 'audio' : 'visual') !== target.family) {
+            showToast?.('Audio and visual media must use their matching runway.', 'info');
+            return;
+          }
+          handleRunwayDrop(asset, event.clientX, target.element.getBoundingClientRect());
+          return;
+        }
+        if (
+          target.kind !== 'timeline-track' &&
+          target.kind !== 'timeline-clip' &&
+          target.kind !== 'timeline-cut'
+        )
+          return;
+
+        const track = composition.tracks.find((candidate) => candidate.id === target.trackId);
+        if (track === undefined || track.locked === true) return;
+        const elementKind = kind === 'audio' ? 'audio' : 'video';
+        if (!canPlaceTimelineElement(elementKind, track, elementKinds)) {
+          showToast?.(
+            `${kind === 'audio' ? 'Audio' : 'Visual'} media must be dropped on a compatible ${trackFamilyForElement(elementKind)} track.`,
+            'info',
+          );
+          return;
+        }
+
+        const existingClip =
+          target.kind === 'timeline-clip'
+            ? track.clips.find((candidate) => candidate.id === target.clipId)
+            : undefined;
+        if (event.altKey && existingClip !== undefined) {
+          const transaction = buildTimelineClipReplaceTransaction({
+            composition,
+            trackId: track.id,
+            clip: existingClip,
+            assetId: asset.assetId,
+            displayName: timelineAsset.displayName,
+          });
+          if (transaction === undefined) return;
+          onMediaPlaced?.(timelineAsset, existingClip.id);
+          onDispatch(transaction);
+          return;
+        }
+
+        const dropUs = timelineDropTimeAt(event.clientX, pointerTimelineDropRect(target));
+        if (event.ctrlKey || event.metaKey) {
+          const insertBeforeClip =
+            existingClip ??
+            (target.kind === 'timeline-cut'
+              ? track.clips.find((candidate) => candidate.id === target.rightClipId)
+              : undefined);
+          const clipId = `${kind === 'audio' ? 'voice' : 'clip'}-${asset.assetId}-${Date.now()}`;
+          const transaction = buildTimelineClipInsertTransaction({
+            composition,
+            trackId: track.id,
+            asset: {
+              assetId: asset.assetId,
+              displayName: timelineAsset.displayName,
+              durationUs: safeAssetDuration(asset),
+            },
+            clipId,
+            startUs: insertBeforeClip?.startUs ?? dropUs,
+          });
+          if (transaction === undefined) {
+            showToast?.('Drop in a clear timeline position to insert media.', 'info');
+            return;
+          }
+          onMediaPlaced?.(timelineAsset, clipId);
+          onDispatch(transaction);
+          return;
+        }
+
+        insertAssetOnTrack(track.id, asset, dropUs);
+        return;
+      }
+
+      if (payload.kind === 'effect' && target.kind === 'timeline-clip') {
+        const track = composition.tracks.find((candidate) => candidate.id === target.trackId);
+        if (track === undefined || track.locked === true) return;
+        if (track.clips.some((clip) => clip.id === target.clipId)) {
+          onEffectDrop?.(payload.effectId, target.clipId, target.trackId);
+        }
+        return;
+      }
+
+      if (payload.kind === 'transition' && target.kind === 'timeline-cut') {
+        const track = composition.tracks.find((candidate) => candidate.id === target.trackId);
+        if (track === undefined || track.locked === true) return;
+        onTransitionDrop?.(
+          payload.transitionId,
+          target.leftClipId,
+          target.rightClipId,
+          target.trackId,
+        );
+      }
+    },
+    [
+      composition,
+      elementKinds,
+      handleAssetDrop,
+      handleRunwayDrop,
+      insertAssetOnTrack,
+      onDispatch,
+      onEffectDrop,
+      onMediaPlaced,
+      onTransitionDrop,
+      showToast,
+      timelineDropTimeAt,
+    ],
+  );
+
+  useEffect(() => {
+    const root = pointerDndRootRef.current;
+    if (root === null) return;
+    return registerEditorPointerDndRoot(root, {
+      onMove: handleEditorPointerDndMove,
+      onDrop: handleEditorPointerDndDrop,
+    });
+  }, [handleEditorPointerDndDrop, handleEditorPointerDndMove]);
+
   const handleAddFromLibrary = useCallback(() => {
     if (onOpenAssetLibrary !== undefined) {
       onOpenAssetLibrary();
@@ -2273,6 +2608,8 @@ export function TimelinePanel({
 
   return (
     <article
+      ref={pointerDndRootRef}
+      data-editor-pointer-dnd-root=""
       tabIndex={-1}
       onKeyDown={(event) => {
         if (event.key !== 'Delete' && event.key !== 'Backspace') return;
@@ -2876,6 +3213,7 @@ export function TimelinePanel({
                 <span
                   className="timeline-lane"
                   data-track-id={track.id}
+                  data-editor-pointer-dnd-target="timeline-track"
                   role="button"
                   tabIndex={0}
                   aria-label={`Insert media on ${trackCode} track`}
@@ -3197,8 +3535,47 @@ export function TimelinePanel({
                           dispatchSplitAt(track.id, clip.id, atUs);
                         }
                       }}
+                      snapClipStartUs={snapClipStartUs}
+                      onDragMove={scrollTimelineNearPointer}
+                      onRestoreSelection={() => {
+                        if (onSelectClips !== undefined) {
+                          onSelectClips(selectedIds);
+                        } else {
+                          onClearSelection();
+                          for (const selectedId of selectedIds) onToggleSelection(selectedId);
+                        }
+                      }}
                     />
                   ))}
+                  {source.clips
+                    .slice()
+                    .sort((left, right) => left.startUs - right.startUs)
+                    .map((right, index, ordered) => {
+                      if (index === 0) return null;
+                      const left = ordered[index - 1];
+                      if (
+                        left === undefined ||
+                        left.startUs + left.durationUs !== right.startUs ||
+                        transitions.some(
+                          (transition) =>
+                            transition.trackId === source.id &&
+                            transition.leftClipId === left.id &&
+                            transition.rightClipId === right.id,
+                        )
+                      )
+                        return null;
+                      return (
+                        <TimelineTransitionJunction
+                          key={`cut-${left.id}-${right.id}`}
+                          trackId={source.id}
+                          leftClipId={left.id}
+                          rightClipId={right.id}
+                          boundaryUs={right.startUs}
+                          viewport={{ ...viewport, originUs: 0 }}
+                          onSeek={onSeek}
+                        />
+                      );
+                    })}
                   {transitions
                     .filter(
                       (transition) =>
@@ -3213,6 +3590,9 @@ export function TimelinePanel({
                         <TimelineTransitionJunction
                           key={transition.id}
                           transition={transition}
+                          trackId={transition.trackId}
+                          leftClipId={transition.leftClipId}
+                          rightClipId={transition.rightClipId}
                           boundaryUs={right.startUs}
                           viewport={{ ...viewport, originUs: 0 }}
                           onSeek={onSeek}

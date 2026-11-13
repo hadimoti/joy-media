@@ -107,6 +107,12 @@ import {
   DroppedImportProgress,
   type DroppedImportProgressState,
 } from '../DroppedImportProgress.js';
+import {
+  registerEditorPointerDndRoot,
+  type EditorPointerDragPayload,
+  type EditorPointerDropTarget,
+  type EditorPointerMediaAsset,
+} from '../editor-pointer-dnd.js';
 
 /**
  * The Program Monitor panel: the preview canvas, its renderer lifecycle and the
@@ -116,12 +122,14 @@ import {
 export function MonitorPanel({
   agentPreviewSurfaceVisible = true,
   onFilesDrop,
+  onAssetDrop,
   droppedImportProgress,
   onCancelDroppedImport,
   formatMenu,
 }: {
   readonly agentPreviewSurfaceVisible?: boolean;
   readonly onFilesDrop?: (files: readonly File[]) => void;
+  readonly onAssetDrop?: (asset: EditorPointerMediaAsset) => void;
   readonly droppedImportProgress?: DroppedImportProgressState;
   readonly onCancelDroppedImport?: () => void;
   /** The App-owned Format popup; the monitor bar's read-out opens the same popover. */
@@ -139,6 +147,7 @@ export function MonitorPanel({
       context={context}
       agentPreviewSurfaceVisible={agentPreviewSurfaceVisible}
       onFilesDrop={onFilesDrop}
+      onAssetDrop={onAssetDrop}
       droppedImportProgress={droppedImportProgress}
       onCancelDroppedImport={onCancelDroppedImport}
       formatMenu={formatMenu}
@@ -150,6 +159,7 @@ function MonitorPanelContent({
   context,
   agentPreviewSurfaceVisible,
   onFilesDrop,
+  onAssetDrop,
   droppedImportProgress,
   onCancelDroppedImport,
   formatMenu,
@@ -157,6 +167,7 @@ function MonitorPanelContent({
   readonly context: EditorPanelContextValue;
   readonly agentPreviewSurfaceVisible: boolean;
   readonly onFilesDrop?: ((files: readonly File[]) => void) | undefined;
+  readonly onAssetDrop?: ((asset: EditorPointerMediaAsset) => void) | undefined;
   readonly droppedImportProgress?: DroppedImportProgressState | undefined;
   readonly onCancelDroppedImport?: (() => void) | undefined;
   readonly formatMenu: PopupControl;
@@ -912,6 +923,30 @@ function MonitorPanelContent({
     setMonitorDragOver(false);
   }, []);
 
+  const applyMonitorEffect = useCallback(
+    (effectId: string) => {
+      const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
+      if (!objectId || !isSingleVideoClipSelected(timelineProject, state.selectedIds)) {
+        showToast('Select one video clip before dropping an effect.', 'info');
+        return;
+      }
+      const descriptor = effectRegistry.getEffect(effectId);
+      if (!descriptor) return;
+      const defaults: Record<string, unknown> = {};
+      for (const p of descriptor.params) defaults[p.key] = p.defaultValue;
+      dispatchProject({
+        label: `Effect: ${effectId}`,
+        commands: [
+          {
+            type: 'effect.add',
+            payload: { objectId, effectId, params: defaults },
+          },
+        ],
+      } as unknown as VisualObjectTransaction);
+    },
+    [dispatchProject, timelineProject, visualProject, state.selectedIds, showToast],
+  );
+
   const handleMonitorEffectDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
@@ -925,35 +960,57 @@ function MonitorPanelContent({
       if (!raw) return;
       try {
         const payload = JSON.parse(raw) as { kind: string; effectId: string; source: string };
-        const objectId = resolveObjectIdForSelection(visualProject, state.selectedIds);
-        if (!objectId || !isSingleVideoClipSelected(timelineProject, state.selectedIds)) {
-          showToast('Select one video clip before dropping an effect.', 'info');
-          return;
-        }
-        const descriptor = effectRegistry.getEffect(payload.effectId);
-        if (!descriptor) return;
-        const defaults: Record<string, unknown> = {};
-        for (const p of descriptor.params) {
-          defaults[p.key] = p.defaultValue;
-        }
-        dispatchProject({
-          label: `Effect: ${payload.effectId}`,
-          commands: [
-            {
-              type: 'effect.add',
-              payload: { objectId, effectId: payload.effectId, params: defaults },
-            },
-          ],
-        } as unknown as VisualObjectTransaction);
+        applyMonitorEffect(payload.effectId);
       } catch {
         /* ignore malformed */
       }
     },
-    [dispatchProject, onFilesDrop, timelineProject, visualProject, state.selectedIds, showToast],
+    [applyMonitorEffect, onFilesDrop],
   );
 
+  const handlePointerDndMove = useCallback(
+    (
+      payload: EditorPointerDragPayload,
+      target: EditorPointerDropTarget | undefined,
+      event: globalThis.PointerEvent | undefined,
+    ) => {
+      setMonitorDragOver(
+        event !== undefined &&
+          target?.kind === 'monitor' &&
+          (payload.kind === 'media' || payload.kind === 'effect'),
+      );
+    },
+    [],
+  );
+
+  const handlePointerDndDrop = useCallback(
+    (payload: EditorPointerDragPayload, target: EditorPointerDropTarget) => {
+      setMonitorDragOver(false);
+      if (target.kind !== 'monitor') return;
+      if (payload.kind === 'media') {
+        if (onAssetDrop === undefined) {
+          showToast('The Monitor cannot add media in this workspace.', 'info');
+          return;
+        }
+        onAssetDrop(payload.asset);
+      } else if (payload.kind === 'effect') {
+        applyMonitorEffect(payload.effectId);
+      }
+    },
+    [applyMonitorEffect, onAssetDrop, showToast],
+  );
+
+  useEffect(() => {
+    const root = panelRef.current;
+    if (root === null) return;
+    return registerEditorPointerDndRoot(root, {
+      onMove: handlePointerDndMove,
+      onDrop: handlePointerDndDrop,
+    });
+  }, [handlePointerDndDrop, handlePointerDndMove]);
+
   return (
-    <article className="monitor-panel" ref={panelRef}>
+    <article className="monitor-panel" ref={panelRef} data-editor-pointer-dnd-root="">
       {error !== undefined && <p className="monitor-error">{error}</p>}
       {droppedImportProgress !== undefined && onCancelDroppedImport !== undefined && (
         <DroppedImportProgress progress={droppedImportProgress} onCancel={onCancelDroppedImport} />

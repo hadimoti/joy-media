@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { Clip } from '@joy-media/project-schema';
+import { ProjectHistory } from '@joy-media/commands';
+import type { Clip, Composition, SpikeProject } from '@joy-media/project-schema';
 import {
+  buildTimelineClipInsertTransaction,
   buildTimelineClipGroupMoveTransaction,
   buildTimelineClipMoveTransaction,
+  buildTimelineClipReplaceTransaction,
   keyboardTrimTimeUs,
 } from './timeline-clip-interaction.js';
 
@@ -16,6 +19,59 @@ const CLIP: Clip = {
 };
 
 describe('timeline clip interaction', () => {
+  it('inserts media between clips and pushes later clips as one undo step', () => {
+    const left = { ...CLIP, id: 'left', startUs: 0, durationUs: 1_000_000 };
+    const right = { ...CLIP, id: 'right', startUs: 3_000_000, durationUs: 1_000_000 };
+    const composition = baseComposition([left, right]);
+    const initial = projectWith(composition);
+    const transaction = buildTimelineClipInsertTransaction({
+      composition,
+      trackId: 'V1',
+      asset: { assetId: 'asset-new', displayName: 'new.mp4', durationUs: 2_000_000 },
+      clipId: 'inserted',
+      startUs: 1_500_000,
+    });
+    expect(transaction).toBeDefined();
+    if (transaction === undefined) return;
+
+    const history = new ProjectHistory(initial);
+    history.apply(transaction);
+    expect(
+      history.present.compositions.root!.tracks[0]!.clips.map((clip) => ({
+        id: clip.id,
+        startUs: clip.startUs,
+      })),
+    ).toEqual([
+      { id: 'left', startUs: 0 },
+      { id: 'inserted', startUs: 1_500_000 },
+      { id: 'right', startUs: 5_000_000 },
+    ]);
+    expect(history.undo()).toEqual(initial);
+  });
+
+  it('replaces a clip asset without changing its timing and one undo restores it', () => {
+    const original = { ...CLIP, startUs: 4_000_000, sourceInUs: 750_000 };
+    const composition = baseComposition([original]);
+    const initial = projectWith(composition);
+    const transaction = buildTimelineClipReplaceTransaction({
+      composition,
+      trackId: 'V1',
+      clip: original,
+      assetId: 'asset-replacement',
+      displayName: 'replacement.mp4',
+    });
+    expect(transaction).toBeDefined();
+    if (transaction === undefined) return;
+
+    const history = new ProjectHistory(initial);
+    history.apply(transaction);
+    expect(history.present.compositions.root!.tracks[0]!.clips[0]).toEqual({
+      ...original,
+      assetId: 'asset-replacement',
+    });
+    expect(history.undo()).toEqual(initial);
+  });
+
   it('builds one semantic atomic transaction for a cross-track move', () => {
     expect(
       buildTimelineClipMoveTransaction({
@@ -112,3 +168,33 @@ describe('timeline clip interaction', () => {
     ).toBeUndefined();
   });
 });
+
+function baseComposition(clips: readonly Clip[]): Composition {
+  return {
+    id: 'root',
+    name: 'Root',
+    width: 1920,
+    height: 1080,
+    frameRate: { num: 30, den: 1 },
+    durationUs: 30_000_000,
+    tracks: [
+      {
+        id: 'V1',
+        kind: 'video',
+        family: 'visual',
+        order: 0,
+        enabled: true,
+        clips: [...clips],
+      },
+    ],
+  };
+}
+
+function projectWith(composition: Composition): SpikeProject {
+  return {
+    schemaVersion: 0,
+    id: 'project',
+    rootCompositionId: composition.id,
+    compositions: { [composition.id]: composition },
+  };
+}
