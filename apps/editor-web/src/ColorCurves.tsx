@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -26,6 +27,7 @@ import {
   nextCurvePointIndex,
   nudgeCurvePoint,
   removeCurvePoint,
+  sameCurve,
   type CurvePoints,
 } from './color-curves-math.js';
 import './ColorCurvesHsl.css';
@@ -72,6 +74,29 @@ interface CurveDrag {
   points: CurvePoints;
   /** The point is out of the graph and goes away on release. */
   out: boolean;
+  /** The latest pointer position not shown yet (moves are drawn once per frame). */
+  pending: { readonly x: number; readonly y: number } | undefined;
+  /** The animation frame that draws the pending move. */
+  frame: number | undefined;
+}
+
+/** Runs `callback` on the next animation frame (or soon, where there are no frames). */
+function nextFrame(callback: () => void): number {
+  if (typeof requestAnimationFrame === 'function') return requestAnimationFrame(callback);
+  return setTimeout(callback, 16) as unknown as number;
+}
+
+function cancelFrame(handle: number): void {
+  if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(handle);
+  else clearTimeout(handle);
+}
+
+/** Stops a drag's pending frame: nothing is drawn after the drag is over. */
+function dropPendingFrame(drag: CurveDrag | undefined): void {
+  if (drag === undefined) return;
+  if (drag.frame !== undefined) cancelFrame(drag.frame);
+  drag.frame = undefined;
+  drag.pending = undefined;
 }
 
 /** The pointer in the unit square of the graph (y up). */
@@ -115,12 +140,16 @@ export function ColorCurves({
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<CurveDrag | undefined>(undefined);
   const curves = { ...IDENTITY_COLOR_CURVES, ...(draft.curves ?? {}) };
-  const points = editableCurve(curves[channel]);
+  const stored = curves[channel];
+  // Worked out once per change of the curve, not on every render.
+  const points = useMemo(() => editableCurve(stored), [stored]);
+  const linePath = useMemo(() => curvePath(points, GRAPH), [points]);
   const label = CURVE_CHANNEL_LABELS[channel];
 
   // The live grade stops when the panel goes away, whatever happened to the drag.
   useEffect(
     () => () => {
+      dropPendingFrame(dragRef.current);
       colorGradePreview.set(undefined);
     },
     [],
@@ -128,6 +157,7 @@ export function ColorCurves({
 
   // A live grade belongs to the grade it was started on.
   useEffect(() => {
+    dropPendingFrame(dragRef.current);
     colorGradePreview.set(undefined);
     dragRef.current = undefined;
     setDragging(false);
@@ -184,6 +214,8 @@ export function ColorCurves({
       before: points,
       points: base,
       out: false,
+      pending: undefined,
+      frame: undefined,
     };
     target.setPointerCapture(event.pointerId);
     if (typeof target.focus === 'function') target.focus();
@@ -192,20 +224,53 @@ export function ColorCurves({
     event.preventDefault();
   };
 
+  /** Moves the dragged point to a pointer position and previews the result. */
+  const applyMove = (drag: CurveDrag, x: number, y: number) => {
+    const out = isDraggedOut(drag.base, drag.index, x, y);
+    const next = out
+      ? removeCurvePoint(drag.base, drag.index)
+      : moveCurvePoint(drag.base, drag.index, x, y);
+    // A move that lands on the same curve changes nothing: no new grade.
+    if (out === drag.out && sameCurve(next, drag.points)) return;
+    drag.out = out;
+    drag.points = next;
+    preview(drag.channel, drag.points);
+  };
+
+  /** Draws the latest pointer position not drawn yet, if any. */
+  const flushMove = (drag: CurveDrag) => {
+    const pending = drag.pending;
+    drag.pending = undefined;
+    if (pending !== undefined) applyMove(drag, pending.x, pending.y);
+  };
+  // The frame callback draws with the latest render's grade, not the one it was scheduled in.
+  const flushMoveRef = useRef(flushMove);
+  flushMoveRef.current = flushMove;
+
+  // The first move of a frame is drawn at once; the moves after it in the same
+  // frame are folded into one update when the frame comes (or on release).
   const onPointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
     const drag = dragRef.current;
     if (drag === undefined || event.pointerId !== drag.pointerId) return;
     const pointer = unitPoint(event.currentTarget, event.clientX, event.clientY);
-    drag.out = isDraggedOut(drag.base, drag.index, pointer.x, pointer.y);
-    drag.points = drag.out
-      ? removeCurvePoint(drag.base, drag.index)
-      : moveCurvePoint(drag.base, drag.index, pointer.x, pointer.y);
-    preview(drag.channel, drag.points);
+    if (drag.frame !== undefined) {
+      drag.pending = { x: pointer.x, y: pointer.y };
+      return;
+    }
+    applyMove(drag, pointer.x, pointer.y);
+    drag.frame = nextFrame(() => {
+      drag.frame = undefined;
+      if (dragRef.current === drag) flushMoveRef.current(drag);
+    });
   };
 
   const endDrag = (event: ReactPointerEvent<SVGSVGElement>) => {
     const drag = dragRef.current;
     if (drag === undefined || event.pointerId !== drag.pointerId) return;
+    // The last position counts even when its frame has not come yet.
+    if (drag.frame !== undefined) cancelFrame(drag.frame);
+    drag.frame = undefined;
+    flushMove(drag);
     dragRef.current = undefined;
     setDragging(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId))
@@ -250,6 +315,7 @@ export function ColorCurves({
     }
     if (event.key === 'Escape' && dragRef.current !== undefined) {
       const drag = dragRef.current;
+      dropPendingFrame(drag);
       dragRef.current = undefined;
       setDragging(false);
       onChange(withCurve(drag.channel, drag.before));
@@ -335,12 +401,7 @@ export function ColorCurves({
               </g>
             ))}
             <line className="ccv-diagonal" x1={0} y1={GRAPH} x2={GRAPH} y2={0} />
-            <path
-              className="ccv-line"
-              d={curvePath(points, GRAPH)}
-              stroke={stroke}
-              data-curve-line={channel}
-            />
+            <path className="ccv-line" d={linePath} stroke={stroke} data-curve-line={channel} />
             {points.map((point, index) => (
               <circle
                 key={index}

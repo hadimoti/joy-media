@@ -1,5 +1,5 @@
 import type { ColorCurveChannel, ColorCurvePoint } from '@joy-media/project-schema';
-import { sampleColorCurve } from '@joy-media/renderer-pixi';
+import { ColorCurveSpline, sampleColorCurve } from '@joy-media/renderer-pixi';
 
 /**
  * The maths of the curves editor (T-K03).
@@ -227,16 +227,41 @@ export function curveReadout(point: CurvePoint): string {
 }
 
 /**
- * The SVG path of the line in a `size` × `size` box (y up), one segment per
- * input level, sampled with the colour engine's spline.
+ * The spline the graph line is drawn with. It is prepared once per drawn
+ * curve and keeps its buffers, so drawing the line during a drag allocates
+ * nothing per sample.
  */
-export function curvePath(points: CurvePoints, size: number, samples = 256): string {
-  const curve = editableCurve(points);
-  const parts: string[] = [];
+export const curveLineSpline = new ColorCurveSpline();
+
+/**
+ * The SVG path of the line in a `size` × `size` box (y up), one segment per
+ * input level, sampled with the colour engine's spline. The spline is
+ * prepared once for the whole line, not once per sample.
+ */
+export function curvePath(
+  points: CurvePoints,
+  size: number,
+  samples = 256,
+  spline: ColorCurveSpline = curveLineSpline,
+): string {
+  spline.prepare(editableCurve(points));
+  let path = '';
   for (let index = 0; index < samples; index += 1) {
     const x = index / (samples - 1);
-    const y = curveValueAt(curve, x);
-    parts.push(`${index === 0 ? 'M' : 'L'}${(x * size).toFixed(2)} ${((1 - y) * size).toFixed(2)}`);
+    const y = spline.valueAt(clamp01(x));
+    path += `${index === 0 ? 'M' : ' L'}${(x * size).toFixed(2)} ${((1 - y) * size).toFixed(2)}`;
   }
-  return parts.join(' ');
+  return path;
+}
+
+/** True when two curves have the same points (a pointer move that changed nothing). */
+export function sameCurve(left: CurvePoints, right: CurvePoints): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index]!;
+    const b = right[index]!;
+    if (a.x !== b.x || a.y !== b.y) return false;
+  }
+  return true;
 }

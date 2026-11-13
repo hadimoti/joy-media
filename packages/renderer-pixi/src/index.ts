@@ -47,6 +47,7 @@ export {
   normalizeColorGradeHslBands,
   sampleColorCurve,
 } from './color-grade-math.js';
+export { ColorCurveSpline } from './color-curve-spline.js';
 export type { ParsedCubeLut } from './lut.js';
 
 export const PACKAGE_NAME = '@joy-media/renderer-pixi' as const;
