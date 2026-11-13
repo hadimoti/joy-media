@@ -2039,11 +2039,6 @@ h2 {
   overflow: hidden;
   pointer-events: none;
 }
-/* T-M12: with keyboard focus on the Monitor picture, the selected element's box shows the focus ring. */
-.joy-panel-root:has(.monitor-canvas-wrap:focus-visible) .monitor-transform-lines {
-  outline: 2px solid var(--joy-accent);
-  outline-offset: 2px;
-}
 .monitor-transform-lines {
   position: absolute;
   inset: 0;
@@ -2053,6 +2048,12 @@ h2 {
   fill: none;
   stroke: var(--joy-accent);
   stroke-width: 1px;
+}
+/* T-M12: with keyboard focus on the Monitor picture, the selected element's box is drawn with a
+   thicker, dashed stroke, so the focus shows on the element (the box itself is not focusable). */
+.monitor-panel:has(.monitor-canvas-wrap:focus-visible) .monitor-transform-outline {
+  stroke-width: 3px;
+  stroke-dasharray: 6 3;
 }
 .monitor-transform-stem {
   stroke: var(--joy-accent);
